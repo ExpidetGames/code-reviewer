@@ -160,27 +160,30 @@ A project also selects the one review kind it runs (#193). These fields live in 
 built-in layer never hold them (`validateReviewSettingsPatch` reports them as `UNKNOWN_FIELD`), so a
 review kind can never become a workspace-wide default.
 
-| Field          | Meaning                                                                               | Default                   |
-| -------------- | ------------------------------------------------------------------------------------- | ------------------------- |
-| `reviewKind`   | `diff` (the existing PR-Agent review) or `dynamic` (the read-only agent of the epic)  | `diff`                    |
-| `dynamicModel` | The model a Dynamic review uses, as the configured provider spells it, kept literally | `deepseek-v4.1-flash`     |
-| `reviewSkill`  | The project's review-skill override, or absent for the shipped default skill          | the shipped default skill |
+| Field          | Meaning                                                                               | Default                        |
+| -------------- | ------------------------------------------------------------------------------------- | ------------------------------ |
+| `reviewKind`   | `diff` (the existing PR-Agent review) or `dynamic` (the read-only agent of the epic)  | `diff`                         |
+| `dynamicModel` | The model a Dynamic review uses, as the configured provider spells it, kept literally | `deepseek/deepseek-v4.1-flash` |
+| `reviewSkill`  | The project's review-skill override, or absent for the shipped default skill          | the shipped default skill      |
 
 `dynamicModel` is a **default, not an allow-list** (#194-T08): any identifier the provider serves is
 kept as-is, with no provider rewrite and no routing field. How a configured model is resolved and
 whether it can serve the engine's needs is #197's business, not a project setting. `reviewKind` is
 independent of the Diff `model`, so each kind keeps its own model and skill across a switch.
 
-**No SQL migration.** The fields are JSON inside `projects.settings`, and missing values read as Diff
-Review, `deepseek-v4.1-flash` and the shipped skill (`resolveProjectDynamicSettings`,
+**No schema migration.** The fields are JSON inside `projects.settings`, and missing values read as Diff
+Review, `deepseek/deepseek-v4.1-flash` and the shipped skill (`resolveProjectDynamicSettings`,
 `builtInProjectDynamicSettings`). An existing project therefore behaves exactly as before; a
-legacy-data integration fixture pins this (`service.integration.test.ts`, #194-T06).
+legacy-data integration fixture pins this (`service.integration.test.ts`, #194-T06). The default is
+the id OpenRouter serves, because the name is sent to the provider as it is (#262). One data migration
+(`20261014090000_fix_dynamic_default_model`) rewrote a stored `dynamicModel` of the first, wrong
+spelling `deepseek-v4.1-flash`, in a project's overrides or the workspace review defaults, to that id.
 
 The skill is **untrusted data**: it is stored as text, bounded to `PROJECT_DYNAMIC_LIMITS.reviewSkillMaxBytes`
 (16 KiB of UTF-8, so multibyte characters count as their bytes), refused with a stable code on
 forbidden control characters or an unpaired surrogate, and never interpreted. An empty or null value is
-an explicit reset to the shipped default, never another project's skill. A `deepseek-v4.1-flash`-like
-provider/model slug, a URL, a permission or a credential is not part of these settings.
+an explicit reset to the shipped default, never another project's skill. A provider/model slug
+like `deepseek/deepseek-v4.1-flash`, a URL, a permission or a credential is not part of these settings.
 
 `default-skill.ts` is the **reader seam** for the shipped default skill (id, version, hash and text).
 Since #198 the text is the canonical asset `contracts/dynamic-review/review-skill.md`, embedded in the

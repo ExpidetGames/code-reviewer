@@ -353,7 +353,7 @@ def _tagged_claim() -> Document:
     }
 
 
-# #195-T06, #195-T10
+# #195-T06, #195-T10, #262-T02
 def test_the_tagged_dynamic_job_input_is_accepted_and_keeps_exact_shas_and_bounds() -> None:
     job = _load(DYNAMIC_JOB)
     claim = _tagged_claim()
@@ -362,7 +362,7 @@ def test_the_tagged_dynamic_job_input_is_accepted_and_keeps_exact_shas_and_bound
     parsed = runner_job.parse_job(json.dumps(job))
     assert parsed.review_kind is runner_job.ReviewKind.DYNAMIC
     assert parsed.dynamic is not None
-    assert parsed.dynamic.model == "deepseek-v4.1-flash"
+    assert parsed.dynamic.model == "deepseek/deepseek-v4.1-flash"
     assert parsed.dynamic.limits.max_findings == 5
     assert parsed.base is not None
     assert parsed.base.head_sha == "1f3a5c7e9b2d4f60a8c1e3b5d7f90a2c4e6b8d01"

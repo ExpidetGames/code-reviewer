@@ -9,7 +9,9 @@ import {
   resolveProjectDynamicSettings,
   resolveReviewSettings,
 } from "./effective.ts";
+import { MODEL_PRICES } from "./model-pricing.ts";
 import {
+  DEFAULT_DYNAMIC_MODEL,
   DEFAULT_MAX_TOKENS,
   builtInProjectDynamicSettings,
   builtInReviewSettings,
@@ -133,6 +135,14 @@ describe("resolving the settings of a project", () => {
   });
 });
 
+describe("the default Dynamic model", () => {
+  // #262-T01
+  it("is a model id OpenRouter serves, with the vendor prefix, as the price table spells it", () => {
+    expect(DEFAULT_DYNAMIC_MODEL).toBe("deepseek/deepseek-v4.1-flash");
+    expect(Object.keys(MODEL_PRICES)).toContain(DEFAULT_DYNAMIC_MODEL);
+  });
+});
+
 describe("the project-only review kind, model and skill", () => {
   // #194-T01
   it("default a project without the fields to Diff Review, the shipped Dynamic model and the shipped skill", () => {
@@ -143,8 +153,8 @@ describe("the project-only review kind, model and skill", () => {
 
     expect(dynamic.reviewKind).toBe("diff");
     // The required default model, pinned literally so a mutation of the production constant cannot
-    // pass this test (#194-T01).
-    expect(dynamic.dynamicModel).toBe("deepseek-v4.1-flash");
+    // pass this test (#194-T01). It is the id OpenRouter serves, sent verbatim (#262-T01, #262-T02).
+    expect(dynamic.dynamicModel).toBe("deepseek/deepseek-v4.1-flash");
     expect(dynamic.reviewSkill).toBe(SHIPPED_SKILL);
     expect(dynamic.reviewSkillIsDefault).toBe(true);
     expect(dynamic.sources).toEqual({

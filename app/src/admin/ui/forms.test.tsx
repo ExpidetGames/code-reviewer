@@ -106,6 +106,17 @@ describe("the Dynamic Review card of the instance form", () => {
     expect(dynamic.textContent).toMatch(/dynamic_review_disabled/);
   });
 
+  // #262-T04
+  it("tells an admin to deploy a Dynamic-capable runner, not that the engine has not shipped", () => {
+    const { api } = apiAnswering(SAVED);
+    render(<InstanceForm settings={view()} api={api} />);
+
+    const text = card("Dynamic Review").textContent;
+    expect(text).not.toMatch(/until it ships/i);
+    expect(text).not.toMatch(/cannot be activated yet/i);
+    expect(text).toMatch(/Deploy a Dynamic-capable runner/);
+  });
+
   // #202 (gate control)
   it("sends the gate only after the rollout order was confirmed, and nothing else", async () => {
     const { api, change } = apiAnswering(SAVED);
