@@ -7,6 +7,7 @@
 import type {
   StoppedEarly,
   ClaimEngine,
+  ClaimFeature,
   ClaimRequest,
   CompleteRequest,
   FieldError,
@@ -15,7 +16,11 @@ import type {
   RunnerResult,
   RunnerUsage,
 } from "./contract.ts";
-import { CLAIM_ENGINES, STOPPED_EARLY_REASONS } from "./contract.ts";
+import {
+  CLAIM_ENGINES,
+  CLAIM_FEATURES,
+  STOPPED_EARLY_REASONS,
+} from "./contract.ts";
 
 export type Parsed<T> =
   { ok: true; value: T } | { ok: false; fields: FieldError[] };
@@ -160,10 +165,37 @@ export function parseClaimRequest(body: unknown): Parsed<ClaimRequest> {
     }
     if (check.fields.length === 0) engines = accepted;
   }
+  const features = parseFeatures(check, body.features);
   if (check.fields.length > 0) return { ok: false, fields: check.fields };
-  return engines === undefined
-    ? { ok: true, value: {} }
-    : { ok: true, value: { engines } };
+  return {
+    ok: true,
+    value: {
+      ...(engines === undefined ? {} : { engines }),
+      ...(features === undefined ? {} : { features }),
+    },
+  };
+}
+
+const FEATURE_NAME = /^[a-z][a-z0-9_]{0,63}$/;
+const MAX_FEATURES = 16;
+
+/**
+ * #279: what else the runner understands. Only the names this app knows are kept; an unknown one is
+ * ignored, so a newer runner can name features an older app has never heard of. A list that is not a
+ * list of plain names is refused like the contract does.
+ */
+function parseFeatures(
+  check: Checker,
+  raw: unknown,
+): ClaimFeature[] | undefined {
+  if (raw === undefined) return undefined;
+  if (
+    !Array.isArray(raw) ||
+    raw.length > MAX_FEATURES ||
+    !raw.every((entry) => typeof entry === "string" && FEATURE_NAME.test(entry))
+  )
+    return check.fail("features", "invalid");
+  return CLAIM_FEATURES.filter((known) => raw.includes(known));
 }
 
 export function parseHeartbeatRequest(body: unknown): Parsed<HeartbeatRequest> {
