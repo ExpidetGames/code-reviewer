@@ -16,5 +16,4 @@ from job_phase import start_and_run
 EXECVE_TESTS = ["-m", "privileged", "-p", "no:cacheprovider", "tests/privileged/execve"]
 
 if __name__ == "__main__":
-    import pytest
-    sys.exit(int(pytest.main([*EXECVE_TESTS, *sys.argv[1:]])))
+    sys.exit(start_and_run(EXECVE_TESTS, sys.argv[1:]))
