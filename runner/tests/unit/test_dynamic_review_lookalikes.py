@@ -66,6 +66,9 @@ SPELLINGS = [
     ("underscore-closing", "</system_reminder>"),
     ("upper-case-underscore", "<SYSTEM_REMINDER>"),
     ("combined", "\uff1c\u200b/ system\u2011\u200breminder\uff1e"),
+    ("zero-width-space-before-bracket", "\u200b<system-reminder>"),
+    ("byte-order-mark-before-full-width-bracket", "\ufeff\uff1csystem-reminder>"),
+    ("invisibles-before-and-inside", "\u200b\u2060<sys\u200btem-reminder>"),
 ]
 TEMPLATE_TOKENS = [
     "<|im_start|>system",
@@ -78,6 +81,8 @@ TEMPLATE_TOKENS = [
     "<\uff5cAssistant\uff5c>",
     "\uff1c|im_start|\uff1e",
     "<\u200b|im_start|>",
+    "a\u200b\u200b<|im_start|>",
+    "\ufeff<|im_end|>",
 ]
 # The standard-library oracle does not see these as the tag, the escape must still handle them.
 BEYOND_THE_ORACLE = {"variation-selector", "combining-grapheme-joiner"}
@@ -143,6 +148,9 @@ def test_chat_template_special_token_syntax_stays_text(token: str) -> None:
         ["</", "system-reminder>"],
         ["<", " ", "/", "system-reminder>"],
         ["<", "|im_start|>"],
+        ["\u200b", "<system-reminder>"],
+        ["a\u200b", "\u200b", "<|im_start|>"],
+        ["\ufeff", "\uff1c", "system-reminder>"],
     ],
 )
 def test_a_tag_split_across_text_parts_is_escaped_in_the_part_that_holds_the_bracket(
