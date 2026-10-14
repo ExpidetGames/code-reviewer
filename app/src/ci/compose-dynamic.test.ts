@@ -247,8 +247,8 @@ describe("compose.dynamic.yml", () => {
     expect(names).toEqual(CREATED_WITH);
     expect(privilegedScript).toContain("--no-new-privs");
     expect(privilegedScript).toContain("unshare --net --mount");
-    // The container mounts nothing from the host, so the suite starts without the host's /run.
-    expect(privilegedScript).toContain("mount -t tmpfs tmpfs /run");
+    // The container mounts nothing from the host, so the suite starts without the host's /run (a
+    // tmpfs of its own, with the options of the compose file: the next test).
     expect(privilegedScript).toContain("scripts/privileged_phases.sh");
   });
 

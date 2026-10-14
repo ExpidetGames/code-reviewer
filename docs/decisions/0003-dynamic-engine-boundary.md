@@ -61,12 +61,27 @@ the container is allowed to hold for that.
    back to confirm. Every process the loop starts afterwards (job processes, the engine) inherits the
    smaller bounding set, so none of them, root included, can touch the rules for the life of the
    container. That boundary is per container lifetime: the container restarts
-   (`restart: unless-stopped`) with a writable root filesystem and a root supervisor that has
-   `DAC_OVERRIDE`, so a compromised supervisor could overwrite `nft`, `tini` or the runner source,
-   crash the container, and get a restart that runs the modified code with `NET_ADMIN`. The engine
-   user cannot do this (it cannot write those files), but the drop is only as strong as the
-   supervisor's integrity until a read-only root filesystem or an entrypoint that drops the
-   capabilities before the runner starts closes it (#249). The slot ports must also lie outside the
+   (`restart: unless-stopped`) and the new one is created with `NET_ADMIN` again, so a compromised
+   supervisor (it has `DAC_OVERRIDE`) must not be able to change what that restart runs (`nft`,
+   `tini`, the runner source), crash the container and wait for it. **The root filesystem is
+   therefore read-only (`read_only: true`, #249).** The only writable paths are three private
+   `tmpfs`, all `noexec,nosuid,nodev` with a size limit, empty after every restart: `/tmp` (512 MiB,
+   mode 1777, as `/tmp` is in the image: job directories, per-job export, the engine's HOME, XDG and
+   TMPDIR), `/run` (1 MiB, root only: the identity leases) and `/home/runner` (64 MiB, 10001, mode
+   0700: the Diff job user's HOME). The engine user gains no write path: `/tmp` is the one it had,
+   the other two are closed to it, the rest is read-only. A tmpfs is charged to the memory limit,
+   so the sizes are part of the capacity figures. The two alternatives of the issue were weighed;
+   the entry point does **not** drop the capabilities with `setpriv --bounding-set=-net_admin,-setpcap`
+   before the runner starts: that would not close the restart persistence by itself (PID 1,
+   `tini`, keeps both either way, and the files would still be writable), it would split the
+   startup (settings, the port-range check, the rule installation, the read-back of the sets and
+   the order before the self-check) between a shell entry point and the runner, and the entry
+   point is shared with the Diff image, which has no capabilities to drop. What it would remove,
+   the hand-written `capset` and the thread guard, is covered by kernel-level tests in CI, and
+   a process that holds the capabilities (PID 1) is acceptable (see below). It stays an option
+   if the startup is split for other reasons. A file-capability or setuid binary cannot give the
+   two capabilities back either: the bounding set caps an `execve`, and the privileged suite
+   proves it in a phase without `no-new-privileges` (#249). The slot ports must also lie outside the
    kernel's ephemeral port range, which startup reads from `/proc/sys/net/ipv4/ip_local_port_range`
    (a port inside it, or an unreadable range, counts as rules not installable). Each Dynamic job checks
    that its own process holds neither capability, then runs the probe. Failure behaviour: a drop that
@@ -77,7 +92,8 @@ the container is allowed to hold for that.
    by the engine user. The alternatives are worse (a per-job network namespace needs `SYS_ADMIN`; a
    user namespace or slirp is excluded by the lead decisions; a separate container cannot tell the
    supervisor from the engine).
-6. **Nothing is mounted and nothing is shared (AF_UNIX).** The rules cover TCP, UDP and IPv6 of the
+6. **Nothing is mounted from outside and nothing is shared (AF_UNIX).** The only mounts are the
+   three private tmpfs of decision 5. The rules cover TCP, UDP and IPv6 of the
    engine user, not unix sockets. A unix socket cannot leave the container, and nothing in the
    container listens on one today. To keep that gap empty, `compose.dynamic.yml` has no `volumes`,
    `network_mode`, `pid`, `ipc` or Docker socket (a file test fails otherwise), and the privileged

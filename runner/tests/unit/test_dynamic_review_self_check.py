@@ -327,6 +327,14 @@ UNTRUSTED_REASON = {
 LEVELS = [0, 1, 2, 3]
 
 
+def first_to_notice(world: World, directory: Path) -> SelfCheckReason:
+    """The reason of the first file whose chain holds `directory`, in the order of the check."""
+    for subject in UNTRUSTED_REASON:
+        if directory in getattr(world.tools, subject).parents:
+            return UNTRUSTED_REASON[subject]
+    raise AssertionError(directory)
+
+
 def directory_above(world: World, subject: str, level: int) -> Path:
     path: Path = getattr(world.tools, subject)
     directory = path.parents[level]
@@ -340,11 +348,12 @@ def directory_above(world: World, subject: str, level: int) -> Path:
 def test_a_directory_above_a_pinned_file_that_others_can_write_is_refused(
     world: World, subject: str, level: int, mode: int
 ) -> None:
-    directory_above(world, subject, level).chmod(mode)
+    directory = directory_above(world, subject, level)
+    directory.chmod(mode)
 
     error = refused(world)
 
-    assert getattr(error, "reason", None) is UNTRUSTED_REASON[subject]
+    assert getattr(error, "reason", None) is first_to_notice(world, directory)
     assert not any(call.startswith("probe") for call in world.calls)
 
 
@@ -365,7 +374,7 @@ def test_a_directory_above_a_pinned_file_owned_by_somebody_else_is_refused(
 
     error = refused(world, lstat=lstat)
 
-    assert getattr(error, "reason", None) is UNTRUSTED_REASON[subject]
+    assert getattr(error, "reason", None) is first_to_notice(world, foreign)
 
 
 @pytest.mark.parametrize("subject", UNTRUSTED_REASON)
@@ -380,7 +389,7 @@ def test_a_directory_above_a_pinned_file_that_is_a_link_is_refused(
 
     error = refused(world)
 
-    assert getattr(error, "reason", None) is UNTRUSTED_REASON[subject]
+    assert getattr(error, "reason", None) is first_to_notice(world, directory)
 
 
 # #249-T04: the chain ends at the root it is given ("/" in the image), not above it.

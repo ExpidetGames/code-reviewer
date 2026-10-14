@@ -268,8 +268,11 @@ Engine suite (`runner/tests/engine/`, `uv run pytest -m engine`, about 5 minutes
 Privileged suite (`runner/tests/privileged/`, `uv run pytest -m privileged`, #197 part 2b, #244): what
 only root can prove about the Dynamic runner's engine boundary. It runs **as root with the
 capabilities of `compose.dynamic.yml`**, with no-new-privileges, in a network namespace with a
-loopback interface and no route out and in a mount namespace with a fresh `/run` (the container
-mounts nothing from the host; a CI host has a Docker socket). It has **two phases**, as the runner
+loopback interface and no route out and in a mount namespace laid out like the container (#249):
+every disk filesystem read-only, a fresh `/run` and `/tmp` tmpfs with the options of the compose file
+(the container mounts nothing from the host; a CI host has a Docker socket), so the whole suite
+doubles as the proof that the job directories, leases and the engine's home need no other writable
+path. It has **three phases**, as the runner
 has two stages of life (`PRIVILEGED_PHASE`, set by `scripts/privileged_phases.sh`;
 `tests/privileged/conftest.py` fails unless the effective, permitted and bounding sets equal the
 phase's):
@@ -287,6 +290,14 @@ phase's):
   then pytest in the same process, so the tests run as a job process sees the container: the
   capabilities are exactly the six of the supervisor, the bounding set has no `NET_ADMIN` or
   `SETPCAP`, and the rules (installed by the production code) cannot be read or changed by anyone.
+  `test_read_only_rootfs.py` judges the layout: root with its capabilities cannot change `nft`, the
+  runner source or the system (`EROFS`), cannot remount, the tmpfs are `noexec,nosuid,nodev` with a
+  size limit, and the engine user can write nowhere but `/tmp`.
+- **execve** (`tests/privileged/execve/`, `execve_phase.py`): the same startup step, started
+  **without** no-new-privileges so that the bounding set is what is tested. Probes prepared by the
+  script before the drop (a file-capability `cat`, one with the effective flag, a setuid-root `cat`,
+  on an exec/suid tmpfs) cannot give root, the Diff job user or the engine user `NET_ADMIN` or
+  `SETPCAP` back.
 
 `scripts/run_privileged_offline.sh` arranges the namespaces and the capabilities with `sudo`,
 `unshare --net --mount` and `setpriv --bounding-set`, creates the engine user (`10101`), a stranger

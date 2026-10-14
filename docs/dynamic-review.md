@@ -114,9 +114,9 @@ namespaces, no host kernel setting beyond the `nf_tables` support every current 
   start). From then on the loop, every job process, the supervisor and the engine have a bounding set
   without them: `nft` fails for all of them, root included, and no process can add or remove a rule
   for the life of the container. It is per container, not forever: the container restarts
-  (`restart: unless-stopped`) with a writable root filesystem, so a compromised root supervisor
-  could change `nft`, `tini` or the runner source, crash the container, and get the restart with
-  `NET_ADMIN`. The engine user cannot write those files. Closing this is tracked in #249.
+  (`restart: unless-stopped`) and gets `NET_ADMIN` again, so what a restart runs must not be
+  changeable by a compromised root supervisor. That is what the read-only root filesystem is for
+  (next item, #249).
   If the rules cannot be installed (no `nft`, no `nf_tables`) the capabilities are dropped anyway and
   every Dynamic job fails with `dynamic_isolation_self_check_failed` while Diff jobs keep running.
   The fixed slot ports are checked at startup against the kernel's ephemeral port range
@@ -124,8 +124,25 @@ namespaces, no host kernel setting beyond the `nf_tables` support every current 
   means the rules are not installed and every Dynamic job fails closed. Keep the defaults (10180,
   10181) or other ports below the range.
   Only PID 1 (`tini`) keeps them. Do not run the container with `seccomp=unconfined`.
-- **Nothing mounted, nothing shared.** `compose.dynamic.yml` has no `volumes`, `network_mode`, `pid`,
-  `ipc` or Docker socket (a file test fails otherwise); do not add any. The rules do not cover
+- **Read-only root filesystem (#249).** `compose.dynamic.yml` runs the container with
+  `read_only: true`: nothing in the image can be written, not even by root with `DAC_OVERRIDE`, so
+  `nft`, `tini`, the pinned tools and pins, and the runner source stay as built and a restart cannot
+  run altered code with `NET_ADMIN`. The only writable paths are three private `tmpfs`, all
+  `noexec,nosuid,nodev`, empty again after every restart: `/tmp` (512 MiB, world-writable with the
+  sticky bit as before: job working directories, the per-job export, the engine's HOME, XDG and
+  TMPDIR), `/run` (1 MiB, root only: the identity leases) and `/home/runner` (64 MiB, owned by the
+  Diff job user 10001, mode 0700: its HOME). The engine user (10101) has **no new write path**: `/tmp`
+  is what it could write before, `/run` and `/home/runner` are closed to it, and the rest of the
+  filesystem is read-only (besides Docker's own `/dev/shm`, as before); the image smoke test checks
+  this against the same image without the layout. Docker also keeps `/etc/hosts`, `/etc/hostname`
+  and `/etc/resolv.conf` writable for root; they are rewritten at every start. Because a tmpfs is
+  charged to the container's memory limit, `/tmp` counts against the 2 GiB (see "Capacity"): a
+  repository export is limited to 64 MiB and a preparation to 256 MiB, but a runaway engine that
+  fills `/tmp` takes memory, not disk, and ends in the OOM kill of the job, bounded at 512 MiB. Do
+  not add `volumes` or widen the tmpfs; the file test pins them. It is not a way to a read-only
+  Diff runner: only `compose.dynamic.yml` and `compose.coolify.dynamic.yml` use it.
+- **Nothing mounted, nothing shared.** Besides those three tmpfs, `compose.dynamic.yml` has no
+  `volumes`, `network_mode`, `pid`, `ipc` or Docker socket (a file test fails otherwise); do not add any. The rules do not cover
   AF_UNIX, and this is what keeps that gap empty. The privileged suite reads `/proc/net/unix` as the
   engine user and asserts that no listener other than its own exists and that no Docker socket is
   present.
@@ -183,8 +200,9 @@ stable reason (never a value) and keeps serving Diff jobs.
 | `network_rules_not_installed` | `nft` could not install the rules: no `NET_ADMIN` at container creation, no `nf_tables` in the host kernel, no `nft`, or a slot port inside the kernel's ephemeral range |
 | `capabilities_not_dropped` | The process still holds `NET_ADMIN` or `SETPCAP` |
 | `pin_unreadable` | A pin file in `/opt/code-reviewer/pins/` is missing, malformed or has no entry for this platform (arm64) |
+| `pin_untrusted` | A pin file, or a directory above it up to `/`, is a link, is not owned by root or can be written by group or others |
 | `engine_binary_missing`, `ripgrep_missing` | The file is absent, a link, or not executable |
-| `engine_binary_untrusted`, `ripgrep_untrusted` | The file is not owned by root or can be written by group or others |
+| `engine_binary_untrusted`, `ripgrep_untrusted` | The file, or a directory above it up to `/`, is not owned by root, is a link (directories) or can be written by group or others |
 | `engine_binary_checksum_mismatch`, `ripgrep_checksum_mismatch` | Size or SHA-256 differ from the pin |
 | `engine_version_mismatch` | Run offline as the engine user, the engine does not report the pinned version |
 | `network_probe_failed` | A probe run as the engine user could not reach the slot's proxy port, or could reach something else (another loopback service, another address, UDP). Also: a stranger holds the proxy port |
@@ -353,7 +371,9 @@ spike's conservative proposal, not a measurement. The spike's stock trace (11 mo
 596.57 MiB peak RSS of the engine process with fake model answers) is **not** a capacity figure: it
 excludes the export's page cache, the proxy, the runner and helper processes, and it used a tiny
 repository. Do not raise the concurrency, and do not lower the limit below 1 GiB per slot plus the
-reserve, until the following has been measured on your deployment target.
+reserve, until the following has been measured on your deployment target. The read-only root
+filesystem (#249) puts the job working directories in a 512 MiB `tmpfs` (`/tmp`), which is charged
+to this limit like any other memory: it is part of the figure to measure, not extra.
 
 **What an out-of-memory kill does.** With no swap, a peak above the limit makes the kernel kill
 processes of the container. If the engine or the job process is killed, the loop ends the job, the
@@ -411,10 +431,11 @@ by the defaults.
   A lost edit response is recognised by re-reading the comment (it must hold exactly the body sent).
 - **Hidden Unicode tag characters in repository files reach the model untouched (#247).** An attacker
   who controls repository text can hide instructions in tag characters.
-- **A restarted container runs with `NET_ADMIN` again (#249).** The capability is dropped per container
-  lifetime, not forever: `restart: unless-stopped` starts a fresh container with the writable root
-  filesystem, so a compromised root supervisor that crashes the container and altered `nft`, `tini` or
-  the runner source gets the restart with the capability. The engine user cannot do this.
+- **A restarted container runs with `NET_ADMIN` again, by design (#249).** The capability is dropped
+  per container lifetime. Because the root filesystem is read-only, a compromised root supervisor
+  that crashes the container cannot have changed `nft`, `tini` or the runner source for the restart;
+  what it can still do is bounded by the three tmpfs, which are empty after the restart. PID 1
+  (`tini`) still holds the two capabilities, and the supervisor's startup is the same code as before.
 - **The byte-to-token estimate of the token cap is uncalibrated (#235).** The cap is preventive and
   conservative, but its calibration against real tokenizers is open.
 - **Nested `AGENTS.md` and similar files** in the repository can influence the model. The core marks

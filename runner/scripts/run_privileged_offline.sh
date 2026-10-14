@@ -4,8 +4,10 @@
 # Runs the privileged suite (pytest -m privileged, #197, #244) as the Dynamic runner would run: as
 # root with exactly the capabilities of compose.dynamic.yml (cap_add) and nothing else, with
 # no-new-privileges, in a Linux network namespace that has a loopback interface and no route out,
-# and in a mount namespace with a fresh /run (the container mounts nothing from the host, so there
-# is no Docker socket; a CI host has one). The suite starts the engine as a dedicated unprivileged
+# and in a mount namespace laid out like the container (#249): every disk filesystem read-only, a
+# fresh tmpfs on /run and /tmp with the options of compose.dynamic.yml, a throwaway HOME. Nothing is
+# mounted from the host, so there is no Docker socket (a CI host has one), and the suite runs on the
+# only writable paths the container has. The suite starts the engine as a dedicated unprivileged
 # user, installs the per-user nft rules and kills that user's processes; none of it can run as an
 # ordinary user. For CI (GitHub's Ubuntu runners have passwordless sudo and the nf_tables kernel
 # module); it needs `nft`, `rg`, `setpriv`, `unshare` and `ip`. On a developer machine without root,
@@ -43,9 +45,16 @@ sudo --preserve-env env "PATH=$PATH:/usr/sbin:/sbin" "HOME=$HOME" "OPENCODE_BIN=
   unshare --net --mount -- bash -c '
     set -euo pipefail
     ip link set lo up
-    # A container mounts nothing from the host: nothing of the /run of the CI host (its Docker
-    # socket among it) is visible to the suite, and the AF_UNIX test (#244) judges the container.
-    mount -t tmpfs tmpfs /run
+    # The writable paths of the container (#249): the same tmpfs options as compose.dynamic.yml
+    # (`tmpfs`, pinned by app/src/ci/compose-dynamic.test.ts). A container mounts nothing from the
+    # host: nothing of the /run of the CI host (its Docker socket among it) is visible to the suite,
+    # and the AF_UNIX test (#244) judges the container. The HOME of the Diff job user is the CI
+    # host'"'"'s own directory and cannot be hidden, so the suite gets a throwaway one in /tmp instead.
+    mount -t tmpfs -o rw,noexec,nosuid,nodev,size=1m,mode=0755 tmpfs /run
+    mount -t tmpfs -o rw,noexec,nosuid,nodev,size=512m,mode=1777 tmpfs /tmp
+    HOME="$(mktemp -d)"
+    export HOME
+    export UV_CACHE_DIR="$HOME/uv-cache"
     # A temporary root of its own: the engine suite that ran before as the unprivileged runner user
     # left a pytest directory of that user in /tmp, which pytest refuses to share with root.
     PYTEST_DEBUG_TEMPROOT="$(mktemp -d)"
@@ -58,8 +67,8 @@ sudo --preserve-env env "PATH=$PATH:/usr/sbin:/sbin" "HOME=$HOME" "OPENCODE_BIN=
         || useradd --system --uid "$id" --gid "$id" --no-create-home --shell /usr/sbin/nologin "$name"
     done
     # The probes of the execve phase: copies of `cat`, one with the file capabilities of the two
-    # startup-only capabilities (permitted and inheritable, once with the effective flag too), one setuid root, on a tmpfs
-    # that allows exec and setuid (the container'"'"'s own tmpfs allow neither).
+    # startup-only capabilities (permitted and inheritable, once with the effective flag too), one
+    # setuid root, on a tmpfs that allows exec and setuid (the container'"'"'s own tmpfs allow neither).
     CR_PROBE_DIR="$(mktemp -d)"
     export CR_PROBE_DIR
     mount -t tmpfs -o rw,exec,suid,dev,size=8m,mode=0755 tmpfs "$CR_PROBE_DIR"
@@ -69,6 +78,16 @@ sudo --preserve-env env "PATH=$PATH:/usr/sbin:/sbin" "HOME=$HOME" "OPENCODE_BIN=
     setcap cap_net_admin,cap_setpcap+ip "$CR_PROBE_DIR/cap-cat"
     setcap cap_net_admin,cap_setpcap+eip "$CR_PROBE_DIR/cap-cat-effective"
     chmod 4755 "$CR_PROBE_DIR/suid-cat"
+    # The root filesystem is read-only, the last step of the set-up (it needs to write /etc): every
+    # mount of a disk filesystem, so the repository, the tools and the system cannot be changed by
+    # the suite however the CI host lays out its disks. tests/privileged/test_read_only_rootfs.py
+    # proves the result.
+    while read -r mountpoint fstype; do
+      case "$fstype" in
+        ext2 | ext3 | ext4 | xfs | btrfs | vfat | overlay | fuseblk | squashfs | erofs | f2fs)
+          mount -o remount,bind,ro "$mountpoint" || echo "could not make $mountpoint read-only" >&2 ;;
+      esac
+    done < <(awk '"'"'{ for (i = 1; i <= NF; i++) if ($i == "-") print $5, $(i + 1) }'"'"' /proc/self/mountinfo)
     status=0
     setpriv \
       --bounding-set=-all,+chown,+dac_override,+fowner,+kill,+setgid,+setuid,+setpcap,+net_admin \

@@ -68,14 +68,18 @@ def test_the_supervisor_cannot_change_what_a_restart_would_run_with_net_admin(in
     path = the_files_that_run_with_the_startup_capabilities()[index]
     sibling = path.with_name(path.name + ".planted")
     before = path.stat()
+    # The attempts below would damage a writable system: they only run on a read-only one.
+    assert os.statvfs(path).f_flag & os.ST_RDONLY, f"{path} is on a writable filesystem"
 
-    refused_as_read_only("open for writing", lambda: os.open(path, os.O_WRONLY))
-    refused_as_read_only("append", lambda: path.open("ab").write(b"x"))
+    refused_as_read_only("open for writing", lambda: os.close(os.open(path, os.O_WRONLY)))
+    refused_as_read_only("append", lambda: path.open("ab").close())
     refused_as_read_only("chmod", lambda: os.chmod(path, 0o777))
     refused_as_read_only("chown", lambda: os.chown(path, ENGINE_UID, ENGINE_GID))
     refused_as_read_only("unlink", lambda: os.unlink(path))
     refused_as_read_only("rename", lambda: os.rename(path, sibling))
-    refused_as_read_only("create next to it", lambda: os.open(sibling, os.O_CREAT | os.O_WRONLY))
+    refused_as_read_only(
+        "create next to it", lambda: os.close(os.open(sibling, os.O_CREAT | os.O_WRONLY))
+    )
     assert not sibling.exists()
     assert path.stat().st_mtime_ns == before.st_mtime_ns
     assert path.stat().st_mode == before.st_mode
@@ -118,6 +122,8 @@ def test_the_tmpfs_are_writable_for_root_and_locked_down() -> None:
 # #249-T01: the engine user gains no write path from the layout. On the read-only root it can write
 # nowhere (find asks the kernel with access(2), which also answers for a read-only mount); the one
 # place on the mounts it can use is /tmp, world-writable with the sticky bit as in the image before.
+# The CI host's disk is large, so the search is bounded in depth; that the whole mount is read-only
+# is the first test, and the image smoke test walks the real container filesystem completely.
 def test_the_engine_user_cannot_write_anywhere_but_tmp() -> None:
     def writable_as_engine(*arguments: str) -> list[str]:
         done = subprocess.run(
@@ -134,7 +140,11 @@ def test_the_engine_user_cannot_write_anywhere_but_tmp() -> None:
         return sorted(done.stdout.splitlines())
 
     # -xdev: the root filesystem, whose mount points are listed but not entered.
-    assert writable_as_engine("/", "-xdev") == ["/tmp"]
+    assert writable_as_engine("/", "-xdev", "-maxdepth", "3") == ["/tmp"]
+    assert (
+        writable_as_engine("/var/tmp", "/usr/local", "/opt", "/etc", "-xdev", "-maxdepth", "2")
+        == []
+    )
     # The other tmpfs: its own contents are root's.
     assert writable_as_engine("/run", "-maxdepth", "0") == []
     assert writable_as_engine("/tmp", "-maxdepth", "0") == ["/tmp"]

@@ -303,7 +303,12 @@ dynamic_caps=(
 dynamic_env=(--env HOME=/home/runner --env RUNNER_DIFF_JOB_USER=10001:10001)
 # #249: the root filesystem is read-only, and the only writable paths are three private tmpfs (the
 # `read_only` and `tmpfs` of compose.dynamic.yml; app/src/ci/compose-dynamic.test.ts keeps them equal).
-dynamic_rootfs=()
+dynamic_rootfs=(
+  --read-only
+  --tmpfs "/tmp:rw,noexec,nosuid,nodev,size=512m,mode=1777"
+  --tmpfs "/run:rw,noexec,nosuid,nodev,size=1m,mode=0755"
+  --tmpfs "/home/runner:rw,noexec,nosuid,nodev,size=64m,uid=10001,gid=10001,mode=0700"
+)
 
 step "the self-check of the Dynamic runner passes and opencode is advertised"
 start_loop smoke-runner-capable "${dynamic_caps[@]}" "${dynamic_rootfs[@]}" "${dynamic_env[@]}"
