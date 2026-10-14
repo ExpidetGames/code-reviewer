@@ -51,6 +51,18 @@ other way round, so a change to the format has to change the file and both sides
   from before #257 rejects it when present: update the runner before or together with the app. A newer
   runner with an older app is safe: absent means false, and the publisher stays fail-closed.
 
+- #279 adds the optional `DynamicReview.capabilities` (`DynamicModelCapabilities`: the features, the
+  context window, the output allowance and the unit prices the app read from the provider's model
+  metadata) and the optional `ClaimRequest.features`. `RunnerJobInput` is closed, so a runner from
+  before #279 rejects a `dynamic.capabilities` it receives. The rule is therefore the opposite of the
+  two above: the **app** never sends the field unless the claim names the feature
+  `dynamic_capabilities`. A new runner always names it; an old runner names no feature and gets
+  exactly the previous payload; an old app ignores `features` and sends no descriptor, so the new
+  runner uses its operator's description as before. Either side can be upgraded first and neither
+  breaks the other. Unknown feature names are ignored (a newer runner may name features an older app
+  does not know), unlike unknown engines. `golden` fixtures: `fakes/fixtures/dynamic-review-job.json`
+  (without) and `dynamic-review-job-capabilities.json` (with the field), validated by both suites.
+
 ### Rolling out Dynamic Review (#195, finding 4)
 
 A previous-release **app** ignores `review_kind` in its claim SQL: on a shared, migrated database it
