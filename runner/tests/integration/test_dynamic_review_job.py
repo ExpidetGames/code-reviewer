@@ -13,7 +13,6 @@ import socket
 import sys
 from collections.abc import Generator
 from contextlib import contextmanager
-from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -34,7 +33,6 @@ from code_reviewer_runner.capabilities import ALL_ENGINES
 from code_reviewer_runner.dynamic_review.checkout import PreparedContent
 from code_reviewer_runner.dynamic_review.engine_user import EngineLaunch
 from code_reviewer_runner.dynamic_review.limits import CheckoutError
-from code_reviewer_runner.dynamic_review.self_check import DEFAULT_TOOLS
 from code_reviewer_runner.dynamic_review.supervisor import Prepared
 from code_reviewer_runner.job import parse_job
 from code_reviewer_runner.result import ErrorCode
@@ -128,20 +126,25 @@ def environment() -> dict[str, str]:
     return {
         runner.OPENCODE_COMMAND_VARIABLE: f"{sys.executable} {FAKE_ENGINE}",
         runner.DYNAMIC_CAPABILITIES_VARIABLE: CAPABILITIES,
-        # The fake engine never searches; the production default (a ripgrep is required) stays.
+        # The fake engine never searches; the production default (a verified ripgrep is required)
+        # stays: the loop names it, the fixture below provides one.
+        runner.RIPGREP_PATH_VARIABLE: str(FAKE_RIPGREP["path"]),
     }
 
 
+# The file the loop would name as the verified ripgrep; set per test by the fixture below.
+FAKE_RIPGREP: dict[str, Path] = {}
+
+
 @pytest.fixture(autouse=True)
-def fake_engine_needs_no_ripgrep(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    # `run_dynamic_job` hands the engine the verified ripgrep of the image (`DEFAULT_TOOLS`) and the
-    # adapter requires it to be an executable file named `rg`; the fake engine has no search tool,
-    # so an empty executable stands in for it.
+def fake_engine_needs_no_ripgrep(tmp_path: Path) -> None:
+    # `run_dynamic_job` requires the verified ripgrep the loop names to be an executable file called
+    # `rg`; the fake engine has no search tool, so an empty executable stands in for it.
     ripgrep = tmp_path / "tools" / "rg"
     ripgrep.parent.mkdir()
     ripgrep.write_text("#!/bin/sh\n", encoding="utf-8")
     ripgrep.chmod(0o755)
-    monkeypatch.setattr(runner, "DEFAULT_TOOLS", replace(DEFAULT_TOOLS, ripgrep=ripgrep))
+    FAKE_RIPGREP["path"] = ripgrep
 
 
 # #197-T01
@@ -384,12 +387,15 @@ def test_a_slot_whose_proxy_port_is_held_by_somebody_else_fails_closed_before_an
 
 
 # #202-T04
+@pytest.mark.parametrize("named", [None, "missing"])
 def test_a_job_without_the_verified_ripgrep_file_does_not_start_the_engine(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, named: str | None
 ) -> None:
-    monkeypatch.setattr(
-        runner, "DEFAULT_TOOLS", replace(DEFAULT_TOOLS, ripgrep=tmp_path / "missing" / "rg")
-    )
+    env = environment()
+    if named is None:
+        del env[runner.RIPGREP_PATH_VARIABLE]
+    else:
+        env[runner.RIPGREP_PATH_VARIABLE] = str(tmp_path / named / "rg")
     preparer = Preparer(tmp_path / "export", {"proxy_calls": 0, "answer": "structured"})
 
     with FakeUpstream() as upstream:
@@ -397,7 +403,7 @@ def test_a_job_without_the_verified_ripgrep_file_does_not_start_the_engine(
             job_for(f"{upstream.url}/v1"),
             None,
             0.0,
-            environment(),
+            env,
             engines=ALL_ENGINES,
             prepare=preparer,
         )

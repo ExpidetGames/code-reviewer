@@ -186,8 +186,9 @@ unreadable private state, the network again) is proven for every job before its 
 failure there ends that job with `dynamic_isolation_self_check_failed`.
 
 The loop hands the job process of a Dynamic job the engines it advertised, the verified engine
-command and the operator's `RUNNER_DYNAMIC_CAPABILITIES`; nothing an operator sets under
-`RUNNER_OPENCODE_COMMAND` or `RUNNER_ADVERTISED_ENGINES` reaches a job. A Dynamic job that arrives at
+command, the verified `rg` (the engine runs exactly that file, first on its `PATH`) and the
+operator's `RUNNER_DYNAMIC_CAPABILITIES`; nothing an operator sets under `RUNNER_OPENCODE_COMMAND`,
+`RUNNER_DYNAMIC_RIPGREP` or `RUNNER_ADVERTISED_ENGINES` reaches a job. A Dynamic job that arrives at
 a runner without `opencode` in that list is refused with `dynamic_engine_unavailable`.
 
 ## The model

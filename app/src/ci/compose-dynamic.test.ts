@@ -315,6 +315,7 @@ describe("compose.dynamic.yml", () => {
     // and handed to its job processes; nothing in deployment configuration can set them.
     expect(Object.keys(environment)).not.toContain("RUNNER_OPENCODE_COMMAND");
     expect(Object.keys(environment)).not.toContain("RUNNER_ADVERTISED_ENGINES");
+    expect(Object.keys(environment)).not.toContain("RUNNER_DYNAMIC_RIPGREP");
   });
 
   // #202-T08

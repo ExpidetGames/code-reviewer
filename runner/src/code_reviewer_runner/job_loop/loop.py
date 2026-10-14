@@ -31,6 +31,7 @@ from code_reviewer_runner.capabilities import (
     ENGINE_DYNAMIC,
     ENGINES_VARIABLE,
     OPENCODE_COMMAND_VARIABLE,
+    RIPGREP_PATH_VARIABLE,
 )
 from code_reviewer_runner.dynamic_review.engine_user import sweep_user
 from code_reviewer_runner.job import Job, JobError, ReviewKind, parse_job
@@ -285,9 +286,9 @@ class RunnerLoop:
     def _dynamic_environment(self) -> dict[str, str]:
         """What only a Dynamic job process gets (#202), all of it decided by trusted configuration.
 
-        The engines the startup self-check advertised, the engine command it verified (never one the
-        operator typed) and the operator's description of the model and of the slot. A runner whose
-        check failed hands over no command: the job process then refuses with
+        The engines the startup self-check advertised, the engine command and `rg` it verified
+        (never ones the operator typed) and the operator's description of the model and of the
+        slot. A runner whose check failed hands over no command: the job process then refuses with
         `dynamic_engine_unavailable`.
         """
         env = {
@@ -298,6 +299,8 @@ class RunnerLoop:
         env[ENGINES_VARIABLE] = ",".join(self._settings.engines)
         if ENGINE_DYNAMIC in self._settings.engines and self._settings.dynamic_command:
             env[OPENCODE_COMMAND_VARIABLE] = shlex.join(self._settings.dynamic_command)
+            if self._settings.dynamic_ripgrep:
+                env[RIPGREP_PATH_VARIABLE] = self._settings.dynamic_ripgrep
         return env
 
     def _ms_since(self, started: float) -> int:

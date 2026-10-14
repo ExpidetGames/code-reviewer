@@ -103,6 +103,9 @@ ENGINES_VARIABLE = "RUNNER_ADVERTISED_ENGINES"
 # The engine command the same way: the loop sets it for a Dynamic job process, from the executable
 # the self-check verified. The operator's own environment is never passed on under this name.
 OPENCODE_COMMAND_VARIABLE = "RUNNER_OPENCODE_COMMAND"
+# And the `rg` the same check verified: the file the engine runs for its grep and glob, first on its
+# PATH. Set by the loop for a Dynamic job process; never read from operator configuration.
+RIPGREP_PATH_VARIABLE = "RUNNER_DYNAMIC_RIPGREP"
 
 
 def engines_from_environment(environment: Mapping[str, str]) -> tuple[str, ...]:

@@ -206,7 +206,7 @@ Engine suite (`runner/tests/engine/`, `uv run pytest -m engine`, about 5 minutes
   `~/.cache/code-reviewer/opencode/<digest prefix>/` (`OPENCODE_BIN` overrides it; `OPENCODE_TEST_PATH`
   adds a directory with `rg` to the engine PATH on a machine that has none). A missing executable fails
   loudly with the command to run, never a skip. Without a ripgrep on its PATH the pinned release
-  downloads one on the first grep, so the adapter refuses to start it; the engine gets the verified `rg` file (a parameter of the adapter) first on its PATH, and a different `rg` earlier in `PATH` is never used. The tests prove, with the real
+  downloads one on the first grep, so the adapter refuses to start it; the engine gets the verified `rg` file (named by the job loop in `RUNNER_DYNAMIC_RIPGREP`) first on its PATH, and a different `rg` earlier in `PATH` is never used. The tests prove, with the real
   binary and no real model: a hostile repository (plugins in `.opencode/` and named by an
   `opencode.json`, nested config, agents, commands, tools, skills, AGENTS.md, instruction files) goes
   through the real #196 export and nothing is loaded or executed, with the same tree unsanitized as the

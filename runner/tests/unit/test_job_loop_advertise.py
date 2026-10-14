@@ -46,6 +46,7 @@ def test_a_passing_check_advertises_both_engines_and_names_the_verified_command(
 
     assert settings.engines == ALL_ENGINES
     assert settings.dynamic_command == (str(DEFAULT_TOOLS.opencode),)
+    assert settings.dynamic_ripgrep == str(DEFAULT_TOOLS.ripgrep)
     assert seen == [{"user": (10101, 10101), "ports": PORTS, "rules_installed": True}]
     assert "advertised" in caplog.text and "opencode" in caplog.text
 
@@ -64,6 +65,7 @@ def test_a_failed_check_never_advertises_and_logs_the_reason(
     assert settings.engines == (ENGINE_DIFF,)
     assert ENGINE_DYNAMIC not in settings.engines
     assert settings.dynamic_command is None
+    assert settings.dynamic_ripgrep is None
     warnings = [record for record in caplog.records if record.levelno == logging.WARNING]
     assert len(warnings) == 1
     assert "not advertised" in warnings[0].getMessage()

@@ -13,7 +13,12 @@ import json
 from loop_support import RUNNER_TOKEN, Harness, make_claim, run
 from test_dynamic_review_run import dynamic_document
 
-from code_reviewer_runner.capabilities import ALL_ENGINES, ENGINE_DIFF, ENGINES_VARIABLE
+from code_reviewer_runner.capabilities import (
+    ALL_ENGINES,
+    ENGINE_DIFF,
+    ENGINES_VARIABLE,
+    RIPGREP_PATH_VARIABLE,
+)
 
 COMMAND_VARIABLE = "RUNNER_OPENCODE_COMMAND"
 OPERATOR = {
@@ -33,7 +38,12 @@ def test_a_dynamic_job_process_gets_the_verified_engine_and_the_model_descriptio
             **USERS,
             engines=ALL_ENGINES,
             dynamic_command=("/usr/local/bin/opencode",),
-            environment={**OPERATOR, "RUNNER_OPENCODE_COMMAND": "/tmp/operator-chosen"},
+            dynamic_ripgrep="/usr/local/bin/rg",
+            environment={
+                **OPERATOR,
+                "RUNNER_OPENCODE_COMMAND": "/tmp/operator-chosen",
+                "RUNNER_DYNAMIC_RIPGREP": "/tmp/operator-chosen-rg",
+            },
         )
         harness.api.claims = [make_claim(1, **dynamic_document())]
         await harness.start()
@@ -42,6 +52,8 @@ def test_a_dynamic_job_process_gets_the_verified_engine_and_the_model_descriptio
         assert env[ENGINES_VARIABLE] == "pr-agent,opencode"
         # The command is the one the self-check verified, never an operator-supplied one.
         assert env[COMMAND_VARIABLE] == "/usr/local/bin/opencode"
+        # So is `rg`: the verified file, never the operator's.
+        assert env[RIPGREP_PATH_VARIABLE] == "/usr/local/bin/rg"
         for name, value in OPERATOR.items():
             assert env[name] == value
         assert RUNNER_TOKEN not in json.dumps(dict(env))
@@ -59,7 +71,7 @@ def test_a_dynamic_job_process_of_a_runner_without_the_capability_gets_no_engine
 
         env = harness.launcher.processes[0].spec.env
         assert env[ENGINES_VARIABLE] == "pr-agent"
-        assert COMMAND_VARIABLE not in env
+        assert COMMAND_VARIABLE not in env and RIPGREP_PATH_VARIABLE not in env
         await harness.stop()
 
     run(scenario)
@@ -72,6 +84,7 @@ def test_a_diff_job_process_gets_no_dynamic_variable() -> None:
             **USERS,
             engines=ALL_ENGINES,
             dynamic_command=("/usr/local/bin/opencode",),
+            dynamic_ripgrep="/usr/local/bin/rg",
             environment=OPERATOR,
         )
         harness.api.claims = [make_claim(1)]
@@ -84,6 +97,7 @@ def test_a_diff_job_process_gets_no_dynamic_variable() -> None:
             if name.startswith("RUNNER_") and name != "RUNNER_JOB_TIMEOUT_SECONDS"
         ]
         assert ENGINES_VARIABLE not in env and COMMAND_VARIABLE not in env
+        assert RIPGREP_PATH_VARIABLE not in env
         await harness.stop()
 
     run(scenario)

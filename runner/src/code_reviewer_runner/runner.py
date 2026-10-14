@@ -28,6 +28,7 @@ import time
 from collections.abc import Generator, Mapping, Sequence
 from contextlib import ExitStack, contextmanager
 from dataclasses import replace
+from pathlib import Path
 from typing import Any, TextIO
 
 from loguru import logger
@@ -36,6 +37,7 @@ from code_reviewer_runner import __version__
 from code_reviewer_runner.capabilities import (
     ENGINE_DYNAMIC,
     OPENCODE_COMMAND_VARIABLE,
+    RIPGREP_PATH_VARIABLE,
     engines_from_environment,
 )
 from code_reviewer_runner.comment_recorder import CommentRecorder, install_comment_recorder
@@ -53,7 +55,6 @@ from code_reviewer_runner.dynamic_review.inputs import review_inputs
 from code_reviewer_runner.dynamic_review.limits import CheckoutError
 from code_reviewer_runner.dynamic_review.prompts import compose_system_prompt
 from code_reviewer_runner.dynamic_review.proxy import ModelProxy, capabilities_from_config
-from code_reviewer_runner.dynamic_review.self_check import DEFAULT_TOOLS
 from code_reviewer_runner.dynamic_review.supervisor import (
     ContentPreparer,
     Prepared,
@@ -255,6 +256,11 @@ def run_dynamic_job(
             started,
             capture,
         )
+    # The `rg` the startup self-check verified, named by the loop and not looked up along the PATH.
+    # Without one the adapter refuses to start the engine.
+    ripgrep = (
+        Path(named_ripgrep) if (named_ripgrep := environment.get(RIPGREP_PATH_VARIABLE)) else None
+    )
     try:
         capabilities = capabilities_from_config(environment.get(DYNAMIC_CAPABILITIES_VARIABLE))
     except LimitError as error:
@@ -326,8 +332,7 @@ def run_dynamic_job(
                     exported_paths=frozenset(content.files),
                     launch=prepared.launch,
                     node_bin=environment.get(DYNAMIC_NODE_BIN_VARIABLE) or None,
-                    # The file the startup self-check verified, not a lookup along the PATH.
-                    ripgrep=DEFAULT_TOOLS.ripgrep,
+                    ripgrep=ripgrep,
                 )
                 answer = engine.run()
             finally:

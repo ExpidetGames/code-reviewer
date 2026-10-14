@@ -75,6 +75,7 @@ class LoopSettings:
     # together with the verified engine command that the Dynamic job process is handed.
     engines: tuple[str, ...] = (ENGINE_DIFF,)
     dynamic_command: tuple[str, ...] | None = None
+    dynamic_ripgrep: str | None = None
     job_command: tuple[str, ...] = field(default_factory=default_job_command)
     # (uid, gid) of the user every non-Dynamic job process drops to. Set only for a loop that runs
     # as root (the Dynamic runner, #197); unset, jobs run as the loop's own user.

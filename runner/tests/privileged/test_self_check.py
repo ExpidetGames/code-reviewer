@@ -122,6 +122,7 @@ def test_the_real_system_passes_the_check_and_advertises_opencode(tools: ToolPat
 
     assert advertised.engines == ALL_ENGINES
     assert advertised.dynamic_command == (str(DEFAULT_TOOLS.opencode),)
+    assert advertised.dynamic_ripgrep == str(DEFAULT_TOOLS.ripgrep)
 
 
 # #202-T09: a user the network rules do not name is not confined: the probe says so.

@@ -84,7 +84,12 @@ def advertise_engines(
     log = logging.getLogger(LOGGER_NAME)
     if error is None:
         log.info("Dynamic Review: opencode is advertised, the startup self-check passed")
-        return replace(settings, engines=engines, dynamic_command=(str(DEFAULT_TOOLS.opencode),))
+        return replace(
+            settings,
+            engines=engines,
+            dynamic_command=(str(DEFAULT_TOOLS.opencode),),
+            dynamic_ripgrep=str(DEFAULT_TOOLS.ripgrep),
+        )
     reason: Any = getattr(error, "reason", None)
     named = reason.value if isinstance(reason, SelfCheckReason) else "self_check_error"
     if settings.dynamic_engine_user is None:
@@ -96,7 +101,7 @@ def advertise_engines(
             error.code.value,
             named,
         )
-    return replace(settings, engines=engines, dynamic_command=None)
+    return replace(settings, engines=engines, dynamic_command=None, dynamic_ripgrep=None)
 
 
 async def serve(
