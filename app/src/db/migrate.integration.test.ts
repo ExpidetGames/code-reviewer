@@ -86,6 +86,7 @@ describe("the migrations of both epics", () => {
       "20261012160000_remove_commands",
       "20261013090000_add_job_review_kind",
       "20261014090000_fix_dynamic_default_model",
+      "20261014120000_create_workspace_entitlements",
     ]);
   });
 
@@ -149,6 +150,7 @@ describe("starting the database", () => {
       "users",
       "verifications",
       "webhook_deliveries",
+      "workspace_entitlements",
       "workspace_members",
       "workspace_secrets",
       "workspaces",

@@ -8,7 +8,7 @@
 import type { Kysely } from "kysely";
 import {
   createInstanceSettingsRepository,
-  type InstanceSettingKey,
+  type ReadableSettingKey,
   type InstanceSettingValues,
 } from "../db/repositories/instance-settings-repository.ts";
 import type { Database } from "../db/schema.ts";
@@ -187,7 +187,7 @@ export function createAdminService({
 
   return {
     async readSettings() {
-      const keys: InstanceSettingKey[] = [
+      const keys: ReadableSettingKey[] = [
         "tenancy",
         "sign_up_rule",
         "sign_in_methods",

@@ -307,6 +307,31 @@ export interface WorkspaceSecretsTable {
   updated_at: string;
 }
 
+/**
+ * What an operator allows one workspace (src/db/repositories/workspace-entitlements-repository.ts,
+ * src/workspaces/entitlements.ts). One row per workspace; no row means the instance default or unlimited.
+ */
+export interface WorkspaceEntitlementsTable {
+  /** The workspace; the primary key, so a workspace has at most one row. */
+  workspace_id: string;
+  /** A label for display and audit, at most 64 printable characters; the code never branches on it. */
+  plan_label: string;
+  /** `own` or `managed` (KEY_MODES). */
+  key_mode: string;
+  /** JSON text: `diffRunsPerPeriod`, `dynamicRunsPerPeriod`, `managedCostLimitMicroUsd`, each a count or null. */
+  limits: string;
+  /** ISO 8601 text in UTC: usage counts from here. Never moves to an earlier time. */
+  period_start: string;
+  /** 1 while the workspace's reviews are suspended, otherwise 0. */
+  suspended: number;
+  /** A short lowercase code that says why; null unless `suspended` is 1. */
+  suspension_code: string | null;
+  /** ISO 8601 text in UTC. */
+  updated_at: string;
+  /** The id of the user who saved it last, or null (the operator API, or a user who was deleted since). */
+  updated_by: string | null;
+}
+
 /** The LLM key handed to a runner with the claim of a job, encrypted (src/runner-api/claimed-keys.ts). */
 export interface JobClaimedKeysTable {
   job_id: string;
@@ -470,6 +495,7 @@ export interface Database {
   rate_limits: RateLimitsTable;
   secrets: SecretsTable;
   workspace_secrets: WorkspaceSecretsTable;
+  workspace_entitlements: WorkspaceEntitlementsTable;
   job_claimed_keys: JobClaimedKeysTable;
   password_reset_tokens: PasswordResetTokensTable;
   email_verification_tokens: EmailVerificationTokensTable;
