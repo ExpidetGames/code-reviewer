@@ -200,5 +200,4 @@ def secure_startup(
             error.detail,
             error.code.value,
         )
-    drop()
-    return installed
+    return installed  # TEMPORARY red proof: no drop
