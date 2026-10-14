@@ -96,7 +96,10 @@ from code_reviewer_runner.pr_agent_config import InvalidOption, build_environmen
 from code_reviewer_runner.pr_agent_runtime import JobTimeout, execute
 from code_reviewer_runner.redaction import REDACTED, RedactingStream, Redactor
 from code_reviewer_runner.repo_settings_guard import install_repo_settings_guard
-from code_reviewer_runner.require_parameters_patch import apply_require_parameters_patch
+from code_reviewer_runner.require_parameters_patch import (
+    RequireParametersPatchError,
+    apply_require_parameters_patch,
+)
 from code_reviewer_runner.result import ErrorCode, JobResult
 from code_reviewer_runner.review_state_watch import (
     ReviewStateWatch,
@@ -149,6 +152,14 @@ def run_job(
                 patches.callback(apply_require_parameters_patch())
         except IdentityPatchError as error:
             return _failure(error.code, error.detail, started, capture)
+        except RequireParametersPatchError as error:
+            # Fails closed: no request goes out without the field. The cause is named in the result.
+            return _failure(
+                ErrorCode.RUNNER_ERROR,
+                f"cannot patch the OpenRouter request controls of PR-Agent: {error}",
+                started,
+                capture,
+            )
         except Exception as error:
             capture.add(_ERROR_LEVEL, "ERROR", "cannot load PR-Agent", error)
             return _failure(ErrorCode.RUNNER_ERROR, "cannot load PR-Agent", started, capture)

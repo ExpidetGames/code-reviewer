@@ -206,6 +206,7 @@ class LlmAccess:
     fallback_models: tuple[str, ...] = ()
     # Whether every request carries OpenRouter's `provider.require_parameters` (#270). True for the
     # provider itself; a local fake only gets it when the test double that gave it its address asks.
+    # `_llm_access` is the one constructor in production and always sets it.
     require_parameters: bool = True
 
 

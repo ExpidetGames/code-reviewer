@@ -339,6 +339,26 @@ def test_a_missing_identity_method_stops_the_job_before_handle_request(
     assert calls == []
 
 
+# #270-T03
+def test_a_pr_agent_without_the_request_controls_stops_the_job_and_names_the_cause(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def double() -> bool:
+        return True
+
+    calls = use_double(monkeypatch, double)
+    module = import_module("pr_agent.algo.ai_handlers.litellm_ai_handler")
+    monkeypatch.delattr(module.LiteLLMAIHandler, "_apply_openrouter_request_controls")
+
+    result, _ = run()
+
+    # No request goes out without the field; the cause is in the result, not only in a log line.
+    assert result.ok is False
+    assert result.error_code is ErrorCode.RUNNER_ERROR
+    assert "OpenRouter request controls" in result.log_tail
+    assert calls == []
+
+
 # CR-30-T04
 def test_a_moved_login_chain_stops_the_job_before_handle_request_and_names_the_step(
     monkeypatch: pytest.MonkeyPatch,

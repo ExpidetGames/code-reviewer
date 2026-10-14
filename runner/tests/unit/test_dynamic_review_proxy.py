@@ -1161,3 +1161,46 @@ def test_a_call_the_provider_refused_leaves_the_cost_unknown() -> None:
     # reported charge, so it cannot claim an exact total.
     assert statuses == [200, 503, 200]
     assert subject.ledger.usage(None).cost_usd is None
+
+
+# The 404 texts OpenRouter gives when no endpoint supports what the request asks for, each seen in
+# public reports (HTTP 404 from https://openrouter.ai/api/v1/chat/completions): the same words as
+# the one above, a request that offers tools, and a `tool_choice` value.
+NO_ENDPOINT_FOR_PARAMETERS = (
+    "No endpoints found that can handle the requested parameters.",
+    "No endpoints found that support tool use. To learn more about provider routing, visit: "
+    "https://openrouter.ai/docs/provider-routing",
+    "No endpoints found that support the provided 'tool_choice' value.",
+)
+
+
+# #270-T05
+@pytest.mark.parametrize("message", NO_ENDPOINT_FOR_PARAMETERS)
+def test_every_openrouter_answer_that_no_endpoint_supports_the_request_is_unsupported_features(
+    message: str,
+) -> None:
+    upstream = Upstream(status=404, body={"error": {"message": message, "code": 404}})
+    subject = proxy(upstream, require_parameters=True)
+
+    response = post(subject, request_body())
+
+    assert error_code(response) == ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED.value
+    assert len(upstream.requests) == 1
+
+
+# #270-T05
+@pytest.mark.parametrize(
+    "message",
+    [
+        "No endpoints found for some/model.",
+        "No endpoints found matching your data policy.",
+        "Model not found",
+    ],
+)
+def test_other_openrouter_not_found_answers_keep_the_unknown_model_code(message: str) -> None:
+    subject = proxy(
+        Upstream(status=404, body={"error": {"message": message, "code": 404}}),
+        require_parameters=True,
+    )
+
+    assert error_code(post(subject, request_body())) == ErrorCode.MODEL_UNKNOWN.value

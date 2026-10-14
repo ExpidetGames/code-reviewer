@@ -581,15 +581,15 @@ OpenRouter may route a request to a provider that silently ignores a parameter i
 (`tools`, `tool_choice`, `response_format`). Every request the runner sends to OpenRouter for a job
 therefore carries `provider.require_parameters: true`: OpenRouter then routes only to providers that
 support every parameter of the request, and answers 404 ("No endpoints found that can handle the
-requested parameters") when there is none. The field states a capability requirement. It selects no
+requested parameters", or "...that support tool use") when there is none. The field states a capability requirement. It selects no
 provider and expresses no preference, so it is no provider-specific routing (epic #193, decision 6);
 `provider.only`, `order` and any other routing field stay forbidden.
 
 - **Dynamic Review:** the model proxy adds the field to the body it forwards
   (`ModelProxy(require_parameters=...)`). The engine still cannot send `provider` or any other
   routing field: such a request stops the run with `dynamic_policy_violation` and never reaches the
-  provider. A 404 with OpenRouter's "no provider for the parameters" text ends the run with
-  `dynamic_model_features_unsupported`; any other 404 stays `model_unknown`. No retry on another
+  provider. A 404 whose text says that no endpoint "can handle the requested parameters" or "supports tool use" / "the provided 'tool_choice' value" (the wordings seen from OpenRouter; `openrouter_parameters.py`) ends the run with
+  `dynamic_model_features_unsupported`; any other 404 (an unknown model, a data policy) stays `model_unknown`. No retry on another
   model or provider.
 - **Diff Review:** PR-Agent 0.47.0 has no setting for it (`litellm.extra_body` takes three other
   keys, and `openrouter.provider_only` / `provider_order` are provider selectors). The runner wraps
