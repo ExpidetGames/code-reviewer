@@ -502,6 +502,22 @@ def test_a_platform_without_a_pinned_artifact_is_refused(world: World) -> None:
     assert getattr(error, "reason", None) is SelfCheckReason.PIN_UNREADABLE
 
 
+# #264-T10: the image of a platform without a pin has no engine files at all (the build installs
+# nothing there). The runner then reports the documented missing-engine reason and serves Diff only.
+def test_an_image_built_without_the_engine_on_an_unpinned_platform_reports_the_missing_engine(
+    world: World,
+) -> None:
+    world.tools.opencode.unlink()
+    world.tools.ripgrep.unlink()
+
+    error = refused(world, platform="linux-arm64")
+    engines, outcome = self_check_outcome(lambda: world.run(platform="linux-arm64"))
+
+    assert getattr(error, "reason", None) is SelfCheckReason.ENGINE_BINARY_MISSING
+    assert engines == (ENGINE_DIFF,)
+    assert outcome is not None and outcome.code is ErrorCode.DYNAMIC_ISOLATION_SELF_CHECK_FAILED
+
+
 # #202-T09: the stat of a file must not follow a link planted in the way.
 def test_the_binary_file_is_a_regular_file_with_no_write_bit_for_others(world: World) -> None:
     mode = stat.S_IMODE(world.tools.opencode.stat().st_mode)
@@ -536,9 +552,12 @@ def test_an_unexpected_error_in_the_check_never_advertises(world: World) -> None
 def test_the_default_tool_locations_are_the_ones_the_image_installs() -> None:
     dockerfile = (Path(__file__).parents[2] / "Dockerfile").read_text(encoding="utf-8")
 
-    # The executables are copied to their exact paths; the pins are copied into their directory.
-    assert str(DEFAULT_TOOLS.opencode) in dockerfile
-    assert str(DEFAULT_TOOLS.ripgrep) in dockerfile
+    # The executables are copied into their directory (the whole fetch directory, so the build also
+    # works where nothing was fetched, #264) under the names the fetch scripts give them; the pins
+    # are copied into their directory.
+    assert DEFAULT_TOOLS.opencode.parent == DEFAULT_TOOLS.ripgrep.parent
+    assert f" /engine-tools/ {DEFAULT_TOOLS.opencode.parent}/" in dockerfile
+    assert (DEFAULT_TOOLS.opencode.name, DEFAULT_TOOLS.ripgrep.name) == ("opencode", "rg")
     assert DEFAULT_TOOLS.opencode_pin.parent == DEFAULT_TOOLS.ripgrep_pin.parent
     assert f"{DEFAULT_TOOLS.opencode_pin.parent}/" in dockerfile
     for pin in (DEFAULT_TOOLS.opencode_pin, DEFAULT_TOOLS.ripgrep_pin):

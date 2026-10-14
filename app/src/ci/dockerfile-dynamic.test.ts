@@ -89,11 +89,32 @@ describe("the dynamic runner image", () => {
       line.startsWith("COPY "),
     );
 
+    // The directory, not the two files (#264): on a platform without a pin the fetch stage installs
+    // nothing, and a COPY of a named file that is not there would fail the build.
     expect(copies).toContain(
-      "COPY --from=engine-tools --chown=0:0 --chmod=0755 /engine-tools/opencode /usr/local/bin/opencode",
+      "COPY --from=engine-tools --chown=0:0 --chmod=0755 /engine-tools/ /usr/local/bin/",
     );
-    expect(copies).toContain(
-      "COPY --from=engine-tools --chown=0:0 --chmod=0755 /engine-tools/rg /usr/local/bin/rg",
+    expect(
+      copies.filter((line) => line.includes("--from=engine-tools")),
+    ).toHaveLength(1);
+  });
+
+  // #264-T10
+  it("builds on a platform without a pin: the fetch stage installs nothing there and succeeds", () => {
+    const fetching = stage("engine-tools").lines.join("\n");
+
+    for (const script of ["fetch_opencode.py", "fetch_ripgrep.py"])
+      expect(fetching).toMatch(
+        new RegExp(
+          `python /fetch/scripts/${script} --dest /engine-tools --allow-unpinned-platform`,
+        ),
+      );
+    // Never the other way round: the flag is not for the CI engine jobs, which must stay strict.
+    expect(
+      readFileSync(`${repoRoot}.github/workflows/engine.yml`, "utf8"),
+    ).not.toContain("--allow-unpinned-platform");
+    expect(readFileSync(`${repoRoot}Makefile`, "utf8")).not.toContain(
+      "--allow-unpinned-platform",
     );
   });
 

@@ -425,6 +425,21 @@ jobs:
           cache-to: type=gha,mode=max,scope=runner-dynamic
       - name: Smoke test the image
         run: docker/smoke/runner.sh code-reviewer-runner-dynamic:ci dynamic
+      # Only linux-x64 is pinned (#264). The fetch stage must succeed on any other platform and
+      # install nothing, so that a Coolify server on arm64 can still build and deploy the stack: the
+      # image then has no engine and its runner serves Diff jobs only. Emulated, and only this stage.
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        with:
+          platforms: arm64
+      - name: The engine stage builds on arm64 and installs nothing
+        run: |
+          docker buildx build --platform linux/arm64 --file runner/Dockerfile --target engine-tools \
+            --output type=tar,dest="$RUNNER_TEMP/engine-tools-arm64.tar" .
+          # No -q: grep reads the whole listing, so tar is never cut off by a closed pipe.
+          if tar -tf "$RUNNER_TEMP/engine-tools-arm64.tar" | grep -E '^engine-tools/.' > /dev/null; then
+            echo "an engine was installed on an unpinned platform" >&2
+            exit 1
+          fi
 
   # The Docker Compose stack (compose.yml): both images are built here and the stack is started
   # with dummy settings by docker/smoke/compose.sh. Nothing is pushed; the job has no login and only

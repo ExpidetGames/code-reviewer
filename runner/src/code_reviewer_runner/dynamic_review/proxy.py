@@ -129,13 +129,28 @@ class DynamicCapabilities:
             )
 
 
-def capabilities_from_config(raw: str | None) -> DynamicCapabilities:
+# The model id the app ships as the default Dynamic model (`DEFAULT_DYNAMIC_MODEL` in
+# app/src/review-settings/settings.ts; app/src/ci/dynamic-default-model.test.ts keeps the two equal)
+# and the descriptor of it, verified on OpenRouter: tools, tool_choice and response_format /
+# structured outputs are supported. It ships with the image, so a fix reaches every deployment with
+# the next build, whatever a platform stored as a variable.
+DEFAULT_DYNAMIC_MODEL = "deepseek/deepseek-v4.1-flash"
+DEFAULT_MODEL_CAPABILITIES = DynamicCapabilities(
+    tool_choice_required=True, structured_output=True, max_output_tokens=8192
+)
+
+
+def capabilities_from_config(raw: str | None, model: str | None = None) -> DynamicCapabilities:
     """The operator-supplied capability descriptor of the selected model/destination.
 
     The descriptor is trusted runner configuration, never repository input. Anything missing or
     unusable fails closed: the run must not assume a destination can serve the required tool choice
-    and structured output.
+    and structured output. The one exception is no descriptor at all for exactly the shipped
+    default model, whose built-in descriptor applies; any descriptor the operator sets, usable or
+    not, takes precedence, and every other model needs one.
     """
+    if not raw and model == DEFAULT_DYNAMIC_MODEL:
+        return DEFAULT_MODEL_CAPABILITIES
     if not raw:
         raise LimitError(
             ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED,

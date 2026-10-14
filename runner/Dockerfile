@@ -59,11 +59,15 @@ RUN mkdir -p "$DATA_GYM_CACHE_DIR" \
 # download only with the pinned size and SHA-256 (runner/opencode-pin.json, runner/ripgrep-pin.json),
 # unpack only the one pinned file and check the version it reports. The scripts find their pin
 # one directory above them. Nothing at run time downloads anything.
+# Only linux-x64 is pinned. On another platform (an arm64 build server) `--allow-unpinned-platform`
+# makes the scripts install nothing and exit 0, so the image still builds: it has no engine, the
+# runner's self-check reports the missing engine and it serves Diff jobs only (#264). Without the
+# flag a missing pin is an error, as everywhere else the scripts are used.
 FROM ${PYTHON_IMAGE} AS engine-tools
 COPY runner/scripts/fetch_opencode.py runner/scripts/fetch_ripgrep.py /fetch/scripts/
 COPY runner/opencode-pin.json runner/ripgrep-pin.json /fetch/
-RUN python /fetch/scripts/fetch_opencode.py --dest /engine-tools \
-    && python /fetch/scripts/fetch_ripgrep.py --dest /engine-tools
+RUN python /fetch/scripts/fetch_opencode.py --dest /engine-tools --allow-unpinned-platform \
+    && python /fetch/scripts/fetch_ripgrep.py --dest /engine-tools --allow-unpinned-platform
 
 # ---- runtime-base: Python, the venv and nothing else (no uv, no compiler, no sources) ----
 FROM ${PYTHON_IMAGE} AS runtime-base
@@ -117,8 +121,8 @@ RUN apt-get update \
 # directory, no shell, no supplementary group. The runner gives the engine a home per job.
 RUN groupadd --system --gid 10101 engine \
     && useradd --system --uid 10101 --gid engine --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin engine
-COPY --from=engine-tools --chown=0:0 --chmod=0755 /engine-tools/opencode /usr/local/bin/opencode
-COPY --from=engine-tools --chown=0:0 --chmod=0755 /engine-tools/rg /usr/local/bin/rg
+# The directory, so that the build also works where the stage above installed nothing (no pin).
+COPY --from=engine-tools --chown=0:0 --chmod=0755 /engine-tools/ /usr/local/bin/
 # The directory first: COPY would create it with the mode given to the files (0644, not enterable).
 RUN install -d -m 0755 -o 0 -g 0 /opt/code-reviewer/pins
 COPY --chown=0:0 --chmod=0644 runner/opencode-pin.json runner/ripgrep-pin.json /opt/code-reviewer/pins/

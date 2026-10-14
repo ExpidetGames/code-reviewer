@@ -135,10 +135,10 @@ if message=$(env -u BETTER_AUTH_URL docker compose --project-name "$project" \
 fi
 grep -q 'BETTER_AUTH_URL' <<<"$message" || fail "the message does not name BETTER_AUTH_URL: $message"
 
-# #264-T05: the Dynamic runner of the Coolify file describes the default model by default, as the
-# JSON it was written as, and the variable replaces it. The default contains braces, which the
-# interpolation of Compose must not cut at the first one.
-step "compose.coolify.yml gives the Dynamic runner the descriptor of the default model, overridable"
+# #264-T05: the Dynamic runner of the Coolify file passes the descriptor of its model through with
+# an empty default (the default model's descriptor is built into the runner), and the variable's
+# value arrives unchanged, braces and all.
+step "compose.coolify.yml passes the Dynamic runner's model descriptor through"
 capabilities_of() {
   docker compose --project-name "$project" --project-directory "$repo_root" --env-file /dev/null \
     --file "$coolify_file" config --format json |
@@ -147,12 +147,12 @@ print(json.load(sys.stdin)["services"]["runner-dynamic"]["environment"]["RUNNER_
 }
 default_capabilities=$(unset RUNNER_DYNAMIC_CAPABILITIES; BETTER_AUTH_URL=https://reviews.example.com capabilities_of) ||
   fail "docker compose config failed on the Dynamic runner of compose.coolify.yml"
-[ "$default_capabilities" = '{"tool_choice_required":true,"structured_output":true,"max_output_tokens":8192}' ] ||
-  fail "the Dynamic runner got '$default_capabilities' as its default model descriptor"
+[ -z "$default_capabilities" ] ||
+  fail "the Dynamic runner got '$default_capabilities' as a default model descriptor, expected none"
 override_capabilities=$(export RUNNER_DYNAMIC_CAPABILITIES='{"tool_choice_required":false}'
   BETTER_AUTH_URL=https://reviews.example.com capabilities_of) || fail "docker compose config failed with an override"
 [ "$override_capabilities" = '{"tool_choice_required":false}' ] ||
-  fail "the variable did not replace the default model descriptor: '$override_capabilities'"
+  fail "the variable did not reach the Dynamic runner: '$override_capabilities'"
 
 # CR-37-T08: a missing required setting stops `up` with a message naming it, before any container.
 step "a missing runner token stops the start before a container is created"

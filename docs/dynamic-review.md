@@ -26,7 +26,7 @@ publishes as one persistent summary comment. The decisions are in epic
 | Engine seam: trusted config, hard limits, per-job model proxy, adapter, process-group cleanup | Shipped (#197 part 1, #202 process-group reuse) |
 | Summary comment, findings state, reconciliation | Shipped (#199) |
 | Real pinned OpenCode fetch, proxy-side audit, hostile-repository proof; launch as the dedicated engine user, static per-user network rules, `NET_ADMIN` dropped after startup | Shipped (#197 parts 2a and 2b, #244) |
-| The Dynamic runner image: the `dynamic` target of `runner/Dockerfile` with the pinned OpenCode, a pinned `rg`, `nft` and the engine user (**linux-x64 glibc only**: the pins have no other platform, an arm64 image needs its own pinned digests) | Shipped (#202) |
+| The Dynamic runner image: the `dynamic` target of `runner/Dockerfile` with the pinned OpenCode, a pinned `rg`, `nft` and the engine user (**linux-x64 glibc only**: the pins have no other platform. On another platform such as arm64 the image still builds, without an engine, and its runner serves Diff jobs only (#264); an arm64 engine needs its own pinned digests) | Shipped (#202, #264) |
 | Startup self-check that advertises `opencode` only when everything holds, with a stable logged reason otherwise | Shipped (#202) |
 | Deployment: `compose.dynamic.yml` (Docker Compose, opt-in override file) and the `runner-dynamic` service of `compose.coolify.yml` (Coolify, built and started with the rest, **untested on a real Coolify**) | Shipped (#202, #264) |
 | Provenance audit of the engine binary and `rg` in `make check-licenses` (source commit, licence, the Bun-lock runtime closure of the pinned commit), notices in `NOTICE` and `THIRD_PARTY_LICENSES.md` | Shipped (#202) |
@@ -206,9 +206,9 @@ stable reason (never a value) and keeps serving Diff jobs.
 | `engine_user_invalid` | The engine user does not exist with its own group, or is root. Image users are 10101; do not change `RUNNER_DYNAMIC_ENGINE_UID`/`GID` without a matching image |
 | `network_rules_not_installed` | `nft` could not install the rules: no `NET_ADMIN` at container creation, no `nf_tables` in the host kernel, no `nft`, or a slot port inside the kernel's ephemeral range |
 | `capabilities_not_dropped` | The process still holds `NET_ADMIN` or `SETPCAP` |
-| `pin_unreadable` | A pin file in `/opt/code-reviewer/pins/` is missing (or a directory above it is), malformed or has no entry for this platform (arm64) |
+| `pin_unreadable` | A pin file in `/opt/code-reviewer/pins/` is missing (or a directory above it is), malformed or has no entry for this platform (an x64 image started on arm64) |
 | `pin_untrusted` | A pin file, or a directory above it up to `/`, is a link, is not owned by root or can be written by group or others |
-| `engine_binary_missing`, `ripgrep_missing` | The file (or a directory above it) is absent, the file is a link, or not executable |
+| `engine_binary_missing`, `ripgrep_missing` | The file (or a directory above it) is absent, the file is a link, or not executable. This is also what an image **built on arm64** reports: the build installs no engine where there is no pin (#264), so the image builds and the runner serves Diff jobs only |
 | `engine_binary_untrusted`, `ripgrep_untrusted` | The file, or a directory above it up to `/`, is not owned by root, is a link (directories) or can be written by group or others |
 | `engine_binary_checksum_mismatch`, `ripgrep_checksum_mismatch` | Size or SHA-256 differ from the pin |
 | `engine_version_mismatch` | Run offline as the engine user, the engine does not report the pinned version |
@@ -234,16 +234,22 @@ the id OpenRouter serves (the name is sent to the provider as it is). It is a de
 allow-list, and there is no provider routing or fallback. The workspace's existing encrypted BYOK
 credential is used (no new key variable, no per-project key).
 
-The operator describes what the selected model and destination can do in
-`RUNNER_DYNAMIC_CAPABILITIES` (trusted runner configuration, never repository input):
+The runner carries a **built-in description of the default model** `deepseek/deepseek-v4.1-flash`
+(verified on OpenRouter: tools, `tool_choice` and structured outputs), so the default model needs no
+variable, and a correction of it ships with the next image. It applies only when the job's model is
+exactly that id and `RUNNER_DYNAMIC_CAPABILITIES` is unset or empty. For any other model the operator
+describes what the selected model and destination can do in `RUNNER_DYNAMIC_CAPABILITIES` (trusted
+runner configuration, never repository input); one value per runner, so it must hold for every
+project's model on that instance:
 
 ```json
 {"tool_choice_required": true, "structured_output": true, "max_output_tokens": 8192}
 ```
 
-If it is unset, not JSON, or lacks a required feature, the run fails with
-`dynamic_model_features_unsupported`. There is no silent fallback to another model or to a Diff
-review.
+A value that is set always wins, including over the built-in description for the default model. If a
+job's model has no description (unset variable, another model), the value is not JSON, or it lacks a
+required feature, the run fails with `dynamic_model_features_unsupported`. There is no silent fallback
+to another model or to a Diff review.
 
 ## Hard limits
 
@@ -301,7 +307,7 @@ docker compose -f compose.yml -f compose.dynamic.yml up -d --build --wait
 | `RUNNER_DYNAMIC_MEMORY_LIMIT` | `2g` | At least 1 GiB per Dynamic slot plus the runner and proxy reserve (the spike's conservative, unvalidated proposal) |
 | `RUNNER_DYNAMIC_MEMORY_RESERVATION` | `1536m` | The soft reservation under the limit |
 | `RUNNER_DYNAMIC_IMAGE` | `code-reviewer-runner-dynamic:local` | Name of the image compose builds; set it to use a prebuilt one |
-| `RUNNER_DYNAMIC_CAPABILITIES` | empty | The model description (see "The model"); empty makes every Dynamic job fail with `dynamic_model_features_unsupported` |
+| `RUNNER_DYNAMIC_CAPABILITIES` | empty | The model description (see "The model"); empty applies the description built into the runner for the default model only, and makes a job of any other model fail with `dynamic_model_features_unsupported` |
 
 The container runs the supervisor as root with only the capabilities of "The engine boundary", sets
 `no-new-privileges`, bounds its process count (512) and has no swap, so a memory peak shows up as an
@@ -335,9 +341,11 @@ model you choose, the knowledge of what it supports (tool choice "required" and 
    (`contracts/README.md`, "Rolling out Dynamic Review"). A previous-release app on the same database
    could hand a Dynamic row to a runner as an untagged Diff job. Do not continue until all instances
    are upgraded.
-2. **Describe the model** in `.env`: `RUNNER_DYNAMIC_CAPABILITIES={"tool_choice_required": true,
-   "structured_output": true, "max_output_tokens": 8192}` (use what your model and destination really
-   support). Review the memory settings of the table above.
+2. **Describe the model** in `.env` only if projects use a model other than the default:
+   `RUNNER_DYNAMIC_CAPABILITIES={"tool_choice_required": true, "structured_output": true,
+   "max_output_tokens": 8192}` (use what your model and destination really support; it applies to every
+   Dynamic job of this runner). The default model needs nothing. Review the memory settings of the
+   table above.
 3. **Deploy the Dynamic runner:**
    `docker compose -f compose.yml -f compose.dynamic.yml up -d --build --wait`.
    The first build downloads the pinned engine (about 60 MB) and verifies it; if the bytes are not the
@@ -372,11 +380,17 @@ model you choose, the knowledge of what it supports (tool choice "required" and 
 **Coolify.** The `runner-dynamic` service is part of `compose.coolify.yml` (#264): the existing
 Coolify resource builds and starts it with the app and the Diff runner after the next release, and a
 file test keeps it equal to the service of `compose.dynamic.yml`. It does nothing until the gate is
-turned on, and it carries the capability descriptor of the default model by default. Read the section
+turned on (it also takes Diff jobs, see "Capacity"), and the runner has the capability descriptor of the default model built in. Read the section
 "Dynamic Review runner" of `docs/deployment-coolify.md` first. It has **not been tested on a real
 Coolify instance**.
 
 ## Capacity: slots, memory and what is not measured
+
+The Dynamic runner is also a Diff runner: it keeps `pr-agent` among its engines (as every runner
+does), so the app hands it Diff jobs as well. Its one slot is shared: a Diff job (up to
+`RUNNER_JOB_TIMEOUT_SECONDS`, 20 minutes by default) can occupy it once the gate is on, and a Dynamic
+run then waits for it. Dynamic jobs wait for the gate and for an advertising runner; Diff jobs are
+shared by both runners, and the total Diff capacity is the Diff runner's slots plus this one.
 
 The shipped defaults are **one Dynamic slot** (`RUNNER_DYNAMIC_CONCURRENCY=1`) and a **2 GiB limit with
 1.5 GiB reserved and no swap**: at least 1 GiB per slot plus the runner and proxy reserve. That is the
@@ -472,9 +486,11 @@ by the defaults.
 - **The boundary is the container, not a sandbox.** The engine user's network is confined by nft rules
   that cover TCP, UDP and IPv6 but not AF_UNIX (kept empty by mounting and sharing nothing), and the
   supervisor is a root process that parses untrusted Git objects and HTTP. See ADR 0003.
-- **Supported hosts.** Linux/amd64 glibc images only, on a Docker host whose kernel has `nf_tables`.
-  Nothing is tested on arm64, rootless Docker, user-namespace remapping or Podman. Coolify support is
-  written down but untested.
+- **Supported hosts.** Linux/amd64 (x86_64) glibc images only, on a Docker host whose kernel has
+  `nf_tables`. **Dynamic Review needs x86_64.** On an arm64 host the stack still builds and deploys,
+  but the Dynamic image has no engine (the build skips the unpinned download, #264), the runner reports
+  `engine_binary_missing` and serves Diff jobs only: Dynamic stays unavailable. Nothing is tested on
+  rootless Docker, user-namespace remapping or Podman. Coolify support is written down but untested.
 - **Capacity beyond one slot is unknown** (see above).
 - **Hosted activation needs the egress gate (#82).** It is not permission for unrestricted
   self-hosted agent egress either.

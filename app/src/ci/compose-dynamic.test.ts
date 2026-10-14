@@ -480,19 +480,19 @@ describe("compose.coolify.yml runner-dynamic", () => {
   }
 
   // #264-T02 #264-T03
-  it("is the service of compose.dynamic.yml, except for the image name, the message of the token and the model descriptor", () => {
+  it("is the service of compose.dynamic.yml, except for the image name and the message of the token", () => {
     const own = JSON.parse(JSON.stringify(coolifyDynamic())) as Service;
     const shared = JSON.parse(JSON.stringify(runnerDynamic())) as Service;
 
-    // What differs on purpose: Coolify names the images it builds, shows a required variable by its
-    // name alone (a message would break its recognition of `:?`), and the Coolify file carries the
-    // descriptor of the default model (the next tests) where compose.dynamic.yml asks for .env.
+    // What differs on purpose: Coolify names the images it builds, and shows a required variable by
+    // its name alone (a message would break its recognition of `:?`).
     for (const service of [own, shared]) {
       delete service.image;
       service.environment = Object.fromEntries(
-        Object.entries(service.environment ?? {})
-          .filter(([key]) => key !== "RUNNER_DYNAMIC_CAPABILITIES")
-          .map(([key, value]) => [key, withoutMessage(String(value))]),
+        Object.entries(service.environment ?? {}).map(([key, value]) => [
+          key,
+          withoutMessage(String(value)),
+        ]),
       );
     }
     expect(own).toEqual(shared);
@@ -585,24 +585,17 @@ describe("compose.coolify.yml runner-dynamic", () => {
         expect(String(value), key).not.toContain(":?");
   });
 
-  // #264-T05
-  it("describes the default model by default, as plain JSON that Compose and Coolify pass on unchanged, and lets the variable replace it", () => {
-    const value = String(
-      coolifyDynamic().environment?.RUNNER_DYNAMIC_CAPABILITIES,
-    );
-    const prefix = "${RUNNER_DYNAMIC_CAPABILITIES:-";
+  // #264-T05 #264-T11
+  it("passes the model descriptor through with an empty default, like compose.dynamic.yml: the default model's one is built into the runner", () => {
+    const value = coolifyDynamic().environment?.RUNNER_DYNAMIC_CAPABILITIES;
 
-    expect(value.startsWith(prefix)).toBe(true);
-    expect(value.endsWith("}")).toBe(true);
-    const fallback = value.slice(prefix.length, -1);
-    // No `$` (nothing for Compose or Coolify to interpolate again) and no backslash or newline.
-    expect(fallback).not.toMatch(/[$\\\n]/);
-    expect(JSON.parse(fallback)).toEqual({
-      tool_choice_required: true,
-      structured_output: true,
-      max_output_tokens: 8192,
-    });
-    // The variable has its place in the template of the settings.
+    expect(value).toBe("${RUNNER_DYNAMIC_CAPABILITIES:-}");
+    expect(value).toBe(
+      runnerDynamic().environment?.RUNNER_DYNAMIC_CAPABILITIES,
+    );
+    // No JSON in the file: Coolify stores a default on its first parse and a stored value would win
+    // over every later fix of the file, which is why the default model's descriptor is in the image.
+    expect(coolifySource).not.toMatch(/tool_choice_required|max_output_tokens/);
     expect(read(".env.example")).toMatch(/^#?\s?RUNNER_DYNAMIC_CAPABILITIES=/m);
   });
 

@@ -13,6 +13,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import platform
 import re
 import sys
 import tarfile
@@ -190,3 +191,31 @@ def test_a_platform_without_a_pinned_artifact_is_refused() -> None:
 
     with pytest.raises(script.PinError):
         script.artifact(json.loads(PIN.read_text(encoding="utf-8")), "linux-arm64")
+
+
+# #264-T10: see test_opencode_pin.py; ripgrep behaves the same, so the image builds on any platform.
+def test_the_image_build_flag_turns_a_missing_pin_into_a_clear_message_and_no_ripgrep(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    script = load_script()
+    monkeypatch.setattr(platform, "machine", lambda: "aarch64")
+
+    assert script.main(["--dest", str(tmp_path / "tools"), "--allow-unpinned-platform"]) == 0
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "linux-aarch64" in captured.err
+    assert "no pin" in captured.err
+    assert "Dynamic Review is disabled" in captured.err
+    assert list((tmp_path / "tools").iterdir()) == []
+
+
+# #264-T10
+def test_without_the_flag_a_missing_pin_still_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    script = load_script()
+    monkeypatch.setattr(platform, "machine", lambda: "aarch64")
+
+    assert script.main(["--dest", str(tmp_path / "tools")]) == 1
+    assert "cannot install the pinned ripgrep" in capsys.readouterr().err

@@ -276,7 +276,9 @@ def run_dynamic_job(
         Path(named_ripgrep) if (named_ripgrep := environment.get(RIPGREP_PATH_VARIABLE)) else None
     )
     try:
-        capabilities = capabilities_from_config(environment.get(DYNAMIC_CAPABILITIES_VARIABLE))
+        capabilities = capabilities_from_config(
+            environment.get(DYNAMIC_CAPABILITIES_VARIABLE), model=dynamic.model
+        )
     except LimitError as error:
         return _failure(error.code, error.detail, started, capture)
 
