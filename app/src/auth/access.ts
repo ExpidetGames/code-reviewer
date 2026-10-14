@@ -42,6 +42,9 @@ export const PUBLIC_PATHS: readonly PublicPath[] = [
   { path: "/invitation", match: "exact" },
   // The runner authenticates with its own shared token, not with a session.
   { path: "/api/runners", match: "prefix" },
+  // The operator API (#275) authenticates with its own bearer token, not with a session. Only the versioned
+  // prefix: it answers 404 as a missing path until OPERATOR_API_TOKEN is set. Not under /api/admin.
+  { path: "/api/operator/v1", match: "prefix" },
   // GitHub authenticates a webhook with its signature, not with a session.
   { path: "/api/webhooks", match: "prefix" },
 ];

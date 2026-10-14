@@ -188,4 +188,39 @@ describe("the members of a workspace", () => {
     expect(await repository.hasMembership("nobody")).toBe(false);
     expect(await repository.listForUser("nobody")).toEqual([]);
   });
+
+  // #275-T05
+  it("lists workspaces in pages ordered by id, after a cursor, and says whether more follow", async () => {
+    const { db } = await createTestDatabase();
+    let counter = 0;
+    const repository = createWorkspacesRepository(
+      db,
+      () => new Date("2026-10-11T12:00:00.000Z"),
+      () => `ws-${String(++counter)}`,
+    );
+    for (const slug of ["c", "a", "b", "d"])
+      await repository.create({ name: slug, slug, createdBy: null });
+
+    const first = await repository.listPage({ limit: 3 });
+    const second = await repository.listPage({
+      after: first.workspaces.at(-1)?.id,
+      limit: 3,
+    });
+
+    expect(first.workspaces.map((w) => w.id)).toEqual(["ws-1", "ws-2", "ws-3"]);
+    expect(first.hasMore).toBe(true);
+    expect(second.workspaces.map((w) => w.id)).toEqual(["ws-4"]);
+    expect(second.hasMore).toBe(false);
+  });
+
+  // #275-T05
+  it("lists nothing after the last id and for an empty table", async () => {
+    const { db } = await createTestDatabase();
+    const repository = createWorkspacesRepository(db);
+
+    expect(await repository.listPage({ limit: 10 })).toEqual({
+      workspaces: [],
+      hasMore: false,
+    });
+  });
 });
