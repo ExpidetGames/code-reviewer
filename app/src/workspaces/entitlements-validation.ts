@@ -9,6 +9,7 @@ import {
   type EntitlementLimits,
   type EntitlementsData,
   type KeyMode,
+  type LimitName,
 } from "./entitlements.ts";
 
 export const ENTITLEMENT_ERROR_CODES = [
@@ -30,10 +31,24 @@ export const SUSPENSION_CODE_MAX_LENGTH = 64;
 /** A clock that runs a little ahead is fine; a reset dated further ahead is a mistake. */
 export const PERIOD_START_FUTURE_TOLERANCE_MS = 5 * 60 * 1000;
 
+/**
+ * Limits that were added after the first release of the table. A stored entry written before one existed
+ * lacks its key; reading it must not make the entry unreadable, and no limit existed then, so the missing key
+ * reads as `null` (unlimited). Adding a limit means: add it to LIMIT_NAMES (entitlements.ts) and to this
+ * list. Writes still require every key (a caller states every limit explicitly). The three first limits are
+ * not on the list: every entry has them.
+ */
+export const LIMITS_ADDED_LATER: readonly LimitName[] = [];
+
 const SUSPENSION_CODE_PATTERN = /^[a-z][a-z0-9_-]*$/;
-// Control characters (C0, C1, DEL), formatting characters (zero width joiners, bidirectional overrides),
-// the Unicode line separators and unassigned or private use code points: nothing a label should hide in.
-const NOT_PRINTABLE = /[\p{C}\p{Zl}\p{Zp}]/u;
+// What a label may not contain: control characters (C0, C1, DEL), formatting characters (zero width joiners,
+// bidirectional overrides), private use and surrogate code points, and the Unicode line and paragraph
+// separators. Unassigned code points (Cn) are deliberately not listed: whether one is assigned depends on the
+// Unicode version of the runtime, and a check must not give another answer on another Node.
+const NOT_PRINTABLE = /[\p{Cc}\p{Cf}\p{Co}\p{Cs}\p{Zl}\p{Zp}]/u;
+// What shows nothing: spaces (also the no-break space), combining marks, and the letters and symbols that
+// are blank by design (Hangul fillers, the blank braille pattern, the Mongolian vowel separator).
+const SHOWS_NOTHING = /[\p{Z}\p{M}\u115f\u1160\u180e\u2800\u3164\uffa0]/u;
 const UTC_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/;
 
 export type EntitlementsValidation =
@@ -63,25 +78,41 @@ function isKeyMode(value: unknown): value is KeyMode {
 
 function isValidPlanLabel(value: unknown): value is string {
   if (typeof value !== "string") return false;
-  const length = [...value].length;
-  return (
-    length >= 1 && length <= PLAN_LABEL_MAX_LENGTH && !NOT_PRINTABLE.test(value)
-  );
+  const characters = [...value];
+  if (characters.length < 1 || characters.length > PLAN_LABEL_MAX_LENGTH)
+    return false;
+  if (NOT_PRINTABLE.test(value)) return false;
+  return characters.some((character) => !SHOWS_NOTHING.test(character));
 }
 
 type LimitsValidation =
   | { ok: true; value: EntitlementLimits }
   | { ok: false; code: "limits_invalid" | "limit_invalid"; field?: string };
 
-function validateLimits(value: unknown): LimitsValidation {
+/**
+ * Checks the limits: an object with a count or null for every limit. `optional` names the limits whose
+ * absence is fine and reads as null; `allowUnknownKeys` (reading only) ignores keys of a newer version
+ * instead of refusing them, which on a write catches typos such as `diffRunPerPeriod`.
+ */
+export function validateLimits(
+  value: unknown,
+  optional: readonly LimitName[] = [],
+  allowUnknownKeys = false,
+): LimitsValidation {
   if (!isRecord(value)) return { ok: false, code: "limits_invalid" };
   const known: readonly string[] = LIMIT_NAMES;
-  if (Object.keys(value).some((key) => !known.includes(key)))
-    return { ok: false, code: "limits_invalid" };
-  if (LIMIT_NAMES.some((name) => !(name in value)))
+  if (
+    !allowUnknownKeys &&
+    Object.keys(value).some((key) => !known.includes(key))
+  )
     return { ok: false, code: "limits_invalid" };
   const limits: Partial<EntitlementLimits> = {};
   for (const name of LIMIT_NAMES) {
+    if (!(name in value) && optional.includes(name)) {
+      limits[name] = null;
+      continue;
+    }
+    if (!(name in value)) return { ok: false, code: "limits_invalid" };
     const limit = value[name];
     const valid =
       limit === null ||
@@ -105,23 +136,33 @@ function canonicalUtcTime(value: unknown): string | undefined {
   return date.toISOString();
 }
 
-/**
- * Checks the input of an operator (or a repository caller) and returns it in the form that is stored. The
- * label has to be printable, every limit present and a count or null, the period start a UTC time that is not
- * more than a few minutes ahead of `now`. A suspension code is kept only while suspended: clearing the
- * suspension clears the code with it.
- */
-export function validateEntitlements(
-  input: unknown,
-  now: Date,
-): EntitlementsValidation {
+const ENTITLEMENT_KEYS = [
+  "planLabel",
+  "keyMode",
+  "limits",
+  "periodStart",
+  "suspended",
+  "suspensionCode",
+] as const;
+
+type CheckMode = { reading: false; now: Date } | { reading: true };
+
+function check(input: unknown, mode: CheckMode): EntitlementsValidation {
   if (!isRecord(input)) return { ok: false, code: "entitlements_invalid" };
+  if (!mode.reading) {
+    const known: readonly string[] = ENTITLEMENT_KEYS;
+    const unknown = Object.keys(input).find((key) => !known.includes(key));
+    if (unknown !== undefined)
+      return { ok: false, code: "entitlements_invalid", field: unknown };
+  }
 
   if (!isValidPlanLabel(input.planLabel))
     return { ok: false, code: "plan_label_invalid" };
   if (!isKeyMode(input.keyMode)) return { ok: false, code: "key_mode_invalid" };
 
-  const limits = validateLimits(input.limits);
+  const limits = mode.reading
+    ? validateLimits(input.limits, LIMITS_ADDED_LATER, true)
+    : validateLimits(input.limits);
   if (!limits.ok)
     return limits.field === undefined
       ? { ok: false, code: limits.code }
@@ -131,19 +172,18 @@ export function validateEntitlements(
   if (periodStart === undefined)
     return { ok: false, code: "period_start_invalid" };
   if (
+    !mode.reading &&
     new Date(periodStart).getTime() >
-    now.getTime() + PERIOD_START_FUTURE_TOLERANCE_MS
+      mode.now.getTime() + PERIOD_START_FUTURE_TOLERANCE_MS
   )
     return { ok: false, code: "period_start_in_future" };
 
   if (typeof input.suspended !== "boolean")
     return { ok: false, code: "suspended_invalid" };
+  // The code is checked whether or not the workspace is suspended: garbage is a client bug, not something
+  // to drop silently.
   let suspensionCode: string | null = null;
-  if (
-    input.suspended &&
-    input.suspensionCode !== null &&
-    input.suspensionCode !== undefined
-  ) {
+  if (input.suspensionCode !== null && input.suspensionCode !== undefined) {
     const code = input.suspensionCode;
     const valid =
       typeof code === "string" &&
@@ -151,6 +191,12 @@ export function validateEntitlements(
       SUSPENSION_CODE_PATTERN.test(code);
     if (!valid) return { ok: false, code: "suspension_code_invalid" };
     suspensionCode = code;
+  }
+  if (!input.suspended && suspensionCode !== null) {
+    // A valid code on a workspace that is not suspended: written, the suspension is cleared together with its
+    // code; stored, such an entry cannot exist (the table refuses it), so it is not readable.
+    if (mode.reading) return { ok: false, code: "suspension_code_invalid" };
+    suspensionCode = null;
   }
 
   return {
@@ -164,6 +210,30 @@ export function validateEntitlements(
       suspensionCode,
     },
   };
+}
+
+/**
+ * Checks the input of an operator (or a repository caller) and returns it in the form that is stored. The
+ * label has to be printable and show something, no key may be unknown, every limit present and a count or
+ * null, the period start a UTC time that is not more than a few minutes ahead of `now`. A valid suspension
+ * code is kept only while suspended: clearing the suspension clears the code with it.
+ */
+export function validateEntitlements(
+  input: unknown,
+  now: Date,
+): EntitlementsValidation {
+  return check(input, { reading: false, now });
+}
+
+/**
+ * Reads a stored entry (the decoded JSON of the default, or the columns of a row put together): the same rules
+ * as a write, except that the clock is not asked, a key it does not know is ignored (an older app reads what
+ * a newer one wrote) and a limit on LIMITS_ADDED_LATER may be missing. Undefined means unreadable; the
+ * caller resolves that to `invalid`, never to "no limits".
+ */
+export function readEntitlements(input: unknown): EntitlementsData | undefined {
+  const result = check(input, { reading: true });
+  return result.ok ? result.value : undefined;
 }
 
 /**

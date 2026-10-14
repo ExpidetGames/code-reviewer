@@ -150,13 +150,37 @@ and the enforcement are later issues of the epic). A self-hosted instance config
 - **Resolver.** `resolveEntitlements(row, default)` in `entitlements.ts` is the one place that interprets the data. A
   row wins entirely (no field-wise merge with the default); without a row the default applies; with neither the
   answer is `{ kind: "unlimited" }` (own key, no limits, not suspended). A limited answer says whether it came from
-  the `workspace` or the `default`.
-- **Validation.** `entitlements-validation.ts` returns stable codes: `plan_label_invalid`, `key_mode_invalid`,
-  `limits_invalid` (not an object, a missing or an unknown key), `limit_invalid` (with the name of the limit),
-  `period_start_invalid`, `period_start_in_future` (more than five minutes ahead), `period_start_backwards` (earlier
-  than the stored one; the same value again is accepted), `suspended_invalid`, `suspension_code_invalid` (lower case
-  letters, digits, `_` and `-`, starting with a letter, at most 64 characters). A suspension code is kept only while
-  suspended: clearing the suspension clears the code. The repositories throw `EntitlementsError` with the code.
+  the `workspace` or the `default`. It copies the named fields only: the user id and the time of the last save
+  that a stored row carries never reach the answer.
+- **Unreadable data fails closed.** The columns of a row and the JSON of the default are checked when they are
+  read, with the rules of a write (`readEntitlements`). An entry that exists but cannot be read (damaged JSON,
+  limits with a missing or bad value, an unknown key mode) is never "unlimited": the resolver answers
+  `{ kind: "invalid", code: "entitlements_invalid", source }`, and nothing throws. A row of the workspace that is
+  unreadable wins over a good default, like any row. The caller that enforces (#277) must refuse the claim with
+  that code and a clear message; repairing the entry is a valid `put`. Reading ignores keys it does not know (an
+  older app reads what a newer one wrote) and does not ask the clock.
+- **Adding a limit later.** A new limit goes into `LIMIT_NAMES` and, so that existing entries stay readable, into
+  `LIMITS_ADDED_LATER` (`entitlements-validation.ts`): when reading, its missing key means `null` (unlimited), which
+  is true because no such limit existed when the entry was written. Writes still require every key. (The alternative
+  is a migration that backfills the key; choose that if the old entries must not read as unlimited.)
+- **Validation.** `entitlements-validation.ts` returns stable codes: `entitlements_invalid` (not an object, or an
+  unknown top-level key named in `field`), `plan_label_invalid` (1 to 64 characters, nothing a person cannot see:
+  spaces including the no-break space, combining marks, Hangul fillers and the blank braille pattern do not count;
+  no control, formatting, private use or line separator characters; unassigned code points are not judged, so the
+  answer does not depend on the Unicode version of Node), `key_mode_invalid`, `limits_invalid` (not an object, a
+  missing or an unknown key), `limit_invalid` (with the name of the limit), `period_start_invalid`,
+  `period_start_in_future` (more than five minutes ahead), `period_start_backwards` (earlier than the stored one;
+  the same value again is accepted), `suspended_invalid`, `suspension_code_invalid` (lower case letters, digits,
+  `_` and `-`, starting with a letter, at most 64 characters; checked even when not suspended). A valid code is
+  kept only while suspended: clearing the suspension clears the code. The repositories throw `EntitlementsError`
+  with the code.
+- **Left to #275 (the operator API).** A write must carry a `periodStart` not earlier than the stored one, so a
+  partial update (a suspension toggle, a limit change) with a stale start is refused as a whole with
+  `period_start_backwards`: either merge with the stored row when the field is absent, or document the
+  read-then-write rule. A `remove` of the row (or of the setting `default_entitlements`) ends the guard against an
+  earlier start; decide there whether it is offered and how it keeps the guard (for example by remembering the
+  last start). Numbers above 2^53 lose precision in `JSON.parse` before they reach the validation; test that
+  case there.
 
 ## Not here
 

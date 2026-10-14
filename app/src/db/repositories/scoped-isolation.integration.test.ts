@@ -709,11 +709,6 @@ const CASES: Case[] = [
     expectAnswer: (answer) =>
       expect(answer).toMatchObject({ planLabel: "changed" }),
   },
-  {
-    name: "entitlements.remove",
-    run: (a) => a.entitlements.remove(),
-    expectAnswer: (answer) => expect(answer).toBe(true),
-  },
   // runs
   {
     name: "runs.list",
@@ -915,7 +910,7 @@ describe("two workspaces", () => {
   });
 
   // #271-T06
-  it("keep the entitlements apart: changing or removing A's leaves B with its own", async () => {
+  it("keep the entitlements apart: changing A's leaves B with its own", async () => {
     const { reposA, reposB } = await twoWorkspaces();
 
     await reposA.entitlements.put(
@@ -925,11 +920,9 @@ describe("two workspaces", () => {
     expect(await reposB.entitlements.get()).toMatchObject({
       planLabel: "plan-b",
     });
-    await reposA.entitlements.remove();
 
-    expect(await reposA.entitlements.get()).toBeUndefined();
-    expect(await reposB.entitlements.get()).toMatchObject({
-      planLabel: "plan-b",
+    expect(await reposA.entitlements.get()).toMatchObject({
+      planLabel: "changed",
     });
   });
 

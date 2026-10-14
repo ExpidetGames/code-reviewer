@@ -4,17 +4,37 @@
 // writes, a reset of the period never goes backwards (also for the default), and a second writer cannot
 // race it back. The columns and types are compared with SQLite by the schema parity test in
 // ../postgres.integration.test.ts. Runs only when TEST_DATABASE_URL is set.
-import { sql } from "kysely";
+import { sql, type Kysely } from "kysely";
 import { describe, expect, it } from "vitest";
 import {
+  connectPostgres,
   createPostgresTestDatabase,
   hasPostgres,
 } from "../../test-support/postgres-test-database.ts";
+import type { Database } from "../schema.ts";
 import { createTestDatabase } from "../../test-support/test-database.ts";
 import { defaultWorkspaceId } from "../../test-support/workspaces.ts";
 import type { EntitlementsData } from "../../workspaces/entitlements.ts";
 import { createInstanceSettingsRepository } from "./instance-settings-repository.ts";
 import { createWorkspaceEntitlementsRepository } from "./workspace-entitlements-repository.ts";
+
+/** Waits until a backend of the database waits on a lock; bounded, so a bug fails instead of hanging. */
+async function waitForLockWait(
+  db: Kysely<Database>,
+  database: string,
+  timeoutMs = 5000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const { rows } = await sql<{ count: number }>`
+      select count(*)::int as count from pg_stat_activity
+      where datname = ${database} and wait_event_type = 'Lock'`.execute(db);
+    if ((rows[0]?.count ?? 0) > 0) return;
+    if (Date.now() >= deadline)
+      throw new Error("No backend ever waited on the row lock.");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
 
 const describePostgres = hasPostgres() ? describe : describe.skip;
 
@@ -119,29 +139,54 @@ describePostgres("the entitlements on Postgres", () => {
       ),
     ).rejects.toMatchObject({ code: "period_start_backwards" });
 
-    expect(await settings.get("default_entitlements")).toEqual(ENTITLEMENTS);
+    expect(await settings.getDefaultEntitlements()).toEqual(ENTITLEMENTS);
   });
 
   // #271-T05
-  it("lets only the latest of concurrent resets win", async () => {
-    const postgres = await createPostgresTestDatabase({ poolMax: 8 });
+  it("refuses a reset that was overtaken while it waited for the row", async () => {
+    const postgres = await createPostgresTestDatabase();
+    const workspaceId = await defaultWorkspaceId(postgres.db);
     const repository = createWorkspaceEntitlementsRepository(
       postgres.db,
-      await defaultWorkspaceId(postgres.db),
+      workspaceId,
       () => NOW,
     );
-    const starts = [1, 2, 3, 4, 5, 6].map(
-      (day) => `2026-10-0${day}T00:00:00.000Z`,
+    await repository.put(
+      { ...ENTITLEMENTS, periodStart: "2026-10-01T00:00:00.000Z" },
+      null,
     );
+    // A second connection holds the row with a later start, uncommitted: the reset of day 3 is issued
+    // against day 1, waits for the row lock, and by the time it gets the row the stored start is day 5.
+    // Without the guard in the statement the late reset would overwrite it.
+    const holder = connectPostgres(postgres.url).db;
+    let locked!: () => void;
+    const hasLock = new Promise<void>((resolve) => (locked = resolve));
+    let commit!: () => void;
+    const mayCommit = new Promise<void>((resolve) => (commit = resolve));
+    const holding = holder.transaction().execute(async (trx) => {
+      await trx
+        .updateTable("workspace_entitlements")
+        .set({ period_start: "2026-10-05T00:00:00.000Z" })
+        .where("workspace_id", "=", workspaceId)
+        .execute();
+      locked();
+      await mayCommit;
+    });
+    await hasLock;
 
-    await Promise.allSettled(
-      starts.map((periodStart) =>
-        repository.put({ ...ENTITLEMENTS, periodStart }, null),
-      ),
-    );
+    const late = repository
+      .put({ ...ENTITLEMENTS, periodStart: "2026-10-03T00:00:00.000Z" }, null)
+      .then(
+        () => "stored",
+        (error: unknown) => error,
+      );
+    await waitForLockWait(postgres.db, postgres.database);
+    commit();
+    await holding;
 
+    expect(await late).toMatchObject({ code: "period_start_backwards" });
     expect(await repository.get()).toMatchObject({
-      periodStart: "2026-10-06T00:00:00.000Z",
+      periodStart: "2026-10-05T00:00:00.000Z",
     });
   });
 });

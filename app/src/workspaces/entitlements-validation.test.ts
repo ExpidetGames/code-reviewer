@@ -4,7 +4,9 @@ import { describe, expect, it } from "vitest";
 import {
   PERIOD_START_FUTURE_TOLERANCE_MS,
   checkPeriodStartNotBackwards,
+  readEntitlements,
   validateEntitlements,
+  validateLimits,
 } from "./entitlements-validation.ts";
 
 const NOW = new Date("2026-10-14T12:00:00.000Z");
@@ -202,9 +204,126 @@ describe("validating entitlements", () => {
     });
   });
 
+  // #271-T04
+  it.each(["BAD CODE!", 5, ""])(
+    "refuses the garbage suspension code %j even when the workspace is not suspended",
+    (suspensionCode) => {
+      expect(
+        validateEntitlements(input({ suspended: false, suspensionCode }), NOW),
+      ).toEqual({ ok: false, code: "suspension_code_invalid" });
+    },
+  );
+
+  // #271-T04
+  it.each([
+    ["only spaces", "   "],
+    ["a no-break space", "\u00a0"],
+    ["a Hangul filler", "\u3164"],
+    ["Hangul fillers and spaces", " \u3164\u115f\uffa0 "],
+    ["a blank braille pattern", "\u2800"],
+    ["only combining marks", "\u0301\u0302"],
+    ["a private use character", "team\ue000"],
+    ["a line separator", "team\u2028plus"],
+  ])("refuses a plan label that is %s", (_name, planLabel) => {
+    expect(validateEntitlements(input({ planLabel }), NOW)).toEqual({
+      ok: false,
+      code: "plan_label_invalid",
+    });
+  });
+
+  it("accepts labels with inner spaces, accents and non-Latin letters", () => {
+    for (const planLabel of ["Team plus", "Équipe", "チーム", "plan-2 (beta)"])
+      expect(validateEntitlements(input({ planLabel }), NOW).ok).toBe(true);
+  });
+
+  // #271-T04
+  it("refuses an unknown top-level key, like an unknown limit", () => {
+    expect(validateEntitlements(input({ admin: true }), NOW)).toEqual({
+      ok: false,
+      code: "entitlements_invalid",
+      field: "admin",
+    });
+  });
+
   it("refuses an input that is not an object", () => {
     for (const bad of [null, undefined, "x", 1, []])
       expect(validateEntitlements(bad, NOW)).toMatchObject({ ok: false });
+  });
+});
+
+describe("validating limits", () => {
+  it("treats a missing key as unlimited only for a limit that is declared as added later", () => {
+    const partial = { diffRunsPerPeriod: 1, managedCostLimitMicroUsd: null };
+
+    expect(validateLimits(partial, [])).toMatchObject({
+      ok: false,
+      code: "limits_invalid",
+    });
+    expect(validateLimits(partial, ["dynamicRunsPerPeriod"])).toEqual({
+      ok: true,
+      value: {
+        diffRunsPerPeriod: 1,
+        dynamicRunsPerPeriod: null,
+        managedCostLimitMicroUsd: null,
+      },
+    });
+  });
+});
+
+describe("reading stored entitlements", () => {
+  const stored = {
+    planLabel: "team",
+    keyMode: "managed",
+    limits: {
+      diffRunsPerPeriod: 1,
+      dynamicRunsPerPeriod: null,
+      managedCostLimitMicroUsd: 0,
+    },
+    periodStart: "2026-10-01T00:00:00.000Z",
+    suspended: true,
+    suspensionCode: "payment_overdue",
+  };
+
+  // #271-T10
+  it("returns the data of a valid entry", () => {
+    expect(readEntitlements(stored)).toEqual(stored);
+  });
+
+  // #271-T10
+  it.each([
+    ["limits that are an empty object", { ...stored, limits: {} }],
+    [
+      "a limit that is not a count",
+      { ...stored, limits: { ...stored.limits, diffRunsPerPeriod: "1" } },
+    ],
+    ["a key mode the code does not know", { ...stored, keyMode: "shared" }],
+    [
+      "a period start that is not canonical",
+      { ...stored, periodStart: "yesterday" },
+    ],
+    ["a suspension code without suspension", { ...stored, suspended: false }],
+    ["JSON text that is damaged", undefined],
+    ["null", null],
+  ])("reads %s as unreadable", (_name, entry) => {
+    expect(readEntitlements(entry)).toBeUndefined();
+  });
+
+  // #271-T10
+  it("does not read a period start in the future as unreadable (the clock is not asked)", () => {
+    expect(
+      readEntitlements({ ...stored, periodStart: "2099-01-01T00:00:00.000Z" }),
+    ).toMatchObject({ periodStart: "2099-01-01T00:00:00.000Z" });
+  });
+
+  // #271-T10
+  it("ignores keys it does not know, so an older app can read what a newer one wrote", () => {
+    expect(
+      readEntitlements({
+        ...stored,
+        newField: 1,
+        limits: { ...stored.limits, newLimit: 5 },
+      }),
+    ).toEqual(stored);
   });
 });
 

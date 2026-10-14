@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { resolveEntitlements, type EntitlementsData } from "./entitlements.ts";
+import {
+  INVALID_ENTITLEMENTS,
+  resolveEntitlements,
+  type EntitlementsData,
+} from "./entitlements.ts";
 
 const NO_LIMITS = {
   diffRunsPerPeriod: null,
@@ -98,5 +102,68 @@ describe("resolving the entitlements of a workspace", () => {
       suspended: false,
       suspensionCode: null,
     });
+  });
+
+  it("copies named fields only, so nothing else of a stored row reaches the answer", () => {
+    // What the repository hands over carries who saved it and when (personal data); and a future column.
+    const stored = {
+      ...WORKSPACE_ROW,
+      limits: { ...WORKSPACE_ROW.limits, futureLimit: 7 },
+      updatedBy: "user-1",
+      updatedAt: "2026-10-14T12:00:00.000Z",
+      futureColumn: true,
+    } as EntitlementsData;
+
+    const resolved = resolveEntitlements(stored, undefined);
+
+    expect(resolved).toEqual({
+      kind: "limited",
+      source: "workspace",
+      ...WORKSPACE_ROW,
+    });
+    expect(Object.keys(resolved).sort()).toEqual([
+      "keyMode",
+      "kind",
+      "limits",
+      "periodStart",
+      "planLabel",
+      "source",
+      "suspended",
+      "suspensionCode",
+    ]);
+  });
+
+  it("does not hand out the limits object of the stored row", () => {
+    const resolved = resolveEntitlements(WORKSPACE_ROW, undefined);
+
+    expect(resolved.kind === "limited" && resolved.limits).not.toBe(
+      WORKSPACE_ROW.limits,
+    );
+  });
+});
+
+describe("resolving entitlements that could not be read", () => {
+  // #271-T10
+  it("fails closed: an unreadable row of the workspace is invalid, never unlimited, and wins over a good default", () => {
+    expect(resolveEntitlements(INVALID_ENTITLEMENTS, DEFAULT)).toEqual({
+      kind: "invalid",
+      code: "entitlements_invalid",
+      source: "workspace",
+    });
+  });
+
+  // #271-T10
+  it("fails closed: an unreadable default is invalid for a workspace without a row", () => {
+    expect(resolveEntitlements(undefined, INVALID_ENTITLEMENTS)).toEqual({
+      kind: "invalid",
+      code: "entitlements_invalid",
+      source: "default",
+    });
+  });
+
+  it("lets a good row of the workspace win over an unreadable default", () => {
+    expect(
+      resolveEntitlements(WORKSPACE_ROW, INVALID_ENTITLEMENTS),
+    ).toMatchObject({ kind: "limited", source: "workspace" });
   });
 });

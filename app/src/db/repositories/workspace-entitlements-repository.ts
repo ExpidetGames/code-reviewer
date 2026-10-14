@@ -7,34 +7,41 @@
 import "server-only";
 import { sql, type Kysely } from "kysely";
 import {
-  decodeBoolean,
-  decodeJson,
   encodeBoolean,
   encodeJson,
   formatTimestamp,
+  tryDecodeJson,
 } from "../codecs.ts";
 import type { Database, WorkspaceEntitlementsTable } from "../schema.ts";
 import type { WorkspaceId } from "../workspace-scope.ts";
-import type {
-  EntitlementLimits,
-  EntitlementsData,
-  KeyMode,
+import {
+  INVALID_ENTITLEMENTS,
+  type EntitlementsData,
+  type EntitlementsEntry,
 } from "../../workspaces/entitlements.ts";
 import {
   EntitlementsError,
+  readEntitlements,
   validateEntitlements,
 } from "../../workspaces/entitlements-validation.ts";
 
-/** A stored row: the entitlements with who saved them last and when. */
-export type StoredEntitlements = EntitlementsData & {
+/** Who saved a row last and when; not part of the entitlements, and not handed on by the resolver. */
+type StoredMeta = {
   /** The id of the user who saved it, or null (the operator API, or a user who was deleted since). */
   updatedBy: string | null;
   /** ISO 8601 text in UTC. */
   updatedAt: string;
 };
 
+/** A stored row: readable entitlements, or `{ invalid: true }` when the row cannot be read, plus the meta. */
+export type StoredEntitlements = EntitlementsEntry & StoredMeta;
+
 export type WorkspaceEntitlementsRepository = {
-  /** The row of the workspace, or undefined when it has none. */
+  /**
+   * The row of the workspace, or undefined when it has none. A row that cannot be read (limits that are
+   * damaged or incomplete, a time that is none) comes back as `{ invalid: true, ... }`, never as an
+   * exception and never as "no row"; `resolveEntitlements` turns it into `invalid`.
+   */
   get(): Promise<StoredEntitlements | undefined>;
   /**
    * Inserts the row or replaces it, recording who and when. Refuses (with an `EntitlementsError`) what
@@ -45,21 +52,22 @@ export type WorkspaceEntitlementsRepository = {
     entitlements: EntitlementsData,
     updatedBy: string | null,
   ): Promise<StoredEntitlements>;
-  /** Deletes the row, so the instance default (or unlimited) applies again; false when there was none. */
-  remove(): Promise<boolean>;
 };
 
 function toStored(row: WorkspaceEntitlementsTable): StoredEntitlements {
-  return {
+  const meta = { updatedBy: row.updated_by, updatedAt: row.updated_at };
+  const limits = tryDecodeJson(row.limits);
+  const data = readEntitlements({
     planLabel: row.plan_label,
-    keyMode: row.key_mode as KeyMode,
-    limits: decodeJson<EntitlementLimits>(row.limits),
+    keyMode: row.key_mode,
+    limits: limits.ok ? limits.value : undefined,
     periodStart: row.period_start,
-    suspended: decodeBoolean(row.suspended),
+    suspended: row.suspended === 1,
     suspensionCode: row.suspension_code,
-    updatedBy: row.updated_by,
-    updatedAt: row.updated_at,
-  };
+  });
+  return data === undefined
+    ? { ...INVALID_ENTITLEMENTS, ...meta }
+    : { ...data, ...meta };
 }
 
 export function createWorkspaceEntitlementsRepository(
@@ -67,17 +75,15 @@ export function createWorkspaceEntitlementsRepository(
   workspaceId: WorkspaceId,
   now: () => Date = () => new Date(),
 ): WorkspaceEntitlementsRepository {
-  async function get(): Promise<StoredEntitlements | undefined> {
-    const row = await db
-      .selectFrom("workspace_entitlements")
-      .selectAll()
-      .where("workspace_id", "=", workspaceId)
-      .executeTakeFirst();
-    return row === undefined ? undefined : toStored(row);
-  }
-
   return {
-    get,
+    async get() {
+      const row = await db
+        .selectFrom("workspace_entitlements")
+        .selectAll()
+        .where("workspace_id", "=", workspaceId)
+        .executeTakeFirst();
+      return row === undefined ? undefined : toStored(row);
+    },
 
     async put(entitlements, updatedBy) {
       const moment = now();
@@ -97,8 +103,9 @@ export function createWorkspaceEntitlementsRepository(
       };
       // One statement decides: an existing row is replaced only when the new period start is not earlier
       // than the stored one (canonical text of fixed width compares as time), so two writers cannot
-      // race a start backwards. No row written means the guard refused it.
-      const result = await db
+      // race a start backwards. No row back means the guard refused it. `returning` answers with the row
+      // this statement wrote, not with whatever another writer stored in between.
+      const stored = await db
         .insertInto("workspace_entitlements")
         .values(row)
         .onConflict((conflict) =>
@@ -118,21 +125,11 @@ export function createWorkspaceEntitlementsRepository(
               sql<boolean>`workspace_entitlements.period_start <= excluded.period_start`,
             ),
         )
+        .returningAll()
         .executeTakeFirst();
-      if (Number(result.numInsertedOrUpdatedRows ?? 0) === 0)
-        throw new EntitlementsError("period_start_backwards");
-      const stored = await get();
       if (stored === undefined)
-        throw new Error("The entitlements row is gone right after its write.");
-      return stored;
-    },
-
-    async remove() {
-      const result = await db
-        .deleteFrom("workspace_entitlements")
-        .where("workspace_id", "=", workspaceId)
-        .executeTakeFirst();
-      return Number(result.numDeletedRows) > 0;
+        throw new EntitlementsError("period_start_backwards");
+      return toStored(stored);
     },
   };
 }

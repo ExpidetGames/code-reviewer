@@ -12,6 +12,7 @@ import {
   defaultWorkspaceId,
 } from "../../test-support/workspaces.ts";
 import {
+  INVALID_ENTITLEMENTS,
   resolveEntitlements,
   type EntitlementsData,
 } from "../../workspaces/entitlements.ts";
@@ -114,15 +115,6 @@ describe("the entitlements repository of a workspace", () => {
     expect(await repository.get()).toMatchObject({ planLabel: "large" });
   });
 
-  it("removes the row, after which the workspace has none", async () => {
-    const { repository } = await setup();
-    await repository.put(entitlements(), null);
-
-    expect(await repository.remove()).toBe(true);
-    expect(await repository.get()).toBeUndefined();
-    expect(await repository.remove()).toBe(false);
-  });
-
   it("refuses an invalid input with its stable code and stores nothing", async () => {
     const { repository } = await setup();
 
@@ -143,6 +135,100 @@ describe("the entitlements repository of a workspace", () => {
       field: "diffRunsPerPeriod",
     });
     expect(await repository.get()).toBeUndefined();
+  });
+
+  describe("a row that cannot be read", () => {
+    async function insertRaw(
+      db: Awaited<ReturnType<typeof setup>>["db"],
+      workspaceId: string,
+      overrides: { limits?: string; period_start?: string } = {},
+    ) {
+      const row = {
+        workspace_id: workspaceId,
+        plan_label: "team",
+        key_mode: "managed",
+        limits: JSON.stringify(entitlements().limits),
+        period_start: "2026-10-01T00:00:00.000Z",
+        suspended: 0,
+        suspension_code: null,
+        updated_at: "2026-10-13T08:00:00.000Z",
+        updated_by: null,
+        ...overrides,
+      };
+      await db.insertInto("workspace_entitlements").values(row).execute();
+    }
+
+    // #271-T10
+    it.each([
+      ["limits that lack a key", '{"diffRunsPerPeriod":1}'],
+      ["limits that are an empty object", "{}"],
+      [
+        "limits with a value that is not a count",
+        '{"diffRunsPerPeriod":-5,"dynamicRunsPerPeriod":null,"managedCostLimitMicroUsd":null}',
+      ],
+      ["limits that are damaged JSON", "{not json"],
+      ["limits that are JSON null", "null"],
+    ])("reads %s as invalid, without throwing", async (_name, limits) => {
+      const { db, workspaceId, repository } = await setup();
+      await insertRaw(db, workspaceId, { limits });
+
+      const stored = await repository.get();
+
+      expect(stored).toEqual({
+        ...INVALID_ENTITLEMENTS,
+        updatedBy: null,
+        updatedAt: "2026-10-13T08:00:00.000Z",
+      });
+      expect(resolveEntitlements(stored, undefined)).toEqual({
+        kind: "invalid",
+        code: "entitlements_invalid",
+        source: "workspace",
+      });
+    });
+
+    // #271-T10
+    it("reads a period start that is not a time as invalid", async () => {
+      const { db, workspaceId, repository } = await setup();
+      await insertRaw(db, workspaceId, { period_start: "garbage" });
+
+      expect(await repository.get()).toMatchObject({ invalid: true });
+    });
+
+    // #271-T10
+    it("never resolves to unlimited, not even when the default would be", async () => {
+      const { db, workspaceId, repository } = await setup();
+      await insertRaw(db, workspaceId, { limits: "{}" });
+
+      expect(
+        resolveEntitlements(await repository.get(), undefined),
+      ).toMatchObject({ kind: "invalid" });
+    });
+
+    // #271-T10
+    it("can be replaced by a valid put, which repairs it", async () => {
+      const { db, workspaceId, repository } = await setup();
+      await insertRaw(db, workspaceId, { limits: "{}" });
+
+      await repository.put(entitlements(), null);
+
+      expect(await repository.get()).toMatchObject({ planLabel: "team" });
+      expect(await repository.get()).not.toHaveProperty("invalid");
+    });
+
+    // #271-T10
+    it("keeps a row that lacks a limit a later version added readable (the key reads as unlimited)", async () => {
+      // LIMITS_ADDED_LATER is empty today, so the guarantee is pinned in entitlements-validation.test.ts;
+      // here: a row with an extra key of a newer version is still read.
+      const { db, workspaceId, repository } = await setup();
+      await insertRaw(db, workspaceId, {
+        limits: JSON.stringify({ ...entitlements().limits, newerLimit: 3 }),
+      });
+
+      expect(await repository.get()).toMatchObject({
+        planLabel: "team",
+        limits: entitlements().limits,
+      });
+    });
   });
 
   describe("the period start", () => {
@@ -293,11 +379,11 @@ describe("the default entitlements of the instance", () => {
     const { db, repository } = await setup();
     const settings = createInstanceSettingsRepository(db, () => NOW);
 
-    expect(await settings.get("default_entitlements")).toBeUndefined();
+    expect(await settings.getDefaultEntitlements()).toBeUndefined();
     expect(
       resolveEntitlements(
         await repository.get(),
-        await settings.get("default_entitlements"),
+        await settings.getDefaultEntitlements(),
       ),
     ).toEqual({ kind: "unlimited" });
   });
@@ -313,12 +399,12 @@ describe("the default entitlements of the instance", () => {
 
     const fromDefault = resolveEntitlements(
       await repository.get(),
-      await settings.get("default_entitlements"),
+      await settings.getDefaultEntitlements(),
     );
     await repository.put(entitlements({ planLabel: "team" }), null);
     const fromRow = resolveEntitlements(
       await repository.get(),
-      await settings.get("default_entitlements"),
+      await settings.getDefaultEntitlements(),
     );
 
     expect(fromDefault).toMatchObject({
@@ -326,6 +412,40 @@ describe("the default entitlements of the instance", () => {
       planLabel: "starter",
     });
     expect(fromRow).toMatchObject({ source: "workspace", planLabel: "team" });
+  });
+
+  // #271-T10
+  it("reads a default that is damaged or invalid as invalid, and a workspace without a row resolves to invalid", async () => {
+    const { db, repository } = await setup();
+    const settings = createInstanceSettingsRepository(db, () => NOW);
+    for (const value of ["{not json", '{"planLabel":"x"}', "null"]) {
+      await sql`delete from instance_settings`.execute(db);
+      await sql`insert into instance_settings (key, value, updated_by, updated_at)
+        values ('default_entitlements', ${value}, null, '2026-10-13T08:00:00.000Z')`.execute(
+        db,
+      );
+
+      const stored = await settings.getDefaultEntitlements();
+
+      expect(stored).toEqual(INVALID_ENTITLEMENTS);
+      expect(resolveEntitlements(await repository.get(), stored)).toEqual({
+        kind: "invalid",
+        code: "entitlements_invalid",
+        source: "default",
+      });
+    }
+  });
+
+  // #271-T10
+  it("reads a default that a newer version wrote with an extra key", async () => {
+    const { db } = await setup();
+    const settings = createInstanceSettingsRepository(db, () => NOW);
+    await sql`insert into instance_settings (key, value, updated_by, updated_at)
+      values ('default_entitlements', ${JSON.stringify({ ...entitlements(), newer: 1 })}, null, '2026-10-13T08:00:00.000Z')`.execute(
+      db,
+    );
+
+    expect(await settings.getDefaultEntitlements()).toEqual(entitlements());
   });
 
   // #271-T04
@@ -340,7 +460,7 @@ describe("the default entitlements of the instance", () => {
         null,
       ),
     ).rejects.toBeInstanceOf(EntitlementsError);
-    expect(await settings.get("default_entitlements")).toBeUndefined();
+    expect(await settings.getDefaultEntitlements()).toBeUndefined();
   });
 
   // #271-T05
@@ -358,6 +478,6 @@ describe("the default entitlements of the instance", () => {
       ),
     ).rejects.toMatchObject({ code: "period_start_backwards" });
 
-    expect(await settings.get("default_entitlements")).toEqual(entitlements());
+    expect(await settings.getDefaultEntitlements()).toEqual(entitlements());
   });
 });
