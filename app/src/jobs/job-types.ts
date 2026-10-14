@@ -70,9 +70,10 @@ export type EnqueueJobInput = {
   prUrl: string;
   headSha: string;
   /**
-   * The review kind the job runs (#195). Producers resolve it from the project's settings through
-   * the one shared resolver (`review-kind.ts`). A missing value is read as `diff`, the kind of every
-   * job that existed before this column and of a project that never chose one.
+   * The review kind the job runs (#195). Test-only: no producer sets it. The queue resolves the kind
+   * from the project's settings inside the enqueue transaction through the one shared resolver
+   * (`review-kind.ts`), so no entry point can choose it. Left out, the stored kind applies; a project
+   * that never chose one is `diff`.
    */
   reviewKind?: ProjectReviewKind;
   command: ReviewCommand;
