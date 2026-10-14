@@ -81,6 +81,11 @@ from code_reviewer_runner.job import (
     ReviewKind,
     parse_job,
 )
+from code_reviewer_runner.lease_check import (
+    LeaseCheck,
+    LeaseState,
+    lease_check_from_environment,
+)
 from code_reviewer_runner.log_capture import (
     MAX_TAIL_BYTES,
     LogCapture,
@@ -230,6 +235,7 @@ def run_dynamic_job(
     engines: Sequence[str] = (),
     prepare: ContentPreparer | None = None,
     publish: Callable[[Job, DynamicFindings], Published] | None = None,
+    lease_check: LeaseCheck | None = None,
 ) -> JobResult:
     """Run a Dynamic job with the read-only stock engine (#197) and publish its summary (#201).
 
@@ -353,6 +359,15 @@ def run_dynamic_job(
     assert answer.findings is not None
     # The summary is written by this supervisor, never by the engine, and only for a run whose
     # findings passed every check above: any earlier failure leaves the previous comment untouched.
+    # A run whose job is no longer ours (lease lost, cancelled) writes nothing (#260). Without a
+    # check (a process the loop did not start) there is no lease to ask about.
+    if lease_check is not None and (state := lease_check()) is not LeaseState.HELD:
+        detail = (
+            "the lease could not be confirmed, so nothing was written"
+            if state is LeaseState.UNCONFIRMED
+            else "the job is no longer held by this runner, so nothing was written"
+        )
+        return _failure(ErrorCode.LEASE_LOST, detail, started, capture)
     try:
         published = (publish or publish_run)(job, answer.findings)
     except PublishError as error:
@@ -569,6 +584,7 @@ def main(
                     saved_env,
                     dynamic_timeout,
                     engines=engines_from_environment(saved_env),
+                    lease_check=lease_check_from_environment(saved_env, required=True),
                 )
         except KeyboardInterrupt:
             raise

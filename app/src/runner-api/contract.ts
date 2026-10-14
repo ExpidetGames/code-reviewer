@@ -77,6 +77,7 @@ export const RUNNER_ERROR_CODES = [
   "dynamic_budget_exceeded",
   "dynamic_accounting_failed",
   "dynamic_model_features_unsupported",
+  "lease_lost",
 ] as const;
 export type RunnerErrorCode = (typeof RUNNER_ERROR_CODES)[number];
 
