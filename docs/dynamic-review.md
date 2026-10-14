@@ -335,11 +335,60 @@ Diff Review "Token budget" (`llm.maxTokens`) is **ignored** by Dynamic Review: i
 (the size PR-Agent gives a diff), the review kind card hides it for Dynamic, and using it as the
 window is what refused real reviews. It is neither a window nor an extra cap.
 
-A run whose limit is hit ends with `dynamic_budget_exceeded`, a run whose usage or cost cannot be
-established with `dynamic_accounting_failed`. The previous summary comment is preserved in both
+A run whose limit is hit ends with `dynamic_budget_exceeded` (see "Wrap-up" for the run that is
+wrapped up before), a run whose usage or cost cannot be established with `dynamic_accounting_failed`. The previous summary comment is preserved in both
 cases. The tool, file and result-byte checks are enforced at the model proxy, before the request is
 forwarded (#197 part 2a): a model request whose history exceeds one of them never reaches the
 provider.
+
+## Wrap-up: a review at its limit is finished, not thrown away (#293)
+
+A run that is about to reach its cost limit or the end of its wall clock does not just stop. The
+model is given one last call in which it can only return its answer, and the review it produces is
+published.
+
+- **When.** The ledger decides, per model request, from its own cost and clock (never from the
+  content of the request): the request becomes the *final call* when a further normal call could
+  not be followed by a final one inside the cost limit (what is spent, what is held for calls in
+  flight, this call, and a final call after it whose history may have grown by two tool results,
+  128 KiB), or when less wall clock is left than one provider call needs (150 s of the 600 s; a
+  quarter of a shorter deadline). The final call must itself fit the cost limit, else the run ends
+  with `dynamic_budget_exceeded` as before.
+- **What changes in that call.** The model proxy, which is trusted runner code, rewrites the request
+  before it is forwarded: every tool except the engine's `StructuredOutput` return tool is removed,
+  `tool_choice` is forced to `required` (with one tool this forces that tool; `required` is the
+  capability every Dynamic model must have, and `provider.require_parameters` still holds), and a
+  runner-written instruction is appended as the last message: *the limit set for this review is used
+  up, do not call any more tools, return the complete review now with the findings you have so
+  far*. The rest of the request is as the engine sent it. A request that does not offer the return
+  tool (a title call, for example) is never rewritten and keeps the plain rule.
+- **One final call.** After it is granted every other request is refused with
+  `dynamic_budget_exceeded`. If the final call fails, the run ends with the stable code of that
+  failure (the provider's or the transport's), and the engine's retry is refused.
+- **Result.** The review is validated like any other, published, and its summary starts with a
+  neutral notice that the review stopped early because it reached the cost limit set for a review (or
+  its time limit) and may be incomplete. The notice is one of two constants and is not part of the
+  stored review state, so the next complete run does not carry it. The runner result carries
+  `usage.stoppedEarly` (`cost_limit` or `time_limit`; absent for a complete run) and the Run's
+  detail page shows "Stopped early".
+- **Security.** The instruction is trusted runner text. Repository content can neither trigger the
+  wrap-up nor prevent it: the decision is made from the ledger's own state, and a request that sets
+  its own `tool_choice` or tools is rewritten all the same. Nothing in the repository can imitate the
+  instruction: it is a user-role message appended after all of the history, and the `<runner-wrap-up>`
+  tag that wraps it is escaped, like `<system-reminder>`, in tool results, in the pull request text
+  and in the prior review state (`tagescape.py`). Compaction is off (below), so the return tool is
+  always still registered with the engine when the final call is made; a test pins that assumption.
+- **Checked against the pinned OpenCode v1.19.0.** The tool the model calls in the final answer is
+  the engine's own `StructuredOutput`, which the engine registers for the whole turn because the
+  structured format lives on the turn's user message. Rewriting what the proxy forwards does not
+  touch that registry: the engine captures the structured answer and ends the turn as it does after
+  any last call (the real binary runs both wrap-up scenarios in `tests/engine`).
+- **Reasoning tokens.** OpenRouter's documentation says reasoning tokens count against `max_tokens`
+  (the limit "applies to reasoning and visible output combined"), are billed as output tokens, and
+  are a subset of `completion_tokens`. The proxy sets `max_tokens` to the output allowance of the
+  model's description, so the reservation of every call (priced at the output cost) already covers
+  them. A provider that reports more completion tokens than the allowance, reasoning included, ends
+  the run with `dynamic_accounting_failed` instead of being paid for it.
 
 ## Context window and compaction
 

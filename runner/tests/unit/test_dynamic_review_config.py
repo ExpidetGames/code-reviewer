@@ -108,7 +108,8 @@ def test_discovery_and_runtime_services_are_switched_off_in_the_config() -> None
     assert document["compaction"] == {"auto": False, "prune": False}
 
 
-# #290-T13: OpenCode's own compaction stays off. After a compaction the engine's next requests
+# #290-T13, #293-T11: OpenCode's own compaction stays off, which is also what lets the wrap-up
+# (`wrap_up.py`) rely on the structured-output tool still being registered with the engine. After a compaction the engine's next requests
 # offer no `StructuredOutput` tool and no forced tool choice (the real v1.19.0 binary, see
 # docs/dynamic-review.md, "Context window and compaction"), so the run could not return its answer.
 def test_compaction_and_pruning_stay_off_in_the_config_and_the_environment() -> None:
