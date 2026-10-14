@@ -16,12 +16,19 @@ import type { ModelCapabilities } from "./model-capabilities.ts";
  */
 export const DYNAMIC_OUTPUT_ALLOWANCE_TOKENS = 8192;
 
+/**
+ * The largest window the contract carries (`DynamicModelCapabilities.contextWindowTokens`; a test keeps
+ * the two equal). A model that states more has no descriptor: the runner would refuse the whole job as
+ * malformed, and no descriptor makes it use its own description instead.
+ */
+export const MAX_CONTEXT_WINDOW_TOKENS = 100_000_000;
+
 /** The descriptor of a model whose metadata was read, or null when the metadata has no usable window. */
 export function dynamicCapabilitiesOf(
   metadata: ModelCapabilities,
 ): DynamicModelCapabilities | null {
   const window = metadata.contextLength;
-  if (window === null) return null;
+  if (window === null || window > MAX_CONTEXT_WINDOW_TOKENS) return null;
   const { inputUsdPerMtok, outputUsdPerMtok } = metadata;
   return {
     toolChoiceRequired: metadata.toolChoiceRequired,

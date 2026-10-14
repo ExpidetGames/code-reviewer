@@ -241,4 +241,38 @@ describe("the capabilities of the model in a Dynamic claim", () => {
     expect(claim.job.input).not.toHaveProperty("dynamic");
     expect(asked).toEqual([]);
   });
+
+  // #279 (review): the read waits up to five seconds, so a job that a cheap local check refuses
+  // anyway must not pay it.
+  it("is not read for a job that ends because its pull request is closed", async () => {
+    const { checker, asked } = scripted(SUPPORTED);
+    const h = await startDynamic(checker);
+    const job = await h.enqueueNew({ prNumber: 9 });
+
+    const response = await h.claim({ engines: ENGINES, features: FEATURES });
+
+    expect(response.status).toBe(204);
+    expect(await h.queue.get(job.id)).toMatchObject({
+      status: "failed",
+      errorCode: "pull_request_closed",
+    });
+    expect(asked).toEqual([]);
+  });
+
+  // #279-T06 (review): still before the credential is created.
+  it("is read before the git credentials are created", async () => {
+    let tokensWhenRead = -1;
+    const h = await startDynamic({
+      check: async () => {
+        tokensWhenRead = h.issuedJobTokens().length;
+        return SUPPORTED;
+      },
+    });
+    await h.enqueueNew();
+
+    await h.claimed({ engines: ENGINES, features: FEATURES });
+
+    expect(tokensWhenRead).toBe(0);
+    expect(h.issuedJobTokens().length).toBe(1);
+  });
 });

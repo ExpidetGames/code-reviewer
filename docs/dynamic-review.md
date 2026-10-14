@@ -273,7 +273,7 @@ answers only), not at save time: the settings save also checks the model, but a 
 go stale (prices and providers change) and would need a migration. A model whose metadata says it has
 no tool calling or no required tool choice ends the job at claim, before any credential is created,
 with `dynamic_model_features_unsupported`. **If OpenRouter cannot be asked** (unreachable, an answer
-that cannot be used, a model it does not list, no stated window) nothing is invented: the job is
+that cannot be used, a model it does not list, no stated or oversized window) nothing is invented: the job is
 claimed without `dynamic.capabilities`, the claim log says `model capabilities not read (...)`, and
 the runner uses its own description as before, so a provider outage fails only models the operator did
 not describe. A claim waits at most five seconds for the metadata.

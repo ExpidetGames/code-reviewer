@@ -309,7 +309,7 @@ async function modelCapabilitiesOf(
   };
   if (result.outcome !== "supported") return fallback(result.outcome);
   const capabilities = dynamicCapabilitiesOf(result.capabilities);
-  if (capabilities === null) return fallback("no_context_window");
+  if (capabilities === null) return fallback("no_usable_context_window");
   if (!features.includes("dynamic_capabilities")) return { kind: "none" };
   deps.logger.info(`[runner-api] job=${job.id} model capabilities sent`);
   return { kind: "send", capabilities };
@@ -360,19 +360,6 @@ async function prepare(
     if (!engines.includes("opencode"))
       return refuse("dynamic_engine_unavailable");
     if (dynamic === null) return refuse("dynamic_config_invalid");
-  }
-  // #279: the model's capabilities, read before any credential is created.
-  let capabilities: DynamicModelCapabilities | undefined;
-  if (dynamic !== null) {
-    const decision = await modelCapabilitiesOf(
-      deps,
-      job,
-      dynamic.model,
-      features,
-    );
-    if (decision.kind === "unsupported")
-      return refuse("dynamic_model_features_unsupported");
-    if (decision.kind === "send") capabilities = decision.capabilities;
   }
 
   if (job.leaseExpiresAt === null)
@@ -428,6 +415,21 @@ async function prepare(
       reason: "pull_request_unavailable",
       retryAfterSeconds: retryAfterOf(error),
     };
+  }
+
+  // #279: the model's capabilities. The read can wait on the provider, so it comes after every cheap
+  // local refusal above, and still before the git credentials are created.
+  let capabilities: DynamicModelCapabilities | undefined;
+  if (dynamic !== null) {
+    const decision = await modelCapabilitiesOf(
+      deps,
+      job,
+      dynamic.model,
+      features,
+    );
+    if (decision.kind === "unsupported")
+      return refuse("dynamic_model_features_unsupported");
+    if (decision.kind === "send") capabilities = decision.capabilities;
   }
 
   // The one place that creates credentials for a job. The revealed copy is a plain object that only

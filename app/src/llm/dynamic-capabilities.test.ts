@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   DYNAMIC_OUTPUT_ALLOWANCE_TOKENS,
+  MAX_CONTEXT_WINDOW_TOKENS,
   dynamicCapabilitiesOf,
 } from "./dynamic-capabilities.ts";
 import type { ModelCapabilities } from "./model-capabilities.ts";
@@ -87,5 +89,40 @@ describe("the capability descriptor of a Dynamic job", () => {
   // #279: it never invents a window.
   it("is no descriptor when the metadata states no window", () => {
     expect(dynamicCapabilitiesOf(metadata({ contextLength: null }))).toBeNull();
+  });
+
+  // #279 (review): a window the contract cannot carry would make the runner refuse the whole job as
+  // malformed; no descriptor makes it fall back to its own description instead.
+  it("is no descriptor when the stated window is larger than the contract allows", () => {
+    expect(
+      dynamicCapabilitiesOf(
+        metadata({ contextLength: MAX_CONTEXT_WINDOW_TOKENS }),
+      )?.contextWindowTokens,
+    ).toBe(MAX_CONTEXT_WINDOW_TOKENS);
+    expect(
+      dynamicCapabilitiesOf(
+        metadata({ contextLength: MAX_CONTEXT_WINDOW_TOKENS + 1 }),
+      ),
+    ).toBeNull();
+  });
+
+  it("keeps the window bound equal to the contract's", () => {
+    const contract = JSON.parse(
+      readFileSync(
+        new URL("../../../contracts/runner-api.v1.json", import.meta.url),
+        "utf8",
+      ),
+    ) as {
+      $defs: {
+        DynamicModelCapabilities: {
+          properties: { contextWindowTokens: { maximum: number } };
+        };
+      };
+    };
+
+    expect(MAX_CONTEXT_WINDOW_TOKENS).toBe(
+      contract.$defs.DynamicModelCapabilities.properties.contextWindowTokens
+        .maximum,
+    );
   });
 });
