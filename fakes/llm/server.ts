@@ -146,7 +146,10 @@ function completion(model: string, content: string) {
   };
 }
 
-/** A completion that asks for tool calls, with the fixed token counts a journey can check. */
+/**
+ * A completion that asks for tool calls, with the fixed token counts a journey can check and the
+ * `usage.cost` OpenRouter reports with every answer (a Dynamic run without it stops, #290).
+ */
 function toolCompletion(model: string, id: string, calls: AgentToolCall[]) {
   return {
     id: "chatcmpl-fake-agent",
@@ -171,7 +174,12 @@ function toolCompletion(model: string, id: string, calls: AgentToolCall[]) {
         finish_reason: "tool_calls",
       },
     ],
-    usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 },
+    usage: {
+      prompt_tokens: 100,
+      completion_tokens: 20,
+      total_tokens: 120,
+      cost: 0.0001,
+    },
   };
 }
 
