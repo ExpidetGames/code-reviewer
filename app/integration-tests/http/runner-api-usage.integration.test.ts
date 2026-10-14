@@ -174,6 +174,7 @@ describe("the completion of a job", () => {
         totalTokens: 12900,
         aiCalls: 2,
         fallbackUsed: false,
+        stoppedEarly: null,
         costUsd: 0.0123456,
       },
     });
