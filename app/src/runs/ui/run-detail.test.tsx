@@ -120,7 +120,7 @@ describe("the usage of a run", () => {
   });
 
   // #267-T08
-  it("shows the exact cost of a run, down to a tenth of a cent, and never rounds a real cost to zero", () => {
+  it("shows the cost of a run to four decimals and never rounds a real cost to zero", () => {
     function shown(costUsd: number): string | null {
       const { container } = render(
         <RunDetail
@@ -135,6 +135,10 @@ describe("the usage of a run", () => {
     }
 
     expect(shown(0.0123)).toContain("$0.0123");
+    // The boundary: $0.0001 is the smallest cost shown as a number, anything below it is named.
+    expect(shown(0.0001)).toContain("$0.0001");
+    expect(shown(0.0001)).not.toContain("Less than");
+    expect(shown(0.00009999)).toContain("Less than $0.0001");
     expect(shown(0.00004)).toContain("Less than $0.0001");
     expect(shown(0.00004)).not.toContain("$0.0000");
     // A free call is a known cost of zero, not an unknown one.
