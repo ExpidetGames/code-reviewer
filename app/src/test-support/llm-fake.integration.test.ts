@@ -104,4 +104,43 @@ describe("the fake LLM", () => {
     expect(response.status).toBe(404);
     expect(llm.requests()).toEqual([]);
   });
+
+  // #269-T05
+  it("serves the endpoints metadata of the models a test registered, keyless, and 404 for any other", async () => {
+    const llm = await setup();
+    llm.setModel("vendor/model", [
+      {
+        supported_parameters: ["tools", "tool_choice"],
+        max_completion_tokens: 8192,
+      },
+    ]);
+
+    const known = await fetch(`${llm.baseUrl}/models/vendor/model/endpoints`);
+    const unknown = await fetch(`${llm.baseUrl}/models/vendor/other/endpoints`);
+
+    expect(known.status).toBe(200);
+    expect(await known.json()).toEqual({
+      data: {
+        id: "vendor/model",
+        name: "vendor/model",
+        endpoints: [
+          {
+            name: "fake-provider",
+            supported_parameters: ["tools", "tool_choice"],
+            max_completion_tokens: 8192,
+          },
+        ],
+      },
+    });
+    expect(unknown.status).toBe(404);
+    expect(llm.modelRequests()).toEqual([
+      { path: "/api/v1/models/vendor/model/endpoints", authorization: "" },
+      { path: "/api/v1/models/vendor/other/endpoints", authorization: "" },
+    ]);
+    llm.reset();
+    expect(llm.modelRequests()).toEqual([]);
+    expect(
+      (await fetch(`${llm.baseUrl}/models/vendor/model/endpoints`)).status,
+    ).toBe(404);
+  });
 });

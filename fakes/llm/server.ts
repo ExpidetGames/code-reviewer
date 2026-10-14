@@ -16,7 +16,10 @@
 //   (`ScriptedModel` in runner/tests/engine/opencode_support.py);
 // - `GET <api base>/key`, the cheap call that tells whether a key is accepted (the app's "test key"
 //   button): 200 for an accepted key, 401 for any other once `acceptKeys` names the accepted ones. The
-//   keys that arrived are recorded apart (`keyChecks`), so a test can see which key a check carried.
+//   keys that arrived are recorded apart (`keyChecks`), so a test can see which key a check carried;
+// - `GET <api base>/models/{author}/{slug}/endpoints`, the public model metadata behind the app's check of a
+//   Dynamic model (#269): the endpoints of the models a test registered with `setModel` (the request
+//   parameters each lists), 404 for any other model. The requests are recorded apart (`modelRequests`).
 //
 // The replies are canned (`canned.ts`). They satisfy the output contract of the review tool and
 // say nothing about review quality. The engine suite of the runner has its own Python twin of this
@@ -53,6 +56,12 @@ export type AgentScript = {
   final: Record<string, unknown>;
 };
 
+/** One endpoint (provider) of a model in the metadata answer. */
+export type FakeModelEndpoint = {
+  supported_parameters: string[];
+  max_completion_tokens?: number | null;
+};
+
 export type FakeLlmError = { status: number; message: string };
 
 export type FakeLlm = {
@@ -72,6 +81,10 @@ export type FakeLlm = {
   keyChecks(): string[];
   /** Answers like the model of a Dynamic Review (see `AgentScript`); null is the canned reply again. */
   scriptAgent(script: AgentScript | null): void;
+  /** Registers a model for the metadata endpoint; its endpoints list what the test says they support. */
+  setModel(id: string, endpoints: FakeModelEndpoint[]): void;
+  /** Every metadata request received (path and `Authorization` header, empty when none), in order. */
+  modelRequests(): Array<{ path: string; authorization: string }>;
   /** Normal replies, no error, no recorded requests. */
   reset(): void;
   close(): Promise<void>;
@@ -179,6 +192,8 @@ export async function startLlmFake(
   let keyChecks: string[] = [];
   let agent: AgentScript | null = null;
   let agentRequests = 0;
+  let models = new Map<string, FakeModelEndpoint[]>();
+  let modelLog: Array<{ path: string; authorization: string }> = [];
 
   const server: Server = createServer((request, response) => {
     const chunks: Buffer[] = [];
@@ -212,6 +227,29 @@ export async function startLlmFake(
             },
           });
         return send(200, { data: { label: "fake-key", limit: null } });
+      }
+      const metadata = /\/models\/([^/]+)\/([^/]+)\/endpoints$/.exec(
+        (request.url ?? "").split("?")[0] ?? "",
+      );
+      if (request.method === "GET" && metadata !== null) {
+        modelLog.push({
+          path: request.url ?? "",
+          authorization: request.headers.authorization ?? "",
+        });
+        const id = `${decodeURIComponent(metadata[1] ?? "")}/${decodeURIComponent(metadata[2] ?? "")}`;
+        const endpoints = models.get(id);
+        if (endpoints === undefined)
+          return send(404, { error: { message: "Not Found", code: 404 } });
+        return send(200, {
+          data: {
+            id,
+            name: id,
+            endpoints: endpoints.map((endpoint) => ({
+              name: "fake-provider",
+              ...endpoint,
+            })),
+          },
+        });
       }
       if (
         request.method !== "POST" ||
@@ -286,6 +324,10 @@ export async function startLlmFake(
       accepted = keys;
     },
     keyChecks: () => [...keyChecks],
+    setModel(id, endpoints) {
+      models.set(id, endpoints);
+    },
+    modelRequests: () => [...modelLog],
     scriptAgent(script) {
       agent = script;
       agentRequests = 0;
@@ -299,6 +341,8 @@ export async function startLlmFake(
       quoteKey = false;
       accepted = null;
       keyChecks = [];
+      models = new Map();
+      modelLog = [];
     },
     async close() {
       await new Promise<void>((resolve, reject) => {
