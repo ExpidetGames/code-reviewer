@@ -2,6 +2,7 @@
 """Trusted preparation against real local Git objects, never GitHub or a model."""
 
 import os
+import re
 import sys
 from dataclasses import replace
 from pathlib import Path
@@ -275,7 +276,8 @@ def test_huge_deferred_blobs_and_ignored_filters_cannot_expand_past_quota(
     tmp_path: Path, filtering: bool
 ) -> None:
     repo = GitFixture(tmp_path / "base.git", filtering=filtering)
-    repo.set_head({"large.txt": b"x" * 1_000_000})
+    # Below the file limit, so the size filter lets it through: only the quota can stop it.
+    repo.set_head({"large.txt": b"x" * 400_000})
     with pytest.raises(CheckoutError):
         prepare_content(
             claim(repo),
@@ -860,8 +862,8 @@ def test_a_credential_shaped_filename_is_omitted_without_exposing_the_token(
     assert token not in (result.root / "evidence.json").read_text()
 
 
-# #196-T01 #196-T12
-def test_authorized_blob_hydration_is_batched_without_requesting_omitted_inputs(
+# #296-T03
+def test_every_small_blob_arrives_with_the_commit_and_none_is_wanted_by_name(
     repo: GitFixture, tmp_path: Path
 ) -> None:
     from collections.abc import Generator
@@ -875,7 +877,7 @@ def test_authorized_blob_hydration_is_batched_without_requesting_omitted_inputs(
 
     class TrackingTransport(LocalTransport):
         def stream(self, request: bytes | None, budget: Budget) -> Generator[bytes]:
-            if request is not None and b"deepen" not in request:
+            if request is not None:
                 requests.append(request)
             yield from super().stream(request, budget)
 
@@ -883,12 +885,17 @@ def test_authorized_blob_hydration_is_batched_without_requesting_omitted_inputs(
         claim(repo), 196, TrackingTransport(repo.path), tmp_path / "job", Redactor(())
     )
     assert len(result.files) == 101
-    assert len(requests) == 4
-    assert all(request.count(b"want ") <= 32 for request in requests)
+    # Every request is a depth-one commit fetch; a blob wanted by name would ignore the filter.
+    assert requests and all(b"deepen" in request for request in requests)
+    wanted = {
+        oid for request in requests for oid in re.findall(r"want ([0-9a-f]{40})", request.decode())
+    }
+    assert wanted
+    assert {git(repo.path, "cat-file", "-t", oid).decode().strip() for oid in wanted} == {"commit"}
 
 
 # #196-T07 #196-T11
-def test_missing_prior_blob_declares_full_mode_without_losing_prior_findings(
+def test_missing_previous_commit_declares_full_mode_without_losing_prior_findings(
     repo: GitFixture, tmp_path: Path
 ) -> None:
     from collections.abc import Generator
@@ -898,20 +905,19 @@ def test_missing_prior_blob_declares_full_mode_without_losing_prior_findings(
 
     previous = repo.head
     git(repo.path, "update-ref", "refs/heads/previous", previous)
-    old_blob = git(repo.path, "hash-object", "--stdin", data=b"print('review')\n").decode().strip()
     repo.set_head({"README.md": b"base\n", "source.py": b"updated\n"}, orphan=True)
 
-    class MissingPriorBlob(LocalTransport):
+    class MissingPrevious(LocalTransport):
         def stream(self, request: bytes | None, budget: Budget) -> Generator[bytes]:
-            if request is not None and old_blob.encode() in request and b"deepen" not in request:
-                yield packet(f"ERR upload-pack: not our ref {old_blob}\n".encode())
+            if request is not None and f"want {previous}".encode() in request:
+                yield packet(f"ERR upload-pack: not our ref {previous}\n".encode())
                 return
             yield from super().stream(request, budget)
 
     result = prepare_content(
         claim(repo, previous),
         196,
-        MissingPriorBlob(repo.path),
+        MissingPrevious(repo.path),
         tmp_path / "job",
         Redactor(()),
         prior_state="prior-findings",
@@ -1021,3 +1027,108 @@ def test_a_failed_preparation_still_reports_the_metrics_and_the_reason(
     assert error.value.reason is CheckoutReason.BUDGET_PREPARATION
     assert error.value.metrics is not None
     assert error.value.metrics.transfer_bytes > 0
+
+
+def _asset_repository(repo: GitFixture, size: int) -> tuple[dict[str, bytes], bytes]:
+    asset = os.urandom(size)
+    files = {
+        "README.md": b"base\n",
+        "assets/clip.bin": asset,
+        **{f"src/module-{i}.txt": f"module {i}\n".encode() * 20 for i in range(40)},
+    }
+    repo.set_head(dict(files))
+    return files, asset
+
+
+# #296-T01
+def test_a_large_binary_blob_is_never_transferred_and_is_reported_not_failed(
+    repo: GitFixture, tmp_path: Path
+) -> None:
+    from collections.abc import Generator
+
+    from code_reviewer_runner.dynamic_review.limits import Budget
+
+    _, asset = _asset_repository(repo, 3_000_000)
+    asset_oid = git(repo.path, "hash-object", "--stdin", data=asset).decode().strip()
+    requests: list[bytes] = []
+
+    class Tracking(LocalTransport):
+        def stream(self, request: bytes | None, budget: Budget) -> Generator[bytes]:
+            if request is not None:
+                requests.append(request)
+            yield from super().stream(request, budget)
+
+    result = prepare_content(claim(repo), 196, Tracking(repo.path), tmp_path / "job", Redactor(()))
+    assert "assets/clip.bin" not in result.files
+    assert len([name for name in result.files if name.startswith("src/")]) == 40
+    assert [(x.path, x.reason) for x in result.omissions] == [("assets/clip.bin", "large_file")]
+    assert [(x.path, x.reason) for x in result.skipped] == [("assets/clip.bin", "too_large")]
+    assert result.metrics.transfer_bytes < 200_000
+    assert result.metrics.omitted == {"large_file": 1}
+    assert all(asset_oid.encode() not in request for request in requests)
+
+
+# #296-T01
+def test_the_same_holds_over_smart_http(repo: GitFixture, tmp_path: Path) -> None:
+    from fakes.dynamic_git.server import git_server
+
+    from code_reviewer_runner.dynamic_review.transport import HttpTransport
+
+    _asset_repository(repo, 3_000_000)
+    git(repo.path, "update-ref", "refs/heads/main", repo.base)
+    with git_server(repo.path) as server:
+        result = prepare_content(
+            claim(repo),
+            196,
+            HttpTransport(server.url, server.token),
+            tmp_path / "job",
+            Redactor((server.token,)),
+        )
+    assert result.metrics.transfer_bytes < 200_000
+    assert [x.reason for x in result.skipped] == ["too_large"]
+
+
+# #296-T01
+def test_an_unchanged_large_blob_is_omitted_without_a_skip(
+    repo: GitFixture, tmp_path: Path
+) -> None:
+    files, _ = _asset_repository(repo, 600_000)
+    git(repo.path, "update-ref", "refs/heads/main", repo.head)
+    result = prepare_content(
+        claim(repo), 196, LocalTransport(repo.path), tmp_path / "job", Redactor(())
+    )
+    assert [(x.path, x.reason) for x in result.omissions] == [("assets/clip.bin", "large_file")]
+    assert result.skipped == ()
+    assert set(result.files) == set(files) - {"assets/clip.bin"}
+
+
+# #296-T02
+def test_a_server_without_filters_still_yields_an_omission_when_the_transfer_fits(
+    tmp_path: Path,
+) -> None:
+    repo = GitFixture(tmp_path / "plain.git", filtering=False)
+    _asset_repository(repo, 600_000)
+    result = prepare_content(
+        claim(repo), 196, LocalTransport(repo.path), tmp_path / "job", Redactor(())
+    )
+    assert [x.reason for x in result.skipped] == ["too_large"]
+    assert result.metrics.transfer_bytes > 600_000
+
+
+# #296-T02
+def test_a_server_without_filters_fails_with_the_transfer_budget_when_it_does_not_fit(
+    tmp_path: Path,
+) -> None:
+    repo = GitFixture(tmp_path / "plain.git", filtering=False)
+    _asset_repository(repo, 3_000_000)
+    with pytest.raises(CheckoutError) as error:
+        prepare_content(
+            claim(repo),
+            196,
+            LocalTransport(repo.path),
+            tmp_path / "job",
+            Redactor(()),
+            limits=Limits(transfer_bytes=1_000_000),
+        )
+    assert error.value.reason is CheckoutReason.BUDGET_TRANSFER
+    assert not (tmp_path / "job").exists()

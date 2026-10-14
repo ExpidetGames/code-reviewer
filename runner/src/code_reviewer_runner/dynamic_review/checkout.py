@@ -160,14 +160,18 @@ def prepare_content(
         if base_sha is None:
             raise CheckoutError(CheckoutReason.REF_MISSING)
         store = ObjectStore(directory / "objects", budget)
-        store.unpack(fetch_pack(transport, base.head_sha, caps, budget))
+        # Blobs above the file limit are left out by the server and never transferred. Blobs wanted
+        # by name would ignore the filter, so no blob is ever wanted by name.
+        blob_limit = limits.file_bytes + 1
+        filtered = "filter" in caps
+        store.unpack(fetch_pack(transport, base.head_sha, caps, budget, blob_limit=blob_limit))
         head = tracked_tree(store, base.head_sha)
         entries = len(head)
         # The base-to-head ("Files changed") diff is against the merge base, never the moving
         # base-ref snapshot. If the ancestry walk cannot find one within its bound, review the
         # whole head instead of guessing a base.
         merge_base_sha = _resolve_merge_base(
-            store, transport, caps, base.head_sha, base_sha, budget
+            store, transport, caps, base.head_sha, base_sha, budget, blob_limit
         )
         base_tree: dict[str, Entry] = {}
         if merge_base_sha is not None:
@@ -182,7 +186,15 @@ def prepare_content(
         ):
             try:
                 if base.previous_reviewed_sha not in store.objects:
-                    store.unpack(fetch_pack(transport, base.previous_reviewed_sha, caps, budget))
+                    store.unpack(
+                        fetch_pack(
+                            transport,
+                            base.previous_reviewed_sha,
+                            caps,
+                            budget,
+                            blob_limit=blob_limit,
+                        )
+                    )
                 previous = tracked_tree(store, base.previous_reviewed_sha)
             except ObjectUnavailable:
                 budget.check()
@@ -194,44 +206,7 @@ def prepare_content(
         tree_skips: list[dict[str, SkipReason]] = [{}, {}, {}]
         texts: dict[str, str] = {}
         cache: dict[str, str | None] = {}
-        eligible: set[str] = set()
-        prior_eligible: set[str] = set()
-        for index, tree in enumerate((head, base_tree, previous or {})):
-            for path, entry in tree.items():
-                budget.check()
-                reason = omission_reason(path, entry.mode)
-                if redact_text(path, redactor) != path:
-                    reason = OmissionReason.CREDENTIAL_PATH
-                if reason is not None:
-                    omissions[path] = Omission(redact_text(path, redactor), reason)
-                    if path in required:
-                        raise CheckoutError(CheckoutReason.INVALID_REQUEST)
-                    continue
-                if entry.oid not in store.objects:
-                    (eligible if index < 2 else prior_eligible).add(entry.oid)
-
-        def hydrate(oids: set[str]) -> None:
-            missing = sorted(oids - store.objects.keys())
-            for offset in range(0, len(missing), 32):
-                store.unpack(
-                    fetch_pack(
-                        transport, tuple(missing[offset : offset + 32]), caps, budget, blobs=True
-                    )
-                )
-
-        hydrate(eligible)
-        try:
-            hydrate(prior_eligible)
-        except ObjectUnavailable:
-            budget.check()
-            previous = None
-            required = changed_paths(head, base_tree)
-            omissions = {
-                path: omission
-                for path, omission in omissions.items()
-                if path in head or path in base_tree
-            }
-        # Apply policy to every endpoint before any blob reads, including deleted evidence.
+        # Apply policy to every endpoint, including deleted evidence, before its blob is read.
         for index, tree in enumerate((head, base_tree, previous or {})):
             for path, entry in tree.items():
                 budget.check()
@@ -240,9 +215,13 @@ def prepare_content(
                     reason = OmissionReason.CREDENTIAL_PATH
                 if reason is None:
                     obj = store.objects.get(entry.oid)
-                    if obj is None or obj.kind != "blob":
+                    if obj is None and filtered:
+                        # The size filter left the blob out: it is above the limit and was
+                        # never transferred, so its exact size is unknown and not needed.
+                        reason = OmissionReason.LARGE_FILE
+                    elif obj is None or obj.kind != "blob":
                         raise CheckoutError(CheckoutReason.OBJECT_MISSING)
-                    if obj.size > limits.file_bytes:
+                    elif obj.size > limits.file_bytes:
                         reason = OmissionReason.LARGE_FILE
                     else:
                         if entry.oid not in cache:
@@ -391,13 +370,14 @@ def _resolve_merge_base(
     head: str,
     base_sha: str,
     budget: Budget,
+    blob_limit: int,
 ) -> str | None:
     try:
         found = merge_base(store, transport, capabilities, head, base_sha, budget)
         if found is None or found == head:
             return found
         # The ancestry walk is commits-only; fetch the merge base commit with its tree.
-        store.unpack(fetch_pack(transport, found, capabilities, budget))
+        store.unpack(fetch_pack(transport, found, capabilities, budget, blob_limit=blob_limit))
     except ObjectUnavailable:
         budget.check()
         return None
