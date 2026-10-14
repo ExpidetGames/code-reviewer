@@ -31,6 +31,8 @@ type Service = {
   cap_drop?: string[];
   cap_add?: string[];
   volumes?: unknown;
+  read_only?: boolean;
+  tmpfs?: string[];
   user?: string;
   privileged?: boolean;
   security_opt?: string[];
@@ -47,6 +49,7 @@ type Compose = { services: Record<string, Service> };
 
 const source = read("compose.dynamic.yml");
 const privilegedScript = read("runner/scripts/run_privileged_offline.sh");
+const smokeScript = read("docker/smoke/runner.sh");
 const phasesScript = read("runner/scripts/privileged_phases.sh");
 // What the root supervisor of the Dynamic job needs for its whole life (#197): launch the engine as
 // another user (SETUID, SETGID), end what that user runs (KILL) and seal and remove the export
@@ -68,6 +71,23 @@ const CREATED_WITH = [
   ...SUPERVISOR_CAPABILITIES,
   ...STARTUP_ONLY_CAPABILITIES,
 ].sort();
+// The only writable paths of the container (#249): the root filesystem is read-only, so a root
+// supervisor that is compromised cannot change `nft`, `tini` or the runner source for the restart
+// that gives `NET_ADMIN` back (ADR 0003, decision 5). Each is a tmpfs, so it is empty again after a
+// restart, and each is as tight as it can be:
+//  * /tmp          the job working directories, the per-job export and the engine's HOME, XDG and
+//                  TMPDIR. World-writable with the sticky bit, exactly as /tmp is in the image: the
+//                  engine user could write there before and gains nothing.
+//  * /run          the identity leases of the checkout. Root only (0755): the engine user cannot
+//                  write there.
+//  * /home/runner  the HOME of the Diff job user 10001 and of the loop. 10001 only (0700): not
+//                  writable, not even enterable, for the engine user.
+// Memory: a tmpfs is charged to the container's memory limit, so the sizes are deliberate.
+const READ_ONLY_TMPFS = [
+  "/home/runner:rw,noexec,nosuid,nodev,size=64m,uid=10001,gid=10001,mode=0700",
+  "/run:rw,noexec,nosuid,nodev,size=1m,mode=0755",
+  "/tmp:rw,noexec,nosuid,nodev,size=512m,mode=1777",
+];
 const dynamic = parse(source) as Compose;
 const plain = parse(read("compose.yml")) as Compose;
 
@@ -86,6 +106,15 @@ function bytes(value: string): number {
     (match[2] ?? "").toLowerCase() as "" | "k" | "m" | "g"
   ];
   return Number(match[1]) * unit;
+}
+
+/** A `tmpfs` entry as its path and its comma separated options. */
+function splitTmpfs(entry: string): { path: string; options: string[] } {
+  const colon = entry.indexOf(":");
+  return {
+    path: entry.slice(0, colon),
+    options: entry.slice(colon + 1).split(","),
+  };
 }
 
 /** The default of `${NAME:-default}`. */
@@ -218,8 +247,8 @@ describe("compose.dynamic.yml", () => {
     expect(names).toEqual(CREATED_WITH);
     expect(privilegedScript).toContain("--no-new-privs");
     expect(privilegedScript).toContain("unshare --net --mount");
-    // The container mounts nothing from the host, so the suite starts without the host's /run.
-    expect(privilegedScript).toContain("mount -t tmpfs tmpfs /run");
+    // The container mounts nothing from the host, so the suite starts without the host's /run (a
+    // tmpfs of its own, with the options of the compose file: the next test).
     expect(privilegedScript).toContain("scripts/privileged_phases.sh");
   });
 
@@ -235,7 +264,7 @@ describe("compose.dynamic.yml", () => {
     );
   });
 
-  // #244-T12
+  // #244-T12 #249-T03
   it("mounts nothing and shares nothing with the host or another container", () => {
     const service = runnerDynamic();
     const code = source
@@ -246,11 +275,11 @@ describe("compose.dynamic.yml", () => {
     // The nft rules cover TCP, UDP and IPv6 of the engine user, not AF_UNIX. A unix socket cannot
     // leave the container, so the gap is empty exactly as long as nothing is mounted (a Docker
     // socket, a credential helper's socket) and no namespace is shared with a process that listens
-    // on one.
+    // on one. The three tmpfs of the read-only root filesystem (next test) are private to the
+    // container and hold nothing from outside; they are the only mounts, pinned exactly.
     for (const key of [
       "volumes",
       "volumes_from",
-      "tmpfs",
       "devices",
       "network_mode",
       "pid",
@@ -274,6 +303,95 @@ describe("compose.dynamic.yml", () => {
     expect(code).not.toMatch(/docker\.sock/);
     expect(code).not.toMatch(/\/var\/run|\/run\//);
     expect(code).not.toMatch(/^\s*volumes:/m);
+  });
+
+  // #249-T03
+  it("makes the root filesystem read-only and lists exactly three private tmpfs as the only writable paths", () => {
+    const service = runnerDynamic();
+
+    expect(service.read_only).toBe(true);
+    expect([...(service.tmpfs ?? [])].sort()).toEqual(READ_ONLY_TMPFS);
+    for (const entry of service.tmpfs ?? []) {
+      const { path, options: flags } = splitTmpfs(entry);
+      // None may run code, honour a setuid bit or file capability, or hold a device node.
+      for (const flag of ["rw", "noexec", "nosuid", "nodev"]) {
+        expect(flags, `${path} ${flag}`).toContain(flag);
+      }
+      for (const flag of ["exec", "suid", "dev", "ro"]) {
+        expect(flags, `${path} ${flag}`).not.toContain(flag);
+      }
+      const size = flags.find((flag) => flag.startsWith("size="));
+      expect(size, `${path} has a size limit`).toBeDefined();
+      // A tmpfs is charged to the memory limit, so none may reach it.
+      expect(bytes((size ?? "").slice("size=".length))).toBeLessThan(
+        bytes(defaultOf(service.mem_limit)),
+      );
+    }
+    // The engine user (10101) must gain no write path from them: only /tmp, which is world-writable
+    // in the image as well, may be writable by others; every other one is owned by root or by the
+    // Diff job user and closed to everyone else.
+    const worldWritable = (service.tmpfs ?? [])
+      .filter((entry) => {
+        const mode = /mode=([0-7]+)/.exec(entry)?.[1] ?? "1777";
+        return (Number.parseInt(mode, 8) & 0o002) !== 0;
+      })
+      .map((entry) => entry.split(":")[0]);
+    expect(worldWritable).toEqual(["/tmp"]);
+    expect(source).not.toMatch(/uid=10101|gid=10101/);
+  });
+
+  // #249-T01 #249-T03
+  it("runs the privileged suite on the same layout: read-only disk filesystems, the same tmpfs options", () => {
+    // The suite proves the container's behaviour, so it runs on its layout: every disk filesystem
+    // read-only, and a tmpfs with the compose file's options on the paths the runner writes. (The
+    // home directory of the Diff job user is the CI host's own, so it is not modelled.)
+    expect(privilegedScript).toMatch(/remount,bind,ro/);
+    for (const entry of READ_ONLY_TMPFS) {
+      const { path, options } = splitTmpfs(entry);
+      if (path === "/home/runner") continue;
+      const own = options.filter((flag) => !/^(uid|gid)=/.test(flag)).join(",");
+      expect(privilegedScript, path).toContain(
+        `mount -t tmpfs -o ${own} tmpfs ${path}`,
+      );
+    }
+    // The execve phase (#250) judges the bounding set, so it must not run under no-new-privileges.
+    const execve = privilegedScript
+      .split("\n")
+      .filter((line) => line.includes("execve_phase.py"));
+    expect(execve).toHaveLength(1);
+    expect(privilegedScript).toMatch(
+      /setpriv \\\n\s+--bounding-set=-all[^\n]*\\\n\s+--inh-caps=-all \\\n\s+uv run --no-sync --offline python tests\/privileged\/execve_phase\.py/,
+    );
+  });
+
+  // #249-T03
+  it("passes the read-only options to every Dynamic container the smoke test starts", () => {
+    // Continuation lines joined, so a command is one line. Every command that creates a container
+    // like compose.dynamic.yml (the shared capability list, or the one spelled out for the case
+    // without NET_ADMIN) must carry the read-only root filesystem and the tmpfs.
+    const commands = smokeScript.replace(/\\\n\s*/g, " ").split("\n");
+    const dynamic = commands.filter(
+      (line) =>
+        /docker run|start_loop|expect_not_advertised/.test(line) &&
+        (line.includes("${dynamic_caps[@]}") ||
+          line.includes("--cap-add FOWNER")),
+    );
+
+    // The capable runner, the read-only check, and the three "not advertised" cases.
+    expect(dynamic).toHaveLength(5);
+    for (const line of dynamic) {
+      expect(line, line).toContain("${dynamic_rootfs[@]}");
+    }
+  });
+
+  // #249-T03
+  it("runs the smoke test of the image with the same read-only root filesystem and tmpfs", () => {
+    const flags = [...smokeScript.matchAll(/--tmpfs "([^"]+)"/g)].map(
+      (match) => match[1],
+    );
+
+    expect(smokeScript).toContain("--read-only");
+    expect([...flags].sort()).toEqual(READ_ONLY_TMPFS);
   });
 
   // #197-T04

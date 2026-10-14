@@ -26,6 +26,7 @@ from privileged_support import (
     PROXY_PORT,
     STRANGER_GID,
     STRANGER_UID,
+    exec_directory,
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "engine"))
@@ -72,8 +73,7 @@ def pin_for(path: Path, pin: Path, version: str) -> None:
 @pytest.fixture(scope="module")
 def tools() -> Generator[ToolPaths]:
     """The real engine and a real `rg` in a root-owned directory every user can enter."""
-    directory = Path(tempfile.mkdtemp(prefix="cr-self-check-"))
-    directory.chmod(0o755)
+    directory = exec_directory("cr-self-check-")
     opencode, ripgrep = directory / "opencode", directory / "rg"
     shutil.copyfile(opencode_binary(), opencode)
     host_rg = shutil.which("rg")
@@ -94,6 +94,9 @@ def check(installed: ToolPaths, **changes: Any) -> None:
         "ports": PORTS,
         "rules_installed": True,
         "tools": installed,
+        # The tools sit in a directory of this suite, not under "/": the chain of directories above
+        # them is judged up to its root. The chain from "/" is the image smoke test's.
+        "chain_root": installed.opencode.parent,
         **changes,
     }
     check_dynamic_runner(**arguments)
@@ -117,7 +120,9 @@ def test_the_real_system_passes_the_check_and_advertises_opencode(tools: ToolPat
     )
 
     advertised = service.advertise_engines(
-        settings, True, check=partial(check_dynamic_runner, tools=tools)
+        settings,
+        True,
+        check=partial(check_dynamic_runner, tools=tools, chain_root=tools.opencode.parent),
     )
 
     assert advertised.engines == ALL_ENGINES
@@ -143,14 +148,12 @@ def test_an_engine_user_with_a_foreign_group_is_not_advertised(tools: ToolPaths)
 
 
 # #202-T09: the pinned executable is the one that runs
-def test_a_binary_that_is_not_the_pinned_one_is_not_advertised(
-    tools: ToolPaths, tmp_path: Path
-) -> None:
-    tampered = tmp_path / "opencode"
+def test_a_binary_that_is_not_the_pinned_one_is_not_advertised(tools: ToolPaths) -> None:
+    tampered = Path(tempfile.mkdtemp(dir=tools.opencode.parent)) / "opencode"
+    tampered.parent.chmod(0o755)
     shutil.copyfile(tools.opencode, tampered)
     tampered.chmod(0o755)
     tampered.write_bytes(tampered.read_bytes() + b"\0")
-    tampered.parent.chmod(0o755)
 
     reason = reason_of(
         tools, tools=ToolPaths(tampered, tools.ripgrep, tools.opencode_pin, tools.ripgrep_pin)
@@ -161,9 +164,11 @@ def test_a_binary_that_is_not_the_pinned_one_is_not_advertised(
 
 # #202-T09: the engine itself says which release it is, as the engine user, offline.
 def test_an_engine_that_reports_another_version_than_the_pin_is_not_advertised(
-    tools: ToolPaths, tmp_path: Path
+    tools: ToolPaths,
 ) -> None:
-    pin = tmp_path / "opencode-pin.json"
+    other = Path(tempfile.mkdtemp(dir=tools.opencode.parent))
+    other.chmod(0o755)
+    pin = other / "opencode-pin.json"
     pin_for(tools.opencode, pin, "0.0.1")
 
     reason = reason_of(
@@ -187,7 +192,9 @@ def test_diff_stays_advertised_whatever_the_check_says(tools: ToolPaths) -> None
     )
 
     advertised = service.advertise_engines(
-        settings, True, check=partial(check_dynamic_runner, tools=tools)
+        settings,
+        True,
+        check=partial(check_dynamic_runner, tools=tools, chain_root=tools.opencode.parent),
     )
 
     assert advertised.engines == (ENGINE_DIFF,)

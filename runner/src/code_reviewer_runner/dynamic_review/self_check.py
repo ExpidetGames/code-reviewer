@@ -10,7 +10,9 @@ before the job loop claims anything. `opencode` is advertised only when every pr
 * the static network rules were installed and `NET_ADMIN`/`SETPCAP` are gone from this process;
 * the engine binary and `rg` are the pinned files (size and SHA-256 of `opencode-pin.json` and
   `ripgrep-pin.json`), regular files owned by the trusted owner that nobody else can write, and the
-  binary reports the pinned version when run as the engine user, offline;
+  binary reports the pinned version when run as the engine user, offline. The pin files are held to
+  the same standard, and so is every directory above each of the four files, up to `/`: a real
+  directory (no link), owned by the trusted owner, not writable by group or others (#249);
 * a probe run as the engine user reaches the slot's proxy port and nothing else.
 
 Each failure has a stable reason that the loop logs; none carries a value. A successful `--version`
@@ -34,6 +36,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
+from typing import BinaryIO
 
 from code_reviewer_runner.capabilities import IsolationSelfCheckError
 from code_reviewer_runner.job_loop.jsonvalues import as_object
@@ -57,6 +60,7 @@ class SelfCheckReason(StrEnum):
     NETWORK_RULES_NOT_INSTALLED = "network_rules_not_installed"
     CAPABILITIES_NOT_DROPPED = "capabilities_not_dropped"
     PIN_UNREADABLE = "pin_unreadable"
+    PIN_UNTRUSTED = "pin_untrusted"
     ENGINE_BINARY_MISSING = "engine_binary_missing"
     ENGINE_BINARY_UNTRUSTED = "engine_binary_untrusted"
     ENGINE_BINARY_CHECKSUM_MISMATCH = "engine_binary_checksum_mismatch"
@@ -166,12 +170,86 @@ class _Pinned:
     sha256: str
 
 
-def _read_pin(path: Path, platform: str) -> _Pinned:
-    unreadable = SelfCheckFailed(SelfCheckReason.PIN_UNREADABLE, "a pin file cannot be used")
+@dataclass(frozen=True)
+class _Where:
+    """Which owner and which top directory the files and their directories are judged against."""
+
+    trusted_owner: int
+    chain_root: Path
+    lstat: Callable[[Path], os.stat_result]
+
+
+def _ancestors_trusted(
+    path: Path, root: Path, trusted_owner: int, lstat: Callable[[Path], os.stat_result]
+) -> bool:
+    """Every directory from the parent of `path` up to `root` is the owner's and closed to others.
+
+    Somebody who can write into one of them can swap the whole subtree, however the file itself is
+    owned. A link in the chain is refused as well: it would let the judged path lead elsewhere.
+    A directory that is not there raises `FileNotFoundError`: that is a missing file, not an
+    untrusted one.
+    """
+    directory = path.parent
+    while True:
+        try:
+            facts = lstat(directory)
+        except (FileNotFoundError, NotADirectoryError):
+            raise FileNotFoundError from None
+        except OSError:
+            return False
+        if (
+            not stat.S_ISDIR(facts.st_mode)
+            or facts.st_uid != trusted_owner
+            or facts.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
+        ):
+            return False
+        if directory == root:
+            return True
+        if directory.parent == directory:
+            return False  # walked past "/" without meeting the root: the root is not above it
+        directory = directory.parent
+
+
+def _open_trusted(
+    path: Path,
+    where: _Where,
+    unreadable: SelfCheckFailed,
+    untrusted: SelfCheckFailed,
+) -> BinaryIO:
+    """The open file at `path`, if only its owner can change it and every directory above it."""
     try:
-        document = as_object(json.loads(path.read_text(encoding="utf-8")))
-    except (OSError, ValueError):
+        trusted = _ancestors_trusted(path, where.chain_root, where.trusted_owner, where.lstat)
+    except FileNotFoundError:
         raise unreadable from None
+    if not trusted:
+        raise untrusted
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    except OSError:
+        raise unreadable from None
+    stream = os.fdopen(descriptor, "rb")
+    facts = os.fstat(stream.fileno())
+    if not stat.S_ISREG(facts.st_mode):
+        stream.close()
+        raise unreadable
+    if facts.st_uid != where.trusted_owner or facts.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+        stream.close()
+        raise untrusted
+    return stream
+
+
+def _read_pin(path: Path, platform: str, where: _Where) -> _Pinned:
+    unreadable = SelfCheckFailed(SelfCheckReason.PIN_UNREADABLE, "a pin file cannot be used")
+    untrusted = SelfCheckFailed(
+        SelfCheckReason.PIN_UNTRUSTED, "a pin file could be changed by someone else"
+    )
+    if path.is_symlink():
+        raise untrusted
+    with _open_trusted(path, where, unreadable, untrusted) as stream:
+        try:
+            document = as_object(json.loads(stream.read().decode("utf-8")))
+        except (OSError, ValueError):
+            raise unreadable from None
     if document is None:
         raise unreadable
     platforms = as_object(document.get("platforms")) or {}
@@ -189,33 +267,35 @@ def _read_pin(path: Path, platform: str) -> _Pinned:
 
 def _verify_executable(
     path: Path,
-    pin: _Pinned,
-    trusted_owner: int,
+    pin_path: Path,
+    platform: str,
+    where: _Where,
     reasons: tuple[SelfCheckReason, SelfCheckReason, SelfCheckReason],
-) -> None:
+) -> _Pinned:
     """The file is the pinned one, and only its trusted owner can change it.
 
     The descriptor is opened without following a link and judged with `fstat`, so the file that is
-    hashed is the file that was judged.
+    hashed is the file that was judged. The file and its directories are judged before its pin is
+    read, and the pin the same way.
     """
     missing, untrusted, mismatch = reasons
-    try:
-        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
-    except OSError:
-        raise SelfCheckFailed(missing, "a required tool is not installed") from None
-    with os.fdopen(descriptor, "rb") as stream:
-        facts = os.fstat(stream.fileno())
-        if not stat.S_ISREG(facts.st_mode) or not facts.st_mode & stat.S_IXUSR:
+    with _open_trusted(
+        path,
+        where,
+        SelfCheckFailed(missing, "a required tool is not installed"),
+        SelfCheckFailed(untrusted, "a required tool could be changed by someone else"),
+    ) as stream:
+        if not os.fstat(stream.fileno()).st_mode & stat.S_IXUSR:
             raise SelfCheckFailed(missing, "a required tool is not an executable file")
-        if facts.st_uid != trusted_owner or facts.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
-            raise SelfCheckFailed(untrusted, "a required tool could be changed by someone else")
-        if facts.st_size != pin.size:
+        pin = _read_pin(pin_path, platform, where)
+        if os.fstat(stream.fileno()).st_size != pin.size:
             raise SelfCheckFailed(mismatch, "a required tool is not the pinned file")
         sha = hashlib.sha256()
         while chunk := stream.read(_CHUNK):
             sha.update(chunk)
     if sha.hexdigest() != pin.sha256:
         raise SelfCheckFailed(mismatch, "a required tool is not the pinned file")
+    return pin
 
 
 # -- the check ----------------------------------------------------------------
@@ -229,6 +309,8 @@ def check_dynamic_runner(
     tools: ToolPaths = DEFAULT_TOOLS,
     platform: str | None = None,
     trusted_owner: int = 0,
+    chain_root: Path = Path("/"),
+    lstat: Callable[[Path], os.stat_result] = os.lstat,
     euid: Callable[[], int] = os.geteuid,
     capabilities_gone: Callable[[], None] = require_startup_capabilities_gone,
     user_group: GroupOf = group_of,
@@ -263,11 +345,12 @@ def check_dynamic_runner(
             "a capability only startup may hold was not dropped",
         ) from None
     platform = platform or platform_key()
-    engine_pin = _read_pin(tools.opencode_pin, platform)
-    _verify_executable(
+    where = _Where(trusted_owner, chain_root, lstat)
+    engine_pin = _verify_executable(
         tools.opencode,
-        engine_pin,
-        trusted_owner,
+        tools.opencode_pin,
+        platform,
+        where,
         (
             SelfCheckReason.ENGINE_BINARY_MISSING,
             SelfCheckReason.ENGINE_BINARY_UNTRUSTED,
@@ -276,8 +359,9 @@ def check_dynamic_runner(
     )
     _verify_executable(
         tools.ripgrep,
-        _read_pin(tools.ripgrep_pin, platform),
-        trusted_owner,
+        tools.ripgrep_pin,
+        platform,
+        where,
         (
             SelfCheckReason.RIPGREP_MISSING,
             SelfCheckReason.RIPGREP_UNTRUSTED,

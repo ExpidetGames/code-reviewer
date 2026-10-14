@@ -42,10 +42,11 @@ services:
     # runs as root. Root here holds exactly the capabilities below and nothing else: the engine user
     # has none, and no-new-privileges means no program can regain one.
     #
-    # Nothing is mounted and nothing is shared with the host or another container: no `volumes`, no
-    # `network_mode`, `pid` or `ipc`, no Docker socket. A unix socket cannot leave the container, and
-    # the engine user's nft rules do not cover AF_UNIX, so this is what keeps that gap empty
-    # (app/src/ci/compose-dynamic.test.ts fails the day one of them is added, #244).
+    # Nothing is mounted from outside and nothing is shared with the host or another container: no
+    # `volumes`, no `network_mode`, `pid` or `ipc`, no Docker socket. A unix socket cannot leave the
+    # container, and the engine user's nft rules do not cover AF_UNIX, so this is what keeps that gap
+    # empty (app/src/ci/compose-dynamic.test.ts fails the day one of them is added, #244). The only
+    # mounts are the three private tmpfs below.
     user: "0:0"
     cap_drop:
       - ALL
@@ -66,6 +67,23 @@ services:
       - SETPCAP # drop NET_ADMIN (and itself) from the bounding set right after
     security_opt:
       - no-new-privileges:true
+    # A read-only root filesystem (#249, ADR 0003 decision 5). NET_ADMIN and SETPCAP are dropped for
+    # the life of the container, but `restart: unless-stopped` starts a new one with them again, so
+    # a compromised root supervisor (it holds DAC_OVERRIDE) must not be able to change `nft`, `tini`
+    # or the runner source and then crash the container. Nothing is written to the image: the only
+    # writable paths are these three private tmpfs, empty again after every restart, none able to run
+    # a program, honour a setuid bit or hold a device. A tmpfs is charged to mem_limit, hence the
+    # sizes. The engine user (10101) gains no write path: /tmp is world-writable as it is in the
+    # image, /run is root's (0755) and /home/runner is 10001's (0700).
+    #   /tmp          job working directories, the per-job export, the engine's HOME, XDG and TMPDIR
+    #   /run          the identity leases of the checkout
+    #   /home/runner  HOME of the Diff job user 10001 (PR-Agent, git) and of the root loop
+    # The test pins these exact strings (and docker/smoke/runner.sh runs the image with them).
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=512m,mode=1777
+      - /run:rw,noexec,nosuid,nodev,size=1m,mode=0755
+      - /home/runner:rw,noexec,nosuid,nodev,size=64m,uid=10001,gid=10001,mode=0700
     stop_grace_period: 90s
     depends_on:
       app:

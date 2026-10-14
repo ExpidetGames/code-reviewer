@@ -79,8 +79,10 @@ Docker Compose or Coolify gets the runner.
 - The Dynamic image is built where it is deployed (first build downloads about 60 MB, verified).
 - A host without `nf_tables`, a platform that strips capabilities or ignores `user: "0:0"`, or an
   arm64 host, is a runner that logs a reason and serves Diff jobs only. It never fails Diff.
-- The check is a point-in-time proof. A container restart repeats it (and, until #249, also starts
-  with `NET_ADMIN` again, see 0003).
+- The check is a point-in-time proof. A container restart repeats it (and starts with `NET_ADMIN` again; the
+  read-only root filesystem of #249 makes sure it runs the image as built, see 0003). The files it
+  trusts are judged with every directory above them up to `/` (a real directory, owned by root, not
+  writable by group or others), and the pins like the binaries (#249, from the review of #250).
 - `fail_closed_self_check` is gone; the tests that pinned it are replaced by tests of the real check
   that pin the same property (a failure never advertises) and more.
 
@@ -90,8 +92,8 @@ Docker Compose or Coolify gets the runner.
 - The measured slot count per GiB, and concurrency above one (a pair of ports, a user and a ruleset per
   slot).
 - Which Docker and Coolify targets are verified (today only CI's Docker on Linux/amd64).
-- The prompt inputs on the production Dynamic path (#201), the hidden-character input (#247), the
-  restart (#249) and the token calibration (#235).
+- The prompt inputs on the production Dynamic path (#201), the hidden-character input (#247) and the
+  token calibration (#235).
 
 ## 6. Out of scope
 

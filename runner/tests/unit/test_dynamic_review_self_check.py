@@ -12,6 +12,7 @@ injected.
 import hashlib
 import json
 import os
+import shutil
 import stat
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -105,6 +106,7 @@ class World:
 
     tools: ToolPaths
     calls: list[str]
+    anchor: Path
 
     def capabilities_gone(self) -> None:
         self.calls.append("capabilities")
@@ -120,6 +122,7 @@ class World:
             "tools": self.tools,
             "platform": PLATFORM,
             "trusted_owner": os.getuid(),
+            "chain_root": self.anchor,
             "euid": as_root,
             "capabilities_gone": self.capabilities_gone,
             "user_group": group_of_the_same_number,
@@ -132,17 +135,23 @@ class World:
 
 @pytest.fixture
 def world(tmp_path: Path) -> World:
+    # The layout of the image: the tools in /usr/local/bin, the pins in /opt/code-reviewer/pins.
+    # tmp_path stands for "/": the chain of directories above each file is judged up to it.
+    bin_directory = tmp_path / "usr" / "local" / "bin"
+    pin_directory = tmp_path / "opt" / "code-reviewer" / "pins"
+    bin_directory.mkdir(parents=True)
+    pin_directory.mkdir(parents=True)
     tools = ToolPaths(
-        opencode=tmp_path / "opencode",
-        ripgrep=tmp_path / "rg",
-        opencode_pin=tmp_path / "opencode-pin.json",
-        ripgrep_pin=tmp_path / "ripgrep-pin.json",
+        opencode=bin_directory / "opencode",
+        ripgrep=bin_directory / "rg",
+        opencode_pin=pin_directory / "opencode-pin.json",
+        ripgrep_pin=pin_directory / "ripgrep-pin.json",
     )
     install(tools.opencode, OPENCODE)
     install(tools.ripgrep, RIPGREP)
     pin_file(tools.opencode_pin, OPENCODE)
     pin_file(tools.ripgrep_pin, RIPGREP, version="14.1.1")
-    return World(tools, [])
+    return World(tools, [], tmp_path)
 
 
 def refused(world: World, **changes: Any) -> IsolationSelfCheckError:
@@ -304,6 +313,151 @@ def test_a_binary_owned_by_another_user_is_refused(world: World) -> None:
     error = refused(world, trusted_owner=os.getuid() + 1)
 
     assert getattr(error, "reason", None) is SelfCheckReason.ENGINE_BINARY_UNTRUSTED
+
+
+# #250 (nit 4) / #249-T04: a file is only as trusted as every directory above it. Somebody who can
+# write into one of them can swap the whole subtree, however the file itself is owned.
+UNTRUSTED_REASON = {
+    "opencode": SelfCheckReason.ENGINE_BINARY_UNTRUSTED,
+    "ripgrep": SelfCheckReason.RIPGREP_UNTRUSTED,
+    "opencode_pin": SelfCheckReason.PIN_UNTRUSTED,
+    "ripgrep_pin": SelfCheckReason.PIN_UNTRUSTED,
+}
+# How many directories above the file: its own, then the ones up to the root the chain is judged to
+# (the tools and pins sit three directories below it).
+LEVELS = [0, 1, 2, 3]
+
+
+def first_to_notice_subject(world: World, directory: Path) -> str:
+    """The first file whose chain holds `directory`, in the order of the check."""
+    for subject in UNTRUSTED_REASON:
+        if directory in getattr(world.tools, subject).parents:
+            return subject
+    raise AssertionError(directory)
+
+
+def first_to_notice(world: World, directory: Path) -> SelfCheckReason:
+    return UNTRUSTED_REASON[first_to_notice_subject(world, directory)]
+
+
+def directory_above(world: World, subject: str, level: int) -> Path:
+    path: Path = getattr(world.tools, subject)
+    directory = path.parents[level]
+    assert directory == world.anchor or world.anchor in directory.parents
+    return directory
+
+
+@pytest.mark.parametrize("subject", UNTRUSTED_REASON)
+@pytest.mark.parametrize("level", LEVELS)
+@pytest.mark.parametrize("mode", [0o775, 0o757, 0o777, 0o1777], ids=oct)
+def test_a_directory_above_a_pinned_file_that_others_can_write_is_refused(
+    world: World, subject: str, level: int, mode: int
+) -> None:
+    directory = directory_above(world, subject, level)
+    directory.chmod(mode)
+
+    error = refused(world)
+
+    assert getattr(error, "reason", None) is first_to_notice(world, directory)
+    assert not any(call.startswith("probe") for call in world.calls)
+
+
+@pytest.mark.parametrize("subject", UNTRUSTED_REASON)
+@pytest.mark.parametrize("level", LEVELS)
+def test_a_directory_above_a_pinned_file_owned_by_somebody_else_is_refused(
+    world: World, subject: str, level: int
+) -> None:
+    foreign = directory_above(world, subject, level)
+
+    def lstat(path: Path) -> os.stat_result:
+        facts = os.lstat(path)
+        if path != foreign:
+            return facts
+        fields = list(facts)
+        fields[stat.ST_UID] = os.getuid() + 1
+        return os.stat_result(tuple(fields))
+
+    error = refused(world, lstat=lstat)
+
+    assert getattr(error, "reason", None) is first_to_notice(world, foreign)
+
+
+@pytest.mark.parametrize("subject", UNTRUSTED_REASON)
+@pytest.mark.parametrize("level", [0, 1, 2])
+def test_a_directory_above_a_pinned_file_that_is_a_link_is_refused(
+    world: World, subject: str, level: int
+) -> None:
+    directory = directory_above(world, subject, level)
+    real = directory.with_name(directory.name + ".real")
+    directory.rename(real)
+    directory.symlink_to(real, target_is_directory=True)
+
+    error = refused(world)
+
+    assert getattr(error, "reason", None) is first_to_notice(world, directory)
+
+
+# #249-T04: a directory that is not there is a missing tool or pin, not an untrusted one: the
+# documented reasons (docs/dynamic-review.md) are what an operator searches the log for.
+MISSING_REASON = {
+    "opencode": SelfCheckReason.ENGINE_BINARY_MISSING,
+    "ripgrep": SelfCheckReason.RIPGREP_MISSING,
+    "opencode_pin": SelfCheckReason.PIN_UNREADABLE,
+    "ripgrep_pin": SelfCheckReason.PIN_UNREADABLE,
+}
+
+
+@pytest.mark.parametrize("subject", MISSING_REASON)
+@pytest.mark.parametrize("level", [0, 1, 2])
+def test_a_directory_above_a_pinned_file_that_does_not_exist_is_a_missing_file_not_an_untrusted_one(
+    world: World, subject: str, level: int
+) -> None:
+    directory = directory_above(world, subject, level)
+    shutil.rmtree(directory)
+
+    error = refused(world)
+
+    expected = MISSING_REASON[first_to_notice_subject(world, directory)]
+    assert getattr(error, "reason", None) is expected
+
+
+def test_a_directory_above_a_pinned_file_under_a_plain_file_is_a_missing_file(
+    world: World,
+) -> None:
+    directory = directory_above(world, "opencode", 2)
+    shutil.rmtree(directory)
+    directory.write_text("not a directory", encoding="utf-8")
+
+    error = refused(world)
+
+    assert getattr(error, "reason", None) is SelfCheckReason.ENGINE_BINARY_MISSING
+
+
+# #249-T04: the chain ends at the root it is given ("/" in the image), not above it.
+def test_the_chain_of_directories_is_judged_up_to_its_root_and_no_further(world: World) -> None:
+    world.anchor.parent.chmod(0o777)
+    try:
+        world.run()
+    finally:
+        world.anchor.parent.chmod(0o755)
+
+
+@pytest.mark.parametrize("subject", ["opencode_pin", "ripgrep_pin"])
+@pytest.mark.parametrize("mode", [0o664, 0o646, 0o666])
+def test_a_pin_file_that_others_can_write_is_refused(world: World, subject: str, mode: int) -> None:
+    getattr(world.tools, subject).chmod(mode)
+
+    error = refused(world)
+
+    assert getattr(error, "reason", None) is SelfCheckReason.PIN_UNTRUSTED
+
+
+def test_a_pin_file_that_is_a_link_is_refused(world: World) -> None:
+    replace_by_link(world.tools.opencode_pin)
+
+    error = refused(world)
+
+    assert getattr(error, "reason", None) is SelfCheckReason.PIN_UNTRUSTED
 
 
 # #202-T09
