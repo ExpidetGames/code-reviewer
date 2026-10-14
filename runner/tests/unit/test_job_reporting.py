@@ -3,11 +3,13 @@
 """Pins down how the output of a job process becomes the result sent to the app."""
 
 import json
+from decimal import Decimal
 from typing import Any
 
 from loop_support import outcome, result_line
 from support import API_KEY, TOKEN
 
+from code_reviewer_runner.dynamic_review.budget import BudgetLedger, DynamicLimits
 from code_reviewer_runner.job_loop.process import ProcessOutcome
 from code_reviewer_runner.job_loop.reporting import (
     MAX_LOG_TAIL_CHARS,
@@ -132,3 +134,30 @@ def test_the_bare_verdict_keeps_ok_and_code_and_drops_the_log() -> None:
 
     assert bare["ok"] is True
     assert bare["logTail"] == ""
+
+
+# #267-T07
+def test_the_exact_cost_of_a_dynamic_run_reaches_the_reported_result_unchanged() -> None:
+    ledger = BudgetLedger(DynamicLimits())
+    for cost in ("0.000123", "0.000456"):
+        reservation = ledger.reserve_call("a request", output_tokens=1)
+        ledger.settle_call(reservation, prompt_tokens=9, completion_tokens=1, cost=Decimal(cost))
+    usage = ledger.usage("vendor/model").to_json()
+
+    result = reported(outcome(stdout=result_line(usage=usage)))
+
+    assert result["usage"] is not None
+    assert result["usage"]["costUsd"] == 0.000579
+    assert result["usage"]["aiCalls"] == 2
+
+
+# #267-T07
+def test_an_unknown_cost_of_a_dynamic_run_stays_unknown_in_the_reported_result() -> None:
+    ledger = BudgetLedger(DynamicLimits())
+    reservation = ledger.reserve_call("a request", output_tokens=1)
+    ledger.settle_call(reservation, prompt_tokens=9, completion_tokens=1)
+
+    result = reported(outcome(stdout=result_line(usage=ledger.usage("vendor/model").to_json())))
+
+    assert result["usage"] is not None
+    assert result["usage"]["costUsd"] is None

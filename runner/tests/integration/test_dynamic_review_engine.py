@@ -370,6 +370,8 @@ def test_the_adapter_drives_the_engine_and_returns_the_validated_findings(tmp_pa
     assert usage.prompt_tokens == 2 * UPSTREAM_USAGE["prompt_tokens"]
     assert usage.completion_tokens == 2 * UPSTREAM_USAGE["completion_tokens"]
     assert usage.ai_calls == 2
+    # This provider reported no cost, so the run reports none; it is never derived from tokens.
+    assert usage.cost_usd is None
 
     # The tool loop is audited at the proxy from the requests themselves: three calls (the final
     # StructuredOutput included), two distinct files, and the bytes the model was shown.
@@ -404,6 +406,29 @@ def test_the_adapter_drives_the_engine_and_returns_the_validated_findings(tmp_pa
     helper = next(entry["helper_pid"] for entry in fixture.traces() if "helper_pid" in entry)
     assert process_is_gone(pid)
     assert process_is_gone(helper)
+
+
+# #267-T06
+def test_the_cost_the_provider_reports_reaches_the_usage_of_the_run(tmp_path: Path) -> None:
+    script = {
+        "proxy_calls": 2,
+        "answer": "structured",
+        "findings": findings(),
+        "results": {},
+    }
+    fixture = Fixture(tmp_path, script)
+    reported = {**UPSTREAM_USAGE, "cost": 0.000123}
+
+    with FakeUpstream(
+        [asks(tool_call("c1", "StructuredOutput", findings()))], usage=reported
+    ) as upstream:
+        answer = fixture.run(upstream)
+
+    assert answer.ok
+    usage = fixture.ledger.usage("deepseek/deepseek-v4.1-flash")
+    assert usage.ai_calls == fixture.ledger.model_calls >= 1
+    assert usage.cost_usd == pytest.approx(0.000123 * usage.ai_calls, rel=0, abs=1e-12)
+    assert usage.prompt_tokens == usage.ai_calls * UPSTREAM_USAGE["prompt_tokens"]
 
 
 # #197-T13
