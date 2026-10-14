@@ -261,7 +261,7 @@ posts a fresh summary comment, no finding is carried over, #193). "Discard chang
 change of a project form back.
 
 **The instance gate.** Dynamic Review is only queued while the instance setting `dynamic_review` is on
-(`jobs/dynamic-review-gate.ts`, default off until #202). The page reads it with `isDynamicReviewEnabled`
+(`jobs/dynamic-review-gate.ts`, default off). The page reads it with `isDynamicReviewEnabled`
 and the card says the truth: while it is off, the Dynamic option carries "Not enabled on this instance yet."
 and choosing it shows that reviews of the project fail until an instance admin turns it on (the run ends
 with `dynamic_review_disabled`, see `runs/error-copy.ts`). The choice stays **available** so a project can

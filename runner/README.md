@@ -69,10 +69,15 @@ Rules (the CR-29 decisions; tests in `tests/unit/test_job_loop*.py` and `tests/i
   asyncio, because asyncio's own subprocess reaps the child at once), so a reused group id can never
   be signalled (#233).
 - **The engines of a claim (#195).** The loop sends `{"engines": [...]}` with every claim: `pr-agent`
-  always, `opencode` only after the fail-closed startup self-check proved the dedicated unprivileged
-  engine user, a read-only export and proxy-only egress (`capabilities.py`; the concrete probes are
-  #202's). A runner that cannot run a kind is never handed such a job by the app; a Dynamic job that
-  arrives anyway is refused locally and never run by PR-Agent.
+  always, `opencode` only after the startup self-check passed (#202): root supervisor, engine user,
+  static network rules installed, `NET_ADMIN`/`SETPCAP` dropped, pinned and trusted engine and `rg`,
+  and a probe run as the engine user (`dynamic_review/self_check.py`, run by `job_loop/service.py`
+  after the network setup and before the first claim). A failure logs a stable reason and leaves
+  `pr-agent` only; a runner without an engine user (every runner but the Dynamic one) never passes.
+  The loop gives the job process of a Dynamic job the advertised engines, the verified engine command
+  and `RUNNER_DYNAMIC_CAPABILITIES`; a Diff job process gets none of them. A runner that cannot run a
+  kind is never handed such a job by the app; a Dynamic job that arrives anyway is refused locally and
+  never run by PR-Agent.
 - **Refused jobs start nothing.** The input is validated with the runner's own `parse_job` before a
   process is started: an unknown command (`invalid_command`) or platform and any other invalid input
   (`invalid_job`) are reported with `complete` at once. The platforms are the table in
@@ -136,7 +141,8 @@ The base-to-head diff is against the merge base of the head and the base ref (a 
 declares a full review of the head); a changed binary or oversized file is excluded and reported as
 `skipped` with reason `binary`/`too_large` instead of failing, while denied and unsafe paths still
 fail closed. It is an integration seam for #197; it does not launch an engine or enable the
-capability/gate. The current non-root runner image cannot act as that root supervisor yet (#202).
+capability/gate. The default runner image is not the root supervisor; the `dynamic` image target run by
+`compose.dynamic.yml` is (#202).
 Details, hard bounds, the v1.19.0 discovery deny-list and cleanup obligations:
 [Dynamic checkout](../docs/dynamic-checkout.md).
 
@@ -310,27 +316,30 @@ input and the boundaries around it (the epic's binding decision). Modules:
   limit, engine exit or unusable answer the whole process group is killed and the private scratch
   removed. A group is only ever signalled while its leader is still unreaped (`process_group.py`: the
   exit is observed with `waitid(WNOWAIT)`, the group is ended, the leader is reaped last), so a reused
-  group id can never be signalled (#202); `shutdown_engines()` is also called by the entry point's
+  group id can never be signalled (#202, ADR 0002); `shutdown_engines()` is also called by the entry point's
   watchdog so a timed-out run leaks nothing.
 
 `run_dynamic_job` takes the sanitized export from a `prepare` seam (a context manager yielding
 `PreparedContent`): the supervisor that owns the privileges supplies it (#196 `prepared_checkout`, with
-the dedicated engine user of part 2b/#202); without one the run ends with `checkout_incomplete`.
+the dedicated engine user of part 2b); without one the run ends with `checkout_incomplete`.
 
 The pinned executable: `opencode-pin.json` names the exact release (version, tag, source commit),
 and per platform the asset, archive size and SHA-256 and the executable's SHA-256. `scripts/fetch_opencode.py`
 downloads it only over https, accepts it only when size and digest equal the pin, unpacks exactly one
 regular file and checks that it reports the pinned version; nothing at run time downloads anything.
-The runner image build calls the same pin (#202). `make test-engine` and the engine CI job fetch it
+The `dynamic` target of `Dockerfile` calls the same pin in its own stage and installs the verified
+file at `/usr/local/bin/opencode`; `ripgrep-pin.json` and `scripts/fetch_ripgrep.py` do the same for
+`rg`, which the engine's grep and glob need. `make test-engine` and the engine CI job fetch the engine
 the same way.
 
 The answer's schema is the packaged copy of `contracts/dynamic-review/schema.v1.json`
 (`dynamic_review/findings-schema.v1.json`), sent as the engine's `format`, and validated again by
 `parse_dynamic_findings`. Publication of the findings is #199 (below). The isolation (dedicated uid and the
-per-job network boundary, part 2b of #197 and #202) follows; until then the engine is not advertised
-(`capabilities.py` stays fail-closed) and `opencode` never claims a Dynamic job. The runner does not
-rely on the app alone: `run_dynamic_job` refuses a Dynamic job with `dynamic_engine_unavailable`
-unless the runner itself advertised `opencode`.
+static network boundary) is part 2b of #197; whether a runner advertises `opencode` is decided once at
+start by the self-check above, and only the Dynamic image run as `compose.dynamic.yml` runs it can pass.
+The runner does not rely on the app alone: `run_dynamic_job` refuses a Dynamic job with
+`dynamic_engine_unavailable` unless the loop handed this job process `opencode` among the advertised
+engines.
 
 What the real-binary engine suite (`tests/engine/test_engine_opencode.py`) proves today, with the
 unmodified pinned release behind the real proxy: a hostile repository (plugins in `.opencode/` and

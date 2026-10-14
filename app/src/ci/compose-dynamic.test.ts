@@ -340,3 +340,53 @@ describe("compose.dynamic.yml", () => {
     expect(header).not.toMatch(/engine is not in the (runner )?image/i);
   });
 });
+
+describe("compose.coolify.dynamic.yml", () => {
+  // #202-T07: Coolify takes one Compose file per resource, so the Dynamic runner of a Coolify
+  // installation is a second resource built from this standalone file. It must stay the same runner.
+  const coolify = parse(read("compose.coolify.dynamic.yml")) as Compose;
+  const coolifySource = read("compose.coolify.dynamic.yml");
+
+  it("adds exactly the one service and nothing else", () => {
+    expect(Object.keys(coolify.services)).toEqual(["runner-dynamic"]);
+    expect(coolify).not.toHaveProperty("volumes");
+    expect(read("compose.coolify.yml")).not.toContain("runner-dynamic");
+  });
+
+  it("is the service of compose.dynamic.yml, except that it reaches the app by its address and builds without a local tag", () => {
+    const own = { ...(coolify.services["runner-dynamic"] ?? {}) };
+    const shared = { ...runnerDynamic() };
+
+    // What differs on purpose: no sibling `app` service to wait for, the address of the app, and the
+    // image name (Coolify names the images it builds).
+    for (const service of [own, shared]) {
+      delete service.depends_on;
+      delete service.image;
+      service.environment = {
+        ...service.environment,
+        RUNNER_API_URL: "<differs>",
+      };
+    }
+    expect(own).toEqual(shared);
+  });
+
+  it("takes the address of the app from a required variable, not from a sibling service", () => {
+    const environment = coolify.services["runner-dynamic"]?.environment ?? {};
+
+    expect(environment.RUNNER_API_URL).toMatch(
+      /^\$\{RUNNER_API_URL:\?[^}]*\}$/,
+    );
+    expect(coolify.services["runner-dynamic"]).not.toHaveProperty("depends_on");
+    expect(environment.RUNNER_TOKEN).toBe(
+      runnerDynamic().environment?.RUNNER_TOKEN,
+    );
+  });
+
+  it("says that it is untested on Coolify and points to the guide", () => {
+    const header = coolifySource.split("\n").slice(0, 20).join("\n");
+
+    expect(header).toMatch(/not (yet )?(been )?(tested|verified)/i);
+    expect(header).toContain("docs/deployment-coolify.md");
+    expect(coolifySource).not.toContain("PR_AGENT_COMMAND");
+  });
+});

@@ -15,9 +15,11 @@ and the findings that only the real binary showed.
 size and SHA-256 and the executable's SHA-256. `runner/scripts/fetch_opencode.py` is the only way an
 executable gets onto a machine: https only, size and digest checked before anything is unpacked, one
 regular file, the pinned version reported. Another architecture needs its own pinned artifact; the
-amd64 digest is never reused. The runner image build reads the same pin (#202, which also owns the
-licence and provenance audit of the binary inside `make check-licenses`). Nothing at run time
-downloads anything.
+amd64 digest is never reused. The `dynamic` target of `runner/Dockerfile` reads the same pin in its own
+build stage and installs the verified file root-owned at `/usr/local/bin/opencode` (#202); the
+runner hashes it against the pin again at start. The licence and provenance audit of the binary runs
+inside `make check-licenses` (`license-policy.json`, `binaries`). Nothing at run time downloads
+anything.
 
 ## Where each bound is enforced
 
@@ -45,7 +47,8 @@ Part 1 shipped against a protocol fake; the real binary showed these, all fixed 
 - `OPENCODE_CONFIG_DIR` makes the engine install `@opencode-ai/plugin` from the package registry into
   that directory; only `OPENCODE_CONFIG` (the file) is set.
 - Without a `rg` on its `PATH` the engine downloads ripgrep from GitHub on the first grep. The adapter
-  refuses to start without one; the image must carry it (#202).
+  refuses to start without one; the Dynamic image carries a pinned one at `/usr/local/bin/rg`
+  (`runner/ripgrep-pin.json`, #202).
 - A health request before the listening marker can hang; polls use short timeouts.
 - The contract schema has only `$defs`; the engine's `StructuredOutput` tool needs an object root, so
   the engine gets a self-contained object schema (`dynamic_review/schema.py`).
@@ -60,8 +63,8 @@ Part 1 shipped against a protocol fake; the real binary showed these, all fixed 
   the engine suite asserts the real engine's output and the neutralised form side by side. The
   files stay readable by an explicit `read`. Dropped, not relabelled: a relabel would keep an
   automatic, uncapped channel for repository text and need parsing of repository-controlled text.
-- Part 2b of #197 and #202 still owe: the dedicated unprivileged uid under `prepared_checkout`, the
-  per-job network boundary and its direct-network-denial proof, port ownership and process-group
-  reuse (deployment), config readability across uids, and advertising `opencode` after the real
-  startup self-check. Until then `capabilities.py` stays fail-closed and no Dynamic job reaches a
-  runner.
+- The dedicated unprivileged uid under `prepared_checkout`, the network boundary and its
+  direct-network-denial proof, port ownership, process-group reuse and config readability across uids
+  are shipped (#197 part 2b, #244). `opencode` is advertised by the startup self-check of the Dynamic
+  runner image (#202, `docs/dynamic-review.md`), and only when it passes; the default runner never
+  advertises it.

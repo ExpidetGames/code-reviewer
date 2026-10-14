@@ -51,7 +51,7 @@ immediate transaction write lock. Both retain the lock through commit, so a conc
 can never leave a stale-kind job waiting. A producer never passes a kind; a repository without a project row is Diff.
 
 The rollout gate: Dynamic Review is only **queued** when the instance setting `dynamic_review` says
-`{ enabled: true }` (`dynamic-review-gate.ts`), default off until #202 ships. With the gate off, a
+`{ enabled: true }` (`dynamic-review-gate.ts`), default off. With the gate off, a
 Dynamic project still gets a run, and that run is created `failed` with `dynamic_review_disabled` —
 visible in Runs, never a silent Diff review and never a Dynamic row a previous-release app could
 claim. PostgreSQL queue writers take the instance gate advisory lock before row locks: shared for
@@ -72,7 +72,8 @@ kind: two waiting kinds of one pull request still run one after the other.
 A runner only ever claims a kind one of its engines can run (`runner-capabilities.ts`,
 `runner-queue.ts`): the claim filters on `review_kind` in the atomic statement, so an ineligible job is
 never selected — it keeps waiting without an attempt being counted and without credentials being
-created. Because every production runner advertises only `pr-agent` until #202, such a job is
+created. A runner advertises `opencode` only when it is the Dynamic runner and its startup self-check
+passed (a default runner never does), so a Dynamic job that no such runner claims is
 **cancelled** after `noCapableRunnerMs` (default 30 minutes, `RUNNER_NO_CAPABLE_TIMEOUT_SECONDS`) with
 the stable code `no_capable_runner`. That is the one exception to "waiting forever": it is a bounded
 outcome, not a failed review, and no attempt is counted. This initial-claim deadline starts at the
