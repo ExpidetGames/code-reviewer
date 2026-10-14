@@ -585,3 +585,42 @@ def test_by_default_the_job_writes_one_summary_comment_through_the_github_api_of
         assert all("/issues/" in path for _, path in github.requests)
     finally:
         github.stop()
+
+
+# #253-R05
+def test_a_second_job_for_the_same_pull_request_edits_the_summary_comment_and_adds_none(
+    tmp_path: Path,
+) -> None:
+    token = "ghs_dummy-installation-token-0123456789"
+    github = FakeGithubComments(token=token)
+    # Somebody else quotes the identity marker; it is not the bot's summary and must stay as it is.
+    quote = github.seed(f"{IDENTITY_MARKER}\nquoted by a person", author="octocat")
+    try:
+        links: list[str | None] = []
+        for name in ("first", "second"):
+            with reading_upstream() as upstream:
+                result = runner.run_dynamic_job(
+                    job_for(
+                        f"{upstream.url}/v1",
+                        pr_url=f"{github.url}/octo/repo/pull/7",
+                        git_base_url=github.url,
+                        git_token=token,
+                    ),
+                    None,
+                    0.0,
+                    environment(),
+                    engines=ALL_ENGINES,
+                    prepare=Preparer(tmp_path / name, structured_script()),
+                )
+            assert result.ok, result.log_tail
+            links.append(result.comment_url)
+
+        summaries = [c for c in github.comments if c["user"]["login"] == "code-reviewer[bot]"]
+        assert len(summaries) == 1
+        assert len(github.comments) == 2
+        assert links == [summaries[0]["html_url"]] * 2
+        assert github.comments[0]["body"] == quote["body"]
+        assert [m for m, _ in github.requests if m == "POST"] == ["POST"]
+        assert "PATCH" in [m for m, _ in github.requests]
+    finally:
+        github.stop()
