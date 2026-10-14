@@ -44,7 +44,7 @@ async function asUser(
   home: string,
   command: string,
   args: string[],
-): Promise<{ status: number | string }> {
+): Promise<{ status: number | string; stderr: string }> {
   try {
     await run(
       "setpriv",
@@ -62,12 +62,17 @@ async function asUser(
         command,
         ...args,
       ],
-      { timeout: 60_000, killSignal: "SIGKILL" },
+      // The home is the one directory every user of the lane can enter: the working directory of the
+      // test process is the checkout of the CI user.
+      { cwd: home, timeout: 60_000, killSignal: "SIGKILL" },
     );
-    return { status: 0 };
+    return { status: 0, stderr: "" };
   } catch (error) {
-    const failure = error as { code?: number | string };
-    return { status: failure.code ?? "failed" };
+    const failure = error as { code?: number | string; stderr?: string };
+    return {
+      status: failure.code ?? "failed",
+      stderr: String(failure.stderr ?? "").slice(-600),
+    };
   }
 }
 
@@ -82,57 +87,67 @@ test.describe("the network guard of the Dynamic lane", () => {
     rmSync(home, { recursive: true, force: true });
   });
 
-  async function countedFor(who: ControlWho, attempt: () => Promise<unknown>) {
+  async function countedFor(
+    who: ControlWho,
+    attempt: () => Promise<{ status: number | string; stderr: string }>,
+  ) {
     const before = readGuard();
-    await attempt();
+    const done = await attempt();
     const after = readGuard();
-    expect(after.controls[who] - before.controls[who]).toBeGreaterThan(0);
+    expect(
+      after.controls[who] - before.controls[who],
+      `the attempt ended with ${JSON.stringify(done)}`,
+    ).toBeGreaterThan(0);
     // Whatever the attempt did, it did not go through a counter that fails a test.
     expect(after.violations).toEqual(before.violations);
+    return done;
   }
 
   // #253-G05
   test("counts the pinned OpenCode, run as the engine user, when it reaches for an address that is not a fake", async () => {
-    await countedFor("engine", async () => {
-      const done = await asUser(ENGINE, home, OPENCODE_PATH, [
+    const done = await countedFor("engine", () =>
+      asUser(ENGINE, home, OPENCODE_PATH, [
         "run",
         "--attach",
         `http://${CONTROL_PREFIX.host}:9`,
         "--dir",
         home,
         "hello",
-      ]);
-      expect(done.status).not.toBe(0);
-    });
+      ]),
+    );
+
+    expect(done.status).not.toBe(0);
   });
 
   // #253-G06
   test("counts Git, run as the Diff job user, when it reaches for an address that is not a fake", async () => {
-    await countedFor("job", async () => {
-      const done = await asUser(JOB, home, "git", [
+    const done = await countedFor("job", () =>
+      asUser(JOB, home, "git", [
         "ls-remote",
         `http://${CONTROL_PREFIX.host}/nobody/nothing.git`,
-      ]);
-      expect(done.status).not.toBe(0);
-    });
+      ]),
+    );
+
+    expect(done.status).not.toBe(0);
   });
 
   // #253-G07
   test("counts helper processes of other runtimes, run as root, when they reach for an address that is not a fake", async () => {
-    await countedFor("root", async () => {
-      const shell = await asUser(ROOT, home, "bash", [
+    const shell = await countedFor("root", () =>
+      asUser(ROOT, home, "bash", [
         "-c",
         `exec 3<>/dev/tcp/${CONTROL_PREFIX.host}/80`,
-      ]);
-      expect(shell.status).not.toBe(0);
-    });
-    await countedFor("root", async () => {
-      const node = await asUser(ROOT, home, process.execPath, [
+      ]),
+    );
+    const node = await countedFor("root", () =>
+      asUser(ROOT, home, process.execPath, [
         "-e",
         `require("node:net").connect(80, "${CONTROL_PREFIX.host}").on("error", () => process.exit(7))`,
-      ]);
-      expect(node.status).toBe(7);
-    });
+      ]),
+    );
+
+    expect(shell.status).not.toBe(0);
+    expect(node.status).toBe(7);
   });
 
   // #253-G08
