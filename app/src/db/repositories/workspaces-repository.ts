@@ -58,6 +58,14 @@ export type WorkspacesRepository = {
   ): Promise<void>;
   /** Whether the workspace has at least one Owner. */
   hasOwner(workspaceId: string): Promise<boolean>;
+  /**
+   * A page of workspaces ordered by id, those after `after` (exclusive) when given. `hasMore` says whether
+   * another page follows. For the operator API (#275): instance level, like the table.
+   */
+  listPage(input: {
+    after?: string | undefined;
+    limit: number;
+  }): Promise<{ workspaces: Workspace[]; hasMore: boolean }>;
 };
 
 export const DEFAULT_WORKSPACE_SLUG = "default";
@@ -224,6 +232,20 @@ export function createWorkspacesRepository(
         .limit(1)
         .executeTakeFirst();
       return row !== undefined;
+    },
+
+    async listPage({ after, limit }) {
+      let query = db.selectFrom("workspaces").selectAll();
+      if (after !== undefined) query = query.where("id", ">", after);
+      // One more than asked for tells whether another page follows.
+      const rows = await query
+        .orderBy("id")
+        .limit(limit + 1)
+        .execute();
+      return {
+        workspaces: rows.slice(0, limit).map(toWorkspace),
+        hasMore: rows.length > limit,
+      };
     },
   };
 }
