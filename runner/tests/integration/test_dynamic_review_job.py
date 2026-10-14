@@ -42,6 +42,7 @@ from code_reviewer_runner.dynamic_review.publish import (
     PublishError,
 )
 from code_reviewer_runner.dynamic_review.supervisor import Prepared
+from code_reviewer_runner.dynamic_review.wrap_up import WRAP_UP_INSTRUCTION
 from code_reviewer_runner.job import parse_job
 from code_reviewer_runner.result import ErrorCode
 
@@ -196,6 +197,64 @@ def test_a_dynamic_run_against_a_fake_llm_sends_required_parameters_only_when_th
     assert len(upstream.requests) == 2
     for _headers, body in upstream.requests:
         assert body.get("provider") == ({"require_parameters": True} if fake_asks else None)
+
+
+# #293-T07, #293-T08
+def test_a_run_at_its_cost_limit_is_wrapped_up_published_and_marked(tmp_path: Path) -> None:
+    script = {"proxy_calls": 1, "answer": "structured", "findings": findings(), "results": {}}
+    preparer = Preparer(tmp_path / "export", script)
+    publisher = RecordingPublisher()
+
+    with FakeUpstream([asks(tool_call("c1", "StructuredOutput", findings()))]) as upstream:
+        result = runner.run_dynamic_job(
+            job_for(f"{upstream.url}/v1"),
+            None,
+            0.0,
+            # One call is reserved at about 0.016 USD (4,096 output tokens), so a call after
+            # which no final call fits is the final call: the first one.
+            {**environment(), runner.DYNAMIC_MAX_COST_VARIABLE: "0.02"},
+            engines=ALL_ENGINES,
+            prepare=preparer,
+            publish=publisher,
+        )
+
+    assert result.ok, result.log_tail
+    # The only request the provider saw is the final one: the return tool alone, instruction last.
+    assert len(upstream.requests) == 1
+    _headers, body = upstream.requests[0]
+    assert [tool["function"]["name"] for tool in body["tools"]] == ["StructuredOutput"]
+    assert body["tool_choice"] == "required"
+    assert body["messages"][-1] == {"role": "user", "content": WRAP_UP_INSTRUCTION}
+    # The review is published, with the reason, and the Run's usage says it stopped early.
+    assert len(publisher.calls) == 1
+    assert publisher.calls[0][1].stopped_early == "cost_limit"
+    assert result.usage is not None
+    assert result.usage.stopped_early == "cost_limit"
+    assert result.usage.to_json()["stoppedEarly"] == "cost_limit"
+
+
+# #293-T07
+def test_a_complete_run_is_published_without_the_mark(tmp_path: Path) -> None:
+    script = {"proxy_calls": 1, "answer": "structured", "findings": findings(), "results": {}}
+    preparer = Preparer(tmp_path / "export", script)
+    publisher = RecordingPublisher()
+
+    with FakeUpstream([asks(tool_call("c1", "StructuredOutput", findings()))]) as upstream:
+        result = runner.run_dynamic_job(
+            job_for(f"{upstream.url}/v1"),
+            None,
+            0.0,
+            environment(),
+            engines=ALL_ENGINES,
+            prepare=preparer,
+            publish=publisher,
+        )
+
+    assert result.ok, result.log_tail
+    assert publisher.calls[0][1].stopped_early is None
+    assert result.usage is not None
+    assert result.usage.stopped_early is None
+    assert "stoppedEarly" not in result.usage.to_json()
 
 
 # #197-T01

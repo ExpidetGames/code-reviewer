@@ -426,7 +426,10 @@ def run_dynamic_job(
         )
         return _failure(ErrorCode.LEASE_LOST, detail, started, capture)
     try:
-        published = (publish or publish_run)(job, answer.findings)
+        # A review that was wrapped up at its limit says so in the summary; the reason is the
+        # ledger's, never the model's.
+        findings = replace(answer.findings, stopped_early=ledger.stopped_early)
+        published = (publish or publish_run)(job, findings)
     except PublishError as error:
         return _failure(error.code, error.detail, started, capture)
     summary = (
@@ -435,6 +438,8 @@ def run_dynamic_job(
     )
     if published.reset:
         summary += f"; {STATE_RESET_CODE}"
+    if findings.stopped_early is not None:
+        summary += f"; stopped early ({findings.stopped_early})"
     return JobResult(
         ok=True,
         duration_ms=_elapsed_ms(started),
