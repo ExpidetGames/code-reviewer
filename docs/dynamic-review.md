@@ -293,6 +293,10 @@ the concurrency before the memory matrix exists; a later change can keep Diff jo
 This is the order to follow; every step can be stopped and rolled back. Nothing in it is done by
 installing the files.
 
+**Deploy order.** `base.attemptedShas` (#255) is only sent when it is not empty, and a runner from
+before #255 rejects the key (its job contract is closed). Update the app and the Dynamic runner image
+together, or the runner first. A newer runner with an older app is safe: an absent key means none.
+
 **Before you start.** A Linux Docker host (Docker Engine with Compose v2) whose kernel has
 `nf_tables` (every current distribution kernel; the self-check tells you when it does not), that can
 give the Dynamic runner container at least 2 GiB; an app that is already running with the workspace's
@@ -393,14 +397,18 @@ by the defaults.
   purpose, #199). A run can edit the comment and then fail (the watchdog or `SIGTERM` fires after the
   write, the lease is lost, the completion report is lost): the comment says head A while the app has
   no succeeded review of A. The claim therefore carries `base.attemptedShas`: the heads of the
-  pull request's earlier jobs of the same kind that did not succeed, created after the last succeeded
-  job and before the claimed one (newest first, at most 20). The publisher accepts such a head next
-  to the job's own head and `previousReviewedSha`, reconciles from that state and edits the same
-  comment; the next success makes it the previous review again. A head the app never attempted
-  (foreign, tampered, newer) is still refused. What stays: after 20 or more consecutive unsuccessful
-  heads *without* a success in between, an older state head falls out of the list, and a
-  `review_not_published` there is repaired by re-reviewing the newest head the app attempted. A lost
-  edit response is recognised by re-reading the comment (it must hold exactly the body sent).
+  pull request's earlier jobs of the same kind that *ran* and did not succeed (`failed`, or at least
+  one lost attempt; a job superseded or cancelled while still waiting never ran and is not counted),
+  created after the last succeeded job and before the claimed one (newest first, at most 20, the key
+  is left out when there are none). The publisher accepts such a head next to the job's own head and
+  `previousReviewedSha`, reconciles from that state and edits the same comment; the next success
+  makes it the previous review again. A head the app never attempted (foreign, tampered, newer) is
+  still refused. What stays: after 20 or more distinct heads that ran and failed, *without* a success
+  in between, an older state head falls out of the list and every later push fails with
+  `review_not_published`. Re-reviewing the newest head does not repair it (it gets the same window).
+  Until the guaranteed recovery (#257) lands, the repair is to **delete the bot's summary comment**
+  on the pull request: the next review creates a new one (the history of resolved findings is lost).
+  A lost edit response is recognised by re-reading the comment (it must hold exactly the body sent).
 - **Hidden Unicode tag characters in repository files reach the model untouched (#247).** An attacker
   who controls repository text can hide instructions in tag characters.
 - **A restarted container runs with `NET_ADMIN` again (#249).** The capability is dropped per container

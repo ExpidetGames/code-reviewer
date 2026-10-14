@@ -43,6 +43,9 @@ other way round, so a change to the format has to change the file and both sides
   union is enforced on both sides: a Dynamic job must carry `dynamic` and `base`, a Diff job (no
   `reviewKind`, or `"diff"`) must not, and a Dynamic `model` uses the same character pattern the runner
   accepts.
+- #255 adds the optional `ClaimBase.attemptedShas`. The app leaves the key out when it is empty, but a
+  runner from before #255 rejects it when present (`RunnerJobInput` is closed): update the runner
+  before or together with the app. The reverse (a newer runner, an older app) is safe: absent means none.
 
 ### Rolling out Dynamic Review (#195, finding 4)
 

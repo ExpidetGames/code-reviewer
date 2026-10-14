@@ -120,9 +120,11 @@ advertised `opencode`, and its `input` is tagged:
   the base identity the provider reported, and the _declared_ comparison mode (`full` in this stage;
   the checkout verifies completeness before it trusts it). `previousReviewedSha` is the head of the
   last successful review of the same kind (#199), or `null` when there is none; `attemptedShas`
-  (#255) are the heads of the pull request's earlier jobs of that kind that did not succeed (created
-  after the last succeeded job and before this one, newest first, at most 20): a run may have written
-  the summary before it ended, and the publisher accepts exactly these heads as the comment's state;
+  (#255, optional: left out when there are none, so a runner from before #255 still accepts the job)
+  are the heads of the pull request's earlier jobs of that kind that ran and did not succeed (`failed`
+  or at least one lost attempt; created after the last succeeded job and before this one, newest
+  first, at most 20): a run may have written the summary before it ended, and the publisher accepts
+  exactly these heads as the comment's state;
 - `env: {}`: no PR-Agent option is promoted into the Dynamic job.
 
 The kind, the engines and the tagged shape are also the contract `ClaimRequest`, `Engine`,
