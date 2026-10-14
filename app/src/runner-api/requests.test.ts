@@ -187,6 +187,48 @@ describe("the complete body", () => {
     });
   });
 
+  // #267-T07
+  it("keeps the exact small cost of a Dynamic Review as the runner wrote it", () => {
+    const parsed = parseCompleteRequest({
+      leaseToken: TOKEN,
+      result: {
+        ...GOOD_RESULT,
+        usage: { ...GOOD_RESULT.usage, costUsd: 5.79e-5 },
+      },
+    });
+
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value.result.usage?.costUsd).toBe(5.79e-5);
+    expect(parsed.value.result.usage?.costUsd).toBe(
+      JSON.parse('{"costUsd":5.79e-05}').costUsd,
+    );
+  });
+
+  // #267-T07
+  it("refuses a cost that is not a finite number of at least zero", () => {
+    for (const costUsd of [
+      Number.POSITIVE_INFINITY,
+      Number.NaN,
+      -0.01,
+      "0.01",
+      true,
+    ]) {
+      const parsed = parseCompleteRequest({
+        leaseToken: TOKEN,
+        result: {
+          ...GOOD_RESULT,
+          usage: { ...GOOD_RESULT.usage, costUsd },
+        },
+      });
+
+      expect(fieldsOf(parsed)).toContainEqual({
+        field: "result.usage.costUsd",
+        code: "invalid",
+      });
+    }
+  });
+
   it("names every field that is missing or wrong, once each, without echoing values", () => {
     const parsed = parseCompleteRequest({
       leaseToken: "short",
