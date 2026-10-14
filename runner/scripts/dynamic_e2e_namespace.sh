@@ -16,7 +16,7 @@
 #   5. the last word of the guard, and a check that no process of the lane is left.
 set -euo pipefail
 
-: "${LANE_OPENCODE_BIN:?}" "${LANE_RIPGREP_BIN:?}" "${LANE_APP_DIR:?}" "${LANE_RUNNER_DIR:?}"
+: "${LANE_OPENCODE_BIN:?}" "${LANE_RIPGREP_BIN:?}" "${LANE_APP_DIR:?}" "${LANE_RUNNER_DIR:?}" "${LANE_STAGE:?}"
 export NEXT_TELEMETRY_DISABLED=1
 NODE=(node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON)
 
@@ -41,7 +41,7 @@ fi
 
 # 2. The Dynamic image's users, run directory and tools, inside this namespace only.
 mount -t tmpfs tmpfs /run
-STAGE="$(mktemp -d)"
+STAGE="$LANE_STAGE"
 mount -t tmpfs tmpfs "$STAGE"
 cp /etc/passwd "$STAGE/passwd"
 cp /etc/group "$STAGE/group"

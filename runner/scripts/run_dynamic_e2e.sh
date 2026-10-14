@@ -31,8 +31,11 @@ done
 sudo -n true 2>/dev/null \
   || { echo "The Dynamic e2e lane needs sudo without a password (root for the supervisor, nft and the engine user)." >&2; exit 1; }
 
+# The staging directory is ours; the root part mounts a tmpfs on `lane` (inside its mount namespace
+# only), so what it installs there never reaches the host and this directory stays empty.
 STAGING="$(mktemp -d)"
 trap 'rm -rf "$STAGING"' EXIT
+mkdir "$STAGING/lane"
 
 # Step 1: the pinned tools and the one build.
 OPENCODE_BIN="$(uv run python scripts/fetch_opencode.py)"
@@ -52,7 +55,7 @@ esac
 set +e
 sudo --preserve-env env "PATH=$PATH:/usr/sbin:/sbin" "HOME=$HOME" \
   "LANE_OPENCODE_BIN=$OPENCODE_BIN" "LANE_RIPGREP_BIN=$RIPGREP_BIN" \
-  "LANE_APP_DIR=$APP_DIR" "LANE_RUNNER_DIR=$RUNNER_DIR" "E2E_PORT=$E2E_PORT" \
+  "LANE_APP_DIR=$APP_DIR" "LANE_RUNNER_DIR=$RUNNER_DIR" "LANE_STAGE=$STAGING/lane" "E2E_PORT=$E2E_PORT" \
   unshare --net --mount --pid --fork --mount-proc -- \
   bash "$RUNNER_DIR/scripts/dynamic_e2e_namespace.sh" "$@"
 status=$?
