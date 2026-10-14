@@ -287,6 +287,7 @@ def main(argv: list[str]) -> int:
     _trace(
         {
             "pid": os.getpid(),
+            "port": args.port,
             "env": dict(os.environ),
             "config_mode": config_mode,
             "scratch_mode": scratch_mode,

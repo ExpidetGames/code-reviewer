@@ -6,18 +6,20 @@ network boundary, so the operating system enforces one: an nftables output filte
 socket owner (`meta skuid`) that lets that one user open new connections only to the loopback
 address of this job's model proxy (and to the engine's own server port). Everything else it tries
 (another job's loopback service, any other address, IPv6, UDP, raw sends) is rejected at once.
-Only the answers of the engine's own server pass as replies (never "any tracked flow"). The
-supervisor that owns the root privileges (the job process, `NET_ADMIN`) installs the rules; the
-engine user cannot change them.
+Only the answers of the engine's own server pass as replies (never "any tracked flow").
+
+The rules are static: with one Dynamic slot the engine user and its two loopback ports are fixed,
+so the runner installs them once when the container starts and then drops `NET_ADMIN` for good
+(`static_isolation.py`, #244). Nothing in the container, root included, can change them after that.
 
 A per-job network namespace would need `SYS_ADMIN`, a user namespace is excluded by the lead
 decisions and a container-level rule cannot tell the supervisor (GitHub, the model upstream) from
 the engine in the same container. The rules are therefore proven in effect before the engine
 starts: a probe running as the engine user must reach the proxy and must be refused everywhere
-else; any other result is `dynamic_isolation_self_check_failed` and no engine is started.
+else; any other result is `dynamic_isolation_self_check_failed` and no engine is started. Without
+`NET_ADMIN` the supervisor cannot list the ruleset, so this probe is the verification of it.
 """
 
-import contextlib
 import json
 import shutil
 import socket
@@ -86,7 +88,7 @@ def ruleset(uid: int, proxy_port: int, engine_port: int) -> str:
     """The nft script that confines `uid` to loopback TCP to `proxy_port` and `engine_port`.
 
     `add table` + `flush table` makes it idempotent: installing again replaces the rules of this
-    uid (the engine's own port changes when a start is retried on another one).
+    uid (a restarted container, a changed port).
 
     Nothing is accepted by connection state alone: a flow another process opened (the
     supervisor's DNS lookup, say) stays tracked for a while after its socket closed, and the user
@@ -141,24 +143,13 @@ def _run_nft(script: str) -> None:
 
 @dataclass
 class NetworkConfinement:
-    """The nft rules of one engine user. `apply` installs them, `remove` takes them out again."""
+    """The nft rules of one engine user: `apply` installs them (at container start, #244)."""
 
     uid: int
     run: NftRunner = _run_nft
-    _installed: bool = False
 
     def apply(self, proxy_port: int, engine_port: int) -> None:
         self.run(ruleset(self.uid, proxy_port, engine_port))
-        self._installed = True
-
-    def remove(self) -> None:
-        if not self._installed:
-            return
-        self._installed = False
-        # If the delete fails the user cannot start another engine anyway; the table dies with the
-        # container.
-        with contextlib.suppress(IsolationError):
-            self.run(f"delete table inet {table_name(self.uid)}\n")
 
 
 # Runs the probe as the engine user: argv, the user and group, returns the stdout text.

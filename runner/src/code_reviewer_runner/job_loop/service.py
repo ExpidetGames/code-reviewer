@@ -7,8 +7,10 @@ import logging
 import os
 import signal
 import sys
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 
+from code_reviewer_runner.dynamic_review.netguard import IsolationError
+from code_reviewer_runner.dynamic_review.static_isolation import SlotPorts, secure_startup
 from code_reviewer_runner.job_loop.api import HttpRunnerApi
 from code_reviewer_runner.job_loop.loop import RunnerLoop
 from code_reviewer_runner.job_loop.masking import SecretMasker
@@ -30,6 +32,27 @@ def configure_logging(stream: object = None) -> None:
     logger.handlers = [handler]
     logger.setLevel(logging.INFO)
     logger.propagate = False
+
+
+def prepare_dynamic_runtime(
+    settings: LoopSettings, *, startup: Callable[[int, SlotPorts], bool] = secure_startup
+) -> bool:
+    """The Dynamic runner's one-time network setup, before the loop and any thread exist (#244).
+
+    Installs the engine user's static nft rules and drops `NET_ADMIN` for good. Returns False when
+    the rules could not be installed (Dynamic jobs then fail closed). Raises `IsolationError` when
+    the capabilities could not be dropped: such a runner must not start. A runner without an
+    engine user (Diff only) has nothing to do.
+    """
+    user, ports = settings.dynamic_engine_user, settings.dynamic_ports
+    if user is None or ports is None:
+        return True
+    installed = startup(user[0], ports)
+    if not installed:
+        logging.getLogger(LOGGER_NAME).warning(
+            "Dynamic jobs on this runner fail closed until the engine network rules are installed"
+        )
+    return installed
 
 
 async def serve(
@@ -82,6 +105,11 @@ def run_from_environment(environment: Mapping[str, str] | None = None) -> int:
     try:
         settings = settings_from_environment(env)
     except SettingsError as error:
+        logging.getLogger(LOGGER_NAME).error("cannot start: %s", error)
+        return 2
+    try:
+        prepare_dynamic_runtime(settings)
+    except IsolationError as error:
         logging.getLogger(LOGGER_NAME).error("cannot start: %s", error)
         return 2
     return asyncio.run(serve(settings, env))

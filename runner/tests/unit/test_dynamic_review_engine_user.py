@@ -10,6 +10,7 @@ import contextlib
 import json
 import os
 import stat
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -20,10 +21,28 @@ from code_reviewer_runner.dynamic_review.engine_user import (
     listener_uids,
     user_pids,
 )
-from code_reviewer_runner.dynamic_review.netguard import IsolationError, table_name
+from code_reviewer_runner.dynamic_review.netguard import IsolationError
 from code_reviewer_runner.result import ErrorCode
 
 HEADER = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid"
+
+
+def record_probe(probed: list[int]) -> Callable[[int, int, int], None]:
+    """A stand-in for `verify_confinement` that notes the port it was asked to prove."""
+
+    def probe(uid: int, gid: int, port: int) -> None:
+        probed.append(port)
+
+    return probe
+
+
+def event_probe(events: list[str]) -> Callable[[int, int, int], None]:
+    """A stand-in for `verify_confinement` that notes in `events` which port it was asked for."""
+
+    def probe(uid: int, gid: int, port: int) -> None:
+        events.append(f"probe:{port}")
+
+    return probe
 
 
 def row(local: str, state: str, uid: int, remote: str = "00000000:0000") -> str:
@@ -113,52 +132,94 @@ def test_the_processes_of_a_user_are_listed_without_zombies() -> None:
     assert user_pids(2**31 - 5) == []
 
 
-def recorded(mine: EngineLaunch) -> list[str]:
-    """Replace the nft call of `mine` by a list of the scripts it was asked to run."""
-    scripts: list[str] = []
-    mine.confinement.run = scripts.append
-    return scripts
-
-
-# #197-T07
-def test_the_network_rules_stay_when_the_sweep_cannot_finish(tmp_path: Path) -> None:
-    mine = launch(tmp_path, uid=10101, gid=10101)
-    scripts = recorded(mine)
-    mine.confinement.apply(4000, 4001)
-    mine.sweep = lambda: False  # type: ignore[method-assign]  # a process stuck in D state
-
-    swept = mine.close()
-
-    # Deleting the table now would leave a survivor of that user without any boundary.
-    assert swept is False
-    assert len(scripts) == 1
-    assert f"delete table inet {table_name(10101)}" not in "".join(scripts)
-
-
-# #197-T07
-def test_the_network_rules_go_once_the_sweep_has_finished(tmp_path: Path) -> None:
-    mine = launch(tmp_path, uid=10101, gid=10101)
-    scripts = recorded(mine)
-    mine.confinement.apply(4000, 4001)
-    mine.sweep = lambda: True  # type: ignore[method-assign]
-
-    assert mine.close() is True
-    assert scripts[-1] == f"delete table inet {table_name(10101)}\n"
-
-
-# #197-T07
-def test_no_job_starts_while_a_predecessors_process_survives_the_first_sweep(
+# #197-T07 #244-T02
+def test_the_network_rules_are_static_and_closing_a_launch_never_touches_them(
     tmp_path: Path,
 ) -> None:
     mine = launch(tmp_path, uid=10101, gid=10101)
-    scripts = recorded(mine)
+    swept: list[bool] = []
+    mine.sweep = lambda: swept.append(True) or True  # type: ignore[method-assign]
+
+    # Whatever the sweep says, close() ends processes only; there is no nft call to make (the
+    # supervisor holds no NET_ADMIN) and no attribute that could make one.
+    assert mine.close() is True
+    mine.sweep = lambda: False  # type: ignore[method-assign]  # a process stuck in D state
+    assert mine.close() is False
+    assert swept == [True]
+    assert not hasattr(mine, "confinement")
+
+
+# #197-T07 #244-T03
+def test_no_job_starts_while_a_predecessors_process_survives_the_first_sweep(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    mine = launch(tmp_path, uid=10101, gid=10101)
+    probed: list[int] = []
+    monkeypatch.setattr(engine_user, "verify_confinement", record_probe(probed))
     mine.sweep = lambda: False  # type: ignore[method-assign]
 
     with pytest.raises(IsolationError) as caught:
-        mine.confine(4000, 4001)
+        mine.confine(mine.proxy_port, mine.engine_port)
 
     assert caught.value.code is ErrorCode.DYNAMIC_ISOLATION_SELF_CHECK_FAILED
-    assert scripts == []  # nothing was installed and no engine can follow
+    assert probed == []  # no proof was taken and no engine can follow
+
+
+# #244-T03
+def test_a_job_proves_the_static_rules_once_after_checking_its_own_capabilities(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    mine = launch(tmp_path, uid=10101, gid=10101)
+    events: list[str] = []
+    mine.sweep = lambda: events.append("sweep") or True  # type: ignore[method-assign]
+    monkeypatch.setattr(
+        engine_user, "require_startup_capabilities_gone", lambda: events.append("capabilities")
+    )
+    monkeypatch.setattr(engine_user, "verify_confinement", event_probe(events))
+
+    mine.confine(mine.proxy_port, mine.engine_port)
+    mine.confine(mine.proxy_port, mine.engine_port)  # a start retry: nothing is proven twice
+
+    assert events == [
+        "sweep",
+        "capabilities",
+        f"probe:{mine.proxy_port}",
+        "capabilities",
+    ]
+
+
+# #244-T03
+def test_a_supervisor_that_still_holds_net_admin_means_no_engine(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    mine = launch(tmp_path, uid=10101, gid=10101)
+    probed: list[int] = []
+    monkeypatch.setattr(engine_user, "verify_confinement", record_probe(probed))
+    monkeypatch.setattr(
+        engine_user,
+        "require_startup_capabilities_gone",
+        lambda: (_ for _ in ()).throw(IsolationError("the supervisor still holds a capability")),
+    )
+    mine.sweep = lambda: True  # type: ignore[method-assign]
+
+    with pytest.raises(IsolationError):
+        mine.confine(mine.proxy_port, mine.engine_port)
+
+    assert probed == []
+
+
+# #244-T03
+@pytest.mark.parametrize("ports", [(1, 10181), (10180, 2), (10181, 10180)])
+def test_ports_other_than_the_ones_the_static_rules_allow_are_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ports: tuple[int, int]
+) -> None:
+    mine = launch(tmp_path, uid=10101, gid=10101)
+    monkeypatch.setattr(engine_user, "verify_confinement", event_probe([]))
+    monkeypatch.setattr(engine_user, "require_startup_capabilities_gone", lambda: None)
+    mine.sweep = lambda: True  # type: ignore[method-assign]
+
+    with pytest.raises(IsolationError):
+        mine.confine(*ports)
 
 
 # #197-T07

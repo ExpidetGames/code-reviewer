@@ -29,6 +29,8 @@ from code_reviewer_runner.capabilities import (
     advertised_engines,
     fail_closed_self_check,
 )
+from code_reviewer_runner.dynamic_review.netguard import IsolationError
+from code_reviewer_runner.dynamic_review.static_isolation import SlotPorts, slot_ports
 from code_reviewer_runner.dynamic_review.supervisor import (
     DEFAULT_ENGINE_ID,
     ENGINE_GID_VARIABLE,
@@ -83,6 +85,9 @@ class LoopSettings:
     # (a root loop, the Dynamic runner): after every Dynamic job process the loop ends whatever
     # that user still runs, which a job killed outright could not.
     dynamic_engine_user: tuple[int, int] | None = None
+    # The fixed proxy and engine ports of the single Dynamic slot, set with `dynamic_engine_user`:
+    # the engine user's nft rules are installed once at startup for exactly these (#244).
+    dynamic_ports: SlotPorts | None = None
 
 
 def _number(
@@ -166,6 +171,17 @@ def _dynamic_engine_user(
     return uid, gid
 
 
+def _dynamic_ports(
+    environment: Mapping[str, str], diff_job_user: tuple[int, int] | None
+) -> SlotPorts | None:
+    if diff_job_user is None:
+        return None
+    try:
+        return slot_ports(environment)
+    except IsolationError as error:
+        raise SettingsError(error.detail) from None
+
+
 def _identifier(environment: Mapping[str, str], name: str) -> int:
     raw = environment.get(name, "").strip()
     if not raw:
@@ -194,6 +210,7 @@ def settings_from_environment(environment: Mapping[str, str]) -> LoopSettings:
         job_command=_job_command(environment),
         diff_job_user=diff_job_user,
         dynamic_engine_user=_dynamic_engine_user(environment, diff_job_user),
+        dynamic_ports=_dynamic_ports(environment, diff_job_user),
         engines=advertised_engines(fail_closed_self_check()),
         api_url=_api_url(api_url),
         token=token,
