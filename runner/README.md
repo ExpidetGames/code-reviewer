@@ -24,6 +24,7 @@ jobs running. It is configured by environment variables:
 | `RUNNER_OPENCODE_COMMAND` | #197: the pinned stock engine that runs one Dynamic job, split like a shell would (the adapter appends `serve --hostname 127.0.0.1 --port <job port>`). The executable is the one `scripts/fetch_opencode.py` verified against `opencode-pin.json`. Unset means a Dynamic job is refused with `dynamic_engine_unavailable`; never falls back to PR-Agent. The engine also needs a trusted `rg` (ripgrep) on its `PATH`, or it is not started | unset |
 | `RUNNER_DYNAMIC_CAPABILITIES` | #197: trusted JSON descriptor of the selected model/destination: `{"tool_choice_required": true, "structured_output": true, "max_output_tokens": 8192}`. Operator-owned; unset or without a required feature means `dynamic_model_features_unsupported`, no fallback | unset |
 | `RUNNER_DYNAMIC_ENGINE_UID`, `RUNNER_DYNAMIC_ENGINE_GID` | #197: the numeric dedicated unprivileged user (and its own group) the engine runs as; it must exist in the image and be neither root nor the runner's own user. The Dynamic job process is the root supervisor that starts the engine as this user | `10101` and `10101` |
+| `RUNNER_DYNAMIC_PROXY_PORT`, `RUNNER_DYNAMIC_ENGINE_PORT` | #244: the two fixed loopback ports of the single Dynamic slot (model proxy, engine server), 1024 to 32767 and different. The engine user's static nft rules, installed once at container start, name exactly these; a stranger holding one makes the job fail closed | `10180` and `10181` |
 | `RUNNER_DIFF_JOB_USER` | #197: `uid:gid` the loop drops every non-Dynamic job process to, with no other group, in a working directory it owns. Set only on a loop that runs as root (`compose.dynamic.yml`), so PR-Agent never runs as root; unset runs jobs as the loop's own user | unset |
 | `RUNNER_DYNAMIC_NODE_BIN` | #197: directory of the Node runtime the engine needs, if it is not on the runner's own `PATH` | unset |
 
@@ -32,19 +33,27 @@ limit, a root supervisor with a short capability list); it cannot claim Dynamic 
 `docs/dynamic-review.md`, "The engine boundary".
 
 **The Dynamic job process is the supervisor (#197 part 2b).** It runs as root with only the
-capabilities of that file (`SETUID`, `SETGID`, `KILL`, `CHOWN`, `DAC_OVERRIDE`, `FOWNER`,
-`NET_ADMIN`; `no-new-privileges` stays on). Per job it (1) prepares and seals the read-only export
-for the dedicated engine user (`export_isolation.prepared_checkout`, which also leases that user and
-its group exclusively), (2) installs nft rules that let that user open new connections only to this
-job's model proxy and the engine's own server port, and proves them with a probe run as that user
-before the engine exists (`netguard.py`; a failure is `dynamic_isolation_self_check_failed` and no
-engine), (3) starts the engine with `setuid` in the child, no supplementary group and a closed
+capabilities of that file (`SETUID`, `SETGID`, `KILL`, `CHOWN`, `DAC_OVERRIDE`, `FOWNER`;
+`no-new-privileges` stays on). **At container start only**, before the event loop and any thread
+exists, `job_loop.service.prepare_dynamic_runtime` (`dynamic_review/static_isolation.py`, #244)
+installs the static nft rules for the single slot (new connections of the engine user only to the
+fixed proxy port `RUNNER_DYNAMIC_PROXY_PORT`, default 10180, and the engine's own port
+`RUNNER_DYNAMIC_ENGINE_PORT`, default 10181, on `127.0.0.1`) and then drops `NET_ADMIN` and `SETPCAP`
+from the bounding set and from its own sets: the container is created with them (`cap_add`), but the
+loop, every job process and the engine never hold them, so `nft` fails for all of them. If the drop
+cannot be confirmed the runner does not start; if the rules cannot be installed the capabilities are
+dropped anyway and every Dynamic job fails with `dynamic_isolation_self_check_failed`. Per job it (1)
+prepares and seals the read-only export for the dedicated engine user
+(`export_isolation.prepared_checkout`, which also leases that user and its group exclusively), (2)
+checks that its own process holds neither capability and proves the static rules with a probe run as
+that user before the engine exists (`netguard.py`, `engine_user.py`; a failure is
+`dynamic_isolation_self_check_failed` and no engine), (3) starts the engine with `setuid` in the child, no supplementary group and a closed
 environment, with its config file readable (not writable) by that user only, and checks that the user, and nobody
 else, listens on the engine's port (`engine_user.py`), and (4) at the end, on SIGTERM (lease loss,
 shutdown, timeout) and in the watchdog, kills the engine's process group and then every process of
-that user, including helpers that left the group, removes the rules and the job's files. The loop
-(root) sweeps that user after every Dynamic job process, and every job sweeps it right after taking
-the lease; a sweep that fails leaves the rules in place and the next job refuses to start. Without root
+that user, including helpers that left the group, and removes the job's files (the rules are static
+and stay). The loop (root) sweeps that user after every Dynamic job process, and every job sweeps it
+right after taking the lease; a sweep that fails makes the next job refuse to start. Without root
 (or without the user) the production preparation refuses with `dynamic_isolation_self_check_failed`:
 the engine never runs unconfined. The proofs need root and live in `tests/privileged` (below).
 

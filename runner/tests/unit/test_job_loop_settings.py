@@ -4,6 +4,7 @@
 
 import pytest
 
+from code_reviewer_runner.dynamic_review.static_isolation import SlotPorts
 from code_reviewer_runner.job_loop.settings import SettingsError, settings_from_environment
 
 TOKEN = "dummy-runner-token-0123456789-abcdef-0123456789"
@@ -111,6 +112,30 @@ def test_the_engine_user_of_a_root_loop_defaults_to_the_image_user_and_follows_t
     assert settings_from_environment(root).dynamic_engine_user == (10101, 10101)
     custom = {**root, "RUNNER_DYNAMIC_ENGINE_UID": "20001", "RUNNER_DYNAMIC_ENGINE_GID": "20002"}
     assert settings_from_environment(custom).dynamic_engine_user == (20001, 20002)
+
+
+# #244-T04
+def test_the_slot_ports_default_to_fixed_ones_and_follow_the_variables_on_a_root_loop() -> None:
+    assert settings_from_environment(BASE).dynamic_ports is None  # not the Dynamic runner
+    root = {**BASE, "RUNNER_DIFF_JOB_USER": "10001:10001"}
+    assert settings_from_environment(root).dynamic_ports == SlotPorts(10180, 10181)
+    custom = {**root, "RUNNER_DYNAMIC_PROXY_PORT": "20000", "RUNNER_DYNAMIC_ENGINE_PORT": "20001"}
+    assert settings_from_environment(custom).dynamic_ports == SlotPorts(20000, 20001)
+
+
+# #244-T04
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"RUNNER_DYNAMIC_PROXY_PORT": "80"},  # privileged range
+        {"RUNNER_DYNAMIC_ENGINE_PORT": "40000"},  # inside the ephemeral range
+        {"RUNNER_DYNAMIC_PROXY_PORT": "proxy"},
+        {"RUNNER_DYNAMIC_PROXY_PORT": "10181"},  # the same as the default engine port
+    ],
+)
+def test_unusable_slot_ports_stop_the_runner_from_starting(extra: dict[str, str]) -> None:
+    with pytest.raises(SettingsError, match="RUNNER_DYNAMIC_"):
+        settings_from_environment({**BASE, "RUNNER_DIFF_JOB_USER": "10001:10001", **extra})
 
 
 # #197-T04

@@ -431,11 +431,13 @@ class DynamicEngine:
             raise EngineError(
                 ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE, "no ripgrep on the engine search path"
             )
-        # The port is only probed free, not held: the engine binds it itself a moment later. If a
-        # stranger took it in between, our engine exits instead of serving and is started again on
-        # another port; an answer is only trusted while our own process is alive.
+        # Without a dedicated user the port is only probed free, not held: the engine binds it
+        # itself a moment later. If a stranger took it in between, our engine exits instead of
+        # serving and is started again on another port. With one, the port is the slot's fixed
+        # one (the static network rules name it); a stranger holding it fails every attempt.
+        # Either way an answer is only trusted while our own process is alive.
         for attempt in range(START_ATTEMPTS):
-            port = self._port_source()
+            port = self._port_source() if self.launch is None else self.launch.engine_port
             if self.launch is not None:
                 # The user's network is closed to everything but this job's proxy (and the
                 # engine's own server) before the engine exists, and proven once.
