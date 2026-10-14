@@ -344,6 +344,19 @@ is smoke tested by `image-runner-dynamic`. The configuration has its own server 
 private port pair: `E2E_PORT` defaults to 3517 here, the app listens on `E2E_PIPELINE_PORT`, never 3000 or 3100) and
 its own projects: `prepare` (the first-run setup and the GitHub App of the app), `guard` (the positive controls),
 `journey` (T01). `playwright.config.ts` ignores `e2e/dynamic/`.
+- **What keeps the lane safe, and must not change.** The job runs the code of the pull request as root (`sudo`, the
+  namespace script, the Python runner, Playwright). That is acceptable only because it runs on a GitHub-hosted,
+  ephemeral VM, on the `pull_request` trigger (a fork gets a read-only token), with `contents: read`, no `secrets.*`
+  and a checkout with `persist-credentials: false` (the `engine` job, which also runs a privileged suite, too). It
+  must never move to a self-hosted runner, to `pull_request_target`, or to a job with a secret or a write
+  permission: `src/ci/dynamic-lane.test.ts` (#253-C06, C07) fails if it does. Whether workflows of outside
+  contributors need an owner's approval every time is a repository setting, not a file in the repository (see the
+  PR #254 recommendation: "Require approval for all outside collaborators").
+- **Running it locally** (`make test-e2e-dynamic`) builds as you and runs the rest as root; at the end the script gives
+  every file root created in `app/` and `runner/` (test-results, playwright-report, `.next/cache`, `__pycache__`) back to
+  you, however the lane ends. The fetched tools are copied to the lane's own root-owned tmpfs before they are installed;
+  the pin check (size and SHA-256 in the fetch scripts, the preflight and the runner's self-check) is what accepts
+  them.
 - **Preflight** (`app/e2e/helpers/dynamic-preflight.ts`, a command run by the script and the global setup of the
   configuration): the pinned OpenCode and `rg` where the image has them, `nft` (it must list the ruleset), the engine
   user with a group of its own, and root. Every missing item is named, all of them at once, and the run stops; nothing
