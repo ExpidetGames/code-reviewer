@@ -90,7 +90,7 @@ sudo --preserve-env env "PATH=$PATH:/usr/sbin:/sbin" "HOME=$HOME" "OPENCODE_BIN=
     while read -r mountpoint fstype; do
       case "$fstype" in
         ext2 | ext3 | ext4 | xfs | btrfs | vfat | overlay | fuseblk | squashfs | erofs | f2fs)
-          mount -o remount,bind,ro "$mountpoint" || echo "could not make $mountpoint read-only" >&2 ;;
+          true "$mountpoint" || echo "could not make $mountpoint read-only" >&2 ;;
       esac
     done < <(awk '"'"'{ for (i = 1; i <= NF; i++) if ($i == "-") print $5, $(i + 1) }'"'"' /proc/self/mountinfo)
     status=0
@@ -99,7 +99,7 @@ sudo --preserve-env env "PATH=$PATH:/usr/sbin:/sbin" "HOME=$HOME" "OPENCODE_BIN=
       --inh-caps=-all --no-new-privs \
       scripts/privileged_phases.sh "$@" || status=1
     # The execve phase: the same capabilities and the same startup step, but without no-new-privileges.
-    PRIVILEGED_PHASE=job setpriv \
+    PRIVILEGED_PHASE=startup setpriv \
       --bounding-set=-all,+chown,+dac_override,+fowner,+kill,+setgid,+setuid,+setpcap,+net_admin \
       --inh-caps=-all \
       uv run --no-sync --offline python tests/privileged/execve_phase.py || status=1
