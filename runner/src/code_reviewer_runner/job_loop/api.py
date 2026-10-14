@@ -166,6 +166,12 @@ class HttpRunnerApi:
         )
         if reply.status != 200:
             raise self._failure(reply)
+        # #260: a 200 is the app's "yes" only as the contract's answer for this very job. A gateway
+        # or a captive portal that answers 200 to everything is not the app.
+        body = as_object(_json(reply))
+        job = as_object(body.get("job")) if body and body.get("version") == 1 else None
+        if job is None or job.get("id") != job_id:
+            raise ApiUnavailable("the heartbeat answer does not match the contract", 200)
 
     async def complete(
         self, job_id: str, lease_token: str, result: Mapping[str, Any]

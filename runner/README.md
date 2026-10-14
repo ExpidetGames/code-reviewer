@@ -471,6 +471,7 @@ and the enum agree. Callers branch on the code, never on the text.
 | `dynamic_budget_exceeded` | The Dynamic Review used more than its allowed budget |
 | `dynamic_accounting_failed` | The Dynamic Review's model usage could not be established or accounted for |
 | `dynamic_model_features_unsupported` | The configured model does not support the tool calling or structured output Dynamic Review requires; there is no fallback model or provider |
+| `lease_lost` | A Dynamic job was no longer held by this runner (lease lost, job cancelled) or could not be confirmed as held right before it would have written its summary; nothing was written (#260) |
 | `timeout` | The command did not finish within `RUNNER_JOB_TIMEOUT_SECONDS` (also reported by the job loop for a process it had to end) |
 | `unknown` | Something failed that no rule recognises |
 
