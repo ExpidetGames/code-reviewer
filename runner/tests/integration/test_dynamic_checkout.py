@@ -205,6 +205,24 @@ def test_orphan_heads_compare_exact_endpoint_trees_with_rename_and_delete(
     assert result.prior_state == "prior-findings"
 
 
+# #257-T04
+def test_a_truncated_claim_is_a_full_review_whatever_comparison_it_declares(
+    repo: GitFixture, tmp_path: Path
+) -> None:
+    previous = repo.head
+    git(repo.path, "update-ref", "refs/heads/previous", previous)
+    repo.set_head({"renamed.py": b"print('review')\n"}, orphan=True)
+    result = prepare_content(
+        replace(claim(repo, previous), attempted_shas_truncated=True),
+        196,
+        LocalTransport(repo.path),
+        tmp_path / "job",
+        Redactor(()),
+    )
+    assert result.comparison == "full"
+    assert result.previous_diff == ""
+
+
 # #196-T07 #196-T11
 def test_unavailable_prior_tree_declares_full_mode_and_retains_findings(
     repo: GitFixture, tmp_path: Path

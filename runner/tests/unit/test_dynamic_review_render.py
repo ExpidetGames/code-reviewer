@@ -13,6 +13,7 @@ import pytest
 from code_reviewer_runner.dynamic_findings import Finding
 from code_reviewer_runner.dynamic_review import render
 from code_reviewer_runner.dynamic_review.render import (
+    RESET_NOTICE,
     RenderError,
     render_comment,
     web_base_of,
@@ -179,3 +180,16 @@ def test_multibyte_text_stays_inside_both_bounds() -> None:
 def test_the_web_base_maps_the_api_host() -> None:
     assert web_base_of("https://api.github.com") == "https://github.com"
     assert web_base_of("http://127.0.0.1:4000/api/v3") == "http://127.0.0.1:4000"
+
+
+# #257-T05
+def test_a_reset_summary_says_so_and_does_not_claim_the_old_state_is_kept() -> None:
+    body = render_comment(state(finding()), repository="acme/repo", reset=True)
+    normal = render_comment(state(finding()), repository="acme/repo")
+
+    assert RESET_NOTICE in body
+    assert "previous review state is kept" not in body
+    assert RESET_NOTICE not in normal
+    assert "previous review state is kept" in normal
+    # The notice is part of the visible text only: the hidden state does not carry it forward.
+    assert decode_state(body) == decode_state(normal)

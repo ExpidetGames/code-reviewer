@@ -56,7 +56,12 @@ from code_reviewer_runner.dynamic_review.inputs import review_inputs
 from code_reviewer_runner.dynamic_review.limits import CheckoutError
 from code_reviewer_runner.dynamic_review.prompts import compose_system_prompt
 from code_reviewer_runner.dynamic_review.proxy import ModelProxy, capabilities_from_config
-from code_reviewer_runner.dynamic_review.publish import Published, PublishError, publish_run
+from code_reviewer_runner.dynamic_review.publish import (
+    STATE_RESET_CODE,
+    Published,
+    PublishError,
+    publish_run,
+)
 from code_reviewer_runner.dynamic_review.supervisor import (
     ContentPreparer,
     Prepared,
@@ -356,6 +361,8 @@ def run_dynamic_job(
         f"dynamic review: {len(answer.findings.findings)} findings against {base.head_sha}; "
         f"{ledger.model_calls} model calls, {ledger.tool_calls} tool calls, {ledger.files} files"
     )
+    if published.reset:
+        summary += f"; {STATE_RESET_CODE}"
     return JobResult(
         ok=True,
         duration_ms=_elapsed_ms(started),

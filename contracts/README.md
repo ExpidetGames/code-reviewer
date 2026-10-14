@@ -46,6 +46,10 @@ other way round, so a change to the format has to change the file and both sides
 - #255 adds the optional `ClaimBase.attemptedShas`. The app leaves the key out when it is empty, but a
   runner from before #255 rejects it when present (`RunnerJobInput` is closed): update the runner
   before or together with the app. The reverse (a newer runner, an older app) is safe: absent means none.
+- #257 adds the optional `ClaimBase.attemptedShasTruncated`: `true` when more heads qualified than
+  `attemptedShas` holds. The app leaves the key out unless it is true (never sends `false`), and a runner
+  from before #257 rejects it when present: update the runner before or together with the app. A newer
+  runner with an older app is safe: absent means false, and the publisher stays fail-closed.
 
 ### Rolling out Dynamic Review (#195, finding 4)
 

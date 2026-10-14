@@ -156,7 +156,13 @@ def prepare_content(
         if merge_base_sha is not None:
             base_tree = tracked_tree(store, merge_base_sha)
         previous: dict[str, Entry] | None = None
-        if base.comparison == "incremental" and base.previous_reviewed_sha:
+        # A claim whose attempted-heads list was cut (#257) is always a full review: the summary
+        # may be rewritten from scratch, so a diff against the last review would show a part only.
+        if (
+            base.comparison == "incremental"
+            and base.previous_reviewed_sha
+            and not base.attempted_shas_truncated
+        ):
             try:
                 if base.previous_reviewed_sha not in store.objects:
                     store.unpack(fetch_pack(transport, base.previous_reviewed_sha, caps, budget))
