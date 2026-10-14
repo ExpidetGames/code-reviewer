@@ -632,6 +632,53 @@ describe("the heads the app attempted for a Dynamic job", () => {
   });
 
   // #257-T04
+  it.each([
+    // 200 rows in all fill the scan exactly and nothing is left out: not truncated. A 201st row
+    // may be one more than the scan reads, so an older head may be hidden: truncated.
+    { reruns: 199, truncated: false },
+    { reruns: 200, truncated: true },
+  ])(
+    "flags the scan at its exact boundary (1 older head and $reruns reruns of another: truncated $truncated)",
+    async ({ reruns, truncated }) => {
+      const h = await startDynamicHarness();
+      await seedDynamic(h, "a".repeat(40), "failed");
+      for (let n = 0; n < reruns; n += 1)
+        await seedDynamic(h, "b".repeat(40), "failed");
+
+      const body = await claimNew(h);
+
+      expect(body.job.input.base?.attemptedShas).toEqual([
+        "b".repeat(40),
+        "a".repeat(40),
+      ]);
+      if (truncated)
+        expect(body.job.input.base).toMatchObject({
+          attemptedShasTruncated: true,
+        });
+      else
+        expect(body.job.input.base).not.toHaveProperty(
+          "attemptedShasTruncated",
+        );
+    },
+  );
+
+  // #257-T07
+  it("is always a full comparison on a truncated claim, whatever the last review was", async () => {
+    const h = await startDynamicHarness();
+    await seedDynamic(h, "9".repeat(40), "succeeded");
+    for (let n = 1; n <= 21; n += 1)
+      await seedDynamic(h, n.toString(16).padStart(40, "0"), "failed");
+
+    const body = await claimNew(h);
+
+    expect(body.job.input.base).toMatchObject({
+      previousReviewedSha: "9".repeat(40),
+      attemptedShasTruncated: true,
+      comparison: "full",
+    });
+  });
+
+  // #257-T04
   it("leaves the flag out, with the list, when nothing was truncated, so an older runner still accepts the claim", async () => {
     const h = await startDynamicHarness();
     await seedDynamic(h, "e".repeat(40), "failed");

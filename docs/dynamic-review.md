@@ -410,9 +410,14 @@ by the defaults.
   of the summary comment can fall out of the list. The app then also sends `base.attemptedShasTruncated:
   true` (left out otherwise), and a state head the job cannot account for on the **bot-owned** summary
   (author and exact identity marker, and a valid state) no longer ends in `review_not_published`: the
-  run is a full review, the old state is dropped (nothing of it is carried over as active or resolved,
-  nothing is resolved by inference) and the same comment is rewritten, so the history of resolved
-  findings restarts. A comment that is not the bot's, a corrupt state and a claim that was not
+  run is a full review (the checkout is full whatever `comparison` the claim declares), the old state
+  is dropped (nothing of it is carried over as active or resolved, nothing is resolved by inference)
+  and the same comment is rewritten. The history of resolved findings restarts **and the active
+  findings are re-derived from scratch too**: a finding of the earlier summary is only on the pull
+  request again if this run finds it. The rewritten summary says so in a one-shot notice ("Full
+  review after a state reset: ..."), its footer no longer claims the previous state is kept, and the
+  result log of the run carries `state_reset_attempted_shas_truncated` (visible in Runs). The notice
+  is not part of the state, so the next normal run renders without it. A comment that is not the bot's, a corrupt state and a claim that was not
   truncated stay fail-closed. Residual risk: on a truncated claim a late result of an older run can no
   longer be told from a lost head and may overwrite a newer review; the next push reviews again.
   A lost edit response is recognised by re-reading the comment (it must hold exactly the body sent).

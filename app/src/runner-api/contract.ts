@@ -132,7 +132,11 @@ export type ClaimBase = {
   previousReviewedSha: string | null;
   /** #255: heads of earlier jobs of the pull request that did not succeed, newest first; absent when none. */
   attemptedShas?: string[];
-  /** #257: true when more heads were attempted than `attemptedShas` holds; absent means false. */
+  /**
+   * #257: true when more heads were attempted than `attemptedShas` holds; absent means false. Only
+   * `true` or absent on purpose: the app is stricter than the contract (the schema and the runner
+   * accept a boolean), and a runner from before #257 rejects the key, so `false` is never sent.
+   */
   attemptedShasTruncated?: true;
   comparison: "full" | "incremental";
 };
