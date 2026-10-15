@@ -68,7 +68,7 @@ from code_reviewer_runner.dynamic_review.net import no_redirect_opener
 from code_reviewer_runner.dynamic_review.netguard import IsolationError
 from code_reviewer_runner.dynamic_review.prompts import ReviewInputs, compose_user_prompt
 from code_reviewer_runner.dynamic_review.schema import engine_schema
-from code_reviewer_runner.dynamic_review.wrap_up import RECOVERY_PROMPT
+from code_reviewer_runner.dynamic_review.wrap_up import recovery_prompt
 from code_reviewer_runner.job import Job
 from code_reviewer_runner.job_loop.jsonvalues import as_object
 from code_reviewer_runner.process_group import end_group, has_exited
@@ -398,6 +398,81 @@ def missing_answer(message: bytes) -> bool:
     return named is not None and named.get("name") == MISSING_ANSWER_ERROR
 
 
+# The engine's own message for its missing-answer error is a fixed sentence; it is copied into a
+# note only while it still looks like one (plain words, short), so a different engine text can
+# never carry anything through.
+_ENGINE_SENTENCE = re.compile(r"[A-Za-z0-9 .,'-]{1,120}")
+MAX_TOOLS_NAMED = 4
+
+
+def _message_parts(message: bytes) -> list[dict[str, Any]]:
+    """The parts of the assistant message that ended a turn, or none when it is unreadable."""
+    try:
+        value: Any = json.loads(message)
+    except ValueError:
+        return []
+    document = as_object(value)
+    parts: Any = document.get("parts") if document else None
+    if not isinstance(parts, list):
+        return []
+    entries: list[Any] = parts  # pyright: ignore[reportUnknownVariableType]
+    return [part for part in map(as_object, entries) if part is not None]
+
+
+def _visible_texts(parts: list[dict[str, Any]], kind: str) -> list[str]:
+    return [
+        text
+        for part in parts
+        if part.get("type") == kind
+        and part.get("ignored") is not True
+        and part.get("synthetic") is not True
+        and isinstance(text := part.get("text"), str)
+    ]
+
+
+def answer_text(message: bytes) -> str:
+    """The text the model ended a turn with (#312): the visible text parts of the last step.
+
+    The pinned engine leaves this message out of the next turn's history, so the adapter hands the
+    text back in the recovery message (`wrap_up.recovery_prompt`). Reasoning is not part of it.
+    """
+    return "\n\n".join(_visible_texts(_message_parts(message), "text"))
+
+
+def turn_end_detail(message: bytes) -> str:
+    """`turn_end_note` plus what separates a model that wrote prose from one that wrote nothing
+    (#312): the engine's own sentence for its missing-answer error, the size of the text and of
+    the reasoning of the last step, and the tools it called. Sizes and plain identifiers only."""
+    note = turn_end_note(message)
+    if note == "unknown":
+        return note
+    document = as_object(json.loads(message))
+    info = as_object(document.get("info")) if document else None
+    error = as_object(info.get("error")) if info else None
+    data = as_object(error.get("data")) if error else None
+    sentence: Any = data.get("message") if data else None
+    if (
+        error is not None
+        and error.get("name") == MISSING_ANSWER_ERROR
+        and isinstance(sentence, str)
+        and _ENGINE_SENTENCE.fullmatch(sentence)
+    ):
+        note += f" ({sentence})"
+    parts = _message_parts(message)
+    text = sum(len(part) for part in _visible_texts(parts, "text"))
+    reasoning = sum(len(part) for part in _visible_texts(parts, "reasoning"))
+    note += f", text={text} chars, reasoning={reasoning} chars"
+    tools: list[str] = []
+    for part in parts:
+        if part.get("type") == "tool":
+            name = _identifier(part.get("tool"))
+            if name not in tools:
+                tools.append(name)
+    if tools:
+        note += ", tools=" + "+".join(tools[:MAX_TOOLS_NAMED])
+    return note
+
+
 def structured_answer(message: bytes) -> Any:
     """The structured result out of a message POST answer, or None.
 
@@ -709,30 +784,39 @@ class DynamicEngine:
         if structured_answer(client.last_message) is not None:
             return self._validate(client)
         ended = turn_end_note(client.last_message)
+        first = turn_end_detail(client.last_message)
         if not missing_answer(client.last_message):
             return self._no_answer(
-                f"the first turn: {ended}; the engine's own error, not recovered"
+                f"the first turn: {first}; the engine's own error, not recovered"
             )
         if not self.ledger.begin_recovery():
-            return self._no_answer(f"the first turn: {ended}; no recovery was possible")
+            return self._no_answer(f"the first turn: {first}; no recovery was possible")
         self.recovery = ended
         try:
-            self._send(client, session_id, prompt=RECOVERY_PROMPT)
+            # The engine drops the answer that ended the turn from the history: hand it back.
+            self._send(client, session_id, prompt=recovery_prompt(answer_text(client.last_message)))
             self._raise_recorded_failure()
         except LimitError as error:
             raise LimitError(error.code, self._during_recovery(error.detail, ended)) from None
         except EngineError as error:
             raise EngineError(error.code, self._during_recovery(error.detail, ended)) from None
         if structured_answer(client.last_message) is None:
-            return self._no_answer(f"after one recovery; the first turn: {ended}")
+            return self._no_answer(
+                f"after one recovery; the first turn: {first}; "
+                f"the recovery: {turn_end_detail(client.last_message)}"
+            )
         return self._validate(client)
 
     @staticmethod
     def _during_recovery(detail: str, ended: str) -> str:
         return f"{detail} (during the recovery; the first turn: {ended})"
 
-    @staticmethod
-    def _no_answer(note: str) -> EngineAnswer:
+    def _no_answer(self, note: str) -> EngineAnswer:
+        # What the provider returned for the last calls is what tells prose from silence from a
+        # broken tool call (#312); the engine's own report of the turn cannot.
+        calls = self.ledger.recent_call_outcomes
+        if calls:
+            note += "; last model calls: " + "; ".join(calls)
         return EngineAnswer(
             findings=None,
             error=EngineError(

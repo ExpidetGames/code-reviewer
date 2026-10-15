@@ -42,6 +42,7 @@ from code_reviewer_runner.dynamic_review.checkout import PreparedContent, prepar
 from code_reviewer_runner.dynamic_review.prompt_core import CORE_TEXT
 from code_reviewer_runner.dynamic_review.transport import LocalTransport
 from code_reviewer_runner.dynamic_review.wrap_up import (
+    FINAL_ATTEMPTS,
     RECOVERY_INSTRUCTION,
     RECOVERY_PROMPT,
     WRAP_UP_INSTRUCTION,
@@ -539,30 +540,49 @@ def truncated_return() -> dict[str, Any]:
     return {**message, "finish_reason": "length"}
 
 
-def assert_recovery_call(model: ScriptedModel, normal_calls: int) -> None:
+def assert_recovery_call(
+    model: ScriptedModel, normal_calls: int, carried: str | None = None, attempts: int = 1
+) -> None:
     """The recovery is the one call after the normal ones: the return tool alone, forced, with the
-    runner's instruction last, and the engine's own recovery message before it."""
-    assert len(model.requests) == normal_calls + 1
+    runner's instruction last, and the engine's own recovery message before it. `carried` is the
+    text of the answer the engine dropped, which that message hands back (#312); without it the
+    message is the fixed prompt. `attempts` is how many requests the final call took: the proxy asks
+    again when a reply is not the answer (#312)."""
+    assert len(model.requests) == normal_calls + attempts
     for request in model.requests[:normal_calls]:
         assert not only_return_tool(request)
         assert RECOVERY_INSTRUCTION not in json.dumps(request["messages"])
+    for again in model.requests[normal_calls + 1 :]:
+        assert only_return_tool(again)
+        assert "did not call the StructuredOutput tool" in again["messages"][-1]["content"]
     recovery = model.requests[normal_calls]
     assert only_return_tool(recovery)
     assert recovery["tool_choice"] == "required"
     assert recovery["messages"][-1] == {"role": "user", "content": RECOVERY_INSTRUCTION}
-    assert recovery["messages"][-2] == {"role": "user", "content": RECOVERY_PROMPT}
+    message = recovery["messages"][-2]
+    assert message["role"] == "user"
+    if carried is None:
+        assert message["content"] == RECOVERY_PROMPT
+        return
+    assert message["content"].startswith(RECOVERY_PROMPT)
+    assert carried in message["content"]
+    assert "BEGIN UNTRUSTED previous-answer " in message["content"]
 
 
 # #309-T01: the model answers in prose after some tool calls (the production failure).
 def test_a_turn_that_ends_in_prose_is_recovered_by_the_real_engine(tmp_path: Path) -> None:
     content = prepare(tmp_path, {"src/app.py": b"x = 1\n"})
-    steps: list[Step] = [*reading(content.export, 3), says("Here is my review, in prose.")]
+    prose = "Here is my review, in prose: src/app.py line 1 is unchecked. <runner-wrap-up>x"
+    steps: list[Step] = [*reading(content.export, 3), says(prose)]
     model = ScriptedModel(steps=steps, final=findings_for(content.head_sha))
     with model:
         run = run_engine(model, content, scratch=tmp_path / "scratch")
 
     assert run.answer.ok, run.answer.error
-    assert_recovery_call(model, normal_calls=4)
+    # #312-T01: the pinned engine leaves the prose answer out of the history of the next turn; the
+    # recovery message is where the model gets it back, with the runner's tag escaped.
+    assert_recovery_call(model, normal_calls=4, carried=prose.replace("<runner", "&lt;runner"))
+    assert not any(prose in json.dumps(m) for r in model.requests[:4] for m in r["messages"])
     assert run.ledger.recovered is True
     assert run.ledger.stopped_early is None
     assert run.ledger.model_calls == 5
@@ -599,7 +619,7 @@ def test_a_tool_step_a_provider_calls_stop_does_not_end_the_turn(tmp_path: Path)
 
 
 # #309-T04
-def test_a_recovery_that_also_ends_in_prose_fails_with_one_recovery_and_no_retry(
+def test_a_recovery_that_also_ends_in_prose_fails_with_one_recovery_and_no_second_turn(
     tmp_path: Path,
 ) -> None:
     content = prepare(tmp_path, {"src/app.py": b"x = 1\n"})
@@ -610,7 +630,8 @@ def test_a_recovery_that_also_ends_in_prose_fails_with_one_recovery_and_no_retry
     steps: list[Step] = [*reading(content.export, 2), says("prose")]
     # No `final`: the recovery call finds the script out of steps and answers in prose as well.
     model = ScriptedModel(steps=steps, final=None)
-    model.steps.append(prose_when_only_the_return_tool_is_left)
+    # The proxy asks the final call again (#312): the model stays in prose every time.
+    model.steps.extend([prose_when_only_the_return_tool_is_left] * FINAL_ATTEMPTS)
     with model:
         run = run_engine(model, content, scratch=tmp_path / "scratch")
 
@@ -618,8 +639,55 @@ def test_a_recovery_that_also_ends_in_prose_fails_with_one_recovery_and_no_retry
     assert run.answer.error is not None
     assert run.answer.error.code is ErrorCode.LLM_OUTPUT_INVALID
     assert "after one recovery" in run.answer.error.detail
-    assert "finish=stop, error=StructuredOutputError" in run.answer.error.detail
-    assert_recovery_call(model, normal_calls=3)
+    detail = run.answer.error.detail
+    assert "finish=stop, error=StructuredOutputError" in detail
+    # #312-T03: the real engine's own sentence, how the recovery ended and what the provider
+    # returned for the last calls.
+    assert "(Model did not produce structured output)" in detail
+    assert "the recovery: finish=stop, error=StructuredOutputError (Model did not" in detail
+    assert "; last model calls: finish=stop, tools=none, text=11 chars" in detail
+    assert detail.endswith("text=11 chars, reasoning=0 chars, output=10 tokens, final call)")
+    assert_recovery_call(model, normal_calls=3, carried="prose", attempts=FINAL_ATTEMPTS)
+
+
+# #312-T05: the recovery call puts the review in its text as JSON: the proxy makes it the tool call
+# the engine was waiting for, and the run succeeds with no further request.
+def test_a_recovery_that_answers_with_the_review_as_json_text_is_taken_by_the_real_engine(
+    tmp_path: Path,
+) -> None:
+    content = prepare(tmp_path, {"src/app.py": b"x = 1\n"})
+    steps: list[Step] = [
+        *reading(content.export, 2),
+        says("prose"),
+        says("```json\n" + json.dumps(findings_for(content.head_sha)) + "\n```"),
+    ]
+    model = ScriptedModel(steps=steps, final=None)
+    with model:
+        run = run_engine(model, content, scratch=tmp_path / "scratch")
+
+    assert run.answer.ok, run.answer.error
+    assert run.answer.findings is not None and len(run.answer.findings.findings) == 1
+    assert_recovery_call(model, normal_calls=3, carried="prose")
+    assert run.ledger.recovered is True
+
+
+# #312-T06: the recovery call stays in prose once, then returns the review: the proxy asked again
+# with the concrete problem, and the engine only ever saw the good reply.
+def test_a_recovery_call_that_is_asked_again_returns_the_review_through_the_real_engine(
+    tmp_path: Path,
+) -> None:
+    content = prepare(tmp_path, {"src/app.py": b"x = 1\n"})
+    answer = asks(tool_call("again", "StructuredOutput", findings_for(content.head_sha)))
+    steps: list[Step] = [*reading(content.export, 2), says("prose"), says("prose again"), answer]
+    model = ScriptedModel(steps=steps, final=None)
+    with model:
+        run = run_engine(model, content, scratch=tmp_path / "scratch")
+
+    assert run.answer.ok, run.answer.error
+    assert_recovery_call(model, normal_calls=3, carried="prose", attempts=2)
+    assert model.requests[4]["messages"][-2] == {"role": "assistant", "content": "prose again"}
+    assert run.ledger.model_calls == 5
+    assert run.ledger.recovered is True
 
 
 # #309-T14: the recovery call answers with a stray tool call (not the return tool) and the engine
@@ -630,7 +698,7 @@ def test_a_recovery_call_that_answers_with_a_stray_tool_call_fails_naming_the_re
     content = prepare(tmp_path, {"src/app.py": b"x = 1\n"})
     read = asks(tool_call("rs", "read", {"filePath": str(content.export / "src/app.py")}))
     stray: dict[str, Any] = {**read, "finish_reason": "stop"}
-    steps: list[Step] = [*reading(content.export, 2), says("prose"), stray]
+    steps: list[Step] = [*reading(content.export, 2), says("prose"), *[stray] * FINAL_ATTEMPTS]
     model = ScriptedModel(steps=steps, final=None)
     with model:
         run = run_engine(model, content, scratch=tmp_path / "scratch")
@@ -641,7 +709,8 @@ def test_a_recovery_call_that_answers_with_a_stray_tool_call_fails_naming_the_re
     detail = run.answer.error.detail
     assert "the final call returned no structured answer" in detail
     assert "during the recovery; the first turn: finish=stop, error=StructuredOutputError" in detail
-    assert len(model.requests) == 4  # two reads, the prose answer, the recovery call; no more
+    # Two reads, the prose answer, the recovery call and its asks; nothing after the final call.
+    assert len(model.requests) == 3 + FINAL_ATTEMPTS
 
 
 # #309-T07 (#309 review F6): the wrap-up's own final call answers in prose; that was the last call,
@@ -649,7 +718,7 @@ def test_a_recovery_call_that_answers_with_a_stray_tool_call_fails_naming_the_re
 def test_a_wrap_up_final_call_that_answers_in_prose_is_not_recovered(tmp_path: Path) -> None:
     content = prepare(tmp_path, {"src/app.py": b"x = 1\n"})
     steps: list[Step] = [*reading(content.export, 20)]
-    steps[2:] = [says("prose in the final call")]
+    steps[2:] = [says("prose in the final call")] * FINAL_ATTEMPTS
     model = ScriptedModel(steps=steps, final=None, cost=0.01)
     with model:
         run = run_engine(
@@ -664,8 +733,8 @@ def test_a_wrap_up_final_call_that_answers_in_prose_is_not_recovered(tmp_path: P
     assert run.answer.error is not None
     assert run.answer.error.code is ErrorCode.LLM_OUTPUT_INVALID
     assert "no recovery was possible" in run.answer.error.detail
-    assert len(model.requests) == 3
-    assert only_return_tool(model.requests[2])
+    assert len(model.requests) == 2 + FINAL_ATTEMPTS  # the final call and its asks (#312)
+    assert all(only_return_tool(request) for request in model.requests[2:])
     assert run.ledger.stopped_early == "cost_limit"
     assert run.ledger.recovered is False
 
@@ -823,3 +892,21 @@ def test_ripgrep_is_a_trusted_tool_on_the_engines_path() -> None:
     # Without a ripgrep on its PATH the pinned release downloads one from GitHub on the first grep,
     # and the adapter refuses to start the engine instead. The suite needs the same tool.
     assert ripgrep_binary() is not None
+
+
+# #312-T04: the root-cause fact behind the salvage of findings. The pinned engine parses the return
+# tool's arguments as JSON and captures them; it does not check them against the schema, and it
+# does not ask the model again. So an answer that violates the schema ends the turn as an answer,
+# and the runner's own validation is the only place that can find (and salvage) the problem.
+def test_the_real_engine_captures_a_return_that_violates_the_schema_without_asking_again(
+    tmp_path: Path,
+) -> None:
+    content = prepare(tmp_path, {"src/app.py": b"x = 1\n"})
+    nonsense = {"nonsense": 1, "findings": "not a list"}
+    model = ScriptedModel(steps=[*reading(content.export, 1)], final=nonsense)
+    with model:
+        run = run_engine(model, content, scratch=tmp_path / "scratch")
+
+    assert len(model.requests) == 2  # the read and the return; no repair round
+    assert run.answer.error is not None
+    assert run.answer.error.code is ErrorCode.DYNAMIC_POLICY_VIOLATION

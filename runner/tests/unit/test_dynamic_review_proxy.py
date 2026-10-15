@@ -74,6 +74,14 @@ def answer_with_usage(
     }
 
 
+# The review a final call returns when it found nothing: valid for the runner's own parser, which
+# the proxy applies to the final call's reply (#312).
+EMPTY_REVIEW = json.dumps(
+    {"schemaVersion": 1, "reviewedSha": "1f3a5c7e9b2d4f60a8c1e3b5d7f90a2c4e6b8d01"}
+    | {"findings": [], "resolvedIds": []}
+)
+
+
 def answer_with_structured_output(**usage: Any) -> dict[str, Any]:
     """A provider answer that returns the review through the structured-output tool."""
     answer = answer_with_usage(**usage)
@@ -86,7 +94,7 @@ def answer_with_structured_output(**usage: Any) -> dict[str, Any]:
                     {
                         "id": "call_1",
                         "type": "function",
-                        "function": {"name": "StructuredOutput", "arguments": "{}"},
+                        "function": {"name": "StructuredOutput", "arguments": EMPTY_REVIEW},
                     }
                 ],
             },

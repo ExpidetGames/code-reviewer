@@ -150,3 +150,83 @@ def test_it_parses_a_json_string_and_never_echoes_a_value() -> None:
             document(findings=[{**document()["findings"][0], "title": ""}], reviewedSha=secret)
         )
     assert secret not in refused.value.detail
+
+
+# #312-T02: one bad finding must not throw away the valid ones of a review that took minutes.
+def test_an_invalid_finding_is_dropped_and_counted_when_a_valid_one_remains() -> None:
+    kept = document()["findings"][0]
+    swapped = {**kept, "id": "f-2", "lineStart": 9, "lineEnd": 1}
+    percent = {**kept, "id": "f-3", "confidence": 85}
+    unknown = {**kept, "id": "f-4", "command": "sh"}
+    traversal = {**kept, "id": "f-5", "path": "../../outside.txt"}
+
+    parsed = parse_dynamic_findings(
+        document(findings=[swapped, kept, percent, unknown, traversal]),
+        exported_paths={"src/api/handler.ts"},
+    )
+
+    assert [finding.id for finding in parsed.findings] == ["f-1"]
+    assert parsed.dropped_invalid == 4
+    # Only field names, never a value, and each reason once.
+    assert parsed.dropped_invalid_reasons == (
+        "lineStart must not be after lineEnd",
+        "confidence must be between 0 and 1",
+        "unknown field command",
+        "path is not a safe repository-relative path",
+    )
+    assert parsed.dropped_outside_export == 0
+
+
+# #312-T02
+def test_the_reasons_of_dropped_findings_are_distinct_and_bounded() -> None:
+    kept = document()["findings"][0]
+    bad = [{**kept, "id": f"b-{n}", "lineStart": 9, "lineEnd": 1} for n in range(8)]
+    other = [{**kept, "id": f"c-{n}", "title": "x" * 301} for n in range(8)]
+
+    parsed = parse_dynamic_findings(document(findings=[kept, *bad, *other]))
+
+    assert parsed.dropped_invalid == 16
+    assert len(parsed.dropped_invalid_reasons) == 2
+    assert len(set(parsed.dropped_invalid_reasons)) == 2
+
+
+# #312-T02: fail closed. A review whose findings are all invalid says nothing, and publishing it as
+# "no findings" would be a false all-clear.
+def test_a_review_with_only_invalid_findings_still_fails() -> None:
+    kept = document()["findings"][0]
+    swapped = {**kept, "lineStart": 9, "lineEnd": 1}
+
+    with pytest.raises(FindingsError) as refused:
+        parse_dynamic_findings(document(findings=[swapped, {**swapped, "id": "f-2"}]))
+
+    assert refused.value.code is ErrorCode.DYNAMIC_POLICY_VIOLATION
+    assert "lineStart" in refused.value.detail
+
+
+# #312-T02: the envelope is never salvaged.
+@pytest.mark.parametrize(
+    "envelope",
+    [
+        {"schemaVersion": 2},
+        {"reviewedSha": "not-a-sha"},
+        {"resolvedIds": "old"},
+        {"findings": "none"},
+    ],
+)
+def test_an_invalid_envelope_still_fails_whatever_the_findings_hold(
+    envelope: dict[str, Any],
+) -> None:
+    with pytest.raises(FindingsError):
+        parse_dynamic_findings(document(**envelope))
+
+
+# #312-T02: a finding that carries another head than the run's is still an invalid finding; it is
+# dropped like any other, and the envelope's own head is what the runner compares.
+def test_a_finding_with_another_head_is_dropped_not_trusted() -> None:
+    kept = document()["findings"][0]
+    stray = {**kept, "id": "f-2", "reviewedSha": "0" * 40}
+
+    parsed = parse_dynamic_findings(document(findings=[kept, stray]))
+
+    assert [finding.id for finding in parsed.findings] == ["f-1"]
+    assert parsed.dropped_invalid == 1

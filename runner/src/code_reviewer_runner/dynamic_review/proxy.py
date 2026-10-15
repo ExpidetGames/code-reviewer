@@ -58,16 +58,22 @@ from code_reviewer_runner.dynamic_review.budget import (
     DEFAULT_WINDOW_TOKENS,
     BudgetLedger,
     LimitError,
+    Reservation,
     UnitCosts,
     exact_cost,
 )
+from code_reviewer_runner.dynamic_review.call_outcome import describe_call
 from code_reviewer_runner.dynamic_review.completion_stream import completion_as_stream
 from code_reviewer_runner.dynamic_review.config import PROXY_CAPABILITY_BYTES, PROXY_PROVIDER_ID
 from code_reviewer_runner.dynamic_review.net import no_redirect_opener
 from code_reviewer_runner.dynamic_review.wrap_up import (
+    FINAL_ATTEMPTS,
     RECOVERY_INSTRUCTION,
     WRAP_UP_INSTRUCTION,
+    answer_from_text,
+    final_reply_problem,
     offers_structured_output,
+    retry_request,
     returns_structured_output,
     wrap_up_request,
 )
@@ -383,6 +389,14 @@ UNAUTHORIZED = ProxyResponse(
 )
 
 
+@dataclass(frozen=True)
+class _Attempt:
+    """One settled answer of the provider: its body as received and the decoded completion."""
+
+    body: bytes
+    completion: dict[str, Any]
+
+
 class ModelProxy:
     """One proxy per job. `handle` is the whole policy; `serve` only puts it on loopback."""
 
@@ -474,12 +488,37 @@ class ModelProxy:
             wrap_up_text=WRAP_UP_INSTRUCTION,
             recovery_text=RECOVERY_INSTRUCTION,
         )
+        final_request: dict[str, Any] | None = None
         if reservation.final:
             # The ledger decided, from its own cost and clock (#293), or from the recovery the
             # adapter armed after a turn without an answer (#309), that this is the last call of
             # the run: it can only return the answer, whatever the request asked for.
             instruction = RECOVERY_INSTRUCTION if reservation.recovery else WRAP_UP_INSTRUCTION
-            forwarded = self._forward_body(wrap_up_request(request, instruction))
+            final_request = wrap_up_request(request, instruction)
+            forwarded = self._forward_body(final_request)
+        attempt = self._attempt(forwarded, reservation)
+        if isinstance(attempt, ProxyResponse):
+            return attempt
+        if final_request is not None:
+            attempt = self._enforce_answer(attempt, final_request)
+            if isinstance(attempt, ProxyResponse):
+                return attempt
+        # The tool calls the model asked for are counted before the engine can run any of them.
+        self.audit.calls_in_answer(attempt.completion)
+        if reservation.final and not returns_structured_output(attempt.completion):
+            # The last call did not return the answer (#301 F3): whatever the engine does next, the
+            # failure is the model's, and a further request says so instead of blaming the limit.
+            self.ledger.note_final_unanswered()
+        if not wants_stream:
+            return ProxyResponse(status=200, body=attempt.body)
+        stream = completion_as_stream(attempt.completion)
+        if stream is None:
+            raise LimitError(ErrorCode.LLM_OUTPUT_INVALID, "the provider answer has no message")
+        return ProxyResponse(status=200, body=stream, content_type="text/event-stream")
+
+    def _attempt(self, forwarded: bytes, reservation: Reservation) -> "_Attempt | ProxyResponse":
+        """One request to the provider, reserved before and settled after: its answer, or the
+        response that ends the run (a provider refusal, a transport failure)."""
         try:
             status, response_body = self._post(
                 self.upstream_url,
@@ -517,18 +556,44 @@ class ModelProxy:
             completion_tokens=usage[1],
             cost=self._cost(completion),
         )
-        # The tool calls the model asked for are counted before the engine can run any of them.
-        self.audit.calls_in_answer(completion)
-        if reservation.final and not returns_structured_output(completion):
-            # The last call did not return the answer (#301 F3): whatever the engine does next, the
-            # failure is the model's, and a further request says so instead of blaming the limit.
-            self.ledger.note_final_unanswered()
-        if not wants_stream:
-            return ProxyResponse(status=status, body=response_body)
-        stream = completion_as_stream(completion)
-        if stream is None:
-            raise LimitError(ErrorCode.LLM_OUTPUT_INVALID, "the provider answer has no message")
-        return ProxyResponse(status=status, body=stream, content_type="text/event-stream")
+        self.ledger.note_call_outcome(describe_call(completion, final=reservation.final))
+        return _Attempt(body=response_body, completion=completion)
+
+    def _enforce_answer(
+        self, attempt: "_Attempt", request: dict[str, Any]
+    ) -> "_Attempt | ProxyResponse":
+        """Make the reply of a final call the answer, or as close to it as the limits allow (#312).
+
+        A reply that put the review in its text as JSON becomes the tool call. A reply that is not
+        the answer is asked for again with the concrete problem, up to `FINAL_ATTEMPTS` requests in
+        all and only while the ledger has room for one more. What is returned is the last reply,
+        valid or not: a reply that still fails is the model's failure, and the runner's own
+        validation says which field.
+        """
+        for _ in range(FINAL_ATTEMPTS - 1):
+            reply = attempt.completion  # what the model said, before a text answer is rewritten
+            wrapped = answer_from_text(reply)
+            if wrapped is not None:
+                attempt = _Attempt(body=json.dumps(wrapped).encode("utf-8"), completion=wrapped)
+            problem = final_reply_problem(attempt.completion)
+            if problem is None:
+                return attempt
+            request = retry_request(request, reply, problem)
+            body = self._forward_body(request)
+            reservation = self.ledger.try_reserve_final_retry(
+                body.decode("utf-8", errors="replace"),
+                output_tokens=self._output_allowance(request),
+            )
+            if reservation is None:
+                return attempt
+            retried = self._attempt(body, reservation)
+            if isinstance(retried, ProxyResponse):
+                return retried
+            attempt = retried
+        wrapped = answer_from_text(attempt.completion)
+        if wrapped is not None:
+            attempt = _Attempt(body=json.dumps(wrapped).encode("utf-8"), completion=wrapped)
+        return attempt
 
     def _transport_failure(self, error: Exception) -> ProxyResponse:
         timed_out = isinstance(error, TimeoutError) or (
