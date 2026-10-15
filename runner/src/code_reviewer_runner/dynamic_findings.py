@@ -270,7 +270,8 @@ def parse_dynamic_findings(
 
     `exported_paths` is the set of files the runner prepared; a finding outside it is not a review
     of anything the engine could read, so it is dropped and counted (`dropped_outside_export`)
-    instead of failing the run. A finding that is malformed in any other way still fails the run.
+    instead of failing the run. A finding that is malformed in any other way is dropped and
+    counted too (`dropped_invalid`), as above.
     Pass None to skip the membership check (for example a re-render of a previously validated
     output).
     """

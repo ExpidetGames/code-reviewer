@@ -571,13 +571,14 @@ class ModelProxy:
         validation says which field.
         """
         for _ in range(FINAL_ATTEMPTS - 1):
-            wrapped = answer_from_text(attempt.completion)
+            reply = attempt.completion  # what the model said, before a text answer is rewritten
+            wrapped = answer_from_text(reply)
             if wrapped is not None:
                 attempt = _Attempt(body=json.dumps(wrapped).encode("utf-8"), completion=wrapped)
             problem = final_reply_problem(attempt.completion)
             if problem is None:
                 return attempt
-            request = retry_request(request, attempt.completion, problem)
+            request = retry_request(request, reply, problem)
             body = self._forward_body(request)
             reservation = self.ledger.try_reserve_final_retry(
                 body.decode("utf-8", errors="replace"),

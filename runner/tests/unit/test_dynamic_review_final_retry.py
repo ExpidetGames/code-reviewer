@@ -287,3 +287,19 @@ def test_the_wrap_up_call_is_enforced_like_the_recovery_call() -> None:
     assert ledger.stopped_early == "cost_limit"
     assert [call["function"]["name"] for call in streamed_calls(response)] == ["StructuredOutput"]
     assert len(upstream.requests) == 2
+
+
+# #312-T06 (review of #313): a JSON text the proxy rewrote into a tool call and then rejected is
+# still the model's reply: the ask hands that text back, not nothing.
+def test_a_rewritten_text_reply_that_is_rejected_is_handed_back_in_the_retry() -> None:
+    text = json.dumps(review(schemaVersion=2))
+    upstream = Sequence(answer_with_usage(), completion_with(content=text), returns(review()))
+    subject = make(upstream)
+
+    response = post(subject, loop_request())
+
+    assert response.status == 200
+    assert len(upstream.requests) == 3
+    messages = forwarded(upstream, 2)["messages"]
+    assert messages[-2] == {"role": "assistant", "content": text}
+    assert "schemaVersion must be 1" in messages[-1]["content"]
