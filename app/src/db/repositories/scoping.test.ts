@@ -57,6 +57,10 @@ const SCOPED = [
  * - usage-records-sweep: the sweep of usage records for instance level code that ends jobs of any workspace (the
  *   lease side of the queue, the switch-off of Dynamic Review); one statement that only voids `reserved` records of
  *   jobs that have ended, and it takes no workspace on purpose;
+ * - claim-admission: the check of the entitlements of a claimed job (#277), made inside the claim transaction of
+ *   the lease side of the queue for whichever workspace the job is in; it reads, and everything it reads goes
+ *   through repositories created for that job's workspace (the instance default and the workspace row it locks
+ *   are not customer data);
  * - job-dispatches: where the signed wake-up call of a job stands (#326). The sender holds the job it just queued and
  *   the sweep works through the whole instance, like the lease side of the queue; the table has a job id and
  *   counters, no repository data, and is only written in webhook mode;
@@ -67,6 +71,7 @@ const SCOPED = [
 const INSTANCE_LEVEL = [
   "allowed-login-pins-repository.ts",
   "app-meta-repository.ts",
+  "claim-admission.ts",
   "installation-link-request-directory-repository.ts",
   "instance-settings-repository.ts",
   "integration-directory-repository.ts",

@@ -27,5 +27,11 @@ export function getRunnerQueue(): RunnerQueue {
   return createRunnerQueue(getDatabase(), {
     // #195: how long a job no capable runner claims may wait; the operator owns the value.
     limits: { noCapableRunnerMs: configuredNoCapableRunnerMs(process.env) },
+    // #277: a job refused for the entitlements of its workspace is failed inside the claim; this is its log line
+    // (ids and codes only, never a name or a number of the plan).
+    onRefused: ({ jobId, workspaceId, errorCode, detail }) =>
+      console.info(
+        `[queue] job=${jobId} workspace=${workspaceId} refused at claim: ${errorCode}${detail === undefined ? "" : ` (${detail})`}`,
+      ),
   });
 }

@@ -87,8 +87,13 @@ Every answer, including `204`, carries `Cache-Control: no-store`.
 
 ## Claim
 
-`claimNext(runnerId)` reserves a job (and first expires lapsed leases, see `src/jobs/README.md`). Then,
-for that job, in this order:
+`claimNext(runnerId)` reserves a job (and first expires lapsed leases, see `src/jobs/README.md`). **#277: inside that
+transaction, before the usage record is reserved, the entitlements of the job's workspace are checked** (a suspended
+workspace, a used up run or cost limit, or entitlements that cannot be read): the job ends `failed` with
+`workspace_suspended`, `quota_exhausted` or `entitlements_invalid` and the next one is tried, so none of the steps
+below runs for it, no credential exists and no record is written (`src/usage/README.md`, "Limits and suspension at
+claim"). Every claim path passes through it: the legacy claim, the split claim of a Dispatcher and the claim by job
+id (for which a refused job answers `204`, like any job that cannot be claimed). Then, for that job, in this order:
 
 1. **The claim guard** may refuse it (below).
 2. **LLM access** of the job's own workspace (`llm.accessFor(job.workspaceId)`, `src/llm/resolve.ts`): the key the

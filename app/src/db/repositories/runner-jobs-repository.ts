@@ -48,6 +48,7 @@ import type {
 import { encodeJson, formatTimestamp } from "../codecs.ts";
 import { databaseDriver, type DatabaseDriver } from "../driver.ts";
 import type { Database } from "../schema.ts";
+import { admitClaimedJob, type ClaimRefusal } from "./claim-admission.ts";
 import { claimOldestDueJob, claimOldestDueJobPostgres } from "./jobs-claim.ts";
 import { toJob } from "./jobs-repository.ts";
 import { createUsageRecordsRepository } from "./usage-records-repository.ts";
@@ -75,7 +76,16 @@ export type RunnerJobsRepositoryOptions = {
   limits?: Partial<JobQueueLimits>;
   /** Overrides the engine read from the connection; tests only. */
   driver?: DatabaseDriver;
+  /**
+   * #277: called for every job a claim refused for the entitlements of its workspace (suspended, a limit used
+   * up, entitlements that cannot be read), after the transaction of the claim committed. The job is `failed`
+   * already; this is only for the log.
+   */
+  onRefused?: (refusal: ClaimRefusal) => void;
 };
+
+/** How many jobs one `claimNext` may refuse before it answers "nothing" and lets the runner ask again. */
+const MAX_REFUSED_PER_CLAIM = 25;
 
 export type RunnerJobsRepository = {
   /**
@@ -507,9 +517,35 @@ export function createRunnerJobsRepository(
     return Number(count);
   }
 
+  /**
+   * #277: ends the job this claim just took as `failed` with the code of the refusal, in the transaction of the
+   * claim. No attempt is counted and no runner heard of it; its record, if it had one, is voided by the caller.
+   */
+  async function refuseClaimedJob(
+    executor: Kysely<Database>,
+    jobId: string,
+    errorCode: string,
+    current: Date,
+  ): Promise<void> {
+    const timestamp = formatTimestamp(current);
+    await executor
+      .updateTable("jobs")
+      .set({
+        status: "failed",
+        error_code: errorCode,
+        lease_expires_at: null,
+        finished_at: timestamp,
+        updated_at: timestamp,
+      })
+      .where("id", "=", jobId)
+      .where("status", "=", "running")
+      .execute();
+  }
+
   return {
-    claimNext(runnerId, engines = DEFAULT_ENGINES, claimOptions = {}) {
-      return inTransaction(async (trx) => {
+    async claimNext(runnerId, engines = DEFAULT_ENGINES, claimOptions = {}) {
+      const refusals: ClaimRefusal[] = [];
+      const claimed = await inTransaction(async (trx) => {
         const current = now();
         await expire(trx, current);
         // The credential is only ever returned; the database gets its hash as the lease token.
@@ -533,24 +569,54 @@ export function createRunnerJobsRepository(
           (await runningInPool(trx, runnerId)) >= claimOptions.maxRunning
         )
           return null;
-        const row = await (
-          driver === "postgres" ? claimOldestDueJobPostgres : claimOldestDueJob
-        )(trx, claim, reviewKinds, claimOptions.jobId);
-        if (row === undefined) return null;
-        // The record is reserved in the transaction of the claim, so a job handed out always counts. The key
-        // mode is the workspace's own until the claim route has resolved the access (`setKeyMode`); a job
-        // claimed again keeps the record it has.
-        await createUsageRecordsRepository(
-          trx,
-          row.workspace_id,
-          () => current,
-        ).reserve(row.id, "own");
-        return {
-          job: toJob(row),
-          leaseToken,
-          ...(credential === undefined ? {} : { credential }),
-        };
+        for (let refused = 0; refused < MAX_REFUSED_PER_CLAIM; refused += 1) {
+          const row = await (
+            driver === "postgres"
+              ? claimOldestDueJobPostgres
+              : claimOldestDueJob
+          )(trx, claim, reviewKinds, claimOptions.jobId);
+          if (row === undefined) return null;
+          // #277: the limits and the suspension of the job's workspace, decided in this transaction, before
+          // the record is reserved: a refused job leaves no record, and two claims cannot both take the
+          // last unit of a limit.
+          const { admission, hadRecord } = await admitClaimedJob(
+            trx,
+            row,
+            () => current,
+          );
+          if (!admission.allow) {
+            await refuseClaimedJob(trx, row.id, admission.errorCode, current);
+            // A job claimed again after a lost lease had a record that counted: it ends with the job.
+            if (hadRecord) await voidRecordsOfEndedJobs(trx);
+            refusals.push({
+              jobId: row.id,
+              workspaceId: row.workspace_id,
+              errorCode: admission.errorCode,
+              ...(admission.detail === undefined
+                ? {}
+                : { detail: admission.detail }),
+            });
+            continue;
+          }
+          // The record is reserved in the transaction of the claim, so a job handed out always counts. The
+          // key mode is the workspace's own until the claim route has resolved the access (`setKeyMode`); a
+          // job claimed again keeps the record it has.
+          await createUsageRecordsRepository(
+            trx,
+            row.workspace_id,
+            () => current,
+          ).reserve(row.id, "own");
+          return {
+            job: toJob(row),
+            leaseToken,
+            ...(credential === undefined ? {} : { credential }),
+          };
+        }
+        // Many jobs in a row were refused; the runner asks again.
+        return null;
       });
+      for (const refusal of refusals) options.onRefused?.(refusal);
+      return claimed;
     },
 
     async holding(jobId, leaseToken) {

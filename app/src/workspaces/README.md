@@ -138,8 +138,8 @@ characters without control or formatting characters (they end up in mails and pa
 ## Entitlements
 
 An operator who serves many workspaces can state, per workspace, what it may do (#271; epic #268). The data
-model, and the operator API that sets it (#275): no page, nothing is enforced yet (the usage records, the managed key
-and the enforcement are later issues of the epic). A self-hosted instance configures nothing and nothing changes.
+model, and the operator API that sets it (#275): no page. The limits and the suspension are enforced when a job is
+claimed (#277, `src/usage/README.md`, "Limits and suspension at claim"); the managed key is a later issue of the epic. A self-hosted instance configures nothing and nothing changes.
 
 - **Data.** One row per workspace in `workspace_entitlements` (`src/db/repositories/workspace-entitlements-repository.ts`)
   and one instance setting `default_entitlements` for the workspaces without a row. Both hold the same fields:
@@ -156,8 +156,8 @@ and the enforcement are later issues of the epic). A self-hosted instance config
   read, with the rules of a write (`readEntitlements`). An entry that exists but cannot be read (damaged JSON,
   limits with a missing or bad value, an unknown key mode) is never "unlimited": the resolver answers
   `{ kind: "invalid", code: "entitlements_invalid", source }`, and nothing throws. A row of the workspace that is
-  unreadable wins over a good default, like any row. The caller that enforces (#277) must refuse the claim with
-  that code and a clear message; repairing the entry is a valid `put`. Reading ignores keys it does not know (an
+  unreadable wins over a good default, like any row. The claim (#277) refuses with
+  that code (`entitlements_invalid`; the Runs pages explain it); repairing the entry is a valid `put`. Reading ignores keys it does not know (an
   older app reads what a newer one wrote) and does not ask the clock.
 - **Adding a limit later.** A new limit goes into `LIMIT_NAMES` and, so that existing entries stay readable, into
   `LIMITS_ADDED_LATER` (`entitlements-validation.ts`): when reading, its missing key means `null` (unlimited), which
