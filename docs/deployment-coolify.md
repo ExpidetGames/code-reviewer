@@ -229,6 +229,7 @@ Variables that exist in `.env.example` but that you **do not set on Coolify**:
 | `APP_PORT`, `APP_BIND_ADDRESS` | not used | Only `compose.yml` publishes a port. |
 | `GITHUB_APP_PRIVATE_KEY_PATH` | not used | The Compose file mounts no key file; use `GITHUB_APP_PRIVATE_KEY`. |
 | `DATABASE_URL`, `DATABASE_POOL_MAX` | not used | Only the large (Postgres) topology sets them; on Coolify the database is the SQLite file in the data volume ([deployment-large.md](deployment-large.md)). |
+| `APP_RUNTIME`, `VERCEL`, `DATABASE_URL_MIGRATE`, `CRON_SECRET` | not used | For a hosted deployment on a serverless platform only: the runtime mode (`server` is the default and what Coolify runs), the platform's own marker, the direct database URL of `pnpm migrate`, and the secret of the platform's cron. Leave them unset; the app then behaves exactly as described in this guide. |
 | `BACKUP_DIR` | not used | The image fixes it to `/backups`, the mount point of the backup volume. |
 | `ALLOW_TEST_GITHUB_ENDPOINTS`, `GITHUB_OAUTH_BASE_URL`, `GITHUB_API_BASE_URL` | not used | For the test stack with a fake GitHub only. Never set them in a real deployment. |
 | `ALLOW_TEST_LLM_ENDPOINTS`, `LLM_API_BASE_URL` | not used | For the test stack with a fake LLM only (the "test key" button). Never set them in a real deployment. |

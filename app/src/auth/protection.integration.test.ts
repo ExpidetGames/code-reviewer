@@ -53,6 +53,8 @@ const PUBLIC_ROUTES = [
   "/api/operator/v1/workspaces/[id]/entitlements",
   "/api/operator/v1/entitlements/default",
   "/api/operator/v1/[...path]",
+  // The platform's cron sends CRON_SECRET; the route is a 404 outside serverless mode (src/cron/, #319).
+  "/api/internal/repository-sync",
 ] as const;
 const PROTECTED_ROUTES = [
   "/",

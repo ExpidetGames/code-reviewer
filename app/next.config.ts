@@ -9,12 +9,14 @@ import {
   PORTAL_REWRITE_HEADER,
   PROXY_SKIPPED_PATHS,
 } from "./src/admin/paths.ts";
+import { isServerless } from "./src/runtime/mode.ts";
 import { SETUP_PAGE, SETUP_REWRITE_HEADER } from "./src/setup/paths.ts";
 
 const nextConfig: NextConfig = {
   // A self-contained server (`.next/standalone/server.js`) with only the files it needs, for the
-  // Docker image (app/Dockerfile).
-  output: "standalone",
+  // Docker image (app/Dockerfile). A serverless build (APP_RUNTIME=serverless, or the platform's own
+  // VERCEL=1 marker) leaves the output to the platform, which packages every function itself.
+  output: isServerless(process.env) ? undefined : "standalone",
   cacheComponents: true,
   partialPrefetching: true,
   async headers() {
