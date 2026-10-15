@@ -73,10 +73,20 @@ function repositoryUnknown(repositoryId: string, cause: unknown) {
   );
 }
 
+export type JobQueueOptions = JobsRepositoryOptions & {
+  /**
+   * #326: called with the result of every `enqueue` that returned, after its transaction committed. It
+   * must not wait for anything slow: the app hands the work to `after()` (src/dispatch/shared.ts). A
+   * hook that throws is ignored, so it can never fail or undo an enqueue. Not called when the enqueue
+   * rejected.
+   */
+  onEnqueued?: (result: EnqueueResult) => void;
+};
+
 export function createJobQueue(
   db: Kysely<Database>,
   workspaceId: WorkspaceId,
-  options: JobsRepositoryOptions = {},
+  options: JobQueueOptions = {},
 ): JobQueue {
   const jobs = createJobsRepository(db, workspaceId, options);
 
@@ -89,13 +99,20 @@ export function createJobQueue(
           `The job is not valid: ${checked.fieldErrors.map((error) => `${error.field} (${error.code})`).join(", ")}.`,
           { fieldErrors: checked.fieldErrors },
         );
+      let result: EnqueueResult;
       try {
-        return await jobs.enqueue(checked.value);
+        result = await jobs.enqueue(checked.value);
       } catch (error) {
         if (errorCode(error) === "SQLITE_CONSTRAINT_FOREIGNKEY")
           throw repositoryUnknown(checked.value.repositoryId, error);
         throw error;
       }
+      try {
+        options.onEnqueued?.(result);
+      } catch {
+        // The job is queued; what a hook does after that is its own business.
+      }
+      return result;
     },
     cancelWaitingForRepository: (repositoryId) =>
       jobs.cancelWaitingForRepository(repositoryId),

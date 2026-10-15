@@ -5,13 +5,21 @@
 // and `createRunnerQueue`.
 import "server-only";
 import { getDatabase } from "../db/startup.ts";
+import { dispatchHook } from "../dispatch/shared.ts";
 import { createJobQueue, type JobQueue } from "./job-queue.ts";
 import { configuredNoCapableRunnerMs } from "./job-limits.ts";
 import { createRunnerQueue, type RunnerQueue } from "./runner-queue.ts";
 
-/** The queue of one workspace. */
+/**
+ * The queue of one workspace. Every producer (the GitHub webhook, a comment, the start button) gets its
+ * queue here, so each of them wakes the Dispatcher after it queued a job when `RUNNER_DISPATCH=webhook`
+ * (#326); by default there is no hook and nothing changes.
+ */
 export function jobQueueFor(workspaceId: string): JobQueue {
-  return createJobQueue(getDatabase(), workspaceId);
+  const onEnqueued = dispatchHook();
+  return createJobQueue(getDatabase(), workspaceId, {
+    ...(onEnqueued === undefined ? {} : { onEnqueued }),
+  });
 }
 
 /** The queue as runners use it: one for the whole instance, every workspace. */
