@@ -11,6 +11,7 @@
 // therefore opens a dedicated `pg.Client` from the same URL, holds a session-level advisory lock on
 // it, and closes it in `finally`.
 import "server-only";
+import { attachDatabasePool } from "@vercel/functions/db-connections";
 import { Kysely, PostgresDialect, sql } from "kysely";
 import { Client, Pool } from "pg";
 import {
@@ -27,16 +28,32 @@ const CONNECT_TIMEOUT_MS = 10_000;
 // same URL. A WeakMap keeps nothing alive on its own.
 const CONFIG_OF = new WeakMap<Kysely<Database>, PostgresDatabaseConfig>();
 
+type PoolHooks = {
+  /** Tells the hosting platform when the pool is idle, so it waits for the connections to close. */
+  attachPool?: (pool: Pool) => void;
+};
+
+/**
+ * Opens the pool without connecting: the first query does. In serverless mode (`attachPlatformPool`)
+ * the pool is also handed to the platform's hook, which keeps an instance alive until the idle
+ * connections have closed instead of freezing it with them open (that leaks connections: nobody closes
+ * them while the instance sleeps).
+ */
 export function openPostgresDatabase(
   config: PostgresDatabaseConfig,
+  { attachPool = attachDatabasePool }: PoolHooks = {},
 ): Kysely<Database> {
   const pool = new Pool({
     connectionString: config.url,
     max: config.poolMax,
     connectionTimeoutMillis: CONNECT_TIMEOUT_MS,
+    ...(config.idleTimeoutMs === undefined
+      ? {}
+      : { idleTimeoutMillis: config.idleTimeoutMs }),
   });
   // An error on an idle client (the server went away) must not become an unhandled event.
   pool.on("error", () => undefined);
+  if (config.attachPlatformPool) attachPool(pool);
   const db = new Kysely<Database>({ dialect: new PostgresDialect({ pool }) });
   CONFIG_OF.set(db, config);
   return db;

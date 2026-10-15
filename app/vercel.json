@@ -1,0 +1,14 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "installCommand": "pnpm install --frozen-lockfile",
+  "regions": ["fra1"],
+  "functions": {
+    "src/app/api/webhooks/**/route.ts": { "maxDuration": 60 },
+    "src/app/api/runners/**/route.ts": { "maxDuration": 60 },
+    "src/app/api/internal/**/route.ts": { "maxDuration": 300 }
+  },
+  "crons": [
+    { "path": "/api/internal/repository-sync", "schedule": "17 3 * * *" }
+  ]
+}

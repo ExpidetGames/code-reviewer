@@ -3,21 +3,31 @@
 // What happens when the app server starts: open the database (creating the file if needed), bring
 // the schema to the latest version, and keep the connection for the rest of the process.
 // `instrumentation.ts` calls initializeDatabaseOnStart; everything else here is testable on its own.
+//
+// Serverless mode (src/runtime/mode.ts) does none of that at start: `getDatabase()` opens the Postgres
+// pool on its first call, and the schema is migrated by `pnpm migrate`, never by the app. This file
+// imports `connection.ts` (and with it the SQLite driver, a native module) only when a server starts, so
+// a serverless instance never loads it.
 import "server-only";
 import type { Kysely } from "kysely";
-import { loadDatabaseConfig, type DatabaseConfig } from "./config.ts";
-import { openDatabase } from "./connection.ts";
+import {
+  loadDatabaseConfig,
+  type DatabaseConfig,
+  type PostgresDatabaseConfig,
+} from "./config.ts";
 import { DatabaseError } from "./errors.ts";
 import type { MigrationProvider } from "kysely/migration";
 import { migrateToLatest } from "./migrate.ts";
-import { assertPostgresReachable } from "./postgres.ts";
+import { assertPostgresReachable, openPostgresDatabase } from "./postgres.ts";
 import type { Database } from "./schema.ts";
+import { isServerless } from "../runtime/mode.ts";
 
 /** Opens the database and migrates it. Closes the connection again when that fails. */
 export async function startDatabase(
   config: DatabaseConfig,
   provider?: MigrationProvider,
 ): Promise<{ db: Kysely<Database>; migrationsApplied: string[] }> {
+  const { openDatabase } = await import("./connection.ts");
   const db = openDatabase(config);
   try {
     if (config.driver === "postgres") await assertPostgresReachable(db, config);
@@ -37,14 +47,25 @@ type GlobalWithDatabase = typeof globalThis & {
   [globalKey]?: Kysely<Database>;
 };
 
-/** The connection opened at startup. Fails loudly when the server did not start the database. */
+/**
+ * The connection of this process. A server opens it at start, so asking before that fails loudly.
+ * A serverless instance opens it here, on the first call: a pool that connects on its first query,
+ * shared by everything that runs in this instance afterwards.
+ */
 export function getDatabase(): Kysely<Database> {
-  const db = (globalThis as GlobalWithDatabase)[globalKey];
-  if (!db)
+  const holder = globalThis as GlobalWithDatabase;
+  const db = holder[globalKey];
+  if (db) return db;
+  if (!isServerless())
     throw new Error(
       "The database is not initialized: it is opened when the server starts.",
     );
-  return db;
+  // Serverless refuses anything but Postgres in loadDatabaseConfig; the cast states that.
+  const opened = openPostgresDatabase(
+    loadDatabaseConfig(process.env) as PostgresDatabaseConfig,
+  );
+  holder[globalKey] = opened;
+  return opened;
 }
 
 /** Closes the connection opened at startup, if any. */

@@ -10,6 +10,7 @@
     "lint": "eslint .",
     "format": "prettier --write . ../fakes",
     "format:check": "prettier --check . ../fakes",
+    "migrate": "node --conditions=react-server --disable-warning=MODULE_TYPELESS_PACKAGE_JSON src/db/migrate-cli.ts",
     "typecheck": "next typegen && tsc --noEmit --pretty false",
     "test": "vitest run --project unit",
     "test:watch": "vitest --project unit",
@@ -22,6 +23,7 @@
     "contracts:check": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON src/ci/contract-types/cli.ts --check"
   },
   "dependencies": {
+    "@vercel/functions": "^3.10.1",
     "better-auth": "1.7.7",
     "better-sqlite3": "^13.0.3",
     "class-variance-authority": "^0.7.1",

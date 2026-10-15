@@ -70,6 +70,9 @@ import { register } from "./instrumentation.ts";
 beforeEach(() => {
   calls.length = 0;
   vi.stubEnv("NEXT_RUNTIME", "nodejs");
+  // These are the server's start; the serverless one is pinned in instrumentation.serverless.test.ts. The CI job
+  // that runs the unit suite with APP_RUNTIME=serverless (#319-T06) must not change which one this file tests.
+  vi.stubEnv("APP_RUNTIME", "server");
   // A usable runner token, so the start has nothing to say about the runner API (CR-28).
   vi.stubEnv("RUNNER_TOKEN", "dummy-runner-token-0123456789abcdef");
   // An instance that is connected to GitHub; the case without is tested on its own.

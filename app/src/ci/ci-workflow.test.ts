@@ -113,6 +113,20 @@ describe("CI workflow triggers and jobs", () => {
     expect(environment?.TEST_DATABASE_URL).toMatch(/^postgres:\/\//);
   });
 
+  // #319-T06
+  it("runs the unit suite a second time in serverless mode, so the two runtime modes cannot drift", () => {
+    const job = jobNamed("app-serverless");
+    const unit = steps(job).find((step) => step.run === "pnpm test");
+    const environment = unit?.env as Record<string, string> | undefined;
+
+    expect(environment?.APP_RUNTIME).toBe("serverless");
+    expect(String(job.if)).toContain("needs.changes.outputs.app == 'true'");
+    expect(jobNamed("ci-passed").needs).toContain("app-serverless");
+    // Nothing here may be able to reach a database: the suite is the unit one.
+    expect(job.services).toBeUndefined();
+    expect(commandLines(job)).not.toContain("pnpm test:int");
+  });
+
   // CR-16-T01
   it("checks lint, formatting, types and the unit, integration and contract tests of the runner", () => {
     const lines = commandLines(jobNamed("runner-fast"));
