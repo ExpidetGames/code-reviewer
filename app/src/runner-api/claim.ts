@@ -18,6 +18,11 @@
 //
 // Nothing in here logs or keeps a credential: the revealed access exists only as a local value that
 // is built as late as possible and dropped with the response.
+//
+// #320: a claim that names the feature `worker_credential` (a Dispatcher) runs steps 1 to 3 only and
+// answers with a per-job credential and no input. Step 4 (`buildJobInput`: the job's input, with the git
+// credentials and the model key) runs when the Worker fetches the job (`worker-fetch.ts`), by the same
+// code, so the Dispatcher never sees a secret of the job.
 import "server-only";
 import type { AttemptedShas } from "../db/repositories/jobs-repository.ts";
 import type { IntegrationsRepository } from "../db/repositories/integrations-repository.ts";
@@ -28,6 +33,7 @@ import type { IntegrationRegistry } from "../integrations/registry.ts";
 import type {
   GitAccess,
   GitPlatform,
+  Integration,
   IntegrationType,
   RepoRef,
   ReviewCommand,
@@ -57,11 +63,13 @@ import {
   type DynamicModelCapabilities,
   type DynamicReviewOptions,
   type RunnerJobInput,
+  type SplitClaimResponse,
 } from "./contract.ts";
 import type { RunnerEngine } from "../jobs/runner-capabilities.ts";
 import type { JobOptions, JobOptionsSource } from "./job-options.ts";
 import { describeError, type RunnerApiLogger } from "./logger.ts";
 import { errorResponse, jsonResponse, noContent } from "./responses.ts";
+import type { ClaimOptions } from "../db/repositories/runner-jobs-repository.ts";
 
 /**
  * The codes a job gets when it ends at claim time. Branch on these, not on messages. The queue's
@@ -93,6 +101,8 @@ export const CLAIM_RELEASE_REASONS = [
   "git_access_unavailable",
   "pull_request_unavailable",
   "claim_failed",
+  // #320: the Dispatcher could not start the Worker (reported with the Worker API's result call).
+  "launch_failed",
 ] as const;
 
 /** When the platform does not say how long to wait. */
@@ -151,19 +161,47 @@ export type ClaimDeps = {
   heartbeatIntervalSeconds: number;
 };
 
-type Prepared =
-  | { kind: "ready"; response: ClaimResponse }
+/** Why a job does not go on: it ends, it is cancelled, or it is given back to try again later. */
+export type Refusal =
   | { kind: "refused"; errorCode: string; detail?: string }
   | { kind: "cancelled"; errorCode: JobErrorCode }
   | { kind: "retry"; reason: string; retryAfterSeconds: number };
 
-function refuse(errorCode: string, detail?: string): Prepared {
+type Prepared =
+  | { kind: "ready"; response: ClaimResponse }
+  /** #320: the claim of a Dispatcher: the credential and no input. */
+  | { kind: "split"; response: SplitClaimResponse }
+  | Refusal;
+
+/** What the checks of a job established; the input of the job is built from it. */
+export type Checked = {
+  kind: "checked";
+  llm: Extract<LlmAccessResult, { ok: true }>;
+  command: ReviewCommand;
+  options: JobOptions;
+  llmOptions: { model?: string; maxTokens?: number };
+  /** The Dynamic options of a Dynamic job; null for a Diff job. */
+  dynamic: DynamicReviewOptions | null;
+  integration: Integration;
+  repo: RepoRef;
+  prUrl: string;
+  baseRef: string;
+};
+
+/** What `buildJobInput` made: the input of the job and when its git token stops working. */
+export type Built = {
+  kind: "built";
+  input: RunnerJobInput;
+  tokenExpiresAt: string | null;
+};
+
+function refuse(errorCode: string, detail?: string): Refusal {
   return detail === undefined
     ? { kind: "refused", errorCode }
     : { kind: "refused", errorCode, detail };
 }
 
-function retryAfterOf(error: unknown): number {
+export function retryAfterOf(error: unknown): number {
   const seconds =
     error instanceof IntegrationError ? error.retryAfterSeconds : null;
   return Math.min(
@@ -324,14 +362,31 @@ async function modelCapabilitiesOf(
   return { kind: "send", capabilities };
 }
 
-async function prepare(
-  deps: ClaimDeps,
-  claimed: NonNullable<ClaimResult>,
-  engines: readonly RunnerEngine[],
-  features: readonly ClaimFeature[],
-): Promise<Prepared> {
-  const { job, leaseToken } = claimed;
+/** How `checkJob` is asked. */
+export type CheckOptions = {
+  /**
+   * The engines the claimant advertised. A Dynamic job needs `opencode`. `null` when that was already
+   * decided at claim (the Worker's fetch): the job is Dynamic because the claim allowed it.
+   */
+  engines: readonly RunnerEngine[] | null;
+  /**
+   * What a pull request that cannot be read means. At claim (false) every failure but "not found" gives
+   * the job back to try later, as it always did. At the Worker's fetch (true) a permanent failure of the
+   * connection (the installation was removed, the app is suspended, the scope was refused) ends the job
+   * with its stable code instead, like the same failure when the credentials are created.
+   */
+  classifyReadFailures: boolean;
+};
 
+/**
+ * Steps 1 to 3 of the module comment: the guard, the LLM access, the options of the job and the pull
+ * request. Nothing here creates or reveals a credential of the job.
+ */
+export async function checkJob(
+  deps: ClaimDeps,
+  job: Job,
+  { engines, classifyReadFailures }: CheckOptions,
+): Promise<Checked | Refusal> {
   const decision = await deps.guard.check(job);
   if (!decision.allow)
     return decision.outcome === "cancel"
@@ -368,7 +423,7 @@ async function prepare(
   const dynamic =
     job.reviewKind === "dynamic" ? dynamicOptionsOf(options) : null;
   if (job.reviewKind === "dynamic") {
-    if (!engines.includes("opencode"))
+    if (engines !== null && !engines.includes("opencode"))
       return refuse("dynamic_engine_unavailable");
     if (dynamic === null) return refuse("dynamic_config_invalid");
   }
@@ -421,12 +476,49 @@ async function prepare(
     deps.logger.error(
       `[runner-api] job=${job.id} the pull request could not be read: ${describeError(error)}`,
     );
+    if (
+      classifyReadFailures &&
+      error instanceof IntegrationError &&
+      !error.retryable &&
+      error.code.startsWith("INTEGRATION_ACCESS_")
+    )
+      return refuse(accessFailureCode(error));
     return {
       kind: "retry",
       reason: "pull_request_unavailable",
       retryAfterSeconds: retryAfterOf(error),
     };
   }
+
+  return {
+    kind: "checked",
+    llm,
+    command,
+    options,
+    llmOptions,
+    dynamic,
+    integration,
+    repo,
+    prUrl,
+    baseRef,
+  };
+}
+
+/**
+ * Step 4 of the module comment, the only place that creates credentials for a job: the model's
+ * capabilities (#279), the git credentials for exactly this repository, and the job's input with the
+ * key revealed. Both the legacy claim and the Worker's fetch call it. The revealed copy is a plain
+ * object that only lives until the response is built.
+ */
+export async function buildJobInput(
+  deps: ClaimDeps,
+  job: Job,
+  checked: Checked,
+  features: readonly ClaimFeature[],
+): Promise<Built | Refusal> {
+  const { llm, command, options, llmOptions, dynamic, integration, repo } =
+    checked;
+  const provider = deps.registry.resolve(integration.type);
 
   // #279: the model's capabilities. The read can wait on the provider, so it comes after every cheap
   // local refusal above, and still before the git credentials are created.
@@ -443,8 +535,7 @@ async function prepare(
     if (decision.kind === "send") capabilities = decision.capabilities;
   }
 
-  // The one place that creates credentials for a job. The revealed copy is a plain object that only
-  // lives until the response is built.
+  // The one place that creates credentials for a job.
   let git: GitAccess;
   try {
     git = revealGitAccess(await provider.jobAccess(integration, repo));
@@ -484,7 +575,7 @@ async function prepare(
   const input: RunnerJobInput =
     dynamic === null
       ? {
-          prUrl,
+          prUrl: checked.prUrl,
           command,
           git: {
             provider: "github",
@@ -501,14 +592,14 @@ async function prepare(
           env: options.env,
         }
       : {
-          prUrl,
+          prUrl: checked.prUrl,
           command,
           reviewKind: "dynamic",
           dynamic:
             capabilities === undefined ? dynamic : { ...dynamic, capabilities },
           base: claimBaseOf(
             repo.fullName,
-            baseRef,
+            checked.baseRef,
             job.headSha,
             previousReviewedSha,
             attempted,
@@ -527,6 +618,49 @@ async function prepare(
           },
           env: {},
         };
+  return { kind: "built", input, tokenExpiresAt: git.expiresAt };
+}
+
+async function prepare(
+  deps: ClaimDeps,
+  claimed: NonNullable<ClaimResult>,
+  engines: readonly RunnerEngine[],
+  features: readonly ClaimFeature[],
+  split: boolean,
+): Promise<Prepared> {
+  const { job, leaseToken } = claimed;
+  const checked = await checkJob(deps, job, {
+    engines,
+    classifyReadFailures: false,
+  });
+  if (checked.kind !== "checked") return checked;
+
+  // #320: a Dispatcher gets the per-job credential and nothing of the job's input; the Worker fetches
+  // that (and with it the git token and the model key) with the credential.
+  if (split) {
+    if (claimed.credential === undefined)
+      throw new Error(`Claim of job ${job.id} has no credential.`);
+    if (job.leaseExpiresAt === null)
+      throw new Error(`Claimed job ${job.id} has no lease expiry.`);
+    return {
+      kind: "split",
+      response: {
+        version: RUNNER_API_VERSION,
+        job: {
+          id: job.id,
+          credential: claimed.credential,
+          reviewKind: job.reviewKind,
+          leaseExpiresAt: job.leaseExpiresAt,
+          heartbeatIntervalSeconds: deps.heartbeatIntervalSeconds,
+        },
+      },
+    };
+  }
+
+  const built = await buildJobInput(deps, job, checked, features);
+  if (built.kind !== "built") return built;
+  if (job.leaseExpiresAt === null)
+    throw new Error(`Claimed job ${job.id} has no lease expiry.`);
   return {
     kind: "ready",
     response: {
@@ -536,21 +670,27 @@ async function prepare(
         leaseToken,
         leaseExpiresAt: job.leaseExpiresAt,
         heartbeatIntervalSeconds: deps.heartbeatIntervalSeconds,
-        tokenExpiresAt: git.expiresAt,
-        input,
+        tokenExpiresAt: built.tokenExpiresAt,
+        input: built.input,
       },
     },
   };
 }
 
+/**
+ * Who a job is ended for, as the log names it: the claim of a runner (`claim runner=a`, stage `claim`)
+ * or the fetch of a Worker (`fetch worker`, stage `fetch`, #320). Never a secret.
+ */
+export type Origin = { label: string; stage: "claim" | "fetch" };
+
 /** Ends a claimed job as failed with a code; the runner is not told. Throws if the queue fails. */
-async function endJob(
+export async function endJob(
   deps: ClaimDeps,
   claimed: NonNullable<ClaimResult>,
-  runnerId: string,
+  origin: Origin,
   errorCode: string,
   detail?: string,
-): Promise<void> {
+): Promise<"ended" | "not_holder"> {
   const result = await deps.queue.complete(claimed.job.id, claimed.leaseToken, {
     ok: false,
     errorCode,
@@ -558,13 +698,14 @@ async function endJob(
   if (result.status !== "completed") {
     // Not ours any more (the lease ran out in the meantime); whoever holds the job now decides.
     deps.logger.error(
-      `[runner-api] claim runner=${runnerId} job=${claimed.job.id} could not be ended at claim: ${result.status}`,
+      `[runner-api] ${origin.label} job=${claimed.job.id} could not be ended at ${origin.stage}: ${result.status}`,
     );
-    return;
+    return "not_holder";
   }
   deps.logger.info(
-    `[runner-api] claim runner=${runnerId} job=${claimed.job.id} ended at claim: ${errorCode}${detail === undefined || detail === "" ? "" : ` (${detail})`}`,
+    `[runner-api] ${origin.label} job=${claimed.job.id} ended at ${origin.stage}: ${errorCode}${detail === undefined || detail === "" ? "" : ` (${detail})`}`,
   );
+  return "ended";
 }
 
 /**
@@ -573,12 +714,12 @@ async function endJob(
  * touched; the other waiting jobs of the repository were cancelled by the deactivation. Throws if the
  * queue fails; the caller gives the job back.
  */
-async function cancelJob(
+export async function cancelJob(
   deps: ClaimDeps,
   claimed: NonNullable<ClaimResult>,
-  runnerId: string,
+  origin: Origin,
   errorCode: JobErrorCode,
-): Promise<void> {
+): Promise<"cancelled" | "not_holder"> {
   const result = await deps.queue.cancelClaimed(
     claimed.job.id,
     claimed.leaseToken,
@@ -587,17 +728,18 @@ async function cancelJob(
   if (result.status === "not_holder") {
     // Not ours any more (the lease ran out in the meantime); whoever holds the job now decides.
     deps.logger.error(
-      `[runner-api] claim runner=${runnerId} job=${claimed.job.id} could not be cancelled at claim: not_holder`,
+      `[runner-api] ${origin.label} job=${claimed.job.id} could not be cancelled at ${origin.stage}: not_holder`,
     );
-    return;
+    return "not_holder";
   }
   deps.logger.info(
-    `[runner-api] claim runner=${runnerId} job=${claimed.job.id} cancelled at claim: ${errorCode}`,
+    `[runner-api] ${origin.label} job=${claimed.job.id} cancelled at ${origin.stage}: ${errorCode}`,
   );
+  return "cancelled";
 }
 
 /** Gives the job back after an unexpected failure, so it is not stuck under a lease nobody uses. */
-async function giveBack(
+export async function giveBack(
   deps: ClaimDeps,
   claimed: NonNullable<ClaimResult>,
   reason: string,
@@ -623,20 +765,27 @@ export async function handleClaim(
   engines: readonly RunnerEngine[],
   features: readonly ClaimFeature[] = [],
 ): Promise<Response> {
+  // #320: a Dispatcher names `worker_credential` and gets a per-job credential instead of the input.
+  const split = features.includes("worker_credential");
+  const origin: Origin = { label: `claim runner=${runnerId}`, stage: "claim" };
   for (let refused = 0; refused < MAX_REFUSED_PER_REQUEST; refused += 1) {
-    const claimed = await deps.queue.claimNext(runnerId, engines);
+    const claimed = split
+      ? await deps.queue.claimNext(runnerId, engines, {
+          workerCredential: true,
+        })
+      : await deps.queue.claimNext(runnerId, engines);
     if (claimed === null) return noContent();
 
     // Whatever goes wrong from here on, the job is given back instead of staying under a lease that
     // nobody uses (it would only run out after two minutes).
     try {
-      const prepared = await prepare(deps, claimed, engines, features);
+      const prepared = await prepare(deps, claimed, engines, features, split);
 
       if (prepared.kind === "refused") {
         await endJob(
           deps,
           claimed,
-          runnerId,
+          origin,
           prepared.errorCode,
           prepared.detail,
         );
@@ -644,7 +793,7 @@ export async function handleClaim(
       }
 
       if (prepared.kind === "cancelled") {
-        await cancelJob(deps, claimed, runnerId, prepared.errorCode);
+        await cancelJob(deps, claimed, origin, prepared.errorCode);
         continue;
       }
 
@@ -656,11 +805,19 @@ export async function handleClaim(
           new Date(deps.now().getTime() + prepared.retryAfterSeconds * 1000),
         );
         deps.logger.info(
-          `[runner-api] claim runner=${runnerId} job=${claimed.job.id} given back: ${prepared.reason}`,
+          `[runner-api] ${origin.label} job=${claimed.job.id} given back: ${prepared.reason}`,
         );
         return errorResponse(503, "RUNNER_GIT_ACCESS_UNAVAILABLE", {
           retryAfterSeconds: prepared.retryAfterSeconds,
         });
+      }
+
+      if (prepared.kind === "split") {
+        // The credential is in the response and nowhere else: not in the log line, not in the database.
+        deps.logger.info(
+          `[runner-api] ${origin.label} job=${claimed.job.id} command=${claimed.job.command} credential issued`,
+        );
+        return jsonResponse(200, prepared.response);
       }
 
       // Before the key leaves with the response: if it cannot be remembered, the job is given back (below)
@@ -670,12 +827,12 @@ export async function handleClaim(
         prepared.response.job.input.llm.apiKey,
       );
       deps.logger.info(
-        `[runner-api] claim runner=${runnerId} job=${claimed.job.id} command=${claimed.job.command}`,
+        `[runner-api] ${origin.label} job=${claimed.job.id} command=${claimed.job.command}`,
       );
       return jsonResponse(200, prepared.response);
     } catch (error) {
       deps.logger.error(
-        `[runner-api] claim runner=${runnerId} job=${claimed.job.id} failed: ${describeError(error)}`,
+        `[runner-api] ${origin.label} job=${claimed.job.id} failed: ${describeError(error)}`,
       );
       await giveBack(deps, claimed, "claim_failed");
       return errorResponse(500, "RUNNER_INTERNAL_ERROR");

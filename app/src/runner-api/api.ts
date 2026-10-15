@@ -13,11 +13,11 @@
 //   4. body      read up to 64 KiB, JSON object, checked                             413 / 400
 //   5. work      claim, heartbeat or complete                                        see contract
 //
-// Every answer carries `Cache-Control: no-store` (responses.ts).
+// Every answer carries `Cache-Control: no-store` (responses.ts). The Worker API, which a per-job
+// credential opens instead of `RUNNER_TOKEN`, is worker-api.ts.
 import "server-only";
-import { readLimitedBody } from "../webhooks/limited-body.ts";
 import { DEFAULT_ENGINES } from "../jobs/runner-capabilities.ts";
-import { RUNNER_MAX_BODY_BYTES } from "./contract.ts";
+import { readJsonBody, readOptionalJsonBody } from "./body.ts";
 import { handleClaim, type ClaimDeps } from "./claim.ts";
 import { describeError } from "./logger.ts";
 import { parseClaimRequest, parseJobId, parseRunnerId } from "./requests.ts";
@@ -36,47 +36,6 @@ export type RunnerApi = {
   heartbeat(request: Request, jobId: string): Promise<Response>;
   complete(request: Request, jobId: string): Promise<Response>;
 };
-
-type Body = { ok: true; value: unknown } | { ok: false; response: Response };
-
-async function readJsonBody(request: Request): Promise<Body> {
-  const body = await readLimitedBody(request, RUNNER_MAX_BODY_BYTES);
-  if (!body.ok)
-    return { ok: false, response: errorResponse(413, "RUNNER_BODY_TOO_LARGE") };
-  try {
-    return { ok: true, value: JSON.parse(body.text) as unknown };
-  } catch {
-    return {
-      ok: false,
-      response: errorResponse(400, "RUNNER_REQUEST_INVALID", {
-        fields: [{ field: "body", code: "invalid" }],
-      }),
-    };
-  }
-}
-
-/**
- * The claim body is optional (#195): a previous-release runner sends none. An empty body is the same
- * as no body; anything else must be JSON, and a body over the limit is refused before it is parsed.
- */
-async function readOptionalJsonBody(
-  request: Request,
-): Promise<{ ok: true; value: unknown } | { ok: false; response: Response }> {
-  const body = await readLimitedBody(request, RUNNER_MAX_BODY_BYTES);
-  if (!body.ok)
-    return { ok: false, response: errorResponse(413, "RUNNER_BODY_TOO_LARGE") };
-  if (body.text.trim() === "") return { ok: true, value: undefined };
-  try {
-    return { ok: true, value: JSON.parse(body.text) as unknown };
-  } catch {
-    return {
-      ok: false,
-      response: errorResponse(400, "RUNNER_REQUEST_INVALID", {
-        fields: [{ field: "body", code: "invalid" }],
-      }),
-    };
-  }
-}
 
 export function createRunnerApi(deps: RunnerApiDeps): RunnerApi {
   /** Steps 1 and 2: who is asking. */

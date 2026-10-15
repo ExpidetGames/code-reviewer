@@ -31,6 +31,7 @@ from code_reviewer_runner.job_loop.process import ProcessLauncher, SubprocessLau
 from code_reviewer_runner.job_loop.settings import (
     LoopSettings,
     SettingsError,
+    WorkerSettings,
     settings_from_environment,
 )
 
@@ -48,7 +49,9 @@ def configure_logging(stream: object = None) -> None:
 
 
 def prepare_dynamic_runtime(
-    settings: LoopSettings, *, startup: Callable[[int, SlotPorts], EgressSetup] = secure_startup
+    settings: LoopSettings | WorkerSettings,
+    *,
+    startup: Callable[[int, SlotPorts], EgressSetup] = secure_startup,
 ) -> EgressSetup:
     """The Dynamic runner's one-time network setup, before the loop and any thread exist (#244).
 
@@ -64,13 +67,13 @@ def prepare_dynamic_runtime(
     return startup(user[0], ports)
 
 
-def advertise_engines(
-    settings: LoopSettings,
+def advertise_engines[Settings: (LoopSettings, WorkerSettings)](
+    settings: Settings,
     rules_installed: bool,
     *,
     egress_mode: EgressMode = EgressMode.FULL,
     check: Callable[..., object] | None = None,
-) -> LoopSettings:
+) -> Settings:
     """The settings with the engines this runner may advertise, decided by the startup self-check.
 
     `opencode` is added (with the verified engine command the Dynamic job process is handed) only
@@ -78,9 +81,8 @@ def advertise_engines(
     startup capabilities dropped, pinned and trusted engine and `rg`, probe as the engine user (and,
     with the fallback ruleset, IPv6 proven off). Any failure leaves `pr-agent` only and logs the
     stable reason, never a value. The egress mode startup found is logged and kept in the settings
-    for the job processes (#345). A runner without an
-    engine user (every runner but the Dynamic one) is not a failure: it serves Diff jobs, as
-    designed.
+    for the job processes (#345). A runner without an engine user (every runner but the Dynamic
+    one) is not a failure: it serves Diff jobs, as designed.
     """
     run_check = check or check_dynamic_runner
     passed: list[EgressMode] = []

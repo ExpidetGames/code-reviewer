@@ -55,6 +55,8 @@ export const ERROR_COPY: Readonly<Record<string, string>> = {
     "The pull request could not be read from GitHub, even after several tries.",
   claim_failed:
     "The server could not prepare this run, even after several tries.",
+  launch_failed:
+    "The worker for this run could not be started, even after several tries.",
 
   // The runner
   invalid_job: "The runner refused the job because it was incomplete.",
