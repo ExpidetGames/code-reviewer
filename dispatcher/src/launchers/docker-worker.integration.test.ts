@@ -21,7 +21,10 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { LocalSandboxService } from "../../../fakes/sandbox/local.ts";
 import { waitFor } from "../test-support/harness.ts";
 import { renderDockerRunArguments } from "./container.ts";
-import { WORKER_CONTAINER_SPEC } from "./container-spec.ts";
+import {
+  SANDBOX_LAUNCHER_ADDITIONS,
+  WORKER_CONTAINER_SPEC,
+} from "./container-spec.ts";
 
 const DOCKER_WORKER = join(
   import.meta.dirname,
@@ -90,6 +93,8 @@ function flags(mode: string, environment: Record<string, string> = {}) {
     name: NAME,
     environment,
     command: [mode],
+    // The flags of the Sandbox-Launcher, all of them: the stand-in must know every one.
+    additions: SANDBOX_LAUNCHER_ADDITIONS,
   });
 }
 

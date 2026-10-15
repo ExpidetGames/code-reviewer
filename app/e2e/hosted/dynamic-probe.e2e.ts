@@ -14,7 +14,7 @@
 import { execFile } from "node:child_process";
 import { resolve } from "node:path";
 import { promisify } from "node:util";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import { startLlmFake, type FakeLlm } from "../../../fakes/llm/server.ts";
 import { changeAdminSetting } from "../helpers/admin-api";
 import { e2eEnv } from "../helpers/e2e-env";
@@ -29,6 +29,7 @@ import {
   type HostedDispatcher,
 } from "../helpers/hosted-dispatcher";
 import {
+  chooseDynamicReview,
   eventually,
   OWNER,
   runSweep,
@@ -138,7 +139,7 @@ test.describe("a Dynamic job where the container's hardening cannot be proven", 
     try {
       const page = await context.newPage();
       await signInAsAdmin(page);
-      await chooseDynamicReview(page, DYNAMIC.fullName);
+      await chooseDynamicReview(page, DYNAMIC.fullName, MODEL);
     } finally {
       await context.close();
     }
@@ -156,24 +157,6 @@ test.describe("a Dynamic job where the container's hardening cannot be proven", 
     if (dispatcher === undefined)
       throw new Error("The Dispatcher was not started.");
     return dispatcher;
-  }
-
-  async function chooseDynamicReview(page: Page, fullName: string) {
-    await page.getByRole("link", { name: fullName, exact: true }).click();
-    await expect(
-      page.getByRole("heading", { level: 1, name: fullName }),
-    ).toBeVisible();
-    const dynamic = page.getByRole("radio", { name: "Dynamic Review" });
-    await dynamic.click();
-    await page.getByLabel("Dynamic Review model", { exact: true }).fill(MODEL);
-    await page.getByRole("button", { name: "Save review settings" }).click();
-    await page
-      .getByRole("alertdialog")
-      .getByRole("button", { name: "Switch to Dynamic Review" })
-      .click();
-    await expect(page.getByRole("status")).toContainText("Saved.");
-    await page.reload();
-    await expect(dynamic).toBeChecked();
   }
 
   // #332-T09

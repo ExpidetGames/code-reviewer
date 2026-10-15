@@ -87,6 +87,33 @@ export async function setUpReviewedRepositories(
   }
 }
 
+/**
+ * Chooses Dynamic Review for a project in its settings page, the way a person does (the instance admin has turned the
+ * gate on before): the model they type is the one the engine asks the fake LLM for. The account is signed in.
+ */
+export async function chooseDynamicReview(
+  page: Page,
+  fullName: string,
+  model: string,
+): Promise<void> {
+  await page.goto("/");
+  await page.getByRole("link", { name: fullName, exact: true }).click();
+  await expect(
+    page.getByRole("heading", { level: 1, name: fullName }),
+  ).toBeVisible();
+  const dynamic = page.getByRole("radio", { name: "Dynamic Review" });
+  await dynamic.click();
+  await page.getByLabel("Dynamic Review model", { exact: true }).fill(model);
+  await page.getByRole("button", { name: "Save review settings" }).click();
+  await page
+    .getByRole("alertdialog")
+    .getByRole("button", { name: "Switch to Dynamic Review" })
+    .click();
+  await expect(page.getByRole("status")).toContainText("Saved.");
+  await page.reload();
+  await expect(dynamic).toBeChecked();
+}
+
 export type SweepAnswer = {
   status: string;
   expired?: Record<string, number>;

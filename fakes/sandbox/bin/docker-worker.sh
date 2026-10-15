@@ -103,13 +103,15 @@ case "${1:-}" in
     printf '%s' "$name" >"$dir/run-$n.name"
     printf '%s\n' "$$" >"$dir/run-$n.pid"
 
-    home="$(mktemp -d "${TMPDIR:-/tmp}/cr-container-XXXXXX")"
+    # The Worker's home, in the "VM" directory (the working directory): it goes with the VM, and a wrapper that puts a
+    # fresh /tmp over the real one does not hide it.
+    home="$(mktemp -d "$PWD/cr-container-XXXXXX")"
     worker_path="${E2E_WORKER_PATH:-$PATH}"
     declare -a environment=("PATH=$worker_path" "HOME=$home" "TMPDIR=$home" "LANG=C.UTF-8")
     # A later entry wins in `env`, so a HOME of the flags replaces the one made here.
     environment+=("${worker_env[@]+"${worker_env[@]}"}")
     while IFS='=' read -r variable value; do
-      case "$variable" in E2E_WORKER_PASS_*) environment+=("${variable#E2E_WORKER_PASS_}=$value") ;; esac
+      case "$variable" in E2E_WORKER_PASS_*) environment+=("${variable/E2E_WORKER_PASS_/}=$value") ;; esac
     done < <(env)
     if [ "$mode" = "worker-once" ] && [ -n "${E2E_WORKER_ONCE_UNSET:-}" ]; then
       declare -a kept=()

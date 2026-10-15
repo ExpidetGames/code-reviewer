@@ -10,6 +10,8 @@
 //
 //   E2E_PORT              the port to listen on, on loopback (required)
 //   E2E_DOCKER_BIN        the `docker` stand-in (default: fakes/sandbox/bin/docker-worker.sh)
+//   E2E_VM_ROOT           where the "VM" directories are made (default: the temporary directory); a lane whose Worker
+//                         has a read-only root needs one that stays writable
 //   E2E_IMAGE_ID          the image id the stand-in reports and the Launcher requires (required)
 //   E2E_CONTROL_DIR       a directory a journey writes to steer this process: `fail-create` holds a number, and the
 //                         next that many VM creations fail like a platform that is down (the file is counted down)
@@ -84,6 +86,7 @@ const background = createBackgroundTracker();
 
 const local = new LocalSandboxService({
   dockerBin: read(env, "E2E_DOCKER_BIN") ?? DEFAULT_DOCKER,
+  root: read(env, "E2E_VM_ROOT"),
   environment: Object.fromEntries(
     Object.entries(env).filter(
       (entry): entry is [string, string] =>

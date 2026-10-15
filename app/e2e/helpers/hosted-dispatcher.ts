@@ -127,6 +127,14 @@ export async function startHostedDispatcher(options: {
   maxRunning?: number;
   /** What the container of a Dynamic job is given (the operator's model descriptor and cost limit). */
   dynamic?: { capabilities: string; maxCostUsd: string };
+  /**
+   * The names the `docker` stand-in takes out of the environment of `worker-once`. By default `RUNNER_DIFF_JOB_USER`:
+   * this lane is not root with capabilities, so its Workers serve Diff jobs. The privileged lane passes none: its
+   * Worker starts the way the container's does.
+   */
+  unsetForWorkerOnce?: string[];
+  /** Whether the Worker needs the tiktoken encoding of PR-Agent (every lane that runs a Diff job). Default true. */
+  tiktoken?: boolean;
   /** More variables for the process, for a lane that needs them (the privileged lane's wrapper). */
   environment?: Record<string, string>;
 }): Promise<HostedDispatcher> {
@@ -136,7 +144,8 @@ export async function startHostedDispatcher(options: {
     throw new Error(
       `The Worker is not installed (${program} is missing): run "make install" or "uv sync --locked" in runner/.`,
     );
-  assertTiktokenCache();
+  const tiktoken = options.tiktoken ?? true;
+  if (tiktoken) assertTiktokenCache();
   mkdirSync(absolute(hostedEnv.dockerDirectory), { recursive: true });
   mkdirSync(absolute(hostedEnv.controlDirectory), { recursive: true });
   const gate = absolute(`${hostedEnv.controlDirectory}/hold-workers`);
@@ -169,15 +178,17 @@ export async function startHostedDispatcher(options: {
     E2E_DOCKER_DIR: absolute(hostedEnv.dockerDirectory),
     E2E_WORKER_COMMAND: program,
     E2E_WORKER_GATE: gate,
-    // This lane is not root with capabilities, so its Workers serve Diff jobs (see docker-worker.sh); the privileged
-    // lane (e2e/dynamic/) runs the Worker the way the container does and unsets nothing.
-    E2E_WORKER_ONCE_UNSET: "RUNNER_DIFF_JOB_USER",
+    E2E_WORKER_ONCE_UNSET: (
+      options.unsetForWorkerOnce ?? ["RUNNER_DIFF_JOB_USER"]
+    ).join(" "),
     // What the image carries itself and the container is not given: the job command that adds the address of the fake
     // LLM to the job, and the tiktoken encoding PR-Agent counts tokens with.
     E2E_WORKER_PASS_PR_AGENT_COMMAND: [python, WRAPPER, options.llmBaseUrl]
       .map(quoted)
       .join(" "),
-    E2E_WORKER_PASS_TIKTOKEN_CACHE_DIR: tiktokenCacheDirectory(),
+    ...(tiktoken
+      ? { E2E_WORKER_PASS_TIKTOKEN_CACHE_DIR: tiktokenCacheDirectory() }
+      : {}),
     ...options.environment,
   };
 
