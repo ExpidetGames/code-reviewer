@@ -46,6 +46,7 @@ import { createProjectService } from "../projects/service.ts";
 import { createReviewSettingsService } from "../review-settings/service.ts";
 import { builtInReviewSettings } from "../review-settings/settings.ts";
 import { startGithubAppHarness } from "./github-app-harness.ts";
+import { readEffectiveEntitlements } from "../workspaces/effective-entitlements.ts";
 import { createJobQueueFixture, sha, type TestQueue } from "./jobs.ts";
 
 export const TEST_RUNNER_TOKEN = "test-runner-token-4f9c2a7e1b-0d58a3c6e9f2";
@@ -241,6 +242,8 @@ export async function startRunnerApiHarness(
             })
           : emptyJobOptionsSource),
       loadLlm: options.loadLlm ?? ((workspaceId) => llm.accessFor(workspaceId)),
+      entitlementsFor: (workspaceId) =>
+        readEffectiveEntitlements(fixture.db, workspaceId, fixture.clock.now),
       recordKeyMode: (job, keyMode) =>
         createUsageRecordsRepository(
           fixture.db,

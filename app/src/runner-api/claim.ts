@@ -40,6 +40,7 @@ import type {
 } from "../integrations/types.ts";
 import type { RunnerQueue } from "../jobs/runner-queue.ts";
 import type { ClaimResult, Job, JobErrorCode } from "../jobs/job-types.ts";
+import type { ResolvedEntitlements } from "../workspaces/entitlements.ts";
 import { revealLlmAccess, type LlmAccessResult } from "../llm/access.ts";
 import {
   MAX_LLM_CONTEXT_TOKENS,
@@ -143,6 +144,12 @@ export type ClaimDeps = {
    * (src/llm/resolve.ts, docs/decisions/0001-editions-setup-and-accounts.md, section 2.8).
    */
   loadLlm: (workspaceId: string) => Promise<LlmAccessResult>;
+  /**
+   * The effective entitlements of ONE workspace right now (`readEffectiveEntitlements`). The Worker's fetch asks
+   * for the standing of the workspace (suspended, unreadable) before it hands out a key, because the claim that
+   * admitted the job is behind it (#276).
+   */
+  entitlementsFor: (workspaceId: string) => Promise<ResolvedEntitlements>;
   /**
    * Notes whose key the claimed job runs on in its usage record (src/usage/README.md). The claim reserved the
    * record already, as `own`; this corrects it once the access is resolved. A failure gives the job back.

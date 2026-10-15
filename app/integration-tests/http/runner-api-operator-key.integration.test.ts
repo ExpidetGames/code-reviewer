@@ -551,3 +551,89 @@ describe("the model of a job on the operator's key", () => {
     });
   });
 });
+
+describe("the Worker's fetch after the workspace's standing changed (#276)", () => {
+  async function suspendedAfterClaim(keyMode: "own" | "managed") {
+    const h = await start(keyMode);
+    const job = await h.enqueueNew();
+    const { job: claimed } = await h.claimedSplit();
+    await createWorkspaceEntitlementsRepository(
+      h.db,
+      h.workspaceId,
+      h.clock.now,
+    ).put(
+      entitlements(keyMode, { suspended: true, suspensionCode: "overdue" }),
+      null,
+    );
+    return { h, job, claimed };
+  }
+
+  // #276-P3
+  it.each(["managed", "own"] as const)(
+    "hands out no key to a %s workspace that was suspended after the claim: the job ends with the code of the claim",
+    async (keyMode) => {
+      const { h, job, claimed } = await suspendedAfterClaim(keyMode);
+
+      const response = await h.worker.details(job.id, claimed.credential);
+      const text = await response.text();
+
+      expect(response.status).toBe(409);
+      expect(JSON.parse(text)).toMatchObject({
+        error: { code: "RUNNER_JOB_ENDED" },
+      });
+      expect(text).not.toContain(OPERATOR_KEY);
+      expect(text).not.toContain(WORKSPACE_KEY);
+      expect(await h.queue.get(job.id)).toMatchObject({
+        status: "failed",
+        errorCode: "workspace_suspended",
+      });
+      expect(
+        await h.db.selectFrom("job_claimed_keys").selectAll().execute(),
+      ).toEqual([]);
+      // No token was minted for the repository either.
+      expect(h.issuedJobTokens()).toEqual([]);
+      expect(await recordOf(h, job.id)).toMatchObject({ state: "void" });
+    },
+  );
+
+  // #276-P3
+  it("ends the job with entitlements_invalid when its entitlements became unreadable after the claim", async () => {
+    const h = await start("managed");
+    const job = await h.enqueueNew();
+    const { job: claimed } = await h.claimedSplit();
+    await h.db
+      .updateTable("workspace_entitlements")
+      .set({ limits: "not json" })
+      .execute();
+
+    const response = await h.worker.details(job.id, claimed.credential);
+
+    expect(response.status).toBe(409);
+    expect(await h.queue.get(job.id)).toMatchObject({
+      status: "failed",
+      errorCode: "entitlements_invalid",
+    });
+    expect(await everythingWritten(h)).not.toContain(OPERATOR_KEY);
+  });
+
+  // #276-P3
+  it("does not check a quota again: a limit used up after the claim does not stop the fetch, it was decided at the claim", async () => {
+    const h = await start("managed", {
+      entitlements: {
+        limits: {
+          diffRunsPerPeriod: 1,
+          dynamicRunsPerPeriod: null,
+          managedCostLimitMicroUsd: 1,
+        },
+      },
+    });
+    const job = await h.enqueueNew();
+    const { job: claimed } = await h.claimedSplit();
+
+    const response = await h.worker.details(job.id, claimed.credential);
+
+    // The run counts as the one run the limit allows, and it still gets its details.
+    expect(response.status).toBe(200);
+    expect((await response.json()).job.input.llm.apiKey).toBe(OPERATOR_KEY);
+  });
+});

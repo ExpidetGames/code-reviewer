@@ -12,6 +12,7 @@ import { getDatabase } from "../db/startup.ts";
 import { integrationRegistry } from "../integrations/registry.ts";
 import { getRunnerQueue } from "../jobs/shared.ts";
 import { resolveAppSecret } from "../crypto/app-secret.ts";
+import { readEffectiveEntitlements } from "../workspaces/effective-entitlements.ts";
 import { getWorkspaceLlm, modelCapabilities } from "../llm/shared.ts";
 import { projectServiceFor } from "../projects/shared.ts";
 import { reviewSettingsServiceFor } from "../review-settings/shared.ts";
@@ -85,6 +86,9 @@ function sharedDeps(): WorkerApiDeps {
     }),
     // The LLM access of the workspace of the claimed job: its own key, never another workspace's (src/llm).
     loadLlm: (workspaceId) => llm.accessFor(workspaceId),
+    // The standing of the job's workspace, asked by the Worker's fetch before it hands out a key (#276).
+    entitlementsFor: (workspaceId) =>
+      readEffectiveEntitlements(db, workspaceId),
     // Whose key the job runs on, in its usage record; scoped to the job's own workspace.
     recordKeyMode: (job, keyMode) =>
       createUsageRecordsRepository(db, job.workspaceId).setKeyMode(

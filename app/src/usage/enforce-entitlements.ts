@@ -85,6 +85,20 @@ export function isJobIndependentRefusal(code: EntitlementRefusalCode): boolean {
   return code === "workspace_suspended" || code === ENTITLEMENTS_INVALID_CODE;
 }
 
+/**
+ * The part of the admission that is about the workspace's standing and not about what it used: unreadable entitlements
+ * and a suspension, in the order of `decideAdmission`. A caller that decided the quotas already (the Worker's fetch,
+ * which runs after the claim, #276) asks only this before it hands out a credential; it needs no count and no lock.
+ */
+export function standingRefusal(
+  entitlements: ResolvedEntitlements,
+): "entitlements_invalid" | "workspace_suspended" | null {
+  if (entitlements.kind === "invalid") return entitlements.code;
+  if (entitlements.kind === "limited" && entitlements.suspended)
+    return "workspace_suspended";
+  return null;
+}
+
 function exhausted(detail: QuotaDetail): Admission {
   return { allow: false, errorCode: "quota_exhausted", detail };
 }
