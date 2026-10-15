@@ -13,9 +13,13 @@ import {
   type RecordedLogger,
 } from "../test-support/harness.ts";
 import { ManualClock, settle } from "../test-support/manual-clock.ts";
+import { DEFAULT_CONFIG } from "../snapshot/config.ts";
+import { PATHS } from "../snapshot/scripts.ts";
 import { WORKER_CONTAINER_SPEC } from "./container-spec.ts";
+import { VM_PREPARE_PATH } from "./sandbox-host.ts";
 import {
   SANDBOX_HANDOVER_SECONDS,
+  SANDBOX_IMAGE_REFERENCE,
   SANDBOX_REGION,
   VM_TIMEOUT_MARGIN_SECONDS,
   createSandboxLauncher,
@@ -551,6 +555,13 @@ describe("the Sandbox-Launcher", () => {
         capabilities: () => Promise.resolve(["pr-agent", "opencode"]),
       }).capabilities(signal),
     ).toStrictEqual(["pr-agent", "opencode"]);
+  });
+
+  // #329 (additional): the Launcher and the golden snapshot pipeline (#330) name the same things
+  it("agrees with the golden snapshot pipeline on the script, the image tag and the region", () => {
+    expect(VM_PREPARE_PATH).toBe(PATHS.vmPrepareInstalled);
+    expect(SANDBOX_IMAGE_REFERENCE).toBe(DEFAULT_CONFIG.imageTag);
+    expect(SANDBOX_REGION).toBe(DEFAULT_CONFIG.region);
   });
 
   // #329 (additional): the container is the shared hardened spec

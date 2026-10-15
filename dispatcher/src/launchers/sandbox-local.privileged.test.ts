@@ -3,8 +3,8 @@
 // The privileged lane of the Sandbox-Launcher (#329-T09, T10): the local mode of the Sandbox double with a REAL Docker
 // daemon and the REAL Worker image, against the fake App. It needs a daemon the user may use and an image built from
 // the `sandbox` target (docker build --file runner/Dockerfile --target sandbox); it fails, naming the missing item,
-// and never skips. `make test-sandbox-local` runs it; the CI job `sandbox-local` runs it for pull requests that touch
-// the Dispatcher, the Worker image or the docker/ directory.
+// and never skips. `make test-sandbox-local` runs it. The `sandbox` target and the `worker-once` entry mode it needs
+// arrive with #324; a CI job for the lane follows once they are on `development`.
 //
 //   SANDBOX_LOCAL_IMAGE      the image reference built locally (required)
 //   SANDBOX_LOCAL_APP_HOST   where a container reaches this machine; the docker0 gateway 172.17.0.1 by default.

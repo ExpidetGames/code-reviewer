@@ -5,6 +5,7 @@ import { ConfigError } from "../config.ts";
 import { noLauncher } from "./none.ts";
 import { sandboxFromEnvironment } from "./sandbox-env.ts";
 import { recordingLogger } from "../test-support/harness.ts";
+import { GoldenRecordSchema } from "../snapshot/record.ts";
 import { loadSettings } from "../config.ts";
 import type { SandboxSdk } from "./vercel-sandbox.ts";
 
@@ -69,6 +70,34 @@ describe("the Sandbox-Launcher's configuration from the environment", () => {
     expect(
       await launcher.capabilities(new AbortController().signal),
     ).toStrictEqual(["pr-agent"]);
+  });
+
+  // #329 (additional): the record of the golden snapshot pipeline (#330) is what these variables hold
+  it("accepts the snapshot id and the image id of a golden snapshot record as they are", () => {
+    const record = GoldenRecordSchema.parse({
+      version: 1,
+      snapshotId: "snap_dummy_golden_0001",
+      imageDigest: IMAGE_DIGEST,
+      builtAt: "2026-10-15T12:00:00.000Z",
+      region: "fra1",
+      target: "sandbox",
+    });
+
+    const sandbox = sandboxFromEnvironment(
+      {
+        SANDBOX_SNAPSHOT_ID: record.snapshotId,
+        SANDBOX_IMAGE_DIGEST: record.imageDigest,
+      },
+      never,
+    );
+
+    expect(
+      sandbox.launcher({
+        settings: loadSettings(BASE),
+        logger: recordingLogger(),
+        background: () => undefined,
+      }),
+    ).not.toBe(noLauncher);
   });
 
   // #329 (additional)
