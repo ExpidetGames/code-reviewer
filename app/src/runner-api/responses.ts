@@ -83,3 +83,21 @@ export function unauthorized(): Response {
     { "WWW-Authenticate": "Bearer" },
   );
 }
+
+/**
+ * The one answer of the Worker API to a credential that is not the job's: missing, malformed, the
+ * dispatcher credential, for another job, of an earlier claim, or for a job that does not exist. Same
+ * status, headers and body in every case, so it says nothing about which jobs exist or how close a guess was.
+ */
+export function workerUnauthorized(): Response {
+  return jsonResponse(
+    401,
+    {
+      error: {
+        code: "WORKER_CREDENTIAL_INVALID",
+        message: MESSAGES.WORKER_CREDENTIAL_INVALID,
+      },
+    } satisfies ErrorResponse,
+    { "WWW-Authenticate": "Bearer" },
+  );
+}

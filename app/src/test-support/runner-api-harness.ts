@@ -16,10 +16,19 @@ import { createWorkspaceLlm } from "../llm/assemble.ts";
 import type { ModelCapabilityChecker } from "../llm/model-capabilities.ts";
 import { createRunnerApi } from "../runner-api/api.ts";
 import {
+  createWorkerApi,
+  type WorkerApiDeps,
+} from "../runner-api/worker-api.ts";
+import {
   allowAllClaimGuard,
   type ClaimGuard,
 } from "../runner-api/claim-guard.ts";
-import type { ClaimResponse, RunnerResult } from "../runner-api/contract.ts";
+import type {
+  ClaimResponse,
+  RunnerResult,
+  SplitClaimResponse,
+  WorkerJobDetailsResponse,
+} from "../runner-api/contract.ts";
 import {
   emptyJobOptionsSource,
   type JobOptionsSource,
@@ -185,7 +194,7 @@ export async function startRunnerApiHarness(
       appSecret: () => TEST_APP_SECRET,
       now: fixture.clock.now,
     });
-    const api = createRunnerApi({
+    const apiDeps: WorkerApiDeps = {
       queue: options.wrapQueue?.(fixture.queue) ?? fixture.queue,
       repositories: (workspaceId) =>
         createRepositoriesRepository(
@@ -240,15 +249,20 @@ export async function startRunnerApiHarness(
       now: fixture.clock.now,
       logger,
       heartbeatIntervalSeconds: 30,
-      runnerToken: () => configuredRunnerToken(env),
       knownSecrets: async (workspaceId) => [
         ...knownSecretsFromEnv(env),
         ...(await llm.currentKeysFor(workspaceId)),
       ],
+    };
+    const api = createRunnerApi({
+      ...apiDeps,
+      runnerToken: () => configuredRunnerToken(env),
     });
-    return { api, llm, claimedKeys };
+    // #320: the Worker API over the same collaborators (it has no dispatcher credential).
+    const workerApi = createWorkerApi(apiDeps);
+    return { api, workerApi, llm, claimedKeys };
   }
-  const { api, llm, claimedKeys } = buildApi();
+  const { api, workerApi, llm, claimedKeys } = buildApi();
   /** Saves (or, with null, removes) the LLM key of the workspace of the jobs. */
   async function setLlmKey(key: string | null): Promise<void> {
     const keys = llm.keyServiceFor(fixture.workspaceId);
@@ -341,6 +355,7 @@ export async function startRunnerApiHarness(
     const other = buildApi();
     return {
       claimedKeys: other.claimedKeys,
+      workerApi: other.workerApi,
       claim: (request: RequestOptions = {}) =>
         other.api.claim(claimRequest(request)),
       complete: (
@@ -382,6 +397,112 @@ export async function startRunnerApiHarness(
   const snapshotJobs = () =>
     fixture.db.selectFrom("jobs").selectAll().orderBy("id").execute();
 
+  const workerUrl = "https://app.test/api/workers/v1";
+
+  /** What a Worker sends: the bearer credential, nothing else (no runner id). */
+  function workerHeaders(
+    credential: string | null,
+    extra: Record<string, string> = {},
+  ): Headers {
+    const result = new Headers(extra);
+    if (credential !== null)
+      result.set("authorization", `Bearer ${credential}`);
+    return result;
+  }
+
+  /** The claim of a Dispatcher: the dispatcher credential and the feature `worker_credential` (#320). */
+  function claimSplit(
+    request: RequestOptions & { engines?: string[] } = {},
+    target: typeof api = api,
+  ): Promise<Response> {
+    return target.claim(
+      claimRequest({
+        engines: ["pr-agent"],
+        ...request,
+        features: ["worker_credential", ...(request.features ?? [])],
+      }),
+    );
+  }
+
+  /** Claims the next job as a Dispatcher and returns the parsed split answer. */
+  async function claimedSplit(
+    request?: RequestOptions & { engines?: string[] },
+  ): Promise<SplitClaimResponse> {
+    const response = await claimSplit(request);
+    if (response.status !== 200)
+      throw new Error(`Expected a job, got ${response.status}.`);
+    return (await response.json()) as SplitClaimResponse;
+  }
+
+  /** The Worker API as a Worker calls it. `credential: null` sends no header. */
+  const worker = {
+    details: (
+      jobId: string,
+      credential: string | null,
+      features?: string,
+      target: typeof workerApi = workerApi,
+    ) =>
+      target.details(
+        new Request(
+          `${workerUrl}/jobs/${jobId}${features === undefined ? "" : `?features=${features}`}`,
+          { method: "GET", headers: workerHeaders(credential) },
+        ),
+        jobId,
+      ),
+    heartbeat: (
+      jobId: string,
+      credential: string | null,
+      body: string = "{}",
+    ) =>
+      workerApi.heartbeat(
+        new Request(`${workerUrl}/jobs/${jobId}/heartbeat`, {
+          method: "POST",
+          headers: workerHeaders(credential, {
+            "content-type": "application/json",
+          }),
+          body,
+        }),
+        jobId,
+      ),
+    /** `body` is sent as JSON, or as it is if it is a string; a result alone is wrapped as `{ result }`. */
+    result: (
+      jobId: string,
+      credential: string | null,
+      result: Partial<RunnerResult> | string = {},
+      target: typeof workerApi = workerApi,
+    ) =>
+      target.result(
+        new Request(`${workerUrl}/jobs/${jobId}/result`, {
+          method: "POST",
+          headers: workerHeaders(credential, {
+            "content-type": "application/json",
+          }),
+          body:
+            typeof result === "string"
+              ? result
+              : JSON.stringify({ result: goodResult(result) }),
+        }),
+        jobId,
+      ),
+  };
+
+  /** Claims as a Dispatcher and fetches the job as its Worker: the credential and the job details. */
+  async function startedWorker(features?: string) {
+    const claim = await claimedSplit();
+    const response = await worker.details(
+      claim.job.id,
+      claim.job.credential,
+      features,
+    );
+    if (response.status !== 200)
+      throw new Error(`Expected the job details, got ${response.status}.`);
+    return {
+      jobId: claim.job.id,
+      credential: claim.job.credential,
+      details: (await response.json()) as WorkerJobDetailsResponse,
+    };
+  }
+
   /** Claims the next job and returns the parsed answer. */
   async function claimed(request?: RequestOptions) {
     const response = await claim(request);
@@ -410,6 +531,11 @@ export async function startRunnerApiHarness(
     projectService,
     reviewSettings,
     api,
+    workerApi,
+    worker,
+    claimSplit,
+    claimedSplit,
+    startedWorker,
     anotherInstance,
     claim,
     claimed,
