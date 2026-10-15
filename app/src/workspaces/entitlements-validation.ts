@@ -18,6 +18,12 @@ export const ENTITLEMENT_ERROR_CODES = [
   "key_mode_invalid",
   "limits_invalid",
   "limit_invalid",
+  /**
+   * A cost limit next to the own key (#277): the cost limit only counts runs on the operator's key, so it
+   * would be stored and never read. Refused on a write; a stored entry of that shape still reads (the limit
+   * is ignored).
+   */
+  "cost_limit_requires_managed_key",
   "period_start_invalid",
   "period_start_in_future",
   "period_start_backwards",
@@ -167,6 +173,17 @@ function check(input: unknown, mode: CheckMode): EntitlementsValidation {
     return limits.field === undefined
       ? { ok: false, code: limits.code }
       : { ok: false, code: limits.code, field: limits.field };
+
+  if (
+    !mode.reading &&
+    input.keyMode === "own" &&
+    limits.value.managedCostLimitMicroUsd !== null
+  )
+    return {
+      ok: false,
+      code: "cost_limit_requires_managed_key",
+      field: "managedCostLimitMicroUsd",
+    };
 
   const periodStart = canonicalUtcTime(input.periodStart);
   if (periodStart === undefined)

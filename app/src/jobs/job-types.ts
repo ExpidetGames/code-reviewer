@@ -143,6 +143,12 @@ export const JOB_ERROR_CODES = [
   "command_removed",
   /** Failed because no Dispatcher took the job within the give-up time of a hosted deployment (#328). */
   "dispatch_unavailable",
+  /** Failed at claim because an operator suspended the workspace's reviews (#277). */
+  "workspace_suspended",
+  /** Failed at claim because the workspace used up a limit of its period (#277; the log names which). */
+  "quota_exhausted",
+  /** Failed at claim because the workspace's entitlements could not be read; never treated as unlimited (#277). */
+  "entitlements_invalid",
 ] as const;
 export type JobErrorCode = (typeof JOB_ERROR_CODES)[number];
 

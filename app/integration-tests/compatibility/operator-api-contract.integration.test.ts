@@ -379,7 +379,12 @@ describe("what the app accepts", () => {
   const GOOD: unknown[] = [
     WRITE,
     WITHOUT_START,
-    { ...WRITE, keyMode: "own" },
+    // #277: the own key takes no cost limit (cost_limit_requires_managed_key), so it is sent without one.
+    {
+      ...WRITE,
+      keyMode: "own",
+      limits: { ...WRITE.limits, managedCostLimitMicroUsd: null },
+    },
     { ...WRITE, limits: { ...WRITE.limits, diffRunsPerPeriod: 0 } },
     {
       ...WRITE,
@@ -398,6 +403,13 @@ describe("what the app accepts", () => {
     "text",
     {},
     { ...WRITE, keyMode: "shared" },
+    // #277: a cost limit, even 0, next to the own key.
+    { ...WRITE, keyMode: "own" },
+    {
+      ...WRITE,
+      keyMode: "own",
+      limits: { ...WRITE.limits, managedCostLimitMicroUsd: 0 },
+    },
     { ...WRITE, planLabel: "" },
     { ...WRITE, planLabel: "x".repeat(65) },
     { ...WRITE, suspended: "no" },

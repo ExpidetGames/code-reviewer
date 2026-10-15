@@ -23,7 +23,8 @@ function limits(overrides: Record<string, unknown> = {}): unknown {
 function input(overrides: Record<string, unknown> = {}): unknown {
   return {
     planLabel: "team",
-    keyMode: "own",
+    // "managed": the own key takes no cost limit (#277), and the default input carries one.
+    keyMode: "managed",
     limits: limits({ diffRunsPerPeriod: 10, managedCostLimitMicroUsd: 0 }),
     periodStart: "2026-10-01T00:00:00.000Z",
     suspended: false,
@@ -40,7 +41,7 @@ describe("validating entitlements", () => {
       ok: true,
       value: {
         planLabel: "team",
-        keyMode: "own",
+        keyMode: "managed",
         limits: {
           diffRunsPerPeriod: 10,
           dynamicRunsPerPeriod: null,
@@ -248,6 +249,70 @@ describe("validating entitlements", () => {
   it("refuses an input that is not an object", () => {
     for (const bad of [null, undefined, "x", 1, []])
       expect(validateEntitlements(bad, NOW)).toMatchObject({ ok: false });
+  });
+});
+
+describe("the cost limit and the key mode (#277)", () => {
+  // #277-P2
+  it("refuses a cost limit, even 0, next to the own key: nothing would read it", () => {
+    for (const cost of [0, 5_000_000])
+      expect(
+        validateEntitlements(
+          input({
+            keyMode: "own",
+            limits: limits({ managedCostLimitMicroUsd: cost }),
+          }),
+          NOW,
+        ),
+      ).toEqual({
+        ok: false,
+        code: "cost_limit_requires_managed_key",
+        field: "managedCostLimitMicroUsd",
+      });
+  });
+
+  // #277-P2
+  it("accepts a cost limit with the managed key, and the own key without one", () => {
+    expect(
+      validateEntitlements(
+        input({
+          keyMode: "managed",
+          limits: limits({ managedCostLimitMicroUsd: 5_000_000 }),
+        }),
+        NOW,
+      ),
+    ).toMatchObject({ ok: true });
+    expect(
+      validateEntitlements(input({ keyMode: "own", limits: limits() }), NOW),
+    ).toMatchObject({ ok: true });
+  });
+
+  // #277-P2
+  it("still reads a stored entry of that shape, so an existing entry keeps working", () => {
+    expect(
+      readEntitlements(
+        input({
+          keyMode: "own",
+          limits: limits({ managedCostLimitMicroUsd: 5_000_000 }),
+        }),
+      ),
+    ).toMatchObject({
+      keyMode: "own",
+      limits: { managedCostLimitMicroUsd: 5_000_000 },
+    });
+  });
+
+  // #277-P2
+  it("reports a bad key mode before the cost limit", () => {
+    expect(
+      validateEntitlements(
+        input({
+          keyMode: "shared",
+          limits: limits({ managedCostLimitMicroUsd: 1 }),
+        }),
+        NOW,
+      ),
+    ).toEqual({ ok: false, code: "key_mode_invalid" });
   });
 });
 

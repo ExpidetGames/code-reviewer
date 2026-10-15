@@ -40,7 +40,7 @@ is shown. The "Started by" line is `Automatic`, `Comment by <login>` or `Started
 The **review kind** the run was queued for (#200, `Diff Review` or `Dynamic Review`, `review-settings/kind-names.ts`)
 is a "Review kind" fact in the detail summary; the list marks only a Dynamic Review run with a small
 badge, since Diff Review is the default. The codes a Dynamic project's run can end with
-(`dynamic_review_disabled`, `no_capable_runner`, `dispatch_unavailable` (#328: no Worker was started within the give-up time of a hosted deployment) and the Dynamic failure codes) are translated in
+(`dynamic_review_disabled`, `no_capable_runner`, `dispatch_unavailable` (#328: no Worker was started within the give-up time of a hosted deployment), the three refusals for the plan of the workspace (#277: `workspace_suspended`, `quota_exhausted`, `entitlements_invalid`; their sentences say a run did not start and no model was used, and carry no number) and the Dynamic failure codes) are translated in
 `error-copy.ts` like every other code; a test requires a sentence for each.
 
 ## Polling

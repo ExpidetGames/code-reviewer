@@ -76,8 +76,13 @@ A change takes effect on the next claim; a running job is not touched.
 The whole entitlements (`planLabel`, `keyMode`, `limits` with every limit, `periodStart`, `suspended`,
 `suspensionCode`), validated by `validateEntitlements` of #271 (unknown keys are refused). A refusal is `422` with
 the stable code of the validation (`plan_label_invalid`, `key_mode_invalid`, `limits_invalid`, `limit_invalid`,
-`period_start_invalid`, `period_start_in_future`, `suspended_invalid`, `suspension_code_invalid`,
-`entitlements_invalid`), or `409 period_start_backwards`.
+`cost_limit_requires_managed_key`, `period_start_invalid`, `period_start_in_future`, `suspended_invalid`,
+`suspension_code_invalid`, `entitlements_invalid`), or `409 period_start_backwards`.
+
+`managedCostLimitMicroUsd` counts the cost of runs on the operator's key, so a non-null value (even `0`) with
+`keyMode: "own"` is refused as `cost_limit_requires_managed_key` (field `managedCostLimitMicroUsd`). Send `null` for it,
+or switch the key mode. An entry of that shape that was stored before this rule keeps working: it reads back as it was
+and the limit is ignored (the app logs it once per workspace).
 
 Limits are JSON numbers. A number above 2^53 − 1 loses precision when JSON is parsed, so it can never be stored
 as sent: it is refused as `limit_invalid`, not rounded.
