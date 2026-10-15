@@ -76,6 +76,11 @@ The App, the Dispatcher (TypeScript) and the Worker (Python) agree on these file
   closed objects and the same vectors, with a verifier written independently of the TypeScript one. `runner/tests/contract/test_worker_api_client_contract.py` runs the
   Worker's API client (#323) against a recording server that answers with the examples: the routes, the credential only in
   `Authorization`, request bodies valid against the schemas, an additive field of an answer ignored.
+- **App, sending side** (#326; `app/src/dispatch/`): `request.test.ts` builds the request the app sends and holds it to
+  the example and to the signing vectors (the signature of every vector that verifies is reproduced; the reference
+  receiver of `fakes/dispatcher-app/signing.ts` accepts the app's request and rejects a tampered body, an old
+  timestamp and an unknown key id); `service.integration.test.ts` sends to a stand-in receiver
+  (`app/src/test-support/fake-dispatch-receiver.ts`) that verifies every call with that reference.
 - **Dispatcher** (`dispatcher/`, #327; `dispatcher/src/contracts.test.ts`, `src/triggers/signature.test.ts`):
   validates the same examples with Ajv, checks that its closed webhook body and its reading of the split claim
   answer agree with the schemas, and runs every signing vector against its own receiver and the reference verifier.

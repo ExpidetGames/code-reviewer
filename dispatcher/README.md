@@ -58,6 +58,15 @@ runs that kind; nothing is claimed), `429` or `503` with `Retry-After`.
 6. Logs go through a masker: the dispatcher token, the signing secrets and anything shaped like a job credential or an
    `Authorization` value are replaced. Only stable codes are logged for an error, never its text.
 
+## The sender
+
+The App sends the call (`app/src/dispatch/README.md`, #326) when it runs with `RUNNER_DISPATCH=webhook`: `RUNNER_WEBHOOK_URL`
+is this project's `/dispatch`, and `RUNNER_WEBHOOK_SECRET` / `RUNNER_WEBHOOK_KEY_ID` are `DISPATCHER_SIGNING_SECRET` /
+`DISPATCHER_SIGNING_KEY_ID`. It reads only the status (and `Retry-After` of `429`/`503`) of the answer: `202` is
+acknowledged, `200 ignored` with `not_claimable` is sent again after two minutes, with `not_capable` never again; `429`
+and `503` are retried after `Retry-After` or the back-off, whichever is longer; any other status waits half an hour and
+raises an alert in the App's log.
+
 ## The Launcher
 
 ```ts

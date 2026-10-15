@@ -2,8 +2,14 @@
 
 // The dispatch webhook against a real SQLite database (#326): the hook on the job queue, the signed request
 // to a stand-in for the Dispatcher, the rows of `job_dispatches`, and the resends the sweep (#328) will drive
-// through `sendDue`. The Postgres behavior is the same SQL; the queue itself is proven on Postgres elsewhere.
-import { describe, expect, it } from "vitest";
+// through `sendDue`. On SQLite and, when TEST_DATABASE_URL is set, on Postgres (CI).
+import type { Kysely } from "kysely";
+import { describe, expect, it as vitestIt } from "vitest";
+import type { Database } from "../db/schema.ts";
+import {
+  createPostgresTestDatabase,
+  hasPostgres,
+} from "../test-support/postgres-test-database.ts";
 import { createJobDispatchesRepository } from "../db/repositories/job-dispatches-repository.ts";
 import { createJobQueue } from "../jobs/job-queue.ts";
 import type { EnqueueJobInput, EnqueueResult } from "../jobs/job-types.ts";
@@ -36,8 +42,25 @@ const webhookConfig: WebhookDispatchConfig = {
   previousKey: PREVIOUS,
 };
 
-async function setup(options: { dynamicReview?: boolean } = {}) {
+const databases: Array<
+  [string, (() => Promise<Kysely<Database>>) | undefined]
+> = [
+  ["SQLite", undefined],
+  [
+    "Postgres",
+    hasPostgres()
+      ? async () => (await createPostgresTestDatabase({ poolMax: 12 })).db
+      : undefined,
+  ],
+];
+
+async function setupOn(
+  open: (() => Promise<Kysely<Database>>) | undefined,
+  options: { dynamicReview?: boolean } = {},
+) {
+  const database = await open?.();
   const fixture = await createJobQueueFixture({
+    ...(database === undefined ? {} : { database }),
     ...(options.dynamicReview === true ? { dynamicReview: true } : {}),
   });
   const receiver = createFakeDispatchReceiver({
@@ -96,545 +119,561 @@ async function setup(options: { dynamicReview?: boolean } = {}) {
   };
 }
 
-describe("the dispatch webhook after a job is queued", () => {
-  // #326-T01
-  it("sends one signed request for a new job, and the receiver's verdict is ok", async () => {
-    const t = await setup();
+describe.each(databases)("the dispatch webhook on %s", (name, open) => {
+  const it =
+    name === "Postgres" && open === undefined ? vitestIt.skip : vitestIt;
+  const setup = (options: { dynamicReview?: boolean } = {}) =>
+    setupOn(open, options);
 
-    const result = await t.enqueue();
-    await t.settled();
+  describe("the dispatch webhook after a job is queued", () => {
+    // #326-T01
+    it("sends one signed request for a new job, and the receiver's verdict is ok", async () => {
+      const t = await setup();
 
-    expect(result.status).toBe("created");
-    expect(t.receiver.received).toHaveLength(1);
-    const call = t.receiver.received[0];
-    expect(call?.verdict).toBe("ok");
-    expect(call?.url).toBe(URL_OK);
-    expect(call?.headers["x-dispatch-key-id"]).toBe("k2");
-    expect(call?.body).toEqual({
-      version: 1,
-      type: "job.ready",
-      jobId: result.job.id,
-      reviewKind: "diff",
-      attempt: 1,
-      dispatchId: call?.headers["x-dispatch-id"],
-      sentAt: t.fixture.clock.now().toISOString(),
+      const result = await t.enqueue();
+      await t.settled();
+
+      expect(result.status).toBe("created");
+      expect(t.receiver.received).toHaveLength(1);
+      const call = t.receiver.received[0];
+      expect(call?.verdict).toBe("ok");
+      expect(call?.url).toBe(URL_OK);
+      expect(call?.headers["x-dispatch-key-id"]).toBe("k2");
+      expect(call?.body).toEqual({
+        version: 1,
+        type: "job.ready",
+        jobId: result.job.id,
+        reviewKind: "diff",
+        attempt: 1,
+        dispatchId: call?.headers["x-dispatch-id"],
+        sentAt: t.fixture.clock.now().toISOString(),
+      });
+      const row = await t.dispatches.get(result.job.id);
+      expect(row).toMatchObject({
+        state: "acked",
+        attempts: 1,
+        consecutiveFailures: 0,
+        lastStatus: 202,
+        lastCode: "accepted",
+        ackedAt: t.fixture.clock.now().toISOString(),
+      });
     });
-    const row = await t.dispatches.get(result.job.id);
-    expect(row).toMatchObject({
-      state: "acked",
-      attempts: 1,
-      consecutiveFailures: 0,
-      lastStatus: 202,
-      lastCode: "accepted",
-      ackedAt: t.fixture.clock.now().toISOString(),
+
+    // #326-T01
+    it("names the review kind of a Dynamic job", async () => {
+      const t = await setup({ dynamicReview: true });
+
+      const result = await t.enqueue({ reviewKind: "dynamic" });
+      await t.settled();
+
+      expect(result.job.reviewKind).toBe("dynamic");
+      expect(t.receiver.received.map((call) => call.body?.reviewKind)).toEqual([
+        "dynamic",
+      ]);
     });
-  });
 
-  // #326-T01
-  it("names the review kind of a Dynamic job", async () => {
-    const t = await setup({ dynamicReview: true });
+    // #326-T06
+    it("does nothing for a job that was created already failed (Dynamic Review is off)", async () => {
+      const t = await setup();
 
-    const result = await t.enqueue({ reviewKind: "dynamic" });
-    await t.settled();
+      const result = await t.enqueue({ reviewKind: "dynamic" });
+      await t.settled();
 
-    expect(result.job.reviewKind).toBe("dynamic");
-    expect(t.receiver.received.map((call) => call.body?.reviewKind)).toEqual([
-      "dynamic",
-    ]);
-  });
-
-  // #326-T06
-  it("does nothing for a job that was created already failed (Dynamic Review is off)", async () => {
-    const t = await setup();
-
-    const result = await t.enqueue({ reviewKind: "dynamic" });
-    await t.settled();
-
-    expect(result.job.status).toBe("failed");
-    expect(t.receiver.received).toHaveLength(0);
-    expect(await t.rows()).toEqual([]);
-  });
-
-  // #326-T06
-  it("leaves the job queued and the enqueue unaffected when the endpoint hangs", async () => {
-    const t = await setup();
-    t.receiver.reply("hang");
-
-    const result = await t.enqueue();
-    // The enqueue came back while the send was still waiting for the endpoint.
-    expect((await t.queue.get(result.job.id))?.status).toBe("queued");
-    await t.settled();
-
-    expect((await t.queue.get(result.job.id))?.status).toBe("queued");
-    expect(await t.dispatches.get(result.job.id)).toMatchObject({
-      state: "pending",
-      attempts: 1,
-      consecutiveFailures: 1,
-      lastStatus: null,
-      lastCode: "timeout",
+      expect(result.job.status).toBe("failed");
+      expect(t.receiver.received).toHaveLength(0);
+      expect(await t.rows()).toEqual([]);
     });
-  });
 
-  // #326-T06
-  it("leaves the job queued when the connection fails or the endpoint answers 500", async () => {
-    const t = await setup();
-    t.receiver.reply({ fails: "connect ECONNREFUSED" }, { status: 500 });
+    // #326-T06
+    it("leaves the job queued and the enqueue unaffected when the endpoint hangs", async () => {
+      const t = await setup();
+      t.receiver.reply("hang");
 
-    const first = await t.enqueue({
-      prNumber: 1,
-      prUrl: "https://github.test/acme/widgets/pull/1",
-    });
-    const second = await t.enqueue({
-      prNumber: 2,
-      prUrl: "https://github.test/acme/widgets/pull/2",
-    });
-    await t.settled();
-
-    for (const result of [first, second])
+      const result = await t.enqueue();
+      // The enqueue came back while the send was still waiting for the endpoint.
       expect((await t.queue.get(result.job.id))?.status).toBe("queued");
-    expect(
-      (await t.rows()).map((row) => [row.last_code, row.consecutive_failures]),
-    ).toEqual(
-      expect.arrayContaining([
-        ["network_error", 1],
-        ["server_error", 1],
-      ]),
-    );
-  });
+      await t.settled();
 
-  // #326-T06
-  it("never rejects, even when the database under the dispatch fails", async () => {
-    const t = await setup();
-    await t.fixture.db.schema.dropTable("job_dispatches").execute();
-
-    const result = await t.enqueue();
-    await expect(t.settled()).resolves.toBeUndefined();
-
-    expect((await t.queue.get(result.job.id))?.status).toBe("queued");
-    expect(t.receiver.received).toHaveLength(0);
-    expect(t.logs.error).toHaveLength(1);
-    expect(t.logs.error[0]).toContain(
-      `[dispatch] DISPATCH_FAILED job=${result.job.id}`,
-    );
-  });
-});
-
-describe("the resends", () => {
-  // #326-T03
-  it("resends on the back-off schedule after a 5xx and then marks the job acknowledged", async () => {
-    const t = await setup();
-    t.receiver.reply({ status: 502 }, { status: 504 }, accepted);
-
-    const { job } = await t.enqueue();
-    await t.settled();
-    expect(t.receiver.received).toHaveLength(1);
-    expect(await t.dispatches.get(job.id)).toMatchObject({
-      state: "pending",
-      consecutiveFailures: 1,
-      lastStatus: 502,
-      nextDispatchAt: new Date(
-        t.fixture.clock.now().getTime() + 10 * SECOND,
-      ).toISOString(),
+      expect((await t.queue.get(result.job.id))?.status).toBe("queued");
+      expect(await t.dispatches.get(result.job.id)).toMatchObject({
+        state: "pending",
+        attempts: 1,
+        consecutiveFailures: 1,
+        lastStatus: null,
+        lastCode: "timeout",
+      });
     });
 
-    // Not yet due: nothing is sent.
-    t.fixture.clock.advance(9 * SECOND);
-    expect(await t.service.sendDue()).toEqual({ sent: 0 });
-    expect(t.receiver.received).toHaveLength(1);
+    // #326-T06
+    it("leaves the job queued when the connection fails or the endpoint answers 500", async () => {
+      const t = await setup();
+      t.receiver.reply({ fails: "connect ECONNREFUSED" }, { status: 500 });
 
-    t.fixture.clock.advance(1 * SECOND);
-    expect(await t.service.sendDue()).toEqual({ sent: 1 });
-    expect(t.receiver.received).toHaveLength(2);
-    expect(await t.dispatches.get(job.id)).toMatchObject({
-      consecutiveFailures: 2,
-      lastStatus: 504,
-      attempts: 2,
-      nextDispatchAt: new Date(
-        t.fixture.clock.now().getTime() + 30 * SECOND,
-      ).toISOString(),
-    });
-
-    t.fixture.clock.advance(30 * SECOND);
-    expect(await t.service.sendDue()).toEqual({ sent: 1 });
-    expect(await t.dispatches.get(job.id)).toMatchObject({
-      state: "acked",
-      consecutiveFailures: 0,
-      attempts: 3,
-      lastCode: "accepted",
-    });
-    // Every send is a new call: a new dispatch id, and every one verifies.
-    expect(
-      new Set(t.receiver.received.map((c) => c.body?.dispatchId)).size,
-    ).toBe(3);
-    expect(t.receiver.received.map((c) => c.verdict)).toEqual([
-      "ok",
-      "ok",
-      "ok",
-    ]);
-  });
-
-  // #326-T03
-  it("follows 10 s, 30 s, 2 min, 5 min and then 15 min while the receiver keeps failing", async () => {
-    const t = await setup();
-    t.receiver.reply(...Array.from({ length: 7 }, () => ({ status: 500 })));
-
-    const { job } = await t.enqueue();
-    await t.settled();
-    const waits: number[] = [];
-    for (let step = 0; step < 6; step += 1) {
-      const row = await t.dispatches.get(job.id);
-      const wait =
-        Date.parse(row?.nextDispatchAt ?? "") - t.fixture.clock.now().getTime();
-      waits.push(wait);
-      t.fixture.clock.advance(wait);
-      await t.service.sendDue();
-    }
-
-    expect(waits).toEqual([
-      10 * SECOND,
-      30 * SECOND,
-      2 * MINUTE,
-      5 * MINUTE,
-      15 * MINUTE,
-      15 * MINUTE,
-    ]);
-    expect(t.receiver.received).toHaveLength(7);
-  });
-
-  // #326-T04
-  it("waits for a Retry-After that is longer than the schedule", async () => {
-    const t = await setup();
-    t.receiver.reply({ status: 429, headers: { "retry-after": "600" } });
-
-    const { job } = await t.enqueue();
-    await t.settled();
-
-    expect(await t.dispatches.get(job.id)).toMatchObject({
-      lastCode: "rate_limited",
-      nextDispatchAt: new Date(
-        t.fixture.clock.now().getTime() + 600 * SECOND,
-      ).toISOString(),
-    });
-    t.fixture.clock.advance(599 * SECOND);
-    expect(await t.service.sendDue()).toEqual({ sent: 0 });
-    t.fixture.clock.advance(1 * SECOND);
-    expect(await t.service.sendDue()).toEqual({ sent: 1 });
-    expect(t.receiver.received).toHaveLength(2);
-  });
-
-  // #326-T05
-  it("waits long after any other 4xx, raises an alert, and does not loop hot", async () => {
-    const t = await setup();
-    t.receiver.reply({ status: 401, body: '{"error":"nope"}' });
-
-    const { job } = await t.enqueue();
-    await t.settled();
-
-    expect(await t.dispatches.get(job.id)).toMatchObject({
-      state: "pending",
-      lastStatus: 401,
-      lastCode: "rejected",
-      nextDispatchAt: new Date(
-        t.fixture.clock.now().getTime() + REJECTED_BACKOFF_MS,
-      ).toISOString(),
-    });
-    expect(t.logs.error).toHaveLength(1);
-    expect(t.logs.error[0]).toContain("DISPATCH_REJECTED");
-    expect(t.logs.error[0]).toContain("status=401");
-    // The sweep may run every minute for half an hour; nothing is sent.
-    for (let minute = 0; minute < 29; minute += 1) {
-      t.fixture.clock.advance(MINUTE);
-      expect(await t.service.sendDue()).toEqual({ sent: 0 });
-    }
-    expect(t.receiver.received).toHaveLength(1);
-    t.fixture.clock.advance(MINUTE);
-    expect(await t.service.sendDue()).toEqual({ sent: 1 });
-  });
-
-  // #326-T03
-  it("resends after the acknowledgement timeout when the job is still queued, and says which attempt it is on", async () => {
-    const t = await setup();
-    const { job } = await t.enqueue();
-    await t.settled();
-    expect(t.receiver.received).toHaveLength(1);
-
-    // A Dispatcher claimed it and gave it back (a failed launch): queued again, one attempt lost.
-    const claim = await t.fixture.queue.claimNext("dispatcher-a");
-    expect(claim?.job.id).toBe(job.id);
-    await t.fixture.queue.release(
-      job.id,
-      claim?.leaseToken ?? "",
-      "launch_failed",
-    );
-
-    t.fixture.clock.advance(ACK_TIMEOUT_MS - 1);
-    expect(await t.service.sendDue()).toEqual({ sent: 0 });
-    t.fixture.clock.advance(1);
-    expect(await t.service.sendDue()).toEqual({ sent: 1 });
-    expect(t.receiver.received.map((c) => c.body?.attempt)).toEqual([1, 2]);
-  });
-
-  // #326-T03
-  it("does not resend a job that was claimed in time", async () => {
-    const t = await setup();
-    const { job } = await t.enqueue();
-    await t.settled();
-    const claim = await t.fixture.queue.claimNext("dispatcher-a");
-    expect(claim?.job.id).toBe(job.id);
-
-    t.fixture.clock.advance(10 * MINUTE);
-    expect(await t.service.sendDue()).toEqual({ sent: 0 });
-    expect(t.receiver.received).toHaveLength(1);
-  });
-
-  // #326-T03
-  it("resends after the acknowledgement timeout when the job was not claimable", async () => {
-    const t = await setup();
-    t.receiver.reply(ignored("not_claimable"));
-
-    const { job } = await t.enqueue();
-    await t.settled();
-
-    expect(await t.dispatches.get(job.id)).toMatchObject({
-      state: "pending",
-      lastCode: "ignored_not_claimable",
-      consecutiveFailures: 0,
-      nextDispatchAt: new Date(
-        t.fixture.clock.now().getTime() + ACK_TIMEOUT_MS,
-      ).toISOString(),
-    });
-    t.fixture.clock.advance(ACK_TIMEOUT_MS);
-    expect(await t.service.sendDue()).toEqual({ sent: 1 });
-  });
-
-  // #326-T03
-  it("stops resending a job whose kind the receiver cannot run", async () => {
-    const t = await setup();
-    t.receiver.reply(ignored("not_capable"));
-
-    const { job } = await t.enqueue();
-    await t.settled();
-
-    expect(await t.dispatches.get(job.id)).toMatchObject({
-      state: "stopped",
-      lastCode: "ignored_not_capable",
-    });
-    t.fixture.clock.advance(24 * 60 * MINUTE);
-    expect(await t.service.sendDue()).toEqual({ sent: 0 });
-    expect(t.receiver.received).toHaveLength(1);
-  });
-
-  // #326-T03
-  it("sends a queued job that has no row (its row was never written), once", async () => {
-    const t = await setup();
-    // Queued by an instance that did not run the hook (or lost it): no row at all.
-    const bare = await t.fixture.enqueue();
-    expect(bare.status).toBe("created");
-
-    const [first, second] = await Promise.all([
-      t.service.sendDue(),
-      t.service.sendDue(),
-    ]);
-
-    expect(first.sent + second.sent).toBe(1);
-    expect(t.receiver.received).toHaveLength(1);
-    expect(t.receiver.received[0]?.body?.jobId).toBe(bare.job.id);
-    expect(await t.dispatches.get(bare.job.id)).toMatchObject({
-      state: "acked",
-      attempts: 1,
-    });
-  });
-
-  // #326-T03
-  it("lets the sweep find due work through the repository's listing of due jobs", async () => {
-    const t = await setup();
-    const first = await t.fixture.enqueue();
-    const second = await t.fixture.enqueue({
-      prNumber: 9,
-      prUrl: "https://github.test/acme/widgets/pull/9",
-    });
-    const claim = await t.fixture.queue.claimNext("dispatcher-a");
-    const running = claim?.job.id;
-    const waiting = running === first.job.id ? second : first;
-
-    const due = await t.dispatches.listDue(t.fixture.clock.now(), 10);
-
-    // The claimed job is running, so only the other one is due.
-    expect(due).toEqual([
-      { jobId: waiting.job.id, reviewKind: "diff", jobAttempts: 0 },
-    ]);
-  });
-});
-
-describe("which enqueues send a call", () => {
-  // #326-T09
-  it("sends exactly one call per job, for a webhook, a comment and a manual producer", async () => {
-    const t = await setup();
-
-    const results = [
-      await t.enqueue({
+      const first = await t.enqueue({
         prNumber: 1,
         prUrl: "https://github.test/acme/widgets/pull/1",
-        triggerKind: "webhook",
-        deliveryId: "delivery-1",
-      }),
+      });
+      const second = await t.enqueue({
+        prNumber: 2,
+        prUrl: "https://github.test/acme/widgets/pull/2",
+      });
+      await t.settled();
+
+      for (const result of [first, second])
+        expect((await t.queue.get(result.job.id))?.status).toBe("queued");
+      expect(
+        (await t.rows()).map((row) => [
+          row.last_code,
+          row.consecutive_failures,
+        ]),
+      ).toEqual(
+        expect.arrayContaining([
+          ["network_error", 1],
+          ["server_error", 1],
+        ]),
+      );
+    });
+
+    // #326-T06
+    it("never rejects, even when the database under the dispatch fails", async () => {
+      const t = await setup();
+      await t.fixture.db.schema.dropTable("job_dispatches").execute();
+
+      const result = await t.enqueue();
+      await expect(t.settled()).resolves.toBeUndefined();
+
+      expect((await t.queue.get(result.job.id))?.status).toBe("queued");
+      expect(t.receiver.received).toHaveLength(0);
+      expect(t.logs.error).toHaveLength(1);
+      expect(t.logs.error[0]).toContain(
+        `[dispatch] DISPATCH_FAILED job=${result.job.id}`,
+      );
+    });
+  });
+
+  describe("the resends", () => {
+    // #326-T03
+    it("resends on the back-off schedule after a 5xx and then marks the job acknowledged", async () => {
+      const t = await setup();
+      t.receiver.reply({ status: 502 }, { status: 504 }, accepted);
+
+      const { job } = await t.enqueue();
+      await t.settled();
+      expect(t.receiver.received).toHaveLength(1);
+      expect(await t.dispatches.get(job.id)).toMatchObject({
+        state: "pending",
+        consecutiveFailures: 1,
+        lastStatus: 502,
+        nextDispatchAt: new Date(
+          t.fixture.clock.now().getTime() + 10 * SECOND,
+        ).toISOString(),
+      });
+
+      // Not yet due: nothing is sent.
+      t.fixture.clock.advance(9 * SECOND);
+      expect(await t.service.sendDue()).toEqual({ sent: 0 });
+      expect(t.receiver.received).toHaveLength(1);
+
+      t.fixture.clock.advance(1 * SECOND);
+      expect(await t.service.sendDue()).toEqual({ sent: 1 });
+      expect(t.receiver.received).toHaveLength(2);
+      expect(await t.dispatches.get(job.id)).toMatchObject({
+        consecutiveFailures: 2,
+        lastStatus: 504,
+        attempts: 2,
+        nextDispatchAt: new Date(
+          t.fixture.clock.now().getTime() + 30 * SECOND,
+        ).toISOString(),
+      });
+
+      t.fixture.clock.advance(30 * SECOND);
+      expect(await t.service.sendDue()).toEqual({ sent: 1 });
+      expect(await t.dispatches.get(job.id)).toMatchObject({
+        state: "acked",
+        consecutiveFailures: 0,
+        attempts: 3,
+        lastCode: "accepted",
+      });
+      // Every send is a new call: a new dispatch id, and every one verifies.
+      expect(
+        new Set(t.receiver.received.map((c) => c.body?.dispatchId)).size,
+      ).toBe(3);
+      expect(t.receiver.received.map((c) => c.verdict)).toEqual([
+        "ok",
+        "ok",
+        "ok",
+      ]);
+    });
+
+    // #326-T03
+    it("follows 10 s, 30 s, 2 min, 5 min and then 15 min while the receiver keeps failing", async () => {
+      const t = await setup();
+      t.receiver.reply(...Array.from({ length: 7 }, () => ({ status: 500 })));
+
+      const { job } = await t.enqueue();
+      await t.settled();
+      const waits: number[] = [];
+      for (let step = 0; step < 6; step += 1) {
+        const row = await t.dispatches.get(job.id);
+        const wait =
+          Date.parse(row?.nextDispatchAt ?? "") -
+          t.fixture.clock.now().getTime();
+        waits.push(wait);
+        t.fixture.clock.advance(wait);
+        await t.service.sendDue();
+      }
+
+      expect(waits).toEqual([
+        10 * SECOND,
+        30 * SECOND,
+        2 * MINUTE,
+        5 * MINUTE,
+        15 * MINUTE,
+        15 * MINUTE,
+      ]);
+      expect(t.receiver.received).toHaveLength(7);
+    });
+
+    // #326-T04
+    it("waits for a Retry-After that is longer than the schedule", async () => {
+      const t = await setup();
+      t.receiver.reply({ status: 429, headers: { "retry-after": "600" } });
+
+      const { job } = await t.enqueue();
+      await t.settled();
+
+      expect(await t.dispatches.get(job.id)).toMatchObject({
+        lastCode: "rate_limited",
+        nextDispatchAt: new Date(
+          t.fixture.clock.now().getTime() + 600 * SECOND,
+        ).toISOString(),
+      });
+      t.fixture.clock.advance(599 * SECOND);
+      expect(await t.service.sendDue()).toEqual({ sent: 0 });
+      t.fixture.clock.advance(1 * SECOND);
+      expect(await t.service.sendDue()).toEqual({ sent: 1 });
+      expect(t.receiver.received).toHaveLength(2);
+    });
+
+    // #326-T05
+    it("waits long after any other 4xx, raises an alert, and does not loop hot", async () => {
+      const t = await setup();
+      t.receiver.reply({ status: 401, body: '{"error":"nope"}' });
+
+      const { job } = await t.enqueue();
+      await t.settled();
+
+      expect(await t.dispatches.get(job.id)).toMatchObject({
+        state: "pending",
+        lastStatus: 401,
+        lastCode: "rejected",
+        nextDispatchAt: new Date(
+          t.fixture.clock.now().getTime() + REJECTED_BACKOFF_MS,
+        ).toISOString(),
+      });
+      expect(t.logs.error).toHaveLength(1);
+      expect(t.logs.error[0]).toContain("DISPATCH_REJECTED");
+      expect(t.logs.error[0]).toContain("status=401");
+      // The sweep may run every minute for half an hour; nothing is sent.
+      for (let minute = 0; minute < 29; minute += 1) {
+        t.fixture.clock.advance(MINUTE);
+        expect(await t.service.sendDue()).toEqual({ sent: 0 });
+      }
+      expect(t.receiver.received).toHaveLength(1);
+      t.fixture.clock.advance(MINUTE);
+      expect(await t.service.sendDue()).toEqual({ sent: 1 });
+    });
+
+    // #326-T03
+    it("resends after the acknowledgement timeout when the job is still queued, and says which attempt it is on", async () => {
+      const t = await setup();
+      const { job } = await t.enqueue();
+      await t.settled();
+      expect(t.receiver.received).toHaveLength(1);
+
+      // A Dispatcher claimed it and gave it back (a failed launch): queued again, one attempt lost.
+      const claim = await t.fixture.queue.claimNext("dispatcher-a");
+      expect(claim?.job.id).toBe(job.id);
+      await t.fixture.queue.release(
+        job.id,
+        claim?.leaseToken ?? "",
+        "launch_failed",
+      );
+
+      t.fixture.clock.advance(ACK_TIMEOUT_MS - 1);
+      expect(await t.service.sendDue()).toEqual({ sent: 0 });
+      t.fixture.clock.advance(1);
+      expect(await t.service.sendDue()).toEqual({ sent: 1 });
+      expect(t.receiver.received.map((c) => c.body?.attempt)).toEqual([1, 2]);
+    });
+
+    // #326-T03
+    it("does not resend a job that was claimed in time", async () => {
+      const t = await setup();
+      const { job } = await t.enqueue();
+      await t.settled();
+      const claim = await t.fixture.queue.claimNext("dispatcher-a");
+      expect(claim?.job.id).toBe(job.id);
+
+      t.fixture.clock.advance(10 * MINUTE);
+      expect(await t.service.sendDue()).toEqual({ sent: 0 });
+      expect(t.receiver.received).toHaveLength(1);
+    });
+
+    // #326-T03
+    it("resends after the acknowledgement timeout when the job was not claimable", async () => {
+      const t = await setup();
+      t.receiver.reply(ignored("not_claimable"));
+
+      const { job } = await t.enqueue();
+      await t.settled();
+
+      expect(await t.dispatches.get(job.id)).toMatchObject({
+        state: "pending",
+        lastCode: "ignored_not_claimable",
+        consecutiveFailures: 0,
+        nextDispatchAt: new Date(
+          t.fixture.clock.now().getTime() + ACK_TIMEOUT_MS,
+        ).toISOString(),
+      });
+      t.fixture.clock.advance(ACK_TIMEOUT_MS);
+      expect(await t.service.sendDue()).toEqual({ sent: 1 });
+    });
+
+    // #326-T03
+    it("stops resending a job whose kind the receiver cannot run", async () => {
+      const t = await setup();
+      t.receiver.reply(ignored("not_capable"));
+
+      const { job } = await t.enqueue();
+      await t.settled();
+
+      expect(await t.dispatches.get(job.id)).toMatchObject({
+        state: "stopped",
+        lastCode: "ignored_not_capable",
+      });
+      t.fixture.clock.advance(24 * 60 * MINUTE);
+      expect(await t.service.sendDue()).toEqual({ sent: 0 });
+      expect(t.receiver.received).toHaveLength(1);
+    });
+
+    // #326-T03
+    it("sends a queued job that has no row (its row was never written), once", async () => {
+      const t = await setup();
+      // Queued by an instance that did not run the hook (or lost it): no row at all.
+      const bare = await t.fixture.enqueue();
+      expect(bare.status).toBe("created");
+
+      const [first, second] = await Promise.all([
+        t.service.sendDue(),
+        t.service.sendDue(),
+      ]);
+
+      expect(first.sent + second.sent).toBe(1);
+      expect(t.receiver.received).toHaveLength(1);
+      expect(t.receiver.received[0]?.body?.jobId).toBe(bare.job.id);
+      expect(await t.dispatches.get(bare.job.id)).toMatchObject({
+        state: "acked",
+        attempts: 1,
+      });
+    });
+
+    // #326-T03
+    it("lets the sweep find due work through the repository's listing of due jobs", async () => {
+      const t = await setup();
+      const first = await t.fixture.enqueue();
+      const second = await t.fixture.enqueue({
+        prNumber: 9,
+        prUrl: "https://github.test/acme/widgets/pull/9",
+      });
+      const claim = await t.fixture.queue.claimNext("dispatcher-a");
+      const running = claim?.job.id;
+      const waiting = running === first.job.id ? second : first;
+
+      const due = await t.dispatches.listDue(t.fixture.clock.now(), 10);
+
+      // The claimed job is running, so only the other one is due.
+      expect(due).toEqual([
+        { jobId: waiting.job.id, reviewKind: "diff", jobAttempts: 0 },
+      ]);
+    });
+  });
+
+  describe("which enqueues send a call", () => {
+    // #326-T09
+    it("sends exactly one call per job, for a webhook, a comment and a manual producer", async () => {
+      const t = await setup();
+
+      const results = [
+        await t.enqueue({
+          prNumber: 1,
+          prUrl: "https://github.test/acme/widgets/pull/1",
+          triggerKind: "webhook",
+          deliveryId: "delivery-1",
+        }),
+        await t.enqueue({
+          prNumber: 2,
+          prUrl: "https://github.test/acme/widgets/pull/2",
+          triggerKind: "comment",
+          deliveryId: "delivery-2",
+          commentId: "comment-1",
+        }),
+        await t.enqueue({
+          prNumber: 3,
+          prUrl: "https://github.test/acme/widgets/pull/3",
+          triggerKind: "manual",
+        }),
+      ];
+      await t.settled();
+
+      expect(results.map((result) => result.status)).toEqual([
+        "created",
+        "created",
+        "created",
+      ]);
+      expect(
+        t.receiver.received.map((call) => call.body?.jobId).sort(),
+      ).toEqual(results.map((result) => result.job.id).sort());
+      expect(await t.rows()).toHaveLength(3);
+    });
+
+    // #326-T09
+    it("sends nothing for a deduplicated enqueue (same delivery, same head, same comment, same active job)", async () => {
+      const t = await setup();
+      await t.enqueue({ deliveryId: "delivery-1", headSha: sha("a") });
       await t.enqueue({
         prNumber: 2,
         prUrl: "https://github.test/acme/widgets/pull/2",
         triggerKind: "comment",
         deliveryId: "delivery-2",
         commentId: "comment-1",
-      }),
+      });
       await t.enqueue({
         prNumber: 3,
         prUrl: "https://github.test/acme/widgets/pull/3",
         triggerKind: "manual",
-      }),
-    ];
-    await t.settled();
+      });
+      await t.settled();
+      expect(t.receiver.received).toHaveLength(3);
 
-    expect(results.map((result) => result.status)).toEqual([
-      "created",
-      "created",
-      "created",
-    ]);
-    expect(t.receiver.received.map((call) => call.body?.jobId).sort()).toEqual(
-      results.map((result) => result.job.id).sort(),
-    );
-    expect(await t.rows()).toHaveLength(3);
-  });
+      const replays = await Promise.all([
+        t.enqueue({ deliveryId: "delivery-1", headSha: sha("a") }),
+        t.enqueue({ deliveryId: "delivery-9", headSha: sha("a") }),
+        t.enqueue({
+          prNumber: 2,
+          prUrl: "https://github.test/acme/widgets/pull/2",
+          triggerKind: "comment",
+          deliveryId: "delivery-3",
+          commentId: "comment-1",
+        }),
+        t.enqueue({
+          prNumber: 3,
+          prUrl: "https://github.test/acme/widgets/pull/3",
+          triggerKind: "manual",
+        }),
+      ]);
+      await t.settled();
 
-  // #326-T09
-  it("sends nothing for a deduplicated enqueue (same delivery, same head, same comment, same active job)", async () => {
-    const t = await setup();
-    await t.enqueue({ deliveryId: "delivery-1", headSha: sha("a") });
-    await t.enqueue({
-      prNumber: 2,
-      prUrl: "https://github.test/acme/widgets/pull/2",
-      triggerKind: "comment",
-      deliveryId: "delivery-2",
-      commentId: "comment-1",
+      expect(
+        replays.map((r) => (r.status === "existing" ? r.reason : r.status)),
+      ).toEqual([
+        "same_delivery",
+        "same_head",
+        "same_comment",
+        "already_active",
+      ]);
+      expect(t.receiver.received).toHaveLength(3);
+      expect(await t.rows()).toHaveLength(3);
     });
-    await t.enqueue({
-      prNumber: 3,
-      prUrl: "https://github.test/acme/widgets/pull/3",
-      triggerKind: "manual",
-    });
-    await t.settled();
-    expect(t.receiver.received).toHaveLength(3);
 
-    const replays = await Promise.all([
-      t.enqueue({ deliveryId: "delivery-1", headSha: sha("a") }),
-      t.enqueue({ deliveryId: "delivery-9", headSha: sha("a") }),
-      t.enqueue({
+    // #326-T09
+    it("sends a debounced job once it is due, and once only when a person pulls it forward", async () => {
+      const t = await setup();
+      const runAfter = new Date(t.fixture.clock.now().getTime() + 90 * SECOND);
+      const debounced = await t.enqueue({ runAfter });
+      const waiting = await t.enqueue({
         prNumber: 2,
         prUrl: "https://github.test/acme/widgets/pull/2",
-        triggerKind: "comment",
-        deliveryId: "delivery-3",
-        commentId: "comment-1",
-      }),
-      t.enqueue({
-        prNumber: 3,
-        prUrl: "https://github.test/acme/widgets/pull/3",
-        triggerKind: "manual",
-      }),
-    ]);
-    await t.settled();
-
-    expect(
-      replays.map((r) => (r.status === "existing" ? r.reason : r.status)),
-    ).toEqual(["same_delivery", "same_head", "same_comment", "already_active"]);
-    expect(t.receiver.received).toHaveLength(3);
-    expect(await t.rows()).toHaveLength(3);
-  });
-
-  // #326-T09
-  it("sends a debounced job once it is due, and once only when a person pulls it forward", async () => {
-    const t = await setup();
-    const runAfter = new Date(t.fixture.clock.now().getTime() + 90 * SECOND);
-    const debounced = await t.enqueue({ runAfter });
-    const waiting = await t.enqueue({
-      prNumber: 2,
-      prUrl: "https://github.test/acme/widgets/pull/2",
-      runAfter,
-    });
-    await t.settled();
-
-    // Not due yet: a row waits for its time, and nothing is sent.
-    expect(t.receiver.received).toHaveLength(0);
-    expect(await t.dispatches.get(debounced.job.id)).toMatchObject({
-      state: "pending",
-      attempts: 0,
-      nextDispatchAt: runAfter.toISOString(),
-    });
-
-    // A person starts a review of the first pull request: the waiting job is made due now and is sent now.
-    const pulled = await t.enqueue({ triggerKind: "manual" });
-    await t.settled();
-    expect(pulled).toMatchObject({
-      status: "existing",
-      reason: "already_active",
-    });
-    expect(t.receiver.received.map((c) => c.body?.jobId)).toEqual([
-      debounced.job.id,
-    ]);
-
-    // A second click does not send again.
-    await t.enqueue({ triggerKind: "manual" });
-    await t.settled();
-    expect(t.receiver.received).toHaveLength(1);
-
-    // The other job becomes due by itself: the sweep sends it.
-    t.fixture.clock.advance(90 * SECOND);
-    expect(await t.service.sendDue()).toEqual({ sent: 1 });
-    expect(t.receiver.received.map((c) => c.body?.jobId)).toEqual([
-      debounced.job.id,
-      waiting.job.id,
-    ]);
-  });
-});
-
-describe("what the dispatch logs", () => {
-  // #326-T10
-  it("never contains a secret, a signature, a key id or the URL, when the send fails in every way", async () => {
-    const t = await setup();
-    t.receiver.reply(
-      { fails: `connect failed to ${URL_OK} with ${CURRENT.secret}` },
-      "hang",
-      { status: 500, body: CURRENT.secret },
-      { status: 429, headers: { "retry-after": "5" }, body: CURRENT.secret },
-      { status: 403, body: `${CURRENT.secret} ${PREVIOUS.secret}` },
-    );
-
-    for (let number = 1; number <= 5; number += 1)
-      await t.enqueue({
-        prNumber: number,
-        prUrl: `https://github.test/acme/widgets/pull/${String(number)}`,
+        runAfter,
       });
-    await t.settled();
+      await t.settled();
 
-    const lines = [...t.logs.warn, ...t.logs.error];
-    expect(lines.length).toBeGreaterThanOrEqual(5);
-    const signatures = t.receiver.received.map(
-      (call) => call.headers["x-dispatch-signature"] ?? "",
-    );
-    expect(signatures.every((signature) => signature.startsWith("v1="))).toBe(
-      true,
-    );
-    const text = lines.join("\n");
-    for (const forbidden of [
-      CURRENT.secret,
-      PREVIOUS.secret,
-      "dispatcher.example.test",
-      CURRENT.kid,
-      ...signatures,
-      ...signatures.map((signature) => signature.slice(3)),
-    ])
-      expect(text).not.toContain(forbidden);
-    expect(text).toContain("code=network_error");
-    expect(text).toContain("code=timeout");
-    expect(text).toContain("code=server_error");
-    expect(text).toContain("code=rate_limited");
-    expect(text).toContain("code=rejected");
+      // Not due yet: a row waits for its time, and nothing is sent.
+      expect(t.receiver.received).toHaveLength(0);
+      expect(await t.dispatches.get(debounced.job.id)).toMatchObject({
+        state: "pending",
+        attempts: 0,
+        nextDispatchAt: runAfter.toISOString(),
+      });
+
+      // A person starts a review of the first pull request: the waiting job is made due now and is sent now.
+      const pulled = await t.enqueue({ triggerKind: "manual" });
+      await t.settled();
+      expect(pulled).toMatchObject({
+        status: "existing",
+        reason: "already_active",
+      });
+      expect(t.receiver.received.map((c) => c.body?.jobId)).toEqual([
+        debounced.job.id,
+      ]);
+
+      // A second click does not send again.
+      await t.enqueue({ triggerKind: "manual" });
+      await t.settled();
+      expect(t.receiver.received).toHaveLength(1);
+
+      // The other job becomes due by itself: the sweep sends it.
+      t.fixture.clock.advance(90 * SECOND);
+      expect(await t.service.sendDue()).toEqual({ sent: 1 });
+      expect(t.receiver.received.map((c) => c.body?.jobId)).toEqual([
+        debounced.job.id,
+        waiting.job.id,
+      ]);
+    });
+  });
+
+  describe("what the dispatch logs", () => {
+    // #326-T10
+    it("never contains a secret, a signature, a key id or the URL, when the send fails in every way", async () => {
+      const t = await setup();
+      t.receiver.reply(
+        { fails: `connect failed to ${URL_OK} with ${CURRENT.secret}` },
+        "hang",
+        { status: 500, body: CURRENT.secret },
+        { status: 429, headers: { "retry-after": "5" }, body: CURRENT.secret },
+        { status: 403, body: `${CURRENT.secret} ${PREVIOUS.secret}` },
+      );
+
+      for (let number = 1; number <= 5; number += 1)
+        await t.enqueue({
+          prNumber: number,
+          prUrl: `https://github.test/acme/widgets/pull/${String(number)}`,
+        });
+      await t.settled();
+
+      const lines = [...t.logs.warn, ...t.logs.error];
+      expect(lines.length).toBeGreaterThanOrEqual(5);
+      const signatures = t.receiver.received.map(
+        (call) => call.headers["x-dispatch-signature"] ?? "",
+      );
+      expect(signatures.every((signature) => signature.startsWith("v1="))).toBe(
+        true,
+      );
+      const text = lines.join("\n");
+      for (const forbidden of [
+        CURRENT.secret,
+        PREVIOUS.secret,
+        "dispatcher.example.test",
+        CURRENT.kid,
+        ...signatures,
+        ...signatures.map((signature) => signature.slice(3)),
+      ])
+        expect(text).not.toContain(forbidden);
+      expect(text).toContain("code=network_error");
+      expect(text).toContain("code=timeout");
+      expect(text).toContain("code=server_error");
+      expect(text).toContain("code=rate_limited");
+      expect(text).toContain("code=rejected");
+    });
   });
 });
