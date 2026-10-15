@@ -44,6 +44,9 @@ import { databaseDriver, type DatabaseDriver } from "../driver.ts";
 import type { Database } from "../schema.ts";
 import { claimOldestDueJob, claimOldestDueJobPostgres } from "./jobs-claim.ts";
 import { toJob } from "./jobs-repository.ts";
+import { createUsageRecordsRepository } from "./usage-records-repository.ts";
+import { voidRecordsOfEndedJobs } from "./usage-records-sweep.ts";
+import { settlementOfOutcome } from "../../usage/usage-records.ts";
 
 /** What `expireStaleJobs` did. */
 export type ExpiryReport = {
@@ -379,6 +382,7 @@ export function createRunnerJobsRepository(
     // A job whose runner keeps the lease alive but never finishes. Lost leases come first: a job
     // whose runner vanished long ago is retried, not failed for taking long.
     const timedOut = await failTimedOut(executor, {}, current);
+    await voidRecordsOfEndedJobs(executor);
     return {
       requeued: lost.requeued,
       leaseExpired: lost.failed,
@@ -403,7 +407,16 @@ export function createRunnerJobsRepository(
         const row = await (
           driver === "postgres" ? claimOldestDueJobPostgres : claimOldestDueJob
         )(trx, claim, reviewKinds);
-        return row === undefined ? null : { job: toJob(row), leaseToken };
+        if (row === undefined) return null;
+        // The record is reserved in the transaction of the claim, so a job handed out always counts. The key
+        // mode is the workspace's own until the claim route has resolved the access (`setKeyMode`); a job
+        // claimed again keeps the record it has.
+        await createUsageRecordsRepository(
+          trx,
+          row.workspace_id,
+          () => current,
+        ).reserve(row.id, "own");
+        return { job: toJob(row), leaseToken };
       });
     },
 
@@ -413,7 +426,12 @@ export function createRunnerJobsRepository(
         const timestamp = formatTimestamp(current);
         // The hard limit does not depend on anyone else's claim: the holder that is past it learns
         // so here, and the job fails.
-        await failTimedOut(trx, { claim: { jobId, leaseToken } }, current);
+        const timedOut = await failTimedOut(
+          trx,
+          { claim: { jobId, leaseToken } },
+          current,
+        );
+        if (timedOut > 0) await voidRecordsOfEndedJobs(trx);
         const row = await trx
           .updateTable("jobs")
           .set({
@@ -451,8 +469,15 @@ export function createRunnerJobsRepository(
           .where(runningWhere({ claim: { jobId, leaseToken } }))
           .returningAll()
           .executeTakeFirst();
-        if (finished !== undefined)
+        if (finished !== undefined) {
+          // Settled from what the runner reported, in the same transaction as the job's end.
+          await createUsageRecordsRepository(
+            trx,
+            finished.workspace_id,
+            now,
+          ).settle(finished.id, settlementOfOutcome(outcome));
           return { status: "completed", job: toJob(finished) };
+        }
 
         // Not running any more: either this claim already reported (same or other outcome), or it
         // was lost, or it never existed.
@@ -494,8 +519,10 @@ export function createRunnerJobsRepository(
           .where("command", "!=", "review")
           .returningAll()
           .executeTakeFirst();
-        if (removed !== undefined)
+        if (removed !== undefined) {
+          await voidRecordsOfEndedJobs(trx);
           return { status: "cancelled", job: toJob(removed) };
+        }
         const lost = await loseAttempt(
           trx,
           { claim: { jobId, leaseToken } },
@@ -507,6 +534,7 @@ export function createRunnerJobsRepository(
         );
         if (lost.failed === 0 && lost.requeued === 0)
           return { status: "not_holder" };
+        await voidRecordsOfEndedJobs(trx);
         const row = await trx
           .selectFrom("jobs")
           .selectAll()
@@ -549,9 +577,9 @@ export function createRunnerJobsRepository(
           .where(runningWhere({ claim: { jobId, leaseToken } }))
           .returningAll()
           .executeTakeFirst();
-        return row === undefined
-          ? { status: "not_holder" }
-          : { status: "cancelled", job: toJob(row) };
+        if (row === undefined) return { status: "not_holder" };
+        await voidRecordsOfEndedJobs(trx);
+        return { status: "cancelled", job: toJob(row) };
       });
     },
   };
