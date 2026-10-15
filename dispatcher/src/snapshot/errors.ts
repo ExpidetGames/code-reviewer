@@ -5,6 +5,7 @@
 export const SNAPSHOT_ERROR_CODES = [
   "configuration_invalid",
   "builder_create_failed",
+  "base_manifest_failed",
   "docker_install_failed",
   "docker_version_mismatch",
   "daemon_config_failed",

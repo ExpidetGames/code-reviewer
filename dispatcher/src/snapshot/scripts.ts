@@ -11,6 +11,7 @@ export { probeRunArguments };
 
 /** The label of each command; the logs, the errors and the Sandbox double address a command by it. */
 export const STEPS = {
+  recordBaseManifest: "record_base_manifest",
   installDocker: "install_docker",
   writeDaemonConfig: "write_daemon_config",
   installHostScripts: "install_host_scripts",
@@ -34,8 +35,22 @@ export const PATHS = {
   contextDir: "/tmp/golden-ctx",
   buildLog: "/tmp/golden-build.log",
   vmPrepareInstalled: "/usr/local/sbin/vm-prepare.sh",
+  // Outside every scan root and outside /tmp (which the clean step empties): it travels in the snapshot to the check VM.
+  baseManifest: "/var/lib/code-reviewer-golden/base-manifest",
 } as const;
 
+/** Exit status of the scan when the base manifest is missing or empty: the scan cannot tell what the pipeline added. */
+export const EXIT_MANIFEST_MISSING = 43;
+/** Exit status of the record step when the roots hold no file at all. */
+export const EXIT_MANIFEST_EMPTY = 44;
+/** Exit status of the scan when it listed no file under the roots (the manifest is not empty, so a tool failed). */
+export const EXIT_LISTING_EMPTY = 45;
+/** Exit status of the scan when the file the pipeline wrote after the record is not among the added files. */
+export const EXIT_ANCHOR_MISSING = 46;
+/** Exit status of the scan when `find` or `grep` failed (anything but a match or no match). */
+export const EXIT_TOOL_FAILED = 47;
+/** Exit status of the scan when the manifest is not the one the pipeline pinned. */
+export const EXIT_MANIFEST_MODIFIED = 48;
 /** Exit status of the install step when the installed docker.io is not the pinned version. */
 export const EXIT_VERSION_MISMATCH = 42;
 export const SCAN_DONE = "SCAN_DONE";
@@ -156,7 +171,8 @@ exit 1
 `;
 }
 
-const DEFAULT_SCAN_ROOTS = [
+/** The directories the pipeline's scan looks into: the record of the base image and the scan share them. */
+export const SCAN_ROOTS = [
   "/root",
   "/home",
   "/etc",
@@ -164,8 +180,51 @@ const DEFAULT_SCAN_ROOTS = [
   "/usr/local",
   "/var/tmp",
   "/var/log",
-];
+] as const;
 const DEFAULT_DOCKER_ROOT = "/var/lib/docker";
+const SHA256_HEX = /^[0-9a-f]{64}$/;
+
+// One file per record, NUL separated so that a name with a newline or a tab stays one record: path, size in
+// bytes, modification time and status change time with their fractions. A user space tool can restore the
+// modification time (`touch -r`, `cp -p`, tar) but not the status change time. The record script and the scan
+// both print it, byte for byte alike.
+const RECORD_FORMAT = "%p\\t%s\\t%T@\\t%C@\\0";
+
+/**
+ * The manifest of the platform's base image (first command of the builder, before anything is installed): the
+ * files of the scan roots with their size, modification time and status change time, sorted. The scan reports only what is not in
+ * it or differs from it, so the files the platform ships (the docs and bundles of its global Node packages hold
+ * example keys and placeholder tokens) are not mistaken for something the pipeline left. A file that is new
+ * (an apt package, a script of ours) or changed is not in it: it is scanned. Errors of `find` (a file that
+ * vanishes at boot) are tolerated: a file missed here is only scanned later, never skipped. It prints
+ * `MANIFEST_SHA256 <hex>` of the finished file: the pipeline keeps that hash outside the VM and the scan
+ * refuses a manifest that does not match it.
+ */
+export function recordBaseManifestScript(
+  options: { roots?: readonly string[]; manifestPath?: string } = {},
+): string {
+  const roots = options.roots ?? SCAN_ROOTS;
+  const manifest = options.manifestPath ?? PATHS.baseManifest;
+  return `${STRICT}
+roots=(${roots.map(shellQuote).join(" ")})
+manifest=${shellQuote(manifest)}
+mkdir -p "$(dirname "$manifest")"
+chmod 0700 "$(dirname "$manifest")"
+for root in "\${roots[@]}"; do
+  [ -d "$root" ] || continue
+  find "$root" -xdev -type f -printf '${RECORD_FORMAT}' 2>/dev/null || true
+done | LC_ALL=C sort -zu > "$manifest.tmp"
+if [ ! -s "$manifest.tmp" ]; then
+  rm -f "$manifest.tmp"
+  echo "the base image has no file under the scan roots" >&2
+  exit ${EXIT_MANIFEST_EMPTY}
+fi
+mv "$manifest.tmp" "$manifest"
+chmod 0600 "$manifest"
+sync
+printf 'MANIFEST_SHA256 %s\\n' "$(sha256sum "$manifest" | cut -d ' ' -f 1)"
+`;
+}
 
 // High-confidence shapes only: a false finding stops a release. The per-job credential of the Worker API, the
 // tokens of the services the product talks to, and assignments of the variables that hold them.
@@ -187,34 +246,143 @@ const PRIVATE_KEY_PATTERN = "-----BEGIN ([A-Z0-9]+ )*PRIVATE KEY-----";
  * finding (never a content) and `SCAN_DONE` last; a caller that does not see the marker treats the scan as
  * failed. It reads files only: the daemon need not run. Kinds: secret_file, history, docker_auth,
  * private_key, token, job_data.
+ *
+ * The file checks cover what the pipeline added or changed since the base manifest (`recordBaseManifestScript`)
+ * plus every file of Docker's `containers` and `volumes`. `job_data` is any entry of those two Docker
+ * directories except the two artifacts `dockerd` creates in `volumes` at every start: `metadata.db` as a
+ * regular file and `backingFsBlockDev` as a block device (a file, a directory or a link of that name is job data).
+ *
+ * Fail closed: the scan ends without its marker, with an exit status of its own, when the manifest is missing,
+ * empty or not the pinned one, when `find` or `grep` fails (only a match and no match are answers), when it
+ * lists no file, and when `anchorPath` (the file the pipeline wrote after the record: vm-prepare.sh) is not among
+ * the added files, which is what an empty or failed listing looks like. Nothing in it ignores a tool's error.
  */
 export function scanScript(
-  options: { roots?: readonly string[]; dockerRoot?: string } = {},
+  options: {
+    roots?: readonly string[];
+    dockerRoot?: string;
+    manifestPath?: string;
+    /** sha256 the pipeline pinned when it recorded the manifest; the scan refuses a manifest that differs. */
+    manifestSha256?: string;
+    anchorPath?: string;
+  } = {},
 ): string {
-  const roots = options.roots ?? DEFAULT_SCAN_ROOTS;
+  const roots = options.roots ?? SCAN_ROOTS;
   const dockerRoot = options.dockerRoot ?? DEFAULT_DOCKER_ROOT;
+  const manifest = options.manifestPath ?? PATHS.baseManifest;
+  const anchor = options.anchorPath ?? PATHS.vmPrepareInstalled;
+  if (
+    options.manifestSha256 !== undefined &&
+    !SHA256_HEX.test(options.manifestSha256)
+  )
+    throw new Error("manifestSha256 is not 64 hex digits");
   const tokenArgs = TOKEN_PATTERNS.map(
     (pattern) => `-e ${shellQuote(pattern)}`,
   ).join(" ");
+  const pin =
+    options.manifestSha256 === undefined
+      ? ""
+      : `if ! printf '%s  %s\\n' ${shellQuote(options.manifestSha256)} "$manifest" | sha256sum --check --status -; then
+  echo "the base manifest is not the one the pipeline recorded" >&2
+  exit ${EXIT_MANIFEST_MODIFIED}
+fi
+`;
   return `${STRICT}
 roots=(${roots.map(shellQuote).join(" ")})
 docker_root=${shellQuote(dockerRoot)}
+manifest=${shellQuote(manifest)}
+anchor=${shellQuote(anchor)}
 report() { printf 'FINDING %s %s\\n' "$1" "$2"; }
-roots+=("$docker_root/containers" "$docker_root/volumes")
-for root in "\${roots[@]}"; do
-  [ -d "$root" ] || continue
-  while IFS= read -r -d '' path; do report secret_file "$path"; done < <(find "$root" -xdev -type f \\( -name '.env' -o \\( -name '.env.*' ! -name '.env.example' \\) -o -name '.netrc' -o -name '.git-credentials' -o -name 'id_rsa' -o -name 'id_dsa' -o -name 'id_ecdsa' -o -name 'id_ed25519' \\) -print0 2>/dev/null)
-  while IFS= read -r -d '' path; do report history "$path"; done < <(find "$root" -xdev -type f \\( -name '.bash_history' -o -name '.zsh_history' -o -name '.python_history' -o -name '.node_repl_history' \\) -print0 2>/dev/null)
-  while IFS= read -r -d '' path; do
-    if grep -qE '"(auth|identitytoken|registrytoken)"[[:space:]]*:[[:space:]]*"[^"]+"' "$path" 2>/dev/null; then report docker_auth "$path"; fi
-  done < <(find "$root" -xdev -type f -path '*/.docker/config.json' -print0 2>/dev/null)
-  while IFS= read -r -d '' path; do report private_key "$path"; done < <(grep -rIlZs --exclude=ssl-cert-snakeoil.key -E -e ${shellQuote(PRIVATE_KEY_PATTERN)} "$root" 2>/dev/null || true)
-  while IFS= read -r -d '' path; do report token "$path"; done < <(grep -rIlZs -E ${tokenArgs} "$root" 2>/dev/null || true)
-done
+fail() { echo "$2" >&2; exit "$1"; }
+if [ ! -s "$manifest" ]; then
+  fail ${EXIT_MANIFEST_MISSING} "the base manifest is missing or empty"
+fi
+${pin}work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+# One batch of \`grep\` for xargs: the options, \`--\`, the files. Only a match (0) and no match (1) are answers. On
+# any other status the files are asked one by one: a file that is gone by then was a temporary file of the
+# platform's boot (listed, then renamed or removed) and holds nothing; an error on a file that is still there stops
+# xargs at once (255, so 124), so that a failing tool never reads as "nothing found".
+grep_batch() {
+  local options=() file status=0
+  while [ "$1" != "--" ]; do options+=("$1"); shift; done
+  shift
+  grep -IlZ "\${options[@]}" -- "$@" || status=$?
+  if [ "$status" -le 1 ]; then return 0; fi
+  for file in "$@"; do
+    status=0
+    grep -IlZ "\${options[@]}" -- "$file" || status=$?
+    if [ "$status" -gt 1 ] && [ -e "$file" ]; then exit 255; fi
+  done
+}
+export -f grep_batch
+# \`grep_batch\` over the paths in $work/files; \`sort -u\` drops a hit that a batch and its retry both printed.
+grep_files() {
+  local kind=$1 status=0
+  shift
+  xargs -0 -r -a "$work/files" bash -c 'grep_batch "$@"' grep_batch "$@" -- > "$work/hits" || status=$?
+  case "$status" in
+    0|123) ;;
+    *) fail ${EXIT_TOOL_FAILED} "grep failed (status $status)" ;;
+  esac
+  LC_ALL=C sort -zu "$work/hits" > "$work/hits.sorted"
+  while IFS= read -r -d '' path; do report "$kind" "$path"; done < "$work/hits.sorted"
+}
+# The listing is asked up to three times: \`find\` ends with 1 when a file it walked past is gone by the time it
+# looks at it, which happens while the VM boots. A listing that keeps failing fails the scan.
+list_files() {
+  local attempt
+  for attempt in 1 2 3; do
+    if for root in "\${roots[@]}"; do
+      [ -d "$root" ] || continue
+      find "$root" -xdev -type f -printf '${RECORD_FORMAT}'
+    done | LC_ALL=C sort -zu > "$work/current"; then return 0; fi
+    sleep 1
+  done
+  return 1
+}
+# The files of the roots now, in the manifest's format; the records that are not in the manifest are the new
+# and the changed files. Their paths, and every file of Docker's own data, are what the checks read.
+list_files || fail ${EXIT_TOOL_FAILED} "find or sort failed"
+[ -s "$work/current" ] || fail ${EXIT_LISTING_EMPTY} "no file was listed under the scan roots"
+LC_ALL=C comm -z -13 "$manifest" "$work/current" | sed -z 's/\\t[0-9]*\\t[0-9.]*\\t[0-9.]*$//' > "$work/files"
+found=
+while IFS= read -r -d '' path; do
+  if [ "$path" = "$anchor" ]; then found=1; break; fi
+done < "$work/files"
+[ -n "$found" ] || fail ${EXIT_ANCHOR_MISSING} "the file the pipeline wrote is not among the added files"
 for dir in "$docker_root/containers" "$docker_root/volumes"; do
   [ -d "$dir" ] || continue
-  while IFS= read -r -d '' path; do report job_data "$path"; done < <(find "$dir" -mindepth 1 -maxdepth 1 ! -name metadata.db -print0 2>/dev/null)
+  find "$dir" -xdev -type f -print0 >> "$work/files"
 done
+while IFS= read -r -d '' path; do
+  name=\${path##*/}
+  case "$name" in
+    .env.example) ;;
+    .env|.env.*|.netrc|.git-credentials|id_rsa|id_dsa|id_ecdsa|id_ed25519) report secret_file "$path" ;;
+    .bash_history|.zsh_history|.python_history|.node_repl_history) report history "$path" ;;
+  esac
+  case "$path" in
+    */.docker/config.json)
+      status=0
+      grep -qE '"(auth|identitytoken|registrytoken)"[[:space:]]*:[[:space:]]*"[^"]+"' "$path" || status=$?
+      case "$status" in
+        0) report docker_auth "$path" ;;
+        1) ;;
+        *) fail ${EXIT_TOOL_FAILED} "grep failed (status $status)" ;;
+      esac ;;
+  esac
+done < "$work/files"
+grep_files private_key --exclude=ssl-cert-snakeoil.key -E -e ${shellQuote(PRIVATE_KEY_PATTERN)}
+grep_files token -E ${tokenArgs}
+if [ -d "$docker_root/containers" ]; then
+  find "$docker_root/containers" -mindepth 1 -maxdepth 1 -print0 > "$work/job_data"
+  while IFS= read -r -d '' path; do report job_data "$path"; done < "$work/job_data"
+fi
+if [ -d "$docker_root/volumes" ]; then
+  find "$docker_root/volumes" -mindepth 1 -maxdepth 1 ! \\( -name metadata.db -type f \\) ! \\( -name backingFsBlockDev -type b \\) -print0 > "$work/job_data"
+  while IFS= read -r -d '' path; do report job_data "$path"; done < "$work/job_data"
+fi
 echo ${SCAN_DONE}
 `;
 }
