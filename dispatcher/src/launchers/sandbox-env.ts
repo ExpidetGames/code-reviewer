@@ -10,7 +10,7 @@
 // | SANDBOX_HANDOVER_SECONDS                           | How long the container runs before the Worker counts as having taken over (1 to 120) | 20 |
 // | SANDBOX_VM_TIMEOUT_MARGIN_SECONDS                 | Seconds added to the job's timeout for the VM's own (the backstop that ends a VM nobody stops); at least 180 and 150 more than the hand-over time, at most 3600 | 300 |
 // | DISPATCHER_PROBE_TTL_SECONDS                      | How long a capability probe's answer counts before a new canary VM is asked (60 to 86400, #331) | 3600 |
-// | DISPATCHER_PROBE_TIMEOUT_SECONDS                  | How long a probe may take, canary VM included (30 to 600)          | 150 |
+// | DISPATCHER_PROBE_TIMEOUT_SECONDS                  | How long a probe may take, canary VM included (30 to 600); the reaper (#364) takes a canary's lifetime from it | 150 |
 // | DISPATCHER_PROBE_REUSE_SECONDS                    | A forced probe (`POST /probe`) is served from an answer younger than this instead of a new canary VM (0 to 600; 0: never) | 60 |
 // | RUNNER_DYNAMIC_CAPABILITIES, RUNNER_DYNAMIC_MAX_COST_USD | The operator's Dynamic configuration, given to the container of a Dynamic job and to the canary, as the self-hosted `runner-dynamic` service has them (a JSON object; a plain positive decimal) | none |
 // | VERCEL_TOKEN, VERCEL_TEAM_ID, VERCEL_PROJECT_ID    | Platform access by token. Without a token the OIDC token is used   | OIDC |
@@ -28,6 +28,7 @@ import type { Launcher, Logger } from "../core/types.ts";
 import { systemClock } from "../core/clock.ts";
 import { createCapabilityProbe } from "../probe/capability-probe.ts";
 import { withCapabilityProbe } from "../probe/probed-launcher.ts";
+import type { SandboxFleet } from "./sandbox-service.ts";
 import { noLauncher } from "./none.ts";
 import { createSandboxCanary } from "./sandbox-canary.ts";
 import {
@@ -57,11 +58,22 @@ export type LauncherContext = {
   background: (work: Promise<unknown>) => void;
 };
 
+/** What the reaper (#364) needs of the platform side, and how long each kind of VM may live before it is overdue. */
+export type ReaperSetup = {
+  fleet: SandboxFleet;
+  /** A job VM's lifetime when the platform reports none: the job timeout plus the VM margin. */
+  jobLifetimeSeconds: number;
+  /** A canary VM's (#331): the probe timeout plus the VM margin. */
+  canaryLifetimeSeconds: number;
+};
+
 export type SandboxFromEnvironment = {
   /** The launcher for a composed Dispatcher: the Sandbox-Launcher, or `noLauncher` when no snapshot is configured. */
   launcher: (context: LauncherContext) => Launcher;
   /** Secrets of this part of the configuration, for the logger's masker. */
   secrets: string[];
+  /** The reaper's platform side; undefined when no snapshot is configured, so there is nothing to reap and no route. */
+  reaper?: (settings: Settings) => ReaperSetup;
 };
 
 function credentials(env: Environment): VercelCredentials | undefined {
@@ -164,9 +176,17 @@ export function sandboxFromEnvironment(
   const secrets = [access?.token, read(env, "VERCEL_OIDC_TOKEN")].filter(
     (secret): secret is string => secret !== undefined,
   );
+  // One service for the launcher and the reaper: the platform's access is configured once.
+  const service = createVercelSandboxService(loadSdk, access);
 
   return {
     secrets,
+    reaper: (settings) => ({
+      fleet: service,
+      jobLifetimeSeconds:
+        settings.core.jobTimeoutSeconds + vmTimeoutMarginSeconds,
+      canaryLifetimeSeconds: probeTimeoutSeconds + vmTimeoutMarginSeconds,
+    }),
     launcher({ settings, logger, background }) {
       // The launch has the core's deadline from the claim: the hand-over comes after create, the host preparation
       // and the image check, whose own timeouts add up to LAUNCH_STEPS_SECONDS.
@@ -186,7 +206,6 @@ export function sandboxFromEnvironment(
       // it does not use must not take its Diff jobs down.
       const serversDynamic = settings.core.engines.includes("opencode");
       const dynamic = serversDynamic ? dynamicEnvironment(env) : {};
-      const service = createVercelSandboxService(loadSdk, access);
       const launcher = createSandboxLauncher({
         service,
         snapshotId,

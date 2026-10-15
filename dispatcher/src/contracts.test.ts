@@ -52,6 +52,7 @@ describe("the contracts the Dispatcher speaks", () => {
       ["runner-api", "ReleaseRequest", "examples/ReleaseRequest.json"],
       ["runner-api", "ReleaseResponse", "examples/ReleaseResponse.json"],
       ["runner-api", "VersionResponse", "examples/VersionResponse.json"],
+      ["runner-api", "JobStateResponse", "examples/JobStateResponse.json"],
     ] as const) {
       const check = validator(file, definition);
       expect(

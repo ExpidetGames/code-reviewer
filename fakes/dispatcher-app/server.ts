@@ -11,12 +11,16 @@
 // TypeScript-only runtime syntax. It reads the examples of contracts/ from disk, so its answers cannot
 // drift from them (app/integration-tests/fakes checks every answer against the schemas).
 //
+// The Dispatcher API also answers the state of a job (`GET /api/runners/v1/jobs/{id}`, #364); a test sets the
+// state with `setJobStatus` (or `POST /__fake/job-status`) and scripts the route `job_state` like any other.
+//
 // Control API (JSON, no authentication: loopback and test only), for suites that run it as a process
 // (main.ts):
 //   GET  /__fake/health                         200 once the server is up
 //   POST /__fake/enqueue   {id?, reviewKind?}   adds a queued job, answers {id}
 //   POST /__fake/script    {route, steps}       the next requests of that route get the steps in order
 //   POST /__fake/lose-lease {jobId}             heartbeat and result of that job answer 409
+//   POST /__fake/job-status {jobId, status}     sets the status the job state call answers
 //   GET  /__fake/requests                       every call so far: {method, route, jobId, status}
 //   GET  /__fake/results[?jobId=<id>]           the results delivered so far
 //   POST /__fake/reset                          forgets jobs, scripts and the log
@@ -42,11 +46,18 @@ const UUID =
 const SHUTDOWN_CODES = ["runner_shutdown", "launch_failed"];
 
 export type Route =
-  "claim" | "release" | "version" | "job" | "heartbeat" | "result";
+  | "claim"
+  | "release"
+  | "version"
+  | "job_state"
+  | "job"
+  | "heartbeat"
+  | "result";
 const ROUTES: readonly Route[] = [
   "claim",
   "release",
   "version",
+  "job_state",
   "job",
   "heartbeat",
   "result",
@@ -65,6 +76,15 @@ export type Step = {
 };
 
 export type ReviewKind = "diff" | "dynamic";
+const JOB_STATUSES = [
+  "queued",
+  "running",
+  "succeeded",
+  "failed",
+  "superseded",
+  "cancelled",
+] as const;
+export type JobStatus = (typeof JOB_STATUSES)[number];
 export type EnqueueOptions = {
   id?: string;
   reviewKind?: ReviewKind;
@@ -94,6 +114,8 @@ export type DispatcherAppFake = {
   enqueue(options?: EnqueueOptions): string;
   script(route: Route, steps: Step[]): void;
   loseLease(jobId: string): void;
+  /** Sets the status the job state call answers for a job (the App's other statuses than a claim reaches). */
+  setJobStatus(jobId: string, status: JobStatus): void;
   results(jobId: string): unknown[];
   requests(): LoggedRequest[];
   reset(): void;
@@ -104,7 +126,7 @@ type JobState = {
   id: string;
   reviewKind: ReviewKind;
   input: Record<string, unknown>;
-  status: "queued" | "running" | "succeeded" | "failed";
+  status: JobStatus;
   attempts: number;
   claims: number;
   credential: string | null;
@@ -357,6 +379,15 @@ export async function startDispatcherAppFake(
     return { status: 200, body: { version: 1, job: { id: job.id, status } } };
   }
 
+  function handleJobState(jobId: string): Reply {
+    const job = jobs.get(jobId);
+    if (job === undefined) return errorReply(404);
+    return {
+      status: 200,
+      body: { version: 1, job: { id: job.id, status: job.status } },
+    };
+  }
+
   function workerJob(
     jobId: string,
     credential: string | null,
@@ -449,7 +480,9 @@ export async function startDispatcherAppFake(
     const path = url.pathname;
     const none = (reply: Reply) => ({ route: null, jobId: null, reply });
     const runnerMatch =
-      /^\/api\/runners\/v1\/(claim|version|jobs\/([^/]+)\/release)$/.exec(path);
+      /^\/api\/runners\/v1\/(claim|version|jobs\/([^/]+)\/release|jobs\/([^/]+))$/.exec(
+        path,
+      );
     const workerMatch =
       /^\/api\/workers\/v1\/jobs\/([^/]+)(?:\/(heartbeat|result))?$/.exec(path);
     if (runnerMatch === null && workerMatch === null)
@@ -458,11 +491,16 @@ export async function startDispatcherAppFake(
     const credential = bearer(request);
     if (runnerMatch !== null) {
       const name = runnerMatch[1] ?? "";
-      const route: Route = name.startsWith("jobs/")
-        ? "release"
-        : (name as Route);
-      const jobId = runnerMatch[2] ?? null;
-      const expectedMethod = route === "version" ? "GET" : "POST";
+      const stateJob = runnerMatch[3] ?? null;
+      const route: Route =
+        stateJob !== null
+          ? "job_state"
+          : name.startsWith("jobs/")
+            ? "release"
+            : (name as Route);
+      const jobId = stateJob ?? runnerMatch[2] ?? null;
+      const expectedMethod =
+        route === "version" || route === "job_state" ? "GET" : "POST";
       if (method !== expectedMethod)
         return { route, jobId, reply: errorReply(404) };
       if (route === "version" && credential !== dispatcherToken) {
@@ -504,6 +542,8 @@ export async function startDispatcherAppFake(
             body: { ...versionExample, appVersion },
           },
         };
+      if (route === "job_state")
+        return { route, jobId, reply: handleJobState(jobId ?? "") };
       const raw = await readBody(request);
       if (raw === "too_large") return { route, jobId, reply: errorReply(413) };
       const body = parseObject(raw.text);
@@ -620,6 +660,14 @@ export async function startDispatcherAppFake(
       fake.script(route as Route, body.steps as Step[]);
       return { status: 200, body: { ok: true } };
     }
+    if (
+      name === "job-status" &&
+      typeof body.jobId === "string" &&
+      JOB_STATUSES.includes(body.status as JobStatus)
+    ) {
+      fake.setJobStatus(body.jobId, body.status as JobStatus);
+      return { status: 200, body: { ok: true } };
+    }
     if (name === "lose-lease" && typeof body.jobId === "string") {
       fake.loseLease(body.jobId);
       return { status: 200, body: { ok: true } };
@@ -657,6 +705,10 @@ export async function startDispatcherAppFake(
     loseLease(jobId) {
       const job = jobs.get(jobId);
       if (job !== undefined) job.leaseLost = true;
+    },
+    setJobStatus(jobId, status) {
+      const job = jobs.get(jobId);
+      if (job !== undefined) job.status = status;
     },
     results(jobId) {
       return structuredClone(jobs.get(jobId)?.results ?? []);

@@ -94,3 +94,35 @@ export interface SandboxService {
    */
   stop(name: string): Promise<void>;
 }
+
+/** A VM as the platform lists it: only what the reaper (#364) reads. */
+export type ListedVm = {
+  name: string;
+  /** Creation time, in milliseconds since the epoch. */
+  createdAtMs: number;
+  /** The platform's own word (`running`, `pending`, `stopping`, `stopped`, ...). Never assumed to be one we know. */
+  status: string;
+  /** The VM's own timeout, when the platform reports it. */
+  timeoutMs?: number;
+  /** Whether the platform keeps a snapshot of the VM: the golden builder is persistent, no VM of a job or a canary is. */
+  persistent?: boolean;
+  tags: Readonly<Record<string, string>>;
+};
+
+/** What a listing narrows to: a name prefix and a single tag (the platform allows one tag per filter). */
+export type ListFilter = {
+  namePrefix: string;
+  tags: Readonly<Record<string, string>>;
+};
+
+/**
+ * What the reaper (#364) needs of the platform, next to the Launcher's `SandboxService`: list the VMs of the
+ * project by a filter, and stop one by name. The platform's filter is a narrowing, never the check: the reaper
+ * decides itself which VMs are ours.
+ */
+export interface SandboxFleet {
+  /** Every VM the filter matches, across all pages. Throws `SandboxServiceError` for a failure of the platform. */
+  list(filter: ListFilter, signal?: AbortSignal): Promise<readonly ListedVm[]>;
+  /** The same call as `SandboxService.stop`: by name, a VM that is gone is not an error. */
+  stop(name: string): Promise<void>;
+}

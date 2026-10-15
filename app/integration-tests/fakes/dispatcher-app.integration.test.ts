@@ -303,6 +303,66 @@ describe("the fake App", () => {
     expect(other.status).toBe(401);
   });
 
+  // #364-T26
+  it("serves the state of a job to the Dispatcher, scripted like every route", async () => {
+    const fake = await start();
+    fake.enqueue({ id: JOB });
+
+    const queued = await dispatcherCall(
+      fake,
+      "GET",
+      `/api/runners/v1/jobs/${JOB}`,
+    );
+    expect(queued.status).toBe(200);
+    const body = await queued.json();
+    valid(runner, "JobStateResponse", body);
+    expect(body).toStrictEqual({
+      version: 1,
+      job: { id: JOB, status: "queued" },
+    });
+
+    for (const status of ["running", "cancelled", "superseded"] as const) {
+      fake.setJobStatus(JOB, status);
+      const answer = await dispatcherCall(
+        fake,
+        "GET",
+        `/api/runners/v1/jobs/${JOB}`,
+      );
+      valid(runner, "JobStateResponse", await answer.json());
+    }
+    fake.script("job_state", [{ status: 500 }]);
+    const scripted = await dispatcherCall(
+      fake,
+      "GET",
+      `/api/runners/v1/jobs/${JOB}`,
+    );
+    expect(scripted.status).toBe(500);
+
+    const missing = await dispatcherCall(
+      fake,
+      "GET",
+      "/api/runners/v1/jobs/11111111-1111-4111-8111-111111111111",
+    );
+    expect(missing.status).toBe(404);
+    valid(runner, "ErrorResponse", await missing.json());
+    expect(fake.requests().map((entry) => entry.route)).toContain("job_state");
+  });
+
+  // #364-T24
+  it("refuses a job credential and no credential on the job state, like the App", async () => {
+    const fake = await start();
+    fake.enqueue({ id: JOB });
+    const { job } = await claim(fake);
+
+    const asWorker = await fetch(`${fake.url}/api/runners/v1/jobs/${JOB}`, {
+      headers: { authorization: `Bearer ${job?.job.credential}` },
+    });
+    const anonymous = await fetch(`${fake.url}/api/runners/v1/jobs/${JOB}`);
+
+    expect(asWorker.status).toBe(401);
+    expect(anonymous.status).toBe(401);
+  });
+
   // #318-T08
   it("serves release and version to the Dispatcher", async () => {
     const fake = await start();

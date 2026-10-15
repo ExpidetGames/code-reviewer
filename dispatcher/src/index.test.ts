@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { REAP_PATH } from "./reaper/route.ts";
 import { startApp, waitFor } from "./test-support/harness.ts";
+
+const CRON_SECRET = "a-cron-secret-of-at-least-32-characters";
 
 // The Sandbox SDK is replaced for the whole file: no test here may reach the platform. A test scripts `create`.
 const sdk = vi.hoisted(() => ({
   create: vi.fn<(params: Record<string, unknown>) => Promise<unknown>>(),
   get: vi.fn<(params: Record<string, unknown>) => Promise<unknown>>(),
+  list: vi.fn<(params: Record<string, unknown>) => Promise<unknown>>(),
 }));
 vi.mock("@vercel/sandbox", () => ({ Sandbox: sdk }));
 
@@ -14,6 +18,7 @@ afterEach(() => {
   vi.unstubAllEnvs();
   sdk.create.mockReset();
   sdk.get.mockReset();
+  sdk.list.mockReset();
   vi.resetModules();
 });
 
@@ -203,6 +208,136 @@ describe("the Vercel entry", () => {
     vi.stubEnv("SANDBOX_SNAPSHOT_ID", "snap_dummy_golden_0001");
 
     await expect(import("./index.ts")).rejects.toThrow(/SANDBOX_IMAGE_DIGEST/);
+  });
+
+  // #364-T18
+  it("has no reaper route when no golden snapshot is configured, and calls no platform", async () => {
+    stubEnvironment();
+    vi.stubEnv("CRON_SECRET", CRON_SECRET);
+    const { default: app } = await import("./index.ts");
+
+    const response = await app.fetch(
+      new Request(`http://dispatcher.test${REAP_PATH}`, {
+        headers: { authorization: `Bearer ${CRON_SECRET}` },
+      }),
+    );
+
+    expect(response.status).toBe(404);
+    expect(sdk.list).not.toHaveBeenCalled();
+  });
+
+  // #364-T15
+  it("refuses the reaper route without the cron secret and lists nothing, also when no secret is set", async () => {
+    stubEnvironment();
+    stubSandbox();
+    const { default: app } = await import("./index.ts");
+
+    const unset = await app.fetch(
+      new Request(`http://dispatcher.test${REAP_PATH}`, {
+        headers: { authorization: `Bearer ${CRON_SECRET}` },
+      }),
+    );
+
+    expect(unset.status).toBe(401);
+    expect(sdk.list).not.toHaveBeenCalled();
+  });
+
+  // #364-T15
+  it("refuses the reaper route to the dispatcher credential", async () => {
+    stubEnvironment();
+    stubSandbox();
+    vi.stubEnv("CRON_SECRET", CRON_SECRET);
+    const { default: app } = await import("./index.ts");
+
+    const response = await app.fetch(
+      new Request(`http://dispatcher.test${REAP_PATH}`, {
+        headers: { authorization: "Bearer dummy-dispatcher-token-for-tests" },
+      }),
+    );
+
+    expect(response.status).toBe(401);
+    expect(sdk.list).not.toHaveBeenCalled();
+  });
+
+  // #364-T20
+  it("reaps through the SDK for the cron secret: lists our VMs by prefix and one tag, and stops none when none is a leftover", async () => {
+    stubEnvironment();
+    stubSandbox();
+    vi.stubEnv("CRON_SECRET", CRON_SECRET);
+    sdk.list.mockResolvedValue(
+      (async function* () {
+        yield {
+          name: "code-reviewer-golden-builder-20261015t030000z",
+          createdAt: 1,
+          status: "running",
+          tags: { app: "code-reviewer", role: "golden-builder" },
+        };
+      })(),
+    );
+    const { default: app } = await import("./index.ts");
+
+    const response = await app.fetch(
+      new Request(`http://dispatcher.test${REAP_PATH}`, {
+        headers: { authorization: `Bearer ${CRON_SECRET}` },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toStrictEqual({
+      status: "ok",
+      listed: 1,
+      candidates: 0,
+      stopped: 0,
+      kept: 0,
+      unreadable: 0,
+      failed: 0,
+    });
+    expect(sdk.list).toHaveBeenCalledTimes(1);
+    expect(sdk.list.mock.calls[0]?.[0]).toMatchObject({
+      namePrefix: "cr-",
+      sortBy: "name",
+      tags: { app: "code-reviewer" },
+    });
+    expect(sdk.get).not.toHaveBeenCalled();
+  });
+
+  // #364-T17
+  it("refuses to start with a malformed CRON_SECRET when the reaper is mounted, and ignores it when it is not", async () => {
+    stubEnvironment();
+    vi.stubEnv("CRON_SECRET", "tiny-cron-secret");
+
+    const { default: app } = await import("./index.ts");
+    expect(
+      (await app.fetch(new Request("http://dispatcher.test/health"))).status,
+    ).toBe(200);
+
+    vi.resetModules();
+    stubSandbox();
+    await expect(import("./index.ts")).rejects.toThrow(/CRON_SECRET/);
+  });
+
+  // #364-T11
+  it("answers 500 REAP_LIST_FAILED when the platform cannot be listed, without its text", async () => {
+    stubEnvironment();
+    stubSandbox();
+    vi.stubEnv("CRON_SECRET", CRON_SECRET);
+    sdk.list.mockRejectedValue(
+      Object.assign(new Error("platform said dummy-detail"), {
+        response: { status: 503 },
+      }),
+    );
+    const { default: app } = await import("./index.ts");
+
+    const response = await app.fetch(
+      new Request(`http://dispatcher.test${REAP_PATH}`, {
+        headers: { authorization: `Bearer ${CRON_SECRET}` },
+      }),
+    );
+
+    expect(response.status).toBe(500);
+    expect(await response.text()).toBe(
+      JSON.stringify({ status: "error", code: "REAP_LIST_FAILED" }),
+    );
   });
 });
 

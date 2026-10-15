@@ -7,11 +7,13 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { loadSettings } from "./config.ts";
+import { REAP_PATH } from "./reaper/route.ts";
 
 const ROOT = join(import.meta.dirname, "..");
 const config = JSON.parse(readFileSync(join(ROOT, "vercel.json"), "utf8")) as {
   regions?: string[];
   functions?: Record<string, { maxDuration?: number }>;
+  crons?: Array<{ path: string; schedule: string }>;
 };
 
 // 800 s is generally available on Pro; up to 1800 s (30 minutes) is an extended maximum in beta for Pro and
@@ -46,5 +48,16 @@ describe("vercel.json of the Dispatcher", () => {
     expect(
       core.jobTimeoutSeconds + core.launchDeadlineSeconds,
     ).toBeLessThanOrEqual(PRO_EXTENDED_MAXIMUM_SECONDS);
+  });
+
+  // #364-T19
+  it("calls the reaper's route by cron, at least every five minutes, and nothing else", () => {
+    const crons = config.crons ?? [];
+
+    expect(crons.map((cron) => cron.path)).toStrictEqual([REAP_PATH]);
+    const every = /^\*\/(\d{1,2}) \* \* \* \*$/.exec(crons[0]?.schedule ?? "");
+    expect(every, `schedule ${crons[0]?.schedule}`).not.toBeNull();
+    expect(Number(every?.[1])).toBeGreaterThanOrEqual(1);
+    expect(Number(every?.[1])).toBeLessThanOrEqual(5);
   });
 });

@@ -38,6 +38,21 @@ export const APP_FAILURES = [
 ] as const;
 export type AppFailure = (typeof APP_FAILURES)[number];
 
+/** The statuses of a job in the App (`JobStateResponse`). A status not in this list is read as unknown. */
+export const JOB_STATUSES = [
+  "queued",
+  "running",
+  "succeeded",
+  "failed",
+  "superseded",
+  "cancelled",
+] as const;
+export type JobStatus = (typeof JOB_STATUSES)[number];
+
+/** What the App said about a job. `unreadable` is every other case: no answer, a refusal, an App without the call. */
+export type JobStateResult =
+  { kind: "known"; status: JobStatus } | { kind: "unreadable" };
+
 export type HeartbeatResult = "ok" | "lease_lost" | "failed";
 export type ReleaseResult = "released" | "not_holder" | "failed";
 
@@ -60,6 +75,11 @@ export function parseSplitClaim(body: unknown): ClaimedJob | null {
     parsed.data.job;
   return { id, credential, reviewKind, heartbeatIntervalSeconds };
 }
+
+const jobStateAnswer = z.object({
+  version: z.literal(1),
+  job: z.object({ id: z.string(), status: z.enum(JOB_STATUSES) }),
+});
 
 const versionAnswer = z.object({
   version: z.literal(1),
@@ -162,6 +182,25 @@ export function createAppClient(options: AppClientOptions) {
       return missing.length === 0
         ? { ok: true }
         : { ok: false, code: "app_too_old" };
+    },
+
+    /**
+     * The status of a job (`GET /jobs/{id}`, #364). Anything but a valid answer for this very job is `unreadable`:
+     * an App of a previous release has no such route, and a caller that cannot read the state must not act on it.
+     */
+    async jobState(jobId: string): Promise<JobStateResult> {
+      const response = await send(
+        `/api/runners/v1/jobs/${encodeURIComponent(jobId)}`,
+        { method: "GET", bearer: options.token },
+      );
+      if (response === null || response.status !== 200)
+        return { kind: "unreadable" };
+      const parsed = jobStateAnswer.safeParse(
+        await response.json().catch(() => null),
+      );
+      if (!parsed.success || parsed.data.job.id !== jobId)
+        return { kind: "unreadable" };
+      return { kind: "known", status: parsed.data.job.status };
     },
 
     async claim(body: ClaimRequestBody): Promise<ClaimResult> {

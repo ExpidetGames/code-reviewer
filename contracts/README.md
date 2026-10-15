@@ -49,6 +49,8 @@ The App, the Dispatcher (TypeScript) and the Worker (Python) agree on these file
   the split answer `SplitClaimResponse` (the per-job credential, **no job input and no secrets**; without the
   feature the answer is the legacy `ClaimResponse`, unchanged); `ReleaseRequest`/`ReleaseResponse`;
   `VersionResponse` (the features of the app, so a Dispatcher or a Worker detects an app that is too old);
+  `JobStateResponse` (#364, `GET /api/runners/v1/jobs/{id}`: the status of a job and nothing else, for the Dispatcher's
+  reaper; not a required feature, an app without it is a `404` the reader treats as "state unknown");
   the API error codes `WORKER_CREDENTIAL_INVALID` and `RUNNER_JOB_ENDED`. The Worker API and the split claim are
   served since #320 (`app/src/runner-api/README.md`, "The Worker API"); claim by job id, the pool cap, release and
   version since #322 ("The Dispatcher's calls" there). A previous-release app ignores the new claim

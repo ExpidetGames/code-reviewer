@@ -37,6 +37,8 @@ BODIES = (
     "ReleaseRequest",
     "ReleaseResponse",
     "VersionResponse",
+    # #364: the job state a Dispatcher reads to find the VMs of jobs that ended.
+    "JobStateResponse",
 )
 
 Document = dict[str, Any]
