@@ -35,6 +35,7 @@ jobs:
       pull-requests: read
     outputs:
       app: ${{ steps.filter.outputs.app }}
+      dispatcher: ${{ steps.filter.outputs.dispatcher }}
       runner: ${{ steps.filter.outputs.runner }}
       workflows: ${{ steps.filter.outputs.workflows }}
       licenses: ${{ steps.filter.outputs.licenses }}
@@ -48,6 +49,14 @@ jobs:
           filters: |
             app:
               - '**'
+              - '!runner/**'
+              - '!*.md'
+              - '!fakes/**/*.md'
+            # The Dispatcher (#327) also reads contracts/ and fakes/, so those count; the app and the
+            # runner jobs still run for its changes (the app's project-boundary test lives there).
+            dispatcher:
+              - '**'
+              - '!app/**'
               - '!runner/**'
               - '!*.md'
               - '!fakes/**/*.md'
@@ -153,6 +162,40 @@ jobs:
         env:
           APP_RUNTIME: serverless
         run: pnpm test
+
+  # The Dispatcher (#327): TypeScript on Hono, its own pnpm project. No database and no network service:
+  # its tests run against the fake App of fakes/dispatcher-app on loopback.
+  dispatcher-fast:
+    name: "Dispatcher: static & tests"
+    needs: changes
+    if: ${{ github.event_name == 'push' || github.base_ref == 'main' || needs.changes.outputs.dispatcher == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: dispatcher
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: dispatcher/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+          cache-dependency-path: dispatcher/pnpm-lock.yaml
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Check formatting
+        run: pnpm format:check
+      - name: Lint
+        run: pnpm lint
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Unit tests
+        run: pnpm test
+      - name: Integration tests on the host
+        run: pnpm test:int
 
   runner-fast:
     name: "Runner: static & tests"
@@ -350,7 +393,7 @@ jobs:
   licenses:
     name: "Licenses: dependency check"
     needs: changes
-    if: ${{ github.event_name == 'push' || github.base_ref == 'main' || needs.changes.outputs.app == 'true' || needs.changes.outputs.runner == 'true' || needs.changes.outputs.licenses == 'true' }}
+    if: ${{ github.event_name == 'push' || github.base_ref == 'main' || needs.changes.outputs.app == 'true' || needs.changes.outputs.dispatcher == 'true' || needs.changes.outputs.runner == 'true' || needs.changes.outputs.licenses == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     defaults:
@@ -367,6 +410,9 @@ jobs:
           cache: pnpm
           cache-dependency-path: app/pnpm-lock.yaml
       - name: Install the app dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install the dispatcher dependencies
+        working-directory: dispatcher
         run: pnpm install --frozen-lockfile
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
@@ -533,7 +579,7 @@ jobs:
   # fails on any failed or cancelled job and accepts skipped jobs (path filter).
   ci-passed:
     name: All checks passed?
-    needs: [changes, app-fast, app-serverless, runner-fast, engine, e2e, e2e-dynamic, licenses, image-app, image-runner, image-runner-dynamic, compose, actionlint]
+    needs: [changes, app-fast, app-serverless, dispatcher-fast, runner-fast, engine, e2e, e2e-dynamic, licenses, image-app, image-runner, image-runner-dynamic, compose, actionlint]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
