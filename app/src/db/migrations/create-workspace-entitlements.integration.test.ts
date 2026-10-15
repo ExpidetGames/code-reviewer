@@ -33,7 +33,11 @@ async function snapshot(
   for (const table of tables) {
     // The table of this migration, and the ones that later migrations added.
     if (table.name === "workspace_entitlements") continue;
-    if (table.name === "usage_records" || table.name === "setup_codes")
+    if (
+      table.name === "usage_records" ||
+      table.name === "setup_codes" ||
+      table.name === "job_dispatches"
+    )
       continue;
     const { rows } =
       await sql<unknown>`select * from ${sql.table(table.name)}`.execute(db);

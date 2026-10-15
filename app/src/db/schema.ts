@@ -398,6 +398,27 @@ export interface JobClaimedKeysTable {
   created_at: string;
 }
 
+/** Where the signed wake-up call of a job stands (src/dispatch/README.md); only written in webhook mode. */
+export interface JobDispatchesTable {
+  job_id: string;
+  /** `pending`, `acked` or `stopped` (`DISPATCH_STATES`). */
+  state: string;
+  /** How many times the call was claimed for sending (0 while it never was). */
+  attempts: number;
+  /** Failed sends in a row; the schedule of the next wait. */
+  consecutive_failures: number;
+  /** ISO 8601 text in UTC: when the job is to be sent (again). While a send is in flight: when its claim ends. */
+  next_dispatch_at: string;
+  acked_at: string | null;
+  last_attempt_at: string | null;
+  /** The HTTP status of the last answer, null when there was none. */
+  last_status: number | null;
+  /** A name of `DISPATCH_RESULT_CODES`. */
+  last_code: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 /** A single-use link to set a new password; only the hash of the token is kept (src/auth/password-reset.ts). */
 export interface PasswordResetTokensTable {
   /** SHA-256 of the token, hex. */
@@ -553,6 +574,7 @@ export interface Database {
   workspace_entitlements: WorkspaceEntitlementsTable;
   usage_records: UsageRecordsTable;
   job_claimed_keys: JobClaimedKeysTable;
+  job_dispatches: JobDispatchesTable;
   password_reset_tokens: PasswordResetTokensTable;
   email_verification_tokens: EmailVerificationTokensTable;
   signed_states: SignedStatesTable;

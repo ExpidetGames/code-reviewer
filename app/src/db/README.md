@@ -311,6 +311,18 @@ Migration `20261014150000_create_usage_records` (#272; epic #268). It adds an em
   larger number as unknown). The id is text; readers page through the settled records by `(settled_at, id)`. Rows are
   never deleted. See `src/usage/README.md`.
 
+### Job dispatches
+
+Migration `20261015120000_create_job_dispatches` (#326; epic #316). It adds an empty table and touches no existing row,
+so an app of the previous release on the same database is unaffected:
+
+- `job_dispatches` (`job_id` primary key and foreign key to `jobs`, `state` `pending`/`acked`/`stopped`, `attempts`,
+  `consecutive_failures`, `next_dispatch_at`, `acked_at`, `last_attempt_at`, `last_status`, `last_code`, `created_at`,
+  `updated_at`): where the signed wake-up call of a job stands (`job-dispatches-repository.ts`, instance level: the
+  sender and the sweep work from a job id and the table holds no repository data). Written only with
+  `RUNNER_DISPATCH=webhook`; in the default poll mode it stays empty. A partial index serves the due rows. Rows are
+  not removed yet. See `src/dispatch/README.md`.
+
 ## Workspace scoping
 
 Every repository that reads or writes customer data is created for one workspace:
