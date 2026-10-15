@@ -11,21 +11,24 @@ App ──signed POST /dispatch──▶ Trigger ──▶ core ──claim─�
                                             └──▶ Launcher.launch(...)   (heartbeats with the credential meanwhile)
 ```
 
-| Part                                                                              | Where                                    | Status                                                                         |
-| --------------------------------------------------------------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------ |
-| Dispatcher core: claim, capacity, heartbeat during the launch, release on failure | `src/core/`                              | here; platform-free (no `node:*`, no platform SDK: ESLint and a test check it) |
-| Webhook-Trigger: `POST /dispatch`, `GET /health`                                  | `src/triggers/webhook.ts`, `src/app.ts`  | here                                                                           |
-| Fake Launcher (tests)                                                             | `src/launchers/fake.ts`                  | here                                                                           |
-| Hardened container spec renderer and `ContainerLauncher` (#325)                   | `src/launchers/container*.ts`            | here, used by the Sandbox-Launcher (#329) and the Docker-Launcher (#334)       |
-| Vercel entry, a default export                                                    | `src/index.ts`                           | here, with no engine until the Sandbox-Launcher (#329) is wired in             |
-| Node entry, `@hono/node-server` and a graceful shutdown                           | `src/node.ts` (`pnpm start`)             | here, with no engine until the Docker-Launcher (#334) is wired in              |
-| Poll-Trigger, Docker-Launcher, Sandbox-Launcher                                   | `src/triggers/poll.ts`, `src/launchers/` | #334, #329                                                                     |
-| Golden snapshot pipeline (a command, not a runtime part)                          | `src/snapshot/`, `pnpm snapshot:build`   | here (#330), `docs/golden-snapshot.md`                                         |
+| Part                                                                              | Where                                            | Status                                                                             |
+| --------------------------------------------------------------------------------- | ------------------------------------------------ | ---------------------------------------------------------------------------------- |
+| Dispatcher core: claim, capacity, heartbeat during the launch, release on failure | `src/core/`                                      | here; platform-free (no `node:*`, no platform SDK: ESLint and a test check it)     |
+| Webhook-Trigger: `POST /dispatch`, `GET /health`                                  | `src/triggers/webhook.ts`, `src/app.ts`          | here                                                                               |
+| Fake Launcher (tests)                                                             | `src/launchers/fake.ts`                          | here                                                                               |
+| Hardened container spec renderer and `ContainerLauncher` (#325)                   | `src/launchers/container*.ts`                    | here, used by the Sandbox-Launcher (#329) and the Docker-Launcher (#334)           |
+| Sandbox-Launcher over the Vercel Sandbox SDK (#329)                               | `src/launchers/sandbox*.ts`, `vercel-sandbox.ts` | here, wired into the Vercel entry when `SANDBOX_SNAPSHOT_ID` is set                |
+| Vercel entry, a default export                                                    | `src/index.ts`                                   | here: the Sandbox-Launcher when a golden snapshot is configured, else `noLauncher` |
+| Node entry, `@hono/node-server` and a graceful shutdown                           | `src/node.ts` (`pnpm start`)                     | here, with no engine until the Docker-Launcher (#334) is wired in                  |
+| Poll-Trigger, Docker-Launcher                                                     | `src/triggers/poll.ts`, `src/launchers/`         | #334                                                                               |
+| Golden snapshot pipeline (a command, not a runtime part)                          | `src/snapshot/`, `pnpm snapshot:build`           | here (#330), `docs/golden-snapshot.md`                                             |
 
 Two entry files keep `node:child_process` (the Docker-Launcher's way of starting a process) out of the serverless
-bundle; `src/bundle/serverless-bundle.test.ts` follows the import graph of `src/index.ts` to prove it. Until a real
-Launcher is wired in, both entries use `noLauncher`: it advertises no engine, so every wake-up call is answered
-`200 ignored` with the reason `not_capable` and nothing is claimed.
+bundle (none of ours: the Sandbox SDK's dependency tree holds `execa` for a local-development token fetch and `undici`; the
+test leaves out exactly those two, each only as imported by its known importer); `src/bundle/serverless-bundle.test.ts` follows the import graph of `src/index.ts` to prove it. Without a real
+Launcher an entry uses `noLauncher`: it advertises no engine, so every wake-up call is answered `200 ignored` with the
+reason `not_capable` and nothing is claimed. The Node entry keeps it until the Docker-Launcher (#334); the Vercel entry
+uses it until `SANDBOX_SNAPSHOT_ID` is set.
 
 ## The wake-up call
 
@@ -102,29 +105,120 @@ could become a flag, with the stable codes of `CONTAINER_ERROR_CODES`.
   `SANDBOX_LAUNCHER_ADDITIONS` for every Worker kind, because the Sandbox kernel only supports the nft `ip` family
   and the Dynamic-Worker then needs IPv6 off from the container spec. The shared spec and the self-hosted
   compose files do not have them (a full-mode host behaves as before); the default is no additions.
-- The entry mode of the image (`worker-once`) is a placeholder until the image has its entry modes (#324).
+- The entry mode of the image (`worker-once`, `probe`) is a placeholder until the image has its entry modes (#324); the
+  names are those #324 proposes, and nothing else changes when it fixes them.
 - `seccomp.ts` derives, from Docker's default profile, a profile that denies chosen socket families (AF_VSOCK);
   off unless a profile path is passed as `seccompProfile`. Not required by the spike; not yet run against a daemon.
 - A Sandbox VM needs `docker/sandbox/vm-prepare.sh` (the cgroup root fix, then `dockerd`) before the first
-  `docker run` with limits; it is the host's job, not part of the flags.
+  `docker run` with limits; it is the host's job, not part of the flags. The Sandbox-Launcher runs it on every VM start.
+
+## The Sandbox-Launcher
+
+`src/launchers/sandbox.ts` starts the Worker of one job as our hardened container inside a fresh Sandbox VM
+(#329). Vercel's firewall is not part of the security boundary: everything security-relevant comes from the container
+(`ContainerLauncher`, one spec), run through Docker inside a throw-away VM. All platform-specific code is in
+`vercel-sandbox.ts`, behind the small `SandboxService` port of `sandbox-service.ts`; `fakes/sandbox/` holds the doubles.
+
+Per job, after the core has claimed it:
+
+1. `Sandbox.create` from the golden snapshot (#330): `persistent: false` (a persistent sandbox writes a snapshot of the
+   job on stop), region `fra1`, no failover region (snapshots are region-bound), a VM size per Worker kind, tags
+   `{app, kind, job}`, and a **timeout of the job's plus 300 seconds** (`SANDBOX_VM_TIMEOUT_MARGIN_SECONDS`, at least 180 and at least 150 more than the
+   hand-over time: the platform counts from the creation of the VM, the Worker's own timer from the start of the container, so
+   the margin has to cover create, `vm-prepare.sh`, the image check and the hand-over besides the Worker's `timeout` result), the backstop that ends a VM nobody stops. The name
+   is `cr-<kind>-<job id>-<random>`: unique per launch, so a second attempt of a job never meets the first one's VM, and
+   it carries the job for lookup. A VM is never reused.
+2. `/usr/local/sbin/vm-prepare.sh` as root (the cgroup fix and `dockerd`, spike F1), then `docker image inspect` of the
+   image in the VM: its id must equal `SANDBOX_IMAGE_DIGEST`. Otherwise `image_mismatch` and the VM is stopped.
+3. `docker run --interactive` with the flags of the container spec (`SANDBOX_LAUNCHER_ADDITIONS` for every kind), by
+   image **id** (exactly what was verified, never a pull). The start document `{appUrl, jobId, credential}` is written to
+   the process's stdin and the pipe closed. **It is in no argument, no environment variable and no file on the VM**; the
+   SDK adapter has no way to set an environment or write a file, and a test searches every request for the credential.
+4. The launch resolves when the Worker has taken over: the container is running and has run for `SANDBOX_HANDOVER_SECONDS`
+   (20), or ended with 0 sooner. Until then the core heartbeats with the credential so the lease does not lapse. A
+   container that ends with an error first is `worker_exited_early`. The time is the stand-in for the Worker's own first
+   heartbeat, which the Worker does not announce (follow-up).
+5. When the container ends, the VM is stopped by the name the platform returned (`stop()` takes about 2.4 s for an idle VM,
+   22.6 s with a running container, so the container ends first). A `wait()` that fails (a broken log stream or network
+   during a long job) is asked again, three tries in all; if it still fails, what became of the container is unknown, so
+   the VM is **not** stopped under a Worker that may be reviewing: `worker_wait_failed` is logged and the VM timeout ends
+   it. There is no `poweroff` in the image (spike T13).
+
+**The function lifetime and the VM timeout.** The supervision of step 5 is work held in `waitUntil`, so it lives as long as
+the Dispatcher's function may. `vercel.json` sets `maxDuration` of `src/index.ts` explicitly to **1800 s** and the region
+to `fra1`. 1800 s is the extended maximum for Pro and Enterprise teams on Node.js 22 or 24 (**beta**; 800 s is the generally
+available maximum, and Hobby is limited to 300 s); it covers the default job (1200 s) plus its launch (at most 300 s). When
+the function ends before the container does (a job of more than about 1500 s, a platform restart, a lost instance), nothing
+stops the VM and **the VM timeout is the backstop**: it keeps running, idle and billed, until job + margin after its
+creation. A reaper that stops leftover VMs by their tags is a follow-up of #316, to be done before staging.
+
+Every failure before the hand-over stops the VM by name and ends in a `LaunchError` with a stable code and a `retryable`
+flag. The core releases the job with `launch_failed` and the App counts the attempt (three attempts, then `failed`), no
+matter whether the flag is set; it is for logs and for the operator.
+
+| Code                                                                      | Retryable                    | Cause                                                                                                                                                                                                                                                                                |
+| ------------------------------------------------------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `sandbox_rate_limited`, `sandbox_quota_exceeded`                          | yes                          | the platform's limits                                                                                                                                                                                                                                                                |
+| `sandbox_network`, `sandbox_unavailable`                                  | yes                          | no answer, or a platform error (these also stop by name: the VM may exist)                                                                                                                                                                                                           |
+| `image_not_ready`                                                         | yes                          | the platform says the snapshot is not ready                                                                                                                                                                                                                                          |
+| `sandbox_auth_failed`                                                     | no                           | the platform refuses the credentials (HTTP 401 or 403): an expired or wrong token or OIDC token                                                                                                                                                                                      |
+| `docker_not_ready`                                                        | yes                          | `vm-prepare.sh` exited with an error (cgroup or `dockerd`)                                                                                                                                                                                                                           |
+| `vm_prepare_failed`                                                       | yes                          | a call of the host preparation failed in a way no other code names (a platform failure keeps its own code)                                                                                                                                                                           |
+| `worker_exited_early`                                                     | no for exit 1, yes otherwise | the container ended with an error before the hand-over. Exit 1 is the Worker reporting that the job failed, after delivering its own result: a second VM gets the same answer. A setup error (2), docker's own refusals (125 to 127) and a kill (137) are about this VM or its start |
+| `worker_start_failed`                                                     | yes                          | the container could not be started                                                                                                                                                                                                                                                   |
+| `sandbox_snapshot_missing`, `sandbox_region_mismatch`, `sandbox_rejected` | no                           | the snapshot is gone or in another region; the platform refuses the request                                                                                                                                                                                                          |
+| `image_missing`, `image_mismatch`                                         | no                           | the VM has no such image, or not the configured one                                                                                                                                                                                                                                  |
+| `sandbox_config_invalid`                                                  | no                           | a VM size or memory limit the Launcher cannot run                                                                                                                                                                                                                                    |
+| `sandbox_create_failed`                                                   | no                           | an error it does not recognise                                                                                                                                                                                                                                                       |
+| `launch_aborted`                                                          | no                           | the deadline, a lost lease or a shutdown aborted the launch                                                                                                                                                                                                                          |
+
+The classification of the platform's errors goes by the HTTP status first (429 rate limit, 402 quota, 401 and 403 authentication, 5xx platform), then by the code of the error body (an explicit quota or `limit_exceeded` code), then by words of the message for the snapshot and the region; a message that only says `limit` or `exceeds` is not a quota; the
+platform does not document its error bodies, so the mapping is **not verified against the live API** (a follow-up of the
+first real run). Only the code is logged, never the platform's text.
+
+**Sizes.** The platform's VMs have 1 vCPU or an even number up to 8, and 2 GiB of memory per vCPU. Per Worker kind,
+`DISPATCHER_WORKER_CONFIG` sets the VM (`launcher.vcpus`) and the container memory (`container.memory`), for example
+`{"dynamic": {"launcher": {"vcpus": 2}, "container": {"memory": {"limit": "3g", "reservation": "2g"}}}}`. Without
+configuration both kinds get 1 vCPU / 2 GB and a container limit of `1536m` (reservation `1280m`), which leaves room
+for `dockerd` and the OS; a limit that leaves the VM less than 256 MiB is refused. The spike suggests 2 vCPU / 4 GB for
+the Dynamic-Worker; its real peak is not measured yet, so that is a configuration change, not a code change. A wrong
+value fails the deployment at start (`DISPATCHER_WORKER_CONFIG`), not the first job.
+
+**Capabilities.** The Launcher advertises `pr-agent` only. `opencode` is advertised after the capability probe (#331)
+has vouched for the hardening in a canary VM: until then the Dynamic-Worker is not claimed here (fail closed).
+
+**What the container can reach (documented, not relied on).** The VM's agent listens on `172.17.0.1:23456` (the Docker
+bridge gateway). Container root can reach it; the Dynamic engine's uid cannot, only because the egress rules drop it
+(spike #317). No process in the VM can open an `AF_VSOCK` socket: a platform filter denies it, and Docker's default
+profile adds a second layer. Nothing here depends on these; they are recorded because the supervisor's egress inside the
+VM is unrestricted by design (#82 stays an open hosted gate). The platform operator can read job secrets by construction.
+
+**Authentication.** Without credentials the SDK uses the OIDC token of the Vercel project, automatic inside a Function.
+With `VERCEL_TOKEN`, `VERCEL_TEAM_ID` and `VERCEL_PROJECT_ID` it uses that access token. The token is masked in every log
+line and is never sent anywhere but to the SDK.
 
 ## Configuration
 
 Names only: a refusal names the variable, never the value.
 
-| Variable                                                                   | Meaning                                                                                                                | Default      |
-| -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ------------ |
-| `RUNNER_API_URL`                                                           | Base URL of the App                                                                                                    | required     |
-| `RUNNER_TOKEN`                                                             | The dispatcher credential (the runner API token)                                                                       | required     |
-| `DISPATCHER_MAX_RUNNING`                                                   | The pool cap, 1 to 1000                                                                                                | required     |
-| `DISPATCHER_SIGNING_KEY_ID`, `DISPATCHER_SIGNING_SECRET`                   | The key the App signs the wake-up call with; the secret has at least 32 characters and differs from every other secret | required     |
-| `DISPATCHER_SIGNING_KEY_ID_PREVIOUS`, `DISPATCHER_SIGNING_SECRET_PREVIOUS` | The previous key, accepted while the keys rotate                                                                       | none         |
-| `DISPATCHER_POOL_ID`                                                       | Sent as `X-Runner-Id`; the App counts the running jobs of the pool by it                                               | `dispatcher` |
-| `DISPATCHER_ENGINES`                                                       | `pr-agent`, `opencode` or both                                                                                         | both         |
-| `DISPATCHER_JOB_TIMEOUT_SECONDS`                                           | How long a Worker may live, 60 to 21600                                                                                | `1200`       |
-| `DISPATCHER_WORKER_CONFIG`                                                 | JSON `{"diff": {...}, "dynamic": {...}}` with `container.memory` and `launcher`                                        | none         |
-| `DISPATCHER_SHUTDOWN_GRACE_SECONDS`                                        | Node entry: how long launches may finish after SIGTERM, 0 to 600                                                       | `60`         |
-| `PORT`                                                                     | Node entry                                                                                                             | `8080`       |
+| Variable                                                                   | Meaning                                                                                                                                                                                       | Default      |
+| -------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
+| `RUNNER_API_URL`                                                           | Base URL of the App                                                                                                                                                                           | required     |
+| `RUNNER_TOKEN`                                                             | The dispatcher credential (the runner API token)                                                                                                                                              | required     |
+| `DISPATCHER_MAX_RUNNING`                                                   | The pool cap, 1 to 1000                                                                                                                                                                       | required     |
+| `DISPATCHER_SIGNING_KEY_ID`, `DISPATCHER_SIGNING_SECRET`                   | The key the App signs the wake-up call with; the secret has at least 32 characters and differs from every other secret                                                                        | required     |
+| `DISPATCHER_SIGNING_KEY_ID_PREVIOUS`, `DISPATCHER_SIGNING_SECRET_PREVIOUS` | The previous key, accepted while the keys rotate                                                                                                                                              | none         |
+| `DISPATCHER_POOL_ID`                                                       | Sent as `X-Runner-Id`; the App counts the running jobs of the pool by it                                                                                                                      | `dispatcher` |
+| `DISPATCHER_ENGINES`                                                       | `pr-agent`, `opencode` or both                                                                                                                                                                | both         |
+| `DISPATCHER_JOB_TIMEOUT_SECONDS`                                           | How long a Worker may live, 60 to 21600                                                                                                                                                       | `1200`       |
+| `DISPATCHER_WORKER_CONFIG`                                                 | JSON `{"diff": {...}, "dynamic": {...}}` with `container.memory` and `launcher`                                                                                                               | none         |
+| `SANDBOX_SNAPSHOT_ID`                                                      | Vercel entry: the golden snapshot (#330 record `snapshotId`). Unset: no launcher, nothing is claimed                                                                                          | none         |
+| `SANDBOX_IMAGE_DIGEST`                                                     | The Worker image id in that snapshot (#330 record `imageDigest`, `sha256:` and 64 hex). Required with the snapshot                                                                            | none         |
+| `SANDBOX_HANDOVER_SECONDS`                                                 | How long the container runs before the Worker counts as having taken over, 1 to 120; with create, `vm-prepare.sh` and the image check (150 s) it must fit in the core's 300 s launch deadline | `20`         |
+| `SANDBOX_VM_TIMEOUT_MARGIN_SECONDS`                                        | Seconds added to the job's timeout for the VM's own, 180 to 3600 and at least the hand-over time plus 150                                                                                     | `300`        |
+| `VERCEL_TOKEN`, `VERCEL_TEAM_ID`, `VERCEL_PROJECT_ID`                      | Platform access by token (all three). Without a token the OIDC token is used                                                                                                                  | OIDC         |
+| `DISPATCHER_SHUTDOWN_GRACE_SECONDS`                                        | Node entry: how long launches may finish after SIGTERM, 0 to 600                                                                                                                              | `60`         |
+| `PORT`                                                                     | Node entry                                                                                                                                                                                    | `8080`       |
 
 ## The golden snapshot pipeline
 
@@ -137,7 +231,7 @@ rebuild, rollback, retention, the scan and the failure codes are in `docs/golden
 ## Working here
 
 From the repository root: `make lint`, `make typecheck`, `make test-unit`, `make test-integration`, `make verify`.
-Inside `dispatcher/`: `pnpm test`, `pnpm test:int`, `pnpm exec vitest run <path>`, `pnpm start` (the Node entry).
+Inside `dispatcher/`: `pnpm test`, `pnpm test:int`, `pnpm test:privileged` (a Docker daemon and the Worker image, `make test-sandbox-local`), `pnpm exec vitest run <path>`, `pnpm start` (the Node entry).
 `src/contracts/` is generated from `contracts/` (`make generate-contracts`) and never edited by hand. The project
 imports nothing from `app/` or `runner/`; what is shared is the contracts and `fakes/` (`fakes/dispatcher-app` is the
 fake App every test here runs against). See `TESTING.md` for the test rules.

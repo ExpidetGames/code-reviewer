@@ -9,7 +9,7 @@ DISPATCHER := pnpm --dir dispatcher
 RUNNER := uv --directory runner
 
 .PHONY: help install lint lint-app lint-dispatcher lint-runner typecheck typecheck-app typecheck-dispatcher typecheck-runner \
-	test-unit test-unit-app test-unit-dispatcher test-unit-runner test-integration check-licenses fix-spdx-headers generate-contracts check-contracts test-engine test-e2e test-e2e-dynamic test-images test-compose verify
+	test-unit test-unit-app test-unit-dispatcher test-unit-runner test-integration check-licenses fix-spdx-headers generate-contracts check-contracts test-engine test-e2e test-e2e-dynamic test-sandbox-local test-images test-compose verify
 
 help:
 	@echo "make install           install app, dispatcher and runner dependencies from the lockfiles"
@@ -24,6 +24,7 @@ help:
 	@echo "make test-engine       the real PR-Agent and the pinned OpenCode against the fakes (about 5 minutes, not part of verify)"
 	@echo "make test-e2e          Playwright journeys against a production build (ARGS=... to filter)"
 	@echo "make test-e2e-dynamic   the privileged Dynamic Review journey with the real OpenCode (root and nft, CI-first, ARGS=... to filter)"
+	@echo "make test-sandbox-local  the Sandbox-Launcher's local mode with a real Docker daemon and the Worker image (needs Docker, not part of verify)"
 	@echo "make test-images       build the container images (the Dynamic runner and Sandbox targets too) and run their smoke tests (needs Docker)"
 	@echo "make test-compose      build both images and smoke test the Docker Compose stack (needs Docker)"
 	@echo "make verify            lint, typecheck, unit and host integration tests and the license check; run before every PR"
@@ -104,6 +105,14 @@ test-e2e:
 # and ripgrep). It fails, with the missing item named, where it cannot run; it never skips.
 test-e2e-dynamic:
 	cd runner && scripts/run_dynamic_e2e.sh $(ARGS)
+
+# The privileged lane of the Sandbox-Launcher (#329-T09, T10): the local mode of the Sandbox double over a real Docker
+# daemon, with the Worker image of the `sandbox` target and the fake App. Needs a running daemon this user may use and
+# fails, naming what is missing, without one. The container reaches the fake App on the docker0 gateway
+# (SANDBOX_LOCAL_APP_HOST). Not part of `make verify`; CI runs it as the job `sandbox-local`.
+test-sandbox-local:
+	docker build --file runner/Dockerfile --target sandbox --tag code-reviewer-worker:local .
+	SANDBOX_LOCAL_IMAGE=code-reviewer-worker:local TEST_ALLOWED_HOSTS=$${SANDBOX_LOCAL_APP_HOST:-172.17.0.1} $(DISPATCHER) test:privileged
 
 # Builds both container images and runs docker/smoke/app.sh and docker/smoke/runner.sh against them.
 # Needs a running Docker daemon and fails without one. Not part of `make verify` (CI runs it for

@@ -197,6 +197,32 @@ jobs:
       - name: Integration tests on the host
         run: pnpm test:int
 
+  # The privileged lane of the Sandbox-Launcher (#329-T09, T10): `make test-sandbox-local` builds the `sandbox`
+  # target on the runner's Docker daemon and runs the Launcher's local mode against it and the fake App, so
+  # `docker run <image id>` with the full rendered flag set (IPv6 sysctls, memory and swap, capabilities, tmpfs) is
+  # proven on a real daemon, and nothing of one job is left for the next. The container reaches the fake App on the
+  # docker0 gateway. No login, no push, the read-only token.
+  sandbox-local:
+    name: "Dispatcher: Sandbox-Launcher with a real Docker daemon"
+    needs: changes
+    if: ${{ github.event_name == 'pull_request' && (github.base_ref == 'main' || needs.changes.outputs.dispatcher == 'true' || needs.changes.outputs.runner == 'true') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: dispatcher/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+          cache-dependency-path: dispatcher/pnpm-lock.yaml
+      - name: Install the dispatcher dependencies
+        run: pnpm --dir dispatcher install --frozen-lockfile
+      - name: Run the Sandbox-Launcher against a real Docker daemon
+        run: make test-sandbox-local
+
   runner-fast:
     name: "Runner: static & tests"
     needs: changes
@@ -626,7 +652,7 @@ jobs:
   # fails on any failed or cancelled job and accepts skipped jobs (path filter).
   ci-passed:
     name: All checks passed?
-    needs: [changes, app-fast, app-serverless, dispatcher-fast, runner-fast, engine, e2e, e2e-dynamic, licenses, image-app, image-runner, image-runner-dynamic, image-runner-sandbox, compose, actionlint]
+    needs: [changes, app-fast, app-serverless, dispatcher-fast, runner-fast, engine, e2e, e2e-dynamic, licenses, image-app, image-runner, image-runner-dynamic, image-runner-sandbox, sandbox-local, compose, actionlint]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
