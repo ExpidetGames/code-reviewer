@@ -153,6 +153,17 @@ export type ClaimOptions = {
    * as the lease token of the claim and returns the credential once, as `credential`.
    */
   workerCredential?: boolean;
+  /**
+   * #322: claim exactly this job (a Dispatcher woken by the dispatch webhook). Every other rule of the
+   * claim applies to it unchanged; a job that cannot be claimed gives `null`.
+   */
+  jobId?: string;
+  /**
+   * #322: the pool cap. The pool is the runner id of the claim: when that many jobs with this runner id
+   * are running, the claim gives `null`. Counted inside the claim transaction, after lapsed leases were
+   * dealt with: see `claimNext`.
+   */
+  maxRunning?: number;
 };
 
 /** Which running jobs an attempt-losing statement applies to. */
@@ -427,6 +438,20 @@ export function createRunnerJobsRepository(
     };
   }
 
+  /** #322: the running jobs of one pool (the runner id of their claim). */
+  async function runningInPool(
+    executor: Kysely<Database>,
+    runnerId: string,
+  ): Promise<number> {
+    const { count } = await executor
+      .selectFrom("jobs")
+      .select((eb) => eb.fn.countAll<number | string>().as("count"))
+      .where("status", "=", "running")
+      .where("runner_id", "=", runnerId)
+      .executeTakeFirstOrThrow();
+    return Number(count);
+  }
+
   return {
     claimNext(runnerId, engines = DEFAULT_ENGINES, claimOptions = {}) {
       return inTransaction(async (trx) => {
@@ -444,9 +469,18 @@ export function createRunnerJobsRepository(
           leaseExpiresAt: new Date(current.getTime() + limits.leaseMs),
         };
         const reviewKinds = reviewKindsForEngines(engines);
+        // #322: the pool cap. Atomic because a claim is the only way a job becomes running and every
+        // claim runs under the exclusive gate lock of `inTransaction` (Postgres) or the write lock of the
+        // connection (SQLite): two claims of one pool cannot both count below the cap and then both
+        // claim. The count follows `expire`, so a lapsed lease does not hold a slot.
+        if (
+          claimOptions.maxRunning !== undefined &&
+          (await runningInPool(trx, runnerId)) >= claimOptions.maxRunning
+        )
+          return null;
         const row = await (
           driver === "postgres" ? claimOldestDueJobPostgres : claimOldestDueJob
-        )(trx, claim, reviewKinds);
+        )(trx, claim, reviewKinds, claimOptions.jobId);
         if (row === undefined) return null;
         // The record is reserved in the transaction of the claim, so a job handed out always counts. The key
         // mode is the workspace's own until the claim route has resolved the access (`setKeyMode`); a job

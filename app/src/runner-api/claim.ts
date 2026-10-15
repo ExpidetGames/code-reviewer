@@ -764,16 +764,25 @@ export async function handleClaim(
   runnerId: string,
   engines: readonly RunnerEngine[],
   features: readonly ClaimFeature[] = [],
+  target: { jobId?: string; maxRunning?: number } = {},
 ): Promise<Response> {
   // #320: a Dispatcher names `worker_credential` and gets a per-job credential instead of the input.
   const split = features.includes("worker_credential");
   const origin: Origin = { label: `claim runner=${runnerId}`, stage: "claim" };
   for (let refused = 0; refused < MAX_REFUSED_PER_REQUEST; refused += 1) {
-    const claimed = split
-      ? await deps.queue.claimNext(runnerId, engines, {
-          workerCredential: true,
-        })
-      : await deps.queue.claimNext(runnerId, engines);
+    // #322: `jobId` and `maxRunning` are passed to the queue only when the caller sent them, so the
+    // claim of a runner of the previous release makes exactly the call it made before.
+    const claimOptions: ClaimOptions = {
+      ...(split ? { workerCredential: true } : {}),
+      ...(target.jobId === undefined ? {} : { jobId: target.jobId }),
+      ...(target.maxRunning === undefined
+        ? {}
+        : { maxRunning: target.maxRunning }),
+    };
+    const claimed =
+      Object.keys(claimOptions).length > 0
+        ? await deps.queue.claimNext(runnerId, engines, claimOptions)
+        : await deps.queue.claimNext(runnerId, engines);
     if (claimed === null) return noContent();
 
     // Whatever goes wrong from here on, the job is given back instead of staying under a lease that
