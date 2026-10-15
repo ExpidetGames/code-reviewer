@@ -30,6 +30,7 @@ anything.
 | request/response bytes | proxy | refused before forwarding / before the engine gets the answer |
 | 64 KiB per result, 4 MiB cumulative | proxy | audited in the next request's history, before it is forwarded |
 | what a read can reach | engine config + export | default-deny permissions, read-only export; reads outside the export are denied |
+| what the engine user can connect to | static nft rules (`netguard.py`) + probe | the job's proxy port and the engine's own port on loopback, nothing else; the full or the fallback ruleset, see below |
 
 The audit reads the model requests, not the engine's session: the pinned server answers its own
 session list with HTTP 400 once a JSON-schema format is stored (the defect of #85, still present in
@@ -39,6 +40,28 @@ The message call that runs the turn blocks until the turn is done, so its socket
 left to the whole-job deadline plus a margin, not a cap (`docs/dynamic-review.md`, "How long a
 turn may take"). `prompt_async` exists in v1.19.0 but its result could only be read through the
 session message list (HTTP 400 with a stored JSON-schema format, #85) or the event stream.
+
+## The engine's egress rules: two modes (#345)
+
+The engine user's network policy is one policy with two implementations, chosen by the kernel at
+container start:
+
+- **Full** (`table inet`, last rule `reject`): the engine's other connections fail at once. Every
+  ordinary Linux host gets this, and it is exactly what ran before #345.
+- **Fallback** (`table ip`, last rule `drop`, IPv6 switched off): for kernels that only support the
+  nf_tables `ip` family and have no `reject` expression, such as the VM kernels of some hosted
+  sandbox services (found by the hosted-deployment spike, #317). The same three accepts, then a
+  drop: the engine's other connections hang until they time out instead of failing. IPv6 is not
+  seen by an `ip` table, so IPv6 must be off and proven off by the kernel's own files and by the
+  engine user's own attempts (`ipv6_off.py`); if that cannot be proven, `opencode` is not
+  advertised (`ipv6_not_disabled`).
+
+Both are verified the same way: a probe running as the engine user must reach the proxy port and
+nothing else, at startup and before every engine, and the active mode is in the startup log
+(`egress rules: full (inet)` / `egress rules: fallback (ip, ipv6 disabled)`) and in the self-check
+result. Details, the IPv6 proof, and how the privileged suite forces the fallback on a complete
+kernel (a seam of the startup step, never the environment or a job) are in
+[dynamic-review.md](dynamic-review.md), "Network: one user, one proxy".
 
 ## Found against the real binary
 

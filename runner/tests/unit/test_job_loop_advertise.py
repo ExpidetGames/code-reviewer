@@ -13,12 +13,14 @@ from typing import Any
 import pytest
 
 from code_reviewer_runner.capabilities import ALL_ENGINES, ENGINE_DIFF, ENGINE_DYNAMIC
+from code_reviewer_runner.dynamic_review.netguard import EGRESS_MODE_VARIABLE, EgressMode
 from code_reviewer_runner.dynamic_review.self_check import (
     DEFAULT_TOOLS,
     SelfCheckFailed,
     SelfCheckReason,
+    SelfCheckResult,
 )
-from code_reviewer_runner.dynamic_review.static_isolation import SlotPorts
+from code_reviewer_runner.dynamic_review.static_isolation import EgressSetup, SlotPorts
 from code_reviewer_runner.job_loop import service
 from code_reviewer_runner.job_loop.service import advertise_engines
 from code_reviewer_runner.job_loop.settings import LoopSettings, settings_from_environment
@@ -47,7 +49,14 @@ def test_a_passing_check_advertises_both_engines_and_names_the_verified_command(
     assert settings.engines == ALL_ENGINES
     assert settings.dynamic_command == (str(DEFAULT_TOOLS.opencode),)
     assert settings.dynamic_ripgrep == str(DEFAULT_TOOLS.ripgrep)
-    assert seen == [{"user": (10101, 10101), "ports": PORTS, "rules_installed": True}]
+    assert seen == [
+        {
+            "user": (10101, 10101),
+            "ports": PORTS,
+            "rules_installed": True,
+            "egress_mode": EgressMode.FULL,
+        }
+    ]
     assert "advertised" in caplog.text and "opencode" in caplog.text
 
 
@@ -125,9 +134,9 @@ def test_the_runner_sets_up_the_network_then_checks_then_serves(
     events: list[str] = []
     served: list[LoopSettings] = []
 
-    def prepare(settings: LoopSettings) -> bool:
+    def prepare(settings: LoopSettings) -> EgressSetup:
         events.append("prepare")
-        return True
+        return EgressSetup(True, EgressMode.FULL)
 
     def check(**facts: Any) -> None:
         events.append("check")
@@ -147,8 +156,8 @@ def test_the_runner_sets_up_the_network_then_checks_then_serves(
     assert served[0].engines == ALL_ENGINES
 
 
-def installed(settings: LoopSettings) -> bool:
-    return True
+def installed(settings: LoopSettings) -> EgressSetup:
+    return EgressSetup(True, EgressMode.FULL)
 
 
 # #202-T09: a check that fails still lets the runner serve Diff jobs.
@@ -180,8 +189,9 @@ def test_a_host_without_nf_tables_leaves_a_runner_that_serves_diff_jobs_and_name
 ) -> None:
     served: list[LoopSettings] = []
 
-    def rules_not_installed(settings: LoopSettings) -> bool:
-        return False  # `secure_startup` returns False when `nft` cannot install the rules
+    def rules_not_installed(settings: LoopSettings) -> EgressSetup:
+        # `secure_startup` says so when `nft` cannot install the rules
+        return EgressSetup(False, EgressMode.FULL)
 
     def check(**facts: Any) -> None:
         if not facts["rules_installed"]:
@@ -213,7 +223,7 @@ def test_a_dynamic_runner_that_cannot_end_its_startup_capabilities_exits_without
 ) -> None:
     served: list[LoopSettings] = []
 
-    def cannot_drop(settings: LoopSettings) -> bool:
+    def cannot_drop(settings: LoopSettings) -> EgressSetup:
         raise service.IsolationError("a capability could not be dropped from the bounding set")
 
     async def serve(settings: LoopSettings, environment: Any, **options: Any) -> int:
@@ -229,3 +239,67 @@ def test_a_dynamic_runner_that_cannot_end_its_startup_capabilities_exits_without
     log = capsys.readouterr().err
     assert "cannot start" in log
     assert "bounding set" in log
+
+
+# #345-T10: the mode is logged with the advertisement and kept for the job processes.
+@pytest.mark.parametrize("mode", list(EgressMode))
+def test_the_advertisement_logs_the_egress_mode_and_keeps_it_for_the_job_processes(
+    caplog: pytest.LogCaptureFixture, mode: EgressMode
+) -> None:
+    def passing(**facts: Any) -> SelfCheckResult:
+        return SelfCheckResult(egress_mode=facts["egress_mode"])
+
+    with caplog.at_level(logging.INFO, logger="code_reviewer_runner.loop"):
+        settings = advertise_engines(dynamic_settings(), True, egress_mode=mode, check=passing)
+
+    assert settings.engines == ALL_ENGINES
+    assert settings.dynamic_egress_mode is mode
+    assert f"egress rules: {mode.value}" in caplog.text
+
+
+# #345-T10: a runner that is not advertised keeps the mode as well; no job reads it.
+def test_a_failed_check_in_fallback_mode_is_not_advertised_and_names_the_ipv6_reason(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    def ipv6_on(**facts: Any) -> None:
+        raise SelfCheckFailed(SelfCheckReason.IPV6_NOT_DISABLED, "IPv6 is not proven off")
+
+    with caplog.at_level(logging.INFO, logger="code_reviewer_runner.loop"):
+        settings = advertise_engines(
+            dynamic_settings(), True, egress_mode=EgressMode.FALLBACK, check=ipv6_on
+        )
+
+    assert settings.engines == (ENGINE_DIFF,)
+    assert settings.dynamic_command is None
+    assert "ipv6_not_disabled" in caplog.text
+
+
+# #345-T11: the startup of a runner follows the kernel, and no variable of the container changes it.
+def test_the_runner_hands_the_mode_of_the_startup_step_to_the_check_and_the_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    served: list[LoopSettings] = []
+    checked: list[Any] = []
+
+    def prepare(settings: LoopSettings) -> EgressSetup:
+        return EgressSetup(True, EgressMode.FALLBACK)
+
+    def check(**facts: Any) -> SelfCheckResult:
+        checked.append(facts["egress_mode"])
+        return SelfCheckResult(egress_mode=facts["egress_mode"])
+
+    async def serve(settings: LoopSettings, environment: Any, **options: Any) -> int:
+        served.append(settings)
+        return 0
+
+    monkeypatch.setattr(service, "prepare_dynamic_runtime", prepare)
+    monkeypatch.setattr(service, "check_dynamic_runner", check)
+    monkeypatch.setattr(service, "serve", serve)
+
+    environment = {**DYNAMIC_RUNNER, EGRESS_MODE_VARIABLE: "full"}
+    assert service.run_from_environment(environment) == 0
+
+    assert checked == [EgressMode.FALLBACK]
+    assert served[0].dynamic_egress_mode is EgressMode.FALLBACK
+    # Nor does the environment reach the settings: they are built before startup has run.
+    assert settings_from_environment(environment).dynamic_egress_mode is EgressMode.FULL

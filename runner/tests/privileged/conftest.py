@@ -26,6 +26,7 @@ from pathlib import Path
 
 import pytest
 from privileged_support import (
+    EGRESS_MODE,
     ENGINE_GID,
     ENGINE_UID,
     JOB_CAPABILITIES,
@@ -35,6 +36,7 @@ from privileged_support import (
     Repo,
 )
 
+from code_reviewer_runner.dynamic_review.netguard import EGRESS_MODE_VARIABLE
 from code_reviewer_runner.dynamic_review.supervisor import ENGINE_GID_VARIABLE, ENGINE_UID_VARIABLE
 from code_reviewer_runner.job_loop.process import JOB_WORKDIR_PREFIX
 
@@ -103,7 +105,12 @@ def job_dir() -> Iterator[Path]:
 
 @pytest.fixture
 def environment() -> dict[str, str]:
-    return {ENGINE_UID_VARIABLE: str(ENGINE_UID), ENGINE_GID_VARIABLE: str(ENGINE_GID)}
+    # What the loop hands a Dynamic job process: the engine user and the egress mode of this run.
+    return {
+        ENGINE_UID_VARIABLE: str(ENGINE_UID),
+        ENGINE_GID_VARIABLE: str(ENGINE_GID),
+        EGRESS_MODE_VARIABLE: EGRESS_MODE.value,
+    }
 
 
 @pytest.fixture

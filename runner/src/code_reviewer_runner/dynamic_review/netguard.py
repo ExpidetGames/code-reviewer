@@ -8,6 +8,12 @@ address of this job's model proxy (and to the engine's own server port). Everyth
 (another job's loopback service, any other address, IPv6, UDP, raw sends) is rejected at once.
 Only the answers of the engine's own server pass as replies (never "any tracked flow").
 
+Two rulesets exist (#345). The full one (`table inet`, `reject`) is what every host with a complete
+nf_tables gets. Some VM kernels support only the `ip` family and have no `reject`; there the
+fallback (`table ip`, `drop`) enforces the same policy, silently instead of at once, and IPv6 (which
+an `ip` table does not see) must be switched off and proven so (`ipv6_off.py`). Startup asks the
+kernel and picks (`select_egress_mode`); nothing in the environment or in a job can choose.
+
 The rules are static: with one Dynamic slot the engine user and its two loopback ports are fixed,
 so the runner installs them once when the container starts and then drops `NET_ADMIN` for good
 (`static_isolation.py`, #244). Nothing in the container, root included, can change them after that.
@@ -20,12 +26,14 @@ else; any other result is `dynamic_isolation_self_check_failed` and no engine is
 `NET_ADMIN` the supervisor cannot list the ruleset, so this probe is the verification of it.
 """
 
+import contextlib
 import json
 import shutil
 import socket
 import subprocess
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Any
 
 from code_reviewer_runner.job_loop.jsonvalues import as_object
@@ -76,15 +84,39 @@ class IsolationError(Exception):
         self.detail = detail
 
 
+class NftUnavailable(IsolationError):
+    """`nft` is not installed or could not be run: no ruleset of either mode can be installed."""
+
+
+class NftRefused(IsolationError):
+    """`nft` ran and the kernel refused the script (an unsupported family or expression)."""
+
+
+class EgressMode(StrEnum):
+    """Which ruleset confines the engine user. Stable: logged, and handed to the job processes."""
+
+    FULL = "full"
+    FALLBACK = "fallback"
+
+
+# The loop hands the mode it decided to the Dynamic job processes under this name. It is set by the
+# loop alone: the container's own environment is never passed on under it (`loop.py`).
+EGRESS_MODE_VARIABLE = "RUNNER_EGRESS_MODE"
+_PROBE_TABLE = "code_reviewer_capability_probe"
+
 # Runs `nft` with a script on stdin. A test replaces it; the real one is `_run_nft`.
 NftRunner = Callable[[str], None]
+
+
+def table_family(mode: EgressMode) -> str:
+    return "inet" if mode is EgressMode.FULL else "ip"
 
 
 def table_name(uid: int) -> str:
     return f"code_reviewer_engine_{uid}"
 
 
-def ruleset(uid: int, proxy_port: int, engine_port: int) -> str:
+def ruleset(uid: int, proxy_port: int, engine_port: int, mode: EgressMode = EgressMode.FULL) -> str:
     """The nft script that confines `uid` to loopback TCP to `proxy_port` and `engine_port`.
 
     `add table` + `flush table` makes it idempotent: installing again replaces the rules of this
@@ -94,29 +126,34 @@ def ruleset(uid: int, proxy_port: int, engine_port: int) -> str:
     supervisor's DNS lookup, say) stays tracked for a while after its socket closed, and the user
     could send on it from the same source port. Replies are accepted only as the answers of the
     engine's own server port.
+
+    The two modes differ in the family of the table and in the last rule only: `inet` + `reject`
+    (refused at once) or `ip` + `drop` (silent, for kernels that have neither).
     """
     ports = (proxy_port, engine_port)
     if uid <= 0 or any(not 0 < port < 65536 for port in ports) or proxy_port == engine_port:
         raise IsolationError("the network rules are given an unusable user or port")
     table = table_name(uid)
+    family = table_family(mode)
     loopback = f'oifname "lo" ip daddr {PROXY_HOST}'
+    last = "reject with icmpx type admin-prohibited" if mode is EgressMode.FULL else "drop"
     return "\n".join(
         [
-            f"add table inet {table}",
-            f"flush table inet {table}",
-            f"add chain inet {table} output {{ type filter hook output priority 0 ; "
+            f"add table {family} {table}",
+            f"flush table {family} {table}",
+            f"add chain {family} {table} output {{ type filter hook output priority 0 ; "
             "policy accept ; }",
             # The answers of the engine's own server to whoever connected to it (the supervisor).
-            f'add rule inet {table} output meta skuid {uid} oifname "lo" ip saddr {PROXY_HOST} '
-            f"ip daddr {PROXY_HOST} tcp sport {engine_port} ct state established accept",
+            f'add rule {family} {table} output meta skuid {uid} oifname "lo" '
+            f"ip saddr {PROXY_HOST} ip daddr {PROXY_HOST} tcp sport {engine_port} "
+            "ct state established accept",
             # The only new connections: this job's proxy and the engine's own server.
-            f"add rule inet {table} output meta skuid {uid} {loopback} tcp dport {proxy_port} "
-            "accept",
-            f"add rule inet {table} output meta skuid {uid} {loopback} tcp dport {engine_port} "
-            "accept",
-            # Every other packet of that user: refused at once, not silently dropped.
-            f"add rule inet {table} output meta skuid {uid} "
-            "reject with icmpx type admin-prohibited",
+            f"add rule {family} {table} output meta skuid {uid} {loopback} "
+            f"tcp dport {proxy_port} accept",
+            f"add rule {family} {table} output meta skuid {uid} {loopback} "
+            f"tcp dport {engine_port} accept",
+            # Every other packet of that user: refused at once (full) or dropped (fallback).
+            f"add rule {family} {table} output meta skuid {uid} {last}",
             "",
         ]
     )
@@ -125,7 +162,7 @@ def ruleset(uid: int, proxy_port: int, engine_port: int) -> str:
 def _run_nft(script: str) -> None:
     executable = shutil.which("nft", path=_NFT_PATH)
     if executable is None:
-        raise IsolationError("the network filter tool is not installed")
+        raise NftUnavailable("the network filter tool is not installed")
     try:
         outcome = subprocess.run(
             [executable, "-f", "-"],
@@ -136,9 +173,56 @@ def _run_nft(script: str) -> None:
             check=False,
         )
     except (OSError, subprocess.TimeoutExpired):
-        raise IsolationError("the network filter could not be run") from None
+        raise NftUnavailable("the network filter could not be run") from None
     if outcome.returncode != 0:
-        raise IsolationError("the network filter was refused by the kernel")
+        raise NftRefused("the network filter was refused by the kernel")
+
+
+def inet_reject_supported(run: NftRunner = _run_nft) -> bool:
+    """True when the kernel accepts what the full ruleset needs: a `table inet` with `reject`.
+
+    Asked by installing a throw-away table whose one rule can match nobody (no process has that
+    user id), and taking it away again. A kernel that refuses either the family or the expression
+    answers False; a missing or unrunnable `nft` raises `NftUnavailable`, because that is not a
+    statement about the kernel.
+    """
+    script = "\n".join(
+        [
+            f"add table inet {_PROBE_TABLE}",
+            f"flush table inet {_PROBE_TABLE}",
+            f"add chain inet {_PROBE_TABLE} output {{ type filter hook output priority 0 ; "
+            "policy accept ; }",
+            f"add rule inet {_PROBE_TABLE} output meta skuid 4294967294 "
+            "reject with icmpx type admin-prohibited",
+            "",
+        ]
+    )
+    try:
+        run(script)
+    except NftRefused:
+        return False
+    # A table that matches nobody is harmless if it stays; the answer stands either way.
+    with contextlib.suppress(NftRefused):
+        run(f"delete table inet {_PROBE_TABLE}\n")
+    return True
+
+
+def select_egress_mode(run: NftRunner = _run_nft) -> EgressMode:
+    """The full ruleset whenever the kernel supports it, the fallback only when it does not."""
+    return EgressMode.FULL if inet_reject_supported(run) else EgressMode.FALLBACK
+
+
+def egress_mode_from_environment(environment: Mapping[str, str]) -> EgressMode:
+    """The mode the loop handed to this job process: missing means full, anything else unknown.
+
+    Only the loop sets it (`loop.py`); an unknown value is an isolation failure, not a default.
+    """
+    if EGRESS_MODE_VARIABLE not in environment:
+        return EgressMode.FULL
+    try:
+        return EgressMode(environment[EGRESS_MODE_VARIABLE])
+    except ValueError:
+        raise IsolationError("the egress mode handed to the job process is unknown") from None
 
 
 @dataclass
@@ -147,16 +231,17 @@ class NetworkConfinement:
 
     uid: int
     run: NftRunner = _run_nft
+    mode: EgressMode = EgressMode.FULL
 
     def apply(self, proxy_port: int, engine_port: int) -> None:
-        self.run(ruleset(self.uid, proxy_port, engine_port))
+        self.run(ruleset(self.uid, proxy_port, engine_port, self.mode))
 
 
 # Runs the probe as the engine user: argv, the user and group, returns the stdout text.
 ProbeRunner = Callable[[list[str], int, int], str]
 
 
-def _run_probe(argv: list[str], uid: int, gid: int) -> str:
+def run_probe_as_user(argv: list[str], uid: int, gid: int) -> str:
     try:
         outcome = subprocess.run(
             argv,
@@ -178,7 +263,7 @@ def _run_probe(argv: list[str], uid: int, gid: int) -> str:
 
 
 def verify_confinement(
-    uid: int, gid: int, allowed_port: int, *, run_probe: ProbeRunner = _run_probe
+    uid: int, gid: int, allowed_port: int, *, run_probe: ProbeRunner = run_probe_as_user
 ) -> None:
     """Prove, as the engine user, that only `allowed_port` is reachable. Raises `IsolationError`.
 

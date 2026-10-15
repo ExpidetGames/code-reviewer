@@ -85,12 +85,12 @@ def main(
         log.error("worker cannot start: %s: %s", WorkerFailure.SETTINGS_INVALID.value, error)
         return WorkerExit.SETUP_ERROR
     try:
-        rules_installed = prepare_dynamic_runtime(settings)
+        setup = prepare_dynamic_runtime(settings)
     except IsolationError as error:
         log.error("worker cannot start: %s", error)
         return WorkerExit.SETUP_ERROR
     # The same startup as the runner: `opencode` is advertised only after the self-check passed.
-    settings = advertise_engines(settings, rules_installed)
+    settings = advertise_engines(settings, setup.rules_installed, egress_mode=setup.mode)
     return asyncio.run(run_worker(request, settings, env, install_signals=True))
 
 

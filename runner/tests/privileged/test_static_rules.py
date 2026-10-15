@@ -11,7 +11,6 @@ and nothing else. A refusal can only be the rules at work: every target is a loo
 test owns, and the namespace has no route out.
 """
 
-import errno
 import shutil
 import socket
 import subprocess
@@ -19,23 +18,26 @@ from collections.abc import Generator
 from contextlib import contextmanager
 
 from privileged_support import (
+    EGRESS_MODE,
     ENGINE_GID,
     ENGINE_PORT,
     ENGINE_UID,
     STRANGER_GID,
     STRANGER_UID,
     TRUSTED_PATH,
+    blocked,
     connect_as,
     listener,
     run_as,
     slot_proxy,
 )
 
-from code_reviewer_runner.dynamic_review.netguard import table_name, verify_confinement
+from code_reviewer_runner.dynamic_review.netguard import (
+    table_family,
+    table_name,
+    verify_confinement,
+)
 
-# What a refused connection looks like to the user: an immediate error from the reject, never a
-# timeout (a silent drop).
-REFUSED = {errno.EACCES, errno.ECONNREFUSED, errno.EHOSTUNREACH, errno.ENETUNREACH}
 SEND = (
     "import socket, sys; "
     "s = socket.socket(int(sys.argv[1]), socket.SOCK_DGRAM); "
@@ -93,8 +95,10 @@ def test_the_engine_user_reaches_the_slots_two_ports_and_nothing_else() -> None:
     assert engine["engine port"]["connected"] is True
     for label in (target[0] for target in targets[2:]):
         assert engine[label]["connected"] is False, label
-        # Refused by the reject, not silently dropped (a drop ends in a timeout: no errno).
-        assert engine[label]["errno"] in REFUSED, label
+        # Full mode: refused by the reject, not silently dropped (a drop ends in a timeout, no
+        # errno), the strict assertion. Fallback mode (#345): the rules drop, so a timeout is the
+        # expected outcome as well.
+        assert blocked(engine[label], EGRESS_MODE), label
     # The rules name one user: another job's user reaches everything.
     assert all(result["connected"] for result in stranger.values())
 
@@ -179,10 +183,10 @@ def test_nobody_in_the_container_can_read_or_change_the_rules_not_even_root() ->
     assert nft is not None
     attempts = [
         ["list", "tables"],
-        ["list", "table", "inet", table_name(ENGINE_UID)],
-        ["delete", "table", "inet", table_name(ENGINE_UID)],
+        ["list", "table", table_family(EGRESS_MODE), table_name(ENGINE_UID)],
+        ["delete", "table", table_family(EGRESS_MODE), table_name(ENGINE_UID)],
         ["flush", "ruleset"],
-        ["add", "table", "inet", "code_reviewer_probe"],
+        ["add", "table", table_family(EGRESS_MODE), "code_reviewer_probe"],
     ]
     # The supervisor itself (root, the process running this test) ...
     for arguments in attempts:

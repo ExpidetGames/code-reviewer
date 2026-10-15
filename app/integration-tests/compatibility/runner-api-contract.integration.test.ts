@@ -457,6 +457,32 @@ describe("what the app accepts from a runner", () => {
       ["a feature that is no name", { features: [1] }],
       ["a feature with a bad name", { features: ["Bad Name"] }],
       ["too many features", { features: Array(17).fill("some_feature") }],
+      // #322-T12
+      [
+        "a job id and a cap",
+        {
+          engines: ["pr-agent"],
+          features: ["worker_credential"],
+          jobId: "0b9f6f4e-3c1a-4d9e-8f43-2a7d5e1c9b10",
+          maxRunning: 4,
+        },
+      ],
+      ["the lowest cap", { maxRunning: 1 }],
+      ["the highest cap", { maxRunning: 1000 }],
+      ["a cap of 0", { maxRunning: 0 }],
+      ["a negative cap", { maxRunning: -1 }],
+      ["a cap over 1000", { maxRunning: 1001 }],
+      ["a cap that is no integer", { maxRunning: 2.5 }],
+      ["a cap as text", { maxRunning: "4" }],
+      ["a null cap", { maxRunning: null }],
+      ["a job id that is no UUID", { jobId: "abc" }],
+      ["a job id with a path in it", { jobId: "../etc/passwd" }],
+      [
+        "a job id with a suffix",
+        { jobId: "0b9f6f4e-3c1a-4d9e-8f43-2a7d5e1c9b10x" },
+      ],
+      ["a job id as a number", { jobId: 7 }],
+      ["a null job id", { jobId: null }],
     ];
 
     for (const [name, body] of cases)
