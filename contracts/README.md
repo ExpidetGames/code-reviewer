@@ -45,8 +45,9 @@ The App, the Dispatcher (TypeScript) and the Worker (Python) agree on these file
   the split answer `SplitClaimResponse` (the per-job credential, **no job input and no secrets**; without the
   feature the answer is the legacy `ClaimResponse`, unchanged); `ReleaseRequest`/`ReleaseResponse`;
   `VersionResponse` (the features of the app, so a Dispatcher or a Worker detects an app that is too old);
-  the API error codes `WORKER_CREDENTIAL_INVALID` and `RUNNER_JOB_ENDED`. The new definitions are served by
-  #320 and #322; until then only the fake App speaks them. A previous-release app ignores the new claim
+  the API error codes `WORKER_CREDENTIAL_INVALID` and `RUNNER_JOB_ENDED`. The Worker API and the split claim are
+  served since #320 (`app/src/runner-api/README.md`, "The Worker API"); claim by job id, the pool cap, release and
+  version come with #322, until then only the fake App speaks those. A previous-release app ignores the new claim
   fields, and a previous-release runner never names `worker_credential`, so neither side is affected.
 - **Generated types.** `make generate-contracts` writes TypeScript types of `runner-api`, `worker-api`,
   `dispatch-webhook` and `worker-container` into `app/src/contracts/` and `dispatcher/src/contracts/` (the
@@ -71,7 +72,9 @@ The App, the Dispatcher (TypeScript) and the Worker (Python) agree on these file
   #320 and #322 land. `app/src/ci/contract-types/generate.test.ts` checks that the generated types are the
   committed ones; `app/src/runner-api/contract.ts` keeps the API error codes equal to the file.
 - **Runner** (`runner/tests/contract/test_hosted_contracts.py`, with `jsonschema`): the same examples, the same
-  closed objects and the same vectors, with a verifier written independently of the TypeScript one.
+  closed objects and the same vectors, with a verifier written independently of the TypeScript one. `runner/tests/contract/test_worker_api_client_contract.py` runs the
+  Worker's API client (#323) against a recording server that answers with the examples: the routes, the credential only in
+  `Authorization`, request bodies valid against the schemas, an additive field of an answer ignored.
 - **Dispatcher** (`dispatcher/`, #327): validates the same examples with its own tooling against the types in
   `dispatcher/src/contracts/` and runs the vectors against its receiver. Until that project exists nothing
   there is checked, only that the generated copy is current.

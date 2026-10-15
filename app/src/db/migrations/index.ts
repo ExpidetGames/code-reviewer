@@ -39,7 +39,8 @@ import { migration as addJobReviewKind } from "./20261013090000_add_job_review_k
 import { migration as fixDynamicDefaultModel } from "./20261014090000_fix_dynamic_default_model.ts";
 import { migration as createWorkspaceEntitlements } from "./20261014120000_create_workspace_entitlements.ts";
 import { migration as createUsageRecords } from "./20261014150000_create_usage_records.ts";
-import { migration as createSetupCodes } from "./20261015100000_create_setup_codes.ts";
+import { migration as addJobWorkerFetches } from "./20261015100000_add_job_worker_fetches.ts";
+import { migration as createSetupCodes } from "./20261015110000_create_setup_codes.ts";
 
 const migrations: Record<string, Migration> = {
   "0001_create_app_meta": createAppMeta,
@@ -79,7 +80,8 @@ const migrations: Record<string, Migration> = {
   "20261014090000_fix_dynamic_default_model": fixDynamicDefaultModel,
   "20261014120000_create_workspace_entitlements": createWorkspaceEntitlements,
   "20261014150000_create_usage_records": createUsageRecords,
-  "20261015100000_create_setup_codes": createSetupCodes,
+  "20261015100000_add_job_worker_fetches": addJobWorkerFetches,
+  "20261015110000_create_setup_codes": createSetupCodes,
 };
 
 export const migrationProvider: MigrationProvider = {

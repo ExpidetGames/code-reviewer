@@ -209,7 +209,7 @@ sections 2.2, 2.3 and 2.10):
   uses it (`src/auth/sign-in-limit.ts`); the setup code has its own counters (in memory on a server, in `setup_codes` in a serverless deployment).
 - `users.is_instance_admin` (0 or 1, default 0): set for the account the setup creates.
 
-Migration `20261015100000_create_setup_codes` (#321): `setup_codes` (`id`, `code_hash`, `created_at`, `expires_at`,
+Migration `20261015110000_create_setup_codes` (#321): `setup_codes` (`id`, `code_hash`, `created_at`, `expires_at`,
 `used_at`, `failures`, `window_started_at`, `attempts_in_window`) holds the first-run setup code of a serverless
 deployment, at most one row (`setup-codes-repository.ts`, `src/setup/database-code-store.ts`). The code is stored as a
 keyed hash only. A server never reads or writes the table. The migration is additive, so an instance from before it

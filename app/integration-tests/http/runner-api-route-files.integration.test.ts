@@ -46,6 +46,12 @@ type Heartbeat =
   typeof import("../../src/app/api/runners/v1/jobs/[id]/heartbeat/route.ts");
 type Complete =
   typeof import("../../src/app/api/runners/v1/jobs/[id]/complete/route.ts");
+type WorkerDetails =
+  typeof import("../../src/app/api/workers/v1/jobs/[id]/route.ts");
+type WorkerHeartbeat =
+  typeof import("../../src/app/api/workers/v1/jobs/[id]/heartbeat/route.ts");
+type WorkerResult =
+  typeof import("../../src/app/api/workers/v1/jobs/[id]/result/route.ts");
 
 const fakes: FakeGithub[] = [];
 
@@ -92,7 +98,80 @@ async function startRoutes() {
       (await import("../../src/app/api/runners/v1/jobs/[id]/heartbeat/route.ts")) as Heartbeat,
     complete:
       (await import("../../src/app/api/runners/v1/jobs/[id]/complete/route.ts")) as Complete,
+    workerDetails:
+      (await import("../../src/app/api/workers/v1/jobs/[id]/route.ts")) as WorkerDetails,
+    workerHeartbeat:
+      (await import("../../src/app/api/workers/v1/jobs/[id]/heartbeat/route.ts")) as WorkerHeartbeat,
+    workerResult:
+      (await import("../../src/app/api/workers/v1/jobs/[id]/result/route.ts")) as WorkerResult,
   };
+}
+
+/** A pull request delivery that the webhook route turns into a waiting job. */
+async function queueJobThroughWebhook(
+  routes: Awaited<ReturnType<typeof startRoutes>>,
+) {
+  routes.fake.addInstallation({
+    id: 4242,
+    account: { login: "acme", id: 5001, type: "Organization" },
+  });
+  routes.fake.setRepositories(4242, [{ id: 7001, fullName: "acme/widgets" }]);
+  // A person of the workspace linked the installation (the binding); nothing is made from a delivery alone.
+  await linkTestInstallation(
+    getDatabase(),
+    await defaultWorkspaceId(getDatabase()),
+    { id: "4242", accountLogin: "acme", accountId: 5001 },
+  );
+  routes.fake.addPullRequest("acme/widgets", {
+    number: 7,
+    title: "Add widget caching",
+    state: "open",
+    headSha: HEAD,
+    headRef: "feature/caching",
+    baseRef: "main",
+    author: { login: "alice", id: 1001 },
+  });
+  for (const [event, fixture] of [
+    ["installation", "installation.created"],
+    ["pull_request", "pull_request.opened"],
+  ] as const) {
+    expect(
+      (
+        await routes.webhook.POST(
+          webhookDelivery({
+            event,
+            payload: webhookFixture(fixture),
+            secret: TEST_WEBHOOK_SECRET,
+          }),
+        )
+      ).status,
+    ).toBe(202);
+    if (event === "installation") {
+      // The repository must be a project before its pull requests are reviewed.
+      const [repository] = await createRepositoriesRepository(
+        getDatabase(),
+        await defaultWorkspaceId(getDatabase()),
+      ).list();
+      await projectServiceFor(
+        await defaultWorkspaceId(getDatabase()),
+      ).activateProject(repository!.id);
+    }
+  }
+}
+
+function workerRequest(
+  path: string,
+  credential: string,
+  options: { method?: string; body?: unknown } = {},
+): Request {
+  return new Request(`https://app.test/api/workers/v1/${path}`, {
+    method: options.method ?? "GET",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${credential}`,
+    },
+    body: options.body === undefined ? null : JSON.stringify(options.body),
+  });
 }
 
 function runnerRequest(
@@ -135,52 +214,7 @@ describe("the runner API route files", () => {
 
   it("takes a job that came in through the webhook route from claim to complete", async () => {
     const routes = await startRoutes();
-    routes.fake.addInstallation({
-      id: 4242,
-      account: { login: "acme", id: 5001, type: "Organization" },
-    });
-    routes.fake.setRepositories(4242, [{ id: 7001, fullName: "acme/widgets" }]);
-    // A person of the workspace linked the installation (the binding); nothing is made from a delivery alone.
-    await linkTestInstallation(
-      getDatabase(),
-      await defaultWorkspaceId(getDatabase()),
-      { id: "4242", accountLogin: "acme", accountId: 5001 },
-    );
-    routes.fake.addPullRequest("acme/widgets", {
-      number: 7,
-      title: "Add widget caching",
-      state: "open",
-      headSha: HEAD,
-      headRef: "feature/caching",
-      baseRef: "main",
-      author: { login: "alice", id: 1001 },
-    });
-    for (const [event, fixture] of [
-      ["installation", "installation.created"],
-      ["pull_request", "pull_request.opened"],
-    ] as const) {
-      expect(
-        (
-          await routes.webhook.POST(
-            webhookDelivery({
-              event,
-              payload: webhookFixture(fixture),
-              secret: TEST_WEBHOOK_SECRET,
-            }),
-          )
-        ).status,
-      ).toBe(202);
-      if (event === "installation") {
-        // The repository must be a project before its pull requests are reviewed.
-        const [repository] = await createRepositoriesRepository(
-          getDatabase(),
-          await defaultWorkspaceId(getDatabase()),
-        ).list();
-        await projectServiceFor(
-          await defaultWorkspaceId(getDatabase()),
-        ).activateProject(repository!.id);
-      }
-    }
+    await queueJobThroughWebhook(routes);
 
     const claim = await routes.claim.POST(runnerRequest("claim", undefined));
 
@@ -212,6 +246,85 @@ describe("the runner API route files", () => {
           commentUrl: null,
           errorCode: null,
           logTail: "done",
+        },
+      }),
+      context,
+    );
+
+    expect([beat.status, done.status]).toStrictEqual([200, 200]);
+    expect(
+      await getDatabase().selectFrom("jobs").select("status").execute(),
+    ).toStrictEqual([{ status: "succeeded" }]);
+  });
+
+  // #320-T01
+  it("takes a job from a split claim to its result through the Worker API route files, and keeps both doors apart", async () => {
+    const routes = await startRoutes();
+    await queueJobThroughWebhook(routes);
+
+    const claim = await routes.claim.POST(
+      new Request("https://app.test/api/runners/v1/claim", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${RUNNER_TOKEN}`,
+          "x-runner-id": "dispatcher-a",
+        },
+        body: JSON.stringify({
+          engines: ["pr-agent"],
+          features: ["worker_credential"],
+        }),
+      }),
+    );
+
+    expect(claim.status).toBe(200);
+    const { job } = await claim.json();
+    expect(job).not.toHaveProperty("input");
+    expect(job.credential).toMatch(/^crj_[A-Za-z0-9_-]{43}$/);
+    const context = { params: Promise.resolve({ id: job.id }) };
+
+    // The dispatcher credential does not open the Worker API.
+    const refused = await routes.workerDetails.GET(
+      workerRequest(`jobs/${job.id}`, RUNNER_TOKEN),
+      context,
+    );
+    expect(refused.status).toBe(401);
+    expect((await refused.json()).error.code).toBe("WORKER_CREDENTIAL_INVALID");
+
+    const details = await routes.workerDetails.GET(
+      workerRequest(
+        `jobs/${job.id}?features=dynamic_capabilities`,
+        job.credential,
+      ),
+      context,
+    );
+    expect(details.status).toBe(200);
+    expect(details.headers.get("cache-control")).toBe("no-store");
+    const body = await details.json();
+    expect(body.job.input).toMatchObject({
+      command: "review",
+      llm: { apiKey: LLM_KEY },
+    });
+    expect(body.job.input.git.token).toMatch(/^ghs_fake/);
+
+    const beat = await routes.workerHeartbeat.POST(
+      workerRequest(`jobs/${job.id}/heartbeat`, job.credential, {
+        method: "POST",
+        body: {},
+      }),
+      context,
+    );
+    const done = await routes.workerResult.POST(
+      workerRequest(`jobs/${job.id}/result`, job.credential, {
+        method: "POST",
+        body: {
+          result: {
+            ok: true,
+            durationMs: 1200,
+            commentUrl: null,
+            errorCode: null,
+            logTail: "done",
+          },
         },
       }),
       context,

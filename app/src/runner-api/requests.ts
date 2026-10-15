@@ -15,6 +15,7 @@ import type {
   HeartbeatRequest,
   RunnerResult,
   RunnerUsage,
+  WorkerResultRequest,
 } from "./contract.ts";
 import {
   CLAIM_ENGINES,
@@ -374,4 +375,31 @@ export function parseCompleteRequest(body: unknown): Parsed<CompleteRequest> {
   )
     return { ok: false, fields: check.fields };
   return { ok: true, value: { leaseToken, result } };
+}
+
+/** #320: the body of the Worker's result call: the result alone, the credential identifies the job. */
+export function parseWorkerResultRequest(
+  body: unknown,
+): Parsed<WorkerResultRequest> {
+  if (!isRecord(body))
+    return { ok: false, fields: [{ field: "body", code: "invalid" }] };
+  const check = new Checker();
+  const result =
+    body.result === undefined
+      ? check.fail("result", "required")
+      : parseResult(check, body.result);
+  if (check.fields.length > 0 || result === undefined)
+    return { ok: false, fields: check.fields };
+  return { ok: true, value: { result } };
+}
+
+/**
+ * #320: the features named in the `features` query parameter of the Worker's details call, a comma
+ * separated list with the same meaning as `features` of a claim. Only the names this app knows are kept;
+ * anything else is ignored, so a newer Worker can name features an older app has never heard of.
+ */
+export function parseWorkerFeatures(raw: string | null): ClaimFeature[] {
+  if (raw === null) return [];
+  const names = raw.split(",").map((name) => name.trim());
+  return CLAIM_FEATURES.filter((known) => names.includes(known));
 }

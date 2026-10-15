@@ -26,6 +26,7 @@ from code_reviewer_runner.job_loop.process import ProcessLauncher, SubprocessLau
 from code_reviewer_runner.job_loop.settings import (
     LoopSettings,
     SettingsError,
+    WorkerSettings,
     settings_from_environment,
 )
 
@@ -43,7 +44,9 @@ def configure_logging(stream: object = None) -> None:
 
 
 def prepare_dynamic_runtime(
-    settings: LoopSettings, *, startup: Callable[[int, SlotPorts], bool] = secure_startup
+    settings: LoopSettings | WorkerSettings,
+    *,
+    startup: Callable[[int, SlotPorts], bool] = secure_startup,
 ) -> bool:
     """The Dynamic runner's one-time network setup, before the loop and any thread exist (#244).
 
@@ -58,12 +61,12 @@ def prepare_dynamic_runtime(
     return startup(user[0], ports)
 
 
-def advertise_engines(
-    settings: LoopSettings,
+def advertise_engines[Settings: (LoopSettings, WorkerSettings)](
+    settings: Settings,
     rules_installed: bool,
     *,
     check: Callable[..., None] | None = None,
-) -> LoopSettings:
+) -> Settings:
     """The settings with the engines this runner may advertise, decided by the startup self-check.
 
     `opencode` is added (with the verified engine command the Dynamic job process is handed) only

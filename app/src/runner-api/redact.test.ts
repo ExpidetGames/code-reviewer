@@ -146,3 +146,19 @@ describe("removing a key that was rotated", () => {
     expect(cleaned).not.toContain(base64);
   });
 });
+
+describe("the credential of a Worker (#320)", () => {
+  // #320-T11
+  it("is removed by its shape even when the app does not know it", () => {
+    const credential = `crj_${"Ab3-_".repeat(9)}Zz`;
+
+    const cleaned = redactText(
+      `calling with ${credential} and Authorization: Bearer ${credential}`,
+      [],
+    );
+
+    expect(cleaned).not.toContain(credential);
+    expect(cleaned).not.toContain(credential.slice(4));
+    expect(cleaned).toContain("[redacted]");
+  });
+});

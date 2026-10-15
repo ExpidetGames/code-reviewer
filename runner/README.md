@@ -121,6 +121,36 @@ Rules (the CR-29 decisions; tests in `tests/unit/test_job_loop*.py` and `tests/i
 - The codes the loop adds to the ones of the table below: `runner_shutdown`. `timeout` and
   `runner_error` are also reported by the loop itself.
 
+### The Worker: `code-reviewer-worker --once` (#323)
+
+The hosted deployment (#316) runs every job in a Worker that knows nothing but the app URL, the job id and a
+**per-job credential**. `code-reviewer-worker --once` is that Worker: it reads one JSON document from **stdin**,
+`{"appUrl": "...", "jobId": "<uuid>", "credential": "crj_..."}` (never the arguments or the environment; other
+keys are ignored), fetches the job over the Worker API (`contracts/worker-api.v1.json`, `/api/workers/v1`), runs it
+through the same job host as the loop (`job_loop/host.py`: the same job process, heartbeats, hard timeout, lease check
+before the Dynamic summary, masking, delivery with retry and engine-user sweep), delivers the result and exits. The
+legacy loop (`code-reviewer-runner`, claiming with `RUNNER_TOKEN`) is unchanged and remains the default.
+
+| Exit | Meaning |
+|---|---|
+| 0 | the job succeeded, or it was given back to the queue (SIGTERM/SIGINT during the job: `runner_shutdown` is delivered, there is no grace period) |
+| 1 | the job failed, the app no longer held it (409 on a heartbeat: the process group is ended and nothing is delivered), or the result could not be delivered |
+| 2 | the Worker could not start the job; the log line names a stable code (`worker_input_invalid`, `worker_settings_invalid`, `worker_app_unsupported`, `worker_app_unreachable`, `worker_credential_invalid`, `worker_job_ended`, `worker_job_given_back`, `worker_fetch_refused`) |
+
+- **Settings** are the variables of the job process that the loop reads too (`RUNNER_JOB_TIMEOUT_SECONDS`,
+  `PR_AGENT_COMMAND` for test stacks, `RUNNER_DIFF_JOB_USER` and the Dynamic slot's variables), and the same
+  startup self-check decides whether `opencode` is advertised. There is no `RUNNER_TOKEN` and no `RUNNER_API_URL`.
+- **An app without the Worker API is refused** before anything is fetched or started: a `GET /api/runners/v1/version`
+  that lists no `worker_api`, or a Worker API route that answers with something other than the contract's error body
+  (an app from before the hosted deployment), ends with `worker_app_unsupported`. The Worker holds the job credential,
+  not the dispatcher credential, so a `401` on `/version` is not a refusal; the details call decides.
+- **A Dynamic job whose engine is not advertised** is not started: `dynamic_engine_unavailable` is delivered.
+- **The fetch** is tried at most three times, the number the contract allows per claim (pauses of 1 and 2 seconds, at least the app's `Retry-After`). A
+  credential the app does not accept, a job the app ended, and a `503` that gave the job back are final.
+- **The credential** is in memory only. It is a secret of the masker from the first log line, so no log line or result
+  holds it, and it is never given to the job process: that gets the job (with the git token and the model key) on stdin
+  and a minimal environment, as in the loop. A usage error does not echo the arguments.
+
 The sizing of a container (memory per process, default concurrency) is in
 `docs/spike/cr-13-measurements.md`.
 

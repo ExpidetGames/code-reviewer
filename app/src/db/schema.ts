@@ -228,6 +228,11 @@ export interface JobsTable {
    * when the job is requeued, kept on a finished job so that a repeated report is recognised.
    */
   lease_token: string | null;
+  /**
+   * How many times the Worker of the current claim fetched the job details (#320, at most 3). Reset by
+   * every claim, so it only counts for a claim made with a per-job credential. Not a `Job` field.
+   */
+  worker_fetches: ColumnType<number, number | undefined, number>;
   claimed_at: string | null;
   heartbeat_at: string | null;
   lease_expires_at: string | null;

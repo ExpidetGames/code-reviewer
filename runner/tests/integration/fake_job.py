@@ -16,6 +16,10 @@ argument list, the command line `ps` shows for it and the job from stdin.
     leak        write both credentials of the job to stdout and stderr, and into a failed result
     flood       write 100 MB to stdout and 100 MB to stderr, then a successful result line
     wait        wait until `<directory>/go` exists (at most 30 seconds), then print a result line
+    summary     ask the host over the lease channel (as a Dynamic job does right before it writes
+                its summary) and write `<directory>/summary` only if the answer is "held"; the
+                result line says which answer it got
+    kill        end by SIGKILL, with no result line and nothing cleaned up (an OOM kill)
 """
 
 import json
@@ -101,5 +105,15 @@ elif scenario == "wait":
             break
         time.sleep(0.1)
     print(result())
+elif scenario == "summary":
+    from code_reviewer_runner.lease_check import lease_check_from_environment
+
+    check = lease_check_from_environment(os.environ)
+    answer = check().value if check is not None else "no channel"
+    if answer == "held":
+        (directory / "summary").write_text("the summary")
+    print(result(ok=answer == "held", errorCode=None if answer == "held" else "lease_lost"))
+elif scenario == "kill":
+    os.kill(os.getpid(), signal.SIGKILL)
 else:
     sys.exit(99)

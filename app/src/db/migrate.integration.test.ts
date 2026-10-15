@@ -88,7 +88,8 @@ describe("the migrations of both epics", () => {
       "20261014090000_fix_dynamic_default_model",
       "20261014120000_create_workspace_entitlements",
       "20261014150000_create_usage_records",
-      "20261015100000_create_setup_codes",
+      "20261015100000_add_job_worker_fetches",
+      "20261015110000_create_setup_codes",
     ]);
   });
 

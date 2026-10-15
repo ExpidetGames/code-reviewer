@@ -1131,7 +1131,8 @@ describe("a runner that stalled and came back", () => {
     const first = await fixture.queue.claimNext("runner-a");
     const second = await fixture.queue.claimNext("runner-a");
 
-    expect(first?.leaseToken).toMatch(/^[0-9a-f-]{36}$/);
+    // #320: 256 random bits, base64url (it was a UUID before).
+    expect(first?.leaseToken).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(second?.leaseToken).not.toBe(first?.leaseToken);
     expect(JSON.stringify(first?.job)).not.toContain(first?.leaseToken ?? "x");
   });

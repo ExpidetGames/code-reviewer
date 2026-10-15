@@ -89,6 +89,9 @@ describe("the setup gate on an existing installation", () => {
       "/api/webhooks/github-app",
       "/api/runners/v1/claim",
       "/api/runners/v1/jobs/1/heartbeat",
+      // #320-T25
+      "/api/workers/v1/jobs/1",
+      "/api/workers/v1/jobs/1/result",
     ])
       expect(decide(EXISTING, path, "POST")).toBe("pass");
   });
@@ -110,6 +113,7 @@ describe("the setup gate on an existing installation", () => {
     for (const path of [
       "/api/webhooksx",
       "/api/runnersx/v1/claim",
+      "/api/workersx/v1/jobs/1",
       "/API/webhooks/x",
     ])
       expect(decide(EXISTING, path, "POST")).toBe("setup_required");
