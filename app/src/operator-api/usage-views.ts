@@ -4,6 +4,7 @@
 // later never reaches the outside by accident. No pull request, repository, branch, title or person is in a
 // record, and the model of a managed tier is only ever its tier name. The shapes are the definitions `UsageItem`
 // and `UsageSummaryResponse` of the contract.
+import { TIER_NAME_PATTERN } from "./contract.ts";
 import type {
   UsageRecord,
   UsageSummaryGroup,
@@ -16,7 +17,11 @@ export function usageItemView(record: UsageRecord) {
     jobId: record.jobId,
     reviewKind: record.reviewKind,
     keyMode: record.keyMode,
-    modelTier: record.modelTier,
+    // Whatever is stored, only a tier name leaves the app: a value that is not one is served as null.
+    modelTier:
+      record.modelTier !== null && TIER_NAME_PATTERN.test(record.modelTier)
+        ? record.modelTier
+        : null,
     costMicroUsd: record.costMicroUsd,
     promptTokens: record.promptTokens,
     completionTokens: record.completionTokens,

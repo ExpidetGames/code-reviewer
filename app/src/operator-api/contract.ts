@@ -37,6 +37,12 @@ export const OPERATOR_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
  */
 export const USAGE_SAFETY_LAG_MS = 60_000;
 
+/**
+ * What a usage item may show as `modelTier`: a short lowercase tier name. No `/` and no `.`, so the id of a model
+ * (`vendor/model-4.5`) is never served as a tier (the contract's `UsageItem.modelTier.pattern`).
+ */
+export const TIER_NAME_PATTERN = /^[a-z][a-z0-9_-]{0,31}$/;
+
 /** The longest cursor the feed accepts (the contract's `UsageCursor.maxLength`). */
 export const MAX_USAGE_CURSOR_LENGTH = 128;
 

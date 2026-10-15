@@ -7,6 +7,7 @@
 import { describe, expect, it } from "vitest";
 import {
   MAX_USAGE_CURSOR_LENGTH,
+  TIER_NAME_PATTERN,
   OPERATOR_API_ERROR_CODES,
   OPERATOR_API_VERSION,
   OPERATOR_ID_PATTERN,
@@ -129,6 +130,7 @@ describe("the usage part of the contract file", () => {
       UsageCursor: { maxLength: number };
       UsageItem: {
         properties: {
+          modelTier: { pattern: string };
           keyMode: { enum: string[] };
           reviewKind: { enum: string[] };
         };
@@ -137,6 +139,9 @@ describe("the usage part of the contract file", () => {
     };
 
     expect(defs.UsageCursor.maxLength).toBe(MAX_USAGE_CURSOR_LENGTH);
+    expect(defs.UsageItem.properties.modelTier.pattern).toBe(
+      TIER_NAME_PATTERN.source,
+    );
     expect(defs.UsageItem.properties.keyMode.enum).toEqual([...KEY_MODES]);
     expect(defs.UsageItem.properties.reviewKind.enum).toEqual([
       ...PROJECT_REVIEW_KINDS,

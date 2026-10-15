@@ -529,12 +529,13 @@
           ]
         },
         "modelTier": {
-          "description": "The quality tier of a managed run, or null.",
+          "description": "The quality tier of a managed run, or null. Only a tier name is ever shown (lowercase letters, digits, '_' and '-', starting with a letter, at most 32 characters); anything else is served as null.",
           "type": [
             "string",
             "null"
           ],
-          "maxLength": 64
+          "maxLength": 32,
+          "pattern": "^[a-z][a-z0-9_-]{0,31}$"
         },
         "costMicroUsd": {
           "type": [
@@ -648,7 +649,7 @@
       }
     },
     "UsageSummaryResponse": {
-      "description": "GET /workspaces/{id}/usage/summary?from=&to=: both are required timestamps with 'from' before 'to'. A run belongs to the period it started in ('from' included, 'to' excluded), the same rule the limits count by, so this summary is what a limit sees; it is not a view of the feed (which is by time of settlement) and a run still in progress is counted in 'recordCount'. The groups are ordered by review kind then key mode; a combination without runs is not listed.",
+      "description": "GET /workspaces/{id}/usage/summary?from=&to=: both are required timestamps with 'from' before 'to'. A run belongs to the period it started in ('from' included, 'to' excluded), the same rule the limits count by, so this summary is what a limit sees; it is not a view of the feed (which is by time of settlement) and a run still in progress is counted in 'recordCount'. The groups are ordered by review kind then key mode; a combination without runs is not listed. The summary counts by the time a run started ('reserved_at'), so it does not reconcile with the feed, which is by time of settlement, at the edges of a period (a run that started on the 30th and settled on the 1st is in the earlier period's summary and the later period's feed). A closed period's counts can still change until its last run has ended: 'recordCount' minus 'settledCount' is the number still in progress. For accounts by time of settlement, use the feed.",
       "type": "object",
       "required": [
         "version",

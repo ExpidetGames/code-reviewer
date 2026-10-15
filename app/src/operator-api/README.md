@@ -106,7 +106,7 @@ A stored row or default that cannot be read comes back as `{ "invalid": true }`,
 ## Reading usage (#278)
 
 The records are those of `usage_records` (`src/usage/README.md`). An item is `id`, `workspaceId`, `jobId`,
-`reviewKind`, `keyMode`, `modelTier` (the name of a quality tier or `null`, never a model name), `costMicroUsd`
+`reviewKind`, `keyMode`, `modelTier` (the name of a quality tier or `null`; a stored value that is not a tier name, `^[a-z][a-z0-9_-]{0,31}$`, is served as `null`, never a model id), `costMicroUsd`
 (integer or `null` when it could not be measured), `promptTokens`, `completionTokens`, `settledAt` and `reason` (a short
 code or `null`; the table keeps none yet, so it is `null` until #273 stores `no_result`). Nothing else leaves the app:
 no pull request, repository, branch, title or person, and no key. The view is built field by field

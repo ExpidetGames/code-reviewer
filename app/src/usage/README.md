@@ -68,8 +68,9 @@ yet (#282).
 
 ### The feed and the safety lag
 
-A record's `settled_at` is stamped by the statement that settles it, but it becomes visible when its transaction
-commits. With concurrent writers (Postgres) two settlements can therefore become visible in the reverse order of
+A record's `settled_at` is stamped with the settling app instance's clock (`settle()` reads it just before the update),
+and the record becomes visible when its transaction commits; if `settle` runs inside a longer outer transaction, the
+whole gap to the commit counts against the lag. With concurrent writers (Postgres) two settlements can therefore become visible in the reverse order of
 their stamps, and a reader that already moved past the later stamp would never see the earlier arrival. The operator
 API only serves records settled **more than 60 seconds ago** (`USAGE_SAFETY_LAG_MS`, a validated instance constant:
 `operator-api/contract.ts`), so a settlement may take up to that long to commit and still never be skipped. The
