@@ -587,6 +587,26 @@ describe.each(databases)("the dispatch webhook on %s", (name, open) => {
     });
 
     // #326-T09
+    it("leaves a deduplicated replay to the sweep even when the first call was never recorded", async () => {
+      const t = await setup();
+      // The first enqueue came from an instance whose hook did not run: the job exists, with no row.
+      const first = await t.fixture.enqueue({ deliveryId: "delivery-1" });
+
+      const replay = await t.enqueue({ deliveryId: "delivery-1" });
+      await t.settled();
+
+      expect(first.status).toBe("created");
+      expect(replay).toMatchObject({
+        status: "existing",
+        reason: "same_delivery",
+      });
+      expect(t.receiver.received).toHaveLength(0);
+      expect(await t.rows()).toEqual([]);
+      // The sweep is what finds it.
+      expect(await t.service.sendDue()).toEqual({ sent: 1 });
+    });
+
+    // #326-T09
     it("sends a debounced job once it is due, and once only when a person pulls it forward", async () => {
       const t = await setup();
       const runAfter = new Date(t.fixture.clock.now().getTime() + 90 * SECOND);
