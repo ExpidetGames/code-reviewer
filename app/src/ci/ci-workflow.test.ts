@@ -282,6 +282,31 @@ describe("CI compose job", () => {
   });
 });
 
+describe("CI contract types check", () => {
+  // #318-T02
+  it("checks the generated contract types in the app job, after the typecheck", () => {
+    const lines = commandLines(jobNamed("app-fast"));
+
+    expect(lines).toContain("pnpm contracts:check");
+    expect(lines.indexOf("pnpm contracts:check")).toBeGreaterThan(
+      lines.indexOf("pnpm typecheck"),
+    );
+  });
+
+  // #318-T02
+  it("is part of make verify, so the check can be run before opening a pull request", () => {
+    const makefile = readFileSync(`${repoRoot}Makefile`, "utf8");
+
+    expect(makefile).toMatch(/^verify: .*\bcheck-contracts\b/m);
+    expect(makefile).toMatch(
+      /^check-contracts:\n\t\$\(APP\) contracts:check$/m,
+    );
+    expect(makefile).toMatch(
+      /^generate-contracts:\n\t\$\(APP\) contracts:generate$/m,
+    );
+  });
+});
+
 describe("CI license job", () => {
   // #118-T01
   it("installs both parts from their lockfiles and runs the dependency license check", () => {

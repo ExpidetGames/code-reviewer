@@ -1,0 +1,7 @@
+{
+  "memory": {
+    "limit": "1536m",
+    "reservation": "1280m",
+    "swap": "1536m"
+  }
+}

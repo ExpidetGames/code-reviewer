@@ -1,0 +1,6 @@
+{
+  "error": {
+    "code": "RUNNER_LEASE_LOST",
+    "message": "The Worker no longer holds this job."
+  }
+}

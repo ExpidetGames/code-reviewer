@@ -1,0 +1,456 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// Generated from contracts/worker-api.v1.json. Do not edit: change the schema and run `make generate-contracts`.
+// `make verify` fails while this file differs from what the schema generates.
+
+/**
+ * Exactly the job the runner reads on stdin (see runner/src/code_reviewer_runner/job.py). Closed: the runner refuses unknown fields. Contains secrets (git.token, llm.apiKey): only the claim response carries it.
+ */
+export type RunnerJobInput = {
+  [k: string]: unknown;
+} & {
+  prUrl: string;
+  /**
+   * The commands the product executes. Since the removal of /ask, /improve and /describe only /review exists (a historical run keeps its original command in the database, never on the wire).
+   */
+  command: "review";
+  /**
+   * The review kind a job was queued for (#195), pinned at enqueue time. Absent on a legacy Diff payload means diff. A runner is only handed a job whose kind one of its engines can run, and a Dynamic job is never silently run by PR-Agent.
+   */
+  reviewKind?: "diff" | "dynamic";
+  dynamic?: DynamicReview;
+  base?: ClaimBase;
+  /**
+   * Legacy field of the removed /ask command. A previous release may send it; the runner accepts and ignores it and never hands it to PR-Agent. This app sends no args.
+   *
+   * @maxItems 1
+   */
+  args?: [] | [string];
+  git: {
+    provider: "github";
+    baseUrl: string;
+    token: string;
+    botLogin: string;
+  };
+  llm: {
+    provider: "openrouter";
+    model: string;
+    apiKey: string;
+    baseUrl?: string;
+    /**
+     * The token budget of a review (it also bounds the fallback models, so it must fit the smallest window of the chain).
+     */
+    maxTokens?: number;
+    /**
+     * Models to try, in order, when the main model fails. Optional; the app does not send it in the MVP (no fallback chain is decided), the runner accepts it.
+     *
+     * @maxItems 5
+     */
+    fallbackModels?:
+      | []
+      | [string]
+      | [string, string]
+      | [string, string, string]
+      | [string, string, string, string]
+      | [string, string, string, string, string];
+  };
+  env: JobEnv;
+};
+/**
+ * What the runner prints when a job ends (the output of code-reviewer-run-job), plus an optional errorMessage. The runner has redacted secrets from logTail; the app removes anything that still looks like one before it stores the result.
+ */
+export type RunnerResult = {
+  ok: boolean;
+  durationMs: number;
+  /**
+   * Link to the comment PR-Agent wrote; null when it could not be found (the run is still ok). A failed result may carry it too: review_state_truncated and review_text_truncated report a review that was posted but shortened.
+   */
+  commentUrl?: string | null;
+  /**
+   * null if and only if ok is true. See KnownRunnerErrorCode.
+   */
+  errorCode: string | null;
+  /**
+   * Optional stable finer name of a failure, never free text. For a Dynamic Review checkout failure it is one of KnownCheckoutReason. Absent when the runner gave none; the app stores only a name of the form below.
+   */
+  errorReason?: string | null;
+  /**
+   * Optional human readable detail for a failure; never contains secrets.
+   */
+  errorMessage?: string | null;
+  logTail: string;
+  logTruncated?: boolean;
+  usage?: RunnerUsage | null;
+  [k: string]: unknown;
+};
+
+/**
+ * 200 from GET /api/workers/v1/jobs/{id}: the job, with the git token and the model key minted at this call. Cache-Control is always no-store. The credential is not repeated here and there is no lease token: the credential is the proof of the claim.
+ */
+export interface WorkerJobDetailsResponse {
+  version: 1;
+  job: {
+    /**
+     * The id of a job (a UUID).
+     */
+    id: string;
+    /**
+     * ISO 8601, UTC.
+     */
+    leaseExpiresAt: string;
+    /**
+     * How often to send a heartbeat; the lease is several times longer.
+     */
+    heartbeatIntervalSeconds: number;
+    /**
+     * When the git token stops working; null if it does not expire.
+     */
+    tokenExpiresAt: string | null;
+    input: RunnerJobInput;
+    [k: string]: unknown;
+  };
+  [k: string]: unknown;
+}
+/**
+ * #195: the Dynamic options of a tagged job. Model, skill and the output limit only. A closed object: there is no fixed core, permission, executable command, endpoint or upstream URL here, so a job can never widen what the read-only agent may do. The skill is literal data.
+ */
+export interface DynamicReview {
+  model: string;
+  skill: string;
+  limits: {
+    maxFindings: number;
+  };
+  capabilities?: DynamicModelCapabilities;
+}
+/**
+ * #279: what the app read from the provider's public metadata about the job's Dynamic model, so any tool-capable model runs without the operator describing it. Optional, and sent only to a runner that advertised the `dynamic_capabilities` feature in its claim. It comes from the app, never from the repository or the model. The runner can only narrow with it: it is intersected with the operator's RUNNER_DYNAMIC_CAPABILITIES (both booleans must hold, the smaller number wins for the limits, the higher unit price wins) and never widens what that allows. `maxOutputTokens` is the output allowance of one call, chosen by the app within the model's stated limit. The two unit prices come together or not at all; a model without them (outside the runner's built-in default) is refused by the runner with dynamic_config_invalid. A closed object.
+ */
+export interface DynamicModelCapabilities {
+  toolChoiceRequired: boolean;
+  structuredOutput: boolean;
+  maxOutputTokens: number;
+  contextWindowTokens: number;
+  /**
+   * US dollars per million tokens as an exact decimal text (no exponent, no sign), for example "0.02016". Zero is a free model.
+   */
+  inputUsdPerMtok?: string;
+  /**
+   * US dollars per million tokens as an exact decimal text (no exponent, no sign), for example "0.02016". Zero is a free model.
+   */
+  outputUsdPerMtok?: string;
+}
+/**
+ * #195: the checkout facts a Dynamic job carries, pinned when the job was queued or claimed and bounded. `headSha` is the exact queued head; `baseRef` is the branch the pull request merges into (the exact base SHA is resolved during checkout, #196). `previousReviewedSha` is the head of the last successful review of the same kind (#199), or null. `attemptedShas` (#255, optional: absent means none, and the app leaves it out when empty) are the heads of the earlier jobs of the pull request that ran and did not succeed, newest first; the publisher accepts such a head as the state of the summary comment, because a run may have written it and then ended without success. `attemptedShasTruncated` (#257, optional: absent means false, and the app leaves it out unless it is true) says that more heads qualified than the list holds; only then does the publisher rewrite a bot-owned summary whose state head it cannot account for, with a full review, instead of refusing it. `comparison` is the *declared* mode: a hint for preparation, never proof that the comparison is complete — the checkout verifies that before it trusts it.
+ */
+export interface ClaimBase {
+  repository: string;
+  baseRef: string;
+  headSha: string;
+  previousReviewedSha: string | null;
+  /**
+   * @maxItems 20
+   */
+  attemptedShas?:
+    | []
+    | [string]
+    | [string, string]
+    | [string, string, string]
+    | [string, string, string, string]
+    | [string, string, string, string, string]
+    | [string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string, string, string]
+    | [
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+      ]
+    | [
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+      ]
+    | [
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+      ]
+    | [
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+      ]
+    | [
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+      ]
+    | [
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+      ]
+    | [
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+      ]
+    | [
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+      ]
+    | [
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+      ]
+    | [
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+      ]
+    | [
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+      ];
+  attemptedShasTruncated?: boolean;
+  comparison: "full" | "incremental";
+}
+/**
+ * Extra options of the PR-Agent tools, as strings. The review tool's options (PR_REVIEWER__*) are used; a previous release's option families for the removed tools (PR_DESCRIPTION__*, PR_CODE_SUGGESTIONS__*, PR_QUESTIONS__*) are accepted for v1 compatibility and ignored. Nothing else is allowed here (credentials, endpoints and the model have their own fields).
+ */
+export interface JobEnv {
+  [k: string]: string;
+}
+/**
+ * The body of POST /api/workers/v1/jobs/{id}/heartbeat: empty (the credential identifies the job). A body is accepted and ignored.
+ */
+export interface WorkerHeartbeatRequest {
+  [k: string]: unknown;
+}
+/**
+ * 200 from the heartbeat: the lease is extended. 409 RUNNER_LEASE_LOST means the lease is lost: stop and deliver nothing.
+ */
+export interface WorkerHeartbeatResponse {
+  version: 1;
+  job: {
+    /**
+     * The id of a job (a UUID).
+     */
+    id: string;
+    /**
+     * ISO 8601, UTC.
+     */
+    heartbeatAt: string;
+    /**
+     * ISO 8601, UTC.
+     */
+    leaseExpiresAt: string;
+    [k: string]: unknown;
+  };
+  [k: string]: unknown;
+}
+/**
+ * The body of POST /api/workers/v1/jobs/{id}/result. The whole request body must not exceed 65536 bytes (413 otherwise). The app applies the redaction of the runner API's complete call, including the model key remembered at fetch. A result with errorCode runner_shutdown or launch_failed is not stored: the job is given back and counts an attempt.
+ */
+export interface WorkerResultRequest {
+  result: RunnerResult;
+  [k: string]: unknown;
+}
+export interface RunnerUsage {
+  model: string | null;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  aiCalls: number;
+  fallbackUsed: boolean;
+  /**
+   * The cost in US dollars, or null when it is not known. A Dynamic Review reports the exact sum of the charges its model provider reported for every call, and null when any call has no reported charge; it never estimates one.
+   */
+  costUsd: number | null;
+  /**
+   * Why a Dynamic Review was wrapped up before it was done: the model was asked for its answer right away because the run reached its cost limit or its time limit. Absent or null for a complete run; the review it produced is published and says it may be incomplete.
+   */
+  stoppedEarly?: "cost_limit" | "time_limit" | null;
+  [k: string]: unknown;
+}
+/**
+ * 200 for a result and for the repetition of the same result (alreadyCompleted: true); a different result for a finished job is 409 RUNNER_RESULT_CONFLICT. After the job reached a final state only a repeat of the same result is accepted.
+ */
+export interface WorkerResultResponse {
+  version: 1;
+  job: {
+    /**
+     * The id of a job (a UUID).
+     */
+    id: string;
+    /**
+     * succeeded or failed: the job is finished. queued: the job was given back (runner_shutdown, launch_failed) and waits for another claim; it fails instead if that was the last allowed attempt.
+     */
+    status: "succeeded" | "failed" | "queued";
+    [k: string]: unknown;
+  };
+  alreadyCompleted: boolean;
+  [k: string]: unknown;
+}
+/**
+ * Every error of the Worker API. The same body as the runner API's ErrorResponse; the codes are those of ApiErrorCode.
+ */
+export interface WorkerErrorResponse {
+  error: {
+    /**
+     * Every error of the API has one of these codes. 401 RUNNER_UNAUTHORIZED, 400 RUNNER_ID_INVALID / RUNNER_REQUEST_INVALID, 404 RUNNER_JOB_NOT_FOUND, 409 RUNNER_LEASE_LOST / RUNNER_RESULT_CONFLICT, 413 RUNNER_BODY_TOO_LARGE, 503 RUNNER_GIT_ACCESS_UNAVAILABLE (with Retry-After), 500 RUNNER_INTERNAL_ERROR. #318 adds 401 WORKER_CREDENTIAL_INVALID (a Worker route got a credential that is not the job's: wrong job, unknown, expired or from an earlier claim) and 409 RUNNER_JOB_ENDED (the app ended the job, for example after a permanent access failure at fetch; the Worker stops).
+     */
+    code:
+      | "RUNNER_UNAUTHORIZED"
+      | "RUNNER_ID_INVALID"
+      | "RUNNER_REQUEST_INVALID"
+      | "RUNNER_JOB_NOT_FOUND"
+      | "RUNNER_LEASE_LOST"
+      | "RUNNER_RESULT_CONFLICT"
+      | "RUNNER_BODY_TOO_LARGE"
+      | "RUNNER_GIT_ACCESS_UNAVAILABLE"
+      | "RUNNER_INTERNAL_ERROR"
+      | "WORKER_CREDENTIAL_INVALID"
+      | "RUNNER_JOB_ENDED";
+    message: string;
+    retryAfterSeconds?: number;
+    [k: string]: unknown;
+  };
+  [k: string]: unknown;
+}

@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ExpidetGames/code-reviewer/contracts/worker-api.v1.json",
+  "title": "Code Reviewer Worker API, version 1",
+  "description": "The Worker contract (#316, #318): what a Worker may do with the per-job credential and nothing more. The app serves GET /api/workers/v1/jobs/{id}, POST /api/workers/v1/jobs/{id}/heartbeat and POST /api/workers/v1/jobs/{id}/result. Every request carries 'Authorization: Bearer <credential>' (WorkerCredential in runner-api.v1.json), which is valid only for the job in the path and only while the claim that minted it holds; the dispatcher credential (RUNNER_TOKEN) is refused here and the job credential is refused by the runner API. The Worker never sees the dispatcher credential and cannot claim another job. A reader ignores fields it does not know (an additive field is not a new version), except in RunnerJobInput, which stays closed: the Worker refuses unknown job fields. The App sends an optional job field only to a Worker that names the matching feature in the details request (`?features=dynamic_capabilities`, a comma separated list, unknown names ignored). Errors have the shape and the codes of the runner API (ErrorResponse, ApiErrorCode): 401 WORKER_CREDENTIAL_INVALID, 404 RUNNER_JOB_NOT_FOUND, 409 RUNNER_LEASE_LOST (stop at once), 409 RUNNER_JOB_ENDED (the app ended the job), 409 RUNNER_RESULT_CONFLICT (another result is already stored), 413 RUNNER_BODY_TOO_LARGE, 503 RUNNER_GIT_ACCESS_UNAVAILABLE with Retry-After (the job was given back; the Worker exits). The details call is allowed at most three times per claim, and each call mints a fresh installation token. Secrets (git.token, llm.apiKey) appear only in the details answer. This file is the only source of the format: the app (app/integration-tests/compatibility), the runner (runner/tests/contract) and the Dispatcher project check the examples in contracts/examples/worker-api against it.",
+  "version": 1,
+  "$defs": {
+    "WorkerJobDetailsResponse": {
+      "description": "200 from GET /api/workers/v1/jobs/{id}: the job, with the git token and the model key minted at this call. Cache-Control is always no-store. The credential is not repeated here and there is no lease token: the credential is the proof of the claim.",
+      "type": "object",
+      "required": ["version", "job"],
+      "properties": {
+        "version": { "const": 1 },
+        "job": {
+          "type": "object",
+          "required": [
+            "id",
+            "leaseExpiresAt",
+            "heartbeatIntervalSeconds",
+            "tokenExpiresAt",
+            "input"
+          ],
+          "properties": {
+            "id": { "$ref": "runner-api.v1.json#/$defs/JobId" },
+            "leaseExpiresAt": { "$ref": "runner-api.v1.json#/$defs/Timestamp" },
+            "heartbeatIntervalSeconds": {
+              "description": "How often to send a heartbeat; the lease is several times longer.",
+              "type": "integer",
+              "minimum": 1
+            },
+            "tokenExpiresAt": {
+              "description": "When the git token stops working; null if it does not expire.",
+              "oneOf": [
+                { "$ref": "runner-api.v1.json#/$defs/Timestamp" },
+                { "type": "null" }
+              ]
+            },
+            "input": { "$ref": "runner-api.v1.json#/$defs/RunnerJobInput" }
+          }
+        }
+      }
+    },
+    "WorkerHeartbeatRequest": {
+      "description": "The body of POST /api/workers/v1/jobs/{id}/heartbeat: empty (the credential identifies the job). A body is accepted and ignored.",
+      "type": "object"
+    },
+    "WorkerHeartbeatResponse": {
+      "description": "200 from the heartbeat: the lease is extended. 409 RUNNER_LEASE_LOST means the lease is lost: stop and deliver nothing.",
+      "type": "object",
+      "required": ["version", "job"],
+      "properties": {
+        "version": { "const": 1 },
+        "job": {
+          "type": "object",
+          "required": ["id", "heartbeatAt", "leaseExpiresAt"],
+          "properties": {
+            "id": { "$ref": "runner-api.v1.json#/$defs/JobId" },
+            "heartbeatAt": { "$ref": "runner-api.v1.json#/$defs/Timestamp" },
+            "leaseExpiresAt": { "$ref": "runner-api.v1.json#/$defs/Timestamp" }
+          }
+        }
+      }
+    },
+    "WorkerResultRequest": {
+      "description": "The body of POST /api/workers/v1/jobs/{id}/result. The whole request body must not exceed 65536 bytes (413 otherwise). The app applies the redaction of the runner API's complete call, including the model key remembered at fetch. A result with errorCode runner_shutdown or launch_failed is not stored: the job is given back and counts an attempt.",
+      "type": "object",
+      "required": ["result"],
+      "properties": {
+        "result": { "$ref": "runner-api.v1.json#/$defs/RunnerResult" }
+      }
+    },
+    "WorkerResultResponse": {
+      "description": "200 for a result and for the repetition of the same result (alreadyCompleted: true); a different result for a finished job is 409 RUNNER_RESULT_CONFLICT. After the job reached a final state only a repeat of the same result is accepted.",
+      "type": "object",
+      "required": ["version", "job", "alreadyCompleted"],
+      "properties": {
+        "version": { "const": 1 },
+        "job": {
+          "type": "object",
+          "required": ["id", "status"],
+          "properties": {
+            "id": { "$ref": "runner-api.v1.json#/$defs/JobId" },
+            "status": {
+              "description": "succeeded or failed: the job is finished. queued: the job was given back (runner_shutdown, launch_failed) and waits for another claim; it fails instead if that was the last allowed attempt.",
+              "type": "string",
+              "enum": ["succeeded", "failed", "queued"]
+            }
+          }
+        },
+        "alreadyCompleted": { "type": "boolean" }
+      }
+    },
+    "WorkerErrorResponse": {
+      "description": "Every error of the Worker API. The same body as the runner API's ErrorResponse; the codes are those of ApiErrorCode.",
+      "type": "object",
+      "required": ["error"],
+      "properties": {
+        "error": {
+          "type": "object",
+          "required": ["code", "message"],
+          "properties": {
+            "code": { "$ref": "runner-api.v1.json#/$defs/ApiErrorCode" },
+            "message": { "type": "string", "minLength": 1, "maxLength": 500 },
+            "retryAfterSeconds": { "type": "integer", "minimum": 1 }
+          }
+        }
+      }
+    }
+  }
+}

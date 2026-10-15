@@ -1,0 +1,19 @@
+{
+  "result": {
+    "ok": true,
+    "durationMs": 41250,
+    "commentUrl": "https://github.com/acme/widgets/pull/7#issuecomment-1001",
+    "errorCode": null,
+    "logTail": "review published",
+    "logTruncated": false,
+    "usage": {
+      "model": "vendor/model-name",
+      "promptTokens": 12000,
+      "completionTokens": 900,
+      "totalTokens": 12900,
+      "aiCalls": 2,
+      "fallbackUsed": false,
+      "costUsd": 0.04
+    }
+  }
+}
