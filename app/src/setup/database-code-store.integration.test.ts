@@ -435,6 +435,43 @@ describe("what the database keeps", () => {
   });
 });
 
+describe("a code replaced while an attempt is under way", () => {
+  // #321-T03
+  it("answers invalid_code, not rate_limited, to an attempt that was about the issuance that was just replaced", async () => {
+    const { db } = await createTestDatabase();
+    const time = clock();
+    await instance(db, time, { code: "111111" }).issue();
+    const real = createSetupCodesRepository(db);
+    // The operator runs pnpm setup-code between the read of the row and the count of the attempt.
+    const store = createDatabaseSetupCodeStore({
+      db,
+      appSecret: SECRET,
+      now: time.now,
+      repository: {
+        ...real,
+        async countAttempt(id, limits) {
+          await instance(db, time, { code: "222222" }).issue();
+          return real.countAttempt(id, limits);
+        },
+      },
+    });
+
+    expect(await store.attempt("111111")).toEqual({
+      ok: false,
+      error: "invalid_code",
+    });
+    // The new issuance was not touched by the stale attempt.
+    const row = await db
+      .selectFrom("setup_codes")
+      .selectAll()
+      .executeTakeFirst();
+    expect(row?.failures).toBe(0);
+    expect(await instance(db, time).attempt("222222")).toMatchObject({
+      ok: true,
+    });
+  });
+});
+
 describe("a database that cannot be read", () => {
   // #321-T03
   it("answers setup_unavailable, with one log line that names no value, when the table is missing", async () => {

@@ -25,6 +25,7 @@ import { deriveKey } from "../crypto/keys.ts";
 import {
   createSetupCodesRepository,
   type SetupCodeRow,
+  type SetupCodesRepository,
 } from "../db/repositories/setup-codes-repository.ts";
 import type { Database } from "../db/schema.ts";
 import {
@@ -57,6 +58,8 @@ type StoreOptions = {
   /** Replaces the secure random source; only tests pass this. */
   randomCode?: () => string;
   log?: (line: string) => void;
+  /** Replaces the repository on `db`; only tests pass this. */
+  repository?: SetupCodesRepository;
 };
 
 function secureCode(): string {
@@ -95,8 +98,9 @@ export function createDatabaseSetupCodeStore({
   now = Date.now,
   randomCode = secureCode,
   log = (line) => console.error(line),
+  repository,
 }: StoreOptions): DatabaseSetupCodeStore {
-  const codes = createSetupCodesRepository(db);
+  const codes = repository ?? createSetupCodesRepository(db);
 
   // The reason is not repeated: an error of the driver can carry a connection string or a statement.
   function unavailable(): void {
@@ -117,7 +121,7 @@ export function createDatabaseSetupCodeStore({
       attemptsPerWindow: SETUP_ATTEMPTS_PER_WINDOW,
       maxFailures: SETUP_MAX_FAILURES,
     });
-    if (counted === null) return refusal(await codes.current(), at);
+    if (counted === null) return refusal(row.id, await codes.current(), at);
 
     if (counted.usedAt !== null) return { ok: false, error: "code_used" };
     if (!matches(appSecret, counted, submitted))
@@ -130,8 +134,15 @@ export function createDatabaseSetupCodeStore({
   }
 
   /** Why the attempt did not count, in the order the in-memory store checks. */
-  function refusal(row: SetupCodeRow | null, at: Date): SetupCodeAttempt {
+  function refusal(
+    attemptedId: string,
+    row: SetupCodeRow | null,
+    at: Date,
+  ): SetupCodeAttempt {
     if (row === null) return { ok: false, error: "setup_unavailable" };
+    // The operator made a new code while this attempt was under way: the submitted code was about the
+    // old one, which is gone, and the new issuance must not answer for it.
+    if (row.id !== attemptedId) return { ok: false, error: "invalid_code" };
     if (row.failures >= SETUP_MAX_FAILURES)
       return { ok: false, error: "setup_locked" };
     if (at.getTime() >= row.expiresAt.getTime())
