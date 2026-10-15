@@ -44,7 +44,7 @@ HARDENING_REASONS = {
     "root_filesystem_writable",
     "ipv6_not_disabled",
 }
-CREDENTIAL = "crj_dummy-per-job-credential-0123456789-abcdefghijkl"
+CREDENTIAL = "crj_" + ("dummy-credential-" * 3)[:43]
 JOB_ID = "00000000-0000-4000-8000-000000000001"
 
 
@@ -187,7 +187,7 @@ def test_worker_once_runs_the_startup_then_talks_to_the_given_app_with_the_crede
 
     # The app refuses the credential: the Worker could not fetch its job, a setup error (2).
     assert done.returncode == 2, done.stderr
-    assert seen, "the Worker never asked the app"
+    assert seen, f"the Worker never asked the app: {done.stderr}"
     assert all(path.startswith("/api/workers/v1/") for _, path, _ in seen), seen
     assert all(header == f"Bearer {CREDENTIAL}" for _, _, header in seen), seen
     # The credential is on no output, and the startup ran first: the verdict file is there.

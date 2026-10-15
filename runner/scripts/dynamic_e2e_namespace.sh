@@ -90,11 +90,14 @@ probe_as_container() {
     RUNNER_DIFF_JOB_USER=10001:10001 RUNNER_DYNAMIC_ENGINE_UID=10101 RUNNER_DYNAMIC_ENGINE_GID=10101 \
       setpriv --bounding-set=-all,+chown,+dac_override,+fowner,+kill,+setgid,+setuid,+setpcap,+net_admin \
       --inh-caps=-all --no-new-privs \
-      uv run --no-sync --offline python -m code_reviewer_runner probe 2>/dev/null
+      uv run --no-sync --offline python -m code_reviewer_runner probe 2>>"$PROBE_LOG"
   )
 }
 make_root_read_only() {
   local failed=0 mountpoint fstype
+  # The container's own writable paths (compose.dynamic.yml tmpfs): the engine's version check and the
+  # startup write nowhere else once the disks are read-only.
+  mount -t tmpfs -o rw,noexec,nosuid,nodev,size=512m,mode=1777 tmpfs /tmp || return 1
   while read -r mountpoint fstype; do
     case "$fstype" in
       ext2 | ext3 | ext4 | xfs | btrfs | vfat | overlay | fuseblk | squashfs | erofs | f2fs)
@@ -103,19 +106,22 @@ make_root_read_only() {
   done < <(awk '{ for (i = 1; i <= NF; i++) if ($i == "-") print $5, $(i + 1) }' /proc/self/mountinfo)
   [ "$failed" = 0 ]
 }
+PROBE_LOG="$STAGE/probe.log"
 export -f probe_as_container make_root_read_only
-export LANE_RUNNER_DIR
+export LANE_RUNNER_DIR PROBE_LOG
 read_only_verdict="$(unshare --mount -- bash -c 'make_root_read_only && probe_as_container | tail -n 1')" \
   || fail "the probe entry mode could not be run with a read-only root"
 case "$read_only_verdict" in
   *'"engines":["pr-agent","opencode"]'*'"reasons":[]'*) ;;
-  *) fail "the probe entry mode does not advertise opencode on the lane's layout with a read-only root (verdict: $read_only_verdict)" ;;
+  *) tail -n 15 "$PROBE_LOG" >&2 || true
+     fail "the probe entry mode does not advertise opencode on the lane's layout with a read-only root (verdict: $read_only_verdict)" ;;
 esac
 writable_verdict="$(probe_as_container | tail -n 1)" \
   || fail "the probe entry mode could not be run with a writable root"
 case "$writable_verdict" in
   *'"engines":["pr-agent"]'*root_filesystem_writable*) ;;
-  *) fail "the probe entry mode advertises opencode, or names another reason, on a writable root (verdict: $writable_verdict)" ;;
+  *) tail -n 15 "$PROBE_LOG" >&2 || true
+     fail "the probe entry mode advertises opencode, or names another reason, on a writable root (verdict: $writable_verdict)" ;;
 esac
 echo "probe entry mode: opencode with a read-only root, not with a writable one"
 
