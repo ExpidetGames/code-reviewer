@@ -52,6 +52,8 @@ export const PUBLIC_PATHS: readonly PublicPath[] = [
   // The platform's cron (serverless mode, vercel.json) authenticates with CRON_SECRET, not with a session;
   // the route is a 404 on a server (src/cron/). One exact path per job: nothing below /api/internal is open.
   { path: "/api/internal/repository-sync", match: "exact" },
+  // The same cron, once a minute: lapsed leases, resends, the give-up and the cleanup (#328).
+  { path: "/api/internal/dispatch-sweep", match: "exact" },
 ];
 
 /**

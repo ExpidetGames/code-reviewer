@@ -82,6 +82,13 @@ later of creation and `run_after`, so a scheduled delay does not consume the wai
 already claimed (`attempts > 0` after lease loss/release) follow the existing lease/attempt/backoff
 policy instead, independently of which runner polls first.
 
+A hosted deployment (`RUNNER_DISPATCH=webhook`, #316) has a second bound, from the cron sweep (#328,
+`src/dispatch/README.md`): a job that was queued for `RUNNER_DISPATCH_GIVE_UP_SECONDS` (default 3600) without any
+Dispatcher claiming it **fails** with `dispatch_unavailable` (`failUndispatched` of the runner queue), with no attempt
+counted; the time counts from the later of `run_after` and the last time the job was queued. In poll mode this is off
+unless the operator sets the variable. The same sweep expires lapsed leases (`expireStaleJobs`), which a claim did
+and, with nobody claiming, nothing else would.
+
 When the project's review kind changes, #194's `ReviewSettingsHooks.onProjectSettingsChanged` calls
 `cancelWaitingForReviewKindChange` in the settings transaction: the project's waiting jobs become
 `cancelled` with `review_kind_changed`, a running job finishes, and a rejecting hook rolls the

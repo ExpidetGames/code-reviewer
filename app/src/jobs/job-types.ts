@@ -141,6 +141,8 @@ export const JOB_ERROR_CODES = [
   "dynamic_review_disabled",
   /** Cancelled because the job's command was removed from the product (#203). */
   "command_removed",
+  /** Failed because no Dispatcher took the job within the give-up time of a hosted deployment (#328). */
+  "dispatch_unavailable",
 ] as const;
 export type JobErrorCode = (typeof JOB_ERROR_CODES)[number];
 

@@ -135,6 +135,16 @@ export type RunnerJobsRepository = {
   /** Deals with leases and runtimes that ran out. `claimNext` does this first on every call. */
   expireStaleJobs(): Promise<ExpiryReport>;
   /**
+   * #328: fails every queued job that has waited `waitedMs` or longer, counted from the later of the time it
+   * became due and the time it was last queued (a job given back after a lost lease starts waiting again), with
+   * the stable code `dispatch_unavailable`. No attempt is counted. A job whose dispatch a Dispatcher
+   * acknowledged and that is still inside the acknowledgement window is spared: that Dispatcher is working on
+   * it. Returns how many jobs it failed.
+   */
+  failUndispatched(waitedMs: number): Promise<number>;
+  /** #328: how many jobs are running now, of any runner or pool. */
+  countRunning(): Promise<number>;
+  /**
    * Cancels one claimed job with `errorCode`, in one statement keyed on the job id and the lease token
    * of the claim (running -> cancelled). The attempt count is not touched and the job is never queued
    * in between. `not_holder` when the caller does not hold the job (any more).
@@ -438,6 +448,51 @@ export function createRunnerJobsRepository(
     };
   }
 
+  /** #328: the queued jobs that waited for a claim longer than `waitedMs`; see `failUndispatched`. */
+  async function failUndispatched(
+    executor: Kysely<Database>,
+    current: Date,
+    waitedMs: number,
+  ): Promise<number> {
+    const timestamp = formatTimestamp(current);
+    const waitedBefore = formatTimestamp(
+      new Date(current.getTime() - waitedMs),
+    );
+    const waiting = (eb: ExpressionBuilder<Database, "jobs">) =>
+      eb.and([
+        eb("status", "=", "queued"),
+        // Due for that long, and queued (again) for that long: a requeue changes `updated_at`, not `run_after`.
+        eb("run_after", "<=", waitedBefore),
+        eb("updated_at", "<=", waitedBefore),
+        eb.not(
+          eb.exists(
+            eb
+              .selectFrom("job_dispatches")
+              .select("job_dispatches.job_id")
+              .whereRef("job_dispatches.job_id", "=", "jobs.id")
+              .where("job_dispatches.state", "=", "acked")
+              .where("job_dispatches.next_dispatch_at", ">", timestamp),
+          ),
+        ),
+      ]);
+    await lockJobRowsInOrder(
+      executor,
+      executor.selectFrom("jobs").select("id").where(waiting),
+    );
+    const result = await executor
+      .updateTable("jobs")
+      .set({
+        status: "failed",
+        error_code: "dispatch_unavailable" satisfies JobErrorCode,
+        finished_at: timestamp,
+        updated_at: timestamp,
+      })
+      .where(waiting)
+      .executeTakeFirst();
+    await voidRecordsOfEndedJobs(executor);
+    return Number(result.numUpdatedRows);
+  }
+
   /** #322: the running jobs of one pool (the runner id of their claim). */
   async function runningInPool(
     executor: Kysely<Database>,
@@ -665,6 +720,19 @@ export function createRunnerJobsRepository(
 
     expireStaleJobs() {
       return inTransaction((trx) => expire(trx, now()));
+    },
+
+    failUndispatched(waitedMs) {
+      return inTransaction((trx) => failUndispatched(trx, now(), waitedMs));
+    },
+
+    async countRunning() {
+      const { count } = await db
+        .selectFrom("jobs")
+        .select((eb) => eb.fn.countAll<number | string>().as("count"))
+        .where("status", "=", "running")
+        .executeTakeFirstOrThrow();
+      return Number(count);
     },
 
     cancelClaimed(jobId, leaseToken, errorCode) {
