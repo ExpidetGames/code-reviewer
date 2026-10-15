@@ -32,6 +32,11 @@ BODIES = (
     "CompleteRequest",
     "CompleteResponse",
     "ErrorResponse",
+    # #318: the Dispatcher API additions (the claim by a Dispatcher, release, version).
+    "SplitClaimResponse",
+    "ReleaseRequest",
+    "ReleaseResponse",
+    "VersionResponse",
 )
 
 Document = dict[str, Any]

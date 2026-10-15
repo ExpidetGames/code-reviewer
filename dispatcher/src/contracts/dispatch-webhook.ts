@@ -1,0 +1,110 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// Generated from contracts/dispatch-webhook.v1.json. Do not edit: change the schema and run `make generate-contracts`.
+// `make verify` fails while this file differs from what the schema generates.
+
+/**
+ * Why a receiver answered 200 ignored. `not_claimable`: the claim of that job answered 204 (not due, running, finished, cancelled, superseded, or the pool cap is reached); the app resends after its acknowledgement timeout. `not_capable`: the receiver cannot run that review kind; the app stops resending that kind. A reader accepts any reason of the right form.
+ */
+export type KnownDispatchIgnoredReason = "not_claimable" | "not_capable";
+
+/**
+ * The body of the wake-up call. Closed: an unknown field, such as a secret, a token, a credential, a signature or repository data, is refused. A sender never adds one and a receiver refuses a body that has one.
+ */
+export interface DispatchWebhook {
+  version: 1;
+  type: "job.ready";
+  /**
+   * The id of a job (a UUID).
+   */
+  jobId: string;
+  /**
+   * The review kind a job was queued for (#195), pinned at enqueue time. Absent on a legacy Diff payload means diff. A runner is only handed a job whose kind one of its engines can run, and a Dynamic job is never silently run by PR-Agent.
+   */
+  reviewKind: "diff" | "dynamic";
+  /**
+   * The number of the attempt the job is on (1 for the first).
+   */
+  attempt: number;
+  /**
+   * The id of a job (a UUID).
+   */
+  dispatchId: string;
+  /**
+   * ISO 8601, UTC.
+   */
+  sentAt: string;
+}
+/**
+ * 202 from the receiver: the wake-up call is verified and the claim goes on in the background.
+ */
+export interface DispatchAccepted {
+  version: 1;
+  status: "accepted";
+  [k: string]: unknown;
+}
+/**
+ * 200 from the receiver: verified, and there is nothing to start.
+ */
+export interface DispatchIgnored {
+  version: 1;
+  status: "ignored";
+  reason: string;
+  [k: string]: unknown;
+}
+/**
+ * The file dispatch-signing-vectors.json: signing keys of the example (dummy values), the tolerance, and requests as a receiver sees them with the verdict each must get. A consumer (the app's sender and the Dispatcher's receiver, in TypeScript, and the runner suite in Python) computes the verdict itself and compares. Header names are lower case.
+ */
+export interface DispatchSigningVectors {
+  version: 1;
+  toleranceSeconds: number;
+  keys: {
+    current: DispatchSigningKey;
+    previous: DispatchSigningKey;
+  };
+  /**
+   * @minItems 1
+   */
+  vectors: [
+    {
+      name: string;
+      /**
+       * The receiver's clock, Unix seconds.
+       */
+      now: number;
+      headers: {
+        [k: string]: string;
+      };
+      /**
+       * The raw body exactly as received.
+       */
+      body: string;
+      expected:
+        "ok" | "malformed" | "expired" | "unknown_key" | "bad_signature";
+    },
+    ...{
+      name: string;
+      /**
+       * The receiver's clock, Unix seconds.
+       */
+      now: number;
+      headers: {
+        [k: string]: string;
+      };
+      /**
+       * The raw body exactly as received.
+       */
+      body: string;
+      expected:
+        "ok" | "malformed" | "expired" | "unknown_key" | "bad_signature";
+    }[],
+  ];
+  [k: string]: unknown;
+}
+/**
+ * A signing key of the example. The secret is a dummy; a real one is at least 32 characters and unique to this purpose.
+ */
+export interface DispatchSigningKey {
+  kid: string;
+  secret: string;
+}

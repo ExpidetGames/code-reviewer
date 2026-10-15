@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "appVersion": "0.1.0",
+  "features": [
+    "worker_api",
+    "claim_by_job_id",
+    "pool_cap",
+    "release"
+  ]
+}

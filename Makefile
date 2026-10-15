@@ -7,7 +7,7 @@ APP := pnpm --dir app
 RUNNER := uv --directory runner
 
 .PHONY: help install lint lint-app lint-runner typecheck typecheck-app typecheck-runner \
-	test-unit test-unit-app test-unit-runner test-integration check-licenses fix-spdx-headers test-engine test-e2e test-e2e-dynamic test-images test-compose verify
+	test-unit test-unit-app test-unit-runner test-integration check-licenses fix-spdx-headers generate-contracts check-contracts test-engine test-e2e test-e2e-dynamic test-images test-compose verify
 
 help:
 	@echo "make install           install app and runner dependencies from the lockfiles"
@@ -16,6 +16,8 @@ help:
 	@echo "make test-unit         unit tests of both parts"
 	@echo "make test-integration  integration tests that run on the host (app and runner)"
 	@echo "make check-licenses    fail when a dependency has a license outside license-policy.json (needs make install)"
+	@echo "make generate-contracts regenerate the TypeScript types of contracts/*.v1.json (app/src/contracts, dispatcher/src/contracts)"
+	@echo "make check-contracts   fail when the generated contract types differ from the schemas (part of verify)"
 	@echo "make fix-spdx-headers  add the SPDX license header to every source file that lacks it (a unit test fails without it)"
 	@echo "make test-engine       the real PR-Agent and the pinned OpenCode against the fakes (about 5 minutes, not part of verify)"
 	@echo "make test-e2e          Playwright journeys against a production build (ARGS=... to filter)"
@@ -58,6 +60,15 @@ test-integration:
 # (app/src/ci/license-check). Reads installed metadata and both lockfiles, no network.
 check-licenses:
 	$(APP) licenses:check
+
+# The TypeScript types of the contract schemas (#318), committed into app/src/contracts and
+# dispatcher/src/contracts so no project imports another's source. `check-contracts` fails with the
+# command to regenerate when a committed file is stale; it reads the schemas only, no network.
+generate-contracts:
+	$(APP) contracts:generate
+
+check-contracts:
+	$(APP) contracts:check
 
 # Adds `SPDX-License-Identifier: Apache-2.0` (in the comment syntax of the language) to every source file
 # that lacks it; changes nothing else and can be run at any time. Which files count is in
@@ -104,4 +115,4 @@ test-compose:
 	docker build --file runner/Dockerfile --tag code-reviewer-runner:compose .
 	docker/smoke/compose.sh code-reviewer-app:compose code-reviewer-runner:compose
 
-verify: lint typecheck test-unit test-integration check-licenses
+verify: lint typecheck check-contracts test-unit test-integration check-licenses

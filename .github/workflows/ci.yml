@@ -106,6 +106,10 @@ jobs:
         run: pnpm lint
       - name: Typecheck
         run: pnpm typecheck
+      # The TypeScript types generated from contracts/*.v1.json are committed (app/src/contracts and
+      # dispatcher/src/contracts); a stale file fails with the command that regenerates it (#318).
+      - name: Check the generated contract types
+        run: pnpm contracts:check
       - name: Unit tests
         run: pnpm test
       - name: Integration tests on the host

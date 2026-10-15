@@ -23,6 +23,8 @@ const MESSAGES: Record<RunnerApiErrorCode, string> = {
   RUNNER_GIT_ACCESS_UNAVAILABLE:
     "Credentials for the job could not be created right now. Try again later.",
   RUNNER_INTERNAL_ERROR: "The request could not be handled.",
+  WORKER_CREDENTIAL_INVALID: "A valid credential for this job is required.",
+  RUNNER_JOB_ENDED: "The job was ended and cannot be continued.",
 };
 
 export function jsonResponse(
