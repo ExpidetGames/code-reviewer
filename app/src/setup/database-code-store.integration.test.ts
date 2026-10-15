@@ -561,4 +561,84 @@ describe("the setup codes repository", () => {
       await db.selectFrom("setup_codes").select("id").execute(),
     ).toHaveLength(1);
   });
+
+  // #321-T01
+  it("cannot hold a second row, however it is written", async () => {
+    const { db } = await createTestDatabase();
+    const repository = createSetupCodesRepository(db);
+    const createdAt = new Date("2026-10-15T08:00:00.000Z");
+    await repository.replace({
+      id: "a".repeat(32),
+      codeHash: "0".repeat(64),
+      createdAt,
+      expiresAt: new Date(createdAt.getTime() + SETUP_CODE_TTL_MS),
+    });
+
+    await expect(
+      db
+        .insertInto("setup_codes")
+        .values({
+          id: "c".repeat(32),
+          slot: 1,
+          code_hash: "2".repeat(64),
+          created_at: createdAt.toISOString(),
+          expires_at: createdAt.toISOString(),
+          used_at: null,
+          failures: 0,
+          window_started_at: null,
+          attempts_in_window: 0,
+        })
+        .execute(),
+    ).rejects.toThrow();
+  });
+
+  // #321-T01
+  it("keeps exactly one row, the last one written, when several replace it at the same moment", async () => {
+    const { db } = await createTestDatabase();
+    const repository = createSetupCodesRepository(db);
+    const createdAt = new Date("2026-10-15T08:00:00.000Z");
+
+    await Promise.all(
+      "abcdef".split("").map((letter) =>
+        repository.replace({
+          id: letter.repeat(32),
+          codeHash: letter.repeat(64),
+          createdAt,
+          expiresAt: new Date(createdAt.getTime() + SETUP_CODE_TTL_MS),
+        }),
+      ),
+    );
+
+    const rows = await db.selectFrom("setup_codes").selectAll().execute();
+    expect(rows).toHaveLength(1);
+    expect((await repository.current())?.id).toBe(rows[0]?.id);
+    expect(rows[0]?.code_hash).toBe((rows[0]?.id ?? "").slice(0, 1).repeat(64));
+  });
+});
+
+describePostgres("the setup codes repository on Postgres", () => {
+  // #321-T01
+  it("keeps exactly one row, matching the issuance, when several replace it at the same moment on an empty table", async () => {
+    const postgres = await createPostgresTestDatabase({ poolMax: 10 });
+    const repository = createSetupCodesRepository(postgres.db);
+    const createdAt = new Date("2026-10-15T08:00:00.000Z");
+
+    await Promise.all(
+      "abcdefghij".split("").map((letter) =>
+        repository.replace({
+          id: letter.repeat(32),
+          codeHash: letter.repeat(64),
+          createdAt,
+          expiresAt: new Date(createdAt.getTime() + SETUP_CODE_TTL_MS),
+        }),
+      ),
+    );
+
+    const rows = await postgres.db
+      .selectFrom("setup_codes")
+      .selectAll()
+      .execute();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.code_hash).toBe((rows[0]?.id ?? "").slice(0, 1).repeat(64));
+  });
 });

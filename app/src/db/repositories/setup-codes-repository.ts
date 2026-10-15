@@ -5,6 +5,7 @@
 // instances could make at the same moment is ONE statement with its condition in the WHERE clause, so
 // whichever instance's statement runs second finds the row already changed:
 //
+// - `replace` writes the one row with an upsert on the unique `slot`;
 // - `countAttempt` takes a place in the rate limit window and counts the attempt as a failure in the same
 //   statement, before anything is compared (so concurrent guesses cannot get past the limit);
 // - `consume` marks the code used only while it is unused (a correct code is accepted exactly once).
@@ -43,7 +44,7 @@ export type AttemptLimits = {
 };
 
 export type SetupCodesRepository = {
-  /** Makes `code` the one row: whatever was there (a code, its counters) is deleted in the same transaction. */
+  /** Makes `code` the one row: whatever was there (a code, its counters) is overwritten, in one statement. */
   replace(code: NewSetupCode): Promise<void>;
   /** The row, or null when no code was ever issued (or the setup is complete). */
   current(): Promise<SetupCodeRow | null>;
@@ -80,22 +81,23 @@ export function createSetupCodesRepository(
 ): SetupCodesRepository {
   return {
     async replace(code) {
-      await db.transaction().execute(async (trx) => {
-        await trx.deleteFrom("setup_codes").execute();
-        await trx
-          .insertInto("setup_codes")
-          .values({
-            id: code.id,
-            code_hash: code.codeHash,
-            created_at: formatTimestamp(code.createdAt),
-            expires_at: formatTimestamp(code.expiresAt),
-            used_at: null,
-            failures: 0,
-            window_started_at: null,
-            attempts_in_window: 0,
-          })
-          .execute();
-      });
+      // One upsert on the unique `slot`: two runs that overlap, even on an empty table, leave one row, the
+      // one that wrote last, with all of its fields (a delete followed by an insert could leave two).
+      const fresh = {
+        id: code.id,
+        code_hash: code.codeHash,
+        created_at: formatTimestamp(code.createdAt),
+        expires_at: formatTimestamp(code.expiresAt),
+        used_at: null,
+        failures: 0,
+        window_started_at: null,
+        attempts_in_window: 0,
+      };
+      await db
+        .insertInto("setup_codes")
+        .values({ slot: 1, ...fresh })
+        .onConflict((conflict) => conflict.column("slot").doUpdateSet(fresh))
+        .execute();
     },
 
     async current() {

@@ -272,6 +272,8 @@ export interface RateLimitsTable {
 export interface SetupCodesTable {
   /** The id of this issuance of the code; the setup session is bound to it. */
   id: string;
+  /** Always 1 and unique: the table cannot hold a second row, and the replacement is one upsert on it. */
+  slot: number;
   /** Hex of a keyed hash (HMAC with a key derived from `APP_SECRET`) of the id and the code. */
   code_hash: string;
   /** ISO 8601 text in UTC. */
