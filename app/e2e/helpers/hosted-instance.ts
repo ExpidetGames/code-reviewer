@@ -4,6 +4,9 @@
 // as the instance admin (the lane's apps have no GitHub sign-in set up: the database is Postgres), install the GitHub
 // App for the repositories at the fake GitHub, sync, save the workspace's LLM key and switch a project on, and the app's own
 // cron: the sweep (`GET /api/internal/dispatch-sweep`, #328).
+import { execFile } from "node:child_process";
+import { resolve } from "node:path";
+import { promisify } from "node:util";
 import {
   expect,
   type APIRequestContext,
