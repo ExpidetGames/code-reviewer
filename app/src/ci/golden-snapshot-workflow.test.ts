@@ -4,7 +4,7 @@
 // request, only one job holds the platform secrets and only one step of it reads them, and the commit is
 // archived and checked out without credentials. It reads the file as YAML; that the platform accepts the run is
 // verified by the first real run (docs/golden-snapshot.md).
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
@@ -146,6 +146,14 @@ describe("golden snapshot workflow", () => {
     );
     expect(upload).toBeDefined();
     expect(String(upload?.with?.path)).toContain("golden-snapshot.json");
+  });
+
+  // #330-extra-workflow
+  it("passes a vm-prepare script that exists in the repository (the one #325 owns)", () => {
+    const build = stepNamed("Build, check and record the snapshot");
+    const path = /--vm-prepare \.\.\/(\S+)/.exec(build.run ?? "")?.[1];
+    expect(path).toBe("docker/sandbox/vm-prepare.sh");
+    expect(existsSync(`${repoRoot}${path}`)).toBe(true);
   });
 
   // #330-extra-workflow

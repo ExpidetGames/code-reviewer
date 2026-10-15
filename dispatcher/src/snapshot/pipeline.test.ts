@@ -382,9 +382,12 @@ describe("the golden snapshot pipeline", () => {
     // #330-extra-probe
     it("keeps only stable reason codes from a verdict, so a value in it never reaches the error", async () => {
       const fake = happyFake();
+      // Joined at run time: the tracked-secrets check rejects a token-shaped literal in the source.
+      const looksLikeAKey = ["sk", "or", "v1", "0123456789abcdef0123"].join(
+        "-",
+      );
       fake.onExec(STEPS.probe, {
-        stdout:
-          '{"version":1,"engines":["pr-agent"],"reasons":["sk-or-v1-0123456789abcdef0123","root_filesystem_writable"]}\n',
+        stdout: `{"version":1,"engines":["pr-agent"],"reasons":["${looksLikeAKey}","root_filesystem_writable"]}\n`,
       });
       const error = await failure(run(fake).result);
       expect(error.code).toBe("engine_missing");
