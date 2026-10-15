@@ -48,6 +48,10 @@ const PUBLIC_ROUTES = [
   "/api/runners/v1/claim",
   "/api/runners/v1/jobs/[id]/heartbeat",
   "/api/runners/v1/jobs/[id]/complete",
+  // A Worker sends the per-job credential of its claim (src/runner-api/README.md, #320).
+  "/api/workers/v1/jobs/[id]",
+  "/api/workers/v1/jobs/[id]/heartbeat",
+  "/api/workers/v1/jobs/[id]/result",
   // The operator sends its own bearer token; the routes do not exist until it is set (src/operator-api/README.md).
   "/api/operator/v1/workspaces",
   "/api/operator/v1/workspaces/[id]/entitlements",
@@ -214,7 +218,11 @@ describe("a request without a session", () => {
   it("may open the paths of the runner and the webhooks, which carry their own authentication", async () => {
     const app = await createGuardedApp();
 
-    for (const path of ["/api/runners/v1/claim", "/api/webhooks/github-app"]) {
+    for (const path of [
+      "/api/runners/v1/claim",
+      "/api/workers/v1/jobs/42",
+      "/api/webhooks/github-app",
+    ]) {
       expect(passesThrough(await app.visit(path, undefined, "POST"))).toBe(
         true,
       );

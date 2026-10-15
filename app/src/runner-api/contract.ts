@@ -22,7 +22,12 @@ export type ClaimEngine = RunnerEngine;
  * `dynamic_capabilities`: it reads `dynamic.capabilities` of a Dynamic job. A job field a previous-release
  * runner would refuse (its job input is closed) is only sent to a runner that names the feature.
  */
-export const CLAIM_FEATURES = ["dynamic_capabilities"] as const;
+export const CLAIM_FEATURES = [
+  "dynamic_capabilities",
+  // #320: the caller is a Dispatcher and gets the split answer (`SplitClaimResponse`): a per-job
+  // credential and no job input, no git token and no model key.
+  "worker_credential",
+] as const;
 export type ClaimFeature = (typeof CLAIM_FEATURES)[number];
 
 /**
@@ -36,6 +41,12 @@ export type ClaimRequest = {
 
 /** The path prefix of this version; the version is part of the URL. */
 export const RUNNER_API_PATH = "/api/runners/v1" as const;
+
+/** #320: the path prefix of the Worker API, which a per-job credential (not the runner token) opens. */
+export const WORKER_API_PATH = "/api/workers/v1" as const;
+
+/** #320: how many times the Worker of one claim may fetch the job details (each mints a fresh token). */
+export const MAX_WORKER_FETCHES = 3;
 
 /** Every request body is read up to this size; a larger one is refused with 413. */
 export const RUNNER_MAX_BODY_BYTES = 64 * 1024;
@@ -246,6 +257,37 @@ export type ClaimResponse = {
     input: RunnerJobInput;
   };
 };
+
+/**
+ * #320: the answer of a claim that names the feature `worker_credential` (`SplitClaimResponse`). The
+ * Dispatcher gets the per-job credential and no job input: the git token and the model key reach only
+ * the Worker, which fetches them with the credential (`WorkerJobDetailsResponse`).
+ */
+export type SplitClaimResponse = {
+  version: typeof RUNNER_API_VERSION;
+  job: {
+    id: string;
+    credential: string;
+    reviewKind: ReviewKind;
+    leaseExpiresAt: string;
+    heartbeatIntervalSeconds: number;
+  };
+};
+
+/** #320: 200 from `GET /api/workers/v1/jobs/{id}` (`WorkerJobDetailsResponse`). */
+export type WorkerJobDetailsResponse = {
+  version: typeof RUNNER_API_VERSION;
+  job: {
+    id: string;
+    leaseExpiresAt: string;
+    heartbeatIntervalSeconds: number;
+    tokenExpiresAt: string | null;
+    input: RunnerJobInput;
+  };
+};
+
+/** #320: the body of `POST /api/workers/v1/jobs/{id}/result` (`WorkerResultRequest`). */
+export type WorkerResultRequest = { result: RunnerResult };
 
 export type HeartbeatRequest = { leaseToken: string };
 

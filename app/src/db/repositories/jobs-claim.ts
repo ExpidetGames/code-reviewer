@@ -106,6 +106,7 @@ function claimQuery(
     set status = 'running',
         runner_id = ${claim.runnerId},
         lease_token = ${claim.leaseToken},
+        worker_fetches = 0,
         claimed_at = ${now},
         heartbeat_at = ${now},
         lease_expires_at = ${formatTimestamp(claim.leaseExpiresAt)},

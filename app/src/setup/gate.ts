@@ -31,7 +31,11 @@ function isPath(pathname: string, path: string): boolean {
 const SETUP_API = "/api/setup";
 
 /** Paths that keep working on an existing installation while the setup is open. */
-const EXISTING_INSTALLATION_PATHS = ["/api/webhooks", "/api/runners"] as const;
+const EXISTING_INSTALLATION_PATHS = [
+  "/api/webhooks",
+  "/api/runners",
+  "/api/workers",
+] as const;
 
 export function decideSetupGate({
   pathname,

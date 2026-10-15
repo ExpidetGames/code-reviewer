@@ -161,6 +161,15 @@ export type CompleteResult =
   | { status: "outcome_conflict"; job: Job }
   | { status: "not_holder" };
 
+/** #320: what counting a fetch of the job details of a claim answered. */
+export type CountFetchResult =
+  /** One more fetch is counted; the Worker may go on. */
+  | "counted"
+  /** The claim holds, but its fetches are used up. */
+  | "exhausted"
+  /** The caller does not hold the job (any more). */
+  | "not_holder";
+
 export type CancelClaimedResult =
   { status: "cancelled"; job: Job } | { status: "not_holder" };
 
@@ -179,4 +188,16 @@ export type ReleaseResult =
  * runner id) can no longer heartbeat, complete or release it. It is deliberately not part of `Job`:
  * it is handed to the holder once and never listed or logged.
  */
-export type ClaimResult = { job: Job; leaseToken: string } | null;
+export type ClaimResult = {
+  job: Job;
+  /**
+   * What the queue fences the claim on. For a claim made with `workerCredential` this is the stored
+   * (hashed) form of the credential, never the credential itself.
+   */
+  leaseToken: string;
+  /**
+   * #320: the per-job credential of a claim made with `workerCredential`, shown here once so the
+   * claim response can hand it out. It is not stored anywhere: the database keeps only its hash.
+   */
+  credential?: string;
+} | null;
