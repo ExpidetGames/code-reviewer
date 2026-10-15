@@ -61,6 +61,7 @@ from code_reviewer_runner.dynamic_review.budget import (
     UnitCosts,
     exact_cost,
 )
+from code_reviewer_runner.dynamic_review.call_outcome import describe_call
 from code_reviewer_runner.dynamic_review.completion_stream import completion_as_stream
 from code_reviewer_runner.dynamic_review.config import PROXY_CAPABILITY_BYTES, PROXY_PROVIDER_ID
 from code_reviewer_runner.dynamic_review.net import no_redirect_opener
@@ -519,6 +520,7 @@ class ModelProxy:
         )
         # The tool calls the model asked for are counted before the engine can run any of them.
         self.audit.calls_in_answer(completion)
+        self.ledger.note_call_outcome(describe_call(completion, final=reservation.final))
         if reservation.final and not returns_structured_output(completion):
             # The last call did not return the answer (#301 F3): whatever the engine does next, the
             # failure is the model's, and a further request says so instead of blaming the limit.

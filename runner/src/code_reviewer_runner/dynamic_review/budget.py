@@ -60,6 +60,7 @@ import math
 import re
 import threading
 import time
+from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from decimal import Context, Decimal, InvalidOperation
@@ -103,6 +104,8 @@ STOPPED_EARLY_TIME = "time_limit"
 # What the recovery call's request is larger than the last call's by, besides the model's own last
 # answer (one output allowance): the engine's recovery message and the runner's instruction.
 RECOVERY_REQUEST_SLACK_BYTES = 4096
+# How many of the last model calls the ledger remembers the outcome of (#312).
+RECENT_CALL_OUTCOMES = 3
 # The density of the window backstop: the bytes one token is assumed to hold when the ledger asks
 # whether a request can fit the model window at all. Natural text has 3 to 4.5, so 6 refuses only
 # what cannot fit at any realistic density (a long run of one repeated character is the only text
@@ -291,6 +294,7 @@ class BudgetLedger:
         self._counters = _Counters()
         self._lock = threading.Lock()
         self._failure: LimitError | None = None
+        self._outcomes: deque[str] = deque(maxlen=RECENT_CALL_OUTCOMES)
 
     @property
     def started(self) -> float:
@@ -365,6 +369,19 @@ class BudgetLedger:
                 return False
             self._recovery_armed = True
             return True
+
+    def note_call_outcome(self, outcome: str) -> None:
+        """Remember how a model call ended (`call_outcome.py`): sizes and names, no model text.
+
+        Only the last few are kept; they are what a failure of the run says about itself (#312).
+        """
+        with self._lock:
+            self._outcomes.append(outcome)
+
+    @property
+    def recent_call_outcomes(self) -> tuple[str, ...]:
+        with self._lock:
+            return tuple(self._outcomes)
 
     def note_final_unanswered(self) -> None:
         """The final call came back without the structured answer (#301 F3): the model's failure.

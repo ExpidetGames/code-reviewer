@@ -84,6 +84,9 @@ class Finding:
 
 # The stable name of the reason a finding was dropped before it could be rendered.
 DROPPED_OUTSIDE_EXPORT = "finding_path_not_exported"
+DROPPED_INVALID = "finding_invalid"
+# How many distinct reasons a run keeps for the findings it dropped as invalid.
+MAX_DROPPED_REASONS = 5
 
 
 @dataclass(frozen=True)
@@ -94,6 +97,11 @@ class DynamicFindings:
     # Findings that named a file the verified export does not hold (a hallucinated or excluded
     # path): not rendered, not an error, and counted so the run can say so.
     dropped_outside_export: int = 0
+    # Findings that were not valid (a swapped line range, a confidence of 85, an unknown field...)
+    # next to at least one that was (#312): not rendered, not an error, counted with the first few
+    # distinct reasons (field names only, never a value) so the run can say so.
+    dropped_invalid: int = 0
+    dropped_invalid_reasons: tuple[str, ...] = ()
     # Why the run was wrapped up before it was done (`cost_limit`, `time_limit`, #293). It is set
     # by the runner from its ledger after the answer was validated, never by the model.
     stopped_early: str | None = None
@@ -229,12 +237,36 @@ def parse_finding(
     return _finding(_object(data, "a finding"), reviewed_sha, exported_paths)
 
 
+def _valid_findings(
+    entries: list[Any], reviewed_sha: str
+) -> tuple[tuple[Finding, ...], list[FindingsError]]:
+    """The valid findings of an answer, and why each of the others was dropped (#312).
+
+    One malformed finding does not throw away a review that took minutes: it is dropped and
+    counted. Fail closed all the same: when there are findings and none is valid, nothing in the
+    answer can be trusted to say "no findings", and the first problem fails the run as before.
+    """
+    valid: list[Finding] = []
+    invalid: list[FindingsError] = []
+    for entry in entries:
+        try:
+            valid.append(_finding(_object(entry, "a finding"), reviewed_sha, None))
+        except FindingsError as error:
+            invalid.append(error)
+    if entries and not valid:
+        raise invalid[0]
+    return tuple(valid), invalid
+
+
 def parse_dynamic_findings(
     raw: str | dict[str, Any],
     *,
     exported_paths: Collection[str] | None = None,
 ) -> DynamicFindings:
-    """Parse and validate the findings DTO. Raises `FindingsError`; never returns a half valid run.
+    """Parse and validate the findings DTO. Raises `FindingsError`; the envelope is never salvaged.
+
+    An invalid finding next to at least one valid one is dropped and counted (`dropped_invalid`,
+    #312); a review with findings of which none is valid fails with the first problem.
 
     `exported_paths` is the set of files the runner prepared; a finding outside it is not a review
     of anything the engine could read, so it is dropped and counted (`dropped_outside_export`)
@@ -264,7 +296,7 @@ def parse_dynamic_findings(
     entries: list[Any] = findings_value  # pyright: ignore[reportUnknownVariableType]
     if len(entries) > MAX_FINDINGS:
         raise _invalid(f"findings may hold at most {MAX_FINDINGS} entries")
-    parsed = tuple(_finding(_object(entry, "a finding"), reviewed_sha, None) for entry in entries)
+    parsed, invalid = _valid_findings(entries, reviewed_sha)
     findings = (
         parsed
         if exported_paths is None
@@ -276,4 +308,8 @@ def parse_dynamic_findings(
         findings=findings,
         resolved_ids=resolved_ids,
         dropped_outside_export=len(parsed) - len(findings),
+        dropped_invalid=len(invalid),
+        dropped_invalid_reasons=tuple(dict.fromkeys(e.detail for e in invalid))[
+            :MAX_DROPPED_REASONS
+        ],
     )

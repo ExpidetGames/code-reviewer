@@ -490,6 +490,36 @@ def test_a_finding_outside_the_prepared_export_is_dropped_and_counted_not_failed
     assert preparer.events == ["prepared", "released", "published"]
 
 
+# #312-T02
+def test_an_invalid_finding_is_dropped_and_named_in_the_log_not_failed(tmp_path: Path) -> None:
+    document = findings()
+    document["findings"].append(
+        {**document["findings"][0], "id": "f-2", "lineStart": 9, "lineEnd": 1, "body": "SECRET"}
+    )
+    preparer = Preparer(
+        tmp_path / "export", {"proxy_calls": 1, "answer": "structured", "findings": document}
+    )
+    publisher = RecordingPublisher(preparer)
+
+    with FakeUpstream() as upstream:
+        result = runner.run_dynamic_job(
+            job_for(f"{upstream.url}/v1"),
+            None,
+            0.0,
+            environment(),
+            engines=ALL_ENGINES,
+            prepare=preparer,
+            publish=publisher,
+        )
+
+    assert result.ok, result.log_tail
+    assert len(publisher.calls[0][1].findings) == len(document["findings"]) - 1
+    assert "dropped 1 finding(s): finding_invalid (lineStart must not be after lineEnd)" in (
+        result.log_tail
+    )
+    assert "SECRET" not in result.log_tail
+
+
 # #197-T06
 def test_a_preparation_that_fails_is_its_stable_code_and_no_engine_starts(
     tmp_path: Path,

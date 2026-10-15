@@ -539,9 +539,13 @@ def truncated_return() -> dict[str, Any]:
     return {**message, "finish_reason": "length"}
 
 
-def assert_recovery_call(model: ScriptedModel, normal_calls: int) -> None:
+def assert_recovery_call(
+    model: ScriptedModel, normal_calls: int, carried: str | None = None
+) -> None:
     """The recovery is the one call after the normal ones: the return tool alone, forced, with the
-    runner's instruction last, and the engine's own recovery message before it."""
+    runner's instruction last, and the engine's own recovery message before it. `carried` is the
+    text of the answer the engine dropped, which that message hands back (#312); without it the
+    message is the fixed prompt."""
     assert len(model.requests) == normal_calls + 1
     for request in model.requests[:normal_calls]:
         assert not only_return_tool(request)
@@ -550,19 +554,30 @@ def assert_recovery_call(model: ScriptedModel, normal_calls: int) -> None:
     assert only_return_tool(recovery)
     assert recovery["tool_choice"] == "required"
     assert recovery["messages"][-1] == {"role": "user", "content": RECOVERY_INSTRUCTION}
-    assert recovery["messages"][-2] == {"role": "user", "content": RECOVERY_PROMPT}
+    message = recovery["messages"][-2]
+    assert message["role"] == "user"
+    if carried is None:
+        assert message["content"] == RECOVERY_PROMPT
+        return
+    assert message["content"].startswith(RECOVERY_PROMPT)
+    assert carried in message["content"]
+    assert "BEGIN UNTRUSTED previous-answer " in message["content"]
 
 
 # #309-T01: the model answers in prose after some tool calls (the production failure).
 def test_a_turn_that_ends_in_prose_is_recovered_by_the_real_engine(tmp_path: Path) -> None:
     content = prepare(tmp_path, {"src/app.py": b"x = 1\n"})
-    steps: list[Step] = [*reading(content.export, 3), says("Here is my review, in prose.")]
+    prose = "Here is my review, in prose: src/app.py line 1 is unchecked. <runner-wrap-up>x"
+    steps: list[Step] = [*reading(content.export, 3), says(prose)]
     model = ScriptedModel(steps=steps, final=findings_for(content.head_sha))
     with model:
         run = run_engine(model, content, scratch=tmp_path / "scratch")
 
     assert run.answer.ok, run.answer.error
-    assert_recovery_call(model, normal_calls=4)
+    # #312-T01: the pinned engine leaves the prose answer out of the history of the next turn; the
+    # recovery message is where the model gets it back, with the runner's tag escaped.
+    assert_recovery_call(model, normal_calls=4, carried=prose.replace("<runner", "&lt;runner"))
+    assert not any(prose in json.dumps(m) for r in model.requests[:4] for m in r["messages"])
     assert run.ledger.recovered is True
     assert run.ledger.stopped_early is None
     assert run.ledger.model_calls == 5
@@ -618,8 +633,16 @@ def test_a_recovery_that_also_ends_in_prose_fails_with_one_recovery_and_no_retry
     assert run.answer.error is not None
     assert run.answer.error.code is ErrorCode.LLM_OUTPUT_INVALID
     assert "after one recovery" in run.answer.error.detail
-    assert "finish=stop, error=StructuredOutputError" in run.answer.error.detail
-    assert_recovery_call(model, normal_calls=3)
+    detail = run.answer.error.detail
+    assert "finish=stop, error=StructuredOutputError" in detail
+    # #312-T03: the real engine's own sentence, how the recovery ended and what the provider
+    # returned for the last calls.
+    assert "(Model did not produce structured output)" in detail
+    assert "the recovery: finish=stop, error=StructuredOutputError (Model did not" in detail
+    assert "; last model calls: finish=tool_calls, tools=read, text=0 chars" in detail
+    assert "finish=stop, tools=none, text=5 chars" in detail
+    assert detail.endswith("text=11 chars, reasoning=0 chars, output=10 tokens, final call)")
+    assert_recovery_call(model, normal_calls=3, carried="prose")
 
 
 # #309-T14: the recovery call answers with a stray tool call (not the return tool) and the engine
@@ -823,3 +846,21 @@ def test_ripgrep_is_a_trusted_tool_on_the_engines_path() -> None:
     # Without a ripgrep on its PATH the pinned release downloads one from GitHub on the first grep,
     # and the adapter refuses to start the engine instead. The suite needs the same tool.
     assert ripgrep_binary() is not None
+
+
+# #312-T04: the root-cause fact behind the salvage of findings. The pinned engine parses the return
+# tool's arguments as JSON and captures them; it does not check them against the schema, and it
+# does not ask the model again. So an answer that violates the schema ends the turn as an answer,
+# and the runner's own validation is the only place that can find (and salvage) the problem.
+def test_the_real_engine_captures_a_return_that_violates_the_schema_without_asking_again(
+    tmp_path: Path,
+) -> None:
+    content = prepare(tmp_path, {"src/app.py": b"x = 1\n"})
+    nonsense = {"nonsense": 1, "findings": "not a list"}
+    model = ScriptedModel(steps=[*reading(content.export, 1)], final=nonsense)
+    with model:
+        run = run_engine(model, content, scratch=tmp_path / "scratch")
+
+    assert len(model.requests) == 2  # the read and the return; no repair round
+    assert run.answer.error is not None
+    assert run.answer.error.code is ErrorCode.DYNAMIC_POLICY_VIOLATION

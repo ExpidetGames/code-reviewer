@@ -229,3 +229,82 @@ def test_a_cut_off_step_with_tool_calls_keeps_the_length_reason() -> None:
 
     assert stream is not None
     assert b'"finish_reason":"length"' in stream.replace(b" ", b"")
+
+
+def completion_with(
+    *,
+    content: Any = None,
+    calls: list[tuple[str, str]] | None = None,
+    finish: str | None = "stop",
+    reasoning: str | None = None,
+    **choice: Any,
+) -> dict[str, Any]:
+    """A provider answer: `calls` are (tool name, raw arguments)."""
+    answer = answer_with_usage(prompt=40, completion=7)
+    message: dict[str, Any] = {"role": "assistant", "content": content}
+    if reasoning is not None:
+        message["reasoning_content"] = reasoning
+    if calls:
+        message["tool_calls"] = [
+            {"id": f"c{n}", "type": "function", "function": {"name": name, "arguments": raw}}
+            for n, (name, raw) in enumerate(calls)
+        ]
+    answer["choices"] = [{"message": message, "finish_reason": finish, **choice}]
+    return answer
+
+
+# #312-T03: the proxy sees what the provider really returned; the engine's own report of a turn
+# cannot tell a model that wrote prose from one that sent nothing or a broken tool call.
+def test_the_proxy_notes_how_each_model_call_ended() -> None:
+    answers = [
+        completion_with(content="a" * 250),
+        completion_with(content="", reasoning="r" * 30),
+        completion_with(calls=[("StructuredOutput", '{"findings": [')], finish="length"),
+        completion_with(calls=[("StructuredOutput", "{}")], finish="stop"),
+    ]
+    upstream = Upstream()
+    subject = proxy(upstream)
+    outcomes: list[str] = []
+    for answer in answers:
+        upstream.body = answer
+        assert post(subject, loop_request()).status == 200
+        outcomes.append(subject.ledger.recent_call_outcomes[-1])
+
+    assert outcomes == [
+        "finish=stop, tools=none, text=250 chars, reasoning=0 chars, output=7 tokens",
+        "finish=stop, tools=none, text=0 chars, reasoning=30 chars, output=7 tokens",
+        "finish=length, tools=StructuredOutput(args not json), text=0 chars, reasoning=0 chars, "
+        "output=7 tokens",
+        "finish=stop, tools=StructuredOutput, text=0 chars, reasoning=0 chars, output=7 tokens",
+    ]
+
+
+# #312-T03
+def test_the_note_of_a_call_marks_the_final_call_and_the_provider_reason() -> None:
+    upstream = Upstream()
+    subject = recovering(upstream)
+    upstream.body = completion_with(content="x", native_finish_reason="STOP")
+
+    assert post(subject, loop_request()).status == 200
+
+    assert subject.ledger.recent_call_outcomes[-1].endswith("output=7 tokens, final call")
+    assert "native=STOP" in subject.ledger.recent_call_outcomes[-1]
+
+
+# #312-T03: only the last few calls are kept, and nothing from the model's text, the tool names
+# or the arguments is copied.
+def test_the_notes_are_bounded_and_never_copy_model_text() -> None:
+    upstream = Upstream()
+    subject = proxy(upstream)
+    upstream.body = completion_with(
+        content="SECRET_TEXT",
+        calls=[("read<script>SECRET_TOOL", '{"SECRET_ARG": 1}')],
+        finish="stop\nSECRET_FINISH",
+    )
+    for _ in range(6):
+        assert post(subject, loop_request()).status == 200
+
+    notes = subject.ledger.recent_call_outcomes
+    assert len(notes) == 3
+    assert "SECRET" not in " ".join(notes)
+    assert "tools=other" in notes[-1] and "finish=other" in notes[-1]
