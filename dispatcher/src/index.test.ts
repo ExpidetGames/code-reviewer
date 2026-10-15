@@ -74,29 +74,78 @@ describe("the Vercel entry", () => {
     );
   });
 
-  // #329 (additional): wired in, configured by the environment
-  it("advertises the PR-Agent engine and not the Dynamic one once a golden snapshot is configured", async () => {
+  // #331-T01
+  it("starts a canary VM for the first Dynamic call and asks the App to ask again, instead of claiming on the Launcher's word", async () => {
     stubEnvironment();
     stubSandbox();
+    sdk.create.mockRejectedValue(
+      Object.assign(new Error("unavailable"), {
+        name: "APIError",
+        response: { status: 503 },
+      }),
+    );
     const { default: app } = await import("./index.ts");
     const { signedRequest, webhookBody } =
       await import("./test-support/harness.ts");
+    const call = () =>
+      app.fetch(
+        signedRequest({
+          body: webhookBody({ reviewKind: "dynamic" }),
+          nowSeconds: Math.floor(Date.now() / 1000),
+          secret: "dummy-signing-secret-current-0000000000",
+          keyId: "k1",
+        }),
+      );
 
-    const response = await app.fetch(
-      signedRequest({
-        body: webhookBody({ reviewKind: "dynamic" }),
-        nowSeconds: Math.floor(Date.now() / 1000),
-        secret: "dummy-signing-secret-current-0000000000",
-        keyId: "k1",
+    const first = await call();
+
+    expect(first.status).toBe(503);
+    expect(first.headers.get("retry-after")).toMatch(/^\d+$/);
+    await waitFor(() => sdk.create.mock.calls.length === 1, "the canary VM");
+    expect(sdk.create.mock.calls[0]?.[0]).toMatchObject({
+      source: { type: "snapshot", snapshotId: "snap_dummy_golden_0001" },
+      region: "fra1",
+      persistent: false,
+    });
+    expect(String(JSON.stringify(sdk.create.mock.calls[0]?.[0]))).toContain(
+      "canary",
+    );
+  });
+
+  // #331-T02
+  it("advertises no Dynamic engine while the canary cannot be made, and the App is told it is not capable", async () => {
+    stubEnvironment();
+    stubSandbox();
+    sdk.create.mockRejectedValue(
+      Object.assign(new Error("unavailable"), {
+        name: "APIError",
+        response: { status: 503 },
       }),
     );
+    const { default: app } = await import("./index.ts");
+    const { signedRequest, webhookBody } =
+      await import("./test-support/harness.ts");
+    const call = () =>
+      app.fetch(
+        signedRequest({
+          body: webhookBody({ reviewKind: "dynamic" }),
+          nowSeconds: Math.floor(Date.now() / 1000),
+          secret: "dummy-signing-secret-current-0000000000",
+          keyId: "k1",
+        }),
+      );
+    await call();
+    await waitFor(() => sdk.create.mock.calls.length === 1, "the canary VM");
 
-    // Dynamic is advertised only after the capability probe (#331): until then it is not claimed.
-    expect(await response.json()).toMatchObject({
-      status: "ignored",
-      reason: "not_capable",
+    // The failed probe is remembered for a minute: no second VM, and the call is answered `not_capable`.
+    await vi.waitFor(async () => {
+      const response = await call();
+      expect(await response.json()).toMatchObject({
+        status: "ignored",
+        reason: "not_capable",
+      });
     });
-    expect(sdk.create).not.toHaveBeenCalled();
+    expect(sdk.create).toHaveBeenCalledTimes(1);
   });
 
   // #329 (additional)
@@ -139,6 +188,10 @@ describe("the Vercel entry", () => {
       });
       expect(sdk.create.mock.calls[0]?.[0]).not.toHaveProperty(
         "failoverRegions",
+      );
+      // A Diff job never waits for, or starts, a canary VM (#331).
+      expect(JSON.stringify(sdk.create.mock.calls[0]?.[0])).not.toContain(
+        "canary",
       );
     } finally {
       await fake.close();

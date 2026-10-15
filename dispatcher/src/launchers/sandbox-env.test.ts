@@ -2,6 +2,7 @@
 
 import { describe, expect, it } from "vitest";
 import { ConfigError } from "../config.ts";
+import { CapabilitiesPending } from "../core/types.ts";
 import { noLauncher } from "./none.ts";
 import { sandboxFromEnvironment } from "./sandbox-env.ts";
 import { recordingLogger } from "../test-support/harness.ts";
@@ -281,6 +282,149 @@ describe("the Sandbox-Launcher's configuration from the environment", () => {
         logger: recordingLogger(),
         background: () => undefined,
       }),
+    ).not.toThrow();
+  });
+});
+
+describe("the capability probe's configuration from the environment", () => {
+  const launcherFor = (
+    env: Record<string, string>,
+    extra: Record<string, string> = {},
+  ) =>
+    sandboxFromEnvironment(env, never).launcher({
+      settings: loadSettings({ ...BASE, ...extra }),
+      logger: recordingLogger(),
+      background: () => undefined,
+    });
+
+  // #331-T01
+  it("puts the Sandbox-Launcher behind the capability probe: it can be asked for a probe, and opencode waits for it", async () => {
+    const launcher = launcherFor(configured());
+    const signal = new AbortController().signal;
+
+    expect(launcher.probe).toBeTypeOf("function");
+    await expect(
+      launcher.capabilities(signal, "opencode"),
+    ).rejects.toBeInstanceOf(CapabilitiesPending);
+    expect(await launcher.capabilities(signal, "pr-agent")).toStrictEqual([
+      "pr-agent",
+    ]);
+  });
+
+  // #331-T02
+  it("starts no probe for a deployment that is configured for Diff jobs only", async () => {
+    const launcher = launcherFor(configured(), {
+      DISPATCHER_ENGINES: "pr-agent",
+    });
+
+    expect(launcher.probe).toBeUndefined();
+    expect(
+      await launcher.capabilities(new AbortController().signal, "opencode"),
+    ).toStrictEqual(["pr-agent"]);
+  });
+
+  // #331-T03
+  it.each<[string, Record<string, string>, string]>([
+    [
+      "a time to live of 59 seconds",
+      configured({ DISPATCHER_PROBE_TTL_SECONDS: "59" }),
+      "DISPATCHER_PROBE_TTL_SECONDS",
+    ],
+    [
+      "a time to live above a day",
+      configured({ DISPATCHER_PROBE_TTL_SECONDS: "86401" }),
+      "DISPATCHER_PROBE_TTL_SECONDS",
+    ],
+    [
+      "a time to live that is not a number",
+      configured({ DISPATCHER_PROBE_TTL_SECONDS: "hour" }),
+      "DISPATCHER_PROBE_TTL_SECONDS",
+    ],
+    [
+      "a probe time of 29 seconds",
+      configured({ DISPATCHER_PROBE_TIMEOUT_SECONDS: "29" }),
+      "DISPATCHER_PROBE_TIMEOUT_SECONDS",
+    ],
+    [
+      "a probe time above ten minutes",
+      configured({ DISPATCHER_PROBE_TIMEOUT_SECONDS: "601" }),
+      "DISPATCHER_PROBE_TIMEOUT_SECONDS",
+    ],
+  ])("refuses %s and names the variable", (_what, env, variable) => {
+    expect(refusal(env).variable).toBe(variable);
+  });
+
+  // #331-T03
+  it("accepts the time to live and the probe time at their bounds", () => {
+    const bounds: [string, string][] = [
+      ["60", "30"],
+      ["3600", "150"],
+      ["86400", "600"],
+    ];
+    for (const [ttl, timeout] of bounds)
+      expect(() =>
+        sandboxFromEnvironment(
+          configured({
+            DISPATCHER_PROBE_TTL_SECONDS: ttl,
+            DISPATCHER_PROBE_TIMEOUT_SECONDS: timeout,
+          }),
+          never,
+        ),
+      ).not.toThrow();
+  });
+
+  // #331-T09
+  it.each<[string, Record<string, string>, string]>([
+    [
+      "a capability descriptor that is not JSON",
+      configured({ RUNNER_DYNAMIC_CAPABILITIES: "tools" }),
+      "RUNNER_DYNAMIC_CAPABILITIES",
+    ],
+    [
+      "a capability descriptor that is not an object",
+      configured({ RUNNER_DYNAMIC_CAPABILITIES: "[1]" }),
+      "RUNNER_DYNAMIC_CAPABILITIES",
+    ],
+    [
+      "a capability descriptor with a line break",
+      configured({ RUNNER_DYNAMIC_CAPABILITIES: '{"a":1,\n"b":2}' }),
+      "RUNNER_DYNAMIC_CAPABILITIES",
+    ],
+    [
+      "a cost limit that is not a number",
+      configured({ RUNNER_DYNAMIC_MAX_COST_USD: "free" }),
+      "RUNNER_DYNAMIC_MAX_COST_USD",
+    ],
+    [
+      "a cost limit of zero",
+      configured({ RUNNER_DYNAMIC_MAX_COST_USD: "0" }),
+      "RUNNER_DYNAMIC_MAX_COST_USD",
+    ],
+    [
+      "a negative cost limit",
+      configured({ RUNNER_DYNAMIC_MAX_COST_USD: "-1" }),
+      "RUNNER_DYNAMIC_MAX_COST_USD",
+    ],
+    [
+      "a cost limit in exponent form",
+      configured({ RUNNER_DYNAMIC_MAX_COST_USD: "1e3" }),
+      "RUNNER_DYNAMIC_MAX_COST_USD",
+    ],
+  ])("refuses %s at start and names the variable", (_what, env, variable) => {
+    expect(refusal(env).variable).toBe(variable);
+  });
+
+  // #331-T09
+  it("accepts the operator's Dynamic configuration as the self-hosted service has it", () => {
+    expect(() =>
+      sandboxFromEnvironment(
+        configured({
+          RUNNER_DYNAMIC_CAPABILITIES:
+            '{"tool_choice_required":true,"max_output_tokens":4096}',
+          RUNNER_DYNAMIC_MAX_COST_USD: "2.50",
+        }),
+        never,
+      ),
     ).not.toThrow();
   });
 });

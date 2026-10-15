@@ -160,6 +160,43 @@ describe("the Sandbox-Launcher", () => {
     expect(service.stdinClosed(name)).toBe(true);
   });
 
+  // #331-T09
+  it("gives a Dynamic job the operator's Dynamic configuration and a Diff job none of it", async () => {
+    const dynamicEnvironment = {
+      RUNNER_DYNAMIC_CAPABILITIES: '{"tool_choice_required":true}',
+      RUNNER_DYNAMIC_MAX_COST_USD: "2.5",
+    };
+    const launcher = build({ dynamicEnvironment });
+
+    await launch(launcher, spec({ kind: "dynamic" }));
+    await launch(
+      launcher,
+      spec({ kind: "diff", jobId: "00000000-0000-4000-8000-000000000002" }),
+    );
+
+    const [dynamic, diff] = service.starts.map((call) =>
+      valuesOf(call.args, "--env"),
+    );
+    expect(dynamic).toContain("RUNNER_DYNAMIC_MAX_COST_USD=2.5");
+    expect(dynamic).toContain(
+      'RUNNER_DYNAMIC_CAPABILITIES={"tool_choice_required":true}',
+    );
+    expect(dynamic).toContain("HOME=/home/runner");
+    expect(diff?.some((entry) => entry.startsWith("RUNNER_DYNAMIC"))).toBe(
+      false,
+    );
+  });
+
+  // #331-T09
+  it("passes nothing of the kind when the operator configured nothing", async () => {
+    await launch(build(), spec({ kind: "dynamic" }));
+
+    const environment = valuesOf(dockerRun()?.args ?? [], "--env");
+    expect(
+      environment.some((entry) => entry.startsWith("RUNNER_DYNAMIC")),
+    ).toBe(false);
+  });
+
   // #329-T02
   it("puts the credential on the stdin pipe and nowhere else: no argument, no environment, no file, no log line", async () => {
     const launcher = build();
