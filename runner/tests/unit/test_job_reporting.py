@@ -287,3 +287,64 @@ def test_a_shrunk_failure_keeps_its_usage() -> None:
     shrunk = fit_request(big)
 
     assert shrunk["usage"]["costUsd"] == 0.0035
+
+
+# #273-T06: the loop's own failures for a job process that held the job and left no result say so,
+# with one stable reason, so the app can count the run with an unknown cost instead of voiding it.
+@pytest.mark.parametrize(
+    "process",
+    [
+        outcome(exit_code=-9, stdout=b"", stderr=b"Killed\n"),
+        outcome(exit_code=0, stdout=b"\n\n"),
+        outcome(exit_code=1, stdout=b"not json at all\n"),
+        outcome(exit_code=1, stdout=result_line(ok=True)),
+    ],
+    ids=["killed by a signal", "no output", "no result line", "result and exit code disagree"],
+)
+def test_a_process_that_leaves_no_usable_result_is_reported_with_the_no_result_reason(
+    process: ProcessOutcome,
+) -> None:
+    result = reported(process)
+
+    assert result["ok"] is False
+    assert result["usage"] is None
+    assert result["errorReason"] == "no_result_from_process"
+    assert minimal(result)["errorReason"] == "no_result_from_process"
+
+
+# #273-T06
+def test_a_result_the_process_did_print_never_gets_the_no_result_reason() -> None:
+    failed = reported(outcome(exit_code=1, stdout=result_line(ok=False, errorCode="timeout")))
+
+    assert "errorReason" not in failed
+
+
+# #273-T06: a failed result that sent a usage the loop cannot read still says a usage was sent.
+def test_a_failed_result_with_an_unreadable_usage_gets_the_unreadable_usage_reason() -> None:
+    damaged = {"model": "vendor/model", "promptTokens": "many", "aiCalls": 3}
+
+    failed = reported(
+        outcome(exit_code=1, stdout=result_line(ok=False, errorCode="timeout", usage=damaged))
+    )
+
+    assert failed["usage"] is None
+    assert failed["errorReason"] == "unreadable_usage"
+
+
+# #273-T06: the reason a job process gave stays its own.
+def test_a_reason_the_process_gave_is_not_replaced_by_the_unreadable_usage_reason() -> None:
+    line = result_line(
+        ok=False,
+        errorCode="checkout_incomplete",
+        errorReason="budget_preparation",
+        usage={"promptTokens": "many"},
+    )
+
+    assert reported(outcome(exit_code=1, stdout=line))["errorReason"] == "budget_preparation"
+
+
+# #273-T08
+def test_a_successful_result_with_an_unreadable_usage_gets_no_reason() -> None:
+    assert "errorReason" not in reported(
+        outcome(stdout=result_line(usage={"promptTokens": "many"}))
+    )

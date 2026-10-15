@@ -196,6 +196,7 @@ export function createUsageRecordsRepository(
               prompt_tokens: settlement.promptTokens,
               completion_tokens: settlement.completionTokens,
               settled_at: timestamp,
+              settled_reason: settlement.reason ?? null,
             }
           : {
               state: "void",
@@ -203,6 +204,7 @@ export function createUsageRecordsRepository(
               prompt_tokens: null,
               completion_tokens: null,
               settled_at: null,
+              settled_reason: null,
             };
       // One statement: a reserved record is ended, a final one is left alone, a missing one is created.
       await db

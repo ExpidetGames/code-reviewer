@@ -8,6 +8,15 @@ import {
   settlementOfOutcome,
 } from "./usage-records.ts";
 
+/** A run that may have used the model and reported nothing: it counts, with everything unknown. */
+const NO_RESULT = {
+  state: "settled",
+  costMicroUsd: null,
+  promptTokens: null,
+  completionTokens: null,
+  reason: "no_result",
+};
+
 const USAGE = {
   model: "vendor/model",
   promptTokens: 12000,
@@ -182,8 +191,9 @@ describe("how a completed job settles its usage record", () => {
     ).toMatchObject({ state: "settled", costMicroUsd: 12346 });
   });
 
+  // #273-T06: a usage that was sent and cannot be read is a run that reached the model.
   it.each([-1, 2_147_483_648, 1.5])(
-    "does not trust a usage with %s tokens",
+    "settles a failed job whose usage with %s tokens cannot be read, with everything unknown",
     (promptTokens) => {
       const damaged = { ...USAGE, promptTokens };
       expect(
@@ -192,9 +202,75 @@ describe("how a completed job settles its usage record", () => {
           errorCode: "review_failed",
           result: { ok: false, usage: damaged },
         }),
-      ).toStrictEqual({ state: "void" });
+      ).toStrictEqual(NO_RESULT);
     },
   );
+
+  it("does not trust a damaged usage of a run that succeeded either", () => {
+    expect(
+      settlementOfOutcome({
+        ok: true,
+        result: { ok: true, usage: { ...USAGE, promptTokens: -1 } },
+      }),
+    ).toMatchObject({
+      state: "settled",
+      costMicroUsd: null,
+      promptTokens: null,
+    });
+  });
+
+  // #273-T06: the loop of the runner ended a job process that held the job and left no result.
+  it.each(["no_result_from_process", "unreadable_usage"])(
+    "settles a failed job without usage whose reason is %s as a run with no result",
+    (errorReason) => {
+      expect(
+        settlementOfOutcome({
+          ok: false,
+          errorCode: "timeout",
+          result: { ok: false, usage: null, errorReason },
+        }),
+      ).toStrictEqual(NO_RESULT);
+    },
+  );
+
+  // #273-T06
+  it("voids a failed job without usage whose reason is any other", () => {
+    for (const errorReason of [
+      "budget_preparation",
+      "launch_failed",
+      undefined,
+    ])
+      expect(
+        settlementOfOutcome({
+          ok: false,
+          errorCode: "checkout_incomplete",
+          result: {
+            ok: false,
+            usage: null,
+            ...(errorReason ? { errorReason } : {}),
+          },
+        }),
+      ).toStrictEqual({ state: "void" });
+  });
+
+  // #273-T06: a usage that was read wins over the reason.
+  it("settles a failed job that reported a usage with it, whatever its reason", () => {
+    expect(
+      settlementOfOutcome({
+        ok: false,
+        errorCode: "timeout",
+        result: {
+          ok: false,
+          usage: USAGE,
+          errorReason: "no_result_from_process",
+        },
+      }),
+    ).toMatchObject({
+      state: "settled",
+      costMicroUsd: 12346,
+      promptTokens: 12000,
+    });
+  });
 });
 
 describe("the key mode of a run", () => {

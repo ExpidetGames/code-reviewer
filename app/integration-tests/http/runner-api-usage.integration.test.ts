@@ -291,6 +291,51 @@ describe("the completion of a job", () => {
     });
   });
 
+  // #273-T06: the loop of the runner ended a job process that held the job (hard timeout, killed, no
+  // result line): the model may have been used.
+  it("settles the record with an unknown cost when the runner's loop reports a process that left no result", async () => {
+    const h = await startRunnerApiHarness();
+    const job = await claimedJob(h);
+
+    await h.complete(job.id, job.leaseToken, {
+      ok: false,
+      errorCode: "timeout",
+      errorReason: "no_result_from_process",
+      errorMessage:
+        "the job did not finish within the time limit and was ended",
+      commentUrl: null,
+      usage: null,
+    });
+
+    expect(await h.queue.get(job.id)).toMatchObject({
+      status: "failed",
+      errorCode: "timeout",
+    });
+    expect(await recordsOf(h).get(job.id)).toMatchObject({
+      state: "settled",
+      settledReason: "no_result",
+      costMicroUsd: null,
+      promptTokens: null,
+      settledAt: h.clock.now().toISOString(),
+    });
+  });
+
+  // #273-T08: a runner of an earlier release sends the same failure without the reason: as before.
+  it("still voids a timeout without usage and without the reason", async () => {
+    const h = await startRunnerApiHarness();
+    const job = await claimedJob(h);
+
+    await h.complete(job.id, job.leaseToken, {
+      ok: false,
+      errorCode: "timeout",
+      errorMessage: "the command did not finish in time",
+      commentUrl: null,
+      usage: null,
+    });
+
+    expect((await recordsOf(h).get(job.id))?.state).toBe("void");
+  });
+
   // #272-T07
   it("does not change the record again when the same result is reported twice", async () => {
     const h = await startRunnerApiHarness();

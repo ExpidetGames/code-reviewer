@@ -76,6 +76,8 @@ export type UsageSettlement =
       costMicroUsd: number | null;
       promptTokens: number | null;
       completionTokens: number | null;
+      /** Why it was settled without a report of its run; absent when the run reported. */
+      reason?: SettledReason;
     };
 
 type ReportedUsage = {
@@ -113,6 +115,36 @@ function reportedUsage(result: unknown): ReportedUsage | null {
   return { promptTokens, completionTokens, costUsd, aiCalls: calls };
 }
 
+/** Whether the result carries a usage at all, readable or not. */
+function carriesUsage(result: unknown): boolean {
+  if (typeof result !== "object" || result === null) return false;
+  const usage = (result as { usage?: unknown }).usage;
+  return usage !== undefined && usage !== null;
+}
+
+/**
+ * The reasons the loop of a runner gives (`errorReason`) when it ends a job process that held the job and left no
+ * usable result: killed, no result line, past the hard timeout, or a usage it could not read.
+ */
+const NO_RESULT_ERROR_REASONS: readonly string[] = [
+  "no_result_from_process",
+  "unreadable_usage",
+];
+
+function errorReasonOf(result: unknown): string | null {
+  if (typeof result !== "object" || result === null) return null;
+  const reason = (result as { errorReason?: unknown }).errorReason;
+  return typeof reason === "string" ? reason : null;
+}
+
+const NO_RESULT: UsageSettlement = {
+  state: "settled",
+  costMicroUsd: null,
+  promptTokens: null,
+  completionTokens: null,
+  reason: "no_result",
+};
+
 /** A usage that shows no model call: no call and no token. */
 function showsNoModelCall(usage: ReportedUsage): boolean {
   return (
@@ -129,9 +161,23 @@ function showsNoModelCall(usage: ReportedUsage): boolean {
  * succeeded is still a run (settled, everything unknown), and a run that failed made no model call as far as
  * anybody can tell (void: checkout, configuration, a lost lease). A failed run whose usage shows no call at all
  * (what a runner of an earlier release reports for a command that never reached the model) is void too.
+ *
+ * Two failed results say that a runner held the job and the model may have been used, without a usable usage, and
+ * count as `no_result` (everything unknown): one whose usage was sent and cannot be read (a usage that is there is
+ * evidence of a call, and for a failed run nothing else would count it), and one the runner's job loop made
+ * itself for a process it had to end or that left no result (`NO_RESULT_ERROR_REASONS`). A runner of an earlier
+ * release never sends the reason, and an app of an earlier release ignores it: both stay void, as before.
  */
 export function settlementOfOutcome(outcome: JobOutcome): UsageSettlement {
   const usage = reportedUsage(outcome.result);
+  if (usage === null && !outcome.ok) {
+    const reason = errorReasonOf(outcome.result);
+    if (
+      carriesUsage(outcome.result) ||
+      (reason !== null && NO_RESULT_ERROR_REASONS.includes(reason))
+    )
+      return NO_RESULT;
+  }
   if (usage === null)
     return outcome.ok
       ? {

@@ -8,6 +8,7 @@ import { sql } from "kysely";
 import { describe, expect, it } from "vitest";
 import { createJobQueueFixture } from "../../test-support/jobs.ts";
 import { createUsageRecordsRepository } from "./usage-records-repository.ts";
+import { voidRecordsOfEndedJobs } from "./usage-records-sweep.ts";
 
 const SETTLED = (costMicroUsd: number | null) =>
   ({
@@ -536,5 +537,34 @@ describe("summarizing a period", () => {
         knownCostMicroUsd: 99999,
       }),
     ]);
+  });
+});
+
+describe("the sweep under its name before #273", () => {
+  // #273-T06: another change still calls `voidRecordsOfEndedJobs(executor)`; it must keep working.
+  it("still closes the reserved records of ended jobs: void for a cancelled job, no_result for a lost last attempt", async () => {
+    const t = await setup();
+    const cancelled = await t.newJob();
+    const lost = await t.newJob();
+    await t.records.reserve(cancelled.id, "own");
+    await t.records.reserve(lost.id, "own");
+    await t.db
+      .updateTable("jobs")
+      .set({ status: "cancelled" })
+      .where("id", "=", cancelled.id)
+      .execute();
+    await t.db
+      .updateTable("jobs")
+      .set({ status: "failed", error_code: "lease_expired" })
+      .where("id", "=", lost.id)
+      .execute();
+
+    await voidRecordsOfEndedJobs(t.db);
+
+    expect(await t.records.get(cancelled.id)).toMatchObject({ state: "void" });
+    expect(await t.records.get(lost.id)).toMatchObject({
+      state: "settled",
+      settledReason: "no_result",
+    });
   });
 });
