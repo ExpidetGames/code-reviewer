@@ -144,4 +144,22 @@ describe("loadMigrationDatabaseConfig", () => {
     expect(sqlite.message).toContain("DATABASE_URL_MIGRATE");
     expect(sqlite.message).not.toContain("secret-name");
   });
+
+  // #319-T03
+  it("names DATABASE_URL_MIGRATE, not DATABASE_URL or SQLite, for a URL that is malformed, and repeats nothing of it", () => {
+    for (const url of [
+      "postgres://app:s3cr3t-pw@",
+      "postgres://app:s3cr3t-pw@:5432/app",
+    ]) {
+      const error = failureOf(() =>
+        loadMigrationDatabaseConfig({ DATABASE_URL_MIGRATE: url }),
+      );
+
+      expect(error.code).toBe("DATABASE_CONFIG_INVALID");
+      expect(error.message).toContain("DATABASE_URL_MIGRATE");
+      expect(error.message).not.toMatch(/DATABASE_URL(?!_MIGRATE)/);
+      expect(error.message.toLowerCase()).not.toContain("sqlite");
+      expect(error.message).not.toContain("s3cr3t-pw");
+    }
+  });
 });

@@ -81,7 +81,10 @@ export function loadMigrationDatabaseConfig(
       "DATABASE_CONFIG_INVALID",
       "DATABASE_URL_MIGRATE must be set to a direct postgres:// or postgresql:// URL of the database to migrate.",
     );
-  return { ...postgresConfig(url, {}), poolMax: MIGRATION_POOL_MAX };
+  return {
+    ...postgresConfig(url, {}, false, "DATABASE_URL_MIGRATE"),
+    poolMax: MIGRATION_POOL_MAX,
+  };
 }
 
 function parseDatabaseConfig(
@@ -137,14 +140,15 @@ function postgresConfig(
   url: string,
   env: Readonly<Record<string, string | undefined>>,
   serverless = false,
+  variable = "DATABASE_URL",
 ): PostgresDatabaseConfig {
   let parsed: URL;
   try {
     parsed = new URL(url);
   } catch {
-    throw invalidUrl("it is not a valid URL");
+    throw invalidUrl("it is not a valid URL", variable);
   }
-  if (!parsed.hostname) throw invalidUrl("it names no host");
+  if (!parsed.hostname) throw invalidUrl("it names no host", variable);
   if (serverless)
     return {
       driver: "postgres",
@@ -178,7 +182,12 @@ function serverlessNeedsPostgres(): DatabaseError {
 }
 
 /** A Postgres URL is never repeated in the message: it carries the password. */
-function invalidUrl(problem: string): DatabaseError {
+function invalidUrl(problem: string, variable = "DATABASE_URL"): DatabaseError {
+  if (variable !== "DATABASE_URL")
+    return new DatabaseError(
+      "DATABASE_CONFIG_INVALID",
+      `${variable} is not usable: ${problem}. Use a direct postgres:// or postgresql:// URL.`,
+    );
   return new DatabaseError(
     "DATABASE_CONFIG_INVALID",
     `DATABASE_URL is not usable: ${problem}. Use an empty value, a path or a sqlite: URL for SQLite, ` +
