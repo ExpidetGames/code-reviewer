@@ -56,6 +56,7 @@ from code_reviewer_runner.dynamic_review.budget import (
     max_cost_from_environment,
 )
 from code_reviewer_runner.dynamic_review.config import new_proxy_capability
+from code_reviewer_runner.dynamic_review.failure_note import FAILURE_SENTENCES
 from code_reviewer_runner.dynamic_review.inputs import review_inputs
 from code_reviewer_runner.dynamic_review.limits import CheckoutError
 from code_reviewer_runner.dynamic_review.prompts import compose_system_prompt
@@ -68,6 +69,7 @@ from code_reviewer_runner.dynamic_review.publish import (
     STATE_RESET_CODE,
     Published,
     PublishError,
+    publish_failure_note,
     publish_run,
 )
 from code_reviewer_runner.dynamic_review.supervisor import (
@@ -312,6 +314,7 @@ def run_dynamic_job(
     prepare: ContentPreparer | None = None,
     publish: Callable[[Job, DynamicFindings], Published] | None = None,
     lease_check: LeaseCheck | None = None,
+    publish_failure: Callable[[Job, ErrorCode, str | None], Published | None] | None = None,
 ) -> JobResult:
     """Run a Dynamic job with the read-only stock engine (#197) and publish its summary (#201).
 
@@ -325,7 +328,72 @@ def run_dynamic_job(
     reaches a runner). This function does not rely on that alone: `engines` is what the runner
     advertised, and a Dynamic job is refused unless it contains `opencode`, whatever else is
     configured. The default (nothing advertised) refuses.
+
+    A failure that a developer can understand or act on also leaves a short note in the pull
+    request's summary comment (#299, `add_failure_note`); the note never changes the result.
     """
+    result = _run_dynamic_job(
+        job,
+        capture,
+        started,
+        environment,
+        timeout_seconds,
+        engines=engines,
+        prepare=prepare,
+        publish=publish,
+        lease_check=lease_check,
+    )
+    return add_failure_note(job, result, lease_check, publish_failure or publish_failure_note)
+
+
+def add_failure_note(
+    job: Job,
+    result: JobResult,
+    lease_check: LeaseCheck | None,
+    write: Callable[[Job, ErrorCode, str | None], Published | None],
+) -> JobResult:
+    """Leaves the note of a failed run in the summary comment and returns the result unchanged but
+    for one line of the log (#299).
+
+    Only a code with a fixed sentence writes (`failure_note.FAILURE_SENTENCES`); `lease_lost`, a
+    refused token and the rest stay in the Runs view. A job that is no longer ours writes nothing,
+    like a review (#260). Fail closed: whatever goes wrong while writing, the run keeps its code and
+    its reason, and the log names only a stable code, never the failure's text.
+    """
+    code = result.error_code
+    if result.ok or code is None or code not in FAILURE_SENTENCES:
+        return result
+    if lease_check is not None and lease_check() is not LeaseState.HELD:
+        return result
+    try:
+        written = write(job, code, result.error_reason)
+    except PublishError as error:
+        return _with_note_line(result, f"failure note: not written ({error.code.value})")
+    except Exception:
+        return _with_note_line(result, "failure note: not written")
+    if written is None:
+        return result
+    return _with_note_line(result, "failure note: written")
+
+
+def _with_note_line(result: JobResult, line: str) -> JobResult:
+    tail = f"{result.log_tail}\n{line}"
+    # The verdict at the top of the log matters more than this line: this one is dropped, never it.
+    return result if len(tail.encode("utf-8")) > MAX_TAIL_BYTES else replace(result, log_tail=tail)
+
+
+def _run_dynamic_job(
+    job: Job,
+    capture: LogCapture | None,
+    started: float,
+    environment: Mapping[str, str],
+    timeout_seconds: float | None = None,
+    *,
+    engines: Sequence[str] = (),
+    prepare: ContentPreparer | None = None,
+    publish: Callable[[Job, DynamicFindings], Published] | None = None,
+    lease_check: LeaseCheck | None = None,
+) -> JobResult:
     dynamic = job.dynamic
     base = job.base
     assert dynamic is not None and base is not None  # parse_job guarantees the tagged shape
