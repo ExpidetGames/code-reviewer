@@ -114,6 +114,49 @@ export async function chooseDynamicReview(
   await expect(dynamic).toBeChecked();
 }
 
+const run = promisify(execFile);
+
+/**
+ * Runs the deploy canary (`pnpm probe:canary`, the release gate of #331) against the Dispatcher the way the pipeline does:
+ * the credential is in the environment and nowhere else. Resolves with the exit code and everything it printed.
+ */
+export async function runDeployCanary(
+  timeoutSeconds: number,
+): Promise<{ code: number; output: string }> {
+  try {
+    const { stdout, stderr } = await run(
+      process.execPath,
+      [
+        "--disable-warning=MODULE_TYPELESS_PACKAGE_JSON",
+        "src/probe/canary-main.ts",
+        "--url",
+        hostedEnv.dispatcherUrl,
+        "--allowed-hosts",
+        "127.0.0.1",
+        "--wait-seconds",
+        "30",
+        "--timeout-seconds",
+        String(timeoutSeconds),
+      ],
+      {
+        cwd: resolve(process.cwd(), "../dispatcher"),
+        env: { ...process.env, RUNNER_TOKEN: hostedEnv.dispatcherToken },
+      },
+    );
+    return { code: 0, output: `${stdout}${stderr}` };
+  } catch (error) {
+    const failure = error as {
+      code?: number;
+      stdout?: string;
+      stderr?: string;
+    };
+    return {
+      code: typeof failure.code === "number" ? failure.code : -1,
+      output: `${failure.stdout ?? ""}${failure.stderr ?? ""}`,
+    };
+  }
+}
+
 export type SweepAnswer = {
   status: string;
   expired?: Record<string, number>;

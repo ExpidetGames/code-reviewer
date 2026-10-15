@@ -11,10 +11,8 @@
 // the fake pull request. Nothing is replaced but the container itself and the platform behind it; the network guard of
 // the lane counts every attempt to leave loopback, of the Dispatcher, the Worker and the engine alike.
 import { mkdtempSync, rmSync } from "node:fs";
-import { execFile } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { promisify } from "node:util";
 import { expect, test } from "@playwright/test";
 import {
   createGitRepository,
@@ -48,6 +46,7 @@ import {
   chooseDynamicReview,
   eventually,
   OWNER,
+  runDeployCanary,
   saveWorkspaceKey,
   signInAsAdmin,
   switchProjectOn,
@@ -55,8 +54,6 @@ import {
 import { openRuns, required, runsOf } from "../helpers/hosted-journey";
 import { deliverPullRequestEvent } from "../helpers/webhooks";
 
-const run = promisify(execFile);
-const DISPATCHER_DIRECTORY = resolve(process.cwd(), "../dispatcher");
 const WRAPPER = resolve(
   process.cwd(),
   "../runner/scripts/dynamic_e2e_worker_container.sh",
@@ -182,27 +179,16 @@ test.describe("a pull request on its way to a Dynamic Review summary through the
 
     // The release gate, as the pipeline runs it: the probe container (the `probe` mode of the image, in the
     // container's own layout) vouches for the hardening, and `opencode` is advertised from that.
-    const canary = await run(
-      process.execPath,
-      [
-        "--disable-warning=MODULE_TYPELESS_PACKAGE_JSON",
-        "src/probe/canary-main.ts",
-        "--url",
-        hostedEnv.dispatcherUrl,
-        "--allowed-hosts",
-        "127.0.0.1",
-        "--wait-seconds",
-        "30",
-        "--timeout-seconds",
-        "150",
-      ],
-      {
-        cwd: DISPATCHER_DIRECTORY,
-        env: { ...process.env, RUNNER_TOKEN: hostedEnv.dispatcherToken },
-      },
-    );
-    expect(canary.stdout).toContain("canary: passed");
-    expect(canary.stdout).toContain("opencode");
+    const canary = await runDeployCanary(150);
+    expect(
+      canary.code,
+      `${canary.output}\n${theDispatcher.output()}\n${theDispatcher
+        .containers()
+        .map((container) => container.log())
+        .join("\n")}`,
+    ).toBe(0);
+    expect(canary.output).toContain("canary: passed");
+    expect(canary.output).toContain("opencode");
     expect(theDispatcher.output()).toContain('"event":"probe_passed"');
 
     const number = 7;

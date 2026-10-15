@@ -11,9 +11,6 @@
 //    the time the run is cancelled with `no_capable_runner` and the page says what that means;
 //  - a Diff job of another project, on the same Dispatcher, is reviewed as ever.
 // The privileged lane (e2e/dynamic/hosted-dynamic.e2e.ts) is the same Dispatcher with a container that does prove it.
-import { execFile } from "node:child_process";
-import { resolve } from "node:path";
-import { promisify } from "node:util";
 import { expect, test } from "@playwright/test";
 import { startLlmFake, type FakeLlm } from "../../../fakes/llm/server.ts";
 import { changeAdminSetting } from "../helpers/admin-api";
@@ -32,6 +29,7 @@ import {
   chooseDynamicReview,
   eventually,
   OWNER,
+  runDeployCanary,
   runSweep,
   setUpReviewedRepositories,
   signInAsAdmin,
@@ -45,55 +43,12 @@ import {
 } from "../helpers/hosted-journey";
 import { deliverPullRequestEvent } from "../helpers/webhooks";
 
-const run = promisify(execFile);
-const DISPATCHER_DIRECTORY = resolve(process.cwd(), "../dispatcher");
-
 const INSTALLATION_ID = 9500304;
 const DYNAMIC = { id: 9700004, fullName: "hosted-probe/dynamic" };
 const DIFF = { id: 9700005, fullName: "hosted-probe/diff" };
 const OWNER_OF_REPOSITORIES = { login: "hosted-probe", id: OWNER.id };
 // The model name a person types into the project's settings.
 const MODEL = "vendor/agent-e2e";
-
-/** Runs the deploy canary against the Dispatcher like the release pipeline does; resolves with its exit code and output. */
-async function deployCanary(): Promise<{ code: number; output: string }> {
-  try {
-    const { stdout, stderr } = await run(
-      process.execPath,
-      [
-        "--disable-warning=MODULE_TYPELESS_PACKAGE_JSON",
-        "src/probe/canary-main.ts",
-        "--url",
-        hostedEnv.dispatcherUrl,
-        "--allowed-hosts",
-        "127.0.0.1",
-        "--wait-seconds",
-        "30",
-        "--timeout-seconds",
-        "120",
-      ],
-      {
-        cwd: DISPATCHER_DIRECTORY,
-        env: {
-          ...process.env,
-          // The credential is in the environment and nowhere else, as the workflow gives it.
-          RUNNER_TOKEN: hostedEnv.dispatcherToken,
-        },
-      },
-    );
-    return { code: 0, output: `${stdout}${stderr}` };
-  } catch (error) {
-    const failure = error as {
-      code?: number;
-      stdout?: string;
-      stderr?: string;
-    };
-    return {
-      code: typeof failure.code === "number" ? failure.code : -1,
-      output: `${failure.stdout ?? ""}${failure.stderr ?? ""}`,
-    };
-  }
-}
 
 test.describe.configure({ mode: "serial" });
 
@@ -165,7 +120,7 @@ test.describe("a Dynamic job where the container's hardening cannot be proven", 
     request,
   }) => {
     // The release gate: the canary VM ran the real probe and the container could not vouch for itself.
-    const canary = await deployCanary();
+    const canary = await runDeployCanary(120);
     expect(canary.code).toBe(1);
     // The container's own startup said why: it could not end its startup capabilities (this process is no root).
     expect(canary.output).toContain("reasons=capabilities_not_dropped");
