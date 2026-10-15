@@ -41,6 +41,7 @@ import { migration as createWorkspaceEntitlements } from "./20261014120000_creat
 import { migration as createUsageRecords } from "./20261014150000_create_usage_records.ts";
 import { migration as addJobWorkerFetches } from "./20261015100000_add_job_worker_fetches.ts";
 import { migration as createSetupCodes } from "./20261015110000_create_setup_codes.ts";
+import { migration as createJobDispatches } from "./20261015120000_create_job_dispatches.ts";
 
 const migrations: Record<string, Migration> = {
   "0001_create_app_meta": createAppMeta,
@@ -82,6 +83,7 @@ const migrations: Record<string, Migration> = {
   "20261014150000_create_usage_records": createUsageRecords,
   "20261015100000_add_job_worker_fetches": addJobWorkerFetches,
   "20261015110000_create_setup_codes": createSetupCodes,
+  "20261015120000_create_job_dispatches": createJobDispatches,
 };
 
 export const migrationProvider: MigrationProvider = {

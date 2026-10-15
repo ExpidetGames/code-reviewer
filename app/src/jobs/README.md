@@ -19,6 +19,7 @@ workspace the signed-in user works in) and `getRunnerQueue()` (`shared.ts`). The
 | `job-input.ts`    | `validateEnqueueInput`: field level checks before anything is written                                                                                                                                                                                                                                                        |
 | `job-types.ts`    | `Job`, the inputs and results, the trigger kinds and the error codes the queue itself writes                                                                                                                                                                                                                                 |
 | `job-limits.ts`   | Lease, maximum runtime and maximum attempts, with their defaults                                                                                                                                                                                                                                                             |
+| `shared.ts`       | `jobQueueFor(workspaceId)`, `getRunnerQueue()`: the queues of the running server. `jobQueueFor` attaches the dispatch hook (below)                                                                                                                                                                                           |
 | `errors.ts`       | `JobQueueError` with the stable codes `JOB_INPUT_INVALID` (with `fieldErrors`) and `JOB_REPOSITORY_UNKNOWN`                                                                                                                                                                                                                  |
 
 Every job belongs to the workspace of its repository (`jobs.workspace_id`; the database refuses a job
@@ -123,6 +124,13 @@ Unique indexes enforce the promises even if the code were wrong: one job per del
 per comment of a repository (the primary key of `job_comments`, migration `20261011090000_create_job_comments`),
 one automatic job per head commit and command in the slot-holding statuses, one running job per pull
 request.
+
+**The enqueue hook (#326).** `createJobQueue(db, workspaceId, { onEnqueued })` calls `onEnqueued(result)` with what
+`enqueue` returned (a new job or an existing one) once its transaction has committed, never for a refused enqueue,
+and ignores a hook that throws. The running server passes the dispatch hook through `jobQueueFor` (`shared.ts`),
+which is how a job queued by the GitHub webhook, a comment or the start button wakes a Dispatcher when
+`RUNNER_DISPATCH=webhook`; by default there is no hook (`src/dispatch/README.md`). A producer must get its queue
+from `jobQueueFor` (`src/dispatch/producers.test.ts`).
 
 ## Claiming, leases, attempts
 

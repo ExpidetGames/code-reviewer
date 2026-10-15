@@ -2,7 +2,8 @@
 
 // What the production server checks about the deployment when it starts, besides sign in (see
 // src/auth/startup.ts, which requires the master key and the public address): the shared token of the
-// runner and, when set, that the operator API token is not a copy of another credential. A missing value would otherwise show up later as a failing runner with a less helpful
+// runner, that the operator API token (when set) is not a copy of another credential, and, in webhook
+// dispatch mode, the URL and the signing secret of the dispatch webhook (src/dispatch/config.ts). A missing value would otherwise show up later as a failing runner with a less helpful
 // message. Called from `src/instrumentation.ts`.
 //
 // The GitHub App is not an environment setting any more: it is entered in the admin portal, and the variables of
@@ -10,6 +11,7 @@
 // could not be used. An instance starts without any `GITHUB_*` variable; GitHub is then "not configured" (the
 // pages say so) until the integration is set up.
 
+import { dispatchConfigProblems } from "../dispatch/config.ts";
 import { operatorTokenReuseProblem } from "../operator-api/token.ts";
 import { runnerTokenProblem } from "../runner-api/token-auth.ts";
 
@@ -37,6 +39,10 @@ export function findDeploymentConfigProblems(env: Env): string[] {
   const reuseProblem = operatorTokenReuseProblem(env);
   if (reuseProblem !== null)
     problems.push(`OPERATOR_API_TOKEN ${reuseProblem}`);
+
+  // The dispatch webhook (#326) is off by default. Only a webhook mode with an incomplete setup stops the
+  // start: the app would queue jobs and never wake anyone. The problems name variables, never values.
+  problems.push(...dispatchConfigProblems(env));
 
   return problems;
 }
