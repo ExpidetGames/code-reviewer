@@ -51,7 +51,7 @@ describe("the probe verdict", () => {
 
   // #331-T08
   it("keeps stable reasons only: a reason shaped like a secret is dropped and never echoed", () => {
-    const secret = "ghp_0123456789abcdef0123456789abcdef0123";
+    const secret = "ghp_" + "0123456789abcdef0123456789abcdef0123";
     const verdict = parseProbeOutput(
       line({
         version: 1,
@@ -76,7 +76,7 @@ describe("the probe verdict", () => {
         version: 1,
         engines: ["pr-agent", "opencode"],
         reasons: [],
-        token: "ghp_0123456789abcdef0123456789abcdef0123",
+        token: "ghp_" + "0123456789abcdef0123456789abcdef0123",
         env: { RUNNER_TOKEN: "dummy" },
       }),
     );

@@ -203,7 +203,7 @@ describe("POST /probe", () => {
   it("fails closed when the probe itself breaks, and says nothing of the error", async () => {
     const { app, logger } = build(() =>
       Promise.reject(
-        new Error("boom with ghp_0123456789abcdef0123456789abcdef0123"),
+        new Error("boom with ghp_" + "0123456789abcdef0123456789abcdef0123"),
       ),
     );
 

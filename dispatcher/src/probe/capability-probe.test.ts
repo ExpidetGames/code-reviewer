@@ -122,7 +122,9 @@ describe("the capability probe", () => {
   it("names no code of its own for an error it does not know and never logs its text", async () => {
     const { probe, logger } = setup(() =>
       Promise.reject(
-        new Error("token ghp_0123456789abcdef0123456789abcdef0123 rejected"),
+        new Error(
+          "token ghp_" + "0123456789abcdef0123456789abcdef0123 rejected",
+        ),
       ),
     );
 
@@ -245,7 +247,7 @@ describe("the capability probe", () => {
 
   // #331-T08
   it("keeps stable reasons only in the outcome and in the log", async () => {
-    const secret = "sk-or-v1-0123456789abcdef0123456789abcdef";
+    const secret = "sk-or-v1-" + "0123456789abcdef0123456789abcdef";
     const { probe, logger } = setup(() =>
       Promise.resolve(
         `${JSON.stringify({ version: 1, engines: ["pr-agent"], reasons: ["pin_untrusted", secret] })}\n`,

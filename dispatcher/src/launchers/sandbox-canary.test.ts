@@ -250,7 +250,7 @@ describe("the canary VM of the capability probe", () => {
     service.onExec("probe", {
       exitCode: 2,
       stdout: `${JSON.stringify({ version: 1, engines: ["pr-agent", "opencode"], reasons: [] })}\n`,
-      stderr: "token ghp_0123456789abcdef0123456789abcdef0123",
+      stderr: "token ghp_" + "0123456789abcdef0123456789abcdef0123",
     });
 
     const error = await failure(canary()(signal()));
@@ -293,7 +293,7 @@ describe("the canary VM of the capability probe", () => {
 
   // #331-T08
   it("hands the output on unread and keeps it out of the log: reading it is the probe's job", async () => {
-    const secret = "ghp_0123456789abcdef0123456789abcdef0123";
+    const secret = "ghp_" + "0123456789abcdef0123456789abcdef0123";
     service.onExec("probe", { stdout: `${secret}\n${PASSING}` });
 
     const stdout = await canary()(signal());

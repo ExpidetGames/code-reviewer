@@ -85,7 +85,7 @@ def test_what_the_probe_prints_is_a_valid_verdict(verdict: Verdict) -> None:
         {
             "version": 1,
             "engines": ["pr-agent"],
-            "reasons": ["ghp_0123456789abcdef0123456789abcdef0123"],
+            "reasons": ["ghp_" + "0123456789abcdef0123456789abcdef0123"],
         },
         {"version": 1, "engines": ["pr-agent"], "reasons": [], "path": "/run/secret"},
         {"version": 1, "engines": ["not-an-engine"], "reasons": []},

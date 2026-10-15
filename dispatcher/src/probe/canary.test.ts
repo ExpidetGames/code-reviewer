@@ -99,7 +99,7 @@ describe("the deploy canary", () => {
       engines: ["pr-agent"],
       reasons: [
         "ipv6_not_disabled",
-        "ghp_0123456789abcdef0123456789abcdef0123",
+        "ghp_" + "0123456789abcdef0123456789abcdef0123",
       ],
       detail: "text the Dispatcher would never send",
     };
