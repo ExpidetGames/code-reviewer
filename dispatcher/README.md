@@ -354,9 +354,11 @@ billed, until its own timeout (job timeout plus margin). The reaper is the secon
 
 - **Credential.** `CRON_SECRET` of this project, which the platform sends as `Authorization: Bearer <secret>`. A secret
   of its own: at least 32 characters, no space or control character, and different from the dispatcher credential and
-  every signing secret (start-up error otherwise); no other credential opens the route, and it opens nothing else.
-  Unset: every caller gets `401` and a `reaper_cron_secret_missing` warning is logged at start. The route exists
-  only with a golden snapshot configured (otherwise `404`).
+  every signing secret; no other credential opens the route, and it opens nothing else. The route exists only with a
+  golden snapshot configured (otherwise `404`). Where it exists, a malformed secret is a start-up error (fail closed) and
+  an unset one makes every caller get `401`, with a `reaper_cron_secret_missing` warning at start. Where it does not
+  exist, a malformed `CRON_SECRET` is ignored with a `cron_secret_ignored` warning (variable and reason, never the value),
+  so a Dispatcher that never reaps is not taken down by it.
 - **Which VMs.** The listing is narrowed by the name prefix `cr-` and the tag `app = code-reviewer`, and every VM it
   returns is checked again: only a running or pending, non-persistent VM of exactly the shape our code creates is ever considered.
   A job VM is named `cr-<diff|dynamic>-<job id>-<8 hex>` with the tags `kind` and `job` equal to the name's; a canary

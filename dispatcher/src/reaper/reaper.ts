@@ -104,7 +104,13 @@ export function createReaper(options: ReaperOptions): Reaper {
   const { fleet, jobs, logger } = options;
   const now = options.now ?? (() => Date.now());
 
-  /** The VM's own timeout when the platform reports a believable one, the configured lifetime otherwise, plus the grace. */
+  /**
+   * The VM's own timeout when the platform reports a believable one, the configured lifetime otherwise, plus the grace.
+   * The ages compare this function's clock with the platform's `createdAt`, so a skew between them moves every age.
+   * The only margin against it is the grace and the minimum age (two minutes each): a function clock more than that
+   * ahead could stop a job VM inside its own timeout, but only in its last seconds, and the same skew the other way only
+   * delays a stop. Accepted: a VM is never stopped early by more than the margin, and its own timeout is the backstop.
+   */
   function lifetimeMs({ vm, shape }: Candidate): number {
     const [fallbackMs, boundMs] =
       shape.kind === "job"

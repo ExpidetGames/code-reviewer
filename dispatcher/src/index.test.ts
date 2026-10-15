@@ -295,9 +295,25 @@ describe("the Vercel entry", () => {
     expect(sdk.list).toHaveBeenCalledTimes(1);
     expect(sdk.list.mock.calls[0]?.[0]).toMatchObject({
       namePrefix: "cr-",
+      sortBy: "name",
       tags: { app: "code-reviewer" },
     });
     expect(sdk.get).not.toHaveBeenCalled();
+  });
+
+  // #364-T17
+  it("refuses to start with a malformed CRON_SECRET when the reaper is mounted, and ignores it when it is not", async () => {
+    stubEnvironment();
+    vi.stubEnv("CRON_SECRET", "tiny-cron-secret");
+
+    const { default: app } = await import("./index.ts");
+    expect(
+      (await app.fetch(new Request("http://dispatcher.test/health"))).status,
+    ).toBe(200);
+
+    vi.resetModules();
+    stubSandbox();
+    await expect(import("./index.ts")).rejects.toThrow(/CRON_SECRET/);
   });
 
   // #364-T11

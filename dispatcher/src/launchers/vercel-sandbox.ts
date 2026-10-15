@@ -319,6 +319,8 @@ export function createVercelSandboxService(
         for await (const listed of await Sandbox.list({
           ...auth,
           namePrefix: filter.namePrefix,
+          // The platform refuses a name prefix with any other sort (HTTP 400): without it every run would fail.
+          sortBy: "name",
           tags: { ...filter.tags },
           ...(signal === undefined ? {} : { signal }),
         }))

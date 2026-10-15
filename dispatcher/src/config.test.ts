@@ -197,13 +197,29 @@ describe("the settings of the Dispatcher", () => {
       "not_distinct",
     ],
   ])(
-    "refuses a CRON_SECRET that %s, naming the variable and never the value",
+    "reports a CRON_SECRET that %s as a problem naming the variable, and never takes it",
     (_name, env, variable, reason) => {
-      const error = failure({ ...base, ...env });
+      const settings = loadSettings({ ...base, ...env });
 
-      expect(error.variable).toBe(variable);
-      expect(error.reason).toBe(reason);
-      expect(error.message).not.toContain(env.CRON_SECRET ?? "unreachable");
+      // Whether it matters depends on whether the reaper's route is mounted (compose.ts): not here.
+      expect(settings.cronSecret).toBeUndefined();
+      expect(settings.cronSecretProblem).toBeInstanceOf(ConfigError);
+      expect(settings.cronSecretProblem?.variable).toBe(variable);
+      expect(settings.cronSecretProblem?.reason).toBe(reason);
+      expect(settings.cronSecretProblem?.message).not.toContain(
+        env.CRON_SECRET ?? "unreachable",
+      );
     },
   );
+
+  // #364-T17
+  it("reports no problem for a good or an absent CRON_SECRET", () => {
+    expect(loadSettings(base).cronSecretProblem).toBeUndefined();
+    expect(
+      loadSettings({
+        ...base,
+        CRON_SECRET: "a-cron-secret-of-at-least-32-characters",
+      }).cronSecretProblem,
+    ).toBeUndefined();
+  });
 });

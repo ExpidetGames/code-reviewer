@@ -49,6 +49,11 @@ export type Settings = {
   core: CoreSettings;
   /** `CRON_SECRET`: what the reaper's cron route (#364) accepts. Absent: the route refuses every caller. */
   cronSecret: string | undefined;
+  /**
+   * Why a set `CRON_SECRET` was not taken (never its value). It refuses the start only where the route is mounted,
+   * so a snapshot is configured (compose.ts); elsewhere the variable is ignored with a warning.
+   */
+  cronSecretProblem?: ConfigError;
   /** The current key first, then the previous one if there is one. */
   signingKeys: SigningKey[];
   shutdownGraceSeconds: number;
@@ -181,6 +186,20 @@ function cronSecret(
   return value;
 }
 
+function cronSecretOf(
+  env: Environment,
+  dispatcherToken: string,
+  keys: readonly SigningKey[],
+): { cronSecret: string | undefined; cronSecretProblem?: ConfigError } {
+  try {
+    return { cronSecret: cronSecret(env, dispatcherToken, keys) };
+  } catch (error) {
+    if (error instanceof ConfigError)
+      return { cronSecret: undefined, cronSecretProblem: error };
+    throw error;
+  }
+}
+
 function engines(env: Environment): Engine[] {
   const raw = read(env, "DISPATCHER_ENGINES");
   if (raw === undefined) return [...ENGINES];
@@ -257,7 +276,7 @@ export function loadSettings(env: Environment): Settings {
       launchDeadlineSeconds: 300,
       workerConfig: workerConfigs(env),
     },
-    cronSecret: cronSecret(env, dispatcherToken, keys),
+    ...cronSecretOf(env, dispatcherToken, keys),
     signingKeys: keys,
     shutdownGraceSeconds: integer(env, "DISPATCHER_SHUTDOWN_GRACE_SECONDS", {
       min: 0,

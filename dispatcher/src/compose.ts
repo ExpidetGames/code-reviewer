@@ -57,6 +57,15 @@ export function composeDispatcher(
     logger,
     fetch: options.fetch,
   });
+  // A malformed CRON_SECRET matters only where the route exists: there it refuses the start (fail closed), elsewhere
+  // a Dispatcher that never reaps is not taken down by a variable it does not use.
+  if (settings.cronSecretProblem !== undefined) {
+    if (options.reaper !== undefined) throw settings.cronSecretProblem;
+    logger.warn("cron_secret_ignored", {
+      variable: settings.cronSecretProblem.variable,
+      reason: settings.cronSecretProblem.reason,
+    });
+  }
   if (options.reaper !== undefined) {
     const setup = options.reaper(settings);
     const client = createAppClient({

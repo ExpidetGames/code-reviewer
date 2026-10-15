@@ -106,7 +106,21 @@ function standIn(
         calls.list.push(params);
         if (options.listError !== undefined)
           return Promise.reject(options.listError);
-        const items = options.listed ?? [];
+        // The platform's own rule, seen on a real run: a name prefix filters by name, so it needs that sort.
+        if (params.namePrefix !== undefined && params.sortBy !== "name")
+          return Promise.reject(
+            apiError(
+              400,
+              undefined,
+              "Invalid request: `namePrefix` is only valid when `sortBy` is `name`",
+            ),
+          );
+        const prefix = params.namePrefix;
+        const items = (options.listed ?? []).filter(
+          (item) =>
+            typeof prefix !== "string" ||
+            String((item as { name: string }).name).startsWith(prefix),
+        );
         return Promise.resolve(
           (async function* () {
             for (let at = 0; at < items.length; at += 2) {
@@ -392,7 +406,12 @@ describe("the Vercel adapter of the Sandbox port", () => {
       currentSessionId: "ignored",
       vcpus: 1,
     }));
-    const { sdk, calls } = standIn({ listed });
+    const { sdk, calls } = standIn({
+      listed: [
+        ...listed,
+        { name: "other-1", createdAt: 9, status: "running", tags: {} },
+      ],
+    });
     const service = createVercelSandboxService(() => Promise.resolve(sdk), {
       token: PLATFORM_TOKEN,
       teamId: "team_dummy",
@@ -410,6 +429,8 @@ describe("the Vercel adapter of the Sandbox port", () => {
         teamId: "team_dummy",
         projectId: "prj_dummy",
         namePrefix: "cr-",
+        // The platform refuses a name prefix with any other sort (HTTP 400).
+        sortBy: "name",
         tags: { app: "code-reviewer" },
       },
     ]);
@@ -456,5 +477,20 @@ describe("the Vercel adapter of the Sandbox port", () => {
     expect(failed).toBeInstanceOf(SandboxServiceError);
     expect((failed as SandboxServiceError).kind).toBe("unavailable");
     expect((failed as SandboxServiceError).message).toBe("unavailable");
+  });
+
+  // #364-T30
+  it("is held to the platform's rule by its stand-in: a name prefix without the name sort is refused", async () => {
+    const { sdk } = standIn();
+
+    await expect(sdk.Sandbox.list({ namePrefix: "cr-" })).rejects.toThrow(
+      "`namePrefix` is only valid when `sortBy` is `name`",
+    );
+    await expect(
+      sdk.Sandbox.list({ namePrefix: "cr-", sortBy: "createdAt" }),
+    ).rejects.toThrow("`namePrefix` is only valid");
+    await expect(
+      sdk.Sandbox.list({ namePrefix: "cr-", sortBy: "name" }),
+    ).resolves.toBeDefined();
   });
 });
