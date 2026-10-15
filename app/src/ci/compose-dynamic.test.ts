@@ -376,8 +376,11 @@ describe("compose.dynamic.yml", () => {
           line.includes("--cap-add FOWNER")),
     );
 
-    // The capable runner, the read-only check, and the three "not advertised" cases.
-    expect(dynamic).toHaveLength(5);
+    // The capable runner, the read-only check, the three "not advertised" cases, and the container
+    // that keeps the engines file and the one that runs worker-reap (#324). The probes are started
+    // by `assert_probe`; the one with a writable root is the deliberate exception and builds its
+    // tmpfs from `dynamic_rootfs` without `--read-only`.
+    expect(dynamic).toHaveLength(7);
     for (const line of dynamic) {
       expect(line, line).toContain("${dynamic_rootfs[@]}");
     }

@@ -595,11 +595,10 @@ assert_probe pr-agent network_rules_not_installed \
   "${dynamic_caps[@]}" "${dynamic_rootfs[@]}" "${dynamic_env[@]}" --volume "$no_nft:/usr/sbin/nft:ro"
 
 step "probe with a writable root filesystem: pr-agent only, root_filesystem_writable"
+# The tmpfs of the layout without its first element, `--read-only`.
+writable_rootfs=("${dynamic_rootfs[@]:1}")
 assert_probe pr-agent root_filesystem_writable \
-  "${dynamic_caps[@]}" "${dynamic_env[@]}" \
-  --tmpfs "/tmp:rw,noexec,nosuid,nodev,size=512m,mode=1777" \
-  --tmpfs "/run:rw,noexec,nosuid,nodev,size=1m,mode=0755" \
-  --tmpfs "/home/runner:rw,noexec,nosuid,nodev,size=64m,uid=10001,gid=10001,mode=0700"
+  "${dynamic_caps[@]}" "${dynamic_env[@]}" "${writable_rootfs[@]}"
 
 # #324-T04 / #324-T07: a Worker started like the hardened container spec starts it does the startup
 # (rules, end of NET_ADMIN, self-check) before it reads its job, and delivers it.
