@@ -2,9 +2,9 @@
 
 // The try-lock of the cron sweep (#328): at most one holder of a key at any moment, a second caller is told
 // "not acquired" at once instead of waiting, and the key is free again however the holder ended. On SQLite
-// (one process) and, when TEST_DATABASE_URL is set, on Postgres, where it is `pg_try_advisory_xact_lock` and
-// the two callers use two connections of the pool (CI).
-import type { Kysely } from "kysely";
+// (one process) and, when TEST_DATABASE_URL is set, on Postgres, where it is `pg_try_advisory_xact_lock` on a
+// dedicated connection next to the pool, which may hold a single connection (CI).
+import { sql, type Kysely } from "kysely";
 import { describe, expect, it as vitestIt } from "vitest";
 import {
   createPostgresTestDatabase,
@@ -75,6 +75,22 @@ describe.each(databases)("the try-lock on %s", (name, open) => {
     const again = await tryWithLock(db, KEY, async () => "again");
 
     expect(again).toEqual({ acquired: true, value: "again" });
+  });
+
+  // #328-T06
+  it("leaves the connections of the pool to the work, even with a pool of one", async () => {
+    if (open === undefined) throw new Error("No database for this suite.");
+    const db =
+      name === "Postgres"
+        ? (await createPostgresTestDatabase({ poolMax: 1 })).db
+        : await database();
+
+    const outcome = await tryWithLock(db, KEY, async () => {
+      const { rows } = await sql<{ one: number }>`select 1 as one`.execute(db);
+      return rows[0]?.one;
+    });
+
+    expect(outcome).toEqual({ acquired: true, value: 1 });
   });
 
   // #328-T06

@@ -3,15 +3,17 @@
 // A lock that is tried, not waited for: the cron sweep (#328) runs once a minute on whichever serverless
 // instance the platform picks, and a run that finds another one still working must skip, not queue up behind it.
 //
-// Postgres: a transaction advisory lock (`pg_try_advisory_xact_lock`) held by one connection for as long as the
-// work runs. It is released by the end of the transaction, so a crashed instance or a lost connection frees it
-// and no key can stay locked. The work itself uses the pool's other connections; the lock transaction touches
-// no table. Keys are two integers; the namespaces in use are listed here so that none is used twice: 195 is
-// the Dynamic Review gate (`dynamic-review-lock.ts`), 328 the sweep.
+// Postgres: a transaction advisory lock (`pg_try_advisory_xact_lock`) on a dedicated client that is not part of
+// the pool (`tryWithPostgresAdvisoryLock`, postgres.ts), because the work does its own database work from the pool
+// and a pooled connection held across it could starve it (with a pool of one, deadlock it). The lock is
+// released when the work ends, when the client is closed or when its connection dies, so a crashed instance
+// cannot leave it locked (a transaction lock, not a session lock, so a pooler cannot strand it). Keys are two integers; the namespaces in use are listed here so that none is used
+// twice: 195 is the Dynamic Review gate (`dynamic-review-lock.ts`), 328 the sweep.
 //
 // SQLite: one process owns the file, so a set of keys held in memory is the same guarantee.
-import { sql, type Kysely } from "kysely";
+import type { Kysely } from "kysely";
 import { databaseDriver } from "./driver.ts";
+import { tryWithPostgresAdvisoryLock } from "./postgres.ts";
 import type { Database } from "./schema.ts";
 
 export type LockKey = { namespace: number; id: number };
@@ -23,25 +25,6 @@ export type TryLockResult<T> =
   { acquired: true; value: T } | { acquired: false };
 
 const heldOnSqlite = new WeakMap<object, Set<string>>();
-
-async function tryOnPostgres<T>(
-  db: Kysely<Database>,
-  key: LockKey,
-  work: () => Promise<T>,
-): Promise<TryLockResult<T>> {
-  const attempt = async (
-    executor: Kysely<Database>,
-  ): Promise<TryLockResult<T>> => {
-    const { rows } = await sql<{ locked: boolean }>`
-      select pg_try_advisory_xact_lock(${key.namespace}, ${key.id}) as locked`.execute(
-      executor,
-    );
-    if (rows[0]?.locked !== true) return { acquired: false };
-    return { acquired: true, value: await work() };
-  };
-  // Inside a transaction the lock lasts as long as that one; the caller owns its end.
-  return db.isTransaction ? attempt(db) : db.transaction().execute(attempt);
-}
 
 async function tryOnSqlite<T>(
   db: Kysely<Database>,
@@ -73,6 +56,6 @@ export function tryWithLock<T>(
   work: () => Promise<T>,
 ): Promise<TryLockResult<T>> {
   return databaseDriver(db) === "postgres"
-    ? tryOnPostgres(db, key, work)
+    ? tryWithPostgresAdvisoryLock(db, key, work)
     : tryOnSqlite(db, key, work);
 }

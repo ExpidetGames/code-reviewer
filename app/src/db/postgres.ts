@@ -109,6 +109,46 @@ export async function withPostgresAdvisoryLock<T>(
 }
 
 /**
+ * Like `withPostgresAdvisoryLock`, but tried and not waited for, and keyed by two integers (the cron sweep,
+ * #328): on a dedicated `pg.Client`, never the main pool, so a pool of one connection still has a connection
+ * for the work. The lock is a transaction lock (`pg_try_advisory_xact_lock`) in a transaction that stays open
+ * on that client for as long as the work runs, not a session lock: a transaction pins the connection even
+ * behind a pooler that hands out a different server connection per statement, and the lock is released by
+ * the end of the transaction, by closing the client or by the connection dying, so it can never stay behind.
+ * Returns `{ acquired: false }` at once when another session holds the key.
+ */
+export async function tryWithPostgresAdvisoryLock<T>(
+  db: Kysely<Database>,
+  key: { namespace: number; id: number },
+  job: () => Promise<T>,
+): Promise<{ acquired: true; value: T } | { acquired: false }> {
+  const config = CONFIG_OF.get(db);
+  if (!config)
+    throw new Error(
+      "The advisory lock needs a connection opened by openPostgresDatabase.",
+    );
+  const client = new Client({
+    connectionString: config.url,
+    connectionTimeoutMillis: CONNECT_TIMEOUT_MS,
+  });
+  client.on("error", () => undefined);
+  await client.connect();
+  try {
+    await client.query("begin");
+    const { rows } = await client.query<{ locked: boolean }>(
+      "select pg_try_advisory_xact_lock($1, $2) as locked",
+      [key.namespace, key.id],
+    );
+    if (rows[0]?.locked !== true) return { acquired: false };
+    return { acquired: true, value: await job() };
+  } finally {
+    // The end of the transaction releases the lock; closing the client would too.
+    await client.query("rollback").catch(() => undefined);
+    await client.end().catch(() => undefined);
+  }
+}
+
+/**
  * Proves at startup that the database answers, so an unreachable server or a wrong password ends the
  * start with one clear line (naming the host and database, never the password) instead of a stack
  * trace from deep inside the first query. The health route answers 503 meanwhile; the pool connects

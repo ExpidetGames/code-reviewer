@@ -87,18 +87,18 @@ is the platform's cron**: `GET /api/internal/dispatch-sweep`, once a minute (`ap
 secret is `401` with no side effect, and nothing below `/api/internal` is open except the two exact paths of the
 two crons (`src/auth/access.ts`).
 
-| File                             | Role                                                                                                                       |
-| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `app/src/cron/dispatch-sweep.ts` | The route's handler: the secret, the try-lock, the answer (counts only)                                                    |
-| `app/src/db/try-lock.ts`         | `tryWithLock`: a Postgres transaction advisory try-lock (`pg_try_advisory_xact_lock(328, 1)`), an in-process set on SQLite |
-| `sweep.ts`                       | `createDispatchSweep(...).run()`: the steps of one run                                                                     |
-| `sweep-settings.ts`              | The two settings below                                                                                                     |
-| `sweep-shared.ts`                | The wiring of the running server                                                                                           |
+| File                             | Role                                                                                                                                                               |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `app/src/cron/dispatch-sweep.ts` | The route's handler: the secret, the try-lock, the answer (counts only)                                                                                            |
+| `app/src/db/try-lock.ts`         | `tryWithLock`: a Postgres transaction advisory try-lock (`pg_try_advisory_xact_lock(328, 1)`) on a dedicated connection, not the pool; an in-process set on SQLite |
+| `sweep.ts`                       | `createDispatchSweep(...).run()`: the steps of one run                                                                                                             |
+| `sweep-settings.ts`              | The two settings below                                                                                                                                             |
+| `sweep-shared.ts`                | The wiring of the running server                                                                                                                                   |
 
 **Overlapping runs.** A run that starts while another one is still working (the platform retries, or a run
 outlasts its minute) does not queue behind it: it answers `{"status":"skipped","reason":"already_running"}` and
-does nothing. The lock lives and dies with one database transaction, so a crashed instance can never leave it
-locked. Every step is also safe on its own, so a second instance that got in anyway (for example the job
+does nothing. The lock lives and dies with one transaction on a connection of its own (not the pool, whose connections the steps
+need: a pool of one still works), so a crashed instance can never leave it locked. Every step is also safe on its own, so a second instance that got in anyway (for example the job
 creation hook running at the same moment) only ever sees compare-and-set statements.
 
 **One run, in order.** A step that fails is logged by its name (`[sweep] SWEEP_STEP_FAILED step=<name>`, never the
