@@ -25,7 +25,10 @@ _OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
 class FakeAppProcess:
-    def __init__(self) -> None:
+    def __init__(self, host: str = "127.0.0.1") -> None:
+        # The image smoke test (docker/smoke/worker_once_fake_app.py) listens on all interfaces so
+        # that a container on the bridge network reaches it through the host gateway.
+        self._host = host
         self.url = ""
         self._process: subprocess.Popen[str] | None = None
 
@@ -37,7 +40,7 @@ class FakeAppProcess:
             env={
                 "PATH": os.environ["PATH"],
                 "DISPATCHER_APP_FAKE_PORT": "0",
-                "DISPATCHER_APP_FAKE_HOST": "127.0.0.1",
+                "DISPATCHER_APP_FAKE_HOST": self._host,
                 "DISPATCHER_APP_FAKE_TOKEN": DISPATCHER_TOKEN,
             },
             stdout=subprocess.PIPE,

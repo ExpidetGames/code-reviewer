@@ -73,7 +73,7 @@ class WorkerJob:
 
 
 class WorkerApi(Protocol):
-    async def check_app(self) -> None: ...
+    async def check_app(self, job_id: str) -> None: ...
 
     async def fetch(self, job_id: str) -> WorkerJob: ...
 
@@ -95,16 +95,20 @@ class HttpWorkerApi:
 
     # -- the checks and the three calls -------------------------------------------------------
 
-    async def check_app(self) -> None:
-        """Refuse an app that says it has no Worker API (`GET /api/runners/v1/version`).
+    async def check_app(self, job_id: str) -> None:
+        """Refuse an app that says it has no Worker API (`GET /api/runners/v1/version?jobId=...`).
 
-        The Worker holds the job credential and not the dispatcher credential, so an app may answer
-        this call with 401; only a contract answer that leaves `worker_api` out is a refusal here.
+        The Worker holds the job credential and not the dispatcher credential: the app accepts it
+        on this call only together with the id of its job (#322), which is sent as `jobId`. An app
+        from before that may answer 401; only a contract answer that leaves `worker_api` out is a
+        refusal here.
         Any other answer (an app from before the call, a 401, no answer) is left to the details
         call, which is a Worker API call and tells the two apart (`fetch`).
         """
         try:
-            reply = await asyncio.to_thread(self._send, "GET", "/api/runners/v1/version", None)
+            reply = await asyncio.to_thread(
+                self._send, "GET", f"/api/runners/v1/version?jobId={self._safe_id(job_id)}", None
+            )
         except ApiUnavailable:
             return
         body = as_object(parse_json(reply)) if reply.status == 200 else None
