@@ -51,6 +51,12 @@ claim --> reserved --complete with usage (failed or not), or a run that succeede
   never `void`. A lease that runs out on an earlier attempt ends nothing: the job is tried again and its record
   stays `reserved`. Only the usage of the attempt that ends the job is recorded; the cost of earlier attempts that
   were lost is not (a follow-up of #273).
+- **A job process the runner's loop ended.** The loop reports the process it had to end (hard timeout, killed by a
+  signal, no result line, a result that disagrees with its exit code) with `errorReason` `no_result_from_process`,
+  and a failed result with a usage it could not read with `unreadable_usage`; the Diff watchdog uses the first. A
+  failed result without a readable usage and with one of these reasons, or whose usage was sent and cannot be read,
+  settles as `no_result` too. A runner of an earlier release never sends the reasons and an app of an earlier
+  release ignores them: both stay void, as before.
 - **Void without a report.** Every other way a job ends without `complete` made no model call anybody knows of
   (a cancellation at claim time, a release before the runner began, such as `launch_failed` of a Dispatcher or a
   failure of the runner API itself, a cancellation or replacement while the job waited again, a job that was never

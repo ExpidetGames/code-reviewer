@@ -656,7 +656,7 @@ export function createRunnerJobsRepository(
                 current,
               );
               // Any of them may have had a record that counted (claimed before, lost its lease).
-              await voidRecordsOfEndedJobs(trx);
+              await closeRecordsOfEndedJobs(trx, formatTimestamp(current));
               for (const jobId of ended)
                 refusals.push({
                   jobId,
@@ -668,7 +668,8 @@ export function createRunnerJobsRepository(
             }
             await refuseClaimedJob(trx, row.id, admission.errorCode, current);
             // A job claimed again after a lost lease had a record that counted: it ends with the job.
-            if (hadRecord) await voidRecordsOfEndedJobs(trx);
+            if (hadRecord)
+              await closeRecordsOfEndedJobs(trx, formatTimestamp(current));
             refusals.push({
               jobId: row.id,
               workspaceId: row.workspace_id,

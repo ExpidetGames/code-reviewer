@@ -7,6 +7,11 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
+# The finer name (`errorReason`) of a failure of a job process that held the job and left no usable
+# result (#273): the model may have been used and nobody can say how much, so the app counts the run
+# with an unknown cost instead of voiding it.
+NO_RESULT_REASON = "no_result_from_process"
+
 
 class ErrorCode(StrEnum):
     """Stable codes a caller may branch on. Never put free text where a code is expected."""

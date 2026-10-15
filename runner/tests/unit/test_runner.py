@@ -909,6 +909,29 @@ def test_the_watchdog_still_prints_a_timeout_result_when_the_log_tail_cannot_be_
     assert json.loads(out.getvalue())["errorCode"] == "timeout"
 
 
+# #273-T06: a Diff command that blocks the event loop is ended by the watchdog; PR-Agent's counters
+# live in the blocked loop and cannot be read, so the result says it is a run that may have used
+# the model, not a run that did not.
+def test_the_watchdog_of_a_diff_run_says_it_left_no_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    exits: list[int] = []
+    monkeypatch.setattr(runner.os, "_exit", exits.append)
+    monkeypatch.setattr(runner, "HARD_TIMEOUT_GRACE_SECONDS", 0.0)
+    out = io.StringIO()
+    channel = runner._ResultChannel(out)  # pyright: ignore[reportPrivateUsage]
+
+    timer = runner._start_watchdog(  # pyright: ignore[reportPrivateUsage]
+        0.01, channel, time.monotonic(), LogCapture(Redactor([])), []
+    )
+    timer.join(timeout=5)
+
+    result = json.loads(out.getvalue())
+    assert result["errorCode"] == "timeout"
+    assert result["errorReason"] == "no_result_from_process"
+    assert result["usage"] is None
+
+
 class FakeClock:
     """Stands in for the `time` module of the runner, so a run takes exactly as long as we say."""
 

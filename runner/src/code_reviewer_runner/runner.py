@@ -110,7 +110,7 @@ from code_reviewer_runner.require_parameters_patch import (
     RequireParametersPatchError,
     apply_require_parameters_patch,
 )
-from code_reviewer_runner.result import ErrorCode, JobResult, Usage
+from code_reviewer_runner.result import NO_RESULT_REASON, ErrorCode, JobResult, Usage
 from code_reviewer_runner.review_state_watch import (
     ReviewStateWatch,
     WatchError,
@@ -734,6 +734,9 @@ def _start_watchdog(
         # before this process ends, so no engine or helper survives the timeout (#197-T07).
         shutdown_engines()
         usage = _probe_usage(probe)
+        # Without a probe (a Diff command) the counters cannot be read from here: the run may have
+        # used the model, which the reason says (#273).
+        reason = NO_RESULT_REASON if probe is None else None
         try:
             result = _failure(
                 ErrorCode.TIMEOUT,
@@ -741,6 +744,7 @@ def _start_watchdog(
                 started,
                 capture,
                 usage=usage,
+                reason=reason,
             )
         except Exception:
             result = JobResult(
@@ -751,6 +755,7 @@ def _start_watchdog(
                 log_tail="timeout: the command did not stop in time",
                 log_truncated=True,
                 usage=usage,
+                error_reason=reason,
             )
         try:
             written = channel.write(result, secrets)

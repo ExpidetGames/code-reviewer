@@ -6,7 +6,6 @@
 // jobs of one workspace is `voidEndedJobs()` of usage-records-repository.ts.
 import "server-only";
 import { sql, type Kysely } from "kysely";
-import { formatTimestamp } from "../codecs.ts";
 import type { Database } from "../schema.ts";
 import { NO_RESULT_JOB_ERROR_CODES } from "../../usage/usage-records.ts";
 
@@ -65,15 +64,4 @@ export async function closeRecordsOfEndedJobs(
       ),
     )
     .execute();
-}
-
-/**
- * @deprecated The name and the shape before #273, kept so that a change written against them still compiles
- * (#277 calls it): use `closeRecordsOfEndedJobs` with the time of the transition. It closes the same records, with
- * the time of the call.
- */
-export async function voidRecordsOfEndedJobs(
-  executor: Kysely<Database>,
-): Promise<void> {
-  await closeRecordsOfEndedJobs(executor, formatTimestamp(new Date()));
 }

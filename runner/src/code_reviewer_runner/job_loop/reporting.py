@@ -19,7 +19,7 @@ from typing import Any, Protocol
 from code_reviewer_runner.job_loop.jsonvalues import as_object
 from code_reviewer_runner.job_loop.process import ProcessOutcome
 from code_reviewer_runner.redaction import Redactor
-from code_reviewer_runner.result import ErrorCode
+from code_reviewer_runner.result import NO_RESULT_REASON, ErrorCode
 
 MAX_LOG_TAIL_CHARS = 4096
 MAX_ERROR_MESSAGE_CHARS = 500
@@ -33,7 +33,6 @@ RUNNER_SHUTDOWN = "runner_shutdown"
 # run with an unknown cost instead of voiding it. `no_result_from_process`: a process that left no
 # usable result (ended by the loop's hard timeout, killed by a signal, no result line).
 # `unreadable_usage`: a failed result whose usage could not be read.
-NO_RESULT_REASON = "no_result_from_process"
 UNREADABLE_USAGE_REASON = "unreadable_usage"
 _ERROR_CODE = re.compile(r"[a-z][a-z0-9_]{0,63}")
 # The finer name of a failure (a checkout reason): the same shape as a code, never free text.

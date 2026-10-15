@@ -353,5 +353,6 @@ def test_the_watchdog_reports_what_the_run_used_up_to_then(monkeypatch: pytest.M
     result = json.loads(out.getvalue())
     assert ended == [1]
     assert result["errorCode"] == "timeout"
+    assert "errorReason" not in result  # the counters were read: nothing is unknown
     assert result["usage"]["aiCalls"] == 1
     assert result["usage"]["costUsd"] == 0.01
