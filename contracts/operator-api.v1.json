@@ -496,7 +496,7 @@
       "pattern": "^[A-Za-z0-9_-]+$"
     },
     "UsageReason": {
-      "description": "Why a record carries no measurement, as a short code (lowercase letters, digits and '_'), or null. A reader ignores a code it does not know. No record carries one yet.",
+      "description": "Why a record carries no measurement, as a short code (lowercase letters, digits and '_'), or null. A reader ignores a code it does not know. 'no_result': the job ended without any result from the runner that held it (it died, its lease ran out on the last attempt, it ran past the hard limit), so the model may have been used and the cost and the tokens are unknown. A run that reported its usage, failed or not, carries no reason; an unpriced run has a null cost and its tokens.",
       "type": [
         "string",
         "null"

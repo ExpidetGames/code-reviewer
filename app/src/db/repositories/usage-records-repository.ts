@@ -13,6 +13,7 @@ import type { Database, UsageRecordsTable } from "../schema.ts";
 import type { WorkspaceId } from "../workspace-scope.ts";
 import type { ProjectReviewKind } from "../../review-settings/settings.ts";
 import type {
+  SettledReason,
   UsageKeyMode,
   UsageSettlement,
   UsageState,
@@ -35,6 +36,8 @@ export type UsageRecord = {
   reservedAt: string;
   /** Null until the record is settled (a void record has none). */
   settledAt: string | null;
+  /** Why it was settled without a report of its run (`no_result`); null when the run reported, and while not settled. */
+  settledReason: SettledReason | null;
 };
 
 /** Where a reader stopped in the settled records: the next page starts after this `(settledAt, id)`. */
@@ -124,6 +127,7 @@ export function toUsageRecord(row: Selectable<UsageRecordsTable>): UsageRecord {
     completionTokens: row.completion_tokens,
     reservedAt: row.reserved_at,
     settledAt: row.settled_at,
+    settledReason: row.settled_reason as SettledReason | null,
   };
 }
 
@@ -192,6 +196,7 @@ export function createUsageRecordsRepository(
               prompt_tokens: settlement.promptTokens,
               completion_tokens: settlement.completionTokens,
               settled_at: timestamp,
+              settled_reason: settlement.reason ?? null,
             }
           : {
               state: "void",
@@ -199,6 +204,7 @@ export function createUsageRecordsRepository(
               prompt_tokens: null,
               completion_tokens: null,
               settled_at: null,
+              settled_reason: null,
             };
       // One statement: a reserved record is ended, a final one is left alone, a missing one is created.
       await db

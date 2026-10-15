@@ -19,7 +19,7 @@ from typing import Any, Protocol
 from code_reviewer_runner.job_loop.jsonvalues import as_object
 from code_reviewer_runner.job_loop.process import ProcessOutcome
 from code_reviewer_runner.redaction import Redactor
-from code_reviewer_runner.result import ErrorCode
+from code_reviewer_runner.result import NO_RESULT_REASON, ErrorCode
 
 MAX_LOG_TAIL_CHARS = 4096
 MAX_ERROR_MESSAGE_CHARS = 500
@@ -28,6 +28,12 @@ MAX_DURATION_MS = 604_800_000
 # The app refuses a body over 65,536 bytes; stay well under it (the lease token is in the body too).
 MAX_REQUEST_BYTES = 48 * 1024
 RUNNER_SHUTDOWN = "runner_shutdown"
+# The finer names (`errorReason`) of the failures the loop makes itself for a job process that held
+# the job (#273). The model may have been used and nobody can say how much, so the app counts the
+# run with an unknown cost instead of voiding it. `no_result_from_process`: a process that left no
+# usable result (ended by the loop's hard timeout, killed by a signal, no result line).
+# `unreadable_usage`: a failed result whose usage could not be read.
+UNREADABLE_USAGE_REASON = "unreadable_usage"
 _ERROR_CODE = re.compile(r"[a-z][a-z0-9_]{0,63}")
 # The finer name of a failure (a checkout reason): the same shape as a code, never free text.
 _ERROR_REASON = _ERROR_CODE
@@ -60,10 +66,15 @@ def failure_result(
     log_tail: str = "",
     log_truncated: bool = False,
     redactor: TextRedactor | None = None,
+    reason: str | None = None,
 ) -> Result:
-    """A failure the loop itself reports (invalid job, timeout, shutdown, crashed process)."""
+    """A failure the loop itself reports (invalid job, timeout, shutdown, crashed process).
+
+    `reason` is the stable finer name of a failure of a job process that held the job and left no
+    usable result (`NO_RESULT_REASON`); a failure before the process started has none.
+    """
     redactor = redactor or Redactor(())
-    return {
+    result: Result = {
         "ok": False,
         "durationMs": _duration(duration_ms),
         "commentUrl": None,
@@ -73,6 +84,9 @@ def failure_result(
         "logTruncated": log_truncated,
         "usage": None,
     }
+    if reason is not None:
+        result["errorReason"] = reason
+    return result
 
 
 def _duration(value: Any) -> int:
@@ -165,6 +179,9 @@ def _sanitize(line: Mapping[str, Any], redactor: TextRedactor, measured_ms: int)
     reason: Any = line.get("errorReason")
     if not ok and isinstance(reason, str) and _ERROR_REASON.fullmatch(reason):
         result["errorReason"] = reason
+    elif not ok and result["usage"] is None and line.get("usage") is not None:
+        # A usage was sent but cannot be read: the run did reach the model (#273).
+        result["errorReason"] = UNREADABLE_USAGE_REASON
     return result
 
 
@@ -190,6 +207,7 @@ def result_from_outcome(
         log_tail=stderr_tail,
         log_truncated=outcome.stderr_truncated,
         redactor=redactor,
+        reason=NO_RESULT_REASON,
     )
 
 
@@ -207,11 +225,14 @@ def fit_request(result: Result) -> Result:
     return current
 
 
-def minimal(result: Mapping[str, Any]) -> Result:
+def minimal(result: Mapping[str, Any], *, keep_usage: bool = True) -> Result:
     """Only the verdict: the fallback when the app refuses the full result (400 or 413).
 
     A failure keeps its stable code and reason, and says them in one line of log, so the Runs view
-    still shows why the run failed.
+    still shows why the run failed. It keeps its usage too: what the run cost does not depend on the
+    size of the log, and a failure the app could not count would be spend nobody sees (#273). When
+    the usage itself is what the app refuses, `keep_usage=False` sends the verdict without it, so
+    the verdict is never lost.
     """
     reason = result.get("errorReason")
     verdict: Result = {
@@ -225,6 +246,7 @@ def minimal(result: Mapping[str, Any]) -> Result:
     }
     if result["ok"]:
         return verdict
+    verdict["usage"] = result.get("usage") if keep_usage else None
     verdict["logTail"] = f"{result['errorCode']}" + (f" [{reason}]" if reason else "")
     if reason:
         verdict["errorReason"] = reason

@@ -7,6 +7,11 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
+# The finer name (`errorReason`) of a failure of a job process that held the job and left no usable
+# result (#273): the model may have been used and nobody can say how much, so the app counts the run
+# with an unknown cost instead of voiding it.
+NO_RESULT_REASON = "no_result_from_process"
+
 
 class ErrorCode(StrEnum):
     """Stable codes a caller may branch on. Never put free text where a code is expected."""
@@ -78,6 +83,11 @@ class Usage:
     cost_usd: float | None
     # Why a Dynamic Review was wrapped up before it was done (`cost_limit`, `time_limit`, #293).
     stopped_early: str | None = None
+
+    @property
+    def used_the_model(self) -> bool:
+        """True when at least one model call was made. A failed result reports usage only then."""
+        return self.ai_calls > 0 or self.total_tokens > 0
 
     def to_json(self) -> dict[str, Any]:
         document: dict[str, Any] = {

@@ -27,8 +27,9 @@ export function usageItemView(record: UsageRecord) {
     completionTokens: record.completionTokens,
     // A settled record always has its time (a check of the table); null is only for the type.
     settledAt: record.settledAt,
-    // The table keeps no reason yet (#273 adds `no_result`); the field is part of the format from the start.
-    reason: null,
+    // `no_result` (#273): the job ended without any result from the runner, so the measurement is unknown. A run that
+    // reported its usage, failed or not, carries its measurement and no reason; its unknown cost is a null cost.
+    reason: record.settledReason,
   };
 }
 

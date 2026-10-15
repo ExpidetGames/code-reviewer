@@ -91,6 +91,7 @@ describe("the migrations of both epics", () => {
       "20261015100000_add_job_worker_fetches",
       "20261015110000_create_setup_codes",
       "20261015120000_create_job_dispatches",
+      "20261015200000_add_usage_record_settled_reason",
     ]);
   });
 

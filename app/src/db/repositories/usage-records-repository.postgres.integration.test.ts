@@ -29,6 +29,7 @@ const REFUSED_UPDATES = [
   ["a settled record without its time", "state = 'settled'"],
   ["a cost on a record that is not settled", "cost_micro_usd = 5"],
   ["a key mode the code does not know", "key_mode = 'shared'"],
+  ["a reason the code does not write", "settled_reason = 'lost'"],
 ] as const;
 
 describePostgres("the usage records on Postgres", () => {
@@ -107,8 +108,8 @@ describePostgres("the usage records on Postgres", () => {
     });
   });
 
-  // #272-T10
-  it("voids the record of a job that lost its last attempt", async () => {
+  // #273-T06
+  it("settles the record of a job that lost its last attempt with an unknown cost and the reason no_result", async () => {
     const postgres = await createPostgresTestDatabase();
     const fixture = await createJobQueueFixture({ database: postgres.db });
     const records = createUsageRecordsRepository(
@@ -128,6 +129,33 @@ describePostgres("the usage records on Postgres", () => {
     await fixture.queue.expireStaleJobs();
 
     expect((await fixture.queue.get(job.id))?.status).toBe("failed");
+    expect(await records.get(job.id)).toMatchObject({
+      state: "settled",
+      settledReason: "no_result",
+      costMicroUsd: null,
+      settledAt: fixture.clock.now().toISOString(),
+    });
+  });
+
+  // #272-T10
+  it("voids the record of a job that was cancelled while it ran", async () => {
+    const postgres = await createPostgresTestDatabase();
+    const fixture = await createJobQueueFixture({ database: postgres.db });
+    const records = createUsageRecordsRepository(
+      postgres.db,
+      fixture.workspaceId,
+      fixture.clock.now,
+    );
+    const job = await fixture.enqueueNew();
+    const claimed = await fixture.queue.claimNext("runner-a");
+
+    await fixture.queue.cancelClaimed(
+      job.id,
+      claimed?.leaseToken ?? "",
+      "pull_request_closed",
+    );
+
+    expect((await fixture.queue.get(job.id))?.status).toBe("cancelled");
     expect((await records.get(job.id))?.state).toBe("void");
   });
 

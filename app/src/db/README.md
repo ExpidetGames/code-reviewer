@@ -311,6 +311,11 @@ Migration `20261014150000_create_usage_records` (#272; epic #268). It adds an em
   larger number as unknown). The id is text; readers page through the settled records by `(settled_at, id)`. Rows are
   never deleted. See `src/usage/README.md`.
 
+Migration `20261015200000_add_usage_record_settled_reason` (#273). It adds one nullable column, `settled_reason`, to
+`usage_records` and touches no row: why a record was settled without a report of its run (`no_result`). A check
+allows only that value. A previous release's app instance never names the column, so it keeps working against the
+migrated database; its writes leave the reason empty.
+
 ### Job dispatches
 
 Migration `20261015120000_create_job_dispatches` (#326; epic #316). It adds an empty table and touches no existing row,

@@ -264,6 +264,27 @@ a fallback model reports `usage.fallbackUsed`.
 The result is exactly one line of JSON on stdout: `ok`, `durationMs`, `commentUrl` (or `null`),
 `errorCode` (or `null`), `logTail` (redacted, at most 4 KB), `logTruncated` (true if the runner's log sink, which sees PR-Agent's records at INFO and above,
 held more than the tail shows; output on stdout and stderr is not counted) and `usage` (model, tokens, cost).
+A failed result carries `usage` too, when the run made at least one model call before it failed (a timeout at
+the end, an answer the validator refuses, a publish error, a lost lease, an error nobody expected); a run that
+failed before its first model call reports `null`. The cost follows the rule of a successful run: exact, or
+`null` when any call was unpriced (the token counters are reported either way), never zero for an unknown
+cost. A Dynamic run reads its ledger (`usage_probe.py`, also from the watchdog that ends a run that does not
+stop); a Diff run reports what PR-Agent measured. Some ends report no usage although the model may have been
+used; the app then counts the run with an unknown cost (`settled`, reason `no_result`, `src/usage/README.md`)
+and never as void:
+- the Diff watchdog ends a command that blocks the event loop (`timeout`, `errorReason`
+  `no_result_from_process`: PR-Agent's counters cannot be read from another thread);
+- the loop ends a job process at its hard timeout (`timeout`, reason `no_result_from_process`), the process
+  is killed by a signal, exits without a result line, or prints a result that disagrees with its exit code
+  (`runner_error`, the same reason);
+- a failed result carries a usage the loop cannot read (reason `unreadable_usage`);
+- the runner prints nothing at all and the lease runs out on the last attempt, the app's own hard limit ends the
+  job, or the runner is shut down on the last attempt (no `complete`, or `runner_shutdown`: the app decides).
+
+Not counted at all (void): a failure before the process started (the job could not be parsed or the process
+could not be launched) and a Dynamic run that failed before its first model call. A Diff command that fails while its first call is still in
+flight reports zero calls, because PR-Agent counts only calls that came back: it is void (a known gap, see the
+follow-up of #273).
 The exit code is 0 for `ok` and 1 otherwise. The environment variable `RUNNER_JOB_TIMEOUT_SECONDS`
 (read from the process environment, not handed to PR-Agent) makes the runner stop the command and
 report `timeout`: first by cancelling it, and if it does not react (a call that blocks the process)
