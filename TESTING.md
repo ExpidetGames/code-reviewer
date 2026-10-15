@@ -384,6 +384,11 @@ its own projects: `prepare` (the first-run setup and the GitHub App of the app),
   is pushed and the same comment is edited and lists the finding as resolved. Neither a key nor a token is in the
   page, the runs API, the runner output or what the model was shown. The Playwright run takes about 35 seconds (the journey 20 s), the whole `e2e-dynamic`
   job, with its installations and the build, about 2.5 minutes: far within the budgets of section 1.
+- **T09 of #299** (`dynamic-review.e2e.ts`): a pull request whose head the fake GitHub does not advertise fails the real
+  preparation (`checkout_incomplete`, reason `ref_moved`); the Runs page says Failed and the pull request holds exactly one
+  comment, the failure note of the bot with the code, the reason and the head, and nothing of the title, the description,
+  a file name or a credential. Where the note is written, what it holds and what it never holds are proven at lower levels
+  (`runner/tests/unit/test_dynamic_review_failure_note*.py`, `runner/tests/integration/test_dynamic_review_job.py`).
 - Fakes the lane added: the fake GitHub serves Git over smart HTTP (`fakes/github/git-http.ts`, repositories made with
   `fakes/github/git-fixture.ts`, registered through `POST /__fake/git-repositories`), and the fake LLM can answer as the
   model of an agent (`scriptAgent`), tests in `src/integrations/providers/github-app/fake-github-git.integration.test.ts`
