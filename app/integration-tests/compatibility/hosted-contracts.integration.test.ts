@@ -93,6 +93,7 @@ describe("the examples", () => {
       "DispatchWebhook",
     ]);
     expect(names("examples/worker-container")).toStrictEqual([
+      "WorkerContainerLauncherAdditions",
       "WorkerContainerOverrides",
       "WorkerContainerSpec",
     ]);
@@ -310,6 +311,36 @@ describe("the hardened container spec", () => {
     expectInvalid(container, "WorkerContainerOverrides", {
       pids: { limit: 100000 },
     });
+  });
+
+  // #325-T08
+  it("has no sysctls of its own: they are a per-launcher addition", () => {
+    expectInvalid(container, "WorkerContainerSpec", {
+      ...spec(),
+      sysctls: { "net.ipv6.conf.all.disable_ipv6": "1" },
+    });
+  });
+
+  // #325-T08
+  it("lets a launcher add the two IPv6 switches and nothing else", () => {
+    const both = {
+      "net.ipv6.conf.all.disable_ipv6": "1",
+      "net.ipv6.conf.default.disable_ipv6": "1",
+    };
+
+    expectValid(container, "WorkerContainerLauncherAdditions", {
+      sysctls: both,
+    });
+    expectValid(container, "WorkerContainerLauncherAdditions", {});
+    for (const bad of [
+      { sysctls: { "net.ipv6.conf.all.disable_ipv6": "1" } },
+      { sysctls: { ...both, "net.ipv4.ip_forward": "1" } },
+      { sysctls: { ...both, "net.ipv6.conf.all.disable_ipv6": "0" } },
+      { sysctls: { ...both, "kernel.core_pattern": "|/bin/sh" } },
+      { sysctls: both, privileged: true },
+      { devices: ["/dev/kvm"] },
+    ])
+      expectInvalid(container, "WorkerContainerLauncherAdditions", bad);
   });
 
   // #318-T05

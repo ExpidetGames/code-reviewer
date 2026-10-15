@@ -166,3 +166,12 @@ export interface WorkerContainerOverrides {
     swap?: MemorySize;
   };
 }
+/**
+ * What one launcher variant adds to the spec and the self-hosted compose files do not carry (#325, #345): the two switches that turn IPv6 off in the container's network namespace. Needed where the kernel has only the nf_tables `ip` family, such as the Sandbox VM: the Dynamic-Worker then installs its egress rules as a fallback `ip` table, which does not see IPv6, so IPv6 has to be off and proven off, and the container's /proc/sys is read-only (docker `--sysctl`). The Sandbox-Launcher always adds them; the self-hosted Docker-Launcher and the compose files do not, so a full-mode host changes nothing (the spec has no sysctls key, the parity test with the compose files fails on one). Exactly these two names with the value 1, both together; no other sysctl can be added.
+ */
+export interface WorkerContainerLauncherAdditions {
+  sysctls?: {
+    "net.ipv6.conf.all.disable_ipv6": "1";
+    "net.ipv6.conf.default.disable_ipv6": "1";
+  };
+}
