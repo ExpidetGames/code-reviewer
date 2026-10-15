@@ -71,7 +71,9 @@ The App, the Dispatcher (TypeScript) and the Worker (Python) agree on these file
   #320 and #322 land. `app/src/ci/contract-types/generate.test.ts` checks that the generated types are the
   committed ones; `app/src/runner-api/contract.ts` keeps the API error codes equal to the file.
 - **Runner** (`runner/tests/contract/test_hosted_contracts.py`, with `jsonschema`): the same examples, the same
-  closed objects and the same vectors, with a verifier written independently of the TypeScript one.
+  closed objects and the same vectors, with a verifier written independently of the TypeScript one. `runner/tests/contract/test_worker_api_client_contract.py` runs the
+  Worker's API client (#323) against a recording server that answers with the examples: the routes, the credential only in
+  `Authorization`, request bodies valid against the schemas, an additive field of an answer ignored.
 - **Dispatcher** (`dispatcher/`, #327): validates the same examples with its own tooling against the types in
   `dispatcher/src/contracts/` and runs the vectors against its receiver. Until that project exists nothing
   there is checked, only that the generated copy is current.

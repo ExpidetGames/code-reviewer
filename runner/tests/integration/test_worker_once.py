@@ -320,6 +320,23 @@ def test_a_job_the_app_gave_back_at_fetch_is_not_retried(
     assert reports(tmp_path) == []
 
 
+# #323-T05: the app ended the job (for example a permanent access failure): nothing to run
+def test_a_job_the_app_ended_is_not_retried_and_nothing_runs(
+    app: FakeAppProcess, tmp_path: Path
+) -> None:
+    job = app.enqueue("diff")
+    credential = app.claim(job)
+    ended = {"error": {"code": "RUNNER_JOB_ENDED", "message": "The job was ended."}}
+    app.script("job", [{"status": 409, "body": ended}])
+    clock = RecordingClock()
+
+    code = worker_run(app, job, credential, settings_for(tmp_path, "ok"), tmp_path, clock=clock)
+
+    assert code is WorkerExit.SETUP_ERROR
+    assert clock.pauses == []
+    assert reports(tmp_path) == []
+
+
 # #323-T06
 def test_sigterm_during_the_job_delivers_runner_shutdown_and_exits_with_zero(
     app: FakeAppProcess, tmp_path: Path
