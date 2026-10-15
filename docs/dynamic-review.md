@@ -33,6 +33,7 @@ publishes as one persistent summary comment. The decisions are in epic
 | Worst-case memory and OOM measurements, the decision to run more than one Dynamic job at a time | **Manual step, not done** (needs a real deployment target, see "Capacity") |
 | Full path from a signed webhook to the Run: the pull request title, body and previous-review state in the prompt (#251), the review kind proved for every entry point and the model and usage in Runs (#252), and the privileged `e2e-dynamic` journey with the real pinned OpenCode that publishes the summary (#253) | Shipped (#251, #252, #253) |
 | Recovery when a run wrote the summary and then ended failed | Shipped (#255, #257): the claim names the heads of earlier unsuccessful runs and says when that list was cut, see "Known limitations" |
+| A short failure note in the summary comment when a run fails (not `lease_lost`, not a refused token) | Shipped (#299) |
 | Hosted activation | Needs the hosted egress gate (#82) |
 
 ## How a Dynamic job reaches an engine
@@ -584,6 +585,57 @@ re-check with every engine pin), because of a defect found against the real pinn
 A compaction therefore needs either the engine to keep the format (an upstream fix) or a way for the
 runner to keep it that is not a workaround of the proxy's rules; that is a follow-up. Until then the
 run is bounded by the cost limit and the model's window.
+
+## A failed run leaves a short note on the pull request (#299)
+
+A run that fails used to leave the pull request silent: the reason was only in the Runs view. Now a
+failure that a developer can understand or act on writes one short note into the run's own summary
+comment (the comment of the publisher, the one a successful review is in), so there is never a
+second comment.
+
+**What the note says.** That the Dynamic Review did not complete for a named commit, one fixed
+sentence for the failure, the stable error code and, where the run has one, the stable reason (for
+example `checkout_incomplete` / `budget_preparation`). The sentences are a table in the code
+(`FAILURE_SENTENCES` in `runner/src/code_reviewer_runner/dynamic_review/failure_note.py`): the code
+is translated to words, never the other way round, like the Runs view.
+
+**What it never holds.** Only the fixed text, the code, the reason and the head SHA. No path, file
+name, diff text, log line, model output, provider message or secret: none of them is an input of the
+note. A reason that is not a known stable name is left out (the code stays), and the diagnostic
+detail the Runs view shows for a failure (the log, the checkout counters) is not in the note.
+
+**Which failures.** The codes with a sentence: `checkout_incomplete`, `dynamic_budget_exceeded`,
+`dynamic_model_features_unsupported`, the model provider failures (`llm_auth`, `llm_rate_limit`,
+`llm_timeout`, `llm_unavailable`, `llm_bad_request`, `llm_quota`, `llm_context_length_exceeded`,
+`llm_output_invalid`, `model_unknown`) and `timeout`. Everything else writes nothing and stays visible
+in the Runs view only: `lease_lost`, `git_auth`, `git_forbidden` (the runner cannot write safely),
+and the failures of the job's own setup or of the runner. A unit test classifies every `ErrorCode`
+as one or the other, so a new code cannot be added without that decision. A job that is no longer
+held by its runner writes no note either, as it writes no review.
+
+**Update, do not spam.** The note lives in the same persistent summary comment:
+
+- the same failure on the same head, or a different failure, replaces the note: there is one note;
+- a later successful run replaces it with the review;
+- a failure after an earlier successful review keeps that review's findings, resolved history and
+  review state exactly as they are and shows the note on top of them (the failed head is not recorded
+  as reviewed), also when that review found nothing; a pull request that was never reviewed shows the
+  note alone, not "0 active findings" (a hidden mark in the comment says so, because its state looks
+  like that of a clean review);
+- the state of the comment is validated as for a review: a comment that is not the bot's is never
+  edited, and a failure whose head the comment cannot account for (a newer review is there) writes
+  nothing. A state that a review would reset is not dropped for a note;
+- the first failure creates the comment with a review state that holds no findings and the failed
+  head, a head the app reports as attempted (#255), so the next run, of any runner version, reads it
+  like any other summary.
+
+**Fail closed.** If writing the note fails (GitHub unreachable, a permission, anything), the run keeps
+its original error code and reason; the note never changes the verdict. The result log says
+`failure note: written` or `failure note: not written (<code>)`, a stable code and never the text of
+the failure.
+
+**Not covered.** The process watchdog that ends a job whose runner did not stop in time writes no
+note: it cannot write safely while the job is being killed. That failure is in the Runs view.
 
 ## Errors an operator sees
 
