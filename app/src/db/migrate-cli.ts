@@ -11,7 +11,7 @@
 // relative paths, and `server-only` resolves to nothing under that condition.
 import type { MigrationProvider } from "kysely/migration";
 import { loadMigrationDatabaseConfig } from "./config.ts";
-import { DatabaseError } from "./errors.ts";
+import { DatabaseError, errorCode } from "./errors.ts";
 import { migrateToLatest } from "./migrate.ts";
 import { migrationProvider } from "./migrations/index.ts";
 import {
@@ -53,8 +53,17 @@ export async function runMigrateCommand(
       await db.destroy().catch(() => undefined);
     }
   } catch (error) {
-    if (!(error instanceof DatabaseError)) throw error;
-    io.err(`[migrate] ${error.code}: ${error.message}`);
+    if (error instanceof DatabaseError) {
+      io.err(`[migrate] ${error.code}: ${error.message}`);
+      return 1;
+    }
+    // Not a DatabaseError: the lock connection failed or was lost, or the connection dropped after the reachability
+    // check. The cause is not repeated (it could carry a connection string); the system code, if any, says what.
+    const system = errorCode(error);
+    io.err(
+      `[migrate] MIGRATE_FAILED: the migration ended with an unexpected error${system === undefined ? "" : ` (${system})`}. ` +
+        "Nothing of a failed batch is kept; check that DATABASE_URL_MIGRATE is a direct, reachable connection and run it again.",
+    );
     return 1;
   }
 }
