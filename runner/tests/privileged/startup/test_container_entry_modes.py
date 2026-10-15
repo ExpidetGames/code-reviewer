@@ -188,7 +188,9 @@ def test_worker_once_runs_the_startup_then_talks_to_the_given_app_with_the_crede
     # The app refuses the credential: the Worker could not fetch its job, a setup error (2).
     assert done.returncode == 2, done.stderr
     assert seen, f"the Worker never asked the app: {done.stderr}"
-    assert all(path.startswith("/api/workers/v1/") for _, path, _ in seen), seen
+    # The Worker contract (contracts/worker-api.v1.json) and the version check that precedes it.
+    allowed = ("/api/workers/v1/", "/api/runners/v1/version")
+    assert all(path.startswith(allowed) for _, path, _ in seen), seen
     assert all(header == f"Bearer {CREDENTIAL}" for _, _, header in seen), seen
     # The credential is on no output, and the startup ran first: the verdict file is there.
     assert CREDENTIAL not in done.stdout + done.stderr

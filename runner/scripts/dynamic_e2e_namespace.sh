@@ -106,21 +106,21 @@ make_root_read_only() {
   done < <(awk '{ for (i = 1; i <= NF; i++) if ($i == "-") print $5, $(i + 1) }' /proc/self/mountinfo)
   [ "$failed" = 0 ]
 }
-PROBE_LOG="$STAGE/probe.log"
+PROBE_LOG=/run/lane-probe.log
 export -f probe_as_container make_root_read_only
 export LANE_RUNNER_DIR PROBE_LOG
 read_only_verdict="$(unshare --mount -- bash -c 'make_root_read_only && probe_as_container | tail -n 1')" \
   || fail "the probe entry mode could not be run with a read-only root"
 case "$read_only_verdict" in
   *'"engines":["pr-agent","opencode"]'*'"reasons":[]'*) ;;
-  *) tail -n 15 "$PROBE_LOG" >&2 || true
+  *) [ ! -f "$PROBE_LOG" ] || tail -n 15 "$PROBE_LOG" >&2
      fail "the probe entry mode does not advertise opencode on the lane's layout with a read-only root (verdict: $read_only_verdict)" ;;
 esac
 writable_verdict="$(probe_as_container | tail -n 1)" \
   || fail "the probe entry mode could not be run with a writable root"
 case "$writable_verdict" in
   *'"engines":["pr-agent"]'*root_filesystem_writable*) ;;
-  *) tail -n 15 "$PROBE_LOG" >&2 || true
+  *) [ ! -f "$PROBE_LOG" ] || tail -n 15 "$PROBE_LOG" >&2
      fail "the probe entry mode advertises opencode, or names another reason, on a writable root (verdict: $writable_verdict)" ;;
 esac
 echo "probe entry mode: opencode with a read-only root, not with a writable one"
