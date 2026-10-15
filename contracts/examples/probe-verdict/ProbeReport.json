@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "status": "denied",
+  "ok": false,
+  "engines": ["pr-agent"],
+  "reasons": ["ipv6_not_disabled"],
+  "checkedAt": "2026-10-15T12:00:00.000Z"
+}

@@ -207,6 +207,38 @@ describe("the Dispatcher core", () => {
     expect(recorded.calls).toStrictEqual([]);
   });
 
+  // #331-T01
+  it("asks the launcher for the engine of the job's kind, and for nothing in particular when the job is not known", async () => {
+    const diff = app.enqueue();
+    const dynamic = app.enqueue({ reviewKind: "dynamic" });
+    const { core, launcher } = build();
+
+    await handled(core.handle({ jobId: diff, reviewKind: "diff" }));
+    await handled(core.handle({ jobId: dynamic, reviewKind: "dynamic" }));
+    await handled(core.handle({}));
+
+    expect(launcher.wanted).toStrictEqual(["pr-agent", "opencode", undefined]);
+  });
+
+  // #331-T02
+  it("answers unavailable with the launcher's own retry time while a probe is on its way, and claims nothing", async () => {
+    const jobId = app.enqueue({ reviewKind: "dynamic" });
+    const { core, recorded, logger } = build(
+      {},
+      { capabilitiesPendingSeconds: 25 },
+    );
+
+    const result = await core.handle({ jobId, reviewKind: "dynamic" });
+
+    expect(result).toStrictEqual({
+      outcome: "unavailable",
+      retryAfterSeconds: 25,
+    });
+    expect(recorded.calls).toStrictEqual([]);
+    expect(logger.text()).toContain("capabilities_pending");
+    expect(logger.text()).not.toContain("capabilities_failed");
+  });
+
   // #327-T06
   it("sends the pool cap with the claim and treats 204 at the cap as ignored", async () => {
     const { core, launcher, recorded } = build({ maxRunning: 2 });

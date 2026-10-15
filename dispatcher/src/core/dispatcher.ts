@@ -17,6 +17,7 @@ import {
 } from "./app-client.ts";
 import { systemClock } from "./clock.ts";
 import {
+  CapabilitiesPending,
   ENGINE_BY_KIND,
   type Clock,
   type CoreSettings,
@@ -51,6 +52,11 @@ export type CoreDependencies = {
   requestTimeoutMs?: number;
 };
 
+type EnginesAnswer =
+  | { kind: "usable"; engines: Engine[] }
+  | { kind: "not_capable" }
+  | { kind: "retry"; retryAfterSeconds: number };
+
 type Abort = { signal: AbortSignal; why: () => string | undefined };
 
 function clampRetry(seconds: number | undefined, fallback: number): number {
@@ -74,26 +80,43 @@ export function createDispatcherCore(deps: CoreDependencies): DispatcherCore {
   let launching = 0;
   let versionOkUntil = 0;
 
-  async function engines(
-    hint: JobHint,
-  ): Promise<Engine[] | "not_capable" | "unavailable"> {
+  async function engines(hint: JobHint): Promise<EnginesAnswer> {
     let offered: readonly Engine[];
     try {
-      offered = await launcher.capabilities(shutdown.signal);
-    } catch {
+      offered = await launcher.capabilities(
+        shutdown.signal,
+        hint.reviewKind === undefined
+          ? undefined
+          : ENGINE_BY_KIND[hint.reviewKind],
+      );
+    } catch (error) {
+      // Not a failure: an engine is being proven and the answer is "ask again soon".
+      if (error instanceof CapabilitiesPending) {
+        logger.info("capabilities_pending", { reviewKind: hint.reviewKind });
+        return {
+          kind: "retry",
+          retryAfterSeconds: clampRetry(
+            error.retryAfterSeconds,
+            DEFAULT_RETRY_UNAVAILABLE_SECONDS,
+          ),
+        };
+      }
       logger.error("capabilities_failed");
-      return "unavailable";
+      return {
+        kind: "retry",
+        retryAfterSeconds: DEFAULT_RETRY_UNAVAILABLE_SECONDS,
+      };
     }
     const usable = settings.engines.filter((engine) =>
       offered.includes(engine),
     );
-    if (usable.length === 0) return "not_capable";
+    if (usable.length === 0) return { kind: "not_capable" };
     if (
       hint.reviewKind !== undefined &&
       !usable.includes(ENGINE_BY_KIND[hint.reviewKind])
     )
-      return "not_capable";
-    return usable;
+      return { kind: "not_capable" };
+    return { kind: "usable", engines: usable };
   }
 
   async function appSupportsTheSplit(): Promise<
@@ -106,13 +129,13 @@ export function createDispatcherCore(deps: CoreDependencies): DispatcherCore {
   }
 
   async function handle(hint: JobHint): Promise<HandleResult> {
-    const usable = await engines(hint);
-    if (usable === "unavailable")
+    const answer = await engines(hint);
+    if (answer.kind === "retry")
       return {
         outcome: "unavailable",
-        retryAfterSeconds: DEFAULT_RETRY_UNAVAILABLE_SECONDS,
+        retryAfterSeconds: answer.retryAfterSeconds,
       };
-    if (usable === "not_capable") {
+    if (answer.kind === "not_capable") {
       logger.info("not_capable", { reviewKind: hint.reviewKind });
       return { outcome: "not_capable" };
     }
@@ -137,7 +160,7 @@ export function createDispatcherCore(deps: CoreDependencies): DispatcherCore {
         };
       }
       const claimed = await app.claim({
-        engines: usable,
+        engines: answer.engines,
         ...(hint.jobId === undefined ? {} : { jobId: hint.jobId }),
         maxRunning: settings.maxRunning,
       });
