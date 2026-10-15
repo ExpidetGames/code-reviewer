@@ -5,6 +5,9 @@ from the App with the dispatcher credential, receives the per-job credential, st
 Launcher and hands the job over. It never reviews, and it never sees the git token or the model key: the App
 reveals those to the Worker when the Worker fetches its job.
 
+The words used here and the interfaces are in [`docs/dispatcher.md`](../docs/dispatcher.md); deploying it is in
+[`docs/deployment-vercel.md`](../docs/deployment-vercel.md).
+
 ```
 App ──signed POST /dispatch──▶ Trigger ──▶ core ──claim──▶ App
                                             │  ◀── per-job credential

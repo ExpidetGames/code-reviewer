@@ -6,6 +6,8 @@ already built. This document is the runbook for that snapshot: how it is made, w
 back to the previous one and what happens to old ones. The code is `dispatcher/src/snapshot/`; the workflow is
 `.github/workflows/golden-snapshot.yml`; the Sandbox double the tests use is `fakes/vercel-sandbox/`.
 
+The place of the snapshot in a whole deployment, and the order of the steps around it, is in [`deployment-vercel.md`](deployment-vercel.md).
+
 ## What the pipeline does
 
 `pnpm --dir dispatcher snapshot:build --context <tgz> --vm-prepare <sh> --out <json> [options]` (the workflow runs it).
