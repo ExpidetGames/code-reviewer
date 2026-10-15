@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { DispatcherAppFake } from "../../../fakes/dispatcher-app/server.ts";
 import { createApp } from "../app.ts";
 import { createBackgroundTracker } from "../background.ts";
-import { CapabilitiesPending } from "../core/types.ts";
+import { CapabilitiesPending, LaunchError } from "../core/types.ts";
 import { createFakeLauncher } from "../launchers/fake.ts";
 import { ManualClock, settle } from "../test-support/manual-clock.ts";
 import {
@@ -58,6 +58,7 @@ function setup(
     launcher: base,
     probe,
     background: background.run,
+    now: () => clock.now(),
   });
   const signal = new AbortController().signal;
   return {
@@ -103,10 +104,37 @@ describe("a Launcher behind the capability probe", () => {
   });
 
   // #331-T02
-  it("does not advertise opencode when the probe could not run", async () => {
-    const { launcher, signal, probe } = setup(() =>
+  it("answers a Dynamic job with a retry, not with not-capable, when the probe could not run", async () => {
+    const { launcher, signal, probe, clock } = setup(() =>
       Promise.reject(new ProbeRunError("sandbox_unavailable")),
     );
+    await probe.refresh();
+
+    // Right after the failure the answer counts for the whole failure time; later, for what is left of it, but
+    // never for less than the pending time.
+    const asked = async () => {
+      try {
+        await launcher.capabilities(signal, "opencode");
+      } catch (error) {
+        return error;
+      }
+      return undefined;
+    };
+    const first = await asked();
+    expect(first).toBeInstanceOf(CapabilitiesPending);
+    expect((first as CapabilitiesPending).retryAfterSeconds).toBe(60);
+    await clock.advance(50_000);
+    expect(((await asked()) as CapabilitiesPending).retryAfterSeconds).toBe(20);
+    // The poll style (nothing wanted in particular) and a Diff job get PR-Agent as ever.
+    expect(await launcher.capabilities(signal)).toStrictEqual(["pr-agent"]);
+    expect(await launcher.capabilities(signal, "pr-agent")).toStrictEqual([
+      "pr-agent",
+    ]);
+  });
+
+  // #331-R02
+  it("answers not-capable for a real denial, and does not ask to be asked again", async () => {
+    const { launcher, signal, probe } = setup(() => Promise.resolve(DENYING));
     await probe.refresh();
 
     expect(await launcher.capabilities(signal, "opencode")).toStrictEqual([
@@ -220,9 +248,9 @@ describe("a Launcher behind the capability probe", () => {
     );
     await launcher.capabilities(signal, "opencode").catch(() => undefined);
     await background.drain(1000);
-    expect(await launcher.capabilities(signal, "opencode")).toStrictEqual([
-      "pr-agent",
-    ]);
+    await expect(
+      launcher.capabilities(signal, "opencode"),
+    ).rejects.toBeInstanceOf(CapabilitiesPending);
 
     await clock.advance(61_000);
     await launcher.capabilities(signal, "opencode").catch(() => undefined);
@@ -251,12 +279,66 @@ describe("a Launcher behind the capability probe", () => {
     expect(base.launches).toStrictEqual([spec]);
   });
 
+  // #331-R06
+  it("refuses to launch a Dynamic job without a proof that still counts, as a retryable error", async () => {
+    const { launcher, base, signal, probe, clock } = setup(() =>
+      Promise.resolve(PASSING),
+    );
+    const spec = {
+      appUrl: "http://app.invalid",
+      jobId: "job",
+      credential: "dummy",
+      kind: "dynamic" as const,
+      timeoutSeconds: 60,
+      config: {},
+    };
+
+    // Never probed.
+    await expect(launcher.launch(spec, signal)).rejects.toMatchObject({
+      code: "capability_not_proven",
+      retryable: true,
+    });
+    await probe.refresh();
+    await launcher.launch(spec, signal);
+    expect(base.launches).toHaveLength(1);
+
+    // The proof ran out between the claim and the launch.
+    await clock.advance(HOUR + 1000);
+    await expect(launcher.launch(spec, signal)).rejects.toBeInstanceOf(
+      LaunchError,
+    );
+    expect(base.launches).toHaveLength(1);
+  });
+
+  // #331-R06
+  it("refuses a Dynamic launch after a denial, and never asks of a Diff launch", async () => {
+    const { launcher, base, signal, probe } = setup(() =>
+      Promise.resolve(DENYING),
+    );
+    await probe.refresh();
+    const spec = {
+      appUrl: "http://app.invalid",
+      jobId: "job",
+      credential: "dummy",
+      timeoutSeconds: 60,
+      config: {},
+    };
+
+    await expect(
+      launcher.launch({ ...spec, kind: "dynamic" }, signal),
+    ).rejects.toMatchObject({ code: "capability_not_proven" });
+    await launcher.launch({ ...spec, kind: "diff" }, signal);
+
+    expect(base.launches.map((entry) => entry.kind)).toStrictEqual(["diff"]);
+  });
+
   // #331-T05
   it("forces a probe on request, whatever the age of the last one, and reports it with the time", async () => {
-    const { launcher, signal, probe, calls } = setup(() =>
+    const { launcher, signal, probe, calls, clock } = setup(() =>
       Promise.resolve(PASSING),
     );
     await probe.refresh();
+    await clock.advance(61_000);
 
     const report = await launcher.probe?.(signal);
 
@@ -265,8 +347,8 @@ describe("a Launcher behind the capability probe", () => {
       status: "passed",
       engines: ["pr-agent", "opencode"],
       reasons: [],
-      // The probe's clock is epoch milliseconds; the test's starts at 0.
-      checkedAt: "1970-01-01T00:00:00.000Z",
+      // The probe's clock is epoch milliseconds; the test's starts at 0 and has moved 61 seconds.
+      checkedAt: "1970-01-01T00:01:01.000Z",
     });
   });
 
@@ -328,7 +410,7 @@ describe("a Dispatcher behind the capability probe, against the fake App", () =>
   }
 
   // #331-T07
-  it("leaves a Dynamic job queued, unclaimed, when the probe fails, and still runs a Diff job", async () => {
+  it("leaves a Dynamic job queued and unclaimed while the probe fails, asks the App to try again, and still runs a Diff job", async () => {
     const dynamicJob = fake.enqueue({ reviewKind: "dynamic" });
     const diffJob = fake.enqueue();
     const { call, background, base, calls } = dispatcher(() =>
@@ -338,15 +420,14 @@ describe("a Dispatcher behind the capability probe, against the fake App", () =>
     // The first call finds no proof: it starts the probe and asks to be asked again.
     const waiting = await call(dynamicJob, "dynamic");
     expect(waiting.status).toBe(503);
-    expect(waiting.headers.get("retry-after")).toMatch(/^\d+$/);
+    expect(waiting.headers.get("retry-after")).toBe("20");
     await background.drain(1000);
-    // The probe failed: PR-Agent only, so the Dynamic job is not capable here.
+    // The probe failed: no verdict, so no "not capable" (the App would park the job for ten minutes): a retry.
     const refused = await call(dynamicJob, "dynamic");
-    expect(refused.status).toBe(200);
-    expect(await refused.json()).toMatchObject({
-      status: "ignored",
-      reason: "not_capable",
-    });
+    expect(refused.status).toBe(503);
+    expect(Number(refused.headers.get("retry-after"))).toBeGreaterThanOrEqual(
+      20,
+    );
 
     const diff = await call(diffJob, "diff");
     expect(diff.status).toBe(202);
@@ -359,6 +440,47 @@ describe("a Dispatcher behind the capability probe, against the fake App", () =>
     ).toStrictEqual([]);
     expect(base.launches.map((spec) => spec.jobId)).toStrictEqual([diffJob]);
     expect(calls()).toBe(1);
+  });
+
+  // #331-R02
+  it("tries again once the failure time is over, and claims the job when the platform has recovered", async () => {
+    const dynamicJob = fake.enqueue({ reviewKind: "dynamic" });
+    const { call, background, base, clock } = dispatcher((n) =>
+      n === 1
+        ? Promise.reject(new ProbeRunError("sandbox_unavailable"))
+        : Promise.resolve(PASSING),
+    );
+    await call(dynamicJob, "dynamic");
+    await background.drain(1000);
+    expect((await call(dynamicJob, "dynamic")).status).toBe(503);
+
+    await clock.advance(61_000);
+    expect((await call(dynamicJob, "dynamic")).status).toBe(503);
+    await background.drain(1000);
+    const accepted = await call(dynamicJob, "dynamic");
+    await background.drain(1000);
+
+    expect(accepted.status).toBe(202);
+    expect(base.launches.map((spec) => spec.jobId)).toStrictEqual([dynamicJob]);
+  });
+
+  // #331-R02
+  it("answers 200 not_capable for a denial, which the App stops resending", async () => {
+    const dynamicJob = fake.enqueue({ reviewKind: "dynamic" });
+    const { call, background } = dispatcher(() => Promise.resolve(DENYING));
+    await call(dynamicJob, "dynamic");
+    await background.drain(1000);
+
+    const refused = await call(dynamicJob, "dynamic");
+
+    expect(refused.status).toBe(200);
+    expect(await refused.json()).toMatchObject({
+      status: "ignored",
+      reason: "not_capable",
+    });
+    expect(fake.requests().filter((r) => r.route === "claim")).toStrictEqual(
+      [],
+    );
   });
 
   // #331-T01

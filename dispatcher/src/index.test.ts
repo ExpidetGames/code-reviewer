@@ -113,7 +113,7 @@ describe("the Vercel entry", () => {
   });
 
   // #331-T02
-  it("advertises no Dynamic engine while the canary cannot be made, and the App is told it is not capable", async () => {
+  it("claims no Dynamic job while the canary cannot be made, and the App is told to try again", async () => {
     stubEnvironment();
     stubSandbox();
     sdk.create.mockRejectedValue(
@@ -137,13 +137,12 @@ describe("the Vercel entry", () => {
     await call();
     await waitFor(() => sdk.create.mock.calls.length === 1, "the canary VM");
 
-    // The failed probe is remembered for a minute: no second VM, and the call is answered `not_capable`.
+    // The failed probe is remembered for a minute: no second VM, and the App is told to try again after what is
+    // left of that minute (not "not capable", which it would hold against the job for ten minutes).
     await vi.waitFor(async () => {
       const response = await call();
-      expect(await response.json()).toMatchObject({
-        status: "ignored",
-        reason: "not_capable",
-      });
+      expect(response.status).toBe(503);
+      expect(Number(response.headers.get("retry-after"))).toBeGreaterThan(20);
     });
     expect(sdk.create).toHaveBeenCalledTimes(1);
   });

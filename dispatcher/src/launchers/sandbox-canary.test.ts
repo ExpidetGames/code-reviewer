@@ -11,6 +11,7 @@ import {
   recordingLogger,
   type RecordedLogger,
 } from "../test-support/harness.ts";
+import { CapabilitiesPending } from "../core/types.ts";
 import { ManualClock, settle } from "../test-support/manual-clock.ts";
 import {
   createSandboxCanary,
@@ -381,9 +382,11 @@ describe("a Sandbox-Launcher behind the capability probe of its canary VM", () =
     service.failNextCreate(new SandboxServiceError("unavailable"));
     await probed.capabilities(signal(), "opencode").catch(() => undefined);
     await settled(background);
-    expect(await probed.capabilities(signal(), "opencode")).toStrictEqual([
-      "pr-agent",
-    ]);
+    // No verdict: a retry for the App, not "not capable".
+    await expect(
+      probed.capabilities(signal(), "opencode"),
+    ).rejects.toBeInstanceOf(CapabilitiesPending);
+    expect(await probed.capabilities(signal())).toStrictEqual(["pr-agent"]);
 
     await clock.advance(61_000);
     await probed.capabilities(signal(), "opencode").catch(() => undefined);

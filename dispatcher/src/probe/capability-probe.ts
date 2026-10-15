@@ -13,13 +13,16 @@
 // (a minute), so a platform that comes back is used again soon, and an outage does not create a VM per wake-up.
 // Platform-free: the run itself is a function the caller brings.
 import type { Clock, Engine, Logger } from "../core/types.ts";
+import { probeFailureCode, type ProbeFailureCode } from "./failure-codes.ts";
 import { parseProbeOutput, type ProbeReason } from "./verdict.ts";
 
 export const DEFAULT_PROBE_TTL_MS = 60 * 60 * 1000;
 export const DEFAULT_PROBE_FAILURE_TTL_MS = 60 * 1000;
 export const DEFAULT_PROBE_TIMEOUT_MS = 150 * 1000;
-
-const STABLE_CODE = /^[a-z][a-z0-9_]{0,63}$/;
+/** A forced probe (`POST /probe`) is served from an answer younger than this instead of starting another VM. */
+export const DEFAULT_PROBE_FORCE_REUSE_MS = 60 * 1000;
+/** After a timeout, how long to wait for the run to finish stopping what it started (the canary's VM). */
+export const DEFAULT_PROBE_ABORT_GRACE_MS = 10 * 1000;
 
 /** A probe that could not be run. The code is stable; the message is not read by anyone. */
 export class ProbeRunError extends Error {
@@ -48,8 +51,8 @@ export type ProbeOutcome = {
   engines: Engine[];
   /** Why the container left `opencode` out (`denied`). */
   reasons: ProbeReason[];
-  /** Why no verdict was read (`failed`): a launch error code, `probe_timeout`, `probe_unreadable`, `probe_error`. */
-  failure?: string;
+  /** Why no verdict was read (`failed`): a code of the closed list (`failure-codes.ts`). */
+  failure?: ProbeFailureCode;
   /** Milliseconds on the probe's clock when the answer was read. */
   checkedAt: number;
   /** Milliseconds on the probe's clock until which the answer counts. */
@@ -65,6 +68,10 @@ export type CapabilityProbeOptions = {
   ttlMs?: number;
   failureTtlMs?: number;
   timeoutMs?: number;
+  /** A forced probe is served from an answer younger than this (0: never). */
+  forceReuseMs?: number;
+  /** How long a timed out run may take to finish stopping what it started before the probe answers anyway. */
+  abortGraceMs?: number;
 };
 
 export interface CapabilityProbe {
@@ -78,18 +85,12 @@ export interface CapabilityProbe {
   ensure(): Promise<ProbeOutcome> | undefined;
   /** Runs a probe now, or joins the one that runs, whatever the age of the last answer. Never rejects. */
   refresh(): Promise<ProbeOutcome>;
-}
-
-function stableCode(error: unknown, fallback: string): string {
-  if (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    typeof error.code === "string" &&
-    STABLE_CODE.test(error.code)
-  )
-    return error.code;
-  return fallback;
+  /**
+   * A forced probe (`POST /probe`): joins the one that runs, else serves the last answer (any status) when it is
+   * younger than the reuse time, else runs one. A forced probe that only failed (the platform, a timeout) never
+   * replaces a pass that still counts, though the caller is told of the failure; a real denial does replace it.
+   */
+  force(): Promise<ProbeOutcome>;
 }
 
 export function createCapabilityProbe(
@@ -99,7 +100,12 @@ export function createCapabilityProbe(
   const ttlMs = options.ttlMs ?? DEFAULT_PROBE_TTL_MS;
   const failureTtlMs = options.failureTtlMs ?? DEFAULT_PROBE_FAILURE_TTL_MS;
   const timeoutMs = options.timeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS;
+  const forceReuseMs = options.forceReuseMs ?? DEFAULT_PROBE_FORCE_REUSE_MS;
+  const abortGraceMs = options.abortGraceMs ?? DEFAULT_PROBE_ABORT_GRACE_MS;
+  /** The answer that counts for the Launcher (never replaced by a bare failure while it is valid). */
   let current: ProbeOutcome | undefined;
+  /** The latest answer of any status: what a forced probe may reuse. */
+  let last: ProbeOutcome | undefined;
   let running: Promise<ProbeOutcome> | undefined;
 
   function fresh(): ProbeOutcome | undefined {
@@ -108,7 +114,8 @@ export function createCapabilityProbe(
       : undefined;
   }
 
-  function failed(code: string): ProbeOutcome {
+  function failed(value: unknown): ProbeOutcome {
+    const code = probeFailureCode(value);
     const at = now();
     logger.warn("probe_failed", { code });
     return {
@@ -127,8 +134,9 @@ export function createCapabilityProbe(
     const timer = clock
       .sleep(timeoutMs, finished.signal)
       .then(() => (finished.signal.aborted ? undefined : ("timeout" as const)));
+    let attempt: Promise<string> | undefined;
     try {
-      const attempt = run(stop.signal);
+      attempt = run(stop.signal);
       // A run that ends after its timeout must not be an unhandled rejection.
       attempt.catch(() => undefined);
       const result = await Promise.race([
@@ -137,6 +145,17 @@ export function createCapabilityProbe(
       ]);
       if (result === "timeout" || result === undefined) {
         stop.abort();
+        // The VM is stopped by the run's own cleanup, which must be finished before the work that holds the
+        // function alive ends (`waitUntil`): wait for it, but not for ever.
+        const grace = new AbortController();
+        await Promise.race([
+          attempt.then(
+            () => undefined,
+            () => undefined,
+          ),
+          clock.sleep(abortGraceMs, grace.signal),
+        ]);
+        grace.abort();
         return failed("probe_timeout");
       }
       const verdict = parseProbeOutput(result.stdout);
@@ -162,7 +181,11 @@ export function createCapabilityProbe(
       };
     } catch (error) {
       stop.abort();
-      return failed(stableCode(error, "probe_error"));
+      return failed(
+        typeof error === "object" && error !== null && "code" in error
+          ? error.code
+          : undefined,
+      );
     } finally {
       finished.abort();
     }
@@ -172,7 +195,11 @@ export function createCapabilityProbe(
     if (running !== undefined) return running;
     const started = execute()
       .then((outcome) => {
-        current = outcome;
+        last = outcome;
+        // A probe that only failed does not take away a pass that still counts: the platform had a bad minute,
+        // the container did not change its answer. A denial is the container's answer and does replace it.
+        if (outcome.status !== "failed" || fresh()?.status !== "passed")
+          current = outcome;
         return outcome;
       })
       .finally(() => {
@@ -189,5 +216,15 @@ export function createCapabilityProbe(
       return refresh();
     },
     refresh,
+    force() {
+      if (running !== undefined) return running;
+      if (
+        last !== undefined &&
+        forceReuseMs > 0 &&
+        now() - last.checkedAt < forceReuseMs
+      )
+        return Promise.resolve(last);
+      return refresh();
+    },
   };
 }

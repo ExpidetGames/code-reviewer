@@ -19,7 +19,13 @@ type Script = (call: number, signal: AbortSignal) => Promise<string>;
 
 function setup(
   script: Script,
-  options: { ttlMs?: number; failureTtlMs?: number; timeoutMs?: number } = {},
+  options: {
+    ttlMs?: number;
+    failureTtlMs?: number;
+    timeoutMs?: number;
+    forceReuseMs?: number;
+    abortGraceMs?: number;
+  } = {},
 ) {
   const clock = new ManualClock();
   const logger = recordingLogger();
@@ -109,6 +115,9 @@ describe("the capability probe", () => {
     await settle();
     expect(calls[0]?.aborted).toBe(false);
     await clock.advance(2 * MINUTE);
+    // A run that never stops what it started is waited for during the grace time and no longer.
+    await settle();
+    await clock.advance(10_000);
 
     expect(await pending).toMatchObject({
       status: "failed",
@@ -269,5 +278,180 @@ describe("the capability probe", () => {
     const outcome = await probe.refresh();
 
     expect(outcome.checkedAt).toBe(5000);
+  });
+
+  // #331-R04
+  it("names an error it does not know with probe_error, and a code that is not on the closed list too", async () => {
+    const { probe } = setup(() =>
+      Promise.reject(new ProbeRunError("a1b2c3d4e5f6a1b2c3d4")),
+    );
+
+    expect(await probe.refresh()).toMatchObject({
+      status: "failed",
+      failure: "probe_error",
+    });
+  });
+
+  // #331-R03
+  it("serves a forced probe from an answer younger than the reuse time, and runs a new one after it", async () => {
+    const { probe, clock, calls } = setup(() => Promise.resolve(PASSING), {
+      forceReuseMs: 60_000,
+    });
+    const first = await probe.force();
+
+    await clock.advance(59_000);
+    const again = await probe.force();
+    expect(again).toStrictEqual(first);
+    expect(calls).toHaveLength(1);
+
+    await clock.advance(2_000);
+    await probe.force();
+    expect(calls).toHaveLength(2);
+  });
+
+  // #331-R03
+  it("runs every forced probe when the reuse time is zero", async () => {
+    const { probe, calls } = setup(() => Promise.resolve(PASSING), {
+      forceReuseMs: 0,
+    });
+
+    await probe.force();
+    await probe.force();
+
+    expect(calls).toHaveLength(2);
+  });
+
+  // #331-R03
+  it("reuses a young failure too: the reuse time protects the platform, not only a pass", async () => {
+    const { probe, calls } = setup(() =>
+      Promise.reject(new ProbeRunError("sandbox_unavailable")),
+    );
+
+    const first = await probe.force();
+    const again = await probe.force();
+
+    expect(first.status).toBe("failed");
+    expect(again).toStrictEqual(first);
+    expect(calls).toHaveLength(1);
+  });
+
+  // #331-R03
+  it("does not let a forced probe that failed overwrite a pass that still counts, but still reports the failure", async () => {
+    const { probe, clock } = setup(
+      (call) =>
+        call === 1
+          ? Promise.resolve(PASSING)
+          : Promise.reject(new ProbeRunError("probe_exec_failed")),
+      { forceReuseMs: 1000 },
+    );
+    const passed = await probe.force();
+    await clock.advance(5_000);
+
+    const forced = await probe.force();
+
+    expect(forced).toMatchObject({
+      status: "failed",
+      failure: "probe_exec_failed",
+    });
+    expect(probe.fresh()).toStrictEqual(passed);
+  });
+
+  // #331-R03
+  it("does not let a forced probe that timed out overwrite a pass either", async () => {
+    const { probe, clock } = setup(
+      (call) =>
+        call === 1
+          ? Promise.resolve(PASSING)
+          : new Promise<string>(() => undefined),
+      { forceReuseMs: 1000, timeoutMs: 30_000 },
+    );
+    const passed = await probe.force();
+    await clock.advance(5_000);
+
+    const pending = probe.force();
+    await settle();
+    await clock.advance(30_000);
+    await clock.advance(10_000);
+
+    expect(await pending).toMatchObject({
+      status: "failed",
+      failure: "probe_timeout",
+    });
+    expect(probe.fresh()).toStrictEqual(passed);
+  });
+
+  // #331-R03
+  it("lets a forced probe that got a real denial overwrite a pass", async () => {
+    const { probe, clock } = setup(
+      (call) => Promise.resolve(call === 1 ? PASSING : DENYING),
+      { forceReuseMs: 1000 },
+    );
+    await probe.force();
+    await clock.advance(5_000);
+
+    const forced = await probe.force();
+
+    expect(forced.status).toBe("denied");
+    expect(probe.fresh()?.status).toBe("denied");
+  });
+
+  // #331-R03
+  it("lets a failure overwrite a pass that no longer counts", async () => {
+    const { probe, clock } = setup((call) =>
+      call === 1
+        ? Promise.resolve(PASSING)
+        : Promise.reject(new ProbeRunError("sandbox_network")),
+    );
+    await probe.force();
+    await clock.advance(HOUR + 1000);
+
+    await probe.force();
+
+    expect(probe.fresh()?.status).toBe("failed");
+  });
+
+  // #331-R05
+  it("does not return after a timeout before the run has stopped what it started, within the grace time", async () => {
+    let stopped = false;
+    const { probe, clock } = setup(
+      (_call, signal) =>
+        new Promise<string>((_resolve, reject) => {
+          signal.addEventListener("abort", () => {
+            // The canary's stop call takes a while.
+            setTimeout(() => {
+              stopped = true;
+              reject(new ProbeRunError("probe_aborted"));
+            }, 30);
+          });
+        }),
+      { timeoutMs: 20_000, abortGraceMs: 10_000 },
+    );
+
+    const pending = probe.refresh();
+    await settle();
+    await clock.advance(20_000);
+    const outcome = await pending;
+
+    expect(stopped).toBe(true);
+    expect(outcome).toMatchObject({
+      status: "failed",
+      failure: "probe_timeout",
+    });
+  });
+
+  // #331-R05
+  it("gives up waiting for a run that never stops after the grace time", async () => {
+    const { probe, clock } = setup(() => new Promise<string>(() => undefined), {
+      timeoutMs: 20_000,
+      abortGraceMs: 10_000,
+    });
+
+    const pending = probe.refresh();
+    await settle();
+    await clock.advance(20_000);
+    await settle();
+    await clock.advance(10_000);
+
+    expect(await pending).toMatchObject({ failure: "probe_timeout" });
   });
 });
