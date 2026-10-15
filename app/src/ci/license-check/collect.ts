@@ -154,14 +154,19 @@ export const UV_LICENSES_ARGS = [
 /** Starts pnpm and uv; both need their dependencies installed (`make install`). */
 export function collectAll(repoRoot: string): Collected {
   const appDir = `${repoRoot}/app`;
+  const dispatcherDir = `${repoRoot}/dispatcher`;
   const runnerDir = `${repoRoot}/runner`;
   return {
     installed: [
       ...parsePnpmLicenses(run("pnpm", ["licenses", "list", "--json"], appDir)),
+      ...parsePnpmLicenses(
+        run("pnpm", ["licenses", "list", "--json"], dispatcherDir),
+      ),
       ...parsePythonInstalled(run("uv", UV_LICENSES_ARGS, runnerDir)),
     ],
     locked: [
       ...parsePnpmLock(readFileSync(`${appDir}/pnpm-lock.yaml`, "utf8")),
+      ...parsePnpmLock(readFileSync(`${dispatcherDir}/pnpm-lock.yaml`, "utf8")),
       ...parseUvLock(readFileSync(`${runnerDir}/uv.lock`, "utf8")),
     ],
   };

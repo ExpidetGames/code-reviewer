@@ -72,9 +72,9 @@ The App, the Dispatcher (TypeScript) and the Worker (Python) agree on these file
   committed ones; `app/src/runner-api/contract.ts` keeps the API error codes equal to the file.
 - **Runner** (`runner/tests/contract/test_hosted_contracts.py`, with `jsonschema`): the same examples, the same
   closed objects and the same vectors, with a verifier written independently of the TypeScript one.
-- **Dispatcher** (`dispatcher/`, #327): validates the same examples with its own tooling against the types in
-  `dispatcher/src/contracts/` and runs the vectors against its receiver. Until that project exists nothing
-  there is checked, only that the generated copy is current.
+- **Dispatcher** (`dispatcher/`, #327; `dispatcher/src/contracts.test.ts`, `src/triggers/signature.test.ts`):
+  validates the same examples with Ajv, checks that its closed webhook body and its reading of the split claim
+  answer agree with the schemas, and runs every signing vector against its own receiver and the reference verifier.
 - **The self-hosted compose files** are compared with `worker-container.v1.json` (the spec equals
   `compose.dynamic.yml`: test in `hosted-contracts.integration.test.ts`; the renderer and the comparison with
   the PaaS compose file come with #325).
