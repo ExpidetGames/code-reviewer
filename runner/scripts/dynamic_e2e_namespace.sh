@@ -11,6 +11,8 @@
 #      10001 (bind-mounted copies of passwd and group), a fresh /run, the pinned OpenCode and ripgrep at
 #      /usr/local/bin, and their pin files in /opt/code-reviewer/pins (overlays, so the host is untouched);
 #   3. the preflight, which names whatever is missing and stops;
+#   3b. the `probe` entry mode of the Worker image (#324, #331) on this layout: with a read-only root it must advertise
+#      `opencode`, with a writable one it must not (the capability probe of the hosted deployment is this verdict);
 #   4. the journeys (the runner inside them is started as root with the capabilities of compose.dynamic.yml
 #      and no-new-privileges: app/e2e/helpers/dynamic-runner.ts);
 #   5. the last word of the guard, and a check that no process of the lane is left.
@@ -73,6 +75,55 @@ install -m 0644 -o root -g root "$LANE_RUNNER_DIR/opencode-pin.json" "$LANE_RUNN
 
 # 3. The preflight. It names what is missing and stops the lane.
 "${NODE[@]}" "$LANE_APP_DIR/e2e/helpers/dynamic-preflight-command.ts"
+
+# 3b. The `probe` entry mode on the real layout (#331). The hosted deployment advertises `opencode` from this verdict
+# only, so the lane proves both directions with the pinned tools and pins installed above: the hardened container's
+# read-only root passes, a writable root does not (`root_filesystem_writable`). The read-only root is made in a mount
+# namespace of its own (every disk filesystem read-only, like tests/privileged in run_privileged_offline.sh), so the
+# journeys below keep their writable one. The runner is started as root with exactly the capabilities of
+# compose.dynamic.yml and no-new-privileges; the verdict is the one line of its stdout.
+probe_as_container() {
+  (
+    cd "$LANE_RUNNER_DIR"
+    export UV_CACHE_DIR=/run/lane-uv-cache HOME=/run/lane-home PYTHONDONTWRITEBYTECODE=1
+    mkdir -p "$UV_CACHE_DIR" "$HOME"
+    RUNNER_DIFF_JOB_USER=10001:10001 RUNNER_DYNAMIC_ENGINE_UID=10101 RUNNER_DYNAMIC_ENGINE_GID=10101 \
+      setpriv --bounding-set=-all,+chown,+dac_override,+fowner,+kill,+setgid,+setuid,+setpcap,+net_admin \
+      --inh-caps=-all --no-new-privs \
+      uv run --no-sync --offline python -m code_reviewer_runner probe 2>>"$PROBE_LOG"
+  )
+}
+make_root_read_only() {
+  local failed=0 mountpoint fstype
+  # The container's own writable paths (compose.dynamic.yml tmpfs): the engine's version check and the
+  # startup write nowhere else once the disks are read-only.
+  mount -t tmpfs -o rw,noexec,nosuid,nodev,size=512m,mode=1777 tmpfs /tmp || return 1
+  while read -r mountpoint fstype; do
+    case "$fstype" in
+      ext2 | ext3 | ext4 | xfs | btrfs | vfat | overlay | fuseblk | squashfs | erofs | f2fs)
+        mount -o remount,bind,ro "$mountpoint" || { echo "could not make $mountpoint read-only" >&2; failed=1; } ;;
+    esac
+  done < <(awk '{ for (i = 1; i <= NF; i++) if ($i == "-") print $5, $(i + 1) }' /proc/self/mountinfo)
+  [ "$failed" = 0 ]
+}
+PROBE_LOG=/run/lane-probe.log
+export -f probe_as_container make_root_read_only
+export LANE_RUNNER_DIR PROBE_LOG
+read_only_verdict="$(unshare --mount -- bash -c 'make_root_read_only && probe_as_container | tail -n 1')" \
+  || fail "the probe entry mode could not be run with a read-only root"
+case "$read_only_verdict" in
+  *'"engines":["pr-agent","opencode"]'*'"reasons":[]'*) ;;
+  *) [ ! -f "$PROBE_LOG" ] || tail -n 15 "$PROBE_LOG" >&2
+     fail "the probe entry mode does not advertise opencode on the lane's layout with a read-only root (verdict: $read_only_verdict)" ;;
+esac
+writable_verdict="$(probe_as_container | tail -n 1)" \
+  || fail "the probe entry mode could not be run with a writable root"
+case "$writable_verdict" in
+  *'"engines":["pr-agent"]'*root_filesystem_writable*) ;;
+  *) [ ! -f "$PROBE_LOG" ] || tail -n 15 "$PROBE_LOG" >&2
+     fail "the probe entry mode advertises opencode, or names another reason, on a writable root (verdict: $writable_verdict)" ;;
+esac
+echo "probe entry mode: opencode with a read-only root, not with a writable one"
 
 # 4. The journeys.
 cd "$LANE_APP_DIR"

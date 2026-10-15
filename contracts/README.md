@@ -13,6 +13,7 @@ other way round, so a change to the format has to change the file and both sides
 | `dispatch-webhook.v1.json`      | The signed wake-up call the app sends a Dispatcher after a job is enqueued: the closed body (`DispatchWebhook`), the headers and the signing rule in its description, the answers, and the shape of `dispatch-signing-vectors.json` (`DispatchSigningVectors`). `examples/dispatch-webhook/<Definition>.json` holds the examples.                                                                                                                                                                                                                                                                                                              |
 | `dispatch-signing-vectors.json` | Requests as a receiver sees them (valid, previous key, wrong key, old or future timestamp, tampered body, id or timestamp, unknown key id, malformed headers) with the verdict each must get. Dummy keys only. Every consumer computes the verdict itself and compares.                                                                                                                                                                                                                                                                                                                                                                        |
 | `worker-container.v1.json`      | The hardened container spec: user, `cap_drop` and `cap_add` with startup-only markers, security options, read-only root, tmpfs mounts with options, memory/swap/pids limits, stop timeout, allowed environment names, forbidden keys, and what a launcher may override per Worker kind (`WorkerContainerOverrides`: the memory limit). The schema is the hardening floor: `privileged`, binds, volumes, devices, host namespaces, host networking, `seccomp=unconfined`, a writable root or a credential in the environment have no way in. `examples/worker-container/WorkerContainerSpec.json` is the spec and equals `compose.dynamic.yml`. |
+| `probe-verdict.v1.json`         | The capability probe of the hosted deployment (#331): `ProbeVerdict`, the one line the Worker image's `probe` mode prints (engines, and the stable `ProbeReason` list of the startup self-check when `opencode` is missing), and `ProbeReport`, what `POST /probe` of the Dispatcher answers (status `passed`, `denied` or `failed`, `ok`, the engines it advertises, the reasons or a stable failure code, the time). Engines, stable reasons and codes only: no path, no value, no text. `examples/probe-verdict/<Definition>.json` holds the examples.                                                                                      |
 | `dynamic-review/schema.v1.json` | The neutral findings of a Dynamic Review (#195), before the runner renders them: opaque id, P0–P3, confidence, bounded title/body, a lexically safe repository-relative path, a line range (ordering is the runner's semantic check), evidence references, and the reviewed SHA. Resolutions of earlier findings sit on the run envelope (`resolvedIds`), so a run that leaves no current finding can still report them. No permission, provider, routing, endpoint or command field. `dynamic-review/example.v1.json` and `example-resolved.v1.json` are validated by both suites.                                                            |
 
 ## Who checks what
@@ -65,6 +66,16 @@ The App, the Dispatcher (TypeScript) and the Worker (Python) agree on these file
   examples, and fails on script (status, body, delay, lost lease). The Worker, the Dispatcher and the
   end-to-end journeys run against it. Its answers are checked against the schemas in
   `app/integration-tests/fakes/dispatcher-app.integration.test.ts`.
+
+### The probe contract (#331)
+
+`probe-verdict.v1.json` has no generated types: the reader, the Dispatcher, keeps the closed list of reasons in
+`dispatcher/src/probe/verdict.ts` and a test (`verdict.test.ts`) holds it equal to the file's `ProbeReason`; the
+writer, the runner, is checked by `runner/tests/contract/test_probe_verdict_contract.py` (the examples are valid, the
+runner's `SelfCheckReason` values are exactly the file's list, what `probe` prints is a valid `ProbeVerdict`, the verdict
+is closed). The Dispatcher reads a verdict leniently (an unknown field is ignored, an unknown reason is dropped, never
+echoed) and `POST /probe`'s answers are checked against `ProbeReport` in `dispatcher/src/probe/route.test.ts`. A new
+`SelfCheckReason` is added to the file, to the Dispatcher's list and to the runner in one pull request. `ProbeFailure`, the closed list of codes of a probe that gave no verdict, is the Dispatcher's own (`dispatcher/src/probe/failure-codes.ts`, held equal to the file by `failure-codes.test.ts`).
 
 ### Who checks what (hosted deployment)
 

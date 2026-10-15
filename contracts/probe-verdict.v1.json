@@ -1,0 +1,153 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ExpidetGames/code-reviewer/contracts/probe-verdict.v1.json",
+  "title": "Code Reviewer capability probe, version 1",
+  "description": "The capability probe of the hosted deployment (#316, #331). ProbeVerdict is the one line of JSON that the Worker image prints in its `probe` entry mode (#324, runner/README.md): which engines the container may advertise and, when `opencode` is not among them, the stable reasons of its startup self-check (docs/dynamic-review.md, 'The startup self-check'). It holds engines and stable reasons and nothing else: no path, no value of the environment, no text. The Dispatcher runs the probe in a canary VM from the golden snapshot with the flags of the hardened container spec and advertises `opencode` only from a verdict that passed (fail closed). ProbeReport is what `POST /probe` of the Dispatcher answers (authorized with the dispatcher credential as `Authorization: Bearer <token>`): the verdict as the Dispatcher read it, or the stable code of the reason no verdict was read. It is what a deploy step reads to block a release whose Dynamic canary fails. A reader ignores fields it does not know; the writer of a ProbeVerdict never adds one.",
+  "version": 1,
+  "$defs": {
+    "ProbeEngine": {
+      "description": "An engine a container may advertise: `pr-agent` runs Diff jobs, `opencode` runs Dynamic jobs.",
+      "type": "string",
+      "enum": [
+        "pr-agent",
+        "opencode"
+      ]
+    },
+    "ProbeReason": {
+      "description": "Why `opencode` is not advertised: the `SelfCheckReason` values of the runner (runner/src/code_reviewer_runner/dynamic_review/self_check.py). A closed set, so that the Dispatcher can keep a verdict to stable reasons and drop anything else. Both ends check their lists against this one.",
+      "type": "string",
+      "enum": [
+        "not_a_dynamic_runner",
+        "not_root_supervisor",
+        "engine_user_invalid",
+        "network_rules_not_installed",
+        "capabilities_not_dropped",
+        "root_filesystem_writable",
+        "ipv6_not_disabled",
+        "pin_unreadable",
+        "pin_untrusted",
+        "engine_binary_missing",
+        "engine_binary_untrusted",
+        "engine_binary_checksum_mismatch",
+        "engine_version_mismatch",
+        "ripgrep_missing",
+        "ripgrep_untrusted",
+        "ripgrep_checksum_mismatch",
+        "network_probe_failed"
+      ]
+    },
+    "ProbeVerdict": {
+      "description": "The line the `probe` mode prints. `engines` always holds `pr-agent`; `opencode` is in it only when the whole self-check passed (the hardening of the container, the egress mode, IPv6 off where the fallback ruleset needs it, the pins), and then `reasons` is empty.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "engines",
+        "reasons"
+      ],
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "engines": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ProbeEngine"
+          },
+          "uniqueItems": true,
+          "maxItems": 2
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ProbeReason"
+          },
+          "uniqueItems": true,
+          "maxItems": 17
+        }
+      }
+    },
+    "ProbeStatus": {
+      "description": "`passed`: the canary container answered and advertises `opencode`. `denied`: it answered and does not (the reasons say why). `failed`: no verdict was read (the canary VM, the container or the clock failed); `failure` says which.",
+      "type": "string",
+      "enum": [
+        "passed",
+        "denied",
+        "failed"
+      ]
+    },
+    "ProbeFailure": {
+      "description": "Why no verdict was read: a closed list of stable codes, the launch codes of a job VM and the codes of the probe itself. The Dispatcher keeps the list in dispatcher/src/probe/failure-codes.ts (a test holds them equal); a code that is not on it is probe_error.",
+      "type": "string",
+      "enum": [
+        "probe_timeout",
+        "probe_unreadable",
+        "probe_error",
+        "probe_exit_nonzero",
+        "probe_exec_failed",
+        "probe_aborted",
+        "probe_not_supported",
+        "sandbox_rate_limited",
+        "sandbox_quota_exceeded",
+        "sandbox_network",
+        "sandbox_unavailable",
+        "image_not_ready",
+        "sandbox_snapshot_missing",
+        "sandbox_region_mismatch",
+        "sandbox_rejected",
+        "sandbox_auth_failed",
+        "sandbox_create_failed",
+        "sandbox_config_invalid",
+        "docker_not_ready",
+        "vm_prepare_failed",
+        "image_missing",
+        "image_mismatch"
+      ]
+    },
+    "ProbeReport": {
+      "description": "The answer of `POST /probe`: 200 when every engine the Dispatcher is configured to serve is advertised (`ok` true), 503 with the same body when one is not. `engines` and `reasons` are what the Dispatcher advertises and why not; `failure` is a code of the closed `ProbeFailure` list, present only for `failed`. 401 with the runner API's ErrorResponse, the same for every refusal, when the credential is missing or wrong; no VM is created then.",
+      "type": "object",
+      "required": [
+        "version",
+        "status",
+        "ok",
+        "engines",
+        "reasons",
+        "checkedAt"
+      ],
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "status": {
+          "$ref": "#/$defs/ProbeStatus"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "engines": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ProbeEngine"
+          },
+          "uniqueItems": true,
+          "maxItems": 2
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ProbeReason"
+          },
+          "uniqueItems": true,
+          "maxItems": 17
+        },
+        "failure": {
+          "$ref": "#/$defs/ProbeFailure"
+        },
+        "checkedAt": {
+          "$ref": "runner-api.v1.json#/$defs/Timestamp"
+        }
+      }
+    }
+  }
+}

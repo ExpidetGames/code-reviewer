@@ -25,6 +25,9 @@ import {
   settingsFor,
   waitFor,
 } from "../test-support/harness.ts";
+import { systemClock } from "../core/clock.ts";
+import { createCapabilityProbe } from "../probe/capability-probe.ts";
+import { createSandboxCanary } from "./sandbox-canary.ts";
 import { createSandboxLauncher } from "./sandbox.ts";
 
 const IMAGE = process.env.SANDBOX_LOCAL_IMAGE;
@@ -174,6 +177,52 @@ describe("the Sandbox-Launcher in local mode with a real Docker daemon", () => {
         "name=code-reviewer-worker-",
       ).trim(),
     ).toBe("");
+    expect(service?.running()).toStrictEqual([]);
+  });
+
+  // #331-T10
+  it("runs the canary probe in the real image with the real flags and reads a verdict from it", async () => {
+    const { bin } = await loggingDocker();
+    build(bin);
+    const imageId = docker(
+      "image",
+      "inspect",
+      "--format",
+      "{{.Id}}",
+      IMAGE ?? "",
+    ).trim();
+    const logger = recordingLogger();
+    const probe = createCapabilityProbe({
+      run: createSandboxCanary({
+        service: service as LocalSandboxService,
+        snapshotId: "snap_local_mode",
+        imageDigest: imageId,
+        imageReference: IMAGE ?? "",
+        logger,
+        config: {},
+      }),
+      clock: systemClock,
+      now: () => Date.now(),
+      logger,
+      timeoutMs: WORKER_RESULT_TIMEOUT_MS,
+    });
+
+    const outcome = await probe.refresh();
+
+    // The container ran with the flags of a Dynamic-Worker and printed a verdict of the contract. Whether
+    // `opencode` passes depends on the host's kernel (this lane runs on a CI host); what must hold is that the
+    // probe ran, was read, and that none of the hardening of the container itself is what it names.
+    expect(outcome.status).not.toBe("failed");
+    expect(outcome.engines).toContain("pr-agent");
+    for (const reason of [
+      "root_filesystem_writable",
+      "capabilities_not_dropped",
+      "not_root_supervisor",
+    ])
+      expect(outcome.reasons).not.toContain(reason);
+    expect(outcome.status === "passed").toBe(
+      outcome.engines.includes("opencode"),
+    );
     expect(service?.running()).toStrictEqual([]);
   });
 });

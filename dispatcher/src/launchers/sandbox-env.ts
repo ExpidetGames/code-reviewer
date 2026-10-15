@@ -9,6 +9,10 @@
 // | SANDBOX_IMAGE_DIGEST                               | The Worker image id in it (#330 record `imageDigest`), `sha256:...` | required with the snapshot |
 // | SANDBOX_HANDOVER_SECONDS                           | How long the container runs before the Worker counts as having taken over (1 to 120) | 20 |
 // | SANDBOX_VM_TIMEOUT_MARGIN_SECONDS                 | Seconds added to the job's timeout for the VM's own (the backstop that ends a VM nobody stops); at least 180 and 150 more than the hand-over time, at most 3600 | 300 |
+// | DISPATCHER_PROBE_TTL_SECONDS                      | How long a capability probe's answer counts before a new canary VM is asked (60 to 86400, #331) | 3600 |
+// | DISPATCHER_PROBE_TIMEOUT_SECONDS                  | How long a probe may take, canary VM included (30 to 600)          | 150 |
+// | DISPATCHER_PROBE_REUSE_SECONDS                    | A forced probe (`POST /probe`) is served from an answer younger than this instead of a new canary VM (0 to 600; 0: never) | 60 |
+// | RUNNER_DYNAMIC_CAPABILITIES, RUNNER_DYNAMIC_MAX_COST_USD | The operator's Dynamic configuration, given to the container of a Dynamic job and to the canary, as the self-hosted `runner-dynamic` service has them (a JSON object; a plain positive decimal) | none |
 // | VERCEL_TOKEN, VERCEL_TEAM_ID, VERCEL_PROJECT_ID    | Platform access by token. Without a token the OIDC token is used   | OIDC |
 //
 // VM size and container memory per Worker kind are part of DISPATCHER_WORKER_CONFIG (`launcher.vcpus`,
@@ -21,7 +25,11 @@ import {
   type Settings,
 } from "../config.ts";
 import type { Launcher, Logger } from "../core/types.ts";
+import { systemClock } from "../core/clock.ts";
+import { createCapabilityProbe } from "../probe/capability-probe.ts";
+import { withCapabilityProbe } from "../probe/probed-launcher.ts";
 import { noLauncher } from "./none.ts";
+import { createSandboxCanary } from "./sandbox-canary.ts";
 import {
   LAUNCH_STEPS_SECONDS,
   createSandboxLauncher,
@@ -38,6 +46,9 @@ import {
 const SNAPSHOT_ID = /^[A-Za-z0-9_-]{3,128}$/;
 const IMAGE_DIGEST = /^sha256:[0-9a-f]{64}$/;
 const PLAIN = /^[^\s\p{Cc}]+$/u;
+const NO_CONTROL = /^[^\p{Cc}]+$/u;
+const PLAIN_DECIMAL = /^(?:0|[1-9]\d{0,5})(?:\.\d{1,6})?$/;
+const MAX_DESCRIPTOR_LENGTH = 4096;
 
 export type LauncherContext = {
   settings: Settings;
@@ -70,6 +81,40 @@ function credentials(env: Environment): VercelCredentials | undefined {
   return { token, teamId, projectId };
 }
 
+/**
+ * The operator's Dynamic configuration for the container (names of the spec's allow-list): refused at start when
+ * the value could not be given to a container or the runner would refuse it, so a typo does not wait for the
+ * first Dynamic job. The runner reads the values again and decides what they mean; here only their form is held.
+ */
+function dynamicEnvironment(env: Environment): Record<string, string> {
+  const result: Record<string, string> = {};
+  const capabilities = read(env, "RUNNER_DYNAMIC_CAPABILITIES");
+  if (capabilities !== undefined) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(capabilities);
+    } catch {
+      throw new ConfigError("RUNNER_DYNAMIC_CAPABILITIES", "invalid");
+    }
+    if (
+      typeof parsed !== "object" ||
+      parsed === null ||
+      Array.isArray(parsed) ||
+      capabilities.length > MAX_DESCRIPTOR_LENGTH ||
+      !NO_CONTROL.test(capabilities)
+    )
+      throw new ConfigError("RUNNER_DYNAMIC_CAPABILITIES", "invalid");
+    result.RUNNER_DYNAMIC_CAPABILITIES = capabilities;
+  }
+  const cost = read(env, "RUNNER_DYNAMIC_MAX_COST_USD");
+  if (cost !== undefined) {
+    if (!PLAIN_DECIMAL.test(cost) || Number(cost) <= 0)
+      throw new ConfigError("RUNNER_DYNAMIC_MAX_COST_USD", "invalid");
+    result.RUNNER_DYNAMIC_MAX_COST_USD = cost;
+  }
+  return result;
+}
+
 export function sandboxFromEnvironment(
   env: Environment,
   loadSdk: () => Promise<SandboxSdk>,
@@ -100,6 +145,21 @@ export function sandboxFromEnvironment(
   );
   if (vmTimeoutMarginSeconds < minimumVmTimeoutMargin(handoverSeconds))
     throw new ConfigError("SANDBOX_VM_TIMEOUT_MARGIN_SECONDS", "invalid");
+  const probeTtlSeconds = integer(env, "DISPATCHER_PROBE_TTL_SECONDS", {
+    min: 60,
+    max: 86400,
+    fallback: 3600,
+  });
+  const probeTimeoutSeconds = integer(env, "DISPATCHER_PROBE_TIMEOUT_SECONDS", {
+    min: 30,
+    max: 600,
+    fallback: 150,
+  });
+  const probeReuseSeconds = integer(env, "DISPATCHER_PROBE_REUSE_SECONDS", {
+    min: 0,
+    max: 600,
+    fallback: 60,
+  });
   const access = credentials(env);
   const secrets = [access?.token, read(env, "VERCEL_OIDC_TOKEN")].filter(
     (secret): secret is string => secret !== undefined,
@@ -122,15 +182,43 @@ export function sandboxFromEnvironment(
           throw new ConfigError("DISPATCHER_WORKER_CONFIG", "invalid");
         }
       }
-      return createSandboxLauncher({
-        service: createVercelSandboxService(loadSdk, access),
+      // Only a deployment that serves Dynamic jobs reads (and refuses) the Dynamic configuration: a typo in a variable
+      // it does not use must not take its Diff jobs down.
+      const serversDynamic = settings.core.engines.includes("opencode");
+      const dynamic = serversDynamic ? dynamicEnvironment(env) : {};
+      const service = createVercelSandboxService(loadSdk, access);
+      const launcher = createSandboxLauncher({
+        service,
         snapshotId,
         imageDigest,
         handoverSeconds,
         vmTimeoutMarginSeconds,
         logger,
         background,
+        dynamicEnvironment: dynamic,
       });
+      // A deployment that serves no Dynamic job has nothing to prove: no canary VM is ever made for it.
+      if (!serversDynamic) return launcher;
+      // opencode is advertised only from a fresh canary (#331): the Launcher's own word is never taken.
+      const probe = createCapabilityProbe({
+        run: createSandboxCanary({
+          service,
+          snapshotId,
+          imageDigest,
+          logger,
+          config: settings.core.workerConfig.dynamic,
+          environment: dynamic,
+          timeoutSeconds: probeTimeoutSeconds,
+          vmTimeoutMarginSeconds,
+        }),
+        clock: systemClock,
+        now: () => Date.now(),
+        logger,
+        ttlMs: probeTtlSeconds * 1000,
+        timeoutMs: probeTimeoutSeconds * 1000,
+        forceReuseMs: probeReuseSeconds * 1000,
+      });
+      return withCapabilityProbe({ launcher, probe, background });
     },
   };
 }

@@ -1,0 +1,192 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// The canary VM of the capability probe (#331): the way the Sandbox-Launcher runs the Worker image's `probe` mode
+// to learn whether the Dynamic-Worker's hardening can be established here. It is a job VM without a job:
+//
+//   1. a VM from the golden snapshot (`persistent: false`, fra1, the VM size a Dynamic job gets), named and tagged
+//      as a canary, with a timeout beyond the probe's own as the backstop
+//   2. vm-prepare.sh and the image check, exactly like a job VM (a probe of another image proves nothing)
+//   3. `docker run` of the image by id with the flags the shared renderer makes for a Dynamic-Worker (the hardened
+//      container spec, the memory of the Dynamic kind, the two IPv6 switches of the Sandbox variant, the Dynamic
+//      environment of a job) and the entry mode `probe`: no stdin, no App URL, no token, no credential
+//   4. the stdout is the verdict, handed on unread (`probe/verdict.ts` reads it)
+//   5. the VM is stopped by name, whatever happened
+//
+// It returns the output or rejects with a `ProbeRunError` whose code is stable: the launch error codes of a job VM
+// (`sandbox_unavailable`, `docker_not_ready`, `image_mismatch`, ...), `probe_exit_nonzero`, `probe_exec_failed`,
+// `probe_aborted`. The text of the platform's error and the container's stderr are never logged.
+import {
+  LaunchError,
+  type Clock,
+  type LaunchConfig,
+  type Logger,
+} from "../core/types.ts";
+import { ProbeRunError, type ProbeRunner } from "../probe/capability-probe.ts";
+import { systemClock } from "../core/clock.ts";
+import { ContainerSpecError, renderDockerRunArguments } from "./container.ts";
+import {
+  SANDBOX_LAUNCHER_ADDITIONS,
+  WORKER_CONTAINER_SPEC,
+} from "./container-spec.ts";
+import { SandboxDockerHost } from "./sandbox-host.ts";
+import {
+  CONTAINER_ENVIRONMENT,
+  CREATE_FAILURES,
+  SANDBOX_IMAGE_REFERENCE,
+  SANDBOX_REGION,
+  VM_TIMEOUT_MARGIN_SECONDS,
+  planForKind,
+} from "./sandbox.ts";
+import {
+  SandboxServiceError,
+  type SandboxService,
+  type SandboxVm,
+} from "./sandbox-service.ts";
+
+/** How long the probe container may run: the self-check takes seconds. */
+const PROBE_RUN_TIMEOUT_MS = 60_000;
+
+export type SandboxCanaryOptions = {
+  service: SandboxService;
+  /** The golden snapshot every VM starts from (#330). */
+  snapshotId: string;
+  /** The id of the Worker image in that snapshot. */
+  imageDigest: string;
+  logger: Logger;
+  clock?: Clock;
+  imageReference?: string;
+  /** The Dynamic kind's part of `DISPATCHER_WORKER_CONFIG`: the VM size and the container memory of a Dynamic job. */
+  config: LaunchConfig;
+  /** What a Dynamic job's container is given besides the base: `RUNNER_DYNAMIC_CAPABILITIES`, `RUNNER_DYNAMIC_MAX_COST_USD`. */
+  environment?: Readonly<Record<string, string>>;
+  /** The time the probe is given (the VM timeout is this plus the margin). */
+  timeoutSeconds?: number;
+  vmTimeoutMarginSeconds?: number;
+  newSuffix?: () => string;
+};
+
+function isAbort(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "name" in error &&
+    error.name === "AbortError"
+  );
+}
+
+export function createSandboxCanary(
+  options: SandboxCanaryOptions,
+): ProbeRunner {
+  const { service, logger } = options;
+  const clock = options.clock ?? systemClock;
+  const timeoutSeconds = options.timeoutSeconds ?? 150;
+  const marginSeconds =
+    options.vmTimeoutMarginSeconds ?? VM_TIMEOUT_MARGIN_SECONDS;
+
+  async function stopQuietly(name: string): Promise<void> {
+    try {
+      await service.stop(name);
+    } catch {
+      // Only that it failed: the platform's text is not ours to log. The VM timeout ends the VM.
+      logger.warn("canary_stop_failed", { sandbox: name });
+    }
+  }
+
+  function codeOf(
+    error: unknown,
+    signal: AbortSignal,
+    fallback: string,
+  ): ProbeRunError {
+    if (error instanceof ProbeRunError) return error;
+    if (signal.aborted || isAbort(error))
+      return new ProbeRunError("probe_aborted");
+    if (error instanceof LaunchError) return new ProbeRunError(error.code);
+    if (error instanceof ContainerSpecError)
+      return new ProbeRunError("sandbox_config_invalid");
+    if (error instanceof SandboxServiceError)
+      return new ProbeRunError(CREATE_FAILURES[error.kind].code);
+    return new ProbeRunError(fallback);
+  }
+
+  return async (signal) => {
+    const plan = planForKind("dynamic", options.config);
+    const suffix = (
+      options.newSuffix ??
+      (() => crypto.randomUUID().replace(/-/g, "").slice(0, 8))
+    )();
+    const requested = `cr-canary-${suffix}`;
+
+    let vm: SandboxVm;
+    try {
+      vm = await service.create(
+        {
+          name: requested,
+          snapshotId: options.snapshotId,
+          region: SANDBOX_REGION,
+          vcpus: plan.vcpus,
+          timeoutMs: (timeoutSeconds + marginSeconds) * 1000,
+          tags: { app: "code-reviewer", kind: "canary", job: "canary" },
+          persistent: false,
+        },
+        signal,
+      );
+    } catch (error) {
+      // The call may have got through: stop by name, which is harmless for a VM that is not there.
+      if (
+        !(error instanceof SandboxServiceError) ||
+        CREATE_FAILURES[error.kind].mayExist ||
+        signal.aborted
+      )
+        await stopQuietly(requested);
+      throw codeOf(error, signal, "sandbox_create_failed");
+    }
+    // The platform's own name is the one that stops the VM.
+    const name = vm.name;
+    try {
+      const host = new SandboxDockerHost({
+        vm,
+        clock,
+        imageReference: options.imageReference ?? SANDBOX_IMAGE_REFERENCE,
+        imageDigest: options.imageDigest,
+        handoverSeconds: 0,
+      });
+      try {
+        await host.prepare(signal);
+      } catch (error) {
+        throw codeOf(error, signal, "vm_prepare_failed");
+      }
+      let args: string[];
+      try {
+        args = renderDockerRunArguments(WORKER_CONTAINER_SPEC, {
+          image: options.imageDigest,
+          environment: { ...CONTAINER_ENVIRONMENT, ...options.environment },
+          command: ["probe"],
+          overrides: plan.overrides,
+          additions: SANDBOX_LAUNCHER_ADDITIONS,
+        });
+      } catch (error) {
+        throw codeOf(error, signal, "sandbox_config_invalid");
+      }
+      let result;
+      try {
+        result = await vm.exec(
+          {
+            label: "probe",
+            cmd: "docker",
+            args,
+            sudo: true,
+            timeoutMs: PROBE_RUN_TIMEOUT_MS,
+          },
+          signal,
+        );
+      } catch (error) {
+        throw codeOf(error, signal, "probe_exec_failed");
+      }
+      // The exit status says whether the probe ran (runner/README.md): 0 with a verdict, 2 without one.
+      if (result.exitCode !== 0) throw new ProbeRunError("probe_exit_nonzero");
+      return result.stdout;
+    } finally {
+      await stopQuietly(name);
+    }
+  };
+}
