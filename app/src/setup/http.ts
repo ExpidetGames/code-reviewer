@@ -18,7 +18,7 @@ import {
   readSetupSessionCookie,
   setupSessionCookie,
 } from "./setup-session.ts";
-import type { SetupCodeStore } from "./code-store.ts";
+import type { SetupCodeGuard } from "./code-store.ts";
 import type { CompletedSetup } from "./complete.ts";
 import {
   SETUP_ERROR_STATUS,
@@ -41,7 +41,8 @@ export type SetupRouteDependencies = {
   appSecret: string;
   /** Whether the cookies get the `Secure` attribute (the app is served over https). */
   secureCookies: boolean;
-  store: SetupCodeStore;
+  /** The setup code: in memory on a server, in the database in a serverless deployment (#321). */
+  store: SetupCodeGuard;
   readState: SetupStateReader;
   /** Creates the admin and finishes the setup (complete.ts, with the real hash and database). */
   complete: (input: SetupInput) => Promise<CompletedSetup>;
@@ -125,7 +126,7 @@ export function createSetupRouteHandlers(
         typeof body.value === "object" && body.value !== null
           ? (body.value as { code?: unknown }).code
           : undefined;
-      const attempt = deps.store.attempt(submitted);
+      const attempt = await deps.store.attempt(submitted);
       if (!attempt.ok)
         return refusal(attempt.error, {
           headers:
@@ -156,7 +157,7 @@ export function createSetupRouteHandlers(
       const session = checkSetupSession(
         deps.appSecret,
         readSetupSessionCookie(request.headers.get("cookie")),
-        deps.store.currentIssueId(),
+        await deps.store.currentIssueId(),
         now(),
       );
       if (!session.ok)
@@ -180,7 +181,15 @@ export function createSetupRouteHandlers(
         throw error;
       }
       // The code and the setup session are worthless from here on.
-      deps.store.invalidate();
+      try {
+        await deps.store.invalidate();
+      } catch {
+        // The instance is set up either way (the routes answer 404 from here on); the code row is
+        // only housekeeping. Never the reason: it could quote a statement.
+        log(
+          "[setup] SETUP_CODE_INVALIDATE_FAILED: the setup is complete, but the stored setup code could not be removed.",
+        );
+      }
 
       const headers = new Headers(NO_STORE);
       headers.append(

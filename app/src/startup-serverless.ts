@@ -9,8 +9,9 @@
 //   database that is behind on /api/health (src/health/health.ts) and never changes the schema;
 // - the backup of an old database and the legacy import: they are for an installation that updates in
 //   place from before accounts, which a hosted deployment never is;
-// - the setup code held in this process's memory: another instance would not know it (first-run setup
-//   across instances is #321);
+// - the setup code held in this process's memory: another instance would not know it. The operator makes
+//   the code with `pnpm setup-code` (src/setup/setup-code-cli.ts) and the instances check it in the
+//   database (src/setup/database-code-store.ts, #321);
 // - the sync with GitHub, the cleanup and the backup timer: the instance lives for seconds, so a timer
 //   would never fire. The sync runs from a daily cron and from the webhooks (src/app/api/internal/
 //   repository-sync), the cleanup from the sweep (#328).
