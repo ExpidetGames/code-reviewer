@@ -358,10 +358,10 @@ billed, until its own timeout (job timeout plus margin). The reaper is the secon
   Unset: every caller gets `401` and a `reaper_cron_secret_missing` warning is logged at start. The route exists
   only with a golden snapshot configured (otherwise `404`).
 - **Which VMs.** The listing is narrowed by the name prefix `cr-` and the tag `app = code-reviewer`, and every VM it
-  returns is checked again: only a running or pending VM of exactly the shape our code creates is ever considered.
+  returns is checked again: only a running or pending, non-persistent VM of exactly the shape our code creates is ever considered.
   A job VM is named `cr-<diff|dynamic>-<job id>-<8 hex>` with the tags `kind` and `job` equal to the name's; a canary
   VM (#331) is named `cr-canary-<8 hex>` and tagged `kind = canary`, `job = canary`. The golden snapshot's builder and
-  check VMs carry the same `app` tag, a `role` tag and `code-reviewer-golden-` names: they never match, and neither does
+  check VMs carry the same `app` tag, a `role` tag and `code-reviewer-golden-` names (the builder is also persistent): they never match, and neither does
   anything else (another deployment's VM, a person's, a lookalike).
 - **Which are leftovers.** Younger than two minutes: never. Older than its lifetime (the timeout the platform reports
   for the VM, or the configured one: job timeout plus VM margin for a job VM, `DISPATCHER_PROBE_TIMEOUT_SECONDS` plus the

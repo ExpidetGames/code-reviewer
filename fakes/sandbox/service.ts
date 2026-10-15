@@ -75,6 +75,7 @@ export type FakeListedVm = {
   createdAtMs: number;
   status: string;
   timeoutMs?: number;
+  persistent?: boolean;
   tags: Record<string, string>;
 };
 
@@ -180,6 +181,8 @@ export class FakeSandboxService {
     timeoutMs?: number;
     /** The platform's word: `running` (the default), `stopping`, `stopped`, ... */
     status?: string;
+    /** A persistent VM, like the golden builder; `list` reports it. */
+    persistent?: boolean;
   }): void {
     const status = vm.status ?? "running";
     this.vms.set(vm.name, {
@@ -191,7 +194,7 @@ export class FakeSandboxService {
         vcpus: 1,
         timeoutMs: vm.timeoutMs ?? 0,
         tags: { ...vm.tags },
-        persistent: false,
+        persistent: vm.persistent ?? false,
       },
       state:
         status === "running" || status === "pending" ? "running" : "stopped",
@@ -336,6 +339,7 @@ export class FakeSandboxService {
         ...(vm.options.timeoutMs > 0
           ? { timeoutMs: vm.options.timeoutMs }
           : {}),
+        persistent: vm.options.persistent,
         tags: { ...vm.options.tags },
       }));
   }
