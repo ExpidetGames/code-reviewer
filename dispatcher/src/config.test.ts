@@ -132,4 +132,78 @@ describe("the settings of the Dispatcher", () => {
 
     expect(error.variable).toBe("DISPATCHER_SIGNING_SECRET");
   });
+
+  // #364-T16
+  it("has no cron secret unless CRON_SECRET is set", () => {
+    expect(loadSettings(base).cronSecret).toBeUndefined();
+    expect(
+      loadSettings({ ...base, CRON_SECRET: "   " }).cronSecret,
+    ).toBeUndefined();
+  });
+
+  // #364-T17
+  it("reads CRON_SECRET, the platform's own name for the secret its cron sends", () => {
+    const secret = "a-cron-secret-of-at-least-32-characters";
+
+    expect(loadSettings({ ...base, CRON_SECRET: secret }).cronSecret).toBe(
+      secret,
+    );
+  });
+
+  // #364-T17
+  it.each<[string, Record<string, string>, string, string]>([
+    [
+      "is too short",
+      { CRON_SECRET: "tiny-secret" },
+      "CRON_SECRET",
+      "too_short",
+    ],
+    [
+      "has a space",
+      { CRON_SECRET: "a cron secret with spaces in it 0123456789" },
+      "CRON_SECRET",
+      "invalid",
+    ],
+    [
+      "has a control character",
+      { CRON_SECRET: "a-cron-secret-with-a-tab\t-0123456789" },
+      "CRON_SECRET",
+      "invalid",
+    ],
+    [
+      "equals the dispatcher credential",
+      {
+        CRON_SECRET: TOKEN.padEnd(32, "x"),
+        RUNNER_TOKEN: TOKEN.padEnd(32, "x"),
+      },
+      "CRON_SECRET",
+      "not_distinct",
+    ],
+    [
+      "equals the signing secret",
+      { CRON_SECRET: SECRET },
+      "CRON_SECRET",
+      "not_distinct",
+    ],
+    [
+      "equals the previous signing secret",
+      {
+        CRON_SECRET: "the-previous-signing-secret-32-characters",
+        DISPATCHER_SIGNING_KEY_ID_PREVIOUS: "k0",
+        DISPATCHER_SIGNING_SECRET_PREVIOUS:
+          "the-previous-signing-secret-32-characters",
+      },
+      "CRON_SECRET",
+      "not_distinct",
+    ],
+  ])(
+    "refuses a CRON_SECRET that %s, naming the variable and never the value",
+    (_name, env, variable, reason) => {
+      const error = failure({ ...base, ...env });
+
+      expect(error.variable).toBe(variable);
+      expect(error.reason).toBe(reason);
+      expect(error.message).not.toContain(env.CRON_SECRET ?? "unreachable");
+    },
+  );
 });
