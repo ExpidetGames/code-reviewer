@@ -19,6 +19,7 @@
 
 import type { LaunchSpec } from "../core/types.ts";
 import type {
+  WorkerContainerLauncherAdditions,
   WorkerContainerOverrides,
   WorkerContainerSpec,
 } from "../contracts/worker-container.ts";
@@ -29,6 +30,7 @@ export const CONTAINER_ERROR_CODES = [
   "spec_not_hardened",
   "override_not_allowed",
   "override_invalid",
+  "additions_not_allowed",
   "environment_not_allowed",
   "credential_in_arguments",
   "option_invalid",
@@ -341,6 +343,37 @@ export function applyOverrides(
   return { ...spec, memory: merged };
 }
 
+const IPV6_SWITCHES = [
+  "net.ipv6.conf.all.disable_ipv6",
+  "net.ipv6.conf.default.disable_ipv6",
+] as const;
+
+/**
+ * Refuses additions other than the contract's: no key but `sysctls`, and in it exactly the two IPv6
+ * switches with the value 1, together. A launcher variant cannot add a flag through this.
+ */
+export function assertLauncherAdditions(
+  additions: unknown,
+): asserts additions is WorkerContainerLauncherAdditions {
+  if (!isRecord(additions))
+    return refuse("additions_not_allowed", "the additions are not an object");
+  for (const key of Object.keys(additions)) {
+    if (key !== "sysctls")
+      refuse("additions_not_allowed", `${key} cannot be added`);
+  }
+  const sysctls = additions.sysctls;
+  if (sysctls === undefined) return;
+  if (
+    !isRecord(sysctls) ||
+    Object.keys(sysctls).length !== IPV6_SWITCHES.length ||
+    !IPV6_SWITCHES.every((name) => sysctls[name] === "1")
+  )
+    refuse(
+      "additions_not_allowed",
+      "sysctls are exactly the two IPv6 switches, both set to 1",
+    );
+}
+
 export interface RenderOptions {
   /** The image reference, a digest in production. Never an option. */
   image: string;
@@ -352,6 +385,11 @@ export interface RenderOptions {
   command?: readonly string[];
   /** What this Worker kind may change: the memory limit. */
   overrides?: WorkerContainerOverrides;
+  /**
+   * What this launcher variant adds to the spec (the Sandbox: IPv6 off, `SANDBOX_LAUNCHER_ADDITIONS`).
+   * Nothing when absent, which is what the self-hosted compose files run.
+   */
+  additions?: WorkerContainerLauncherAdditions;
   /** A seccomp profile derived from the default one (seccomp.ts), by path on the host. Off when absent. */
   seccompProfile?: string;
 }
@@ -390,6 +428,8 @@ export function renderDockerRunArguments(
       ? (assertHardenedSpec(spec), spec)
       : applyOverrides(spec, options.overrides);
 
+  if (options.additions !== undefined)
+    assertLauncherAdditions(options.additions);
   checkOption(options.image, IMAGE, "the image");
   if (options.name !== undefined)
     checkOption(options.name, CONTAINER_NAME, "the container name");
@@ -445,6 +485,11 @@ export function renderDockerRunArguments(
     String(hardened.stopTimeoutSeconds),
     "--network",
     hardened.network.mode,
+    ...IPV6_SWITCHES.flatMap((name) =>
+      options.additions?.sysctls === undefined
+        ? []
+        : ["--sysctl", `${name}=${options.additions.sysctls[name]}`],
+    ),
     ...environment.flatMap(([name, value]) => ["--env", `${name}=${value}`]),
     options.image,
     ...command,
@@ -479,6 +524,8 @@ export interface ContainerLauncherConfig<H extends ContainerHost> {
   image: string;
   /** Names of `spec.allowedEnvironment` with their values, the same for every job. */
   environment?: Readonly<Record<string, string>>;
+  /** The launcher variant's additions to the spec, for every container: the Sandbox sets IPv6 off. */
+  additions?: WorkerContainerLauncherAdditions;
   seccompProfile?: string;
   /** The entry mode of the image (#324); a placeholder until the image has it. */
   entryMode?: string;
@@ -522,6 +569,9 @@ export class ContainerLauncher<H extends ContainerHost = ContainerHost> {
       ...(environment === undefined ? {} : { environment }),
       command: [config.entryMode ?? ENTRY_MODE_WORKER_ONCE],
       ...(overrides === undefined ? {} : { overrides }),
+      ...(config.additions === undefined
+        ? {}
+        : { additions: config.additions }),
       ...(config.seccompProfile === undefined
         ? {}
         : { seccompProfile: config.seccompProfile }),

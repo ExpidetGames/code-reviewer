@@ -86,6 +86,12 @@ could become a flag, with the stable codes of `CONTAINER_ERROR_CODES`.
   kind: `applyOverrides` changes only the keys the spec lists as overridable and keeps the swap equal to the limit),
   sets `RUNNER_JOB_TIMEOUT_SECONDS`, and hands `{appUrl, jobId, credential}` to the container on **stdin only**. It
   refuses to start if an argument would contain the credential.
+- **Per-launcher additions (#345).** `RenderOptions.additions` / `ContainerLauncherConfig.additions` take the
+  contract's `WorkerContainerLauncherAdditions`: exactly the two `net.ipv6.conf.{all,default}.disable_ipv6=1`
+  switches, rendered as `--sysctl`, nothing else (`additions_not_allowed`). The Sandbox-Launcher passes
+  `SANDBOX_LAUNCHER_ADDITIONS` for every Worker kind, because the Sandbox kernel only supports the nft `ip` family
+  and the Dynamic-Worker then needs IPv6 off from the container spec. The shared spec and the self-hosted
+  compose files do not have them (a full-mode host behaves as before); the default is no additions.
 - The entry mode of the image (`worker-once`) is a placeholder until the image has its entry modes (#324).
 - `seccomp.ts` derives, from Docker's default profile, a profile that denies chosen socket families (AF_VSOCK);
   off unless a profile path is passed as `seccompProfile`. Not required by the spike; not yet run against a daemon.

@@ -17,7 +17,10 @@ import {
   type ContainerHost,
   type ContainerInvocation,
 } from "./container.ts";
-import { WORKER_CONTAINER_SPEC } from "./container-spec.ts";
+import {
+  SANDBOX_LAUNCHER_ADDITIONS,
+  WORKER_CONTAINER_SPEC,
+} from "./container-spec.ts";
 
 const IMAGE =
   "registry.invalid/code-reviewer-worker@sha256:0000000000000000000000000000000000000000000000000000000000000000";
@@ -425,6 +428,128 @@ describe("the memory limit per Worker kind", () => {
     expect(launches).toEqual([]);
   });
 });
+
+describe("the per-launcher additions (IPv6 off)", () => {
+  const IPV6_OFF = [
+    "net.ipv6.conf.all.disable_ipv6=1",
+    "net.ipv6.conf.default.disable_ipv6=1",
+  ];
+
+  // #325-T08
+  it("renders no sysctl unless a launcher asks for the additions", () => {
+    expect(valuesOf(render(), "--sysctl")).toEqual([]);
+    expect(valuesOf(render({ additions: {} }), "--sysctl")).toEqual([]);
+  });
+
+  // #325-T08
+  it("renders the two IPv6 switches for the Sandbox variant", () => {
+    const args = render({ additions: SANDBOX_LAUNCHER_ADDITIONS });
+
+    expect(valuesOf(args, "--sysctl")).toEqual(IPV6_OFF);
+    // Everything else is the spec: the additions change nothing but the two flags.
+    expect(args.filter((_, i) => !isSysctl(args, i))).toEqual(render());
+  });
+
+  // #325-T08
+  it("renders arguments for the Sandbox variant that equal the golden file", () => {
+    const golden = JSON.parse(
+      readFileSync(
+        new URL("./testdata/docker-run.sandbox.golden.json", import.meta.url),
+        "utf8",
+      ),
+    ) as string[];
+
+    expect(
+      render({
+        name: "code-reviewer-worker-job-1",
+        environment: { HOME: "/home/runner" },
+        overrides: { memory: { limit: "1536m", reservation: "1280m" } },
+        additions: SANDBOX_LAUNCHER_ADDITIONS,
+      }),
+    ).toEqual(golden);
+  });
+
+  // #325-T08
+  it.each<[string, unknown]>([
+    ["another sysctl", { sysctls: { "net.ipv4.ip_forward": "1" } }],
+    [
+      "an extra sysctl",
+      {
+        sysctls: {
+          "net.ipv6.conf.all.disable_ipv6": "1",
+          "net.ipv6.conf.default.disable_ipv6": "1",
+          "kernel.core_pattern": "x",
+        },
+      },
+    ],
+    [
+      "only one of the two",
+      { sysctls: { "net.ipv6.conf.all.disable_ipv6": "1" } },
+    ],
+    [
+      "a switch left on",
+      {
+        sysctls: {
+          "net.ipv6.conf.all.disable_ipv6": "0",
+          "net.ipv6.conf.default.disable_ipv6": "1",
+        },
+      },
+    ],
+    ["another key", { privileged: true }],
+    ["a device", { devices: ["/dev/kvm"] }],
+    ["a non-object", "net.ipv6.conf.all.disable_ipv6=1"],
+  ])("refuses additions with %s", (_name, additions) => {
+    expect(codeOf(() => render({ additions: additions as never }))).toBe(
+      "additions_not_allowed",
+    );
+  });
+
+  // #325-T08
+  it("is added by the launcher to every container it starts, and only when configured", async () => {
+    const launches: ContainerInvocation[] = [];
+    const sandbox = new ContainerLauncher({
+      host: recordingHost(launches),
+      spec: WORKER_CONTAINER_SPEC,
+      image: IMAGE,
+      additions: SANDBOX_LAUNCHER_ADDITIONS,
+    });
+    const selfHosted = new ContainerLauncher({
+      host: recordingHost(launches),
+      spec: WORKER_CONTAINER_SPEC,
+      image: IMAGE,
+    });
+
+    await sandbox.launch(request("dynamic"));
+    await sandbox.launch(request("diff"));
+    await selfHosted.launch(request("dynamic"));
+
+    expect(launches.map((l) => valuesOf(l.args, "--sysctl"))).toEqual([
+      IPV6_OFF,
+      IPV6_OFF,
+      [],
+    ]);
+  });
+
+  // #325-T08
+  it("refuses invalid additions when the launcher is created", () => {
+    expect(
+      codeOf(
+        () =>
+          new ContainerLauncher({
+            host: recordingHost([]),
+            spec: WORKER_CONTAINER_SPEC,
+            image: IMAGE,
+            additions: { sysctls: { "net.ipv4.ip_forward": "1" } } as never,
+          }),
+      ),
+    ).toBe("additions_not_allowed");
+  });
+});
+
+/** Whether the argument at `index` is `--sysctl` or the value after it. */
+function isSysctl(args: string[], index: number): boolean {
+  return args[index] === "--sysctl" || args[index - 1] === "--sysctl";
+}
 
 describe("the optional seccomp profile", () => {
   const PROFILE = "/etc/code-reviewer/seccomp-no-vsock.json";

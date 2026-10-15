@@ -90,7 +90,12 @@ The App, the Dispatcher (TypeScript) and the Worker (Python) agree on these file
   weakens the container (stable codes), takes the credential on stdin only, and lets a launcher change
   the memory limit per Worker kind and nothing else (`WorkerContainerOverrides`; the swap stays equal to
   the limit). A change of a flag is made in the spec, both compose files and the dispatcher copy in one
-  pull request. `docker/sandbox/vm-prepare.sh` is the host preparation a Sandbox VM needs before its
+  pull request. `WorkerContainerLauncherAdditions` (`examples/worker-container/`) is the one explicit per-launcher
+  addition (#345): the two `net.ipv6.conf.{all,default}.disable_ipv6=1` sysctls the Sandbox variant renders as
+  `--sysctl` because the Sandbox kernel only supports the `ip` nft family (the Dynamic-Worker's fallback
+  ruleset does not see IPv6, so IPv6 must be off, and the container's `/proc/sys` is read-only). The shared spec
+  and both compose files have no sysctl (the parity test fails on one), so self-hosted full-mode hosts do not
+  change. `docker/sandbox/vm-prepare.sh` is the host preparation a Sandbox VM needs before its
   first `docker run` with limits (the cgroup root fix of spike #317, run before `dockerd` on every VM start).
 
 ## Rules of version 1

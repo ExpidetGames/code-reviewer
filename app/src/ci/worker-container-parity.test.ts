@@ -79,6 +79,45 @@ describe("the hardened container spec against the compose files", () => {
   });
 });
 
+describe("the per-launcher additions of the Sandbox variant", () => {
+  const additions = JSON.parse(
+    read(
+      "contracts/examples/worker-container/WorkerContainerLauncherAdditions.json",
+    ),
+  ) as { sysctls: Record<string, string> };
+
+  // #325-T08
+  it.each(COMPOSE_FILES)(
+    "are not in %s: a full-mode host keeps its behaviour",
+    (path) => {
+      const service = serviceOf(path);
+
+      expect(service).not.toHaveProperty("sysctls");
+      expect(spec).not.toHaveProperty("sysctls");
+    },
+  );
+
+  // #325-T08
+  it("are the two switches the runner's IPv6 proof and the docs ask the container spec for", () => {
+    const docs = read("docs/dynamic-review.md");
+    const proof = read(
+      "runner/src/code_reviewer_runner/dynamic_review/ipv6_off.py",
+    );
+
+    expect(Object.keys(additions.sysctls).sort()).toEqual([
+      "net.ipv6.conf.all.disable_ipv6",
+      "net.ipv6.conf.default.disable_ipv6",
+    ]);
+    for (const [name, value] of Object.entries(additions.sysctls)) {
+      expect(value).toBe("1");
+      expect(docs).toContain(`${name}=1`);
+    }
+    // The proof reads `disable_ipv6` of `all` and `default` and wants both to be 1.
+    expect(proof).toContain("--sysctl net.ipv6.conf.all.disable_ipv6=1");
+    expect(proof).toContain("disable_ipv6");
+  });
+});
+
 describe("a changed flag is found", () => {
   // Each change is applied to the text of a compose file, as a person editing it would.
   const CHANGES: Array<[string, (text: string) => string]> = [

@@ -174,6 +174,26 @@ def test_the_container_overrides_allow_the_memory_limit_only() -> None:
     assert not _accepts("worker-container.v1.json", "WorkerContainerOverrides", {"readOnly": False})
 
 
+def test_the_container_launcher_additions_allow_the_two_ipv6_switches_only() -> None:
+    # #325-T08
+    both = {
+        "net.ipv6.conf.all.disable_ipv6": "1",
+        "net.ipv6.conf.default.disable_ipv6": "1",
+    }
+    additions = "WorkerContainerLauncherAdditions"
+    assert _accepts("worker-container.v1.json", additions, {"sysctls": both})
+    assert _accepts("worker-container.v1.json", additions, {})
+    assert not _accepts("worker-container.v1.json", additions, {"sysctls": {"net.ipv4.ip_forward": "1"}})
+    assert not _accepts(
+        "worker-container.v1.json",
+        additions,
+        {"sysctls": {**both, "net.ipv6.conf.all.disable_ipv6": "0"}},
+    )
+    # The spec itself has no sysctls: the self-hosted compose files carry none.
+    spec = _example("examples/worker-container", "WorkerContainerSpec")
+    assert not _accepts("worker-container.v1.json", "WorkerContainerSpec", {**spec, "sysctls": both})
+
+
 # The reference verifier of the dispatch webhook, written here from the description in the schema
 # and not copied from the TypeScript one (fakes/dispatcher-app/signing.ts).
 def _verdict(vectors: Document, vector: Document) -> str:
