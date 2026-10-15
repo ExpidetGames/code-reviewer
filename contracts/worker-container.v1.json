@@ -1,0 +1,215 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ExpidetGames/code-reviewer/contracts/worker-container.v1.json",
+  "title": "Code Reviewer hardened Worker container, version 1",
+  "description": "The hardened container spec (#316, #318): one definition of the flags of the container a Worker runs in, so that the self-hosted compose files and the container the Sandbox-Launcher starts inside a VM cannot drift apart. The schema is the hardening floor: a document that weakens it (privileged, a bind or volume, a device, host namespaces, host networking, an unconfined seccomp or AppArmor profile, a writable root, a weaker tmpfs, another user, another capability set, a credential in the environment) is refused, because the weakening has no key to live in or a value the schema does not allow. examples/worker-container/WorkerContainerSpec.json is the spec and equals compose.dynamic.yml and the runner-dynamic service of compose.coolify.yml (tests in the app, #325 extends them); the renderer to `docker run` arguments is #325. Per Worker kind a launcher may override only what WorkerContainerOverrides names (the memory limit: the self-hosted default is the spec's, the Sandbox sizes differ). The per-job credential is never part of a container: it goes to the Worker on stdin.",
+  "version": 1,
+  "$defs": {
+    "MemorySize": {
+      "description": "A size in the notation of docker: digits and m or g.",
+      "type": "string",
+      "pattern": "^[0-9]+[mg]$"
+    },
+    "Capability": {
+      "description": "The capabilities the Worker container may be created with, nothing else. SETUID SETGID KILL CHOWN DAC_OVERRIDE FOWNER stay for the life of the container (the root supervisor starts the engine as another user, seals and removes its tree); NET_ADMIN and SETPCAP are startup only: the entry point installs the engine user's static network rules and then drops both from every set, including the bounding set, before any job exists.",
+      "type": "string",
+      "enum": [
+        "SETUID",
+        "SETGID",
+        "KILL",
+        "CHOWN",
+        "DAC_OVERRIDE",
+        "FOWNER",
+        "NET_ADMIN",
+        "SETPCAP"
+      ]
+    },
+    "CapabilityGrant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "startupOnly"],
+      "properties": {
+        "name": { "$ref": "#/$defs/Capability" },
+        "startupOnly": {
+          "description": "true exactly for NET_ADMIN and SETPCAP.",
+          "type": "boolean"
+        }
+      },
+      "if": {
+        "properties": { "name": { "enum": ["NET_ADMIN", "SETPCAP"] } }
+      },
+      "then": { "properties": { "startupOnly": { "const": true } } },
+      "else": { "properties": { "startupOnly": { "const": false } } }
+    },
+    "TmpfsMount": {
+      "description": "A private memory filesystem. It can run no program, honour no setuid bit and hold no device; it is charged to the memory limit, hence the sizes.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "options", "size", "mode"],
+      "properties": {
+        "path": { "type": "string", "enum": ["/tmp", "/run", "/home/runner"] },
+        "options": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["rw", "noexec", "nosuid", "nodev"] },
+          "uniqueItems": true,
+          "allOf": [
+            { "contains": { "const": "noexec" } },
+            { "contains": { "const": "nosuid" } },
+            { "contains": { "const": "nodev" } }
+          ]
+        },
+        "size": { "$ref": "#/$defs/MemorySize" },
+        "mode": { "type": "string", "pattern": "^[0-7]{4}$" },
+        "uid": { "type": "integer", "minimum": 0 },
+        "gid": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "SecurityOption": {
+      "description": "no-new-privileges, or a named seccomp profile (never `unconfined`). No other option: AppArmor and SELinux labels are the daemon's.",
+      "oneOf": [
+        { "type": "string", "const": "no-new-privileges:true" },
+        {
+          "type": "string",
+          "pattern": "^seccomp=(?!unconfined$)[A-Za-z0-9_./-]+$"
+        }
+      ]
+    },
+    "EnvironmentName": {
+      "description": "A name the container may be given. Never one that looks like it holds a secret: the dispatcher token and the per-job credential do not reach a container through its environment.",
+      "type": "string",
+      "pattern": "^(?![A-Z0-9_]*(TOKEN|SECRET|KEY|PASSWORD|CREDENTIAL))[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "MemoryLimits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["limit", "reservation", "swap"],
+      "properties": {
+        "limit": { "$ref": "#/$defs/MemorySize" },
+        "reservation": { "$ref": "#/$defs/MemorySize" },
+        "swap": {
+          "description": "Memory plus swap. Equal to the limit: no swap, so the peak shows as an out-of-memory kill of the job.",
+          "$ref": "#/$defs/MemorySize"
+        }
+      }
+    },
+    "ForbiddenKey": {
+      "description": "A key a spec never has, and the renderer never emits.",
+      "type": "string",
+      "enum": [
+        "privileged",
+        "binds",
+        "volumes",
+        "devices",
+        "networkMode",
+        "pid",
+        "ipc",
+        "uts",
+        "userns",
+        "cgroupns",
+        "dockerSocket"
+      ]
+    },
+    "WorkerContainerSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "user",
+        "capDrop",
+        "capAdd",
+        "securityOpt",
+        "readOnly",
+        "tmpfs",
+        "memory",
+        "pids",
+        "stopTimeoutSeconds",
+        "network",
+        "allowedEnvironment",
+        "forbiddenKeys",
+        "overridable"
+      ],
+      "properties": {
+        "version": { "const": 1 },
+        "user": {
+          "description": "The container starts as root: the job process of a Dynamic job is the supervisor that owns every credential and starts the engine as another user. Root holds exactly the capabilities of capAdd and no-new-privileges means nothing can regain more.",
+          "const": "0:0"
+        },
+        "capDrop": { "const": ["ALL"] },
+        "capAdd": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/CapabilityGrant" },
+          "minItems": 1,
+          "maxItems": 8,
+          "uniqueItems": true
+        },
+        "securityOpt": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/SecurityOption" },
+          "contains": { "const": "no-new-privileges:true" },
+          "maxItems": 2,
+          "uniqueItems": true
+        },
+        "readOnly": { "const": true },
+        "tmpfs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/TmpfsMount" },
+          "minItems": 3,
+          "maxItems": 3
+        },
+        "memory": { "$ref": "#/$defs/MemoryLimits" },
+        "pids": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["limit"],
+          "properties": {
+            "limit": { "type": "integer", "minimum": 1, "maximum": 4096 }
+          }
+        },
+        "stopTimeoutSeconds": { "type": "integer", "minimum": 1, "maximum": 600 },
+        "network": {
+          "description": "The default bridge. Never the host's network and never none (the Worker must reach the app).",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode"],
+          "properties": { "mode": { "const": "bridge" } }
+        },
+        "allowedEnvironment": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/EnvironmentName" },
+          "uniqueItems": true
+        },
+        "forbiddenKeys": {
+          "description": "Documentation that a tool can check: the keys that no spec has. The schema is closed, so none of them can be added.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/ForbiddenKey" },
+          "uniqueItems": true
+        },
+        "overridable": {
+          "description": "The only values a launcher may change per Worker kind (WorkerContainerOverrides).",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["memory.limit", "memory.reservation", "memory.swap"]
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "WorkerContainerOverrides": {
+      "description": "What a launcher may change per Worker kind (ADR of the hosted deployment, #325): the memory limit, because the self-hosted default is not the size of a Sandbox VM. Nothing else.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "memory": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "limit": { "$ref": "#/$defs/MemorySize" },
+            "reservation": { "$ref": "#/$defs/MemorySize" },
+            "swap": { "$ref": "#/$defs/MemorySize" }
+          }
+        }
+      }
+    }
+  }
+}

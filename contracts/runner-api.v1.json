@@ -37,7 +37,7 @@
       "enum": ["diff", "dynamic"]
     },
     "ClaimRequest": {
-      "description": "The optional body of POST /api/runners/v1/claim (#195): the engines the calling runner can run. Absent or empty means ['pr-agent'] (a previous-release runner). Unknown or duplicated engine names are refused with 400 RUNNER_REQUEST_INVALID before any job is claimed. #279 adds the optional `features`: what else this runner understands. The app sends a job optional fields a previous-release runner would reject (the job input is closed) only to a runner that names the matching feature, so `dynamic_capabilities` means the runner reads `dynamic.capabilities`. Unknown feature names are ignored, so a newer runner can name features an older app does not know. Unknown fields are ignored, as everywhere in v1.",
+      "description": "The optional body of POST /api/runners/v1/claim (#195): the engines the calling runner can run. Absent or empty means ['pr-agent'] (a previous-release runner). Unknown or duplicated engine names are refused with 400 RUNNER_REQUEST_INVALID before any job is claimed. #279 adds the optional `features`: what else this runner understands. The app sends a job optional fields a previous-release runner would reject (the job input is closed) only to a runner that names the matching feature, so `dynamic_capabilities` means the runner reads `dynamic.capabilities`. Unknown feature names are ignored, so a newer runner can name features an older app does not know. Unknown fields are ignored, as everywhere in v1. #318 adds the Dispatcher's fields: `jobId` claims exactly that job (anything else, such as a job that is not due, already running, finished, cancelled or of a kind the advertised engines cannot run, is 204), `maxRunning` is the pool cap (the claim is 204 while that many jobs of the same X-Runner-Id are running), and the feature `worker_credential` selects the split answer (SplitClaimResponse: a per-job credential and no job input). Without that feature the answer is the legacy ClaimResponse, unchanged.",
       "type": "object",
       "properties": {
         "engines": {
@@ -51,8 +51,28 @@
           "type": "array",
           "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$" },
           "maxItems": 16
+        },
+        "jobId": {
+          "description": "#318: claim exactly this job (a Dispatcher woken by the dispatch webhook). Absent: the next due job, as before.",
+          "$ref": "#/$defs/JobId"
+        },
+        "maxRunning": {
+          "description": "#318: the pool cap. The app counts the running jobs whose X-Runner-Id equals this request's and answers 204 at or above the cap, inside the claim transaction.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
         }
       }
+    },
+    "KnownClaimFeature": {
+      "description": "The claim features this version of the contract defines (`features` in ClaimRequest). A reader ignores a feature name it does not know. `dynamic_capabilities` (#279): the runner reads `dynamic.capabilities`. `worker_credential` (#318): the caller is a Dispatcher and wants the split answer; the job input and its secrets reach only the Worker, with the per-job credential.",
+      "type": "string",
+      "enum": ["dynamic_capabilities", "worker_credential"]
+    },
+    "WorkerCredential": {
+      "description": "#318: the per-job credential. 256 random bits, base64url without padding, behind the prefix `crj_`. The app mints it at claim; it is valid only for that job and only while the claim holds, and it is the one thing a Worker holds (Authorization: Bearer). Secret: never log it, never put it in an argument, an environment variable or a file; the Dispatcher passes it to the Worker on stdin.",
+      "type": "string",
+      "pattern": "^crj_[A-Za-z0-9_-]{43}$"
     },
     "DynamicReview": {
       "description": "#195: the Dynamic options of a tagged job. Model, skill and the output limit only. A closed object: there is no fixed core, permission, executable command, endpoint or upstream URL here, so a job can never widen what the read-only agent may do. The skill is literal data.",
@@ -436,8 +456,93 @@
         "alreadyCompleted": { "type": "boolean" }
       }
     },
+    "SplitClaimResponse": {
+      "description": "#318: 200 from POST /api/runners/v1/claim when the request names the feature `worker_credential`. The job's input, the git token and the model key are not in it: the Worker fetches them with the credential (GET /api/workers/v1/jobs/{id}), so the Dispatcher never sees them. 204 without a body means there is nothing to do. Cache-Control is always no-store. The credential is a secret.",
+      "type": "object",
+      "required": ["version", "job"],
+      "properties": {
+        "version": { "const": 1 },
+        "job": {
+          "type": "object",
+          "required": [
+            "id",
+            "credential",
+            "reviewKind",
+            "leaseExpiresAt",
+            "heartbeatIntervalSeconds"
+          ],
+          "properties": {
+            "id": { "$ref": "#/$defs/JobId" },
+            "credential": { "$ref": "#/$defs/WorkerCredential" },
+            "reviewKind": { "$ref": "#/$defs/ReviewKind" },
+            "leaseExpiresAt": { "$ref": "#/$defs/Timestamp" },
+            "heartbeatIntervalSeconds": {
+              "description": "How often the lease must be extended; the Dispatcher heartbeats with the credential until the Worker takes over.",
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        }
+      }
+    },
+    "KnownReleaseReason": {
+      "description": "Why a Dispatcher gives a claimed job back. `launch_failed`: the Worker could not be started; the app counts it as a lost attempt (three attempts, then the job fails). A reader accepts any reason of the right form (ReleaseRequest) and treats an unknown one like launch_failed.",
+      "type": "string",
+      "enum": ["launch_failed"]
+    },
+    "ReleaseRequest": {
+      "description": "#318: POST /api/runners/v1/jobs/{id}/release, with the dispatcher credential (RUNNER_TOKEN) in Authorization and the job credential in the body. Gives the job back to the queue (or fails it on the last attempt).",
+      "type": "object",
+      "required": ["credential", "reason"],
+      "properties": {
+        "credential": { "$ref": "#/$defs/WorkerCredential" },
+        "reason": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$" },
+        "retryAfterSeconds": {
+          "description": "Do not offer the job again before this many seconds have passed.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400
+        }
+      }
+    },
+    "ReleaseResponse": {
+      "description": "#318: 200 from the release. `queued`: the job waits for another claim; `failed`: that was the last allowed attempt.",
+      "type": "object",
+      "required": ["version", "job"],
+      "properties": {
+        "version": { "const": 1 },
+        "job": {
+          "type": "object",
+          "required": ["id", "status"],
+          "properties": {
+            "id": { "$ref": "#/$defs/JobId" },
+            "status": { "type": "string", "enum": ["queued", "failed"] }
+          }
+        }
+      }
+    },
+    "KnownAppFeature": {
+      "description": "The features an app lists in VersionResponse.features. A reader ignores a name it does not know and refuses to run against an app that lacks one it needs. `worker_api`: /api/workers/v1 exists. `claim_by_job_id`: ClaimRequest.jobId is honoured. `pool_cap`: ClaimRequest.maxRunning is honoured. `release`: the release call exists.",
+      "type": "string",
+      "enum": ["worker_api", "claim_by_job_id", "pool_cap", "release"]
+    },
+    "VersionResponse": {
+      "description": "#318: 200 from GET /api/runners/v1/version (dispatcher credential). Lets a Dispatcher or a Worker detect an app that is too old before it claims anything. `version` is the runner API version; `appVersion` is the build of the app, for logs.",
+      "type": "object",
+      "required": ["version", "appVersion", "features"],
+      "properties": {
+        "version": { "const": 1 },
+        "appVersion": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "features": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$" },
+          "maxItems": 64,
+          "uniqueItems": true
+        }
+      }
+    },
     "ApiErrorCode": {
-      "description": "Every error of the API has one of these codes. 401 RUNNER_UNAUTHORIZED, 400 RUNNER_ID_INVALID / RUNNER_REQUEST_INVALID, 404 RUNNER_JOB_NOT_FOUND, 409 RUNNER_LEASE_LOST / RUNNER_RESULT_CONFLICT, 413 RUNNER_BODY_TOO_LARGE, 503 RUNNER_GIT_ACCESS_UNAVAILABLE (with Retry-After), 500 RUNNER_INTERNAL_ERROR.",
+      "description": "Every error of the API has one of these codes. 401 RUNNER_UNAUTHORIZED, 400 RUNNER_ID_INVALID / RUNNER_REQUEST_INVALID, 404 RUNNER_JOB_NOT_FOUND, 409 RUNNER_LEASE_LOST / RUNNER_RESULT_CONFLICT, 413 RUNNER_BODY_TOO_LARGE, 503 RUNNER_GIT_ACCESS_UNAVAILABLE (with Retry-After), 500 RUNNER_INTERNAL_ERROR. #318 adds 401 WORKER_CREDENTIAL_INVALID (a Worker route got a credential that is not the job's: wrong job, unknown, expired or from an earlier claim) and 409 RUNNER_JOB_ENDED (the app ended the job, for example after a permanent access failure at fetch; the Worker stops).",
       "type": "string",
       "enum": [
         "RUNNER_UNAUTHORIZED",
@@ -448,7 +553,9 @@
         "RUNNER_RESULT_CONFLICT",
         "RUNNER_BODY_TOO_LARGE",
         "RUNNER_GIT_ACCESS_UNAVAILABLE",
-        "RUNNER_INTERNAL_ERROR"
+        "RUNNER_INTERNAL_ERROR",
+        "WORKER_CREDENTIAL_INVALID",
+        "RUNNER_JOB_ENDED"
       ]
     },
     "ErrorResponse": {

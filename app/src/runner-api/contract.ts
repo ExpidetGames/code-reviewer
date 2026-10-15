@@ -135,6 +135,9 @@ export const RUNNER_API_ERROR_CODES = [
   "RUNNER_BODY_TOO_LARGE",
   "RUNNER_GIT_ACCESS_UNAVAILABLE",
   "RUNNER_INTERNAL_ERROR",
+  // The Worker API (#318, served from #320): a credential that is not the job's, and a job the app ended.
+  "WORKER_CREDENTIAL_INVALID",
+  "RUNNER_JOB_ENDED",
 ] as const;
 export type RunnerApiErrorCode = (typeof RUNNER_API_ERROR_CODES)[number];
 

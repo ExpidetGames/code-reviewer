@@ -1,0 +1,184 @@
+{
+  "version": 1,
+  "toleranceSeconds": 300,
+  "keys": {
+    "current": {
+      "kid": "k2",
+      "secret": "example-dispatch-secret-current-00000000"
+    },
+    "previous": {
+      "kid": "k1",
+      "secret": "example-dispatch-secret-previous-0000000"
+    }
+  },
+  "vectors": [
+    {
+      "name": "valid, current key",
+      "now": 1791633600,
+      "headers": {
+        "content-type": "application/json",
+        "x-dispatch-timestamp": "1791633600",
+        "x-dispatch-id": "5d3a8c0e-91b4-4f6a-a2c7-3e8b1d7f4a92",
+        "x-dispatch-key-id": "k2",
+        "x-dispatch-signature": "v1=be1740f25ea6e560f81dc3edf31b0cd0f61f637e87fda9446a75f853e72b290a"
+      },
+      "body": "{\"version\":1,\"type\":\"job.ready\",\"jobId\":\"0b9f6f4e-3c1a-4d9e-8f43-2a7d5e1c9b10\",\"reviewKind\":\"diff\",\"attempt\":1,\"dispatchId\":\"5d3a8c0e-91b4-4f6a-a2c7-3e8b1d7f4a92\",\"sentAt\":\"2026-10-10T12:00:00.000Z\"}",
+      "expected": "ok"
+    },
+    {
+      "name": "valid, previous key (rotation)",
+      "now": 1791633600,
+      "headers": {
+        "content-type": "application/json",
+        "x-dispatch-timestamp": "1791633600",
+        "x-dispatch-id": "5d3a8c0e-91b4-4f6a-a2c7-3e8b1d7f4a92",
+        "x-dispatch-key-id": "k1",
+        "x-dispatch-signature": "v1=fe88bf56592013309f67b55b5446fe22aaebfb5ed414e329334c57d7bd6e7fdc"
+      },
+      "body": "{\"version\":1,\"type\":\"job.ready\",\"jobId\":\"0b9f6f4e-3c1a-4d9e-8f43-2a7d5e1c9b10\",\"reviewKind\":\"diff\",\"attempt\":1,\"dispatchId\":\"5d3a8c0e-91b4-4f6a-a2c7-3e8b1d7f4a92\",\"sentAt\":\"2026-10-10T12:00:00.000Z\"}",
+      "expected": "ok"
+    },
+    {
+      "name": "valid at the edge of the tolerance",
+      "now": 1791633600,
+      "headers": {
+        "content-type": "application/json",
+        "x-dispatch-timestamp": "1791633300",
+        "x-dispatch-id": "5d3a8c0e-91b4-4f6a-a2c7-3e8b1d7f4a92",
+        "x-dispatch-key-id": "k2",
+        "x-dispatch-signature": "v1=a6a9fbd9fe0040294ba18583f9f048090197ab0874ef024388c63997dc9a0ff7"
+      },
+      "body": "{\"version\":1,\"type\":\"job.ready\",\"jobId\":\"0b9f6f4e-3c1a-4d9e-8f43-2a7d5e1c9b10\",\"reviewKind\":\"diff\",\"attempt\":1,\"dispatchId\":\"5d3a8c0e-91b4-4f6a-a2c7-3e8b1d7f4a92\",\"sentAt\":\"2026-10-10T12:00:00.000Z\"}",
+      "expected": "ok"
+    },
+    {
+      "name": "wrong key",
+      "now": 1791633600,
+      "headers": {
+        "content-type": "application/json",
+        "x-dispatch-timestamp": "1791633600",
+        "x-dispatch-id": "5d3a8c0e-91b4-4f6a-a2c7-3e8b1d7f4a92",
+        "x-dispatch-key-id": "k2",
+        "x-dispatch-signature": "v1=9b509b260a18c38a53f273db95b1730cca452097efd2d32949fe296b9004404a"
+      },
+      "body": "{\"version\":1,\"type\":\"job.ready\",\"jobId\":\"0b9f6f4e-3c1a-4d9e-8f43-2a7d5e1c9b10\",\"reviewKind\":\"diff\",\"attempt\":1,\"dispatchId\":\"5d3a8c0e-91b4-4f6a-a2c7-3e8b1d7f4a92\",\"sentAt\":\"2026-10-10T12:00:00.000Z\"}",
+      "expected": "bad_signature"
+    },
+    {
+      "name": "old timestamp",
+      "now": 1791633600,
+      "headers": {
+        "content-type": "application/json",
+        "x-dispatch-timestamp": "1791633299",
+        "x-dispatch-id": "5d3a8c0e-91b4-4f6a-a2c7-3e8b1d7f4a92",
+        "x-dispatch-key-id": "k2",
+        "x-dispatch-signature": "v1=5ba89599a0a8fff4c8f6f00af17d85d67e2e36af961c50bbe98c9be152dd525f"
+      },
+      "body": "{\"version\":1,\"type\":\"job.ready\",\"jobId\":\"0b9f6f4e-3c1a-4d9e-8f43-2a7d5e1c9b10\",\"reviewKind\":\"diff\",\"attempt\":1,\"dispatchId\":\"5d3a8c0e-91b4-4f6a-a2c7-3e8b1d7f4a92\",\"sentAt\":\"2026-10-10T12:00:00.000Z\"}",
+      "expected": "expired"
+    },
+    {
+      "name": "timestamp too far ahead",
+      "now": 1791633600,
+      "headers": {
+        "content-type": "application/json",
+        "x-dispatch-timestamp": "1791633901",
+        "x-dispatch-id": "5d3a8c0e-91b4-4f6a-a2c7-3e8b1d7f4a92",
+        "x-dispatch-key-id": "k2",
+        "x-dispatch-signature": "v1=d0ad27d5bfc002bfd79467f152f0cc42420dcf27fc02c030307e26bd24718e2f"
+      },
+      "body": "{\"version\":1,\"type\":\"job.ready\",\"jobId\":\"0b9f6f4e-3c1a-4d9e-8f43-2a7d5e1c9b10\",\"reviewKind\":\"diff\",\"attempt\":1,\"dispatchId\":\"5d3a8c0e-91b4-4f6a-a2c7-3e8b1d7f4a92\",\"sentAt\":\"2026-10-10T12:00:00.000Z\"}",
+      "expected": "expired"
+    },
+    {
+      "name": "tampered body",
+      "now": 1791633600,
+      "headers": {
+        "content-type": "application/json",
+        "x-dispatch-timestamp": "1791633600",
+        "x-dispatch-id": "5d3a8c0e-91b4-4f6a-a2c7-3e8b1d7f4a92",
+        "x-dispatch-key-id": "k2",
+        "x-dispatch-signature": "v1=be1740f25ea6e560f81dc3edf31b0cd0f61f637e87fda9446a75f853e72b290a"
+      },
+      "body": "{\"version\":1,\"type\":\"job.ready\",\"jobId\":\"0b9f6f4e-3c1a-4d9e-8f43-2a7d5e1c9b10\",\"reviewKind\":\"diff\",\"attempt\":2,\"dispatchId\":\"5d3a8c0e-91b4-4f6a-a2c7-3e8b1d7f4a92\",\"sentAt\":\"2026-10-10T12:00:00.000Z\"}",
+      "expected": "bad_signature"
+    },
+    {
+      "name": "tampered dispatch id",
+      "now": 1791633600,
+      "headers": {
+        "content-type": "application/json",
+        "x-dispatch-timestamp": "1791633600",
+        "x-dispatch-id": "00000000-0000-4000-8000-000000000000",
+        "x-dispatch-key-id": "k2",
+        "x-dispatch-signature": "v1=be1740f25ea6e560f81dc3edf31b0cd0f61f637e87fda9446a75f853e72b290a"
+      },
+      "body": "{\"version\":1,\"type\":\"job.ready\",\"jobId\":\"0b9f6f4e-3c1a-4d9e-8f43-2a7d5e1c9b10\",\"reviewKind\":\"diff\",\"attempt\":1,\"dispatchId\":\"5d3a8c0e-91b4-4f6a-a2c7-3e8b1d7f4a92\",\"sentAt\":\"2026-10-10T12:00:00.000Z\"}",
+      "expected": "bad_signature"
+    },
+    {
+      "name": "tampered timestamp within the tolerance",
+      "now": 1791633600,
+      "headers": {
+        "content-type": "application/json",
+        "x-dispatch-timestamp": "1791633590",
+        "x-dispatch-id": "5d3a8c0e-91b4-4f6a-a2c7-3e8b1d7f4a92",
+        "x-dispatch-key-id": "k2",
+        "x-dispatch-signature": "v1=be1740f25ea6e560f81dc3edf31b0cd0f61f637e87fda9446a75f853e72b290a"
+      },
+      "body": "{\"version\":1,\"type\":\"job.ready\",\"jobId\":\"0b9f6f4e-3c1a-4d9e-8f43-2a7d5e1c9b10\",\"reviewKind\":\"diff\",\"attempt\":1,\"dispatchId\":\"5d3a8c0e-91b4-4f6a-a2c7-3e8b1d7f4a92\",\"sentAt\":\"2026-10-10T12:00:00.000Z\"}",
+      "expected": "bad_signature"
+    },
+    {
+      "name": "unknown key id",
+      "now": 1791633600,
+      "headers": {
+        "content-type": "application/json",
+        "x-dispatch-timestamp": "1791633600",
+        "x-dispatch-id": "5d3a8c0e-91b4-4f6a-a2c7-3e8b1d7f4a92",
+        "x-dispatch-key-id": "k0",
+        "x-dispatch-signature": "v1=be1740f25ea6e560f81dc3edf31b0cd0f61f637e87fda9446a75f853e72b290a"
+      },
+      "body": "{\"version\":1,\"type\":\"job.ready\",\"jobId\":\"0b9f6f4e-3c1a-4d9e-8f43-2a7d5e1c9b10\",\"reviewKind\":\"diff\",\"attempt\":1,\"dispatchId\":\"5d3a8c0e-91b4-4f6a-a2c7-3e8b1d7f4a92\",\"sentAt\":\"2026-10-10T12:00:00.000Z\"}",
+      "expected": "unknown_key"
+    },
+    {
+      "name": "signature without the version prefix",
+      "now": 1791633600,
+      "headers": {
+        "content-type": "application/json",
+        "x-dispatch-timestamp": "1791633600",
+        "x-dispatch-id": "5d3a8c0e-91b4-4f6a-a2c7-3e8b1d7f4a92",
+        "x-dispatch-key-id": "k2",
+        "x-dispatch-signature": "be1740f25ea6e560f81dc3edf31b0cd0f61f637e87fda9446a75f853e72b290a"
+      },
+      "body": "{\"version\":1,\"type\":\"job.ready\",\"jobId\":\"0b9f6f4e-3c1a-4d9e-8f43-2a7d5e1c9b10\",\"reviewKind\":\"diff\",\"attempt\":1,\"dispatchId\":\"5d3a8c0e-91b4-4f6a-a2c7-3e8b1d7f4a92\",\"sentAt\":\"2026-10-10T12:00:00.000Z\"}",
+      "expected": "malformed"
+    },
+    {
+      "name": "missing timestamp",
+      "now": 1791633600,
+      "headers": {
+        "content-type": "application/json",
+        "x-dispatch-id": "5d3a8c0e-91b4-4f6a-a2c7-3e8b1d7f4a92",
+        "x-dispatch-key-id": "k2",
+        "x-dispatch-signature": "v1=be1740f25ea6e560f81dc3edf31b0cd0f61f637e87fda9446a75f853e72b290a"
+      },
+      "body": "{\"version\":1,\"type\":\"job.ready\",\"jobId\":\"0b9f6f4e-3c1a-4d9e-8f43-2a7d5e1c9b10\",\"reviewKind\":\"diff\",\"attempt\":1,\"dispatchId\":\"5d3a8c0e-91b4-4f6a-a2c7-3e8b1d7f4a92\",\"sentAt\":\"2026-10-10T12:00:00.000Z\"}",
+      "expected": "malformed"
+    },
+    {
+      "name": "signature in upper case",
+      "now": 1791633600,
+      "headers": {
+        "content-type": "application/json",
+        "x-dispatch-timestamp": "1791633600",
+        "x-dispatch-id": "5d3a8c0e-91b4-4f6a-a2c7-3e8b1d7f4a92",
+        "x-dispatch-key-id": "k2",
+        "x-dispatch-signature": "v1=BE1740F25EA6E560F81DC3EDF31B0CD0F61F637E87FDA9446A75F853E72B290A"
+      },
+      "body": "{\"version\":1,\"type\":\"job.ready\",\"jobId\":\"0b9f6f4e-3c1a-4d9e-8f43-2a7d5e1c9b10\",\"reviewKind\":\"diff\",\"attempt\":1,\"dispatchId\":\"5d3a8c0e-91b4-4f6a-a2c7-3e8b1d7f4a92\",\"sentAt\":\"2026-10-10T12:00:00.000Z\"}",
+      "expected": "malformed"
+    }
+  ]
+}

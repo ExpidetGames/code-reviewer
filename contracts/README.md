@@ -9,6 +9,10 @@ other way round, so a change to the format has to change the file and both sides
 | `runner-api.v1.json`         | The wire format of the runner API v1 (JSON Schema, draft 2020-12): the claim request, the claim response, the heartbeat and complete requests and responses, and every error. The `$defs` are the named bodies. |
 | `operator-api.v1.json`       | The wire format of the operator API (#275, `app/src/operator-api/README.md`): the workspace list, the entitlements of a workspace and of the instance default, the write body and every error. For an external service that sets limits; it exists only while the app has an `OPERATOR_API_TOKEN`. `examples/operator-api/<Definition>.json` holds one valid example per body. |
 | `examples/<Definition>.json` | One valid document per body. Both test suites validate them, so an example can never drift from the schema. They hold dummy values only.                                                     |
+| `worker-api.v1.json`         | The Worker contract of the hosted deployment (#316, #318): job details, heartbeat and result under `/api/workers/v1`, with the per-job credential (`crj_…`, valid for one job only). Reuses `RunnerJobInput` and `RunnerResult` of the runner API. `examples/worker-api/<Definition>.json` holds one valid example per body. |
+| `dispatch-webhook.v1.json`   | The signed wake-up call the app sends a Dispatcher after a job is enqueued: the closed body (`DispatchWebhook`), the headers and the signing rule in its description, the answers, and the shape of `dispatch-signing-vectors.json` (`DispatchSigningVectors`). `examples/dispatch-webhook/<Definition>.json` holds the examples. |
+| `dispatch-signing-vectors.json` | Requests as a receiver sees them (valid, previous key, wrong key, old or future timestamp, tampered body, id or timestamp, unknown key id, malformed headers) with the verdict each must get. Dummy keys only. Every consumer computes the verdict itself and compares. |
+| `worker-container.v1.json`   | The hardened container spec: user, `cap_drop` and `cap_add` with startup-only markers, security options, read-only root, tmpfs mounts with options, memory/swap/pids limits, stop timeout, allowed environment names, forbidden keys, and what a launcher may override per Worker kind (`WorkerContainerOverrides`: the memory limit). The schema is the hardening floor: `privileged`, binds, volumes, devices, host namespaces, host networking, `seccomp=unconfined`, a writable root or a credential in the environment have no way in. `examples/worker-container/WorkerContainerSpec.json` is the spec and equals `compose.dynamic.yml`. |
 | `dynamic-review/schema.v1.json` | The neutral findings of a Dynamic Review (#195), before the runner renders them: opaque id, P0–P3, confidence, bounded title/body, a lexically safe repository-relative path, a line range (ordering is the runner's semantic check), evidence references, and the reviewed SHA. Resolutions of earlier findings sit on the run envelope (`resolvedIds`), so a run that leaves no current finding can still report them. No permission, provider, routing, endpoint or command field. `dynamic-review/example.v1.json` and `example-resolved.v1.json` are validated by both suites. |
 
 ## Who checks what
@@ -31,6 +35,49 @@ rest, such as a start in the future or backwards, is the app's rule and document
 error codes, key modes, limit names and id pattern equal the app's lists. The version is in the path
 (`/api/operator/v1`) and in every body (`"version": 1`); the file only grows in ways readers may ignore, and a
 reader ignores fields it does not know. It identifies workspaces by id and slug only. No runner reads it.
+
+## The hosted deployment contracts (#316, #318)
+
+The App, the Dispatcher (TypeScript) and the Worker (Python) agree on these files; none imports another's source.
+
+- **Additions to `runner-api.v1.json`** (all optional, so a previous-release reader and writer keep working):
+  `ClaimRequest.jobId` and `ClaimRequest.maxRunning`; the claim feature `worker_credential`, which selects
+  the split answer `SplitClaimResponse` (the per-job credential, **no job input and no secrets**; without the
+  feature the answer is the legacy `ClaimResponse`, unchanged); `ReleaseRequest`/`ReleaseResponse`;
+  `VersionResponse` (the features of the app, so a Dispatcher or a Worker detects an app that is too old);
+  the API error codes `WORKER_CREDENTIAL_INVALID` and `RUNNER_JOB_ENDED`. The new definitions are served by
+  #320 and #322; until then only the fake App speaks them. A previous-release app ignores the new claim
+  fields, and a previous-release runner never names `worker_credential`, so neither side is affected.
+- **Generated types.** `make generate-contracts` writes TypeScript types of `runner-api`, `worker-api`,
+  `dispatch-webhook` and `worker-container` into `app/src/contracts/` and `dispatcher/src/contracts/` (the
+  same content twice, committed). `make check-contracts`, part of `make verify`, fails with the command to
+  regenerate while a committed file differs from the schemas, is missing or has no schema any more. Do not
+  edit the files by hand.
+- **No cross-project imports.** The Dispatcher never imports anything under `app/` (or `runner/`), the app
+  never imports the Dispatcher: `app/src/ci/project-boundaries.test.ts` fails on such an import. What is shared
+  is the contract files, the generated types and `fakes/`.
+- **The fake App** (`fakes/dispatcher-app/`) speaks the Dispatcher API and the Worker API with the bodies of the
+  examples, and fails on script (status, body, delay, lost lease). The Worker, the Dispatcher and the
+  end-to-end journeys run against it. Its answers are checked against the schemas in
+  `app/integration-tests/fakes/dispatcher-app.integration.test.ts`.
+
+### Who checks what (hosted deployment)
+
+- **App** (`app/integration-tests/compatibility/hosted-contracts.integration.test.ts`, with Ajv): every
+  example is valid; the dispatch webhook is closed (an unknown or a secret-shaped field is refused); an
+  additive field of a Worker API answer is ignored, while `RunnerJobInput` stays closed; the container spec
+  refuses every weakening; the signing vectors give their verdicts with the reference verifier of
+  `fakes/dispatcher-app/signing.ts`; and the real routes will check their answers against these files when
+  #320 and #322 land. `app/src/ci/contract-types/generate.test.ts` checks that the generated types are the
+  committed ones; `app/src/runner-api/contract.ts` keeps the API error codes equal to the file.
+- **Runner** (`runner/tests/contract/test_hosted_contracts.py`, with `jsonschema`): the same examples, the same
+  closed objects and the same vectors, with a verifier written independently of the TypeScript one.
+- **Dispatcher** (`dispatcher/`, #327): validates the same examples with its own tooling against the types in
+  `dispatcher/src/contracts/` and runs the vectors against its receiver. Until that project exists nothing
+  there is checked, only that the generated copy is current.
+- **The self-hosted compose files** are compared with `worker-container.v1.json` (the spec equals
+  `compose.dynamic.yml`: test in `hosted-contracts.integration.test.ts`; the renderer and the comparison with
+  the PaaS compose file come with #325).
 
 ## Rules of version 1
 
