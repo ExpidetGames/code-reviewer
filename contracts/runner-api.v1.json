@@ -560,6 +560,25 @@
         }
       }
     },
+    "JobStateResponse": {
+      "description": "#364: 200 from GET /api/runners/v1/jobs/{id} (the dispatcher credential only; a per-job credential is refused). What a Dispatcher asks to decide whether the VM of a job is a leftover: the job's status and nothing else, no job input, lease, repository or credential. `running`: the app holds the job under a lease. Any other status: it does not (`queued` also covers a lease that lapsed and a job that was given back). A reader that meets a status it does not know treats the job as running. An unknown id is 404 RUNNER_JOB_NOT_FOUND. An app of a previous release has no such route (a 404 without an ErrorResponse body); it is not a required feature, so a reader goes on without it.",
+      "type": "object",
+      "required": ["version", "job"],
+      "properties": {
+        "version": { "const": 1 },
+        "job": {
+          "type": "object",
+          "required": ["id", "status"],
+          "properties": {
+            "id": { "$ref": "#/$defs/JobId" },
+            "status": {
+              "type": "string",
+              "enum": ["queued", "running", "succeeded", "failed", "superseded", "cancelled"]
+            }
+          }
+        }
+      }
+    },
     "KnownAppFeature": {
       "description": "The features an app lists in VersionResponse.features. A reader ignores a name it does not know and refuses to run against an app that lacks one it needs. `worker_api`: /api/workers/v1 exists. `claim_by_job_id`: ClaimRequest.jobId is honoured. `pool_cap`: ClaimRequest.maxRunning is honoured. `release`: the release call exists.",
       "type": "string",

@@ -353,6 +353,20 @@ export async function startRunnerApiHarness(
     );
   }
 
+  /** #364: the job state call of a Dispatcher (`GET /jobs/{id}`). */
+  function jobState(
+    jobId: string,
+    request: RequestOptions = {},
+  ): Promise<Response> {
+    return api.jobState(
+      new Request(`${url}/jobs/${jobId}`, {
+        method: "GET",
+        headers: headers(request),
+      }),
+      jobId,
+    );
+  }
+
   /** #322: the version call of a Dispatcher. */
   function version(
     request: RequestOptions & { query?: string } = {},
@@ -585,6 +599,7 @@ export async function startRunnerApiHarness(
     claim,
     claimed,
     release,
+    jobState,
     version,
     heartbeat,
     complete,

@@ -308,12 +308,23 @@ Worker. It cannot count what runs, so the app counts for it. Three additions, al
   credential must be the running claim of that job, a primary key lookup), to check the app before it
   fetches its job. The answer holds nothing of any job.
 
+- **Job state (#364).** `GET /api/runners/v1/jobs/:id` answers `{ version: 1, job: { id, status } }` with the
+  status of the job (`queued`, `running`, `succeeded`, `failed`, `superseded`, `cancelled`) and nothing else: no job
+  input, lease, repository or credential, and nothing is written. The dispatcher credential only (a per-job
+  credential is `401 RUNNER_UNAUTHORIZED`), a job id that is no UUID is `400` and an unknown job `404
+RUNNER_JOB_NOT_FOUND`, both before anything else is read. A Dispatcher's reaper asks it to find the Sandbox
+  VMs of jobs that ended (`dispatcher/README.md`, "The reaper"). It is not in `APP_FEATURES`: a Dispatcher
+  does not need it to claim, and one that meets an app without the route reads a `404` without an error body as
+  "state unknown".
+
 **Mixed versions.** No migration. A previous-release app does not know `jobId` or `maxRunning` and would
 claim the _next_ job and ignore the cap, and has no `release` or `version` route (`404`): a Dispatcher
 must therefore read `/version` and refuse to claim unless the features it needs are listed (`404` or a
 missing feature means "app too old"). The legacy claim (no body, or `engines` and `features` only) makes the
 same queue call and the same SQL as before; a runner of the previous release is not affected, and a new app
-behind an old Dispatcher is not either (nobody sends the new fields).
+behind an old Dispatcher is not either (nobody sends the new fields). The job state call is the same kind
+of addition: a new Dispatcher with an app without it keeps claiming and its reaper falls back to the maximum
+lifetime of a VM; an old Dispatcher never calls it.
 
 ## Hooks
 

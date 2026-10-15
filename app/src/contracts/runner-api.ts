@@ -709,6 +709,24 @@ export interface ReleaseResponse {
   [k: string]: unknown;
 }
 /**
+ * #364: 200 from GET /api/runners/v1/jobs/{id} (the dispatcher credential only; a per-job credential is refused). What a Dispatcher asks to decide whether the VM of a job is a leftover: the job's status and nothing else, no job input, lease, repository or credential. `running`: the app holds the job under a lease. Any other status: it does not (`queued` also covers a lease that lapsed and a job that was given back). A reader that meets a status it does not know treats the job as running. An unknown id is 404 RUNNER_JOB_NOT_FOUND. An app of a previous release has no such route (a 404 without an ErrorResponse body); it is not a required feature, so a reader goes on without it.
+ */
+export interface JobStateResponse {
+  version: 1;
+  job: {
+    id: JobId;
+    status:
+      | "queued"
+      | "running"
+      | "succeeded"
+      | "failed"
+      | "superseded"
+      | "cancelled";
+    [k: string]: unknown;
+  };
+  [k: string]: unknown;
+}
+/**
  * #318: 200 from GET /api/runners/v1/version (dispatcher credential; #322: a Worker may also send its per-job credential with ?jobId=<its job>, which must be the running claim of that job). Lets a Dispatcher or a Worker detect an app that is too old before it claims anything. An app of a previous release has no such route (404), which means it is too old. `version` is the runner API version; `appVersion` is the build of the app, for logs.
  */
 export interface VersionResponse {
