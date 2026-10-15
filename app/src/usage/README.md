@@ -39,7 +39,7 @@ claim --> reserved --complete with usage, or a run that succeeded--> settled   (
 - **Void without a report.** A job that ends without `complete` (the last attempt loses its lease, the hard limit,
   a release on the last attempt, a cancellation at claim time, a cancellation or replacement while it waited again)
   has its `reserved` record voided in the same transaction as the transition: the runner side with
-  `voidRecordsOfEndedJobs` (`runner-jobs-repository.ts`), the scoped job repository (`cancelWaiting`, and the
+  `voidRecordsOfEndedJobs` (`usage-records-sweep.ts`, also run when Dynamic Review is switched off), the scoped job repository (`cancelWaiting`, and the
   replacement in `enqueue`) with `voidEndedJobs()`.
 - **Immutable.** Every statement that changes a record only touches a `reserved` one; a repeated completion
   (`alreadyCompleted`) changes nothing. A job that was claimed before this table existed has no record; its

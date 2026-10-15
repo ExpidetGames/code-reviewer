@@ -18,7 +18,7 @@ import {
 } from "../dynamic-review-lock.ts";
 import { createInstanceSettingsRepository } from "./instance-settings-repository.ts";
 import { isDeepStrictEqual } from "node:util";
-import { sql, type ExpressionBuilder, type Kysely } from "kysely";
+import type { ExpressionBuilder, Kysely } from "kysely";
 import {
   DEFAULT_JOB_QUEUE_LIMITS,
   type JobQueueLimits,
@@ -45,6 +45,7 @@ import type { Database } from "../schema.ts";
 import { claimOldestDueJob, claimOldestDueJobPostgres } from "./jobs-claim.ts";
 import { toJob } from "./jobs-repository.ts";
 import { createUsageRecordsRepository } from "./usage-records-repository.ts";
+import { voidRecordsOfEndedJobs } from "./usage-records-sweep.ts";
 import { settlementOfOutcome } from "../../usage/usage-records.ts";
 
 /** What `expireStaleJobs` did. */
@@ -141,40 +142,6 @@ function runningWhere(scope: RunningScope) {
             eb("lease_token", "=", scope.claim.leaseToken),
           ]),
     ]);
-}
-
-/**
- * A job that ended without a report (a lost last attempt, the hard limit, a cancellation, a replacement while
- * it waited again) made no model call anybody knows of: its record, if still `reserved`, is void and no longer
- * counts (src/usage/README.md). A job that was completed already has a settled or void record, which this
- * leaves alone. One statement over the reserved records only (a partial index), run by every transition that
- * can end a job without `complete`, in the same transaction.
- */
-async function voidRecordsOfEndedJobs(
-  executor: Kysely<Database>,
-): Promise<void> {
-  await executor
-    .updateTable("usage_records")
-    .set({ state: "void" })
-    // A literal, not a bound value, so the planner can use the partial index of the reserved records.
-    .where("state", "=", sql.lit("reserved"))
-    // Driven by the few reserved records (the partial index), each probing its job by primary key: the work
-    // does not grow with the history of ended jobs.
-    .where((eb) =>
-      eb.exists(
-        eb
-          .selectFrom("jobs")
-          .select("jobs.id")
-          .whereRef("jobs.id", "=", "usage_records.job_id")
-          .where("jobs.status", "in", [
-            "succeeded",
-            "failed",
-            "cancelled",
-            "superseded",
-          ]),
-      ),
-    )
-    .execute();
 }
 
 export function createRunnerJobsRepository(

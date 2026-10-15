@@ -32,6 +32,7 @@ import type { StoredGithubApp } from "../../github-config/settings.ts";
 import type { ImportNotice } from "../../legacy-import/notice.ts";
 import type { SmtpSettings } from "../../mail/smtp-settings.ts";
 import type { Database } from "../schema.ts";
+import { voidRecordsOfEndedJobs } from "./usage-records-sweep.ts";
 
 /** The value of each setting, by key. A new setting adds its key and type here. */
 export type InstanceSettingValues = {
@@ -166,6 +167,8 @@ export function createInstanceSettingsRepository(
         .where("review_kind", "=", "dynamic")
         .where("status", "=", "queued")
         .execute();
+      // A job that waited again after a lost lease keeps a reserved usage record; it no longer counts.
+      await voidRecordsOfEndedJobs(trx);
       return result;
     };
     return db.isTransaction ? run(db) : db.transaction().execute(run);

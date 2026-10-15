@@ -5,6 +5,7 @@
 // and a job that ends without a model call voids it. The record is a bookkeeping side effect: what a runner
 // is handed and what a job does are pinned by the other runner API tests.
 import { describe, expect, it } from "vitest";
+import { createInstanceSettingsRepository } from "../../src/db/repositories/instance-settings-repository.ts";
 import { createUsageRecordsRepository } from "../../src/db/repositories/usage-records-repository.ts";
 import { createLlmAccess } from "../../src/llm/access.ts";
 import { sha } from "../../src/test-support/jobs.ts";
@@ -399,6 +400,29 @@ describe("a job that ends without reporting", () => {
 
     expect(newer.status).toBe("created");
     expect((await h.queue.get(job.id))?.status).toBe("superseded");
+    expect((await recordsOf(h).get(job.id))?.state).toBe("void");
+  });
+
+  // #272-T04
+  it("voids the reserved record of a Dynamic job that went back to the queue and was cancelled when Dynamic Review was switched off, at once", async () => {
+    const h = await startDynamic();
+    const job = await h.enqueueNew();
+    await h.claimed({ engines: ENGINES });
+    h.clock.advance(3 * MINUTE);
+    await h.queue.expireStaleJobs();
+    expect((await h.queue.get(job.id))?.status).toBe("queued");
+    expect((await recordsOf(h).get(job.id))?.state).toBe("reserved");
+
+    await createInstanceSettingsRepository(h.db, h.clock.now).set(
+      "dynamic_review",
+      { enabled: false },
+      null,
+    );
+
+    expect(await h.queue.get(job.id)).toMatchObject({
+      status: "cancelled",
+      errorCode: "dynamic_review_disabled",
+    });
     expect((await recordsOf(h).get(job.id))?.state).toBe("void");
   });
 });
