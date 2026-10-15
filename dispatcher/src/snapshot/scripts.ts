@@ -299,24 +299,51 @@ if [ ! -s "$manifest" ]; then
 fi
 ${pin}work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
-# \`grep\` over the paths in $work/files. Only a match (0) and no match (1) are answers: any other status of grep
-# is turned into 255, which stops xargs at once with 124, so that a failing tool never reads as "nothing found".
+# One batch of \`grep\` for xargs: the options, \`--\`, the files. Only a match (0) and no match (1) are answers. On
+# any other status the files are asked one by one: a file that is gone by then was a temporary file of the
+# platform's boot (listed, then renamed or removed) and holds nothing; an error on a file that is still there stops
+# xargs at once (255, so 124), so that a failing tool never reads as "nothing found".
+grep_batch() {
+  local options=() file status=0
+  while [ "$1" != "--" ]; do options+=("$1"); shift; done
+  shift
+  grep -IlZ "\${options[@]}" -- "$@" || status=$?
+  if [ "$status" -le 1 ]; then return 0; fi
+  for file in "$@"; do
+    status=0
+    grep -IlZ "\${options[@]}" -- "$file" || status=$?
+    if [ "$status" -gt 1 ] && [ -e "$file" ]; then exit 255; fi
+  done
+}
+export -f grep_batch
+# \`grep_batch\` over the paths in $work/files; \`sort -u\` drops a hit that a batch and its retry both printed.
 grep_files() {
   local kind=$1 status=0
   shift
-  xargs -0 -r -a "$work/files" bash -c 'grep -IlZ "$@"; status=$?; if [ "$status" -gt 1 ]; then exit 255; fi' grep "$@" -- > "$work/hits" || status=$?
+  xargs -0 -r -a "$work/files" bash -c 'grep_batch "$@"' grep_batch "$@" -- > "$work/hits" || status=$?
   case "$status" in
     0|123) ;;
     *) fail ${EXIT_TOOL_FAILED} "grep failed (status $status)" ;;
   esac
-  while IFS= read -r -d '' path; do report "$kind" "$path"; done < "$work/hits"
+  LC_ALL=C sort -zu "$work/hits" > "$work/hits.sorted"
+  while IFS= read -r -d '' path; do report "$kind" "$path"; done < "$work/hits.sorted"
+}
+# The listing is asked up to three times: \`find\` ends with 1 when a file it walked past is gone by the time it
+# looks at it, which happens while the VM boots. A listing that keeps failing fails the scan.
+list_files() {
+  local attempt
+  for attempt in 1 2 3; do
+    if for root in "\${roots[@]}"; do
+      [ -d "$root" ] || continue
+      find "$root" -xdev -type f -printf '${RECORD_FORMAT}'
+    done | LC_ALL=C sort -zu > "$work/current"; then return 0; fi
+    sleep 1
+  done
+  return 1
 }
 # The files of the roots now, in the manifest's format; the records that are not in the manifest are the new
 # and the changed files. Their paths, and every file of Docker's own data, are what the checks read.
-for root in "\${roots[@]}"; do
-  [ -d "$root" ] || continue
-  find "$root" -xdev -type f -printf '${RECORD_FORMAT}'
-done | LC_ALL=C sort -zu > "$work/current" || fail ${EXIT_TOOL_FAILED} "find or sort failed"
+list_files || fail ${EXIT_TOOL_FAILED} "find or sort failed"
 [ -s "$work/current" ] || fail ${EXIT_LISTING_EMPTY} "no file was listed under the scan roots"
 LC_ALL=C comm -z -13 "$manifest" "$work/current" | sed -z 's/\\t[0-9]*\\t[0-9.]*\\t[0-9.]*$//' > "$work/files"
 found=

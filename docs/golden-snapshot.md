@@ -137,7 +137,10 @@ disk":
   manifest is missing or empty (43), it is not the pinned one (48), `find` fails or lists no file under the roots (47,
   45), `grep` fails with anything but a match or no match (47), or `/usr/local/sbin/vm-prepare.sh`, which the pipeline
   wrote after the record, is not among the added files (46: the listing is not the one of the pipeline's VM). No tool
-  error is ignored. A builder whose roots hold no file at all does not produce a manifest (`base_manifest_failed`).
+  error is ignored. Two races of the VM's boot are tolerated and nothing else: the listing is asked up to three times
+  (`find` ends with 1 when a file it walked past is gone), and a file that is listed and gone when `grep` asks for it
+  (the platform renames a temporary `ca-certificates.crt.new` at boot, seen in the first run) is skipped; an error on a
+  file that is still there fails the scan. A builder whose roots hold no file at all does not produce a manifest (`base_manifest_failed`).
 
 | Kind          | Finding                                                                                                                                     |
 | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |

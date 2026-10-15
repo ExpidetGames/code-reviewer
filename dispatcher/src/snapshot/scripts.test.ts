@@ -812,6 +812,41 @@ describe("the final scan of the restored snapshot", () => {
       expect(result.stdout).not.toContain("SCAN_DONE");
     });
 
+    // #357-T18
+    it("does not fail on a file that was listed and is gone when grep asks for it, and still reports the others", () => {
+      writeAnchor();
+      const victim = join(roots, "etc", "ca-certificates.crt.new");
+      writeFileSync(victim, "a temporary file of the boot\n");
+      const leak = join(roots, "home", "ubuntu", "leak.txt");
+      writeFileSync(leak, `ghp_${"A1b2".repeat(10)}\n`);
+      // The stand-in lists as the real find does and removes the temporary file right after, as the boot does.
+      const env = {
+        ...stubTools({
+          find: `/usr/bin/find "$@"; status=$?; case "$*" in *-printf*) rm -f "$GOLDEN_VICTIM" ;; esac; exit $status`,
+        }),
+        GOLDEN_VICTIM: victim,
+      };
+      const result = scanResult({}, env);
+      expect(result.stdout).toBe(`FINDING token ${leak}\nSCAN_DONE\n`);
+      expect(result.status).toBe(0);
+    });
+
+    // #357-T18
+    it("lists again when find fails once, and passes", () => {
+      writeAnchor();
+      const flag = join(work, "find-failed-once");
+      const env = {
+        ...stubTools({
+          find: `case "$*" in *-printf*) if [ ! -e "$GOLDEN_FLAG" ]; then : > "$GOLDEN_FLAG"; echo "find: vanished" >&2; exit 1; fi ;; esac; exec /usr/bin/find "$@"`,
+        }),
+        GOLDEN_FLAG: flag,
+      };
+      const result = scanResult({}, env);
+      expect(existsSync(flag)).toBe(true);
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe("SCAN_DONE\n");
+    });
+
     // #357-T15
     it("still passes when grep finds nothing in some of its batches (exit 1 is a plain no-match)", () => {
       writeAnchor();
