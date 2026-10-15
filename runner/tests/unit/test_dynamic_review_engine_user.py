@@ -21,7 +21,7 @@ from code_reviewer_runner.dynamic_review.engine_user import (
     listener_uids,
     user_pids,
 )
-from code_reviewer_runner.dynamic_review.netguard import IsolationError
+from code_reviewer_runner.dynamic_review.netguard import EgressMode, IsolationError
 from code_reviewer_runner.result import ErrorCode
 
 HEADER = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid"
@@ -232,3 +232,67 @@ def test_a_missing_interpreter_is_a_failed_sweep(
     monkeypatch.setattr(engine_user.shutil, "which", no_interpreter)
 
     assert launch(tmp_path).sweep() is False
+
+
+# #345-T13
+def test_in_fallback_mode_a_job_proves_ipv6_off_after_the_probe_and_only_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    mine = launch(tmp_path, uid=10101, gid=10101)
+    mine.egress_mode = EgressMode.FALLBACK
+    events: list[str] = []
+    mine.sweep = lambda: True  # type: ignore[method-assign]
+    monkeypatch.setattr(engine_user, "require_startup_capabilities_gone", lambda: None)
+    monkeypatch.setattr(engine_user, "verify_confinement", event_probe(events))
+
+    def record_ipv6(uid: int, gid: int) -> None:
+        events.append(f"ipv6:{uid}:{gid}")
+
+    monkeypatch.setattr(engine_user, "verify_ipv6_off", record_ipv6)
+
+    mine.confine(mine.proxy_port, mine.engine_port)
+    mine.confine(mine.proxy_port, mine.engine_port)
+
+    assert events == [f"probe:{mine.proxy_port}", "ipv6:10101:10101"]
+
+
+# #345-T13
+def test_in_fallback_mode_ipv6_that_is_on_stops_the_job_before_the_engine(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    mine = launch(tmp_path, uid=10101, gid=10101)
+    mine.egress_mode = EgressMode.FALLBACK
+    mine.sweep = lambda: True  # type: ignore[method-assign]
+    monkeypatch.setattr(engine_user, "require_startup_capabilities_gone", lambda: None)
+    monkeypatch.setattr(engine_user, "verify_confinement", event_probe([]))
+
+    def ipv6_on(uid: int, gid: int) -> None:
+        raise IsolationError("IPv6 is not switched off on every interface")
+
+    monkeypatch.setattr(engine_user, "verify_ipv6_off", ipv6_on)
+
+    with pytest.raises(IsolationError) as caught:
+        mine.confine(mine.proxy_port, mine.engine_port)
+
+    assert caught.value.code is ErrorCode.DYNAMIC_ISOLATION_SELF_CHECK_FAILED
+    # Not marked proven: the next attempt proves it again instead of trusting the failure.
+    assert mine._verified is False  # pyright: ignore[reportPrivateUsage]
+
+
+# #345-T13
+def test_in_full_mode_no_ipv6_proof_runs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    mine = launch(tmp_path, uid=10101, gid=10101)
+    assert mine.egress_mode is EgressMode.FULL
+    events: list[str] = []
+    mine.sweep = lambda: True  # type: ignore[method-assign]
+    monkeypatch.setattr(engine_user, "require_startup_capabilities_gone", lambda: None)
+    monkeypatch.setattr(engine_user, "verify_confinement", event_probe(events))
+
+    def must_not_run(uid: int, gid: int) -> None:
+        events.append("ipv6-must-not-run")
+
+    monkeypatch.setattr(engine_user, "verify_ipv6_off", must_not_run)
+
+    mine.confine(mine.proxy_port, mine.engine_port)
+
+    assert events == [f"probe:{mine.proxy_port}"]

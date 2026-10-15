@@ -21,6 +21,7 @@ from typing import Any
 
 import pytest
 from privileged_support import (
+    EGRESS_MODE,
     ENGINE_GID,
     ENGINE_UID,
     PROXY_PORT,
@@ -37,6 +38,7 @@ from code_reviewer_runner.dynamic_review.self_check import (
     DEFAULT_TOOLS,
     SelfCheckFailed,
     SelfCheckReason,
+    SelfCheckResult,
     ToolPaths,
     check_dynamic_runner,
     platform_key,
@@ -88,7 +90,7 @@ def tools() -> Generator[ToolPaths]:
     shutil.rmtree(directory, ignore_errors=True)
 
 
-def check(installed: ToolPaths, **changes: Any) -> None:
+def check(installed: ToolPaths, **changes: Any) -> SelfCheckResult:
     arguments: dict[str, Any] = {
         "user": (ENGINE_UID, ENGINE_GID),
         "ports": PORTS,
@@ -97,9 +99,11 @@ def check(installed: ToolPaths, **changes: Any) -> None:
         # The tools sit in a directory of this suite, not under "/": the chain of directories above
         # them is judged up to its root. The chain from "/" is the image smoke test's.
         "chain_root": installed.opencode.parent,
+        # What the startup step of this run found (forced in the fallback pass, #345).
+        "egress_mode": EGRESS_MODE,
         **changes,
     }
-    check_dynamic_runner(**arguments)
+    return check_dynamic_runner(**arguments)
 
 
 def reason_of(installed: ToolPaths, **changes: Any) -> SelfCheckReason:
@@ -110,7 +114,8 @@ def reason_of(installed: ToolPaths, **changes: Any) -> SelfCheckReason:
 
 # #202-T01
 def test_the_real_system_passes_the_check_and_advertises_opencode(tools: ToolPaths) -> None:
-    check(tools)
+    # In either mode (#345-T18): the result names the ruleset the startup step installed.
+    assert check(tools) == SelfCheckResult(egress_mode=EGRESS_MODE)
     settings = settings_from_environment(
         {
             "RUNNER_API_URL": "http://app.invalid:3000",
@@ -122,10 +127,12 @@ def test_the_real_system_passes_the_check_and_advertises_opencode(tools: ToolPat
     advertised = service.advertise_engines(
         settings,
         True,
+        egress_mode=EGRESS_MODE,
         check=partial(check_dynamic_runner, tools=tools, chain_root=tools.opencode.parent),
     )
 
     assert advertised.engines == ALL_ENGINES
+    assert advertised.dynamic_egress_mode is EGRESS_MODE
     assert advertised.dynamic_command == (str(DEFAULT_TOOLS.opencode),)
     assert advertised.dynamic_ripgrep == str(DEFAULT_TOOLS.ripgrep)
 
