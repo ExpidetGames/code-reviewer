@@ -71,6 +71,13 @@ by Next.js.
 
 A change takes effect on the next claim; a running job is not touched.
 
+**There is no call for the operator's own LLM key** (#276): it is saved by the instance admin in the admin portal and by
+nobody else. Whoever holds the API token sets which workspaces are `managed`, never the key itself, and no answer or log
+of the API holds or mentions it (`operator-api.integration.test.ts`).
+
+**Upgrade every app instance before setting any workspace to `managed`** (#276). An instance of the previous release
+ignores the key mode: it would run the workspace's jobs on the workspace's own key and model, outside the cost limit.
+
 ### The PUT body
 
 The whole entitlements (`planLabel`, `keyMode`, `limits` with every limit, `periodStart`, `suspended`,

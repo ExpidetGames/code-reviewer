@@ -1,0 +1,116 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// The keys remembered for a job (#276): every key handed out for it stays remembered, so each is masked in the
+// result after any number of rotations; the number is bounded; a row of the earlier format (one plain key) is
+// still read; and what is stored is encrypted.
+import { describe, expect, it } from "vitest";
+import { encryptSecret } from "../crypto/secret-box.ts";
+import { createJobClaimedKeysRepository } from "../db/repositories/job-claimed-keys-repository.ts";
+import { createJobQueueFixture } from "../test-support/jobs.ts";
+import { CLAIMED_KEYS_PER_JOB, createClaimedKeys } from "./claimed-keys.ts";
+
+const APP_SECRET = "claimed-keys-test-app-secret-0123456789-01";
+
+async function start() {
+  const fixture = await createJobQueueFixture({});
+  const job = await fixture.enqueueNew();
+  const keys = createClaimedKeys({
+    db: fixture.db,
+    appSecret: () => APP_SECRET,
+    now: fixture.clock.now,
+  });
+  return { ...fixture, job, keys };
+}
+
+describe("the keys remembered for a job", () => {
+  // #276-P3
+  it("keeps every key handed out for it, so each stays masked after a rotation", async () => {
+    const { job, keys } = await start();
+
+    await keys.remember(job.id, "plain-key-one-0001");
+    await keys.remember(job.id, "plain-key-two-0002");
+
+    expect(await keys.keysOf(job.id)).toEqual([
+      "plain-key-one-0001",
+      "plain-key-two-0002",
+    ]);
+  });
+
+  // #276-P3
+  it("does not spend a place on a key it has already, so repeated fetches with one key keep it once", async () => {
+    const { job, keys } = await start();
+
+    for (let i = 0; i < 5; i += 1)
+      await keys.remember(job.id, "plain-key-one-0001");
+
+    expect(await keys.keysOf(job.id)).toEqual(["plain-key-one-0001"]);
+  });
+
+  // #276-P3
+  it(`is bounded to ${String(CLAIMED_KEYS_PER_JOB)} keys per job and then forgets the oldest`, async () => {
+    const { job, keys } = await start();
+
+    for (const key of ["key-a-0001", "key-b-0002", "key-c-0003", "key-d-0004"])
+      await keys.remember(job.id, key);
+
+    const kept = await keys.keysOf(job.id);
+    expect(kept).toHaveLength(CLAIMED_KEYS_PER_JOB);
+    expect(CLAIMED_KEYS_PER_JOB).toBe(3);
+    expect(kept).toEqual(["key-b-0002", "key-c-0003", "key-d-0004"]);
+  });
+
+  // #276-P3
+  it("stores them encrypted in one row of the job, and keeps the keys of another job apart", async () => {
+    const { db, job, keys, enqueueNew } = await start();
+    const other = await enqueueNew({ prNumber: 8 });
+
+    await keys.remember(job.id, "plain-key-one-0001");
+    await keys.remember(job.id, "plain-key-two-0002");
+    await keys.remember(other.id, "plain-key-other-0003");
+
+    const rows = await db.selectFrom("job_claimed_keys").selectAll().execute();
+    expect(rows).toHaveLength(2);
+    expect(JSON.stringify(rows)).not.toContain("plain-key");
+    expect(await keys.keysOf(job.id)).toEqual([
+      "plain-key-one-0001",
+      "plain-key-two-0002",
+    ]);
+    expect(await keys.keysOf(other.id)).toEqual(["plain-key-other-0003"]);
+  });
+
+  // #276-P3
+  it("reads a row of the earlier format, a single plain key, and adds to it", async () => {
+    const { db, job, keys, clock } = await start();
+    const sealed = encryptSecret(
+      APP_SECRET,
+      { table: "job_claimed_keys", rowId: job.id, field: "api_key" },
+      "plain-key-legacy-0000",
+    );
+    await createJobClaimedKeysRepository(db, clock.now).put({
+      jobId: job.id,
+      ciphertext: sealed.ciphertext,
+      nonce: sealed.nonce,
+      keyVersion: sealed.keyVersion,
+    });
+    expect(await keys.keysOf(job.id)).toEqual(["plain-key-legacy-0000"]);
+
+    await keys.remember(job.id, "plain-key-new-0001");
+
+    expect(await keys.keysOf(job.id)).toEqual([
+      "plain-key-legacy-0000",
+      "plain-key-new-0001",
+    ]);
+  });
+
+  // #276-P3
+  it("reads nothing it cannot decrypt, and a new key then starts the list again", async () => {
+    const { db, job, keys } = await start();
+    await keys.remember(job.id, "plain-key-one-0001");
+    await db.updateTable("job_claimed_keys").set({ nonce: "AAAA" }).execute();
+
+    expect(await keys.keysOf(job.id)).toEqual([]);
+    await keys.remember(job.id, "plain-key-two-0002");
+
+    expect(await keys.keysOf(job.id)).toEqual(["plain-key-two-0002"]);
+  });
+});

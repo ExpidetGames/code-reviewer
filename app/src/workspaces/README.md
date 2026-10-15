@@ -139,12 +139,12 @@ characters without control or formatting characters (they end up in mails and pa
 
 An operator who serves many workspaces can state, per workspace, what it may do (#271; epic #268). The data
 model, and the operator API that sets it (#275): no page. The limits and the suspension are enforced when a job is
-claimed (#277, `src/usage/README.md`, "Limits and suspension at claim"); the managed key is a later issue of the epic. A self-hosted instance configures nothing and nothing changes.
+claimed (#277, `src/usage/README.md`, "Limits and suspension at claim"); the key mode decides whose LLM key a job uses (#276, `src/llm/README.md`). A self-hosted instance configures nothing and nothing changes.
 
 - **Data.** One row per workspace in `workspace_entitlements` (`src/db/repositories/workspace-entitlements-repository.ts`)
   and one instance setting `default_entitlements` for the workspaces without a row. Both hold the same fields:
   `planLabel` (a label for display and audit, at most 64 printable characters; the code never branches on it),
-  `keyMode` (`own` or `managed`), `limits` (`diffRunsPerPeriod`, `dynamicRunsPerPeriod`,
+  `keyMode` (`own` or `managed`: whose LLM key the reviews use, the workspace's own or the operator's), `limits` (`diffRunsPerPeriod`, `dynamicRunsPerPeriod`,
   `managedCostLimitMicroUsd`, each a non-negative integer up to 2^53-1 or `null` for unlimited), `periodStart` (usage
   counts from here), `suspended` and `suspensionCode`.
 - **Resolver.** `resolveEntitlements(row, default)` in `entitlements.ts` is the one place that interprets the data. A
@@ -152,6 +152,9 @@ claimed (#277, `src/usage/README.md`, "Limits and suspension at claim"); the man
   answer is `{ kind: "unlimited" }` (own key, no limits, not suspended). A limited answer says whether it came from
   the `workspace` or the `default`. It copies the named fields only: the user id and the time of the last save
   that a stored row carries never reach the answer.
+- **Reading them for one workspace.** `readEffectiveEntitlements(db, workspaceId)` in `effective-entitlements.ts`
+  reads the workspace's row and, only without one, the default, and resolves them: the claim's admission (#277) and the
+  choice of the LLM key (#276) both go through it, so they cannot read the entitlements differently.
 - **Unreadable data fails closed.** The columns of a row and the JSON of the default are checked when they are
   read, with the rules of a write (`readEntitlements`). An entry that exists but cannot be read (damaged JSON,
   limits with a missing or bad value, an unknown key mode) is never "unlimited": the resolver answers

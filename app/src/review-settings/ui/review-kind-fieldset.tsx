@@ -24,6 +24,7 @@ import {
   SettingsTextField,
   type SettingsOrigin,
 } from "./settings-fields.tsx";
+import { MODEL_CHOSEN_BY_INSTANCE } from "./model-fieldset.tsx";
 import { SkillEditor } from "./skill-editor.tsx";
 
 const KIND_HINTS: Record<ProjectReviewKind, string> = {
@@ -61,7 +62,10 @@ export function ReviewKindFieldset({
   hiddenProblem,
   kindError,
   handlers,
+  modelChosenByInstance = false,
 }: {
+  /** The instance chooses the model (the workspace's key mode is managed): a note replaces the model field (#276). */
+  modelChosenByInstance?: boolean;
   view: ProjectDynamicView;
   values: DynamicFormValues;
   errors: Partial<Record<string, string>>;
@@ -177,15 +181,21 @@ export function ReviewKindFieldset({
 
       {dynamic ? (
         <>
-          <SettingsTextField
-            name="dynamicModel"
-            label="Dynamic Review model"
-            hint={`The model the agent uses. Type the name of any model your provider serves; the default is ${view.defaults.dynamicModel}.`}
-            error={errors.dynamicModel}
-            origin={modelOrigin}
-            value={values.dynamicModel}
-            onChange={handlers.setModel}
-          />
+          {modelChosenByInstance ? (
+            <p className="text-sm text-muted-foreground">
+              {MODEL_CHOSEN_BY_INSTANCE}
+            </p>
+          ) : (
+            <SettingsTextField
+              name="dynamicModel"
+              label="Dynamic Review model"
+              hint={`The model the agent uses. Type the name of any model your provider serves; the default is ${view.defaults.dynamicModel}.`}
+              error={errors.dynamicModel}
+              origin={modelOrigin}
+              value={values.dynamicModel}
+              onChange={handlers.setModel}
+            />
+          )}
           <SkillEditor
             view={view}
             values={values}

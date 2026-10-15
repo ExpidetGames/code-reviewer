@@ -28,6 +28,7 @@ import {
   RUNNER_API_VERSION,
   type WorkerJobDetailsResponse,
 } from "./contract.ts";
+import { standingRefusal } from "../usage/enforce-entitlements.ts";
 import { describeError } from "./logger.ts";
 import { parseWorkerFeatures } from "./requests.ts";
 import {
@@ -68,6 +69,16 @@ export async function handleFetch(
 
   const claimed = { job, leaseToken };
   try {
+    // The claim admitted the job; the workspace may have been suspended since, or its entitlements may have become
+    // unreadable. No key and no token are made then: the job ends with the code of the claim. Quotas were
+    // decided at the claim and are not counted again.
+    const standing = standingRefusal(
+      await deps.entitlementsFor(job.workspaceId),
+    );
+    if (standing !== null) {
+      await endJob(deps, claimed, ORIGIN, standing);
+      return errorResponse(409, "RUNNER_JOB_ENDED");
+    }
     const checked = await checkJob(deps, job, {
       engines: null,
       classifyReadFailures: true,
