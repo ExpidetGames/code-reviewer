@@ -48,10 +48,13 @@ def _tools(message: dict[str, Any]) -> str:
     entries: list[Any] = calls  # pyright: ignore[reportUnknownVariableType]
     named: list[str] = []
     for call in entries[:MAX_TOOLS_NAMED]:
-        function = as_object(as_object(call).get("function")) if as_object(call) else None
+        entry = as_object(call)
+        function = as_object(entry.get("function")) if entry else None
         name = _identifier(function.get("name")) if function else "other"
-        if name == STRUCTURED_OUTPUT_TOOL and not _arguments_are_json(
-            function.get("arguments") if function else None
+        if (
+            function is not None
+            and name == STRUCTURED_OUTPUT_TOOL
+            and not _arguments_are_json(function.get("arguments"))
         ):
             name += "(args not json)"
         named.append(name)
@@ -62,7 +65,8 @@ def _tools(message: dict[str, Any]) -> str:
 def describe_call(completion: Mapping[str, Any], *, final: bool) -> str:
     """The note of one provider answer; `final` marks the wrap-up or recovery call."""
     choices: Any = completion.get("choices")
-    first = as_object(choices[0]) if isinstance(choices, list) and choices else None
+    options: list[Any] = choices if isinstance(choices, list) else []  # pyright: ignore[reportUnknownVariableType]
+    first = as_object(options[0]) if options else None
     message = as_object(first.get("message")) if first else None
     if first is None or message is None:
         return "no usable choice" + (", final call" if final else "")
