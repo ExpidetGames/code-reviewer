@@ -37,4 +37,4 @@ not the builder calls of this port (scripts, files, snapshots, deletion), and th
 that is a change of both, see `fakes/sandbox/README.md`.
 
 The double is wider than the platform in one place: the pipeline's `SandboxVm.run` has a `label`, which the real
-adapter drops. A Launcher test should address a command by its label the same way.
+adapter drops. A pipeline test addresses a command by its label; the Launcher's double (`fakes/sandbox/`) does the same for its own port.
