@@ -37,6 +37,52 @@ export type ClaimFeature = (typeof CLAIM_FEATURES)[number];
 export type ClaimRequest = {
   engines?: ClaimEngine[];
   features?: ClaimFeature[];
+  /** #322: claim exactly this job (a Dispatcher woken by the dispatch webhook). */
+  jobId?: string;
+  /** #322: the pool cap: 204 while this many jobs of the caller's `X-Runner-Id` are running. */
+  maxRunning?: number;
+};
+
+/** #322: the range of `ClaimRequest.maxRunning`. */
+export const MAX_RUNNING_RANGE = { min: 1, max: 1000 } as const;
+
+/**
+ * #322: what this app lists in `VersionResponse.features` (`KnownAppFeature` in the contract). A
+ * Dispatcher reads the list before it claims, so an app that lacks one of them (a previous release,
+ * which would ignore `jobId` and `maxRunning`) is never asked.
+ */
+export const APP_FEATURES = [
+  "worker_api",
+  "claim_by_job_id",
+  "pool_cap",
+  "release",
+] as const;
+export type AppFeature = (typeof APP_FEATURES)[number];
+
+/** #322: 200 from `GET /api/runners/v1/version` (`VersionResponse`). */
+export type VersionResponse = {
+  version: typeof RUNNER_API_VERSION;
+  appVersion: string;
+  features: AppFeature[];
+};
+
+/**
+ * #322: the body of `POST /api/runners/v1/jobs/{id}/release` (`ReleaseRequest`): the per-job credential of
+ * the claim, why the job is given back and, optionally, how long it must not be offered again.
+ */
+export type ReleaseRequest = {
+  credential: string;
+  reason: string;
+  retryAfterSeconds?: number;
+};
+
+/** #322: the range of `ReleaseRequest.retryAfterSeconds`. */
+export const RELEASE_RETRY_AFTER_RANGE = { min: 1, max: 86_400 } as const;
+
+/** #322: 200 from the release (`ReleaseResponse`). */
+export type ReleaseResponse = {
+  version: typeof RUNNER_API_VERSION;
+  job: { id: string; status: "queued" | "failed" };
 };
 
 /** The path prefix of this version; the version is part of the URL. */

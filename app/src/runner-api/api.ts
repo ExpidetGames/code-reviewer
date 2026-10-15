@@ -9,24 +9,37 @@
 //
 //   1. token     `Authorization: Bearer <RUNNER_TOKEN>`, constant time compare       401
 //   2. runner id `X-Runner-Id`, optional, for bookkeeping only                       400
-//   3. job id    a UUID in the path (heartbeat, complete)                            400
+//   3. job id    a UUID in the path (heartbeat, complete, release)                            400
 //   4. body      read up to 64 KiB, JSON object, checked                             413 / 400
 //   5. work      claim, heartbeat or complete                                        see contract
 //
 // Every answer carries `Cache-Control: no-store` (responses.ts). The Worker API, which a per-job
 // credential opens instead of `RUNNER_TOKEN`, is worker-api.ts.
 import "server-only";
+import {
+  bearerWorkerCredential,
+  workerLeaseToken,
+} from "../jobs/worker-credential.ts";
 import { DEFAULT_ENGINES } from "../jobs/runner-capabilities.ts";
 import { readJsonBody, readOptionalJsonBody } from "./body.ts";
 import { handleClaim, type ClaimDeps } from "./claim.ts";
+import {
+  APP_FEATURES,
+  RUNNER_API_VERSION,
+  type VersionResponse,
+} from "./contract.ts";
+import { handleRelease, type ReleaseDeps } from "./release.ts";
 import { describeError } from "./logger.ts";
 import { parseClaimRequest, parseJobId, parseRunnerId } from "./requests.ts";
 import { handleComplete, handleHeartbeat, type ReportDeps } from "./report.ts";
-import { errorResponse, unauthorized } from "./responses.ts";
+import { errorResponse, jsonResponse, unauthorized } from "./responses.ts";
 import { bearerTokenOf, tokensMatch } from "./token-auth.ts";
 
 export type RunnerApiDeps = ClaimDeps &
-  ReportDeps & {
+  ReportDeps &
+  ReleaseDeps & {
+    /** #322: the build of the app, reported by the version call. */
+    appVersion: string;
     /** The configured shared secret (`RUNNER_TOKEN`), read for every request. */
     runnerToken: () => string | undefined;
   };
@@ -35,6 +48,10 @@ export type RunnerApi = {
   claim(request: Request): Promise<Response>;
   heartbeat(request: Request, jobId: string): Promise<Response>;
   complete(request: Request, jobId: string): Promise<Response>;
+  /** #322: a Dispatcher gives a claimed job back. */
+  release(request: Request, jobId: string): Promise<Response>;
+  /** #322: what this app is and can do. */
+  version(request: Request): Promise<Response>;
 };
 
 export function createRunnerApi(deps: RunnerApiDeps): RunnerApi {
@@ -52,6 +69,18 @@ export function createRunnerApi(deps: RunnerApiDeps): RunnerApi {
         response: errorResponse(400, "RUNNER_ID_INVALID"),
       };
     return { ok: true, runnerId: runnerId.value };
+  }
+
+  /** #322: the Worker's way into the version call: `Bearer crj_...` plus `?jobId=` of the job it holds. */
+  async function isRunningClaim(request: Request): Promise<boolean> {
+    const credential = bearerWorkerCredential(
+      request.headers.get("authorization"),
+    );
+    const jobId = new URL(request.url).searchParams.get("jobId");
+    if (credential === null || jobId === null || !parseJobId(jobId))
+      return false;
+    const job = await deps.queue.holding(jobId, workerLeaseToken(credential));
+    return job?.status === "running";
   }
 
   /** A failure nobody planned for: the caller gets a generic answer, the log gets the cause. */
@@ -78,6 +107,14 @@ export function createRunnerApi(deps: RunnerApiDeps): RunnerApi {
           who.runnerId,
           parsed.value.engines ?? DEFAULT_ENGINES,
           parsed.value.features ?? [],
+          {
+            ...(parsed.value.jobId === undefined
+              ? {}
+              : { jobId: parsed.value.jobId }),
+            ...(parsed.value.maxRunning === undefined
+              ? {}
+              : { maxRunning: parsed.value.maxRunning }),
+          },
         );
       } catch (error) {
         return unexpected("claim", error);
@@ -113,6 +150,38 @@ export function createRunnerApi(deps: RunnerApiDeps): RunnerApi {
         return await handleComplete(deps, jobId, who.runnerId, body.value);
       } catch (error) {
         return unexpected("complete", error);
+      }
+    },
+
+    async release(request, jobId) {
+      try {
+        const who = identify(request);
+        if (!who.ok) return who.response;
+        if (!parseJobId(jobId))
+          return errorResponse(400, "RUNNER_REQUEST_INVALID", {
+            fields: [{ field: "jobId", code: "invalid" }],
+          });
+        const body = await readJsonBody(request);
+        if (!body.ok) return body.response;
+        return await handleRelease(deps, jobId, who.runnerId, body.value);
+      } catch (error) {
+        return unexpected("release", error);
+      }
+    },
+
+    async version(request) {
+      try {
+        // The dispatcher credential, or the credential of a running claim with its job id: a Worker
+        // checks the app before it fetches its job. Read only, and the answer holds nothing of any job.
+        const who = identify(request);
+        if (!who.ok && !(await isRunningClaim(request))) return who.response;
+        return jsonResponse(200, {
+          version: RUNNER_API_VERSION,
+          appVersion: deps.appVersion,
+          features: [...APP_FEATURES],
+        } satisfies VersionResponse);
+      } catch (error) {
+        return unexpected("version", error);
       }
     },
   };

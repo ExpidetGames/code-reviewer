@@ -51,6 +51,7 @@ import { createJobQueueFixture, sha, type TestQueue } from "./jobs.ts";
 export const TEST_RUNNER_TOKEN = "test-runner-token-4f9c2a7e1b-0d58a3c6e9f2";
 export const TEST_LLM_API_KEY = "test-llm-api-key-8d3b6e0a5c";
 export const TEST_LLM_MODEL = "vendor/test-model";
+export const TEST_APP_VERSION = "0.0.0-test";
 export const TEST_APP_SECRET = "runner-api-test-app-secret-0123456789-0123";
 
 export type RequestOptions = {
@@ -67,6 +68,10 @@ export type RequestOptions = {
   engines?: string[];
   /** #279: the features sent in the claim body next to the engines (`dynamic_capabilities`). */
   features?: string[];
+  /** #322: the job a Dispatcher claims. Sent in the claim body; the engines then default to `pr-agent`. */
+  jobId?: string;
+  /** #322: the pool cap. Sent in the claim body. Any value, so a test can send an invalid one. */
+  maxRunning?: unknown;
 };
 
 export async function startRunnerApiHarness(
@@ -257,6 +262,7 @@ export async function startRunnerApiHarness(
     const api = createRunnerApi({
       ...apiDeps,
       runnerToken: () => configuredRunnerToken(env),
+      appVersion: TEST_APP_VERSION,
     });
     // #320: the Worker API over the same collaborators (it has no dispatcher credential).
     const workerApi = createWorkerApi(apiDeps);
@@ -305,7 +311,11 @@ export async function startRunnerApiHarness(
 
   /** The claim request of the runner: no body, or the engines (#195) and features (#279) it advertises. */
   function claimRequest(request: RequestOptions): Request {
-    if (request.engines === undefined)
+    if (
+      request.engines === undefined &&
+      request.jobId === undefined &&
+      request.maxRunning === undefined
+    )
       return new Request(`${url}/claim`, {
         method: "POST",
         headers: headers(request),
@@ -314,12 +324,45 @@ export async function startRunnerApiHarness(
       method: "POST",
       headers: headers(request, { "content-type": "application/json" }),
       body: JSON.stringify({
-        engines: request.engines,
+        ...(request.engines === undefined ? {} : { engines: request.engines }),
         ...(request.features === undefined
           ? {}
           : { features: request.features }),
+        ...(request.jobId === undefined ? {} : { jobId: request.jobId }),
+        ...(request.maxRunning === undefined
+          ? {}
+          : { maxRunning: request.maxRunning }),
       }),
     });
+  }
+
+  /** #322: the release of a Dispatcher: `body` is sent as JSON, or as it is if it is a string. */
+  function release(
+    jobId: string,
+    body: unknown,
+    request: RequestOptions = {},
+    target: typeof api = api,
+  ): Promise<Response> {
+    return target.release(
+      new Request(`${url}/jobs/${jobId}/release`, {
+        method: "POST",
+        headers: headers(request, { "content-type": "application/json" }),
+        body: typeof body === "string" ? body : JSON.stringify(body),
+      }),
+      jobId,
+    );
+  }
+
+  /** #322: the version call of a Dispatcher. */
+  function version(
+    request: RequestOptions & { query?: string } = {},
+  ): Promise<Response> {
+    return api.version(
+      new Request(`${url}/version${request.query ?? ""}`, {
+        method: "GET",
+        headers: headers(request),
+      }),
+    );
   }
 
   function postTo(
@@ -358,6 +401,8 @@ export async function startRunnerApiHarness(
       workerApi: other.workerApi,
       claim: (request: RequestOptions = {}) =>
         other.api.claim(claimRequest(request)),
+      release: (jobId: string, body: unknown, request: RequestOptions = {}) =>
+        release(jobId, body, request, other.api),
       complete: (
         jobId: string,
         leaseToken: string,
@@ -539,6 +584,8 @@ export async function startRunnerApiHarness(
     anotherInstance,
     claim,
     claimed,
+    release,
+    version,
     heartbeat,
     complete,
     post,
