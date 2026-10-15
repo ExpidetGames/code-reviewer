@@ -27,6 +27,7 @@ import {
   installDockerScript,
   installHostScriptsScript,
   probeScript,
+  recordBaseManifestScript,
   scanScript,
   startDaemonScript,
   stopDaemonScript,
@@ -144,6 +145,14 @@ class Run {
     );
     this.builder = builder;
 
+    // Before anything is installed: what the scan later treats as the platform's own files.
+    await this.exec(
+      builder,
+      STEPS.recordBaseManifest,
+      recordBaseManifestScript(),
+      "base_manifest_failed",
+      { sudo: true, timeoutMs: 5 * 60_000 },
+    );
     await this.exec(
       builder,
       STEPS.installDocker,

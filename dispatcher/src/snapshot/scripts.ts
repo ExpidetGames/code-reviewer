@@ -11,6 +11,7 @@ export { probeRunArguments };
 
 /** The label of each command; the logs, the errors and the Sandbox double address a command by it. */
 export const STEPS = {
+  recordBaseManifest: "record_base_manifest",
   installDocker: "install_docker",
   writeDaemonConfig: "write_daemon_config",
   installHostScripts: "install_host_scripts",
@@ -34,8 +35,14 @@ export const PATHS = {
   contextDir: "/tmp/golden-ctx",
   buildLog: "/tmp/golden-build.log",
   vmPrepareInstalled: "/usr/local/sbin/vm-prepare.sh",
+  // Outside every scan root and outside /tmp (which the clean step empties): it travels in the snapshot to the check VM.
+  baseManifest: "/var/lib/code-reviewer-golden/base-manifest",
 } as const;
 
+/** Exit status of the scan when the base manifest is missing or empty: the scan cannot tell what the pipeline added. */
+export const EXIT_MANIFEST_MISSING = 43;
+/** Exit status of the record step when the roots hold no file at all. */
+export const EXIT_MANIFEST_EMPTY = 44;
 /** Exit status of the install step when the installed docker.io is not the pinned version. */
 export const EXIT_VERSION_MISMATCH = 42;
 export const SCAN_DONE = "SCAN_DONE";
@@ -156,7 +163,8 @@ exit 1
 `;
 }
 
-const DEFAULT_SCAN_ROOTS = [
+/** The directories the pipeline's scan looks into: the record of the base image and the scan share them. */
+export const SCAN_ROOTS = [
   "/root",
   "/home",
   "/etc",
@@ -164,8 +172,45 @@ const DEFAULT_SCAN_ROOTS = [
   "/usr/local",
   "/var/tmp",
   "/var/log",
-];
+] as const;
 const DEFAULT_DOCKER_ROOT = "/var/lib/docker";
+
+// One file per record, NUL separated so that a name with a newline or a tab stays one record: path, size in
+// bytes, modification time with its fraction. The record script and the scan both print it, byte for byte alike.
+const RECORD_FORMAT = "%p\\t%s\\t%T@\\0";
+
+/**
+ * The manifest of the platform's base image (first command of the builder, before anything is installed): the
+ * files of the scan roots with their size and modification time, sorted. The scan reports only what is not in
+ * it or differs from it, so the files the platform ships (the docs and bundles of its global Node packages hold
+ * example keys and placeholder tokens) are not mistaken for something the pipeline left. A file that is new
+ * (an apt package, a script of ours) or changed is not in it: it is scanned. Errors of `find` (a file that
+ * vanishes at boot) are tolerated: a file missed here is only scanned later, never skipped.
+ */
+export function recordBaseManifestScript(
+  options: { roots?: readonly string[]; manifestPath?: string } = {},
+): string {
+  const roots = options.roots ?? SCAN_ROOTS;
+  const manifest = options.manifestPath ?? PATHS.baseManifest;
+  return `${STRICT}
+roots=(${roots.map(shellQuote).join(" ")})
+manifest=${shellQuote(manifest)}
+mkdir -p "$(dirname "$manifest")"
+chmod 0700 "$(dirname "$manifest")"
+for root in "\${roots[@]}"; do
+  [ -d "$root" ] || continue
+  find "$root" -xdev -type f -printf '${RECORD_FORMAT}' 2>/dev/null || true
+done | LC_ALL=C sort -zu > "$manifest.tmp"
+if [ ! -s "$manifest.tmp" ]; then
+  rm -f "$manifest.tmp"
+  echo "the base image has no file under the scan roots" >&2
+  exit ${EXIT_MANIFEST_EMPTY}
+fi
+mv "$manifest.tmp" "$manifest"
+chmod 0600 "$manifest"
+sync
+`;
+}
 
 // High-confidence shapes only: a false finding stops a release. The per-job credential of the Worker API, the
 // tokens of the services the product talks to, and assignments of the variables that hold them.
@@ -187,34 +232,69 @@ const PRIVATE_KEY_PATTERN = "-----BEGIN ([A-Z0-9]+ )*PRIVATE KEY-----";
  * finding (never a content) and `SCAN_DONE` last; a caller that does not see the marker treats the scan as
  * failed. It reads files only: the daemon need not run. Kinds: secret_file, history, docker_auth,
  * private_key, token, job_data.
+ *
+ * The file checks cover what the pipeline added or changed since the base manifest (`recordBaseManifestScript`)
+ * plus every file of Docker's `containers` and `volumes`. Without the manifest the scan exits with
+ * `EXIT_MANIFEST_MISSING` and prints no marker: it never falls back to "nothing to scan". `job_data` is any
+ * entry of those two Docker directories except the two artifacts `dockerd` creates in `volumes` at every start:
+ * `metadata.db` as a regular file and `backingFsBlockDev` as a block device (a file, a directory or a link of
+ * that name is job data).
  */
 export function scanScript(
-  options: { roots?: readonly string[]; dockerRoot?: string } = {},
+  options: {
+    roots?: readonly string[];
+    dockerRoot?: string;
+    manifestPath?: string;
+  } = {},
 ): string {
-  const roots = options.roots ?? DEFAULT_SCAN_ROOTS;
+  const roots = options.roots ?? SCAN_ROOTS;
   const dockerRoot = options.dockerRoot ?? DEFAULT_DOCKER_ROOT;
+  const manifest = options.manifestPath ?? PATHS.baseManifest;
   const tokenArgs = TOKEN_PATTERNS.map(
     (pattern) => `-e ${shellQuote(pattern)}`,
   ).join(" ");
   return `${STRICT}
 roots=(${roots.map(shellQuote).join(" ")})
 docker_root=${shellQuote(dockerRoot)}
+manifest=${shellQuote(manifest)}
 report() { printf 'FINDING %s %s\\n' "$1" "$2"; }
-roots+=("$docker_root/containers" "$docker_root/volumes")
+if [ ! -s "$manifest" ]; then
+  echo "the base manifest is missing or empty" >&2
+  exit ${EXIT_MANIFEST_MISSING}
+fi
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+# The files of the roots now, in the manifest's format; the records that are not in the manifest are the new
+# and the changed files. Their paths, and every file of Docker's own data, are what the checks read.
 for root in "\${roots[@]}"; do
   [ -d "$root" ] || continue
-  while IFS= read -r -d '' path; do report secret_file "$path"; done < <(find "$root" -xdev -type f \\( -name '.env' -o \\( -name '.env.*' ! -name '.env.example' \\) -o -name '.netrc' -o -name '.git-credentials' -o -name 'id_rsa' -o -name 'id_dsa' -o -name 'id_ecdsa' -o -name 'id_ed25519' \\) -print0 2>/dev/null)
-  while IFS= read -r -d '' path; do report history "$path"; done < <(find "$root" -xdev -type f \\( -name '.bash_history' -o -name '.zsh_history' -o -name '.python_history' -o -name '.node_repl_history' \\) -print0 2>/dev/null)
-  while IFS= read -r -d '' path; do
-    if grep -qE '"(auth|identitytoken|registrytoken)"[[:space:]]*:[[:space:]]*"[^"]+"' "$path" 2>/dev/null; then report docker_auth "$path"; fi
-  done < <(find "$root" -xdev -type f -path '*/.docker/config.json' -print0 2>/dev/null)
-  while IFS= read -r -d '' path; do report private_key "$path"; done < <(grep -rIlZs --exclude=ssl-cert-snakeoil.key -E -e ${shellQuote(PRIVATE_KEY_PATTERN)} "$root" 2>/dev/null || true)
-  while IFS= read -r -d '' path; do report token "$path"; done < <(grep -rIlZs -E ${tokenArgs} "$root" 2>/dev/null || true)
-done
+  find "$root" -xdev -type f -printf '${RECORD_FORMAT}' 2>/dev/null || true
+done | LC_ALL=C sort -zu > "$work/current"
+LC_ALL=C comm -z -13 "$manifest" "$work/current" | sed -z 's/\\t[0-9]*\\t[0-9.]*$//' > "$work/files"
 for dir in "$docker_root/containers" "$docker_root/volumes"; do
   [ -d "$dir" ] || continue
-  while IFS= read -r -d '' path; do report job_data "$path"; done < <(find "$dir" -mindepth 1 -maxdepth 1 ! -name metadata.db -print0 2>/dev/null)
+  find "$dir" -xdev -type f -print0 2>/dev/null >> "$work/files" || true
 done
+while IFS= read -r -d '' path; do
+  name=\${path##*/}
+  case "$name" in
+    .env.example) ;;
+    .env|.env.*|.netrc|.git-credentials|id_rsa|id_dsa|id_ecdsa|id_ed25519) report secret_file "$path" ;;
+    .bash_history|.zsh_history|.python_history|.node_repl_history) report history "$path" ;;
+  esac
+  case "$path" in
+    */.docker/config.json)
+      if grep -qE '"(auth|identitytoken|registrytoken)"[[:space:]]*:[[:space:]]*"[^"]+"' "$path" 2>/dev/null; then report docker_auth "$path"; fi ;;
+  esac
+done < "$work/files"
+while IFS= read -r -d '' path; do report private_key "$path"; done < <(xargs -0 -r -a "$work/files" grep -IlZs --exclude=ssl-cert-snakeoil.key -E -e ${shellQuote(PRIVATE_KEY_PATTERN)} -- 2>/dev/null || true)
+while IFS= read -r -d '' path; do report token "$path"; done < <(xargs -0 -r -a "$work/files" grep -IlZs -E ${tokenArgs} -- 2>/dev/null || true)
+if [ -d "$docker_root/containers" ]; then
+  while IFS= read -r -d '' path; do report job_data "$path"; done < <(find "$docker_root/containers" -mindepth 1 -maxdepth 1 -print0 2>/dev/null)
+fi
+if [ -d "$docker_root/volumes" ]; then
+  while IFS= read -r -d '' path; do report job_data "$path"; done < <(find "$docker_root/volumes" -mindepth 1 -maxdepth 1 ! \\( -name metadata.db -type f \\) ! \\( -name backingFsBlockDev -type b \\) -print0 2>/dev/null)
+fi
 echo ${SCAN_DONE}
 `;
 }

@@ -15,7 +15,12 @@ import {
 import { SnapshotPipelineError } from "./errors.ts";
 import type { SnapshotErrorCode } from "./errors.ts";
 import { runPipeline } from "./pipeline.ts";
-import { PATHS, STEPS } from "./scripts.ts";
+import {
+  PATHS,
+  STEPS,
+  recordBaseManifestScript,
+  scanScript,
+} from "./scripts.ts";
 
 const NOW = new Date("2026-10-15T18:00:00.000Z");
 
@@ -60,6 +65,7 @@ describe("the golden snapshot pipeline", () => {
     const check = "code-reviewer-golden-check-20261015T180000Z";
     expect(fake.events.filter((event) => !event.startsWith("write:"))).toEqual([
       `create:${builder}`,
+      `exec:${STEPS.recordBaseManifest}`,
       `exec:${STEPS.installDocker}`,
       `exec:${STEPS.writeDaemonConfig}`,
       `exec:${STEPS.installHostScripts}`,
@@ -236,6 +242,41 @@ describe("the golden snapshot pipeline", () => {
     expect(fake.events.some((event) => event.startsWith("snapshot:"))).toBe(
       false,
     );
+  });
+
+  // #357-T10
+  it("records the base manifest as the first command of the builder, before anything is installed", async () => {
+    const fake = happyFake();
+    await run(fake).result;
+    const [first, second] = fake.calls;
+    expect(first?.label).toBe(STEPS.recordBaseManifest);
+    expect(first?.sudo).toBe(true);
+    expect(first?.script).toBe(recordBaseManifestScript());
+    expect(second?.label).toBe(STEPS.installDocker);
+    // The scan reads the very file the record step wrote.
+    expect(first?.script).toContain(PATHS.baseManifest);
+    expect(fake.callsFor(STEPS.scanFilesystem)[0]?.script).toBe(scanScript());
+    expect(fake.callsFor(STEPS.scanFilesystem)[0]?.script).toContain(
+      PATHS.baseManifest,
+    );
+    expect(fake.callsFor(STEPS.recordBaseManifest)).toHaveLength(1);
+  });
+
+  // #357-T11
+  it("fails closed when the base manifest cannot be recorded: no snapshot, builder removed", async () => {
+    const fake = happyFake();
+    fake.onExec(STEPS.recordBaseManifest, { exitCode: 44 });
+    const error = await failure(run(fake).result);
+    expect(error.code).toBe("base_manifest_failed");
+    expect(error.step).toBe(STEPS.recordBaseManifest);
+    expect(fake.callsFor(STEPS.installDocker)).toHaveLength(0);
+    expect(fake.events.some((event) => event.startsWith("snapshot:"))).toBe(
+      false,
+    );
+    expect(
+      fake.vms.get("code-reviewer-golden-builder-20261015T180000Z")?.state,
+    ).toBe("deleted");
+    expectNothingPublished(fake);
   });
 
   it.each<[string, { exitCode: number }, SnapshotErrorCode]>([
