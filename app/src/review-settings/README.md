@@ -2,7 +2,9 @@
 
 What a review can be tuned by, with sensible built-in values, global defaults for the whole workspace
 and overrides per project. The settings end up in the runner job (`llm.model`, `llm.maxTokens`, `env`)
-through one pure function.
+through one pure function. On a workspace whose key mode is `managed` (the operator's own key, `src/llm/README.md`)
+the model, token budget and Dynamic model are stored but **not used**: the instance chooses the model, and the form
+shows a note instead of those fields (#276).
 
 ## Layers
 

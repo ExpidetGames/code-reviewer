@@ -99,6 +99,7 @@ describe("the examples", () => {
     ]);
     expect(names("examples")).toStrictEqual(
       expect.arrayContaining([
+        "JobStateResponse",
         "ReleaseRequest",
         "ReleaseResponse",
         "SplitClaimResponse",
@@ -213,6 +214,7 @@ describe("a reader and an additive field", () => {
       "SplitClaimResponse",
       "ReleaseResponse",
       "VersionResponse",
+      "JobStateResponse",
     ]) {
       const body = example("examples", definition);
 

@@ -91,6 +91,33 @@ function mailRow(settings: AdminSettingsView): {
   };
 }
 
+function operatorKeyRow(settings: AdminSettingsView): {
+  status: RowStatus;
+  summary: string;
+  hint?: string;
+} {
+  const key = settings.operatorLlmKey;
+  if (key.state === "unreadable")
+    return {
+      status: "warn",
+      summary: "Saved, cannot be read",
+      hint: "Workspaces that use the key of the instance cannot run reviews until it is entered again.",
+    };
+  if (key.state === "configured")
+    return {
+      status: "ok",
+      summary:
+        key.lastFour === null
+          ? "Configured"
+          : `Configured (ending in ${key.lastFour})`,
+    };
+  return {
+    status: "ok",
+    summary: "Not configured",
+    hint: "Optional. Only workspaces that use the key of the instance need it.",
+  };
+}
+
 function githubRow(
   github: GithubConfigView | undefined,
   signInConfigured: boolean,
@@ -149,8 +176,9 @@ function secretsNotice(count: number): AttentionNotice {
     detail: (
       <>
         {UNREADABLE_SECRET_CAUSE} Enter it again under{" "}
-        <Link href="/admin/integrations">Integrations</Link> or{" "}
-        <Link href="/admin/mail">Mail</Link>; if you changed APP_SECRET by
+        <Link href="/admin/integrations">Integrations</Link>,{" "}
+        <Link href="/admin/mail">Mail</Link> or{" "}
+        <Link href="/admin/llm">LLM key</Link>; if you changed APP_SECRET by
         mistake, restore the old value.
       </>
     ),
@@ -198,6 +226,7 @@ export function Overview({
   ];
   const mail = mailRow(settings);
   const githubItem = githubRow(github, settings.githubConfigured);
+  const operatorKey = operatorKeyRow(settings);
   return (
     <>
       <NeedsAttention notices={attention} maxRows={3} />
@@ -229,6 +258,15 @@ export function Overview({
                 ? {}
                 : { hint: githubItem.hint })}
               href="/admin/integrations"
+            />
+            <SetupRow
+              title="LLM key of the instance"
+              status={operatorKey.status}
+              summary={operatorKey.summary}
+              {...(operatorKey.hint === undefined
+                ? {}
+                : { hint: operatorKey.hint })}
+              href="/admin/llm"
             />
             <SetupRow
               title="Tenancy"

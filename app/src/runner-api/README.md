@@ -30,7 +30,7 @@ checks and the redaction with the runner API and is described in "The Worker API
 | `redact.ts`                        | Removes anything that looks like a credential from a result before it is stored                                                                                                                                                                                       |
 | `responses.ts`                     | Every answer: `Cache-Control: no-store`, the error form `{ error: { code, message } }`                                                                                                                                                                                |
 | `claim-guard.ts`, `job-options.ts` | The two hooks (below); `project-claim-guard.ts` and `review-settings-job-options.ts` are what the running server plugs in                                                                                                                                             |
-| `claimed-keys.ts`                  | In the database, encrypted (`job_claimed_keys`): the LLM key handed out with the claim of each job, so a rotated key can still be masked in its result by whichever app instance completes it                                                                         |
+| `claimed-keys.ts`                  | In the database, encrypted (`job_claimed_keys`): the LLM keys handed out for each job (a list, at most 3), so a rotated key can still be masked in its result by whichever app instance completes it                                                                  |
 | `contract.ts`                      | The TypeScript types and code lists of the contract                                                                                                                                                                                                                   |
 | `shared.ts`                        | The wiring of the running server (`getRunnerApi()`, `withRunnerApi`, `getWorkerApi()`, `withWorkerApi`); the route files under `src/app/api/runners/v1/` and `src/app/api/workers/v1/` only call these, which answer a failure while setting up in the usual 500 form |
 
@@ -111,7 +111,9 @@ id (for which a refused job answers `204`, like any job that cannot be claimed).
    sent (the LLM configuration has no base URL, and the MVP has no fallback chain); the runner adds
    OpenRouter's `provider.require_parameters` to every request for OpenRouter by itself (#270).
    Once the access is resolved, the claim notes whose key the job runs on in its usage record
-   (`recordKeyMode`: `own` for the workspace's key, `managed` for the operator's). The record itself was
+   (`recordKeyMode`: `own` for the workspace's key, `managed` for the operator's; the key mode of the workspace's
+   entitlements picks the key, and a `managed` workspace without a readable operator key fails with
+   `llm_not_configured`, #276). The record itself was
    reserved by `claimNext`, in the transaction of the claim (`src/usage/README.md`); a failure of this call
    gives the job back.
 3. **The pull request** is read through the provider's `getPullRequest`. A pull request that does not
@@ -248,9 +250,13 @@ Conversely the job credential on `claim` is `401 RUNNER_UNAUTHORIZED`. The sessi
 **Details** (`GET`). `?features=dynamic_capabilities` (a comma separated list, unknown names ignored) has
 the same meaning as `features` in a claim: an optional job field reaches only a Worker that reads it.
 This is where the secrets are made, by the same code as the legacy claim's step 4 (`buildJobInput`): the
-checks run again (the project may have been switched off, the key removed, the pull request closed),
-the installation token is minted for exactly this repository, the model key is revealed and **remembered**
-(`job_claimed_keys`, so a result is masked after a key rotation by whichever instance serves it).
+checks run again (the project may have been switched off, the key removed, the pull request closed), and
+so does the **standing of the workspace** (#276): a workspace suspended since the claim, or whose entitlements became
+unreadable, gets no key and no token and the job ends with `workspace_suspended` or `entitlements_invalid`, the code
+the claim would have used. Quotas are not counted again, they were decided at the claim. The installation token is minted for exactly this repository, the model key is revealed and **remembered**
+(`job_claimed_keys`, so a result is masked after a key rotation by whichever instance serves it). Every key handed out
+for the job stays remembered (up to 3, the fetch budget; a key already known takes no place), so the key of the first
+fetch is still masked after the operator rotated its key before the second.
 At most **3 fetches per claim** (the count is on the job row and reset by every claim); each mints a fresh
 token; the fourth is `401`. A permanent failure (the project is off, the key is gone, the installation was
 removed, the pull request closed) ends the job with its stable code (the same list as `CLAIM_FAILURE_CODES`)
@@ -308,12 +314,23 @@ Worker. It cannot count what runs, so the app counts for it. Three additions, al
   credential must be the running claim of that job, a primary key lookup), to check the app before it
   fetches its job. The answer holds nothing of any job.
 
+- **Job state (#364).** `GET /api/runners/v1/jobs/:id` answers `{ version: 1, job: { id, status } }` with the
+  status of the job (`queued`, `running`, `succeeded`, `failed`, `superseded`, `cancelled`) and nothing else: no job
+  input, lease, repository or credential, and nothing is written. The dispatcher credential only (a per-job
+  credential is `401 RUNNER_UNAUTHORIZED`), a job id that is no UUID is `400` and an unknown job `404
+RUNNER_JOB_NOT_FOUND`, both before anything else is read. A Dispatcher's reaper asks it to find the Sandbox
+  VMs of jobs that ended (`dispatcher/README.md`, "The reaper"). It is not in `APP_FEATURES`: a Dispatcher
+  does not need it to claim, and one that meets an app without the route reads a `404` without an error body as
+  "state unknown".
+
 **Mixed versions.** No migration. A previous-release app does not know `jobId` or `maxRunning` and would
 claim the _next_ job and ignore the cap, and has no `release` or `version` route (`404`): a Dispatcher
 must therefore read `/version` and refuse to claim unless the features it needs are listed (`404` or a
 missing feature means "app too old"). The legacy claim (no body, or `engines` and `features` only) makes the
 same queue call and the same SQL as before; a runner of the previous release is not affected, and a new app
-behind an old Dispatcher is not either (nobody sends the new fields).
+behind an old Dispatcher is not either (nobody sends the new fields). The job state call is the same kind
+of addition: a new Dispatcher with an app without it keeps claiming and its reaper falls back to the maximum
+lifetime of a VM; an old Dispatcher never calls it.
 
 ## Hooks
 

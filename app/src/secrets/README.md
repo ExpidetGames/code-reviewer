@@ -1,7 +1,7 @@
 # Secret store
 
 The encrypted credentials of the instance (the SMTP password, the GitHub App's private key, webhook secret
-and client secret). How it works, what it never does and how it fails is in
+and client secret, and the operator's own LLM key, `operator_llm_key`, #276). How it works, what it never does and how it fails is in
 [`src/admin/README.md`](../admin/README.md), "The secret store"; the decision is in
 `docs/decisions/0001-editions-setup-and-accounts.md`, section 2.7.
 

@@ -49,6 +49,8 @@ type Complete =
 type Release =
   typeof import("../../src/app/api/runners/v1/jobs/[id]/release/route.ts");
 type Version = typeof import("../../src/app/api/runners/v1/version/route.ts");
+type JobState =
+  typeof import("../../src/app/api/runners/v1/jobs/[id]/route.ts");
 type WorkerDetails =
   typeof import("../../src/app/api/workers/v1/jobs/[id]/route.ts");
 type WorkerHeartbeat =
@@ -105,6 +107,8 @@ async function startRoutes() {
       (await import("../../src/app/api/runners/v1/jobs/[id]/release/route.ts")) as Release,
     version:
       (await import("../../src/app/api/runners/v1/version/route.ts")) as Version,
+    jobState:
+      (await import("../../src/app/api/runners/v1/jobs/[id]/route.ts")) as JobState,
     workerDetails:
       (await import("../../src/app/api/workers/v1/jobs/[id]/route.ts")) as WorkerDetails,
     workerHeartbeat:
@@ -270,6 +274,32 @@ describe("the runner API route files", () => {
         .select(["status", "attempts"])
         .execute(),
     ).toStrictEqual([{ status: "queued", attempts: 1 }]);
+  });
+
+  // #364-T25
+  it("answers the state of a job to the dispatcher credential through the route file, and refuses anyone else", async () => {
+    const routes = await startRoutes();
+    await queueJobThroughWebhook(routes);
+    const [{ id }] = (await getDatabase()
+      .selectFrom("jobs")
+      .select("id")
+      .execute()) as [{ id: string }];
+    const call = (headers: Record<string, string>) =>
+      routes.jobState.GET(
+        new Request(`https://app.test/api/runners/v1/jobs/${id}`, { headers }),
+        { params: Promise.resolve({ id }) },
+      );
+
+    const known = await call({ authorization: `Bearer ${RUNNER_TOKEN}` });
+    const anonymous = await call({});
+
+    expect(known.status).toBe(200);
+    expect(known.headers.get("cache-control")).toBe("no-store");
+    expect(await known.json()).toStrictEqual({
+      version: 1,
+      job: { id, status: "queued" },
+    });
+    expect(anonymous.status).toBe(401);
   });
 
   it("answers 500 in the usual form, not cacheable, when the server was not set up", async () => {

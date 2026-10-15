@@ -5,7 +5,7 @@
 // (SANDBOX_SNAPSHOT_ID, see launchers/sandbox-env.ts); without one it is `noLauncher`, which advertises no
 // engine, so every wake-up call is ignored. The Sandbox SDK is loaded on the first job, not at start. This file
 // and what it imports must never reach `node:child_process` (the Node entry, node.ts, is a separate file for
-// that reason; see src/bundle/serverless-bundle.test.ts).
+// that reason; see src/bundle/serverless-bundle.test.ts). With a snapshot the reaper's cron route (#364) is mounted too.
 import { waitUntil } from "@vercel/functions";
 import { composeDispatcher } from "./compose.ts";
 import { sandboxFromEnvironment } from "./launchers/sandbox-env.ts";
@@ -19,6 +19,7 @@ const { app } = composeDispatcher({
   env: process.env,
   launcher: sandbox.launcher,
   secrets: sandbox.secrets,
+  reaper: sandbox.reaper,
   background: (work) => waitUntil(work),
 });
 

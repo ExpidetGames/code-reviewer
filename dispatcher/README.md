@@ -345,6 +345,43 @@ uid cannot, only because its egress rules drop it. The probe proves those rules 
 so a Dynamic-Worker whose rules are not in place is not advertised. A seccomp profile that denies a socket family
 (`src/launchers/seccomp.ts`) stays available but is not required and is not enabled.
 
+## The reaper (#364)
+
+The Launcher stops a job's VM from `waitUntil` work, which lives as long as the function. A job longer than the
+function's `maxDuration`, a restart, a `wait()` that kept failing or a failed `stop()` leave the VM running, idle and
+billed, until its own timeout (job timeout plus margin). The reaper is the second line: the platform's cron calls
+`GET /api/cron/reap-sandboxes` every five minutes (`vercel.json`) and it stops the VMs that outlived their purpose.
+
+- **Credential.** `CRON_SECRET` of this project, which the platform sends as `Authorization: Bearer <secret>`. A secret
+  of its own: at least 32 characters, no space or control character, and different from the dispatcher credential and
+  every signing secret; no other credential opens the route, and it opens nothing else. The route exists only with a
+  golden snapshot configured (otherwise `404`). Where it exists, a malformed secret is a start-up error (fail closed) and
+  an unset one makes every caller get `401`, with a `reaper_cron_secret_missing` warning at start. Where it does not
+  exist, a malformed `CRON_SECRET` is ignored with a `cron_secret_ignored` warning (variable and reason, never the value),
+  so a Dispatcher that never reaps is not taken down by it.
+- **Which VMs.** The listing is narrowed by the name prefix `cr-` and the tag `app = code-reviewer`, and every VM it
+  returns is checked again: only a running or pending, non-persistent VM of exactly the shape our code creates is ever considered.
+  A job VM is named `cr-<diff|dynamic>-<job id>-<8 hex>` with the tags `kind` and `job` equal to the name's; a canary
+  VM (#331) is named `cr-canary-<8 hex>` and tagged `kind = canary`, `job = canary`. The golden snapshot's builder and
+  check VMs carry the same `app` tag, a `role` tag and `code-reviewer-golden-` names (the builder is also persistent): they never match, and neither does
+  anything else (another deployment's VM, a person's, a lookalike).
+- **Which are leftovers.** Younger than two minutes: never. Older than its lifetime (the timeout the platform reports
+  for the VM, or the configured one: job timeout plus VM margin for a job VM, `DISPATCHER_PROBE_TIMEOUT_SECONDS` plus the
+  margin for a canary; plus two minutes of grace; a reported timeout above the longest possible one is not believed):
+  stopped, whatever the App says. A canary has no job, so only that ends it. A job VM: stopped when the App says its job
+  is not `running` (`GET /api/runners/v1/jobs/{id}` with the dispatcher credential, one call per job).
+- **Fail safe.** If the App's answer cannot be read (no answer, a refusal, a server error, an App without the call, an
+  unknown job or status, a body of another shape) the VM is kept: only its lifetime can stop it then. A failed listing
+  stops nothing and answers `500 REAP_LIST_FAILED`.
+- **Stopping and logs.** By the listed name; a VM that is already gone is not an error, a failed stop is counted and
+  retried by the next run (runs may overlap, stopping twice is harmless). Stable events and codes only
+  (`vm_reaped`, `vm_reap_failed`, `job_state_unreadable`, `reap_done`, `reap_list_failed`); the answer holds counts
+  (`listed`, `candidates`, `stopped`, `kept`, `unreadable`, `failed`). No credential, token or platform error text.
+
+Not verified against the live platform: that `Sandbox.list` honours the name prefix together with a tag in one call and
+reports `status`, `createdAt`, `timeout` and `tags` as the SDK types say, and that the project's cron may run every five minutes
+(first deployment, staging). The reaper does not depend on the platform's filter: it checks every VM itself.
+
 ## Configuration
 
 Names only: a refusal names the variable, never the value.
@@ -366,8 +403,9 @@ Names only: a refusal names the variable, never the value.
 | `SANDBOX_VM_TIMEOUT_MARGIN_SECONDS`                                        | Seconds added to the job's timeout for the VM's own, 180 to 3600 and at least the hand-over time plus 150                                                                                     | `300`        |
 | `DISPATCHER_PROBE_TTL_SECONDS`                                             | How long a capability probe's answer counts before a new canary VM is asked, 60 to 86400 (#331)                                                                                               | `3600`       |
 | `DISPATCHER_PROBE_REUSE_SECONDS`                                           | A forced probe (`POST /probe`) is served from an answer younger than this instead of a new canary VM, 0 to 600; 0 runs every one                                                              | `60`         |
-| `DISPATCHER_PROBE_TIMEOUT_SECONDS`                                         | How long a probe may take, the canary VM included, 30 to 600                                                                                                                                  | `150`        |
+| `DISPATCHER_PROBE_TIMEOUT_SECONDS`                                         | How long a probe may take, the canary VM included, 30 to 600; the reaper (#364) takes a canary's lifetime from it plus the margin                                                             | `150`        |
 | `RUNNER_DYNAMIC_CAPABILITIES`, `RUNNER_DYNAMIC_MAX_COST_USD`               | The operator's Dynamic configuration for the container of a Dynamic job and for the canary: a JSON object (no line breaks, at most 4096 characters) and a plain positive decimal              | none         |
+| `CRON_SECRET`                                                              | Vercel entry: the secret of the platform's cron for the reaper route (#364), at least 32 characters, different from every other secret. Unset: the route refuses everyone                     | none         |
 | `VERCEL_TOKEN`, `VERCEL_TEAM_ID`, `VERCEL_PROJECT_ID`                      | Platform access by token (all three). Without a token the OIDC token is used                                                                                                                  | OIDC         |
 | `DISPATCHER_SHUTDOWN_GRACE_SECONDS`                                        | Node entry: how long launches may finish after SIGTERM, 0 to 600                                                                                                                              | `60`         |
 | `PORT`                                                                     | Node entry                                                                                                                                                                                    | `8080`       |

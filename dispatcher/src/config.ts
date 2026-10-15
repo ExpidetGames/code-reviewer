@@ -14,6 +14,7 @@
 // | DISPATCHER_ENGINES                                          | Engines to serve, `pr-agent,opencode`                | both |
 // | DISPATCHER_JOB_TIMEOUT_SECONDS                              | How long a Worker may live (60 to 21600)             | 1200 |
 // | DISPATCHER_WORKER_CONFIG                                    | JSON `{diff?, dynamic?}`: container memory, launcher options | none |
+// | CRON_SECRET (Vercel entry)                                  | The secret of the platform's cron for the reaper route (#364), at least 32 characters, distinct from every other secret | none: the route refuses everyone |
 // | DISPATCHER_SHUTDOWN_GRACE_SECONDS (Node entry)              | How long launches may finish after SIGTERM (0 to 600) | 60 |
 import { z } from "zod";
 import type {
@@ -46,6 +47,13 @@ export class ConfigError extends Error {
 
 export type Settings = {
   core: CoreSettings;
+  /** `CRON_SECRET`: what the reaper's cron route (#364) accepts. Absent: the route refuses every caller. */
+  cronSecret: string | undefined;
+  /**
+   * Why a set `CRON_SECRET` was not taken (never its value). It refuses the start only where the route is mounted,
+   * so a snapshot is configured (compose.ts); elsewhere the variable is ignored with a warning.
+   */
+  cronSecretProblem?: ConfigError;
   /** The current key first, then the previous one if there is one. */
   signingKeys: SigningKey[];
   shutdownGraceSeconds: number;
@@ -158,6 +166,40 @@ function signingKeys(env: Environment, dispatcherToken: string): SigningKey[] {
   return keys;
 }
 
+/** The cron secret: a secret of its own, so no other credential opens the reaper's route and it opens nothing else. */
+function cronSecret(
+  env: Environment,
+  dispatcherToken: string,
+  keys: readonly SigningKey[],
+): string | undefined {
+  const value = read(env, "CRON_SECRET");
+  if (value === undefined) return undefined;
+  if (value.length < MIN_SECRET_LENGTH)
+    throw new ConfigError("CRON_SECRET", "too_short");
+  if (CONTROL_OR_SPACE.test(value))
+    throw new ConfigError("CRON_SECRET", "invalid");
+  if (
+    value === dispatcherToken ||
+    keys.some((signing) => signing.secret === value)
+  )
+    throw new ConfigError("CRON_SECRET", "not_distinct");
+  return value;
+}
+
+function cronSecretOf(
+  env: Environment,
+  dispatcherToken: string,
+  keys: readonly SigningKey[],
+): { cronSecret: string | undefined; cronSecretProblem?: ConfigError } {
+  try {
+    return { cronSecret: cronSecret(env, dispatcherToken, keys) };
+  } catch (error) {
+    if (error instanceof ConfigError)
+      return { cronSecret: undefined, cronSecretProblem: error };
+    throw error;
+  }
+}
+
 function engines(env: Environment): Engine[] {
   const raw = read(env, "DISPATCHER_ENGINES");
   if (raw === undefined) return [...ENGINES];
@@ -218,6 +260,7 @@ function poolId(env: Environment): string {
 
 export function loadSettings(env: Environment): Settings {
   const dispatcherToken = token(env);
+  const keys = signingKeys(env, dispatcherToken);
   return {
     core: {
       appUrl: appUrl(env),
@@ -233,7 +276,8 @@ export function loadSettings(env: Environment): Settings {
       launchDeadlineSeconds: 300,
       workerConfig: workerConfigs(env),
     },
-    signingKeys: signingKeys(env, dispatcherToken),
+    ...cronSecretOf(env, dispatcherToken, keys),
+    signingKeys: keys,
     shutdownGraceSeconds: integer(env, "DISPATCHER_SHUTDOWN_GRACE_SECONDS", {
       min: 0,
       max: 600,

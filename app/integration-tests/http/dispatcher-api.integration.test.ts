@@ -734,3 +734,133 @@ describe("the version call", () => {
     expect(await h.snapshotJobs()).toStrictEqual(before);
   });
 });
+
+describe("the job state call", () => {
+  // #364-T25
+  it.each([
+    ["queued", async () => undefined],
+    [
+      "running",
+      async (h: RunnerApiHarness, id: string) => {
+        await claimFor(h, id);
+      },
+    ],
+    [
+      "succeeded",
+      async (h: RunnerApiHarness, id: string) => {
+        await h.complete(id, (await h.claimed()).job.leaseToken);
+      },
+    ],
+    [
+      "failed",
+      async (h: RunnerApiHarness, id: string) => {
+        await h.complete(id, (await h.claimed()).job.leaseToken, {
+          ok: false,
+          errorCode: "timeout",
+          commentUrl: null,
+        });
+      },
+    ],
+    [
+      "superseded",
+      async (h: RunnerApiHarness) => {
+        await h.enqueueNew({ prNumber: 7, headSha: SHA_B });
+      },
+    ],
+    [
+      "cancelled",
+      async (h: RunnerApiHarness) => {
+        await h.queue.discardWaitingForPr(h.repositoryId, 7);
+      },
+    ],
+  ])(
+    "answers the status of a %s job and nothing else, not cacheable",
+    async (status, bring) => {
+      const h = await startRunnerApiHarness();
+      const job = await h.enqueueNew({ prNumber: 7 });
+      await bring(h, job.id);
+      const before = await h.snapshotJobs();
+
+      const response = await h.jobState(job.id);
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      expect(await response.json()).toStrictEqual({
+        version: 1,
+        job: { id: job.id, status },
+      });
+      expect(await h.snapshotJobs()).toStrictEqual(before);
+    },
+  );
+
+  // #364-T25
+  it("answers 404 RUNNER_JOB_NOT_FOUND for an id no job has", async () => {
+    const h = await startRunnerApiHarness();
+
+    const response = await h.jobState(crypto.randomUUID());
+
+    expect(response.status).toBe(404);
+    expect((await errorOf(response)).code).toBe("RUNNER_JOB_NOT_FOUND");
+  });
+
+  // #364-T25
+  it("needs no runner id and leaves the version features as they are", async () => {
+    const h = await startRunnerApiHarness();
+    const job = await h.enqueueNew();
+
+    const response = await h.jobState(job.id, { runnerId: null });
+
+    expect(response.status).toBe(200);
+    expect([...APP_FEATURES]).not.toContain("job_state");
+  });
+
+  // #364-T24
+  it("is opened by the dispatcher credential only, before any job is looked up", async () => {
+    let lookups = 0;
+    const h = await startRunnerApiHarness({
+      wrapQueue: (queue) => ({
+        ...queue,
+        get: (id: string) => {
+          lookups += 1;
+          return queue.get(id);
+        },
+      }),
+    });
+    const job = await h.enqueueNew();
+    const credential = await claimFor(h, job.id);
+    lookups = 0;
+
+    for (const request of [
+      { token: null },
+      { token: "wrong" },
+      { authorization: "Basic abc" },
+      { token: credential },
+      { token: `${TEST_RUNNER_TOKEN}x` },
+    ]) {
+      const response = await h.jobState(job.id, request);
+      expect(response.status).toBe(401);
+      expect((await errorOf(response)).code).toBe("RUNNER_UNAUTHORIZED");
+    }
+    expect(lookups).toBe(0);
+  });
+
+  // #364-T24
+  it("refuses an id that is no UUID with 400 before any job is looked up", async () => {
+    let lookups = 0;
+    const h = await startRunnerApiHarness({
+      wrapQueue: (queue) => ({
+        ...queue,
+        get: (id: string) => {
+          lookups += 1;
+          return queue.get(id);
+        },
+      }),
+    });
+
+    const response = await h.jobState("not-a-uuid");
+
+    expect(response.status).toBe(400);
+    expect((await errorOf(response)).code).toBe("RUNNER_REQUEST_INVALID");
+    expect(lookups).toBe(0);
+  });
+});

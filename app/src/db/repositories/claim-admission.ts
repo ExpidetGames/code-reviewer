@@ -19,13 +19,11 @@ import {
   type Admission,
   type AdmissionUsage,
 } from "../../usage/enforce-entitlements.ts";
-import { resolveEntitlements } from "../../workspaces/entitlements.ts";
 import { databaseDriver } from "../driver.ts";
 import type { Database, JobsTable } from "../schema.ts";
-import { createInstanceSettingsRepository } from "./instance-settings-repository.ts";
 import { createUsageRecordsRepository } from "./usage-records-repository.ts";
-import { createWorkspaceEntitlementsRepository } from "./workspace-entitlements-repository.ts";
 import type { ProjectReviewKind } from "../../review-settings/settings.ts";
+import { readEffectiveEntitlements } from "../../workspaces/effective-entitlements.ts";
 
 /** What the claim did to a job it refused; handed to `onRefused` once the transaction has committed. */
 export type ClaimRefusal = {
@@ -53,19 +51,7 @@ export async function admitClaimedJob(
   const own = await records.get(job.id);
   const hadRecord = own !== undefined;
 
-  const row = await createWorkspaceEntitlementsRepository(
-    trx,
-    workspaceId,
-    now,
-  ).get();
-  const defaults =
-    row === undefined
-      ? await createInstanceSettingsRepository(
-          trx,
-          now,
-        ).getDefaultEntitlements()
-      : undefined;
-  const entitlements = resolveEntitlements(row, defaults);
+  const entitlements = await readEffectiveEntitlements(trx, workspaceId, now);
   if (entitlements.kind === "unlimited")
     return { admission: { allow: true }, hadRecord, ignoredCostLimit: false };
   const ignoredCostLimit = ignoresCostLimit(entitlements);

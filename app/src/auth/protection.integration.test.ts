@@ -51,6 +51,8 @@ const PUBLIC_ROUTES = [
   // A Dispatcher gives a job back and reads the version with the same token (#322).
   "/api/runners/v1/jobs/[id]/release",
   "/api/runners/v1/version",
+  // A Dispatcher reads the status of a job with the same token (#364).
+  "/api/runners/v1/jobs/[id]",
   // A Worker sends the per-job credential of its claim (src/runner-api/README.md, #320).
   "/api/workers/v1/jobs/[id]",
   "/api/workers/v1/jobs/[id]/heartbeat",
@@ -77,6 +79,7 @@ const PROTECTED_ROUTES = [
   "/instance-portal/integrations",
   "/instance-portal/integrations/github",
   "/instance-portal/limits",
+  "/instance-portal/llm",
   "/instance-portal/mail",
   "/instance-portal/setup",
   "/instance-portal/setup/instance",

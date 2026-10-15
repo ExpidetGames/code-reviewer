@@ -155,6 +155,8 @@ export function createVercelService(
       for await (const listed of await sdk.Sandbox.list({
         ...auth,
         namePrefix,
+        // The platform refuses a name prefix with any other sort (HTTP 400), which made retention fail every run.
+        sortBy: "name",
       })) {
         builders.push({
           name: listed.name,

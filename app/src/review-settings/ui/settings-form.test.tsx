@@ -683,3 +683,96 @@ describe("the settings form", () => {
     expect(within(field).getByText(/Stored but not used yet/)).toBeTruthy();
   });
 });
+
+describe("the settings form while the instance chooses the model (#276)", () => {
+  const dynamicModel = (): SettingsFormModel => {
+    const model = projectModel();
+    if (model.dynamic === undefined) throw new Error("no dynamic view");
+    return {
+      ...model,
+      dynamic: {
+        ...model.dynamic,
+        effective: { ...model.dynamic.effective, reviewKind: "dynamic" },
+        sources: { ...model.dynamic.sources, reviewKind: "project" },
+        overrides: { reviewKind: "dynamic" },
+      },
+    };
+  };
+
+  // #276-P2
+  it("shows a note instead of the model, the fallback model and the token budget of a Diff review, and keeps the other settings", () => {
+    render(
+      <SettingsForm
+        workspaceSlug="acme"
+        initial={projectModel({ model: "vendor/project-model" })}
+        modelChosenByInstance
+        api={fakeApi().api}
+      />,
+    );
+
+    expect(screen.queryByLabelText("Model")).toBeNull();
+    expect(screen.queryByLabelText("Fallback model")).toBeNull();
+    expect(screen.queryByLabelText("Token budget")).toBeNull();
+    const text = document.body.textContent ?? "";
+    expect(text).toContain("The model is chosen by this instance");
+    expect(text).not.toContain("vendor/project-model");
+    // The rest of the form is as it was.
+    expect(screen.getByLabelText("Most findings per review")).toBeTruthy();
+  });
+
+  // #276-P2
+  it("shows the same note instead of the Dynamic Review model", () => {
+    render(
+      <SettingsForm
+        workspaceSlug="acme"
+        initial={dynamicModel()}
+        modelChosenByInstance
+        dynamicReviewEnabled
+        api={fakeApi().api}
+      />,
+    );
+
+    expect(screen.queryByLabelText("Dynamic Review model")).toBeNull();
+    expect(document.body.textContent).toContain(
+      "The model is chosen by this instance",
+    );
+    // The skill is still the project's own.
+    expect(screen.getAllByText(/Review skill/i).length).toBeGreaterThan(0);
+  });
+
+  // #276-P2
+  it("keeps the stored model: a save changes nothing about it, and the field is only hidden", async () => {
+    const user = userEvent.setup();
+    const { api, save } = fakeApi();
+    render(
+      <SettingsForm
+        workspaceSlug="acme"
+        initial={projectModel({ model: "vendor/project-model" })}
+        modelChosenByInstance
+        api={api}
+      />,
+    );
+
+    await changeSomething(user);
+    await user.click(screen.getByRole("button", { name: /save/i }));
+
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(save.mock.calls[0])).toContain(
+      "vendor/project-model",
+    );
+  });
+
+  // #276-P2
+  it("shows the model fields as before for a workspace that chooses its own", () => {
+    render(
+      <SettingsForm
+        workspaceSlug="acme"
+        initial={projectModel()}
+        api={fakeApi().api}
+      />,
+    );
+
+    expect(screen.getByLabelText("Model")).toBeTruthy();
+    expect(document.body.textContent).not.toContain("chosen by this instance");
+  });
+});

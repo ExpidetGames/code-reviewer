@@ -1,33 +1,46 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { createLlmAccess } from "./access.ts";
-import { resolveWorkspaceLlmAccess, type ResolveLlmInput } from "./resolve.ts";
+import { ENTITLEMENTS_INVALID_CODE } from "../workspaces/entitlements.ts";
+import {
+  keyModeForJob,
+  resolveWorkspaceLlmAccess,
+  type ResolveLlmInput,
+} from "./resolve.ts";
 
 const WORKSPACE_KEY = "sk-or-v1-workspace-key-aaaaaaaaaaaaaaaa";
 const OPERATOR_KEY = "sk-or-v1-operator-key-cccccccccccccccc";
 
-function input(overrides: Partial<ResolveLlmInput> = {}): ResolveLlmInput {
-  return {
-    key: { state: "none" },
-    operator: null,
-    defaults: { model: "vendor/default-model", contextWindowTokens: null },
-    ...overrides,
-  };
+const DEFAULTS = {
+  model: "vendor/default-model",
+  contextWindowTokens: null,
+} as const;
+
+function own(
+  key: Extract<ResolveLlmInput, { keyMode: "own" }>["key"] = {
+    state: "none",
+  },
+): ResolveLlmInput {
+  return { keyMode: "own", key, defaults: DEFAULTS };
+}
+
+function managed(
+  operatorKey: Extract<
+    ResolveLlmInput,
+    { keyMode: "managed" }
+  >["operatorKey"] = { state: "none" },
+): ResolveLlmInput {
+  return { keyMode: "managed", operatorKey, defaults: DEFAULTS };
 }
 
 describe("which LLM access a workspace gets", () => {
   // #104-LK-01
   it("uses the key of the workspace, with the instance's default model", () => {
-    const result = resolveWorkspaceLlmAccess(
-      input({
-        key: { state: "key", binding: "openrouter", apiKey: WORKSPACE_KEY },
-        defaults: {
-          model: "vendor/default-model",
-          contextWindowTokens: 50_000,
-        },
-      }),
-    );
+    const result = resolveWorkspaceLlmAccess({
+      keyMode: "own",
+      key: { state: "key", binding: "openrouter", apiKey: WORKSPACE_KEY },
+      defaults: { model: "vendor/default-model", contextWindowTokens: 50_000 },
+    });
 
     expect(result).toMatchObject({
       ok: true,
@@ -43,7 +56,7 @@ describe("which LLM access a workspace gets", () => {
 
   // #104-LK-01
   it("fails with llm_not_configured when the workspace has no key and nothing else applies", () => {
-    expect(resolveWorkspaceLlmAccess(input())).toEqual({
+    expect(resolveWorkspaceLlmAccess(own())).toEqual({
       ok: false,
       errorCode: "llm_not_configured",
       reason: "no_key",
@@ -51,65 +64,18 @@ describe("which LLM access a workspace gets", () => {
     });
   });
 
-  // #104-LK-01
-  it("uses the operator's key only when the operator offers included usage", () => {
-    const operator = createLlmAccess({
-      provider: "openrouter",
-      model: "vendor/operator-model",
-      apiKey: OPERATOR_KEY,
-      contextWindowTokens: null,
-    });
-
-    const off = resolveWorkspaceLlmAccess(input({ operator: null }));
-    const on = resolveWorkspaceLlmAccess(input({ operator }));
-
-    expect(off.ok).toBe(false);
-    expect(on).toMatchObject({
-      ok: true,
-      source: "operator",
-      access: { apiKey: OPERATOR_KEY },
-    });
-  });
-
-  // #104-LK-01
-  it("prefers the workspace key over the operator's", () => {
-    const operator = createLlmAccess({
-      provider: "openrouter",
-      model: "m/m",
-      apiKey: OPERATOR_KEY,
-      contextWindowTokens: null,
-    });
-
-    const result = resolveWorkspaceLlmAccess(
-      input({
-        key: { state: "key", binding: "openrouter", apiKey: WORKSPACE_KEY },
-        operator,
-      }),
-    );
-
-    expect(result).toMatchObject({
-      ok: true,
-      source: "workspace",
-      access: { apiKey: WORKSPACE_KEY },
-    });
-  });
-
   // #106-LK-12
   it("does not look at the legacy environment variables any more: a workspace without a key has none", () => {
     // The variables were imported into the default workspace once (src/legacy-import/); the resolver has no
     // input for them, so no environment can give a workspace a key.
-    expect(resolveWorkspaceLlmAccess(input())).toMatchObject({
+    expect(resolveWorkspaceLlmAccess(own())).toMatchObject({
       ok: false,
       reason: "no_key",
     });
   });
 
   it("fails closed for a workspace key that cannot be read, instead of using another key", () => {
-    const result = resolveWorkspaceLlmAccess(
-      input({
-        key: { state: "unreadable" },
-      }),
-    );
+    const result = resolveWorkspaceLlmAccess(own({ state: "unreadable" }));
 
     expect(result).toMatchObject({ ok: false, reason: "key_unreadable" });
   });
@@ -117,12 +83,10 @@ describe("which LLM access a workspace gets", () => {
   // #104-LK-01 (the lesson of #100: a stored secret is never carried to another endpoint)
   it("fails closed for a workspace key that was made for another provider", () => {
     const result = resolveWorkspaceLlmAccess(
-      input({
-        key: {
-          state: "key",
-          binding: "some-other-provider",
-          apiKey: WORKSPACE_KEY,
-        },
+      own({
+        state: "key",
+        binding: "some-other-provider",
+        apiKey: WORKSPACE_KEY,
       }),
     );
 
@@ -131,11 +95,119 @@ describe("which LLM access a workspace gets", () => {
 
   it("keeps the key of the access out of JSON and logs", () => {
     const result = resolveWorkspaceLlmAccess(
-      input({
-        key: { state: "key", binding: "openrouter", apiKey: WORKSPACE_KEY },
-      }),
+      own({ state: "key", binding: "openrouter", apiKey: WORKSPACE_KEY }),
+    );
+    const operator = resolveWorkspaceLlmAccess(
+      managed({ state: "key", apiKey: OPERATOR_KEY }),
     );
 
     expect(JSON.stringify(result)).not.toContain(WORKSPACE_KEY);
+    expect(JSON.stringify(operator)).not.toContain(OPERATOR_KEY);
+  });
+});
+
+describe("the operator's key (key mode managed)", () => {
+  // #276-T02
+  it("is the key of the job, with the source operator, and the instance's default model", () => {
+    const result = resolveWorkspaceLlmAccess({
+      keyMode: "managed",
+      operatorKey: { state: "key", apiKey: OPERATOR_KEY },
+      defaults: { model: "vendor/default-model", contextWindowTokens: 50_000 },
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      source: "operator",
+      access: {
+        provider: "openrouter",
+        model: "vendor/default-model",
+        apiKey: OPERATOR_KEY,
+        contextWindowTokens: 50_000,
+      },
+    });
+  });
+
+  // #276-T03
+  it("fails closed with operator_key_missing when the operator has no key", () => {
+    expect(resolveWorkspaceLlmAccess(managed())).toEqual({
+      ok: false,
+      errorCode: "llm_not_configured",
+      reason: "operator_key_missing",
+      issues: [],
+    });
+  });
+
+  // #276-T04
+  it("fails closed with operator_key_unreadable when the operator's key cannot be read", () => {
+    expect(
+      resolveWorkspaceLlmAccess(managed({ state: "unreadable" })),
+    ).toMatchObject({
+      ok: false,
+      errorCode: "llm_not_configured",
+      reason: "operator_key_unreadable",
+    });
+  });
+
+  // #276-T05
+  it("never takes the operator's key for a workspace that is not managed, even without a key of its own", () => {
+    // `own` has no input for the operator's key at all: the shape makes borrowing impossible.
+    expect(resolveWorkspaceLlmAccess(own())).toMatchObject({
+      ok: false,
+      reason: "no_key",
+    });
+  });
+
+  // #276-T05
+  it("fails closed when the entitlements of the workspace cannot be read, so it is not known whose key applies", () => {
+    expect(
+      resolveWorkspaceLlmAccess({ keyMode: "unreadable", defaults: DEFAULTS }),
+    ).toEqual({
+      ok: false,
+      errorCode: "llm_not_configured",
+      reason: ENTITLEMENTS_INVALID_CODE,
+      issues: [],
+    });
+  });
+});
+
+describe("the key mode of a job, from the entitlements of its workspace", () => {
+  const limits = {
+    diffRunsPerPeriod: null,
+    dynamicRunsPerPeriod: null,
+    managedCostLimitMicroUsd: null,
+  };
+  const entitlements = (keyMode: "own" | "managed") =>
+    ({
+      kind: "limited",
+      source: "workspace",
+      planLabel: "plan",
+      keyMode,
+      limits,
+      periodStart: "2026-10-01T00:00:00.000Z",
+      suspended: false,
+      suspensionCode: null,
+    }) as const;
+
+  // #276-T01
+  // #276-T05
+  it("is own without entitlements and with the key mode own", () => {
+    expect(keyModeForJob({ kind: "unlimited" })).toBe("own");
+    expect(keyModeForJob(entitlements("own"))).toBe("own");
+  });
+
+  // #276-T02
+  it("is managed only when the entitlements say so", () => {
+    expect(keyModeForJob(entitlements("managed"))).toBe("managed");
+  });
+
+  // #276-T05
+  it("is unreadable for entitlements that cannot be read, never own", () => {
+    expect(
+      keyModeForJob({
+        kind: "invalid",
+        code: ENTITLEMENTS_INVALID_CODE,
+        source: "workspace",
+      }),
+    ).toBe("unreadable");
   });
 });

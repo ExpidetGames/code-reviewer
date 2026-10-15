@@ -284,6 +284,58 @@ describe("the Sandbox-Launcher's configuration from the environment", () => {
       }),
     ).not.toThrow();
   });
+
+  // #364-T18
+  it("has no reaper when no snapshot is configured, so there is no route and no platform call", () => {
+    expect(sandboxFromEnvironment({}, never).reaper).toBeUndefined();
+  });
+
+  // #364-T14
+  it("sets the reaper's lifetimes from the job timeout, the probe timeout and the VM margin, with the platform's access", () => {
+    const sandbox = sandboxFromEnvironment(configured(), never);
+
+    const reaper = sandbox.reaper?.(loadSettings(BASE));
+
+    expect(reaper).toMatchObject({
+      jobLifetimeSeconds: 1200 + 300,
+      canaryLifetimeSeconds: 150 + 300,
+    });
+    expect(typeof reaper?.fleet.list).toBe("function");
+    expect(typeof reaper?.fleet.stop).toBe("function");
+  });
+
+  // #364-T14
+  it("follows the configured job timeout, probe timeout and margin", () => {
+    const sandbox = sandboxFromEnvironment(
+      configured({
+        SANDBOX_VM_TIMEOUT_MARGIN_SECONDS: "600",
+        DISPATCHER_PROBE_TIMEOUT_SECONDS: "300",
+      }),
+      never,
+    );
+
+    const reaper = sandbox.reaper?.(
+      loadSettings({ ...BASE, DISPATCHER_JOB_TIMEOUT_SECONDS: "3600" }),
+    );
+
+    expect(reaper).toMatchObject({
+      jobLifetimeSeconds: 3600 + 600,
+      canaryLifetimeSeconds: 300 + 600,
+    });
+  });
+
+  // #364-T18
+  it("loads the SDK only when the reaper first lists, not at start", () => {
+    let loads = 0;
+    const sandbox = sandboxFromEnvironment(configured(), () => {
+      loads += 1;
+      return Promise.reject(new Error("not loaded"));
+    });
+
+    sandbox.reaper?.(loadSettings(BASE));
+
+    expect(loads).toBe(0);
+  });
 });
 
 describe("the capability probe's configuration from the environment", () => {
