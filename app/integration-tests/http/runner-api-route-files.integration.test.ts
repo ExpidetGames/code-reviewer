@@ -46,6 +46,9 @@ type Heartbeat =
   typeof import("../../src/app/api/runners/v1/jobs/[id]/heartbeat/route.ts");
 type Complete =
   typeof import("../../src/app/api/runners/v1/jobs/[id]/complete/route.ts");
+type Release =
+  typeof import("../../src/app/api/runners/v1/jobs/[id]/release/route.ts");
+type Version = typeof import("../../src/app/api/runners/v1/version/route.ts");
 type WorkerDetails =
   typeof import("../../src/app/api/workers/v1/jobs/[id]/route.ts");
 type WorkerHeartbeat =
@@ -98,6 +101,10 @@ async function startRoutes() {
       (await import("../../src/app/api/runners/v1/jobs/[id]/heartbeat/route.ts")) as Heartbeat,
     complete:
       (await import("../../src/app/api/runners/v1/jobs/[id]/complete/route.ts")) as Complete,
+    release:
+      (await import("../../src/app/api/runners/v1/jobs/[id]/release/route.ts")) as Release,
+    version:
+      (await import("../../src/app/api/runners/v1/version/route.ts")) as Version,
     workerDetails:
       (await import("../../src/app/api/workers/v1/jobs/[id]/route.ts")) as WorkerDetails,
     workerHeartbeat:
@@ -200,6 +207,71 @@ afterEach(async () => {
 });
 
 describe("the runner API route files", () => {
+  // #322-T01
+  it("claims a job by its id, answers the version call and gives the job back through the route files", async () => {
+    const routes = await startRoutes();
+    await queueJobThroughWebhook(routes);
+    const headers = {
+      "content-type": "application/json",
+      authorization: `Bearer ${RUNNER_TOKEN}`,
+      "x-runner-id": "dispatcher-a",
+    };
+
+    const version = await routes.version.GET(
+      new Request("https://app.test/api/runners/v1/version", { headers }),
+    );
+    expect(version.status).toBe(200);
+    expect(version.headers.get("cache-control")).toBe("no-store");
+    expect(await version.json()).toMatchObject({
+      version: 1,
+      features: ["worker_api", "claim_by_job_id", "pool_cap", "release"],
+    });
+    const anonymous = await routes.version.GET(
+      new Request("https://app.test/api/runners/v1/version"),
+    );
+    expect(anonymous.status).toBe(401);
+
+    const [{ id }] = (await getDatabase()
+      .selectFrom("jobs")
+      .select("id")
+      .execute()) as [{ id: string }];
+    const claim = await routes.claim.POST(
+      runnerRequest(
+        "claim",
+        {
+          engines: ["pr-agent"],
+          features: ["worker_credential"],
+          jobId: id,
+          maxRunning: 2,
+        },
+        headers,
+      ),
+    );
+    expect(claim.status).toBe(200);
+    const { job } = await claim.json();
+    expect(job.id).toBe(id);
+
+    const released = await routes.release.POST(
+      runnerRequest(
+        `jobs/${job.id}/release`,
+        { credential: job.credential, reason: "launch_failed" },
+        headers,
+      ),
+      { params: Promise.resolve({ id: job.id }) },
+    );
+    expect(released.status).toBe(200);
+    expect(await released.json()).toStrictEqual({
+      version: 1,
+      job: { id, status: "queued" },
+    });
+    expect(
+      await getDatabase()
+        .selectFrom("jobs")
+        .select(["status", "attempts"])
+        .execute(),
+    ).toStrictEqual([{ status: "queued", attempts: 1 }]);
+  });
+
   it("answers 500 in the usual form, not cacheable, when the server was not set up", async () => {
     const routes = await startRoutes();
     await closeDatabase();

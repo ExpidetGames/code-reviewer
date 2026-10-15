@@ -16,6 +16,7 @@ import { getWorkspaceLlm, modelCapabilities } from "../llm/shared.ts";
 import { projectServiceFor } from "../projects/shared.ts";
 import { reviewSettingsServiceFor } from "../review-settings/shared.ts";
 import { createRunnerApi, type RunnerApi } from "./api.ts";
+import { APP_VERSION } from "./app-version.ts";
 import {
   createWorkerApi,
   type WorkerApi,
@@ -109,6 +110,7 @@ export function getRunnerApi(): RunnerApi {
   return createRunnerApi({
     ...sharedDeps(),
     runnerToken: () => configuredRunnerToken(process.env),
+    appVersion: APP_VERSION,
   });
 }
 

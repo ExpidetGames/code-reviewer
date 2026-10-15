@@ -8,16 +8,20 @@ A second door, the **Worker API** (`/api/workers/v1`, #320), lets one process th
 credential** fetch, heartbeat and deliver exactly one job, and nothing else. It shares the queue, the
 checks and the redaction with the runner API and is described in "The Worker API" below.
 
-| Call                                      | Success                        | Meaning                                                           |
-| ----------------------------------------- | ------------------------------ | ----------------------------------------------------------------- |
-| `POST /api/runners/v1/claim`              | `200` job, `204` nothing to do | Reserves the oldest due job and hands it out with its credentials |
-| `POST /api/runners/v1/jobs/:id/heartbeat` | `200`                          | Extends the lease (2 minutes; runners beat every 30 seconds)      |
-| `POST /api/runners/v1/jobs/:id/complete`  | `200`                          | Stores the result and finishes the job                            |
+| Call                                      | Success                        | Meaning                                                                |
+| ----------------------------------------- | ------------------------------ | ---------------------------------------------------------------------- |
+| `POST /api/runners/v1/claim`              | `200` job, `204` nothing to do | Reserves the oldest due job and hands it out with its credentials      |
+| `POST /api/runners/v1/jobs/:id/heartbeat` | `200`                          | Extends the lease (2 minutes; runners beat every 30 seconds)           |
+| `POST /api/runners/v1/jobs/:id/complete`  | `200`                          | Stores the result and finishes the job                                 |
+| `POST /api/runners/v1/jobs/:id/release`   | `200`                          | A Dispatcher gives a claimed job back (#322, "The Dispatcher's calls") |
+| `GET /api/runners/v1/version`             | `200`                          | The app's version and features (#322)                                  |
 
 | File                               | Role                                                                                                                                                                                                                                                                  |
 | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `api.ts`                           | `createRunnerApi(deps)`: the order of the checks and the three entry points                                                                                                                                                                                           |
 | `claim.ts`                         | The claim: `checkJob` (guard, LLM access, settings, pull request) and `buildJobInput` (the credentials and the job input, the one place that makes a secret of a job), the response. A claim with the feature `worker_credential` runs the first only                 |
+| `release.ts`                       | The Dispatcher's release (#322): `handleRelease`                                                                                                                                                                                                                      |
+| `app-version.ts`                   | `APP_VERSION`, the `version` of `app/package.json`, for the version call                                                                                                                                                                                              |
 | `report.ts`                        | Heartbeat and complete (`finishJob`, shared with the Worker API's result)                                                                                                                                                                                             |
 | `worker-api.ts`, `worker-fetch.ts` | The Worker API (#320): `createWorkerApi(deps)` (credential check, details, heartbeat, result) and the details call that mints the secrets                                                                                                                             |
 | `body.ts`                          | Reading a JSON body up to 64 KiB, shared by both APIs                                                                                                                                                                                                                 |
@@ -261,6 +265,48 @@ for a result (`launch_failed` is just another reported code on the legacy `compl
 a column with a default, so an app instance of the previous release keeps working on the migrated database.
 A job claimed with a credential by a new instance and then handled by an old instance only has an opaque
 lease token it can neither guess nor serve; its lease runs out and the job is tried again.
+
+## The Dispatcher's calls (#322)
+
+A Dispatcher (#316) is woken by the dispatch webhook for one job, claims exactly that job and starts a
+Worker. It cannot count what runs, so the app counts for it. Three additions, all optional on the wire:
+
+- **Claim by id.** `jobId` in the claim body adds `id = :jobId` to the claim SQL (SQLite and Postgres) and
+  nothing else: the job must be `queued`, due, of a kind the advertised `engines` can run, and its pull
+  request must have no running job. Anything else (unknown, running, finished, cancelled, superseded, not
+  due yet, another kind) is `204`, with no attempt counted and no other job handed out, also when the named
+  job ends at claim time (closed pull request, project switched off). Two claims for one id: one wins, the
+  other is `204`. It works with the legacy answer too; the answer shape depends only on `worker_credential`.
+- **Pool cap.** `maxRunning` (1 to 1000) counts the running jobs whose `runner_id` equals the request's
+  `X-Runner-Id` (the pool) inside the claim transaction, after lapsed leases were requeued, and answers `204`
+  at or above the cap. Another pool is unaffected. Atomic because a claim is the only way a job becomes
+  running and every claim holds the exclusive Dynamic-gate lock on Postgres (`pg_advisory_xact_lock(195, 1)`,
+  `db/dynamic-review-lock.ts`) or the write lock of the connection on SQLite, so two claims of one pool cannot
+  both see room for one more; `claim-by-id-queue.integration.test.ts` (#322-T06) keeps it that way, on Postgres in CI.
+  A `maxRunning` of 0, a negative or fractional one, one over 1000 and a `jobId` that is no UUID are
+  `400 RUNNER_REQUEST_INVALID` before any job is claimed.
+- **Release.** `POST /api/runners/v1/jobs/:id/release` with `{ credential, reason, retryAfterSeconds? }`: the
+  dispatcher credential in `Authorization`, the job credential in the body. It is the queue's `release`, so an
+  attempt is counted (a failed Worker launch is a failed attempt, no separate budget), the job waits again
+  from `retryAfterSeconds` (default: at once) and fails on the last allowed attempt (three). The stored
+  error code is always `launch_failed`, whatever reason was sent (it is logged, the UI has copy for the
+  known code). Answers: `200` `{ job: { id, status: "queued" | "failed" } }`; `400` for a body that does not
+  fit (a lease token is not a credential); `401 WORKER_CREDENTIAL_INVALID` for a credential that is not the
+  running claim of that job (another job's, an earlier claim's, made up; nothing changes); `404` for an unknown
+  job; `409 RUNNER_JOB_ENDED` when the claim of that credential has ended. A repeated release of a job that
+  was queued again is `401` (the claim is gone). The credential is never logged or returned.
+- **Version.** `GET /api/runners/v1/version` answers `{ version: 1, appVersion, features }` with
+  `features` from `APP_FEATURES` (`worker_api`, `claim_by_job_id`, `pool_cap`, `release`). It takes the
+  dispatcher credential; a Worker may also call it with its credential **and** `?jobId=<its job>` (the
+  credential must be the running claim of that job, a primary key lookup), to check the app before it
+  fetches its job. The answer holds nothing of any job.
+
+**Mixed versions.** No migration. A previous-release app does not know `jobId` or `maxRunning` and would
+claim the _next_ job and ignore the cap, and has no `release` or `version` route (`404`): a Dispatcher
+must therefore read `/version` and refuse to claim unless the features it needs are listed (`404` or a
+missing feature means "app too old"). The legacy claim (no body, or `engines` and `features` only) makes the
+same queue call and the same SQL as before; a runner of the previous release is not affected, and a new app
+behind an old Dispatcher is not either (nobody sends the new fields).
 
 ## Hooks
 

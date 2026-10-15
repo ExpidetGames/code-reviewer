@@ -48,6 +48,9 @@ const PUBLIC_ROUTES = [
   "/api/runners/v1/claim",
   "/api/runners/v1/jobs/[id]/heartbeat",
   "/api/runners/v1/jobs/[id]/complete",
+  // A Dispatcher gives a job back and reads the version with the same token (#322).
+  "/api/runners/v1/jobs/[id]/release",
+  "/api/runners/v1/version",
   // A Worker sends the per-job credential of its claim (src/runner-api/README.md, #320).
   "/api/workers/v1/jobs/[id]",
   "/api/workers/v1/jobs/[id]/heartbeat",
