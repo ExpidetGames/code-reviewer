@@ -62,6 +62,8 @@ const PUBLIC_ROUTES = [
   "/api/operator/v1/[...path]",
   // The platform's cron sends CRON_SECRET; the route is a 404 outside serverless mode (src/cron/, #319).
   "/api/internal/repository-sync",
+  // The same cron, once a minute: the sweep of a hosted deployment, a 404 outside serverless mode (#328).
+  "/api/internal/dispatch-sweep",
 ] as const;
 const PROTECTED_ROUTES = [
   "/",

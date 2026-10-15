@@ -10,6 +10,7 @@
     "src/app/api/internal/**/route.ts": { "maxDuration": 300 }
   },
   "crons": [
-    { "path": "/api/internal/repository-sync", "schedule": "17 3 * * *" }
+    { "path": "/api/internal/repository-sync", "schedule": "17 3 * * *" },
+    { "path": "/api/internal/dispatch-sweep", "schedule": "* * * * *" }
   ]
 }

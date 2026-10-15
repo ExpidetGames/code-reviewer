@@ -16,6 +16,7 @@ function fixture(
     verificationTokens: number;
     passwordResetTokens: number;
     jobClaimedKeys: number;
+    jobDispatches: number;
   }>,
 ) {
   let fire: () => void = () => undefined;
@@ -37,6 +38,7 @@ describe("the cleanup timer", () => {
         verificationTokens: 0,
         passwordResetTokens: 0,
         jobClaimedKeys: 0,
+        jobDispatches: 0,
       }),
     );
 
@@ -60,6 +62,7 @@ describe("the cleanup timer", () => {
         verificationTokens: 1,
         passwordResetTokens: 0,
         jobClaimedKeys: 0,
+        jobDispatches: 0,
       }),
     );
     const none = fixture(() =>
@@ -69,6 +72,7 @@ describe("the cleanup timer", () => {
         verificationTokens: 0,
         passwordResetTokens: 0,
         jobClaimedKeys: 0,
+        jobDispatches: 0,
       }),
     );
 
@@ -94,6 +98,7 @@ describe("the cleanup timer", () => {
             verificationTokens: 0,
             passwordResetTokens: 0,
             jobClaimedKeys: 0,
+            jobDispatches: 0,
           });
     });
 
@@ -116,6 +121,7 @@ describe("the cleanup timer", () => {
         verificationTokens: 0,
         passwordResetTokens: 0,
         jobClaimedKeys: 0,
+        jobDispatches: 0,
       }),
     );
 
@@ -132,6 +138,7 @@ describe("the cleanup timer", () => {
         verificationTokens: 0,
         passwordResetTokens: 0,
         jobClaimedKeys: 0,
+        jobDispatches: 0,
       }),
     );
 
