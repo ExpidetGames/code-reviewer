@@ -294,6 +294,8 @@ def test_token_usage_and_cost_from_the_run_details_are_reported(
 
 def test_cost_is_null_when_no_call_could_be_priced(monkeypatch: pytest.MonkeyPatch) -> None:
     async def double() -> bool:
+        # A run that succeeded: a review was posted (a failed run reports usage only after a call).
+        provider_with_pull().publish_comment(f"## PR Reviewer Guide\n\n{REVIEW_MARKER}\n\nbody")
         return True
 
     use_double(monkeypatch, double)
@@ -302,6 +304,139 @@ def test_cost_is_null_when_no_call_could_be_priced(monkeypatch: pytest.MonkeyPat
 
     assert result.usage is not None
     assert result.usage.cost_usd is None
+
+
+def record_calls(*, priced: int, unpriced: int = 0) -> None:
+    """What PR-Agent's run details hold after `priced` + `unpriced` successful model calls."""
+    from decimal import Decimal
+
+    from pr_agent.algo.run_details import get_run_details
+
+    details = get_run_details()
+    assert details is not None
+    details.model_used = "openrouter/deepseek/deepseek-chat"
+    details.prompt_tokens = 1200
+    details.completion_tokens = 300
+    details.total_tokens = 1500
+    details.num_ai_calls = priced + unpriced
+    details.known_cost_call_count = priced
+    details.total_cost_usd = Decimal("0.0042") if priced else Decimal("0")
+
+
+# #273-T04
+def test_a_diff_run_that_raises_after_its_model_call_reports_the_usage_pr_agent_measured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def double() -> bool:
+        record_calls(priced=2)
+        raise RuntimeError("the comment could not be posted")
+
+    use_double(monkeypatch, double)
+
+    result, _ = run()
+
+    assert result.ok is False
+    assert result.usage is not None
+    assert result.usage.to_json() == {
+        "model": "openrouter/deepseek/deepseek-chat",
+        "promptTokens": 1200,
+        "completionTokens": 300,
+        "totalTokens": 1500,
+        "aiCalls": 2,
+        "fallbackUsed": False,
+        "costUsd": 0.0042,
+    }
+
+
+# #273-T04: the timeout at the end of a run is the case that cost the most.
+def test_a_diff_run_that_times_out_after_its_model_call_reports_the_usage_pr_agent_measured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def double() -> bool:
+        record_calls(priced=2)
+        await asyncio.sleep(30)
+        return True
+
+    use_double(monkeypatch, double)
+    capture = LogCapture(Redactor([TOKEN, API_KEY]))
+
+    result = runner.run_job(make_job(), capture, time.monotonic(), timeout_seconds=0.2)
+
+    assert result.error_code is ErrorCode.TIMEOUT
+    assert result.usage is not None
+    assert result.usage.ai_calls == 2
+    assert result.usage.cost_usd == 0.0042
+
+
+# #273-T04
+def test_a_diff_run_that_fails_after_its_model_call_with_a_failure_comment_reports_the_usage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def double() -> bool:
+        record_calls(priced=2)
+        return False
+
+    use_double(monkeypatch, double)
+
+    result, _ = run()
+
+    assert result.ok is False
+    assert result.usage is not None and result.usage.ai_calls == 2
+
+
+# #273-T02: the same all or nothing rule as for a Dynamic run.
+def test_a_diff_run_with_an_unpriced_call_that_fails_reports_the_tokens_and_no_cost(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def double() -> bool:
+        record_calls(priced=0, unpriced=2)
+        raise RuntimeError("failed")
+
+    use_double(monkeypatch, double)
+
+    result, _ = run()
+
+    assert result.usage is not None
+    assert result.usage.total_tokens == 1500
+    assert result.usage.cost_usd is None
+
+
+# #273-T03
+@pytest.mark.parametrize("fails", ["raises", "returns false", "times out"])
+def test_a_diff_run_that_fails_before_its_first_model_call_reports_no_usage(
+    monkeypatch: pytest.MonkeyPatch, fails: str
+) -> None:
+    async def double() -> bool:
+        if fails == "returns false":
+            return False
+        if fails == "times out":
+            await asyncio.sleep(30)
+        raise RuntimeError("failed before the model was asked")
+
+    use_double(monkeypatch, double)
+    capture = LogCapture(Redactor([TOKEN, API_KEY]))
+
+    result = runner.run_job(make_job(), capture, time.monotonic(), timeout_seconds=0.2)
+
+    assert result.ok is False
+    assert result.usage is None
+
+
+# #273-T08
+def test_a_diff_run_that_succeeds_without_a_model_call_still_reports_its_usage_as_before(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def double() -> bool:
+        provider_with_pull().publish_comment(f"## PR Reviewer Guide\n\n{REVIEW_MARKER}\n\nbody")
+        return True
+
+    use_double(monkeypatch, double)
+
+    result, _ = run()
+
+    assert result.ok is True
+    assert result.usage is not None
+    assert result.usage.ai_calls == 0
 
 
 # CR-10-T07

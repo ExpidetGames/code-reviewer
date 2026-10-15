@@ -224,3 +224,66 @@ def test_an_unknown_cost_of_a_dynamic_run_stays_unknown_in_the_reported_result()
 
     assert result["usage"] is not None
     assert result["usage"]["costUsd"] is None
+
+
+def _failed_with_usage(cost: float | None = 0.0035) -> bytes:
+    usage = {
+        "model": "vendor/model",
+        "promptTokens": 300,
+        "completionTokens": 30,
+        "totalTokens": 330,
+        "aiCalls": 3,
+        "fallbackUsed": False,
+        "costUsd": cost,
+    }
+    return result_line(ok=False, errorCode="dynamic_budget_exceeded", usage=usage)
+
+
+# #273-T01
+def test_the_usage_of_a_failed_result_is_passed_on_with_its_cost_or_its_unknown_cost() -> None:
+    known = reported(outcome(exit_code=1, stdout=_failed_with_usage()))
+    unknown = reported(outcome(exit_code=1, stdout=_failed_with_usage(cost=None)))
+
+    assert known["ok"] is False
+    assert known["usage"]["costUsd"] == 0.0035
+    assert known["usage"]["aiCalls"] == 3
+    assert unknown["usage"]["costUsd"] is None
+    assert unknown["usage"]["totalTokens"] == 330
+
+
+# #273-T01: the bare verdict is sent when the app refuses the whole result; what the run cost is
+# part of the verdict of a failure, and is small.
+def test_the_bare_verdict_of_a_failure_keeps_its_usage() -> None:
+    bare = minimal(reported(outcome(exit_code=1, stdout=_failed_with_usage())))
+
+    assert bare["ok"] is False
+    assert bare["logTail"] == "dynamic_budget_exceeded"
+    assert bare["usage"]["costUsd"] == 0.0035
+    assert bare["usage"]["aiCalls"] == 3
+
+
+# #273-T08
+def test_the_bare_verdict_of_a_success_still_carries_no_usage() -> None:
+    usage = {
+        "model": "vendor/model",
+        "promptTokens": 9,
+        "completionTokens": 1,
+        "totalTokens": 10,
+        "aiCalls": 1,
+        "fallbackUsed": False,
+        "costUsd": 0.01,
+    }
+
+    bare = minimal(reported(outcome(stdout=result_line(usage=usage))))
+
+    assert bare["usage"] is None
+
+
+# #273-T01
+def test_a_shrunk_failure_keeps_its_usage() -> None:
+    big = reported(outcome(exit_code=1, stdout=_failed_with_usage()))
+    big["logTail"] = "é" * 40_000
+
+    shrunk = fit_request(big)
+
+    assert shrunk["usage"]["costUsd"] == 0.0035

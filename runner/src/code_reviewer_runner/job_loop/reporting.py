@@ -211,7 +211,8 @@ def minimal(result: Mapping[str, Any]) -> Result:
     """Only the verdict: the fallback when the app refuses the full result (400 or 413).
 
     A failure keeps its stable code and reason, and says them in one line of log, so the Runs view
-    still shows why the run failed.
+    still shows why the run failed. It keeps its usage too: what the run cost does not depend on the
+    size of the log, and a failure the app could not count would be spend nobody sees (#273).
     """
     reason = result.get("errorReason")
     verdict: Result = {
@@ -225,6 +226,7 @@ def minimal(result: Mapping[str, Any]) -> Result:
     }
     if result["ok"]:
         return verdict
+    verdict["usage"] = result.get("usage")
     verdict["logTail"] = f"{result['errorCode']}" + (f" [{reason}]" if reason else "")
     if reason:
         verdict["errorReason"] = reason

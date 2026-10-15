@@ -79,6 +79,11 @@ class Usage:
     # Why a Dynamic Review was wrapped up before it was done (`cost_limit`, `time_limit`, #293).
     stopped_early: str | None = None
 
+    @property
+    def used_the_model(self) -> bool:
+        """True when at least one model call was made. A failed result reports usage only then."""
+        return self.ai_calls > 0 or self.total_tokens > 0
+
     def to_json(self) -> dict[str, Any]:
         document: dict[str, Any] = {
             "model": self.model,
