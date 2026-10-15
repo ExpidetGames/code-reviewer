@@ -75,6 +75,49 @@ describe("dispatcher canary workflow", () => {
     expect(job["timeout-minutes"]).toBeLessThanOrEqual(20);
   });
 
+  // #331-R01
+  it("runs only from main and development, enforced in the job and not by a branch filter that a manual run ignores", () => {
+    const condition = String(job.if);
+
+    expect(condition).toContain("github.ref == 'refs/heads/main'");
+    expect(condition).toContain("github.ref == 'refs/heads/development'");
+    // Nothing else: no tag, no pull request ref, no wildcard.
+    expect(condition.match(/github\.ref\b/g)).toHaveLength(2);
+    expect(condition).not.toMatch(/startsWith|contains\(github\.ref/);
+    // The two refs are alternatives of one condition that is also bound to the repository.
+    expect(condition).toMatch(/&&\s*\([^)]*\|\|[^)]*\)/);
+  });
+
+  // #331-R01
+  it("checks the URL against the allow-list in a step that holds no secret, before the step that does", () => {
+    const names = job.steps.map((step) => step.name);
+    const check = stepNamed("Check the URL against the allowed hosts");
+
+    expect(
+      names.indexOf("Check the URL against the allowed hosts"),
+    ).toBeLessThan(names.indexOf("Run the canary"));
+    expect(JSON.stringify(check)).not.toContain("secrets.");
+    expect(Object.keys(check.env ?? {}).sort()).toEqual([
+      "CANARY_ALLOWED_HOSTS",
+      "CANARY_URL",
+    ]);
+    expect(check.env?.CANARY_ALLOWED_HOSTS).toContain(
+      "vars.DISPATCHER_CANARY_HOSTS",
+    );
+    expect(check.run).toContain('--url "$CANARY_URL"');
+    expect(check.run).toContain("--check-only");
+    expect(check["working-directory"]).toBe("dispatcher");
+  });
+
+  // #331-R01
+  it("hands the allow-list to the step that sends the credential too, so that it refuses on its own", () => {
+    const canary = stepNamed("Run the canary");
+
+    expect(canary.env?.CANARY_ALLOWED_HOSTS).toContain(
+      "vars.DISPATCHER_CANARY_HOSTS",
+    );
+  });
+
   // #331-extra-workflow
   it("lets two runs queue instead of cancelling one that is waiting for a canary VM", () => {
     expect(workflow.concurrency?.["cancel-in-progress"]).toBe(false);
@@ -90,6 +133,7 @@ describe("dispatcher canary workflow", () => {
     const canary = withSecrets[0] as Step;
     expect(Object.keys(canary.env ?? {}).sort()).toEqual(
       [
+        "CANARY_ALLOWED_HOSTS",
         "CANARY_ENGINES",
         "CANARY_URL",
         "RUNNER_TOKEN",

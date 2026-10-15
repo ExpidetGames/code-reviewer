@@ -75,7 +75,7 @@ writer, the runner, is checked by `runner/tests/contract/test_probe_verdict_cont
 runner's `SelfCheckReason` values are exactly the file's list, what `probe` prints is a valid `ProbeVerdict`, the verdict
 is closed). The Dispatcher reads a verdict leniently (an unknown field is ignored, an unknown reason is dropped, never
 echoed) and `POST /probe`'s answers are checked against `ProbeReport` in `dispatcher/src/probe/route.test.ts`. A new
-`SelfCheckReason` is added to the file, to the Dispatcher's list and to the runner in one pull request.
+`SelfCheckReason` is added to the file, to the Dispatcher's list and to the runner in one pull request. `ProbeFailure`, the closed list of codes of a probe that gave no verdict, is the Dispatcher's own (`dispatcher/src/probe/failure-codes.ts`, held equal to the file by `failure-codes.test.ts`).
 
 ### Who checks what (hosted deployment)
 

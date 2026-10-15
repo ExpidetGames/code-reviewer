@@ -13,11 +13,12 @@
 // and logs).
 import { z } from "zod";
 import type { Clock, Engine } from "../core/types.ts";
+import { probeFailureCode } from "./failure-codes.ts";
 import { PROBE_REASONS } from "./verdict.ts";
 
 const HEALTH_INTERVAL_SECONDS = 5;
 const DEFAULT_PROBE_TIMEOUT_SECONDS = 300;
-const STABLE_CODE = /^[a-z][a-z0-9_]{0,63}$/;
+const HOST_NAME = /^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$/;
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 const ENGINES: readonly Engine[] = ["pr-agent", "opencode"];
 
@@ -26,6 +27,14 @@ export type CanaryOptions = {
   url: string;
   /** The dispatcher credential. A secret. */
   token: string;
+  /**
+   * The host names the credential may be sent to (exact, case does not matter, the port does not). When there is a
+   * list, a URL whose host is not on it is refused before any request, this machine included; an empty list refuses
+   * everything. Without one, any https host (or this machine) is allowed: for a person at a terminal, not for CI.
+   */
+  allowedHosts?: readonly string[];
+  /** Only check the URL against the list: no request, no credential needed. For a step that holds no secret. */
+  checkOnly?: boolean;
   /** The engines the release needs; both by default. */
   requiredEngines?: readonly Engine[];
   /** How long to wait for the deployment to answer `GET /health` before the credential is sent. 0: one try. */
@@ -44,7 +53,7 @@ const ReportSchema = z.object({
   ok: z.boolean(),
   engines: z.array(z.string()).max(16),
   reasons: z.array(z.string()).max(64),
-  failure: z.string().regex(STABLE_CODE).optional(),
+  failure: z.string().max(100).optional(),
 });
 
 export class CanaryUsageError extends Error {
@@ -55,7 +64,7 @@ export class CanaryUsageError extends Error {
 }
 
 const USAGE =
-  "usage: probe:canary --url <https://dispatcher> [--engines pr-agent,opencode] [--wait-seconds <n>] [--timeout-seconds <n>]; the credential is RUNNER_TOKEN in the environment";
+  "usage: probe:canary --url <https://dispatcher> [--allowed-hosts <host,host>] [--check-only] [--engines pr-agent,opencode] [--wait-seconds <n>] [--timeout-seconds <n>]; the credential is RUNNER_TOKEN in the environment, the allowed hosts may also be CANARY_ALLOWED_HOSTS";
 
 function seconds(value: string | undefined, name: string, max: number): number {
   const number = Number(value);
@@ -77,15 +86,25 @@ export function parseCanaryArguments(
   env: Readonly<Record<string, string | undefined>>,
 ): Omit<CanaryOptions, "clock" | "write" | "fetch"> {
   const values = new Map<string, string>();
-  for (let index = 0; index < argv.length; index += 2) {
+  let checkOnly = false;
+  for (let index = 0; index < argv.length; index += 1) {
     const name = argv[index];
+    if (name === "--check-only") {
+      checkOnly = true;
+      continue;
+    }
     const value = argv[index + 1];
+    index += 1;
     if (
       name === undefined ||
       value === undefined ||
-      !["--url", "--engines", "--wait-seconds", "--timeout-seconds"].includes(
-        name,
-      )
+      ![
+        "--url",
+        "--engines",
+        "--wait-seconds",
+        "--timeout-seconds",
+        "--allowed-hosts",
+      ].includes(name)
     )
       throw new CanaryUsageError(USAGE);
     values.set(name, value);
@@ -93,10 +112,22 @@ export function parseCanaryArguments(
   const url = values.get("--url");
   if (url === undefined)
     throw new CanaryUsageError(`--url is required. ${USAGE}`);
-  const token = env.RUNNER_TOKEN;
-  if (token === undefined || token === "")
+  const token = env.RUNNER_TOKEN ?? "";
+  if (token === "" && !checkOnly)
     throw new CanaryUsageError(
       "RUNNER_TOKEN is required (the dispatcher credential)",
+    );
+  const listed = values.get("--allowed-hosts") ?? env.CANARY_ALLOWED_HOSTS;
+  const allowedHosts =
+    listed === undefined
+      ? undefined
+      : listed
+          .split(",")
+          .map((host) => host.trim().toLowerCase())
+          .filter((host) => host !== "");
+  if (allowedHosts?.some((host) => !HOST_NAME.test(host)))
+    throw new CanaryUsageError(
+      "--allowed-hosts takes host names, separated by commas",
     );
 
   const named = values.get("--engines");
@@ -112,6 +143,8 @@ export function parseCanaryArguments(
   return {
     url,
     token,
+    ...(allowedHosts === undefined ? {} : { allowedHosts }),
+    ...(checkOnly ? { checkOnly } : {}),
     requiredEngines,
     healthWaitSeconds: values.has("--wait-seconds")
       ? seconds(values.get("--wait-seconds"), "--wait-seconds", 1800)
@@ -155,6 +188,19 @@ export async function runCanary(options: CanaryOptions): Promise<0 | 1 | 2> {
       "canary: canary_url_invalid (https, or http to this machine; no path, query or credentials)",
     );
     return 2;
+  }
+  if (
+    options.allowedHosts !== undefined &&
+    !options.allowedHosts.includes(base.hostname.toLowerCase())
+  ) {
+    write(
+      "canary: canary_host_not_allowed (the host is not on the list of hosts the credential may be sent to)",
+    );
+    return 2;
+  }
+  if (options.checkOnly === true) {
+    write("canary: the URL is allowed");
+    return 0;
   }
   const request = options.fetch ?? fetch;
   const required = options.requiredEngines ?? ENGINES;
@@ -226,7 +272,9 @@ export async function runCanary(options: CanaryOptions): Promise<0 | 1 | 2> {
   const details = [
     `engines=${engines.join(",") === "" ? "none" : engines.join(",")}`,
     ...(reasons.length === 0 ? [] : [`reasons=${reasons.join(",")}`]),
-    ...(report.failure === undefined ? [] : [`failure=${report.failure}`]),
+    ...(report.failure === undefined
+      ? []
+      : [`failure=${probeFailureCode(report.failure)}`]),
   ].join(" ");
   const missing = required.filter((engine) => !engines.includes(engine));
   if (answer.status === 200 && report.ok && missing.length === 0) {

@@ -286,6 +286,113 @@ describe("the deploy canary", () => {
   });
 });
 
+describe("the host allow-list of the deploy canary", () => {
+  // #331-R01
+  it("sends nothing to a host that is not on the list, not even to /health", async () => {
+    const { fetch, seen } = deployment(() => respond(REPORT));
+    const { run, lines } = options(fetch, {
+      url: "https://evil.example",
+      allowedHosts: ["dispatcher.example"],
+    });
+
+    expect(await run()).toBe(2);
+
+    expect(seen).toStrictEqual([]);
+    expect(lines.join("\n")).toContain("canary_host_not_allowed");
+    expect(lines.join("\n")).not.toContain(DISPATCHER_TOKEN);
+  });
+
+  // #331-R01
+  it("sends to a host on the list, whatever its letter case or port", async () => {
+    const { fetch, seen } = deployment(() => respond(REPORT));
+
+    expect(
+      await options(fetch, {
+        url: "https://Dispatcher.Example:8443",
+        allowedHosts: ["dispatcher.example"],
+      }).run(),
+    ).toBe(0);
+    expect(seen.length).toBeGreaterThan(0);
+  });
+
+  // #331-R01
+  it.each([
+    "https://dispatcher.example.evil.example",
+    "https://evil.example/dispatcher.example",
+    "https://sub.dispatcher.example",
+    "https://dispatcher.example@evil.example",
+    "https://evil.example#dispatcher.example",
+  ])("does not take %s for a listed host", async (url) => {
+    const { fetch, seen } = deployment(() => respond(REPORT));
+
+    expect(
+      await options(fetch, { url, allowedHosts: ["dispatcher.example"] }).run(),
+    ).toBe(2);
+    expect(seen).toStrictEqual([]);
+  });
+
+  // #331-R01
+  it("also holds this machine to the list when there is one", async () => {
+    const { fetch, seen } = deployment(() => respond(REPORT));
+
+    expect(
+      await options(fetch, {
+        url: "http://127.0.0.1:8080",
+        allowedHosts: ["dispatcher.example"],
+      }).run(),
+    ).toBe(2);
+    expect(seen).toStrictEqual([]);
+  });
+
+  // #331-R01
+  it("with an empty list refuses every host: a list that was meant and is empty is a mistake", async () => {
+    const { fetch, seen } = deployment(() => respond(REPORT));
+
+    expect(await options(fetch, { allowedHosts: [] }).run()).toBe(2);
+    expect(seen).toStrictEqual([]);
+  });
+
+  // #331-R01
+  it("checks the URL against the list without a credential and without a request", async () => {
+    const { fetch, seen } = deployment(() => respond(REPORT));
+
+    expect(
+      await options(fetch, {
+        token: "",
+        checkOnly: true,
+        allowedHosts: ["dispatcher.example"],
+      }).run(),
+    ).toBe(0);
+    expect(
+      await options(fetch, {
+        token: "",
+        checkOnly: true,
+        url: "https://evil.example",
+        allowedHosts: ["dispatcher.example"],
+      }).run(),
+    ).toBe(2);
+    expect(seen).toStrictEqual([]);
+  });
+
+  // #331-R04
+  it("prints a failure code only from the closed list", async () => {
+    const failed = {
+      ...REPORT,
+      status: "failed",
+      ok: false,
+      engines: ["pr-agent"],
+      failure: "a1b2c3d4e5f6a1b2c3d4",
+    };
+    const { fetch } = deployment(() => respond(failed, 503));
+    const { run, lines } = options(fetch);
+
+    expect(await run()).toBe(1);
+
+    expect(lines.join("\n")).toContain("failure=probe_error");
+    expect(lines.join("\n")).not.toContain("a1b2c3d4");
+  });
+});
+
 describe("the arguments of the deploy canary", () => {
   it("takes the URL and reads the credential from the environment, never from an argument", () => {
     expect(
@@ -332,5 +439,57 @@ describe("the arguments of the deploy canary", () => {
       healthWaitSeconds: 90,
       bypassSecret: "dummy-bypass",
     });
+  });
+
+  // #331-R01
+  it("takes the allowed hosts from the option or from CANARY_ALLOWED_HOSTS, and checks only with --check-only", () => {
+    const env = { RUNNER_TOKEN: "dummy-token-1234567890" };
+
+    expect(
+      parseCanaryArguments(
+        [
+          "--url",
+          "https://d.example",
+          "--allowed-hosts",
+          "d.example,E.example",
+        ],
+        env,
+      ).allowedHosts,
+    ).toStrictEqual(["d.example", "e.example"]);
+    expect(
+      parseCanaryArguments(["--url", "https://d.example"], {
+        ...env,
+        CANARY_ALLOWED_HOSTS: "d.example",
+      }).allowedHosts,
+    ).toStrictEqual(["d.example"]);
+    expect(
+      parseCanaryArguments(["--url", "https://d.example", "--check-only"], {
+        CANARY_ALLOWED_HOSTS: "d.example",
+      }),
+    ).toMatchObject({ checkOnly: true });
+    expect(() =>
+      parseCanaryArguments(["--url", "https://d.example", "--check-only"], {}),
+    ).not.toThrow();
+  });
+
+  // #331-R01
+  it("refuses a list with something that is not a host name, without echoing it", () => {
+    expect(() =>
+      parseCanaryArguments(
+        [
+          "--url",
+          "https://d.example",
+          "--allowed-hosts",
+          "d.example,https://x/y",
+        ],
+        { RUNNER_TOKEN: "dummy-token-1234567890" },
+      ),
+    ).toThrow(/allowed-hosts/);
+    expect(() =>
+      parseCanaryArguments(
+        ["--url", "https://d.example", "--allowed-hosts", "https://secret-x/y"],
+        { RUNNER_TOKEN: "dummy-token-1234567890" },
+      ),
+    ).not.toThrow(/secret-x/);
   });
 });

@@ -197,7 +197,8 @@ closed). Next section.
 `RUNNER_DYNAMIC_CAPABILITIES` (the model's descriptor, a JSON object) and `RUNNER_DYNAMIC_MAX_COST_USD` (the cost limit of
 a run) from the Dispatcher's own environment, as the self-hosted `runner-dynamic` service has them: both names are on the
 container spec's allow-list, both are non-secret, and a value that is not of the right form fails the deployment at start,
-not the first Dynamic job. The runner reads them again and decides what they mean. The canary gets the same.
+not the first Dynamic job. The runner reads them again and decides what they mean. The canary gets the same. They are read, and refused when malformed, only by a deployment that serves Dynamic jobs
+(`DISPATCHER_ENGINES` includes `opencode`): a typo there does not take a Diff-only Dispatcher down.
 
 **What the container can reach (documented, not relied on).** The VM's agent listens on `172.17.0.1:23456` (the Docker
 bridge gateway). Container root can reach it; the Dynamic engine's uid cannot, only because the egress rules drop it
@@ -246,8 +247,10 @@ counts as proven only when the verdict says it **and** gives no reason against i
 | `failed` (no verdict: the platform, the VM, the container, the time) | one minute                              | tried again by the next call, so a platform that comes back is used again soon and an outage does not create a VM per wake-up |
 
 Only one probe runs at a time per instance: any number of wake-up calls and a forced probe share it. A probe that takes
-longer than `DISPATCHER_PROBE_TIMEOUT_SECONDS` (150) is a `failed` answer (`probe_timeout`) and its VM is stopped.
-**A stale answer is not used**: the first call after the hour finds nothing proven.
+longer than `DISPATCHER_PROBE_TIMEOUT_SECONDS` (150) is a `failed` answer (`probe_timeout`). The probe then waits up to 10
+seconds for the run to finish stopping its canary VM before it answers, so the stop is part of the work held in `waitUntil`
+and a frozen function does not leave the VM to its timeout. **A stale answer is not used**: the first call after the hour
+finds nothing proven. A `failed` answer never replaces a `passed` one that still counts (below).
 
 **What a wake-up call sees.** A Diff job never waits for a probe and never starts one. A Dynamic job:
 
@@ -255,15 +258,27 @@ longer than `DISPATCHER_PROBE_TIMEOUT_SECONDS` (150) is a `failed` answer (`prob
 - with no fresh answer: the probe is started in the background (`waitUntil`), and the call is answered `503` with
   `Retry-After: 20`. The App's sender (8 second timeout) must not wait for a canary VM, and it asks again after the
   retry time. Nothing is claimed;
-- with a fresh `denied` or `failed` answer: PR-Agent only, so the call is answered `200 ignored` with `not_capable` and
-  nothing is claimed. The App stops sending that job, revives the dispatch ten minutes later (a Dispatcher that was fixed is
-  asked again, slowly), and a Dynamic job that nobody can run ends `no_capable_runner` after 30 minutes
-  (`app/src/dispatch/README.md`). Diff jobs are unaffected throughout.
+- with a fresh `failed` answer (no verdict: a platform error, a timeout): `503` with `Retry-After` of what is left of the
+  failure minute, at least 20 s. A transient error must not look like "not capable": the App stops sending a job
+  that was answered `not_capable` for ten minutes, a `503` is retried on its back-off (10 s, 30 s, 2 min, ...; the longer of
+  that and the header). Nothing is claimed. `app/src/dispatch/capability-probe-answers.test.ts` holds both answers against the
+  sender;
+- with a fresh `denied` answer (the container's own "no", with its reasons): PR-Agent only, so the call is answered
+  `200 ignored` with `not_capable` and nothing is claimed. The App stops sending that job, revives the dispatch ten minutes
+  later (a Dispatcher that was fixed is asked again, slowly), and a Dynamic job that nobody can run ends `no_capable_runner`
+  after 30 minutes (`app/src/dispatch/README.md`). Diff jobs are unaffected throughout.
+
+Between the claim and the launch the proof is checked once more: a Dynamic job is launched only while a `passed` answer still
+counts, otherwise the launch fails with the retryable `capability_not_proven` and the job is released like any failed launch
+(the Worker proves the same again itself in `worker-once`; this is defence in depth). A "poll" call that wants no engine in
+particular gets PR-Agent only while nothing is proven.
 
 The stable reasons and codes are logged (`probe_passed`, `probe_denied` with the reasons, `probe_failed` with the code):
-the reasons of the self-check list, and for a probe that gave no verdict the launch codes of a job VM
-(`sandbox_unavailable`, `docker_not_ready`, `image_mismatch`, ...) or `probe_timeout`, `probe_unreadable` (the output is not
-a verdict), `probe_exit_nonzero`, `probe_exec_failed`, `probe_aborted`, `probe_error`.
+the reasons of the self-check list, and for a probe that gave no verdict a code of the **closed** list `ProbeFailure`
+(`src/probe/failure-codes.ts`, equal to the contract's): the launch codes of a job VM (`sandbox_unavailable`,
+`docker_not_ready`, `image_mismatch`, ...) and `probe_timeout`, `probe_unreadable` (the output is not a verdict),
+`probe_exit_nonzero`, `probe_exec_failed`, `probe_aborted`, `probe_not_supported`, `probe_error`. Anything else, such as a code in
+a platform's error, is `probe_error`.
 
 **Cost.** A probe is one short VM (tens of seconds) per instance per hour of Dynamic traffic, and one more for every new
 serverless instance that serves its first Dynamic call. A Diff-only deployment (`DISPATCHER_ENGINES=pr-agent`) has no probe.
@@ -273,6 +288,14 @@ serverless instance that serves its first Dynamic call. A Diff-only deployment (
 Forces a probe (or joins the one that runs) and answers its report (`ProbeReport` of the contract). The call needs the
 dispatcher credential as `Authorization: Bearer <RUNNER_TOKEN>`, checked in constant time **before** anything is started: a
 refused call creates no VM, and every refusal is the same `401` with the same body.
+
+**Throttle.** A forced probe is served from the last answer, whatever its status, when that is younger than
+`DISPATCHER_PROBE_REUSE_SECONDS` (60; 0 turns it off; `checkedAt` of the report says when it was made), so a holder of the
+credential cannot run canary VMs back to back. A fresh deployment instance has an empty cache, so the deploy canary
+against a new deployment is always a real run. **A forced probe that only failed** (a platform error, a timeout) is
+reported to its caller, and the deploy step is blocked, but it does **not** replace a `passed` answer that still counts:
+production Dynamic is not switched off by a bad minute of the platform during a release check. A real `denied` verdict
+(the container's own answer) does replace it.
 
 | Status | Body                                                                                          | Meaning                                                           |
 | ------ | --------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
@@ -285,12 +308,14 @@ proves nothing and advertises what it advertises.
 
 ### The deploy canary
 
-`pnpm probe:canary --url https://<dispatcher> [--engines pr-agent,opencode] [--wait-seconds 120] [--timeout-seconds 300]`
+`pnpm probe:canary --url https://<dispatcher> [--allowed-hosts host,host] [--check-only] [--engines pr-agent,opencode] [--wait-seconds 120] [--timeout-seconds 300]`
 (`src/probe/canary.ts`) is the step of a release pipeline that calls `POST /probe` and fails the release when the Dynamic
 canary fails. The credential is `RUNNER_TOKEN` in the environment (never an argument); `VERCEL_AUTOMATION_BYPASS_SECRET`, when set,
 is sent as `x-vercel-protection-bypass` for a deployment behind deployment protection. It waits for the deployment to answer
 `GET /health` first (never sending the credential there), sends the credential to that one URL (https, or http to this machine;
-no redirect is followed) and prints stable codes and the contract's reasons only.
+no redirect is followed) and prints stable codes and the contract's reasons only. With `--allowed-hosts` (or
+`CANARY_ALLOWED_HOSTS`) a URL whose host is not on the list is refused with exit 2 **before any request**, this machine included;
+an empty list refuses every URL. `--check-only` does only that check, without a credential.
 
 | Exit | Meaning                                                                                                                           |
 | ---- | --------------------------------------------------------------------------------------------------------------------------------- |
@@ -300,7 +325,16 @@ no redirect is followed) and prints stable codes and the contract's reasons only
 
 `.github/workflows/dispatcher-canary.yml` runs it (`workflow_dispatch`, or `workflow_call` from a release workflow) in the
 environment `hosted-canary`, which holds the secrets `RUNNER_TOKEN` and, when needed, `VERCEL_AUTOMATION_BYPASS_SECRET`; inputs
-are `url` and `engines` (`pr-agent` for a Diff-only deployment). The sequence of a release: deploy the Dispatcher to a URL
+are `url` and `engines` (`pr-agent` for a Diff-only deployment). The credential is sent to one host only: a step without any
+secret first checks the `url` against the repository variable **`DISPATCHER_CANARY_HOSTS`** (exact host names, comma separated;
+unset or empty refuses every URL), and the step with the secrets checks it again. The job runs only from `main` and
+`development` (its own condition, because a manual run executes the code of the branch it is started on).
+
+**What the maintainer sets on the environment `hosted-canary`** (repository settings, Environments), because a workflow cannot
+protect itself: _Deployment branches and tags_: **selected branches**, `main` and `development` only (without it any branch could
+run its own copy of the canary code with the environment's secrets); _Required reviewers_: at least one person other than whoever
+starts the run; no secret of any other purpose in it. `RUNNER_TOKEN` there is the Dispatcher project's dispatcher credential;
+rotate it with the Dispatcher project's. The sequence of a release: deploy the Dispatcher to a URL
 that carries the candidate `SANDBOX_SNAPSHOT_ID` and `SANDBOX_IMAGE_DIGEST` (a preview deployment, or the new production
 deployment before it is promoted), run the canary against it, promote only on exit 0. After a golden snapshot rebuild
 (`docs/golden-snapshot.md`) the same step proves the new snapshot before the Dispatcher project is switched to it.
@@ -331,6 +365,7 @@ Names only: a refusal names the variable, never the value.
 | `SANDBOX_HANDOVER_SECONDS`                                                 | How long the container runs before the Worker counts as having taken over, 1 to 120; with create, `vm-prepare.sh` and the image check (150 s) it must fit in the core's 300 s launch deadline | `20`         |
 | `SANDBOX_VM_TIMEOUT_MARGIN_SECONDS`                                        | Seconds added to the job's timeout for the VM's own, 180 to 3600 and at least the hand-over time plus 150                                                                                     | `300`        |
 | `DISPATCHER_PROBE_TTL_SECONDS`                                             | How long a capability probe's answer counts before a new canary VM is asked, 60 to 86400 (#331)                                                                                               | `3600`       |
+| `DISPATCHER_PROBE_REUSE_SECONDS`                                           | A forced probe (`POST /probe`) is served from an answer younger than this instead of a new canary VM, 0 to 600; 0 runs every one                                                              | `60`         |
 | `DISPATCHER_PROBE_TIMEOUT_SECONDS`                                         | How long a probe may take, the canary VM included, 30 to 600                                                                                                                                  | `150`        |
 | `RUNNER_DYNAMIC_CAPABILITIES`, `RUNNER_DYNAMIC_MAX_COST_USD`               | The operator's Dynamic configuration for the container of a Dynamic job and for the canary: a JSON object (no line breaks, at most 4096 characters) and a plain positive decimal              | none         |
 | `VERCEL_TOKEN`, `VERCEL_TEAM_ID`, `VERCEL_PROJECT_ID`                      | Platform access by token (all three). Without a token the OIDC token is used                                                                                                                  | OIDC         |

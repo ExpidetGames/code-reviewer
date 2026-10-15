@@ -11,6 +11,7 @@
 // | SANDBOX_VM_TIMEOUT_MARGIN_SECONDS                 | Seconds added to the job's timeout for the VM's own (the backstop that ends a VM nobody stops); at least 180 and 150 more than the hand-over time, at most 3600 | 300 |
 // | DISPATCHER_PROBE_TTL_SECONDS                      | How long a capability probe's answer counts before a new canary VM is asked (60 to 86400, #331) | 3600 |
 // | DISPATCHER_PROBE_TIMEOUT_SECONDS                  | How long a probe may take, canary VM included (30 to 600)          | 150 |
+// | DISPATCHER_PROBE_REUSE_SECONDS                    | A forced probe (`POST /probe`) is served from an answer younger than this instead of a new canary VM (0 to 600; 0: never) | 60 |
 // | RUNNER_DYNAMIC_CAPABILITIES, RUNNER_DYNAMIC_MAX_COST_USD | The operator's Dynamic configuration, given to the container of a Dynamic job and to the canary, as the self-hosted `runner-dynamic` service has them (a JSON object; a plain positive decimal) | none |
 // | VERCEL_TOKEN, VERCEL_TEAM_ID, VERCEL_PROJECT_ID    | Platform access by token. Without a token the OIDC token is used   | OIDC |
 //
@@ -154,7 +155,11 @@ export function sandboxFromEnvironment(
     max: 600,
     fallback: 150,
   });
-  const dynamic = dynamicEnvironment(env);
+  const probeReuseSeconds = integer(env, "DISPATCHER_PROBE_REUSE_SECONDS", {
+    min: 0,
+    max: 600,
+    fallback: 60,
+  });
   const access = credentials(env);
   const secrets = [access?.token, read(env, "VERCEL_OIDC_TOKEN")].filter(
     (secret): secret is string => secret !== undefined,
@@ -177,6 +182,10 @@ export function sandboxFromEnvironment(
           throw new ConfigError("DISPATCHER_WORKER_CONFIG", "invalid");
         }
       }
+      // Only a deployment that serves Dynamic jobs reads (and refuses) the Dynamic configuration: a typo in a variable
+      // it does not use must not take its Diff jobs down.
+      const serversDynamic = settings.core.engines.includes("opencode");
+      const dynamic = serversDynamic ? dynamicEnvironment(env) : {};
       const service = createVercelSandboxService(loadSdk, access);
       const launcher = createSandboxLauncher({
         service,
@@ -189,7 +198,7 @@ export function sandboxFromEnvironment(
         dynamicEnvironment: dynamic,
       });
       // A deployment that serves no Dynamic job has nothing to prove: no canary VM is ever made for it.
-      if (!settings.core.engines.includes("opencode")) return launcher;
+      if (!serversDynamic) return launcher;
       // opencode is advertised only from a fresh canary (#331): the Launcher's own word is never taken.
       const probe = createCapabilityProbe({
         run: createSandboxCanary({
@@ -207,6 +216,7 @@ export function sandboxFromEnvironment(
         logger,
         ttlMs: probeTtlSeconds * 1000,
         timeoutMs: probeTimeoutSeconds * 1000,
+        forceReuseMs: probeReuseSeconds * 1000,
       });
       return withCapabilityProbe({ launcher, probe, background });
     },

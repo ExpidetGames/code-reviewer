@@ -411,19 +411,54 @@ describe("the capability probe's configuration from the environment", () => {
       "RUNNER_DYNAMIC_MAX_COST_USD",
     ],
   ])("refuses %s at start and names the variable", (_what, env, variable) => {
-    expect(refusal(env).variable).toBe(variable);
+    // At start: when the launcher is built, which is when the Dispatcher starts.
+    expect(() => launcherFor(env)).toThrowError(new RegExp(variable));
+  });
+
+  // #331-R07
+  it("does not refuse a malformed Dynamic configuration of a deployment that serves no Dynamic job", () => {
+    const env = configured({
+      RUNNER_DYNAMIC_CAPABILITIES: "tools",
+      RUNNER_DYNAMIC_MAX_COST_USD: "free",
+    });
+
+    expect(() =>
+      launcherFor(env, { DISPATCHER_ENGINES: "pr-agent" }),
+    ).not.toThrow();
+    expect(() => launcherFor(env)).toThrow();
+  });
+
+  // #331-R03
+  it.each<[string, string]>([
+    ["-1", "DISPATCHER_PROBE_REUSE_SECONDS"],
+    ["601", "DISPATCHER_PROBE_REUSE_SECONDS"],
+    ["soon", "DISPATCHER_PROBE_REUSE_SECONDS"],
+  ])("refuses a reuse time of %s and names the variable", (value, variable) => {
+    expect(
+      refusal(configured({ DISPATCHER_PROBE_REUSE_SECONDS: value })).variable,
+    ).toBe(variable);
+  });
+
+  // #331-R03
+  it("accepts a reuse time of 0 (every forced probe runs) and of 600", () => {
+    for (const value of ["0", "60", "600"])
+      expect(() =>
+        sandboxFromEnvironment(
+          configured({ DISPATCHER_PROBE_REUSE_SECONDS: value }),
+          never,
+        ),
+      ).not.toThrow();
   });
 
   // #331-T09
   it("accepts the operator's Dynamic configuration as the self-hosted service has it", () => {
     expect(() =>
-      sandboxFromEnvironment(
+      launcherFor(
         configured({
           RUNNER_DYNAMIC_CAPABILITIES:
             '{"tool_choice_required":true,"max_output_tokens":4096}',
           RUNNER_DYNAMIC_MAX_COST_USD: "2.50",
         }),
-        never,
       ),
     ).not.toThrow();
   });
