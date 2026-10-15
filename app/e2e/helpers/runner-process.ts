@@ -26,7 +26,7 @@ const O200K_URL =
   "https://openaipublic.blob.core.windows.net/encodings/o200k_base.tiktoken";
 
 /** The directory tiktoken caches encodings in: where the job process will look. */
-function tiktokenCacheDirectory(): string {
+export function tiktokenCacheDirectory(): string {
   return (
     process.env.TIKTOKEN_CACHE_DIR ||
     process.env.DATA_GYM_CACHE_DIR ||
@@ -35,8 +35,20 @@ function tiktokenCacheDirectory(): string {
 }
 
 /** One argument of `PR_AGENT_COMMAND`, which the runner splits like a shell does. */
-function quoted(argument: string): string {
+export function quoted(argument: string): string {
   return `'${argument.replaceAll("'", `'"'"'`)}'`;
+}
+
+/** Fails with the way to fix it when the tiktoken encoding PR-Agent counts tokens with is not cached yet. */
+export function assertTiktokenCache(): void {
+  const cache = join(
+    tiktokenCacheDirectory(),
+    createHash("sha1").update(O200K_URL).digest("hex"),
+  );
+  if (!existsSync(cache))
+    throw new Error(
+      `The tiktoken cache is empty (${tiktokenCacheDirectory()}): run "uv run python scripts/prime_tiktoken_cache.py" in runner/ once (it needs the internet).`,
+    );
 }
 
 export type RunnerProcess = {
@@ -58,14 +70,7 @@ export async function startRunner(options: {
     throw new Error(
       `The runner is not installed (${program} is missing): run "make install" or "uv sync --locked" in runner/.`,
     );
-  const cache = join(
-    tiktokenCacheDirectory(),
-    createHash("sha1").update(O200K_URL).digest("hex"),
-  );
-  if (!existsSync(cache))
-    throw new Error(
-      `The tiktoken cache is empty (${tiktokenCacheDirectory()}): run "uv run python scripts/prime_tiktoken_cache.py" in runner/ once (it needs the internet).`,
-    );
+  assertTiktokenCache();
 
   // A home of its own: nothing of the developer's home reaches the jobs.
   const home = mkdtempSync(join(tmpdir(), "cr-e2e-runner-"));
