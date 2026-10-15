@@ -12,13 +12,18 @@ from dataclasses import replace
 from typing import Any
 
 from code_reviewer_runner.capabilities import self_check_outcome
-from code_reviewer_runner.dynamic_review.netguard import IsolationError
+from code_reviewer_runner.dynamic_review.netguard import EgressMode, IsolationError
 from code_reviewer_runner.dynamic_review.self_check import (
     DEFAULT_TOOLS,
     SelfCheckReason,
+    SelfCheckResult,
     check_dynamic_runner,
 )
-from code_reviewer_runner.dynamic_review.static_isolation import SlotPorts, secure_startup
+from code_reviewer_runner.dynamic_review.static_isolation import (
+    EgressSetup,
+    SlotPorts,
+    secure_startup,
+)
 from code_reviewer_runner.job_loop.api import HttpRunnerApi
 from code_reviewer_runner.job_loop.loop import RunnerLoop
 from code_reviewer_runner.job_loop.masking import SecretMasker
@@ -43,18 +48,19 @@ def configure_logging(stream: object = None) -> None:
 
 
 def prepare_dynamic_runtime(
-    settings: LoopSettings, *, startup: Callable[[int, SlotPorts], bool] = secure_startup
-) -> bool:
+    settings: LoopSettings, *, startup: Callable[[int, SlotPorts], EgressSetup] = secure_startup
+) -> EgressSetup:
     """The Dynamic runner's one-time network setup, before the loop and any thread exist (#244).
 
-    Installs the engine user's static nft rules and drops `NET_ADMIN` for good. Returns False when
-    the rules could not be installed (Dynamic jobs then fail closed; `secure_startup` logs why).
+    Installs the engine user's static nft rules (the full or the fallback ruleset, whichever the
+    kernel supports, #345) and drops `NET_ADMIN` for good. `rules_installed` is False when the
+    rules could not be installed (Dynamic jobs then fail closed; `secure_startup` logs why).
     Raises `IsolationError` when the capabilities could not be dropped: such a runner must not
     start. A runner without an engine user (Diff only) has nothing to do.
     """
     user, ports = settings.dynamic_engine_user, settings.dynamic_ports
     if user is None or ports is None:
-        return True
+        return EgressSetup(True, EgressMode.FULL)
     return startup(user[0], ports)
 
 
@@ -62,33 +68,47 @@ def advertise_engines(
     settings: LoopSettings,
     rules_installed: bool,
     *,
-    check: Callable[..., None] | None = None,
+    egress_mode: EgressMode = EgressMode.FULL,
+    check: Callable[..., object] | None = None,
 ) -> LoopSettings:
     """The settings with the engines this runner may advertise, decided by the startup self-check.
 
     `opencode` is added (with the verified engine command the Dynamic job process is handed) only
     when `check_dynamic_runner` passes: root supervisor, engine user, static rules installed,
-    startup capabilities dropped, pinned and trusted engine and `rg`, probe as the engine user. Any
-    failure leaves `pr-agent` only and logs the stable reason, never a value. A runner without an
+    startup capabilities dropped, pinned and trusted engine and `rg`, probe as the engine user (and,
+    with the fallback ruleset, IPv6 proven off). Any failure leaves `pr-agent` only and logs the
+    stable reason, never a value. The egress mode startup found is logged and kept in the settings
+    for the job processes (#345). A runner without an
     engine user (every runner but the Dynamic one) is not a failure: it serves Diff jobs, as
     designed.
     """
     run_check = check or check_dynamic_runner
-    engines, error = self_check_outcome(
-        lambda: run_check(
+    passed: list[EgressMode] = []
+
+    def verify() -> None:
+        result = run_check(
             user=settings.dynamic_engine_user,
             ports=settings.dynamic_ports,
             rules_installed=rules_installed,
+            egress_mode=egress_mode,
         )
-    )
+        passed.append(result.egress_mode if isinstance(result, SelfCheckResult) else egress_mode)
+
+    engines, error = self_check_outcome(verify)
     log = logging.getLogger(LOGGER_NAME)
     if error is None:
-        log.info("Dynamic Review: opencode is advertised, the startup self-check passed")
+        mode = passed[0]
+        log.info(
+            "Dynamic Review: opencode is advertised, the startup self-check passed "
+            "(egress rules: %s)",
+            mode.value,
+        )
         return replace(
             settings,
             engines=engines,
             dynamic_command=(str(DEFAULT_TOOLS.opencode),),
             dynamic_ripgrep=str(DEFAULT_TOOLS.ripgrep),
+            dynamic_egress_mode=mode,
         )
     reason: Any = getattr(error, "reason", None)
     named = reason.value if isinstance(reason, SelfCheckReason) else "self_check_error"
@@ -101,7 +121,13 @@ def advertise_engines(
             error.code.value,
             named,
         )
-    return replace(settings, engines=engines, dynamic_command=None, dynamic_ripgrep=None)
+    return replace(
+        settings,
+        engines=engines,
+        dynamic_command=None,
+        dynamic_ripgrep=None,
+        dynamic_egress_mode=egress_mode,
+    )
 
 
 async def serve(
@@ -157,10 +183,11 @@ def run_from_environment(environment: Mapping[str, str] | None = None) -> int:
         logging.getLogger(LOGGER_NAME).error("cannot start: %s", error)
         return 2
     try:
-        rules_installed = prepare_dynamic_runtime(settings)
+        setup = prepare_dynamic_runtime(settings)
     except IsolationError as error:
         logging.getLogger(LOGGER_NAME).error("cannot start: %s", error)
         return 2
     # After the network setup and the end of NET_ADMIN, before the first claim: `opencode` is only
     # ever in a claim after the self-check passed.
-    return asyncio.run(serve(advertise_engines(settings, rules_installed), env))
+    advertised = advertise_engines(settings, setup.rules_installed, egress_mode=setup.mode)
+    return asyncio.run(serve(advertised, env))

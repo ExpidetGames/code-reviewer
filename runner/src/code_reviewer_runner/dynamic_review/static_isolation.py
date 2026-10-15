@@ -19,6 +19,11 @@ them.
 
 The one process that keeps the capabilities is PID 1 (`tini`, which runs nothing of the job and is
 not reachable by the engine user).
+
+Which rules are installed depends on the kernel (#345): the full `inet` + `reject` ruleset where the
+kernel supports it, otherwise an `ip` + `drop` one, with IPv6 switched off by the same startup step
+(it needs `NET_ADMIN` too). The choice is the kernel's answer; `secure_startup`'s `detect` seam is
+how a test forces the other mode, and nothing in the environment or in a job reaches it.
 """
 
 import ctypes
@@ -29,7 +34,11 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from .netguard import IsolationError, NetworkConfinement
+from code_reviewer_runner.result import ErrorCode
+
+from .ipv6_off import disable_ipv6 as switch_ipv6_off
+from .ipv6_off import ipv6_problem as find_ipv6_problem
+from .netguard import EgressMode, IsolationError, NetworkConfinement, select_egress_mode
 
 PROXY_PORT_VARIABLE = "RUNNER_DYNAMIC_PROXY_PORT"
 ENGINE_PORT_VARIABLE = "RUNNER_DYNAMIC_ENGINE_PORT"
@@ -201,6 +210,15 @@ def drop_startup_capabilities(task_directory: Path = THREAD_DIRECTORY) -> None:
 
 Install = Callable[[int, int], None]
 Drop = Callable[[], None]
+Detect = Callable[[], EgressMode]
+
+
+@dataclass(frozen=True)
+class EgressSetup:
+    """What the startup step did: whether the engine user's rules are installed, in which mode."""
+
+    rules_installed: bool
+    mode: EgressMode
 
 
 def secure_startup(
@@ -210,20 +228,32 @@ def secure_startup(
     install: Install | None = None,
     drop: Drop = drop_startup_capabilities,
     ephemeral_range: Path = EPHEMERAL_RANGE_FILE,
-) -> bool:
+    detect: Detect | None = None,
+    disable_ipv6: Drop = switch_ipv6_off,
+    ipv6_problem: Callable[[], str | None] = find_ipv6_problem,
+) -> EgressSetup:
     """Install the engine user's rules once, then drop `NET_ADMIN` for good.
 
-    Returns True when the rules were installed. If they could not be (no `nft`, no `nf_tables`,
-    a fixed port inside the kernel's ephemeral range),
-    the capabilities are dropped all the same and False is returned: no Dynamic job then passes
-    its probe, so each fails closed with `dynamic_isolation_self_check_failed`, while Diff jobs
-    are unaffected. If the drop fails, `IsolationError` is raised and the runner must not start:
-    a supervisor that can still change the rules is not the boundary the design says it is.
+    The kernel decides the ruleset (`select_egress_mode`): the full one wherever it can, the `ip`
+    + `drop` fallback only where `inet` or `reject` is missing; the fallback switches IPv6 off
+    first, since its table does not see IPv6. `detect` is the one way to force a mode and exists
+    for tests; no caller in production passes it.
+
+    `rules_installed` is False when the rules could not be installed (no `nft`, no `nf_tables`, a
+    fixed port inside the kernel's ephemeral range). The capabilities are dropped all the same: no
+    Dynamic job then passes its probe, so each fails closed with
+    `dynamic_isolation_self_check_failed`, while Diff jobs are unaffected. If the drop fails,
+    `IsolationError` is raised and the runner must not start: a supervisor that can still change
+    the rules is not the boundary the design says it is.
     """
+    mode = EgressMode.FULL
     installed = True
     try:
         require_ports_outside_ephemeral_range(ports, ephemeral_range)
-        (install or NetworkConfinement(uid).apply)(ports.proxy, ports.engine)
+        mode = (detect or select_egress_mode)()
+        if mode is EgressMode.FALLBACK:
+            disable_ipv6()
+        (install or NetworkConfinement(uid, mode=mode).apply)(ports.proxy, ports.engine)
     except IsolationError as error:
         installed = False
         _log.error(
@@ -232,5 +262,25 @@ def secure_startup(
             error.detail,
             error.code.value,
         )
+    if installed:
+        _log_mode(mode, ipv6_problem)
     drop()
-    return installed
+    return EgressSetup(installed, mode)
+
+
+def _log_mode(mode: EgressMode, ipv6_problem: Callable[[], str | None]) -> None:
+    if mode is EgressMode.FULL:
+        _log.info("egress rules: full (inet)")
+        return
+    problem = ipv6_problem()
+    if problem is None:
+        _log.info("egress rules: fallback (ip, ipv6 disabled)")
+        return
+    # Not a crash: the self-check refuses `opencode` for the same reason (`ipv6_not_disabled`).
+    _log.error(
+        "egress rules: fallback (ip), but %s; Dynamic jobs on this runner will fail with %s. "
+        "Set net.ipv6.conf.all.disable_ipv6=1 and net.ipv6.conf.default.disable_ipv6=1 on the "
+        "container",
+        problem,
+        ErrorCode.DYNAMIC_ISOLATION_SELF_CHECK_FAILED.value,
+    )

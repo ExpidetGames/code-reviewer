@@ -24,6 +24,7 @@ from typing import Any, cast
 import pytest
 from privileged_support import (
     API_KEY,
+    EGRESS_MODE,
     ENGINE_GID,
     ENGINE_PORT,
     ENGINE_UID,
@@ -266,6 +267,7 @@ def test_the_first_start_ends_processes_a_killed_job_left_behind(
             home=str(tmp_path),
             tmpdir=str(tmp_path),
             config_dir=tmp_path,
+            egress_mode=EGRESS_MODE,
         )
         with slot_proxy():
             launch.confine(launch.proxy_port, launch.engine_port)

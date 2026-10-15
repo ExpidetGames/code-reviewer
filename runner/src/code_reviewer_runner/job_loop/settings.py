@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from urllib.parse import urlsplit
 
 from code_reviewer_runner.capabilities import ENGINE_DIFF
-from code_reviewer_runner.dynamic_review.netguard import IsolationError
+from code_reviewer_runner.dynamic_review.netguard import EgressMode, IsolationError
 from code_reviewer_runner.dynamic_review.static_isolation import SlotPorts, slot_ports
 from code_reviewer_runner.dynamic_review.supervisor import (
     DEFAULT_ENGINE_ID,
@@ -87,6 +87,10 @@ class LoopSettings:
     # The fixed proxy and engine ports of the single Dynamic slot, set with `dynamic_engine_user`:
     # the engine user's nft rules are installed once at startup for exactly these (#244).
     dynamic_ports: SlotPorts | None = None
+    # Which ruleset confines the engine user, as the startup step found the kernel (#345). Set by
+    # the service after startup, never read from the environment; the loop hands it to the Dynamic
+    # job processes, which prove the matching properties again.
+    dynamic_egress_mode: EgressMode = EgressMode.FULL
 
 
 def _number(

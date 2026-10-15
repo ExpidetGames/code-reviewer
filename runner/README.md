@@ -43,7 +43,10 @@ fixed proxy port `RUNNER_DYNAMIC_PROXY_PORT`, default 10180, and the engine's ow
 from the bounding set and from its own sets: the container is created with them (`cap_add`), but the
 loop, every job process and the engine never hold them, so `nft` fails for all of them. If the drop
 cannot be confirmed the runner does not start; if the rules cannot be installed the capabilities are
-dropped anyway and every Dynamic job fails with `dynamic_isolation_self_check_failed`. Per job it (1)
+dropped anyway and every Dynamic job fails with `dynamic_isolation_self_check_failed`. The ruleset is
+the full one (`table inet`, `reject`) wherever the kernel supports it; on a kernel with only the
+nf_tables `ip` family the startup step installs an `ip` + `drop` fallback and switches IPv6 off, which
+the self-check proves (`ipv6_off.py`, reason `ipv6_not_disabled`; #345, `docs/dynamic-review.md`). Per job it (1)
 prepares and seals the read-only export for the dedicated engine user
 (`export_isolation.prepared_checkout`, which also leases that user and its group exclusively), (2)
 checks that its own process holds neither capability and proves the static rules with a probe run as

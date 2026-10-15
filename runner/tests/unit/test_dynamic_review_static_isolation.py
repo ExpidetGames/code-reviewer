@@ -8,16 +8,18 @@ behaviour and the reading of a capability status are pinned.
 """
 
 import _thread
+import inspect
 import logging
 from pathlib import Path
 
 import pytest
 
 from code_reviewer_runner.dynamic_review import static_isolation
-from code_reviewer_runner.dynamic_review.netguard import IsolationError
+from code_reviewer_runner.dynamic_review.netguard import EgressMode, IsolationError, NftUnavailable
 from code_reviewer_runner.dynamic_review.static_isolation import (
     CAP_NET_ADMIN,
     CAP_SETPCAP,
+    EgressSetup,
     SlotPorts,
     capability_sets,
     require_startup_capabilities_gone,
@@ -30,6 +32,16 @@ from code_reviewer_runner.job_loop.settings import LoopSettings
 from code_reviewer_runner.result import ErrorCode
 
 PORTS = SlotPorts(10180, 10181)
+
+
+@pytest.fixture(autouse=True)
+def never_ask_the_real_kernel(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The startup step decides its mode from the kernel; a unit test must always say which."""
+
+    def real_kernel() -> EgressMode:
+        raise AssertionError("pass `detect` to secure_startup: a unit test must not run nft")
+
+    monkeypatch.setattr(static_isolation, "select_egress_mode", real_kernel)
 
 
 def status(bounding: int = 0, **sets: int) -> str:
@@ -49,9 +61,10 @@ def test_the_startup_installs_the_rules_for_the_slot_first_and_drops_the_capabil
         PORTS,
         install=lambda proxy, engine: events.append(f"install:{proxy}:{engine}"),
         drop=lambda: events.append("drop"),
+        detect=lambda: EgressMode.FULL,
     )
 
-    assert installed is True
+    assert installed.rules_installed is True
     assert events == ["install:10180:10181", "drop"]
 
 
@@ -65,10 +78,16 @@ def test_rules_that_cannot_be_installed_still_end_net_admin_and_report_it(
         raise IsolationError("the network filter tool is not installed")
 
     with caplog.at_level(logging.ERROR, logger="code_reviewer_runner.loop"):
-        installed = secure_startup(10101, PORTS, install=refuse, drop=lambda: events.append("drop"))
+        installed = secure_startup(
+            10101,
+            PORTS,
+            install=refuse,
+            drop=lambda: events.append("drop"),
+            detect=lambda: EgressMode.FULL,
+        )
 
     # The runner keeps serving Diff jobs without the capability; Dynamic jobs fail their probe.
-    assert installed is False
+    assert installed.rules_installed is False
     assert events == ["drop"]
     assert ErrorCode.DYNAMIC_ISOLATION_SELF_CHECK_FAILED.value in caplog.text
 
@@ -79,7 +98,13 @@ def test_a_drop_that_fails_is_never_swallowed() -> None:
         raise IsolationError("a capability could not be dropped from the bounding set")
 
     with pytest.raises(IsolationError) as caught:
-        secure_startup(10101, PORTS, install=lambda proxy, engine: None, drop=cannot_drop)
+        secure_startup(
+            10101,
+            PORTS,
+            install=lambda proxy, engine: None,
+            drop=cannot_drop,
+            detect=lambda: EgressMode.FULL,
+        )
 
     assert caught.value.code is ErrorCode.DYNAMIC_ISOLATION_SELF_CHECK_FAILED
 
@@ -209,7 +234,7 @@ def test_ports_in_the_ephemeral_range_install_nothing_but_still_end_net_admin(
             ephemeral_range=range_file(tmp_path, "10000\t60999\n"),
         )
 
-    assert installed is False
+    assert installed.rules_installed is False
     assert events == ["drop"]
     assert ErrorCode.DYNAMIC_ISOLATION_SELF_CHECK_FAILED.value in caplog.text
 
@@ -221,8 +246,10 @@ def test_rules_that_cannot_be_installed_are_logged_once_at_error_level(
     def refuse(proxy: int, engine: int) -> None:
         raise IsolationError("the network filter tool is not installed")
 
-    def startup(uid: int, ports: SlotPorts) -> bool:
-        return secure_startup(uid, ports, install=refuse, drop=lambda: None)
+    def startup(uid: int, ports: SlotPorts) -> EgressSetup:
+        return secure_startup(
+            uid, ports, install=refuse, drop=lambda: None, detect=lambda: EgressMode.FULL
+        )
 
     with caplog.at_level(logging.DEBUG, logger="code_reviewer_runner.loop"):
         prepare_dynamic_runtime(settings((10101, 10101), PORTS), startup=startup)
@@ -246,9 +273,9 @@ def settings(
 def test_the_loop_runs_the_startup_only_on_a_root_loop_with_an_engine_user() -> None:
     calls: list[tuple[int, SlotPorts]] = []
 
-    def startup(uid: int, ports: SlotPorts) -> bool:
+    def startup(uid: int, ports: SlotPorts) -> EgressSetup:
         calls.append((uid, ports))
-        return True
+        return EgressSetup(True, EgressMode.FULL)
 
     prepare_dynamic_runtime(settings(), startup=startup)  # a Diff-only runner
     assert calls == []
@@ -259,8 +286,155 @@ def test_the_loop_runs_the_startup_only_on_a_root_loop_with_an_engine_user() -> 
 
 # #244-T05
 def test_a_runner_whose_capabilities_cannot_be_dropped_does_not_start() -> None:
-    def broken(uid: int, ports: SlotPorts) -> bool:
+    def broken(uid: int, ports: SlotPorts) -> EgressSetup:
         raise IsolationError("a capability could not be dropped from the bounding set")
 
     with pytest.raises(IsolationError):
         prepare_dynamic_runtime(settings((10101, 10101), PORTS), startup=broken)
+
+
+# -- the two egress modes (#345) ----------------------------------------------
+
+
+def startup_events(mode: EgressMode, events: list[str], **options: object) -> EgressSetup:
+    """The startup step with the mode forced through its seam, every effect recorded."""
+    return secure_startup(
+        10101,
+        PORTS,
+        detect=lambda: mode,
+        disable_ipv6=lambda: events.append("disable_ipv6"),
+        ipv6_problem=lambda: None,
+        install=lambda proxy, engine: events.append(f"install:{mode.value}"),
+        drop=lambda: events.append("drop"),
+        **options,  # type: ignore[arg-type]
+    )
+
+
+# #345-T05
+def test_full_mode_installs_without_touching_ipv6_logs_it_and_still_drops(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    events: list[str] = []
+
+    with caplog.at_level(logging.INFO, logger="code_reviewer_runner.loop"):
+        setup = startup_events(EgressMode.FULL, events)
+
+    assert setup == EgressSetup(True, EgressMode.FULL)
+    assert events == ["install:full", "drop"]
+    assert "egress rules: full (inet)" in caplog.text
+
+
+# #345-T05
+def test_fallback_mode_switches_ipv6_off_before_the_rules_logs_it_and_still_drops(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    events: list[str] = []
+
+    with caplog.at_level(logging.INFO, logger="code_reviewer_runner.loop"):
+        setup = startup_events(EgressMode.FALLBACK, events)
+
+    assert setup == EgressSetup(True, EgressMode.FALLBACK)
+    assert events == ["disable_ipv6", "install:fallback", "drop"]
+    assert "egress rules: fallback (ip, ipv6 disabled)" in caplog.text
+
+
+# #345-T06
+def test_ipv6_that_stays_on_is_logged_as_an_error_and_never_as_disabled(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    events: list[str] = []
+
+    with caplog.at_level(logging.INFO, logger="code_reviewer_runner.loop"):
+        setup = secure_startup(
+            10101,
+            PORTS,
+            detect=lambda: EgressMode.FALLBACK,
+            disable_ipv6=lambda: events.append("disable_ipv6"),
+            ipv6_problem=lambda: "IPv6 is not switched off on every interface",
+            install=lambda proxy, engine: events.append("install"),
+            drop=lambda: events.append("drop"),
+        )
+
+    # No crash and no early stop: the runner keeps serving Diff jobs, the self-check refuses
+    # Dynamic ones, and the log says why.
+    assert setup == EgressSetup(True, EgressMode.FALLBACK)
+    assert events == ["disable_ipv6", "install", "drop"]
+    assert "ipv6 disabled" not in caplog.text
+    errors = [record for record in caplog.records if record.levelno >= logging.ERROR]
+    assert len(errors) == 1 and "IPv6 is not switched off" in errors[0].getMessage()
+
+
+# #345-T05
+def test_a_missing_nft_tool_installs_nothing_and_does_not_switch_ipv6_off(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    events: list[str] = []
+
+    def no_tool() -> EgressMode:
+        raise NftUnavailable("the network filter tool is not installed")
+
+    with caplog.at_level(logging.INFO, logger="code_reviewer_runner.loop"):
+        setup = secure_startup(
+            10101,
+            PORTS,
+            detect=no_tool,
+            disable_ipv6=lambda: events.append("disable_ipv6"),
+            install=lambda proxy, engine: events.append("install"),
+            drop=lambda: events.append("drop"),
+        )
+
+    assert setup.rules_installed is False
+    assert events == ["drop"]
+    assert "egress rules:" not in caplog.text
+
+
+# #345-T05
+def test_the_ports_are_checked_before_the_kernel_is_asked_anything() -> None:
+    asked: list[str] = []
+    inside = SlotPorts(40000, 40001)
+
+    def detect() -> EgressMode:
+        asked.append("detect")
+        return EgressMode.FULL
+
+    setup = secure_startup(
+        10101,
+        inside,
+        detect=detect,
+        install=lambda proxy, engine: asked.append("install"),
+        drop=lambda: None,
+        ephemeral_range=Path(__file__),  # not a range: unreadable counts as unsafe
+    )
+
+    assert setup.rules_installed is False
+    assert asked == []
+
+
+# #345-T11
+def test_no_environment_variable_picks_the_egress_mode_at_startup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The only ways to a mode are the kernel's answer and the `detect` seam of this function,
+    # which nothing but a test passes. Names a person might guess for a switch change nothing.
+    for name in (
+        "RUNNER_EGRESS_MODE",
+        "RUNNER_DYNAMIC_EGRESS_MODE",
+        "CR_FORCE_EGRESS_FALLBACK",
+        "CR_EGRESS_MODE",
+        "EGRESS_MODE",
+    ):
+        monkeypatch.setenv(name, "fallback")
+    events: list[str] = []
+
+    setup = secure_startup(
+        10101,
+        PORTS,
+        detect=lambda: EgressMode.FULL,
+        install=lambda proxy, engine: events.append("install"),
+        drop=lambda: events.append("drop"),
+    )
+
+    assert setup.mode is EgressMode.FULL
+    assert events == ["install", "drop"]
+    default = inspect.signature(secure_startup).parameters["detect"].default
+    assert default is None  # the production default is the kernel's own answer (select_egress_mode)
