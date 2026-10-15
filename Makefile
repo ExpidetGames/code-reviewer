@@ -1,20 +1,22 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Entry points for developers and agents. Every target is a thin wrapper around the commands
-# of app/package.json and runner/pyproject.toml; see TESTING.md for what each level means.
+# of app/package.json, dispatcher/package.json and runner/pyproject.toml; see TESTING.md for what each
+# level means.
 
 APP := pnpm --dir app
+DISPATCHER := pnpm --dir dispatcher
 RUNNER := uv --directory runner
 
-.PHONY: help install lint lint-app lint-runner typecheck typecheck-app typecheck-runner \
-	test-unit test-unit-app test-unit-runner test-integration check-licenses fix-spdx-headers generate-contracts check-contracts test-engine test-e2e test-e2e-dynamic test-images test-compose verify
+.PHONY: help install lint lint-app lint-dispatcher lint-runner typecheck typecheck-app typecheck-dispatcher typecheck-runner \
+	test-unit test-unit-app test-unit-dispatcher test-unit-runner test-integration check-licenses fix-spdx-headers generate-contracts check-contracts test-engine test-e2e test-e2e-dynamic test-images test-compose verify
 
 help:
-	@echo "make install           install app and runner dependencies from the lockfiles"
-	@echo "make lint              lint and format check, both parts"
-	@echo "make typecheck         typecheck both parts"
-	@echo "make test-unit         unit tests of both parts"
-	@echo "make test-integration  integration tests that run on the host (app and runner)"
+	@echo "make install           install app, dispatcher and runner dependencies from the lockfiles"
+	@echo "make lint              lint and format check, all three parts"
+	@echo "make typecheck         typecheck all three parts"
+	@echo "make test-unit         unit tests of all three parts"
+	@echo "make test-integration  integration tests that run on the host (app, dispatcher and runner)"
 	@echo "make check-licenses    fail when a dependency has a license outside license-policy.json (needs make install)"
 	@echo "make generate-contracts regenerate the TypeScript types of contracts/*.v1.json (app/src/contracts, dispatcher/src/contracts)"
 	@echo "make check-contracts   fail when the generated contract types differ from the schemas (part of verify)"
@@ -28,25 +30,33 @@ help:
 
 install:
 	$(APP) install --frozen-lockfile
+	$(DISPATCHER) install --frozen-lockfile
 	$(RUNNER) sync --locked
 
-lint: lint-app lint-runner
+lint: lint-app lint-dispatcher lint-runner
 lint-app:
 	$(APP) lint
 	$(APP) format:check
+lint-dispatcher:
+	$(DISPATCHER) lint
+	$(DISPATCHER) format:check
 lint-runner:
 	$(RUNNER) run ruff check . ../fakes
 	$(RUNNER) run ruff format --check . ../fakes
 
-typecheck: typecheck-app typecheck-runner
+typecheck: typecheck-app typecheck-dispatcher typecheck-runner
 typecheck-app:
 	$(APP) typecheck
+typecheck-dispatcher:
+	$(DISPATCHER) typecheck
 typecheck-runner:
 	$(RUNNER) run pyright
 
-test-unit: test-unit-app test-unit-runner
+test-unit: test-unit-app test-unit-dispatcher test-unit-runner
 test-unit-app:
 	$(APP) test
+test-unit-dispatcher:
+	$(DISPATCHER) test
 test-unit-runner:
 	$(RUNNER) run pytest -m unit
 
@@ -54,10 +64,11 @@ test-unit-runner:
 # containers, engine smoke) are added with the tickets that introduce the stack.
 test-integration:
 	$(APP) test:int
+	$(DISPATCHER) test:int
 	$(RUNNER) run pytest -m "integration or contract"
 
-# The license of every installed dependency of the app and the runner against license-policy.json
-# (app/src/ci/license-check). Reads installed metadata and both lockfiles, no network.
+# The license of every installed dependency of the app, the Dispatcher and the runner against license-policy.json
+# (app/src/ci/license-check). Reads installed metadata and the lockfiles of app, dispatcher and runner, no network.
 check-licenses:
 	$(APP) licenses:check
 
