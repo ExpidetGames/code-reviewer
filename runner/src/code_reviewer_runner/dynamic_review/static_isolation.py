@@ -235,8 +235,8 @@ def secure_startup(
     """Install the engine user's rules once, then drop `NET_ADMIN` for good.
 
     The kernel decides the ruleset (`select_egress_mode`): the full one wherever it can, the `ip`
-    + `drop` fallback only where `inet` or `reject` is missing; the fallback switches IPv6 off
-    first, since its table does not see IPv6. `detect` is the one way to force a mode and exists
+    + `drop` fallback only where `inet` or `reject` is missing; the fallback then switches IPv6
+    off, since its table does not see IPv6. `detect` is the one way to force a mode and exists
     for tests; no caller in production passes it.
 
     `rules_installed` is False when the rules could not be installed (no `nft`, no `nf_tables`, a
@@ -251,9 +251,11 @@ def secure_startup(
     try:
         require_ports_outside_ephemeral_range(ports, ephemeral_range)
         mode = (detect or select_egress_mode)()
+        (install or NetworkConfinement(uid, mode=mode).apply)(ports.proxy, ports.engine)
+        # After the rules, not before: no engine runs at startup, and rules that could not be
+        # installed must not leave the container, Diff jobs included, without IPv6 (review of #347).
         if mode is EgressMode.FALLBACK:
             disable_ipv6()
-        (install or NetworkConfinement(uid, mode=mode).apply)(ports.proxy, ports.engine)
     except IsolationError as error:
         installed = False
         _log.error(

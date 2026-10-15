@@ -325,7 +325,7 @@ def test_full_mode_installs_without_touching_ipv6_logs_it_and_still_drops(
 
 
 # #345-T05
-def test_fallback_mode_switches_ipv6_off_before_the_rules_logs_it_and_still_drops(
+def test_fallback_mode_installs_the_rules_then_switches_ipv6_off_logs_it_and_still_drops(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     events: list[str] = []
@@ -334,8 +334,31 @@ def test_fallback_mode_switches_ipv6_off_before_the_rules_logs_it_and_still_drop
         setup = startup_events(EgressMode.FALLBACK, events)
 
     assert setup == EgressSetup(True, EgressMode.FALLBACK)
-    assert events == ["disable_ipv6", "install:fallback", "drop"]
+    # No engine runs at startup, so the order costs nothing; it keeps a failed install from
+    # touching IPv6 (below).
+    assert events == ["install:fallback", "disable_ipv6", "drop"]
     assert "egress rules: fallback (ip, ipv6 disabled)" in caplog.text
+
+
+# #345-T06: from the review of the first push: rules that cannot be installed must not leave the
+# whole container, Diff jobs included, without IPv6.
+def test_fallback_rules_that_cannot_be_installed_leave_ipv6_alone() -> None:
+    events: list[str] = []
+
+    def refuse(proxy: int, engine: int) -> None:
+        raise IsolationError("the network filter was refused by the kernel")
+
+    setup = secure_startup(
+        10101,
+        PORTS,
+        detect=lambda: EgressMode.FALLBACK,
+        disable_ipv6=lambda: events.append("disable_ipv6"),
+        install=refuse,
+        drop=lambda: events.append("drop"),
+    )
+
+    assert setup == EgressSetup(False, EgressMode.FALLBACK)
+    assert events == ["drop"]
 
 
 # #345-T06
@@ -358,7 +381,7 @@ def test_ipv6_that_stays_on_is_logged_as_an_error_and_never_as_disabled(
     # No crash and no early stop: the runner keeps serving Diff jobs, the self-check refuses
     # Dynamic ones, and the log says why.
     assert setup == EgressSetup(True, EgressMode.FALLBACK)
-    assert events == ["disable_ipv6", "install", "drop"]
+    assert events == ["install", "disable_ipv6", "drop"]
     assert "ipv6 disabled" not in caplog.text
     errors = [record for record in caplog.records if record.levelno >= logging.ERROR]
     assert len(errors) == 1 and "IPv6 is not switched off" in errors[0].getMessage()

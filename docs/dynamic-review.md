@@ -127,7 +127,7 @@ namespaces, no host kernel setting beyond the `nf_tables` support every current 
   port on loopback and nothing else; a refused attempt and a dropped one are both "not reached".
   Nothing about a host that has `inet` changes: it gets the full ruleset, byte for byte as before.
 
-  **IPv6 in fallback mode.** The startup step writes `1` to
+  **IPv6 in fallback mode.** The startup step (after the rules are installed) writes `1` to
   `net.ipv6.conf.{default,all,<each interface>}.disable_ipv6` as far as the container lets it. A
   container's `/proc/sys` is normally read-only, so the container spec of such a host must set
   `net.ipv6.conf.all.disable_ipv6=1` and `net.ipv6.conf.default.disable_ipv6=1` itself (for Docker
