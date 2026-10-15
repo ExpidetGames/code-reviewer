@@ -51,7 +51,7 @@ export type Settings = {
   shutdownGraceSeconds: number;
 };
 
-type Environment = Readonly<Record<string, string | undefined>>;
+export type Environment = Readonly<Record<string, string | undefined>>;
 
 const KEY_ID = /^[a-z0-9][a-z0-9_-]{0,31}$/;
 const POOL_ID = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,63}$/;
@@ -59,7 +59,7 @@ const ENGINES: readonly Engine[] = ["pr-agent", "opencode"];
 const MIN_SECRET_LENGTH = 32;
 const CONTROL_OR_SPACE = /[\s\p{Cc}]/u;
 
-function read(env: Environment, name: string): string | undefined {
+export function read(env: Environment, name: string): string | undefined {
   const value = env[name]?.trim();
   return value === undefined || value === "" ? undefined : value;
 }
@@ -70,7 +70,7 @@ function required(env: Environment, name: string): string {
   return value;
 }
 
-function integer(
+export function integer(
   env: Environment,
   name: string,
   range: { min: number; max: number; fallback?: number },

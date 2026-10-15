@@ -25,6 +25,7 @@ import {
   type HandleResult,
   type JobHint,
   type Launcher,
+  LaunchError,
   type Logger,
 } from "./types.ts";
 
@@ -228,6 +229,7 @@ export function createDispatcherCore(deps: CoreDependencies): DispatcherCore {
         jobId: job.id,
         kind: job.reviewKind,
         code,
+        ...(error instanceof LaunchError ? { retryable: error.retryable } : {}),
         stopped: reason,
       });
       // A lost lease means the App already gave the job away: there is nothing of ours to release.
