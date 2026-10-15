@@ -1,8 +1,8 @@
 # Vercel Sandbox double
 
 An in-process stand-in for the Vercel Sandbox platform (`service.ts`), for tests that must never reach the real one.
-First user: the golden snapshot pipeline (#330, `dispatcher/src/snapshot/`). The Sandbox-Launcher (#329) extends it
-(see below). It imports nothing from the Dispatcher: it matches the port `dispatcher/src/snapshot/service.ts`
+First user: the golden snapshot pipeline (#330, `dispatcher/src/snapshot/`). The Sandbox-Launcher (#329) does not
+use it: it has its own double, `fakes/sandbox/` (see below). It imports nothing from the Dispatcher: it matches the port `dispatcher/src/snapshot/service.ts`
 structurally, so a Dispatcher test passes it where the port is expected and the type checker proves the match.
 
 It runs **no command**. A command's result is scripted; the double only records what was asked.
@@ -30,11 +30,11 @@ fake.seedBuilder("name-prefix-...", createdAtMs, withSnapshot); // a builder lef
 
 ## For the Sandbox-Launcher (#329)
 
-Extend here, not in the Dispatcher: add the calls the Launcher needs (stop by name, a lookup by name, `stdin` of a
-command, quota and rate-limit errors with a status) to `FakeSandboxService` and to the port the Launcher defines;
-keep `onExec` and `requestText()` as they are, the pipeline tests use them. The hosted deployment (#316) also
-wants a **local mode** that runs the rendered `docker run` on a Docker host in the privileged
-lane; it is not here yet and belongs in a second class next to this one, behind the same port.
+The Sandbox-Launcher has its own double, `fakes/sandbox/`, behind its own port (`dispatcher/src/launchers/sandbox-service.ts`):
+the per-job calls (create from a snapshot, a command as an argument vector, a process with a stdin pipe, stop by name) are
+not the builder calls of this port (scripts, files, snapshots, deletion), and the local mode that runs the rendered
+`docker run` lives there too. This double is for the golden snapshot pipeline only. If the two ports should become one,
+that is a change of both, see `fakes/sandbox/README.md`.
 
 The double is wider than the platform in one place: the pipeline's `SandboxVm.run` has a `label`, which the real
 adapter drops. A Launcher test should address a command by its label the same way.
