@@ -439,8 +439,11 @@ API token, which sets the entitlements, must not hold the key. It reaches a runn
 legacy claim) or in the first fetch of the job through the Worker API; it is remembered encrypted per job so a result
 can be masked even after the key was rotated, and it never reaches a workspace member, the browser, a log or the
 Dispatcher. The workspace's settings page says that access is provided by the instance and shows no key form; the
-routes for the workspace's own key keep working. The usage record names the key a job actually used (`own` or
-`managed`). Limits, tiers and per-workspace sub-keys are separate decisions of the epic (#268).
+routes for the workspace's own key keep working. While a job runs on the operator's key, the operator chooses the
+model, never the tenant: the instance's default model and context window apply to Diff and to Dynamic, and the
+workspace's review settings for them stay stored without taking effect (until managed tiers replace this). The usage
+record names the key a job actually used (`own` or `managed`). Every app instance must be upgraded before a workspace
+is set to `managed`: an instance of the previous release does not know the key mode. Limits, tiers and per-workspace sub-keys are separate decisions of the epic (#268).
 
 ### 2.9 Binding a GitHub App installation to a workspace
 

@@ -72,6 +72,19 @@ admin portal (**LLM key**, `/admin/llm`; `src/admin/ui/operator-llm-key-form.tsx
      per-job credential mints and reveals it (`buildJobInput`, after `checkJob` resolved the access again). A key
      that was removed or rotated between the claim and the fetch is the one the fetch uses; one that is gone ends the
      job with `llm_not_configured`.
+- **The model is the instance's.** While a job runs on the operator's key, the operator chooses the model, never the
+  tenant: the review settings' `model`, `maxTokens` and Dynamic model are **not used** (the instance's `LLM_MODEL` and
+  `LLM_MAX_TOKENS` are, for Diff and for Dynamic, in the job, in the Dynamic options and in the capabilities read),
+  on both delivery paths (`withInstanceModel` in `runner-api/claim.ts`). The settings stay stored and take effect
+  again if the workspace goes back to its own key. The settings pages replace the model fields with a note
+  (`instanceChoosesModel`). Managed tiers (#280, #283) will replace this.
+- **The Worker's fetch asks for the standing again.** A workspace suspended after the claim, or whose entitlements
+  became unreadable, gets no key: the job ends with the code of the claim (`runner-api/README.md`). Quotas are not
+  counted again.
+- **Upgrade every app instance before setting any workspace to `managed`.** An instance of the previous release does
+  not know the key mode: it would run a managed workspace's jobs on the workspace's own key and on the workspace's
+  model, record them as `own` (outside the cost limit), and not read the list of remembered keys of a job as keys. Nothing leaks, but the
+  operator's rules are not applied until every instance is upgraded.
 - **Masking.** `currentKeysFor` returns the workspace's own key and, **while the workspace is managed**, the operator's
   current key; the key of the claim comes from `job_claimed_keys`.
 - **The usage record says the key that was used.** The claim reserves the record as `own` and `recordKeyMode` sets it
@@ -201,8 +214,9 @@ proxy's (`dynamic_model_features_unsupported`).
 - **The key leaves the process only in the claim response** (and to the provider, in the test button).
   `apiKey` is not enumerable on `LlmConfig` and `LlmAccess`, so JSON, spreads and console output leave it out; only
   `revealLlmAccess` hands it out. Issues, statuses and warnings carry names and codes only, never a value.
-- **The key of a claim is remembered, encrypted, in the database** (`job_claimed_keys`, `src/runner-api/
-claimed-keys.ts`) and not in memory, so any app instance can mask a result after the key was rotated (section 2.10). The
+- **The keys of a job are remembered, encrypted, in the database** (`job_claimed_keys`, `src/runner-api/
+claimed-keys.ts`: one row per job, the sealed text is the list of the keys handed out for it, newest last, at most 3, a
+  key already known takes no place; a row of the earlier format, one plain key, is still read) and not in memory, so any app instance can mask a result after the key was rotated (section 2.10). The
   row goes with its job, and the cleanup removes the rows of jobs that finished a week ago.
 - **Masking is best effort.** A text that comes back from a runner (`complete`) is run through
   `maskSecretInText(text, ...keys)` before it is stored. It masks the plain, percent-encoded, JSON-escaped and

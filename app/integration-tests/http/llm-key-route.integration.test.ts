@@ -592,46 +592,48 @@ describe("nothing leaves the server but the key's check", () => {
   });
 });
 
-describe("a workspace whose key mode is managed (#276)", () => {
-  const OPERATOR_KEY = "sk-or-v1-operator-key-1111111111111111";
+const OPERATOR_KEY_FOR_ROUTES = "sk-or-v1-operator-key-1111111111111111";
 
-  async function managed() {
-    const t = await start();
-    await createWorkspaceEntitlementsRepository(t.db, t.alpha.id).put(
-      {
-        planLabel: "plan",
-        keyMode: "managed",
-        limits: {
-          diffRunsPerPeriod: null,
-          dynamicRunsPerPeriod: null,
-          managedCostLimitMicroUsd: null,
-        },
-        periodStart: "2026-10-01T00:00:00.000Z",
-        suspended: false,
-        suspensionCode: null,
+async function managed() {
+  const t = await start();
+  await createWorkspaceEntitlementsRepository(t.db, t.alpha.id).put(
+    {
+      planLabel: "plan",
+      keyMode: "managed",
+      limits: {
+        diffRunsPerPeriod: null,
+        dynamicRunsPerPeriod: null,
+        managedCostLimitMicroUsd: null,
       },
-      null,
+      periodStart: "2026-10-01T00:00:00.000Z",
+      suspended: false,
+      suspensionCode: null,
+    },
+    null,
+  );
+  await createSecretStore({ db: t.db, appSecret: APP_SECRET }).save(
+    "operator_llm_key",
+    OPERATOR_KEY_FOR_ROUTES,
+    { updatedBy: null },
+  );
+  // The assembly the pages and the claim use, on the database of this test.
+  const { getWorkspaceLlm } = await import("../../src/llm/shared.ts");
+  const llm = getWorkspaceLlm();
+  /** What the settings page renders for this role: the section on the real status and summary. */
+  const page = async (canManage: boolean) =>
+    renderToStaticMarkup(
+      createElement(LlmAccessSection, {
+        workspaceSlug: "alpha",
+        canManage,
+        keyStatus: await llm.keyServiceFor(t.alpha.id).status(),
+        summary: await llm.summaryFor(t.alpha.id),
+      }),
     );
-    await createSecretStore({ db: t.db, appSecret: APP_SECRET }).save(
-      "operator_llm_key",
-      OPERATOR_KEY,
-      { updatedBy: null },
-    );
-    // The assembly the pages and the claim use, on the database of this test.
-    const { getWorkspaceLlm } = await import("../../src/llm/shared.ts");
-    const llm = getWorkspaceLlm();
-    /** What the settings page renders for this role: the section on the real status and summary. */
-    const page = async (canManage: boolean) =>
-      renderToStaticMarkup(
-        createElement(LlmAccessSection, {
-          workspaceSlug: "alpha",
-          canManage,
-          keyStatus: await llm.keyServiceFor(t.alpha.id).status(),
-          summary: await llm.summaryFor(t.alpha.id),
-        }),
-      );
-    return { ...t, llm, page };
-  }
+  return { ...t, llm, page };
+}
+
+describe("a workspace whose key mode is managed (#276)", () => {
+  const OPERATOR_KEY = OPERATOR_KEY_FOR_ROUTES;
 
   // #276-T09
   it("shows an Admin and a Member the same note and no key form, whether or not the workspace has a key of its own", async () => {
@@ -680,4 +682,38 @@ describe("a workspace whose key mode is managed (#276)", () => {
     });
     expectNoKey(logged.join("\n"), KEY, OPERATOR_KEY);
   });
+});
+
+describe("the workspace key routes and the operator's key (#276)", () => {
+  // #276-T07
+  it.each(["owner", "admin"] as const)(
+    "tell a workspace %s nothing of the operator's key and never touch it, while the workspace is managed",
+    async (role) => {
+      const t = await managed();
+      t.as(role);
+      const before = await t.db.selectFrom("secrets").selectAll().execute();
+
+      const read = await t.handle.get();
+      const readText = await read.text();
+      const saved = await t.handle.put({ provider: "openrouter", apiKey: KEY });
+      const tested = await t.handle.test({});
+      const removed = await t.handle.delete();
+
+      expect(read.status).toBe(200);
+      for (const text of [
+        readText,
+        await saved.text(),
+        await tested.text(),
+        await removed.text(),
+      ]) {
+        expect(text).not.toContain("operator");
+        expect(text).not.toContain(OPERATOR_KEY_FOR_ROUTES);
+        expect(text).not.toContain(OPERATOR_KEY_FOR_ROUTES.slice(-4));
+      }
+      expect(await t.db.selectFrom("secrets").selectAll().execute()).toEqual(
+        before,
+      );
+      expect(logged.join("\n")).not.toContain(OPERATOR_KEY_FOR_ROUTES);
+    },
+  );
 });

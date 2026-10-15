@@ -4,6 +4,7 @@
 // real data route: only an instance admin saves or removes it, it is write-only (the settings carry the status
 // and the last four characters, nothing else), it is stored encrypted, and it is in no answer, page or log line.
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createWorkspacesRepository } from "../db/repositories/workspaces-repository.ts";
 import { createWorkspaceLlm } from "../llm/assemble.ts";
 import {
   createAdminHarness,
@@ -216,6 +217,63 @@ describe("who can read or write the operator's key", () => {
       before,
     );
   });
+
+  // #276-T07
+  it.each(["owner", "admin"] as const)(
+    "is not the %s of a workspace's to read or write: a person who is not the instance admin gets the answer of a missing path, and nothing changes",
+    async (role) => {
+      const portal = await createAdminHarness();
+      await put(portal, { operatorLlmKey: { apiKey: KEY } });
+      await portal.createUser({
+        id: `${role}-1`,
+        email: `workspace-${role}@example.com`,
+        password: MEMBER.password,
+        member: false,
+      });
+      const workspace = await createWorkspacesRepository(
+        portal.db,
+      ).findDefault();
+      if (workspace === undefined) throw new Error("no workspace");
+      await createWorkspacesRepository(portal.db).addMember(
+        workspace.id,
+        `${role}-1`,
+        role,
+      );
+      const cookies = await portal.signIn(
+        `workspace-${role}@example.com`,
+        MEMBER.password,
+      );
+      const before = await portal.db
+        .selectFrom("secrets")
+        .selectAll()
+        .execute();
+
+      const read = await portal.visit("/api/admin/settings", { cookies });
+      const write = await put(
+        portal,
+        { operatorLlmKey: { apiKey: OTHER_KEY } },
+        cookies,
+      );
+      const remove = await put(portal, { operatorLlmKey: null }, cookies);
+      const page = await portal.visit("/admin/llm", { cookies });
+
+      for (const response of [read, write, remove, page]) {
+        expect(response.status).toBe(404);
+        const text = await response.text();
+        expect(text).not.toContain(KEY.slice(0, -4));
+        expect(text).not.toContain(OTHER_KEY);
+        expect(text).not.toContain("operator_llm_key");
+        expect(text).not.toContain("wxyz");
+      }
+      expect(
+        await portal.db.selectFrom("secrets").selectAll().execute(),
+      ).toEqual(before);
+      expect(await operatorKeyOf(portal)).toEqual({
+        state: "key",
+        apiKey: KEY,
+      });
+    },
+  );
 
   // #276-T07
   it("is not reachable without a session: nobody gets a status, and a bearer token (the operator API's) is no session", async () => {

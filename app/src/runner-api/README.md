@@ -30,7 +30,7 @@ checks and the redaction with the runner API and is described in "The Worker API
 | `redact.ts`                        | Removes anything that looks like a credential from a result before it is stored                                                                                                                                                                                       |
 | `responses.ts`                     | Every answer: `Cache-Control: no-store`, the error form `{ error: { code, message } }`                                                                                                                                                                                |
 | `claim-guard.ts`, `job-options.ts` | The two hooks (below); `project-claim-guard.ts` and `review-settings-job-options.ts` are what the running server plugs in                                                                                                                                             |
-| `claimed-keys.ts`                  | In the database, encrypted (`job_claimed_keys`): the LLM key handed out with the claim of each job, so a rotated key can still be masked in its result by whichever app instance completes it                                                                         |
+| `claimed-keys.ts`                  | In the database, encrypted (`job_claimed_keys`): the LLM keys handed out for each job (a list, at most 3), so a rotated key can still be masked in its result by whichever app instance completes it                                                                  |
 | `contract.ts`                      | The TypeScript types and code lists of the contract                                                                                                                                                                                                                   |
 | `shared.ts`                        | The wiring of the running server (`getRunnerApi()`, `withRunnerApi`, `getWorkerApi()`, `withWorkerApi`); the route files under `src/app/api/runners/v1/` and `src/app/api/workers/v1/` only call these, which answer a failure while setting up in the usual 500 form |
 
@@ -250,9 +250,13 @@ Conversely the job credential on `claim` is `401 RUNNER_UNAUTHORIZED`. The sessi
 **Details** (`GET`). `?features=dynamic_capabilities` (a comma separated list, unknown names ignored) has
 the same meaning as `features` in a claim: an optional job field reaches only a Worker that reads it.
 This is where the secrets are made, by the same code as the legacy claim's step 4 (`buildJobInput`): the
-checks run again (the project may have been switched off, the key removed, the pull request closed),
-the installation token is minted for exactly this repository, the model key is revealed and **remembered**
-(`job_claimed_keys`, so a result is masked after a key rotation by whichever instance serves it).
+checks run again (the project may have been switched off, the key removed, the pull request closed), and
+so does the **standing of the workspace** (#276): a workspace suspended since the claim, or whose entitlements became
+unreadable, gets no key and no token and the job ends with `workspace_suspended` or `entitlements_invalid`, the code
+the claim would have used. Quotas are not counted again, they were decided at the claim. The installation token is minted for exactly this repository, the model key is revealed and **remembered**
+(`job_claimed_keys`, so a result is masked after a key rotation by whichever instance serves it). Every key handed out
+for the job stays remembered (up to 3, the fetch budget; a key already known takes no place), so the key of the first
+fetch is still masked after the operator rotated its key before the second.
 At most **3 fetches per claim** (the count is on the job row and reset by every claim); each mints a fresh
 token; the fourth is `401`. A permanent failure (the project is off, the key is gone, the installation was
 removed, the pull request closed) ends the job with its stable code (the same list as `CLAIM_FAILURE_CODES`)
