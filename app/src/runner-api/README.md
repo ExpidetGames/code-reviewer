@@ -113,6 +113,10 @@ The claim only hands out a job whose review kind one of those engines can run (`
 empty list is `400 RUNNER_REQUEST_INVALID`, and a body over 64 KiB is `413`, both before any job is
 claimed and any credential is created. The token check comes first.
 
+The body may also name `features` (#279): `["dynamic_capabilities"]` says the runner reads
+`dynamic.capabilities`. Unknown names are ignored; a list that is not a list of plain names is
+`400 RUNNER_REQUEST_INVALID`. A previous-release runner names none.
+
 A Diff job keeps the exact legacy payload, whatever runner asked: no field is added, so a
 previous-release runner parses it unchanged. A Dynamic job is only ever handed to a runner that
 advertised `opencode`, and its `input` is tagged:
@@ -120,7 +124,13 @@ advertised `opencode`, and its `input` is tagged:
 - `reviewKind: "dynamic"`;
 - `dynamic`: `{ model, skill, limits: { maxFindings } }` — model/skill/limits only, a closed object.
   There is no field for the fixed core, a permission, an executable command or an endpoint, and the
-  skill is literal data;
+  skill is literal data. **#279:** `capabilities` (`DynamicModelCapabilities`) is added to `dynamic`
+  when the claim built it from the provider's model metadata (`src/llm/dynamic-capabilities.ts`) and the
+  runner named `dynamic_capabilities`. A claim of a Dynamic job reads the metadata of its model (cached)
+  before any credential is created: a model whose metadata says it has no tool calling or no required
+  tool choice ends as `dynamic_model_features_unsupported`, whatever runner claimed it; metadata that
+  cannot be read (provider unreachable, unknown model, no stated window) sends nothing, logs
+  `model capabilities not read (<why>)` and the runner uses its own description, as before;
 - `base`: `{ repository, baseRef, headSha, previousReviewedSha, attemptedShas, attemptedShasTruncated, comparison }` — the exact queued head,
   the base identity the provider reported, and the _declared_ comparison mode (`full` in this stage;
   the checkout verifies completeness before it trusts it). `previousReviewedSha` is the head of the

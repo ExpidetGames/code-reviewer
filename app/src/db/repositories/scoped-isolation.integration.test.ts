@@ -728,6 +728,11 @@ const CASES: Case[] = [
     expectAnswer: (answer) =>
       expect(answer).toMatchObject({ planLabel: "changed" }),
   },
+  {
+    name: "entitlements.remove",
+    run: (a) => a.entitlements.remove(),
+    expectAnswer: (answer) => expect(answer).toBe(true),
+  },
   // usage records: a job of B is not there for A, so it is neither reserved, changed nor settled, and
   // A's reads and pages do not see B's records
   {

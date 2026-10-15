@@ -97,8 +97,9 @@ services:
       RUNNER_CONCURRENCY: ${RUNNER_DYNAMIC_CONCURRENCY:-1}
       RUNNER_JOB_TIMEOUT_SECONDS: ${RUNNER_JOB_TIMEOUT_SECONDS:-1200}
       RUNNER_POLL_INTERVAL_SECONDS: ${RUNNER_POLL_INTERVAL_SECONDS:-5}
-      # The operator's description of the selected model and destination (JSON). Empty: every
-      # Dynamic job fails with dynamic_model_features_unsupported, there is no fallback.
+      # Optional ceiling (JSON) for the model description the app sends with each Dynamic job (#279).
+      # Empty: the job's description applies; without one only the default model runs (built-in
+      # description), any other model fails with dynamic_model_features_unsupported, no fallback.
       RUNNER_DYNAMIC_CAPABILITIES: ${RUNNER_DYNAMIC_CAPABILITIES:-}
       # The most one Dynamic run may cost, in USD. Empty: the runner's default (docs/dynamic-review.md).
       RUNNER_DYNAMIC_MAX_COST_USD: ${RUNNER_DYNAMIC_MAX_COST_USD:-}

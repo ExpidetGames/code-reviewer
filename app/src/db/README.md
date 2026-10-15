@@ -239,13 +239,15 @@ existing row:
   and `put` take no id). The checks refuse a key mode other than the two, a suspended flag other than 0 and 1, and
   a suspension code on a workspace that is not suspended. The row goes with its workspace. `put` validates
   (`src/workspaces/entitlements-validation.ts`) and never lets `period_start` move to an earlier time: one upsert
-  whose `where` compares the stored and the new start, so a repeated or late reset is harmless. There is no
-  `remove` yet: deleting a row would end that guard (a later `put` could store an earlier start); #275 decides
-  whether it needs one.
+  whose `where` compares the stored and the new start, so a repeated or late reset is harmless. `remove()` deletes the row (#275, the operator API's `DELETE`), and
+  that ends the guard for the workspace: the stored start was what it compared with. The operator API documents
+  the consequence (`src/operator-api/README.md`): a later `put` with an earlier start is accepted, and a `put`
+  without a start begins now.
 - The instance setting `default_entitlements` (`instance-settings-repository.ts`, the same fields without the
   workspace) applies to every workspace without a row. `set` validates it the same way and checks the period
   start under a transaction lock (`entitlements-lock.ts`: an advisory lock on Postgres). The generic `remove(key)`
-  would end the guard for the default in the same way; it is not blocked yet (follow-up for #275).
+  would end the guard for the default in the same way. The operator API offers no removal of the default (#275), so
+  nothing in the app calls it for this key.
 - **Reading is checked too.** The columns of a row and the JSON of the default are not trusted: both are read
   through `readEntitlements` (the same rules as a write, except the clock). `get()` and `getDefaultEntitlements()`
   never throw on damaged data; an entry that cannot be read comes back as `{ invalid: true }`, which the resolver

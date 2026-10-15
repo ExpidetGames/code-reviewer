@@ -36,6 +36,10 @@ MAX_HEARTBEAT_INTERVAL_SECONDS = 60
 MAX_RETRY_AFTER_SECONDS = 15 * 60
 
 
+# What this runner understands beyond its engines (ClaimRequest.features in the contract).
+CLAIM_FEATURES: tuple[str, ...] = ("dynamic_capabilities",)
+
+
 class ApiError(Exception):
     """Base of the errors below. `status` is the HTTP status, or None without an answer."""
 
@@ -153,7 +157,14 @@ class HttpRunnerApi:
     async def claim(self) -> ClaimedJob | None:
         # #195: the engines this runner can run. A previous-release runner sends no body; this one
         # advertises what its startup self-check proved.
-        reply = await asyncio.to_thread(self._send, "/claim", {"engines": list(self._engines)})
+        # #279: `features` says what else this runner reads, so an app sends a job's optional fields
+        # (the model capabilities of a Dynamic job) only to a runner that understands them; a
+        # previous-release runner names none and an app from before ignores the key.
+        reply = await asyncio.to_thread(
+            self._send,
+            "/claim",
+            {"engines": list(self._engines), "features": list(CLAIM_FEATURES)},
+        )
         if reply.status == 204:
             return None
         if reply.status != 200:

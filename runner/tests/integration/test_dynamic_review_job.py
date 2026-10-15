@@ -47,7 +47,7 @@ from code_reviewer_runner.dynamic_review.publish import (
     PublishError,
 )
 from code_reviewer_runner.dynamic_review.supervisor import Prepared
-from code_reviewer_runner.dynamic_review.wrap_up import WRAP_UP_INSTRUCTION
+from code_reviewer_runner.dynamic_review.wrap_up import RECOVERY_INSTRUCTION, WRAP_UP_INSTRUCTION
 from code_reviewer_runner.job import parse_job
 from code_reviewer_runner.result import ErrorCode
 
@@ -237,6 +237,87 @@ def test_a_run_at_its_cost_limit_is_wrapped_up_published_and_marked(tmp_path: Pa
     assert result.usage is not None
     assert result.usage.stopped_early == "cost_limit"
     assert result.usage.to_json()["stoppedEarly"] == "cost_limit"
+
+
+# #309-T01, #309-T08
+def test_a_turn_without_an_answer_is_recovered_published_and_marked_in_the_log(
+    tmp_path: Path,
+) -> None:
+    script = {
+        "proxy_calls": 1,
+        "answers": ["none", "structured"],
+        "findings": findings(),
+        "results": {},
+    }
+    preparer = Preparer(tmp_path / "export", script)
+    publisher = RecordingPublisher()
+
+    with FakeUpstream(
+        [
+            {"role": "assistant", "content": "my review in prose"},
+            asks(tool_call("c1", "StructuredOutput", findings())),
+        ]
+    ) as upstream:
+        result = runner.run_dynamic_job(
+            job_for(f"{upstream.url}/v1"),
+            None,
+            0.0,
+            environment(),
+            engines=ALL_ENGINES,
+            prepare=preparer,
+            publish=publisher,
+        )
+
+    assert result.ok, result.log_tail
+    # Two provider calls: the first ended the turn, the second is the recovery call, which the proxy
+    # reduced to the return tool alone with the runner's instruction last.
+    assert len(upstream.requests) == 2
+    _headers, recovery = upstream.requests[1]
+    assert [tool["function"]["name"] for tool in recovery["tools"]] == ["StructuredOutput"]
+    assert recovery["tool_choice"] == "required"
+    assert recovery["messages"][-1] == {"role": "user", "content": RECOVERY_INSTRUCTION}
+    # The review is published as a complete one: a recovery is no limit, so there is no notice.
+    assert len(publisher.calls) == 1
+    assert publisher.calls[0][1].stopped_early is None
+    assert result.usage is not None
+    assert result.usage.stopped_early is None
+    # The result line says so, with how the first turn ended and the time of both message calls.
+    assert (
+        "recovered after a turn without an answer (finish=stop, error=StructuredOutputError)"
+        in (result.log_tail)
+    )
+    assert re.search(r"engine message call: \d+\.\d s, \d+\.\d s", result.log_tail), result.log_tail
+
+
+# #309-T04, #309-T08
+def test_a_recovery_that_also_has_no_answer_fails_with_the_same_code_and_says_so(
+    tmp_path: Path,
+) -> None:
+    script = {"proxy_calls": 1, "answers": ["none"], "findings": findings(), "results": {}}
+    preparer = Preparer(tmp_path / "export", script)
+    publisher = RecordingPublisher()
+
+    with FakeUpstream([{"role": "assistant", "content": "prose"}]) as upstream:
+        result = runner.run_dynamic_job(
+            job_for(f"{upstream.url}/v1"),
+            None,
+            0.0,
+            environment(),
+            engines=ALL_ENGINES,
+            prepare=preparer,
+            publish=publisher,
+        )
+
+    assert not result.ok
+    assert result.error_code is ErrorCode.LLM_OUTPUT_INVALID
+    first_line = result.log_tail.splitlines()[0]
+    assert first_line.startswith("llm_output_invalid: the engine returned no structured answer")
+    assert (
+        "after one recovery; the first turn: finish=stop, error=StructuredOutputError" in first_line
+    )
+    assert re.search(r"\[engine message call: \d+\.\d s, \d+\.\d s\]$", first_line), first_line
+    assert len(upstream.requests) == 2  # one recovery, no further retry
+    assert publisher.calls == []
 
 
 # #293-T16

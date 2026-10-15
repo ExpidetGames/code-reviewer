@@ -13,6 +13,7 @@ import { loadGithubAppConfig } from "../integrations/registry.ts";
 import type { JobQueueLimits } from "../jobs/job-limits.ts";
 import type { LlmAccessResult } from "../llm/access.ts";
 import { createWorkspaceLlm } from "../llm/assemble.ts";
+import type { ModelCapabilityChecker } from "../llm/model-capabilities.ts";
 import { createRunnerApi } from "../runner-api/api.ts";
 import {
   allowAllClaimGuard,
@@ -55,6 +56,8 @@ export type RequestOptions = {
    * a previous-release runner asks and means `pr-agent`. An empty array is an (invalid) explicit list.
    */
   engines?: string[];
+  /** #279: the features sent in the claim body next to the engines (`dynamic_capabilities`). */
+  features?: string[];
 };
 
 export async function startRunnerApiHarness(
@@ -79,6 +82,8 @@ export async function startRunnerApiHarness(
     llmKey?: string | null;
     /** Replaces how the claim resolves the LLM access of a workspace (for example to answer with the operator's key). */
     loadLlm?: (workspaceId: string) => Promise<LlmAccessResult>;
+    /** #279: where a Dynamic claim reads the model metadata from. Left out, the claim reads none. */
+    modelCapabilities?: ModelCapabilityChecker;
   } = {},
 ) {
   const fixture = await createJobQueueFixture({
@@ -228,6 +233,9 @@ export async function startRunnerApiHarness(
           job.workspaceId,
           fixture.clock.now,
         ).setKeyMode(job.id, keyMode),
+      ...(options.modelCapabilities === undefined
+        ? {}
+        : { modelCapabilities: options.modelCapabilities }),
       claimedKeys,
       now: fixture.clock.now,
       logger,
@@ -281,7 +289,7 @@ export async function startRunnerApiHarness(
     return api.claim(claimRequest(request));
   }
 
-  /** The claim request of the runner: no body, or the engines it advertises (#195). */
+  /** The claim request of the runner: no body, or the engines (#195) and features (#279) it advertises. */
   function claimRequest(request: RequestOptions): Request {
     if (request.engines === undefined)
       return new Request(`${url}/claim`, {
@@ -291,7 +299,12 @@ export async function startRunnerApiHarness(
     return new Request(`${url}/claim`, {
       method: "POST",
       headers: headers(request, { "content-type": "application/json" }),
-      body: JSON.stringify({ engines: request.engines }),
+      body: JSON.stringify({
+        engines: request.engines,
+        ...(request.features === undefined
+          ? {}
+          : { features: request.features }),
+      }),
     });
   }
 

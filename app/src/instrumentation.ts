@@ -41,6 +41,9 @@ export async function register(): Promise<void> {
   await startSetupOnStart({ db: getDatabase(), store: getSetupCodeStore() });
   const { warnAboutRunnerToken } = await import("./runner-api/startup.ts");
   warnAboutRunnerToken(process.env);
+  // One line: whether the operator API is on (it is off, and absent, until OPERATOR_API_TOKEN is set).
+  const { logOperatorApiState } = await import("./operator-api/startup.ts");
+  logOperatorApiState(process.env);
   const { warnAboutDebounce } = await import("./webhooks/debounce-config.ts");
   warnAboutDebounce(process.env);
   // Without a GitHub App in the database and without any variable the instance is simply not connected

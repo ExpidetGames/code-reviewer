@@ -106,20 +106,32 @@ used, and it is reported as a _warning_ (`LLM_MODEL_INVALID`, `LLM_MAX_TOKENS_IN
 needs (#269): `GET /api/v1/models/{author}/{slug}/endpoints` of OpenRouter, no key. `checkModelCapabilities`
 answers one of
 
-- `supported`: at least one endpoint lists both `tools` and `tool_choice` in `supported_parameters`;
-- `unsupported`: the model exists, no endpoint lists both;
+- `supported`: at least one endpoint lists both `tools` and `tool_choice` in `supported_parameters` and does not
+  say it cannot force a tool choice (`supports_tool_choice.required` is not `false`, #279);
+- `unsupported`: the model exists, no endpoint qualifies;
 - `unknown_model`: 404, or a name that is not `author/slug` (no request is made then); a variant suffix such as
   `:free` is dropped for the lookup;
 - `unverifiable`: a network error, a timeout, any status but 200 and 404 (a redirect included), an answer that is
   not JSON, over 256 KiB or not shaped like the documented answer. It never throws.
 
-`supported` and `unsupported` carry the capabilities read, for #279 and #280: `tools`, `toolChoice`,
-`responseFormat`, `structuredOutputs` and `maxCompletionTokens` (the largest limit an endpoint states, or null).
-They come from the endpoints that support tools when there are any, otherwise from all of them.
+`supported` and `unsupported` carry the capabilities read: `tools`, `toolChoice`, `toolChoiceRequired`,
+`responseFormat`, `structuredOutputs`, `maxCompletionTokens` (the largest limit an endpoint states, or null) and,
+for the descriptor of a Dynamic job (#279), `smallestCompletionTokens`, `contextLength` (the smallest window,
+null if an endpoint states none) and `inputUsdPerMtok` / `outputUsdPerMtok` (the highest prices of the endpoints a
+run could use, as exact decimal text per million tokens, moved from OpenRouter's per-token text without a float;
+both null when any is missing or not a plain decimal). They come from the endpoints that qualify when there are
+any, otherwise from all of them, and always at the bound a reservation needs.
+
+`dynamic-capabilities.ts` (`dynamicCapabilitiesOf`) turns them into the `dynamic.capabilities` of a job
+(`DynamicModelCapabilities` in `contracts/runner-api.v1.json`): structured output is tool calling (the pinned
+engine returns its findings through a tool call), the output allowance is the smaller of the model's smallest
+stated limit, 8,192 tokens and half the window, prices are left out when unreadable, and a model whose metadata
+states no window yields no descriptor. Nothing is invented. The claim of a Dynamic job sends it (see
+`src/runner-api/README.md`).
 
 The request goes to the provider's fixed address (`endpoint.ts`; the test stack points it at the fake LLM with
 the existing switch), sends no credential, follows no redirect, has a timeout and the size limit, and the fetch is
-a parameter. **Outbound call:** the app asks `openrouter.ai` (HTTPS 443, no key) on every save of a Dynamic model that is not in the cache; a host that cannot reach it waits at most 5 seconds and gets the `DYNAMIC_MODEL_UNVERIFIED` warning (`docs/deployment-coolify.md`). The log line holds the model id and the outcome class only (`MODEL_CAPABILITY_CHECK`).
+a parameter. **Outbound call:** the app asks `openrouter.ai` (HTTPS 443, no key) on every save of a Dynamic model and on every claim of a Dynamic job whose model is not in the cache (#279); a host that cannot reach it waits at most 5 seconds and gets the `DYNAMIC_MODEL_UNVERIFIED` warning (`docs/deployment-coolify.md`). The log line holds the model id and the outcome class only (`MODEL_CAPABILITY_CHECK`).
 `createModelCapabilityChecker` remembers a `supported` answer in memory for five minutes (at most 200 models), so
 saving the same model repeatedly asks once; no other outcome is remembered. The settings save is its first user
 (`src/review-settings/README.md`, "Saving a Dynamic model checks it"); the run-time enforcement is the runner
@@ -147,7 +159,7 @@ claimed-keys.ts`) and not in memory, so any app instance can mask a result after
 
 ## Testing
 
-`resolve.test.ts`, `config.test.ts`, `access.test.ts`, `startup.test.ts`, `endpoint.test.ts`, `model-capabilities.test.ts` and
+`resolve.test.ts`, `config.test.ts`, `access.test.ts`, `startup.test.ts`, `endpoint.test.ts`, `model-capabilities.test.ts`, `dynamic-capabilities.test.ts` and
 `../instrumentation.test.ts` (unit, no database); `workspace-key.integration.test.ts`,
 `key-test.integration.test.ts` (real SQLite, the fake LLM over real HTTP); `ui/*.test.tsx`;
 `integration-tests/http/llm-key-route.integration.test.ts` (the real route files: roles, isolation, the request,
