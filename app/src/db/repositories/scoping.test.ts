@@ -27,6 +27,7 @@ const SCOPED = [
   "projects-repository.ts",
   "repositories-repository.ts",
   "runs-repository.ts",
+  "usage-records-repository.ts",
   "workspace-entitlements-repository.ts",
   "workspace-members-repository.ts",
   "workspace-secrets-repository.ts",
@@ -50,6 +51,9 @@ const SCOPED = [
  * - jobs-claim: the one SQL statement of the runner side, not a repository;
  * - legacy-users: the import of an existing installation (src/legacy-import/) reads the users of the earlier
  *   sign in with their GitHub identity and marks them as imported; users belong to no workspace;
+ * - usage-records-sweep: the sweep of usage records for instance level code that ends jobs of any workspace (the
+ *   lease side of the queue, the switch-off of Dynamic Review); one statement that only voids `reserved` records of
+ *   jobs that have ended, and it takes no workspace on purpose;
  * - job-claimed-keys: the encrypted LLM key handed out with the claim of a job. It is keyed by the job and read
  *   only by the runner API when that job is completed (the job and its workspace are known there); it never
  *   lists, and a key is only ever looked up by the id of a job the caller holds.
@@ -68,6 +72,7 @@ const INSTANCE_LEVEL = [
   "runner-jobs-repository.ts",
   "secrets-repository.ts",
   "unclaimed-installations-repository.ts",
+  "usage-records-sweep.ts",
   "webhook-deliveries-repository.ts",
   "workspaces-repository.ts",
 ] as const;

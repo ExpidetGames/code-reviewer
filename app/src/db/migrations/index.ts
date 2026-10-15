@@ -38,6 +38,7 @@ import { migration as removeCommands } from "./20261012160000_remove_commands.ts
 import { migration as addJobReviewKind } from "./20261013090000_add_job_review_kind.ts";
 import { migration as fixDynamicDefaultModel } from "./20261014090000_fix_dynamic_default_model.ts";
 import { migration as createWorkspaceEntitlements } from "./20261014120000_create_workspace_entitlements.ts";
+import { migration as createUsageRecords } from "./20261014150000_create_usage_records.ts";
 
 const migrations: Record<string, Migration> = {
   "0001_create_app_meta": createAppMeta,
@@ -76,6 +77,7 @@ const migrations: Record<string, Migration> = {
   "20261013090000_add_job_review_kind": addJobReviewKind,
   "20261014090000_fix_dynamic_default_model": fixDynamicDefaultModel,
   "20261014120000_create_workspace_entitlements": createWorkspaceEntitlements,
+  "20261014150000_create_usage_records": createUsageRecords,
 };
 
 export const migrationProvider: MigrationProvider = {

@@ -50,6 +50,7 @@ import { databaseDriver } from "../driver.ts";
 import { decodeJson, formatTimestamp } from "../codecs.ts";
 import type { Database, JobsTable } from "../schema.ts";
 import type { WorkspaceId } from "../workspace-scope.ts";
+import { createUsageRecordsRepository } from "./usage-records-repository.ts";
 
 export type JobListFilter = {
   repositoryId?: string;
@@ -285,6 +286,8 @@ export function createJobsRepository(
           .where("status", "=", "queued"),
       );
       const result = await query.executeTakeFirst();
+      // A job that waited again after a lost lease keeps a reserved usage record; it no longer counts.
+      await createUsageRecordsRepository(trx, workspaceId, now).voidEndedJobs();
       return Number(result.numUpdatedRows);
     });
   }
@@ -487,7 +490,7 @@ export function createJobsRepository(
             .where("id", "!=", id)
             .execute();
           supersededJobIds = waiting.map((row) => row.id);
-          if (supersededJobIds.length > 0)
+          if (supersededJobIds.length > 0) {
             await trx
               .updateTable("jobs")
               .set({
@@ -499,6 +502,13 @@ export function createJobsRepository(
               .where("id", "in", supersededJobIds)
               .where("status", "in", statusesThatCanBecome("superseded"))
               .execute();
+            // Only when jobs were replaced: their reserved records no longer count.
+            await createUsageRecordsRepository(
+              trx,
+              workspaceId,
+              now,
+            ).voidEndedJobs();
+          }
         }
 
         return { status: "created", job: toJob(inserted), supersededJobIds };

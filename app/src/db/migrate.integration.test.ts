@@ -87,6 +87,7 @@ describe("the migrations of both epics", () => {
       "20261013090000_add_job_review_kind",
       "20261014090000_fix_dynamic_default_model",
       "20261014120000_create_workspace_entitlements",
+      "20261014150000_create_usage_records",
     ]);
   });
 
@@ -147,6 +148,7 @@ describe("starting the database", () => {
       "sessions",
       "signed_states",
       "unclaimed_installations",
+      "usage_records",
       "users",
       "verifications",
       "webhook_deliveries",
