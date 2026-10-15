@@ -18,7 +18,7 @@ import {
 } from "../dynamic-review-lock.ts";
 import { createInstanceSettingsRepository } from "./instance-settings-repository.ts";
 import { isDeepStrictEqual } from "node:util";
-import type { ExpressionBuilder, Kysely } from "kysely";
+import { sql, type ExpressionBuilder, type Kysely } from "kysely";
 import {
   DEFAULT_JOB_QUEUE_LIMITS,
   type JobQueueLimits,
@@ -156,17 +156,23 @@ async function voidRecordsOfEndedJobs(
   await executor
     .updateTable("usage_records")
     .set({ state: "void" })
-    .where("state", "=", "reserved")
-    .where("job_id", "in", (eb) =>
-      eb
-        .selectFrom("jobs")
-        .select("jobs.id")
-        .where("status", "in", [
-          "succeeded",
-          "failed",
-          "cancelled",
-          "superseded",
-        ]),
+    // A literal, not a bound value, so the planner can use the partial index of the reserved records.
+    .where("state", "=", sql.lit("reserved"))
+    // Driven by the few reserved records (the partial index), each probing its job by primary key: the work
+    // does not grow with the history of ended jobs.
+    .where((eb) =>
+      eb.exists(
+        eb
+          .selectFrom("jobs")
+          .select("jobs.id")
+          .whereRef("jobs.id", "=", "usage_records.job_id")
+          .where("jobs.status", "in", [
+            "succeeded",
+            "failed",
+            "cancelled",
+            "superseded",
+          ]),
+      ),
     )
     .execute();
 }
@@ -453,8 +459,12 @@ export function createRunnerJobsRepository(
         const timestamp = formatTimestamp(current);
         // The hard limit does not depend on anyone else's claim: the holder that is past it learns
         // so here, and the job fails.
-        await failTimedOut(trx, { claim: { jobId, leaseToken } }, current);
-        await voidRecordsOfEndedJobs(trx);
+        const timedOut = await failTimedOut(
+          trx,
+          { claim: { jobId, leaseToken } },
+          current,
+        );
+        if (timedOut > 0) await voidRecordsOfEndedJobs(trx);
         const row = await trx
           .updateTable("jobs")
           .set({

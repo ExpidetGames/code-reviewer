@@ -192,13 +192,18 @@ export function createUsageRecordsRepository(
         .updateTable("usage_records")
         .set({ state: "void" })
         .where("workspace_id", "=", workspaceId)
-        .where("state", "=", "reserved")
-        .where("job_id", "in", (eb) =>
-          eb
-            .selectFrom("jobs")
-            .select("jobs.id")
-            .where("jobs.workspace_id", "=", workspaceId)
-            .where("jobs.status", "in", ENDED_JOB_STATUSES),
+        // A literal, not a bound value, so the planner can use the partial index of the reserved records.
+        .where("state", "=", sql.lit("reserved"))
+        // Driven by the few reserved records, each probing its job by primary key.
+        .where((eb) =>
+          eb.exists(
+            eb
+              .selectFrom("jobs")
+              .select("jobs.id")
+              .whereRef("jobs.id", "=", "usage_records.job_id")
+              .where("jobs.workspace_id", "=", workspaceId)
+              .where("jobs.status", "in", ENDED_JOB_STATUSES),
+          ),
         )
         .execute();
     },

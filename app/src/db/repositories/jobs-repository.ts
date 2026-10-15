@@ -490,7 +490,7 @@ export function createJobsRepository(
             .where("id", "!=", id)
             .execute();
           supersededJobIds = waiting.map((row) => row.id);
-          if (supersededJobIds.length > 0)
+          if (supersededJobIds.length > 0) {
             await trx
               .updateTable("jobs")
               .set({
@@ -502,11 +502,13 @@ export function createJobsRepository(
               .where("id", "in", supersededJobIds)
               .where("status", "in", statusesThatCanBecome("superseded"))
               .execute();
-          await createUsageRecordsRepository(
-            trx,
-            workspaceId,
-            now,
-          ).voidEndedJobs();
+            // Only when jobs were replaced: their reserved records no longer count.
+            await createUsageRecordsRepository(
+              trx,
+              workspaceId,
+              now,
+            ).voidEndedJobs();
+          }
         }
 
         return { status: "created", job: toJob(inserted), supersededJobIds };
