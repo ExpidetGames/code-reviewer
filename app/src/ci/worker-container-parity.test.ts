@@ -142,6 +142,11 @@ describe("a changed flag is found", () => {
       "a tmpfs that may run a program",
       (t) => t.replace("/tmp:rw,noexec,", "/tmp:rw,"),
     ],
+    [
+      "a tmpfs option with a value the spec has no key for",
+      (t) =>
+        t.replace("size=512m,mode=1777", "size=512m,nr_inodes=100,mode=1777"),
+    ],
     ["a larger tmpfs", (t) => t.replace("size=1m,", "size=64m,")],
     [
       "another stop timeout",

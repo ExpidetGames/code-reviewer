@@ -231,6 +231,8 @@ function assertMemory(memory: unknown, fail: (what: string) => never): void {
   ) as [number, number, number];
   // No swap: the peak of a job must show as an out-of-memory kill. A reservation above the limit
   // is refused by Docker; refusing it here gives a reason instead of a daemon error.
+  // Docker reads 0 as "no limit": a zero size is no limit at all, not a small one.
+  if (l === 0 || r === 0 || s === 0) return fail("a memory size is zero");
   if (s !== l) return fail("swap is not equal to the limit");
   if (r > l) return fail("the reservation is above the limit");
 }

@@ -68,7 +68,9 @@ function tmpfsOf(entry: string): Record<string, unknown> {
     const [name = "", value] = part.split("=");
     if (value === undefined) options.push(name);
     else if (name === "uid" || name === "gid") mount[name] = Number(value);
-    else mount[name] = value;
+    else if (name === "size" || name === "mode") mount[name] = value;
+    // A value option the spec has no key for stays visible as an option, so it shows as a difference.
+    else options.push(`${name}=${value}`);
   }
   return {
     path: mount.path,

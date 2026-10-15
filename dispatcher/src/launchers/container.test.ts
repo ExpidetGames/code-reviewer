@@ -222,6 +222,17 @@ describe("rendering the hardened container spec", () => {
   });
 
   // #325-T03
+  it.each(["0m", "00m", "0g"])(
+    "refuses a spec with the memory size %s",
+    (size) => {
+      const changed = spec();
+      changed.memory = { limit: size, reservation: size, swap: size };
+
+      expect(codeOf(() => render({}, changed))).toBe("spec_not_hardened");
+    },
+  );
+
+  // #325-T03
   it("refuses a tmpfs path outside the three private ones", () => {
     const changed = spec();
     const tmpfs = changed.tmpfs as Array<Record<string, unknown>>;
@@ -368,6 +379,15 @@ describe("the memory limit per Worker kind", () => {
     ["a new limit below the spec's reservation", { memory: { limit: "1g" } }],
     ["a limit that is not a size", { memory: { limit: "lots" } }],
     ["a limit in bytes", { memory: { limit: "1073741824" } }],
+    [
+      "a zero limit, which Docker reads as no limit",
+      { memory: { limit: "0m", reservation: "0m" } },
+    ],
+    [
+      "a zero limit in gigabytes",
+      { memory: { limit: "0g", reservation: "512m" } },
+    ],
+    ["a zero reservation", { memory: { reservation: "0m" } }],
   ])("refuses %s", (_name, overrides) => {
     expect(codeOf(() => applyOverrides(WORKER_CONTAINER_SPEC, overrides))).toBe(
       "override_invalid",
