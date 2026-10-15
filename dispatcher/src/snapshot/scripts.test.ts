@@ -2,13 +2,19 @@
 
 import { execFileSync, spawnSync } from "node:child_process";
 import {
+  appendFileSync,
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
+  symlinkSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -19,6 +25,12 @@ import {
 import { renderDockerRunArguments } from "../launchers/container.ts";
 import { resolveConfig } from "./config.ts";
 import {
+  EXIT_ANCHOR_MISSING,
+  EXIT_LISTING_EMPTY,
+  EXIT_MANIFEST_EMPTY,
+  EXIT_MANIFEST_MISSING,
+  EXIT_MANIFEST_MODIFIED,
+  EXIT_TOOL_FAILED,
   PATHS,
   buildImageScript,
   checkNoContainersScript,
@@ -29,7 +41,9 @@ import {
   inspectImageScript,
   probeRunArguments,
   probeScript,
+  recordBaseManifestScript,
   scanScript,
+  SCAN_ROOTS,
   shellQuote,
   startDaemonScript,
   stopDaemonScript,
@@ -38,6 +52,21 @@ import {
 
 const config = resolveConfig();
 const REPO = join(import.meta.dirname, "..", "..", "..");
+
+/** A block device needs root (or CAP_MKNOD): the test that needs one runs where the runner has it, like a CI VM. */
+function makeBlockDevice(path: string): boolean {
+  return (
+    spawnSync("mknod", [path, "b", "254", "16"], { stdio: "ignore" }).status ===
+    0
+  );
+}
+
+function canMakeBlockDevice(dir: string): boolean {
+  const probe = join(mkdtempSync(join(dir, "golden-mknod-")), "probe");
+  const made = makeBlockDevice(probe);
+  rmSync(join(probe, ".."), { recursive: true, force: true });
+  return made;
+}
 
 function syntaxErrors(script: string): string {
   const result = spawnSync("bash", ["-n", "-c", script], { encoding: "utf8" });
@@ -52,6 +81,7 @@ describe("the scripts the builder VM runs", () => {
     startDaemon: startDaemonScript(),
     buildImage: buildImageScript(config),
     inspectImage: inspectImageScript(config),
+    recordBaseManifest: recordBaseManifestScript(),
     cleanBuilder: cleanBuilderScript(),
     checkNoContainers: checkNoContainersScript(),
     stopDaemon: stopDaemonScript(),
@@ -256,11 +286,13 @@ describe("the final scan of the restored snapshot", () => {
   let work: string;
   let roots: string;
   let docker: string;
+  let manifest: string;
 
   beforeEach(() => {
     work = mkdtempSync(join(tmpdir(), "golden-scan-"));
     roots = join(work, "root");
     docker = join(work, "docker");
+    manifest = join(work, "base-manifest");
     mkdirSync(join(roots, "home", "ubuntu"), { recursive: true });
     mkdirSync(join(roots, "etc"), { recursive: true });
     mkdirSync(join(docker, "containers"), { recursive: true });
@@ -270,20 +302,87 @@ describe("the final scan of the restored snapshot", () => {
       join(roots, "etc", "app.conf"),
       "listen = 8080\nnothing secret here\n",
     );
+    // The base layer as it is after the platform booted: what a test writes from here on is the pipeline's.
+    recordBase();
   });
   afterEach(() => rmSync(work, { recursive: true, force: true }));
 
-  function scan(): string {
-    const script = scanScript({ roots: [roots], dockerRoot: docker });
-    return execFileSync("bash", ["-c", script], { encoding: "utf8" });
+  /** The file the scan expects the pipeline to have written (vm-prepare.sh in production), a canary for an empty listing. */
+  const anchor = () => join(roots, "usr", "local", "sbin", "vm-prepare.sh");
+
+  /** The builder's first command, on the base layer as it is now: what is written later is the pipeline's. */
+  function recordBase(): string {
+    rmSync(anchor(), { force: true });
+    const out = execFileSync(
+      "bash",
+      [
+        "-c",
+        recordBaseManifestScript({ roots: [roots], manifestPath: manifest }),
+      ],
+      { encoding: "utf8" },
+    );
+    return /^MANIFEST_SHA256 ([0-9a-f]{64})$/m.exec(out)?.[1] ?? "";
   }
 
-  // #330-T06
+  function scanOptions(extra: Partial<Parameters<typeof scanScript>[0]> = {}) {
+    return {
+      roots: [roots],
+      dockerRoot: docker,
+      manifestPath: manifest,
+      anchorPath: anchor(),
+      ...extra,
+    };
+  }
+
+  /** The pipeline writes vm-prepare.sh after the record, as the builder does. */
+  function writeAnchor(): void {
+    mkdirSync(join(roots, "usr", "local", "sbin"), { recursive: true });
+    writeFileSync(anchor(), "#!/usr/bin/env bash\n");
+  }
+
+  function scanResult(
+    extra: Partial<Parameters<typeof scanScript>[0]> = {},
+    env: NodeJS.ProcessEnv = process.env,
+  ) {
+    return spawnSync("bash", ["-c", scanScript(scanOptions(extra))], {
+      encoding: "utf8",
+      env,
+    });
+  }
+
+  /** The scan as the check VM runs it, over what the pipeline wrote after the record. */
+  function scanOutput(): string {
+    expect(existsSync(manifest), "a test records the base first").toBe(true);
+    if (!existsSync(anchor())) writeAnchor();
+    return execFileSync("bash", ["-c", scanScript(scanOptions())], {
+      encoding: "utf8",
+    });
+  }
+  const scan = scanOutput;
+
+  const DOC_EXAMPLES: Record<string, string> = {
+    "config.md": "Set `key` to a PEM file:\n-----BEGIN PRIVATE KEY-----\n",
+    "npmrc.md": "//registry.example.org/:_authToken=MYTOKEN1\n",
+    "CHANGELOG.md": "//reg.example.org/:_authToken=${ORG_A_TOKEN}\n",
+    "AssumeRoleCommand.d.ts": "@example accessKeyId: AKIAIOSFODNN7EXAMPLE\n",
+    "pnpm.mjs": "var x = 'AKIAUEFSCETA0ACQCAKI';\n",
+  };
+
+  /** A base image layer as the platform ships it: global Node packages whose docs and bundles hold example secrets. */
+  function writeBaseImageLayer(): string {
+    const packages = join(roots, "usr", "local", "lib", "node_modules", "npm");
+    mkdirSync(join(packages, "docs"), { recursive: true });
+    for (const [file, content] of Object.entries(DOC_EXAMPLES))
+      writeFileSync(join(packages, "docs", file), content);
+    return packages;
+  }
+
+  // #357-T12
   it("finds nothing in a clean tree and ends with its marker", () => {
     expect(scan()).toBe("SCAN_DONE\n");
   });
 
-  // #330-T06
+  // #357-T12
   it.each([
     ["secret_file", ".env", "A=1\n"],
     ["secret_file", ".env.production", "A=1\n"],
@@ -308,8 +407,9 @@ describe("the final scan of the restored snapshot", () => {
     ],
     ["token", "env.txt", "RUNNER_TOKEN=abcdefghijklmnop\n"],
   ])(
-    "reports a %s (%s) by path and never prints its content",
+    "reports a %s (%s) written after the base was recorded, by path, and never prints its content",
     (kind, file, content) => {
+      recordBase();
       const path = join(roots, "home", "ubuntu", file);
       writeFileSync(path, content);
       const out = scan();
@@ -320,8 +420,9 @@ describe("the final scan of the restored snapshot", () => {
     },
   );
 
-  // #330-T06
+  // #357-T12
   it("reports a Docker config that holds an auth entry, not an empty one, and allows .env.example", () => {
+    recordBase();
     mkdirSync(join(roots, "home", "ubuntu", ".docker"), { recursive: true });
     const config = join(roots, "home", "ubuntu", ".docker", "config.json");
     writeFileSync(config, '{"auths":{}}');
@@ -334,31 +435,478 @@ describe("the final scan of the restored snapshot", () => {
     expect(scan()).toContain(`FINDING docker_auth ${config}\n`);
   });
 
-  // #330-T06
-  it("reports job data: a container directory or a volume, but not the volume database", () => {
-    mkdirSync(join(docker, "containers", "abc123"));
-    expect(scan()).toContain(
-      `FINDING job_data ${join(docker, "containers", "abc123")}\n`,
+  // #357-T12
+  it("allows the distribution's snake-oil key and reports a key of the same shape under any other name", () => {
+    mkdirSync(join(roots, "etc", "ssl"), { recursive: true });
+    writeFileSync(
+      join(roots, "etc", "ssl", "ssl-cert-snakeoil.key"),
+      "-----BEGIN PRIVATE KEY-----\nabc\n",
     );
-    rmSync(join(docker, "containers", "abc123"), { recursive: true });
     expect(scan()).toBe("SCAN_DONE\n");
-    mkdirSync(join(docker, "volumes", "vol1"));
-    expect(scan()).toContain(
-      `FINDING job_data ${join(docker, "volumes", "vol1")}\n`,
+    const other = join(roots, "etc", "ssl", "server.key");
+    writeFileSync(other, "-----BEGIN PRIVATE KEY-----\nabc\n");
+    expect(scan()).toBe(`FINDING private_key ${other}\nSCAN_DONE\n`);
+  });
+
+  describe("what the platform's base image ships", () => {
+    // #357-T01
+    it("is not reported: documentation and bundles with an example key, a PEM header and placeholder tokens", () => {
+      writeBaseImageLayer();
+      recordBase();
+      expect(scanOutput()).toBe("SCAN_DONE\n");
+    });
+
+    // #357-T01
+    it("is skipped while the pipeline's own files next to it are still scanned", () => {
+      writeBaseImageLayer();
+      recordBase();
+      const planted = join(roots, "home", "ubuntu", "leak.txt");
+      writeFileSync(planted, `ghp_${"A1b2".repeat(10)}\n`);
+      expect(scanOutput()).toBe(`FINDING token ${planted}\nSCAN_DONE\n`);
+    });
+  });
+
+  describe("what the pipeline adds or changes", () => {
+    // #357-T02
+    it("reports a secret planted in a new file in a base-image directory", () => {
+      const packages = writeBaseImageLayer();
+      recordBase();
+      const planted = join(packages, "docs", "new.md");
+      writeFileSync(planted, `RUNNER_TOKEN=${"x1y2z3".repeat(4)}\n`);
+      expect(scanOutput()).toBe(`FINDING token ${planted}\nSCAN_DONE\n`);
+    });
+
+    // #357-T03
+    it("reports a base file that grew to hold a secret", () => {
+      const packages = writeBaseImageLayer();
+      recordBase();
+      const file = join(packages, "docs", "npmrc.md");
+      appendFileSync(file, `ghp_${"A1b2".repeat(10)}\n`);
+      expect(scanOutput()).toContain(`FINDING token ${file}\n`);
+    });
+
+    // #357-T03
+    it("reports a base file rewritten to the same size with a newer time", () => {
+      writeBaseImageLayer();
+      const file = join(roots, "etc", "app.conf");
+      writeFileSync(
+        file,
+        `${"# a base file, long enough for a token\n".repeat(2)}`,
+      );
+      recordBase();
+      const old = readFileSync(file, "utf8");
+      const replaced = `ghp_${"A1b2".repeat(10)}`.padEnd(old.length, "\n");
+      expect(replaced.length).toBe(old.length);
+      writeFileSync(file, replaced);
+      utimesSync(file, new Date(), new Date(Date.now() + 5000));
+      expect(scanOutput()).toContain(`FINDING token ${file}\n`);
+    });
+
+    // #357-T16
+    it("reports a base file rewritten to the same size with its old modification time restored", () => {
+      const file = join(roots, "etc", "app.conf");
+      writeFileSync(file, "# a base file, long enough for a token\n".repeat(2));
+      recordBase();
+      const before = statSync(file, { bigint: true });
+      const reference = join(work, "reference");
+      writeFileSync(reference, "x");
+      execFileSync("touch", ["-r", file, reference]);
+      writeFileSync(
+        file,
+        `ghp_${"A1b2".repeat(10)}`.padEnd(Number(before.size), "\n"),
+      );
+      // What `touch -r`, `cp -p` and an archive extraction do: size and mtime are exactly the old ones.
+      execFileSync("touch", ["-r", reference, file]);
+      const after = statSync(file, { bigint: true });
+      expect(after.size).toBe(before.size);
+      expect(after.mtimeNs).toBe(before.mtimeNs);
+      expect(scanOutput()).toContain(`FINDING token ${file}\n`);
+    });
+
+    // #357-T04
+    it("reports a documented example key in a file the pipeline wrote", () => {
+      recordBase();
+      const written = join(roots, "etc", "docker-notes.txt");
+      writeFileSync(written, "key AKIAIOSFODNN7EXAMPLE\n");
+      expect(scanOutput()).toBe(`FINDING token ${written}\nSCAN_DONE\n`);
+    });
+
+    // #357-T04
+    it("reports a PEM header and a placeholder token in files the pipeline wrote", () => {
+      recordBase();
+      const pem = join(roots, "etc", "ca.pem");
+      const rc = join(roots, "home", "ubuntu", ".npmrc");
+      writeFileSync(pem, "-----BEGIN PRIVATE KEY-----\nabc\n");
+      writeFileSync(rc, "//registry.example.org/:_authToken=MYTOKEN1\n");
+      const out = scanOutput();
+      expect(out).toContain(`FINDING private_key ${pem}\n`);
+      expect(out).toContain(`FINDING token ${rc}\n`);
+    });
+
+    // #357-T04
+    it("skips nothing that is only a file of the same name as a base file", () => {
+      writeBaseImageLayer();
+      recordBase();
+      const elsewhere = join(roots, "home", "ubuntu", "npmrc.md");
+      writeFileSync(elsewhere, DOC_EXAMPLES["npmrc.md"] ?? "");
+      expect(scanOutput()).toContain(`FINDING token ${elsewhere}\n`);
+    });
+
+    // #357-T09
+    it("does not report a file that was removed after the record", () => {
+      writeBaseImageLayer();
+      recordBase();
+      rmSync(join(roots, "usr", "local", "lib", "node_modules"), {
+        recursive: true,
+      });
+      expect(scanOutput()).toBe("SCAN_DONE\n");
+    });
+  });
+
+  describe("the base manifest", () => {
+    // #357-T07
+    it("makes the scan fail without a marker when it is missing", () => {
+      const result = spawnSync(
+        "bash",
+        [
+          "-c",
+          scanScript({
+            roots: [roots],
+            dockerRoot: docker,
+            manifestPath: join(work, "no-such-manifest"),
+          }),
+        ],
+        { encoding: "utf8" },
+      );
+      expect(result.status).toBe(EXIT_MANIFEST_MISSING);
+      expect(result.stdout).not.toContain("SCAN_DONE");
+    });
+
+    // #357-T07
+    it("makes the scan fail without a marker when it is empty", () => {
+      writeFileSync(manifest, "");
+      const result = spawnSync(
+        "bash",
+        [
+          "-c",
+          scanScript({
+            roots: [roots],
+            dockerRoot: docker,
+            manifestPath: manifest,
+          }),
+        ],
+        { encoding: "utf8" },
+      );
+      expect(result.status).toBe(EXIT_MANIFEST_MISSING);
+      expect(result.stdout).not.toContain("SCAN_DONE");
+    });
+
+    // #357-T07
+    it("is refused by the record step when the roots hold no file", () => {
+      const result = spawnSync(
+        "bash",
+        [
+          "-c",
+          recordBaseManifestScript({
+            roots: [join(work, "missing")],
+            manifestPath: join(work, "none", "manifest"),
+          }),
+        ],
+        { encoding: "utf8" },
+      );
+      expect(result.status).toBe(EXIT_MANIFEST_EMPTY);
+      expect(existsSync(join(work, "none", "manifest"))).toBe(false);
+      expect(result.stdout).not.toContain("MANIFEST_SHA256");
+    });
+
+    // #357-T09
+    it("lists each file once with its size, modification and status change time, one NUL terminated record per file", () => {
+      const records = readFileSync(manifest, "utf8").split("\0");
+      expect(records.pop()).toBe("");
+      expect(records).toHaveLength(1);
+      expect(records[0]).toMatch(
+        new RegExp(
+          `^${join(roots, "etc", "app.conf").replaceAll(".", "\\.")}\t${statSync(join(roots, "etc", "app.conf")).size}\t\\d+\\.\\d+\t\\d+\\.\\d+$`,
+        ),
+      );
+      expect(readFileSync(manifest, "utf8")).not.toContain("SCAN_DONE");
+    });
+
+    // #357-T09
+    it("is recorded and scanned over the same roots by default", () => {
+      const roots = [...SCAN_ROOTS].map((root) => shellQuote(root)).join(" ");
+      expect(recordBaseManifestScript()).toContain(`roots=(${roots})`);
+      expect(scanScript()).toContain(`roots=(${roots})`);
+      expect(recordBaseManifestScript()).toContain(PATHS.baseManifest);
+      expect(scanScript()).toContain(PATHS.baseManifest);
+    });
+
+    // #357-T09
+    it("lies outside the scan roots and outside the staged files the clean step removes", () => {
+      for (const root of SCAN_ROOTS)
+        expect(PATHS.baseManifest.startsWith(`${root}/`)).toBe(false);
+      expect(PATHS.baseManifest.startsWith("/tmp/")).toBe(false);
+    });
+  });
+
+  describe("Docker's own data", () => {
+    // #357-T05
+    it("allows the volume database as a regular file and nothing else of the two directories empty", () => {
+      expect(scan()).toBe("SCAN_DONE\n");
+    });
+
+    // #357-T05
+    it.skipIf(!canMakeBlockDevice(tmpdir()))(
+      "allows the block device dockerd creates in volumes at every start",
+      () => {
+        makeBlockDevice(join(docker, "volumes", "backingFsBlockDev"));
+        expect(scan()).toBe("SCAN_DONE\n");
+      },
     );
+
+    // #357-T06
+    it("reports a container directory or a volume, but not the volume database", () => {
+      mkdirSync(join(docker, "containers", "abc123"));
+      expect(scan()).toContain(
+        `FINDING job_data ${join(docker, "containers", "abc123")}\n`,
+      );
+      rmSync(join(docker, "containers", "abc123"), { recursive: true });
+      expect(scan()).toBe("SCAN_DONE\n");
+      mkdirSync(join(docker, "volumes", "vol1"));
+      expect(scan()).toContain(
+        `FINDING job_data ${join(docker, "volumes", "vol1")}\n`,
+      );
+    });
+
+    // #357-T06
+    it.each([
+      [
+        "a regular file",
+        (path: string) => writeFileSync(path, "not a device\n"),
+      ],
+      ["a directory", (path: string) => mkdirSync(path)],
+      ["a symbolic link", (path: string) => symlinkSync("/dev/null", path)],
+    ])(
+      "reports %s named backingFsBlockDev: only a block device is Docker's own",
+      (_what, create) => {
+        const path = join(docker, "volumes", "backingFsBlockDev");
+        create(path);
+        expect(scan()).toContain(`FINDING job_data ${path}\n`);
+      },
+    );
+
+    // #357-T06
+    it("reports a volume database that is not a regular file, and a database in the container directory", () => {
+      rmSync(join(docker, "volumes", "metadata.db"));
+      mkdirSync(join(docker, "volumes", "metadata.db"));
+      expect(scan()).toContain(
+        `FINDING job_data ${join(docker, "volumes", "metadata.db")}\n`,
+      );
+      rmSync(join(docker, "volumes", "metadata.db"), { recursive: true });
+      writeFileSync(join(docker, "containers", "metadata.db"), "bolt");
+      expect(scan()).toContain(
+        `FINDING job_data ${join(docker, "containers", "metadata.db")}\n`,
+      );
+    });
+
+    // #357-T06
+    it("reads every file of the container and volume directories, new or not", () => {
+      mkdirSync(join(docker, "volumes", "vol1"));
+      const leak = join(docker, "volumes", "vol1", "out.txt");
+      writeFileSync(leak, `ghp_${"A1b2".repeat(10)}\n`);
+      recordBase();
+      const out = scanOutput();
+      expect(out).toContain(`FINDING token ${leak}\n`);
+      expect(out).toContain(
+        `FINDING job_data ${join(docker, "volumes", "vol1")}\n`,
+      );
+    });
   });
 
   it("skips a root that does not exist", () => {
-    const script = scanScript({
-      roots: [join(work, "missing")],
-      dockerRoot: docker,
-    });
-    expect(execFileSync("bash", ["-c", script], { encoding: "utf8" })).toBe(
-      "SCAN_DONE\n",
-    );
+    writeAnchor();
+    const result = scanResult({ roots: [join(work, "missing"), roots] });
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe("SCAN_DONE\n");
   });
 
-  it("is not fooled by a file name with a space or a newline", () => {
+  describe("failing closed", () => {
+    // #357-T15
+    it("fails without a marker when the listing of the roots is empty", () => {
+      writeAnchor();
+      const result = scanResult({ roots: [join(work, "missing")] });
+      expect(result.status).toBe(EXIT_LISTING_EMPTY);
+      expect(result.stdout).not.toContain("SCAN_DONE");
+    });
+
+    // #357-T15
+    it("fails without a marker when the pipeline's own file is not among the added files", () => {
+      // No vm-prepare.sh was written after the record: the listing is not the one of the pipeline's VM.
+      writeFileSync(
+        join(roots, "home", "ubuntu", "other.txt"),
+        "something new\n",
+      );
+      const result = scanResult();
+      expect(result.status).toBe(EXIT_ANCHOR_MISSING);
+      expect(result.stdout).not.toContain("SCAN_DONE");
+    });
+
+    /** A directory of stand-ins that come first on PATH. */
+    function stubTools(stubs: Record<string, string>): NodeJS.ProcessEnv {
+      const bin = join(work, "stub-bin");
+      mkdirSync(bin, { recursive: true });
+      for (const [name, body] of Object.entries(stubs)) {
+        writeFileSync(join(bin, name), `#!/bin/sh\n${body}\n`);
+        chmodSync(join(bin, name), 0o755);
+      }
+      return { ...process.env, PATH: `${bin}:${process.env.PATH ?? ""}` };
+    }
+
+    // #357-T15
+    it.each([
+      ["find exits 2", { find: "exit 2" }, false],
+      ["find exits 1 (a file vanished)", { find: "exit 1" }, false],
+      ["grep exits 2", { grep: "exit 2" }, false],
+      ["grep exits 3", { grep: "exit 3" }, false],
+      ["grep is killed", { grep: "kill -9 $$" }, false],
+      [
+        "grep exits 2 for the Docker auth check only",
+        { grep: 'case "$*" in *-qE*) exit 2 ;; esac; exec /usr/bin/grep "$@"' },
+        true,
+      ],
+    ])(
+      "fails without a marker and with the tool failure status when %s, with a token planted",
+      (_what, stubs, withDockerConfig) => {
+        writeAnchor();
+        if (withDockerConfig) {
+          mkdirSync(join(roots, "home", "ubuntu", ".docker"), {
+            recursive: true,
+          });
+          writeFileSync(
+            join(roots, "home", "ubuntu", ".docker", "config.json"),
+            '{"auths":{}}',
+          );
+        }
+        writeFileSync(
+          join(roots, "home", "ubuntu", "leak.txt"),
+          `ghp_${"A1b2".repeat(10)}\n`,
+        );
+        const result = scanResult({}, stubTools(stubs));
+        expect(result.status).toBe(EXIT_TOOL_FAILED);
+        expect(result.stdout).not.toContain("SCAN_DONE");
+      },
+    );
+
+    // #357-T15
+    it("is not fooled by a grep that finds the token and fails afterwards", () => {
+      writeAnchor();
+      writeFileSync(
+        join(roots, "home", "ubuntu", "leak.txt"),
+        `ghp_${"A1b2".repeat(10)}\n`,
+      );
+      const result = scanResult(
+        {},
+        stubTools({ grep: '/usr/bin/grep "$@"; exit 2' }),
+      );
+      expect(result.status).toBe(EXIT_TOOL_FAILED);
+      expect(result.stdout).not.toContain("SCAN_DONE");
+    });
+
+    // #357-T18
+    it("does not fail on a file that was listed and is gone when grep asks for it, and still reports the others", () => {
+      writeAnchor();
+      const victim = join(roots, "etc", "ca-certificates.crt.new");
+      writeFileSync(victim, "a temporary file of the boot\n");
+      const leak = join(roots, "home", "ubuntu", "leak.txt");
+      writeFileSync(leak, `ghp_${"A1b2".repeat(10)}\n`);
+      // The stand-in lists as the real find does and removes the temporary file right after, as the boot does.
+      const env = {
+        ...stubTools({
+          find: `/usr/bin/find "$@"; status=$?; case "$*" in *-printf*) rm -f "$GOLDEN_VICTIM" ;; esac; exit $status`,
+        }),
+        GOLDEN_VICTIM: victim,
+      };
+      const result = scanResult({}, env);
+      expect(result.stdout).toBe(`FINDING token ${leak}\nSCAN_DONE\n`);
+      expect(result.status).toBe(0);
+    });
+
+    // #357-T18
+    it("lists again when find fails once, and passes", () => {
+      writeAnchor();
+      const flag = join(work, "find-failed-once");
+      const env = {
+        ...stubTools({
+          find: `case "$*" in *-printf*) if [ ! -e "$GOLDEN_FLAG" ]; then : > "$GOLDEN_FLAG"; echo "find: vanished" >&2; exit 1; fi ;; esac; exec /usr/bin/find "$@"`,
+        }),
+        GOLDEN_FLAG: flag,
+      };
+      const result = scanResult({}, env);
+      expect(existsSync(flag)).toBe(true);
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe("SCAN_DONE\n");
+    });
+
+    // #357-T15
+    it("still passes when grep finds nothing in some of its batches (exit 1 is a plain no-match)", () => {
+      writeAnchor();
+      for (let index = 0; index < 5; index += 1)
+        writeFileSync(
+          join(roots, "home", "ubuntu", `f${index}.txt`),
+          "plain\n",
+        );
+      const result = scanResult();
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe("SCAN_DONE\n");
+    });
+
+    // #357-T15
+    it("fails without a marker when the manifest no longer has the hash the pipeline pinned", () => {
+      const pinned = createHash("sha256")
+        .update(readFileSync(manifest))
+        .digest("hex");
+      writeAnchor();
+      const good = scanResult({ manifestSha256: pinned });
+      expect(good.status).toBe(0);
+      expect(good.stdout).toBe("SCAN_DONE\n");
+      // A record is added: a shrunk or garbled manifest would hide files.
+      appendFileSync(manifest, "/etc/app.conf\t1\t1.0\t1.0\0");
+      const tampered = scanResult({ manifestSha256: pinned });
+      expect(tampered.status).toBe(EXIT_MANIFEST_MODIFIED);
+      expect(tampered.stdout).not.toContain("SCAN_DONE");
+      const wrong = scanResult({ manifestSha256: "0".repeat(64) });
+      expect(wrong.status).toBe(EXIT_MANIFEST_MODIFIED);
+    });
+
+    // #357-T15
+    it("prints the hash of the manifest the record step wrote, and nothing else of it", () => {
+      const printed = recordBase();
+      expect(printed).toBe(
+        createHash("sha256").update(readFileSync(manifest)).digest("hex"),
+      );
+    });
+
+    // #357-T15
+    it("refuses a hash that is not 64 hex digits instead of ignoring it", () => {
+      expect(() => scanScript({ manifestSha256: "abc" })).toThrow();
+    });
+
+    it("exits with codes of its own for each of its failures", () => {
+      const codes = [
+        EXIT_MANIFEST_MISSING,
+        EXIT_MANIFEST_EMPTY,
+        EXIT_LISTING_EMPTY,
+        EXIT_ANCHOR_MISSING,
+        EXIT_TOOL_FAILED,
+        EXIT_MANIFEST_MODIFIED,
+      ];
+      expect(new Set(codes).size).toBe(codes.length);
+    });
+  });
+
+  // #357-T08
+  it("is not fooled by a file name with a space, a tab or a newline", () => {
+    recordBase();
     const odd = join(roots, "home", "ubuntu", "my .env");
     writeFileSync(odd, "A=1\n");
     chmodSync(odd, 0o600);
@@ -366,5 +914,21 @@ describe("the final scan of the restored snapshot", () => {
     const tokenFile = join(roots, "home", "ubuntu", "a b.txt");
     writeFileSync(tokenFile, `ghp_${"A1b2".repeat(10)}\n`);
     expect(scan()).toContain(`FINDING token ${tokenFile}\n`);
+    const tabbed = join(roots, "home", "ubuntu", "t\t5\t1.5.txt");
+    writeFileSync(tabbed, `ghp_${"A1b2".repeat(10)}\n`);
+    expect(scan()).toContain(`FINDING token ${tabbed}\n`);
+    const lined = join(roots, "home", "ubuntu", "new\nline.txt");
+    writeFileSync(lined, `ghp_${"A1b2".repeat(10)}\n`);
+    expect(scan()).toContain(`FINDING token ${lined}\n`);
+  });
+
+  // #357-T08
+  it("is not fooled by a base file with an odd name that changed", () => {
+    const lined = join(roots, "home", "ubuntu", "base\n5\nfile.txt");
+    writeFileSync(lined, "plain\n");
+    recordBase();
+    expect(scanOutput()).toBe("SCAN_DONE\n");
+    appendFileSync(lined, `ghp_${"A1b2".repeat(10)}\n`);
+    expect(scanOutput()).toContain(`FINDING token ${lined}\n`);
   });
 });

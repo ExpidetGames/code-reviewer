@@ -5,6 +5,8 @@ import { FakeSandboxService } from "../../../fakes/vercel-sandbox/service.ts";
 import { createLogger } from "../core/logger.ts";
 import {
   IMAGE_ID,
+  MANIFEST_HASH,
+  MANIFEST_OK,
   OTHER_IMAGE_ID,
   PROBE_OK,
   VM_PREPARE_TEXT,
@@ -15,7 +17,12 @@ import {
 import { SnapshotPipelineError } from "./errors.ts";
 import type { SnapshotErrorCode } from "./errors.ts";
 import { runPipeline } from "./pipeline.ts";
-import { PATHS, STEPS } from "./scripts.ts";
+import {
+  PATHS,
+  STEPS,
+  recordBaseManifestScript,
+  scanScript,
+} from "./scripts.ts";
 
 const NOW = new Date("2026-10-15T18:00:00.000Z");
 
@@ -60,6 +67,7 @@ describe("the golden snapshot pipeline", () => {
     const check = "code-reviewer-golden-check-20261015T180000Z";
     expect(fake.events.filter((event) => !event.startsWith("write:"))).toEqual([
       `create:${builder}`,
+      `exec:${STEPS.recordBaseManifest}`,
       `exec:${STEPS.installDocker}`,
       `exec:${STEPS.writeDaemonConfig}`,
       `exec:${STEPS.installHostScripts}`,
@@ -238,6 +246,79 @@ describe("the golden snapshot pipeline", () => {
     );
   });
 
+  // #357-T10
+  it("records the base manifest as the first command of the builder, before anything is installed", async () => {
+    const fake = happyFake();
+    await run(fake).result;
+    const [first, second] = fake.calls;
+    expect(first?.label).toBe(STEPS.recordBaseManifest);
+    expect(first?.sudo).toBe(true);
+    expect(first?.script).toBe(recordBaseManifestScript());
+    expect(second?.label).toBe(STEPS.installDocker);
+    // The scan reads the very file the record step wrote.
+    expect(first?.script).toContain(PATHS.baseManifest);
+    const scanCall = fake.callsFor(STEPS.scanFilesystem)[0];
+    expect(scanCall?.script).toBe(
+      scanScript({ manifestSha256: MANIFEST_HASH }),
+    );
+    expect(scanCall?.script).toContain(PATHS.baseManifest);
+    expect(scanCall?.script).toContain(PATHS.vmPrepareInstalled);
+    expect(fake.callsFor(STEPS.recordBaseManifest)).toHaveLength(1);
+  });
+
+  // #357-T17
+  it("pins the manifest hash the record step printed, outside the VM, and has the scan check it", async () => {
+    const fake = happyFake();
+    const hash = "d".repeat(64);
+    fake.onExec(STEPS.recordBaseManifest, {
+      stdout: `MANIFEST_SHA256 ${hash}\n`,
+    });
+    await run(fake).result;
+    const script = fake.callsFor(STEPS.scanFilesystem)[0]?.script ?? "";
+    expect(script).toBe(scanScript({ manifestSha256: hash }));
+    expect(script).toContain(`'${hash}'`);
+    expect(script).toContain("sha256sum --check");
+  });
+
+  // #357-T17
+  it.each([
+    ["no output", ""],
+    ["no hash", "recorded\n"],
+    ["a short hash", `MANIFEST_SHA256 ${"a".repeat(63)}\n`],
+    ["an upper case hash", `MANIFEST_SHA256 ${"A".repeat(64)}\n`],
+    ["a hash with a suffix", `MANIFEST_SHA256 ${"a".repeat(64)} x\n`],
+  ])(
+    "fails closed when the record step prints %s: no snapshot, builder removed",
+    async (_what, stdout) => {
+      const fake = happyFake();
+      fake.onExec(STEPS.recordBaseManifest, { stdout });
+      const error = await failure(run(fake).result);
+      expect(error.code).toBe("base_manifest_failed");
+      expect(error.step).toBe(STEPS.recordBaseManifest);
+      expect(fake.events.some((event) => event.startsWith("snapshot:"))).toBe(
+        false,
+      );
+      expectNothingPublished(fake);
+    },
+  );
+
+  // #357-T11
+  it("fails closed when the base manifest cannot be recorded: no snapshot, builder removed", async () => {
+    const fake = happyFake();
+    fake.onExec(STEPS.recordBaseManifest, { exitCode: 44 });
+    const error = await failure(run(fake).result);
+    expect(error.code).toBe("base_manifest_failed");
+    expect(error.step).toBe(STEPS.recordBaseManifest);
+    expect(fake.callsFor(STEPS.installDocker)).toHaveLength(0);
+    expect(fake.events.some((event) => event.startsWith("snapshot:"))).toBe(
+      false,
+    );
+    expect(
+      fake.vms.get("code-reviewer-golden-builder-20261015T180000Z")?.state,
+    ).toBe("deleted");
+    expectNothingPublished(fake);
+  });
+
   it.each<[string, { exitCode: number }, SnapshotErrorCode]>([
     [STEPS.installDocker, { exitCode: 100 }, "docker_install_failed"],
     [STEPS.installDocker, { exitCode: 42 }, "docker_version_mismatch"],
@@ -291,6 +372,7 @@ describe("the golden snapshot pipeline", () => {
 
   it("fails when the snapshot is not in fra1: snapshots are region-bound", async () => {
     const fake = new FakeSandboxService({ snapshotRegions: ["iad1"] });
+    fake.onExec(STEPS.recordBaseManifest, { stdout: MANIFEST_OK });
     fake.onExec(STEPS.inspectImage, { stdout: `${IMAGE_ID}\n` });
     const error = await failure(run(fake).result);
     expect(error.code).toBe("snapshot_region_mismatch");
