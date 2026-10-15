@@ -8,12 +8,13 @@
 // The answers never contain the git token or the LLM key: only the claim response does.
 import "server-only";
 import type { RunnerQueue } from "../jobs/runner-queue.ts";
-import type { JobOutcome } from "../jobs/job-types.ts";
+import type { Job, JobOutcome } from "../jobs/job-types.ts";
 import {
   RUNNER_API_VERSION,
   RUNNER_ERROR_CODES,
   type CompleteResponse,
   type HeartbeatResponse,
+  type RunnerResult,
 } from "./contract.ts";
 import type { ClaimedKeys } from "./claimed-keys.ts";
 import { redactResult } from "./redact.ts";
@@ -99,13 +100,50 @@ export async function handleComplete(
   const job = await deps.queue.get(jobId);
   if (job === undefined) return errorResponse(404, "RUNNER_JOB_NOT_FOUND");
 
+  return finishJob(deps, {
+    job,
+    leaseToken: parsed.value.leaseToken,
+    result: parsed.value.result,
+    who: `runner=${runnerId}`,
+    releaseCodes: [RUNNER_SHUTDOWN_CODE],
+    extraSecrets: [],
+  });
+}
+
+/**
+ * The rest of a completion, shared by the runner API's `complete` and the Worker API's `result` (#320):
+ * redact, store, or give the job back. `who` names the caller in the log line (never a secret),
+ * `releaseCodes` are the error codes that give the job back instead of storing the result (the runner
+ * API knows `runner_shutdown`; the Worker API adds `launch_failed`), and `extraSecrets` are values the
+ * caller itself holds (the Worker's own credential) that must not end up in the stored result either.
+ */
+export async function finishJob(
+  deps: ReportDeps,
+  {
+    job,
+    leaseToken,
+    result: reported,
+    who,
+    releaseCodes,
+    extraSecrets,
+  }: {
+    job: Job;
+    leaseToken: string;
+    result: RunnerResult;
+    who: string;
+    releaseCodes: readonly string[];
+    extraSecrets: readonly string[];
+  },
+): Promise<Response> {
+  const jobId = job.id;
   // What is stored: the checked result with everything that looks like a credential removed. The
   // same report always gives the same stored value, which is what makes a repetition recognisable.
   // The key of the claim and the current one: the key may have been rotated while the job ran, and the
   // claim may have been served by another app instance (the key of the claim is in the database).
-  const stored = redactResult(parsed.value.result, [
+  const stored = redactResult(reported, [
     ...(await deps.knownSecrets(job.workspaceId)),
     ...(await deps.claimedKeys.keysOf(jobId)),
+    ...extraSecrets,
   ]);
   const outcome: JobOutcome =
     stored.errorCode === null
@@ -118,20 +156,20 @@ export async function handleComplete(
 
   // A runner that is shut down gives the job back: it waits again (one attempt counted, the same cap
   // as a lapsed lease) instead of failing for good with every redeploy. The result is not stored.
-  if (stored.errorCode === RUNNER_SHUTDOWN_CODE) {
+  if (stored.errorCode !== null && releaseCodes.includes(stored.errorCode)) {
     const released = await deps.queue.release(
       jobId,
-      parsed.value.leaseToken,
-      RUNNER_SHUTDOWN_CODE,
+      leaseToken,
+      stored.errorCode,
     );
     if (released.status === "not_holder") {
       deps.logger.info(
-        `[runner-api] complete runner=${runnerId} job=${jobId} refused: lease lost`,
+        `[runner-api] complete ${who} job=${jobId} refused: lease lost`,
       );
       return errorResponse(409, "RUNNER_LEASE_LOST");
     }
     deps.logger.info(
-      `[runner-api] complete runner=${runnerId} job=${jobId} given back: runner_shutdown (${released.status})`,
+      `[runner-api] complete ${who} job=${jobId} given back: ${stored.errorCode} (${released.status})`,
     );
     return jsonResponse(200, {
       version: RUNNER_API_VERSION,
@@ -143,20 +181,16 @@ export async function handleComplete(
     } satisfies CompleteResponse);
   }
 
-  const result = await deps.queue.complete(
-    jobId,
-    parsed.value.leaseToken,
-    outcome,
-  );
+  const result = await deps.queue.complete(jobId, leaseToken, outcome);
   switch (result.status) {
     case "not_holder":
       deps.logger.info(
-        `[runner-api] complete runner=${runnerId} job=${jobId} refused: lease lost`,
+        `[runner-api] complete ${who} job=${jobId} refused: lease lost`,
       );
       return errorResponse(409, "RUNNER_LEASE_LOST");
     case "outcome_conflict":
       deps.logger.info(
-        `[runner-api] complete runner=${runnerId} job=${jobId} refused: another result was stored before`,
+        `[runner-api] complete ${who} job=${jobId} refused: another result was stored before`,
       );
       return errorResponse(409, "RUNNER_RESULT_CONFLICT");
     case "completed":
@@ -165,7 +199,7 @@ export async function handleComplete(
       if (status !== "succeeded" && status !== "failed")
         throw new Error(`Completed job ${jobId} has the status ${status}.`);
       deps.logger.info(
-        `[runner-api] complete runner=${runnerId} job=${jobId} status=${status}${result.status === "already_completed" ? " (repeated)" : ""}`,
+        `[runner-api] complete ${who} job=${jobId} status=${status}${result.status === "already_completed" ? " (repeated)" : ""}`,
       );
       return jsonResponse(200, {
         version: RUNNER_API_VERSION,

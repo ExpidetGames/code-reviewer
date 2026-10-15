@@ -13,11 +13,13 @@ export const REDACTED = "[redacted]";
 const MIN_SECRET_LENGTH = 8;
 
 // GitHub tokens (ghp_, gho_, ghu_, ghs_, ghr_ and fine-grained github_pat_), OpenRouter and
-// OpenAI style keys, and the credential of an `Authorization: Bearer` line.
+// OpenAI style keys, the per-job credential of a Worker (`crj_`, #320) and the credential of an
+// `Authorization: Bearer` line.
 const SECRET_SHAPES: readonly RegExp[] = [
   /\bgh[pousr]_[A-Za-z0-9]{16,}\b/g,
   /\bgithub_pat_[A-Za-z0-9_]{20,}\b/g,
   /\bsk-(?:or-)?[A-Za-z0-9_-]{16,}\b/g,
+  /\bcrj_[A-Za-z0-9_-]{16,}/g,
   /\bBearer\s+[A-Za-z0-9._~+/=-]{16,}/g,
 ];
 

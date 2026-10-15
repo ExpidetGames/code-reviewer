@@ -89,6 +89,29 @@ class LoopSettings:
     dynamic_ports: SlotPorts | None = None
 
 
+@dataclass(frozen=True)
+class WorkerSettings:
+    """What a Worker (`code-reviewer-worker --once`, #323) reads from its environment.
+
+    The same job-process settings as the loop, and none of its claiming: no token, no app URL (the
+    start document has the URL and the per-job credential), no slots, no polling.
+    """
+
+    job_timeout: float = DEFAULT_JOB_TIMEOUT_SECONDS
+    kill_margin: float = 10.0
+    terminate_grace: float = 5.0
+    backoff_max: float = 60.0
+    request_timeout: float = 30.0
+    complete_retry_window: float = 600.0
+    engines: tuple[str, ...] = (ENGINE_DIFF,)
+    dynamic_command: tuple[str, ...] | None = None
+    dynamic_ripgrep: str | None = None
+    job_command: tuple[str, ...] = field(default_factory=default_job_command)
+    diff_job_user: tuple[int, int] | None = None
+    dynamic_engine_user: tuple[int, int] | None = None
+    dynamic_ports: SlotPorts | None = None
+
+
 def _number(
     environment: Mapping[str, str], name: str, default: float, low: float, high: float
 ) -> float:
@@ -234,5 +257,24 @@ def settings_from_environment(environment: Mapping[str, str]) -> LoopSettings:
             DEFAULT_SHUTDOWN_GRACE_SECONDS,
             0,
             MAX_SHUTDOWN_GRACE_SECONDS,
+        ),
+    )
+
+
+def worker_settings_from_environment(environment: Mapping[str, str]) -> WorkerSettings:
+    """The Worker's settings: `RUNNER_JOB_TIMEOUT_SECONDS`, `PR_AGENT_COMMAND` (test stacks only),
+    `RUNNER_DIFF_JOB_USER` and the Dynamic slot's variables, exactly as the loop reads them."""
+    diff_job_user = _diff_job_user(environment)
+    return WorkerSettings(
+        job_command=_job_command(environment),
+        diff_job_user=diff_job_user,
+        dynamic_engine_user=_dynamic_engine_user(environment, diff_job_user),
+        dynamic_ports=_dynamic_ports(environment, diff_job_user),
+        job_timeout=_number(
+            environment,
+            "RUNNER_JOB_TIMEOUT_SECONDS",
+            DEFAULT_JOB_TIMEOUT_SECONDS,
+            1,
+            MAX_JOB_TIMEOUT_SECONDS,
         ),
     )

@@ -29,10 +29,16 @@ import {
   type RunnerEngine,
 } from "../../jobs/runner-capabilities.ts";
 import type { JobStatus } from "../../jobs/job-status.ts";
+import {
+  newLeaseToken,
+  newWorkerCredential,
+  workerLeaseToken,
+} from "../../jobs/worker-credential.ts";
 import type {
   CancelClaimedResult,
   ClaimResult,
   CompleteResult,
+  CountFetchResult,
   HeartbeatResult,
   Job,
   JobErrorCode,
@@ -62,8 +68,10 @@ export type ExpiryReport = {
 
 export type RunnerJobsRepositoryOptions = {
   now?: () => Date;
-  /** The random lease token of a claim. */
+  /** The random lease token of a claim (256 bits by default). */
   newToken?: () => string;
+  /** #320: the per-job credential of a claim made with `workerCredential`; tests only. */
+  newCredential?: () => string;
   limits?: Partial<JobQueueLimits>;
   /** Overrides the engine read from the connection; tests only. */
   driver?: DatabaseDriver;
@@ -78,7 +86,25 @@ export type RunnerJobsRepository = {
   claimNext(
     runnerId: string,
     engines?: readonly RunnerEngine[],
+    claimOptions?: ClaimOptions,
   ): Promise<ClaimResult>;
+  /**
+   * #320: the job `leaseToken` was issued for, whatever its status: the claim that is running, or the
+   * claim that ended (the token stays on a finished job, so a late or repeated report is recognised).
+   * `undefined` for any other token, including the one of an earlier claim of a job that was queued
+   * again. Reads only; the Worker API tells a credential that is not the job's (401) from a job that
+   * ended (409) with it.
+   */
+  holding(jobId: string, leaseToken: string): Promise<Job | undefined>;
+  /**
+   * #320: counts one fetch of the job details by the Worker of the running claim `leaseToken`
+   * belongs to, in one statement, up to `limit` per claim (the claim resets the count).
+   */
+  countFetch(
+    jobId: string,
+    leaseToken: string,
+    limit: number,
+  ): Promise<CountFetchResult>;
   /**
    * Extends the lease of the claim `leaseToken` belongs to. A job past the hard limit is failed with
    * `timeout` by this call and answers `not_holder`.
@@ -120,6 +146,15 @@ export type RunnerJobsRepository = {
   ): Promise<CancelClaimedResult>;
 };
 
+/** How a claim is made. */
+export type ClaimOptions = {
+  /**
+   * #320: mint a per-job credential for the claim (256 bits, `crj_`). The queue stores only its hash
+   * as the lease token of the claim and returns the credential once, as `credential`.
+   */
+  workerCredential?: boolean;
+};
+
 /** Which running jobs an attempt-losing statement applies to. */
 type RunningScope = {
   /** Only jobs whose lease ran out at or before this timestamp. */
@@ -149,7 +184,8 @@ export function createRunnerJobsRepository(
   options: RunnerJobsRepositoryOptions = {},
 ): RunnerJobsRepository {
   const now = options.now ?? (() => new Date());
-  const newToken = options.newToken ?? (() => crypto.randomUUID());
+  const newToken = options.newToken ?? newLeaseToken;
+  const newCredential = options.newCredential ?? newWorkerCredential;
   const limits = { ...DEFAULT_JOB_QUEUE_LIMITS, ...options.limits };
   const driver = options.driver ?? databaseDriver(db);
   // The transaction guard already holds the exclusive gate lock; read without taking another lock
@@ -392,11 +428,15 @@ export function createRunnerJobsRepository(
   }
 
   return {
-    claimNext(runnerId, engines = DEFAULT_ENGINES) {
+    claimNext(runnerId, engines = DEFAULT_ENGINES, claimOptions = {}) {
       return inTransaction(async (trx) => {
         const current = now();
         await expire(trx, current);
-        const leaseToken = newToken();
+        // The credential is only ever returned; the database gets its hash as the lease token.
+        const credential =
+          claimOptions.workerCredential === true ? newCredential() : undefined;
+        const leaseToken =
+          credential === undefined ? newToken() : workerLeaseToken(credential);
         const claim = {
           runnerId,
           leaseToken,
@@ -416,7 +456,41 @@ export function createRunnerJobsRepository(
           row.workspace_id,
           () => current,
         ).reserve(row.id, "own");
-        return { job: toJob(row), leaseToken };
+        return {
+          job: toJob(row),
+          leaseToken,
+          ...(credential === undefined ? {} : { credential }),
+        };
+      });
+    },
+
+    async holding(jobId, leaseToken) {
+      const row = await db
+        .selectFrom("jobs")
+        .selectAll()
+        .where("id", "=", jobId)
+        .where("lease_token", "=", leaseToken)
+        .executeTakeFirst();
+      return row === undefined ? undefined : toJob(row);
+    },
+
+    countFetch(jobId, leaseToken, limit) {
+      return inTransaction<CountFetchResult>(async (trx) => {
+        const counted = await trx
+          .updateTable("jobs")
+          .set((eb) => ({ worker_fetches: eb("worker_fetches", "+", 1) }))
+          .where(runningWhere({ claim: { jobId, leaseToken } }))
+          .where("worker_fetches", "<", limit)
+          .returning("id")
+          .executeTakeFirst();
+        if (counted !== undefined) return "counted";
+        // Not counted: either the fetches are used up, or the caller does not hold the running claim.
+        const held = await trx
+          .selectFrom("jobs")
+          .select("id")
+          .where(runningWhere({ claim: { jobId, leaseToken } }))
+          .executeTakeFirst();
+        return held === undefined ? "not_holder" : "exhausted";
       });
     },
 
