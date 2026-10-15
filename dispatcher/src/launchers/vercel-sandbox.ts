@@ -111,24 +111,31 @@ function statusOf(error: unknown): number | undefined {
   return typeof status === "number" ? status : undefined;
 }
 
-/** The words of an API error that classify it: its message and the code of its body, lower case. */
+/** The machine-readable code of an API error's body, lower case, or "" when it has none. */
+function codeOf(error: unknown): string {
+  if (typeof error !== "object" || error === null || !("json" in error))
+    return "";
+  const json: unknown = error.json;
+  if (typeof json !== "object" || json === null) return "";
+  const body = json as Record<string, unknown>;
+  const nested = body.error;
+  const code =
+    typeof body.code === "string"
+      ? body.code
+      : typeof nested === "string"
+        ? nested
+        : typeof nested === "object" &&
+            nested !== null &&
+            typeof (nested as Record<string, unknown>).code === "string"
+          ? (nested as { code: string }).code
+          : "";
+  return code.toLowerCase();
+}
+
+/** The words of an API error that classify it: its message and its code, lower case. */
 function wordsOf(error: unknown): string {
-  const parts: string[] = [];
-  if (error instanceof Error) parts.push(error.message);
-  if (typeof error === "object" && error !== null && "json" in error) {
-    const json: unknown = error.json;
-    if (typeof json === "object" && json !== null) {
-      const body = json as Record<string, unknown>;
-      const nested = body.error;
-      if (typeof body.code === "string") parts.push(body.code);
-      if (typeof nested === "string") parts.push(nested);
-      if (typeof nested === "object" && nested !== null) {
-        const detail = nested as Record<string, unknown>;
-        if (typeof detail.code === "string") parts.push(detail.code);
-      }
-    }
-  }
-  return parts.join(" ").toLowerCase();
+  const message = error instanceof Error ? error.message : "";
+  return `${message} ${codeOf(error)}`.toLowerCase();
 }
 
 const NETWORK_CODE = /^(E[A-Z0-9]+|UND_ERR[A-Z_]*)$/;
@@ -153,19 +160,22 @@ function isConnectionFailure(error: unknown): boolean {
 
 /**
  * The failure kind of a platform error. The bodies of the platform's errors are not documented, so this goes by the
- * HTTP status first and by words of the error code second; a call that got no answer is a network failure. Anything
+ * HTTP status first, then the error code of the body, then words of the message; a call that got no answer is a network failure. Anything
  * it does not recognise is a refusal, which no retry is known to fix.
  */
 export function classifySandboxError(error: unknown): SandboxFailureKind {
   const status = statusOf(error);
   if (status === undefined)
     return isConnectionFailure(error) ? "network" : "rejected";
-  const words = wordsOf(error);
   if (status === 429) return "rate_limited";
   if (status >= 500) return "unavailable";
-  if (/region/.test(words)) return "region_mismatch";
-  if (status === 402 || /quota|limit|exceed/.test(words))
+  // A quota is the status 402 or an explicit code of the body. The words of a message are not enough: a refusal of a
+  // bad request ("timeout exceeds the limit") is a configuration error, not a quota that clears.
+  if (status === 402 || /quota|limit_exceeded|too_many/.test(codeOf(error)))
     return "quota_exceeded";
+  if (status === 401 || status === 403) return "auth_failed";
+  const words = wordsOf(error);
+  if (/region/.test(words)) return "region_mismatch";
   if (
     /snapshot/.test(words) &&
     /not.?found|missing|expired|deleted|gone/.test(words)

@@ -25,7 +25,7 @@ help:
 	@echo "make test-e2e          Playwright journeys against a production build (ARGS=... to filter)"
 	@echo "make test-e2e-dynamic   the privileged Dynamic Review journey with the real OpenCode (root and nft, CI-first, ARGS=... to filter)"
 	@echo "make test-sandbox-local  the Sandbox-Launcher's local mode with a real Docker daemon and the Worker image (needs Docker, not part of verify)"
-	@echo "make test-images       build the container images (the Dynamic runner target too) and run their smoke tests (needs Docker)"
+	@echo "make test-images       build the container images (the Dynamic runner and Sandbox targets too) and run their smoke tests (needs Docker)"
 	@echo "make test-compose      build both images and smoke test the Docker Compose stack (needs Docker)"
 	@echo "make verify            lint, typecheck, unit and host integration tests and the license check; run before every PR"
 
@@ -109,8 +109,7 @@ test-e2e-dynamic:
 # The privileged lane of the Sandbox-Launcher (#329-T09, T10): the local mode of the Sandbox double over a real Docker
 # daemon, with the Worker image of the `sandbox` target and the fake App. Needs a running daemon this user may use and
 # fails, naming what is missing, without one. The container reaches the fake App on the docker0 gateway
-# (SANDBOX_LOCAL_APP_HOST). Not part of `make verify`. The image target and the entry mode it runs (`sandbox`, `worker-once`) come with #324; the CI job for
-# this lane follows once they are on `development`.
+# (SANDBOX_LOCAL_APP_HOST). Not part of `make verify`; CI runs it as the job `sandbox-local`.
 test-sandbox-local:
 	docker build --file runner/Dockerfile --target sandbox --tag code-reviewer-worker:local .
 	SANDBOX_LOCAL_IMAGE=code-reviewer-worker:local TEST_ALLOWED_HOSTS=$${SANDBOX_LOCAL_APP_HOST:-172.17.0.1} $(DISPATCHER) test:privileged

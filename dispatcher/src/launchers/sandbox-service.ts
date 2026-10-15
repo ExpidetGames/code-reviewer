@@ -18,6 +18,7 @@ export const SANDBOX_FAILURE_KINDS = [
   "region_mismatch",
   "not_ready",
   "rejected",
+  "auth_failed",
 ] as const;
 export type SandboxFailureKind = (typeof SANDBOX_FAILURE_KINDS)[number];
 

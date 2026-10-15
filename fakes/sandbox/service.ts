@@ -72,6 +72,8 @@ type FakeProcessRecord = {
   stdinClosed: boolean;
   exit: Deferred<{ exitCode: number }>;
   ended: boolean;
+  /** The `wait()` calls that have not ended yet; `dropWaits` rejects them like a broken log stream. */
+  pendingWaits: Set<(error: Error) => void>;
 };
 
 function abortError(): Error {
@@ -92,6 +94,8 @@ export class FakeSandboxService {
   private createError: Error | undefined;
   private createGate: Deferred<void> | undefined;
   private stopError: Error | undefined;
+  private waitFailures: { remaining: number; error: Error } | undefined;
+  private rename: ((name: string) => string) | undefined;
 
   // ---- scripting -------------------------------------------------------------------------------
 
@@ -116,6 +120,23 @@ export class FakeSandboxService {
   /** Every following `stop` throws this error. */
   failStops(error: Error): void {
     this.stopError = error;
+  }
+
+  /** The VMs the platform creates get a different name than the requested one (a normalised name). */
+  renameCreatedVms(rename: (name: string) => string): void {
+    this.rename = rename;
+  }
+
+  /** Rejects the `wait()` calls of the VM's processes that are pending now, like a log stream that broke. */
+  dropWaits(vm: string, error: Error): void {
+    for (const process of this.processes)
+      if (process.vm === vm && !process.ended)
+        for (const reject of [...process.pendingWaits]) reject(error);
+  }
+
+  /** The next `times` calls of `wait()` reject at once with this error. */
+  failWaits(times: number, error: Error): void {
+    this.waitFailures = { remaining: times, error };
   }
 
   /** The next `create` waits until `release()` is called or its signal aborts. */
@@ -193,14 +214,15 @@ export class FakeSandboxService {
         });
       });
     }
-    if (this.vms.has(options.name))
-      throw new Error(`The sandbox name ${options.name} is taken.`);
+    const name = this.rename?.(options.name) ?? options.name;
+    if (this.vms.has(name))
+      throw new Error(`The sandbox name ${name} is taken.`);
     const record: FakeVmRecord = {
-      name: options.name,
+      name,
       options: structuredClone(options),
       state: "running",
     };
-    this.vms.set(options.name, record);
+    this.vms.set(name, record);
     return this.vm(record);
   }
 
@@ -269,6 +291,7 @@ export class FakeSandboxService {
           stdinClosed: false,
           exit: deferred(),
           ended: false,
+          pendingWaits: new Set(),
         };
         this.processes.push(process);
         return Promise.resolve({
@@ -281,22 +304,33 @@ export class FakeSandboxService {
             process.stdinClosed = true;
             return Promise.resolve();
           },
-          wait: (signal?: AbortSignal) =>
-            signal === undefined
-              ? process.exit.promise
-              : Promise.race([
-                  process.exit.promise,
-                  new Promise<never>((_resolve, reject) => {
-                    if (signal.aborted) reject(abortError());
-                    signal.addEventListener(
-                      "abort",
-                      () => reject(abortError()),
-                      {
-                        once: true,
-                      },
-                    );
-                  }),
-                ]),
+          wait: (signal?: AbortSignal) => {
+            const failures = this.waitFailures;
+            if (failures !== undefined && failures.remaining > 0) {
+              failures.remaining -= 1;
+              return Promise.reject(failures.error);
+            }
+            return new Promise<{ exitCode: number }>((resolve, reject) => {
+              process.pendingWaits.add(reject);
+              const done = () => process.pendingWaits.delete(reject);
+              void process.exit.promise.then((result) => {
+                done();
+                resolve(result);
+              });
+              if (signal?.aborted) {
+                done();
+                reject(abortError());
+              }
+              signal?.addEventListener(
+                "abort",
+                () => {
+                  done();
+                  reject(abortError());
+                },
+                { once: true },
+              );
+            });
+          },
         });
       },
     };

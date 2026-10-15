@@ -21,6 +21,7 @@ import {
   SANDBOX_HANDOVER_SECONDS,
   SANDBOX_IMAGE_REFERENCE,
   SANDBOX_REGION,
+  minimumVmTimeoutMargin,
   VM_TIMEOUT_MARGIN_SECONDS,
   createSandboxLauncher,
   type SandboxLauncher,
@@ -222,6 +223,7 @@ describe("the Sandbox-Launcher", () => {
     ["snapshot_missing", "sandbox_snapshot_missing", false],
     ["region_mismatch", "sandbox_region_mismatch", false],
     ["rejected", "sandbox_rejected", false],
+    ["auth_failed", "sandbox_auth_failed", false],
   ])(
     "turns a failed create (%s) into LaunchError %s, retryable %s",
     async (kind, code, retryable) => {
@@ -238,7 +240,7 @@ describe("the Sandbox-Launcher", () => {
 
   // #329-T04
   it("covers every failure kind of the port", () => {
-    expect(SANDBOX_FAILURE_KINDS).toHaveLength(8);
+    expect(SANDBOX_FAILURE_KINDS).toHaveLength(9);
   });
 
   // #329-T04
@@ -315,7 +317,7 @@ describe("the Sandbox-Launcher", () => {
     expect(service.creates[0]?.timeoutMs).toBe(
       (1200 + VM_TIMEOUT_MARGIN_SECONDS) * 1000,
     );
-    expect(VM_TIMEOUT_MARGIN_SECONDS).toBe(120);
+    expect(VM_TIMEOUT_MARGIN_SECONDS).toBe(300);
     expect(service.stops).toStrictEqual([]);
     expect(background).toHaveLength(1);
 
@@ -576,6 +578,160 @@ describe("the Sandbox-Launcher", () => {
     for (const forbidden of ["--privileged", "--volume", "-v", "--device"])
       expect(args).not.toContain(forbidden);
   });
+});
+
+describe("findings of the review of #354", () => {
+  // #329-R01
+  it("retries a wait that failed after the hand-over and stops the VM only when the exit is confirmed", async () => {
+    const launcher = build();
+    await launch(launcher);
+    const name = service.creates[0]?.name ?? "";
+
+    service.dropWaits(name, new Error("the log stream broke"));
+    await settle();
+    await clock.advance(60_000);
+
+    expect(service.stops).toStrictEqual([]);
+    expect(service.running()).toStrictEqual([name]);
+
+    service.exitProcess(name, 0);
+    await launcher.idle();
+
+    expect(service.stops).toStrictEqual([name]);
+    expect(logger.text()).not.toContain("log stream");
+  });
+
+  // #329-R01
+  it("leaves a healthy VM to its timeout when the wait keeps failing, and logs a stable code", async () => {
+    const launcher = build();
+    await launch(launcher);
+    const name = service.creates[0]?.name ?? "";
+
+    service.failWaits(10, new Error("the log stream broke 4711"));
+    service.dropWaits(name, new Error("the log stream broke 4711"));
+    const idle = launcher.idle();
+    await settle();
+    await clock.advance(120_000);
+    await idle;
+
+    expect(service.stops).toStrictEqual([]);
+    expect(service.running()).toStrictEqual([name]);
+    expect(logger.text()).toContain("worker_wait_failed");
+    expect(logger.text()).toContain('"attempts":3');
+    expect(logger.text()).not.toContain("4711");
+  });
+
+  // #329-R02
+  it("stops the VM by the name the platform returned, not the one it was asked for", async () => {
+    service.renameCreatedVms((name) => `${name}-normalised`);
+    const launcher = build();
+    await launch(launcher);
+    const requested = service.creates[0]?.name ?? "";
+    const returned = `${requested}-normalised`;
+
+    service.exitProcess(returned, 0);
+    await launcher.idle();
+
+    expect(service.stops).toStrictEqual([returned]);
+    expect(service.running()).toStrictEqual([]);
+    expect(logger.text()).toContain("sandbox_name_mismatch");
+  });
+
+  // #329-R02
+  it("stops a failed launch by the returned name too", async () => {
+    service.renameCreatedVms((name) => `${name}-normalised`);
+    service.onExec("image-id", { stdout: `${OTHER_IMAGE_ID}\n` });
+
+    await launch(build());
+
+    expect(service.stops).toStrictEqual([
+      `${service.creates[0]?.name}-normalised`,
+    ]);
+    expect(service.running()).toStrictEqual([]);
+  });
+
+  // #329-R03
+  it("gives the VM a timeout that covers the launch phase: the job plus 300 seconds by default", async () => {
+    await launch(build());
+
+    expect(service.creates[0]?.timeoutMs).toBe((1200 + 300) * 1000);
+  });
+
+  // #329-R03
+  it("takes the margin from configuration", async () => {
+    await launch(build({ vmTimeoutMarginSeconds: 600 }));
+
+    expect(service.creates[0]?.timeoutMs).toBe((1200 + 600) * 1000);
+  });
+
+  // #329-R03
+  it("refuses a margin below the floor that covers create, prepare, the image check and the hand-over", () => {
+    expect(minimumVmTimeoutMargin(20)).toBe(180);
+    expect(minimumVmTimeoutMargin(60)).toBe(210);
+
+    expect(() => build({ vmTimeoutMarginSeconds: 179 })).toThrowError(
+      /vmTimeoutMarginSeconds/,
+    );
+    expect(() =>
+      build({ handoverSeconds: 60, vmTimeoutMarginSeconds: 209 }),
+    ).toThrowError(/vmTimeoutMarginSeconds/);
+    expect(() => build({ vmTimeoutMarginSeconds: 180 })).not.toThrow();
+  });
+
+  // #329-R04
+  it("passes the mapped code through when a call of the host preparation fails at the platform", async () => {
+    service.onExec("vm-prepare", () => {
+      throw new SandboxServiceError("rate_limited");
+    });
+
+    const error = failure(await launch(build()));
+
+    expect(error.code).toBe("sandbox_rate_limited");
+    expect(error.retryable).toBe(true);
+    expect(service.stops).toStrictEqual([service.creates[0]?.name]);
+  });
+
+  // #329-R04
+  it("gives an unknown failure of the host preparation its own code", async () => {
+    service.onExec("vm-prepare", () => {
+      throw new Error("something odd 31337");
+    });
+
+    const error = failure(await launch(build()));
+
+    expect(error.code).toBe("vm_prepare_failed");
+    expect(error.retryable).toBe(true);
+    expect(logger.text()).not.toContain("31337");
+  });
+
+  // #329-R04
+  it.each<[number, boolean]>([
+    // The Worker ran and said the job failed: it delivered its own result, and a second VM would do the same.
+    [1, false],
+    // A setup error of the Worker (2), docker's own refusals (125 to 127) and a kill (137): something about this VM
+    // or its start, which a fresh VM can get right.
+    [2, true],
+    [125, true],
+    [126, true],
+    [127, true],
+    [137, true],
+  ])(
+    "decides whether an exit with %s before the hand-over is retryable",
+    async (exitCode, retryable) => {
+      const launcher = build();
+      const ended = launcher.launch(spec(), new AbortController().signal).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      await settle();
+
+      service.exitProcess(service.creates[0]?.name ?? "", exitCode);
+      const error = (await ended) as LaunchError;
+
+      expect(error.code).toBe("worker_exited_early");
+      expect(error.retryable).toBe(retryable);
+    },
+  );
 });
 
 describe("the Sandbox-Launcher in the Dispatcher core", () => {

@@ -8,6 +8,7 @@
 // | SANDBOX_SNAPSHOT_ID                                | The golden snapshot (#330 record `snapshotId`)                     | none: no launcher, nothing is claimed |
 // | SANDBOX_IMAGE_DIGEST                               | The Worker image id in it (#330 record `imageDigest`), `sha256:...` | required with the snapshot |
 // | SANDBOX_HANDOVER_SECONDS                           | How long the container runs before the Worker counts as having taken over (1 to 120) | 20 |
+// | SANDBOX_VM_TIMEOUT_MARGIN_SECONDS                 | Seconds added to the job's timeout for the VM's own (the backstop that ends a VM nobody stops); at least 180 and 150 more than the hand-over time, at most 3600 | 300 |
 // | VERCEL_TOKEN, VERCEL_TEAM_ID, VERCEL_PROJECT_ID    | Platform access by token. Without a token the OIDC token is used   | OIDC |
 //
 // VM size and container memory per Worker kind are part of DISPATCHER_WORKER_CONFIG (`launcher.vcpus`,
@@ -21,7 +22,13 @@ import {
 } from "../config.ts";
 import type { Launcher, Logger } from "../core/types.ts";
 import { noLauncher } from "./none.ts";
-import { createSandboxLauncher, validateKindConfig } from "./sandbox.ts";
+import {
+  LAUNCH_STEPS_SECONDS,
+  createSandboxLauncher,
+  minimumVmTimeoutMargin,
+  validateKindConfig,
+  VM_TIMEOUT_MARGIN_SECONDS,
+} from "./sandbox.ts";
 import {
   createVercelSandboxService,
   type SandboxSdk,
@@ -86,6 +93,13 @@ export function sandboxFromEnvironment(
     max: 120,
     fallback: 20,
   });
+  const vmTimeoutMarginSeconds = integer(
+    env,
+    "SANDBOX_VM_TIMEOUT_MARGIN_SECONDS",
+    { min: 1, max: 3600, fallback: VM_TIMEOUT_MARGIN_SECONDS },
+  );
+  if (vmTimeoutMarginSeconds < minimumVmTimeoutMargin(handoverSeconds))
+    throw new ConfigError("SANDBOX_VM_TIMEOUT_MARGIN_SECONDS", "invalid");
   const access = credentials(env);
   const secrets = [access?.token, read(env, "VERCEL_OIDC_TOKEN")].filter(
     (secret): secret is string => secret !== undefined,
@@ -94,6 +108,13 @@ export function sandboxFromEnvironment(
   return {
     secrets,
     launcher({ settings, logger, background }) {
+      // The launch has the core's deadline from the claim: the hand-over comes after create, the host preparation
+      // and the image check, whose own timeouts add up to LAUNCH_STEPS_SECONDS.
+      if (
+        handoverSeconds + LAUNCH_STEPS_SECONDS >
+        settings.core.launchDeadlineSeconds
+      )
+        throw new ConfigError("SANDBOX_HANDOVER_SECONDS", "invalid");
       for (const kind of ["diff", "dynamic"] as const) {
         try {
           validateKindConfig(kind, settings.core.workerConfig[kind]);
@@ -106,6 +127,7 @@ export function sandboxFromEnvironment(
         snapshotId,
         imageDigest,
         handoverSeconds,
+        vmTimeoutMarginSeconds,
         logger,
         background,
       });

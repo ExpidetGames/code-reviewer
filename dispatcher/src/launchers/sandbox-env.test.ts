@@ -179,6 +179,69 @@ describe("the Sandbox-Launcher's configuration from the environment", () => {
     ]);
   });
 
+  // #329-R05
+  it.each<[string, Record<string, string>, string]>([
+    [
+      "a margin below the floor",
+      configured({ SANDBOX_VM_TIMEOUT_MARGIN_SECONDS: "179" }),
+      "SANDBOX_VM_TIMEOUT_MARGIN_SECONDS",
+    ],
+    [
+      "a margin that is not a number",
+      configured({ SANDBOX_VM_TIMEOUT_MARGIN_SECONDS: "long" }),
+      "SANDBOX_VM_TIMEOUT_MARGIN_SECONDS",
+    ],
+    [
+      "a margin above an hour",
+      configured({ SANDBOX_VM_TIMEOUT_MARGIN_SECONDS: "3601" }),
+      "SANDBOX_VM_TIMEOUT_MARGIN_SECONDS",
+    ],
+    [
+      "a margin that does not cover the hand-over time",
+      configured({
+        SANDBOX_HANDOVER_SECONDS: "100",
+        SANDBOX_VM_TIMEOUT_MARGIN_SECONDS: "249",
+      }),
+      "SANDBOX_VM_TIMEOUT_MARGIN_SECONDS",
+    ],
+  ])("refuses %s and names the variable", (_what, env, variable) => {
+    expect(refusal(env).variable).toBe(variable);
+  });
+
+  // #329-R05
+  it("accepts the margin at its floor and in the middle", () => {
+    for (const margin of ["180", "300", "3600"])
+      expect(() =>
+        sandboxFromEnvironment(
+          configured({ SANDBOX_VM_TIMEOUT_MARGIN_SECONDS: margin }),
+          never,
+        ),
+      ).not.toThrow();
+  });
+
+  // #329-R06
+  it("refuses a hand-over time that, with create, prepare and the image check, would pass the core's launch deadline", () => {
+    const sandbox = sandboxFromEnvironment(
+      configured({ SANDBOX_HANDOVER_SECONDS: "120" }),
+      never,
+    );
+    const make = (launchDeadlineSeconds: number) => {
+      const settings = loadSettings(BASE);
+      return sandbox.launcher({
+        settings: {
+          ...settings,
+          core: { ...settings.core, launchDeadlineSeconds },
+        },
+        logger: recordingLogger(),
+        background: () => undefined,
+      });
+    };
+
+    expect(() => make(300)).not.toThrow();
+    expect(() => make(270)).not.toThrow();
+    expect(() => make(269)).toThrowError(/SANDBOX_HANDOVER_SECONDS/);
+  });
+
   // #329-T11
   it("refuses a worker configuration the Launcher cannot run at start, not at the first job", () => {
     const sandbox = sandboxFromEnvironment(configured(), never);

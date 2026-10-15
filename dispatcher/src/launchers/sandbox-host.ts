@@ -36,6 +36,25 @@ export type SandboxDockerHostOptions = {
   handoverSeconds: number;
 };
 
+/** How often a failed `wait()` is asked again, and how long to wait between the tries. */
+export const WAIT_ATTEMPTS = 3;
+const WAIT_RETRY_DELAYS_MS = [2_000, 5_000] as const;
+
+/**
+ * `wait()` kept failing: what became of the container is unknown. After the hand-over the VM is then left alone
+ * (the Worker may well be reviewing) and its timeout is the backstop.
+ */
+export class WorkerWaitError extends Error {
+  readonly code = "worker_wait_failed";
+  readonly attempts: number;
+
+  constructor(attempts: number) {
+    super("worker_wait_failed");
+    this.name = "WorkerWaitError";
+    this.attempts = attempts;
+  }
+}
+
 function isAbort(error: unknown): boolean {
   return (
     typeof error === "object" &&
@@ -140,7 +159,7 @@ export class SandboxDockerHost implements ContainerHost {
       await worker.writeStdin(invocation.stdin);
       await worker.closeStdin();
 
-      const exited = worker.wait();
+      const exited = this.#wait(worker, pending.signal);
       exited.catch(() => undefined);
       const first = await Promise.race([
         exited.then((result) => ({ ended: result })),
@@ -153,7 +172,12 @@ export class SandboxDockerHost implements ContainerHost {
         throw new LaunchError("launch_aborted");
       }
       if (first.ended !== undefined && first.ended.exitCode !== 0)
-        throw new LaunchError("worker_exited_early", { retryable: true });
+        // Exit 1 is the Worker saying the job failed, after it delivered its own result: a second VM would get the
+        // same answer, so it is not retryable. Any other code (a setup error 2, docker's own 125 to 127, a kill 137)
+        // is about this VM or its start, which a fresh VM can get right.
+        throw new LaunchError("worker_exited_early", {
+          retryable: first.ended.exitCode !== 1,
+        });
       this.#handedOver();
       invocation.signal?.removeEventListener("abort", forward);
       return await exited;
@@ -162,6 +186,27 @@ export class SandboxDockerHost implements ContainerHost {
       const failure = this.#asLaunchError(error, pending.signal);
       this.fail(failure);
       throw failure;
+    }
+  }
+
+  /** `wait()` asked again a bounded number of times: a broken log stream is not the end of the container. */
+  async #wait(
+    worker: { wait(signal?: AbortSignal): Promise<{ exitCode: number }> },
+    pending: AbortSignal,
+  ): Promise<{ exitCode: number }> {
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        return await worker.wait();
+      } catch (error) {
+        // An abort before the hand-over is the launch's own end, not a failed wait.
+        if (!this.#settled && (pending.aborted || isAbort(error))) throw error;
+        if (attempt >= WAIT_ATTEMPTS) throw new WorkerWaitError(attempt);
+        await this.#options.clock.sleep(
+          WAIT_RETRY_DELAYS_MS[attempt - 1] ?? 5_000,
+          this.#settled ? undefined : pending,
+        );
+        if (!this.#settled && pending.aborted) throw error;
+      }
     }
   }
 

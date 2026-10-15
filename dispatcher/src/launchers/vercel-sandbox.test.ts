@@ -304,7 +304,19 @@ describe("the Vercel adapter of the Sandbox port", () => {
     ["a platform error", apiError(503), "unavailable"],
     ["a bad gateway", apiError(502), "unavailable"],
     ["a refusal of the request", apiError(400, "invalid_request"), "rejected"],
-    ["bad credentials", apiError(401), "rejected"],
+    ["bad credentials", apiError(401), "auth_failed"],
+    ["a forbidden request", apiError(403, "forbidden"), "auth_failed"],
+    ["an expired token", apiError(401, "token_expired"), "auth_failed"],
+    [
+      "a refusal that only says limit and exceeds in its text",
+      apiError(400, "invalid_timeout", "timeout exceeds the limit"),
+      "rejected",
+    ],
+    [
+      "a refusal that says quota in its text but has no code of one",
+      apiError(400, "invalid_request", "quota of tags exceeded"),
+      "rejected",
+    ],
     [
       "no connection",
       Object.assign(new TypeError("fetch failed"), {

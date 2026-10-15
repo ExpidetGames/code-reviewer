@@ -35,7 +35,7 @@ import {
   SANDBOX_LAUNCHER_ADDITIONS,
   WORKER_CONTAINER_SPEC,
 } from "./container-spec.ts";
-import { SandboxDockerHost } from "./sandbox-host.ts";
+import { SandboxDockerHost, WorkerWaitError } from "./sandbox-host.ts";
 import {
   SandboxServiceError,
   type SandboxFailureKind,
@@ -45,8 +45,23 @@ import {
 
 /** Snapshots are region-bound and there is no failover region: fixed, not an option. */
 export const SANDBOX_REGION = "fra1";
-/** How much longer than the job a VM may live if nobody stops it. */
-export const VM_TIMEOUT_MARGIN_SECONDS = 120;
+/**
+ * How much longer than the job a VM may live if nobody stops it. The platform counts from the creation of the VM,
+ * the Worker's own job timer from the start of the container, so the margin has to cover create, `vm-prepare.sh`, the
+ * image check and the hand-over besides the Worker's delivery of a `timeout` result.
+ */
+export const VM_TIMEOUT_MARGIN_SECONDS = 300;
+/** The longest the steps before `docker run` may take besides the hand-over: create 60, prepare 60, image check 30. */
+export const LAUNCH_STEPS_SECONDS = 150;
+const MIN_VM_TIMEOUT_MARGIN_SECONDS = 180;
+
+/** The smallest margin that still covers the launch phase with this hand-over time. */
+export function minimumVmTimeoutMargin(handoverSeconds: number): number {
+  return Math.max(
+    MIN_VM_TIMEOUT_MARGIN_SECONDS,
+    handoverSeconds + LAUNCH_STEPS_SECONDS,
+  );
+}
 /** How long the container must run for the Worker to count as having taken over (sandbox-host.ts). */
 export const SANDBOX_HANDOVER_SECONDS = 20;
 /** The tag the golden snapshot pipeline (#330) gives the Worker image in the snapshot. */
@@ -90,6 +105,8 @@ export type SandboxLauncherOptions = {
   background?: (work: Promise<unknown>) => void;
   imageReference?: string;
   handoverSeconds?: number;
+  /** Seconds added to the job's timeout for the VM's own; at least `minimumVmTimeoutMargin(handoverSeconds)`. */
+  vmTimeoutMarginSeconds?: number;
   /**
    * The engines this Launcher can run right now. PR-Agent only until the capability probe (#331) vouches for the
    * Dynamic-Worker: fail closed.
@@ -212,6 +229,12 @@ const CREATE_FAILURES: Readonly<
     mayExist: false,
   },
   rejected: { code: "sandbox_rejected", retryable: false, mayExist: false },
+  // An expired or wrong token (or OIDC token): the first thing an operator meets, and no retry fixes it.
+  auth_failed: {
+    code: "sandbox_auth_failed",
+    retryable: false,
+    mayExist: false,
+  },
 };
 
 function isAbort(error: unknown): boolean {
@@ -228,6 +251,13 @@ export function createSandboxLauncher(
 ): SandboxLauncher {
   const { service, logger } = options;
   const clock = options.clock ?? systemClock;
+  const handoverSeconds = options.handoverSeconds ?? SANDBOX_HANDOVER_SECONDS;
+  const vmTimeoutMarginSeconds =
+    options.vmTimeoutMarginSeconds ?? VM_TIMEOUT_MARGIN_SECONDS;
+  if (vmTimeoutMarginSeconds < minimumVmTimeoutMargin(handoverSeconds))
+    throw new Error(
+      `vmTimeoutMarginSeconds must be at least ${minimumVmTimeoutMargin(handoverSeconds)}`,
+    );
   const supervised = new Set<Promise<void>>();
 
   async function stopQuietly(name: string, jobId: string): Promise<void> {
@@ -252,7 +282,7 @@ export function createSandboxLauncher(
           snapshotId: options.snapshotId,
           region: SANDBOX_REGION,
           vcpus: plan.vcpus,
-          timeoutMs: (spec.timeoutSeconds + VM_TIMEOUT_MARGIN_SECONDS) * 1000,
+          timeoutMs: (spec.timeoutSeconds + vmTimeoutMarginSeconds) * 1000,
           tags: { app: "code-reviewer", kind: spec.kind, job: spec.jobId },
           persistent: false,
         },
@@ -281,19 +311,47 @@ export function createSandboxLauncher(
     jobId: string,
     running: Promise<{ exitCode: number }>,
   ): void {
-    const work = running
-      .then(
-        (result) => {
-          logger.info("worker_exited", { jobId, exitCode: result.exitCode });
-        },
-        () => {
-          logger.warn("worker_wait_failed", { jobId });
-        },
-      )
-      .then(() => stopQuietly(name, jobId));
+    const work = running.then(
+      async (result) => {
+        logger.info("worker_exited", { jobId, exitCode: result.exitCode });
+        // Only a confirmed exit stops the VM.
+        await stopQuietly(name, jobId);
+      },
+      (error: unknown) => {
+        // The container's fate is unknown (the log stream or the network broke): it may be reviewing. The VM is
+        // left to its timeout, the backstop, rather than killed under a healthy Worker.
+        logger.warn("worker_wait_failed", {
+          jobId,
+          sandbox: name,
+          attempts: error instanceof WorkerWaitError ? error.attempts : 0,
+        });
+      },
+    );
     supervised.add(work);
     void work.finally(() => supervised.delete(work));
     options.background?.(work);
+  }
+
+  /** Every failure before the hand-over: stop the VM by name and end in a `LaunchError` with a stable code. */
+  async function failLaunch(
+    name: string,
+    spec: LaunchSpec,
+    signal: AbortSignal,
+    error: unknown,
+    fallbackCode: { code: string; retryable: boolean },
+  ): Promise<LaunchError> {
+    await stopQuietly(name, spec.jobId);
+    if (error instanceof LaunchError) return error;
+    if (signal.aborted || isAbort(error))
+      return new LaunchError("launch_aborted");
+    if (error instanceof ContainerSpecError) return configInvalid();
+    if (error instanceof SandboxServiceError) {
+      const known = CREATE_FAILURES[error.kind];
+      return new LaunchError(known.code, { retryable: known.retryable });
+    }
+    return new LaunchError(fallbackCode.code, {
+      retryable: fallbackCode.retryable,
+    });
   }
 
   return {
@@ -303,18 +361,29 @@ export function createSandboxLauncher(
 
     async launch(spec, signal) {
       const plan = planOf(spec);
-      const name = `cr-${slug(spec.kind, 8)}-${slug(spec.jobId, 36)}-${(options.newSuffix ?? randomSuffix)()}`;
+      const requested = `cr-${slug(spec.kind, 8)}-${slug(spec.jobId, 36)}-${(options.newSuffix ?? randomSuffix)()}`;
 
-      const vm = await createVm(plan, spec, name, signal);
+      const vm = await createVm(plan, spec, requested, signal);
+      // The platform's own name is the one that stops the VM; a normalised name must not make a stop a no-op.
+      const name = vm.name;
+      if (name !== requested)
+        logger.warn("sandbox_name_mismatch", { jobId: spec.jobId });
       const host = new SandboxDockerHost({
         vm,
         clock,
         imageReference: options.imageReference ?? SANDBOX_IMAGE_REFERENCE,
         imageDigest: options.imageDigest,
-        handoverSeconds: options.handoverSeconds ?? SANDBOX_HANDOVER_SECONDS,
+        handoverSeconds,
       });
       try {
         await host.prepare(signal);
+      } catch (error) {
+        throw await failLaunch(name, spec, signal, error, {
+          code: "vm_prepare_failed",
+          retryable: true,
+        });
+      }
+      try {
         const containers = new ContainerLauncher({
           host,
           spec: WORKER_CONTAINER_SPEC,
@@ -331,12 +400,10 @@ export function createSandboxLauncher(
         await host.handover;
         supervise(name, spec.jobId, running);
       } catch (error) {
-        await stopQuietly(name, spec.jobId);
-        if (error instanceof LaunchError) throw error;
-        if (signal.aborted || isAbort(error))
-          throw new LaunchError("launch_aborted");
-        if (error instanceof ContainerSpecError) throw configInvalid();
-        throw new LaunchError("worker_start_failed", { retryable: true });
+        throw await failLaunch(name, spec, signal, error, {
+          code: "worker_start_failed",
+          retryable: true,
+        });
       }
     },
 

@@ -24,7 +24,8 @@ App ──signed POST /dispatch──▶ Trigger ──▶ core ──claim─�
 | Golden snapshot pipeline (a command, not a runtime part)                          | `src/snapshot/`, `pnpm snapshot:build`           | here (#330), `docs/golden-snapshot.md`                                             |
 
 Two entry files keep `node:child_process` (the Docker-Launcher's way of starting a process) out of the serverless
-bundle; `src/bundle/serverless-bundle.test.ts` follows the import graph of `src/index.ts` to prove it. Without a real
+bundle (none of ours: the Sandbox SDK's dependency tree holds `execa` for a local-development token fetch and `undici`; the
+test leaves out exactly those two, each only as imported by its known importer); `src/bundle/serverless-bundle.test.ts` follows the import graph of `src/index.ts` to prove it. Without a real
 Launcher an entry uses `noLauncher`: it advertises no engine, so every wake-up call is answered `200 ignored` with the
 reason `not_capable` and nothing is claimed. The Node entry keeps it until the Docker-Launcher (#334); the Vercel entry
 uses it until `SANDBOX_SNAPSHOT_ID` is set.
@@ -122,7 +123,9 @@ Per job, after the core has claimed it:
 
 1. `Sandbox.create` from the golden snapshot (#330): `persistent: false` (a persistent sandbox writes a snapshot of the
    job on stop), region `fra1`, no failover region (snapshots are region-bound), a VM size per Worker kind, tags
-   `{app, kind, job}`, and a **timeout of the job's plus 120 seconds**, the backstop that ends a VM nobody stops. The name
+   `{app, kind, job}`, and a **timeout of the job's plus 300 seconds** (`SANDBOX_VM_TIMEOUT_MARGIN_SECONDS`, at least 180 and at least 150 more than the
+   hand-over time: the platform counts from the creation of the VM, the Worker's own timer from the start of the container, so
+   the margin has to cover create, `vm-prepare.sh`, the image check and the hand-over besides the Worker's `timeout` result), the backstop that ends a VM nobody stops. The name
    is `cr-<kind>-<job id>-<random>`: unique per launch, so a second attempt of a job never meets the first one's VM, and
    it carries the job for lookup. A VM is never reused.
 2. `/usr/local/sbin/vm-prepare.sh` as root (the cgroup fix and `dockerd`, spike F1), then `docker image inspect` of the
@@ -135,28 +138,41 @@ Per job, after the core has claimed it:
    (20), or ended with 0 sooner. Until then the core heartbeats with the credential so the lease does not lapse. A
    container that ends with an error first is `worker_exited_early`. The time is the stand-in for the Worker's own first
    heartbeat, which the Worker does not announce (follow-up).
-5. When the container ends, the VM is stopped by name (`stop()` takes about 2.4 s for an idle VM, 22.6 s with a running
-   container, so the container ends first). This supervision is handed to the platform (`waitUntil`); if the function is
-   gone before the job is, the VM timeout ends the VM. There is no `poweroff` in the image (spike T13).
+5. When the container ends, the VM is stopped by the name the platform returned (`stop()` takes about 2.4 s for an idle VM,
+   22.6 s with a running container, so the container ends first). A `wait()` that fails (a broken log stream or network
+   during a long job) is asked again, three tries in all; if it still fails, what became of the container is unknown, so
+   the VM is **not** stopped under a Worker that may be reviewing: `worker_wait_failed` is logged and the VM timeout ends
+   it. There is no `poweroff` in the image (spike T13).
+
+**The function lifetime and the VM timeout.** The supervision of step 5 is work held in `waitUntil`, so it lives as long as
+the Dispatcher's function may. `vercel.json` sets `maxDuration` of `src/index.ts` explicitly to **1800 s** and the region
+to `fra1`. 1800 s is the extended maximum for Pro and Enterprise teams on Node.js 22 or 24 (**beta**; 800 s is the generally
+available maximum, and Hobby is limited to 300 s); it covers the default job (1200 s) plus its launch (at most 300 s). When
+the function ends before the container does (a job of more than about 1500 s, a platform restart, a lost instance), nothing
+stops the VM and **the VM timeout is the backstop**: it keeps running, idle and billed, until job + margin after its
+creation. A reaper that stops leftover VMs by their tags is a follow-up of #316, to be done before staging.
 
 Every failure before the hand-over stops the VM by name and ends in a `LaunchError` with a stable code and a `retryable`
 flag. The core releases the job with `launch_failed` and the App counts the attempt (three attempts, then `failed`), no
 matter whether the flag is set; it is for logs and for the operator.
 
-| Code                                                                      | Retryable | Cause                                                                       |
-| ------------------------------------------------------------------------- | --------- | --------------------------------------------------------------------------- |
-| `sandbox_rate_limited`, `sandbox_quota_exceeded`                          | yes       | the platform's limits                                                       |
-| `sandbox_network`, `sandbox_unavailable`                                  | yes       | no answer, or a platform error (these also stop by name: the VM may exist)  |
-| `image_not_ready`                                                         | yes       | the platform says the snapshot is not ready                                 |
-| `docker_not_ready`                                                        | yes       | `vm-prepare.sh` failed (cgroup or `dockerd`)                                |
-| `worker_exited_early`, `worker_start_failed`                              | yes       | the container ended with an error first, or could not be started            |
-| `sandbox_snapshot_missing`, `sandbox_region_mismatch`, `sandbox_rejected` | no        | the snapshot is gone or in another region; the platform refuses the request |
-| `image_missing`, `image_mismatch`                                         | no        | the VM has no such image, or not the configured one                         |
-| `sandbox_config_invalid`                                                  | no        | a VM size or memory limit the Launcher cannot run                           |
-| `sandbox_create_failed`                                                   | no        | an error it does not recognise                                              |
-| `launch_aborted`                                                          | no        | the deadline, a lost lease or a shutdown aborted the launch                 |
+| Code                                                                      | Retryable                    | Cause                                                                                                                                                                                                                                                                                |
+| ------------------------------------------------------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `sandbox_rate_limited`, `sandbox_quota_exceeded`                          | yes                          | the platform's limits                                                                                                                                                                                                                                                                |
+| `sandbox_network`, `sandbox_unavailable`                                  | yes                          | no answer, or a platform error (these also stop by name: the VM may exist)                                                                                                                                                                                                           |
+| `image_not_ready`                                                         | yes                          | the platform says the snapshot is not ready                                                                                                                                                                                                                                          |
+| `sandbox_auth_failed`                                                     | no                           | the platform refuses the credentials (HTTP 401 or 403): an expired or wrong token or OIDC token                                                                                                                                                                                      |
+| `docker_not_ready`                                                        | yes                          | `vm-prepare.sh` exited with an error (cgroup or `dockerd`)                                                                                                                                                                                                                           |
+| `vm_prepare_failed`                                                       | yes                          | a call of the host preparation failed in a way no other code names (a platform failure keeps its own code)                                                                                                                                                                           |
+| `worker_exited_early`                                                     | no for exit 1, yes otherwise | the container ended with an error before the hand-over. Exit 1 is the Worker reporting that the job failed, after delivering its own result: a second VM gets the same answer. A setup error (2), docker's own refusals (125 to 127) and a kill (137) are about this VM or its start |
+| `worker_start_failed`                                                     | yes                          | the container could not be started                                                                                                                                                                                                                                                   |
+| `sandbox_snapshot_missing`, `sandbox_region_mismatch`, `sandbox_rejected` | no                           | the snapshot is gone or in another region; the platform refuses the request                                                                                                                                                                                                          |
+| `image_missing`, `image_mismatch`                                         | no                           | the VM has no such image, or not the configured one                                                                                                                                                                                                                                  |
+| `sandbox_config_invalid`                                                  | no                           | a VM size or memory limit the Launcher cannot run                                                                                                                                                                                                                                    |
+| `sandbox_create_failed`                                                   | no                           | an error it does not recognise                                                                                                                                                                                                                                                       |
+| `launch_aborted`                                                          | no                           | the deadline, a lost lease or a shutdown aborted the launch                                                                                                                                                                                                                          |
 
-The classification of the platform's errors goes by the HTTP status first and by words in the error code second; the
+The classification of the platform's errors goes by the HTTP status first (429 rate limit, 402 quota, 401 and 403 authentication, 5xx platform), then by the code of the error body (an explicit quota or `limit_exceeded` code), then by words of the message for the snapshot and the region; a message that only says `limit` or `exceeds` is not a quota; the
 platform does not document its error bodies, so the mapping is **not verified against the live API** (a follow-up of the
 first real run). Only the code is logged, never the platform's text.
 
@@ -185,23 +201,24 @@ line and is never sent anywhere but to the SDK.
 
 Names only: a refusal names the variable, never the value.
 
-| Variable                                                                   | Meaning                                                                                                                | Default      |
-| -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ------------ |
-| `RUNNER_API_URL`                                                           | Base URL of the App                                                                                                    | required     |
-| `RUNNER_TOKEN`                                                             | The dispatcher credential (the runner API token)                                                                       | required     |
-| `DISPATCHER_MAX_RUNNING`                                                   | The pool cap, 1 to 1000                                                                                                | required     |
-| `DISPATCHER_SIGNING_KEY_ID`, `DISPATCHER_SIGNING_SECRET`                   | The key the App signs the wake-up call with; the secret has at least 32 characters and differs from every other secret | required     |
-| `DISPATCHER_SIGNING_KEY_ID_PREVIOUS`, `DISPATCHER_SIGNING_SECRET_PREVIOUS` | The previous key, accepted while the keys rotate                                                                       | none         |
-| `DISPATCHER_POOL_ID`                                                       | Sent as `X-Runner-Id`; the App counts the running jobs of the pool by it                                               | `dispatcher` |
-| `DISPATCHER_ENGINES`                                                       | `pr-agent`, `opencode` or both                                                                                         | both         |
-| `DISPATCHER_JOB_TIMEOUT_SECONDS`                                           | How long a Worker may live, 60 to 21600                                                                                | `1200`       |
-| `DISPATCHER_WORKER_CONFIG`                                                 | JSON `{"diff": {...}, "dynamic": {...}}` with `container.memory` and `launcher`                                        | none         |
-| `SANDBOX_SNAPSHOT_ID`                                                      | Vercel entry: the golden snapshot (#330 record `snapshotId`). Unset: no launcher, nothing is claimed                   | none         |
-| `SANDBOX_IMAGE_DIGEST`                                                     | The Worker image id in that snapshot (#330 record `imageDigest`, `sha256:` and 64 hex). Required with the snapshot     | none         |
-| `SANDBOX_HANDOVER_SECONDS`                                                 | How long the container runs before the Worker counts as having taken over, 1 to 120                                    | `20`         |
-| `VERCEL_TOKEN`, `VERCEL_TEAM_ID`, `VERCEL_PROJECT_ID`                      | Platform access by token (all three). Without a token the OIDC token is used                                           | OIDC         |
-| `DISPATCHER_SHUTDOWN_GRACE_SECONDS`                                        | Node entry: how long launches may finish after SIGTERM, 0 to 600                                                       | `60`         |
-| `PORT`                                                                     | Node entry                                                                                                             | `8080`       |
+| Variable                                                                   | Meaning                                                                                                                                                                                       | Default      |
+| -------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
+| `RUNNER_API_URL`                                                           | Base URL of the App                                                                                                                                                                           | required     |
+| `RUNNER_TOKEN`                                                             | The dispatcher credential (the runner API token)                                                                                                                                              | required     |
+| `DISPATCHER_MAX_RUNNING`                                                   | The pool cap, 1 to 1000                                                                                                                                                                       | required     |
+| `DISPATCHER_SIGNING_KEY_ID`, `DISPATCHER_SIGNING_SECRET`                   | The key the App signs the wake-up call with; the secret has at least 32 characters and differs from every other secret                                                                        | required     |
+| `DISPATCHER_SIGNING_KEY_ID_PREVIOUS`, `DISPATCHER_SIGNING_SECRET_PREVIOUS` | The previous key, accepted while the keys rotate                                                                                                                                              | none         |
+| `DISPATCHER_POOL_ID`                                                       | Sent as `X-Runner-Id`; the App counts the running jobs of the pool by it                                                                                                                      | `dispatcher` |
+| `DISPATCHER_ENGINES`                                                       | `pr-agent`, `opencode` or both                                                                                                                                                                | both         |
+| `DISPATCHER_JOB_TIMEOUT_SECONDS`                                           | How long a Worker may live, 60 to 21600                                                                                                                                                       | `1200`       |
+| `DISPATCHER_WORKER_CONFIG`                                                 | JSON `{"diff": {...}, "dynamic": {...}}` with `container.memory` and `launcher`                                                                                                               | none         |
+| `SANDBOX_SNAPSHOT_ID`                                                      | Vercel entry: the golden snapshot (#330 record `snapshotId`). Unset: no launcher, nothing is claimed                                                                                          | none         |
+| `SANDBOX_IMAGE_DIGEST`                                                     | The Worker image id in that snapshot (#330 record `imageDigest`, `sha256:` and 64 hex). Required with the snapshot                                                                            | none         |
+| `SANDBOX_HANDOVER_SECONDS`                                                 | How long the container runs before the Worker counts as having taken over, 1 to 120; with create, `vm-prepare.sh` and the image check (150 s) it must fit in the core's 300 s launch deadline | `20`         |
+| `SANDBOX_VM_TIMEOUT_MARGIN_SECONDS`                                        | Seconds added to the job's timeout for the VM's own, 180 to 3600 and at least the hand-over time plus 150                                                                                     | `300`        |
+| `VERCEL_TOKEN`, `VERCEL_TEAM_ID`, `VERCEL_PROJECT_ID`                      | Platform access by token (all three). Without a token the OIDC token is used                                                                                                                  | OIDC         |
+| `DISPATCHER_SHUTDOWN_GRACE_SECONDS`                                        | Node entry: how long launches may finish after SIGTERM, 0 to 600                                                                                                                              | `60`         |
+| `PORT`                                                                     | Node entry                                                                                                                                                                                    | `8080`       |
 
 ## The golden snapshot pipeline
 
