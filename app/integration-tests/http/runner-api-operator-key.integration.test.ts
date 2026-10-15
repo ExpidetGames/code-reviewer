@@ -637,3 +637,57 @@ describe("the Worker's fetch after the workspace's standing changed (#276)", () 
     expect((await response.json()).job.input.llm.apiKey).toBe(OPERATOR_KEY);
   });
 });
+
+describe("every key handed out for a job stays masked (#276)", () => {
+  // #276-P3
+  it("masks the key of the first fetch and the key of the second, after the operator rotated twice", async () => {
+    const h = await start("managed");
+    const job = await h.enqueueNew();
+    const { job: claimed } = await h.claimedSplit();
+    await h.worker.details(job.id, claimed.credential);
+    await h.llm.operatorKey().save({ apiKey: OPERATOR_KEY_ROTATED }, null);
+    await h.worker.details(job.id, claimed.credential);
+    const third = "plain-operator-key-0004-dddddddd";
+    await h.llm.operatorKey().save({ apiKey: third }, null);
+    expect(await h.claimedKeys.keysOf(job.id)).toEqual([
+      OPERATOR_KEY,
+      OPERATOR_KEY_ROTATED,
+    ]);
+
+    const response = await h.worker.result(
+      job.id,
+      claimed.credential,
+      {
+        logTail: `first ${OPERATOR_KEY} second ${OPERATOR_KEY_ROTATED} current ${third}`,
+      },
+      h.anotherInstance().workerApi,
+    );
+
+    expect(response.status).toBe(200);
+    const stored = JSON.stringify((await h.queue.get(job.id))?.result);
+    for (const key of [OPERATOR_KEY, OPERATOR_KEY_ROTATED, third])
+      expect(stored).not.toContain(key);
+  });
+
+  // #276-P3
+  it("masks the key of the first claim and the key of the claim again after a lost lease", async () => {
+    const h = await start("managed");
+    const job = await h.enqueueNew();
+    const first = await h.claimed();
+    await h.llm.operatorKey().save({ apiKey: OPERATOR_KEY_ROTATED }, null);
+    h.clock.advance(10 * 60 * 1000);
+    const again = await h.claimed();
+    expect(again.job.id).toBe(job.id);
+    expect(again.job.input.llm.apiKey).toBe(OPERATOR_KEY_ROTATED);
+
+    const completed = await h.complete(job.id, again.job.leaseToken, {
+      logTail: `old ${OPERATOR_KEY} new ${OPERATOR_KEY_ROTATED}`,
+    });
+
+    expect(first.job.id).toBe(job.id);
+    expect(completed.status).toBe(200);
+    const stored = JSON.stringify((await h.queue.get(job.id))?.result);
+    expect(stored).not.toContain(OPERATOR_KEY);
+    expect(stored).not.toContain(OPERATOR_KEY_ROTATED);
+  });
+});
