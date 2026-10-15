@@ -273,6 +273,27 @@ export interface RateLimitsTable {
   count: number;
 }
 
+/** The setup code of a serverless deployment (src/db/repositories/setup-codes-repository.ts, src/setup/). At most one row. */
+export interface SetupCodesTable {
+  /** The id of this issuance of the code; the setup session is bound to it. */
+  id: string;
+  /** Always 1 and unique: the table cannot hold a second row, and the replacement is one upsert on it. */
+  slot: number;
+  /** Hex of a keyed hash (HMAC with a key derived from `APP_SECRET`) of the id and the code. */
+  code_hash: string;
+  /** ISO 8601 text in UTC. */
+  created_at: string;
+  /** ISO 8601 text in UTC. */
+  expires_at: string;
+  /** ISO 8601 text in UTC; set when the correct code was used. */
+  used_at: string | null;
+  /** Wrong attempts (counted before the comparison, so concurrent guesses cannot exceed the limit). */
+  failures: number;
+  /** ISO 8601 text in UTC: when the current rate limit window began. */
+  window_started_at: string | null;
+  attempts_in_window: number;
+}
+
 /** An encrypted credential of the instance (src/db/repositories/secrets-repository.ts, src/secrets/). */
 export interface SecretsTable {
   /** The secret's name; the row id that is bound into the ciphertext. */
@@ -526,6 +547,7 @@ export interface Database {
   app_settings: AppSettingsTable;
   instance_settings: InstanceSettingsTable;
   rate_limits: RateLimitsTable;
+  setup_codes: SetupCodesTable;
   secrets: SecretsTable;
   workspace_secrets: WorkspaceSecretsTable;
   workspace_entitlements: WorkspaceEntitlementsTable;

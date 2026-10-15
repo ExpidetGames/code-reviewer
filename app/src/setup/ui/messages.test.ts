@@ -57,6 +57,40 @@ describe("the sentence for a failed call", () => {
   });
 });
 
+describe("the sentence for a failed call in a serverless deployment", () => {
+  // #321-T01
+  it("sends the person to pnpm setup-code, never to restart the app or read its log", () => {
+    for (const code of [
+      "invalid_code",
+      "setup_locked",
+      "code_expired",
+      "code_used",
+      "setup_session_expired",
+      "setup_unavailable",
+    ]) {
+      const sentence = describeSetupFailure(code, "serverless");
+      expect(sentence, code).toMatch(/pnpm setup-code/);
+      expect(sentence, code).not.toMatch(/Restart|log of the app/);
+    }
+  });
+
+  // #321-T01
+  it("keeps the sentences that do not depend on where the app runs", () => {
+    for (const code of ["rate_limited", "already_set_up", "email_in_use"])
+      expect(describeSetupFailure(code, "serverless")).toBe(
+        describeSetupFailure(code),
+      );
+  });
+
+  // #321-T04
+  it("does not change the sentences of a server", () => {
+    expect(describeSetupFailure("code_used", "server")).toBe(
+      describeSetupFailure("code_used"),
+    );
+    expect(describeSetupFailure("code_used")).toMatch(/Restart the app/);
+  });
+});
+
 describe("the sentence for a problem with a field", () => {
   // #97-SU-10
   it("shows the reason for each password refusal", () => {

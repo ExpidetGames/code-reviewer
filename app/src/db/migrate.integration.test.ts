@@ -89,6 +89,7 @@ describe("the migrations of both epics", () => {
       "20261014120000_create_workspace_entitlements",
       "20261014150000_create_usage_records",
       "20261015100000_add_job_worker_fetches",
+      "20261015110000_create_setup_codes",
     ]);
   });
 
@@ -147,6 +148,7 @@ describe("starting the database", () => {
       "repositories",
       "secrets",
       "sessions",
+      "setup_codes",
       "signed_states",
       "unclaimed_installations",
       "usage_records",
