@@ -86,9 +86,7 @@ describe("dispatcher canary workflow", () => {
     const withSecrets = job.steps.filter((step) =>
       JSON.stringify(step).includes("secrets."),
     );
-    expect(withSecrets.map((step) => step.name)).toEqual([
-      "Run the canary",
-    ]);
+    expect(withSecrets.map((step) => step.name)).toEqual(["Run the canary"]);
     const canary = withSecrets[0] as Step;
     expect(Object.keys(canary.env ?? {}).sort()).toEqual(
       [
