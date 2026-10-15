@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "start": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON src/node.ts",
+    "snapshot:build": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON src/snapshot/main.ts",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
@@ -17,6 +18,7 @@
   "dependencies": {
     "@hono/node-server": "^2.1.5",
     "@vercel/functions": "^3.10.1",
+    "@vercel/sandbox": "^3.8.0",
     "hono": "^4.13.13",
     "zod": "4.6.5"
   },
