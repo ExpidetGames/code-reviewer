@@ -51,12 +51,12 @@ the environment into the database and an admin portal, and introduce accounts an
 The small and the large deployment have **identical functionality**. They differ only in topology and
 database.
 
-|                 | Small (self-host)                               | Large (hosted)                                                                                                             |
-| --------------- | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| Processes       | `app` container and `runner` (worker) container | `app` (1..n, stateless) and workers (1..n)                                                                                 |
-| Database        | SQLite in a volume                              | External Postgres through `DATABASE_URL`                                                                                   |
-| Deployment file | One `compose.yml`                               | A compose or orchestrator example with Postgres and several replicas (delivered by this milestone as a documented example) |
-| Backups         | Done by the app (existing `src/backup/`)        | Done by the operator with Postgres tooling or the managed service                                                          |
+| | Small (self-host) | Large (hosted) |
+|---|---|---|
+| Processes | `app` container and `runner` (worker) container | `app` (1..n, stateless) and workers (1..n) |
+| Database | SQLite in a volume | External Postgres through `DATABASE_URL` |
+| Deployment file | One `compose.yml` | A compose or orchestrator example with Postgres and several replicas (delivered by this milestone as a documented example) |
+| Backups | Done by the app (existing `src/backup/`) | Done by the operator with Postgres tooling or the managed service |
 
 `DATABASE_URL` selects the database. A `sqlite:` URL, a path form or an **empty value** means SQLite
 (the default location stays `/data/app.db` in the image); a `postgres://` or `postgresql://` URL means
@@ -306,11 +306,11 @@ identities (`provider_id`, `account_id`); `users.github_login` becomes optional.
 
 **Workspaces (tenants)** have **members** with a role: **Owner**, **Admin** or **Member**.
 
-| Role   | Can                                                                                                                                                            |
-| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Member | Use the workspace: see projects, runs and settings, start reviews, change project settings                                                                     |
-| Admin  | Everything a Member can, plus manage connections, repositories and the BYOK LLM key, and manage Members and invitations (invite, remove, revoke; Members only) |
-| Owner  | Everything an Admin can, plus manage Admins and Owners (invite, change roles, remove) and rename the workspace (deleting a workspace is a follow-up)           |
+| Role | Can |
+|---|---|
+| Member | Use the workspace: see projects, runs and settings, start reviews, change project settings |
+| Admin | Everything a Member can, plus manage connections, repositories and the BYOK LLM key, and manage Members and invitations (invite, remove, revoke; Members only) |
+| Owner | Everything an Admin can, plus manage Admins and Owners (invite, change roles, remove) and rename the workspace (deleting a workspace is a follow-up) |
 
 The exact matrix is tested table-driven in the implementation issue; the principle is that every action
 needs the lowest role that is safe. **The last Owner cannot leave, be removed or be demoted**; an Owner
@@ -362,10 +362,10 @@ costs), a Member changes the settings of a project. Only an Owner changes roles;
 
 ### 2.7 Instance level versus workspace level
 
-| Level     | What lives there                                                                                                                                                                                                                  | Who changes it                                      |
-| --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
-| Instance  | Tenancy, sign-up rule, sign-in methods, SMTP, the GitHub App credentials (app id, slug, private key, webhook secret, client id, client secret), the "private app" flag, instance limits, later the operator's LLM key and pricing | Instance admin (the operator in the hosted version) |
-| Workspace | Connections (GitHub App installations), repositories, projects, review settings, BYOK LLM key, members, invitations                                                                                                               | Workspace Owner or Admin                            |
+| Level | What lives there | Who changes it |
+|---|---|---|
+| Instance | Tenancy, sign-up rule, sign-in methods, SMTP, the GitHub App credentials (app id, slug, private key, webhook secret, client id, client secret), the "private app" flag, instance limits, later the operator's LLM key and pricing | Instance admin (the operator in the hosted version) |
+| Workspace | Connections (GitHub App installations), repositories, projects, review settings, BYOK LLM key, members, invitations | Workspace Owner or Admin |
 
 **Credentials at rest.** Every secret stored in the database (SMTP password, GitHub App private key,
 webhook secret, client secret, LLM keys, the remembered keys of claimed jobs) is encrypted:
@@ -394,16 +394,16 @@ follows a correct code is a signed cookie valid for 30 minutes, not a stored tok
 
 **Data model sketch.** The exact schema belongs to the implementation issues; the shape is:
 
-| Table                             | Purpose                                                                                                                                                                 |
-| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `workspaces`                      | id, name, slug, created by, created at                                                                                                                                  |
-| `workspace_members`               | workspace, user, role                                                                                                                                                   |
-| `invitations`                     | workspace, email, role, token hash, invited by, expires at, accepted at, revoked at                                                                                     |
-| `instance_settings` and `secrets` | non-secret settings as JSON, and encrypted secrets with key version                                                                                                     |
-| `rate_limits`                     | shared counters for sign-in, verification, reset and invitation endpoints                                                                                               |
-| `installation_link_requests`      | requests to link an installation that need the instance admin (section 2.9)                                                                                             |
-| `integrations.workspace_id`       | a connection belongs to exactly one workspace; denormalized onto `repositories` and `jobs` (with an index) so that listing, scoping and usage queries do not need joins |
-| `app_settings` (existing)         | the review defaults become per workspace                                                                                                                                |
+| Table | Purpose |
+|---|---|
+| `workspaces` | id, name, slug, created by, created at |
+| `workspace_members` | workspace, user, role |
+| `invitations` | workspace, email, role, token hash, invited by, expires at, accepted at, revoked at |
+| `instance_settings` and `secrets` | non-secret settings as JSON, and encrypted secrets with key version |
+| `rate_limits` | shared counters for sign-in, verification, reset and invitation endpoints |
+| `installation_link_requests` | requests to link an installation that need the instance admin (section 2.9) |
+| `integrations.workspace_id` | a connection belongs to exactly one workspace; denormalized onto `repositories` and `jobs` (with an index) so that listing, scoping and usage queries do not need joins |
+| `app_settings` (existing) | the review defaults become per workspace |
 
 Every query that reads or writes workspace data is scoped by `workspace_id` through one helper; a
 test fails when a repository function takes no workspace.
@@ -492,16 +492,16 @@ Consequences of this design:
 The large topology only works if no app instance relies on its own memory. The following must change;
 each point has a test with two simulated instances:
 
-| Today                                                                                                            | Required                                                                                                                                                                                                                                                                                                                                                             |
-| ---------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Claimed LLM keys list in memory (`runner-api/claimed-keys.ts`), so a rotated key can still be masked in a result | Kept in the database, encrypted, removed together with the job's retention, so any instance can mask a result                                                                                                                                                                                                                                                        |
-| GitHub App status cached for 30 seconds in memory (`SETUP_CACHE_MS`)                                             | No in-process cache of configuration; read from the database (a cache may only exist with a version check against the database)                                                                                                                                                                                                                                      |
-| Backup scheduler inside the app                                                                                  | Runs only for SQLite; for Postgres the operator backs up the database                                                                                                                                                                                                                                                                                                |
-| Sync serialized by an in-process lock (`keyed-lock.ts`, `coalesce.ts`)                                           | Serialized by a database lock per connection (advisory lock on Postgres, an equivalent on SQLite)                                                                                                                                                                                                                                                                    |
-| Migrations run once, protected by the SQLite write lock                                                          | Migrations run behind a lock that makes concurrent starts wait; exactly one instance migrates                                                                                                                                                                                                                                                                        |
-| Job claim is one SQLite statement; "one running job per pull request" holds because SQLite has one writer        | On both databases a **partial unique index on running jobs per pull request** guarantees the rule. The Postgres claim uses `FOR UPDATE SKIP LOCKED` and treats a **unique violation as "skip this job, try the next"**. `FOR UPDATE SKIP LOCKED` alone is not enough: two runners could otherwise start two jobs of one pull request. Same behavior, same test suite |
-| Rate limits (sign-in, verification, reset, invitations)                                                          | Shared counters in the database (`rate_limits`), never in memory                                                                                                                                                                                                                                                                                                     |
-| Setup code and its counter                                                                                       | Per process, by design (section 2.2): the setup is done with one instance running                                                                                                                                                                                                                                                                                    |
+| Today | Required |
+|---|---|
+| Claimed LLM keys list in memory (`runner-api/claimed-keys.ts`), so a rotated key can still be masked in a result | Kept in the database, encrypted, removed together with the job's retention, so any instance can mask a result |
+| GitHub App status cached for 30 seconds in memory (`SETUP_CACHE_MS`) | No in-process cache of configuration; read from the database (a cache may only exist with a version check against the database) |
+| Backup scheduler inside the app | Runs only for SQLite; for Postgres the operator backs up the database |
+| Sync serialized by an in-process lock (`keyed-lock.ts`, `coalesce.ts`) | Serialized by a database lock per connection (advisory lock on Postgres, an equivalent on SQLite) |
+| Migrations run once, protected by the SQLite write lock | Migrations run behind a lock that makes concurrent starts wait; exactly one instance migrates |
+| Job claim is one SQLite statement; "one running job per pull request" holds because SQLite has one writer | On both databases a **partial unique index on running jobs per pull request** guarantees the rule. The Postgres claim uses `FOR UPDATE SKIP LOCKED` and treats a **unique violation as "skip this job, try the next"**. `FOR UPDATE SKIP LOCKED` alone is not enough: two runners could otherwise start two jobs of one pull request. Same behavior, same test suite |
+| Rate limits (sign-in, verification, reset, invitations) | Shared counters in the database (`rate_limits`), never in memory |
+| Setup code and its counter | Per process, by design (section 2.2): the setup is done with one instance running |
 
 The runner API needs no change for several workers: the lease token already makes a claim
 instance-independent.
