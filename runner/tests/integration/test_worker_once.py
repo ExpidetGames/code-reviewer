@@ -266,9 +266,9 @@ def test_an_app_that_cannot_be_reached_at_fetch_is_a_stable_failure_after_bounde
 
     assert code is WorkerExit.SETUP_ERROR
     assert reports(tmp_path) == []
-    # Bounded: a few pauses that grow, then it gives up (it does not wait forever).
-    assert 1 <= len(clock.pauses) <= 6
-    assert clock.pauses == sorted(clock.pauses)
+    # Bounded by the contract: the details call is allowed three times per claim, so three tries
+    # with two growing pauses between them, then it gives up.
+    assert clock.pauses == [1.0, 2.0]
 
 
 # #323-T05

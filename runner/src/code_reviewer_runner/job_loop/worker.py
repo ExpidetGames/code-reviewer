@@ -52,8 +52,9 @@ from code_reviewer_runner.job_loop.worker_errors import (
 LOGGER_NAME = "code_reviewer_runner.loop"
 # The start document is small; anything larger is not one.
 MAX_START_DOCUMENT_BYTES = 16 * 1024
-# The job details are fetched this many times at most; the pauses grow from the first.
-FETCH_ATTEMPTS = 4
+# The contract allows the job details call three times per claim (each mints a fresh token), so
+# this is the most the Worker may try; the pauses grow from the first.
+FETCH_ATTEMPTS = 3
 FETCH_FIRST_PAUSE_SECONDS = 1.0
 FETCH_MAX_PAUSE_SECONDS = 30.0
 

@@ -145,7 +145,7 @@ legacy loop (`code-reviewer-runner`, claiming with `RUNNER_TOKEN`) is unchanged 
   (an app from before the hosted deployment), ends with `worker_app_unsupported`. The Worker holds the job credential,
   not the dispatcher credential, so a `401` on `/version` is not a refusal; the details call decides.
 - **A Dynamic job whose engine is not advertised** is not started: `dynamic_engine_unavailable` is delivered.
-- **The fetch** is tried at most four times (pauses of 1, 2 and 4 seconds, at least the app's `Retry-After`). A
+- **The fetch** is tried at most three times, the number the contract allows per claim (pauses of 1 and 2 seconds, at least the app's `Retry-After`). A
   credential the app does not accept, a job the app ended, and a `503` that gave the job back are final.
 - **The credential** is in memory only. It is a secret of the masker from the first log line, so no log line or result
   holds it, and it is never given to the job process: that gets the job (with the git token and the model key) on stdin
