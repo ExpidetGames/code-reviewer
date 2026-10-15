@@ -17,8 +17,10 @@ from code_reviewer_runner.dynamic_review.self_check import (
     DEFAULT_TOOLS,
     SelfCheckReason,
     check_dynamic_runner,
+    root_filesystem_read_only,
 )
 from code_reviewer_runner.dynamic_review.static_isolation import SlotPorts, secure_startup
+from code_reviewer_runner.engines_file import remove_engines_file, write_engines_file
 from code_reviewer_runner.job_loop.api import HttpRunnerApi
 from code_reviewer_runner.job_loop.loop import RunnerLoop
 from code_reviewer_runner.job_loop.masking import SecretMasker
@@ -29,6 +31,7 @@ from code_reviewer_runner.job_loop.settings import (
     WorkerSettings,
     settings_from_environment,
 )
+from code_reviewer_runner.verdict import Verdict
 
 LOGGER_NAME = "code_reviewer_runner.loop"
 
@@ -61,37 +64,49 @@ def prepare_dynamic_runtime(
     return startup(user[0], ports)
 
 
-def advertise_engines[Settings: (LoopSettings, WorkerSettings)](
+def decide_engines[Settings: (LoopSettings, WorkerSettings)](
     settings: Settings,
     rules_installed: bool,
     *,
     check: Callable[..., None] | None = None,
-) -> Settings:
-    """The settings with the engines this runner may advertise, decided by the startup self-check.
+    require_read_only_root: bool = False,
+) -> tuple[Settings, str | None]:
+    """The settings with the engines this runner may advertise, decided by the startup self-check,
+    and the stable reason `opencode` is missing (None when it is advertised).
 
     `opencode` is added (with the verified engine command the Dynamic job process is handed) only
     when `check_dynamic_runner` passes: root supervisor, engine user, static rules installed,
-    startup capabilities dropped, pinned and trusted engine and `rg`, probe as the engine user. Any
-    failure leaves `pr-agent` only and logs the stable reason, never a value. A runner without an
-    engine user (every runner but the Dynamic one) is not a failure: it serves Diff jobs, as
-    designed.
+    startup capabilities dropped, pinned and trusted engine and `rg`, probe as the engine user.
+    Any failure leaves `pr-agent` only and logs the stable reason, never a value. A runner without
+    an engine user (every runner but the Dynamic one) is not a failure: it serves Diff jobs, as
+    designed. `require_read_only_root` is for the entry modes of the Worker image (#324): the check
+    then also needs the read-only root of the hardened container spec.
     """
     run_check = check or check_dynamic_runner
+    # Only a mode that asks for it passes the extra fact: the checks of the other modes (and their
+    # doubles) are called exactly as before.
+    extra: dict[str, Any] = (
+        {"root_read_only": root_filesystem_read_only} if require_read_only_root else {}
+    )
     engines, error = self_check_outcome(
         lambda: run_check(
             user=settings.dynamic_engine_user,
             ports=settings.dynamic_ports,
             rules_installed=rules_installed,
+            **extra,
         )
     )
     log = logging.getLogger(LOGGER_NAME)
     if error is None:
         log.info("Dynamic Review: opencode is advertised, the startup self-check passed")
-        return replace(
-            settings,
-            engines=engines,
-            dynamic_command=(str(DEFAULT_TOOLS.opencode),),
-            dynamic_ripgrep=str(DEFAULT_TOOLS.ripgrep),
+        return (
+            replace(
+                settings,
+                engines=engines,
+                dynamic_command=(str(DEFAULT_TOOLS.opencode),),
+                dynamic_ripgrep=str(DEFAULT_TOOLS.ripgrep),
+            ),
+            None,
         )
     reason: Any = getattr(error, "reason", None)
     named = reason.value if isinstance(reason, SelfCheckReason) else "self_check_error"
@@ -104,7 +119,45 @@ def advertise_engines[Settings: (LoopSettings, WorkerSettings)](
             error.code.value,
             named,
         )
-    return replace(settings, engines=engines, dynamic_command=None, dynamic_ripgrep=None)
+    return replace(settings, engines=engines, dynamic_command=None, dynamic_ripgrep=None), named
+
+
+def advertise_engines[Settings: (LoopSettings, WorkerSettings)](
+    settings: Settings,
+    rules_installed: bool,
+    *,
+    check: Callable[..., None] | None = None,
+    require_read_only_root: bool = False,
+) -> Settings:
+    """`decide_engines` without the reason: the settings with the engines to advertise."""
+    return decide_engines(
+        settings, rules_installed, check=check, require_read_only_root=require_read_only_root
+    )[0]
+
+
+def run_startup[Settings: (LoopSettings, WorkerSettings)](
+    settings: Settings,
+    *,
+    require_read_only_root: bool = False,
+    remove_verdict: Callable[[], object] | None = None,
+    write_verdict: Callable[[Verdict], object] | None = None,
+) -> tuple[Settings, Verdict]:
+    """The startup every entry mode runs once at container start (#324).
+
+    The verdict of an earlier start is removed first. Then the network setup and the end of
+    `NET_ADMIN` (`prepare_dynamic_runtime`; `IsolationError` when the capabilities could not be
+    dropped: nothing may start then), then the engines to advertise (`decide_engines`), and last
+    the verdict is written to the engines file. All of it before the event loop, any thread and
+    any job process exist.
+    """
+    (remove_verdict or remove_engines_file)()
+    rules_installed = prepare_dynamic_runtime(settings)
+    decided, reason = decide_engines(
+        settings, rules_installed, require_read_only_root=require_read_only_root
+    )
+    verdict = Verdict(decided.engines, (reason,) if reason else ())
+    (write_verdict or write_engines_file)(verdict)
+    return decided, verdict
 
 
 async def serve(
@@ -160,10 +213,10 @@ def run_from_environment(environment: Mapping[str, str] | None = None) -> int:
         logging.getLogger(LOGGER_NAME).error("cannot start: %s", error)
         return 2
     try:
-        rules_installed = prepare_dynamic_runtime(settings)
+        # After the network setup and the end of NET_ADMIN, before the first claim: `opencode` is
+        # only ever in a claim after the self-check passed.
+        settings, _ = run_startup(settings)
     except IsolationError as error:
         logging.getLogger(LOGGER_NAME).error("cannot start: %s", error)
         return 2
-    # After the network setup and the end of NET_ADMIN, before the first claim: `opencode` is only
-    # ever in a claim after the self-check passed.
-    return asyncio.run(serve(advertise_engines(settings, rules_installed), env))
+    return asyncio.run(serve(settings, env))

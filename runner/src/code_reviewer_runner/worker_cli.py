@@ -18,12 +18,7 @@ from typing import NoReturn, TextIO
 
 from code_reviewer_runner import __version__
 from code_reviewer_runner.dynamic_review.netguard import IsolationError
-from code_reviewer_runner.job_loop.service import (
-    LOGGER_NAME,
-    advertise_engines,
-    configure_logging,
-    prepare_dynamic_runtime,
-)
+from code_reviewer_runner.job_loop.service import LOGGER_NAME, configure_logging, run_startup
 from code_reviewer_runner.job_loop.settings import SettingsError, worker_settings_from_environment
 from code_reviewer_runner.job_loop.worker import (
     MAX_START_DOCUMENT_BYTES,
@@ -85,13 +80,19 @@ def main(
         log.error("worker cannot start: %s: %s", WorkerFailure.SETTINGS_INVALID.value, error)
         return WorkerExit.SETUP_ERROR
     try:
-        rules_installed = prepare_dynamic_runtime(settings)
+        # The same startup as every mode: the network setup and the end of `NET_ADMIN` come first,
+        # `opencode` is advertised only after the self-check passed, and the hardened container
+        # spec's read-only root is part of it. No job process exists before it is done.
+        settings, _ = run_startup(settings, require_read_only_root=True)
     except IsolationError as error:
         log.error("worker cannot start: %s", error)
         return WorkerExit.SETUP_ERROR
-    # The same startup as the runner: `opencode` is advertised only after the self-check passed.
-    settings = advertise_engines(settings, rules_installed)
     return asyncio.run(run_worker(request, settings, env, install_signals=True))
+
+
+def run_once(environment: Mapping[str, str], *, stdin: TextIO | None = None) -> int:
+    """`code-reviewer-runner worker-once`: the same Worker as `code-reviewer-worker --once`."""
+    return main(["--once"], environment=environment, stdin=stdin)
 
 
 if __name__ == "__main__":

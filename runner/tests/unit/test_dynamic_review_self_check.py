@@ -562,3 +562,33 @@ def test_the_default_tool_locations_are_the_ones_the_image_installs() -> None:
     assert f"{DEFAULT_TOOLS.opencode_pin.parent}/" in dockerfile
     for pin in (DEFAULT_TOOLS.opencode_pin, DEFAULT_TOOLS.ripgrep_pin):
         assert f"runner/{pin.name}" in dockerfile
+
+
+# #324-T02: a root filesystem that is writable is no hardened container; the entry modes of the
+# Worker image ask for the check, the legacy loop does not (it never had it).
+def test_a_writable_root_filesystem_fails_the_check_when_it_is_asked_for(world: World) -> None:
+    error = refused(world, root_read_only=lambda: False)
+
+    assert isinstance(error, IsolationSelfCheckError)
+    assert getattr(error, "reason", None) is SelfCheckReason.ROOT_FILESYSTEM_WRITABLE
+    assert world.calls == ["capabilities"]  # before the tools are read and before the probe
+
+
+# #324-T01
+def test_a_read_only_root_filesystem_passes_the_check_when_it_is_asked_for(world: World) -> None:
+    world.run(root_read_only=lambda: True)
+
+    assert world.calls == ["capabilities", "probe:10101:10101:10180"]
+
+
+# #324-T08: not asked for, not judged: the legacy loop behaves as it always did.
+def test_the_root_filesystem_is_not_judged_unless_it_is_asked_for(world: World) -> None:
+    world.run()  # no root_read_only: a writable test machine passes
+
+
+def test_the_real_root_check_reads_the_mount_flag(tmp_path: Path) -> None:
+    from code_reviewer_runner.dynamic_review.self_check import root_filesystem_read_only
+
+    # The test machine's root is writable; a directory that does not exist is not read-only.
+    assert root_filesystem_read_only(tmp_path) is False
+    assert root_filesystem_read_only(tmp_path / "missing") is False

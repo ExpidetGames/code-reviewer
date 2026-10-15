@@ -59,6 +59,7 @@ class SelfCheckReason(StrEnum):
     ENGINE_USER_INVALID = "engine_user_invalid"
     NETWORK_RULES_NOT_INSTALLED = "network_rules_not_installed"
     CAPABILITIES_NOT_DROPPED = "capabilities_not_dropped"
+    ROOT_FILESYSTEM_WRITABLE = "root_filesystem_writable"
     PIN_UNREADABLE = "pin_unreadable"
     PIN_UNTRUSTED = "pin_untrusted"
     ENGINE_BINARY_MISSING = "engine_binary_missing"
@@ -117,6 +118,18 @@ def group_of(uid: int) -> int | None:
         return pwd.getpwuid(uid).pw_gid
     except KeyError:
         return None
+
+
+def root_filesystem_read_only(root: Path = Path("/")) -> bool:
+    """True when the root filesystem is mounted read-only (`docker run --read-only`, #249).
+
+    The mount flag is what a process in the container sees; a path that cannot be examined is not
+    judged read-only.
+    """
+    try:
+        return bool(os.statvfs(root).f_flag & os.ST_RDONLY)
+    except OSError:
+        return False
 
 
 def startup_probe(uid: int, gid: int, proxy_port: int) -> None:
@@ -316,8 +329,14 @@ def check_dynamic_runner(
     user_group: GroupOf = group_of,
     probe: Probe = startup_probe,
     version_as_user: VersionAsUser = version_as_user,
+    root_read_only: Callable[[], bool] | None = None,
 ) -> None:
-    """Raise `SelfCheckFailed` unless every property holds. Cheap checks first, the probe last."""
+    """Raise `SelfCheckFailed` unless every property holds. Cheap checks first, the probe last.
+
+    `root_read_only` is given by the entry modes of the Worker image (#324): the hardened container
+    spec runs the image with a read-only root, so a Worker or probe on a writable root is no such
+    container and does not advertise `opencode`. Unset (the legacy loop), the root is not judged.
+    """
     if user is None or ports is None:
         raise SelfCheckFailed(
             SelfCheckReason.NOT_A_DYNAMIC_RUNNER, "no engine user is configured for this runner"
@@ -344,6 +363,11 @@ def check_dynamic_runner(
             SelfCheckReason.CAPABILITIES_NOT_DROPPED,
             "a capability only startup may hold was not dropped",
         ) from None
+    if root_read_only is not None and not root_read_only():
+        raise SelfCheckFailed(
+            SelfCheckReason.ROOT_FILESYSTEM_WRITABLE,
+            "the root filesystem of the container is writable",
+        )
     platform = platform or platform_key()
     where = _Where(trusted_owner, chain_root, lstat)
     engine_pin = _verify_executable(
