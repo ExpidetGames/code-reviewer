@@ -47,7 +47,11 @@ from code_reviewer_runner.dynamic_review.publish import (
     PublishError,
 )
 from code_reviewer_runner.dynamic_review.supervisor import Prepared
-from code_reviewer_runner.dynamic_review.wrap_up import RECOVERY_INSTRUCTION, WRAP_UP_INSTRUCTION
+from code_reviewer_runner.dynamic_review.wrap_up import (
+    FINAL_ATTEMPTS,
+    RECOVERY_INSTRUCTION,
+    WRAP_UP_INSTRUCTION,
+)
 from code_reviewer_runner.job import parse_job
 from code_reviewer_runner.result import ErrorCode
 
@@ -316,7 +320,8 @@ def test_a_recovery_that_also_has_no_answer_fails_with_the_same_code_and_says_so
         "after one recovery; the first turn: finish=stop, error=StructuredOutputError" in first_line
     )
     assert re.search(r"\[engine message call: \d+\.\d s, \d+\.\d s\]$", first_line), first_line
-    assert len(upstream.requests) == 2  # one recovery, no further retry
+    # One normal call and one recovery turn, whose call asked again (#312), bounded.
+    assert len(upstream.requests) == 1 + FINAL_ATTEMPTS
     assert publisher.calls == []
 
 
