@@ -11,12 +11,14 @@ import { hkdfSync } from "node:crypto";
  * Every use of the secret has a label. A new use adds a label here, never reuses one.
  * - `setup-session`: the signature of the cookie that carries the first-run wizard.
  * - `state-signing`: signed state values of round trips (for example to GitHub and back).
+ * - `setup-code`: the keyed hash of the first-run setup code kept in the database of a serverless deployment.
  * - `secret-encryption`: AES-256-GCM of the credentials stored in the database.
  */
 export const KEY_PURPOSES = [
   "setup-session",
   "state-signing",
   "secret-encryption",
+  "setup-code",
 ] as const;
 export type KeyPurpose = (typeof KEY_PURPOSES)[number];
 

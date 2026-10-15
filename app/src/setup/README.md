@@ -9,7 +9,8 @@ implementation.
 | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `state.ts`                 | `readSetupState(db)`: `completed`, `fresh` or `existing`, from the two markers in `instance_settings` (`setup_completed_at`, `import_state`) and whether users exist. `createSetupStateReader` remembers `completed`. |
 | `gate.ts`, `gate-proxy.ts` | The gate: what to do with a request while the instance is not set up (pure decision, then the Next.js response). Applied first in `src/proxy.ts`.                                                                     |
-| `code-store.ts`            | The setup code and everything that protects it, in the memory of the process: expiry, rate limit, lock, single use.                                                                                                   |
+| `code-store.ts`            | The setup code and everything that protects it, in the memory of the process: expiry, rate limit, lock, single use. `SetupCodeGuard` is the shape both stores satisfy.                                                |
+| `database-code-store.ts`   | The same rules with the code in the database, for a serverless deployment (#321); `code-guard.ts` picks the store by the runtime mode, `setup-code-cli.ts` is `pnpm setup-code`.                                      |
 | `start.ts`                 | `startSetupOnStart`: called from `src/instrumentation.ts`; prints the one log line with a fresh code while the instance is not set up.                                                                                |
 | `setup-session.ts`         | The signed, HttpOnly setup session cookie (30 minutes), bound to the issuance of the code it came from.                                                                                                               |
 | `input.ts`, `complete.ts`  | Validation of the wizard's answers; the completion in one transaction (admin, settings, workspace, marker).                                                                                                           |
@@ -35,7 +36,7 @@ setup.
 - Printed once per start of a process while the instance is not set up: `[setup] Setup code: 482913 ...`
   (`start.ts`, the only place that ever shows it, and only in the log). 6 digits from `crypto.randomInt`.
 - Only a keyed hash is kept (HMAC with a random key per issuance), in the memory of the process, together
-  with its counters. **Nothing about it is in the database** and the code is never in a response, a page
+  with its counters. **On a server nothing about it is in the database** and the code is never in a response, a page
   or another log line (`setup.integration.test.ts` checks the responses and the logs).
 - Valid 60 minutes; about 5 attempts per minute for the whole process (not per address); **10 wrong
   attempts lock the endpoint until the process is restarted**, which prints a new code. There is no
@@ -44,7 +45,48 @@ setup.
   cannot be guessed: at most 10 in 1,000,000 per restart. Rate limited attempts are not counted as wrong.
 - Single use: the correct code is consumed and exchanged for the setup session cookie.
 - **The setup is done with one app instance running**: a second process has its own code and counters and
-  refuses the code of the first (`setup.integration.test.ts`, "two processes over one database").
+  refuses the code of the first (`setup.integration.test.ts`, "two processes over one database"). A serverless
+  deployment is built for many instances and keeps the code in the database instead (below).
+
+## The code in a serverless deployment
+
+`APP_RUNTIME=serverless` (`src/runtime/mode.ts`) has no process to hold a code and no log the operator reads, so
+the code lives in the database (#321, table `setup_codes`, at most one row) and every instance checks it there.
+Everything above holds, with these differences:
+
+- **The operator makes the code**, with `pnpm setup-code` (`setup-code-cli.ts`), after `pnpm migrate`, from a
+  terminal:
+
+  ```sh
+  APP_RUNTIME=serverless APP_SECRET=... DATABASE_URL_MIGRATE=... pnpm setup-code
+  ```
+
+  `APP_SECRET` must be the one of the deployment (the code is stored as an HMAC-SHA256 under a key derived from it,
+  over the id of the issuance and the code, so a copy of the database alone cannot tell the code), and the
+  database the one the deployment uses. The command prints the code and its expiry on its output and nowhere
+  else. It **refuses to print to something that is not a terminal** (a build log, a pipe, a CI job) unless you
+  pass `--allow-pipe`: do not put it in a build command. It never repeats the cause of an error (that could carry
+  a connection string). Running it again makes a new code and ends the old one and any open setup session. It
+  refuses (`SETUP_ALREADY_DONE`) on an instance that is set up, with the wrong runtime mode
+  (`SETUP_CODE_NOT_SERVERLESS`: a server prints its own code), and while the schema is behind
+  (`SETUP_CODE_SCHEMA_BEHIND`: run `pnpm migrate`).
+
+- **The counters are shared**: 5 attempts per minute and 10 wrong attempts for the whole deployment, each counted
+  by one statement in the database (`setup-codes-repository.ts`). The attempt takes its place and counts as wrong
+  before the code is compared, so guesses that arrive together cannot get past the limit; a correct code takes
+  the count back. The lock lasts until `pnpm setup-code` makes a new code.
+- **Single use across instances**: the correct code is consumed by a statement that only changes an unused row,
+  so of any number of instances that submit it together exactly one gets a setup session.
+- **The setup session** is bound to the id of the issuance in the database, so a new code ends every open session
+  on every instance. When the setup is complete the row is deleted.
+- **Not set up, no row**: the routes answer `503 setup_unavailable`, and the form says to run `pnpm setup-code`
+  (the copy follows the runtime mode: `ui/messages.ts`). A database that cannot be read (the table is missing)
+  answers the same, with the log line `SETUP_CODE_STORE_UNAVAILABLE`.
+- The code is never in an HTTP response or a log; the start of a serverless instance prints nothing
+  (`src/startup-serverless.ts`).
+
+A server (`APP_RUNTIME=server`, the default) is unchanged: the code is printed in its log and kept in memory, and
+it never reads `setup_codes`.
 
 ## The setup session
 
@@ -85,6 +127,9 @@ ways to sign in there, and `admin reset-password` recovers a lost admin password
 
 ## Tests
 
+`serverless-setup.integration.test.ts` runs the same routes with the code in the database and several instances over
+one database; `database-code-store.integration.test.ts` tests the store, its counters and the races (the Postgres
+variants run when `TEST_DATABASE_URL` is set); `setup-code-cli*.test.ts` test the command.
 `setup.integration.test.ts` drives the real proxy gate, the real routes' handlers and the real Better Auth
 over a real database (`src/test-support/setup-harness.ts`) with a code store whose clock the test moves.
 `code-store.test.ts`, `gate.test.ts`, `setup-session.test.ts` and `input.test.ts` are the unit tests;

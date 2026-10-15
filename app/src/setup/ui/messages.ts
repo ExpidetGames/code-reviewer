@@ -18,7 +18,12 @@ import {
   GENERIC_FAILURE,
 } from "../../ui/transport-messages.ts";
 
+/** Where the app runs decides how a person gets a new setup code. */
+export type SetupHosting = "server" | "serverless";
+
 const RESTART = "Restart the app: it prints a new code in its log.";
+/** A serverless deployment prints nothing: the operator makes the code with a command (#321). */
+const NEW_CODE = "Run pnpm setup-code in a terminal: it makes a new code.";
 
 const FAILURE_COPY: Record<string, string> = {
   invalid_code:
@@ -38,8 +43,23 @@ const FAILURE_COPY: Record<string, string> = {
   cross_site_request: CROSS_SITE_REQUEST,
 };
 
+/** The sentences that differ in a serverless deployment: no log to read, no restart to make. */
+const SERVERLESS_FAILURE_COPY: Record<string, string> = {
+  invalid_code: `That code is not correct. Use the code that pnpm setup-code printed and try again. After 10 wrong codes this form locks until you make a new code with pnpm setup-code.`,
+  setup_locked: `Too many wrong codes: the setup is locked. ${NEW_CODE}`,
+  code_expired: `This code is older than 60 minutes and no longer valid. ${NEW_CODE}`,
+  code_used: `This code was already used. ${NEW_CODE}`,
+  setup_unavailable: `No setup code was made for this deployment yet. ${NEW_CODE}`,
+  setup_session_expired: `The setup session ended after 30 minutes. ${NEW_CODE}`,
+};
+
 /** The sentence for a failed call of the code form or the wizard. */
-export function describeSetupFailure(code: string): string {
+export function describeSetupFailure(
+  code: string,
+  hosting: SetupHosting = "server",
+): string {
+  if (hosting === "serverless" && Object.hasOwn(SERVERLESS_FAILURE_COPY, code))
+    return SERVERLESS_FAILURE_COPY[code] ?? GENERIC_FAILURE;
   return (
     describeTransportFailure(code) ??
     (Object.hasOwn(FAILURE_COPY, code) ? FAILURE_COPY[code] : undefined) ??
