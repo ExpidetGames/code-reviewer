@@ -21,11 +21,10 @@ const code = await runCli(process.argv.slice(2), {
   createService: async (credentials) => {
     // Loaded here so that nothing else in the Dispatcher, and no test, imports the platform SDK.
     const { Sandbox } = await import("@vercel/sandbox");
-    return createVercelService(
-      { Sandbox } as unknown as SandboxSdk,
-      credentials,
-    );
+    return createVercelService({ Sandbox } satisfies SandboxSdk, credentials);
   },
   signal: abort.signal,
 });
-process.exit(code);
+// Not process.exit: a record on a piped stdout must drain first. The timer is a backstop for a socket the SDK keeps open.
+process.exitCode = code;
+setTimeout(() => process.exit(code), 10_000).unref();

@@ -1,4 +1,4 @@
-# Sandbox double
+# Vercel Sandbox double
 
 An in-process stand-in for the Vercel Sandbox platform (`service.ts`), for tests that must never reach the real one.
 First user: the golden snapshot pipeline (#330, `dispatcher/src/snapshot/`). The Sandbox-Launcher (#329) extends it

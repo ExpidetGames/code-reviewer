@@ -5,6 +5,9 @@
 // Nothing here carries a secret: the VMs have none, and the only credential of the pipeline, the platform
 // token, never leaves the process that calls the platform API.
 import type { PipelineConfig } from "./config.ts";
+import { probeRunArguments } from "./probe-flags.ts";
+
+export { probeRunArguments };
 
 /** The label of each command; the logs, the errors and the Sandbox double address a command by it. */
 export const STEPS = {
@@ -142,7 +145,7 @@ if [ -n "$pids" ]; then
   kill -TERM $pids
 fi
 for _ in $(seq 1 300); do
-  if ! pgrep -x 'dockerd|containerd|containerd-shim-runc-v2' > /dev/null; then
+  if ! pgrep -x 'dockerd|containerd|containerd-shim' > /dev/null; then
     sync
     exit 0
   fi
@@ -216,61 +219,9 @@ echo ${SCAN_DONE}
 `;
 }
 
-const CAPABILITIES = [
-  "SETUID",
-  "SETGID",
-  "KILL",
-  "CHOWN",
-  "DAC_OVERRIDE",
-  "FOWNER",
-  "NET_ADMIN",
-  "SETPCAP",
-];
-const TMPFS = [
-  "/tmp:rw,noexec,nosuid,nodev,size=512m,mode=1777",
-  "/run:rw,noexec,nosuid,nodev,size=1m,mode=0755",
-  "/home/runner:rw,noexec,nosuid,nodev,size=64m,uid=10001,gid=10001,mode=0700",
-];
-
-/**
- * The flags of the probe container: the hardening of the `runner-dynamic` service of compose.coolify.yml, as
- * the spike (#317) ran it, plus the two IPv6 sysctls that the reduced egress ruleset needs (#345). No volume,
- * device, host namespace or published port, and no environment but what the probe's settings read.
- */
-export function probeRunArguments(config: PipelineConfig): string[] {
-  return [
-    "--rm",
-    "--user",
-    "0:0",
-    "--cap-drop",
-    "ALL",
-    ...CAPABILITIES.flatMap((capability) => ["--cap-add", capability]),
-    "--security-opt",
-    "no-new-privileges:true",
-    "--read-only",
-    ...TMPFS.flatMap((mount) => ["--tmpfs", mount]),
-    "--pids-limit",
-    "512",
-    "--memory",
-    config.probeMemory,
-    "--memory-swap",
-    config.probeMemory,
-    "--stop-timeout",
-    "90",
-    "--sysctl",
-    "net.ipv6.conf.all.disable_ipv6=1",
-    "--sysctl",
-    "net.ipv6.conf.default.disable_ipv6=1",
-    "--env",
-    "HOME=/home/runner",
-    "--env",
-    "RUNNER_DIFF_JOB_USER=10001:10001",
-  ];
-}
-
-/** Runs the image in `probe` mode (#324): one JSON line, the verdict. The timeout is a backstop. */
+/** Runs the image in `probe` mode (#324): one JSON line, the verdict. The timeout is a backstop. The flags are the renderer's. */
 export function probeScript(config: PipelineConfig): string {
   return `${STRICT}
-timeout 180 docker run ${probeRunArguments(config).map(shellQuote).join(" ")} ${shellQuote(config.imageTag)} probe
+timeout 180 docker ${probeRunArguments(config).map(shellQuote).join(" ")}
 `;
 }

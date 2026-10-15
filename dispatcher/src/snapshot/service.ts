@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // The port between the golden snapshot pipeline and the Sandbox platform (#330). The pipeline never
-// imports the platform SDK: `vercel-service.ts` adapts the SDK to this port, and `fakes/sandbox` is a
+// imports the platform SDK: `vercel-service.ts` adapts the SDK to this port, and `fakes/vercel-sandbox` is a
 // double of it for the tests. The Sandbox-Launcher (#329) has a port of its own for the per-job VM.
 
 export type ExecRequest = {

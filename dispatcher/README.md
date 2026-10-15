@@ -122,7 +122,7 @@ Names only: a refusal names the variable, never the value.
 `src/snapshot/` builds and checks the VM snapshot that every Sandbox job VM is cloned from (#330). It is a command
 (`pnpm snapshot:build`, run by `.github/workflows/golden-snapshot.yml`), not part of the Dispatcher at run time: no entry
 imports it and the serverless bundle does not contain it. It talks to the platform through the port `src/snapshot/service.ts`
-(`vercel-service.ts` is the only file that knows the SDK) and its tests run against `fakes/sandbox`. Steps, the record,
+(`vercel-service.ts` is the only file that knows the SDK) and its tests run against `fakes/vercel-sandbox`. Steps, the record,
 rebuild, rollback, retention, the scan and the failure codes are in `docs/golden-snapshot.md`.
 
 ## Working here

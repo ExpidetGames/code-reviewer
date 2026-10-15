@@ -12,6 +12,11 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+  SANDBOX_LAUNCHER_ADDITIONS,
+  WORKER_CONTAINER_SPEC,
+} from "../launchers/container-spec.ts";
+import { renderDockerRunArguments } from "../launchers/container.ts";
 import { resolveConfig } from "./config.ts";
 import {
   PATHS,
@@ -127,6 +132,8 @@ describe("the scripts the builder VM runs", () => {
     expect(script).not.toMatch(/kill -(9|KILL)|pkill|killall/);
     expect(script).toContain("dockerd");
     expect(script).toContain("containerd");
+    // pgrep sees the kernel's 15-character process name: the shim is "containerd-shim", not its file name.
+    expect(script).toContain("pgrep -x 'dockerd|containerd|containerd-shim'");
   });
 
   it("reads the image id with docker image inspect", () => {
@@ -218,13 +225,30 @@ describe("the container flags of the self-check probe", () => {
     ]);
   });
 
-  it("run the probe mode of the configured image, once, and remove the container", () => {
-    expect(args[0]).toBe("--rm");
-    const script = probeScript(config);
-    expect(script).toContain(
-      `docker run ${args.map(shellQuote).join(" ")} ${shellQuote(config.imageTag)} probe`,
+  // #330-extra-probe
+  it("are the output of the shared renderer (#325) for the Sandbox variant, not flags written here", () => {
+    expect(args).toEqual(
+      renderDockerRunArguments(WORKER_CONTAINER_SPEC, {
+        image: config.imageTag,
+        environment: {
+          HOME: "/home/runner",
+          RUNNER_DIFF_JOB_USER: "10001:10001",
+        },
+        command: ["probe"],
+        overrides: {
+          memory: { limit: config.probeMemory, swap: config.probeMemory },
+        },
+        additions: SANDBOX_LAUNCHER_ADDITIONS,
+      }),
     );
-    expect(script).toContain("timeout");
+    expect(args.slice(-2)).toEqual([config.imageTag, "probe"]);
+    expect(args.slice(0, 3)).toEqual(["run", "--interactive", "--rm"]);
+  });
+
+  it("run the probe mode of the configured image once, with a backstop timeout", () => {
+    expect(probeScript(config)).toContain(
+      `timeout 180 docker ${args.map(shellQuote).join(" ")}`,
+    );
   });
 });
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { FakeSandboxService } from "../../../fakes/sandbox/service.ts";
+import { FakeSandboxService } from "../../../fakes/vercel-sandbox/service.ts";
 import { createLogger } from "../core/logger.ts";
 import {
   IMAGE_ID,

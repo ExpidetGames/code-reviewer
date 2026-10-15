@@ -2,7 +2,7 @@
 
 // What the golden snapshot tests share: a Sandbox double scripted for a successful run, and the standard
 // input of a run. Dummy values only.
-import { FakeSandboxService } from "../../../fakes/sandbox/service.ts";
+import { FakeSandboxService } from "../../../fakes/vercel-sandbox/service.ts";
 import { resolveConfig } from "../snapshot/config.ts";
 import type { PipelineConfig } from "../snapshot/config.ts";
 import type { PipelineInput } from "../snapshot/pipeline.ts";

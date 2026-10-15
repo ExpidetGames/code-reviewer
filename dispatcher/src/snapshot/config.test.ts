@@ -29,6 +29,7 @@ describe("the pipeline configuration", () => {
     ["dockerfile", "runner/Dockerfile'x"],
     ["imageTag", "tag with space"],
     ["probeMemory", "1g;reboot"],
+    ["probeMemory", "1g"], // below the reservation of the container spec: the renderer refuses it
     ["keep", 0],
     ["keep", 11],
     ["keep", 1.5],

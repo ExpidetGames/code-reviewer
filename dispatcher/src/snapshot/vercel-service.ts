@@ -51,11 +51,15 @@ export interface SdkSandbox {
   }): Promise<void>;
 }
 
-/** The part of the SDK's `Sandbox` class (its static side) the adapter uses. */
+/**
+ * The part of the SDK's `Sandbox` class (its static side) the adapter uses. The parameters are `object`: the
+ * SDK's own are unions the adapter's literals cannot be checked against one by one, but the results and the
+ * instance (`SdkSandbox`) are, and `main.ts` checks the whole against the real class with `satisfies`.
+ */
 export interface SandboxSdk {
   Sandbox: {
-    create(params: Record<string, unknown>): Promise<SdkSandbox>;
-    get(params: Record<string, unknown>): Promise<SdkSandbox>;
+    create(params: object): Promise<SdkSandbox>;
+    get(params: object): Promise<SdkSandbox>;
     list(params: Record<string, unknown>): Promise<
       AsyncIterable<{
         name: string;

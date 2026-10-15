@@ -4,6 +4,7 @@
 // root in the builder VM, so each one is checked against a narrow pattern before any script is written; a
 // refusal names the field, never the value.
 import { SnapshotPipelineError } from "./errors.ts";
+import { probeRunArguments } from "./probe-flags.ts";
 
 export type PipelineConfig = {
   /** Snapshots are region-bound and there is no failover region: this is fixed, not an option. */
@@ -99,7 +100,7 @@ export function resolveConfig(
 ): PipelineConfig {
   const merged = { ...DEFAULT_CONFIG, ...overrides };
   if (merged.dockerfile.includes("..")) refuse("dockerfile");
-  return {
+  const config: PipelineConfig = {
     region: "fra1",
     builderVcpus: integer("builderVcpus", merged.builderVcpus, 1, 8),
     checkVcpus: integer("checkVcpus", merged.checkVcpus, 1, 8),
@@ -137,4 +138,12 @@ export function resolveConfig(
       10,
     ),
   };
+  // The renderer is the judge of the memory limit: a limit the container spec does not allow is refused here,
+  // not when the probe is built an hour into a run.
+  try {
+    probeRunArguments(config);
+  } catch {
+    refuse("probeMemory");
+  }
+  return config;
 }
