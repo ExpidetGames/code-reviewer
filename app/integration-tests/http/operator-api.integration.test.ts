@@ -254,6 +254,8 @@ describe("the entitlements of a workspace", () => {
   it.each([
     [{ ...ENTITLEMENTS, planLabel: "" }, "plan_label_invalid"],
     [{ ...ENTITLEMENTS, keyMode: "shared" }, "key_mode_invalid"],
+    // #277: the cost limit only counts runs on the operator's key
+    [{ ...ENTITLEMENTS, keyMode: "own" }, "cost_limit_requires_managed_key"],
     [{ ...ENTITLEMENTS, limits: { diffRunsPerPeriod: 1 } }, "limits_invalid"],
     [
       {

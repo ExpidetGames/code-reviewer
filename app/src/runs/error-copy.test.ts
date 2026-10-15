@@ -66,6 +66,24 @@ describe("the sentences for error codes", () => {
     );
   });
 
+  // #277-T12
+  it("explains a refusal for the plan of the workspace in one sentence, without a number or a figure", () => {
+    for (const code of [
+      "workspace_suspended",
+      "quota_exhausted",
+      "entitlements_invalid",
+    ]) {
+      const { text, known } = describeErrorCode(code);
+
+      expect(known).toBe(true);
+      expect(text).toMatch(/^[A-Z][^.]*\.(?: [A-Z][^.]*\.)*$/);
+      expect(text).not.toMatch(/\d/);
+      expect(text).not.toMatch(/[$€£%]/);
+      expect(text).toMatch(/did not start/);
+      expect(text).toMatch(/no AI model was used/);
+    }
+  });
+
   // #290-T06
   it("tells a person that the request was larger than the model's context window", () => {
     const { text, known } = describeErrorCode("llm_context_length_exceeded");
