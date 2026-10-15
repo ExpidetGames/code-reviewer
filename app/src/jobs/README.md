@@ -169,7 +169,9 @@ from `jobQueueFor` (`src/dispatch/producers.test.ts`).
    job or nothing.
 
 The claim also reserves the job's usage record (`usage_records`, `src/usage/README.md`) in the same
-transaction, `complete` settles it, and every transition that ends a job without `complete` voids it.
+transaction, `complete` settles it, and every transition that ends a job without `complete` closes it: settled with an
+unknown cost (`no_result`) when a runner held the job and sent no result (lease lost on the last attempt, hard limit,
+runner shut down on the last attempt), void for every other end.
 
 That statement is the only dialect specific code (`src/db/repositories/jobs-claim.ts`); a port to
 Postgres changes it (`FOR UPDATE SKIP LOCKED`) and nothing else.

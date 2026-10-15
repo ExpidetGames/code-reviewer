@@ -23,6 +23,7 @@ from code_reviewer_runner.pr_agent_config import (
 )
 from code_reviewer_runner.repo_settings_guard import RepoSettingsGuard
 from code_reviewer_runner.result import Usage
+from code_reviewer_runner.usage_probe import UsageProbe
 
 if TYPE_CHECKING:
     from pr_agent.algo.run_details import RunDetails
@@ -65,9 +66,15 @@ def configure_settings(job: Job, settings: Any, guard: RepoSettingsGuard) -> Non
 
 
 async def execute(
-    job: Job, guard: RepoSettingsGuard, timeout_seconds: float | None = None
+    job: Job,
+    guard: RepoSettingsGuard,
+    timeout_seconds: float | None = None,
+    probe: UsageProbe | None = None,
 ) -> tuple[bool, bool, Usage | None]:
     """Run the command inside a request scope; returns (handled, command_failed, usage).
+
+    `probe` is given what PR-Agent measured however the command ends, also when it raises or runs
+    out of time, so a run that fails after its model call can still report what it used (#273).
 
     `guard` is told which settings the runner has configured, right before the command starts, so
     it can put them back after a repository settings file was merged.
@@ -102,4 +109,8 @@ async def execute(
             if timeout.expired():
                 raise JobTimeout from None
             raise
+        finally:
+            # The tools start a collector of their own; the one in place now is the last one.
+            if probe is not None:
+                probe.record(_usage(get_run_details()))
         return handled is True, command_failed(), _usage(get_run_details())

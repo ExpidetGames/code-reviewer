@@ -110,12 +110,13 @@ from code_reviewer_runner.require_parameters_patch import (
     RequireParametersPatchError,
     apply_require_parameters_patch,
 )
-from code_reviewer_runner.result import ErrorCode, JobResult
+from code_reviewer_runner.result import NO_RESULT_REASON, ErrorCode, JobResult, Usage
 from code_reviewer_runner.review_state_watch import (
     ReviewStateWatch,
     WatchError,
     install_review_state_watch,
 )
+from code_reviewer_runner.usage_probe import UsageProbe
 
 PROGRAM_NAME = "code-reviewer-run-job"
 _ERROR_LEVEL = 40
@@ -136,9 +137,11 @@ def _failure(
     *,
     reason: str | None = None,
     facts: Sequence[str] = (),
+    usage: Usage | None = None,
 ) -> JobResult:
     """A failed result. `reason` is the stable finer name of the failure; `facts` are extra lines
-    that belong with the verdict (counts and stable names only, never repository content)."""
+    that belong with the verdict (counts and stable names only, never repository content).
+    `usage` is what the run used before it failed, when it reached the model (#273)."""
     tail, truncated = capture.snapshot() if capture is not None else ("", False)
     # The code, the reason and the detail are the most important part: they stay, the old log
     # lines make room.
@@ -153,6 +156,7 @@ def _failure(
         error_code=code,
         log_tail=fit_to_bytes(header + (f"\n{fitted}" if fitted else ""), MAX_TAIL_BYTES),
         log_truncated=truncated or fitted != tail,
+        usage=usage,
         error_reason=reason,
     )
 
@@ -204,11 +208,17 @@ def run_job(
         patches.callback(undo_recorder)
         guard, undo_guard = install_repo_settings_guard()
         patches.callback(undo_guard)
+        # What PR-Agent measured is kept for a command that fails after its model call (#273).
+        probe = UsageProbe()
         try:
-            handled, failed_flag, usage = asyncio.run(execute(job, guard, timeout_seconds))
+            handled, failed_flag, usage = asyncio.run(execute(job, guard, timeout_seconds, probe))
         except JobTimeout:
             return _failure(
-                ErrorCode.TIMEOUT, "the command did not finish in time", started, capture
+                ErrorCode.TIMEOUT,
+                "the command did not finish in time",
+                started,
+                capture,
+                usage=probe.usage(),
             )
         except InvalidOption as error:
             # The key is an env name that parse_job validated; the value is never echoed.
@@ -223,7 +233,13 @@ def run_job(
         except BaseException as error:  # SystemExit and friends from a library included
             capture.add(_ERROR_LEVEL, "ERROR", "handle_request raised", error)
             code = classify_failure(capture.exceptions, capture.error_messages)
-            return _failure(code or ErrorCode.UNKNOWN, "the command raised", started, capture)
+            return _failure(
+                code or ErrorCode.UNKNOWN,
+                "the command raised",
+                started,
+                capture,
+                usage=probe.usage(),
+            )
     finally:
         patches.close()
 
@@ -255,7 +271,8 @@ def run_job(
         error_code=error_code,
         log_tail=log_tail,
         log_truncated=log_truncated,
-        usage=usage,
+        # A failed command reports usage only when it reached the model.
+        usage=usage if ok else probe.usage(),
     )
 
 
@@ -315,6 +332,7 @@ def run_dynamic_job(
     publish: Callable[[Job, DynamicFindings], Published] | None = None,
     lease_check: LeaseCheck | None = None,
     publish_failure: Callable[[Job, ErrorCode, str | None], Published | None] | None = None,
+    usage_probe: UsageProbe | None = None,
 ) -> JobResult:
     """Run a Dynamic job with the read-only stock engine (#197) and publish its summary (#201).
 
@@ -331,6 +349,11 @@ def run_dynamic_job(
 
     A failure that a developer can understand or act on also leaves a short note in the pull
     request's summary comment (#299, `add_failure_note`); the note never changes the result.
+
+    A run that fails after at least one model call reports what it used (#273): the counters of the
+    ledger, and the cost only when every call was priced. `usage_probe` lets the caller read the
+    same from outside when the run does not end by returning (an error nobody expected, the
+    watchdog).
     """
     result = _run_dynamic_job(
         job,
@@ -342,6 +365,7 @@ def run_dynamic_job(
         prepare=prepare,
         publish=publish,
         lease_check=lease_check,
+        usage_probe=usage_probe or UsageProbe(),
     )
     return add_failure_note(job, result, lease_check, publish_failure or publish_failure_note)
 
@@ -393,6 +417,7 @@ def _run_dynamic_job(
     prepare: ContentPreparer | None = None,
     publish: Callable[[Job, DynamicFindings], Published] | None = None,
     lease_check: LeaseCheck | None = None,
+    usage_probe: UsageProbe,
 ) -> JobResult:
     dynamic = job.dynamic
     base = job.base
@@ -438,6 +463,8 @@ def _run_dynamic_job(
         ledger = dynamic_ledger(capabilities, environment, deadline)
     except LimitError as error:
         return _failure(error.code, error.detail, started, capture)
+    # From here on every failure says what the model calls so far cost (nothing before the first).
+    usage_probe.watch(lambda: ledger.usage(job.llm.model))
     upstream = job.llm.base_url or "https://openrouter.ai/api/v1"
     # One unguessable capability per job: the proxy demands it, the engine config carries it.
     capability = new_proxy_capability()
@@ -512,11 +539,12 @@ def _run_dynamic_job(
             capture,
             reason=error.reason.value,
             facts=[f"checkout: {error.metrics.describe()}"] if error.metrics else [],
+            usage=usage_probe.usage(),
         )
 
     if answer.error is not None:
         detail = answer.error.detail + (f" [{turn_note}]" if turn_note else "")
-        return _failure(answer.error.code, detail, started, capture)
+        return _failure(answer.error.code, detail, started, capture, usage=usage_probe.usage())
     assert answer.findings is not None
     # The summary is written by this supervisor, never by the engine, and only for a run whose
     # findings passed every check above: any earlier failure leaves the previous comment untouched.
@@ -528,14 +556,14 @@ def _run_dynamic_job(
             if state is LeaseState.UNCONFIRMED
             else "the job is no longer held by this runner, so nothing was written"
         )
-        return _failure(ErrorCode.LEASE_LOST, detail, started, capture)
+        return _failure(ErrorCode.LEASE_LOST, detail, started, capture, usage=usage_probe.usage())
     try:
         # A review that was wrapped up at its limit says so in the summary; the reason is the
         # ledger's, never the model's.
         findings = replace(answer.findings, stopped_early=ledger.stopped_early)
         published = (publish or publish_run)(job, findings)
     except PublishError as error:
-        return _failure(error.code, error.detail, started, capture)
+        return _failure(error.code, error.detail, started, capture, usage=usage_probe.usage())
     summary = (
         f"dynamic review: {len(answer.findings.findings)} findings against {base.head_sha}; "
         f"{ledger.model_calls} model calls, {ledger.tool_calls} tool calls, {ledger.files} files"
@@ -678,22 +706,45 @@ def _unwind_on_sigterm() -> Generator[None]:
         signal.signal(signal.SIGTERM, previous)
 
 
+def _probe_usage(probe: UsageProbe | None) -> Usage | None:
+    """The usage a failure may carry. Reading it must never stop the failure from being reported."""
+    try:
+        return probe.usage() if probe is not None else None
+    except Exception:
+        return None
+
+
 def _start_watchdog(
     seconds: float,
     channel: _ResultChannel,
     started: float,
     capture: LogCapture | None,
     secrets: Sequence[str],
+    probe: UsageProbe | None = None,
 ) -> threading.Timer:
-    """Last resort for a command that blocks the event loop and so ignores the soft timeout."""
+    """Last resort for a command that blocks the event loop and so ignores the soft timeout.
+
+    A Dynamic run hands over its `probe`: the ledger can be read from this thread, so the result
+    still says what the run used (#273). A Diff command keeps its measurements in the context of
+    the blocked event loop, which this thread cannot read; its timeout result carries none.
+    """
 
     def fire() -> None:
         # A Dynamic engine runs in its own process group (it can outlive this process); end it
         # before this process ends, so no engine or helper survives the timeout (#197-T07).
         shutdown_engines()
+        usage = _probe_usage(probe)
+        # Without a probe (a Diff command) the counters cannot be read from here: the run may have
+        # used the model, which the reason says (#273).
+        reason = NO_RESULT_REASON if probe is None else None
         try:
             result = _failure(
-                ErrorCode.TIMEOUT, "the command did not stop in time", started, capture
+                ErrorCode.TIMEOUT,
+                "the command did not stop in time",
+                started,
+                capture,
+                usage=usage,
+                reason=reason,
             )
         except Exception:
             result = JobResult(
@@ -703,6 +754,8 @@ def _start_watchdog(
                 error_code=ErrorCode.TIMEOUT,
                 log_tail="timeout: the command did not stop in time",
                 log_truncated=True,
+                usage=usage,
+                error_reason=reason,
             )
         try:
             written = channel.write(result, secrets)
@@ -753,8 +806,10 @@ def main(
         # A Dynamic job is never run by PR-Agent (#195/#197). It gets the same process-level timeout
         # as a Diff job; on expiry the watchdog ends the engine's process group too (#197-T07).
         dynamic_timeout = _timeout_from(saved_env)
+        # What the run used so far, for the paths that end it without a normal return (#273).
+        dynamic_probe = UsageProbe()
         dynamic_watchdog = (
-            _start_watchdog(dynamic_timeout, channel, started, None, job.secrets)
+            _start_watchdog(dynamic_timeout, channel, started, None, job.secrets, dynamic_probe)
             if dynamic_timeout
             else None
         )
@@ -768,11 +823,18 @@ def main(
                     dynamic_timeout,
                     engines=engines_from_environment(saved_env),
                     lease_check=lease_check_from_environment(saved_env, required=True),
+                    usage_probe=dynamic_probe,
                 )
         except KeyboardInterrupt:
             raise
         except BaseException:
-            result = _failure(ErrorCode.RUNNER_ERROR, "unexpected runner error", started, None)
+            result = _failure(
+                ErrorCode.RUNNER_ERROR,
+                "unexpected runner error",
+                started,
+                None,
+                usage=_probe_usage(dynamic_probe),
+            )
         finally:
             if dynamic_watchdog is not None:
                 dynamic_watchdog.cancel()

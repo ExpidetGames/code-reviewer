@@ -80,6 +80,9 @@ export type RunnerResult = {
   errorMessage?: string | null;
   logTail: string;
   logTruncated?: boolean;
+  /**
+   * What the run used. A failed result carries it too, whenever the run made at least one model call before it failed (a timeout at the end, an answer the validator refuses, a publish error): the app counts such a run exactly like a successful one. A run that failed before its first model call reports null. The cost follows the same rule as for a successful run: exact, or null when any call is unpriced; the token counters are reported either way.
+   */
   usage?: RunnerUsage | null;
   [k: string]: unknown;
 };

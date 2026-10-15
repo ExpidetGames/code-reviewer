@@ -431,6 +431,36 @@ describe("what the app accepts from a runner", () => {
     expect(parseCompleteRequest(examples.get("CompleteRequest")).ok).toBe(true);
   });
 
+  // #273-T07: the examples of a failed result with usage are valid, and the app reads them as the
+  // runner sends them.
+  it("accepts the examples of a failed result that carries the usage of its calls", () => {
+    const examples = readContract().$defs.RunnerResult?.examples as Record<
+      string,
+      unknown
+    >[];
+
+    expect(examples.length).toBeGreaterThanOrEqual(2);
+    for (const result of examples) {
+      expect(result.ok).toBe(false);
+      expect(contract.check("RunnerResult", result).valid).toBe(true);
+      const body = {
+        leaseToken: "6f1d2c9a-5b3e-4a77-9c0d-8e2f1a4b7c33",
+        result,
+      };
+      expect(contract.check("CompleteRequest", body).valid).toBe(true);
+      const parsed = parseCompleteRequest(body);
+      expect(parsed.ok).toBe(true);
+      if (parsed.ok) expect(parsed.value.result.usage).not.toBeNull();
+    }
+    expect(
+      new Set(
+        examples.map(
+          (result) => (result.usage as { costUsd: unknown }).costUsd === null,
+        ),
+      ),
+    ).toEqual(new Set([true, false]));
+  });
+
   // #195-T06: the claim request is judged exactly like the contract. An absent body is the
   // previous-release caller and means pr-agent only; an empty or unknown or duplicated engine list is
   // refused before any job is claimed.

@@ -520,6 +520,46 @@ def test_a_result_the_app_finds_too_large_is_sent_again_as_a_bare_verdict() -> N
     run(scenario)
 
 
+# #273-T01: the usage is what the app may refuse; the verdict is never lost because of it.
+def test_a_verdict_that_is_refused_with_its_usage_is_sent_once_more_without_it() -> None:
+    async def scenario() -> None:
+        harness = Harness()
+        harness.api.claims = [make_claim(1)]
+        harness.api.complete_errors = [
+            ApiRejected("bad", 400, "RUNNER_REQUEST_INVALID"),
+            ApiRejected("bad", 400, "RUNNER_REQUEST_INVALID"),
+        ]
+        await harness.start()
+        usage = {
+            "model": "vendor/model",
+            "promptTokens": 300,
+            "completionTokens": 30,
+            "totalTokens": 330,
+            "aiCalls": 3,
+            "fallbackUsed": False,
+            "costUsd": 0.0035,
+        }
+        only(harness.launcher.processes).finish(
+            outcome(
+                exit_code=1,
+                stdout=result_line(
+                    ok=False, errorCode="timeout", commentUrl=None, usage=usage, logTail="long"
+                ),
+            )
+        )
+        await settle()
+
+        assert len(harness.api.completions) == 3
+        assert harness.api.completions[0][2]["usage"]["aiCalls"] == 3
+        assert harness.api.completions[1][2]["usage"]["aiCalls"] == 3
+        last = harness.api.completions[2][2]
+        assert last["usage"] is None
+        assert (last["ok"], last["errorCode"]) == (False, "timeout")
+        await harness.stop()
+
+    run(scenario)
+
+
 # #296-T10
 def test_the_reason_reaches_the_app_even_when_the_full_result_is_refused() -> None:
     async def scenario() -> None:
@@ -618,6 +658,8 @@ def test_a_process_that_cannot_be_started_is_reported_as_a_runner_error() -> Non
 
         (_, _, result) = harness.api.completions[0]
         assert (result["ok"], result["errorCode"]) == (False, "runner_error")
+        # The process never started: no model was reached, so this is no "no result" of a run.
+        assert "errorReason" not in result
         await harness.stop()
 
     run(scenario)
@@ -638,6 +680,8 @@ def test_the_hard_timeout_ends_a_process_that_does_not_stop_and_reports_a_timeou
         assert process.terminated
         (_, _, result) = harness.api.completions[0]
         assert (result["ok"], result["errorCode"]) == (False, "timeout")
+        # #273-T06: the loop ended a job process that held the job; the model may have been used.
+        assert result["errorReason"] == "no_result_from_process"
         await harness.stop()
 
     run(scenario)

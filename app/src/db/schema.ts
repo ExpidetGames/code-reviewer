@@ -384,6 +384,8 @@ export interface UsageRecordsTable {
   reserved_at: string;
   /** ISO 8601 text in UTC; only a settled record has it. */
   settled_at: string | null;
+  /** Why the record was settled without a report of its run (SETTLED_REASONS); null when the run reported. */
+  settled_reason: string | null;
 }
 
 /** The LLM key handed to a runner with the claim of a job, encrypted (src/runner-api/claimed-keys.ts). */

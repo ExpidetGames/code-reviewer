@@ -61,6 +61,7 @@ from code_reviewer_runner.job_loop.process import (
     RunningProcess,
 )
 from code_reviewer_runner.job_loop.reporting import (
+    NO_RESULT_REASON,
     RUNNER_SHUTDOWN,
     Result,
     TextRedactor,
@@ -445,6 +446,7 @@ class JobHost:
                 duration_ms=self._ms_since(started),
                 log_tail=tail,
                 redactor=redactor,
+                reason=NO_RESULT_REASON,
             )
         if shutdown.done() and not shutdown.cancelled():
             self._log.warning(
@@ -577,7 +579,8 @@ class JobHost:
         body = fit_request(result)
         began = self._clock.monotonic()
         delay = _FIRST_RETRY_SECONDS
-        reduced = False
+        # 0: the whole result, 1: the verdict with its usage, 2: the verdict alone (#273).
+        stage = 0
         while True:
             if lost.is_set():
                 self._log.info("job %s: the lease is lost, the result is not sent", claimed.id)
@@ -590,11 +593,21 @@ class JobHost:
                 self._log.info("job %s: the app does not hold this job for us any more", claimed.id)
                 return Delivery.NOT_HELD
             except ApiRejected as error:
-                if error.status in (400, 413) and not reduced:
-                    reduced = True
+                if error.status in (400, 413) and stage == 0:
+                    stage = 1
                     body = minimal(result)
                     self._log.warning(
                         "job %s: result refused (HTTP %d), sending the verdict only",
+                        claimed.id,
+                        error.status,
+                    )
+                    continue
+                if error.status in (400, 413) and stage == 1 and body.get("usage") is not None:
+                    # The usage may be what the app refuses: the verdict must not be lost for it.
+                    stage = 2
+                    body = minimal(result, keep_usage=False)
+                    self._log.warning(
+                        "job %s: verdict refused (HTTP %d), sending it without the usage",
                         claimed.id,
                         error.status,
                     )

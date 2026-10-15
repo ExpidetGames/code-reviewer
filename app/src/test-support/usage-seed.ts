@@ -23,6 +23,8 @@ export type SeededUsage = {
   reservedAt?: string;
   /** Default for a settled record: `reservedAt`. */
   settledAt?: string;
+  /** Why a settled record carries no measurement (`no_result`). */
+  settledReason?: "no_result" | null;
   /** What the job's stored result says; the feed must never show it. */
   jobResult?: unknown;
 };
@@ -126,6 +128,7 @@ export function createUsageSeeder(db: Kysely<Database>) {
             : null,
           reserved_at: reservedAt,
           settled_at: settledAt,
+          settled_reason: measured ? (options.settledReason ?? null) : null,
         })
         .execute();
       return { id, jobId };

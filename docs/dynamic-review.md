@@ -50,7 +50,13 @@ publishes as one persistent summary comment. The decisions are in epic
    (BYOK) routing, the charge of the upstream provider can differ from `usage.cost` (OpenRouter
    reports it separately); `costUsd` is always the `usage.cost` figure, not the upstream charge. If
    any call has no reported cost, the run's cost is unknown ("Not available") rather than a partial
-   sum. It is never computed from a price table or from token counts.
+   sum. It is never computed from a price table or from token counts. A run that **fails after at
+   least one model call** (the budget or the clock ran out, the answer was refused, the summary
+   could not be published, the lease was lost, the watchdog ended it) still reports that usage in its
+   failed result (#273): the counters of its ledger, and the cost only when every call was priced.
+   A run that fails before its first model call reports none. The app counts both kinds of run
+   alike; a job that ends with no result at all from a runner that held it is counted with an unknown
+   cost (`src/usage/README.md`).
 2. A runner claims a Dynamic job only if it advertises `opencode` in the claim. The runner
    advertises it only after its startup self-check proved the dedicated engine user, the read-only
    export and proxy-only egress (`runner/src/code_reviewer_runner/dynamic_review/self_check.py`, see
