@@ -14,6 +14,7 @@ import {
   utimesSync,
   writeFileSync,
 } from "node:fs";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -24,8 +25,12 @@ import {
 import { renderDockerRunArguments } from "../launchers/container.ts";
 import { resolveConfig } from "./config.ts";
 import {
+  EXIT_ANCHOR_MISSING,
+  EXIT_LISTING_EMPTY,
   EXIT_MANIFEST_EMPTY,
   EXIT_MANIFEST_MISSING,
+  EXIT_MANIFEST_MODIFIED,
+  EXIT_TOOL_FAILED,
   PATHS,
   buildImageScript,
   checkNoContainersScript,
@@ -297,12 +302,18 @@ describe("the final scan of the restored snapshot", () => {
       join(roots, "etc", "app.conf"),
       "listen = 8080\nnothing secret here\n",
     );
+    // The base layer as it is after the platform booted: what a test writes from here on is the pipeline's.
+    recordBase();
   });
   afterEach(() => rmSync(work, { recursive: true, force: true }));
 
+  /** The file the scan expects the pipeline to have written (vm-prepare.sh in production), a canary for an empty listing. */
+  const anchor = () => join(roots, "usr", "local", "sbin", "vm-prepare.sh");
+
   /** The builder's first command, on the base layer as it is now: what is written later is the pipeline's. */
-  function recordBase(): void {
-    execFileSync(
+  function recordBase(): string {
+    rmSync(anchor(), { force: true });
+    const out = execFileSync(
       "bash",
       [
         "-c",
@@ -310,22 +321,44 @@ describe("the final scan of the restored snapshot", () => {
       ],
       { encoding: "utf8" },
     );
+    return /^MANIFEST_SHA256 ([0-9a-f]{64})$/m.exec(out)?.[1] ?? "";
   }
 
-  function scanOutput(): string {
-    const script = scanScript({
+  function scanOptions(extra: Partial<Parameters<typeof scanScript>[0]> = {}) {
+    return {
       roots: [roots],
       dockerRoot: docker,
       manifestPath: manifest,
-    });
-    return execFileSync("bash", ["-c", script], { encoding: "utf8" });
+      anchorPath: anchor(),
+      ...extra,
+    };
   }
 
-  /** The scan as the check VM runs it: after the base was recorded, over what the pipeline then wrote. */
-  function scan(): string {
-    if (!existsSync(manifest)) recordBase();
-    return scanOutput();
+  /** The pipeline writes vm-prepare.sh after the record, as the builder does. */
+  function writeAnchor(): void {
+    mkdirSync(join(roots, "usr", "local", "sbin"), { recursive: true });
+    writeFileSync(anchor(), "#!/usr/bin/env bash\n");
   }
+
+  function scanResult(
+    extra: Partial<Parameters<typeof scanScript>[0]> = {},
+    env: NodeJS.ProcessEnv = process.env,
+  ) {
+    return spawnSync("bash", ["-c", scanScript(scanOptions(extra))], {
+      encoding: "utf8",
+      env,
+    });
+  }
+
+  /** The scan as the check VM runs it, over what the pipeline wrote after the record. */
+  function scanOutput(): string {
+    expect(existsSync(manifest), "a test records the base first").toBe(true);
+    if (!existsSync(anchor())) writeAnchor();
+    return execFileSync("bash", ["-c", scanScript(scanOptions())], {
+      encoding: "utf8",
+    });
+  }
+  const scan = scanOutput;
 
   const DOC_EXAMPLES: Record<string, string> = {
     "config.md": "Set `key` to a PEM file:\n-----BEGIN PRIVATE KEY-----\n",
@@ -403,14 +436,16 @@ describe("the final scan of the restored snapshot", () => {
   });
 
   // #357-T12
-  it("allows the distribution's snake-oil key and reports any other key of the same shape", () => {
-    recordBase();
+  it("allows the distribution's snake-oil key and reports a key of the same shape under any other name", () => {
     mkdirSync(join(roots, "etc", "ssl"), { recursive: true });
     writeFileSync(
       join(roots, "etc", "ssl", "ssl-cert-snakeoil.key"),
       "-----BEGIN PRIVATE KEY-----\nabc\n",
     );
     expect(scan()).toBe("SCAN_DONE\n");
+    const other = join(roots, "etc", "ssl", "server.key");
+    writeFileSync(other, "-----BEGIN PRIVATE KEY-----\nabc\n");
+    expect(scan()).toBe(`FINDING private_key ${other}\nSCAN_DONE\n`);
   });
 
   describe("what the platform's base image ships", () => {
@@ -464,6 +499,27 @@ describe("the final scan of the restored snapshot", () => {
       expect(replaced.length).toBe(old.length);
       writeFileSync(file, replaced);
       utimesSync(file, new Date(), new Date(Date.now() + 5000));
+      expect(scanOutput()).toContain(`FINDING token ${file}\n`);
+    });
+
+    // #357-T16
+    it("reports a base file rewritten to the same size with its old modification time restored", () => {
+      const file = join(roots, "etc", "app.conf");
+      writeFileSync(file, "# a base file, long enough for a token\n".repeat(2));
+      recordBase();
+      const before = statSync(file, { bigint: true });
+      const reference = join(work, "reference");
+      writeFileSync(reference, "x");
+      execFileSync("touch", ["-r", file, reference]);
+      writeFileSync(
+        file,
+        `ghp_${"A1b2".repeat(10)}`.padEnd(Number(before.size), "\n"),
+      );
+      // What `touch -r`, `cp -p` and an archive extraction do: size and mtime are exactly the old ones.
+      execFileSync("touch", ["-r", reference, file]);
+      const after = statSync(file, { bigint: true });
+      expect(after.size).toBe(before.size);
+      expect(after.mtimeNs).toBe(before.mtimeNs);
       expect(scanOutput()).toContain(`FINDING token ${file}\n`);
     });
 
@@ -553,24 +609,24 @@ describe("the final scan of the restored snapshot", () => {
           "-c",
           recordBaseManifestScript({
             roots: [join(work, "missing")],
-            manifestPath: manifest,
+            manifestPath: join(work, "none", "manifest"),
           }),
         ],
         { encoding: "utf8" },
       );
       expect(result.status).toBe(EXIT_MANIFEST_EMPTY);
-      expect(existsSync(manifest)).toBe(false);
+      expect(existsSync(join(work, "none", "manifest"))).toBe(false);
+      expect(result.stdout).not.toContain("MANIFEST_SHA256");
     });
 
     // #357-T09
-    it("lists each file once with its size and time, one NUL terminated record per file", () => {
-      recordBase();
+    it("lists each file once with its size, modification and status change time, one NUL terminated record per file", () => {
       const records = readFileSync(manifest, "utf8").split("\0");
       expect(records.pop()).toBe("");
       expect(records).toHaveLength(1);
       expect(records[0]).toMatch(
         new RegExp(
-          `^${join(roots, "etc", "app.conf").replaceAll(".", "\\.")}\t${statSync(join(roots, "etc", "app.conf")).size}\t\\d+\\.\\d+$`,
+          `^${join(roots, "etc", "app.conf").replaceAll(".", "\\.")}\t${statSync(join(roots, "etc", "app.conf")).size}\t\\d+\\.\\d+\t\\d+\\.\\d+$`,
         ),
       );
       expect(readFileSync(manifest, "utf8")).not.toContain("SCAN_DONE");
@@ -668,15 +724,149 @@ describe("the final scan of the restored snapshot", () => {
   });
 
   it("skips a root that does not exist", () => {
-    recordBase();
-    const script = scanScript({
-      roots: [join(work, "missing"), roots],
-      dockerRoot: docker,
-      manifestPath: manifest,
+    writeAnchor();
+    const result = scanResult({ roots: [join(work, "missing"), roots] });
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe("SCAN_DONE\n");
+  });
+
+  describe("failing closed", () => {
+    // #357-T15
+    it("fails without a marker when the listing of the roots is empty", () => {
+      writeAnchor();
+      const result = scanResult({ roots: [join(work, "missing")] });
+      expect(result.status).toBe(EXIT_LISTING_EMPTY);
+      expect(result.stdout).not.toContain("SCAN_DONE");
     });
-    expect(execFileSync("bash", ["-c", script], { encoding: "utf8" })).toBe(
-      "SCAN_DONE\n",
+
+    // #357-T15
+    it("fails without a marker when the pipeline's own file is not among the added files", () => {
+      // No vm-prepare.sh was written after the record: the listing is not the one of the pipeline's VM.
+      writeFileSync(
+        join(roots, "home", "ubuntu", "other.txt"),
+        "something new\n",
+      );
+      const result = scanResult();
+      expect(result.status).toBe(EXIT_ANCHOR_MISSING);
+      expect(result.stdout).not.toContain("SCAN_DONE");
+    });
+
+    /** A directory of stand-ins that come first on PATH. */
+    function stubTools(stubs: Record<string, string>): NodeJS.ProcessEnv {
+      const bin = join(work, "stub-bin");
+      mkdirSync(bin, { recursive: true });
+      for (const [name, body] of Object.entries(stubs)) {
+        writeFileSync(join(bin, name), `#!/bin/sh\n${body}\n`);
+        chmodSync(join(bin, name), 0o755);
+      }
+      return { ...process.env, PATH: `${bin}:${process.env.PATH ?? ""}` };
+    }
+
+    // #357-T15
+    it.each([
+      ["find exits 2", { find: "exit 2" }, false],
+      ["find exits 1 (a file vanished)", { find: "exit 1" }, false],
+      ["grep exits 2", { grep: "exit 2" }, false],
+      ["grep exits 3", { grep: "exit 3" }, false],
+      ["grep is killed", { grep: "kill -9 $$" }, false],
+      [
+        "grep exits 2 for the Docker auth check only",
+        { grep: 'case "$*" in *-qE*) exit 2 ;; esac; exec /usr/bin/grep "$@"' },
+        true,
+      ],
+    ])(
+      "fails without a marker and with the tool failure status when %s, with a token planted",
+      (_what, stubs, withDockerConfig) => {
+        writeAnchor();
+        if (withDockerConfig) {
+          mkdirSync(join(roots, "home", "ubuntu", ".docker"), {
+            recursive: true,
+          });
+          writeFileSync(
+            join(roots, "home", "ubuntu", ".docker", "config.json"),
+            '{"auths":{}}',
+          );
+        }
+        writeFileSync(
+          join(roots, "home", "ubuntu", "leak.txt"),
+          `ghp_${"A1b2".repeat(10)}\n`,
+        );
+        const result = scanResult({}, stubTools(stubs));
+        expect(result.status).toBe(EXIT_TOOL_FAILED);
+        expect(result.stdout).not.toContain("SCAN_DONE");
+      },
     );
+
+    // #357-T15
+    it("is not fooled by a grep that finds the token and fails afterwards", () => {
+      writeAnchor();
+      writeFileSync(
+        join(roots, "home", "ubuntu", "leak.txt"),
+        `ghp_${"A1b2".repeat(10)}\n`,
+      );
+      const result = scanResult(
+        {},
+        stubTools({ grep: '/usr/bin/grep "$@"; exit 2' }),
+      );
+      expect(result.status).toBe(EXIT_TOOL_FAILED);
+      expect(result.stdout).not.toContain("SCAN_DONE");
+    });
+
+    // #357-T15
+    it("still passes when grep finds nothing in some of its batches (exit 1 is a plain no-match)", () => {
+      writeAnchor();
+      for (let index = 0; index < 5; index += 1)
+        writeFileSync(
+          join(roots, "home", "ubuntu", `f${index}.txt`),
+          "plain\n",
+        );
+      const result = scanResult();
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe("SCAN_DONE\n");
+    });
+
+    // #357-T15
+    it("fails without a marker when the manifest no longer has the hash the pipeline pinned", () => {
+      const pinned = createHash("sha256")
+        .update(readFileSync(manifest))
+        .digest("hex");
+      writeAnchor();
+      const good = scanResult({ manifestSha256: pinned });
+      expect(good.status).toBe(0);
+      expect(good.stdout).toBe("SCAN_DONE\n");
+      // A record is added: a shrunk or garbled manifest would hide files.
+      appendFileSync(manifest, "/etc/app.conf\t1\t1.0\t1.0\0");
+      const tampered = scanResult({ manifestSha256: pinned });
+      expect(tampered.status).toBe(EXIT_MANIFEST_MODIFIED);
+      expect(tampered.stdout).not.toContain("SCAN_DONE");
+      const wrong = scanResult({ manifestSha256: "0".repeat(64) });
+      expect(wrong.status).toBe(EXIT_MANIFEST_MODIFIED);
+    });
+
+    // #357-T15
+    it("prints the hash of the manifest the record step wrote, and nothing else of it", () => {
+      const printed = recordBase();
+      expect(printed).toBe(
+        createHash("sha256").update(readFileSync(manifest)).digest("hex"),
+      );
+    });
+
+    // #357-T15
+    it("refuses a hash that is not 64 hex digits instead of ignoring it", () => {
+      expect(() => scanScript({ manifestSha256: "abc" })).toThrow();
+    });
+
+    it("exits with codes of its own for each of its failures", () => {
+      const codes = [
+        EXIT_MANIFEST_MISSING,
+        EXIT_MANIFEST_EMPTY,
+        EXIT_LISTING_EMPTY,
+        EXIT_ANCHOR_MISSING,
+        EXIT_TOOL_FAILED,
+        EXIT_MANIFEST_MODIFIED,
+      ];
+      expect(new Set(codes).size).toBe(codes.length);
+    });
   });
 
   // #357-T08

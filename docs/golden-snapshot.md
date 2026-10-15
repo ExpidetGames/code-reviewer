@@ -122,17 +122,22 @@ disk":
 
 - The builder's **first command** (`record_base_manifest`, before `install_docker`) writes a sorted list of every file
   under `/root`, `/home`, `/etc`, `/opt`, `/usr/local`, `/var/tmp` and `/var/log`, one record per file: path, size in
-  bytes, modification time with its fraction. It lies in `/var/lib/code-reviewer-golden/base-manifest` (mode 0600,
-  outside every scan root), so it travels in the snapshot to the check VM. It holds no content.
+  bytes, modification time and status change time (ctime), both with their fraction. A tool in user space can restore
+  the modification time (`touch -r`, `cp -p`, tar) but not the ctime, so a base file rewritten with the old size and
+  mtime still differs. The manifest lies in `/var/lib/code-reviewer-golden/base-manifest` (mode 0600, outside every
+  scan root), so it travels in the snapshot to the check VM. It holds no content. The step prints the sha256 of the
+  finished file; the pipeline keeps that hash **outside the VM** and the scan refuses a manifest that does not match it.
 - The scan lists the same roots again and checks every file whose record is **not in the manifest**: a new file (an apt
   package, `daemon.json`, `vm-prepare.sh`, anything the build or a script wrote) or a changed one (another size or time).
   A base file that gained a secret is therefore found; a base file that did not change is not read.
 - Docker's `containers` and `volumes` directories are not subject to the manifest: **every** file in them is read.
 - No pattern was relaxed for this: a documented example key or a placeholder token in a file the pipeline wrote is still
   a finding.
-- **Fail closed.** A missing or empty manifest ends the scan with exit status 43 and no marker (`scan_unreadable`); it
-  never falls back to scanning nothing. A builder whose roots hold no file at all does not produce a manifest
-  (`base_manifest_failed`).
+- **Fail closed.** The scan ends without its marker and with an exit status of its own (`scan_unreadable`) when: the
+  manifest is missing or empty (43), it is not the pinned one (48), `find` fails or lists no file under the roots (47,
+  45), `grep` fails with anything but a match or no match (47), or `/usr/local/sbin/vm-prepare.sh`, which the pipeline
+  wrote after the record, is not among the added files (46: the listing is not the one of the pipeline's VM). No tool
+  error is ignored. A builder whose roots hold no file at all does not produce a manifest (`base_manifest_failed`).
 
 | Kind          | Finding                                                                                                                                     |
 | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -146,13 +151,23 @@ disk":
 The two Docker exemptions are narrow: `volumes/metadata.db` **as a regular file** and `volumes/backingFsBlockDev` **as a
 block device**. A file, a directory or a link of that name, or a `metadata.db` in `containers`, is job data.
 
-**Not covered.** Files outside the roots; a base file replaced by one of the same size and the same modification time
-(an adversary of the platform image is out of scope: the pipeline runs only our own scripts and the pinned apt
-packages); the layers of the Worker image, which come from the tracked files of the commit and the pinned downloads
-of the Dockerfile. The manifest stays in the golden snapshot (2.6 MB and about 20,000 records on the base image of the first validated run: paths, sizes and times, no content). A
-**manual** check of the first real snapshot, before the first Dynamic activation, is still the sign-off of #330-T06:
-create a VM from it, run `sudo docker images`, `sudo docker ps -a`, `sudo find / -xdev -newer /usr/local/sbin/vm-prepare.sh -type f`
-and look at anything that is not an apt, Docker or build artifact.
+**Not covered.**
+
+- **Files outside the roots are not read**, among them `/tmp` and the image layers (`/var/lib/docker/overlay2` and
+  containerd's data). The layers come from the tracked files of the commit and the pinned downloads of the Dockerfile.
+- **A real secret that a future platform base image ships passes the scan**: base files are exempt by design, and the
+  earlier scan of all files would have caught it. This is an accepted trade-off. The base image is the platform's, not
+  ours; the manual check below is the guard.
+- A base file replaced by one with the same size, the same modification time **and** the same ctime is not seen. Setting
+  a ctime needs a clock change or a write to the block device; an adversary of the platform image is out of scope: the
+  pipeline runs only our own scripts and the pinned apt packages.
+- The manifest stays in the golden snapshot (2.6 MB and about 20,000 records on the base image of the first validated
+  run: paths, sizes and times, no content).
+
+A **manual** check of the first real snapshot, before the first Dynamic activation, is still the sign-off of #330-T06:
+create a VM from it, run `sudo docker images`, `sudo docker ps -a`,
+`sudo find / -xdev -newer /usr/local/sbin/vm-prepare.sh -type f` and look at anything that is not an apt, Docker or
+build artifact.
 
 ## Failure codes
 
@@ -167,7 +182,7 @@ and look at anything that is not an apt, Docker or build artifact.
 | `containers_present`, `daemon_not_stopped`, `daemon_query_failed` | A container existed, the engine would not stop, or it could not be asked, at snapshot time. Nothing was snapshotted.                                                                                                                     |
 | `snapshot_failed`, `snapshot_region_mismatch`                     | The platform did not create the snapshot, or not in `fra1`.                                                                                                                                                                              |
 | `base_manifest_failed`                                            | The first command of the builder could not record the base manifest (no file under the scan roots, or the disk is not writable). Nothing was installed or snapshotted.                                                                   |
-| `scan_findings`, `scan_unreadable`                                | The scan found something (kind and path are in the log) or did not finish (also: the manifest was missing). The snapshot was deleted.                                                                                                    |
+| `scan_findings`, `scan_unreadable`                                | The scan found something (kind and path are in the log) or did not finish (also: the manifest was missing or not the pinned one, or `find` or `grep` failed). The snapshot was deleted.                                                  |
 | `probe_failed`, `probe_unreadable`, `engine_missing`              | The image's own self-check failed or answered nonsense, or did not advertise a required engine (the stable reasons are listed). Dynamic stays unavailable; fix the cause (for example the nf_tables fallback of #345, the IPv6 sysctls). |
 | `unexpected_error`                                                | A failure in the pipeline's own code (a bug): no snapshot is kept. Report it with the log.                                                                                                                                               |
 | `cancelled`                                                       | The run was interrupted; whatever it created was deleted.                                                                                                                                                                                |

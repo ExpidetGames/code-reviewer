@@ -61,6 +61,7 @@ export type PipelineResult = {
 export const BUILDER_PREFIX = "code-reviewer-golden-builder-";
 const CHECK_PREFIX = "code-reviewer-golden-check-";
 const TAG_APP = "code-reviewer";
+const MANIFEST_HASH_LINE = /^MANIFEST_SHA256 ([0-9a-f]{64})$/m;
 const IMAGE_ID = /^sha256:[0-9a-f]{64}$/;
 const SAFE_WORD = /^[a-z0-9_]{1,64}$/;
 const ENGINE_NAME = /^[a-z][a-z0-9_-]{0,31}$/;
@@ -145,14 +146,22 @@ class Run {
     );
     this.builder = builder;
 
-    // Before anything is installed: what the scan later treats as the platform's own files.
-    await this.exec(
+    // Before anything is installed: what the scan later treats as the platform's own files. Its hash is kept
+    // here, outside the VM, and the scan refuses a manifest that does not have it.
+    const recorded = await this.exec(
       builder,
       STEPS.recordBaseManifest,
       recordBaseManifestScript(),
       "base_manifest_failed",
       { sudo: true, timeoutMs: 5 * 60_000 },
     );
+    const manifestSha256 = MANIFEST_HASH_LINE.exec(recorded.stdout)?.[1];
+    if (manifestSha256 === undefined)
+      throw new SnapshotPipelineError(
+        "base_manifest_failed",
+        STEPS.recordBaseManifest,
+        ["manifest_hash_unreadable"],
+      );
     await this.exec(
       builder,
       STEPS.installDocker,
@@ -268,7 +277,7 @@ class Run {
     );
 
     const snapshotId = await this.takeSnapshot(builder);
-    await this.verifySnapshot(snapshotId, stamp, imageDigest);
+    await this.verifySnapshot(snapshotId, stamp, imageDigest, manifestSha256);
 
     const record = GoldenRecordSchema.safeParse({
       version: 1,
@@ -316,6 +325,7 @@ class Run {
     snapshotId: string,
     stamp: string,
     imageDigest: string,
+    manifestSha256: string,
   ): Promise<void> {
     const { config } = this;
     const check = await this.createVm("create_check_vm", "check_vm_failed", {
@@ -332,7 +342,7 @@ class Run {
     const scan = await this.exec(
       check,
       STEPS.scanFilesystem,
-      scanScript(),
+      scanScript({ manifestSha256 }),
       "scan_unreadable",
       {
         sudo: true,
