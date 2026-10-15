@@ -28,11 +28,16 @@ def _load(path: Path) -> Any:
 
 _PROBE: Document = _load(CONTRACTS / "probe-verdict.v1.json")
 _RUNNER_API: Document = _load(CONTRACTS / "runner-api.v1.json")
-_REGISTRY: Registry[Any] = (
-    Registry()
-    .with_resource(_PROBE["$id"], Resource.from_contents(_PROBE))
-    .with_resource(_RUNNER_API["$id"], Resource.from_contents(_RUNNER_API))
-)
+
+
+def _registry() -> Registry[Any]:
+    registry: Registry[Any] = Registry()
+    for schema in (_PROBE, _RUNNER_API):
+        registry = registry.with_resource(schema["$id"], Resource.from_contents(schema))
+    return registry
+
+
+_REGISTRY = _registry()
 
 
 def _accepts(definition: str, document: Any) -> bool:
@@ -77,7 +82,11 @@ def test_what_the_probe_prints_is_a_valid_verdict(verdict: Verdict) -> None:
 @pytest.mark.parametrize(
     "document",
     [
-        {"version": 1, "engines": ["pr-agent"], "reasons": ["ghp_0123456789abcdef0123456789abcdef0123"]},
+        {
+            "version": 1,
+            "engines": ["pr-agent"],
+            "reasons": ["ghp_0123456789abcdef0123456789abcdef0123"],
+        },
         {"version": 1, "engines": ["pr-agent"], "reasons": [], "path": "/run/secret"},
         {"version": 1, "engines": ["not-an-engine"], "reasons": []},
         {"version": 2, "engines": ["pr-agent"], "reasons": []},
