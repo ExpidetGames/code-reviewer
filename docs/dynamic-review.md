@@ -489,12 +489,38 @@ sent on every request and forwarded by the proxy (both checked against the real 
   what the model examined, concise (at most 10 findings, short descriptions), so a cut-off at the
   output allowance is less likely to repeat. The pinned engine does not replay the message that
   ended the turn (a prose answer, a cut-off return call): the history of the recovery call holds the
-  task and the tool steps with their results, but not that answer, so the model rewrites the review
-  from the tool results. The instruction uses the `<runner-wrap-up>` tag, so every escape that
-  protects the wrap-up instruction covers it.
-- **No retry loop.** A run has at most one final call: the recovery or the wrap-up, not both. If the
-  recovery also yields nothing the run fails with `llm_output_invalid` as before; if the wrap-up's
-  final call came back without the answer there is no recovery either.
+  task and the tool steps with their results, but not that answer (checked against the real binary,
+  #312). Left like that, the model had to write the whole review again from the raw tool results,
+  which is what the first recovery in production did not manage in 16 s. The adapter therefore
+  hands the dropped text back: the visible text parts of the message that ended the turn (never the
+  reasoning) become one `previous-answer` block of the recovery message, escaped like a tool result
+  (it cannot pose as the runner's instruction), fenced like any untrusted block and cut at 48 KiB
+  without splitting a character. The recovery is then a transcription, not a second review. The
+  instruction uses the `<runner-wrap-up>` tag, so every escape that protects the wrap-up
+  instruction covers it, and it says the message before it may quote the answer.
+- **No second recovery turn.** A run has at most one final call: the recovery or the wrap-up, not
+  both. If the recovery also yields nothing the run fails with `llm_output_invalid` as before; if the
+  wrap-up's final call came back without the answer there is no recovery either.
+- **The final call is enforced in the proxy, not hoped for (#312).** The pinned engine accepts
+  whatever JSON the return tool is called with and ends the turn on any other reply, and the
+  provider may ignore a forced tool choice (a prose or empty reply is `finish=stop` with no tool
+  call). The proxy, which is trusted runner code, therefore checks the reply of every final call
+  before the engine sees it:
+  - a reply with no tool call whose whole text (or a ```json fence of it) is one JSON object with a
+    `findings` key becomes the `StructuredOutput` tool call it should have been;
+  - a reply is the answer when it calls `StructuredOutput` with arguments that parse as JSON and that
+    the runner's own parser (`dynamic_findings`) accepts;
+  - otherwise the proxy asks again, with the same final request, the model's reply as an assistant
+    message (text only, escaped) and a `<runner-wrap-up>` message naming the concrete problem (`the
+    reply did not call the StructuredOutput tool`, `the arguments ... are not valid JSON (Expecting
+    ',' delimiter at position 120)`, `the review is not valid: priority must be one of P0, P1, P2,
+    P3`; field names and parser positions, never a value);
+  - at most `FINAL_ATTEMPTS` (3) requests per final call, each reserved and settled like any model
+    call, and only while the clock and the cost limit have room (`try_reserve_final_retry`); no room
+    means the last reply is what the engine gets;
+  - what the engine gets is the last reply, valid or not. A reply that stays unfit is the model's
+    failure, with the runner's validation naming the field (`dynamic_policy_violation`) or the
+    missing answer (`llm_output_invalid`) as before. Normal calls are never checked or retried.
 - **F3 of #301.** A final call (wrap-up or recovery) that answered without the return tool makes
   every later request fail with `llm_output_invalid`, not `dynamic_budget_exceeded`.
 - **What is recorded.** A recovered review is complete as far as the model is concerned, so it is
@@ -507,6 +533,25 @@ sent on every request and forwarded by the proxy (both checked against the real 
   call answered with a stray tool call, the deadline) keeps its own code and ends with
   `(during the recovery; the first turn: finish=..., error=...)`. The note holds only a finish reason and an error
   name that are plain identifiers; engine text is never copied.
+- **What a failure says about itself (#312).** The engine reports a prose answer, an empty step and a
+  broken tool call alike as `finish=stop, error=StructuredOutputError`. The failure detail (and so the
+  Runs view) therefore also names, for the first turn and the recovery: the engine's own sentence for
+  that error (`Model did not produce structured output`, copied only for that error and only while
+  it is plain short words), the size of the visible text and of the reasoning of the last step, and
+  the tools it called. And it ends with `last model calls: ...`, the last three provider answers as
+  the proxy saw them: finish reason (and the provider's native one), the tools called (the return
+  tool marked `(args not json)` when its arguments do not parse), the sizes of the text and of the
+  reasoning, the output tokens, and `final call` for the wrap-up or recovery call. Sizes and plain
+  identifiers only; no diff, no model text, no tool argument.
+- **A review with one bad finding is still a review (#312).** The pinned engine does not validate the
+  return tool's arguments against the schema (it only parses JSON), so the runner is where a
+  malformed finding is found. A finding that is invalid next to at least one valid one (a swapped line
+  range, a confidence of 85, an unknown field, an unsafe path, another head) is dropped and counted,
+  and the log says `dropped N finding(s): finding_invalid (<field problems>)`; a finding that points
+  outside the export is dropped as before. Fail closed: when there are findings and none is valid, or
+  the envelope itself is invalid (`schemaVersion`, `reviewedSha`, `resolvedIds`, the finding bound),
+  the run fails with the first problem as before, because nothing in such an answer can stand for
+  "no findings".
 - **Not covered (#301 F4).** The final call's history names tools that the call no longer offers. The
   pinned engine and the fakes accept that; if a provider behind OpenRouter rejects it (400, shown as
   `llm_bad_request`), the fallback is to keep the original tool definitions in that call and rely on
@@ -552,7 +597,7 @@ run is bounded by the cost limit and the model's window.
 | `lease_lost` | Right before the summary would have been written the job was no longer held by this runner (lease lost, job cancelled), or the app could not be asked; nothing was written | Normal after a requeue or a cancel. Often: the app was unreachable at that moment; the next push reviews again |
 | `dynamic_config_invalid` | Model, skill or limits of the job are unusable; or no description of the model has unit costs (the provider's metadata stated none and the operator named none); or `RUNNER_DYNAMIC_MAX_COST_USD` is not a number up to the ceiling | The project's settings page; `RUNNER_DYNAMIC_CAPABILITIES` (`input_usd_per_mtok`, `output_usd_per_mtok`) |
 | `dynamic_budget_exceeded`, `dynamic_accounting_failed`, `dynamic_policy_violation` | A hard limit or rule stopped the run. Accounting also fails when a call reports no cost | The Runs page; `RUNNER_DYNAMIC_MAX_COST_USD` |
-| `llm_output_invalid` | The engine finished without a structured answer, and so did its one recovery (or none was possible); the detail says how the first turn ended (`finish=stop`: prose, `finish=length`: cut off at the output allowance) | The model (does it follow a required tool choice?), the output allowance in `RUNNER_DYNAMIC_CAPABILITIES` |
+| `llm_output_invalid` | The engine finished without a structured answer, and so did its one recovery (or none was possible); the detail says how the first turn and the recovery ended (the engine's `finish=stop` covers prose, silence and a broken tool call alike; `last model calls: ...` tells which; `finish=length`: cut off at the output allowance) | The model (does it follow a required tool choice?), the output allowance in `RUNNER_DYNAMIC_CAPABILITIES` |
 | `llm_context_length_exceeded` | The provider said the request is larger than the model's context | The model's context window (its metadata, or `context_window_tokens` in `RUNNER_DYNAMIC_CAPABILITIES`); a smaller pull request |
 
 Switching a project from Dynamic to Diff (or back) starts a fresh summary comment; findings are not
