@@ -204,8 +204,12 @@ The body is `{ leaseToken, result }`. `result` is what `code-reviewer-run-job` p
 ## The Worker API (#320)
 
 `/api/workers/v1/jobs/:id` (`GET`), `/heartbeat` and `/result` (`POST`). The rule behind them: a Worker
-acts with a credential that reaches **one job**, and the Dispatcher that started it never sees a secret of
-that job.
+acts with a credential that reaches **one job**, and the answers to the Dispatcher that started it carry
+no secret of that job. The credential itself opens the details call, so whoever holds it can fetch the
+secrets: the app does not bind it to a process. The Dispatcher is trusted to hand it to the Worker on
+stdin only and to use it for nothing else; the part of the isolation that the app enforces is that the
+Dispatcher's own credential (`RUNNER_TOKEN`) never reaches a Worker route and a job credential never reaches the
+runner API.
 
 **The split claim.** A claim whose body names the feature `worker_credential` (a Dispatcher) runs the same
 guard, LLM access check and pull request check as before, ends or gives back a job exactly as before, and
