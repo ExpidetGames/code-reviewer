@@ -79,9 +79,24 @@ The App, the Dispatcher (TypeScript) and the Worker (Python) agree on these file
 - **Dispatcher** (`dispatcher/`, #327; `dispatcher/src/contracts.test.ts`, `src/triggers/signature.test.ts`):
   validates the same examples with Ajv, checks that its closed webhook body and its reading of the split claim
   answer agree with the schemas, and runs every signing vector against its own receiver and the reference verifier.
-- **The self-hosted compose files** are compared with `worker-container.v1.json` (the spec equals
-  `compose.dynamic.yml`: test in `hosted-contracts.integration.test.ts`; the renderer and the comparison with
-  the PaaS compose file come with #325).
+- **The hardened container spec and its renderer** (#325). `examples/worker-container/WorkerContainerSpec.json`
+  is the spec. It is kept equal to `compose.dynamic.yml` and to the `runner-dynamic` service of
+  `compose.coolify.yml` by `app/src/ci/worker-container-parity.test.ts`, which translates each compose
+  service into the spec's shape and fails on a changed flag, a missing or added capability, tmpfs or
+  limit, or any key that could weaken the isolation (`privileged`, `volumes`, `network_mode`, `devices`,
+  `sysctls` and the like) in either place. The Dispatcher ships the same values as
+  `dispatcher/src/launchers/container-spec.ts` (a test pins it to the example) and renders them to
+  `docker run` arguments in `dispatcher/src/launchers/container.ts`. The renderer refuses a spec that
+  weakens the container (stable codes), takes the credential on stdin only, and lets a launcher change
+  the memory limit per Worker kind and nothing else (`WorkerContainerOverrides`; the swap stays equal to
+  the limit). A change of a flag is made in the spec, both compose files and the dispatcher copy in one
+  pull request. `WorkerContainerLauncherAdditions` (`examples/worker-container/`) is the one explicit per-launcher
+  addition (#345): the two `net.ipv6.conf.{all,default}.disable_ipv6=1` sysctls the Sandbox variant renders as
+  `--sysctl` because the Sandbox kernel only supports the `ip` nft family (the Dynamic-Worker's fallback
+  ruleset does not see IPv6, so IPv6 must be off, and the container's `/proc/sys` is read-only). The shared spec
+  and both compose files have no sysctl (the parity test fails on one), so self-hosted full-mode hosts do not
+  change. `docker/sandbox/vm-prepare.sh` is the host preparation a Sandbox VM needs before its
+  first `docker run` with limits (the cgroup root fix of spike #317, run before `dockerd` on every VM start).
 
 ## Rules of version 1
 
