@@ -6,7 +6,10 @@ import { createDispatcher, type Dispatcher } from "./app.ts";
 import { loadSettings, type Settings } from "./config.ts";
 import { createLogger } from "./core/logger.ts";
 import type { Launcher, Logger } from "./core/types.ts";
-import type { LauncherContext } from "./launchers/sandbox-env.ts";
+import type { LauncherContext, ReaperSetup } from "./launchers/sandbox-env.ts";
+import { createAppClient } from "./core/app-client.ts";
+import { createReaper } from "./reaper/reaper.ts";
+import { mountReaperRoute } from "./reaper/route.ts";
 import { webhookTrigger } from "./triggers/webhook.ts";
 
 export type ComposeOptions = {
@@ -17,6 +20,8 @@ export type ComposeOptions = {
   secrets?: readonly string[];
   /** `waitUntil` on the platform, the tracker of the Node entry. */
   background: (work: Promise<unknown>) => void;
+  /** The reaper's platform side (#364): its cron route is mounted when there is one. */
+  reaper?: (settings: Settings) => ReaperSetup;
   logger?: Logger;
   fetch?: typeof fetch;
 };
@@ -32,6 +37,7 @@ export function composeDispatcher(
       [
         settings.core.token,
         ...settings.signingKeys.map((key) => key.secret),
+        ...(settings.cronSecret === undefined ? [] : [settings.cronSecret]),
         ...(options.secrets ?? []),
       ],
     );
@@ -51,5 +57,28 @@ export function composeDispatcher(
     logger,
     fetch: options.fetch,
   });
+  if (options.reaper !== undefined) {
+    const setup = options.reaper(settings);
+    const client = createAppClient({
+      appUrl: settings.core.appUrl,
+      token: settings.core.token,
+      poolId: settings.core.poolId,
+      fetch: options.fetch ?? fetch,
+    });
+    mountReaperRoute(dispatcher.app, {
+      cronSecret: settings.cronSecret,
+      reaper: createReaper({
+        fleet: setup.fleet,
+        jobs: client,
+        logger,
+        jobLifetimeSeconds: setup.jobLifetimeSeconds,
+        canaryLifetimeSeconds: setup.canaryLifetimeSeconds,
+      }),
+      logger,
+    });
+    // Without it the route refuses everyone and leftover VMs are billed until their own timeout.
+    if (settings.cronSecret === undefined)
+      logger.warn("reaper_cron_secret_missing");
+  }
   return { ...dispatcher, settings, logger };
 }

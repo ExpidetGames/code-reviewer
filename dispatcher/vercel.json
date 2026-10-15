@@ -5,5 +5,11 @@
     "src/index.ts": {
       "maxDuration": 1800
     }
-  }
+  },
+  "crons": [
+    {
+      "path": "/api/cron/reap-sandboxes",
+      "schedule": "*/5 * * * *"
+    }
+  ]
 }
