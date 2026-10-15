@@ -45,6 +45,9 @@ function setup(options: { settings?: SweepSettings; poll?: boolean } = {}) {
       },
     ),
     cleanup: vi.fn<() => Promise<CleanupResult>>(async () => cleaned),
+    retryDue: vi.fn<() => Promise<{ tried: number }>>(async () => ({
+      tried: 0,
+    })),
     info: vi.fn<(line: string) => void>(),
     error: vi.fn<(line: string) => void>(),
   };
@@ -59,11 +62,41 @@ function setup(options: { settings?: SweepSettings; poll?: boolean } = {}) {
     ...(options.poll === true ? {} : { dispatch: { sendDue: mocks.sendDue } }),
     meta: { get: mocks.get, set: mocks.set },
     cleanup: mocks.cleanup,
+    notices: { retryDue: mocks.retryDue },
     settings: options.settings ?? { giveUpMs: 3_600_000, maxRunning: null },
     log: { info: mocks.info, error: mocks.error },
   });
   return { sweep, ...mocks };
 }
+
+describe("the notices of refused reviews in a run of the sweep", () => {
+  // #281-T06
+  it("tries the notices that are due again and reports how many", async () => {
+    const t = setup();
+    t.retryDue.mockResolvedValueOnce({ tried: 3 });
+
+    const report = await t.sweep.run();
+
+    expect(t.retryDue).toHaveBeenCalledOnce();
+    expect(report.noticesTried).toBe(3);
+    expect(report.failedSteps).toEqual([]);
+  });
+
+  // #281-T06
+  it("names a failed step and still does the others", async () => {
+    const t = setup();
+    t.retryDue.mockRejectedValueOnce(new Error("postgres://u:hunter2@db/app"));
+
+    const report = await t.sweep.run();
+
+    expect(report.failedSteps).toEqual(["notices"]);
+    expect(t.cleanup).toHaveBeenCalledOnce();
+    expect(JSON.stringify(t.error.mock.calls)).not.toContain("hunter2");
+    expect(t.error).toHaveBeenCalledWith(
+      "[sweep] SWEEP_STEP_FAILED step=notices",
+    );
+  });
+});
 
 describe("a run of the sweep that partly fails", () => {
   // #328-T01

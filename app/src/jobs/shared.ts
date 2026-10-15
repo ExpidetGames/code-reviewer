@@ -8,6 +8,7 @@ import { getDatabase } from "../db/startup.ts";
 import { dispatchHook } from "../dispatch/shared.ts";
 import { createJobQueue, type JobQueue } from "./job-queue.ts";
 import { configuredNoCapableRunnerMs } from "./job-limits.ts";
+import { noticeOfRefusal } from "../refusal-notices/shared.ts";
 import { createRunnerQueue, type RunnerQueue } from "./runner-queue.ts";
 
 /**
@@ -32,10 +33,14 @@ export function getRunnerQueue(): RunnerQueue {
     limits: { noCapableRunnerMs: configuredNoCapableRunnerMs(process.env) },
     // #277: a job refused for the entitlements of its workspace is failed inside the claim; this is its log line
     // (ids and codes only, never a name or a number of the plan).
-    onRefused: ({ jobId, workspaceId, errorCode, detail }) =>
+    onRefused: (refusal) => {
+      const { jobId, workspaceId, errorCode, detail } = refusal;
       console.info(
         `[queue] job=${jobId} workspace=${workspaceId} refused at claim: ${errorCode}${detail === undefined ? "" : ` (${detail})`}`,
-      ),
+      );
+      // #281: the pull request gets one notice per period, posted after the response of the claim.
+      noticeOfRefusal(refusal);
+    },
     // #277: a cost limit next to the own key is read by nothing; say so once, with the id of the workspace only.
     onIgnoredCostLimit: (workspaceId) => {
       if (ignoredCostLimitLogged.has(workspaceId)) return;

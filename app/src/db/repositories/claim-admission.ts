@@ -31,6 +31,11 @@ export type ClaimRefusal = {
   workspaceId: string;
   errorCode: string;
   detail?: string;
+  /**
+   * The start of the period the refusal was decided under (#281, the pull request notice). Absent for entitlements
+   * that cannot be read: they have no period, and no notice.
+   */
+  periodStart?: string;
 };
 
 /** The decision and whether the job already had a usage record (a job claimed again after a lost lease). */

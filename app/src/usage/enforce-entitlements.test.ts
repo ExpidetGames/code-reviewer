@@ -99,6 +99,7 @@ describe("deciding whether a claimed job may run", () => {
       allow: false,
       errorCode: "quota_exhausted",
       detail: "diff_runs",
+      periodStart: PERIOD_START,
     });
     expect(
       await decideAdmission(entitlements, "diff", usageOf({ diff: 3 })),
@@ -126,6 +127,7 @@ describe("deciding whether a claimed job may run", () => {
       allow: false,
       errorCode: "quota_exhausted",
       detail: "dynamic_runs",
+      periodStart: PERIOD_START,
     });
     expect(await decideAdmission(entitlements, "diff", usageOf())).toEqual({
       allow: true,
@@ -153,6 +155,7 @@ describe("deciding whether a claimed job may run", () => {
       allow: false,
       errorCode: "quota_exhausted",
       detail: "managed_cost",
+      periodStart: PERIOD_START,
     });
     const own = usageOf({ cost: 9_000_000 });
     expect(
@@ -189,7 +192,11 @@ describe("deciding whether a claimed job may run", () => {
         "diff",
         usage,
       ),
-    ).toEqual({ allow: false, errorCode: "workspace_suspended" });
+    ).toEqual({
+      allow: false,
+      errorCode: "workspace_suspended",
+      periodStart: PERIOD_START,
+    });
     expect(usage.asked).toEqual([]);
   });
 
@@ -197,7 +204,11 @@ describe("deciding whether a claimed job may run", () => {
   it("refuses a job of a suspended workspace that has no limits at all", async () => {
     expect(
       await decideAdmission(limited({ suspended: true }), "dynamic", usageOf()),
-    ).toEqual({ allow: false, errorCode: "workspace_suspended" });
+    ).toEqual({
+      allow: false,
+      errorCode: "workspace_suspended",
+      periodStart: PERIOD_START,
+    });
   });
 
   // #277-T02

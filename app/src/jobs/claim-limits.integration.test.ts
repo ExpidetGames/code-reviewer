@@ -641,6 +641,8 @@ describe.each(databases)("the limits at claim on %s", (name, open) => {
           workspaceId: fixture.workspaceId,
           errorCode: "quota_exhausted",
           detail: "diff_runs",
+          // #281: the period the refusal was decided under; the pull request notice is once per period.
+          periodStart: "2026-10-01T00:00:00.000Z",
         },
       ]);
     },

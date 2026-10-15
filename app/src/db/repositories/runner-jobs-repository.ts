@@ -643,10 +643,14 @@ export function createRunnerJobsRepository(
             await admitClaimedJob(trx, row, () => current);
           if (ignoredCostLimit) ignoredCostLimits.add(row.workspace_id);
           if (!admission.allow) {
-            const detail =
-              admission.detail === undefined
+            const detail = {
+              ...(admission.detail === undefined
                 ? {}
-                : { detail: admission.detail };
+                : { detail: admission.detail }),
+              ...(admission.periodStart === undefined
+                ? {}
+                : { periodStart: admission.periodStart }),
+            };
             if (isJobIndependentRefusal(admission.errorCode)) {
               const ended = await refuseDueJobsOfWorkspace(
                 trx,

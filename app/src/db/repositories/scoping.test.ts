@@ -25,6 +25,7 @@ const SCOPED = [
   "invitations-repository.ts",
   "jobs-repository.ts",
   "projects-repository.ts",
+  "refusal-notices-repository.ts",
   "repositories-repository.ts",
   "runs-repository.ts",
   "usage-records-repository.ts",
@@ -61,6 +62,9 @@ const SCOPED = [
  *   the lease side of the queue for whichever workspace the job is in; it reads, and everything it reads goes
  *   through repositories created for that job's workspace (the instance default and the workspace row it locks
  *   are not customer data);
+ * - refusal-notices-sweep: the notices of refused reviews that are due to be posted again (#281), for the cron sweep that
+ *   serves the whole instance; it only reads the rows that wait for a retry, and every answer names its workspace. The
+ *   record itself goes through the scoped refusal notices repository;
  * - job-dispatches: where the signed wake-up call of a job stands (#326). The sender holds the job it just queued and
  *   the sweep works through the whole instance, like the lease side of the queue; the table has a job id and
  *   counters, no repository data, and is only written in webhook mode;
@@ -81,6 +85,7 @@ const INSTANCE_LEVEL = [
   "jobs-claim.ts",
   "legacy-users-repository.ts",
   "rate-limits-repository.ts",
+  "refusal-notices-sweep.ts",
   "runner-jobs-repository.ts",
   "secrets-repository.ts",
   "setup-codes-repository.ts",

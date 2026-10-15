@@ -43,10 +43,16 @@ import { createAppSettingsRepository } from "../db/repositories/app-settings-rep
 import { createProjectsRepository } from "../db/repositories/projects-repository.ts";
 import { createJobProjectHooks } from "../jobs/project-hooks.ts";
 import { createProjectService } from "../projects/service.ts";
+import { assembleRefusalNoticeService } from "../refusal-notices/assemble.ts";
+import type {
+  NoticeRefusal,
+  RefusalNoticeService,
+} from "../refusal-notices/service.ts";
 import { createReviewSettingsService } from "../review-settings/service.ts";
 import { builtInReviewSettings } from "../review-settings/settings.ts";
 import { startGithubAppHarness } from "./github-app-harness.ts";
 import { readEffectiveEntitlements } from "../workspaces/effective-entitlements.ts";
+import { TEST_APP_SLUG } from "./github-app.ts";
 import { createJobQueueFixture, sha, type TestQueue } from "./jobs.ts";
 
 export const TEST_RUNNER_TOKEN = "test-runner-token-4f9c2a7e1b-0d58a3c6e9f2";
@@ -99,15 +105,44 @@ export async function startRunnerApiHarness(
     loadLlm?: (workspaceId: string) => Promise<LlmAccessResult>;
     /** #279: where a Dynamic claim reads the model metadata from. Left out, the claim reads none. */
     modelCapabilities?: ModelCapabilityChecker;
+    /**
+     * #281: wires the notice of a refused review like the running server does (`h.notices`). With
+     * `deliver: "manual"` the refusals are only collected (`h.notices.refusals`) and the test hands them on.
+     */
+    refusalNotices?: {
+      deliver?: "claim" | "manual";
+      /** The link to the plan page of a workspace; default none. */
+      planPageUrl?: (workspaceSlug: string) => string | null;
+      /** How long a request to GitHub may take. */
+      githubRequestTimeoutMs?: number;
+    };
   } = {},
 ) {
+  const noticeOptions = options.refusalNotices;
+  const refusals: NoticeRefusal[] = [];
+  const noticeWork: Promise<void>[] = [];
+  let noticeService: RefusalNoticeService | undefined;
   const fixture = await createJobQueueFixture({
+    ...(noticeOptions === undefined
+      ? {}
+      : {
+          onRefused: (refusal: NoticeRefusal) => {
+            refusals.push(refusal);
+            if (noticeOptions.deliver === "manual") return;
+            if (noticeService !== undefined)
+              noticeWork.push(noticeService.onRefused(refusal));
+          },
+        }),
     // The runner API tests exercise routing by engines; the Dynamic Review rollout gate (#195) is
     // covered by the queue tests, so the harness enables it.
     dynamicReview: true,
     ...(options.limits === undefined ? {} : { limits: options.limits }),
   });
-  const github = await startGithubAppHarness();
+  // With the notice wired, the comments of the fake are authored as the slug of the app's own configuration,
+  // which is how the provider recognizes the app's own comment (`<slug>[bot]`).
+  const github = await startGithubAppHarness(
+    noticeOptions === undefined ? {} : { appSlug: TEST_APP_SLUG },
+  );
   github.fake.addInstallation({
     id: 4242,
     account: { login: "acme", id: 5001, type: "Organization" },
@@ -156,10 +191,28 @@ export async function startRunnerApiHarness(
 
   const registry = createDefaultIntegrationRegistry({
     loadConfig: () => loadGithubAppConfig(github.env),
-    githubClient: { now: github.clock.now, requestTimeoutMs: 5000 },
+    githubClient: {
+      now: github.clock.now,
+      requestTimeoutMs: noticeOptions?.githubRequestTimeoutMs ?? 5000,
+    },
   });
   const infoLines: string[] = [];
   const errorLines: string[] = [];
+  /** What the notice of a refused review logged (#281). */
+  const noticeLines: string[] = [];
+  /** One app instance's notice service; another one shares nothing but the database and GitHub. */
+  const buildNoticeService = () =>
+    assembleRefusalNoticeService({
+      db: fixture.db,
+      registry,
+      planPageUrl: noticeOptions?.planPageUrl ?? (() => null),
+      now: fixture.clock.now,
+      log: {
+        info: (line) => noticeLines.push(line),
+        error: (line) => noticeLines.push(line),
+      },
+    });
+  if (noticeOptions !== undefined) noticeService = buildNoticeService();
   const logger: RunnerApiLogger = {
     info: (line) => infoLines.push(line),
     error: (line) => errorLines.push(line),
@@ -599,6 +652,27 @@ export async function startRunnerApiHarness(
     claimedSplit,
     startedWorker,
     anotherInstance,
+    /** #281: the notice of a refused review. Present only when the harness was started with `refusalNotices`. */
+    notices: {
+      /** Every refusal the claim reported, in order. */
+      refusals,
+      /** The log lines of the notice. */
+      lines: noticeLines,
+      /** Another app instance's service over the same database. */
+      another: buildNoticeService,
+      /** Waits until every notice the claims started is done. */
+      async settled() {
+        await Promise.all(noticeWork);
+      },
+      service: () => {
+        if (noticeService === undefined)
+          throw new Error("Start the harness with refusalNotices.");
+        return noticeService;
+      },
+      /** The comments on a pull request of the fake GitHub. */
+      comments: (repoFullName: string, prNumber: number) =>
+        github.fake.pullRequestComments(repoFullName, prNumber),
+    },
     claim,
     claimed,
     release,
