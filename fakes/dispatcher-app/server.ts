@@ -465,6 +465,31 @@ export async function startDispatcherAppFake(
       const expectedMethod = route === "version" ? "GET" : "POST";
       if (method !== expectedMethod)
         return { route, jobId, reply: errorReply(404) };
+      if (route === "version" && credential !== dispatcherToken) {
+        // #322: a Worker may send its job credential, together with the id of its job.
+        const named = url.searchParams.get("jobId");
+        const held = named === null ? undefined : jobs.get(named);
+        if (
+          held === undefined ||
+          credential === null ||
+          held.credential === null ||
+          credential !== held.credential
+        )
+          return {
+            route,
+            jobId: named,
+            reply: errorReply(401, "RUNNER_UNAUTHORIZED"),
+          };
+        const scripted = await applyScript(route);
+        return {
+          route,
+          jobId: named,
+          reply: scripted ?? {
+            status: 200,
+            body: { ...versionExample, appVersion },
+          },
+        };
+      }
       if (credential !== dispatcherToken)
         return { route, jobId, reply: errorReply(401, "RUNNER_UNAUTHORIZED") };
       const runnerId = String(request.headers["x-runner-id"] ?? "default");

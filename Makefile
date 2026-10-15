@@ -24,7 +24,7 @@ help:
 	@echo "make test-engine       the real PR-Agent and the pinned OpenCode against the fakes (about 5 minutes, not part of verify)"
 	@echo "make test-e2e          Playwright journeys against a production build (ARGS=... to filter)"
 	@echo "make test-e2e-dynamic   the privileged Dynamic Review journey with the real OpenCode (root and nft, CI-first, ARGS=... to filter)"
-	@echo "make test-images       build the container images (the Dynamic runner target too) and run their smoke tests (needs Docker)"
+	@echo "make test-images       build the container images (the Dynamic runner and Sandbox targets too) and run their smoke tests (needs Docker)"
 	@echo "make test-compose      build both images and smoke test the Docker Compose stack (needs Docker)"
 	@echo "make verify            lint, typecheck, unit and host integration tests and the license check; run before every PR"
 
@@ -112,10 +112,12 @@ test-images:
 	docker build --file app/Dockerfile --tag code-reviewer-app:local .
 	docker build --file runner/Dockerfile --tag code-reviewer-runner:local .
 	docker build --file runner/Dockerfile --target dynamic --tag code-reviewer-runner-dynamic:local .
+	docker build --file runner/Dockerfile --target sandbox --tag code-reviewer-runner-sandbox:local .
 	docker/smoke/app.sh code-reviewer-app:local
 	docker/smoke/upgrade.sh code-reviewer-app:local
 	docker/smoke/runner.sh code-reviewer-runner:local
 	docker/smoke/runner.sh code-reviewer-runner-dynamic:local dynamic
+	docker/smoke/runner.sh code-reviewer-runner-sandbox:local sandbox code-reviewer-runner-dynamic:local
 
 # Builds both images (under tags of their own, so images of other work stay untouched) and runs
 # docker/smoke/compose.sh against them: the stack starts with dummy settings, the runner waits for a

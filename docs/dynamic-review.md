@@ -256,6 +256,7 @@ stable reason (never a value) and keeps serving Diff jobs.
 | `engine_user_invalid` | The engine user does not exist with its own group, or is root. Image users are 10101; do not change `RUNNER_DYNAMIC_ENGINE_UID`/`GID` without a matching image |
 | `network_rules_not_installed` | `nft` could not install the rules: no `NET_ADMIN` at container creation, no `nf_tables` in the host kernel (a kernel with only the `ip` family gets the fallback ruleset instead, #345), no `nft`, or a slot port inside the kernel's ephemeral range |
 | `capabilities_not_dropped` | The process still holds `NET_ADMIN` or `SETPCAP` |
+| `root_filesystem_writable` | Only the entry modes `worker-once` and `probe` (#324) ask for it: the root filesystem is not read-only, so this is no container made from the hardened container spec. The legacy loop does not check it |
 | `ipv6_not_disabled` | Only with the fallback ruleset (#345): IPv6 is not proven off for the engine user (a `disable_ipv6` setting is not `1`, an IPv6 address or a usable route exists, `::1` can be bound, or the engine user's IPv6 attempt did not end in a "no IPv6" error). Set `net.ipv6.conf.all.disable_ipv6=1` and `net.ipv6.conf.default.disable_ipv6=1` on the container |
 | `pin_unreadable` | A pin file in `/opt/code-reviewer/pins/` is missing (or a directory above it is), malformed or has no entry for this platform (an x64 image started on arm64) |
 | `pin_untrusted` | A pin file, or a directory above it up to `/`, is a link, is not owned by root or can be written by group or others |

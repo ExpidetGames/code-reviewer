@@ -101,7 +101,7 @@ describe("the CI job of the Dynamic runner image", () => {
 describe("the smoke test of the runner image", () => {
   // #202-T01 #202-T03
   it("has a mode for each image and refuses any other", () => {
-    expect(smoke).toContain("[diff|dynamic]");
+    expect(smoke).toContain("[diff|dynamic|sandbox]");
     expect(smoke).toMatch(/unknown mode/);
   });
 

@@ -335,6 +335,40 @@ describe("the fake App", () => {
     expect(second.job?.job.credential).not.toBe(job?.job.credential);
   });
 
+  // #324-T11
+  it("serves version to a Worker with its job credential and its job id, and to nobody else", async () => {
+    const fake = await start();
+    fake.enqueue({ id: JOB });
+    const { job } = await claim(fake);
+    const credential = job?.job.credential ?? "";
+    const path = "/api/runners/v1/version";
+
+    const own = await workerCall(
+      fake,
+      "GET",
+      `${path}?jobId=${JOB}`,
+      credential,
+    );
+    expect(own.status).toBe(200);
+    valid(runner, "VersionResponse", await own.json());
+
+    // The credential alone, another job id, an unknown job and a wrong credential are all refused.
+    for (const [query, token] of [
+      ["", credential],
+      ["?jobId=11111111-1111-4111-8111-111111111111", credential],
+      [`?jobId=${JOB}`, `crj_${"Z".repeat(43)}`],
+    ] as const) {
+      const refused = await workerCall(fake, "GET", `${path}${query}`, token);
+      expect(refused.status, `${query} ${token}`).toBe(401);
+    }
+    // The dispatcher credential still needs no job id.
+    expect((await dispatcherCall(fake, "GET", path)).status).toBe(200);
+    // The request log names the job of the Worker's call and holds no credential.
+    const logged = fake.requests().filter((entry) => entry.route === "version");
+    expect(logged.some((entry) => entry.jobId === JOB)).toBe(true);
+    expect(JSON.stringify(fake.requests())).not.toContain(credential);
+  });
+
   // #318-T08
   it("never records a credential in its request log", async () => {
     const fake = await start();
