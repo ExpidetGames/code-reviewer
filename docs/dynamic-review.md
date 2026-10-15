@@ -498,9 +498,29 @@ sent on every request and forwarded by the proxy (both checked against the real 
   without splitting a character. The recovery is then a transcription, not a second review. The
   instruction uses the `<runner-wrap-up>` tag, so every escape that protects the wrap-up
   instruction covers it, and it says the message before it may quote the answer.
-- **No retry loop.** A run has at most one final call: the recovery or the wrap-up, not both. If the
-  recovery also yields nothing the run fails with `llm_output_invalid` as before; if the wrap-up's
-  final call came back without the answer there is no recovery either.
+- **No second recovery turn.** A run has at most one final call: the recovery or the wrap-up, not
+  both. If the recovery also yields nothing the run fails with `llm_output_invalid` as before; if the
+  wrap-up's final call came back without the answer there is no recovery either.
+- **The final call is enforced in the proxy, not hoped for (#312).** The pinned engine accepts
+  whatever JSON the return tool is called with and ends the turn on any other reply, and the
+  provider may ignore a forced tool choice (a prose or empty reply is `finish=stop` with no tool
+  call). The proxy, which is trusted runner code, therefore checks the reply of every final call
+  before the engine sees it:
+  - a reply with no tool call whose whole text (or a ```json fence of it) is one JSON object with a
+    `findings` key becomes the `StructuredOutput` tool call it should have been;
+  - a reply is the answer when it calls `StructuredOutput` with arguments that parse as JSON and that
+    the runner's own parser (`dynamic_findings`) accepts;
+  - otherwise the proxy asks again, with the same final request, the model's reply as an assistant
+    message (text only, escaped) and a `<runner-wrap-up>` message naming the concrete problem (`the
+    reply did not call the StructuredOutput tool`, `the arguments ... are not valid JSON (Expecting
+    ',' delimiter at position 120)`, `the review is not valid: priority must be one of P0, P1, P2,
+    P3`; field names and parser positions, never a value);
+  - at most `FINAL_ATTEMPTS` (3) requests per final call, each reserved and settled like any model
+    call, and only while the clock and the cost limit have room (`try_reserve_final_retry`); no room
+    means the last reply is what the engine gets;
+  - what the engine gets is the last reply, valid or not. A reply that stays unfit is the model's
+    failure, with the runner's validation naming the field (`dynamic_policy_violation`) or the
+    missing answer (`llm_output_invalid`) as before. Normal calls are never checked or retried.
 - **F3 of #301.** A final call (wrap-up or recovery) that answered without the return tool makes
   every later request fail with `llm_output_invalid`, not `dynamic_budget_exceeded`.
 - **What is recorded.** A recovered review is complete as far as the model is concerned, so it is

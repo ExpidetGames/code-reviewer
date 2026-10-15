@@ -32,6 +32,7 @@ from test_dynamic_review_proxy import (
 from code_reviewer_runner.dynamic_review.budget import BudgetLedger, DynamicLimits
 from code_reviewer_runner.dynamic_review.completion_stream import completion_as_stream
 from code_reviewer_runner.dynamic_review.wrap_up import (
+    FINAL_ATTEMPTS,
     RECOVERY_INSTRUCTION,
     RECOVERY_PROMPT,
     WRAP_UP_INSTRUCTION,
@@ -151,7 +152,8 @@ def test_a_final_call_that_answered_in_prose_makes_a_further_request_an_output_e
 
     assert again.status == 403
     assert error_code(again) == ErrorCode.LLM_OUTPUT_INVALID.value
-    assert len(upstream.requests) == 1
+    # The final call itself asked again (#312); the further request forwarded nothing.
+    assert len(upstream.requests) == FINAL_ATTEMPTS
     assert ledger.failure is not None
     assert ledger.failure.code is ErrorCode.LLM_OUTPUT_INVALID
 
@@ -237,10 +239,11 @@ def completion_with(
     calls: list[tuple[str, str]] | None = None,
     finish: str | None = "stop",
     reasoning: str | None = None,
+    cost: float | None = 0.0001,
     **choice: Any,
 ) -> dict[str, Any]:
     """A provider answer: `calls` are (tool name, raw arguments)."""
-    answer = answer_with_usage(prompt=40, completion=7)
+    answer = answer_with_usage(prompt=40, completion=7, cost=cost)
     message: dict[str, Any] = {"role": "assistant", "content": content}
     if reasoning is not None:
         message["reasoning_content"] = reasoning

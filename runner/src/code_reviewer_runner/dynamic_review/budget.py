@@ -471,6 +471,41 @@ class BudgetLedger:
             recovery=recovery,
         )
 
+    def try_reserve_final_retry(
+        self, request_text: str, *, output_tokens: int | None = None
+    ) -> Reservation | None:
+        """Reserve one more attempt at the final call, or say there is no room for it (#312).
+
+        The final call (wrap-up or recovery) can only return the review. When its reply did not,
+        the proxy asks again, but only while the clock and the cost limit have room: the attempt is
+        priced and reserved like any call (the same window check, the cost held, spent and
+        reserved), and nothing here can raise a limit the run does not already have. None means
+        "stop asking"; the last reply is what the engine gets.
+        """
+        allowance = self.output_tokens if output_tokens is None else output_tokens
+        size = len(request_text.encode("utf-8", errors="replace"))
+        counters = self._counters
+        with self._lock:
+            if not self._final_granted or self.remaining_seconds() <= 0:
+                return None
+            if math.ceil(size / WINDOW_CHECK_DENSITY) + allowance > self.window_tokens:
+                return None
+            estimate = self._estimate(size)
+            bound = max(size, counters.last_prompt_tokens)
+            cost = self._call_cost(estimate, allowance)
+            if counters.cost + counters.reserved_cost + cost > self.limits.max_cost_usd:
+                return None
+            counters.model_calls += 1
+            counters.reserved_cost = _SUM.add(counters.reserved_cost, cost)
+        return Reservation(
+            input_tokens=estimate,
+            output_tokens=allowance,
+            byte_bound=bound,
+            request_bytes=size,
+            cost=cost,
+            final=True,
+        )
+
     def _estimate(self, size: int) -> int:
         return max(math.ceil(size / self._counters.density), self._counters.last_prompt_tokens)
 

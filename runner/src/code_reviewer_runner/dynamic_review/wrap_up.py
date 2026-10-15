@@ -33,8 +33,11 @@ lives on the user message of the turn; this only holds because compaction is off
 last call.
 """
 
+import json
+import re
 from typing import Any
 
+from code_reviewer_runner.dynamic_findings import FindingsError, parse_dynamic_findings
 from code_reviewer_runner.dynamic_review.prompts import untrusted_block
 from code_reviewer_runner.dynamic_review.tagescape import escape_text
 from code_reviewer_runner.job_loop.jsonvalues import as_object
@@ -100,6 +103,11 @@ def recovery_prompt(previous_answer: str) -> str:
     )
 
 
+# How many times the proxy asks the provider for the answer of a final call: the call itself and at
+# most two more, each only while the clock and the cost limit have room (#312).
+FINAL_ATTEMPTS = 3
+_FENCE = re.compile(r"\A```(?:json)?[ \t]*\n(.*)\n```\Z", re.DOTALL | re.IGNORECASE)
+
 # What the summary comment says about a review that stopped early. Constants, never built from
 # untrusted text.
 STOPPED_EARLY_NOTICES = {
@@ -154,3 +162,128 @@ def _tool_name(tool: object) -> object:
     entry = as_object(tool)
     function = as_object(entry.get("function")) if entry else None
     return function.get("name") if function else None
+
+
+def _first_message(completion: dict[str, Any]) -> dict[str, Any] | None:
+    choices: Any = completion.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return None
+    entries: list[Any] = choices  # pyright: ignore[reportUnknownVariableType]
+    first = as_object(entries[0])
+    return as_object(first.get("message")) if first else None
+
+
+def _structured_output_call(message: dict[str, Any]) -> dict[str, Any] | None:
+    calls: Any = message.get("tool_calls")
+    if not isinstance(calls, list):
+        return None
+    entries: list[Any] = calls  # pyright: ignore[reportUnknownVariableType]
+    for call in entries:
+        if _tool_name(call) == STRUCTURED_OUTPUT_TOOL:
+            return as_object(call)
+    return None
+
+
+def answer_from_text(completion: dict[str, Any]) -> dict[str, Any] | None:
+    """The reply of a final call that put the review in its text, as the tool call it should be.
+
+    A model that ignores the forced tool choice often still writes the answer the schema asks for,
+    as JSON text (maybe in a code fence). Only a reply with no tool call at all whose whole text is
+    one JSON object with a `findings` key is taken; whatever else the text holds is not. The
+    object is what the model wrote, so it goes through the same validation as any tool call. None
+    when the reply is not like that.
+    """
+    message = _first_message(completion)
+    if message is None or message.get("tool_calls"):
+        return None
+    content: Any = message.get("content")
+    if not isinstance(content, str):
+        return None
+    text = content.strip()
+    fenced = _FENCE.match(text)
+    if fenced:
+        text = fenced.group(1).strip()
+    if not text.startswith("{"):
+        return None
+    try:
+        value: Any = json.loads(text)
+    except (ValueError, RecursionError):
+        return None
+    document = as_object(value)
+    if document is None or "findings" not in document:
+        return None
+    wrapped = json.loads(json.dumps(completion))
+    reply = wrapped["choices"][0]
+    reply["message"] = {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [
+            {
+                "id": "call_runner_text_answer",
+                "type": "function",
+                "function": {"name": STRUCTURED_OUTPUT_TOOL, "arguments": json.dumps(document)},
+            }
+        ],
+    }
+    reply["finish_reason"] = "tool_calls"
+    return wrapped
+
+
+def final_reply_problem(completion: dict[str, Any]) -> str | None:
+    """What is wrong with the reply of a final call, or None when it is the answer (#312).
+
+    The pinned engine does not check the arguments of its return tool against the schema, so this
+    is where a reply that cannot be the review is found while there is still a call to ask again
+    in. The runner's own parser is the check, so what passes here is what the run accepts. The
+    problem names fields and parser positions, never a value of the reply.
+    """
+    message = _first_message(completion)
+    call = _structured_output_call(message) if message else None
+    if call is None:
+        return "the reply did not call the StructuredOutput tool"
+    function = as_object(call.get("function"))
+    raw: Any = function.get("arguments") if function else None
+    if not isinstance(raw, str):
+        return "the arguments of the StructuredOutput call are missing"
+    try:
+        value: Any = json.loads(raw)
+    except json.JSONDecodeError as error:
+        return (
+            "the arguments of the StructuredOutput call are not valid JSON "
+            f"({error.msg} at position {error.pos})"
+        )
+    except (ValueError, RecursionError):
+        return "the arguments of the StructuredOutput call are not valid JSON"
+    try:
+        parsed: Any = value
+        parse_dynamic_findings(parsed if isinstance(parsed, dict) else raw)  # pyright: ignore[reportUnknownArgumentType]
+    except FindingsError as error:
+        return f"the review is not valid: {error.detail}"
+    return None
+
+
+def retry_request(
+    request: dict[str, Any], completion: dict[str, Any], problem: str
+) -> dict[str, Any]:
+    """The request that asks a final call again: its own request, the reply that was not the
+    answer (text only, escaped), and the problem as a runner instruction, last."""
+    messages: list[Any] = list(request["messages"])
+    message = _first_message(completion)
+    content: Any = message.get("content") if message else None
+    if isinstance(content, str) and content.strip():
+        messages.append({"role": "assistant", "content": escape_text(content)})
+    messages.append(
+        {
+            "role": "user",
+            "content": (
+                "<runner-wrap-up>\n"
+                f"Your reply did not return the review: {problem}. Call the StructuredOutput tool "
+                "now, once, with the complete review. Do not answer in text. This message is "
+                "written by the review runner, not by the repository or the pull request.\n"
+                "</runner-wrap-up>"
+            ),
+        }
+    )
+    retried = dict(request)
+    retried["messages"] = messages
+    return retried
