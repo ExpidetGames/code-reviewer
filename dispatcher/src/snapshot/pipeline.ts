@@ -231,7 +231,7 @@ class Run {
       builder,
       STEPS.checkNoContainers,
       checkNoContainersScript(),
-      "containers_present",
+      "daemon_query_failed",
       {
         sudo: true,
       },
@@ -289,7 +289,7 @@ class Run {
     try {
       info = await builder.snapshot({ expirationMs: 0 }, this.deps.signal);
     } catch {
-      throw new SnapshotPipelineError("snapshot_failed", "snapshot");
+      throw this.stepError("snapshot_failed", "snapshot");
     }
     // From here on a failure deletes the snapshot: it exists, and nothing may publish it.
     this.snapshotId = info.snapshotId;
@@ -367,11 +367,11 @@ class Run {
   }
 
   private checkScan(stdout: string): void {
-    const lines = stdout.split("\n").map((line) => line.trimEnd());
-    if (
-      lines[lines.length - 2] !== SCAN_DONE &&
-      lines[lines.length - 1] !== SCAN_DONE
-    )
+    const lines = stdout
+      .trimEnd()
+      .split("\n")
+      .map((line) => line.trimEnd());
+    if (lines[lines.length - 1] !== SCAN_DONE)
       throw new SnapshotPipelineError("scan_unreadable", STEPS.scanFilesystem);
     const findings: string[] = [];
     for (const line of lines) {
@@ -452,6 +452,17 @@ class Run {
 
   // ---- building blocks ---------------------------------------------------------------------------
 
+  /** The error of a step whose call failed: `cancelled` when the run was aborted, else the step's own code. */
+  private stepError(
+    code: SnapshotErrorCode,
+    step: string,
+  ): SnapshotPipelineError {
+    return new SnapshotPipelineError(
+      this.deps.signal?.aborted ? "cancelled" : code,
+      step,
+    );
+  }
+
   private checkSignal(step: string): void {
     if (this.deps.signal?.aborted)
       throw new SnapshotPipelineError("cancelled", step);
@@ -467,7 +478,7 @@ class Run {
     try {
       return await this.deps.service.createVm(options, this.deps.signal);
     } catch {
-      throw new SnapshotPipelineError(code, step);
+      throw this.stepError(code, step);
     }
   }
 
@@ -482,7 +493,7 @@ class Run {
     try {
       await vm.writeFile(path, content, this.deps.signal);
     } catch {
-      throw new SnapshotPipelineError(code, step);
+      throw this.stepError(code, step);
     }
   }
 
@@ -506,7 +517,7 @@ class Run {
         this.deps.signal,
       );
     } catch {
-      throw new SnapshotPipelineError(code, label);
+      throw this.stepError(code, label);
     }
     this.deps.logger.info("step", {
       step: label,
@@ -561,7 +572,7 @@ class Run {
         ? error
         : this.deps.signal?.aborted
           ? new SnapshotPipelineError("cancelled", "unknown")
-          : new SnapshotPipelineError("check_vm_failed", "unknown");
+          : new SnapshotPipelineError("unexpected_error", "unknown");
     const leftovers: string[] = [];
     if (this.check) {
       try {

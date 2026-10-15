@@ -13,6 +13,7 @@ export const SNAPSHOT_ERROR_CODES = [
   "image_build_failed",
   "image_digest_invalid",
   "image_digest_mismatch",
+  "daemon_query_failed",
   "containers_present",
   "daemon_not_stopped",
   "snapshot_failed",
@@ -25,6 +26,7 @@ export const SNAPSHOT_ERROR_CODES = [
   "engine_missing",
   "record_invalid",
   "cancelled",
+  "unexpected_error",
 ] as const;
 export type SnapshotErrorCode = (typeof SNAPSHOT_ERROR_CODES)[number];
 

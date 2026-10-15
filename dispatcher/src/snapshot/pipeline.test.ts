@@ -215,6 +215,16 @@ describe("the golden snapshot pipeline", () => {
     ).toBe("deleted");
   });
 
+  it("fails with its own code when the daemon cannot be asked for its containers", async () => {
+    const fake = happyFake();
+    fake.onExec(STEPS.checkNoContainers, { exitCode: 1 });
+    const error = await failure(run(fake).result);
+    expect(error.code).toBe("daemon_query_failed");
+    expect(fake.events.some((event) => event.startsWith("snapshot:"))).toBe(
+      false,
+    );
+  });
+
   it("fails when the daemon does not stop, and takes no snapshot", async () => {
     const fake = happyFake();
     fake.onExec(STEPS.stopDaemon, {
@@ -333,16 +343,18 @@ describe("the golden snapshot pipeline", () => {
     });
 
     // #330-T06
-    it.each(["", "garbage\n", "FINDING nothing\n"])(
-      "fails closed on output without the end marker (%j)",
-      async (stdout) => {
-        const fake = happyFake();
-        fake.onExec(STEPS.scanFilesystem, { stdout });
-        const error = await failure(run(fake).result);
-        expect(error.code).toBe("scan_unreadable");
-        expectNothingPublished(fake);
-      },
-    );
+    it.each([
+      "",
+      "garbage\n",
+      "FINDING nothing\n",
+      "SCAN_DONE\nFINDING secret_file /home/ubuntu/.env\n",
+    ])("fails closed on output without the end marker (%j)", async (stdout) => {
+      const fake = happyFake();
+      fake.onExec(STEPS.scanFilesystem, { stdout });
+      const error = await failure(run(fake).result);
+      expect(error.code).toBe("scan_unreadable");
+      expectNothingPublished(fake);
+    });
 
     it("fails closed when the scan itself fails", async () => {
       const fake = happyFake();
@@ -489,6 +501,46 @@ describe("the golden snapshot pipeline", () => {
     );
     expect(error.code).toBe("cancelled");
     expect(fake.callsFor(STEPS.inspectImage)).toHaveLength(0);
+    expect(
+      fake.vms.get("code-reviewer-golden-builder-20261015T180000Z")?.state,
+    ).toBe("deleted");
+  });
+
+  it("reports cancelled, not the step's code, when the abort ends a command with an error", async () => {
+    const fake = happyFake();
+    const abort = new AbortController();
+    fake.onExec(STEPS.buildImage, () => {
+      abort.abort();
+      throw new Error("The operation was aborted");
+    });
+    const error = await failure(
+      run(fake, testInput(), { signal: abort.signal }).result,
+    );
+    expect(error.code).toBe("cancelled");
+    expect(error.step).toBe(STEPS.buildImage);
+    expect(
+      fake.vms.get("code-reviewer-golden-builder-20261015T180000Z")?.state,
+    ).toBe("deleted");
+  });
+
+  it("turns a failure of the pipeline's own code into a stable code, and still cleans up", async () => {
+    const fake = happyFake();
+    const logger = {
+      info: (event: string, fields?: Record<string, unknown>) => {
+        if (
+          fields?.step === STEPS.cleanBuilder &&
+          fields.exitCode !== undefined
+        )
+          throw new Error("logger broke");
+      },
+      warn: () => {},
+      error: () => {},
+    };
+    const error = await failure(
+      runPipeline({ service: fake, logger, clock: () => NOW }, testInput()),
+    );
+    expect(error.code).toBe("unexpected_error");
+    expect(error.message).not.toContain("logger broke");
     expect(
       fake.vms.get("code-reviewer-golden-builder-20261015T180000Z")?.state,
     ).toBe("deleted");
