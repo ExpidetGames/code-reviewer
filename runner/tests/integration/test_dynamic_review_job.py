@@ -47,7 +47,11 @@ from code_reviewer_runner.dynamic_review.publish import (
     PublishError,
 )
 from code_reviewer_runner.dynamic_review.supervisor import Prepared
-from code_reviewer_runner.dynamic_review.wrap_up import RECOVERY_INSTRUCTION, WRAP_UP_INSTRUCTION
+from code_reviewer_runner.dynamic_review.wrap_up import (
+    FINAL_ATTEMPTS,
+    RECOVERY_INSTRUCTION,
+    WRAP_UP_INSTRUCTION,
+)
 from code_reviewer_runner.job import parse_job
 from code_reviewer_runner.result import ErrorCode
 
@@ -316,7 +320,8 @@ def test_a_recovery_that_also_has_no_answer_fails_with_the_same_code_and_says_so
         "after one recovery; the first turn: finish=stop, error=StructuredOutputError" in first_line
     )
     assert re.search(r"\[engine message call: \d+\.\d s, \d+\.\d s\]$", first_line), first_line
-    assert len(upstream.requests) == 2  # one recovery, no further retry
+    # One normal call and one recovery turn, whose call asked again (#312), bounded.
+    assert len(upstream.requests) == 1 + FINAL_ATTEMPTS
     assert publisher.calls == []
 
 
@@ -488,6 +493,36 @@ def test_a_finding_outside_the_prepared_export_is_dropped_and_counted_not_failed
     assert "outside.ts" not in result.log_tail
     assert "dropped 1 finding(s): finding_path_not_exported" in result.log_tail
     assert preparer.events == ["prepared", "released", "published"]
+
+
+# #312-T02
+def test_an_invalid_finding_is_dropped_and_named_in_the_log_not_failed(tmp_path: Path) -> None:
+    document = findings()
+    document["findings"].append(
+        {**document["findings"][0], "id": "f-2", "lineStart": 9, "lineEnd": 1, "body": "SECRET"}
+    )
+    preparer = Preparer(
+        tmp_path / "export", {"proxy_calls": 1, "answer": "structured", "findings": document}
+    )
+    publisher = RecordingPublisher(preparer)
+
+    with FakeUpstream() as upstream:
+        result = runner.run_dynamic_job(
+            job_for(f"{upstream.url}/v1"),
+            None,
+            0.0,
+            environment(),
+            engines=ALL_ENGINES,
+            prepare=preparer,
+            publish=publisher,
+        )
+
+    assert result.ok, result.log_tail
+    assert len(publisher.calls[0][1].findings) == len(document["findings"]) - 1
+    assert "dropped 1 finding(s): finding_invalid (lineStart must not be after lineEnd)" in (
+        result.log_tail
+    )
+    assert "SECRET" not in result.log_tail
 
 
 # #197-T06
