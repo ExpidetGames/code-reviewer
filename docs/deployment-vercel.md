@@ -100,11 +100,11 @@ GitHub ──webhook──▶ App ──queues the job, then signed POST /dispat
   | Project | Root directory | Framework | Config |
   |---|---|---|---|
   | App | `app/` | Next.js | `app/vercel.json`: region `fra1`, `pnpm install --frozen-lockfile`, function durations, the two crons |
-  | Dispatcher | `dispatcher/` | Hono (detected from the default export of `src/index.ts`) | `dispatcher/vercel.json`: region `fra1`, `maxDuration` 1800 for `src/index.ts` |
+  | Dispatcher | `dispatcher/` | Hono (detected from the default export of `src/index.ts`) | `dispatcher/vercel.json`: region `fra1`, `maxDuration` 1800 for `src/index.ts`, one cron (the reaper, every 5 minutes) |
 
   Both need Node.js 24 (`engines` in both `package.json` files, `.nvmrc`). Set the Node.js version of each project to
   24.x if the project's default differs.
-- Crons run **only for the production deployment** of the App. A preview deployment never sweeps.
+- Crons run **only for the production deployment** of a project. A preview deployment never sweeps (App) and never reaps (Dispatcher).
 - A production domain for each project. The **App's URL must be reachable without a login** by GitHub (webhooks), by
   the Worker inside the VM (it calls the App's Worker API and has no way to send a bypass header) and by Vercel's cron.
   Do not put Vercel's Deployment Protection in front of the App's production domain. The Dispatcher is called only
@@ -240,15 +240,11 @@ A refusal at start names the variable, never its value (`ConfigError`: `required
 | `DISPATCHER_PROBE_TIMEOUT_SECONDS` | optional | no | How long a probe may take, canary VM included, 30 to 600, default 150. |
 | `RUNNER_DYNAMIC_CAPABILITIES` | optional | no | Narrows the model's capabilities for Dynamic jobs and the canary: a JSON object on one line, at most 4096 characters. Normally unset (`docs/dynamic-review.md`, "The model"). Read only when `DISPATCHER_ENGINES` includes `opencode`. |
 | `RUNNER_DYNAMIC_MAX_COST_USD` | optional | no | The most one Dynamic run may cost, a plain positive decimal such as `2.5`. Unset: the Worker's default. |
+| `CRON_SECRET` | yes, with the snapshot | **yes** | The secret Vercel's cron sends to the reaper route (`/api/cron/reap-sandboxes`, every 5 minutes) as `Authorization: Bearer ...`. At least 32 characters, different from `RUNNER_TOKEN` and every signing secret, and **a value of its own: do not reuse the App project's `CRON_SECRET`**. The route exists only when `SANDBOX_SNAPSHOT_ID` is set. Unset, every caller gets `401` and the log warns `reaper_cron_secret_missing`: nothing stops a VM that outlived its job (section 5.5). A malformed value stops the start. |
 | `VERCEL_TOKEN`, `VERCEL_TEAM_ID`, `VERCEL_PROJECT_ID` | all three or none | **yes** (the token) | Platform access by access token. **None: the Dispatcher uses the project's own OIDC token**, which Vercel provides inside a function and which needs nothing to rotate. Prefer that. |
 
 Not set by you: `VERCEL_OIDC_TOKEN` (the platform provides it). Only the Node entry (`pnpm start`, not used on
 Vercel) reads `DISPATCHER_SHUTDOWN_GRACE_SECONDS` and `PORT`.
-
-**Pending #364 (the VM reaper, PR #368, not merged when this was written):** a Dispatcher cron
-(`/api/cron/reap-sandboxes`, every 5 minutes) that stops VMs whose job has ended will need its own `CRON_SECRET` in
-this project (at least 32 characters, different from `RUNNER_TOKEN` and the signing secrets). Until it merges, the
-Dispatcher has no cron and nothing stops a VM that outlived its function except the VM's own timeout (section 9).
 
 ### 3.3 What must match between the two projects
 
@@ -261,6 +257,7 @@ Dispatcher has no cron and nothing stops a VM that outlived its function except 
 | `RUNNER_WEBHOOK_URL` = `https://<dispatcher>/dispatch` | (the Dispatcher's own domain) | |
 | `BETTER_AUTH_URL` (the App's domain) | `RUNNER_API_URL` | The same address. The Dispatcher hands it to every Worker as the App URL |
 | `RUNNER_WEBHOOK_BYPASS_TOKEN` | the Dispatcher project's bypass secret | Only with Deployment Protection |
+| `CRON_SECRET` | `CRON_SECRET` | **Not** the same value: each project has its own, because each cron route must open with its own secret only |
 
 ### 3.4 The GitHub side
 
@@ -361,7 +358,7 @@ anything that is not an apt, Docker or build artifact).
 
 Set the variables of section 3.2 in the Dispatcher project: `RUNNER_API_URL`, `RUNNER_TOKEN`,
 `DISPATCHER_MAX_RUNNING` (start small, for example `2`), `DISPATCHER_SIGNING_KEY_ID` (`k1`),
-`DISPATCHER_SIGNING_SECRET`, `SANDBOX_SNAPSHOT_ID` and `SANDBOX_IMAGE_DIGEST` from the record, and optionally
+`DISPATCHER_SIGNING_SECRET`, `SANDBOX_SNAPSHOT_ID` and `SANDBOX_IMAGE_DIGEST` from the record, `CRON_SECRET` (the reaper's, section 5.5), and optionally
 `DISPATCHER_ENGINES`, `DISPATCHER_WORKER_CONFIG` (section 6). Leave `VERCEL_TOKEN` and its siblings unset to use the
 project's OIDC token. Deploy.
 
@@ -370,7 +367,7 @@ initialises, so a bad value shows as failing requests and a log line that names 
 (`SANDBOX_SNAPSHOT_ID is required`, `DISPATCHER_WORKER_CONFIG is invalid`, ...), not as a failed build. If you
 protect the project with Deployment Protection, every path answers the platform's login page until the bypass header
 is sent: confirm `curl -s -o /dev/null -w '%{http_code}' -H 'x-vercel-protection-bypass: <secret>' https://<dispatcher>/health`
-prints `200` before step 7, or every wake-up waits half an hour (section 5.3).
+prints `200` before step 7, or every wake-up waits half an hour (section 5.3). Also check that the Dispatcher's Cron Jobs settings list the reaper and that its first runs answer `200` (`401` means `CRON_SECRET` is missing in this project).
 
 Then add the Dispatcher's production host to the repository variable `DISPATCHER_CANARY_HOSTS` and the
 Dispatcher's `RUNNER_TOKEN` to the `hosted-canary` environment (and the bypass secret, if it is protected).
@@ -454,7 +451,7 @@ configured one is refused by the Launcher until you do it.
 | **`RUNNER_TOKEN`** (the dispatcher credential) | The App accepts exactly one, so there is a short gap: set the new value in the App and the Dispatcher projects and in the `hosted-canary` environment, redeploy **both**. Claims that arrive between the two deployments fail and the job stays queued, to be resent by the sweep; running Workers are not affected (they use their per-job credential, not this token). Do it when the queue is quiet. |
 | **Vercel access** | With OIDC (no `VERCEL_TOKEN` in the Dispatcher project) there is nothing to rotate for the Launcher. For the snapshot pipeline: create a new access token, update `VERCEL_TOKEN` in `hosted-snapshot` (and in the Dispatcher project if you chose token auth there, then redeploy), run a harmless check (a snapshot run, or the canary), then revoke the old token. |
 | **Bypass secret** | Regenerate it in the Dispatcher project's Deployment Protection settings, then update `RUNNER_WEBHOOK_BYPASS_TOKEN` (App, redeploy) and `VERCEL_AUTOMATION_BYPASS_SECRET` (`hosted-canary`). Wake-ups fail with `DISPATCH_REJECTED` in between. |
-| **`CRON_SECRET`** | Change it in the project, redeploy. Vercel sends the new value to the next cron call; until the deployment is live the calls are refused (`401`) and a minute of the sweep is lost. |
+| **`CRON_SECRET`** (App and Dispatcher, two separate values) | Change it in the project, redeploy. Vercel sends the new value to the next cron call; until the deployment is live the calls are refused (`401`) and a minute of the sweep is lost. |
 | **`OPERATOR_API_TOKEN`** | Change it, redeploy, give the operator's client the new one. |
 | **`APP_SECRET`** | Not rotatable: changing it signs everybody out and makes every stored credential (GitHub App key, mail password, workspace LLM keys) unreadable. |
 
@@ -492,14 +489,33 @@ URL.
   `no_capable_runner` after 30 minutes.
 - **No more wake-ups:** `RUNNER_DISPATCH=poll` in the App. Jobs stay queued; nobody claims them.
 
-### 5.5 Stopping VMs that outlived their job
+### 5.5 Stopping VMs that outlived their job (the reaper)
 
-**Pending #364 (PR #368).** The Dispatcher's supervision runs in the function; if the function ends before the
-container does (a job of more than about 1500 s, a platform restart, a lost instance), nothing stops the VM and its
-own timeout (`job timeout + SANDBOX_VM_TIMEOUT_MARGIN_SECONDS`) is the backstop. The reaper cron is the fix, not
-merged yet. Until it is, list the project's VMs now and then (their names start with `cr-`, tags `app`, `kind`,
-`job`) and stop any that is older than a job can be. Leftover builders of the snapshot pipeline
-(`code-reviewer-golden-builder-*`) are handled in [`golden-snapshot.md`](golden-snapshot.md).
+The Dispatcher stops a job's VM from `waitUntil` work, which lives as long as the function. A job longer than the
+function's limit, a restart or a failed stop leave the VM running, idle and billed, until its own timeout (job
+timeout plus `SANDBOX_VM_TIMEOUT_MARGIN_SECONDS`). The **reaper** (#364) is the second line: Vercel's cron calls
+`GET /api/cron/reap-sandboxes` of the Dispatcher every 5 minutes with `CRON_SECRET`, and it stops the VMs of this
+deployment that outlived their purpose.
+
+- It lists only VMs named `cr-...` with the tag `app = code-reviewer` and checks each again: only a running,
+  non-persistent VM of exactly the shape our code creates is ever stopped. The snapshot pipeline's builder and check
+  VMs and anything else in the project never match.
+- A VM younger than 2 minutes is never touched. One older than its own lifetime plus 2 minutes is stopped whatever the
+  App says. A job VM whose job the App reports as not `running` is stopped; if the App's answer cannot be read the VM
+  is **kept** (only its lifetime ends it then). A canary VM is ended by its lifetime only.
+- The answer and the log hold counts and stable codes only: `listed`, `candidates`, `stopped`, `kept`, `unreadable`,
+  `failed`; events `vm_reaped`, `vm_reap_failed`, `job_state_unreadable`, `reap_done`, `reap_list_failed`. A `500` with
+  `REAP_LIST_FAILED` means the platform's listing failed; nothing was stopped and the next run tries again.
+- **To check it:** Vercel's Cron Jobs settings of the Dispatcher project show the runs. During the smoke test, list the
+  project's VMs after a job: none should be left running with a `cr-` name.
+- **If it does not run** (no `CRON_SECRET`, no snapshot configured, a plan that does not allow the cron), list the
+  project's VMs now and then (names start with `cr-`, tags `app`, `kind`, `job`) and stop any that is older than a job
+  can be. Leftover builders of the snapshot pipeline (`code-reviewer-golden-builder-*`) are handled in
+  [`golden-snapshot.md`](golden-snapshot.md).
+
+The reaper is not verified against the live platform: that the platform's listing honours the name prefix together with a tag
+and reports `status`, `createdAt`, `timeout` and `tags` as the SDK types say, and that the project's cron may run every five
+minutes. The reaper checks every VM itself, so it does not depend on the platform's filter.
 
 ### 5.6 Updating the App or the Dispatcher
 
@@ -573,6 +589,7 @@ A self-hosted installation and a hosted one never share a database or a GitHub A
   error bodies are undocumented, so it is not verified against the live API (`dispatcher/README.md`).
 - **The whole chain**: signed wake-up, claim, VM, Worker, result on a real GitHub pull request. The end-to-end
   journeys are #332, **pending**; this guide's step 8 is the manual version.
+- **The reaper** against the live platform (section 5.5).
 - The **database role split** of section 2.
 - **Dynamic Review memory**: the worst case in a 2 GB VM is unmeasured (section 6).
 - The **golden snapshot** passed its checks in two real runs (the pinned Docker versions, the scan, the probe line).
@@ -593,18 +610,18 @@ A self-hosted installation and a hosted one never share a database or a GitHub A
   are delayed by that, and a `failed` probe holds Dynamic back for another minute. Many cold instances mean many canary
   VMs. Diff jobs never wait for a probe.
 - **The pool cap is not a hard billing cap**: it limits launches in progress; an App-side limit per workspace is the
-  other lever. VMs that outlive a function are bounded by their own timeout only (section 5.5, pending #364).
+  other lever. A VM that outlives a function is stopped by the reaper at the next 5 minute run once its job has ended
+  (section 5.5); if the reaper cannot run, its own timeout is the bound.
 - **Dynamic Review on hosted** is gated on the hosted egress work (#82): the supervisor's own egress inside the VM
   is unrestricted by design, the Vercel firewall is not part of the security boundary, and the platform operator
   can read job secrets by construction (`dispatcher/README.md`). The container's hardening is proven per probe, not
   assumed: if the probe does not pass, `opencode` is not advertised.
 - **The 30 minute function limit** is a beta limit of the platform. A job whose time plus its launch outlasts the
-  function loses its supervision: the VM timeout ends the VM, later and billed (section 5.5).
+  function loses its supervision: the reaper (or, failing that, the VM timeout) ends the VM, billed meanwhile (section 5.5).
 - **Retired:** the runner's concept. A runner still means what it did on a server.
 
 ## 10. Follow-ups
 
-- #364 the VM reaper (PR #368): then section 3.2 gets its `CRON_SECRET` row for real and section 5.5 goes.
 - #332 the end-to-end journeys: then step 8 has an automated twin.
 - #276 the operator's own LLM key: then section 9 and the admin documentation change.
 - #334 and #335 the self-hosted split and flipping its default: then section 8 gets its step table.

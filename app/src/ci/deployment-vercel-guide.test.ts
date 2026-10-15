@@ -174,6 +174,7 @@ describe("the hosted deployment guide and vercel.json", () => {
   const dispatcherConfig = JSON.parse(read("dispatcher/vercel.json")) as {
     regions: string[];
     functions: Record<string, { maxDuration: number }>;
+    crons: Array<{ path: string; schedule: string }>;
   };
 
   // #333-T04
@@ -196,6 +197,12 @@ describe("the hosted deployment guide and vercel.json", () => {
       `\`maxDuration\` of **${String(dispatcherConfig.functions["src/index.ts"]?.maxDuration)} seconds**`,
     );
     expect(guide).toContain("beta limit");
+    // The Dispatcher's reaper cron: its route is named, and the guide says how often it runs.
+    expect(dispatcherConfig.crons).toEqual([
+      { path: "/api/cron/reap-sandboxes", schedule: "*/5 * * * *" },
+    ]);
+    expect(guide).toContain("`/api/cron/reap-sandboxes`");
+    expect(guide).toMatch(/every 5\s+minutes/);
   });
 });
 

@@ -32,6 +32,8 @@ service names, `/api/runners/v1`) stay until a dedicated rename.
 | Dispatcher to Launcher | `capabilities(signal, want)`, `launch(spec, signal)`, optional `probe(signal)`; a `LaunchSpec` is `{appUrl, jobId, credential, kind, timeoutSeconds, config}` | `dispatcher/src/core/types.ts`, `dispatcher/README.md` |
 | Launcher to Worker | The start document `{appUrl, jobId, credential}` on **stdin only**, never an argument, environment variable or file; the container's entry mode `worker-once` (or `probe`) | `runner/README.md`, "Entry modes of the image" |
 | Worker to App (Worker contract) | `GET /api/workers/v1/jobs/{id}` (job details, where the git token and the model key are revealed), `POST .../heartbeat`, `POST .../result`, with the per-job credential | `contracts/worker-api.v1.json` |
+| Dispatcher to App (reaper) | `GET /api/runners/v1/jobs/{id}`: the state of a job, so that the reaper stops the VM of a job that is not `running` | `contracts/runner-api.v1.json` |
+| Platform cron to Dispatcher | `GET /api/cron/reap-sandboxes` with `Authorization: Bearer <CRON_SECRET>` every 5 minutes | `dispatcher/README.md`, "The reaper" |
 | Dispatcher to operator | `GET /health`; `POST /probe` (the capability probe, with the dispatcher credential) | `dispatcher/README.md`, "The capability probe" |
 | Operator to App | `/api/operator/v1`: workspaces, entitlements, limits, usage; only with `OPERATOR_API_TOKEN` | `contracts/operator-api.v1.json`, `app/src/operator-api/README.md` |
 
@@ -57,4 +59,4 @@ configuration of the same parts and are not promised.
 | Golden snapshot pipeline | `pnpm --dir dispatcher snapshot:build`, workflow `golden-snapshot.yml` | exists |
 | Deploy canary | `pnpm --dir dispatcher probe:canary`, workflow `dispatcher-canary.yml` | exists |
 | Poll-Trigger, Docker-Launcher, the Dispatcher bundle in the runner image (`RUNNER_MODE=dispatch`) | | #334, later |
-| Reaper for VMs that outlived a job | a Dispatcher cron | #364, pending (PR #368) |
+| Reaper for VMs that outlived a job | a Dispatcher cron, `/api/cron/reap-sandboxes` | exists (#364) |
