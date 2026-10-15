@@ -149,7 +149,7 @@ block device**. A file, a directory or a link of that name, or a `metadata.db` i
 **Not covered.** Files outside the roots; a base file replaced by one of the same size and the same modification time
 (an adversary of the platform image is out of scope: the pipeline runs only our own scripts and the pinned apt
 packages); the layers of the Worker image, which come from the tracked files of the commit and the pinned downloads
-of the Dockerfile. The manifest stays in the golden snapshot (a few hundred kilobytes of paths, no content). A
+of the Dockerfile. The manifest stays in the golden snapshot (2.6 MB and about 20,000 records on the base image of the first validated run: paths, sizes and times, no content). A
 **manual** check of the first real snapshot, before the first Dynamic activation, is still the sign-off of #330-T06:
 create a VM from it, run `sudo docker images`, `sudo docker ps -a`, `sudo find / -xdev -newer /usr/local/sbin/vm-prepare.sh -type f`
 and look at anything that is not an apt, Docker or build artifact.
