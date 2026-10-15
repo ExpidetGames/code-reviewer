@@ -111,7 +111,9 @@ id (for which a refused job answers `204`, like any job that cannot be claimed).
    sent (the LLM configuration has no base URL, and the MVP has no fallback chain); the runner adds
    OpenRouter's `provider.require_parameters` to every request for OpenRouter by itself (#270).
    Once the access is resolved, the claim notes whose key the job runs on in its usage record
-   (`recordKeyMode`: `own` for the workspace's key, `managed` for the operator's). The record itself was
+   (`recordKeyMode`: `own` for the workspace's key, `managed` for the operator's; the key mode of the workspace's
+   entitlements picks the key, and a `managed` workspace without a readable operator key fails with
+   `llm_not_configured`, #276). The record itself was
    reserved by `claimNext`, in the transaction of the claim (`src/usage/README.md`); a failure of this call
    gives the job back.
 3. **The pull request** is read through the provider's `getPullRequest`. A pull request that does not

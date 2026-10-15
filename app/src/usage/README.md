@@ -114,7 +114,9 @@ entitlements still stop it, and its record is then voided.
   at all by this limit.
 - **Which runs the cost limit watches.** Those of a workspace whose entitlements say `managed`; the sum counts the
   records whose key mode is `managed`. A key mode `managed` whose operator key is missing is not a quota matter (#276)
-  and keeps its own code. **A cost limit next to the key mode `own` is read by nothing.** An operator can no longer
+  and keeps its own code (`llm_not_configured`). The key mode of the entitlements also picks the key (#276), and the record
+  is corrected to the key the job really uses on both claim paths, so the cost limit counts exactly the runs that spent the
+  operator's key. **A cost limit next to the key mode `own` is read by nothing.** An operator can no longer
   write that shape (`cost_limit_requires_managed_key`, 422); an entry stored before that keeps working exactly as it
   did, the limit is ignored, and the claim logs it once per workspace and process (`onIgnoredCostLimit`). Limiting the
   cost of runs on the workspace's own key is a separate limit (#361).
