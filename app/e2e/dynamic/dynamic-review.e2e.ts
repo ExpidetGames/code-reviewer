@@ -425,6 +425,65 @@ test.describe("a pull request on its way to a Dynamic Review summary", () => {
     // Nothing of the lane (OpenCode, Git, the runner, a helper) reached for anything but the fakes.
     assertNoExternalAttempts(readGuard());
   });
+
+  // #299-T09
+  test("a pull request whose checkout fails gets one short failure note in the summary comment, and the run keeps its failure", async ({
+    page,
+    request,
+  }) => {
+    const number = prNumber(8);
+    // The pull request ref is never advertised for this head, so the real preparation refuses it
+    // (`checkout_incomplete`, reason `ref_moved`) before any engine starts.
+    const head = repo().commit(
+      { "src/other.py": HANDLER },
+      "A head without a ref",
+    );
+    await addGithubPullRequest(request, WIDGETS.fullName, {
+      number,
+      title: TITLE,
+      body: BODY,
+      headSha: head,
+    });
+    await openRuns(page);
+
+    const answer = await deliverPullRequestEvent(request, {
+      action: "opened",
+      installationId: INSTALLATION_ID,
+      repository: { ...WIDGETS, owner: OWNER },
+      number,
+      title: TITLE,
+      headSha: head,
+    });
+    expect(answer).toEqual({ status: "accepted", outcome: "trigger_enqueued" });
+
+    // The note is the only visible sign on the pull request, and the Runs view still says failed.
+    await expect(runsOf(page, number).locator("[data-status]")).toContainText(
+      "Failed",
+      RUN_TIMEOUT,
+    );
+    const [note, ...others] = await getPullRequestComments(
+      request,
+      WIDGETS.fullName,
+      number,
+    );
+    expect(others).toEqual([]);
+    expect(note?.login).toBe(e2eEnv.githubBotLogin);
+    expect(note?.body).toContain(IDENTITY_MARKER);
+    expect(note?.body).toContain("Dynamic Review did not complete");
+    expect(note?.body).toContain("`checkout_incomplete`");
+    expect(note?.body).toContain("`ref_moved`");
+    expect(note?.body).toContain(head);
+    // Nothing of the repository, the pull request text or a credential is in the note.
+    for (const text of [
+      TITLE,
+      BODY,
+      "src/other.py",
+      WORKSPACE_KEY,
+      e2eEnv.runnerToken,
+    ])
+      expect(note?.body).not.toContain(text);
+    assertNoExternalAttempts(readGuard());
+  });
 });
 
 /** The keys and every installation token are nowhere in the page, the runner's output, the run data or the prompts. */

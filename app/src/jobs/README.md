@@ -139,6 +139,9 @@ request.
    running job. Two runners claiming at once are serialized by the write lock; each gets a different
    job or nothing.
 
+The claim also reserves the job's usage record (`usage_records`, `src/usage/README.md`) in the same
+transaction, `complete` settles it, and every transition that ends a job without `complete` voids it.
+
 That statement is the only dialect specific code (`src/db/repositories/jobs-claim.ts`); a port to
 Postgres changes it (`FOR UPDATE SKIP LOCKED`) and nothing else.
 

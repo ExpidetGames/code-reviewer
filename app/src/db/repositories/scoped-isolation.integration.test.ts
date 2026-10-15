@@ -24,6 +24,7 @@ import { createJobsRepository } from "./jobs-repository.ts";
 import { createProjectsRepository } from "./projects-repository.ts";
 import { createRepositoriesRepository } from "./repositories-repository.ts";
 import { createRunsRepository } from "./runs-repository.ts";
+import { createUsageRecordsRepository } from "./usage-records-repository.ts";
 
 const SHA = "b".repeat(40);
 const FAILED_SHA = "c".repeat(40);
@@ -41,6 +42,7 @@ function reposOf(db: Kysely<Database>, workspaceId: string) {
     linkRequests: createInstallationLinkRequestsRepository(db, workspaceId),
     workspaceSecrets: createWorkspaceSecretsRepository(db, workspaceId),
     entitlements: createWorkspaceEntitlementsRepository(db, workspaceId),
+    usage: createUsageRecordsRepository(db, workspaceId),
   };
 }
 type Repos = ReturnType<typeof reposOf>;
@@ -124,6 +126,30 @@ async function seed(
       })
       .execute();
   }
+  // A cancelled job whose record is still reserved (it waited again after a lost lease): `voidEndedJobs` of
+  // the other workspace must not touch it.
+  if (options.earlierFailedJob === true) {
+    const row = await db
+      .selectFrom("jobs")
+      .selectAll()
+      .where("id", "=", enqueued.job.id)
+      .executeTakeFirstOrThrow();
+    await db
+      .insertInto("jobs")
+      .values({
+        ...row,
+        id: `cancelled-${tag}`,
+        head_sha: "d".repeat(40),
+        delivery_id: null,
+        status: "cancelled",
+        error_code: "project_deactivated",
+        created_at: "2026-10-11T00:00:00.000Z",
+        updated_at: "2026-10-11T00:00:00.000Z",
+        finished_at: "2026-10-11T00:00:00.000Z",
+      })
+      .execute();
+    await repos.usage.reserve(`cancelled-${tag}`, "own");
+  }
   await repos.appSettings.set("review_defaults", { from: tag }, tag);
   // A member and an open invitation.
   await db
@@ -166,6 +192,17 @@ async function seed(
     },
   });
   await repos.entitlements.put(entitlementsOf(tag), `user-${tag}`);
+  // A reserved record for the job, and a settled managed one for the earlier failed job (when there is one).
+  await repos.usage.reserve(enqueued.job.id, "managed");
+  if (options.earlierFailedJob === true) {
+    await repos.usage.reserve(`failed-${tag}`, "managed");
+    await repos.usage.settle(`failed-${tag}`, {
+      state: "settled",
+      costMicroUsd: 500,
+      promptTokens: 10,
+      completionTokens: 5,
+    });
+  }
   await repos.workspaceSecrets.put({
     name: "llm_api_key",
     binding: `binding-${tag}`,
@@ -223,6 +260,12 @@ async function rowsOf(db: Kysely<Database>, workspaceId: string) {
       .execute(),
     linkRequests: await db
       .selectFrom("installation_link_requests")
+      .selectAll()
+      .where("workspace_id", "=", workspaceId)
+      .orderBy("id")
+      .execute(),
+    usageRecords: await db
+      .selectFrom("usage_records")
       .selectAll()
       .where("workspace_id", "=", workspaceId)
       .orderBy("id")
@@ -714,6 +757,55 @@ const CASES: Case[] = [
     run: (a) => a.entitlements.remove(),
     expectAnswer: (answer) => expect(answer).toBe(true),
   },
+  // usage records: a job of B is not there for A, so it is neither reserved, changed nor settled, and
+  // A's reads and pages do not see B's records
+  {
+    name: "usage.reserve",
+    run: (a, b) => a.usage.reserve(b.job.id, "own"),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
+    name: "usage.setKeyMode",
+    run: (a, b) => a.usage.setKeyMode(b.job.id, "own"),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
+    name: "usage.settle",
+    run: (a, b) =>
+      a.usage.settle(b.job.id, {
+        state: "settled",
+        costMicroUsd: 999,
+        promptTokens: 1,
+        completionTokens: 1,
+      }),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
+    name: "usage.voidEndedJobs",
+    run: (a) => a.usage.voidEndedJobs(),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
+    name: "usage.get",
+    run: (a, b) => a.usage.get(b.job.id),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
+    name: "usage.countByKind",
+    run: (a) => a.usage.countByKind("2000-01-01T00:00:00.000Z"),
+    expectAnswer: (answer) => expect(answer).toEqual({ diff: 1, dynamic: 0 }),
+  },
+  {
+    name: "usage.sumSettledManagedCostMicroUsd",
+    run: (a) =>
+      a.usage.sumSettledManagedCostMicroUsd("2000-01-01T00:00:00.000Z"),
+    expectAnswer: (answer) => expect(answer).toBe(0),
+  },
+  {
+    name: "usage.pageSettled",
+    run: (a) => a.usage.pageSettled({ limit: 50 }),
+    expectAnswer: (answer) => expect(answer).toMatchObject({ records: [] }),
+  },
   // runs
   {
     name: "runs.list",
@@ -931,6 +1023,28 @@ describe("two workspaces", () => {
     });
   });
 
+  // #272-T06
+  it("keep the usage records apart: B's records stay B's, each side counts and sums only its own", async () => {
+    const { a, b, reposA, reposB } = await twoWorkspaces();
+    const since = "2000-01-01T00:00:00.000Z";
+
+    expect(await reposB.usage.get(b.job.id)).toMatchObject({
+      workspaceId: b.workspaceId,
+      state: "reserved",
+    });
+    expect(await reposA.usage.get(a.job.id)).toMatchObject({
+      workspaceId: a.workspaceId,
+    });
+    expect(await reposB.usage.countByKind(since)).toEqual({
+      diff: 3,
+      dynamic: 0,
+    });
+    expect(await reposB.usage.sumSettledManagedCostMicroUsd(since)).toBe(500);
+    expect(
+      (await reposB.usage.pageSettled({ limit: 10 })).records,
+    ).toHaveLength(1);
+  });
+
   // DM-10
   it("keep the review defaults apart: changing A leaves B with its own", async () => {
     const { reposA, reposB } = await twoWorkspaces();
@@ -959,8 +1073,12 @@ describe("two workspaces", () => {
     expect(await reposA.jobs.list()).toEqual([
       expect.objectContaining({ id: a.job.id, workspaceId: a.workspaceId }),
     ]);
-    // B also holds its earlier failed job (seeded for the attempted-heads case).
+    // B also holds its earlier failed job (seeded for the attempted-heads case) and a cancelled one.
     expect(await reposB.jobs.list()).toEqual([
+      expect.objectContaining({
+        id: "cancelled-b",
+        workspaceId: b.workspaceId,
+      }),
       expect.objectContaining({ id: "failed-b", workspaceId: b.workspaceId }),
       expect.objectContaining({ id: b.job.id, workspaceId: b.workspaceId }),
     ]);
