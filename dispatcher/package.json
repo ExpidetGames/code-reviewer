@@ -13,7 +13,8 @@
     "typecheck": "tsc --noEmit --pretty false",
     "test": "vitest run --project unit",
     "test:watch": "vitest --project unit",
-    "test:int": "vitest run --project integration"
+    "test:int": "vitest run --project integration",
+    "test:privileged": "vitest run --project privileged"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.5",

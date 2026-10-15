@@ -1,0 +1,194 @@
+// SPDX-License-Identifier: Apache-2.0
+
+import { describe, expect, it } from "vitest";
+import { ConfigError } from "../config.ts";
+import { noLauncher } from "./none.ts";
+import { sandboxFromEnvironment } from "./sandbox-env.ts";
+import { recordingLogger } from "../test-support/harness.ts";
+import { loadSettings } from "../config.ts";
+import type { SandboxSdk } from "./vercel-sandbox.ts";
+
+const IMAGE_DIGEST = `sha256:${"c".repeat(64)}`;
+const PLATFORM_TOKEN = "dummy-platform-token-for-tests-0000";
+const BASE = {
+  RUNNER_API_URL: "http://127.0.0.1:9",
+  RUNNER_TOKEN: "dummy-dispatcher-token-for-tests",
+  DISPATCHER_MAX_RUNNING: "2",
+  DISPATCHER_SIGNING_KEY_ID: "k1",
+  DISPATCHER_SIGNING_SECRET: "dummy-signing-secret-current-0000000000",
+};
+
+function configured(extra: Record<string, string> = {}) {
+  return {
+    SANDBOX_SNAPSHOT_ID: "snap_dummy_golden_0001",
+    SANDBOX_IMAGE_DIGEST: IMAGE_DIGEST,
+    ...extra,
+  };
+}
+
+function refusal(env: Record<string, string>): ConfigError {
+  try {
+    sandboxFromEnvironment(env, () => Promise.reject(new Error("not loaded")));
+  } catch (error) {
+    if (error instanceof ConfigError) return error;
+    throw error;
+  }
+  throw new Error("the configuration was expected to be refused");
+}
+
+const never: () => Promise<SandboxSdk> = () =>
+  Promise.reject(new Error("not loaded"));
+
+describe("the Sandbox-Launcher's configuration from the environment", () => {
+  // #329 (additional): not configured is fail closed, not an error
+  it("is the launcher that advertises nothing when no snapshot is configured", async () => {
+    const sandbox = sandboxFromEnvironment({}, never);
+    const settings = loadSettings(BASE);
+
+    const launcher = sandbox.launcher({
+      settings,
+      logger: recordingLogger(),
+      background: () => undefined,
+    });
+
+    expect(launcher).toBe(noLauncher);
+    expect(sandbox.secrets).toStrictEqual([]);
+  });
+
+  // #329 (additional)
+  it("builds the Sandbox-Launcher, which advertises PR-Agent, when the snapshot and the image are configured", async () => {
+    const sandbox = sandboxFromEnvironment(configured(), never);
+
+    const launcher = sandbox.launcher({
+      settings: loadSettings(BASE),
+      logger: recordingLogger(),
+      background: () => undefined,
+    });
+
+    expect(launcher).not.toBe(noLauncher);
+    expect(
+      await launcher.capabilities(new AbortController().signal),
+    ).toStrictEqual(["pr-agent"]);
+  });
+
+  // #329 (additional)
+  it.each<[string, Record<string, string>, string]>([
+    [
+      "an image id without a snapshot",
+      { SANDBOX_IMAGE_DIGEST: IMAGE_DIGEST },
+      "SANDBOX_SNAPSHOT_ID",
+    ],
+    [
+      "a snapshot without an image id",
+      { SANDBOX_SNAPSHOT_ID: "snap_dummy_golden_0001" },
+      "SANDBOX_IMAGE_DIGEST",
+    ],
+    [
+      "a snapshot id with a space",
+      configured({ SANDBOX_SNAPSHOT_ID: "snap x" }),
+      "SANDBOX_SNAPSHOT_ID",
+    ],
+    [
+      "an image id that is not a sha256 digest",
+      configured({ SANDBOX_IMAGE_DIGEST: "latest" }),
+      "SANDBOX_IMAGE_DIGEST",
+    ],
+    [
+      "an image id of the wrong length",
+      configured({ SANDBOX_IMAGE_DIGEST: "sha256:abc" }),
+      "SANDBOX_IMAGE_DIGEST",
+    ],
+    [
+      "a hand-over time of zero",
+      configured({ SANDBOX_HANDOVER_SECONDS: "0" }),
+      "SANDBOX_HANDOVER_SECONDS",
+    ],
+    [
+      "a hand-over time that is not a number",
+      configured({ SANDBOX_HANDOVER_SECONDS: "soon" }),
+      "SANDBOX_HANDOVER_SECONDS",
+    ],
+    [
+      "a token without a team",
+      configured({
+        VERCEL_TOKEN: PLATFORM_TOKEN,
+        VERCEL_PROJECT_ID: "prj_dummy",
+      }),
+      "VERCEL_TEAM_ID",
+    ],
+    [
+      "a token without a project",
+      configured({
+        VERCEL_TOKEN: PLATFORM_TOKEN,
+        VERCEL_TEAM_ID: "team_dummy",
+      }),
+      "VERCEL_PROJECT_ID",
+    ],
+  ])("refuses %s and names the variable", (_what, env, variable) => {
+    const error = refusal(env);
+
+    expect(error.variable).toBe(variable);
+    expect(error.message).not.toContain(PLATFORM_TOKEN);
+    expect(error.message).not.toContain(IMAGE_DIGEST);
+  });
+
+  // #329 (additional): the platform token is a secret of this deployment
+  it("reports the platform token as a secret so the logger masks it", () => {
+    const sandbox = sandboxFromEnvironment(
+      configured({
+        VERCEL_TOKEN: PLATFORM_TOKEN,
+        VERCEL_TEAM_ID: "team_dummy",
+        VERCEL_PROJECT_ID: "prj_dummy",
+        VERCEL_OIDC_TOKEN: "dummy-oidc-token-for-tests-0000",
+      }),
+      never,
+    );
+
+    expect(sandbox.secrets).toStrictEqual([
+      PLATFORM_TOKEN,
+      "dummy-oidc-token-for-tests-0000",
+    ]);
+  });
+
+  // #329-T11
+  it("refuses a worker configuration the Launcher cannot run at start, not at the first job", () => {
+    const sandbox = sandboxFromEnvironment(configured(), never);
+    const settings = loadSettings({
+      ...BASE,
+      DISPATCHER_WORKER_CONFIG: JSON.stringify({
+        dynamic: { launcher: { vcpus: 3 } },
+      }),
+    });
+
+    expect(() =>
+      sandbox.launcher({
+        settings,
+        logger: recordingLogger(),
+        background: () => undefined,
+      }),
+    ).toThrowError(/DISPATCHER_WORKER_CONFIG/);
+  });
+
+  // #329-T11
+  it("accepts a worker configuration with its own size and memory per kind", () => {
+    const sandbox = sandboxFromEnvironment(configured(), never);
+    const settings = loadSettings({
+      ...BASE,
+      DISPATCHER_WORKER_CONFIG: JSON.stringify({
+        dynamic: {
+          launcher: { vcpus: 2 },
+          container: { memory: { limit: "3g", reservation: "2g" } },
+        },
+        diff: { launcher: { vcpus: 1 } },
+      }),
+    });
+
+    expect(() =>
+      sandbox.launcher({
+        settings,
+        logger: recordingLogger(),
+        background: () => undefined,
+      }),
+    ).not.toThrow();
+  });
+});

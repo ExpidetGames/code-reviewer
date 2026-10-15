@@ -39,14 +39,21 @@ export type LaunchSpec = {
   config: LaunchConfig;
 };
 
-/** The stable codes a Launcher reports; the core logs the code and nothing else of the error. */
+/**
+ * The stable codes a Launcher reports; the core logs the code and nothing else of the error. `retryable`
+ * says whether starting the same job again can succeed (a platform outage, a rate limit) or not (a snapshot
+ * that is gone, an image that is not the configured one): it is false unless the Launcher knows better.
+ * Either way the core releases the job and the App counts the failed launch as an attempt.
+ */
 export class LaunchError extends Error {
   readonly code: string;
+  readonly retryable: boolean;
 
-  constructor(code: string) {
+  constructor(code: string, options: { retryable?: boolean } = {}) {
     super(code);
     this.name = "LaunchError";
     this.code = code;
+    this.retryable = options.retryable ?? false;
   }
 }
 

@@ -10,6 +10,14 @@ import { describe, expect, it } from "vitest";
 const ROOT = join(import.meta.dirname, "..", "..");
 const FORBIDDEN = ["child_process", "node:cluster", "node:worker_threads"];
 
+// Packages of the Sandbox SDK's dependency tree that mention a forbidden name, left out of the bundle under test so
+// that everything else in the graph is still checked, and reached only through the package named here. None of
+// them runs on the platform:
+//   execa (via cross-spawn)  @vercel/sandbox -> @vercel/oidc -> @vercel/cli-exec: on a developer machine without an
+//                            OIDC token it runs the Vercel CLI to fetch one; on the platform the token is given.
+//   undici                   the SDK's HTTP client feature-detects worker_threads and uses it for nothing we call.
+const SDK_DEPENDENCIES = ["execa", "undici"];
+
 async function bundleOf(
   entry: string,
 ): Promise<{ modules: string[]; code: string }> {
@@ -17,7 +25,7 @@ async function bundleOf(
     input: entry,
     platform: "node",
     // Node's own modules stay imports; the check below reads them from the chunk.
-    external: [/^node:/],
+    external: [/^node:/, ...SDK_DEPENDENCIES],
     logLevel: "silent",
   });
   const { output } = await bundle.generate({ format: "esm" });
@@ -54,6 +62,19 @@ describe("the serverless bundle", () => {
     expect(
       bundle.modules.some((path) => path.includes("@hono/node-server")),
     ).toBe(false);
+  });
+
+  // #329 (additional): the Sandbox-Launcher is in the serverless bundle, the SDK adapter with it
+  it("contains the Sandbox-Launcher and its platform adapter", async () => {
+    const bundle = await bundleOf(join(ROOT, "src", "index.ts"));
+
+    for (const file of [
+      "launchers/sandbox.ts",
+      "launchers/sandbox-host.ts",
+      "launchers/vercel-sandbox.ts",
+      "launchers/container.ts",
+    ])
+      expect(bundle.modules.some((path) => path.endsWith(file))).toBe(true);
   });
 
   // #327-T09
