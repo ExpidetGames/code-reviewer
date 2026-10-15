@@ -12,8 +12,8 @@
 # of the hardened container spec has, then fails with "cannot enter cgroupv2 ... with domain
 # controllers -- it is in threaded mode". The fix turns the root into a plain domain: it disables the
 # threaded controllers, moves every process of the root into vm.slice and enables the controllers
-# again. It takes about a second. Steps 1 and 2 are idempotent: a root that is already prepared is
-# left alone, and a failure is loud (set -e), so a VM that could not be prepared never runs a Worker.
+# again. It takes about a second. Steps 1 and 2 are idempotent: a root that is already prepared and a
+# daemon that already answers are left alone, and a failure is loud (set -e), so a VM that could not be prepared never runs a Worker.
 #
 # 1. make the cgroup v2 root a domain that can hold the memory controller
 # 2. start dockerd detached and wait until `docker info` answers
@@ -26,6 +26,9 @@ if [ "$(cat cgroup.type)" != "domain" ] || ! grep -qw memory cgroup.subtree_cont
   for p in $(cat cgroup.procs); do echo "$p" > vm.slice/cgroup.procs 2>/dev/null || true; done
   echo "+memory +io +cpu +cpuset +pids" > cgroup.subtree_control
 fi
+# A daemon that already answers (a second run in the same boot) is left alone: a second dockerd could not
+# bind the socket and its redirect would truncate the log of the running one.
+docker info >/dev/null 2>&1 && exit 0
 nohup setsid dockerd > /var/log/dockerd.log 2>&1 &
 for _ in $(seq 1 200); do docker info >/dev/null 2>&1 && exit 0; sleep 0.1; done
 echo "dockerd did not become ready" >&2; exit 1

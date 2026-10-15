@@ -46,6 +46,15 @@ describe("docker/sandbox/vm-prepare.sh", () => {
   });
 
   // #325-extra-F1
+  it("does not start a second daemon when one already answers", () => {
+    const guard = code.indexOf("docker info >/dev/null 2>&1 && exit 0");
+    const start = code.indexOf("nohup setsid dockerd");
+
+    expect(guard).toBeGreaterThan(-1);
+    expect(start).toBeGreaterThan(guard);
+  });
+
+  // #325-extra-F1
   it("waits for the daemon and fails when it does not become ready", () => {
     expect(code).toContain("docker info");
     expect(code).toContain("exit 0");
