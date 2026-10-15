@@ -201,8 +201,8 @@ of the Worker itself, while it still holds the group's leader (never signal a gr
 `process_group.py`), then runs `worker-reap`: a `kill(-1, SIGKILL)` made as the engine user, the same sweep the Worker
 host makes after a Dynamic job. It takes no target (no pid, no group id: the part of the process-group rules that is
 a launcher's stays with the launcher), reads the same variables as the runner, needs the root supervisor and exits
-0 (nothing of the engine user runs, or the container has no engine user), 1 (a process survived) or 2 (not root,
-unusable settings).
+0 (nothing of the engine user runs, or the container has no engine user), 1 (a process survived) or 2 (the sweep could not be made: not root, unusable settings, no `python3`,
+`sweep_unavailable`).
 
 **Images.** `runner/Dockerfile` makes `runtime` (the default target, PR-Agent only), `dynamic` (self-hosted
 Dynamic) and `sandbox`, the Worker image of the hosted deployment. `sandbox` has exactly the Worker layers of

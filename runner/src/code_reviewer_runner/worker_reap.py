@@ -17,7 +17,7 @@ id is exactly what may belong to somebody else by the time a second process uses
 |------|----------------------------------------------------------------------|
 | 0    | Nothing of the engine user runs any more (or this container has none). |
 | 1    | A process of the engine user survived the sweep.                       |
-| 2    | The sweep could not be made (not root, unusable settings).            |
+| 2    | The sweep could not be made (not root, unusable settings, no `python3`). |
 """
 
 import argparse
@@ -28,7 +28,7 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import NoReturn
 
 from code_reviewer_runner import __version__
-from code_reviewer_runner.dynamic_review.engine_user import sweep_user
+from code_reviewer_runner.dynamic_review.engine_user import SweepUnavailable, try_sweep_user
 from code_reviewer_runner.dynamic_review.self_check import SelfCheckReason
 from code_reviewer_runner.job_loop.service import LOGGER_NAME, configure_logging
 from code_reviewer_runner.job_loop.settings import SettingsError, worker_settings_from_environment
@@ -60,7 +60,7 @@ def build_parser() -> argparse.ArgumentParser:
 def run(
     environment: Mapping[str, str],
     *,
-    sweeper: Callable[[int, int], bool] = sweep_user,
+    sweeper: Callable[[int, int], bool] = try_sweep_user,
     euid: Callable[[], int] = os.geteuid,
 ) -> int:
     """Sweep the engine user of this container; returns the exit code."""
@@ -80,7 +80,12 @@ def run(
             SelfCheckReason.NOT_ROOT_SUPERVISOR.value,
         )
         return SETUP_ERROR
-    if sweeper(*user):
+    try:
+        ended = sweeper(*user)
+    except SweepUnavailable as error:
+        log.error("worker-reap cannot run: sweep_unavailable: %s", error)
+        return SETUP_ERROR
+    if ended:
         return REAPED
     log.warning("a process of the engine user survived the sweep")
     return SURVIVORS

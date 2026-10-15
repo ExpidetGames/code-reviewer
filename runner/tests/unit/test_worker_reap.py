@@ -11,6 +11,8 @@ process group itself.
 import pytest
 
 from code_reviewer_runner import worker_reap
+from code_reviewer_runner.dynamic_review import engine_user
+from code_reviewer_runner.dynamic_review.engine_user import SweepUnavailable
 
 DYNAMIC = {"RUNNER_DIFF_JOB_USER": "10001:10001"}
 
@@ -103,3 +105,45 @@ def test_worker_reap_accepts_no_target(capsys: pytest.CaptureFixture[str]) -> No
     assert worker_reap.main(["--pgid", "1"], environment=DYNAMIC) == worker_reap.SETUP_ERROR
 
     assert "usage:" in capsys.readouterr().err
+
+
+# #324 (review of #351): a sweep that could not be made is not "a process survived".
+def test_a_sweep_that_could_not_be_made_is_a_setup_error_and_not_survivors(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def cannot_sweep(uid: int, gid: int) -> bool:
+        raise SweepUnavailable("the sweep tool is not installed")
+
+    code = worker_reap.run(DYNAMIC, sweeper=cannot_sweep, euid=as_root)
+
+    assert code == worker_reap.SETUP_ERROR
+    assert "sweep_unavailable" in capsys.readouterr().err
+
+
+# #324 (review of #351): the real sweep says so when it has no python3 or the subprocess raises.
+def test_the_real_sweep_raises_when_it_cannot_run_and_the_boolean_form_still_says_false(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def one_process(uid: int) -> list[int]:
+        return [4242]
+
+    def no_python(cmd: str, *, path: str | None = None) -> str | None:
+        return None
+
+    def python(cmd: str, *, path: str | None = None) -> str | None:
+        return "/usr/bin/python3"
+
+    def refuses(*args: object, **kwargs: object) -> None:
+        raise PermissionError("not allowed")
+
+    monkeypatch.setattr(engine_user, "user_pids", one_process)
+    monkeypatch.setattr(engine_user.shutil, "which", no_python)
+    with pytest.raises(SweepUnavailable):
+        engine_user.try_sweep_user(10101, 10101)
+    assert engine_user.sweep_user(10101, 10101) is False
+
+    monkeypatch.setattr(engine_user.shutil, "which", python)
+    monkeypatch.setattr(engine_user.subprocess, "run", refuses)
+    with pytest.raises(SweepUnavailable):
+        engine_user.try_sweep_user(10101, 10101)
+    assert engine_user.sweep_user(10101, 10101) is False
