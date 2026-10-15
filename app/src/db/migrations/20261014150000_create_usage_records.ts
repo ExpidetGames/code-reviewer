@@ -67,17 +67,11 @@ export const migration: Migration = {
       .columns(["workspace_id", "review_kind", "reserved_at"])
       .execute();
 
-    // The page of settled records and the sum of settled cost, per workspace and for the whole instance.
+    // The page of settled records (a reader of the whole instance pages by the same order).
     await db.schema
       .createIndex("usage_records_settled")
       .on("usage_records")
       .columns(["settled_at", "id"])
-      .where(sql.ref("state"), "=", "settled")
-      .execute();
-    await db.schema
-      .createIndex("usage_records_workspace_settled")
-      .on("usage_records")
-      .columns(["workspace_id", "settled_at"])
       .where(sql.ref("state"), "=", "settled")
       .execute();
 

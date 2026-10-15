@@ -7,6 +7,7 @@
 import { describe, expect, it } from "vitest";
 import { createUsageRecordsRepository } from "../../src/db/repositories/usage-records-repository.ts";
 import { createLlmAccess } from "../../src/llm/access.ts";
+import { sha } from "../../src/test-support/jobs.ts";
 import {
   goodResult,
   startRunnerApiHarness,
@@ -355,7 +356,7 @@ describe("a job that ends without reporting", () => {
   });
 
   // #272-T04
-  it("voids the reserved record of a job that went back to the queue and was cancelled there", async () => {
+  it("voids the reserved record of a job that went back to the queue and was cancelled there, at once", async () => {
     const h = await startRunnerApiHarness();
     const job = await claimedJob(h);
     h.clock.advance(3 * MINUTE);
@@ -364,9 +365,40 @@ describe("a job that ends without reporting", () => {
     expect((await recordsOf(h).get(job.id))?.state).toBe("reserved");
 
     await h.queue.cancelWaitingForRepository(h.repositoryId);
+
+    // No expiry step in between: nothing waits for a runner to poll.
+    expect((await h.queue.get(job.id))?.status).toBe("cancelled");
+    expect((await recordsOf(h).get(job.id))?.state).toBe("void");
+    expect(await recordsOf(h).countByKind("2000-01-01T00:00:00.000Z")).toEqual({
+      diff: 0,
+      dynamic: 0,
+    });
+  });
+
+  // #272-T04
+  it("voids the reserved record of a job that was dropped with its closed pull request, at once", async () => {
+    const h = await startRunnerApiHarness();
+    const job = await claimedJob(h);
+    h.clock.advance(3 * MINUTE);
     await h.queue.expireStaleJobs();
 
-    expect((await h.queue.get(job.id))?.status).toBe("cancelled");
+    await h.queue.discardWaitingForPr(h.repositoryId, 7);
+
+    expect((await recordsOf(h).get(job.id))?.state).toBe("void");
+  });
+
+  // #272-T04
+  it("voids the reserved record of a job that a newer automatic job replaced, at once", async () => {
+    const h = await startRunnerApiHarness();
+    const job = await claimedJob(h);
+    h.clock.advance(3 * MINUTE);
+    await h.queue.expireStaleJobs();
+    expect((await recordsOf(h).get(job.id))?.state).toBe("reserved");
+
+    const newer = await h.enqueue({ headSha: sha("b") });
+
+    expect(newer.status).toBe("created");
+    expect((await h.queue.get(job.id))?.status).toBe("superseded");
     expect((await recordsOf(h).get(job.id))?.state).toBe("void");
   });
 });

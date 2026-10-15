@@ -38,11 +38,12 @@ claim --> reserved --complete with usage, or a run that succeeded--> settled   (
   failed without usage (checkout, configuration, a runner that never reached the model) is `void`.
 - **Void without a report.** A job that ends without `complete` (the last attempt loses its lease, the hard limit,
   a release on the last attempt, a cancellation at claim time, a cancellation or replacement while it waited again)
-  has its `reserved` record voided in the same transaction as the transition (`voidRecordsOfEndedJobs` in
-  `runner-jobs-repository.ts`; a cancellation of a waiting job is caught by the next expiry step).
+  has its `reserved` record voided in the same transaction as the transition: the runner side with
+  `voidRecordsOfEndedJobs` (`runner-jobs-repository.ts`), the scoped job repository (`cancelWaiting`, and the
+  replacement in `enqueue`) with `voidEndedJobs()`.
 - **Immutable.** Every statement that changes a record only touches a `reserved` one; a repeated completion
   (`alreadyCompleted`) changes nothing. A job that was claimed before this table existed has no record; its
-  completion creates one in its final state (key mode `own`).
+  completion creates one in its final state (key mode `own`, dated from the job's claim).
 - Runs of workspaces without any entitlement are recorded too. Nothing here changes what a run does.
 
 `reserved` and `settled` count towards a limit (#277), `void` does not.
@@ -52,7 +53,7 @@ claim --> reserved --complete with usage, or a run that succeeded--> settled   (
 Repository functions only; there is no endpoint (#278) and no page (#282) yet.
 
 - `countByKind(since)`: records that count (`reserved`, `settled`) reserved at or after `since`, per review kind.
-- `sumSettledManagedCostMicroUsd(since)`: the cost of settled records of managed runs settled at or after `since`;
+- `sumSettledManagedCostMicroUsd(since)`: the cost of settled records of managed runs reserved at or after `since` (a run belongs to the period it started in, for the count and for the cost alike);
   an unknown cost adds nothing.
 - `pageSettled({ after, limit })`: settled records ordered by `(settled_at, id)` after a cursor, with the cursor for
   the next page. Never `reserved` or `void` records.

@@ -61,10 +61,16 @@ export type UsageRecordsRepository = {
    * gets one in its final state, with key mode `own`.
    */
   settle(jobId: string, settlement: UsageSettlement): Promise<void>;
+  /**
+   * Voids the `reserved` records of this workspace whose job has ended without reporting (cancelled, replaced,
+   * or otherwise final), so a run that was dropped while it waited again no longer counts. Called in the
+   * transaction of every transition that ends a waiting job.
+   */
+  voidEndedJobs(): Promise<void>;
   get(jobId: string): Promise<UsageRecord | undefined>;
   /** Records that count (`reserved` and `settled`, never `void`) reserved at or after `since`, per review kind. */
   countByKind(since: string): Promise<Record<ProjectReviewKind, number>>;
-  /** The cost of the settled records of managed runs settled at or after `since`; an unknown cost adds nothing. */
+  /** The cost of the settled records of managed runs reserved at or after `since` (the period of the run, as in `countByKind`); an unknown cost adds nothing. */
   sumSettledManagedCostMicroUsd(since: string): Promise<number>;
   /** Settled records after the cursor, ordered by `(settledAt, id)`; never a `reserved` or `void` record. */
   pageSettled(options: {
@@ -90,6 +96,9 @@ function toRecord(row: Selectable<UsageRecordsTable>): UsageRecord {
   };
 }
 
+/** The statuses a job never leaves (src/jobs/job-status.ts). */
+const ENDED_JOB_STATUSES = ["succeeded", "failed", "cancelled", "superseded"];
+
 export function createUsageRecordsRepository(
   db: Kysely<Database>,
   workspaceId: WorkspaceId,
@@ -100,7 +109,7 @@ export function createUsageRecordsRepository(
   function jobOf(jobId: string) {
     return db
       .selectFrom("jobs")
-      .select(["id", "review_kind"])
+      .select(["id", "review_kind", "claimed_at"])
       .where("id", "=", jobId)
       .where("workspace_id", "=", workspaceId)
       .executeTakeFirst();
@@ -164,7 +173,8 @@ export function createUsageRecordsRepository(
           job_id: job.id,
           review_kind: job.review_kind,
           key_mode: "own",
-          reserved_at: timestamp,
+          // A job claimed before records existed: its claim is the best date of the run.
+          reserved_at: job.claimed_at ?? timestamp,
           ...final,
         })
         .onConflict((conflict) =>
@@ -173,6 +183,22 @@ export function createUsageRecordsRepository(
             .doUpdateSet(final)
             .where("usage_records.state", "=", "reserved")
             .where("usage_records.workspace_id", "=", workspaceId),
+        )
+        .execute();
+    },
+
+    async voidEndedJobs() {
+      await db
+        .updateTable("usage_records")
+        .set({ state: "void" })
+        .where("workspace_id", "=", workspaceId)
+        .where("state", "=", "reserved")
+        .where("job_id", "in", (eb) =>
+          eb
+            .selectFrom("jobs")
+            .select("jobs.id")
+            .where("jobs.workspace_id", "=", workspaceId)
+            .where("jobs.status", "in", ENDED_JOB_STATUSES),
         )
         .execute();
     },
@@ -209,7 +235,7 @@ export function createUsageRecordsRepository(
         .where("workspace_id", "=", workspaceId)
         .where("state", "=", "settled")
         .where("key_mode", "=", "managed")
-        .where("settled_at", ">=", since)
+        .where("reserved_at", ">=", since)
         .executeTakeFirst();
       return Number(row?.total ?? 0);
     },

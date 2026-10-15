@@ -126,6 +126,30 @@ async function seed(
       })
       .execute();
   }
+  // A cancelled job whose record is still reserved (it waited again after a lost lease): `voidEndedJobs` of
+  // the other workspace must not touch it.
+  if (options.earlierFailedJob === true) {
+    const row = await db
+      .selectFrom("jobs")
+      .selectAll()
+      .where("id", "=", enqueued.job.id)
+      .executeTakeFirstOrThrow();
+    await db
+      .insertInto("jobs")
+      .values({
+        ...row,
+        id: `cancelled-${tag}`,
+        head_sha: "d".repeat(40),
+        delivery_id: null,
+        status: "cancelled",
+        error_code: "project_deactivated",
+        created_at: "2026-10-11T00:00:00.000Z",
+        updated_at: "2026-10-11T00:00:00.000Z",
+        finished_at: "2026-10-11T00:00:00.000Z",
+      })
+      .execute();
+    await repos.usage.reserve(`cancelled-${tag}`, "own");
+  }
   await repos.appSettings.set("review_defaults", { from: tag }, tag);
   // A member and an open invitation.
   await db
@@ -757,6 +781,11 @@ const CASES: Case[] = [
     expectAnswer: (answer) => expect(answer).toBeUndefined(),
   },
   {
+    name: "usage.voidEndedJobs",
+    run: (a) => a.usage.voidEndedJobs(),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
     name: "usage.get",
     run: (a, b) => a.usage.get(b.job.id),
     expectAnswer: (answer) => expect(answer).toBeUndefined(),
@@ -1007,7 +1036,7 @@ describe("two workspaces", () => {
       workspaceId: a.workspaceId,
     });
     expect(await reposB.usage.countByKind(since)).toEqual({
-      diff: 2,
+      diff: 3,
       dynamic: 0,
     });
     expect(await reposB.usage.sumSettledManagedCostMicroUsd(since)).toBe(500);
@@ -1044,8 +1073,12 @@ describe("two workspaces", () => {
     expect(await reposA.jobs.list()).toEqual([
       expect.objectContaining({ id: a.job.id, workspaceId: a.workspaceId }),
     ]);
-    // B also holds its earlier failed job (seeded for the attempted-heads case).
+    // B also holds its earlier failed job (seeded for the attempted-heads case) and a cancelled one.
     expect(await reposB.jobs.list()).toEqual([
+      expect.objectContaining({
+        id: "cancelled-b",
+        workspaceId: b.workspaceId,
+      }),
       expect.objectContaining({ id: "failed-b", workspaceId: b.workspaceId }),
       expect.objectContaining({ id: b.job.id, workspaceId: b.workspaceId }),
     ]);

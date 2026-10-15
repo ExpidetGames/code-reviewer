@@ -194,6 +194,22 @@ describe("settling a record", () => {
     });
   });
 
+  it("dates the record of a job claimed before records existed from its claim", async () => {
+    const t = await setup();
+    const job = await t.newJob();
+    await t.queue.claimNext("runner-a");
+    await t.db.deleteFrom("usage_records").execute();
+    t.setNow("2026-10-14T13:00:00.000Z");
+
+    await t.records.settle(job.id, SETTLED(42));
+
+    expect(await t.records.get(job.id)).toMatchObject({
+      state: "settled",
+      reservedAt: t.clock.now().toISOString(),
+      settledAt: "2026-10-14T13:00:00.000Z",
+    });
+  });
+
   it("refuses a final record that is half finished (the table checks it too)", async () => {
     const t = await setup();
     const job = await t.newJob();
@@ -275,8 +291,30 @@ describe("counting", () => {
       await t.records.sumSettledManagedCostMicroUsd("2026-10-14T12:00:00.000Z"),
     ).toBe(1_500_250);
     expect(
-      await t.records.sumSettledManagedCostMicroUsd("2026-10-14T12:30:00.001Z"),
+      await t.records.sumSettledManagedCostMicroUsd("2026-10-14T12:00:00.001Z"),
     ).toBe(0);
+  });
+
+  // The period of a run is the one it started in, for the count and for the cost alike.
+  it("charges the cost of a run to the period it was reserved in, like the count", async () => {
+    const t = await setup();
+    const job = await t.newJob();
+    await t.records.reserve(job.id, "managed");
+    t.setNow("2026-10-15T00:00:05.000Z");
+    await t.records.settle(job.id, SETTLED(700));
+
+    const nextPeriod = "2026-10-15T00:00:00.000Z";
+    expect(await t.records.countByKind(nextPeriod)).toEqual({
+      diff: 0,
+      dynamic: 0,
+    });
+    expect(await t.records.sumSettledManagedCostMicroUsd(nextPeriod)).toBe(0);
+    const thisPeriod = "2026-10-14T00:00:00.000Z";
+    expect(await t.records.countByKind(thisPeriod)).toEqual({
+      diff: 1,
+      dynamic: 0,
+    });
+    expect(await t.records.sumSettledManagedCostMicroUsd(thisPeriod)).toBe(700);
   });
 });
 
