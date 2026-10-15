@@ -51,14 +51,14 @@ export type DispatchService = {
   onEnqueued(result: EnqueueResult): Promise<void>;
   /** The hook of the sweep: sends what is due. Never rejects. */
   sendDue(limit?: number): Promise<{ sent: number }>;
+  /**
+   * One job of `listDue`, as `sendDue` sends it. False when it sent nothing: another sender holds the job or
+   * already dealt with it since the listing was made. Never rejects.
+   */
+  sendJob(job: DueDispatchJob): Promise<boolean>;
 };
 
-type JobToSend = {
-  jobId: string;
-  reviewKind: "diff" | "dynamic";
-  /** The job's lost attempts; the call carries the number of the attempt it is on. */
-  jobAttempts: number;
-};
+type JobToSend = DueDispatchJob;
 
 export function createDispatchService(options: {
   db: Kysely<Database>;
@@ -160,6 +160,14 @@ export function createDispatchService(options: {
         row = await dispatches.get(job.jobId);
         if (row === undefined) return false;
       }
+      // The listing this job came from may be older than the row: a sender that claimed it since (a lease
+      // in the future) or recorded its answer (the next look in the future) has the job, whatever the
+      // listing said. Only a row that is due now is ours to claim.
+      if (
+        row.state === "stopped" ||
+        Date.parse(row.nextDispatchAt) > now().getTime()
+      )
+        return false;
       return claimAndSend(job, row);
     });
   }
@@ -198,6 +206,8 @@ export function createDispatchService(options: {
         );
       });
     },
+
+    sendJob: sendOne,
 
     async sendDue(limit = DEFAULT_SEND_LIMIT) {
       let due: DueDispatchJob[];

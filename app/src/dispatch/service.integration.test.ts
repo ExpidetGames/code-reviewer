@@ -479,6 +479,35 @@ describe.each(databases)("the dispatch webhook on %s", (name, open) => {
     });
 
     // #326-T03
+    it("does not send a job another sender claimed after the sweep listed it", async () => {
+      const t = await setup();
+      const bare = await t.fixture.enqueue();
+      const job = {
+        jobId: bare.job.id,
+        reviewKind: "diff" as const,
+        jobAttempts: 0,
+      };
+      // The first sender is in flight (the endpoint hangs until the limit); the listing the second one works
+      // from is older than that claim.
+      t.receiver.reply("hang");
+      const first = t.service.sendJob(job);
+      while (t.receiver.received.length === 0)
+        await new Promise((resolve) => setTimeout(resolve, 2));
+
+      expect(await t.service.sendJob(job)).toBe(false);
+      await first;
+
+      expect(t.receiver.received).toHaveLength(1);
+      expect(await t.dispatches.get(bare.job.id)).toMatchObject({
+        attempts: 1,
+      });
+      // Once the first call is recorded and acknowledged, a stale listing still sends nothing.
+      t.receiver.reply();
+      expect(await t.service.sendJob(job)).toBe(false);
+      expect(t.receiver.received).toHaveLength(1);
+    });
+
+    // #326-T03
     it("lets the sweep find due work through the repository's listing of due jobs", async () => {
       const t = await setup();
       const first = await t.fixture.enqueue();
