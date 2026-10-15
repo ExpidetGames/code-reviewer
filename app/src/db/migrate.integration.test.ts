@@ -90,6 +90,7 @@ describe("the migrations of both epics", () => {
       "20261014150000_create_usage_records",
       "20261015100000_add_job_worker_fetches",
       "20261015110000_create_setup_codes",
+      "20261015120000_create_job_dispatches",
     ]);
   });
 
@@ -139,6 +140,7 @@ describe("starting the database", () => {
       "invitations",
       "job_claimed_keys",
       "job_comments",
+      "job_dispatches",
       "jobs",
       "kysely_migration",
       "kysely_migration_lock",

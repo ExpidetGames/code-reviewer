@@ -169,3 +169,74 @@ describe("checking the operator API token when the server starts", () => {
     expect(exit).not.toHaveBeenCalled();
   });
 });
+
+describe("checking the dispatch webhook settings when the server starts", () => {
+  const SECRET = "dispatch-signing-secret-0123456789abcdef";
+  const webhook = {
+    ...validEnv,
+    RUNNER_DISPATCH: "webhook",
+    RUNNER_WEBHOOK_URL: "https://dispatcher.example.test/dispatch",
+    RUNNER_WEBHOOK_SECRET: SECRET,
+  };
+
+  // #326-T07
+  it("leaves a deployment that polls (the default) unchanged, whatever webhook variables are left over", async () => {
+    for (const extra of [
+      {},
+      { RUNNER_DISPATCH: "poll" },
+      { RUNNER_WEBHOOK_SECRET: "short", RUNNER_WEBHOOK_URL: "nonsense" },
+    ]) {
+      const { exit, log } = await run({ ...validEnv, ...extra });
+      expect(exit).not.toHaveBeenCalled();
+      expect(log).not.toHaveBeenCalled();
+    }
+  });
+
+  // #326-T08
+  it("lets a complete webhook setup start", async () => {
+    const { exit, log } = await run(webhook);
+
+    expect(exit).not.toHaveBeenCalled();
+    expect(log).not.toHaveBeenCalled();
+  });
+
+  // #326-T08
+  it("stops the start for webhook mode without a URL or a secret, naming only the variables", async () => {
+    const { exit, log } = await run({
+      ...validEnv,
+      RUNNER_DISPATCH: "webhook",
+    });
+
+    expect(exit).toHaveBeenCalledWith(1);
+    const line = String(log.mock.calls[0]?.[0]);
+    expect(line).toContain("DEPLOY_CONFIG_INVALID");
+    expect(line).toContain("RUNNER_WEBHOOK_URL is not set");
+    expect(line).toContain("RUNNER_WEBHOOK_SECRET is not set");
+  });
+
+  // #326-T08
+  it("stops the start for a short secret or a secret that is another credential, without printing any value", async () => {
+    const short = await run({
+      ...webhook,
+      RUNNER_WEBHOOK_SECRET: "short-secret",
+    });
+    const reused = await run({
+      ...webhook,
+      RUNNER_WEBHOOK_SECRET: validEnv.RUNNER_TOKEN,
+    });
+
+    for (const { exit, log } of [short, reused]) {
+      expect(exit).toHaveBeenCalledWith(1);
+      const line = String(log.mock.calls[0]?.[0]);
+      expect(line).not.toContain("short-secret");
+      expect(line).not.toContain(validEnv.RUNNER_TOKEN);
+      expect(line).not.toContain("dispatcher.example.test");
+    }
+    expect(String(short.log.mock.calls[0]?.[0])).toContain(
+      "RUNNER_WEBHOOK_SECRET must be at least 32 characters long",
+    );
+    expect(String(reused.log.mock.calls[0]?.[0])).toContain(
+      "RUNNER_WEBHOOK_SECRET must differ from RUNNER_TOKEN",
+    );
+  });
+});

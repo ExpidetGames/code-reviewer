@@ -54,6 +54,9 @@ const SCOPED = [
  * - usage-records-sweep: the sweep of usage records for instance level code that ends jobs of any workspace (the
  *   lease side of the queue, the switch-off of Dynamic Review); one statement that only voids `reserved` records of
  *   jobs that have ended, and it takes no workspace on purpose;
+ * - job-dispatches: where the signed wake-up call of a job stands (#326). The sender holds the job it just queued and
+ *   the sweep works through the whole instance, like the lease side of the queue; the table has a job id and
+ *   counters, no repository data, and is only written in webhook mode;
  * - job-claimed-keys: the encrypted LLM key handed out with the claim of a job. It is keyed by the job and read
  *   only by the runner API when that job is completed (the job and its workspace are known there); it never
  *   lists, and a key is only ever looked up by the id of a job the caller holds.
@@ -66,6 +69,7 @@ const INSTANCE_LEVEL = [
   "integration-directory-repository.ts",
   "invitation-directory-repository.ts",
   "job-claimed-keys-repository.ts",
+  "job-dispatches-repository.ts",
   "jobs-claim.ts",
   "legacy-users-repository.ts",
   "rate-limits-repository.ts",
