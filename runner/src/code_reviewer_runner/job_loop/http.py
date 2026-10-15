@@ -1,0 +1,113 @@
+# SPDX-License-Identifier: Apache-2.0
+
+"""The HTTP pieces the runner API client and the Worker API client share.
+
+One blocking request without proxy and without redirects (a redirect or a proxy would carry the
+token to wherever it points), the answer reduced to status, headers and a bounded body, and the
+readers for the parts of an answer both clients look at. No error here carries a value of the
+request or the response: they hold secrets.
+"""
+
+import http.client
+import json
+import re
+import urllib.error
+import urllib.request
+from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import Any
+
+from code_reviewer_runner.job_loop.jsonvalues import as_object
+
+MAX_RESPONSE_BYTES = 1024 * 1024
+MAX_RETRY_AFTER_SECONDS = 15 * 60
+
+
+class ApiError(Exception):
+    """Base of the errors of both API clients. `status` is the HTTP status, or None without one."""
+
+    def __init__(self, message: str, status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status
+
+
+class ApiUnavailable(ApiError):
+    def __init__(
+        self, message: str, status: int | None = None, retry_after: float | None = None
+    ) -> None:
+        super().__init__(message, status)
+        self.retry_after = retry_after
+
+
+class LeaseLost(ApiError):
+    pass
+
+
+class ApiRejected(ApiError):
+    def __init__(self, message: str, status: int, code: str | None) -> None:
+        super().__init__(message, status)
+        self.code = code
+
+
+class NoRedirects(urllib.request.HTTPRedirectHandler):
+    """A redirect would carry the token to wherever it points: refuse it instead."""
+
+    def redirect_request(self, *args: Any, **kwargs: Any) -> None:  # type: ignore[override]
+        return None
+
+
+@dataclass(frozen=True)
+class Reply:
+    status: int
+    headers: Mapping[str, str]
+    body: bytes
+
+
+def build_opener() -> urllib.request.OpenerDirector:
+    # No proxy: the token must only go to the app, and the app is reached directly.
+    return urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirects)
+
+
+def retry_after(headers: Mapping[str, str]) -> float | None:
+    raw = headers.get("Retry-After")
+    if raw is None:
+        return None
+    try:
+        seconds = float(raw)
+    except ValueError:
+        return None
+    return min(max(seconds, 0.0), MAX_RETRY_AFTER_SECONDS) if seconds == seconds else None
+
+
+def parse_json(reply: Reply) -> Any:
+    try:
+        return json.loads(reply.body.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        return None
+
+
+def error_code(reply: Reply) -> str | None:
+    body = as_object(parse_json(reply))
+    error = as_object(body.get("error")) if body else None
+    code = error.get("code") if error else None
+    if isinstance(code, str) and re.fullmatch(r"[A-Z_]{1,64}", code):
+        return code
+    return None
+
+
+def send(
+    opener: urllib.request.OpenerDirector, request: urllib.request.Request, timeout: float
+) -> Reply:
+    """Make the request; any answer is a `Reply`, no answer is `ApiUnavailable`."""
+    try:
+        with opener.open(request, timeout=timeout) as response:
+            return Reply(response.status, dict(response.headers), response.read(MAX_RESPONSE_BYTES))
+    except urllib.error.HTTPError as error:
+        try:
+            body_bytes = error.read(MAX_RESPONSE_BYTES)
+        except Exception:
+            body_bytes = b""
+        return Reply(error.code, dict(error.headers), body_bytes)
+    except (urllib.error.URLError, http.client.HTTPException, OSError, ValueError) as error:
+        # The class of the error is enough: its text can hold the URL.
+        raise ApiUnavailable(f"no answer from the app ({type(error).__name__})") from None
