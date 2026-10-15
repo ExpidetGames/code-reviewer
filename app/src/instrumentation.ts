@@ -7,8 +7,16 @@
 // fails ends the start. While the instance is not set up, the setup code is printed. Last, the repositories are
 // synchronized with GitHub in the background: that never delays or stops the start. The LLM options are only
 // reported, never a reason to stop.
+//
+// A serverless instance (APP_RUNTIME=serverless, src/runtime/mode.ts) runs none of the above that opens the
+// database or starts a timer: see src/startup-serverless.ts.
 export async function register(): Promise<void> {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
+  const { isServerless } = await import("./runtime/mode.ts");
+  if (isServerless()) {
+    const { registerServerless } = await import("./startup-serverless.ts");
+    return registerServerless();
+  }
   const { checkAuthConfigOnStart } = await import("./auth/startup.ts");
   checkAuthConfigOnStart();
   // Production only: the runner token (docker compose passes it). GitHub is optional.
