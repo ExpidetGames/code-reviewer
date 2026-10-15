@@ -104,6 +104,8 @@ export type ListedVm = {
   status: string;
   /** The VM's own timeout, when the platform reports it. */
   timeoutMs?: number;
+  /** Whether the platform keeps a snapshot of the VM: the golden builder is persistent, no VM of a job or a canary is. */
+  persistent?: boolean;
   tags: Readonly<Record<string, string>>;
 };
 

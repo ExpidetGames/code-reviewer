@@ -438,6 +438,30 @@ describe("the reaper: only our own VMs", () => {
   });
 
   // #364-T05
+  it("never stops a persistent VM, even one named and tagged like a job VM or a canary: ours are never persistent", async () => {
+    const t = setup();
+    t.fake.listIgnoresFilter();
+    t.fake.seedVm({
+      name: `cr-diff-${JOB_A}-abcd1234`,
+      tags: { app: "code-reviewer", kind: "diff", job: JOB_A },
+      createdAtMs: T0 - 48 * 3600 * SECOND,
+      persistent: true,
+    });
+    t.fake.seedVm({
+      name: "cr-canary-abcd1234",
+      tags: { app: "code-reviewer", kind: "canary", job: "canary" },
+      createdAtMs: T0 - 48 * 3600 * SECOND,
+      persistent: true,
+    });
+    t.states.set(JOB_A, { kind: "known", status: "failed" });
+
+    await t.reaper.run();
+
+    expect(t.fake.stops).toStrictEqual([]);
+    expect(t.asked).toStrictEqual([]);
+  });
+
+  // #364-T05
   it("asks the platform only for the prefix and the one tag of our VMs", async () => {
     const t = setup();
 

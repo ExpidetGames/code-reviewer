@@ -68,6 +68,7 @@ export interface SdkListedSandbox {
   readonly createdAt: number;
   readonly status: string;
   readonly timeout?: number | undefined;
+  readonly persistent?: boolean | undefined;
   readonly tags?: Record<string, string> | undefined;
 }
 
@@ -327,6 +328,9 @@ export function createVercelSandboxService(
             status: listed.status,
             ...(typeof listed.timeout === "number"
               ? { timeoutMs: listed.timeout }
+              : {}),
+            ...(typeof listed.persistent === "boolean"
+              ? { persistent: listed.persistent }
               : {}),
             tags: { ...listed.tags },
           });

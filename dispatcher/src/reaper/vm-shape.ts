@@ -25,6 +25,8 @@ export type VmShape =
 /** What a listed VM is, or null when it is not one of ours. */
 export function shapeOf(vm: ListedVm): VmShape | null {
   if (vm.tags.app !== APP_TAG) return null;
+  // Ours are created `persistent: false`; the golden builder is persistent. A persistent VM is never ours to stop.
+  if (vm.persistent === true) return null;
   const job = JOB_NAME.exec(vm.name);
   if (job !== null) {
     const [, kind, jobId] = job;

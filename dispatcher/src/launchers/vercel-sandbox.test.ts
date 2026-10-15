@@ -387,6 +387,7 @@ describe("the Vercel adapter of the Sandbox port", () => {
       createdAt: 1_700_000_000_000 + n,
       status: "running",
       timeout: 1_500_000,
+      persistent: n === 3,
       tags: { app: "code-reviewer", kind: "diff", job: `job-${n}` },
       currentSessionId: "ignored",
       vcpus: 1,
@@ -418,6 +419,7 @@ describe("the Vercel adapter of the Sandbox port", () => {
         createdAtMs: vm.createdAt,
         status: "running",
         timeoutMs: 1_500_000,
+        persistent: vm.persistent,
         tags: vm.tags,
       })),
     );
