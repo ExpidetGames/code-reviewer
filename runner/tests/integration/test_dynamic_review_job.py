@@ -1006,3 +1006,171 @@ def test_a_second_job_for_the_same_pull_request_edits_the_summary_comment_and_ad
         assert "PATCH" in [m for m, _ in github.requests]
     finally:
         github.stop()
+
+
+def refusing_checkout(reason: CheckoutReason = CheckoutReason.BUDGET_PREPARATION) -> Any:
+    @contextmanager
+    def refusing(job: Any) -> Generator[PreparedContent]:
+        raise CheckoutError(reason)
+        yield  # pragma: no cover
+
+    return refusing
+
+
+def run_failing_job(github: FakeGithubComments, token: str, prepare: Any) -> Any:
+    with FakeUpstream() as upstream:
+        return runner.run_dynamic_job(
+            job_for(
+                f"{upstream.url}/v1",
+                pr_url=f"{github.url}/octo/repo/pull/7",
+                git_base_url=github.url,
+                git_token=token,
+            ),
+            None,
+            0.0,
+            environment(),
+            engines=ALL_ENGINES,
+            prepare=prepare,
+        )
+
+
+# #299-T01 #299-T03
+def test_by_default_a_failed_run_writes_one_note_into_the_summary_and_a_repeat_updates_it(
+    tmp_path: Path,
+) -> None:
+    token = "ghs_dummy-installation-token-0123456789"
+    github = FakeGithubComments(token=token)
+    try:
+        first = run_failing_job(github, token, refusing_checkout())
+        second = run_failing_job(github, token, refusing_checkout())
+
+        for result in (first, second):
+            # The run keeps its own failure; the note is only an addition.
+            assert result.error_code is ErrorCode.CHECKOUT_INCOMPLETE
+            assert result.comment_url is None
+        assert len(github.comments) == 1
+        body = str(github.comments[0]["body"])
+        assert IDENTITY_MARKER in body
+        assert "Dynamic Review did not complete" in body
+        assert "`checkout_incomplete`" in body
+        assert "`budget_preparation`" in body
+        assert [m for m, _ in github.requests if m == "POST"] == ["POST"]
+        assert "PATCH" in [m for m, _ in github.requests]
+    finally:
+        github.stop()
+
+
+# #299-T05
+def test_by_default_a_failed_run_keeps_the_findings_of_an_earlier_review(tmp_path: Path) -> None:
+    token = "ghs_dummy-installation-token-0123456789"
+    github = FakeGithubComments(token=token)
+    try:
+        with reading_upstream() as upstream:
+            reviewed = runner.run_dynamic_job(
+                job_for(
+                    f"{upstream.url}/v1",
+                    pr_url=f"{github.url}/octo/repo/pull/7",
+                    git_base_url=github.url,
+                    git_token=token,
+                ),
+                None,
+                0.0,
+                environment(),
+                engines=ALL_ENGINES,
+                prepare=Preparer(tmp_path / "first", structured_script()),
+            )
+        assert reviewed.ok, reviewed.log_tail
+
+        failed = run_failing_job(github, token, refusing_checkout())
+
+        assert failed.error_code is ErrorCode.CHECKOUT_INCOMPLETE
+        assert len(github.comments) == 1
+        body = str(github.comments[0]["body"])
+        assert "Query text built from the request" in body
+        assert "Dynamic Review did not complete" in body
+    finally:
+        github.stop()
+
+
+# #299-T07
+def test_a_note_that_cannot_be_written_leaves_the_run_with_its_own_failure(
+    tmp_path: Path,
+) -> None:
+    token = "ghs_dummy-installation-token-0123456789"
+    github = FakeGithubComments(token=token)
+    github.faults["GET"] = (403, {})
+    try:
+        result = run_failing_job(github, token, refusing_checkout())
+
+        assert result.error_code is ErrorCode.CHECKOUT_INCOMPLETE
+        assert result.error_reason == "budget_preparation"
+        assert "failure note: not written (git_forbidden)" in result.log_tail
+        assert github.comments == []
+    finally:
+        github.stop()
+
+
+# #299-T06
+def test_a_lost_token_writes_no_note(tmp_path: Path) -> None:
+    token = "ghs_dummy-installation-token-0123456789"
+    github = FakeGithubComments(token=token)
+    try:
+        with FakeUpstream() as upstream:
+            result = runner.run_dynamic_job(
+                job_for(
+                    f"{upstream.url}/v1",
+                    pr_url=f"{github.url}/octo/repo/pull/7",
+                    git_base_url=github.url,
+                    git_token=token,
+                ),
+                None,
+                0.0,
+                environment(),
+                engines=ALL_ENGINES,
+                prepare=refusing_checkout_with(ErrorCode.GIT_AUTH),
+            )
+
+        assert result.error_code is ErrorCode.GIT_AUTH
+        assert github.comments == []
+        assert github.requests == []
+    finally:
+        github.stop()
+
+
+def refusing_checkout_with(code: ErrorCode) -> Any:
+    @contextmanager
+    def refusing(job: Any) -> Generator[PreparedContent]:
+        raise CheckoutError(CheckoutReason.TRANSPORT, code)
+        yield  # pragma: no cover
+
+    return refusing
+
+
+# #299-T02
+def test_the_note_of_a_run_whose_log_holds_repository_text_holds_none_of_it(
+    tmp_path: Path,
+) -> None:
+    token = "ghs_dummy-installation-token-0123456789"
+    github = FakeGithubComments(token=token)
+    secret = "sk-or-dummy-secret-value-0123456789"
+    path = "/srv/work/customer-repo/src/billing/invoice.py"
+    diff_line = "+    charge(card_number='4111-1111-1111-1111')"
+
+    @contextmanager
+    def hostile(job: Any) -> Generator[PreparedContent]:
+        # What a preparation could carry in its message and its metrics: none of it may be copied.
+        error = CheckoutError(CheckoutReason.BUDGET_PREPARATION)
+        error.args = (f"{path} {diff_line} {secret}",)
+        error.metrics = CheckoutMetrics(10, 20, 30, 4, {"binary": 1}, {"too_large": 2})
+        raise error
+        yield content_at(tmp_path)  # pragma: no cover
+
+    try:
+        result = run_failing_job(github, token, hostile)
+
+        assert result.error_code is ErrorCode.CHECKOUT_INCOMPLETE
+        body = str(github.comments[0]["body"])
+        for fragment in (path, "billing", "invoice", diff_line, "card_number", secret, "omitted="):
+            assert fragment not in body
+    finally:
+        github.stop()

@@ -24,6 +24,7 @@ import re
 from urllib.parse import quote, urlsplit
 
 from code_reviewer_runner.dynamic_findings import Finding
+from code_reviewer_runner.dynamic_review.failure_note import FailureNote, render_note
 from code_reviewer_runner.dynamic_review.reconcile import summary_counts
 from code_reviewer_runner.dynamic_review.state import (
     ResolvedFinding,
@@ -54,6 +55,10 @@ RESET_NOTICE = (
     "> **Full review after a state reset:** earlier findings were not carried over. The findings "
     "below are re-derived from scratch."
 )
+# Shown under a failure note when the summary still holds the findings of an earlier review (#299),
+# and as the footer of a note on a pull request that has no review yet. Both are constants.
+KEPT_FINDINGS_NOTICE = "_The findings below are from the last completed review._"
+NOTE_ONLY_FOOTER = "_The next review of this pull request replaces this note._"
 _MENTION = re.compile(r"(?<![A-Za-z0-9_])@(?=[A-Za-z0-9])")
 _ZERO_WIDTH = "\u200b"
 
@@ -142,7 +147,13 @@ def _visible(
     detail: int,
     reset: bool,
     stopped_early: str | None,
+    failure_note: FailureNote | None = None,
 ) -> str:
+    if failure_note is not None and not state.findings and not state.resolved:
+        # Nothing was ever found here: "0 active findings" would read as a clean review.
+        return "\n".join(
+            [IDENTITY_MARKER, _HEADING, "", render_note(failure_note), "", NOTE_ONLY_FOOTER]
+        )
     counts = summary_counts(state.findings)
     active_total = len(state.findings)
     resolved_total = len(state.resolved)
@@ -151,6 +162,8 @@ def _visible(
         f"P0 {counts['P0']} · P1 {counts['P1']} · P2 {counts['P2']} · P3 {counts['P3']}"
     )
     parts = [IDENTITY_MARKER, _HEADING, ""]
+    if failure_note is not None:
+        parts.extend([render_note(failure_note), "", KEPT_FINDINGS_NOTICE, ""])
     notice = STOPPED_EARLY_NOTICES.get(stopped_early or "")
     if notice is not None:
         parts.extend([notice, ""])
@@ -214,13 +227,16 @@ def render_comment(
     web_base: str = "",
     reset: bool = False,
     stopped_early: str | None = None,
+    failure_note: FailureNote | None = None,
 ) -> str:
     """The full comment body: the visible view plus the hidden state marker.
 
     `reset` (#257) adds the one-shot notice of a review that started over; it is not part of the
     state, so the next normal run renders without it. `stopped_early` (#293) does the same for a
     review that was wrapped up at its cost or time limit: one of two constant notices, chosen by
-    the runner's own reason and never built from other text.
+    the runner's own reason and never built from other text. `failure_note` (#299) puts the note of
+    a failed run on top of the state as it is; it too is not part of the state, so the next run
+    that succeeds renders without it.
 
     A state over the caps or the state budget is first reduced by `fit_state` (oldest resolved
     history, then the lowest priority active findings, which the view then counts), so the comment
@@ -241,6 +257,7 @@ def render_comment(
             detail=detail,
             reset=reset,
             stopped_early=stopped_early,
+            failure_note=failure_note,
         )
         body = f"{visible}{suffix}"
         if _fits(body):

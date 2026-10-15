@@ -45,6 +45,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, replace
 
 from code_reviewer_runner.dynamic_findings import DynamicFindings, Finding
+from code_reviewer_runner.dynamic_review.failure_note import FailureNote, failure_note_for
 from code_reviewer_runner.dynamic_review.github import (
     Comment,
     CommentsClient,
@@ -131,6 +132,41 @@ class Publisher:
         published = self._write(existing, body, head_sha)
         return replace(published, reset=reset)
 
+    def publish_failure(
+        self,
+        note: FailureNote,
+        *,
+        head_sha: str,
+        previous_reviewed_sha: str | None,
+        attempted_shas: Sequence[str] = (),
+        attempted_shas_truncated: bool = False,
+    ) -> Published:
+        """Puts the note of a failed run into the summary (#299): the same comment as a review.
+
+        The state is validated exactly as for a review. An earlier review stays as it is, findings
+        and head alike; only the note on top of it is added or replaced. When there is no summary
+        yet, one is created whose state holds no findings and the head of the failed run, which is
+        a head the app reports as attempted, so the next run (of any runner version) can read it.
+        A head this job cannot account for is refused, never overwritten, and a state that would be
+        dropped by a reset is not dropped for a note.
+        """
+        try:
+            comments = self.client.list_comments(self.pr_number)
+        except GitHubError as error:
+            raise PublishError(error.code, error.detail) from None
+        existing = self._summary_comment(comments)
+        previous, reset = self._previous_state(
+            existing, head_sha, previous_reviewed_sha, attempted_shas, attempted_shas_truncated
+        )
+        if reset:
+            raise PublishError(
+                ErrorCode.REVIEW_NOT_PUBLISHED,
+                "the earlier summary is not accounted for, so no note is written over it",
+            )
+        state = previous if existing is not None else ReviewState(head_sha, (), ())
+        body = self._render(state, failure_note=note)
+        return self._write(existing, body, head_sha)
+
     def read_previous_state(
         self,
         head_sha: str,
@@ -209,7 +245,12 @@ class Publisher:
     # -- rendering and writing -------------------------------------------------------------
 
     def _render(
-        self, state: ReviewState, *, reset: bool = False, stopped_early: str | None = None
+        self,
+        state: ReviewState,
+        *,
+        reset: bool = False,
+        stopped_early: str | None = None,
+        failure_note: FailureNote | None = None,
     ) -> str:
         try:
             return render_comment(
@@ -218,6 +259,7 @@ class Publisher:
                 web_base=self.web_base,
                 reset=reset,
                 stopped_early=stopped_early,
+                failure_note=failure_note,
             )
         except RenderError as error:
             raise PublishError(error.code, error.detail) from None
@@ -364,6 +406,27 @@ def publish_run(job: Job, run: DynamicFindings) -> Published:
         )
     return publisher_for(job).publish(
         run,
+        head_sha=base.head_sha,
+        previous_reviewed_sha=base.previous_reviewed_sha,
+        attempted_shas=base.attempted_shas,
+        attempted_shas_truncated=base.attempted_shas_truncated,
+    )
+
+
+def publish_failure_note(job: Job, code: ErrorCode, reason: str | None) -> Published | None:
+    """Writes the note of a failed Dynamic run into the summary comment of the job's own pull
+    request (#299). Returns None when this failure writes nothing. Raises `PublishError` when the
+    write fails; the caller keeps the failure it already has and never lets this change it."""
+    base = job.base
+    if base is None:
+        raise PublishError(
+            ErrorCode.DYNAMIC_POLICY_VIOLATION, "a Dynamic job without checkout facts"
+        )
+    note = failure_note_for(code, reason, base.head_sha)
+    if note is None:
+        return None
+    return publisher_for(job).publish_failure(
+        note,
         head_sha=base.head_sha,
         previous_reviewed_sha=base.previous_reviewed_sha,
         attempted_shas=base.attempted_shas,
