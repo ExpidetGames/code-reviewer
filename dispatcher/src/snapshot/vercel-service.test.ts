@@ -51,8 +51,19 @@ function stubSdk(options: { listed?: Array<Record<string, unknown>> } = {}) {
       },
       list: async (params) => {
         record("list", params);
+        // The platform's own rule, seen on a real run: a name prefix filters by name, so it needs that sort.
+        if (params.namePrefix !== undefined && params.sortBy !== "name")
+          throw new Error(
+            "Status code 400 is not ok: Invalid request: `namePrefix` is only valid when `sortBy` is `name`",
+          );
+        const prefix = params.namePrefix;
         return (async function* () {
-          for (const item of options.listed ?? []) yield item;
+          for (const item of options.listed ?? [])
+            if (
+              typeof prefix !== "string" ||
+              String(item.name).startsWith(prefix)
+            )
+              yield item;
         })() as never;
       },
     },
@@ -178,11 +189,13 @@ describe("the Vercel Sandbox adapter", () => {
     ]);
   });
 
+  // #365-T01 #365-T03
   it("lists the builders by name prefix with their snapshot, and deletes one with its snapshots", async () => {
     const { sdk, calls } = stubSdk({
       listed: [
         { name: "b-1", createdAt: 10, currentSnapshotId: "snap_a" },
         { name: "b-2", createdAt: 20 },
+        { name: "other-1", createdAt: 30, currentSnapshotId: "snap_b" },
       ],
     });
     const service = createVercelService(sdk, {
@@ -197,7 +210,13 @@ describe("the Vercel Sandbox adapter", () => {
     expect(calls[0]).toEqual({
       method: "list",
       args: [
-        { token: "t", teamId: "team", projectId: "prj", namePrefix: "b-" },
+        {
+          token: "t",
+          teamId: "team",
+          projectId: "prj",
+          namePrefix: "b-",
+          sortBy: "name",
+        },
       ],
     });
     await service.deleteBuilder("b-1");
@@ -207,5 +226,19 @@ describe("the Vercel Sandbox adapter", () => {
     expect(calls.find((call) => call.method === "delete")?.args[0]).toEqual({
       deleteOrphanSnapshots: true,
     });
+  });
+
+  // #365-T02
+  it("is held to the platform's rule by its stand-in: a name prefix without the name sort is refused", async () => {
+    const { sdk } = stubSdk();
+    await expect(sdk.Sandbox.list({ namePrefix: "b-" })).rejects.toThrow(
+      "`namePrefix` is only valid when `sortBy` is `name`",
+    );
+    await expect(
+      sdk.Sandbox.list({ namePrefix: "b-", sortBy: "createdAt" }),
+    ).rejects.toThrow("400");
+    await expect(
+      sdk.Sandbox.list({ namePrefix: "b-", sortBy: "name" }),
+    ).resolves.toBeDefined();
   });
 });
