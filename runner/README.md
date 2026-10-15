@@ -140,7 +140,7 @@ legacy loop (`code-reviewer-runner`, claiming with `RUNNER_TOKEN`) is unchanged 
 - **Settings** are the variables of the job process that the loop reads too (`RUNNER_JOB_TIMEOUT_SECONDS`,
   `PR_AGENT_COMMAND` for test stacks, `RUNNER_DIFF_JOB_USER` and the Dynamic slot's variables), and the same
   startup self-check decides whether `opencode` is advertised. There is no `RUNNER_TOKEN` and no `RUNNER_API_URL`.
-- **An app without the Worker API is refused** before anything is fetched or started: a `GET /api/runners/v1/version`
+- **An app without the Worker API is refused** before anything is fetched or started: a `GET /api/runners/v1/version?jobId=<its job>` (the App accepts the job credential there only with the job id, #322)
   that lists no `worker_api`, or a Worker API route that answers with something other than the contract's error body
   (an app from before the hosted deployment), ends with `worker_app_unsupported`. The Worker holds the job credential,
   not the dispatcher credential, so a `401` on `/version` is not a refusal; the details call decides.

@@ -51,7 +51,7 @@ class FakeWorkerApi:
         self.completions: list[dict[str, Any]] = []
         self.check_error: WorkerSetupError | None = None
 
-    async def check_app(self) -> None:
+    async def check_app(self, job_id: str) -> None:
         self.checked += 1
         if self.check_error is not None:
             raise self.check_error

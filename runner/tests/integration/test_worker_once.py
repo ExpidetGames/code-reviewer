@@ -188,9 +188,10 @@ def test_a_dynamic_job_writes_its_summary_only_after_the_lease_check_over_the_wo
 
     assert code is WorkerExit.OK
     assert (tmp_path / "summary").read_text() == "the summary"
-    # The check was a heartbeat of the Worker API, and it came before the result.
+    # The check was a heartbeat of the Worker API, and it came before the result. The version call
+    # (#324) is the Worker's check of the app, before it fetches anything.
     sequence = [route for route, _ in routes(app, job)]
-    assert sequence == ["job", "heartbeat", "result"]
+    assert sequence == ["version", "job", "heartbeat", "result"]
     (delivered,) = app.results(job)
     assert delivered["ok"] is True
 
@@ -446,6 +447,39 @@ class OldApp:
         self._server.shutdown()
         self._server.server_close()
         self._thread.join(10)
+
+
+# #324-T11: the Worker asks `/version` with its job id and its credential, and the App answers.
+def test_the_worker_checks_the_app_version_with_its_job_id_and_its_credential(
+    app: FakeAppProcess, tmp_path: Path
+) -> None:
+    job = app.enqueue("diff")
+    credential = app.claim(job)
+
+    process = start_cli(app.url, job, credential, tmp_path, "ok")
+    _, stderr = process.communicate(timeout=60)
+
+    assert process.returncode == 0, stderr.decode()
+    assert ("version", 200) in routes(app, job)
+
+
+# #324-T11: an older App answers 401 on `/version` to a Worker credential; the Worker goes on and
+# the details call (a Worker API call) decides.
+def test_an_app_that_refuses_the_worker_credential_on_version_does_not_stop_the_worker(
+    app: FakeAppProcess, tmp_path: Path
+) -> None:
+    job = app.enqueue("diff")
+    credential = app.claim(job)
+    app.script("version", [{"status": 401}])
+
+    process = start_cli(app.url, job, credential, tmp_path, "ok")
+    _, stderr = process.communicate(timeout=60)
+
+    assert process.returncode == 0, stderr.decode()
+    assert ("version", 401) in routes(app, job)
+    assert ("job", 200) in routes(app, job)
+    (delivered,) = app.results(job)
+    assert delivered["ok"] is True
 
 
 # #323-T09
