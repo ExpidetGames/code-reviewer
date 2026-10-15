@@ -75,9 +75,9 @@ The App, the Dispatcher (TypeScript) and the Worker (Python) agree on these file
   closed objects and the same vectors, with a verifier written independently of the TypeScript one. `runner/tests/contract/test_worker_api_client_contract.py` runs the
   Worker's API client (#323) against a recording server that answers with the examples: the routes, the credential only in
   `Authorization`, request bodies valid against the schemas, an additive field of an answer ignored.
-- **Dispatcher** (`dispatcher/`, #327): validates the same examples with its own tooling against the types in
-  `dispatcher/src/contracts/` and runs the vectors against its receiver. Until that project exists nothing
-  there is checked, only that the generated copy is current.
+- **Dispatcher** (`dispatcher/`, #327; `dispatcher/src/contracts.test.ts`, `src/triggers/signature.test.ts`):
+  validates the same examples with Ajv, checks that its closed webhook body and its reading of the split claim
+  answer agree with the schemas, and runs every signing vector against its own receiver and the reference verifier.
 - **The self-hosted compose files** are compared with `worker-container.v1.json` (the spec equals
   `compose.dynamic.yml`: test in `hosted-contracts.integration.test.ts`; the renderer and the comparison with
   the PaaS compose file come with #325).

@@ -1,0 +1,227 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// The Dispatcher's calls to the App: the Dispatcher API (claim, release, version under /api/runners/v1,
+// with the dispatcher credential) and the heartbeat of the Worker API (with the per-job credential).
+// Every answer is read against the shapes of contracts/runner-api.v1.json; an answer of another shape,
+// such as a previous release's legacy claim with a job input and a git token, is refused unread.
+import { z } from "zod";
+import type { ReviewKind } from "./types.ts";
+
+/** The features of the App the split needs (`VersionResponse.features`). */
+export const REQUIRED_APP_FEATURES = [
+  "worker_api",
+  "claim_by_job_id",
+  "pool_cap",
+  "release",
+] as const;
+
+export type ClaimedJob = {
+  id: string;
+  credential: string;
+  reviewKind: ReviewKind;
+  heartbeatIntervalSeconds: number;
+};
+
+export type ClaimResult =
+  | { kind: "claimed"; job: ClaimedJob }
+  | { kind: "none" }
+  | { kind: "busy"; retryAfterSeconds?: number }
+  | { kind: "unavailable"; code: AppFailure; retryAfterSeconds?: number };
+
+/** Stable codes for why a call to the App did not work; they are logged, never the App's own text. */
+export const APP_FAILURES = [
+  "app_unreachable",
+  "app_error",
+  "app_rejected",
+  "app_too_old",
+  "app_answer_invalid",
+] as const;
+export type AppFailure = (typeof APP_FAILURES)[number];
+
+export type HeartbeatResult = "ok" | "lease_lost" | "failed";
+export type ReleaseResult = "released" | "not_holder" | "failed";
+
+const splitClaim = z.object({
+  version: z.literal(1),
+  job: z.object({
+    id: z.string().regex(/^[0-9a-fA-F-]{36}$/),
+    credential: z.string().regex(/^crj_[A-Za-z0-9_-]{43}$/),
+    reviewKind: z.enum(["diff", "dynamic"]),
+    leaseExpiresAt: z.string(),
+    heartbeatIntervalSeconds: z.number().int().min(1).max(3600),
+  }),
+});
+
+/** The claim answer of the split, or null for anything else (the legacy answer included). */
+export function parseSplitClaim(body: unknown): ClaimedJob | null {
+  const parsed = splitClaim.safeParse(body);
+  if (!parsed.success) return null;
+  const { id, credential, reviewKind, heartbeatIntervalSeconds } =
+    parsed.data.job;
+  return { id, credential, reviewKind, heartbeatIntervalSeconds };
+}
+
+const versionAnswer = z.object({
+  version: z.literal(1),
+  features: z.array(z.string()),
+});
+
+export type AppClientOptions = {
+  appUrl: string;
+  token: string;
+  poolId: string;
+  fetch: typeof fetch;
+  /** Per request; the claim happens while the sender of the wake-up call waits, so it is short. */
+  requestTimeoutMs?: number;
+};
+
+export type ClaimRequestBody = {
+  engines: readonly string[];
+  jobId?: string;
+  maxRunning: number;
+};
+
+const DEFAULT_TIMEOUT_MS = 5000;
+
+function retryAfterOf(response: Response): number | undefined {
+  const header = response.headers.get("retry-after");
+  if (header === null || !/^\d{1,6}$/.test(header)) return undefined;
+  return Number(header);
+}
+
+export function createAppClient(options: AppClientOptions) {
+  const timeout = options.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const base = options.appUrl.replace(/\/+$/, "");
+
+  async function send(
+    path: string,
+    init: {
+      method: "GET" | "POST";
+      bearer: string;
+      body?: unknown;
+      runnerId?: boolean;
+    },
+  ): Promise<Response | null> {
+    try {
+      return await options.fetch(`${base}${path}`, {
+        method: init.method,
+        headers: {
+          authorization: `Bearer ${init.bearer}`,
+          accept: "application/json",
+          ...(init.body === undefined
+            ? {}
+            : { "content-type": "application/json" }),
+          ...(init.runnerId === true ? { "x-runner-id": options.poolId } : {}),
+        },
+        body: init.body === undefined ? undefined : JSON.stringify(init.body),
+        redirect: "error",
+        signal: AbortSignal.timeout(timeout),
+      });
+    } catch {
+      return null;
+    }
+  }
+
+  type Failure = Extract<ClaimResult, { kind: "busy" | "unavailable" }>;
+  function failure(response: Response | null): Failure {
+    if (response === null)
+      return { kind: "unavailable", code: "app_unreachable" };
+    const retryAfterSeconds = retryAfterOf(response);
+    if (response.status === 429) return { kind: "busy", retryAfterSeconds };
+    if (response.status >= 500)
+      return { kind: "unavailable", code: "app_error", retryAfterSeconds };
+    return { kind: "unavailable", code: "app_rejected" };
+  }
+
+  return {
+    /** Does the App have what the split needs? An App without the version route is a previous release. */
+    async checkVersion(): Promise<
+      { ok: true } | { ok: false; code: AppFailure; retryAfterSeconds?: number }
+    > {
+      const response = await send("/api/runners/v1/version", {
+        method: "GET",
+        bearer: options.token,
+      });
+      if (response === null) return { ok: false, code: "app_unreachable" };
+      if (response.status === 404) return { ok: false, code: "app_too_old" };
+      if (response.status !== 200) {
+        const failed = failure(response);
+        return {
+          ok: false,
+          code: failed.kind === "unavailable" ? failed.code : "app_error",
+          retryAfterSeconds: failed.retryAfterSeconds,
+        };
+      }
+      const parsed = versionAnswer.safeParse(
+        await response.json().catch(() => null),
+      );
+      if (!parsed.success) return { ok: false, code: "app_answer_invalid" };
+      const missing = REQUIRED_APP_FEATURES.filter(
+        (feature) => !parsed.data.features.includes(feature),
+      );
+      return missing.length === 0
+        ? { ok: true }
+        : { ok: false, code: "app_too_old" };
+    },
+
+    async claim(body: ClaimRequestBody): Promise<ClaimResult> {
+      const response = await send("/api/runners/v1/claim", {
+        method: "POST",
+        bearer: options.token,
+        runnerId: true,
+        body: { ...body, features: ["worker_credential"] },
+      });
+      if (
+        response === null ||
+        (response.status !== 200 && response.status !== 204)
+      )
+        return failure(response);
+      if (response.status === 204) return { kind: "none" };
+      const job = parseSplitClaim(await response.json().catch(() => null));
+      // An answer that is not the split one is never read further: it may hold a job input and a git token.
+      if (job === null)
+        return { kind: "unavailable", code: "app_answer_invalid" };
+      return { kind: "claimed", job };
+    },
+
+    async heartbeat(
+      jobId: string,
+      credential: string,
+    ): Promise<HeartbeatResult> {
+      const response = await send(
+        `/api/workers/v1/jobs/${encodeURIComponent(jobId)}/heartbeat`,
+        {
+          method: "POST",
+          bearer: credential,
+          body: {},
+        },
+      );
+      if (response === null) return "failed";
+      if (response.status === 200) return "ok";
+      // The credential is no longer the job's, the lease is gone or the App ended the job: nothing to keep alive.
+      if ([401, 404, 409].includes(response.status)) return "lease_lost";
+      return "failed";
+    },
+
+    async release(
+      jobId: string,
+      credential: string,
+      retryAfterSeconds: number,
+    ): Promise<ReleaseResult> {
+      const response = await send(
+        `/api/runners/v1/jobs/${encodeURIComponent(jobId)}/release`,
+        {
+          method: "POST",
+          bearer: options.token,
+          body: { credential, reason: "launch_failed", retryAfterSeconds },
+        },
+      );
+      if (response === null) return "failed";
+      if (response.status === 200) return "released";
+      if ([401, 404, 409].includes(response.status)) return "not_holder";
+      return "failed";
+    },
+  };
+}
+
+export type AppClient = ReturnType<typeof createAppClient>;

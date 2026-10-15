@@ -4,7 +4,7 @@
 // way whichever app instance a request reaches (sign in, verification, password reset, invitations;
 // docs/decisions/0001-editions-setup-and-accounts.md, section 2.10). One row per counter `key`
 // (chosen by the caller, for example `sign-in:email:<hash>`); the counter starts again when its
-// window is over. The setup code has its own counters in memory, by design (it is per process).
+// window is over. The setup code has its own counters: in memory on a server (it is per process), in `setup_codes` in a serverless deployment.
 import type { Migration } from "kysely/migration";
 
 export const migration: Migration = {

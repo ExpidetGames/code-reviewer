@@ -31,7 +31,9 @@ async function snapshot(
   const tables = await db.introspection.getTables();
   const result: Record<string, unknown[]> = {};
   for (const table of tables) {
-    if (table.name === "usage_records") continue;
+    // Tables of the migrations after this one are not "existing" tables.
+    if (table.name === "usage_records" || table.name === "setup_codes")
+      continue;
     const { rows } =
       await sql<unknown>`select * from ${sql.table(table.name)}`.execute(db);
     result[table.name] = rows;

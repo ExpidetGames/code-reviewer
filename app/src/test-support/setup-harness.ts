@@ -10,7 +10,11 @@ import { createAccessProxy } from "../auth/access-proxy.ts";
 import { createAuth } from "../auth/auth.ts";
 import { loadAuthConfig } from "../auth/config.ts";
 import { createWorkspacesRepository } from "../db/repositories/workspaces-repository.ts";
-import { createSetupCodeStore } from "../setup/code-store.ts";
+import {
+  createSetupCodeStore,
+  type SetupCodeGuard,
+} from "../setup/code-store.ts";
+import { createDatabaseSetupCodeStore } from "../setup/database-code-store.ts";
 import { completeSetup } from "../setup/complete.ts";
 import { createCredentialCheck } from "../setup/credential-check.ts";
 import { createSetupGate } from "../setup/gate-proxy.ts";
@@ -40,11 +44,21 @@ export const WIZARD_BODY = {
 export type SetupHarnessOptions = {
   /** Cookies get the `Secure` attribute, as over https. */
   secureCookies?: boolean;
+  /**
+   * `database`: the code lives in the database, as in a serverless deployment (#321). Every instance the
+   * harness makes (`restart()`) shares the database and one clock, and nothing else. Default `memory`.
+   */
+  codeStore?: "memory" | "database";
+  /** The clock the instances of a `database` harness share; made by `createSetupHarness`. */
+  clock?: { time: number };
 };
 
 export async function createSetupHarness(options: SetupHarnessOptions = {}) {
   const { db } = await createTestDatabase();
-  return assemble(db, options);
+  return assemble(db, {
+    ...options,
+    clock: { time: Date.parse("2026-10-11T08:00:00.000Z") },
+  });
 }
 
 export type SetupHarness = Awaited<ReturnType<typeof createSetupHarness>>;
@@ -75,13 +89,28 @@ function assemble(
     config,
     verificationRequired: () => Promise.resolve(gateState.mail),
   });
-  let time = Date.parse("2026-10-11T08:00:00.000Z");
-  const store = createSetupCodeStore({
-    now: () => time,
+  const logs: string[] = [];
+  // A memory harness keeps the clock of its process; the instances of a database harness share one.
+  const shared = options.codeStore === "database";
+  const clock = shared
+    ? (options.clock ?? { time: Date.parse("2026-10-11T08:00:00.000Z") })
+    : { time: Date.parse("2026-10-11T08:00:00.000Z") };
+  const databaseStore =
+    options.codeStore === "database"
+      ? createDatabaseSetupCodeStore({
+          db,
+          appSecret: SETUP_TEST_SECRET,
+          now: () => clock.time,
+          randomCode: () => firstCode,
+          log: (line) => logs.push(line),
+        })
+      : null;
+  const memoryStore = createSetupCodeStore({
+    now: () => clock.time,
     randomCode: () => firstCode,
   });
+  const store: SetupCodeGuard = databaseStore ?? memoryStore;
   const readState = createSetupStateReader(() => readSetupState(db));
-  const logs: string[] = [];
   let afterCompletedCalls = 0;
 
   const handlers = createSetupRouteHandlers({
@@ -89,7 +118,7 @@ function assemble(
     secureCookies: config.secureCookies,
     store,
     readState,
-    now: () => time,
+    now: () => clock.time,
     log: (line) => logs.push(line),
     afterCompleted: () => {
       afterCompletedCalls += 1;
@@ -225,15 +254,19 @@ function assemble(
       const printed: string[] = [];
       const result = await startSetupOnStart({
         db,
-        store,
+        store: memoryStore,
         log: (line) => printed.push(line),
       });
       return { ...result, printed };
     },
     /** Moves the clock of this process. */
     advance(ms: number) {
-      time += ms;
+      clock.time += ms;
     },
+    /** The code store of this instance, if the code lives in the database. */
+    databaseStore,
+    /** The time this instance sees. */
+    now: () => clock.time,
     /** The same database, a new process: another code store and another state cache. */
     restart(code: string = SETUP_TEST_CODE) {
       return assemble(db, options, code);
