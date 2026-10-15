@@ -21,7 +21,7 @@ App ──signed POST /dispatch──▶ Trigger ──▶ core ──claim─�
 | Poll-Trigger, Docker-Launcher, Sandbox-Launcher                                   | `src/triggers/poll.ts`, `src/launchers/` | #334, #329                                                                     |
 
 Two entry files keep `node:child_process` (the Docker-Launcher's way of starting a process) out of the serverless
-bundle; `src/build/serverless-bundle.test.ts` follows the import graph of `src/index.ts` to prove it. Until a real
+bundle; `src/bundle/serverless-bundle.test.ts` follows the import graph of `src/index.ts` to prove it. Until a real
 Launcher is wired in, both entries use `noLauncher`: it advertises no engine, so every wake-up call is answered
 `200 ignored` with the reason `not_capable` and nothing is claimed.
 
