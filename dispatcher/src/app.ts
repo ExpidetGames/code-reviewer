@@ -13,6 +13,7 @@ import type {
   Launcher,
   Logger,
 } from "./core/types.ts";
+import { mountProbeRoute } from "./probe/route.ts";
 import type { Trigger } from "./triggers/types.ts";
 
 export type AppOptions = {
@@ -42,6 +43,12 @@ export function createDispatcher(options: AppOptions): Dispatcher {
   const app = new Hono();
   app.get("/health", (c) => c.json({ status: "ok" }));
   options.trigger.mount(app, { core, background: options.background, logger });
+  mountProbeRoute(app, {
+    token: options.settings.token,
+    engines: options.settings.engines,
+    launcher: options.launcher,
+    logger,
+  });
   app.onError((_error, c) => {
     // The error is not logged with its text: it may carry what a caller sent.
     logger.error("unhandled_error");

@@ -88,7 +88,7 @@ export const SANDBOX_KIND_DEFAULTS: Readonly<
 };
 
 /** What every container is given, the same as the self-hosted compose service (names of the spec's allow-list). */
-const CONTAINER_ENVIRONMENT = {
+export const CONTAINER_ENVIRONMENT = {
   HOME: "/home/runner",
   RUNNER_DIFF_JOB_USER: "10001:10001",
 } as const;
@@ -114,6 +114,12 @@ export type SandboxLauncherOptions = {
   capabilities?: (signal: AbortSignal) => Promise<readonly Engine[]>;
   /** The unique part of a VM name; random unless a test brings its own. */
   newSuffix?: () => string;
+  /**
+   * The operator's Dynamic configuration, given to the container of a Dynamic job only (#331):
+   * `RUNNER_DYNAMIC_CAPABILITIES` and `RUNNER_DYNAMIC_MAX_COST_USD`, as the self-hosted `runner-dynamic` service has
+   * them. Non-secret; names of the container spec's allow-list.
+   */
+  dynamicEnvironment?: Readonly<Record<string, string>>;
 };
 
 export type SandboxLauncher = Launcher & {
@@ -121,7 +127,7 @@ export type SandboxLauncher = Launcher & {
   idle(): Promise<void>;
 };
 
-type Plan = {
+export type Plan = {
   vcpus: number;
   overrides: WorkerContainerOverrides;
 };
@@ -177,7 +183,12 @@ export function validateKindConfig(
   kind: ReviewKind,
   config: LaunchConfig,
 ): void {
-  planOf({
+  planForKind(kind, config);
+}
+
+/** The VM size and container memory a Worker kind gets (what a launch of that kind uses; the canary of #331 too). */
+export function planForKind(kind: ReviewKind, config: LaunchConfig): Plan {
+  return planOf({
     appUrl: "https://app.invalid",
     jobId: "validation",
     credential: "validation",
@@ -199,7 +210,7 @@ function randomSuffix(): string {
 }
 
 /** The launch error for a failed platform call, and whether the VM may exist anyway (the call may have got through). */
-const CREATE_FAILURES: Readonly<
+export const CREATE_FAILURES: Readonly<
   Record<
     SandboxFailureKind,
     { code: string; retryable: boolean; mayExist: boolean }
@@ -389,7 +400,10 @@ export function createSandboxLauncher(
           spec: WORKER_CONTAINER_SPEC,
           // By id: exactly the image that was just verified, and a reference that cannot be pulled.
           image: options.imageDigest,
-          environment: CONTAINER_ENVIRONMENT,
+          environment:
+            spec.kind === "dynamic"
+              ? { ...CONTAINER_ENVIRONMENT, ...options.dynamicEnvironment }
+              : CONTAINER_ENVIRONMENT,
           additions: SANDBOX_LAUNCHER_ADDITIONS,
         });
         const running = containers.launch(
