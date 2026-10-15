@@ -87,4 +87,30 @@ describe("a seccomp profile derived from the default one", () => {
       SeccompProfileError,
     );
   });
+
+  // #325-T06
+  it.each(["SCMP_ACT_ALLOW", "SCMP_ACT_LOG", "SCMP_ACT_TRACE", undefined])(
+    "refuses a profile whose default action is %s: it would let the denied family through",
+    (defaultAction) => {
+      const profile: Record<string, unknown> = defaultProfile();
+      if (defaultAction === undefined) delete profile.defaultAction;
+      else profile.defaultAction = defaultAction;
+
+      expect(() => denySocketFamilies(profile, [AF_VSOCK])).toThrow(
+        SeccompProfileError,
+      );
+    },
+  );
+
+  // #325-T06
+  it.each([
+    "SCMP_ACT_ERRNO",
+    "SCMP_ACT_KILL",
+    "SCMP_ACT_KILL_PROCESS",
+    "SCMP_ACT_TRAP",
+  ])("accepts a profile whose default action is %s", (defaultAction) => {
+    expect(() =>
+      denySocketFamilies({ ...defaultProfile(), defaultAction }, [AF_VSOCK]),
+    ).not.toThrow();
+  });
 });

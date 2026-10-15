@@ -633,4 +633,23 @@ describe("the container launcher", () => {
       ),
     ).toBe("spec_forbidden_key");
   });
+
+  // #325-T03
+  it("refuses at creation a spec that does not allow the timeout variable the launcher sets", () => {
+    const narrow = {
+      ...spec(),
+      allowedEnvironment: ["HOME"],
+    };
+
+    expect(
+      codeOf(
+        () =>
+          new ContainerLauncher({
+            host: recordingHost([]),
+            spec: narrow,
+            image: IMAGE,
+          }),
+      ),
+    ).toBe("environment_not_allowed");
+  });
 });

@@ -33,6 +33,16 @@ interface Profile {
   [key: string]: unknown;
 }
 
+// The default actions that refuse a call no rule names. The derivation relies on that fall-through: with
+// an allowing default the family stays open, so such a profile is refused instead of passed through.
+const DENYING_DEFAULT_ACTIONS: ReadonlySet<string> = new Set([
+  "SCMP_ACT_ERRNO",
+  "SCMP_ACT_KILL",
+  "SCMP_ACT_KILL_PROCESS",
+  "SCMP_ACT_KILL_THREAD",
+  "SCMP_ACT_TRAP",
+]);
+
 function isSyscallRule(value: unknown): value is SyscallRule {
   if (value === null || typeof value !== "object") return false;
   const { names, action } = value as Record<string, unknown>;
@@ -51,8 +61,9 @@ function isProfile(value: unknown): value is Profile {
 
 /**
  * A copy of `defaultProfile` in which `socket` is refused for each of `families` and allowed for
- * all others. Throws `SeccompProfileError` for a profile that does not allow `socket` without
- * conditions (the shape of Docker's default), so an unknown profile never passes as derived.
+ * all others. Throws `SeccompProfileError` for a profile that does not deny by default or does not
+ * allow `socket` without conditions (the shape of Docker's default), so an unknown profile never
+ * passes as derived.
  */
 export function denySocketFamilies(
   defaultProfile: unknown,
@@ -64,6 +75,9 @@ export function denySocketFamilies(
     throw new SeccompProfileError("a family cannot be negative");
   if (!isProfile(defaultProfile))
     throw new SeccompProfileError("not a seccomp profile");
+
+  if (!DENYING_DEFAULT_ACTIONS.has(String(defaultProfile.defaultAction)))
+    throw new SeccompProfileError("the profile does not deny by default");
 
   const copy = structuredClone(defaultProfile);
   const derived: SyscallRule[] = [];

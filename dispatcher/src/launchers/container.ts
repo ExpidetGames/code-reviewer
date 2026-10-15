@@ -499,7 +499,15 @@ export class ContainerLauncher<H extends ContainerHost = ContainerHost> {
     this.host = config.host;
     this.#config = config;
     // A spec, image or option that is wrong fails here, not on the first job.
-    this.render("configuration-check", undefined, config.environment);
+    this.render("configuration-check", undefined, this.environmentFor(1));
+  }
+
+  /** The launcher's environment plus the job's timeout: what every container is given. */
+  private environmentFor(timeoutSeconds: number): Record<string, string> {
+    return {
+      ...this.#config.environment,
+      RUNNER_JOB_TIMEOUT_SECONDS: String(timeoutSeconds),
+    };
   }
 
   private render(
@@ -533,10 +541,11 @@ export class ContainerLauncher<H extends ContainerHost = ContainerHost> {
       refuse("option_invalid", "the timeout is not valid");
 
     // The Worker's own hard timeout is the job's; the launcher's environment names it first.
-    const args = this.render(spec.jobId, spec.config.container, {
-      ...this.#config.environment,
-      RUNNER_JOB_TIMEOUT_SECONDS: String(spec.timeoutSeconds),
-    });
+    const args = this.render(
+      spec.jobId,
+      spec.config.container,
+      this.environmentFor(spec.timeoutSeconds),
+    );
     if (args.some((argument) => argument.includes(spec.credential)))
       refuse(
         "credential_in_arguments",
