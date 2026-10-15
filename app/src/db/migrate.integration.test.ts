@@ -88,6 +88,7 @@ describe("the migrations of both epics", () => {
       "20261014090000_fix_dynamic_default_model",
       "20261014120000_create_workspace_entitlements",
       "20261014150000_create_usage_records",
+      "20261015100000_create_setup_codes",
     ]);
   });
 
@@ -146,6 +147,7 @@ describe("starting the database", () => {
       "repositories",
       "secrets",
       "sessions",
+      "setup_codes",
       "signed_states",
       "unclaimed_installations",
       "usage_records",

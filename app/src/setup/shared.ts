@@ -10,7 +10,13 @@ import { loadAuthConfig } from "../auth/config.ts";
 import { getAuth } from "../auth/auth.ts";
 import { getDatabase } from "../db/startup.ts";
 import { checkSetupSession, type SetupSessionCheck } from "./setup-session.ts";
-import { createSetupCodeStore, type SetupCodeStore } from "./code-store.ts";
+import {
+  createSetupCodeStore,
+  type SetupCodeGuard,
+  type SetupCodeStore,
+} from "./code-store.ts";
+import { selectSetupCodeGuard } from "./code-guard.ts";
+import { createDatabaseSetupCodeStore } from "./database-code-store.ts";
 import { completeSetup } from "./complete.ts";
 import { createCredentialCheck } from "./credential-check.ts";
 import { createSetupRouteHandlers, type SetupRouteHandlers } from "./http.ts";
@@ -21,7 +27,11 @@ import {
 } from "./state.ts";
 
 const globalKey = Symbol.for("code-reviewer.setup");
-type SetupGlobals = { store: SetupCodeStore; readState?: SetupStateReader };
+type SetupGlobals = {
+  store: SetupCodeStore;
+  databaseStore?: SetupCodeGuard;
+  readState?: SetupStateReader;
+};
 type GlobalWithSetup = typeof globalThis & { [globalKey]?: SetupGlobals };
 
 function globals(): SetupGlobals {
@@ -30,9 +40,28 @@ function globals(): SetupGlobals {
   return holder[globalKey];
 }
 
-/** The setup code store of this process. The code lives nowhere else. */
+/** The setup code store of this process (a server only). On a server the code lives nowhere else. */
 export function getSetupCodeStore(): SetupCodeStore {
   return globals().store;
+}
+
+/**
+ * The setup code the routes check: the one in the memory of this process on a server, the one in the
+ * database in a serverless deployment (`pnpm setup-code` made it; #321).
+ */
+export function getSetupCodeGuard(): SetupCodeGuard {
+  const state = globals();
+  return selectSetupCodeGuard({
+    env: process.env,
+    memory: () => state.store,
+    database: () => {
+      state.databaseStore ??= createDatabaseSetupCodeStore({
+        db: getDatabase(),
+        appSecret: loadAuthConfig(process.env).secret,
+      });
+      return state.databaseStore;
+    },
+  });
 }
 
 /** Whether the instance is set up, read from the database until it is. */
@@ -50,7 +79,7 @@ export function getSetupRouteHandlers(): SetupRouteHandlers {
   return createSetupRouteHandlers({
     appSecret: config.secret,
     secureCookies: config.secureCookies,
-    store: getSetupCodeStore(),
+    store: getSetupCodeGuard(),
     readState: getSetupStateReader(),
     afterCompleted: runSyncAfterSetup,
     async complete(input) {
@@ -82,14 +111,14 @@ export function getSetupRouteHandlers(): SetupRouteHandlers {
   });
 }
 
-/** Whether a setup session cookie value is valid now, for the current code of this process. */
-export function checkCurrentSetupSession(
+/** Whether a setup session cookie value is valid now, for the current code (of this process, or of the database). */
+export async function checkCurrentSetupSession(
   cookieValue: string | undefined,
-): SetupSessionCheck {
+): Promise<SetupSessionCheck> {
   return checkSetupSession(
     loadAuthConfig(process.env).secret,
     cookieValue,
-    getSetupCodeStore().currentIssueId(),
+    await getSetupCodeGuard().currentIssueId(),
     Date.now(),
   );
 }

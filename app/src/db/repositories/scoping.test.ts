@@ -36,7 +36,7 @@ const SCOPED = [
 /**
  * Not scoped, each for a reason that has to hold:
  * - the tables are not customer data (app_meta, allowed_login_pins, webhook_deliveries, workspaces,
- *   instance_settings, rate_limits, secrets);
+ *   instance_settings, rate_limits, secrets, setup_codes);
  * - integration-directory: webhooks and the synchronization find a connection before the workspace is
  *   known; it only reads and the answer names the workspace;
  * - invitation-directory: a person who opens an invitation link holds only the token, and the list of the
@@ -71,6 +71,7 @@ const INSTANCE_LEVEL = [
   "rate-limits-repository.ts",
   "runner-jobs-repository.ts",
   "secrets-repository.ts",
+  "setup-codes-repository.ts",
   "unclaimed-installations-repository.ts",
   "usage-records-sweep.ts",
   "webhook-deliveries-repository.ts",
