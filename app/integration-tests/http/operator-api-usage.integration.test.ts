@@ -128,6 +128,39 @@ describe("the feed of usage records", () => {
     });
   });
 
+  // #273-T06
+  it("serves the reason of a run that ended with no result, and null for a run that reported", async () => {
+    const h = await startOperatorApiHarness();
+    await h.usage.seed({
+      workspaceId: h.workspaceId,
+      id: "no-result",
+      settledAt: SETTLED_AT(1),
+      settledReason: "no_result",
+    });
+    await h.usage.seed({
+      workspaceId: h.workspaceId,
+      id: "failed-after-calls",
+      costMicroUsd: 3500,
+      promptTokens: 300,
+      completionTokens: 30,
+      settledAt: SETTLED_AT(2),
+    });
+
+    const items = await itemsOf(await h.call("GET", FEED));
+
+    expect(items[0]).toMatchObject({
+      id: "no-result",
+      costMicroUsd: null,
+      promptTokens: null,
+      reason: "no_result",
+    });
+    expect(items[1]).toMatchObject({
+      id: "failed-after-calls",
+      costMicroUsd: 3500,
+      reason: null,
+    });
+  });
+
   // #278-T02
   it("does not serve a record settled 10 seconds ago, and serves it once the lag has passed", async () => {
     const h = await startOperatorApiHarness();
