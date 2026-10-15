@@ -20,6 +20,8 @@ in `job_dispatches` and no HTTP: the app behaves as it did before this folder ex
 | `RUNNER_WEBHOOK_SECRET`, `RUNNER_WEBHOOK_KEY_ID`                   | The signing key: at least 32 characters, no white space; the id (`a-z0-9_-`, at most 32, default `k1`) names it for the receiver |
 | `RUNNER_WEBHOOK_SECRET_PREVIOUS`, `RUNNER_WEBHOOK_KEY_ID_PREVIOUS` | The key being replaced, both or neither. The app signs with the current key only; see "Rotating the key"                         |
 | `RUNNER_WEBHOOK_BYPASS_TOKEN`                                      | Optional. Sent as `x-vercel-protection-bypass` when the Dispatcher project sits behind the platform's deployment protection      |
+| `RUNNER_DISPATCH_GIVE_UP_SECONDS`                                  | The sweep's give-up (#328, "The cron sweep"): default 3600 in webhook mode, off in poll mode; `0` is off                         |
+| `RUNNER_DISPATCH_MAX_RUNNING`                                      | Optional. The pool cap the sweep keeps to when it sends (#328), 1 to 1000                                                        |
 
 The signing secret is a credential of its own and must differ from `RUNNER_TOKEN`, `APP_SECRET`,
 `BETTER_AUTH_SECRET`, `OPERATOR_API_TOKEN`, `CRON_SECRET`, `GITHUB_APP_WEBHOOK_SECRET`,
@@ -68,7 +70,7 @@ written, the job is still queued, and `sendDue` finds queued, due jobs **without
 | ------------------------------------------------------------------------------ | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `202`                                                                          | `acked`, `acked_at`     | Looked at again after the **acknowledgement timeout** (2 minutes); sent again only if the job is still queued then (the claim failed, or the Worker launch was given back) |
 | `200 ignored`, `not_claimable` (or any other reason of the right form)         | `pending`               | Again after the acknowledgement timeout (not due, running, pool cap reached, ...)                                                                                          |
-| `200 ignored`, `not_capable`                                                   | `stopped`               | Never again: the Dispatcher cannot run that review kind. Only a person or a later release revives it                                                                       |
+| `200 ignored`, `not_capable`                                                   | `stopped`               | Not by the send itself: the Dispatcher cannot run that review kind. The sweep asks again after 10 minutes ("The cron sweep", step 3)                                       |
 | `429`, `503`                                                                   | `pending`, failures + 1 | The longer of the schedule and `Retry-After` (seconds or HTTP date, at most 1 hour). Only the status and `Retry-After` are read; the body is dropped                       |
 | other `5xx`, timeout, no connection                                            | `pending`, failures + 1 | 10 s, 30 s, 2 min, 5 min, then 15 min                                                                                                                                      |
 | any other status (`4xx`, a redirect, an unexpected `2xx`, an unreadable `200`) | `pending`, failures + 1 | **30 minutes**, and an error log line `DISPATCH_REJECTED` (a wrong URL or a wrong secret looks like this)                                                                  |
@@ -76,12 +78,70 @@ written, the job is still queued, and `sendDue` finds queued, due jobs **without
 `last_status` and `last_code` (`DISPATCH_RESULT_CODES`) keep the last answer for support. The failures count resets
 on any answer that is not a failure.
 
-## The hook for the sweep (#328)
+## The cron sweep (#328)
 
-`getDispatchService()?.sendDue(limit)` is what the cron sweep calls (#328): every queued job that is due and
-has no row or whose row is due and not stopped is sent (at most `limit`, five at a time). It is safe to call from
-several instances or runs at once. The sweep decides the cap, the give-up (`dispatch_unavailable`) and when to call it;
-this folder only sends. `job_dispatches` rows of finished jobs are not removed yet (the sweep's cleanup can).
+A serverless deployment has no process that polls and none that lives long enough to hold a timer, so **the clock
+is the platform's cron**: `GET /api/internal/dispatch-sweep`, once a minute (`app/vercel.json`), with
+`Authorization: Bearer <CRON_SECRET>` like the daily repository sync. The route exists only in serverless mode
+(`APP_RUNTIME=serverless`, a `404` anywhere else, so a Coolify installation is untouched), a missing or wrong
+secret is `401` with no side effect, and nothing below `/api/internal` is open except the two exact paths of the
+two crons (`src/auth/access.ts`).
+
+| File                             | Role                                                                                                                                                               |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `app/src/cron/dispatch-sweep.ts` | The route's handler: the secret, the try-lock, the answer (counts only)                                                                                            |
+| `app/src/db/try-lock.ts`         | `tryWithLock`: a Postgres transaction advisory try-lock (`pg_try_advisory_xact_lock(328, 1)`) on a dedicated connection, not the pool; an in-process set on SQLite |
+| `sweep.ts`                       | `createDispatchSweep(...).run()`: the steps of one run                                                                                                             |
+| `sweep-settings.ts`              | The two settings below                                                                                                                                             |
+| `sweep-shared.ts`                | The wiring of the running server                                                                                                                                   |
+
+**Overlapping runs.** A run that starts while another one is still working (the platform retries, or a run
+outlasts its minute) does not queue behind it: it answers `{"status":"skipped","reason":"already_running"}` and
+does nothing. The lock lives and dies with one transaction on a connection of its own (not the pool, whose connections the steps
+need: a pool of one still works), so a crashed instance can never leave it locked. Every step is also safe on its own, so a second instance that got in anyway (for example the job
+creation hook running at the same moment) only ever sees compare-and-set statements.
+
+**One run, in order.** A step that fails is logged by its name (`[sweep] SWEEP_STEP_FAILED step=<name>`, never the
+cause) and does not stop the others; the answer is then `500` with `failedSteps`, and the next run tries again.
+
+1. **`expire`** (`expireStaleJobs()`, which claims did and now nobody does): a running job whose lease lapsed is
+   queued again with the attempt counted (on the last allowed attempt it fails with `lease_expired`), a job that runs
+   longer than 25 minutes fails with `timeout` whatever its heartbeats say, and a Dynamic job nobody can run is
+   cancelled (`no_capable_runner`). Its row in `job_dispatches` is due by then (the acknowledgement timeout is as long
+   as the lease), so step 4 sends it again.
+2. **`give_up`**: a job that has been **queued for the give-up time without a claim** fails with the stable code
+   `dispatch_unavailable` (copy on the Runs pages, `runs/error-copy.ts`) and no attempt is counted, so the pull
+   request is free for the next push or review request. "Queued" is counted from the later of the time the job
+   became due (`run_after`, so a debounce does not eat the budget) and the time it was last queued (a job given back
+   after a lost lease waits again from then, never from its first due time). A job whose dispatch a Dispatcher
+   **acknowledged** (`202`) within the last acknowledgement timeout is spared: that Dispatcher is working on it.
+   A job that is running is never touched by this step. The time is `RUNNER_DISPATCH_GIVE_UP_SECONDS`: **3600 (60
+   minutes) when `RUNNER_DISPATCH=webhook`**, **off in poll mode** unless the operator sets it, `0` turns it off, a
+   value outside 60 to 604800 or one that is not a whole number keeps the default of the mode. It is also the longest a
+   job may wait when the pool is full, so set it above the longest queue you accept.
+3. **`revive`** (webhook mode): a dispatch **stopped** with `not_capable` (the Dispatcher cannot run that review
+   kind) is made pending again `STOPPED_REVIVE_MS` (10 minutes) after it stopped, if its job is still queued, so a
+   Dispatcher that was updated or got its engine back is asked again, at a slow pace and never in a hot loop. A
+   Dynamic job that nobody can ever run still ends as `no_capable_runner` after 30 minutes (step 1).
+4. **`send`** (webhook mode, `getDispatchService()?.sendDue(limit)`): every queued job that is due and has no row, or
+   whose row is due and not stopped, is sent: jobs queued by an instance that had no hook, a row that could not be
+   written, a debounced job that became due, a call that was never acknowledged, an acknowledged job that is still
+   queued after the acknowledgement timeout (the claim failed, or the Worker launch was given back). **The pool cap:**
+   with `RUNNER_DISPATCH_MAX_RUNNING` (1 to 1000, normally the Dispatcher's `DISPATCHER_MAX_RUNNING`) the run sends
+   at most as many calls as there are free slots (the cap minus the jobs running now, never more than 20 a run), and
+   none at the cap, so a long queue does not wake the Dispatcher for nothing every two minutes; the job is sent in the
+   first run after a slot frees. Unset, the sweep does not limit itself and the Dispatcher's own cap (enforced by the
+   app at the claim, `maxRunning`) is the only limit. The first call right after a job is queued (the hook of
+   `jobQueueFor`) is not held back by the cap: the claim is.
+5. **`cleanup`**: the cleanup a server runs on a timer (`maintenance/cleanup.ts`: old rate limit counters,
+   unverified accounts, verification and reset links, signed states, remembered job keys, **and the `job_dispatches`
+   rows of jobs that finished a week ago**) runs **once when the hour has changed**. The hour of the last
+   successful run is kept in `app_meta` (`maintenance.sweep_cleanup_hour`), so every instance sees the same one; a run
+   that failed is tried again by the next minute's run. On a server (Docker, Coolify) the timer stays as it was.
+
+The answer is `{"status":"ok","expired":{...},"givenUp":n,"revived":n,"sent":n,"cleanedUp":bool}`; a line
+`[sweep] requeued=.. lease_expired=.. timed_out=.. given_up=.. revived=.. sent=..` is logged for a run that did
+something. Nothing a database or a Dispatcher said reaches a log or an answer.
 
 ## Rotating the key
 
@@ -103,3 +163,10 @@ The table is new and nothing reads it but this code, so an app of the previous r
 unaffected; the jobs it queues have no row and are found by `sendDue`. The default is poll mode, which changes
 nothing. A Dispatcher of the previous release has no `/dispatch`; the app then gets `404`, which is the "any other
 status" case above (30 minute wait and an alert), never a lost job.
+
+The sweep (#328) adds no table and no column. `dispatch_unavailable` is a new value in the free-text `jobs.error_code`;
+a previous release shows a failed job with a code it does not know under its general sentence and the code, never as
+an error. A previous release has no `/api/internal/dispatch-sweep`: a cron entry that reaches it gets `404`, which
+changes nothing. While old and new instances share a database, the new sweep only does what the old claim path
+already did (`expireStaleJobs`), plus the compare-and-set statements of this folder; a lease lapsed by the new sweep
+is the same lease an old instance's claim would have expired.

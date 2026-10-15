@@ -17,10 +17,13 @@
 //   for a week after the job finished, as long as a late or repeated report of the job can still need it to
 //   mask the key in its result. After that it is gone: a key that was rotated away does not stay in the
 //   database for ever. (The row also goes with its job.)
+// - The row of the dispatch webhook of a job (`job_dispatches`, #326) is kept for a week after the job
+//   finished, for whoever asks why a review started late, and then removed. A queued or running job keeps its row.
 import type { Kysely } from "kysely";
 import { CREDENTIAL_PROVIDER_ID } from "../auth/session-user.ts";
 import { formatTimestamp } from "../db/codecs.ts";
 import { createJobClaimedKeysRepository } from "../db/repositories/job-claimed-keys-repository.ts";
+import { createJobDispatchesRepository } from "../db/repositories/job-dispatches-repository.ts";
 import { createRateLimitsRepository } from "../db/repositories/rate-limits-repository.ts";
 import type { Database } from "../db/schema.ts";
 
@@ -39,12 +42,16 @@ export const UNVERIFIED_ACCOUNT_KEEP_MS = 7 * 24 * 60 * 60 * 1000;
 /** How long the key of a finished job is kept: a late report of the job can still be masked. */
 export const JOB_CLAIMED_KEY_KEEP_MS = 7 * 24 * 60 * 60 * 1000;
 
+/** How long the dispatch row of a finished job is kept: it only tells how the call to the Dispatcher went. */
+export const JOB_DISPATCH_KEEP_MS = 7 * 24 * 60 * 60 * 1000;
+
 export type CleanupResult = {
   rateLimits: number;
   unverifiedAccounts: number;
   verificationTokens: number;
   passwordResetTokens: number;
   jobClaimedKeys: number;
+  jobDispatches: number;
 };
 
 async function canVerifyByMail(
@@ -183,11 +190,16 @@ export async function cleanUpExpiredRows(
     db,
     now,
   ).deleteFinishedBefore(new Date(now().getTime() - JOB_CLAIMED_KEY_KEEP_MS));
+  const jobDispatches = await createJobDispatchesRepository(
+    db,
+    now,
+  ).deleteFinishedBefore(new Date(now().getTime() - JOB_DISPATCH_KEEP_MS));
   return {
     rateLimits,
     unverifiedAccounts,
     verificationTokens: Number(tokens.numDeletedRows),
     passwordResetTokens: Number(resets.numDeletedRows),
     jobClaimedKeys,
+    jobDispatches,
   };
 }

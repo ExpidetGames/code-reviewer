@@ -60,6 +60,17 @@ export type JobDispatchesRepository = {
    * sweep (#328) sends these (`DispatchService.sendDue`). Oldest first.
    */
   listDue(now: Date, limit: number): Promise<DueDispatchJob[]>;
+  /**
+   * #328: makes the `stopped` rows of jobs that are still queued and were stopped at or before `stoppedBefore`
+   * pending again, due at `at`, with the failure count reset. A Dispatcher that could not run a review kind
+   * may have been updated since; the sweep asks again at a slow pace. Returns how many rows.
+   */
+  reviveStopped(stoppedBefore: Date, at: Date): Promise<number>;
+  /**
+   * #328: removes the rows of jobs that finished at or before `cutoff` (nothing reads them any more). The
+   * rows of a job that is queued or running are never removed. Returns how many.
+   */
+  deleteFinishedBefore(cutoff: Date): Promise<number>;
 };
 
 function isState(value: string): value is DispatchState {
@@ -153,6 +164,41 @@ export function createJobDispatchesRepository(
         })
         .where("job_id", "=", jobId)
         .execute();
+    },
+
+    async reviveStopped(stoppedBefore, at) {
+      const timestamp = formatTimestamp(at);
+      const result = await db
+        .updateTable("job_dispatches")
+        .set({
+          state: "pending",
+          consecutive_failures: 0,
+          next_dispatch_at: timestamp,
+          updated_at: timestamp,
+        })
+        .where("state", "=", "stopped")
+        .where("updated_at", "<=", formatTimestamp(stoppedBefore))
+        .where("job_id", "in", (eb) =>
+          eb
+            .selectFrom("jobs")
+            .select("jobs.id")
+            .where("jobs.status", "=", "queued"),
+        )
+        .executeTakeFirst();
+      return Number(result.numUpdatedRows);
+    },
+
+    async deleteFinishedBefore(cutoff) {
+      const result = await db
+        .deleteFrom("job_dispatches")
+        .where("job_id", "in", (eb) =>
+          eb
+            .selectFrom("jobs")
+            .select("jobs.id")
+            .where("jobs.finished_at", "<=", formatTimestamp(cutoff)),
+        )
+        .executeTakeFirst();
+      return Number(result.numDeletedRows);
     },
 
     async listDue(at, limit) {

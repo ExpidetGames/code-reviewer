@@ -26,6 +26,8 @@ describe("which paths are public", () => {
     "/api/webhooks/github-app",
     // #319-T10: the platform's cron has no session; CRON_SECRET is its credential.
     "/api/internal/repository-sync",
+    // #328-T07: the once-a-minute sweep, with the same credential.
+    "/api/internal/dispatch-sweep",
   ])("lets %s through without a session", (pathname) => {
     expect(isPublicPath(pathname)).toBe(true);
   });
@@ -76,6 +78,8 @@ describe("which paths are public", () => {
     "/x/api/runners/v1/claim",
     "/api/internal/repository-sync/extra",
     "/api/internal/repository-syncx",
+    "/api/internal/dispatch-sweep/extra",
+    "/api/internal/dispatch-sweepx",
     "/api/operator/v1x/workspaces",
     "/api/operator/v10/workspaces",
     "/api/operator//v1/workspaces",
@@ -106,6 +110,7 @@ describe("which paths are public", () => {
       { path: "/api/operator/v1", match: "prefix" },
       { path: "/api/webhooks", match: "prefix" },
       { path: "/api/internal/repository-sync", match: "exact" },
+      { path: "/api/internal/dispatch-sweep", match: "exact" },
     ]);
   });
 });

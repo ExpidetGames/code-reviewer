@@ -1,0 +1,18 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// GET /api/internal/dispatch-sweep: the once-a-minute sweep of a hosted deployment (lapsed leases, resends,
+// the give-up, the hourly cleanup), called by the platform's cron in serverless mode (404 anywhere else).
+// Public for the session guard: CRON_SECRET is the credential. All logic is in src/cron/ and src/dispatch/.
+import { connection } from "next/server";
+import { handleDispatchSweepCron } from "../../../../cron/dispatch-sweep.ts";
+import { getDatabase } from "../../../../db/startup.ts";
+import { getDispatchSweep } from "../../../../dispatch/sweep-shared.ts";
+
+export async function GET(request: Request): Promise<Response> {
+  await connection();
+  return handleDispatchSweepCron(request, {
+    env: process.env,
+    db: getDatabase,
+    sweep: getDispatchSweep,
+  });
+}

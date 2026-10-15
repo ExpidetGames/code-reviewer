@@ -40,7 +40,7 @@ describe("app/vercel.json", () => {
   });
 
   // #319-T08
-  it("calls only routes that exist, that a cron without a session may reach, and at most once a day", () => {
+  it("calls only routes that exist and that a cron without a session may reach, on a valid schedule", () => {
     const crons = config.crons ?? [];
     expect(crons.length).toBeGreaterThan(0);
     for (const { path, schedule } of crons) {
@@ -48,13 +48,30 @@ describe("app/vercel.json", () => {
         true,
       );
       expect(isPublicPath(path), `${path} is open to the cron`).toBe(true);
-      const [minute, hour, day, month, weekday, ...rest] = schedule.split(" ");
-      expect(rest).toEqual([]);
-      expect(minute).toMatch(/^\d+$/);
-      expect(hour).toMatch(/^\d+$/);
-      expect([day, month]).toEqual(["*", "*"]);
-      expect(weekday).toBeDefined();
+      expect(schedule.split(" ")).toHaveLength(5);
     }
+  });
+
+  // #319-T08
+  it("syncs with GitHub at most once a day", () => {
+    const sync = (config.crons ?? []).filter(
+      ({ path }) => path === "/api/internal/repository-sync",
+    );
+    expect(sync).toHaveLength(1);
+    const [minute, hour, day, month] = (sync[0]?.schedule ?? "").split(" ");
+    expect(minute).toMatch(/^\d+$/);
+    expect(hour).toMatch(/^\d+$/);
+    expect([day, month]).toEqual(["*", "*"]);
+  });
+
+  // #328-T06
+  it("sweeps every minute, once", () => {
+    const sweep = (config.crons ?? []).filter(
+      ({ path }) => path === "/api/internal/dispatch-sweep",
+    );
+    expect(sweep).toEqual([
+      { path: "/api/internal/dispatch-sweep", schedule: "* * * * *" },
+    ]);
   });
 
   // #319-T08
