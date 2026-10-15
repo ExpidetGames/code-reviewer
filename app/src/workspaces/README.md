@@ -168,7 +168,9 @@ claimed (#277, `src/usage/README.md`, "Limits and suspension at claim"); the man
   spaces including the no-break space, combining marks, Hangul fillers and the blank braille pattern do not count;
   no control, formatting, private use or line separator characters; unassigned code points are not judged, so the
   answer does not depend on the Unicode version of Node), `key_mode_invalid`, `limits_invalid` (not an object, a
-  missing or an unknown key), `limit_invalid` (with the name of the limit), `period_start_invalid`,
+  missing or an unknown key), `limit_invalid` (with the name of the limit), `cost_limit_requires_managed_key` (#277: a
+  cost limit, even 0, with the key mode `own`, which nothing would read; refused on a write only, a stored entry of that
+  shape is still read and its limit ignored), `period_start_invalid`,
   `period_start_in_future` (more than five minutes ahead), `period_start_backwards` (earlier than the stored one;
   the same value again is accepted), `suspended_invalid`, `suspension_code_invalid` (lower case letters, digits,
   `_` and `-`, starting with a letter, at most 64 characters; checked even when not suspended). A valid code is

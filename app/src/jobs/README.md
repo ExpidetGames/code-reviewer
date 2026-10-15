@@ -48,8 +48,9 @@ the code a runner reported).
 suspension at claim"). After the oldest due job is taken, inside the same transaction and before its usage record is
 reserved, `admitClaimedJob` (`db/repositories/claim-admission.ts`) resolves the entitlements of the job's workspace
 and decides. A refused job is ended `failed` right there, with `workspace_suspended`, `quota_exhausted` or
-`entitlements_invalid`; no attempt is counted, it is never handed out, it has no usage record, and `claimNext` tries
-the next job (at most 25 refusals per call, then `null`). `onRefused` (an option of `createRunnerQueue`, wired to a
+`entitlements_invalid`; no attempt is counted, it is never handed out, it has no usage record, its holder, start time
+and lease are cleared, and `claimNext` tries the next job. A suspension or unreadable entitlements fail all the
+workspace's due jobs in one statement; a limit refuses job by job, at most 25 per call, then `null`. `onRefused` (an option of `createRunnerQueue`, wired to a
 log line in `shared.ts`) is called after the commit, once per refused job, with the code and, for a quota, which
 limit. A claim by job id that is refused answers `null`, like any job that cannot be claimed. An instance whose
 workspaces have no entitlements (and no default) does the same two reads per claim and nothing else.

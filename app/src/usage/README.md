@@ -72,27 +72,44 @@ split claim of a Dispatcher and the claim by job id.
    (`unknownCostCount`), so they can be watched. A workspace on its own key is never blocked by this limit.
 
 A refused job ends `failed` with the code, in the claim transaction: no attempt is counted, no runner hears of it, no
-credential or key is created, no record is written, and the claim tries the next job (up to 25 per call, then it
-answers "nothing" and the runner asks again). The detail is only logged (`onRefused`, `[queue] job=... refused at
-claim: quota_exhausted (diff_runs)`); the stored code is all the Runs pages and the later pull request notice (#281)
+credential or key is created, no record is written, and its holder, start time and lease are cleared (the Runs list
+shows no duration for a run that did not start). The claim then tries the next job.
+**Fairness:** a suspension and unreadable entitlements do not depend on the job, so they fail **all** the due jobs of
+that workspace in one statement (and void the records of those that lost a lease), and a backlog never delays another
+workspace. A refusal for a limit is decided per job (the count changes with every claim) and is bounded: at most 25
+per call, then the call answers "nothing" and the runner asks again. The detail is only logged (`onRefused`, `[queue] job=... refused at
+claim: quota_exhausted (diff_runs)`; a callback that throws is logged as `claim_refusal_log_failed` and ignored, so a
+claimed job is never orphaned); the stored code is all the Runs pages and the later pull request notice (#281)
 get. A job claimed again after a lost lease keeps the one record it has and is **not counted against itself**
 (it is left out of its own count), so it runs at a limit that its first claim used up; suspension and unreadable
 entitlements still stop it, and its record is then voided.
 
 - **Period.** A run belongs to the period it started in (`reserved_at`), for the count and the cost alike. Moving
   `period_start` forward (an operator's reset) takes effect on the next claim.
-- **The cost limit is a soft cap.** Cost is only known when a run settles, so runs in flight are not in the sum. A run
-  that starts below the limit may end above it by what the runs in flight at that moment cost; the overshoot is bounded
-  by the number of concurrent runs times the per-run bounds, and it is recorded as usage like any other.
+- **The cost limit is a soft cap and is not exact under concurrency.** Cost is only known when a run settles, so runs
+  in flight are not in the sum (the run limits are exact, the cost limit is not). A run that starts below the limit may
+  end above it by what the runs in flight at that moment cost; the overshoot is bounded by the number of concurrent
+  runs times the per-run bounds, and it is recorded as usage like any other. A run with an unknown cost is not bounded
+  at all by this limit.
 - **Which runs the cost limit watches.** Those of a workspace whose entitlements say `managed`; the sum counts the
   records whose key mode is `managed`. A key mode `managed` whose operator key is missing is not a quota matter (#276)
-  and keeps its own code.
+  and keeps its own code. **A cost limit next to the key mode `own` is read by nothing.** An operator can no longer
+  write that shape (`cost_limit_requires_managed_key`, 422); an entry stored before that keeps working exactly as it
+  did, the limit is ignored, and the claim logs it once per workspace and process (`onIgnoredCostLimit`). Limiting the
+  cost of runs on the workspace's own key is a separate limit (#361).
 - **Locking.** The claim already runs under the instance gate lock of the queue (Postgres) or the write lock of the
   connection (SQLite), which serializes claims. On Postgres the workspace row is also locked `for no key update` (an
-  insert that only references it does not wait), so the count stays exact if the gate is ever narrowed. A workspace
-  without limits reads no usage and takes no lock: the cost is two point reads (its row, or the instance default).
+  insert that only references it does not wait), so the count stays exact if the gate is ever narrowed. The lock and
+  the count are taken only when a limit applies to the job (`readsUsage`: the limit of its kind, or the cost limit of
+  a `managed` workspace); a workspace that is unlimited, suspended, unreadable or without such a limit reads no usage
+  and takes no lock. What every claim pays is three point reads (its row, or the instance default, and the job's own
+  record).
 - **Indexes.** The count is one query on `usage_records_workspace_reserved` (workspace, kind, reserved time). The cost
   sum only runs for a managed workspace with a cost limit and reads that workspace's records of the period.
+- **Order with the project guard.** The entitlements are decided inside `claimNext`, before the claim guard (a
+  project that was switched off) sees the job. A job of a suspended workspace whose project is also switched off
+  therefore fails as `workspace_suspended` instead of being cancelled as `project_deactivated`. Switching a project off
+  cancels its waiting jobs eagerly, so the guard only matters in a race; a test pins the order.
 - **Mixed versions.** Nothing in the schema changed. An app instance from before #277 still claims, reserves records
   and ignores the entitlements; it shows an unknown code (`quota_exhausted`) with the general sentence if it ever lists
   a job that a newer instance refused. During a rolling upgrade a job claimed by an old instance is not checked.

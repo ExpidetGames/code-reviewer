@@ -47,6 +47,44 @@ const RUN_LIMIT_OF_KIND = {
   { limit: string; detail: QuotaDetail }
 >;
 
+/**
+ * Whether deciding needs the usage of the workspace at all: only a limit that applies to this job reads it. A
+ * workspace that is unlimited, suspended, unreadable or without a limit for this kind (and, for the cost limit,
+ * without the operator's key) needs no count and no lock.
+ */
+export function readsUsage(
+  entitlements: ResolvedEntitlements,
+  reviewKind: ProjectReviewKind,
+): boolean {
+  if (entitlements.kind !== "limited" || entitlements.suspended) return false;
+  const { limits } = entitlements;
+  if (limits[RUN_LIMIT_OF_KIND[reviewKind].limit] !== null) return true;
+  return (
+    entitlements.keyMode === "managed" &&
+    limits.managedCostLimitMicroUsd !== null
+  );
+}
+
+/**
+ * A cost limit stored next to the own key: nothing reads it. An operator can no longer write that shape
+ * (`cost_limit_requires_managed_key`), but an entry stored earlier keeps working and the limit is ignored.
+ */
+export function ignoresCostLimit(entitlements: ResolvedEntitlements): boolean {
+  return (
+    entitlements.kind === "limited" &&
+    entitlements.keyMode === "own" &&
+    entitlements.limits.managedCostLimitMicroUsd !== null
+  );
+}
+
+/**
+ * A refusal that does not depend on the job: the answer is the same for every job of the workspace, so the
+ * claim fails all of its due jobs at once instead of one per round.
+ */
+export function isJobIndependentRefusal(code: EntitlementRefusalCode): boolean {
+  return code === "workspace_suspended" || code === ENTITLEMENTS_INVALID_CODE;
+}
+
 function exhausted(detail: QuotaDetail): Admission {
   return { allow: false, errorCode: "quota_exhausted", detail };
 }

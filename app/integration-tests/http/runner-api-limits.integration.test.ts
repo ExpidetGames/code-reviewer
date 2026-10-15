@@ -4,7 +4,7 @@
 // split claim of a Dispatcher and the claim by job id. A refused job ends `failed` with its code, is not handed to
 // anybody (204), creates no credential and no usage record. The rules themselves (counts, cost, period, races)
 // are pinned at the queue (src/jobs/claim-limits.integration.test.ts); here only that each door goes through them.
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createWorkspaceEntitlementsRepository } from "../../src/db/repositories/workspace-entitlements-repository.ts";
 import {
   startRunnerApiHarness,
@@ -199,5 +199,37 @@ describe("a workspace that used up a limit, on every claim path", () => {
       errorCode: "entitlements_invalid",
     });
     await expectNothingConsumed(h);
+  });
+
+  // #277-P3
+  it("fails a job of a suspended workspace as workspace_suspended, before the project guard looks at it", async () => {
+    const check = vi.fn(async () => ({
+      allow: false as const,
+      errorCode: "project_deactivated" as const,
+      outcome: "cancel" as const,
+    }));
+    const h = await startRunnerApiHarness({ guard: { check } });
+    await limit(
+      h,
+      entitlements({
+        limits: {
+          diffRunsPerPeriod: null,
+          dynamicRunsPerPeriod: null,
+          managedCostLimitMicroUsd: null,
+        },
+        suspended: true,
+        suspensionCode: "overdue",
+      }),
+    );
+    const job = await h.enqueueNew();
+
+    expect((await h.claim()).status).toBe(204);
+
+    // The documented order: the entitlements are decided in the claim, the guard only sees jobs that run.
+    expect(await h.queue.get(job.id)).toMatchObject({
+      status: "failed",
+      errorCode: "workspace_suspended",
+    });
+    expect(check).not.toHaveBeenCalled();
   });
 });

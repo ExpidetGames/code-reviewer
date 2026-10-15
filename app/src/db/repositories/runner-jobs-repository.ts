@@ -48,6 +48,7 @@ import type {
 import { encodeJson, formatTimestamp } from "../codecs.ts";
 import { databaseDriver, type DatabaseDriver } from "../driver.ts";
 import type { Database } from "../schema.ts";
+import { isJobIndependentRefusal } from "../../usage/enforce-entitlements.ts";
 import { admitClaimedJob, type ClaimRefusal } from "./claim-admission.ts";
 import { claimOldestDueJob, claimOldestDueJobPostgres } from "./jobs-claim.ts";
 import { toJob } from "./jobs-repository.ts";
@@ -79,10 +80,44 @@ export type RunnerJobsRepositoryOptions = {
   /**
    * #277: called for every job a claim refused for the entitlements of its workspace (suspended, a limit used
    * up, entitlements that cannot be read), after the transaction of the claim committed. The job is `failed`
-   * already; this is only for the log.
+   * already; this is only for the log. A callback that throws is logged (`claim_refusal_log_failed`) and
+   * ignored: it can never fail the claim or orphan a job that was claimed in the same call.
    */
   onRefused?: (refusal: ClaimRefusal) => void;
+  /**
+   * #277: called once per claim and workspace whose entitlements hold a cost limit next to the own key, which
+   * nothing reads (an entry stored before that shape was refused on write). Same rules as `onRefused`.
+   */
+  onIgnoredCostLimit?: (workspaceId: string) => void;
 };
+
+/**
+ * What a refused job looks like (#277): failed with the code, and as if it never started: no holder, no start
+ * time and no lease, so the Runs list shows no duration for a run that "did not start". No attempt is counted.
+ */
+function refusedJob(errorCode: string, current: Date) {
+  const timestamp = formatTimestamp(current);
+  return {
+    status: "failed",
+    error_code: errorCode,
+    runner_id: null,
+    lease_token: null,
+    claimed_at: null,
+    heartbeat_at: null,
+    lease_expires_at: null,
+    finished_at: timestamp,
+    updated_at: timestamp,
+  } as const;
+}
+
+/** Runs a log callback of the claim; one that throws is reported by its stable code, without its message. */
+function notify(callback: () => void): void {
+  try {
+    callback();
+  } catch {
+    console.error("[queue] claim_refusal_log_failed");
+  }
+}
 
 /** How many jobs one `claimNext` may refuse before it answers "nothing" and lets the runner ask again. */
 const MAX_REFUSED_PER_CLAIM = 25;
@@ -527,24 +562,49 @@ export function createRunnerJobsRepository(
     errorCode: string,
     current: Date,
   ): Promise<void> {
-    const timestamp = formatTimestamp(current);
     await executor
       .updateTable("jobs")
-      .set({
-        status: "failed",
-        error_code: errorCode,
-        lease_expires_at: null,
-        finished_at: timestamp,
-        updated_at: timestamp,
-      })
+      .set(refusedJob(errorCode, current))
       .where("id", "=", jobId)
       .where("status", "=", "running")
       .execute();
   }
 
+  /**
+   * #277: a refusal that does not depend on the job (a suspension, entitlements that cannot be read) ends the
+   * claimed job and every other due job of the workspace in one statement, so a backlog does not take one round
+   * of the claim per job and does not hold the gate lock for as many. Returns the ids it ended.
+   */
+  async function refuseDueJobsOfWorkspace(
+    executor: Kysely<Database>,
+    workspaceId: string,
+    claimedJobId: string,
+    errorCode: string,
+    current: Date,
+  ): Promise<string[]> {
+    const rows = await executor
+      .updateTable("jobs")
+      .set(refusedJob(errorCode, current))
+      .where("workspace_id", "=", workspaceId)
+      .where((eb) =>
+        eb.or([
+          eb.and([eb("id", "=", claimedJobId), eb("status", "=", "running")]),
+          eb.and([
+            eb("status", "=", "queued"),
+            eb("command", "=", "review"),
+            eb("run_after", "<=", formatTimestamp(current)),
+          ]),
+        ]),
+      )
+      .returning("id")
+      .execute();
+    return rows.map((row) => row.id);
+  }
+
   return {
     async claimNext(runnerId, engines = DEFAULT_ENGINES, claimOptions = {}) {
       const refusals: ClaimRefusal[] = [];
+      const ignoredCostLimits = new Set<string>();
       const claimed = await inTransaction(async (trx) => {
         const current = now();
         await expire(trx, current);
@@ -579,12 +639,33 @@ export function createRunnerJobsRepository(
           // #277: the limits and the suspension of the job's workspace, decided in this transaction, before
           // the record is reserved: a refused job leaves no record, and two claims cannot both take the
           // last unit of a limit.
-          const { admission, hadRecord } = await admitClaimedJob(
-            trx,
-            row,
-            () => current,
-          );
+          const { admission, hadRecord, ignoredCostLimit } =
+            await admitClaimedJob(trx, row, () => current);
+          if (ignoredCostLimit) ignoredCostLimits.add(row.workspace_id);
           if (!admission.allow) {
+            const detail =
+              admission.detail === undefined
+                ? {}
+                : { detail: admission.detail };
+            if (isJobIndependentRefusal(admission.errorCode)) {
+              const ended = await refuseDueJobsOfWorkspace(
+                trx,
+                row.workspace_id,
+                row.id,
+                admission.errorCode,
+                current,
+              );
+              // Any of them may have had a record that counted (claimed before, lost its lease).
+              await voidRecordsOfEndedJobs(trx);
+              for (const jobId of ended)
+                refusals.push({
+                  jobId,
+                  workspaceId: row.workspace_id,
+                  errorCode: admission.errorCode,
+                  ...detail,
+                });
+              continue;
+            }
             await refuseClaimedJob(trx, row.id, admission.errorCode, current);
             // A job claimed again after a lost lease had a record that counted: it ends with the job.
             if (hadRecord) await voidRecordsOfEndedJobs(trx);
@@ -592,9 +673,7 @@ export function createRunnerJobsRepository(
               jobId: row.id,
               workspaceId: row.workspace_id,
               errorCode: admission.errorCode,
-              ...(admission.detail === undefined
-                ? {}
-                : { detail: admission.detail }),
+              ...detail,
             });
             continue;
           }
@@ -615,7 +694,11 @@ export function createRunnerJobsRepository(
         // Many jobs in a row were refused; the runner asks again.
         return null;
       });
-      for (const refusal of refusals) options.onRefused?.(refusal);
+      // After the commit, and never able to fail it: a claimed job is already running under its lease.
+      for (const refusal of refusals)
+        notify(() => options.onRefused?.(refusal));
+      for (const workspaceId of ignoredCostLimits)
+        notify(() => options.onIgnoredCostLimit?.(workspaceId));
       return claimed;
     },
 

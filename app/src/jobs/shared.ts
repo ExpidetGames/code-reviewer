@@ -22,6 +22,9 @@ export function jobQueueFor(workspaceId: string): JobQueue {
   });
 }
 
+/** The workspaces whose ignored cost limit was logged already (#277): once per workspace and process is enough. */
+const ignoredCostLimitLogged = new Set<string>();
+
 /** The queue as runners use it: one for the whole instance, every workspace. */
 export function getRunnerQueue(): RunnerQueue {
   return createRunnerQueue(getDatabase(), {
@@ -33,5 +36,13 @@ export function getRunnerQueue(): RunnerQueue {
       console.info(
         `[queue] job=${jobId} workspace=${workspaceId} refused at claim: ${errorCode}${detail === undefined ? "" : ` (${detail})`}`,
       ),
+    // #277: a cost limit next to the own key is read by nothing; say so once, with the id of the workspace only.
+    onIgnoredCostLimit: (workspaceId) => {
+      if (ignoredCostLimitLogged.has(workspaceId)) return;
+      ignoredCostLimitLogged.add(workspaceId);
+      console.info(
+        `[queue] workspace=${workspaceId} has a cost limit next to the own key; the limit is ignored (cost_limit_requires_managed_key)`,
+      );
+    },
   });
 }

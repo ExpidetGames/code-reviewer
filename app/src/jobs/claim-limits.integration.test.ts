@@ -6,7 +6,7 @@
 // The runner API tests (integration-tests/http/runner-api-limits.integration.test.ts) pin what a runner is
 // handed on each claim path.
 import type { Kysely } from "kysely";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
 import { createIntegrationsRepository } from "../db/repositories/integrations-repository.ts";
 import { createRepositoriesRepository } from "../db/repositories/repositories-repository.ts";
@@ -188,13 +188,22 @@ describe.each(databases)("the limits at claim on %s", (name, open) => {
       expect(await fixture.queue.get(third.id)).toMatchObject({
         status: "failed",
         errorCode: "quota_exhausted",
-        runnerId: expect.any(String),
+        // Nothing started: no holder and no start time, so the Runs list shows no duration (#277-P3).
+        runnerId: null,
+        claimedAt: null,
+        heartbeatAt: null,
         leaseExpiresAt: null,
         finishedAt: fixture.clock.now().toISOString(),
         attempts: 0,
       });
       expect(await recordsOf(fixture).get(third.id)).toBeUndefined();
       expect(await allRecords(fixture)).toHaveLength(2);
+      const stored = await fixture.db
+        .selectFrom("jobs")
+        .select("lease_token")
+        .where("id", "=", third.id)
+        .executeTakeFirstOrThrow();
+      expect(stored.lease_token).toBeNull();
     },
   );
 
@@ -276,10 +285,11 @@ describe.each(databases)("the limits at claim on %s", (name, open) => {
       });
       expect(await recordsOf(fixture).get(refused.id)).toBeUndefined();
       // The workspace now reviews on its own key: the cost limit is about the operator's.
-      await setEntitlements(fixture, {
-        keyMode: "own",
-        limits: { managedCostLimitMicroUsd: 5_000_000 },
-      });
+      // An entry of this shape cannot be written any more (#277), but one stored earlier still reads.
+      await fixture.db
+        .updateTable("workspace_entitlements")
+        .set({ key_mode: "own" })
+        .execute();
       const own = await enqueue(fixture);
       expect((await fixture.queue.claimNext("runner-a"))?.job.id).toBe(own.id);
     },
@@ -671,6 +681,161 @@ describe.each(databases)("the limits at claim on %s", (name, open) => {
         status: "failed",
         errorCode: "quota_exhausted",
       });
+    },
+  );
+  // #277-P2
+  run(
+    "fails all the due jobs of a suspended workspace at once, so a healthy workspace behind them is served in the same call",
+    async () => {
+      const fixture = await start();
+      await setEntitlements(fixture, {
+        suspended: true,
+        suspensionCode: "overdue",
+      });
+      const backlog = [];
+      for (let index = 0; index < 30; index += 1)
+        backlog.push(
+          await enqueue(fixture, index % 2 === 0 ? "diff" : "dynamic"),
+        );
+      fixture.clock.advance(1000);
+      const other = await addWorkspace(fixture.db, "other");
+      const healthy = await enqueueInWorkspace(fixture, other);
+      const refusals: string[] = [];
+      const queue = createRunnerQueue(fixture.db, {
+        now: fixture.clock.now,
+        onRefused: ({ jobId }) => refusals.push(jobId),
+      });
+
+      const claimed = await queue.claimNext("runner-a", ENGINES);
+
+      expect(claimed?.job.id).toBe(healthy);
+      for (const job of backlog)
+        expect(await fixture.queue.get(job.id)).toMatchObject({
+          status: "failed",
+          errorCode: "workspace_suspended",
+          claimedAt: null,
+        });
+      expect(refusals.sort()).toEqual(backlog.map((job) => job.id).sort());
+      expect(await allRecords(fixture)).toHaveLength(1);
+    },
+  );
+
+  // #277-P2
+  run(
+    "fails all the due jobs of a workspace whose entitlements cannot be read at once, and voids the record of one that lost its lease",
+    async () => {
+      const fixture = await start();
+      const lost = await enqueue(fixture);
+      await fixture.queue.claimNext("runner-a");
+      await setEntitlements(fixture, { limits: { diffRunsPerPeriod: 5 } });
+      await fixture.db
+        .updateTable("workspace_entitlements")
+        .set({ limits: "{not json" })
+        .execute();
+      fixture.clock.advance(3 * MINUTE);
+      const backlog = [lost];
+      for (let index = 0; index < 29; index += 1)
+        backlog.push(await enqueue(fixture));
+      fixture.clock.advance(1000);
+      const other = await addWorkspace(fixture.db, "other");
+      const healthy = await enqueueInWorkspace(fixture, other);
+
+      const claimed = await fixture.queue.claimNext("runner-b", ENGINES);
+
+      expect(claimed?.job.id).toBe(healthy);
+      for (const job of backlog)
+        expect(await fixture.queue.get(job.id)).toMatchObject({
+          status: "failed",
+          errorCode: "entitlements_invalid",
+        });
+      expect(await recordsOf(fixture).get(lost.id)).toMatchObject({
+        state: "void",
+      });
+    },
+  );
+
+  // #277-P2
+  run(
+    "refuses at most 25 jobs for a run limit in one call, then answers nothing and serves the healthy workspace on the next",
+    async () => {
+      const fixture = await start();
+      await setEntitlements(fixture, { limits: { diffRunsPerPeriod: 0 } });
+      const backlog = [];
+      for (let index = 0; index < 26; index += 1)
+        backlog.push(await enqueue(fixture));
+      fixture.clock.advance(1000);
+      const other = await addWorkspace(fixture.db, "other");
+      const healthy = await enqueueInWorkspace(fixture, other);
+
+      expect(await fixture.queue.claimNext("runner-a")).toBeNull();
+
+      const statuses = await Promise.all(
+        backlog.map(async (job) => (await fixture.queue.get(job.id))?.status),
+      );
+      expect(statuses.filter((status) => status === "failed")).toHaveLength(25);
+      expect(statuses.filter((status) => status === "queued")).toHaveLength(1);
+      expect((await fixture.queue.claimNext("runner-a"))?.job.id).toBe(healthy);
+    },
+  );
+
+  // #277-P3
+  run(
+    "does not reject the claim, and hands out the job claimed in the same call, when the refusal callback throws",
+    async () => {
+      const fixture = await start();
+      await setEntitlements(fixture, { limits: { dynamicRunsPerPeriod: 0 } });
+      const dynamic = await enqueue(fixture, "dynamic");
+      const diff = await enqueue(fixture, "diff");
+      const errors: string[] = [];
+      const spy = vi.spyOn(console, "error").mockImplementation((line) => {
+        errors.push(String(line));
+      });
+      const queue = createRunnerQueue(fixture.db, {
+        now: fixture.clock.now,
+        onRefused: () => {
+          throw new Error("callback failed");
+        },
+      });
+
+      try {
+        const claimed = await queue.claimNext("runner-a", ENGINES);
+
+        expect(claimed?.job.id).toBe(diff.id);
+      } finally {
+        spy.mockRestore();
+      }
+      expect((await fixture.queue.get(dynamic.id))?.status).toBe("failed");
+      expect(errors).toEqual([
+        expect.stringContaining("claim_refusal_log_failed"),
+      ]);
+      expect(errors.join("")).not.toContain("callback failed");
+    },
+  );
+
+  // #277-P2
+  run(
+    "ignores a cost limit stored next to the own key, runs the job, and says so once per claim",
+    async () => {
+      const fixture = await start();
+      await setEntitlements(fixture, {
+        keyMode: "managed",
+        limits: { managedCostLimitMicroUsd: 0 },
+      });
+      // An entry of this shape cannot be written any more (#277), but one stored earlier still reads.
+      await fixture.db
+        .updateTable("workspace_entitlements")
+        .set({ key_mode: "own" })
+        .execute();
+      const ignored: string[] = [];
+      const queue = createRunnerQueue(fixture.db, {
+        now: fixture.clock.now,
+        onIgnoredCostLimit: (workspaceId) => ignored.push(workspaceId),
+      });
+      const job = await enqueue(fixture);
+
+      expect((await queue.claimNext("runner-a"))?.job.id).toBe(job.id);
+
+      expect(ignored).toEqual([fixture.workspaceId]);
     },
   );
 });

@@ -10,6 +10,9 @@ import {
 import {
   decideAdmission,
   ENTITLEMENT_REFUSAL_CODES,
+  isJobIndependentRefusal,
+  readsUsage,
+  ignoresCostLimit,
   QUOTA_DETAILS,
   type AdmissionUsage,
 } from "./enforce-entitlements.ts";
@@ -241,5 +244,62 @@ describe("deciding whether a claimed job may run", () => {
       "dynamic_runs",
       "managed_cost",
     ]);
+  });
+});
+
+describe("which entitlements need the usage of the workspace", () => {
+  // #277-P3
+  it("needs none for an unlimited workspace, for no limits, and for a suspended or unreadable one", () => {
+    const invalid: ResolvedEntitlements = {
+      kind: "invalid",
+      code: ENTITLEMENTS_INVALID_CODE,
+      source: "workspace",
+    };
+
+    expect(readsUsage({ kind: "unlimited" }, "diff")).toBe(false);
+    expect(readsUsage(limited(), "diff")).toBe(false);
+    expect(readsUsage(invalid, "diff")).toBe(false);
+    expect(
+      readsUsage(
+        limited({ suspended: true, limits: { diffRunsPerPeriod: 1 } }),
+        "diff",
+      ),
+    ).toBe(false);
+  });
+
+  // #277-P3
+  it("needs it for the limit of the kind of the job, and for the cost limit of a managed key only", () => {
+    const diff = limited({ limits: { diffRunsPerPeriod: 1 } });
+    const cost = { managedCostLimitMicroUsd: 1 };
+
+    expect(readsUsage(diff, "diff")).toBe(true);
+    expect(readsUsage(diff, "dynamic")).toBe(false);
+    expect(
+      readsUsage(limited({ keyMode: "managed", limits: cost }), "diff"),
+    ).toBe(true);
+    expect(readsUsage(limited({ keyMode: "own", limits: cost }), "diff")).toBe(
+      false,
+    );
+  });
+
+  // #277-P2
+  it("says that a cost limit next to the own key is ignored", () => {
+    const cost = { managedCostLimitMicroUsd: 0 };
+
+    expect(ignoresCostLimit(limited({ keyMode: "own", limits: cost }))).toBe(
+      true,
+    );
+    expect(
+      ignoresCostLimit(limited({ keyMode: "managed", limits: cost })),
+    ).toBe(false);
+    expect(ignoresCostLimit(limited({ keyMode: "own" }))).toBe(false);
+    expect(ignoresCostLimit({ kind: "unlimited" })).toBe(false);
+  });
+
+  // #277-P2
+  it("treats a suspension and unreadable entitlements as refusals that do not depend on the job", () => {
+    expect(isJobIndependentRefusal("workspace_suspended")).toBe(true);
+    expect(isJobIndependentRefusal("entitlements_invalid")).toBe(true);
+    expect(isJobIndependentRefusal("quota_exhausted")).toBe(false);
   });
 });

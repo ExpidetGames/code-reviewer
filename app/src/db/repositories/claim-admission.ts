@@ -14,6 +14,8 @@ import "server-only";
 import { sql, type Kysely, type Selectable } from "kysely";
 import {
   decideAdmission,
+  ignoresCostLimit,
+  readsUsage,
   type Admission,
   type AdmissionUsage,
 } from "../../usage/enforce-entitlements.ts";
@@ -37,6 +39,8 @@ export type ClaimRefusal = {
 export type ClaimAdmission = {
   admission: Admission;
   hadRecord: boolean;
+  /** The entitlements hold a cost limit next to the own key, which nothing reads (#277). */
+  ignoredCostLimit: boolean;
 };
 
 export async function admitClaimedJob(
@@ -63,14 +67,19 @@ export async function admitClaimedJob(
       : undefined;
   const entitlements = resolveEntitlements(row, defaults);
   if (entitlements.kind === "unlimited")
-    return { admission: { allow: true }, hadRecord };
+    return { admission: { allow: true }, hadRecord, ignoredCostLimit: false };
+  const ignoredCostLimit = ignoresCostLimit(entitlements);
 
-  if (databaseDriver(trx) === "postgres")
+  const reviewKind = job.review_kind as ProjectReviewKind;
+  // A limit that applies to this job is the only reason to count and to lock; a suspension needs neither.
+  if (
+    readsUsage(entitlements, reviewKind) &&
+    databaseDriver(trx) === "postgres"
+  )
     await sql`select id from workspaces where id = ${workspaceId} for no key update`.execute(
       trx,
     );
 
-  const reviewKind = job.review_kind as ProjectReviewKind;
   const usage: AdmissionUsage = {
     // A job claimed again keeps its record and is not counted twice: its own unit is not held against it.
     async runsSince(kind, since) {
@@ -87,5 +96,6 @@ export async function admitClaimedJob(
   return {
     admission: await decideAdmission(entitlements, reviewKind, usage),
     hadRecord,
+    ignoredCostLimit,
   };
 }
