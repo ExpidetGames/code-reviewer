@@ -412,9 +412,48 @@
         "logTail": { "type": "string", "maxLength": 8192 },
         "logTruncated": { "type": "boolean" },
         "usage": {
+          "description": "What the run used. A failed result carries it too, whenever the run made at least one model call before it failed (a timeout at the end, an answer the validator refuses, a publish error): the app counts such a run exactly like a successful one. A run that failed before its first model call reports null. The cost follows the same rule as for a successful run: exact, or null when any call is unpriced; the token counters are reported either way.",
           "oneOf": [{ "$ref": "#/$defs/RunnerUsage" }, { "type": "null" }]
         }
       },
+      "examples": [
+        {
+          "ok": false,
+          "durationMs": 187340,
+          "commentUrl": null,
+          "errorCode": "dynamic_budget_exceeded",
+          "errorMessage": "the cost limit is used up",
+          "logTail": "dynamic_budget_exceeded: the cost limit is used up",
+          "logTruncated": false,
+          "usage": {
+            "model": "vendor/model-name",
+            "promptTokens": 30000,
+            "completionTokens": 2100,
+            "totalTokens": 32100,
+            "aiCalls": 3,
+            "fallbackUsed": false,
+            "costUsd": 0.0042
+          }
+        },
+        {
+          "ok": false,
+          "durationMs": 91200,
+          "commentUrl": null,
+          "errorCode": "dynamic_accounting_failed",
+          "errorMessage": "the provider did not report the cost of a call",
+          "logTail": "dynamic_accounting_failed: the provider did not report the cost of a call",
+          "logTruncated": false,
+          "usage": {
+            "model": "vendor/model-name",
+            "promptTokens": 20000,
+            "completionTokens": 1400,
+            "totalTokens": 21400,
+            "aiCalls": 2,
+            "fallbackUsed": false,
+            "costUsd": null
+          }
+        }
+      ],
       "allOf": [
         {
           "if": {

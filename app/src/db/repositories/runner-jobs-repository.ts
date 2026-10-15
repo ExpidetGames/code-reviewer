@@ -53,7 +53,7 @@ import { admitClaimedJob, type ClaimRefusal } from "./claim-admission.ts";
 import { claimOldestDueJob, claimOldestDueJobPostgres } from "./jobs-claim.ts";
 import { toJob } from "./jobs-repository.ts";
 import { createUsageRecordsRepository } from "./usage-records-repository.ts";
-import { voidRecordsOfEndedJobs } from "./usage-records-sweep.ts";
+import { closeRecordsOfEndedJobs } from "./usage-records-sweep.ts";
 import { settlementOfOutcome } from "../../usage/usage-records.ts";
 
 /** What `expireStaleJobs` did. */
@@ -484,7 +484,7 @@ export function createRunnerJobsRepository(
     // A job whose runner keeps the lease alive but never finishes. Lost leases come first: a job
     // whose runner vanished long ago is retried, not failed for taking long.
     const timedOut = await failTimedOut(executor, {}, current);
-    await voidRecordsOfEndedJobs(executor);
+    await closeRecordsOfEndedJobs(executor, timestamp);
     return {
       requeued: lost.requeued,
       leaseExpired: lost.failed,
@@ -534,7 +534,7 @@ export function createRunnerJobsRepository(
       })
       .where(waiting)
       .executeTakeFirst();
-    await voidRecordsOfEndedJobs(executor);
+    await closeRecordsOfEndedJobs(executor, timestamp);
     return Number(result.numUpdatedRows);
   }
 
@@ -743,7 +743,7 @@ export function createRunnerJobsRepository(
           { claim: { jobId, leaseToken } },
           current,
         );
-        if (timedOut > 0) await voidRecordsOfEndedJobs(trx);
+        if (timedOut > 0) await closeRecordsOfEndedJobs(trx, timestamp);
         const row = await trx
           .updateTable("jobs")
           .set({
@@ -832,7 +832,7 @@ export function createRunnerJobsRepository(
           .returningAll()
           .executeTakeFirst();
         if (removed !== undefined) {
-          await voidRecordsOfEndedJobs(trx);
+          await closeRecordsOfEndedJobs(trx, timestamp);
           return { status: "cancelled", job: toJob(removed) };
         }
         const lost = await loseAttempt(
@@ -846,7 +846,7 @@ export function createRunnerJobsRepository(
         );
         if (lost.failed === 0 && lost.requeued === 0)
           return { status: "not_holder" };
-        await voidRecordsOfEndedJobs(trx);
+        await closeRecordsOfEndedJobs(trx, timestamp);
         const row = await trx
           .selectFrom("jobs")
           .selectAll()
@@ -903,7 +903,7 @@ export function createRunnerJobsRepository(
           .returningAll()
           .executeTakeFirst();
         if (row === undefined) return { status: "not_holder" };
-        await voidRecordsOfEndedJobs(trx);
+        await closeRecordsOfEndedJobs(trx, timestamp);
         return { status: "cancelled", job: toJob(row) };
       });
     },

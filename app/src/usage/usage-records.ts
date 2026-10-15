@@ -15,6 +15,27 @@ import type { KeyMode } from "../workspaces/entitlements.ts";
 export const USAGE_STATES = ["reserved", "settled", "void"] as const;
 export type UsageState = (typeof USAGE_STATES)[number];
 
+/**
+ * Why a record was settled without a report of its run. `no_result`: the job ended without any result from the
+ * runner (it died, its lease ran out on the last attempt, it ran past the hard limit), so the model may have been
+ * used and nobody can say how much: the record counts, with an unknown cost and unknown tokens. A run that
+ * reported its usage, failed or not, has no reason.
+ */
+export const SETTLED_REASONS = ["no_result"] as const;
+export type SettledReason = (typeof SETTLED_REASONS)[number];
+
+/**
+ * The error codes a job ends with when a runner held it and no result arrived (`lease_expired` and `timeout` are the
+ * queue's own, `runner_shutdown` is a runner that was stopped and gave the job back on its last attempt). Any other
+ * way for a job to end without `complete` (cancelled, replaced, never started, given back before the runner began)
+ * made no model call anybody knows of: its record is void.
+ */
+export const NO_RESULT_JOB_ERROR_CODES = [
+  "lease_expired",
+  "timeout",
+  "runner_shutdown",
+] as const;
+
 /** Whose key a run was made with. The same two values as the key mode of the entitlements. */
 export type UsageKeyMode = KeyMode;
 
@@ -61,6 +82,8 @@ type ReportedUsage = {
   promptTokens: number;
   completionTokens: number;
   costUsd: number | null;
+  /** Null when the runner did not say (it is not needed to settle). */
+  aiCalls: number | null;
 };
 
 function isCount(value: unknown): value is number {
@@ -77,23 +100,35 @@ function reportedUsage(result: unknown): ReportedUsage | null {
   if (typeof result !== "object" || result === null) return null;
   const usage = (result as { usage?: unknown }).usage;
   if (typeof usage !== "object" || usage === null) return null;
-  const { promptTokens, completionTokens, costUsd } = usage as Record<
+  const { promptTokens, completionTokens, costUsd, aiCalls } = usage as Record<
     string,
     unknown
   >;
   if (!isCount(promptTokens) || !isCount(completionTokens)) return null;
+  const calls = isCount(aiCalls) ? aiCalls : null;
   if (costUsd === null)
-    return { promptTokens, completionTokens, costUsd: null };
+    return { promptTokens, completionTokens, costUsd: null, aiCalls: calls };
   if (typeof costUsd !== "number" || !Number.isFinite(costUsd) || costUsd < 0)
     return null;
-  return { promptTokens, completionTokens, costUsd };
+  return { promptTokens, completionTokens, costUsd, aiCalls: calls };
+}
+
+/** A usage that shows no model call: no call and no token. */
+function showsNoModelCall(usage: ReportedUsage): boolean {
+  return (
+    usage.aiCalls === 0 &&
+    usage.promptTokens === 0 &&
+    usage.completionTokens === 0
+  );
 }
 
 /**
  * How a reported outcome settles the record of its job. A reported usage settles it, with its cost
- * (null when unknown) and tokens, whatever the outcome. Without one, a run that succeeded is still a run
- * (settled, everything unknown), and a run that failed made no model call as far as anybody can tell
- * (void: checkout, configuration, a lost lease).
+ * (null when unknown) and tokens, whatever the outcome: a run that failed after it used the model still cost
+ * what it cost (#273), and the cost of a run with an unpriced call is unknown, never zero. Without one, a run that
+ * succeeded is still a run (settled, everything unknown), and a run that failed made no model call as far as
+ * anybody can tell (void: checkout, configuration, a lost lease). A failed run whose usage shows no call at all
+ * (what a runner of an earlier release reports for a command that never reached the model) is void too.
  */
 export function settlementOfOutcome(outcome: JobOutcome): UsageSettlement {
   const usage = reportedUsage(outcome.result);
@@ -106,6 +141,7 @@ export function settlementOfOutcome(outcome: JobOutcome): UsageSettlement {
           completionTokens: null,
         }
       : { state: "void" };
+  if (!outcome.ok && showsNoModelCall(usage)) return { state: "void" };
   return {
     state: "settled",
     costMicroUsd:

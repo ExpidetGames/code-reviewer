@@ -19,14 +19,15 @@ counting. It measures nothing itself: it stores the `usage.costUsd` that the run
 job ran on the workspace's key, `managed` when it ran on the operator's: the `source` of the resolved LLM access),
 `model_tier` (null until the managed tiers exist, #280), `state`, `cost_micro_usd` (the reported `costUsd` times one
 million, rounded half up; null when unknown), `prompt_tokens`, `completion_tokens` (null when unknown; all three are 32 bit integers, a larger number is stored as unknown), `reserved_at`,
-`settled_at`. The table checks the states, the key modes, that only a settled record has a time and a measurement,
+`settled_at`, `settled_reason` (null unless the record was settled without a report of its run: `no_result`). The table checks the states, the key modes, that only a settled record has a time and a measurement,
 and that amounts are not negative.
 
 ## Life of a record
 
 ```
-claim --> reserved --complete with usage, or a run that succeeded--> settled   (counts, with cost and tokens)
-                   --failed without usage, or ended without a report--> void   (does not count)
+claim --> reserved --complete with usage (failed or not), or a run that succeeded--> settled   (counts, with cost and tokens)
+                   --job ended with no result from a runner that held it---------> settled   (counts, cost and tokens unknown, reason no_result)
+                   --failed without usage, or ended before any runner began------> void      (does not count)
 ```
 
 - **Reserve.** `claimNext` inserts the record in the transaction of the claim, so a job a runner holds always has
@@ -35,14 +36,28 @@ claim --> reserved --complete with usage, or a run that succeeded--> settled   (
   when the LLM access is resolved (`own` for the workspace's key, `managed` for the operator's). Only a `reserved`
   record can be corrected.
 - **Settle.** `complete` settles the record from the result, in the transaction that ends the job:
-  a reported usage settles it with its cost (possibly null: an unknown cost is `settled`, never `void`) and tokens,
-  whatever the outcome; a run that succeeded without any usage is settled with everything unknown; a run that
-  failed without usage (checkout, configuration, a runner that never reached the model) is `void`.
-- **Void without a report.** A job that ends without `complete` (the last attempt loses its lease, the hard limit,
-  a release on the last attempt, a cancellation at claim time, a cancellation or replacement while it waited again)
-  has its `reserved` record voided in the same transaction as the transition: the runner side with
-  `voidRecordsOfEndedJobs` (`usage-records-sweep.ts`, also run when Dynamic Review is switched off), the scoped job repository (`cancelWaiting`, and the
-  replacement in `enqueue`) with `voidEndedJobs()`.
+  a reported usage settles it with its cost (possibly null: an unknown cost is `settled`, never `void`, and never
+  zero) and tokens, whatever the outcome; a run that succeeded without any usage is settled with everything
+  unknown; a run that failed without usage (checkout, configuration, a runner that never reached the model) is
+  `void`. A run that failed after it used the model reports its usage in the failed result (#273: the runner puts
+  it there, see `runner/README.md`), so a pull request that always fails near the end is counted at every attempt
+  and cannot be retried at the operator's cost without anybody seeing it. A failed result whose usage shows no
+  model call at all (a runner of an earlier release reports one for a command that never reached the model) is
+  `void` too.
+- **No result.** A job that a runner held and that then ended without any result (its lease ran out on the last
+  attempt, `lease_expired`; it ran past the hard limit, `timeout`; its runner was shut down and gave it back on the
+  last attempt, `runner_shutdown`) is `settled` with an unknown cost and unknown tokens and the reason
+  `no_result` (`settled_reason`): the model may have been used, and counting it is the conservative reading. It is
+  never `void`. A lease that runs out on an earlier attempt ends nothing: the job is tried again and its record
+  stays `reserved`. Only the usage of the attempt that ends the job is recorded; the cost of earlier attempts that
+  were lost is not (a follow-up of #273).
+- **Void without a report.** Every other way a job ends without `complete` made no model call anybody knows of
+  (a cancellation at claim time, a release before the runner began, such as `launch_failed` of a Dispatcher or a
+  failure of the runner API itself, a cancellation or replacement while the job waited again, a job that was never
+  dispatched): its `reserved` record is voided in the same transaction as the transition. The runner side does both
+  this and the `no_result` settlement with `closeRecordsOfEndedJobs` (`usage-records-sweep.ts`, also run when
+  Dynamic Review is switched off); the scoped job repository (`cancelWaiting`, and the replacement in `enqueue`)
+  voids with `voidEndedJobs()`: a job that waited never ran.
 - **Immutable.** Every statement that changes a record only touches a `reserved` one; a repeated completion
   (`alreadyCompleted`) changes nothing. A job that was claimed before this table existed has no record; its
   completion creates one in its final state (key mode `own`, dated from the job's claim).

@@ -42,6 +42,7 @@ import { migration as createUsageRecords } from "./20261014150000_create_usage_r
 import { migration as addJobWorkerFetches } from "./20261015100000_add_job_worker_fetches.ts";
 import { migration as createSetupCodes } from "./20261015110000_create_setup_codes.ts";
 import { migration as createJobDispatches } from "./20261015120000_create_job_dispatches.ts";
+import { migration as addUsageRecordSettledReason } from "./20261015200000_add_usage_record_settled_reason.ts";
 
 const migrations: Record<string, Migration> = {
   "0001_create_app_meta": createAppMeta,
@@ -84,6 +85,7 @@ const migrations: Record<string, Migration> = {
   "20261015100000_add_job_worker_fetches": addJobWorkerFetches,
   "20261015110000_create_setup_codes": createSetupCodes,
   "20261015120000_create_job_dispatches": createJobDispatches,
+  "20261015200000_add_usage_record_settled_reason": addUsageRecordSettledReason,
 };
 
 export const migrationProvider: MigrationProvider = {

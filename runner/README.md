@@ -264,6 +264,15 @@ a fallback model reports `usage.fallbackUsed`.
 The result is exactly one line of JSON on stdout: `ok`, `durationMs`, `commentUrl` (or `null`),
 `errorCode` (or `null`), `logTail` (redacted, at most 4 KB), `logTruncated` (true if the runner's log sink, which sees PR-Agent's records at INFO and above,
 held more than the tail shows; output on stdout and stderr is not counted) and `usage` (model, tokens, cost).
+A failed result carries `usage` too, when the run made at least one model call before it failed (a timeout at
+the end, an answer the validator refuses, a publish error, a lost lease, an error nobody expected); a run that
+failed before its first model call reports `null`. The cost follows the rule of a successful run: exact, or
+`null` when any call was unpriced (the token counters are reported either way), never zero for an unknown
+cost. A Dynamic run reads its ledger (`usage_probe.py`, also from the watchdog that ends a run that does not
+stop); a Diff run reports what PR-Agent measured. Two cases report none: a Diff command that blocks the
+event loop until the watchdog ends it, and a job process that the loop itself ends (lease lost, shutdown,
+hard timeout) before it printed its result. The app counts the second one as a run with an unknown cost
+(`src/usage/README.md`).
 The exit code is 0 for `ok` and 1 otherwise. The environment variable `RUNNER_JOB_TIMEOUT_SECONDS`
 (read from the process environment, not handed to PR-Agent) makes the runner stop the command and
 report `timeout`: first by cancelling it, and if it does not react (a call that blocks the process)

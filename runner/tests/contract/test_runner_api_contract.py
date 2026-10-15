@@ -274,6 +274,48 @@ def test_a_failed_result_may_carry_the_link_of_a_review_that_was_posted_but_shor
     assert _accepts("RunnerResult", result)
 
 
+# #273-T07
+def test_the_examples_of_a_failed_result_with_usage_are_valid() -> None:
+    schema: Document = _load(SCHEMA_PATH)
+    examples: list[Document] = schema["$defs"]["RunnerResult"]["examples"]
+
+    assert len(examples) >= 2
+    for example in examples:
+        assert example["ok"] is False
+        assert example["usage"]["aiCalls"] > 0
+        assert _accepts("RunnerResult", example)
+        assert _accepts("CompleteRequest", {**_example("CompleteRequest"), "result": example})
+    # One of them shows the unknown cost next to the counters.
+    assert {example["usage"]["costUsd"] is None for example in examples} == {True, False}
+
+
+# #273-T07: what the runner prints for a failed run that used the model is what the file says.
+@pytest.mark.parametrize("cost", [0.0042, None])
+def test_the_failed_result_the_runner_prints_after_a_model_call_is_valid(
+    cost: float | None,
+) -> None:
+    from code_reviewer_runner.result import ErrorCode, JobResult, Usage
+
+    result = JobResult(
+        ok=False,
+        duration_ms=1200,
+        comment_url=None,
+        error_code=ErrorCode.DYNAMIC_BUDGET_EXCEEDED,
+        log_tail="dynamic_budget_exceeded: the cost limit is used up",
+        usage=Usage(
+            model="vendor/model-name",
+            prompt_tokens=300,
+            completion_tokens=30,
+            total_tokens=330,
+            ai_calls=3,
+            fallback_used=False,
+            cost_usd=cost,
+        ),
+    )
+
+    assert _accepts("RunnerResult", result.to_json())
+
+
 # #296-T10
 def test_every_checkout_reason_of_the_runner_is_in_the_contract_once() -> None:
     from code_reviewer_runner.dynamic_review.limits import CheckoutReason

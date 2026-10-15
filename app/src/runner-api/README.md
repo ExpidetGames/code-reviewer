@@ -204,7 +204,9 @@ The body is `{ leaseToken, result }`. `result` is what `code-reviewer-run-job` p
   is `409`.
 - **Usage record.** In the transaction that ends the job, its usage record is settled from the result: a
   reported usage settles it with `usage.costUsd` in micro-USD (rounded half up, null when unknown) and the
-  tokens; a failed result without usage voids it (`src/usage/README.md`). A repeated completion changes nothing.
+  tokens, a failed result too when it made a model call before it failed (#273); a failed result without usage voids it
+  (`src/usage/README.md`). A repeated completion changes nothing. A job that ends without any result is closed by the
+  queue, not by this call: settled with an unknown cost and the reason `no_result` when a runner held it.
 - Repeating the same completion answers `200` with `alreadyCompleted: true`; another result for a
   completed job is `409`. "Same" is compared on the stored form, so leaving out an optional field is
   not a different result.

@@ -110,6 +110,68 @@ describe("how a completed job settles its usage record", () => {
     ).toStrictEqual({ state: "void" });
   });
 
+  // #273-T05
+  it("settles a failed job that reported the usage of its calls, with an unknown cost kept unknown", () => {
+    const failed = (usage: JsonValue): JsonValue => ({ ok: false, usage });
+
+    expect(
+      settlementOfOutcome({
+        ok: false,
+        errorCode: "dynamic_budget_exceeded",
+        result: failed({ ...USAGE, costUsd: 0.0035 }),
+      }),
+    ).toStrictEqual({
+      state: "settled",
+      costMicroUsd: 3500,
+      promptTokens: 12000,
+      completionTokens: 900,
+    });
+    expect(
+      settlementOfOutcome({
+        ok: false,
+        errorCode: "dynamic_accounting_failed",
+        result: failed({ ...USAGE, costUsd: null }),
+      }),
+    ).toStrictEqual({
+      state: "settled",
+      costMicroUsd: null,
+      promptTokens: 12000,
+      completionTokens: 900,
+    });
+  });
+
+  // #273-T03: a runner of an earlier release reports the usage of a failed command that never reached
+  // the model as zero calls; that is no run that used the model.
+  it("voids a failed job whose usage shows no model call, but not a run that succeeded", () => {
+    const noCall = {
+      ...USAGE,
+      promptTokens: 0,
+      completionTokens: 0,
+      totalTokens: 0,
+      aiCalls: 0,
+      costUsd: null,
+    };
+
+    expect(
+      settlementOfOutcome({
+        ok: false,
+        errorCode: "command_failed",
+        result: { ok: false, usage: noCall },
+      }),
+    ).toStrictEqual({ state: "void" });
+    expect(
+      settlementOfOutcome({ ok: true, result: { ok: true, usage: noCall } }),
+    ).toMatchObject({ state: "settled", promptTokens: 0 });
+    // A call that was made but answered nothing is a call.
+    expect(
+      settlementOfOutcome({
+        ok: false,
+        errorCode: "dynamic_engine_unavailable",
+        result: { ok: false, usage: { ...noCall, aiCalls: 1 } },
+      }),
+    ).toMatchObject({ state: "settled", costMicroUsd: null });
+  });
+
   it("settles a failed job that did report a usage", () => {
     expect(
       settlementOfOutcome({
