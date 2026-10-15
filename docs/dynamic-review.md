@@ -619,7 +619,9 @@ held by its runner writes no note either, as it writes no review.
 - a later successful run replaces it with the review;
 - a failure after an earlier successful review keeps that review's findings, resolved history and
   review state exactly as they are and shows the note on top of them (the failed head is not recorded
-  as reviewed); a pull request that was never reviewed shows the note alone, not "0 active findings";
+  as reviewed), also when that review found nothing; a pull request that was never reviewed shows the
+  note alone, not "0 active findings" (a hidden mark in the comment says so, because its state looks
+  like that of a clean review);
 - the state of the comment is validated as for a review: a comment that is not the bot's is never
   edited, and a failure whose head the comment cannot account for (a newer review is there) writes
   nothing. A state that a review would reset is not dropped for a note;

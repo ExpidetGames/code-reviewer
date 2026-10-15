@@ -395,3 +395,32 @@ def test_a_code_the_runner_cannot_write_safely_has_no_note(code: ErrorCode) -> N
 )
 def test_the_codes_of_the_issue_write_a_note(code: ErrorCode) -> None:
     assert failure_note_for(code, None, SHA) is not None
+
+
+# #299-T05
+def test_a_failure_after_a_clean_review_keeps_the_clean_review_visible() -> None:
+    client = MemoryComments()
+    publisher = publisher_for(client)
+    publisher.publish(review(SHA), head_sha=SHA, previous_reviewed_sha=None)
+
+    fail(publisher, NEXT, previous=SHA)
+
+    body = client.comments[0].body
+    assert "Dynamic Review did not complete" in body
+    assert "**0 active finding(s)**" in body
+    assert "No active findings." in body
+    assert "last completed review" in body
+
+
+# #299-T03
+def test_a_repeated_failure_on_a_pull_request_never_reviewed_stays_a_note_alone() -> None:
+    client = MemoryComments()
+    publisher = publisher_for(client)
+
+    fail(publisher)
+    fail(publisher, NEXT, attempted=(SHA,), code=ErrorCode.TIMEOUT, reason=None)
+
+    body = client.comments[0].body
+    assert "active finding" not in body
+    assert "last completed review" not in body
+    assert body.count("Dynamic Review did not complete") == 1

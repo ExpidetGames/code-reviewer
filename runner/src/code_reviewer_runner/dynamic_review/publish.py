@@ -55,6 +55,7 @@ from code_reviewer_runner.dynamic_review.github import (
 from code_reviewer_runner.dynamic_review.reconcile import reconcile
 from code_reviewer_runner.dynamic_review.render import (
     IDENTITY_MARKER,
+    NO_REVIEW_MARKER,
     RenderError,
     render_comment,
     web_base_of,
@@ -164,7 +165,9 @@ class Publisher:
                 "the earlier summary is not accounted for, so no note is written over it",
             )
         state = previous if existing is not None else ReviewState(head_sha, (), ())
-        body = self._render(state, failure_note=note)
+        # A summary that is only a note has the state of a clean review; its mark says which it is.
+        never_reviewed = existing is None or NO_REVIEW_MARKER in existing.body
+        body = self._render(state, failure_note=note, never_reviewed=never_reviewed)
         return self._write(existing, body, head_sha)
 
     def read_previous_state(
@@ -251,6 +254,7 @@ class Publisher:
         reset: bool = False,
         stopped_early: str | None = None,
         failure_note: FailureNote | None = None,
+        never_reviewed: bool = False,
     ) -> str:
         try:
             return render_comment(
@@ -260,6 +264,7 @@ class Publisher:
                 reset=reset,
                 stopped_early=stopped_early,
                 failure_note=failure_note,
+                never_reviewed=never_reviewed,
             )
         except RenderError as error:
             raise PublishError(error.code, error.detail) from None
