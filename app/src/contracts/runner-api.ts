@@ -706,7 +706,7 @@ export interface ReleaseResponse {
   [k: string]: unknown;
 }
 /**
- * #318: 200 from GET /api/runners/v1/version (dispatcher credential). Lets a Dispatcher or a Worker detect an app that is too old before it claims anything. `version` is the runner API version; `appVersion` is the build of the app, for logs.
+ * #318: 200 from GET /api/runners/v1/version (dispatcher credential; #322: a Worker may also send its per-job credential with ?jobId=<its job>, which must be the running claim of that job). Lets a Dispatcher or a Worker detect an app that is too old before it claims anything. An app of a previous release has no such route (404), which means it is too old. `version` is the runner API version; `appVersion` is the build of the app, for logs.
  */
 export interface VersionResponse {
   version: 1;

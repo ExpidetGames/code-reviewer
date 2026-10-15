@@ -13,6 +13,7 @@ import type {
   FieldError,
   FieldErrorCode,
   HeartbeatRequest,
+  ReleaseRequest,
   RunnerResult,
   RunnerUsage,
   WorkerResultRequest,
@@ -20,8 +21,11 @@ import type {
 import {
   CLAIM_ENGINES,
   CLAIM_FEATURES,
+  MAX_RUNNING_RANGE,
+  RELEASE_RETRY_AFTER_RANGE,
   STOPPED_EARLY_REASONS,
 } from "./contract.ts";
+import { WORKER_CREDENTIAL_PATTERN } from "../jobs/worker-credential.ts";
 
 export type Parsed<T> =
   { ok: true; value: T } | { ok: false; fields: FieldError[] };
@@ -167,14 +171,39 @@ export function parseClaimRequest(body: unknown): Parsed<ClaimRequest> {
     if (check.fields.length === 0) engines = accepted;
   }
   const features = parseFeatures(check, body.features);
+  const jobId = parseClaimJobId(check, body.jobId);
+  const maxRunning = parseMaxRunning(check, body.maxRunning);
   if (check.fields.length > 0) return { ok: false, fields: check.fields };
   return {
     ok: true,
     value: {
       ...(engines === undefined ? {} : { engines }),
       ...(features === undefined ? {} : { features }),
+      ...(jobId === undefined ? {} : { jobId }),
+      ...(maxRunning === undefined ? {} : { maxRunning }),
     },
   };
+}
+
+/** #322: the job a Dispatcher wants; absent means the next due job. A present value must be a UUID. */
+function parseClaimJobId(check: Checker, raw: unknown): string | undefined {
+  if (raw === undefined) return undefined;
+  if (typeof raw !== "string" || !JOB_ID.test(raw))
+    return check.fail("jobId", "invalid");
+  return raw;
+}
+
+/** #322: the pool cap; an integer from 1 to 1000. 0 is refused: a cap of 0 would refuse every claim. */
+function parseMaxRunning(check: Checker, raw: unknown): number | undefined {
+  if (raw === undefined) return undefined;
+  if (
+    typeof raw !== "number" ||
+    !Number.isInteger(raw) ||
+    raw < MAX_RUNNING_RANGE.min ||
+    raw > MAX_RUNNING_RANGE.max
+  )
+    return check.fail("maxRunning", "invalid");
+  return raw;
 }
 
 const FEATURE_NAME = /^[a-z][a-z0-9_]{0,63}$/;
@@ -197,6 +226,48 @@ function parseFeatures(
   )
     return check.fail("features", "invalid");
   return CLAIM_FEATURES.filter((known) => raw.includes(known));
+}
+
+/**
+ * #322: the body of the release. The credential is checked for its form only; it is never part of a
+ * refusal, which names fields and reasons. Any reason of the right form is accepted: the app maps one it
+ * does not know to `launch_failed` (it is stored as the error code of a job that fails).
+ */
+export function parseReleaseRequest(body: unknown): Parsed<ReleaseRequest> {
+  if (!isRecord(body))
+    return { ok: false, fields: [{ field: "body", code: "invalid" }] };
+  const check = new Checker();
+  const credential = body.credential;
+  if (credential === undefined) check.fail("credential", "required");
+  else if (
+    typeof credential !== "string" ||
+    !WORKER_CREDENTIAL_PATTERN.test(credential)
+  )
+    check.fail("credential", "invalid");
+  const reason = body.reason;
+  if (reason === undefined) check.fail("reason", "required");
+  else if (typeof reason !== "string" || !ERROR_CODE.test(reason))
+    check.fail("reason", "invalid");
+  const retryAfter = body.retryAfterSeconds;
+  if (
+    retryAfter !== undefined &&
+    (typeof retryAfter !== "number" ||
+      !Number.isInteger(retryAfter) ||
+      retryAfter < RELEASE_RETRY_AFTER_RANGE.min ||
+      retryAfter > RELEASE_RETRY_AFTER_RANGE.max)
+  )
+    check.fail("retryAfterSeconds", "invalid");
+  if (check.fields.length > 0) return { ok: false, fields: check.fields };
+  return {
+    ok: true,
+    value: {
+      credential: credential as string,
+      reason: reason as string,
+      ...(retryAfter === undefined
+        ? {}
+        : { retryAfterSeconds: retryAfter as number }),
+    },
+  };
 }
 
 export function parseHeartbeatRequest(body: unknown): Parsed<HeartbeatRequest> {

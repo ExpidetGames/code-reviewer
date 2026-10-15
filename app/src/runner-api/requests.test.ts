@@ -8,6 +8,7 @@ import {
   parseCompleteRequest,
   parseHeartbeatRequest,
   parseJobId,
+  parseReleaseRequest,
   parseRunnerId,
 } from "./requests.ts";
 
@@ -428,4 +429,166 @@ describe("the features of a claim (#279)", () => {
       });
     }
   });
+});
+
+describe("the Dispatcher's fields of a claim (#322)", () => {
+  const JOB = "0b9f6f4e-3c1a-4d9e-8f43-2a7d5e1c9b10";
+
+  // #322-T12
+  it("keeps a job id and a pool cap", () => {
+    expect(
+      parseClaimRequest({
+        engines: ["pr-agent"],
+        features: ["worker_credential"],
+        jobId: JOB,
+        maxRunning: 4,
+      }),
+    ).toEqual({
+      ok: true,
+      value: {
+        engines: ["pr-agent"],
+        features: ["worker_credential"],
+        jobId: JOB,
+        maxRunning: 4,
+      },
+    });
+  });
+
+  // #322-T12
+  it("accepts the ends of the range of the cap", () => {
+    for (const maxRunning of [1, 1000])
+      expect(parseClaimRequest({ maxRunning })).toEqual({
+        ok: true,
+        value: { maxRunning },
+      });
+  });
+
+  // #322-T12
+  it.each([0, -1, 1001, 1.5, "4", null, true, [], {}, Number.NaN])(
+    "refuses the pool cap %j",
+    (maxRunning) => {
+      expect(parseClaimRequest({ maxRunning })).toEqual({
+        ok: false,
+        fields: [{ field: "maxRunning", code: "invalid" }],
+      });
+    },
+  );
+
+  // #322-T12
+  it.each(["", "abc", "../x", 7, null, JOB + "0", ` ${JOB}`, {}])(
+    "refuses the job id %j",
+    (jobId) => {
+      expect(parseClaimRequest({ jobId })).toEqual({
+        ok: false,
+        fields: [{ field: "jobId", code: "invalid" }],
+      });
+    },
+  );
+
+  // #322-T12
+  it("names every refused field, never its value", () => {
+    const refused = parseClaimRequest({ jobId: "nope", maxRunning: 0 });
+
+    expect(refused).toEqual({
+      ok: false,
+      fields: [
+        { field: "jobId", code: "invalid" },
+        { field: "maxRunning", code: "invalid" },
+      ],
+    });
+    expect(JSON.stringify(refused)).not.toContain("nope");
+  });
+
+  // #322-T10: a claim of an old runner reads the same as before.
+  it("adds nothing to a claim that names neither", () => {
+    expect(parseClaimRequest({ engines: ["pr-agent"] })).toEqual({
+      ok: true,
+      value: { engines: ["pr-agent"] },
+    });
+  });
+});
+
+describe("the release body (#322)", () => {
+  const CREDENTIAL = `crj_${"A".repeat(43)}`;
+
+  // #322-T07
+  it("reads a credential, a reason and a delay", () => {
+    expect(
+      parseReleaseRequest({
+        credential: CREDENTIAL,
+        reason: "launch_failed",
+        retryAfterSeconds: 30,
+      }),
+    ).toEqual({
+      ok: true,
+      value: {
+        credential: CREDENTIAL,
+        reason: "launch_failed",
+        retryAfterSeconds: 30,
+      },
+    });
+  });
+
+  // #322-T07
+  it("does not need a delay, and ignores unknown fields", () => {
+    expect(
+      parseReleaseRequest({ credential: CREDENTIAL, reason: "x", more: 1 }),
+    ).toEqual({ ok: true, value: { credential: CREDENTIAL, reason: "x" } });
+  });
+
+  // #322-T09
+  it("refuses a body that is not an object, or lacks a credential or a reason", () => {
+    expect(parseReleaseRequest("x")).toEqual({
+      ok: false,
+      fields: [{ field: "body", code: "invalid" }],
+    });
+    expect(parseReleaseRequest({})).toEqual({
+      ok: false,
+      fields: [
+        { field: "credential", code: "required" },
+        { field: "reason", code: "required" },
+      ],
+    });
+  });
+
+  // #322-T09
+  it.each([
+    ["not a credential", "lease-token-1234567"],
+    ["too short", `crj_${"A".repeat(42)}`],
+    ["a wrong character", `crj_${"A".repeat(42)}!`],
+    ["with a suffix", `${CREDENTIAL}A`],
+    ["a number", 5],
+  ])("refuses a credential that is %s", (_name, credential) => {
+    expect(parseReleaseRequest({ credential, reason: "x" })).toEqual({
+      ok: false,
+      fields: [{ field: "credential", code: "invalid" }],
+    });
+  });
+
+  // #322-T07
+  it.each(["", "Launch", "1abc", "has space", "a".repeat(65), 5])(
+    "refuses the reason %j",
+    (reason) => {
+      const refused = parseReleaseRequest({ credential: CREDENTIAL, reason });
+      expect(refused.ok).toBe(false);
+      expect(JSON.stringify(refused)).not.toContain(CREDENTIAL);
+    },
+  );
+
+  // #322-T07
+  it.each([0, -1, 86401, 1.5, "30", null])(
+    "refuses the delay %j",
+    (retryAfterSeconds) => {
+      expect(
+        parseReleaseRequest({
+          credential: CREDENTIAL,
+          reason: "x",
+          retryAfterSeconds,
+        }),
+      ).toEqual({
+        ok: false,
+        fields: [{ field: "retryAfterSeconds", code: "invalid" }],
+      });
+    },
+  );
 });
