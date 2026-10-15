@@ -6,12 +6,13 @@
 # (runner/Dockerfile.dockerignore keeps everything else out):
 #   docker build -f runner/Dockerfile -t code-reviewer-runner .
 #
-# Two images come out of this file (#202). The default target, `runtime`, is the PR-Agent-only
+# Three images come out of this file (#202, #324). The default target, `runtime`, is the PR-Agent-only
 # runner and is the LAST stage, so the command above builds it. The `dynamic` target is the same
 # runner plus what Dynamic Review needs and a Diff-only installation should not carry (size and
 # attack surface): the pinned stock OpenCode (about 186 MB), `nft`, a pinned `rg` and the dedicated
-# engine user 10101. Neither image enables anything by itself; compose.dynamic.yml does, for the
-# Dynamic one:
+# engine user 10101. The `sandbox` target has the same Worker layers as `dynamic` and is the Worker
+# image of the hosted deployment (no Dispatcher bundle, see its stage). No image enables anything by
+# itself; compose.dynamic.yml does, for the Dynamic one:
 #   docker build -f runner/Dockerfile --target dynamic -t code-reviewer-runner-dynamic .
 #
 # The Python minor version must match .python-version (a test checks it). Update the digests with
@@ -109,15 +110,17 @@ USER 10001:10001
 WORKDIR /home/runner
 ENTRYPOINT ["/usr/bin/tini", "--", "code-reviewer-runner"]
 
-# ---- dynamic: the runner plus the engine, for compose.dynamic.yml (#202) ----
+# ---- dynamic-worker: the runner plus the engine; every Worker layer of the Dynamic targets (#202) ----
 # Still starts as the unprivileged user 10001: without the override of compose.dynamic.yml
 # (`user: "0:0"` and its capability list) the runner is not the root supervisor, has no engine user
 # configured and serves Diff jobs only. What this stage adds is installed root-owned and not
 # writable by anyone else; the runner's startup self-check hashes both executables against the pins
 # that travel with them (dynamic_review/self_check.py) before it advertises `opencode`.
-FROM runtime-base AS dynamic
-LABEL org.opencontainers.image.title="Code Reviewer runner (Dynamic Review)" \
-      org.opencontainers.image.description="Worker that runs PR-Agent and, when its self-check passes, the stock OpenCode engine for Dynamic Review"
+# Two targets are made from this stage and nothing else is added to either's Worker layers (#324):
+# `dynamic` (self-hosted) and `sandbox` (the Worker image of the hosted deployment). Both are labels
+# on top of it, so they share every layer. The Dispatcher bundle (#334) goes into `dynamic` and
+# `runtime` after this point, never into this stage or `sandbox`: the Sandbox VM runs a Worker only.
+FROM runtime-base AS dynamic-worker
 USER 0:0
 # nft installs the engine user's network rules once, at container start (ADR 0003). Debian's signed
 # package, NOT version-pinned (like tini): apt takes the version the Debian repository has when the
@@ -137,6 +140,22 @@ COPY --from=engine-tools --chown=0:0 --chmod=0755 /engine-tools/ /usr/local/bin/
 RUN install -d -m 0755 -o 0 -g 0 /opt/code-reviewer/pins
 COPY --chown=0:0 --chmod=0644 runner/opencode-pin.json runner/ripgrep-pin.json /opt/code-reviewer/pins/
 USER 10001:10001
+
+# ---- dynamic: the self-hosted Dynamic target, for compose.dynamic.yml (#202) ----
+# The Worker layers of `dynamic-worker`, unchanged. `docker build --target dynamic` gives it.
+FROM dynamic-worker AS dynamic
+LABEL org.opencontainers.image.title="Code Reviewer runner (Dynamic Review)" \
+      org.opencontainers.image.description="Worker that runs PR-Agent and, when its self-check passes, the stock OpenCode engine for Dynamic Review"
+
+# ---- sandbox: the Worker image of the hosted deployment (#324) ----
+# The same Worker layers as `dynamic`, so it keeps the same pins, user layout and fail-closed
+# startup self-check, and no Dispatcher bundle: a Vercel Sandbox VM runs one Worker per job
+# (`worker-once`) or the self-check alone (`probe`), started by the Sandbox-Launcher with the flags
+# of the hardened container spec. Not published by this file (#330 builds and delivers it).
+#   docker build -f runner/Dockerfile --target sandbox -t code-reviewer-runner-sandbox .
+FROM dynamic-worker AS sandbox
+LABEL org.opencontainers.image.title="Code Reviewer Worker (Sandbox)" \
+      org.opencontainers.image.description="Worker image for the hosted deployment: runs one job (worker-once) or the startup self-check (probe)"
 
 # ---- runtime: the default target, PR-Agent only (the last stage, so a plain build gives it) ----
 FROM runtime-base AS runtime

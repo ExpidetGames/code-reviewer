@@ -71,20 +71,22 @@ def main(
     log = logging.getLogger(LOGGER_NAME)
     source = sys.stdin if stdin is None else stdin
     try:
-        request = parse_request(source.read(MAX_START_DOCUMENT_BYTES + 1))
         settings = worker_settings_from_environment(env)
-    except WorkerSetupError as error:
-        log.error("worker cannot start: %s", error)
-        return WorkerExit.SETUP_ERROR
     except SettingsError as error:
         log.error("worker cannot start: %s: %s", WorkerFailure.SETTINGS_INVALID.value, error)
         return WorkerExit.SETUP_ERROR
     try:
-        # The same startup as every mode: the network setup and the end of `NET_ADMIN` come first,
-        # `opencode` is advertised only after the self-check passed, and the hardened container
-        # spec's read-only root is part of it. No job process exists before it is done.
+        # The same startup as every mode, and the first thing a container does: the network setup
+        # and the end of `NET_ADMIN` come first, `opencode` is advertised only after the self-check
+        # passed, and the hardened container spec's read-only root is part of it. No job process
+        # exists before it is done, and the start document (the credential) is not even read yet.
         settings, _ = run_startup(settings, require_read_only_root=True)
     except IsolationError as error:
+        log.error("worker cannot start: %s", error)
+        return WorkerExit.SETUP_ERROR
+    try:
+        request = parse_request(source.read(MAX_START_DOCUMENT_BYTES + 1))
+    except WorkerSetupError as error:
         log.error("worker cannot start: %s", error)
         return WorkerExit.SETUP_ERROR
     return asyncio.run(run_worker(request, settings, env, install_signals=True))

@@ -212,6 +212,7 @@ stable reason (never a value) and keeps serving Diff jobs.
 | `engine_user_invalid` | The engine user does not exist with its own group, or is root. Image users are 10101; do not change `RUNNER_DYNAMIC_ENGINE_UID`/`GID` without a matching image |
 | `network_rules_not_installed` | `nft` could not install the rules: no `NET_ADMIN` at container creation, no `nf_tables` in the host kernel, no `nft`, or a slot port inside the kernel's ephemeral range |
 | `capabilities_not_dropped` | The process still holds `NET_ADMIN` or `SETPCAP` |
+| `root_filesystem_writable` | Only the entry modes `worker-once` and `probe` (#324) ask for it: the root filesystem is not read-only, so this is no container made from the hardened container spec. The legacy loop does not check it |
 | `pin_unreadable` | A pin file in `/opt/code-reviewer/pins/` is missing (or a directory above it is), malformed or has no entry for this platform (an x64 image started on arm64) |
 | `pin_untrusted` | A pin file, or a directory above it up to `/`, is a link, is not owned by root or can be written by group or others |
 | `engine_binary_missing`, `ripgrep_missing` | The file (or a directory above it) is absent, the file is a link, or not executable. This is also what an image **built on arm64** reports: the build installs no engine where there is no pin (#264), so the image builds and the runner serves Diff jobs only |

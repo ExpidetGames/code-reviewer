@@ -1,11 +1,17 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 
-# Smoke test of the runner image. Usage: docker/smoke/runner.sh <image> [diff|dynamic]
+# Smoke test of the runner image. Usage: docker/smoke/runner.sh <image> [diff|dynamic|sandbox] [<dynamic image>]
 # (defaults: code-reviewer-runner:local, diff). `diff` is the default, PR-Agent-only image and proves
 # that it holds nothing of the engine; `dynamic` is the `dynamic` target of runner/Dockerfile and
 # proves the engine is the pinned one, runs as its own user, and that the startup self-check
-# advertises `opencode` exactly when it should (#202).
+# advertises `opencode` exactly when it should (#202). `sandbox` is the `sandbox` target, the Worker
+# image of the hosted deployment: every check of `dynamic` and, besides, no Dispatcher bundle and the
+# same layers as the `dynamic` image given as the third argument (#324).
+#
+# All modes prove the entry modes of the image (#324): `probe` prints a JSON verdict, `worker-once`
+# runs one job against the fake App (dynamic and sandbox; the fake App is Node), `dispatch` refuses while the image has no Dispatcher, the
+# default and RUNNER_MODE=legacy are the job loop, and `worker-reap` is on the PATH.
 #
 # The entry point of the image is the job loop (CR-29), which needs a running app, so this test does
 # not start it for real; it proves that it refuses to start without its configuration. The test
@@ -22,8 +28,14 @@ source "$here/lib.sh"
 
 image=${1:-code-reviewer-runner:local}
 mode=${2:-diff}
-[ "$mode" = diff ] || [ "$mode" = dynamic ] || fail "unknown mode '$mode' (expected diff or dynamic)"
+dynamic_image=${3:-}
+[ "$mode" = diff ] || [ "$mode" = dynamic ] || [ "$mode" = sandbox ] ||
+  fail "unknown mode '$mode' (expected diff, dynamic or sandbox)"
 require_image "$image"
+if [ "$mode" = sandbox ]; then
+  [ -n "$dynamic_image" ] || fail "the sandbox mode needs the dynamic image to compare its layers with"
+  require_image "$dynamic_image"
+fi
 
 # Number of lines in a string (wc pads its output on macOS, hence tr).
 line_count() { printf '%s\n' "$1" | wc -l | tr -d ' '; }
@@ -193,6 +205,57 @@ assert_no_token_in_log() {
   if docker logs "$1" 2>&1 | grep -qF "$loop_token"; then fail "the runner token is in the log of $1"; fi
 }
 
+
+# ---- #324: the entry modes of the image, in every mode -----------------------------------------
+
+# One field of the JSON verdict of `probe`, read on the host: <json text> <python expression of v>
+json_value() {
+  python3 -I -c 'import json, sys
+v = json.loads(sys.argv[1])
+print(eval(sys.argv[2]))' "$1" "$2"
+}
+
+# Runs `probe` in a container made with the given arguments and checks the verdict: exactly one line
+# of JSON with the three keys, the expected engines and reasons, and no value of the environment.
+# Usage: assert_probe <engines> <reasons> <docker run arguments...>   (e.g. "pr-agent" "network_rules_not_installed")
+probe_token="smoke-probe-token-0123456789-abcdef-0123456789"
+assert_probe() {
+  local engines=$1 reasons=$2 output status=0
+  shift 2
+  output=$(docker run --rm --network none --env RUNNER_TOKEN="$probe_token" "$@" "$image" probe 2>/dev/null) || status=$?
+  [ "$status" = "0" ] || fail "probe exited with $status"
+  [ "$(line_count "$output")" = "1" ] || fail "probe must print one line, got: $output"
+  [ "$(json_value "$output" 'sorted(v)')" = "['engines', 'reasons', 'version']" ] || fail "unexpected probe keys: $output"
+  [ "$(json_value "$output" '",".join(v["engines"])')" = "$engines" ] || fail "probe engines: expected '$engines', got: $output"
+  [ "$(json_value "$output" '",".join(v["reasons"])')" = "$reasons" ] || fail "probe reasons: expected '$reasons', got: $output"
+  if grep -qF "$probe_token" <<<"$output"; then fail "a value of the environment is in the probe verdict"; fi
+  printf '    %s\n' "$output"
+}
+
+entry_mode_checks() {
+  # #324-T03: without an engine user and capabilities, probe says so and never advertises opencode.
+  step "probe on a container with the image's own settings advertises pr-agent only"
+  assert_probe pr-agent not_a_dynamic_runner
+
+  # #324-T08: the job loop is the default and RUNNER_MODE=legacy; an unknown mode is refused.
+  step "RUNNER_MODE=legacy is the job loop, and an unknown mode is refused without echoing it"
+  legacy_errors=$(docker run --rm --env RUNNER_MODE=legacy "$image" 2>&1) && status=0 || status=$?
+  [ "$status" = "2" ] || fail "the legacy loop without a URL must exit with 2, got $status"
+  grep -q "RUNNER_API_URL is required" <<<"$legacy_errors" || fail "expected the legacy loop, got: $legacy_errors"
+  unknown_errors=$(docker run --rm --env RUNNER_MODE=smoke-secret-mode-0123456789 "$image" 2>&1) && status=0 || status=$?
+  [ "$status" = "2" ] || fail "an unknown RUNNER_MODE must exit with 2, got $status"
+  if grep -qF "smoke-secret-mode-0123456789" <<<"$unknown_errors"; then fail "the value of RUNNER_MODE is in the output"; fi
+  grep -q "RUNNER_MODE" <<<"$unknown_errors" || fail "the refusal does not name RUNNER_MODE: $unknown_errors"
+
+  step "dispatch refuses with a stable code while the image carries no Dispatcher bundle"
+  dispatch_errors=$(docker run --rm "$image" dispatch 2>&1) && status=0 || status=$?
+  [ "$status" = "2" ] || fail "dispatch must exit with 2, got $status"
+  grep -q "dispatcher_bundle_missing" <<<"$dispatch_errors" || fail "expected dispatcher_bundle_missing, got: $dispatch_errors"
+
+  step "worker-reap is on the PATH and has nothing to do without an engine user"
+  docker run --rm --entrypoint worker-reap "$image" || fail "worker-reap failed in a container without an engine user"
+}
+
 # The default user of both images: nothing makes the runner a Dynamic runner by itself.
 step "a runner started with the image's own settings serves Diff jobs only and says why"
 start_loop smoke-runner-default
@@ -216,6 +279,7 @@ if [ "$mode" = diff ]; then
     'for path in /usr/local/bin/opencode /usr/local/bin/rg /usr/sbin/nft /sbin/nft /usr/bin/nft /opt/code-reviewer; do [ ! -e "$path" ] || echo "$path"; done; getent passwd 10101 || true; getent group 10101 || true'
   [ -z "$SCAN_OUTPUT" ] || fail "the default image holds parts of the Dynamic engine:
 $SCAN_OUTPUT"
+  entry_mode_checks
   step "runner image smoke test passed (diff)"
   exit 0
 fi
@@ -494,5 +558,97 @@ printf '#!/bin/sh\necho 1.19.0\n' >"$replaced"
 chmod 755 "$replaced"
 expect_not_advertised smoke-runner-wrong-binary 'engine_binary_(untrusted|checksum_mismatch)' \
   "${dynamic_caps[@]}" "${dynamic_rootfs[@]}" "${dynamic_env[@]}" --volume "$replaced:/usr/local/bin/opencode:ro"
+
+# ---- #324: probe and worker-once with the production flags; the Sandbox target --------------------
+
+entry_mode_checks
+
+# #324-T04: a Worker with the image's own settings (user 10001, Diff only): one job against the fake
+# App (Node, on the host; the container reaches it through the host gateway), exit codes 0 and 1.
+step "worker-once runs one job against the fake App and exits with the job's outcome"
+python3 -B "$here/worker_once_fake_app.py" "$image" || fail "worker-once did not run the job as expected"
+
+# #324-T01: the same container as the capable runner above, asked for its verdict.
+step "probe with the production flags advertises opencode and names no reason"
+assert_probe "pr-agent,opencode" "" "${dynamic_caps[@]}" "${dynamic_rootfs[@]}" "${dynamic_env[@]}"
+
+# #324-T02: each missing property is pr-agent only with its stable reason, and exit status 0 (the
+# verdict is the answer). No value of the environment is in the verdict.
+step "probe without NET_ADMIN: pr-agent only, network_rules_not_installed"
+assert_probe pr-agent network_rules_not_installed \
+  --user 0:0 --cap-drop ALL --cap-add SETUID --cap-add SETGID --cap-add KILL --cap-add CHOWN \
+  --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add SETPCAP --security-opt no-new-privileges:true \
+  "${dynamic_rootfs[@]}" "${dynamic_env[@]}"
+
+step "probe without SETPCAP: pr-agent only, capabilities_not_dropped"
+assert_probe pr-agent capabilities_not_dropped \
+  --user 0:0 --cap-drop ALL --cap-add SETUID --cap-add SETGID --cap-add KILL --cap-add CHOWN \
+  --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add NET_ADMIN --security-opt no-new-privileges:true \
+  "${dynamic_rootfs[@]}" "${dynamic_env[@]}"
+
+step "probe without nft: pr-agent only, network_rules_not_installed"
+no_nft=$(mktemp)
+extra_cleanup() { rm -f "$replaced" "$no_nft"; }
+printf 'not an executable\n' >"$no_nft"
+chmod 644 "$no_nft"
+assert_probe pr-agent network_rules_not_installed \
+  "${dynamic_caps[@]}" "${dynamic_rootfs[@]}" "${dynamic_env[@]}" --volume "$no_nft:/usr/sbin/nft:ro"
+
+step "probe with a writable root filesystem: pr-agent only, root_filesystem_writable"
+assert_probe pr-agent root_filesystem_writable \
+  "${dynamic_caps[@]}" "${dynamic_env[@]}" \
+  --tmpfs "/tmp:rw,noexec,nosuid,nodev,size=512m,mode=1777" \
+  --tmpfs "/run:rw,noexec,nosuid,nodev,size=1m,mode=0755" \
+  --tmpfs "/home/runner:rw,noexec,nosuid,nodev,size=64m,uid=10001,gid=10001,mode=0700"
+
+# #324-T04 / #324-T07: a Worker started like the hardened container spec starts it does the startup
+# (rules, end of NET_ADMIN, self-check) before it reads its job, and delivers it.
+step "worker-once with the production flags runs one job against the fake App"
+python3 -B "$here/worker_once_fake_app.py" "$image" "${dynamic_caps[@]}" "${dynamic_rootfs[@]}" "${dynamic_env[@]}" ||
+  fail "worker-once with the production flags did not run the job as expected"
+
+step "the startup of the Worker leaves the verdict in a root-only file on the /run tmpfs"
+engines_container=smoke-runner-engines-file
+CLEANUP_CONTAINERS+=("$engines_container")
+docker run --detach --name "$engines_container" --network none --env RUNNER_MODE=worker-once --interactive \
+  "${dynamic_caps[@]}" "${dynamic_rootfs[@]}" "${dynamic_env[@]}" "$image" >/dev/null
+waited=0
+until docker exec "$engines_container" test -f /run/code-reviewer-engines.json 2>/dev/null; do
+  [ "$waited" -lt 90 ] || { docker logs "$engines_container" >&2 || true; fail "no engines file within 90s"; }
+  sleep 1
+  waited=$((waited + 1))
+done
+[ "$(docker exec "$engines_container" stat -c '%u:%g %a' /run/code-reviewer-engines.json)" = "0:0 600" ] ||
+  fail "the engines file is not owned by root with mode 600"
+run_mounts=$(docker exec "$engines_container" cat /proc/self/mountinfo)
+grep -Eq '^[0-9]+ [0-9]+ [0-9]+:[0-9]+ [^ ]+ /run .* - tmpfs ' <<<"$run_mounts" || fail "/run is not a tmpfs in the container"
+engines_document=$(docker exec "$engines_container" cat /run/code-reviewer-engines.json)
+[ "$(json_value "$engines_document" '",".join(v["engines"])')" = "pr-agent,opencode" ] || fail "unexpected engines file: $engines_document"
+docker rm --force "$engines_container" >/dev/null
+
+# #324-T10: the sweep helper works in the hardened container (nothing of the engine user runs).
+step "worker-reap in the hardened container finds nothing of the engine user to end"
+docker run --rm --network none "${dynamic_caps[@]}" "${dynamic_rootfs[@]}" "${dynamic_env[@]}" \
+  --entrypoint worker-reap "$image" || fail "worker-reap failed in the hardened container"
+
+if [ "$mode" = sandbox ]; then
+  # #324-T09: the Sandbox target is the Dynamic image's Worker layers and nothing of a Dispatcher.
+  step "the sandbox image carries no Dispatcher bundle and no Node.js"
+  scan_in_image "$image" "0" sh -c 'for path in /opt/code-reviewer/dispatcher /usr/local/bin/node /usr/bin/node /usr/bin/nodejs; do [ ! -e "$path" ] || echo "$path"; done'
+  [ -z "$SCAN_OUTPUT" ] || fail "the sandbox image holds parts of a Dispatcher:
+$SCAN_OUTPUT"
+
+  step "every layer of the dynamic image is a layer of the sandbox image, in the same order"
+  dynamic_layers=$(docker image inspect --format '{{json .RootFS.Layers}}' "$dynamic_image")
+  sandbox_layers=$(docker image inspect --format '{{json .RootFS.Layers}}' "$image")
+  [ "$dynamic_layers" = "$sandbox_layers" ] || fail "the sandbox image has other layers than the dynamic image:
+dynamic: $dynamic_layers
+sandbox: $sandbox_layers"
+  printf '    %s layers, all shared\n' "$(python3 -I -c 'import json, sys; print(len(json.loads(sys.argv[1])))' "$sandbox_layers")"
+
+  step "the sandbox image is labelled as the Worker image"
+  title=$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.title"}}' "$image")
+  [[ "$title" == *Sandbox* ]] || fail "unexpected image title: $title"
+fi
 
 step "runner image smoke test passed"

@@ -112,3 +112,26 @@ def test_both_ways_to_start_a_worker_run_the_same_startup(recorder: Recorder) ->
     worker_cli.main(["--once"], environment=DYNAMIC, stdin=start_document())
 
     assert recorder.events == ["drop NET_ADMIN", "self-check", "job process may start"]
+
+
+class RecordingStdin(io.StringIO):
+    def __init__(self, events: list[str]) -> None:
+        super().__init__(start_document().getvalue())
+        self._events = events
+
+    def read(self, size: int | None = -1) -> str:
+        self._events.append("read the start document")
+        return super().read(size)
+
+
+# #324-T07: startup is the first thing a container does; the start document is read after it, so a
+# launcher that keeps stdin open still gets a hardened container (and its engines file) at once.
+def test_the_start_document_is_read_only_after_the_startup_is_done(recorder: Recorder) -> None:
+    cli.main(["worker-once"], environment=DYNAMIC, stdin=RecordingStdin(recorder.events))
+
+    assert recorder.events == [
+        "drop NET_ADMIN",
+        "self-check",
+        "read the start document",
+        "job process may start",
+    ]

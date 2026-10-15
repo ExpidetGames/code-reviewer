@@ -494,6 +494,10 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
+      # The smoke test runs the fake App (Node) on the host (worker-once, #324).
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Build the image
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
@@ -523,6 +527,49 @@ jobs:
             echo "an engine was installed on an unpinned platform" >&2
             exit 1
           fi
+
+  # The Sandbox image (#324): the `sandbox` target of the same Dockerfile, the Worker image of the
+  # hosted deployment. Its smoke test runs every check of the Dynamic image on it and proves the
+  # entry modes with the production flags (probe, worker-once against the fake App, the engines
+  # file), that it carries no Dispatcher bundle and that its layers are those of the `dynamic`
+  # image, which is built here too (from the cache of the job above). Not published: #330 builds
+  # and delivers it.
+  image-runner-sandbox:
+    name: "Image: Sandbox runner build & smoke test"
+    needs: changes
+    if: ${{ github.event_name == 'pull_request' && (github.base_ref == 'main' || needs.changes.outputs.runner == 'true') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      # The smoke test runs the fake App (Node) and the engine suite's fakes (Python, standard library)
+      # on the host.
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build the dynamic image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: runner/Dockerfile
+          target: dynamic
+          load: true
+          push: false
+          tags: code-reviewer-runner-dynamic:ci
+          cache-from: type=gha,scope=runner-dynamic
+      - name: Build the sandbox image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: runner/Dockerfile
+          target: sandbox
+          load: true
+          push: false
+          tags: code-reviewer-runner-sandbox:ci
+          cache-from: type=gha,scope=runner-dynamic
+      - name: Smoke test the image
+        run: docker/smoke/runner.sh code-reviewer-runner-sandbox:ci sandbox code-reviewer-runner-dynamic:ci
 
   # The Docker Compose stack (compose.yml): both images are built here and the stack is started
   # with dummy settings by docker/smoke/compose.sh. Nothing is pushed; the job has no login and only
@@ -579,7 +626,7 @@ jobs:
   # fails on any failed or cancelled job and accepts skipped jobs (path filter).
   ci-passed:
     name: All checks passed?
-    needs: [changes, app-fast, app-serverless, dispatcher-fast, runner-fast, engine, e2e, e2e-dynamic, licenses, image-app, image-runner, image-runner-dynamic, compose, actionlint]
+    needs: [changes, app-fast, app-serverless, dispatcher-fast, runner-fast, engine, e2e, e2e-dynamic, licenses, image-app, image-runner, image-runner-dynamic, image-runner-sandbox, compose, actionlint]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5

@@ -151,6 +151,63 @@ legacy loop (`code-reviewer-runner`, claiming with `RUNNER_TOKEN`) is unchanged 
   holds it, and it is never given to the job process: that gets the job (with the git token and the model key) on stdin
   and a minimal environment, as in the loop. A usage error does not echo the arguments.
 
+### Entry modes of the image, the engines file and `worker-reap` (#324)
+
+One image, one entry point, four modes. `code-reviewer-runner [mode]` takes the mode as its argument; without one
+it takes `RUNNER_MODE`; without that it is `legacy`, so an installation that sets nothing starts the job loop as it
+always did. An unknown mode is a usage error (exit 2) that does not echo what was typed.
+
+| Mode | What it does |
+|---|---|
+| `legacy` (default) | The job loop above: claims with `RUNNER_TOKEN` and runs jobs itself. |
+| `worker-once` | One Worker (above): `{appUrl, jobId, credential}` on stdin, one job, exit code 0, 1 or 2. Same as `code-reviewer-worker --once`. |
+| `probe` | Runs the startup and prints one line of JSON, the verdict, then exits. No token, URL or credential is read. |
+| `dispatch` | The Dispatcher. This image carries no Dispatcher bundle yet (#334): exit 2, `dispatcher_bundle_missing`. |
+
+**The startup is the same in every mode** and runs once, first thing in the container, before any thread, job process
+or (in `worker-once`) the start document exists: the engine user's network rules, the end of `NET_ADMIN` and
+`SETPCAP`, then the self-check that decides whether `opencode` is advertised (`job_loop/service.py`, `run_startup`).
+`worker-once`, `probe` and `code-reviewer-worker --once` also require the **read-only root filesystem** of the
+hardened container spec: on a writable root `opencode` is not advertised (`root_filesystem_writable`). The legacy
+loop does not ask for it, as before. A container that cannot drop `NET_ADMIN` (no `SETPCAP`) does not start in
+`legacy` and `worker-once` (exit 2) and answers `probe` with `capabilities_not_dropped`.
+
+**The verdict** (`probe`'s one line of stdout; logs go to stderr):
+
+```json
+{"version":1,"engines":["pr-agent","opencode"],"reasons":[]}
+```
+
+`engines` are the engines the container may advertise; when `opencode` is missing `reasons` holds the stable reason
+from the list of `docs/dynamic-review.md` ("Startup self-check"), for example `network_rules_not_installed` (no
+`NET_ADMIN` or `nft`), `capabilities_not_dropped`, `root_filesystem_writable` or `not_a_dynamic_runner`. It holds no
+other text and no value of the environment. The exit status says whether the probe ran, not whether the container
+passed: 0 with a verdict (also `pr-agent` only), 2 when the settings are unusable and there is no verdict. A launcher
+that wants `opencode` checks that it is in `engines`.
+
+**The engines file.** Every start writes the same verdict to `/run/code-reviewer-engines.json` so that a launcher
+inside the container (#334) reads the result of the init self-check instead of repeating it, which would need the
+capabilities that are gone. It is written only by root on a `/run` that is a tmpfs, with mode 0600 (the three tmpfs of
+the hardened container spec make it so), by a temporary file and a rename, so a link planted at the name is replaced
+and never followed. The file of an earlier start is removed before the startup runs: a start that fails leaves none.
+Not root or not a tmpfs: no file, and the reason (`not_root`, `not_on_tmpfs`, `write_failed`) is logged. The file is
+an aid, never a gate.
+
+**`worker-reap`** ends what the engine user still runs. A launcher that kills a Worker from outside ends the group
+of the Worker itself, while it still holds the group's leader (never signal a group id that is no longer yours,
+`process_group.py`), then runs `worker-reap`: a `kill(-1, SIGKILL)` made as the engine user, the same sweep the Worker
+host makes after a Dynamic job. It takes no target (no pid, no group id: the part of the process-group rules that is
+a launcher's stays with the launcher), reads the same variables as the runner, needs the root supervisor and exits
+0 (nothing of the engine user runs, or the container has no engine user), 1 (a process survived) or 2 (not root,
+unusable settings).
+
+**Images.** `runner/Dockerfile` makes `runtime` (the default target, PR-Agent only), `dynamic` (self-hosted
+Dynamic) and `sandbox`, the Worker image of the hosted deployment. `sandbox` has exactly the Worker layers of
+`dynamic` (the shared stage `dynamic-worker`: the same pins, user layout and self-check) and no Dispatcher bundle:
+the Sandbox VM runs `worker-once` or `probe`, nothing else. The bundle of #334 is added to `dynamic` and `runtime`
+after that stage, never to it. Build: `docker build -f runner/Dockerfile --target sandbox -t code-reviewer-runner-sandbox .`
+(`make test-images` builds and smoke tests all three). Publishing it is #330.
+
 The sizing of a container (memory per process, default concurrency) is in
 `docs/spike/cr-13-measurements.md`.
 
