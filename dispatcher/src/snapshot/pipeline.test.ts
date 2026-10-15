@@ -719,6 +719,40 @@ describe("retention in the pipeline", () => {
     expect(warnings).toEqual(["retention_failed"]);
   });
 
+  // #365-T05
+  it("reports a listing that fails as a warning, deletes nothing and still returns the record", async () => {
+    // What the platform's 400 on a name prefix without the name sort looked like to the pipeline.
+    class RefusingList extends FakeSandboxService {
+      override async listBuilders(): Promise<never> {
+        throw new Error("Status code 400 is not ok");
+      }
+    }
+    const fake = new RefusingList();
+    fake.onExec(STEPS.recordBaseManifest, { stdout: MANIFEST_OK });
+    fake.onExec(STEPS.inspectImage, { stdout: `${IMAGE_ID}\n` });
+    fake.onExec(STEPS.checkNoContainers, { stdout: "" });
+    fake.onExec(STEPS.scanFilesystem, { stdout: "SCAN_DONE\n" });
+    fake.onExec(STEPS.inspectRestoredImage, { stdout: `${IMAGE_ID}\n` });
+    fake.onExec(STEPS.probe, { stdout: PROBE_OK });
+    const old = fake.seedBuilder(
+      "code-reviewer-golden-builder-20260101T000000Z",
+      1,
+    );
+    fake.seedBuilder("code-reviewer-golden-builder-20260201T000000Z", 2);
+    fake.seedBuilder("code-reviewer-golden-builder-20260301T000000Z", 3);
+    const { record, warnings } = await run(fake).result;
+    expect(record.snapshotId).toBeTruthy();
+    expect(warnings).toEqual(["retention_failed"]);
+    // Nothing was removed: the seeded builders and their snapshots, and the new one, are all still there.
+    expect(fake.liveSnapshotIds()).toHaveLength(4);
+    expect(fake.liveSnapshotIds()).toContain(old);
+    expect(
+      fake.events.filter((event) =>
+        event.startsWith("destroy:code-reviewer-golden-builder-"),
+      ),
+    ).toEqual([]);
+  });
+
   it("reports a builder with an unknown snapshot as a warning and leaves it alone", async () => {
     const fake = happyFake();
     fake.seedBuilder("code-reviewer-golden-builder-20260101T000000Z", 1, false);
