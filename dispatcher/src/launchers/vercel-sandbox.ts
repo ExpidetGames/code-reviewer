@@ -15,6 +15,9 @@ import {
   SandboxServiceError,
   type ExecRequest,
   type ExecResult,
+  type ListFilter,
+  type ListedVm,
+  type SandboxFleet,
   type SandboxCreateOptions,
   type SandboxFailureKind,
   type SandboxProcess,
@@ -59,6 +62,15 @@ export interface SdkSandbox {
   stop(opts?: { signal?: AbortSignal }): Promise<unknown>;
 }
 
+/** What the adapter reads of one VM of `Sandbox.list` (the SDK yields more). */
+export interface SdkListedSandbox {
+  readonly name: string;
+  readonly createdAt: number;
+  readonly status: string;
+  readonly timeout?: number | undefined;
+  readonly tags?: Record<string, string> | undefined;
+}
+
 /** The credentials of an access token, as the SDK takes them (all three or none). */
 type SdkAuth = { token?: string; teamId?: string; projectId?: string };
 
@@ -78,6 +90,10 @@ export interface SandboxSdk {
       },
     ): Promise<SdkSandbox>;
     get(params: SdkAuth & { name: string }): Promise<SdkSandbox>;
+    /** The result is async-iterable over every page. The parameters are loose: the SDK's own are unions. */
+    list(
+      params: Record<string, unknown>,
+    ): Promise<AsyncIterable<SdkListedSandbox>>;
   };
 }
 
@@ -257,7 +273,7 @@ function isGone(error: unknown): boolean {
 export function createVercelSandboxService(
   load: () => Promise<SandboxSdk>,
   credentials?: VercelCredentials,
-): SandboxService {
+): SandboxService & SandboxFleet {
   const auth = credentials === undefined ? {} : { ...credentials };
   let sdk: Promise<SandboxSdk> | undefined;
   const loaded = () => (sdk ??= load());
@@ -293,6 +309,31 @@ export function createVercelSandboxService(
         if (isGone(error)) return;
         throw mapped(error);
       }
+    },
+
+    async list(filter: ListFilter, signal): Promise<ListedVm[]> {
+      const { Sandbox } = await loaded();
+      const vms: ListedVm[] = [];
+      try {
+        for await (const listed of await Sandbox.list({
+          ...auth,
+          namePrefix: filter.namePrefix,
+          tags: { ...filter.tags },
+          ...(signal === undefined ? {} : { signal }),
+        }))
+          vms.push({
+            name: listed.name,
+            createdAtMs: listed.createdAt,
+            status: listed.status,
+            ...(typeof listed.timeout === "number"
+              ? { timeoutMs: listed.timeout }
+              : {}),
+            tags: { ...listed.tags },
+          });
+      } catch (error) {
+        throw mapped(error);
+      }
+      return vms;
     },
   };
 }

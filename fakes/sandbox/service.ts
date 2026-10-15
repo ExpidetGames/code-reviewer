@@ -63,6 +63,24 @@ export type FakeVmRecord = {
   name: string;
   options: FakeCreateOptions;
   state: "running" | "stopped";
+  /** When the platform created it, in milliseconds since the epoch (the fake's `now` at `create`, or what a test seeds). */
+  createdAtMs: number;
+  /** The platform's word for the state when a test needs one other than the two of `state`. */
+  statusWord?: string;
+};
+
+/** What `list` yields; it matches `ListedVm` of the Launcher's port, which this file does not import. */
+export type FakeListedVm = {
+  name: string;
+  createdAtMs: number;
+  status: string;
+  timeoutMs?: number;
+  tags: Record<string, string>;
+};
+
+export type FakeListFilter = {
+  namePrefix: string;
+  tags: Readonly<Record<string, string>>;
 };
 
 type FakeProcessRecord = {
@@ -94,8 +112,20 @@ export class FakeSandboxService {
   private createError: Error | undefined;
   private createGate: Deferred<void> | undefined;
   private stopError: Error | undefined;
+  private readonly stopErrors = new Map<string, Error>();
+  private ignoreFilter = false;
   private waitFailures: { remaining: number; error: Error } | undefined;
   private rename: ((name: string) => string) | undefined;
+  private listError: Error | undefined;
+  /** Every filter `list` was called with, in order. */
+  readonly lists: FakeListFilter[] = [];
+
+  /** `now` stamps the creation time of a VM and is what a test moves to age one; the real clock by default. */
+  private readonly now: () => number;
+
+  constructor(now: () => number = () => Date.now()) {
+    this.now = now;
+  }
 
   // ---- scripting -------------------------------------------------------------------------------
 
@@ -117,9 +147,57 @@ export class FakeSandboxService {
     this.createError = error;
   }
 
-  /** Every following `stop` throws this error. */
-  failStops(error: Error): void {
-    this.stopError = error;
+  /** Every following `stop` throws this error; with a name, only the `stop` of that VM does. */
+  failStops(error: Error, name?: string): void {
+    if (name === undefined) this.stopError = error;
+    else this.stopErrors.set(name, error);
+  }
+
+  /** The `stop` calls work again (a failed stop is retried by the next run of the reaper). */
+  healStops(): void {
+    this.stopError = undefined;
+    this.stopErrors.clear();
+  }
+
+  /** `list` returns every VM whatever the filter says: a platform that does not honour it, to prove the caller checks. */
+  listIgnoresFilter(): void {
+    this.ignoreFilter = true;
+  }
+
+  /** The next `list` throws this error (a `SandboxServiceError` of the Dispatcher, brought by the test). */
+  failNextList(error: Error): void {
+    this.listError = error;
+  }
+
+  /**
+   * A VM that is on the platform without a launch of this fake: one an earlier Dispatcher made, a golden builder or
+   * somebody else's. `timeoutMs` and `status` are reported by `list` the way the platform does.
+   */
+  seedVm(vm: {
+    name: string;
+    tags?: Record<string, string>;
+    createdAtMs?: number;
+    timeoutMs?: number;
+    /** The platform's word: `running` (the default), `stopping`, `stopped`, ... */
+    status?: string;
+  }): void {
+    const status = vm.status ?? "running";
+    this.vms.set(vm.name, {
+      name: vm.name,
+      options: {
+        name: vm.name,
+        snapshotId: "seeded",
+        region: "fra1",
+        vcpus: 1,
+        timeoutMs: vm.timeoutMs ?? 0,
+        tags: { ...vm.tags },
+        persistent: false,
+      },
+      state:
+        status === "running" || status === "pending" ? "running" : "stopped",
+      createdAtMs: vm.createdAtMs ?? this.now(),
+      statusWord: status,
+    });
   }
 
   /** The VMs the platform creates get a different name than the requested one (a normalised name). */
@@ -221,18 +299,57 @@ export class FakeSandboxService {
       name,
       options: structuredClone(options),
       state: "running",
+      createdAtMs: this.now(),
     };
     this.vms.set(name, record);
     return this.vm(record);
+  }
+
+  /**
+   * The VMs whose name starts with the prefix and that carry every tag of the filter, like the platform's listing
+   * (which narrows by one tag; the fake accepts more). A VM that was stopped is still listed, as `stopped`.
+   */
+  async list(filter: FakeListFilter): Promise<FakeListedVm[]> {
+    this.events.push("list");
+    this.lists.push(structuredClone(filter));
+    if (this.listError !== undefined) {
+      const error = this.listError;
+      this.listError = undefined;
+      throw error;
+    }
+    return [...this.vms.values()]
+      .filter(
+        (vm) =>
+          this.ignoreFilter ||
+          (vm.name.startsWith(filter.namePrefix) &&
+            Object.entries(filter.tags).every(
+              ([key, value]) => vm.options.tags[key] === value,
+            )),
+      )
+      .map((vm) => ({
+        name: vm.name,
+        createdAtMs: vm.createdAtMs,
+        status:
+          vm.state === "running"
+            ? (vm.statusWord ?? "running")
+            : (vm.statusWord ?? "stopped"),
+        ...(vm.options.timeoutMs > 0
+          ? { timeoutMs: vm.options.timeoutMs }
+          : {}),
+        tags: { ...vm.options.tags },
+      }));
   }
 
   async stop(name: string): Promise<void> {
     this.events.push(`stop:${name}`);
     this.stops.push(name);
     if (this.stopError !== undefined) throw this.stopError;
+    const named = this.stopErrors.get(name);
+    if (named !== undefined) throw named;
     const record = this.vms.get(name);
     if (record === undefined || record.state === "stopped") return;
     record.state = "stopped";
+    delete record.statusWord;
     for (const process of this.processes)
       if (process.vm === name && !process.ended) this.end(process, 137);
   }
