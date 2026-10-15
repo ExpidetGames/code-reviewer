@@ -20,6 +20,7 @@ App ──signed POST /dispatch──▶ Trigger ──▶ core ──claim─�
 | Vercel entry, a default export                                                    | `src/index.ts`                           | here, with no engine until the Sandbox-Launcher (#329) is wired in             |
 | Node entry, `@hono/node-server` and a graceful shutdown                           | `src/node.ts` (`pnpm start`)             | here, with no engine until the Docker-Launcher (#334) is wired in              |
 | Poll-Trigger, Docker-Launcher, Sandbox-Launcher                                   | `src/triggers/poll.ts`, `src/launchers/` | #334, #329                                                                     |
+| Golden snapshot pipeline (a command, not a runtime part)                          | `src/snapshot/`, `pnpm snapshot:build`   | here (#330), `docs/golden-snapshot.md`                                         |
 
 Two entry files keep `node:child_process` (the Docker-Launcher's way of starting a process) out of the serverless
 bundle; `src/bundle/serverless-bundle.test.ts` follows the import graph of `src/index.ts` to prove it. Until a real
@@ -124,6 +125,14 @@ Names only: a refusal names the variable, never the value.
 | `DISPATCHER_WORKER_CONFIG`                                                 | JSON `{"diff": {...}, "dynamic": {...}}` with `container.memory` and `launcher`                                        | none         |
 | `DISPATCHER_SHUTDOWN_GRACE_SECONDS`                                        | Node entry: how long launches may finish after SIGTERM, 0 to 600                                                       | `60`         |
 | `PORT`                                                                     | Node entry                                                                                                             | `8080`       |
+
+## The golden snapshot pipeline
+
+`src/snapshot/` builds and checks the VM snapshot that every Sandbox job VM is cloned from (#330). It is a command
+(`pnpm snapshot:build`, run by `.github/workflows/golden-snapshot.yml`), not part of the Dispatcher at run time: no entry
+imports it and the serverless bundle does not contain it. It talks to the platform through the port `src/snapshot/service.ts`
+(`vercel-service.ts` is the only file that knows the SDK) and its tests run against `fakes/vercel-sandbox`. Steps, the record,
+rebuild, rollback, retention, the scan and the failure codes are in `docs/golden-snapshot.md`.
 
 ## Working here
 
