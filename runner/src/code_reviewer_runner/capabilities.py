@@ -72,7 +72,7 @@ def verify_isolation(facts: IsolationFacts) -> None:
 
 
 def self_check_outcome(
-    verify: Callable[[], None],
+    verify: Callable[[], object],
 ) -> tuple[tuple[str, ...], IsolationSelfCheckError | None]:
     """The engines this runner advertises, and why `opencode` is missing when it is.
 
@@ -91,7 +91,7 @@ def self_check_outcome(
     return ALL_ENGINES, None
 
 
-def advertised_engines(verify: Callable[[], None]) -> tuple[str, ...]:
+def advertised_engines(verify: Callable[[], object]) -> tuple[str, ...]:
     """The engines this runner advertises: both only after `verify` proved the isolation."""
     return self_check_outcome(verify)[0]
 

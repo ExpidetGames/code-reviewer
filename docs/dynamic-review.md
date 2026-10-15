@@ -101,7 +101,8 @@ namespaces, no host kernel setting beyond the `nf_tables` support every current 
   (`RUNNER_DYNAMIC_PROXY_PORT`, default 10180; `RUNNER_DYNAMIC_ENGINE_PORT`, default 10181). The
   engine user may open new connections only to the job's proxy port and its own server port on
   `127.0.0.1`; everything else it tries (another job's loopback service, any other
-  address, IPv6, UDP, a flow that someone else opened and closed) is rejected at once. Only the
+  address, IPv6, UDP, a flow that someone else opened and closed) is rejected at once (the full
+  ruleset; some kernels get the fallback below, #345). Only the
   replies of the engine's own server pass as tracked traffic. A per-job network namespace would need `SYS_ADMIN`, and a
   container-level egress rule cannot tell the supervisor (GitHub, the model upstream) from the engine
   in the same container. The rules are proven before every engine starts, by a probe running as the
@@ -109,6 +110,49 @@ namespaces, no host kernel setting beyond the `nf_tables` support every current 
   ruleset, so the probe is how a job verifies them); any other result is
   `dynamic_isolation_self_check_failed` and no engine is started. The hosted egress gate (#82) is
   still a separate requirement.
+- **Two rulesets, one policy (#345).** The kernel decides which one the runner installs, at start,
+  before it drops `NET_ADMIN`. It asks the kernel by installing and removing a throw-away
+  `table inet` with a `reject` rule (it matches no process).
+
+  | | Full ruleset | Fallback ruleset |
+  |---|---|---|
+  | Chosen when | the kernel accepts `table inet` and `reject` (every ordinary Linux host, Docker host and Coolify host) | `inet` or `reject` is refused. Some VM kernels, for example the ones of hosted sandbox VMs, only support the nf_tables `ip` family |
+  | nft table | `table inet code_reviewer_engine_<uid>` | `table ip code_reviewer_engine_<uid>` |
+  | Last rule for the engine user | `reject with icmpx type admin-prohibited`: refused at once | `drop`: no answer, a connection attempt times out |
+  | IPv4 | proxy port and engine port on `127.0.0.1`, the engine's replies, nothing else | the same three accepts, nothing else |
+  | IPv6 | covered by the same table (every packet of the user is rejected) | **not covered by an `ip` table**: switched off, and proven off (below) |
+  | Startup log line | `egress rules: full (inet)` | `egress rules: fallback (ip, ipv6 disabled)` |
+
+  The policy is the same in both: the engine user reaches the job's model proxy and its own server
+  port on loopback and nothing else; a refused attempt and a dropped one are both "not reached".
+  Nothing about a host that has `inet` changes: it gets the full ruleset, byte for byte as before.
+
+  **IPv6 in fallback mode.** The startup step (after the rules are installed) writes `1` to
+  `net.ipv6.conf.{default,all,<each interface>}.disable_ipv6` as far as the container lets it. A
+  container's `/proc/sys` is normally read-only, so the container spec of such a host must set
+  `net.ipv6.conf.all.disable_ipv6=1` and `net.ipv6.conf.default.disable_ipv6=1` itself (for Docker
+  `--sysctl`, in a compose file `sysctls:`); the runner does not fail on a refused write but on the
+  proof, which it takes from the kernel and from the engine user: every `disable_ipv6` reads `1`,
+  `/proc/net/if_inet6` is empty, `/proc/net/ipv6_route` has no route that can carry a packet (the
+  kernel's always-present "unreachable" entries do not count), `::1` cannot be bound, and as the
+  engine user an IPv6 `connect` and `sendto` to `::1` and to a documentation address end in
+  `ENETUNREACH`, `EADDRNOTAVAIL` or `EAFNOSUPPORT` (a refusal or a timeout is no proof: a working
+  loopback refuses a closed port and a dropped packet times out). The proof is part of the startup
+  self-check (`ipv6_not_disabled`, below) and runs again before every engine of a job. A dual-stack
+  socket's `::ffff:a.b.c.d` traffic is IPv4 on the wire and meets the table like any other.
+  If it cannot be proven, `opencode` is not advertised and the log says what to set.
+
+  **How a test forces the fallback.** On a complete kernel the fallback is never chosen, so the
+  privileged suite passes a `detect` argument to the startup step (`secure_startup(..., detect=...)`),
+  the same kind of seam as its `install` and `drop` arguments. It is a Python argument, not an
+  environment variable, a setting or a job field: nothing in the runner passes it (a unit test scans
+  the sources for that) and the loop never reads the mode from its environment. The loop hands the
+  mode it found to the Dynamic job process (`RUNNER_EGRESS_MODE`, set by the loop alone and
+  dropped from the container's own environment), which proves the properties of that mode again; a
+  missing value means the full mode and an unknown one stops the job. The suite's fallback pass sets
+  its own harness variable (`CR_PRIVILEGED_EGRESS_MODE`) that only the test files read. The tests of
+  the rules run for both rulesets, and the full ruleset's assertion of an immediate refusal is kept
+  as it was; the fallback accepts a refusal or a timeout there.
 - **Cleanup.** At the end of a job, on SIGTERM (the job loop's way to end a job on lease loss,
   shutdown and timeout) and in the watchdog, the supervisor kills the engine's process group and then
   every process of the engine user, also helpers that left the group with `setsid()`, removes the
@@ -129,7 +173,7 @@ namespaces, no host kernel setting beyond the `nf_tables` support every current 
   (`restart: unless-stopped`) and gets `NET_ADMIN` again, so what a restart runs must not be
   changeable by a compromised root supervisor. That is what the read-only root filesystem is for
   (next item, #249).
-  If the rules cannot be installed (no `nft`, no `nf_tables`) the capabilities are dropped anyway and
+  If the rules cannot be installed (no `nft`, no `nf_tables` at all) the capabilities are dropped anyway and
   every Dynamic job fails with `dynamic_isolation_self_check_failed` while Diff jobs keep running.
   The fixed slot ports are checked at startup against the kernel's ephemeral port range
   (`/proc/sys/net/ipv4/ip_local_port_range`); a port inside it, or a range that cannot be read,
@@ -210,9 +254,10 @@ stable reason (never a value) and keeps serving Diff jobs.
 | `not_a_dynamic_runner` | No engine user is configured: this is the default runner (information, not a warning) |
 | `not_root_supervisor` | The process is not root; `compose.dynamic.yml` sets `user: "0:0"` |
 | `engine_user_invalid` | The engine user does not exist with its own group, or is root. Image users are 10101; do not change `RUNNER_DYNAMIC_ENGINE_UID`/`GID` without a matching image |
-| `network_rules_not_installed` | `nft` could not install the rules: no `NET_ADMIN` at container creation, no `nf_tables` in the host kernel, no `nft`, or a slot port inside the kernel's ephemeral range |
+| `network_rules_not_installed` | `nft` could not install the rules: no `NET_ADMIN` at container creation, no `nf_tables` in the host kernel (a kernel with only the `ip` family gets the fallback ruleset instead, #345), no `nft`, or a slot port inside the kernel's ephemeral range |
 | `capabilities_not_dropped` | The process still holds `NET_ADMIN` or `SETPCAP` |
 | `root_filesystem_writable` | Only the entry modes `worker-once` and `probe` (#324) ask for it: the root filesystem is not read-only, so this is no container made from the hardened container spec. The legacy loop does not check it |
+| `ipv6_not_disabled` | Only with the fallback ruleset (#345): IPv6 is not proven off for the engine user (a `disable_ipv6` setting is not `1`, an IPv6 address or a usable route exists, `::1` can be bound, or the engine user's IPv6 attempt did not end in a "no IPv6" error). Set `net.ipv6.conf.all.disable_ipv6=1` and `net.ipv6.conf.default.disable_ipv6=1` on the container |
 | `pin_unreadable` | A pin file in `/opt/code-reviewer/pins/` is missing (or a directory above it is), malformed or has no entry for this platform (an x64 image started on arm64) |
 | `pin_untrusted` | A pin file, or a directory above it up to `/`, is a link, is not owned by root or can be written by group or others |
 | `engine_binary_missing`, `ripgrep_missing` | The file (or a directory above it) is absent, the file is a link, or not executable. This is also what an image **built on arm64** reports: the build installs no engine where there is no pin (#264), so the image builds and the runner serves Diff jobs only |
@@ -223,7 +268,7 @@ stable reason (never a value) and keeps serving Diff jobs.
 
 The full log line is `Dynamic Review: opencode is not advertised, this runner serves Diff jobs only
 (dynamic_isolation_self_check_failed: <reason>)`; a passing check logs `Dynamic Review: opencode is
-advertised, the startup self-check passed`. A successful `--version` is one item of the list and
+advertised, the startup self-check passed (egress rules: full)` (or `fallback`, #345). A successful `--version` is one item of the list and
 proves nothing about isolation; what cannot be known at start (the sealed read-only export, the
 unreadable private state, the network again) is proven for every job before its engine starts, and a
 failure there ends that job with `dynamic_isolation_self_check_failed`.
@@ -851,10 +896,10 @@ by the defaults.
   repository content as untrusted data and the engine has no write, execute or general-network
   capability, but there is no guarantee of model resistance.
 - **The boundary is the container, not a sandbox.** The engine user's network is confined by nft rules
-  that cover TCP, UDP and IPv6 but not AF_UNIX (kept empty by mounting and sharing nothing), and the
+  that cover TCP, UDP and IPv6 (with the fallback ruleset: IPv6 by switching it off, #345) but not AF_UNIX (kept empty by mounting and sharing nothing), and the
   supervisor is a root process that parses untrusted Git objects and HTTP. See ADR 0003.
 - **Supported hosts.** Linux/amd64 (x86_64) glibc images only, on a Docker host whose kernel has
-  `nf_tables`. **Dynamic Review needs x86_64.** On an arm64 host the stack still builds and deploys,
+  `nf_tables` (the `ip` family is enough: see the fallback ruleset). **Dynamic Review needs x86_64.** On an arm64 host the stack still builds and deploys,
   but the Dynamic image has no engine (the build skips the unpinned download, #264), the runner reports
   `engine_binary_missing` and serves Diff jobs only: Dynamic stays unavailable. Nothing is tested on
   rootless Docker, user-namespace remapping or Podman. Coolify support is written down but untested.

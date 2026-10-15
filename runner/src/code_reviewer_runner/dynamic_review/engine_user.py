@@ -30,7 +30,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .netguard import IsolationError, verify_confinement
+from .ipv6_off import verify_ipv6_off
+from .netguard import EgressMode, IsolationError, verify_confinement
 from .static_isolation import (
     DEFAULT_ENGINE_PORT,
     DEFAULT_PROXY_PORT,
@@ -147,6 +148,9 @@ class EngineLaunch:
     # The ports of the single Dynamic slot, which the static network rules allow (#244).
     proxy_port: int = DEFAULT_PROXY_PORT
     engine_port: int = DEFAULT_ENGINE_PORT
+    # Which ruleset startup installed (#345); the fallback one does not see IPv6, so a job in that
+    # mode proves IPv6 off again before its engine starts.
+    egress_mode: EgressMode = EgressMode.FULL
     _verified: bool = field(default=False, init=False)
 
     # -- starting -------------------------------------------------------------
@@ -178,6 +182,8 @@ class EngineLaunch:
         after (`static_isolation.py`); nothing is installed per job. This checks that the ports in
         use are the ones the rules allow, that this process really holds neither `NET_ADMIN` nor
         `SETPCAP` and that the probe, run as the engine user, reaches the proxy and nothing else.
+        With the fallback ruleset (#345) it also proves that IPv6, which that ruleset does not
+        see, is off.
 
         The first call also ends whatever the user still runs: a job process that was killed
         without a chance to clean up (SIGKILL, an OOM kill) leaves its engine behind, and the
@@ -190,6 +196,8 @@ class EngineLaunch:
         require_startup_capabilities_gone()
         if not self._verified:
             verify_confinement(self.uid, self.gid, proxy_port)
+            if self.egress_mode is EgressMode.FALLBACK:
+                verify_ipv6_off(self.uid, self.gid)
             self._verified = True
 
     def owns_listener(self, port: int, *, tables: dict[str, str] | None = None) -> bool:

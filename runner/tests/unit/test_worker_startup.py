@@ -14,7 +14,8 @@ from typing import Any
 import pytest
 
 from code_reviewer_runner import cli, worker_cli
-from code_reviewer_runner.dynamic_review.netguard import IsolationError
+from code_reviewer_runner.dynamic_review.netguard import EgressMode, IsolationError
+from code_reviewer_runner.dynamic_review.static_isolation import EgressSetup
 from code_reviewer_runner.job_loop import service
 from code_reviewer_runner.job_loop.worker import WorkerRequest
 from code_reviewer_runner.job_loop.worker_errors import WorkerExit
@@ -45,11 +46,11 @@ class Recorder:
     def write(self, verdict: Verdict) -> None:
         return None
 
-    def prepare(self, settings: Any) -> bool:
+    def prepare(self, settings: Any) -> EgressSetup:
         self.events.append("drop NET_ADMIN")
         if self.cannot_drop:
             raise IsolationError("a capability could not be dropped from the bounding set")
-        return True
+        return EgressSetup(True, EgressMode.FULL)
 
     def check(self, **facts: Any) -> None:
         self.events.append("self-check")

@@ -14,12 +14,13 @@ from typing import Any
 import pytest
 
 from code_reviewer_runner.capabilities import ALL_ENGINES, ENGINE_DIFF
-from code_reviewer_runner.dynamic_review.netguard import IsolationError
+from code_reviewer_runner.dynamic_review.netguard import EgressMode, IsolationError
 from code_reviewer_runner.dynamic_review.self_check import (
     SelfCheckFailed,
     SelfCheckReason,
     check_dynamic_runner,
 )
+from code_reviewer_runner.dynamic_review.static_isolation import EgressSetup
 from code_reviewer_runner.job_loop import service
 from code_reviewer_runner.job_loop.settings import LoopSettings, WorkerSettings
 from code_reviewer_runner.probe import run_probe
@@ -43,10 +44,10 @@ class World:
         monkeypatch.setattr(service, "write_engines_file", self.write)
         monkeypatch.setattr(service, "remove_engines_file", lambda: None)
 
-    def prepare(self, settings: LoopSettings | WorkerSettings) -> bool:
+    def prepare(self, settings: LoopSettings | WorkerSettings) -> EgressSetup:
         if self.cannot_drop:
             raise IsolationError("a capability could not be dropped from the bounding set")
-        return True
+        return EgressSetup(True, EgressMode.FULL)
 
     def check(self, **facts: Any) -> None:
         self.facts.append(facts)

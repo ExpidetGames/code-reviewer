@@ -13,8 +13,9 @@ from typing import Any
 import pytest
 
 from code_reviewer_runner.capabilities import ALL_ENGINES, ENGINE_DIFF
-from code_reviewer_runner.dynamic_review.netguard import IsolationError
+from code_reviewer_runner.dynamic_review.netguard import EgressMode, IsolationError
 from code_reviewer_runner.dynamic_review.self_check import SelfCheckFailed, SelfCheckReason
+from code_reviewer_runner.dynamic_review.static_isolation import EgressSetup
 from code_reviewer_runner.job_loop import service
 from code_reviewer_runner.job_loop.settings import (
     LoopSettings,
@@ -45,11 +46,11 @@ class Steps:
         monkeypatch.setattr(service, "prepare_dynamic_runtime", self.prepare)
         monkeypatch.setattr(service, "check_dynamic_runner", self.check)
 
-    def prepare(self, settings: LoopSettings | WorkerSettings) -> bool:
+    def prepare(self, settings: LoopSettings | WorkerSettings) -> EgressSetup:
         self.events.append("prepare")
         if self.cannot_drop:
             raise IsolationError("a capability could not be dropped from the bounding set")
-        return self.rules_installed
+        return EgressSetup(self.rules_installed, EgressMode.FULL)
 
     def check(self, **facts: Any) -> None:
         self.events.append("check")
@@ -108,8 +109,8 @@ def test_a_failed_check_leaves_pr_agent_and_the_stable_reason_in_the_verdict(
 def test_a_runner_without_an_engine_user_is_pr_agent_only_with_the_reason_named(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def installed(settings: LoopSettings | WorkerSettings) -> bool:
-        return True
+    def installed(settings: LoopSettings | WorkerSettings) -> EgressSetup:
+        return EgressSetup(True, EgressMode.FULL)
 
     monkeypatch.setattr(service, "prepare_dynamic_runtime", installed)
     written: list[Verdict] = []
