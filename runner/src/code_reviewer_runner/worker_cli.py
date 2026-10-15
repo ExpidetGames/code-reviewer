@@ -18,12 +18,7 @@ from typing import NoReturn, TextIO
 
 from code_reviewer_runner import __version__
 from code_reviewer_runner.dynamic_review.netguard import IsolationError
-from code_reviewer_runner.job_loop.service import (
-    LOGGER_NAME,
-    advertise_engines,
-    configure_logging,
-    prepare_dynamic_runtime,
-)
+from code_reviewer_runner.job_loop.service import LOGGER_NAME, configure_logging, run_startup
 from code_reviewer_runner.job_loop.settings import SettingsError, worker_settings_from_environment
 from code_reviewer_runner.job_loop.worker import (
     MAX_START_DOCUMENT_BYTES,
@@ -76,22 +71,30 @@ def main(
     log = logging.getLogger(LOGGER_NAME)
     source = sys.stdin if stdin is None else stdin
     try:
-        request = parse_request(source.read(MAX_START_DOCUMENT_BYTES + 1))
         settings = worker_settings_from_environment(env)
-    except WorkerSetupError as error:
-        log.error("worker cannot start: %s", error)
-        return WorkerExit.SETUP_ERROR
     except SettingsError as error:
         log.error("worker cannot start: %s: %s", WorkerFailure.SETTINGS_INVALID.value, error)
         return WorkerExit.SETUP_ERROR
     try:
-        setup = prepare_dynamic_runtime(settings)
+        # The same startup as every mode, and the first thing a container does: the network setup
+        # and the end of `NET_ADMIN` come first, `opencode` is advertised only after the self-check
+        # passed, and the hardened container spec's read-only root is part of it. No job process
+        # exists before it is done, and the start document (the credential) is not even read yet.
+        settings, _ = run_startup(settings, require_read_only_root=True)
     except IsolationError as error:
         log.error("worker cannot start: %s", error)
         return WorkerExit.SETUP_ERROR
-    # The same startup as the runner: `opencode` is advertised only after the self-check passed.
-    settings = advertise_engines(settings, setup.rules_installed, egress_mode=setup.mode)
+    try:
+        request = parse_request(source.read(MAX_START_DOCUMENT_BYTES + 1))
+    except WorkerSetupError as error:
+        log.error("worker cannot start: %s", error)
+        return WorkerExit.SETUP_ERROR
     return asyncio.run(run_worker(request, settings, env, install_signals=True))
+
+
+def run_once(environment: Mapping[str, str], *, stdin: TextIO | None = None) -> int:
+    """`code-reviewer-runner worker-once`: the same Worker as `code-reviewer-worker --once`."""
+    return main(["--once"], environment=environment, stdin=stdin)
 
 
 if __name__ == "__main__":

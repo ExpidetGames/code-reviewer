@@ -124,6 +124,32 @@ function defaultOf(reference: string | undefined): string {
   return match[1] ?? "";
 }
 
+/** The commands of the smoke test that create a container like compose.dynamic.yml does. */
+function dynamicContainers(script: string): string[] {
+  // Continuation lines joined, so a command is one line.
+  return script
+    .replace(/\\\n\s*/g, " ")
+    .split("\n")
+    .filter(
+      (line) =>
+        /docker run|start_loop|expect_not_advertised|assert_probe/.test(line) &&
+        (line.includes("${dynamic_caps[@]}") ||
+          line.includes("--cap-add FOWNER")),
+    );
+}
+
+/** Those without the read-only root and tmpfs. The probe with a writable root is allowed (#324). */
+function unguardedDynamicContainers(script: string): string[] {
+  return dynamicContainers(script).filter(
+    (line) =>
+      !line.includes("${dynamic_rootfs[@]}") &&
+      !(
+        line.includes("assert_probe pr-agent root_filesystem_writable") &&
+        line.includes("${writable_rootfs[@]}")
+      ),
+  );
+}
+
 describe("compose.dynamic.yml", () => {
   // #202-T08
   it("adds exactly one service, the Dynamic runner, and changes none of the existing ones", () => {
@@ -365,22 +391,37 @@ describe("compose.dynamic.yml", () => {
 
   // #249-T03
   it("passes the read-only options to every Dynamic container the smoke test starts", () => {
-    // Continuation lines joined, so a command is one line. Every command that creates a container
-    // like compose.dynamic.yml (the shared capability list, or the one spelled out for the case
-    // without NET_ADMIN) must carry the read-only root filesystem and the tmpfs.
-    const commands = smokeScript.replace(/\\\n\s*/g, " ").split("\n");
-    const dynamic = commands.filter(
-      (line) =>
-        /docker run|start_loop|expect_not_advertised/.test(line) &&
-        (line.includes("${dynamic_caps[@]}") ||
-          line.includes("--cap-add FOWNER")),
+    // The capable runner, the read-only check, the three "not advertised" cases, the container that
+    // keeps the engines file, the one that runs worker-reap, and the probes (#324). The probe with a
+    // writable root is the one deliberate exception, see `unguardedDynamicContainers`.
+    expect(dynamicContainers(smokeScript)).toHaveLength(12);
+    expect(unguardedDynamicContainers(smokeScript)).toEqual([]);
+  });
+
+  // #324 (review of #351): a probe is a container like the others, and the guard sees it.
+  it("fails when a probe is started without the read-only root filesystem and tmpfs", () => {
+    const broken = smokeScript.replace(
+      /(assert_probe "pr-agent,opencode" "" "\$\{dynamic_caps\[@\]\}") "\$\{dynamic_rootfs\[@\]\}"/,
+      "$1",
     );
 
-    // The capable runner, the read-only check, and the three "not advertised" cases.
-    expect(dynamic).toHaveLength(5);
-    for (const line of dynamic) {
-      expect(line, line).toContain("${dynamic_rootfs[@]}");
-    }
+    expect(broken).not.toBe(smokeScript);
+    expect(unguardedDynamicContainers(broken)).toHaveLength(1);
+    expect(unguardedDynamicContainers(broken)[0]).toContain("assert_probe");
+  });
+
+  // #324 (review of #351): the exception is the probe that proves a writable root is refused, and
+  // only that one: it must not carry `--read-only`, and it builds its tmpfs from the same list.
+  it("allows exactly one container without the read-only options: the probe with a writable root", () => {
+    const exceptions = dynamicContainers(smokeScript).filter(
+      (line) => !line.includes("${dynamic_rootfs[@]}"),
+    );
+
+    expect(exceptions).toHaveLength(1);
+    expect(exceptions[0]).toContain("root_filesystem_writable");
+    expect(exceptions[0]).toContain("${writable_rootfs[@]}");
+    expect(exceptions[0]).not.toContain("--read-only");
+    expect(smokeScript).toContain('writable_rootfs=("${dynamic_rootfs[@]:1}")');
   });
 
   // #249-T03

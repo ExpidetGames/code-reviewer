@@ -101,8 +101,8 @@ described everywhere else in this file and is unchanged. In serverless mode:
   calls `process.exit`, which would end the function). No migration, no backup of an old database, no
   legacy import, no setup code in memory (it lives in the database: `pnpm setup-code`, `src/setup/README.md`), no sync with GitHub, no
   cleanup or backup timer. The repositories are synchronized by the webhooks and by a daily cron
-  (`src/cron/`, route `/api/internal/repository-sync`, `CRON_SECRET`); the hourly cleanup moves to the sweep
-  (#328).
+  (`src/cron/`, route `/api/internal/repository-sync`, `CRON_SECRET`); the hourly cleanup, the expiry of lapsed leases and
+  the resends are done by a once-a-minute sweep (`/api/internal/dispatch-sweep`, #328, `src/dispatch/README.md`).
 - **Migrations are a command.** `pnpm migrate` connects with `DATABASE_URL_MIGRATE` (a DIRECT Postgres
   connection: a pooler that ends the session between statements would drop the advisory lock), takes the
   session advisory lock `code-reviewer:migrate` for the whole run, applies what is pending and exits 0, or
@@ -320,8 +320,9 @@ so an app of the previous release on the same database is unaffected:
   `consecutive_failures`, `next_dispatch_at`, `acked_at`, `last_attempt_at`, `last_status`, `last_code`, `created_at`,
   `updated_at`): where the signed wake-up call of a job stands (`job-dispatches-repository.ts`, instance level: the
   sender and the sweep work from a job id and the table holds no repository data). Written only with
-  `RUNNER_DISPATCH=webhook`; in the default poll mode it stays empty. A partial index serves the due rows. Rows are
-  not removed yet. See `src/dispatch/README.md`.
+  `RUNNER_DISPATCH=webhook`; in the default poll mode it stays empty. A partial index serves the due rows. The sweep
+  (#328) removes the rows of jobs that finished a week ago and makes a `stopped` row pending again after 10 minutes.
+  See `src/dispatch/README.md`.
 
 ## Workspace scoping
 

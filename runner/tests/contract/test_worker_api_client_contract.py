@@ -155,3 +155,18 @@ def test_an_additive_field_of_an_answer_is_ignored(recorder: Recorder) -> None:
     asyncio.run(go())
 
     assert len(recorder.calls) == 3
+
+
+# #324-T11: the App accepts a Worker credential on /version only with the job id of its job.
+def test_the_version_check_names_the_job_and_sends_the_credential_in_the_header_only(
+    recorder: Recorder,
+) -> None:
+    api = HttpWorkerApi(recorder.url, CREDENTIAL, request_timeout=5)
+
+    asyncio.run(api.check_app(recorder.job_id))
+
+    (call,) = recorder.calls
+    assert call["method"] == "GET"
+    assert call["path"] == f"/api/runners/v1/version?jobId={recorder.job_id}"
+    assert call["authorization"] == f"Bearer {CREDENTIAL}"
+    assert CREDENTIAL not in call["path"]

@@ -241,7 +241,7 @@ async def _run(
 async def _prepare(
     request: WorkerRequest, api: WorkerApi, clock: Clock, log: SafeLog
 ) -> ClaimedJob:
-    await api.check_app()
+    await api.check_app(request.job_id)
     job = await _fetch(api, request.job_id, clock, log)
     return ClaimedJob(
         id=job.id,

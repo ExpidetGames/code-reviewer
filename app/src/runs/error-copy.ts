@@ -26,6 +26,8 @@ export const ERROR_COPY: Readonly<Record<string, string>> = {
     "The project's review kind was changed before this run could start, so the waiting run was cancelled.",
   no_capable_runner:
     "No runner that can run this kind of review picked up the run within the time limit, so it was cancelled. It will run again on the next push or review request.",
+  dispatch_unavailable:
+    "No worker picked up this run within the time limit, so it was stopped. The service that starts workers may be down or fully busy. It will run again on the next push or review request.",
   dynamic_review_disabled:
     "Dynamic Review is not switched on for this instance yet, so this run could not start. Ask whoever runs the server to turn it on, or switch the project to Diff Review on its settings page.",
 

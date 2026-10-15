@@ -122,10 +122,12 @@ test-images:
 	docker build --file app/Dockerfile --tag code-reviewer-app:local .
 	docker build --file runner/Dockerfile --tag code-reviewer-runner:local .
 	docker build --file runner/Dockerfile --target dynamic --tag code-reviewer-runner-dynamic:local .
+	docker build --file runner/Dockerfile --target sandbox --tag code-reviewer-runner-sandbox:local .
 	docker/smoke/app.sh code-reviewer-app:local
 	docker/smoke/upgrade.sh code-reviewer-app:local
 	docker/smoke/runner.sh code-reviewer-runner:local
 	docker/smoke/runner.sh code-reviewer-runner-dynamic:local dynamic
+	docker/smoke/runner.sh code-reviewer-runner-sandbox:local sandbox code-reviewer-runner-dynamic:local
 
 # Builds both images (under tags of their own, so images of other work stay untouched) and runs
 # docker/smoke/compose.sh against them: the stack starts with dummy settings, the runner waits for a

@@ -79,13 +79,15 @@ describe("the dynamic runner image", () => {
 
   // #202-T01
   it("is built from the same base as the default image, not from it", () => {
-    expect(stage("dynamic").base).toBe("runtime-base");
+    // The content stage is `dynamic-worker` (#324); `dynamic` and `sandbox` are built on it.
+    expect(stage("dynamic-worker").base).toBe("runtime-base");
+    expect(stage("dynamic").base).toBe("dynamic-worker");
     expect(stage("runtime").base).toBe("runtime-base");
   });
 
   // #202-T01
   it("installs the engine and ripgrep root-owned from the verified fetch stage, and nothing else", () => {
-    const copies = stage("dynamic").lines.filter((line) =>
+    const copies = stage("dynamic-worker").lines.filter((line) =>
       line.startsWith("COPY "),
     );
 
@@ -152,10 +154,10 @@ describe("the dynamic runner image", () => {
   it("ships the pins the runner's self-check compares the installed files with", () => {
     // The directory exists, root-owned and enterable, before the files go in: COPY would give a new
     // directory the mode of the files.
-    expect(stage("dynamic").lines).toContain(
+    expect(stage("dynamic-worker").lines).toContain(
       "RUN install -d -m 0755 -o 0 -g 0 /opt/code-reviewer/pins",
     );
-    expect(stage("dynamic").lines).toContain(
+    expect(stage("dynamic-worker").lines).toContain(
       "COPY --chown=0:0 --chmod=0644 runner/opencode-pin.json runner/ripgrep-pin.json /opt/code-reviewer/pins/",
     );
   });
@@ -163,7 +165,7 @@ describe("the dynamic runner image", () => {
   // #202-T01
   it("adds nft and the engine user 10101, distinct from the Diff job user 10001", () => {
     const base = chain("runtime-base");
-    const own = stage("dynamic").lines.join("\n");
+    const own = stage("dynamic-worker").lines.join("\n");
 
     expect(own).toContain(
       "apt-get install --yes --no-install-recommends nftables",
@@ -179,7 +181,7 @@ describe("the dynamic runner image", () => {
 
   // #202-T01 / #202-T03: the image alone never makes the runner a root supervisor.
   it("ends on the unprivileged user 10001: root and the capabilities come from compose.dynamic.yml", () => {
-    const users = stage("dynamic").lines.filter((line) =>
+    const users = stage("dynamic-worker").lines.filter((line) =>
       line.startsWith("USER "),
     );
 
