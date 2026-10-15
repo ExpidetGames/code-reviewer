@@ -58,6 +58,9 @@ const PUBLIC_ROUTES = [
   // The operator sends its own bearer token; the routes do not exist until it is set (src/operator-api/README.md).
   "/api/operator/v1/workspaces",
   "/api/operator/v1/workspaces/[id]/entitlements",
+  "/api/operator/v1/workspaces/[id]/usage",
+  "/api/operator/v1/workspaces/[id]/usage/summary",
+  "/api/operator/v1/usage",
   "/api/operator/v1/entitlements/default",
   "/api/operator/v1/[...path]",
   // The platform's cron sends CRON_SECRET; the route is a 404 outside serverless mode (src/cron/, #319).

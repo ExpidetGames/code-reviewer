@@ -50,13 +50,35 @@ claim --> reserved --complete with usage, or a run that succeeded--> settled   (
 
 ## Reads
 
-Repository functions only; there is no endpoint (#278) and no page (#282) yet.
+Repository functions, and the operator API that serves them (#278, `src/operator-api/README.md`); there is no page
+yet (#282).
 
 - `countByKind(since)`: records that count (`reserved`, `settled`) reserved at or after `since`, per review kind.
 - `sumSettledManagedCostMicroUsd(since)`: the cost of settled records of managed runs reserved at or after `since` (a run belongs to the period it started in, for the count and for the cost alike);
   an unknown cost adds nothing.
-- `pageSettled({ after, limit })`: settled records ordered by `(settled_at, id)` after a cursor, with the cursor for
-  the next page. Never `reserved` or `void` records.
+- `pageSettled({ after, limit, settledBefore?, from?, to? })`: settled records ordered by `(settled_at, id)` after a
+  cursor, with the cursor for the next page. Never `reserved` or `void` records. `settledBefore` keeps back what was
+  settled at or after that time (the operator API passes now minus the safety lag); `from` (included) and `to`
+  (excluded) filter on `settled_at`.
+- `summarize({ from, to })`: the runs that started in `[from, to)` (the period rule of the counts), per review kind and
+  key mode: runs that count, settled runs, the sum of the known cost, settled runs with an unknown cost.
+- The instance level `usage-feed-repository.ts` (`pageSettled({ after, limit, settledBefore? })`) is the same page for
+  **every** workspace, for the operator API's feed. It is classified as instance level in `scoping.test.ts`: it only
+  reads, and every record names its workspace.
+
+### The feed and the safety lag
+
+A record's `settled_at` is stamped with the settling app instance's clock (`settle()` reads it just before the update),
+and the record becomes visible when its transaction commits; if `settle` runs inside a longer outer transaction, the
+whole gap to the commit counts against the lag. With concurrent writers (Postgres) two settlements can therefore become visible in the reverse order of
+their stamps, and a reader that already moved past the later stamp would never see the earlier arrival. The operator
+API only serves records settled **more than 60 seconds ago** (`USAGE_SAFETY_LAG_MS`, a validated instance constant:
+`operator-api/contract.ts`), so a settlement may take up to that long to commit and still never be skipped. The
+assumption is stated, not enforced: a transaction that stays open longer than the lag, or a clock that differs between
+two app instances by more than the lag, could still reorder two records. Readers treat `id` as the idempotency key
+anyway. `integration-tests/http/operator-api-usage.integration.test.ts` and
+`usage-feed-repository.integration.test.ts` show both the hazard (a reader without the bound misses a late record) and
+the guarantee.
 
 Records are small and kept; there is no retention job.
 
@@ -64,4 +86,5 @@ Records are small and kept; there is no retention job.
 
 `usage-records.test.ts` (rounding and settlement rules), `usage-records-repository.integration.test.ts` and the
 Postgres twin, `integration-tests/http/runner-api-usage.integration.test.ts` (claim, completion, lease loss),
-and the rows of `scoped-isolation.integration.test.ts`.
+the rows of `scoped-isolation.integration.test.ts`, and the operator API's usage endpoints
+(`usage-feed-repository.integration.test.ts`, `integration-tests/http/operator-api-usage.integration.test.ts`).

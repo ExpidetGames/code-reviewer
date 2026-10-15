@@ -4,11 +4,14 @@
 // real repositories, a recording logger, and a `call` that builds requests like an operator's client does.
 // `notFound` throws a marker, because in the running server it is Next.js's `notFound()`.
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
+import { createUsageFeedRepository } from "../db/repositories/usage-feed-repository.ts";
+import { createUsageRecordsRepository } from "../db/repositories/usage-records-repository.ts";
 import { createWorkspaceEntitlementsRepository } from "../db/repositories/workspace-entitlements-repository.ts";
 import { createWorkspacesRepository } from "../db/repositories/workspaces-repository.ts";
 import { createOperatorApi } from "../operator-api/api.ts";
 import type { OperatorRoute } from "../operator-api/contract.ts";
 import { createTestDatabase } from "./test-database.ts";
+import { createUsageSeeder } from "./usage-seed.ts";
 import { addWorkspace, defaultWorkspaceId } from "./workspaces.ts";
 
 export const TEST_OPERATOR_TOKEN = "test-operator-token-3b8e1d-6a40f2c97e15";
@@ -45,6 +48,22 @@ export function routeOf(path: string): OperatorRoute {
     rest[1] !== undefined
   )
     return { kind: "workspace-entitlements", workspaceId: rest[1] };
+  if (rest.length === 1 && rest[0] === "usage") return { kind: "usage" };
+  if (
+    rest.length === 3 &&
+    rest[0] === "workspaces" &&
+    rest[2] === "usage" &&
+    rest[1] !== undefined
+  )
+    return { kind: "workspace-usage", workspaceId: rest[1] };
+  if (
+    rest.length === 4 &&
+    rest[0] === "workspaces" &&
+    rest[2] === "usage" &&
+    rest[3] === "summary" &&
+    rest[1] !== undefined
+  )
+    return { kind: "workspace-usage-summary", workspaceId: rest[1] };
   if (rest.length === 2 && rest[0] === "entitlements" && rest[1] === "default")
     return { kind: "default-entitlements" };
   return { kind: "unknown" };
@@ -65,6 +84,8 @@ export async function startOperatorApiHarness(
     entitlementsFor: (id) =>
       createWorkspaceEntitlementsRepository(db, id, () => now),
     settings: createInstanceSettingsRepository(db, () => now),
+    usageFeed: createUsageFeedRepository(db),
+    usageFor: (id) => createUsageRecordsRepository(db, id, () => now),
     now: () => now,
     logger: {
       info: (line) => lines.push(line),
@@ -112,6 +133,7 @@ export async function startOperatorApiHarness(
     lines,
     errors,
     api,
+    usage: createUsageSeeder(db),
     setNow: (next: Date) => {
       now = next;
     },

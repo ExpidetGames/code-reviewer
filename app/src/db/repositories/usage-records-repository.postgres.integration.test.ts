@@ -11,6 +11,12 @@ import {
   hasPostgres,
 } from "../../test-support/postgres-test-database.ts";
 import { createJobQueueFixture } from "../../test-support/jobs.ts";
+import { createUsageSeeder } from "../../test-support/usage-seed.ts";
+import {
+  addWorkspace,
+  defaultWorkspaceId,
+} from "../../test-support/workspaces.ts";
+import { createUsageFeedRepository } from "./usage-feed-repository.ts";
 import { createUsageRecordsRepository } from "./usage-records-repository.ts";
 
 const describePostgres = hasPostgres() ? describe : describe.skip;
@@ -159,5 +165,89 @@ describePostgres("the usage records on Postgres", () => {
     await insert();
 
     await expect(insert()).rejects.toThrow();
+  });
+
+  // #278-T01
+  it("serves the feed of every workspace in (settled_at, id) order, bounded by the safety lag, and the page and summary of one", async () => {
+    const postgres = await createPostgresTestDatabase();
+    const first = await defaultWorkspaceId(postgres.db);
+    const second = await addWorkspace(postgres.db, "second");
+    const seeder = createUsageSeeder(postgres.db);
+    const day = "2026-10-14T11:00:0";
+    await seeder.seed({
+      workspaceId: second,
+      id: "c",
+      settledAt: `${day}3.000Z`,
+      reservedAt: `${day}0.000Z`,
+      keyMode: "managed",
+      costMicroUsd: 30,
+    });
+    await seeder.seed({
+      workspaceId: first,
+      id: "b",
+      settledAt: `${day}1.000Z`,
+      reservedAt: `${day}0.000Z`,
+      keyMode: "managed",
+      costMicroUsd: 10,
+    });
+    await seeder.seed({
+      workspaceId: second,
+      id: "a",
+      settledAt: `${day}1.000Z`,
+      reservedAt: `${day}0.000Z`,
+      costMicroUsd: null,
+    });
+    await seeder.seed({
+      workspaceId: second,
+      id: "reserved",
+      state: "reserved",
+      reservedAt: `${day}0.000Z`,
+    });
+    await seeder.seed({
+      workspaceId: second,
+      id: "void",
+      state: "void",
+      reservedAt: `${day}0.000Z`,
+    });
+    const feed = createUsageFeedRepository(postgres.db);
+
+    const page = await feed.pageSettled({ limit: 2 });
+    const rest = await feed.pageSettled({ after: page.next, limit: 2 });
+    const bounded = await feed.pageSettled({
+      limit: 10,
+      settledBefore: `${day}3.000Z`,
+    });
+
+    expect(page.records.map((record) => record.id)).toEqual(["a", "b"]);
+    expect(rest.records.map((record) => record.id)).toEqual(["c"]);
+    expect(bounded.records.map((record) => record.id)).toEqual(["a", "b"]);
+    const mine = createUsageRecordsRepository(postgres.db, second);
+    expect(
+      (await mine.pageSettled({ limit: 10, from: `${day}2.000Z` })).records.map(
+        (record) => record.id,
+      ),
+    ).toEqual(["c"]);
+    const groups = await mine.summarize({
+      from: `${day}0.000Z`,
+      to: `${day}9.000Z`,
+    });
+    expect(groups).toEqual([
+      {
+        reviewKind: "diff",
+        keyMode: "managed",
+        recordCount: 1,
+        settledCount: 1,
+        knownCostMicroUsd: 30,
+        unknownCostCount: 0,
+      },
+      {
+        reviewKind: "diff",
+        keyMode: "own",
+        recordCount: 2,
+        settledCount: 1,
+        knownCostMicroUsd: 0,
+        unknownCostCount: 1,
+      },
+    ]);
   });
 });

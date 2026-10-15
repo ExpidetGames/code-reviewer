@@ -806,6 +806,18 @@ const CASES: Case[] = [
     run: (a) => a.usage.pageSettled({ limit: 50 }),
     expectAnswer: (answer) => expect(answer).toMatchObject({ records: [] }),
   },
+  {
+    name: "usage.summarize",
+    run: (a) =>
+      a.usage.summarize({
+        from: "2000-01-01T00:00:00.000Z",
+        to: "2100-01-01T00:00:00.000Z",
+      }),
+    expectAnswer: (answer) =>
+      expect(answer).toEqual([
+        expect.objectContaining({ recordCount: 1, settledCount: 0 }),
+      ]),
+  },
   // runs
   {
     name: "runs.list",
@@ -1043,6 +1055,16 @@ describe("two workspaces", () => {
     expect(
       (await reposB.usage.pageSettled({ limit: 10 })).records,
     ).toHaveLength(1);
+    const groups = await reposB.usage.summarize({
+      from: since,
+      to: "2100-01-01T00:00:00.000Z",
+    });
+    const total = (
+      field: "recordCount" | "settledCount" | "knownCostMicroUsd",
+    ) => groups.reduce((sum, group) => sum + group[field], 0);
+    expect(total("recordCount")).toBe(3);
+    expect(total("settledCount")).toBe(1);
+    expect(total("knownCostMicroUsd")).toBe(500);
   });
 
   // DM-10

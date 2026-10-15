@@ -6,10 +6,13 @@
 // are the lists of the file. An external client is built against this file.
 import { describe, expect, it } from "vitest";
 import {
+  MAX_USAGE_CURSOR_LENGTH,
+  TIER_NAME_PATTERN,
   OPERATOR_API_ERROR_CODES,
   OPERATOR_API_VERSION,
   OPERATOR_ID_PATTERN,
   OPERATOR_MAX_BODY_BYTES,
+  USAGE_SAFETY_LAG_MS,
 } from "../../src/operator-api/contract.ts";
 import {
   startOperatorApiHarness,
@@ -21,6 +24,7 @@ import {
   readContract,
   readExamples,
 } from "../../src/test-support/runner-contract.ts";
+import { PROJECT_REVIEW_KINDS } from "../../src/review-settings/settings.ts";
 import { KEY_MODES, LIMIT_NAMES } from "../../src/workspaces/entitlements.ts";
 
 const contract = createContractValidator(OPERATOR_CONTRACT_FILE);
@@ -108,9 +112,68 @@ describe("the contract file", () => {
         "EntitlementsWrite",
         "ErrorResponse",
         "StoredEntitlements",
+        "UsageItem",
+        "UsagePage",
+        "UsageSummaryResponse",
         "WorkspaceEntitlementsResponse",
         "WorkspaceList",
         "WorkspaceSummary",
+      ].sort(),
+    );
+  });
+});
+
+describe("the usage part of the contract file", () => {
+  // #278-T09
+  it("names the same cursor size, safety lag, key modes, review kinds and states as the app", () => {
+    const defs = readContract(OPERATOR_CONTRACT_FILE).$defs as unknown as {
+      UsageCursor: { maxLength: number };
+      UsageItem: {
+        properties: {
+          modelTier: { pattern: string };
+          keyMode: { enum: string[] };
+          reviewKind: { enum: string[] };
+        };
+      };
+      UsagePage: { description: string };
+    };
+
+    expect(defs.UsageCursor.maxLength).toBe(MAX_USAGE_CURSOR_LENGTH);
+    expect(defs.UsageItem.properties.modelTier.pattern).toBe(
+      TIER_NAME_PATTERN.source,
+    );
+    expect(defs.UsageItem.properties.keyMode.enum).toEqual([...KEY_MODES]);
+    expect(defs.UsageItem.properties.reviewKind.enum).toEqual([
+      ...PROJECT_REVIEW_KINDS,
+    ]);
+    expect(defs.UsagePage.description).toContain(
+      `${USAGE_SAFETY_LAG_MS / 1000} seconds`,
+    );
+    expect(defs.UsagePage.description).toContain("idempotency key");
+  });
+
+  // #278-T09
+  it("promises no field that could carry a repository, a pull request, a title, a user or a model name", () => {
+    const defs = readContract(OPERATOR_CONTRACT_FILE).$defs as unknown as {
+      UsageItem: {
+        properties: Record<string, unknown>;
+        additionalProperties?: unknown;
+      };
+    };
+
+    expect(Object.keys(defs.UsageItem.properties).sort()).toEqual(
+      [
+        "completionTokens",
+        "costMicroUsd",
+        "id",
+        "jobId",
+        "keyMode",
+        "modelTier",
+        "promptTokens",
+        "reason",
+        "reviewKind",
+        "settledAt",
+        "workspaceId",
       ].sort(),
     );
   });
@@ -177,6 +240,93 @@ describe("what the app answers", () => {
       await h.call("GET", path(h.workspaceId)),
       "WorkspaceEntitlementsResponse",
     );
+  });
+
+  // #278-T09
+  it("answers the usage feed, the usage of a workspace and its summary with documents valid against the file", async () => {
+    const h = await startOperatorApiHarness();
+    const seeded = {
+      workspaceId: h.workspaceId,
+      reservedAt: "2026-10-14T11:00:00.000Z",
+      settledAt: "2026-10-14T11:00:01.000Z",
+    };
+    await h.usage.seed({
+      ...seeded,
+      keyMode: "managed",
+      modelTier: "standard",
+      costMicroUsd: 12346,
+      promptTokens: 10,
+      completionTokens: 5,
+    });
+    await h.usage.seed({ ...seeded, reviewKind: "dynamic" });
+    const page = (await answer(
+      await h.call("GET", "/api/operator/v1/usage?limit=1"),
+      "UsagePage",
+    )) as {
+      nextCursor: string;
+    };
+    await answer(
+      await h.call("GET", `/api/operator/v1/usage?after=${page.nextCursor}`),
+      "UsagePage",
+    );
+    await answer(
+      await h.call(
+        "GET",
+        "/api/operator/v1/usage?after=" + page.nextCursor + "&limit=200",
+      ),
+      "UsagePage",
+    );
+    await answer(
+      await h.call("GET", `/api/operator/v1/workspaces/${h.workspaceId}/usage`),
+      "UsagePage",
+    );
+    await answer(
+      await h.call(
+        "GET",
+        `/api/operator/v1/workspaces/${h.workspaceId}/usage?from=2026-10-01T00:00:00.000Z&to=2026-11-01T00:00:00.000Z`,
+      ),
+      "UsagePage",
+    );
+    await answer(
+      await h.call(
+        "GET",
+        `/api/operator/v1/workspaces/${h.workspaceId}/usage/summary?from=2026-10-01T00:00:00.000Z&to=2026-11-01T00:00:00.000Z`,
+      ),
+      "UsageSummaryResponse",
+    );
+    await answer(
+      await h.call(
+        "GET",
+        `/api/operator/v1/workspaces/${h.workspaceId}/usage/summary?from=2020-10-01T00:00:00.000Z&to=2020-11-01T00:00:00.000Z`,
+      ),
+      "UsageSummaryResponse",
+    );
+    // An empty feed has no position yet.
+    const empty = await startOperatorApiHarness();
+    await answer(
+      await empty.call("GET", "/api/operator/v1/usage"),
+      "UsagePage",
+    );
+  });
+
+  // #278-T09
+  it("answers every usage error with a document valid against the file", async () => {
+    const h = await startOperatorApiHarness();
+    const id = h.workspaceId;
+    const cases: Array<[string, string, CallOptions]> = [
+      ["GET", "/api/operator/v1/usage?after=%20", {}],
+      ["GET", "/api/operator/v1/usage?limit=0", {}],
+      ["GET", `/api/operator/v1/workspaces/${id}/usage?from=x`, {}],
+      ["GET", `/api/operator/v1/workspaces/${id}/usage/summary`, {}],
+      ["GET", "/api/operator/v1/workspaces/nope/usage", {}],
+      ["GET", "/api/operator/v1/usage", { token: null }],
+      ["POST", "/api/operator/v1/usage", {}],
+    ];
+    for (const [method, target, options] of cases) {
+      const response = await h.call(method, target, options);
+      expect(response.status).toBeGreaterThanOrEqual(400);
+      await answer(response, "ErrorResponse");
+    }
   });
 
   // #275-T10

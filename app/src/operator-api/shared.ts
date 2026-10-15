@@ -6,6 +6,8 @@
 import "server-only";
 import { notFound } from "next/navigation";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
+import { createUsageFeedRepository } from "../db/repositories/usage-feed-repository.ts";
+import { createUsageRecordsRepository } from "../db/repositories/usage-records-repository.ts";
 import { createWorkspaceEntitlementsRepository } from "../db/repositories/workspace-entitlements-repository.ts";
 import { createWorkspacesRepository } from "../db/repositories/workspaces-repository.ts";
 import { getDatabase } from "../db/startup.ts";
@@ -23,6 +25,8 @@ export function getOperatorApi(): OperatorApi {
     entitlementsFor: (workspaceId) =>
       createWorkspaceEntitlementsRepository(db, workspaceId),
     settings: createInstanceSettingsRepository(db),
+    usageFeed: createUsageFeedRepository(db),
+    usageFor: (workspaceId) => createUsageRecordsRepository(db, workspaceId),
     now: () => new Date(),
     logger: consoleRunnerApiLogger,
     notFound,
