@@ -4,25 +4,31 @@ The runner (Python, `runner/`) asks the app for work over HTTP: it **claims** a 
 **heartbeats** while it works, and **completes** the job with the result. The wire format is
 `contracts/runner-api.v1.json` (see `contracts/README.md`); this file says what the calls mean.
 
+A second door, the **Worker API** (`/api/workers/v1`, #320), lets one process that holds a **per-job
+credential** fetch, heartbeat and deliver exactly one job, and nothing else. It shares the queue, the
+checks and the redaction with the runner API and is described in "The Worker API" below.
+
 | Call                                      | Success                        | Meaning                                                           |
 | ----------------------------------------- | ------------------------------ | ----------------------------------------------------------------- |
 | `POST /api/runners/v1/claim`              | `200` job, `204` nothing to do | Reserves the oldest due job and hands it out with its credentials |
 | `POST /api/runners/v1/jobs/:id/heartbeat` | `200`                          | Extends the lease (2 minutes; runners beat every 30 seconds)      |
 | `POST /api/runners/v1/jobs/:id/complete`  | `200`                          | Stores the result and finishes the job                            |
 
-| File                               | Role                                                                                                                                                                                                            |
-| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `api.ts`                           | `createRunnerApi(deps)`: the order of the checks and the three entry points                                                                                                                                     |
-| `claim.ts`                         | The claim: guard, settings, pull request, credentials, the response                                                                                                                                             |
-| `report.ts`                        | Heartbeat and complete                                                                                                                                                                                          |
-| `requests.ts`                      | The checks on job id, `X-Runner-Id` and the two request bodies (hand written, kept in line with the contract by the compatibility test)                                                                         |
-| `token-auth.ts`, `startup.ts`      | The `RUNNER_TOKEN` check (constant time, at least 32 characters) and the warning at a start without the production check                                                                                        |
-| `redact.ts`                        | Removes anything that looks like a credential from a result before it is stored                                                                                                                                 |
-| `responses.ts`                     | Every answer: `Cache-Control: no-store`, the error form `{ error: { code, message } }`                                                                                                                          |
-| `claim-guard.ts`, `job-options.ts` | The two hooks (below); `project-claim-guard.ts` and `review-settings-job-options.ts` are what the running server plugs in                                                                                       |
-| `claimed-keys.ts`                  | In the database, encrypted (`job_claimed_keys`): the LLM key handed out with the claim of each job, so a rotated key can still be masked in its result by whichever app instance completes it                   |
-| `contract.ts`                      | The TypeScript types and code lists of the contract                                                                                                                                                             |
-| `shared.ts`                        | The wiring of the running server (`getRunnerApi()`, `withRunnerApi`); the route files under `src/app/api/runners/v1/` only call `withRunnerApi`, which answers a failure while setting up in the usual 500 form |
+| File                               | Role                                                                                                                                                                                                                                                                  |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `api.ts`                           | `createRunnerApi(deps)`: the order of the checks and the three entry points                                                                                                                                                                                           |
+| `claim.ts`                         | The claim: `checkJob` (guard, LLM access, settings, pull request) and `buildJobInput` (the credentials and the job input, the one place that makes a secret of a job), the response. A claim with the feature `worker_credential` runs the first only                 |
+| `report.ts`                        | Heartbeat and complete (`finishJob`, shared with the Worker API's result)                                                                                                                                                                                             |
+| `worker-api.ts`, `worker-fetch.ts` | The Worker API (#320): `createWorkerApi(deps)` (credential check, details, heartbeat, result) and the details call that mints the secrets                                                                                                                             |
+| `body.ts`                          | Reading a JSON body up to 64 KiB, shared by both APIs                                                                                                                                                                                                                 |
+| `requests.ts`                      | The checks on job id, `X-Runner-Id` and the two request bodies (hand written, kept in line with the contract by the compatibility test)                                                                                                                               |
+| `token-auth.ts`, `startup.ts`      | The `RUNNER_TOKEN` check (constant time, at least 32 characters) and the warning at a start without the production check                                                                                                                                              |
+| `redact.ts`                        | Removes anything that looks like a credential from a result before it is stored                                                                                                                                                                                       |
+| `responses.ts`                     | Every answer: `Cache-Control: no-store`, the error form `{ error: { code, message } }`                                                                                                                                                                                |
+| `claim-guard.ts`, `job-options.ts` | The two hooks (below); `project-claim-guard.ts` and `review-settings-job-options.ts` are what the running server plugs in                                                                                                                                             |
+| `claimed-keys.ts`                  | In the database, encrypted (`job_claimed_keys`): the LLM key handed out with the claim of each job, so a rotated key can still be masked in its result by whichever app instance completes it                                                                         |
+| `contract.ts`                      | The TypeScript types and code lists of the contract                                                                                                                                                                                                                   |
+| `shared.ts`                        | The wiring of the running server (`getRunnerApi()`, `withRunnerApi`, `getWorkerApi()`, `withWorkerApi`); the route files under `src/app/api/runners/v1/` and `src/app/api/workers/v1/` only call these, which answer a failure while setting up in the usual 500 form |
 
 ## Workspaces
 
@@ -53,7 +59,8 @@ holds a job is the **lease token**.
 Every claim response carries a new `leaseToken`; heartbeat and complete must send it in the body.
 The queue (`src/jobs`) checks it, not the runner id, so a runner that stalled past its lease, lost the
 job and claimed it again gets a different token, and its old execution is turned away with
-`409 RUNNER_LEASE_LOST`. The token is a secret of the holder: logs never contain it.
+`409 RUNNER_LEASE_LOST`. The token is a secret of the holder: logs never contain it. It has 256 random
+bits (base64url, 43 characters; it was a UUID before #320, and a runner treats it as opaque).
 
 ## Status codes
 
@@ -69,6 +76,8 @@ job and claimed it again gets a different token, and its old execution is turned
 | `413`  | `RUNNER_BODY_TOO_LARGE`         | Body over 64 KiB                                                                                                    |
 | `503`  | `RUNNER_GIT_ACCESS_UNAVAILABLE` | Credentials could not be created now; `Retry-After` says when                                                       |
 | `500`  | `RUNNER_INTERNAL_ERROR`         | Something unplanned; the log has the cause, the answer none                                                         |
+| `401`  | `WORKER_CREDENTIAL_INVALID`     | Worker API only: the credential is missing, not of the form of one, for another job, of an earlier claim, or spent  |
+| `409`  | `RUNNER_JOB_ENDED`              | Worker API only: the job is over (finished, failed, cancelled, ended by the app); the Worker stops                  |
 
 Every answer, including `204`, carries `Cache-Control: no-store`.
 
@@ -192,6 +201,63 @@ The body is `{ leaseToken, result }`. `result` is what `code-reviewer-run-job` p
   not a different result.
 - A body over 64 KiB is refused with `413` before it is parsed.
 
+## The Worker API (#320)
+
+`/api/workers/v1/jobs/:id` (`GET`), `/heartbeat` and `/result` (`POST`). The rule behind them: a Worker
+acts with a credential that reaches **one job**, and the Dispatcher that started it never sees a secret of
+that job.
+
+**The split claim.** A claim whose body names the feature `worker_credential` (a Dispatcher) runs the same
+guard, LLM access check and pull request check as before, ends or gives back a job exactly as before, and
+then answers with `SplitClaimResponse`: `{ id, credential, reviewKind, leaseExpiresAt,
+heartbeatIntervalSeconds }`. There is **no `input`, no git token and no model key** in it, and no
+installation token is made. Without the feature the answer is the legacy `ClaimResponse`, byte for byte
+as before (a previous release's runner never names it).
+
+**The credential.** `crj_` and 256 random bits (base64url, 43 characters), made by the queue in the
+transaction of the claim (`jobs/worker-credential.ts`). It is shown once, in that response, and never
+stored: the database keeps `wc1:` and its SHA-256 as the **lease token** of the claim, so heartbeat,
+result, release and every other statement fenced by the lease token are fenced by the credential without
+a second column and without the secret at rest. The Worker API looks a credential up by its hash
+(`queue.holding`); a lease token of a legacy claim has no `wc1:` form and never matches, and the
+credential is not a lease token of the runner API (`409 RUNNER_LEASE_LOST` there). It is valid for its
+job and its claim only: a job that is queued again (lease expired, released) clears the token, a new
+claim makes a new credential, and the old one gets `401`. Nothing logs it, and a result is redacted of it.
+
+**Authentication.** `Authorization: Bearer crj_...` only. The dispatcher credential (`RUNNER_TOKEN`),
+a lease token, a credential of another job, an unknown job and a missing header all get the one `401
+WORKER_CREDENTIAL_INVALID` (same status, headers and body, so it says nothing about which jobs exist).
+Conversely the job credential on `claim` is `401 RUNNER_UNAUTHORIZED`. The session guard and the setup gate let
+`/api/workers/**` through like `/api/runners/**` (`src/auth/access.ts`, `src/setup/gate.ts`).
+
+**Details** (`GET`). `?features=dynamic_capabilities` (a comma separated list, unknown names ignored) has
+the same meaning as `features` in a claim: an optional job field reaches only a Worker that reads it.
+This is where the secrets are made, by the same code as the legacy claim's step 4 (`buildJobInput`): the
+checks run again (the project may have been switched off, the key removed, the pull request closed),
+the installation token is minted for exactly this repository, the model key is revealed and **remembered**
+(`job_claimed_keys`, so a result is masked after a key rotation by whichever instance serves it).
+At most **3 fetches per claim** (the count is on the job row and reset by every claim); each mints a fresh
+token; the fourth is `401`. A permanent failure (the project is off, the key is gone, the installation was
+removed, the pull request closed) ends the job with its stable code (the same list as `CLAIM_FAILURE_CODES`)
+and answers `409 RUNNER_JOB_ENDED`; a failure that may pass (GitHub down or rate limiting) gives the job
+back with an attempt counted and answers `503` with `Retry-After`; anything unplanned gives it back and
+answers `500`. A Dispatcher that sees `409`/`503` for its Worker just sees the job end or come back.
+
+**Heartbeat.** Extends the lease like the legacy call; the body is read up to 64 KiB and ignored.
+**Result.** `{ result }` (the credential identifies the job), redacted and stored by the same code as
+`complete` (`finishJob`). `runner_shutdown` and `launch_failed` are not results: the job is given back (an
+attempt counted, `status: "queued"`, or `failed` on the last attempt) and the credential is dead. After the
+job reached a final state only a repeat of the same result is accepted (`200 alreadyCompleted`; another
+result `409 RUNNER_RESULT_CONFLICT`); every other call answers `409 RUNNER_JOB_ENDED`. Over 64 KiB is `413`
+before the body is parsed, and the credential is checked before the body is read.
+
+**Mixed versions.** The change is additive: the legacy routes, their answers and the lease semantics are
+the same; the only differences visible to an old runner are a longer lease token and one more stable code
+for a result (`launch_failed` is just another reported code on the legacy `complete`). The migration adds
+a column with a default, so an app instance of the previous release keeps working on the migrated database.
+A job claimed with a credential by a new instance and then handled by an old instance only has an opaque
+lease token it can neither guess nor serve; its lease runs out and the job is tried again.
+
 ## Hooks
 
 - **`ClaimGuard`** (`claim-guard.ts`): `check(job)` returns `{ allow: true }` or
@@ -245,6 +311,10 @@ jobs the policy let through.
 - `integration-tests/http/runner-api-projects.integration.test.ts`: the wiring to the projects, the
   review settings and the LLM configuration (CR-46).
 - `integration-tests/compatibility/runner-api-contract.integration.test.ts`: the contract.
+- `integration-tests/http/worker-api.integration.test.ts` (#320): the split claim and the three Worker
+  calls with the rules of the credential; `integration-tests/compatibility/worker-api-contract.integration.test.ts`:
+  the real answers against `contracts/worker-api.v1.json`; `src/jobs/worker-credential*.test.ts`: the
+  credential and its queue side (also on Postgres in CI).
 - `token-auth.test.ts`, `requests.test.ts`, `redact.test.ts`, `claimed-keys.test.ts`, `project-claim-guard.test.ts`: unit tests.
 - The harness is `src/test-support/runner-api-harness.ts`; `projects: true` wires the guard and the
   options like the running server (real project service and review settings), otherwise every job may

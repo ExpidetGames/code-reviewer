@@ -45,8 +45,9 @@ The App, the Dispatcher (TypeScript) and the Worker (Python) agree on these file
   the split answer `SplitClaimResponse` (the per-job credential, **no job input and no secrets**; without the
   feature the answer is the legacy `ClaimResponse`, unchanged); `ReleaseRequest`/`ReleaseResponse`;
   `VersionResponse` (the features of the app, so a Dispatcher or a Worker detects an app that is too old);
-  the API error codes `WORKER_CREDENTIAL_INVALID` and `RUNNER_JOB_ENDED`. The new definitions are served by
-  #320 and #322; until then only the fake App speaks them. A previous-release app ignores the new claim
+  the API error codes `WORKER_CREDENTIAL_INVALID` and `RUNNER_JOB_ENDED`. The Worker API and the split claim are
+  served since #320 (`app/src/runner-api/README.md`, "The Worker API"); claim by job id, the pool cap, release and
+  version come with #322, until then only the fake App speaks those. A previous-release app ignores the new claim
   fields, and a previous-release runner never names `worker_credential`, so neither side is affected.
 - **Generated types.** `make generate-contracts` writes TypeScript types of `runner-api`, `worker-api`,
   `dispatch-webhook` and `worker-container` into `app/src/contracts/` and `dispatcher/src/contracts/` (the

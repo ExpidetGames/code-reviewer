@@ -16,6 +16,11 @@ import { getWorkspaceLlm, modelCapabilities } from "../llm/shared.ts";
 import { projectServiceFor } from "../projects/shared.ts";
 import { reviewSettingsServiceFor } from "../review-settings/shared.ts";
 import { createRunnerApi, type RunnerApi } from "./api.ts";
+import {
+  createWorkerApi,
+  type WorkerApi,
+  type WorkerApiDeps,
+} from "./worker-api.ts";
 import { createClaimedKeys, type ClaimedKeys } from "./claimed-keys.ts";
 import { createProjectClaimGuard } from "./project-claim-guard.ts";
 import { HEARTBEAT_INTERVAL_SECONDS } from "./contract.ts";
@@ -38,11 +43,14 @@ function getClaimedKeys(): ClaimedKeys {
   });
 }
 
-/** The runner API of the running server. */
-export function getRunnerApi(): RunnerApi {
+/**
+ * The collaborators both APIs share: the runner API (claim, heartbeat, complete) and the Worker API
+ * (#320, details, heartbeat, result) are two doors to the same queue, checks and redaction.
+ */
+function sharedDeps(): WorkerApiDeps {
   const db = getDatabase();
   const llm = getWorkspaceLlm();
-  return createRunnerApi({
+  return {
     // Runners serve the whole instance: the queue is not scoped, and everything the claim looks up
     // for a job is looked up in the job's own workspace.
     queue: getRunnerQueue(),
@@ -88,13 +96,25 @@ export function getRunnerApi(): RunnerApi {
     now: () => new Date(),
     logger: consoleRunnerApiLogger,
     heartbeatIntervalSeconds: HEARTBEAT_INTERVAL_SECONDS,
-    runnerToken: () => configuredRunnerToken(process.env),
     // The runner token and the current LLM key of the job's workspace (the key of the claim is in the database).
     knownSecrets: async (workspaceId) => [
       ...knownSecretsFromEnv(process.env),
       ...(await llm.currentKeysFor(workspaceId).catch(() => [])),
     ],
+  };
+}
+
+/** The runner API of the running server. */
+export function getRunnerApi(): RunnerApi {
+  return createRunnerApi({
+    ...sharedDeps(),
+    runnerToken: () => configuredRunnerToken(process.env),
   });
+}
+
+/** The Worker API of the running server (#320). It has no use for `RUNNER_TOKEN`: a per-job credential opens it. */
+export function getWorkerApi(): WorkerApi {
+  return createWorkerApi(sharedDeps());
 }
 
 /**
@@ -110,6 +130,20 @@ export async function withRunnerApi(
   } catch (error) {
     consoleRunnerApiLogger.error(
       `[runner-api] the API could not be set up: ${describeError(error)}`,
+    );
+    return errorResponse(500, "RUNNER_INTERNAL_ERROR");
+  }
+}
+
+/** What the Worker API's route files call; the same kind of answer as `withRunnerApi` if it cannot be set up. */
+export async function withWorkerApi(
+  call: (api: WorkerApi) => Promise<Response>,
+): Promise<Response> {
+  try {
+    return await call(getWorkerApi());
+  } catch (error) {
+    consoleRunnerApiLogger.error(
+      `[worker-api] the API could not be set up: ${describeError(error)}`,
     );
     return errorResponse(500, "RUNNER_INTERNAL_ERROR");
   }
