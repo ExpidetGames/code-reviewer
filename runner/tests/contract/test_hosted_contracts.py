@@ -183,7 +183,9 @@ def test_the_container_launcher_additions_allow_the_two_ipv6_switches_only() -> 
     additions = "WorkerContainerLauncherAdditions"
     assert _accepts("worker-container.v1.json", additions, {"sysctls": both})
     assert _accepts("worker-container.v1.json", additions, {})
-    assert not _accepts("worker-container.v1.json", additions, {"sysctls": {"net.ipv4.ip_forward": "1"}})
+    assert not _accepts(
+        "worker-container.v1.json", additions, {"sysctls": {"net.ipv4.ip_forward": "1"}}
+    )
     assert not _accepts(
         "worker-container.v1.json",
         additions,
@@ -191,7 +193,9 @@ def test_the_container_launcher_additions_allow_the_two_ipv6_switches_only() -> 
     )
     # The spec itself has no sysctls: the self-hosted compose files carry none.
     spec = _example("examples/worker-container", "WorkerContainerSpec")
-    assert not _accepts("worker-container.v1.json", "WorkerContainerSpec", {**spec, "sysctls": both})
+    assert not _accepts(
+        "worker-container.v1.json", "WorkerContainerSpec", {**spec, "sysctls": both}
+    )
 
 
 # The reference verifier of the dispatch webhook, written here from the description in the schema
