@@ -1,0 +1,76 @@
+name: Dispatcher canary
+
+# The deploy canary of the hosted deployment (#316, #331): calls `POST /probe` of a deployed Dispatcher, which runs
+# the Worker image's `probe` mode in a canary VM cloned from the golden snapshot with the real container flags, and
+# fails when the Dynamic-Worker's canary does not pass (the hardening, the egress mode, IPv6 off where it is required,
+# the self-check). A release pipeline puts this step between "deploy to a URL" and "promote": a failing canary blocks
+# the release. Run it on a preview deployment that carries the new snapshot (docs/golden-snapshot.md, "Rebuild") before
+# the Dispatcher project is switched to it.
+#
+# It never runs for a pull request. It sends the dispatcher credential to the one URL it is given (https, no redirect
+# followed) and prints only stable codes. The credential comes from the environment `hosted-canary` and is read by
+# one step, as an environment variable, never in a command line or a log.
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "Base URL of the deployed Dispatcher (https), for example the preview deployment"
+        required: true
+      engines:
+        description: "Engines the release needs: pr-agent,opencode, or pr-agent for a Diff-only deployment"
+        default: "pr-agent,opencode"
+        required: false
+  workflow_call:
+    inputs:
+      url:
+        description: "Base URL of the deployed Dispatcher (https)"
+        required: true
+        type: string
+      engines:
+        description: "Engines the release needs: pr-agent,opencode, or pr-agent"
+        default: "pr-agent,opencode"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+# Runs queue one behind the other: each one creates a canary VM, and a cancelled run could leave one running.
+concurrency:
+  group: dispatcher-canary
+  cancel-in-progress: false
+
+jobs:
+  canary:
+    name: Prove the Dynamic-Worker canary of a deployment
+    if: ${{ github.repository == 'ExpidetGames/code-reviewer' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    # Holds RUNNER_TOKEN (the Dispatcher project's dispatcher credential) and, when the deployment is behind
+    # deployment protection, VERCEL_AUTOMATION_BYPASS_SECRET.
+    environment: hosted-canary
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: dispatcher/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+          cache-dependency-path: dispatcher/pnpm-lock.yaml
+      - name: Install dependencies
+        working-directory: dispatcher
+        run: pnpm install --frozen-lockfile
+      - name: Run the canary
+        working-directory: dispatcher
+        env:
+          RUNNER_TOKEN: ${{ secrets.RUNNER_TOKEN }}
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+          CANARY_URL: ${{ inputs.url }}
+          CANARY_ENGINES: ${{ inputs.engines || 'pr-agent,opencode' }}
+        run: pnpm probe:canary --url "$CANARY_URL" --engines "$CANARY_ENGINES"
