@@ -14,6 +14,7 @@ import time
 from pathlib import Path
 
 from privileged_support import (
+    EGRESS_MODE,
     ENGINE_GID,
     ENGINE_UID,
     Repo,
@@ -103,6 +104,7 @@ def test_a_job_killed_without_a_chance_to_clean_up_leaves_processes_the_next_job
         home=str(job_dir),
         tmpdir=str(job_dir),
         config_dir=job_dir,
+        egress_mode=EGRESS_MODE,
     )
     with slot_proxy():
         launch.confine(launch.proxy_port, launch.engine_port)

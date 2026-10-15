@@ -30,7 +30,7 @@ from .checkout import PreparedContent, prepare_job_content
 from .engine_user import EngineLaunch, sweep_user
 from .export_isolation import AgentIdentity, prepared_checkout
 from .limits import CheckoutError, CheckoutReason
-from .netguard import IsolationError
+from .netguard import IsolationError, egress_mode_from_environment
 from .pr_context import PreparationContext, load_context
 from .static_isolation import slot_ports
 
@@ -121,6 +121,7 @@ def production_preparer(
         identity = engine_identity(environment)
         try:
             ports = slot_ports(environment)
+            egress_mode = egress_mode_from_environment(environment)
         except IsolationError:
             raise CheckoutError(
                 CheckoutReason.ISOLATION, ErrorCode.DYNAMIC_ISOLATION_SELF_CHECK_FAILED
@@ -144,6 +145,7 @@ def production_preparer(
                     config_dir=lifetime.root,
                     proxy_port=ports.proxy,
                     engine_port=ports.engine,
+                    egress_mode=egress_mode,
                 ),
             )
 

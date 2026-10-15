@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 from privileged_support import (
     CAPABILITIES,
+    EGRESS_MODE,
     ENGINE_GID,
     ENGINE_UID,
     Repo,
@@ -43,6 +44,7 @@ from opencode_support import (
 from code_reviewer_runner import runner
 from code_reviewer_runner.capabilities import ALL_ENGINES
 from code_reviewer_runner.dynamic_review.engine_user import user_pids
+from code_reviewer_runner.dynamic_review.netguard import EGRESS_MODE_VARIABLE
 from code_reviewer_runner.dynamic_review.supervisor import (
     ENGINE_GID_VARIABLE,
     ENGINE_UID_VARIABLE,
@@ -113,6 +115,7 @@ def test_the_real_engine_reviews_as_the_dedicated_user_and_leaves_nothing_behind
         runner.RIPGREP_PATH_VARIABLE: ripgrep(),
         ENGINE_UID_VARIABLE: str(ENGINE_UID),
         ENGINE_GID_VARIABLE: str(ENGINE_GID),
+        EGRESS_MODE_VARIABLE: EGRESS_MODE.value,
     }
     extra = extra_path()
     if extra:

@@ -41,6 +41,7 @@ from code_reviewer_runner.capabilities import (
     RIPGREP_PATH_VARIABLE,
 )
 from code_reviewer_runner.dynamic_review.engine_user import sweep_user
+from code_reviewer_runner.dynamic_review.netguard import EGRESS_MODE_VARIABLE, EgressMode
 from code_reviewer_runner.job import Job, JobError, ReviewKind, parse_job
 from code_reviewer_runner.job_loop.api import (
     ApiError,
@@ -131,6 +132,9 @@ class HostSettings(Protocol):
 
     @property
     def dynamic_ripgrep(self) -> str | None: ...
+
+    @property
+    def dynamic_egress_mode(self) -> EgressMode: ...
 
     @property
     def diff_job_user(self) -> tuple[int, int] | None: ...
@@ -258,9 +262,9 @@ class JobHost:
         """What only a Dynamic job process gets (#202), all of it decided by trusted configuration.
 
         The engines the startup self-check advertised, the engine command and `rg` it verified
-        (never ones the operator typed) and the operator's description of the model and of the
-        slot. A runner whose check failed hands over no command: the job process then refuses with
-        `dynamic_engine_unavailable`.
+        (never ones the operator typed), the egress mode startup found (#345) and the operator's
+        description of the model and of the slot. A runner whose check failed hands over no
+        command: the job process then refuses with `dynamic_engine_unavailable`.
         """
         env = {
             name: self._environment[name]
@@ -268,6 +272,8 @@ class JobHost:
             if name in self._environment
         }
         env[ENGINES_VARIABLE] = ",".join(self._settings.engines)
+        # The ruleset startup installed: the host's own finding, whatever the environment says.
+        env[EGRESS_MODE_VARIABLE] = self._settings.dynamic_egress_mode.value
         if ENGINE_DYNAMIC in self._settings.engines and self._settings.dynamic_command:
             env[OPENCODE_COMMAND_VARIABLE] = shlex.join(self._settings.dynamic_command)
             if self._settings.dynamic_ripgrep:
