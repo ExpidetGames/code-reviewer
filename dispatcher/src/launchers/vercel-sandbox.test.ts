@@ -28,6 +28,7 @@ const PLATFORM_TOKEN = "dummy-platform-token-for-tests-0000";
 type Calls = {
   create: Record<string, unknown>[];
   get: Record<string, unknown>[];
+  list: Record<string, unknown>[];
   run: Record<string, unknown>[];
   stop: number;
   command: { stdin: string[]; closed: number; waits: number };
@@ -40,11 +41,15 @@ function standIn(
     createError?: unknown;
     getError?: unknown;
     stopError?: unknown;
+    /** What `Sandbox.list` yields, one page of two at a time; the real paginator is an async iterable of sandboxes. */
+    listed?: unknown[];
+    listError?: unknown;
   } = {},
 ) {
   const calls: Calls = {
     create: [],
     get: [],
+    list: [],
     run: [],
     stop: 0,
     command: { stdin: [], closed: 0, waits: 0 },
@@ -96,6 +101,34 @@ function standIn(
         return options.getError === undefined
           ? Promise.resolve(sandbox)
           : Promise.reject(options.getError);
+      },
+      list(params) {
+        calls.list.push(params);
+        if (options.listError !== undefined)
+          return Promise.reject(options.listError);
+        // The platform's own rule, seen on a real run: a name prefix filters by name, so it needs that sort.
+        if (params.namePrefix !== undefined && params.sortBy !== "name")
+          return Promise.reject(
+            apiError(
+              400,
+              undefined,
+              "Invalid request: `namePrefix` is only valid when `sortBy` is `name`",
+            ),
+          );
+        const prefix = params.namePrefix;
+        const items = (options.listed ?? []).filter(
+          (item) =>
+            typeof prefix !== "string" ||
+            String((item as { name: string }).name).startsWith(prefix),
+        );
+        return Promise.resolve(
+          (async function* () {
+            for (let at = 0; at < items.length; at += 2) {
+              await Promise.resolve();
+              yield* items.slice(at, at + 2) as never[];
+            }
+          })(),
+        );
       },
     },
   };
@@ -359,5 +392,105 @@ describe("the Vercel adapter of the Sandbox port", () => {
     await expect(
       createVercelSandboxService(() => Promise.resolve(sdk)).stop(CREATE.name),
     ).rejects.toMatchObject({ kind: "unavailable" });
+  });
+
+  // #364-T20
+  it("lists the VMs of one tag by a name prefix, with the credentials, across every page, and maps what the reaper reads", async () => {
+    const listed = [1, 2, 3].map((n) => ({
+      name: `cr-diff-job-${n}-abcd1234`,
+      createdAt: 1_700_000_000_000 + n,
+      status: "running",
+      timeout: 1_500_000,
+      persistent: n === 3,
+      tags: { app: "code-reviewer", kind: "diff", job: `job-${n}` },
+      currentSessionId: "ignored",
+      vcpus: 1,
+    }));
+    const { sdk, calls } = standIn({
+      listed: [
+        ...listed,
+        { name: "other-1", createdAt: 9, status: "running", tags: {} },
+      ],
+    });
+    const service = createVercelSandboxService(() => Promise.resolve(sdk), {
+      token: PLATFORM_TOKEN,
+      teamId: "team_dummy",
+      projectId: "prj_dummy",
+    });
+
+    const vms = await service.list({
+      namePrefix: "cr-",
+      tags: { app: "code-reviewer" },
+    });
+
+    expect(calls.list).toStrictEqual([
+      {
+        token: PLATFORM_TOKEN,
+        teamId: "team_dummy",
+        projectId: "prj_dummy",
+        namePrefix: "cr-",
+        // The platform refuses a name prefix with any other sort (HTTP 400).
+        sortBy: "name",
+        tags: { app: "code-reviewer" },
+      },
+    ]);
+    expect(vms).toStrictEqual(
+      listed.map((vm) => ({
+        name: vm.name,
+        createdAtMs: vm.createdAt,
+        status: "running",
+        timeoutMs: 1_500_000,
+        persistent: vm.persistent,
+        tags: vm.tags,
+      })),
+    );
+    expect(calls.create).toStrictEqual([]);
+    expect(calls.get).toStrictEqual([]);
+    expect(calls.stop).toBe(0);
+  });
+
+  // #364-T20
+  it("lists a VM without tags or a timeout with empty tags and no timeout", async () => {
+    const { sdk } = standIn({
+      listed: [{ name: "cr-x", createdAt: 5, status: "stopped" }],
+    });
+
+    const vms = await createVercelSandboxService(() =>
+      Promise.resolve(sdk),
+    ).list({ namePrefix: "cr-", tags: { app: "code-reviewer" } });
+
+    expect(vms).toStrictEqual([
+      { name: "cr-x", createdAtMs: 5, status: "stopped", tags: {} },
+    ]);
+  });
+
+  // #364-T11
+  it("maps a failed listing to a failure kind without the platform's text", async () => {
+    const { sdk } = standIn({
+      listError: apiError(500, undefined, `boom ${PLATFORM_TOKEN}`),
+    });
+
+    const failed = await createVercelSandboxService(() => Promise.resolve(sdk))
+      .list({ namePrefix: "cr-", tags: { app: "code-reviewer" } })
+      .catch((error: unknown) => error);
+
+    expect(failed).toBeInstanceOf(SandboxServiceError);
+    expect((failed as SandboxServiceError).kind).toBe("unavailable");
+    expect((failed as SandboxServiceError).message).toBe("unavailable");
+  });
+
+  // #364-T30
+  it("is held to the platform's rule by its stand-in: a name prefix without the name sort is refused", async () => {
+    const { sdk } = standIn();
+
+    await expect(sdk.Sandbox.list({ namePrefix: "cr-" })).rejects.toThrow(
+      "`namePrefix` is only valid when `sortBy` is `name`",
+    );
+    await expect(
+      sdk.Sandbox.list({ namePrefix: "cr-", sortBy: "createdAt" }),
+    ).rejects.toThrow("`namePrefix` is only valid");
+    await expect(
+      sdk.Sandbox.list({ namePrefix: "cr-", sortBy: "name" }),
+    ).resolves.toBeDefined();
   });
 });
