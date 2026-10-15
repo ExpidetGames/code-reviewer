@@ -106,11 +106,12 @@ describe("POST /probe", () => {
   it("answers every refusal with the same body, so that it does not say what was wrong", async () => {
     const { app } = build(() => Promise.resolve(PASSED));
 
+    const refusals: Record<string, string>[] = [
+      {},
+      { authorization: "Bearer dummy-not-the-token" },
+    ];
     const bodies = await Promise.all(
-      [{}, { authorization: "Bearer dummy-not-the-token" }].map(
-        async (headers: Record<string, string>) =>
-          (await post(app, headers)).text(),
-      ),
+      refusals.map(async (headers) => (await post(app, headers)).text()),
     );
 
     expect(new Set(bodies).size).toBe(1);
