@@ -40,6 +40,34 @@ export type UsageRecord = {
 /** Where a reader stopped in the settled records: the next page starts after this `(settledAt, id)`. */
 export type UsageCursor = { settledAt: string; id: string };
 
+/** A page of settled records is read with these bounds (all optional). Times are ISO 8601 text in UTC. */
+export type UsagePageOptions = {
+  after?: UsageCursor | undefined;
+  limit: number;
+  /**
+   * Only records settled strictly before this time. The operator API passes "now minus the safety lag", so that a
+   * record that commits late is never behind a position a reader already holds (src/operator-api/README.md).
+   */
+  settledBefore?: string | undefined;
+  /** Only records settled at or after this time. */
+  from?: string | undefined;
+  /** Only records settled before this time. */
+  to?: string | undefined;
+};
+
+/** What one workspace ran in a period, for one kind of review and one key mode. */
+export type UsageSummaryGroup = {
+  reviewKind: ProjectReviewKind;
+  keyMode: UsageKeyMode;
+  /** Runs that count (`reserved` and `settled`; never `void`). */
+  recordCount: number;
+  settledCount: number;
+  /** Sum of the known cost of the settled runs, micro-USD. */
+  knownCostMicroUsd: number;
+  /** Settled runs whose cost is unknown. */
+  unknownCostCount: number;
+};
+
 export type UsageRecordsPage = {
   records: UsageRecord[];
   /** The cursor to pass for the next page: the last record's, or the cursor that was passed when the page is empty. */
@@ -73,13 +101,16 @@ export type UsageRecordsRepository = {
   /** The cost of the settled records of managed runs reserved at or after `since` (the period of the run, as in `countByKind`); an unknown cost adds nothing. */
   sumSettledManagedCostMicroUsd(since: string): Promise<number>;
   /** Settled records after the cursor, ordered by `(settledAt, id)`; never a `reserved` or `void` record. */
-  pageSettled(options: {
-    after?: UsageCursor | undefined;
-    limit: number;
-  }): Promise<UsageRecordsPage>;
+  pageSettled(options: UsagePageOptions): Promise<UsageRecordsPage>;
+  /**
+   * The runs that started in `[from, to)` (a run belongs to the period it started in, as for the limits), per
+   * review kind and key mode, ordered by kind then key mode. A kind and key mode without runs is not listed.
+   */
+  summarize(period: { from: string; to: string }): Promise<UsageSummaryGroup[]>;
 };
 
-function toRecord(row: Selectable<UsageRecordsTable>): UsageRecord {
+/** A row of the table as the rest of the app sees it (shared with the instance level feed). */
+export function toUsageRecord(row: Selectable<UsageRecordsTable>): UsageRecord {
   return {
     id: row.id,
     workspaceId: row.workspace_id,
@@ -94,6 +125,11 @@ function toRecord(row: Selectable<UsageRecordsTable>): UsageRecord {
     reservedAt: row.reserved_at,
     settledAt: row.settled_at,
   };
+}
+
+/** The rows after a cursor in `(settled_at, id)` order, as a condition on `usage_records`. */
+export function afterUsageCursor(after: UsageCursor) {
+  return sql<boolean>`(settled_at > ${after.settledAt} or (settled_at = ${after.settledAt} and id > ${after.id}))`;
 }
 
 /** The statuses a job never leaves (src/jobs/job-status.ts). */
@@ -215,7 +251,7 @@ export function createUsageRecordsRepository(
         .where("job_id", "=", jobId)
         .where("workspace_id", "=", workspaceId)
         .executeTakeFirst();
-      return row === undefined ? undefined : toRecord(row);
+      return row === undefined ? undefined : toUsageRecord(row);
     },
 
     async countByKind(since) {
@@ -245,22 +281,23 @@ export function createUsageRecordsRepository(
       return Number(row?.total ?? 0);
     },
 
-    async pageSettled({ after, limit }) {
+    async pageSettled({ after, limit, settledBefore, from, to }) {
       let query = db
         .selectFrom("usage_records")
         .selectAll()
         .where("workspace_id", "=", workspaceId)
         .where("state", "=", "settled");
-      if (after !== undefined)
-        query = query.where(
-          sql<boolean>`(settled_at > ${after.settledAt} or (settled_at = ${after.settledAt} and id > ${after.id}))`,
-        );
+      if (after !== undefined) query = query.where(afterUsageCursor(after));
+      if (settledBefore !== undefined)
+        query = query.where("settled_at", "<", settledBefore);
+      if (from !== undefined) query = query.where("settled_at", ">=", from);
+      if (to !== undefined) query = query.where("settled_at", "<", to);
       const rows = await query
         .orderBy("settled_at")
         .orderBy("id")
         .limit(limit)
         .execute();
-      const records = rows.map(toRecord);
+      const records = rows.map(toUsageRecord);
       const last = records.at(-1);
       return {
         records,
@@ -269,6 +306,37 @@ export function createUsageRecordsRepository(
             ? after
             : { settledAt: last.settledAt, id: last.id },
       };
+    },
+
+    async summarize({ from, to }) {
+      const rows = await db
+        .selectFrom("usage_records")
+        .select([
+          "review_kind",
+          "key_mode",
+          (eb) => eb.fn.countAll().as("records"),
+          sql`sum(case when state = 'settled' then 1 else 0 end)`.as("settled"),
+          (eb) => eb.fn.sum("cost_micro_usd").as("cost"),
+          sql`sum(case when state = 'settled' and cost_micro_usd is null then 1 else 0 end)`.as(
+            "unknown",
+          ),
+        ])
+        .where("workspace_id", "=", workspaceId)
+        .where("state", "in", ["reserved", "settled"])
+        .where("reserved_at", ">=", from)
+        .where("reserved_at", "<", to)
+        .groupBy(["review_kind", "key_mode"])
+        .orderBy("review_kind")
+        .orderBy("key_mode")
+        .execute();
+      return rows.map((row) => ({
+        reviewKind: row.review_kind as ProjectReviewKind,
+        keyMode: row.key_mode as UsageKeyMode,
+        recordCount: Number(row.records),
+        settledCount: Number(row.settled),
+        knownCostMicroUsd: Number(row.cost ?? 0),
+        unknownCostCount: Number(row.unknown),
+      }));
     },
   };
 }

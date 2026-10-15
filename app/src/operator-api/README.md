@@ -2,8 +2,9 @@
 
 A machine interface for an operator who runs one instance for many workspaces (epic #268, issue #275). An
 external service lists the workspaces and sets what each may do: the key it reviews with, its limits per period
-and whether its reviews are suspended (`src/workspaces/README.md`, "Entitlements"). The app only stores and
-enforces; where the numbers come from is the operator's business.
+and whether its reviews are suspended (`src/workspaces/README.md`, "Entitlements"), and reads what each workspace
+consumed (`src/usage/README.md`, #278). The app only stores and enforces; where the numbers come from is the
+operator's business.
 
 The format is `contracts/operator-api.v1.json` (JSON Schema, with one example per body in
 `contracts/examples/operator-api/`). That file is what an external client is built against; the app tests
@@ -47,7 +48,8 @@ There is no rate limit beyond the strength of the token (out of scope of #275, l
    `body_not_allowed`)
 5. workspace: the id in the path names a workspace, else 404 `workspace_not_found`
 6. work: for a `PUT` first its body, which needs `application/json` (415 `unsupported_media_type`), at most 16 KiB (413
-   `body_too_large`) and one JSON value (400 `request_invalid`); then the read, the replacement or the removal
+   `body_too_large`) and one JSON value (400 `request_invalid`); then the read, the replacement or the removal. For
+   usage: the query (400 `request_invalid`, `cursor_invalid` or `period_invalid`), then the read
 
 Every answer is JSON with `Cache-Control: no-store` and `"version": 1`; an error is `{ "version": 1, "error": <code> }`
 (plus `field` for a refused entitlement). There is no message text: callers branch on the code. Every route file
@@ -63,6 +65,9 @@ by Next.js.
 | `PUT /api/operator/v1/workspaces/{id}/entitlements`    | Replaces the row. Idempotent. Answers like `GET`.                                                                                             |
 | `DELETE /api/operator/v1/workspaces/{id}/entitlements` | Removes the row, so the default applies. Harmless when there is none. Answers like `GET`.                                                     |
 | `GET\|PUT /api/operator/v1/entitlements/default`       | The default for workspaces without a row. No `DELETE`.                                                                                        |
+| `GET /api/operator/v1/usage?after=&limit=`             | A page (default 50, at most 200) of the **settled** usage records of every workspace, ordered by `(settledAt, id)`, and `nextCursor`.         |
+| `GET /api/operator/v1/workspaces/{id}/usage`           | The same for one workspace, plus `from` (included) and `to` (excluded) on `settledAt`.                                                        |
+| `GET /api/operator/v1/workspaces/{id}/usage/summary`   | `from` and `to` are required: per review kind and key mode, what the workspace ran in the period.                                             |
 
 A change takes effect on the next claim; a running job is not touched.
 
@@ -98,6 +103,37 @@ API for the same reason (`settings.remove('default_entitlements')` stays unreach
 A stored row or default that cannot be read comes back as `{ "invalid": true }`, and `effective` is `{ kind:
 "invalid", code: "entitlements_invalid" }` (fail closed, #271). A valid `PUT` repairs it.
 
+## Reading usage (#278)
+
+The records are those of `usage_records` (`src/usage/README.md`). An item is `id`, `workspaceId`, `jobId`,
+`reviewKind`, `keyMode`, `modelTier` (the name of a quality tier or `null`; a stored value that is not a tier name, `^[a-z][a-z0-9_-]{0,31}$`, is served as `null`, never a model id), `costMicroUsd`
+(integer or `null` when it could not be measured), `promptTokens`, `completionTokens`, `settledAt` and `reason` (a short
+code or `null`; the table keeps none yet, so it is `null` until #273 stores `no_result`). Nothing else leaves the app:
+no pull request, repository, branch, title or person, and no key. The view is built field by field
+(`usage-views.ts`), so a column added later does not reach the outside by itself.
+
+- **Only settled records are served.** `reserved` (still running) and `void` (no model was used) records never are,
+  and a served record never changes (a repeated completion changes nothing, and a job has one record).
+- **The cursor** is opaque text (`usage-cursor.ts`): base64url, at most 128 characters, naming a time of settlement and a
+  record id. One that is not what the API wrote is `400 cursor_invalid`. `nextCursor` is the position after the last
+  item; an empty page returns the cursor that was passed, so a reader that is caught up asks again from the same
+  place; `null` only while nothing was served and none was passed. A `limit` out of 1 to 200 is `400 request_invalid`; a
+  bad `from`/`to`, an empty period, or a summary without both is `400 period_invalid`.
+- **Out-of-order commits and the safety lag.** A record is served only once its `settledAt` is more than **60 seconds**
+  old (`USAGE_SAFETY_LAG_MS`, validated when the API is made: 1 second to 1 hour). Two settlements that commit in the
+  reverse order of their stamps are therefore never skipped by a reader that moved on, as long as a settlement commits
+  within the lag (see `src/usage/README.md`, "The feed and the safety lag", for what is and is not covered). The
+  newest minute of settlements shows up a little late; that is the price. **Readers must treat `id` as the idempotency
+  key** (keep one item per id): the contract says so.
+- **The summary** counts a run in the period it started in (`[from, to)`, like the counts of the limits), so it is what
+  a limit sees. It is not a view of the feed (which is by time of settlement), and it counts a run that is still in
+  progress in `recordCount`. A combination without runs is not listed. It has no safety lag: it is a total, not a
+  position to continue from.
+- **Workspace scoping.** The feed of every workspace reads through the instance level `usage-feed-repository.ts`; one
+  workspace's page and summary through the scoped usage records repository, which can only see its own rows.
+- Reads log nothing. A mixed deployment is safe: no migration, only new routes and new definitions in the contract
+  (readers ignore what they do not know), and an older app instance answers these paths with its generic `not_found`.
+
 ## Writes and logs
 
 A write records the operator API as the actor (`updated_by` is null) and logs one line:
@@ -111,7 +147,10 @@ for is a generic `500 internal_error`; the log gets the name of the error.
 | -------------------------- | ------------------------------------------------------------------------------- |
 | `token.ts`                 | The token rules, the constant-time comparison                                   |
 | `startup.ts`               | The one start line                                                              |
-| `contract.ts`              | Error codes, limits, routes and methods                                         |
+| `contract.ts`              | Error codes, limits, routes and methods, the safety lag, the cursor size        |
+| `usage.ts`                 | The three usage routes (query, safety lag, answer)                              |
+| `usage-cursor.ts`          | The opaque cursor and the check of the safety lag                               |
+| `usage-views.ts`           | What a usage record and a summary look like to the outside                      |
 | `responses.ts`, `views.ts` | The answers: headers, errors, what an entitlement looks like to the outside     |
 | `api.ts`                   | `createOperatorApi`: the order above, as one function of its collaborators      |
 | `shared.ts`                | The wiring on the running server (`withOperatorApi`, called by the route files) |

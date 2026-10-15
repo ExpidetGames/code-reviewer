@@ -51,6 +51,9 @@ const SCOPED = [
  * - jobs-claim: the one SQL statement of the runner side, not a repository;
  * - legacy-users: the import of an existing installation (src/legacy-import/) reads the users of the earlier
  *   sign in with their GitHub identity and marks them as imported; users belong to no workspace;
+ * - usage-feed: the settled usage records of every workspace for the operator API (#278), which serves the whole
+ *   instance from one token; it only reads, takes the optional bound of the safety lag, and every item names its
+ *   workspace. The reads of one workspace (its page and its summary) go through the scoped usage records repository;
  * - usage-records-sweep: the sweep of usage records for instance level code that ends jobs of any workspace (the
  *   lease side of the queue, the switch-off of Dynamic Review); one statement that only voids `reserved` records of
  *   jobs that have ended, and it takes no workspace on purpose;
@@ -77,6 +80,7 @@ const INSTANCE_LEVEL = [
   "secrets-repository.ts",
   "setup-codes-repository.ts",
   "unclaimed-installations-repository.ts",
+  "usage-feed-repository.ts",
   "usage-records-sweep.ts",
   "webhook-deliveries-repository.ts",
   "workspaces-repository.ts",

@@ -402,3 +402,139 @@ describe("the page of settled records", () => {
     });
   });
 });
+
+describe("reading the records for the operator API", () => {
+  // #278-T02
+  it("serves only records settled strictly before the bound", async () => {
+    const t = await setup();
+    const [a, b, c] = [await t.newJob(), await t.newJob(), await t.newJob()];
+    for (const job of [a, b, c]) await t.records.reserve(job.id, "own");
+    for (const [job, at] of [
+      [a, "2026-10-14T12:00:01.000Z"],
+      [b, "2026-10-14T12:00:02.000Z"],
+      [c, "2026-10-14T12:00:03.000Z"],
+    ] as const) {
+      t.setNow(at);
+      await t.records.settle(job.id, SETTLED(1));
+    }
+
+    const page = await t.records.pageSettled({
+      limit: 10,
+      settledBefore: "2026-10-14T12:00:03.000Z",
+    });
+
+    expect(page.records.map((record) => record.jobId)).toEqual([a.id, b.id]);
+  });
+
+  // #278-T08
+  it("filters a page on the time of settlement, from included and to excluded", async () => {
+    const t = await setup();
+    const [a, b, c] = [await t.newJob(), await t.newJob(), await t.newJob()];
+    for (const job of [a, b, c]) await t.records.reserve(job.id, "own");
+    for (const [job, at] of [
+      [a, "2026-10-14T12:00:01.000Z"],
+      [b, "2026-10-14T12:00:02.000Z"],
+      [c, "2026-10-14T12:00:03.000Z"],
+    ] as const) {
+      t.setNow(at);
+      await t.records.settle(job.id, SETTLED(1));
+    }
+
+    const page = await t.records.pageSettled({
+      limit: 10,
+      from: "2026-10-14T12:00:02.000Z",
+      to: "2026-10-14T12:00:03.000Z",
+    });
+
+    expect(page.records.map((record) => record.jobId)).toEqual([b.id]);
+  });
+});
+
+describe("summarizing a period", () => {
+  async function seeded() {
+    const t = await setup();
+    const jobs = [];
+    for (let i = 0; i < 7; i += 1)
+      jobs.push(await t.newJob(i === 3 ? "dynamic" : "diff"));
+    const at = (n: number) => `2026-10-14T12:0${n}:00.000Z`;
+    t.setNow(at(1));
+    await t.records.reserve(jobs[0]!.id, "own");
+    await t.records.reserve(jobs[1]!.id, "managed");
+    await t.records.reserve(jobs[2]!.id, "managed");
+    await t.records.reserve(jobs[3]!.id, "managed");
+    await t.records.reserve(jobs[4]!.id, "managed");
+    await t.records.reserve(jobs[5]!.id, "managed");
+    t.setNow(at(0));
+    await t.records.reserve(jobs[6]!.id, "managed");
+    t.setNow(at(2));
+    await t.records.settle(jobs[0]!.id, SETTLED(100));
+    await t.records.settle(jobs[1]!.id, SETTLED(200));
+    await t.records.settle(jobs[2]!.id, SETTLED(null));
+    await t.records.settle(jobs[3]!.id, SETTLED(4000));
+    await t.records.settle(jobs[4]!.id, { state: "void" });
+    // jobs[5] stays reserved; jobs[6] was reserved before the period.
+    await t.records.settle(jobs[6]!.id, SETTLED(99999));
+    return { t, jobs, at };
+  }
+
+  // #278-T05
+  it("counts per kind and key mode, sums the known cost and counts the unknown ones apart", async () => {
+    const { t, at } = await seeded();
+
+    const groups = await t.records.summarize({ from: at(1), to: at(5) });
+
+    expect(groups).toEqual([
+      {
+        reviewKind: "diff",
+        keyMode: "managed",
+        recordCount: 3,
+        settledCount: 2,
+        knownCostMicroUsd: 200,
+        unknownCostCount: 1,
+      },
+      {
+        reviewKind: "diff",
+        keyMode: "own",
+        recordCount: 1,
+        settledCount: 1,
+        knownCostMicroUsd: 100,
+        unknownCostCount: 0,
+      },
+      {
+        reviewKind: "dynamic",
+        keyMode: "managed",
+        recordCount: 1,
+        settledCount: 1,
+        knownCostMicroUsd: 4000,
+        unknownCostCount: 0,
+      },
+    ]);
+  });
+
+  // #278-T05
+  it("leaves out void records and gives nothing for a period without runs", async () => {
+    const { t } = await seeded();
+
+    expect(
+      await t.records.summarize({
+        from: "2030-01-01T00:00:00.000Z",
+        to: "2030-02-01T00:00:00.000Z",
+      }),
+    ).toEqual([]);
+  });
+
+  // #278-T05
+  it("dates a run by the time it started, like the count of the limits, and excludes the end of the period", async () => {
+    const { t, at } = await seeded();
+
+    const groups = await t.records.summarize({ from: at(0), to: at(1) });
+
+    expect(groups).toEqual([
+      expect.objectContaining({
+        recordCount: 1,
+        settledCount: 1,
+        knownCostMicroUsd: 99999,
+      }),
+    ]);
+  });
+});
