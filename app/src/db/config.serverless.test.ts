@@ -111,6 +111,35 @@ describe("loadDatabaseConfig in serverless mode", () => {
   );
 });
 
+describe("loadDatabaseConfig in serverless mode: a URL that names no known database", () => {
+  // #319-T04
+  it("asks for Postgres, not for SQLite, and repeats nothing of the URL", () => {
+    for (const url of [
+      "mysql://app:s3cr3t-pw@db.example.test/app",
+      "postgres://app:s3cr3t-pw@",
+    ]) {
+      const error = failureOf(() =>
+        loadDatabaseConfig({ ...serverless, DATABASE_URL: url }),
+      );
+
+      expect(error.code).toBe("DATABASE_CONFIG_INVALID");
+      expect(error.message).toContain("DATABASE_URL");
+      expect(error.message).toContain("postgres://");
+      expect(error.message.toLowerCase()).not.toContain("sqlite");
+      expect(error.message).not.toContain("s3cr3t-pw");
+    }
+  });
+
+  // #319-T06
+  it("keeps the message with the SQLite advice in server mode", () => {
+    const error = failureOf(() =>
+      loadDatabaseConfig({ DATABASE_URL: "mysql://db.example.test/app" }),
+    );
+
+    expect(error.message).toContain("sqlite:");
+  });
+});
+
 describe("loadMigrationDatabaseConfig", () => {
   // #319-T03
   it("reads the direct URL from DATABASE_URL_MIGRATE and ignores DATABASE_URL", () => {

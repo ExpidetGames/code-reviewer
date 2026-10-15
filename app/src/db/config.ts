@@ -104,7 +104,11 @@ function parseDatabaseConfig(
   // A value with a scheme that is none of the three is a mistake: a path never contains "://".
   if (url.includes("://"))
     throw invalidUrl(
-      "its scheme is neither sqlite:, postgres:// nor postgresql://",
+      serverless
+        ? "its scheme is neither postgres:// nor postgresql://"
+        : "its scheme is neither sqlite:, postgres:// nor postgresql://",
+      "DATABASE_URL",
+      serverless,
     );
   return {
     driver: "sqlite",
@@ -146,9 +150,18 @@ function postgresConfig(
   try {
     parsed = new URL(url);
   } catch {
-    throw invalidUrl("it is not a valid URL", variable);
+    throw invalidUrl(
+      "it is not a valid URL",
+      variable,
+      serverless || variable !== "DATABASE_URL",
+    );
   }
-  if (!parsed.hostname) throw invalidUrl("it names no host", variable);
+  if (!parsed.hostname)
+    throw invalidUrl(
+      "it names no host",
+      variable,
+      serverless || variable !== "DATABASE_URL",
+    );
   if (serverless)
     return {
       driver: "postgres",
@@ -182,11 +195,16 @@ function serverlessNeedsPostgres(): DatabaseError {
 }
 
 /** A Postgres URL is never repeated in the message: it carries the password. */
-function invalidUrl(problem: string, variable = "DATABASE_URL"): DatabaseError {
-  if (variable !== "DATABASE_URL")
+function invalidUrl(
+  problem: string,
+  variable = "DATABASE_URL",
+  postgresOnly = false,
+): DatabaseError {
+  // Serverless and the migration command have no SQLite: do not suggest it.
+  if (postgresOnly)
     return new DatabaseError(
       "DATABASE_CONFIG_INVALID",
-      `${variable} is not usable: ${problem}. Use a direct postgres:// or postgresql:// URL.`,
+      `${variable} is not usable: ${problem}. Use a postgres:// or postgresql:// URL.`,
     );
   return new DatabaseError(
     "DATABASE_CONFIG_INVALID",
