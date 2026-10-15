@@ -172,8 +172,9 @@ portal exists). The admin keeps portal access even when their email address is n
   stored encrypted (section 2.7). A "send test mail" button sends a mail to the admin's address and
   reports the result. **Mail is never configured through environment variables.** SMTP may be removed
   at any time (rules that depend on it become fail-closed, section 2.5).
-- **Instance limits.** The maximum number of workspaces per user (default **10**). Later: the
-  operator's LLM key for "included" usage and pricing (section 2.8).
+- **Instance limits.** The maximum number of workspaces per user (default **10**).
+- **LLM key.** The operator's own LLM key, for the workspaces whose key mode is `managed` (section 2.8,
+  addendum). Write-only like every credential here, stored encrypted (section 2.7).
 - **Approvals.** Requests to link a GitHub installation that need the instance admin (section 2.9).
 
 **A lost admin password.** With SMTP the normal password reset mail works. Without SMTP, a command
@@ -419,6 +420,30 @@ For a review job, the LLM access is resolved in this order:
 
 The runner receives the resolved key in the claim response as it does today; keys never reach the
 browser.
+
+**Addendum (#276, the operator's own key).** Step 2 is no longer a stub, and the order above is replaced by a
+decision on the workspace's **key mode**, the field of its effective entitlements (`own` or `managed`; a workspace
+without entitlements is `own`, which is what an instance that never configured any has always been):
+
+- `own` (or no entitlements): the workspace's own key, as in step 1. **The operator's key is never used for a workspace
+  that is not `managed`**, even when the workspace has no key of its own: the job fails with `llm_not_configured`.
+- `managed`: the operator's own key. The workspace's own stored key is ignored (not deleted) and is never a fallback,
+  because the entitlement says which key is used. Without a key that can be read the job **fails closed** with
+  `llm_not_configured` (reasons `operator_key_missing`, `operator_key_unreadable`).
+- Entitlements that cannot be read fail closed too (reason `entitlements_invalid`): it is not known whose key applies.
+
+The operator's key is one secret, `operator_llm_key`, in the encrypted store of the instance (section 2.7) with the
+provider OpenRouter. **Only the instance admin writes it, in the admin portal** (write-only; the portal shows whether
+it is configured and the last four characters). It is deliberately **not** part of the operator API: whoever holds the
+API token, which sets the entitlements, must not hold the key. It reaches a runner only in the claim response (the
+legacy claim) or in the first fetch of the job through the Worker API; it is remembered encrypted per job so a result
+can be masked even after the key was rotated, and it never reaches a workspace member, the browser, a log or the
+Dispatcher. The workspace's settings page says that access is provided by the instance and shows no key form; the
+routes for the workspace's own key keep working. While a job runs on the operator's key, the operator chooses the
+model, never the tenant: the instance's default model and context window apply to Diff and to Dynamic, and the
+workspace's review settings for them stay stored without taking effect (until managed tiers replace this). The usage
+record names the key a job actually used (`own` or `managed`). Every app instance must be upgraded before a workspace
+is set to `managed`: an instance of the previous release does not know the key mode. Limits, tiers and per-workspace sub-keys are separate decisions of the epic (#268).
 
 ### 2.9 Binding a GitHub App installation to a workspace
 

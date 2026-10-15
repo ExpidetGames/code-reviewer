@@ -73,6 +73,7 @@ describe("the sections of the portal", () => {
       "Integrations",
       "GitHub App",
       "Mail",
+      "LLM key",
     ]);
     expect(links.map((link) => link.getAttribute("href"))).toEqual(
       ADMIN_NAV_ITEMS.map((item) => item.href),
@@ -139,6 +140,7 @@ describe("the sections on a narrow screen", () => {
       "Integrations",
       "GitHub App",
       "Mail",
+      "LLM key",
     ]);
   });
 });

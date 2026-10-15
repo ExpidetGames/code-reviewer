@@ -159,8 +159,14 @@ export function SettingsForm({
   repositoryId,
   readOnly = false,
   dynamicReviewEnabled = false,
+  modelChosenByInstance = false,
   api: apiOverride,
 }: {
+  /**
+   * The workspace reviews with the instance's own key (key mode managed): the instance chooses the model, so the
+   * model fields give way to a note (#276). The stored values are kept and not sent differently.
+   */
+  modelChosenByInstance?: boolean;
   /** The workspace of the page: the call is made in it. */
   workspaceSlug: string;
   initial: SettingsFormModel;
@@ -462,6 +468,7 @@ export function SettingsForm({
             hiddenProblem={hiddenProblem}
             kindError={kindError}
             handlers={kindHandlers}
+            modelChosenByInstance={modelChosenByInstance}
           />
         ) : null}
         {kind === "diff" ? (
@@ -473,6 +480,7 @@ export function SettingsForm({
             handlers={handlers}
             cost={cost}
             datalistId={datalistId}
+            chosenByInstance={modelChosenByInstance}
           />
         ) : null}
         <ReviewFieldset

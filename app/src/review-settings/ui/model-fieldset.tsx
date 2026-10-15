@@ -29,6 +29,10 @@ export function tokenBudgetHint(): string {
   return `How much of a pull request the model can read in one go. A token is about three quarters of a word, so a bigger budget lets it see more of a large change, but costs more. Between ${min.toLocaleString("en-US")} and ${max.toLocaleString("en-US")}.`;
 }
 
+/** Shown instead of the model fields while the instance's own key is used: the operator chooses the model (#276). */
+export const MODEL_CHOSEN_BY_INSTANCE =
+  "The model is chosen by this instance, so there is nothing to set here. Reviews of this workspace use the instance's model, and a model you saved earlier is kept but not used.";
+
 export function ModelFieldset({
   model,
   state,
@@ -37,7 +41,10 @@ export function ModelFieldset({
   handlers,
   cost,
   datalistId,
+  chosenByInstance = false,
 }: SettingsFieldsetProps & {
+  /** The instance chooses the model (the workspace's key mode is managed): a note replaces the fields. */
+  chosenByInstance?: boolean;
   cost: ReviewCostGuard | null;
   /** The id of the `<datalist>` of known model names, rendered by the container. */
   datalistId: string;
@@ -53,6 +60,14 @@ export function ModelFieldset({
       label,
       onReset: () => handlers.reset(name),
     });
+  if (chosenByInstance)
+    return (
+      <SettingsCard title="Model" disabled={disabled}>
+        <p className="text-sm text-muted-foreground">
+          {MODEL_CHOSEN_BY_INSTANCE}
+        </p>
+      </SettingsCard>
+    );
   return (
     <SettingsCard title="Model" disabled={disabled}>
       <SettingsTextField

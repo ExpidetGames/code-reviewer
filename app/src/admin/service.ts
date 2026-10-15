@@ -18,6 +18,10 @@ import type {
 } from "../mail/smtp-config.ts";
 import type { SmtpSettings } from "../mail/smtp-settings.ts";
 import type { TestMailResult, TestMailService } from "../mail/test-mail.ts";
+import {
+  createOperatorLlmKeyService,
+  type OperatorLlmKeyStatus,
+} from "../llm/operator-key.ts";
 import type { SecretStatus, SecretStore } from "../secrets/store.ts";
 import type { SetupIssue } from "../setup/errors.ts";
 import { parseSignUpRule } from "../setup/input.ts";
@@ -80,6 +84,11 @@ export type AdminSettingsView = {
    * whether it can still be read.
    */
   smtp: SettingView<SmtpSettings | null> & { password: SmtpPasswordState };
+  /**
+   * The operator's own LLM key (#276): whether it is configured, cannot be read, or is missing, and the last
+   * four characters of a long key. Never the key.
+   */
+  operatorLlmKey: OperatorLlmKeyStatus;
   workspaceCount: number;
   githubConfigured: boolean;
   mailConfigured: boolean;
@@ -128,6 +137,11 @@ export type AdminService = {
   changeDynamicReview(actorId: string, change: unknown): Promise<ChangeResult>;
   /** `smtp` is the request's `smtp` value as received: an object to save, or null to remove the mail server. */
   changeSmtp(actorId: string, smtp: unknown): Promise<ChangeResult>;
+  /**
+   * `change` is the request's `operatorLlmKey` value as received: `{ apiKey }` to save the operator's own LLM
+   * key (write-only), or null to remove it.
+   */
+  changeOperatorLlmKey(actorId: string, change: unknown): Promise<ChangeResult>;
   /** Sends the test mail to the acting admin's own address. */
   sendTestMail(actor: { id: string; email: string }): Promise<TestMailResult>;
   /** Hides the notice of the import. A notice that is not there is not an error. */
@@ -136,7 +150,7 @@ export type AdminService = {
 
 export type AdminServiceOptions = {
   db: Kysely<Database>;
-  secrets: Pick<SecretStore, "statuses">;
+  secrets: SecretStore;
   /** Whether sign-in with GitHub can work: the GitHub App's user authorization is configured. */
   githubConfigured: () => boolean | Promise<boolean>;
   /**
@@ -174,6 +188,7 @@ export function createAdminService({
   now = () => new Date(),
 }: AdminServiceOptions): AdminService {
   const settings = createInstanceSettingsRepository(db, now);
+  const operatorKey = createOperatorLlmKeyService({ store: secrets });
 
   async function emailsOf(ids: string[]): Promise<Map<string, string>> {
     if (ids.length === 0) return new Map();
@@ -271,6 +286,7 @@ export function createAdminService({
           ),
           password: mailServer.password,
         },
+        operatorLlmKey: await operatorKey.status(),
         workspaceCount: Number(count.count),
         githubConfigured: github,
         mailConfigured: mail,
@@ -346,6 +362,25 @@ export function createAdminService({
         return { ok: true };
       }
       return smtp.save(actorId, value);
+    },
+
+    async changeOperatorLlmKey(actorId, change) {
+      if (change === null) {
+        await operatorKey.remove();
+        return { ok: true };
+      }
+      if (!isObject(change))
+        return {
+          ok: false,
+          error: "invalid_input",
+          issues: [
+            { field: "operatorLlmKey", code: "operator_llm_key_invalid" },
+          ],
+        };
+      const saved = await operatorKey.save({ apiKey: change.apiKey }, actorId);
+      if (!saved.ok)
+        return { ok: false, error: "invalid_input", issues: saved.issues };
+      return { ok: true };
     },
 
     sendTestMail: (actor) => testMail.send(actor),
