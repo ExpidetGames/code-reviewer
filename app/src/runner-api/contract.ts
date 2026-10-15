@@ -5,6 +5,7 @@
 // integration-tests/compatibility/runner-api-contract.integration.test.ts (the sets are compared
 // with the file, and real answers and the request checks are validated against it).
 import type { ReviewCommand } from "../integrations/types.ts";
+import type { JobStatus } from "../jobs/job-status.ts";
 import type { ProjectReviewKind } from "../review-settings/settings.ts";
 import {
   RUNNER_ENGINES,
@@ -83,6 +84,15 @@ export const RELEASE_RETRY_AFTER_RANGE = { min: 1, max: 86_400 } as const;
 export type ReleaseResponse = {
   version: typeof RUNNER_API_VERSION;
   job: { id: string; status: "queued" | "failed" };
+};
+
+/**
+ * #364: 200 from `GET /api/runners/v1/jobs/{id}` (`JobStateResponse`): the status of a job and nothing else, for a
+ * Dispatcher that decides whether the VM of a job is a leftover.
+ */
+export type JobStateResponse = {
+  version: typeof RUNNER_API_VERSION;
+  job: { id: string; status: JobStatus };
 };
 
 /** The path prefix of this version; the version is part of the URL. */

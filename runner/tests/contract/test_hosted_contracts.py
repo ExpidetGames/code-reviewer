@@ -83,7 +83,14 @@ def test_every_example_is_valid_against_its_schema(file: str, definition: str) -
 
 @pytest.mark.contract
 @pytest.mark.parametrize(
-    "definition", ["SplitClaimResponse", "ReleaseRequest", "ReleaseResponse", "VersionResponse"]
+    "definition",
+    [
+        "SplitClaimResponse",
+        "ReleaseRequest",
+        "ReleaseResponse",
+        "VersionResponse",
+        "JobStateResponse",
+    ],
 )
 def test_the_new_runner_api_examples_are_valid(definition: str) -> None:
     # #318-T01

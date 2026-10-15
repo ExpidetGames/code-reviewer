@@ -28,6 +28,7 @@ import {
   RUNNER_API_VERSION,
   type VersionResponse,
 } from "./contract.ts";
+import { handleJobState, type JobStateDeps } from "./job-state.ts";
 import { handleRelease, type ReleaseDeps } from "./release.ts";
 import { describeError } from "./logger.ts";
 import { parseClaimRequest, parseJobId, parseRunnerId } from "./requests.ts";
@@ -37,7 +38,8 @@ import { bearerTokenOf, tokensMatch } from "./token-auth.ts";
 
 export type RunnerApiDeps = ClaimDeps &
   ReportDeps &
-  ReleaseDeps & {
+  ReleaseDeps &
+  JobStateDeps & {
     /** #322: the build of the app, reported by the version call. */
     appVersion: string;
     /** The configured shared secret (`RUNNER_TOKEN`), read for every request. */
@@ -52,6 +54,8 @@ export type RunnerApi = {
   release(request: Request, jobId: string): Promise<Response>;
   /** #322: what this app is and can do. */
   version(request: Request): Promise<Response>;
+  /** #364: the status of a job, for a Dispatcher that looks for the VMs of jobs that ended. */
+  jobState(request: Request, jobId: string): Promise<Response>;
 };
 
 export function createRunnerApi(deps: RunnerApiDeps): RunnerApi {
@@ -166,6 +170,20 @@ export function createRunnerApi(deps: RunnerApiDeps): RunnerApi {
         return await handleRelease(deps, jobId, who.runnerId, body.value);
       } catch (error) {
         return unexpected("release", error);
+      }
+    },
+
+    async jobState(request, jobId) {
+      try {
+        const who = identify(request);
+        if (!who.ok) return who.response;
+        if (!parseJobId(jobId))
+          return errorResponse(400, "RUNNER_REQUEST_INVALID", {
+            fields: [{ field: "jobId", code: "invalid" }],
+          });
+        return await handleJobState(deps, jobId);
+      } catch (error) {
+        return unexpected("job state", error);
       }
     },
 

@@ -168,6 +168,28 @@ describe("the real answers", () => {
     }
   });
 
+  // #364-T26
+  it("of the job state call is a valid JobStateResponse, and its errors valid errors", async () => {
+    const h = await startRunnerApiHarness();
+    const job = await h.enqueueNew();
+
+    const known = await h.jobState(job.id);
+    const missing = await h.jobState(crypto.randomUUID());
+    const refused = await h.jobState(job.id, { token: null });
+    const invalid = await h.jobState("not-a-uuid");
+
+    expect(known.status).toBe(200);
+    expectValid("JobStateResponse", await known.json());
+    for (const [response, status] of [
+      [missing, 404],
+      [refused, 401],
+      [invalid, 400],
+    ] as const) {
+      expect(response.status).toBe(status);
+      expectValid("ErrorResponse", await response.json());
+    }
+  });
+
   // #322-T11
   it("of the version call is a valid VersionResponse, and its refusal a valid error", async () => {
     const h = await startRunnerApiHarness();
