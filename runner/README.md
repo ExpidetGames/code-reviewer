@@ -165,7 +165,7 @@ always did. An unknown mode is a usage error (exit 2) that does not echo what wa
 | `legacy` (default) | The job loop above: claims with `RUNNER_TOKEN` and runs jobs itself. |
 | `worker-once` | One Worker (above): `{appUrl, jobId, credential}` on stdin, one job, exit code 0, 1 or 2. Same as `code-reviewer-worker --once`. |
 | `probe` | Runs the startup and prints one line of JSON, the verdict, then exits. No token, URL or credential is read. |
-| `dispatch` | The Dispatcher. This image carries no Dispatcher bundle yet (#334): exit 2, `dispatcher_bundle_missing`. |
+| `dispatch` | The Dispatcher. This image carries no Dispatcher bundle yet (#334): the startup runs, then exit 2, `dispatcher_bundle_missing`. |
 
 **The startup is the same in every mode** and runs once, first thing in the container, before any thread, job process
 or (in `worker-once`) the start document exists: the engine user's network rules, the end of `NET_ADMIN` and

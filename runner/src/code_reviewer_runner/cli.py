@@ -24,11 +24,14 @@ from collections.abc import Mapping, Sequence
 from typing import NoReturn, TextIO
 
 from code_reviewer_runner import __version__
+from code_reviewer_runner.dynamic_review.netguard import IsolationError
 from code_reviewer_runner.job_loop.service import (
     LOGGER_NAME,
     configure_logging,
     run_from_environment,
+    run_startup,
 )
+from code_reviewer_runner.job_loop.settings import SettingsError, worker_settings_from_environment
 from code_reviewer_runner.probe import run_probe
 from code_reviewer_runner.worker_cli import run_once as run_worker_once
 
@@ -71,9 +74,24 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def run_dispatcher(environment: Mapping[str, str]) -> int:
-    """The Dispatcher bundle is added to the self-hosted targets by #334; this image has none."""
+    """The Dispatcher bundle is added to the self-hosted targets by #334; this image has none.
+
+    The hardened startup still runs first, like in every mode: what #334 starts after it inherits
+    the same container, and the engines file is written. Then the mode refuses.
+    """
     configure_logging()
-    logging.getLogger(LOGGER_NAME).error(
+    log = logging.getLogger(LOGGER_NAME)
+    try:
+        settings = worker_settings_from_environment(environment)
+    except SettingsError as error:
+        log.error("cannot start: %s", error)
+        return 2
+    try:
+        run_startup(settings)
+    except IsolationError as error:
+        log.error("cannot start: %s", error)
+        return 2
+    log.error(
         "cannot start: %s: this image carries no Dispatcher bundle", DISPATCHER_BUNDLE_MISSING
     )
     return 2

@@ -136,3 +136,27 @@ def test_the_start_document_is_read_only_after_the_startup_is_done(recorder: Rec
         "read the start document",
         "job process may start",
     ]
+
+
+# #324 (review of #351): every mode runs the hardened startup first, also the one that can only
+# refuse today; what #334 starts after it then inherits the same container.
+def test_dispatch_runs_the_shared_startup_before_it_refuses(
+    recorder: Recorder, capsys: pytest.CaptureFixture[str]
+) -> None:
+    code = cli.main(["dispatch"], environment=DYNAMIC)
+
+    assert code == 2
+    assert recorder.events == ["drop NET_ADMIN", "self-check"]
+    assert "dispatcher_bundle_missing" in capsys.readouterr().err
+
+
+def test_dispatch_that_cannot_drop_net_admin_refuses_for_that_reason_first(
+    recorder: Recorder, capsys: pytest.CaptureFixture[str]
+) -> None:
+    recorder.cannot_drop = True
+
+    code = cli.main(["dispatch"], environment=DYNAMIC)
+
+    assert code == 2
+    assert recorder.events == ["drop NET_ADMIN"]
+    assert "dispatcher_bundle_missing" not in capsys.readouterr().err
