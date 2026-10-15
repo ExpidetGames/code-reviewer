@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/ExpidetGames/code-reviewer/contracts/operator-api.v1.json",
   "title": "Code Reviewer operator API, version 1",
-  "description": "The wire format of the operator API (#275): a machine interface for an operator who sets the entitlements of workspaces from outside the app. Every request carries 'Authorization: Bearer <OPERATOR_API_TOKEN>'; a request body is application/json up to 16384 bytes, and GET and DELETE carry none. Every answer is JSON with 'Cache-Control: no-store' and the version in its body; an error is {version, error, field?} with a stable code, never a message. Until OPERATOR_API_TOKEN is set the paths do not exist (the 404 of a missing path, not this format). The API identifies workspaces by id and slug only: no names of people, no emails, no repositories, no pull requests. A reader ignores fields it does not know. This file is the only source of the format; the app tests validate real answers and contracts/examples/operator-api holds one valid example per definition.",
+  "description": "The wire format of the operator API (#275, #278): a machine interface for an operator who sets the entitlements of workspaces and reads what they consumed, from outside the app. Every request carries 'Authorization: Bearer <OPERATOR_API_TOKEN>'; a request body is application/json up to 16384 bytes, and GET and DELETE carry none. Every answer is JSON with 'Cache-Control: no-store' and the version in its body; an error is {version, error, field?} with a stable code, never a message. Until OPERATOR_API_TOKEN is set the paths do not exist (the 404 of a missing path, not this format). The API identifies workspaces by id and slug only: no names of people, no emails, no repositories, no pull requests. A reader ignores fields it does not know. This file is the only source of the format; the app tests validate real answers and contracts/examples/operator-api holds one valid example per definition.",
   "version": 1,
   "$defs": {
     "Version": {
@@ -20,7 +20,7 @@
       "pattern": "^[A-Za-z0-9_-]{1,64}$"
     },
     "ApiErrorCode": {
-      "description": "Callers branch on the code. 401 unauthorized; 404 not_found (unknown path) or workspace_not_found; 405 method_not_allowed (with an Allow header); 400 body_not_allowed (a GET or DELETE with a body) or request_invalid (not JSON, or a bad query); 413 body_too_large; 415 unsupported_media_type; 409 period_start_backwards; 422 the other codes of a refused entitlement (the codes of the workspace entitlements validation, with 'field' naming the limit or key concerned); 500 internal_error.",
+      "description": "Callers branch on the code. 401 unauthorized; 404 not_found (unknown path) or workspace_not_found; 405 method_not_allowed (with an Allow header); 400 body_not_allowed (a GET or DELETE with a body), request_invalid (not JSON, or a bad query such as a limit out of range), cursor_invalid (a usage cursor that is not one of the API's) or period_invalid (a usage 'from' or 'to' that is not a timestamp, a period that is empty, or a summary without both); 413 body_too_large; 415 unsupported_media_type; 409 period_start_backwards; 422 the other codes of a refused entitlement (the codes of the workspace entitlements validation, with 'field' naming the limit or key concerned); 500 internal_error.",
       "type": "string",
       "enum": [
         "unauthorized",
@@ -31,6 +31,8 @@
         "unsupported_media_type",
         "body_too_large",
         "request_invalid",
+        "cursor_invalid",
+        "period_invalid",
         "internal_error",
         "entitlements_invalid",
         "plan_label_invalid",
@@ -457,6 +459,222 @@
               "type": "null"
             }
           ]
+        }
+      }
+    },
+    "UsageCursor": {
+      "description": "An opaque position in the usage feed: keep the 'nextCursor' of an answer and pass it back as 'after'. Do not parse it or build one; one the API did not write is refused with cursor_invalid. At most 128 characters of base64url.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9_-]+$"
+    },
+    "UsageReason": {
+      "description": "Why a record carries no measurement, as a short code (lowercase letters, digits and '_'), or null. A reader ignores a code it does not know. No record carries one yet.",
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 64,
+      "pattern": "^[a-z][a-z0-9_]*$"
+    },
+    "UsageItem": {
+      "description": "One settled run. Nothing about the pull request, the repository, the branch, the title or any person is in it, and 'modelTier' is the name of a quality tier, never the name of a model. 'costMicroUsd' is millionths of a US dollar of measured model cost, null when the run could not be measured (never a guess); the token counts are null when unknown. A record is immutable once it is served.",
+      "type": "object",
+      "required": [
+        "id",
+        "workspaceId",
+        "jobId",
+        "reviewKind",
+        "keyMode",
+        "modelTier",
+        "costMicroUsd",
+        "promptTokens",
+        "completionTokens",
+        "settledAt",
+        "reason"
+      ],
+      "properties": {
+        "id": {
+          "description": "The id of the record: the idempotency key. A reader that is handed a record twice (it retried a page) keeps one.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "workspaceId": {
+          "$ref": "#/$defs/WorkspaceId"
+        },
+        "jobId": {
+          "description": "The id of the review job the record belongs to; one record per job.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "reviewKind": {
+          "description": "Which review the run was.",
+          "type": "string",
+          "enum": [
+            "diff",
+            "dynamic"
+          ]
+        },
+        "keyMode": {
+          "description": "Whose LLM key the run used. 'managed' is the operator's key.",
+          "type": "string",
+          "enum": [
+            "own",
+            "managed"
+          ]
+        },
+        "modelTier": {
+          "description": "The quality tier of a managed run, or null.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 64
+        },
+        "costMicroUsd": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 2147483647
+        },
+        "promptTokens": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 2147483647
+        },
+        "completionTokens": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 2147483647
+        },
+        "settledAt": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "reason": {
+          "$ref": "#/$defs/UsageReason"
+        }
+      }
+    },
+    "UsagePage": {
+      "description": "GET /usage?after=<cursor>&limit=<1..200, default 50> (every workspace) and GET /workspaces/{id}/usage?after=&limit=&from=&to= (one workspace; 'from' included and 'to' excluded, on 'settledAt'): a page of SETTLED records ordered by (settledAt, id) after the cursor. Records that are reserved or void are never served. A record is served only once its 'settledAt' is more than 60 seconds old (the safety lag), so a record that commits late cannot appear behind a position a reader already holds; a reader that polls therefore sees the newest minute of settlements a little later. 'nextCursor' is the position after the last item, or the cursor that was passed when the page is empty, or null when nothing has been served and none was passed: keep it and pass it as 'after' next time. Treat 'id' as the idempotency key: keep one item per id, however often a page is read.",
+      "type": "object",
+      "required": [
+        "version",
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "version": {
+          "$ref": "#/$defs/Version"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UsageItem"
+          },
+          "maxItems": 200
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/UsageCursor"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "UsageSummaryGroup": {
+      "description": "What one workspace ran in the period, for one kind of review and one key mode. 'recordCount' counts the runs that count towards a limit (running or settled; void runs are left out), 'settledCount' those among them that are settled, 'knownCostMicroUsd' adds up the cost of the settled runs whose cost is known, and 'unknownCostCount' counts the settled runs whose cost is not known (they add nothing to the sum).",
+      "type": "object",
+      "required": [
+        "reviewKind",
+        "keyMode",
+        "recordCount",
+        "settledCount",
+        "knownCostMicroUsd",
+        "unknownCostCount"
+      ],
+      "properties": {
+        "reviewKind": {
+          "type": "string",
+          "enum": [
+            "diff",
+            "dynamic"
+          ]
+        },
+        "keyMode": {
+          "type": "string",
+          "enum": [
+            "own",
+            "managed"
+          ]
+        },
+        "recordCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "settledCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "knownCostMicroUsd": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "unknownCostCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      }
+    },
+    "UsageSummaryResponse": {
+      "description": "GET /workspaces/{id}/usage/summary?from=&to=: both are required timestamps with 'from' before 'to'. A run belongs to the period it started in ('from' included, 'to' excluded), the same rule the limits count by, so this summary is what a limit sees; it is not a view of the feed (which is by time of settlement) and a run still in progress is counted in 'recordCount'. The groups are ordered by review kind then key mode; a combination without runs is not listed.",
+      "type": "object",
+      "required": [
+        "version",
+        "workspaceId",
+        "from",
+        "to",
+        "groups"
+      ],
+      "properties": {
+        "version": {
+          "$ref": "#/$defs/Version"
+        },
+        "workspaceId": {
+          "$ref": "#/$defs/WorkspaceId"
+        },
+        "from": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "to": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "groups": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UsageSummaryGroup"
+          }
         }
       }
     }

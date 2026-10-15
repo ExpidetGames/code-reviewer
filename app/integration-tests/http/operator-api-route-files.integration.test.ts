@@ -43,7 +43,21 @@ async function loadRoutes() {
     (await import("../../src/app/api/operator/v1/entitlements/default/route.ts")) as unknown as Route;
   const rest =
     (await import("../../src/app/api/operator/v1/[...path]/route.ts")) as unknown as Route;
-  return { list, entitlements, defaults, rest };
+  const usage =
+    (await import("../../src/app/api/operator/v1/usage/route.ts")) as unknown as Route;
+  const workspaceUsage =
+    (await import("../../src/app/api/operator/v1/workspaces/[id]/usage/route.ts")) as unknown as Route;
+  const usageSummary =
+    (await import("../../src/app/api/operator/v1/workspaces/[id]/usage/summary/route.ts")) as unknown as Route;
+  return {
+    list,
+    entitlements,
+    defaults,
+    rest,
+    usage,
+    workspaceUsage,
+    usageSummary,
+  };
 }
 
 function request(method: string, token?: string, body?: unknown): Request {
@@ -175,6 +189,46 @@ describe("the operator API route files while the API is on", () => {
     expect(wrong.status).toBe(401);
     expect(unknown.status).toBe(404);
     expect(await unknown.json()).toEqual({ version: 1, error: "not_found" });
+  });
+
+  // #278-T07
+  it("serve the usage routes through the real wiring, and refuse a wrong token", async () => {
+    vi.stubEnv("OPERATOR_API_TOKEN", TOKEN);
+    const workspaceId = await startDatabase();
+    const routes = await loadRoutes();
+    const context = { params: Promise.resolve({ id: workspaceId }) };
+    const from = "2026-10-01T00:00:00.000Z";
+    const to = "2026-11-01T00:00:00.000Z";
+    const withQuery = (query: string, token: string) =>
+      new Request(`https://app.test/api/operator/v1/x?${query}`, {
+        method: "GET",
+        headers: { authorization: `Bearer ${token}` },
+      });
+
+    const feed = (await routes.usage.GET(
+      request("GET", TOKEN) as never,
+    )) as Response;
+    const mine = (await routes.workspaceUsage.GET(
+      request("GET", TOKEN) as never,
+      context as never,
+    )) as Response;
+    const summary = (await routes.usageSummary.GET(
+      withQuery(`from=${from}&to=${to}`, TOKEN) as never,
+      context as never,
+    )) as Response;
+    const wrong = (await routes.usage.GET(
+      request("GET", "wrong") as never,
+    )) as Response;
+
+    expect(feed.status).toBe(200);
+    expect(await feed.json()).toEqual({
+      version: 1,
+      items: [],
+      nextCursor: null,
+    });
+    expect(mine.status).toBe(200);
+    expect(await summary.json()).toMatchObject({ workspaceId, groups: [] });
+    expect(wrong.status).toBe(401);
   });
 
   // #275-T03

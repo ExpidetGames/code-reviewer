@@ -11,7 +11,8 @@
 //   4. body      GET and DELETE carry none                                                     400
 //   5. workspace the id in the path names a workspace                                          404 workspace_not_found
 //   6. work      PUT: application/json, up to 16 KiB, one JSON value (415 / 413 / 400), then
-//                read, replace or remove
+//                read, replace or remove; usage: the query (400 request_invalid / cursor_invalid / period_invalid)
+//                then the read (usage.ts)
 //
 // Nothing before step 1 reads the request body or touches the database. The API is separate from the browser
 // session of `/api/admin/*`: no cookie is looked at.
@@ -21,6 +22,8 @@ import type {
   StoredEntitlements,
   WorkspaceEntitlementsRepository,
 } from "../db/repositories/workspace-entitlements-repository.ts";
+import type { UsageFeedRepository } from "../db/repositories/usage-feed-repository.ts";
+import type { UsageRecordsRepository } from "../db/repositories/usage-records-repository.ts";
 import type { WorkspacesRepository } from "../db/repositories/workspaces-repository.ts";
 import { describeError } from "../runner-api/logger.ts";
 import { bearerTokenOf } from "../runner-api/token-auth.ts";
@@ -33,6 +36,7 @@ import {
 import { EntitlementsError } from "../workspaces/entitlements-validation.ts";
 import {
   DEFAULT_PAGE_SIZE,
+  USAGE_SAFETY_LAG_MS,
   MAX_FIELD_LENGTH,
   MAX_PAGE_SIZE,
   OPERATOR_ID_PATTERN,
@@ -42,6 +46,8 @@ import {
 } from "./contract.ts";
 import { errorResponse, jsonResponse, unauthorized } from "./responses.ts";
 import { operatorTokensMatch } from "./token.ts";
+import { createUsageHandlers } from "./usage.ts";
+import { validateSafetyLagMs } from "./usage-cursor.ts";
 import {
   changedFieldNames,
   defaultView,
@@ -60,6 +66,12 @@ export type OperatorApiDeps = {
   workspaces: WorkspacesRepository;
   entitlementsFor: (workspaceId: string) => WorkspaceEntitlementsRepository;
   settings: InstanceSettingsRepository;
+  /** The settled usage records of every workspace (the feed). */
+  usageFeed: UsageFeedRepository;
+  /** The usage records of one workspace (its page and its summary). */
+  usageFor: (workspaceId: string) => UsageRecordsRepository;
+  /** How old a settlement must be before it is served; default `USAGE_SAFETY_LAG_MS`. Validated when the API is made. */
+  usageSafetyLagMs?: number;
   now: () => Date;
   logger: OperatorApiLogger;
   /** Ends the request with the answer of a path that does not exist (Next.js's `notFound`). */
@@ -117,6 +129,15 @@ function parsePage(url: URL): Parsed<{ after?: string; limit: number }> {
 }
 
 export function createOperatorApi(deps: OperatorApiDeps): OperatorApi {
+  const usage = createUsageHandlers({
+    feed: deps.usageFeed,
+    usageFor: deps.usageFor,
+    now: deps.now,
+    safetyLagMs: validateSafetyLagMs(
+      deps.usageSafetyLagMs ?? USAGE_SAFETY_LAG_MS,
+    ),
+  });
+
   /** The log line of a write: names of changed fields and the result code, never a value. */
   function logWrite(
     action: "put" | "delete",
@@ -263,13 +284,21 @@ export function createOperatorApi(deps: OperatorApiDeps): OperatorApi {
         return listWorkspaces(request);
       case "default-entitlements":
         return defaultEntitlements(request);
-      case "workspace-entitlements": {
+      case "usage":
+        return usage.feed(request);
+      case "workspace-entitlements":
+      case "workspace-usage":
+      case "workspace-usage-summary": {
         const id = route.workspaceId;
         const workspace = OPERATOR_ID_PATTERN.test(id)
           ? await deps.workspaces.get(id)
           : undefined;
         if (workspace === undefined)
           return errorResponse(404, "workspace_not_found");
+        if (route.kind === "workspace-usage")
+          return usage.workspaceFeed(request, workspace.id);
+        if (route.kind === "workspace-usage-summary")
+          return usage.summary(request, workspace.id);
         return workspaceEntitlements(request, workspace.id);
       }
       case "unknown":
