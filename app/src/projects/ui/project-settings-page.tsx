@@ -90,9 +90,12 @@ export function ProjectSettingsPageContent({
   workspaceSlug,
   audience = "member",
   llmNotice = null,
+  modelChosenByInstance = false,
   data,
   api,
 }: {
+  /** The workspace reviews with the instance's own key: the instance chooses the model (#276). */
+  modelChosenByInstance?: boolean;
   /** The workspace of the page: every link and call stays in it. */
   workspaceSlug: string;
   /** Whether the person runs the instance (reads which variables are wrong) or is a member. */
@@ -122,10 +125,15 @@ export function ProjectSettingsPageContent({
         {/* Keyed on the server data: with Cache Components a page that was left stays mounted, and
             when it is shown again with fresh data the form must start from that data. */}
         <SettingsForm
-          key={JSON.stringify([data.model, data.dynamicReviewEnabled])}
+          key={JSON.stringify([
+            data.model,
+            data.dynamicReviewEnabled,
+            modelChosenByInstance,
+          ])}
           workspaceSlug={workspaceSlug}
           initial={data.model}
           dynamicReviewEnabled={data.dynamicReviewEnabled}
+          modelChosenByInstance={modelChosenByInstance}
           repositoryId={data.row.repositoryId}
           {...(api === undefined ? {} : { api })}
         />

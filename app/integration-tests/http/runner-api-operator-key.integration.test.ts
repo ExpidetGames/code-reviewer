@@ -6,6 +6,10 @@
 // masking; it is in no log line, no stored job row and no Dispatcher answer; and the usage record says the key
 // that was really used, so the cost limit of #277 counts what it should.
 import { describe, expect, it } from "vitest";
+import type {
+  ModelCapabilityChecker,
+  ModelCapabilityResult,
+} from "../../src/llm/model-capabilities.ts";
 import { createWorkspaceEntitlementsRepository } from "../../src/db/repositories/workspace-entitlements-repository.ts";
 import {
   startRunnerApiHarness,
@@ -43,9 +47,13 @@ async function start(
   options: {
     operatorKey?: string | null;
     entitlements?: Partial<EntitlementsData>;
+    harness?: Parameters<typeof startRunnerApiHarness>[0];
   } = {},
 ): Promise<RunnerApiHarness> {
-  const h = await startRunnerApiHarness({ llmKey: WORKSPACE_KEY });
+  const h = await startRunnerApiHarness({
+    llmKey: WORKSPACE_KEY,
+    ...options.harness,
+  });
   if (options.operatorKey !== null) {
     const saved = await h.llm
       .operatorKey()
@@ -381,5 +389,165 @@ describe("the Worker API of a managed workspace", () => {
 
     expect(details.job.input.llm.apiKey).toBe(WORKSPACE_KEY);
     expect(await recordOf(h, job.id)).toMatchObject({ keyMode: "own" });
+  });
+});
+
+describe("the model of a job on the operator's key", () => {
+  const INSTANCE = {
+    LLM_MODEL: "vendor/instance-model",
+    LLM_MAX_TOKENS: "64000",
+  };
+  const CHOSEN = {
+    model: "vendor/project-model",
+    maxTokens: 50_000,
+    dynamicModel: "vendor/dynamic-model",
+  };
+
+  /** A project that chose its own model and token budget, in a workspace of the given key mode. */
+  async function chosen(
+    keyMode: "own" | "managed",
+    dynamic = false,
+    harness: Parameters<typeof startRunnerApiHarness>[0] = {},
+  ) {
+    const h = await start(keyMode, {
+      harness: { projects: true, env: INSTANCE, ...harness },
+    });
+    await h.projectService.activateProject(h.repositoryId);
+    await h.reviewSettings.updateProjectSettings(h.repositoryId, {
+      ...CHOSEN,
+      ...(dynamic ? { reviewKind: "dynamic" as const } : {}),
+    });
+    await h.enqueueNew();
+    return h;
+  }
+
+  // #276-P2
+  it("is the instance's default model and context window on the legacy claim, whatever the project chose", async () => {
+    const h = await chosen("managed");
+
+    const { job } = await h.claimed();
+
+    expect(job.input.llm).toStrictEqual({
+      provider: "openrouter",
+      model: "vendor/instance-model",
+      apiKey: OPERATOR_KEY,
+      maxTokens: 64000,
+    });
+    // The setting stays stored; it does not take effect.
+    const effective = await h.reviewSettings.resolveForRepository(
+      h.repositoryId,
+    );
+    expect(effective?.settings).toMatchObject({
+      model: "vendor/project-model",
+      maxTokens: 50_000,
+    });
+  });
+
+  // #276-P2
+  it("is the instance's default on the Worker's fetch too", async () => {
+    const h = await chosen("managed");
+
+    const { details } = await h.startedWorker();
+
+    expect(details.job.input.llm).toStrictEqual({
+      provider: "openrouter",
+      model: "vendor/instance-model",
+      apiKey: OPERATOR_KEY,
+      maxTokens: 64000,
+    });
+  });
+
+  // #276-P2
+  it("leaves out the token budget when the instance has none, instead of the project's", async () => {
+    const h = await chosen("managed", false, {
+      env: { LLM_MODEL: "vendor/instance-model" },
+    });
+
+    const { job } = await h.claimed();
+
+    expect(job.input.llm).toStrictEqual({
+      provider: "openrouter",
+      model: "vendor/instance-model",
+      apiKey: OPERATOR_KEY,
+    });
+  });
+
+  // #276-P2
+  it("is still the project's own for a workspace that is not managed", async () => {
+    const h = await chosen("own");
+
+    const { job } = await h.claimed();
+
+    expect(job.input.llm).toStrictEqual({
+      provider: "openrouter",
+      model: "vendor/project-model",
+      apiKey: WORKSPACE_KEY,
+      maxTokens: 50_000,
+    });
+  });
+
+  // #276-P2
+  it("pins a Dynamic job to the instance's default model, in the job, in the Dynamic options and in the capabilities read", async () => {
+    const asked: string[] = [];
+    const supported: ModelCapabilityResult = {
+      outcome: "supported",
+      capabilities: {
+        tools: true,
+        toolChoice: true,
+        toolChoiceRequired: true,
+        responseFormat: true,
+        structuredOutputs: true,
+        maxCompletionTokens: 393_216,
+        smallestCompletionTokens: 131_072,
+        contextLength: 1_048_576,
+        inputUsdPerMtok: "0.6",
+        outputUsdPerMtok: "2.4",
+      },
+    };
+    const checker: ModelCapabilityChecker = {
+      check: async (modelId) => {
+        asked.push(modelId);
+        return supported;
+      },
+    };
+    const h = await chosen("managed", true, { modelCapabilities: checker });
+
+    const { job } = await h.claimed({
+      engines: ["opencode"],
+      features: ["dynamic_capabilities"],
+    });
+
+    expect(job.input).toMatchObject({
+      reviewKind: "dynamic",
+      llm: {
+        model: "vendor/instance-model",
+        apiKey: OPERATOR_KEY,
+        maxTokens: 64000,
+      },
+      dynamic: { model: "vendor/instance-model" },
+    });
+    expect(JSON.stringify(job.input)).not.toContain("vendor/dynamic-model");
+    expect(JSON.stringify(job.input)).not.toContain("vendor/project-model");
+    expect(asked).toEqual(["vendor/instance-model"]);
+  });
+
+  // #276-P2
+  it("pins a Dynamic job on the Worker's fetch too, and keeps the project's Dynamic model for a workspace that is not managed", async () => {
+    const managed = await chosen("managed", true);
+    const worker = await managed.claimedSplit({ engines: ["opencode"] });
+    const details = await (
+      await managed.worker.details(worker.job.id, worker.job.credential)
+    ).json();
+    expect(details.job.input).toMatchObject({
+      llm: { model: "vendor/instance-model", maxTokens: 64000 },
+      dynamic: { model: "vendor/instance-model" },
+    });
+
+    const own = await chosen("own", true);
+    const { job } = await own.claimed({ engines: ["opencode"] });
+    expect(job.input).toMatchObject({
+      llm: { model: "vendor/dynamic-model", apiKey: WORKSPACE_KEY },
+      dynamic: { model: "vendor/dynamic-model" },
+    });
   });
 });

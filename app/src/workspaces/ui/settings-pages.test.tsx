@@ -126,3 +126,22 @@ describe("the workspace settings sub-pages", () => {
     }
   });
 });
+
+describe("the review defaults of a workspace that uses the instance's key (#276)", () => {
+  // #276-P2
+  it("shows the note instead of the model fields", () => {
+    render(
+      <GlobalSettingsPageContent
+        workspaceSlug="acme"
+        data={GLOBAL_DATA}
+        modelChosenByInstance
+      />,
+    );
+
+    expect(screen.queryByLabelText("Model")).toBeNull();
+    expect(screen.queryByLabelText("Token budget")).toBeNull();
+    expect(document.body.textContent).toContain(
+      "The model is chosen by this instance",
+    );
+  });
+});

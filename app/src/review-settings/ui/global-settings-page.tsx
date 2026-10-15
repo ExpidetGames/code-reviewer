@@ -25,9 +25,12 @@ export async function loadGlobalSettingsPage(deps: {
 export function GlobalSettingsPageContent({
   workspaceSlug,
   canEdit = true,
+  modelChosenByInstance = false,
   data,
   api,
 }: {
+  /** The workspace reviews with the instance's own key: the instance chooses the model (#276). */
+  modelChosenByInstance?: boolean;
   /** The workspace of the page. */
   workspaceSlug: string;
   /** Whether the person may change the defaults (an Admin or an Owner). */
@@ -44,9 +47,10 @@ export function GlobalSettingsPageContent({
         </p>
         {/* Keyed on the server data, see project-settings-page.tsx. */}
         <SettingsForm
-          key={JSON.stringify(data.model)}
+          key={JSON.stringify([data.model, modelChosenByInstance])}
           workspaceSlug={workspaceSlug}
           readOnly={!canEdit}
+          modelChosenByInstance={modelChosenByInstance}
           initial={data.model}
           {...(api === undefined ? {} : { api })}
         />

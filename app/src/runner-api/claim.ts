@@ -255,6 +255,20 @@ function llmOptionsOf(
   return chosen;
 }
 
+/**
+ * The options of a job on the operator's key: the model of the instance replaces the project's model (Diff and
+ * Dynamic), and the project's token budget is dropped so the instance's own context window applies. Everything
+ * else (the tool options, the Dynamic skill and limits) is the project's.
+ */
+function withInstanceModel(options: JobOptions, model: string): JobOptions {
+  return {
+    env: options.env,
+    ...(options.dynamic === undefined
+      ? {}
+      : { dynamic: { ...options.dynamic, model } }),
+  };
+}
+
 /** `/review` takes no arguments; it is the only command a claim may hand out (#203). */
 function commandOf(job: Job): ReviewCommand | null {
   return job.command === "review" ? "review" : null;
@@ -412,7 +426,14 @@ export async function checkJob(
 
   const command = commandOf(job);
   if (command === null) return refuse("job_args_invalid");
-  const options = await deps.jobOptions.optionsFor(job);
+  // On the operator's own key the operator chooses the model, never the tenant (#276): the instance's default
+  // model and output allowance apply, and the model and token budget of the review settings stay stored
+  // without taking effect. Until managed tiers exist (#280).
+  const stored = await deps.jobOptions.optionsFor(job);
+  const options =
+    llm.source === "operator"
+      ? withInstanceModel(stored, llm.access.model)
+      : stored;
   if (Object.keys(options.env).some((key) => !RUNNER_ENV_KEY_PATTERN.test(key)))
     return refuse("job_env_invalid");
   const llmOptions = llmOptionsOf(options);

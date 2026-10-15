@@ -7,6 +7,7 @@ import { isDynamicReviewEnabled } from "@/jobs/dynamic-review-gate";
 import { getConfigStatusFor } from "@/config-status/shared";
 import { configAudienceOf } from "@/config-status/status";
 import { getWorkspaceLlm } from "@/llm/shared";
+import { instanceChoosesModel } from "@/llm/access";
 import { llmAccessAttention } from "@/llm/ui/llm-access-notice";
 import { projectServiceFor } from "@/projects/shared";
 import {
@@ -64,9 +65,10 @@ async function ProjectSettingsContent({
   });
   if (data.kind === "not_found") notFound();
   // The workspace's LLM hint is a row of the page's one "Needs attention" strip, not its own region.
+  const llmSummary = await getWorkspaceLlm().summaryFor(workspaceId);
   const llmNotice = llmAccessAttention({
     workspaceSlug,
-    summary: await getWorkspaceLlm().summaryFor(workspaceId),
+    summary: llmSummary,
     canManage: canManageLlmKey,
   });
   return (
@@ -74,6 +76,7 @@ async function ProjectSettingsContent({
       workspaceSlug={workspaceSlug}
       audience={configAudienceOf(user)}
       llmNotice={llmNotice}
+      modelChosenByInstance={instanceChoosesModel(llmSummary)}
       data={data}
     />
   );
