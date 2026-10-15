@@ -193,7 +193,7 @@ inside the container (#334) reads the result of the init self-check instead of r
 capabilities that are gone. It is written only by root on a `/run` that is a tmpfs, with mode 0600 (the three tmpfs of
 the hardened container spec make it so), by a temporary file and a rename, so a link planted at the name is replaced
 and never followed. The file of an earlier start is removed before the startup runs: a start that fails leaves none.
-Not root or not a tmpfs: no file, and the reason (`not_root`, `not_on_tmpfs`, `write_failed`) is logged. The file is
+Not root: no file, and nothing is logged (the default runner is not root and has nothing to hide). A `/run` that is not a tmpfs, or a write that fails: no file, and the reason (`not_on_tmpfs`, `write_failed`) is logged as a warning. The file is
 an aid, never a gate.
 
 **`worker-reap`** ends what the engine user still runs. A launcher that kills a Worker from outside ends the group
