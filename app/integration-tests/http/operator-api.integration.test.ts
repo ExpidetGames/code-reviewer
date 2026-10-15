@@ -5,6 +5,7 @@
 // contract file in compatibility/operator-api-contract.integration.test.ts; the route files in
 // operator-api-route-files.integration.test.ts.
 import { describe, expect, it } from "vitest";
+import { createSecretStore } from "../../src/secrets/store.ts";
 import {
   NotFoundMarker,
   startOperatorApiHarness,
@@ -741,5 +742,71 @@ describe("what the writes log", () => {
     expect(text).not.toContain("@");
     expect(text).not.toContain("Acme");
     expect(text).not.toContain(TEST_OPERATOR_TOKEN);
+  });
+});
+
+describe("the operator's own LLM key", () => {
+  const KEY = "sk-or-v1-operator-key-0123456789abcdef-wxyz";
+  const path = (id: string) => `/api/operator/v1/workspaces/${id}/entitlements`;
+
+  // #276-T07
+  it("has no call at all: whoever holds the API token can neither read nor write it", async () => {
+    const h = await startOperatorApiHarness();
+    await createSecretStore({
+      db: h.db,
+      appSecret: "operator-api-test-app-secret-0123456789-01",
+    }).save("operator_llm_key", KEY, { updatedBy: null, showLastFour: true });
+    const answers: string[] = [];
+
+    for (const path of [
+      "/api/operator/v1/llm-key",
+      "/api/operator/v1/operator-llm-key",
+      "/api/operator/v1/secrets",
+      "/api/operator/v1/settings",
+      `/api/operator/v1/workspaces/${h.workspaceId}/llm-key`,
+    ])
+      for (const method of ["GET", "PUT", "POST", "DELETE"]) {
+        const response = await h.call(method, path, {
+          body:
+            method === "PUT" || method === "POST" ? { apiKey: KEY } : undefined,
+        });
+        expect(response.status).toBe(404);
+        answers.push(await response.text());
+      }
+
+    // Nothing the API reads or answers holds the key or says that there is one.
+    await h.call("PUT", path(h.workspaceId), { body: ENTITLEMENTS });
+    for (const read of [
+      "/api/operator/v1/workspaces",
+      path(h.workspaceId),
+      "/api/operator/v1/entitlements/default",
+      "/api/operator/v1/usage",
+      `/api/operator/v1/workspaces/${h.workspaceId}/usage`,
+    ])
+      answers.push(await (await h.call("GET", read)).text());
+    expect(answers.join("\n")).not.toContain(KEY);
+    expect(answers.join("\n")).not.toContain("wxyz");
+    expect(answers.join("\n")).not.toContain("operator_llm_key");
+    expect(h.lines.join("\n")).not.toContain(KEY);
+  });
+
+  // #276-T07
+  it("cannot be set through the entitlements either: a field that is no entitlement is refused", async () => {
+    const h = await startOperatorApiHarness();
+
+    for (const extra of [
+      { operatorLlmKey: KEY },
+      { apiKey: KEY },
+      { llmKey: { apiKey: KEY } },
+    ]) {
+      const response = await h.call("PUT", path(h.workspaceId), {
+        body: { ...ENTITLEMENTS, ...extra },
+      });
+      expect(response.status).toBe(422);
+      expect(await response.text()).not.toContain(KEY);
+    }
+    expect(await h.db.selectFrom("secrets").select("name").execute()).toEqual(
+      [],
+    );
   });
 });

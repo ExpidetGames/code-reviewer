@@ -26,6 +26,7 @@ function view(overrides: Partial<AdminSettingsView> = {}): AdminSettingsView {
     maxWorkspacesPerUser: { value: 10, ...never },
     dynamicReview: { value: false, ...never },
     smtp: { value: null, password: "none", ...never },
+    operatorLlmKey: { state: "not_configured" },
     workspaceCount: 1,
     githubConfigured: false,
     mailConfigured: false,
@@ -220,7 +221,7 @@ describe("the needs attention region", () => {
 
 describe("the setup card", () => {
   // #98-AD-03, #180-T02
-  it("lists the five settings with the value summary and a Configure link", () => {
+  it("lists the six settings with the value summary and a Configure link", () => {
     render(<Overview settings={view()} />);
 
     expect(row("Mail server").textContent).toContain("Not configured");
@@ -243,6 +244,12 @@ describe("the setup card", () => {
     expect(configuredLink("Ways to sign in").getAttribute("href")).toBe(
       "/admin/setup/sign-in",
     );
+    expect(row("LLM key of the instance").textContent).toContain(
+      "Not configured",
+    );
+    expect(configuredLink("LLM key of the instance").getAttribute("href")).toBe(
+      "/admin/llm",
+    );
 
     for (const title of [
       "Mail server",
@@ -250,6 +257,7 @@ describe("the setup card", () => {
       "Tenancy",
       "Sign-up rule",
       "Ways to sign in",
+      "LLM key of the instance",
     ])
       expect(
         within(row(title)).getByRole("link", { name: `Configure ${title}` }),
@@ -367,5 +375,74 @@ describe("the setup card", () => {
     expect(configuredLink("Mail server").getAttribute("href")).toBe(
       "/admin/mail",
     );
+  });
+});
+
+describe("the LLM key of the instance (#276)", () => {
+  const key = (operatorLlmKey: AdminSettingsView["operatorLlmKey"]) =>
+    view({ operatorLlmKey });
+
+  // #276-T06
+  it("is optional: no key is no warning and no attention notice, because only managed workspaces need it", () => {
+    render(<Overview settings={view()} />);
+
+    expect(row("LLM key of the instance").textContent).toContain("Optional");
+    expect(
+      within(row("LLM key of the instance")).queryByRole("img", {
+        hidden: true,
+      }),
+    ).toBeNull();
+    expect(
+      screen.queryByRole("region", { name: /needs attention/i }),
+    ).toBeNull();
+  });
+
+  // #276-T06
+  it("says whether a key is configured and its last four characters, never the key", () => {
+    render(
+      <Overview
+        settings={key({
+          state: "configured",
+          lastFour: "wxyz",
+          updatedAt: "2026-10-12T08:00:00.000Z",
+          updatedBy: null,
+        })}
+      />,
+    );
+
+    const text = row("LLM key of the instance").textContent ?? "";
+    expect(text).toContain("Configured");
+    expect(text).toContain("wxyz");
+  });
+
+  // #276-T06
+  it("warns about a saved key that cannot be read, in the row and in the attention region", () => {
+    render(
+      <Overview
+        settings={{
+          ...key({
+            state: "unreadable",
+            updatedAt: "2026-10-12T08:00:00.000Z",
+            updatedBy: null,
+          }),
+          secrets: [
+            {
+              name: "operator_llm_key",
+              state: "undecryptable",
+              code: "secret_undecryptable",
+              updatedAt: "2026-10-12T08:00:00.000Z",
+              updatedBy: null,
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(row("LLM key of the instance").textContent).toContain(
+      "cannot be read",
+    );
+    expect(
+      screen.getByRole("link", { name: "LLM key" }).getAttribute("href"),
+    ).toBe("/admin/llm");
   });
 });

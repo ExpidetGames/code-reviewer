@@ -41,6 +41,8 @@ export type SettingChange =
   | { dynamicReview: { enabled: boolean } }
   /** `null` removes the mail server. */
   | { smtp: SmtpChange | null }
+  /** The operator's own LLM key (write-only); `null` removes it. */
+  | { operatorLlmKey: { apiKey: string } | null }
   /** Hides the notice that the import of an existing installation left. */
   | { importNotice: { dismiss: true } };
 
