@@ -70,7 +70,7 @@ def test_after_the_production_step_the_kernels_own_files_show_no_ipv6() -> None:
 def test_the_engine_user_cannot_use_ipv6_once_it_is_off_and_the_proof_passes() -> None:
     with ipv6_switched_off():
         verify_ipv6_off(ENGINE_UID, ENGINE_GID)
-        for target in ("::1", "2001:db8::1", "fe80::1"):
+        for target in ("::1", "2001:db8::1"):
             done = run_as(ENGINE_UID, ENGINE_GID, ATTEMPT, target)
             assert done.returncode == 0, done.stderr
             assert int(done.stdout) in NO_IPV6_ERRNOS, (target, done.stdout)

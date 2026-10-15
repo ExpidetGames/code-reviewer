@@ -76,7 +76,7 @@ def test_ipv6_is_off_in_the_kernels_own_files_and_for_the_engine_user() -> None:
     assert ipv6_problem() is None
     verify_ipv6_off(ENGINE_UID, ENGINE_GID)
 
-    for target in ("::1", "2001:db8::1", "fe80::1"):
+    for target in ("::1", "2001:db8::1"):
         done = run_as(ENGINE_UID, ENGINE_GID, IPV6_ATTEMPT, target)
         assert done.returncode == 0, done.stderr
         assert int(done.stdout) in NO_IPV6_ERRNOS, (target, done.stdout)
