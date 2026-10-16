@@ -2,7 +2,7 @@
 
 // Not a journey: the first thing a run does. The apps under test start without a database, so each
 // one is a new instance that waits for the first-run setup and answers nothing else. This sets the
-// three that the other journeys use up (single-tenant, one admin), through the same routes as the
+// ones that the other journeys use up (single-tenant, one admin), through the same routes as the
 // wizard, with the code from the app's log. The two that sign people in and review also get the GitHub App,
 // entered in their admin portal with the same form an operator uses (the dummy App of the fake GitHub). The
 // journeys then see the instance they always saw: a login page, the projects, the runs. The third app is left alone on purpose: e2e/setup/first-run.e2e.ts
@@ -38,6 +38,18 @@ test.describe("the apps under test", () => {
     await enterGithubApp(e2eEnv.multiAppUrl);
 
     const page = await request.get(e2eEnv.multiAppUrl, { maxRedirects: 0 });
+    expect(page.status()).toBe(307);
+  });
+
+  test("the operator app of the limits journey is set up before it runs", async ({
+    request,
+  }) => {
+    await setUpApp(e2eEnv.operatorAppUrl, e2eEnv.logFiles.operator, "multi");
+    await enterGithubApp(e2eEnv.operatorAppUrl);
+
+    const page = await request.get(e2eEnv.operatorAppUrl, {
+      maxRedirects: 0,
+    });
     expect(page.status()).toBe(307);
   });
 

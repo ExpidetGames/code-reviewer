@@ -88,7 +88,7 @@ app/                               Next.js project (pnpm)
   src/ci/                          structure tests of the CI and publish workflows and of the Dockerfiles, and the scan of all tracked files for keys and tokens
   integration-tests/               cross-owner integration tests (exists: webhooks/, http/: the route files, and `http/workspace-isolation.integration.test.ts`, every data route of a workspace against a second workspace and against every role)
     http/ webhooks/ workflows/ compatibility/ support/   closed list; support/ holds no tests
-  e2e/<area>/<journey>.e2e.ts      Playwright; areas: app/, auth/, dynamic/ (the privileged lane, own config), hosted/ (the hosted lane, own config), reviews/, jobs/, runs/, settings/, setup/, workspaces/
+  e2e/<area>/<journey>.e2e.ts      Playwright; areas: app/, auth/, dynamic/ (the privileged lane, own config), hosted/ (the hosted lane, own config), operator/, reviews/, jobs/, runs/, settings/, setup/, workspaces/
   e2e/helpers/                     shared by journeys: ports and dummy credentials, helpers for the fake GitHub, for signed webhook deliveries (`webhooks.ts`), for starting the real runner (`runner-process.ts`, and `dynamic-runner.ts` for the privileged lane) and for acting on the job queue like a runner, and for the first-run setup (`setup.ts`: reads the setup code from the log file of the app under test and sets an app up through the wizard's routes)
 dispatcher/                        TypeScript project on Hono (pnpm)
   src/core/                        the platform-free core (claim, heartbeat during launch, release); no node:* import
@@ -452,6 +452,59 @@ out of its environment (it serves Diff jobs); the container's own startup is pro
   a real Docker daemon (`sandbox-local`), the container's root, capabilities and read-only root for a Diff Worker (T02 proves them for the
   Dynamic one; the Diff Worker starts the same way), and the serverless runtime's behaviour on many instances (#187). The Dispatcher's
   composition in `hosted-e2e-main.ts` repeats `sandboxFromEnvironment` with the local platform, so a change to that wiring is a change here too.
+
+
+Operator limits journeys (`app/e2e/operator/`, the normal Playwright lane, #285, the last issue of #268). They prove the whole chain of
+the epic on the real app, the real runner and the real PR-Agent, over the fake GitHub and a fake LLM, with a script (`e2e/helpers/operator-api.ts`)
+that plays the external service over the operator API with a test token. Nothing is replaced but the outside world; the lower levels prove
+each piece (the claim, the records, the routes, the copy), these prove that they fit. They are in the normal lane and not in `e2e-hosted`
+because nothing they assert needs the Dispatcher or a Worker: all claim paths go through the same admission (#277, proven at the
+integration level for the split claim and the claim by job id), and the lane with the real runner is the one that already has the fakes
+for the reviews. No new product code, no new fake: the fake LLM already offers the model metadata, `usage.cost` and the recorded
+`provider` object.
+
+- **Apps.** `plain-instance.e2e.ts` (project `operator-plain`) runs on the app of the real-runner journey (the second app), after that
+  journey (`dependencies: ["jobs"]`; two runners must not poll one app): an instance with no `OPERATOR_API_TOKEN` and no entitlements.
+  `limited-workspace.e2e.ts` (project `operator`) has an app of its own, the seventh, a `next start` of the same build on
+  `E2E_OPERATOR_PORT` (default `E2E_PORT` + 6), multi-tenant, with `OPERATOR_API_TOKEN` (a dummy in `e2eEnv.operatorApiToken`), the
+  instance's `LLM_MODEL` and `LLM_MAX_TOKENS` and `LLM_API_BASE_URL` at the journey's fake LLM (`E2E_OPERATOR_LLM_PORT`, random in
+  65500-65534, which answers the reviews and the model metadata of the tiers). It has two workspaces made the way people make them
+  (sign-up, "Create a workspace", "Connect GitHub" through the fake's installation page: `e2e/helpers/multi-tenant.ts`): A takes the
+  default entitlements, B has a row of its own for the workspace's own key. The project waits for `connect` because that journey and
+  this one both point the one App registered at the fake GitHub to their own setup address.
+- **The script** sets the default entitlements and the row of B, the tiers (six made-up model ids), the plan management page and
+  the period, suspends and unsuspends, reads the usage feed, the summary and the count of unknown costs, and redeems the handoff
+  token. The operator's LLM key is saved by the instance admin in the admin portal (`changeAdminSetting`), as the API has no call for
+  it. The operator's page (`https://plans.example.test/manage`) is answered by the journey (a route of the page), so the browser asks
+  nothing of the network.
+- **The usage feed has a safety lag of 60 seconds** (`USAGE_SAFETY_LAG_MS`, not configurable): the script polls for the records like
+  a reader that is caught up, with the condition as the wait (`pollUsage`); the summary has no lag and is used where the journey does not
+  need the feed itself. Two reads of the feed cost about 50 s of waiting in the journey; nothing is sped up by writing rows.
+- **The privacy search** (`expectNothingSecret`) looks, in every page and answer a member or an Owner of workspace A can read (the pages
+  of the workspace, the settings, the plan, every run and its data, and the comments on the pull requests, refusal notices included), for
+  the ids of all six tier models and their parts, the operator's key (and all of it but its last four characters), the code of the
+  suspension, the operator token, the prices the provider's metadata states, a measured cost and an amount of money. It proves
+  itself first with texts that must fail it. The usage feed, which is the operator's, may hold the cost and nothing else of the list.
+
+| Case | What it proves | File |
+|---|---|---|
+| #285-T01 | An instance with no operator token and no entitlements: the webhook to the review comment as before (the workspace's key, the instance's model, `require_parameters`), every path of the operator API (any method, with and without a token) is a missing path, the app says at its start that the API is off, the plan page says no limits apply and is not in the navigation, no Manage plan, no hand-over route, the settings still ask for a model | `plain-instance.e2e.ts` |
+| #285-T02 | The script sets default entitlements (the operator's key, two Diff runs per period) and the tiers: two pull requests are reviewed with the operator's key and the model of the medium tier, the fake LLM saw `provider.require_parameters` | `limited-workspace.e2e.ts` |
+| #285-T03 | A third review: the run ends `quota_exhausted` (the sentence says no model was used), one notice on the pull request that leads to the plan page and not to the operator's, no model call, no review; a push in the same period adds no second notice | `limited-workspace.e2e.ts` |
+| #285-T04 | The usage feed: two settled records with the measured cost (100 micro-USD), the tokens and the tier `medium`, in order, no model, repository, person or key; the summary says two runs, none unknown; the count of unknown costs is empty; read again at the end it holds all four records of A (`medium`, `medium`, `high`, `high`) and the one of B (own key, no tier) | `limited-workspace.e2e.ts` |
+| #285-T05 | The script moves `periodStart` forward: the plan page goes from "2 of 2, limit reached" to "0 of 2", the next push is reviewed (on the model of the chosen level) | `limited-workspace.e2e.ts` |
+| #285-T06 | The script suspends the workspace: the plan page says reviews are paused, the next review is refused `workspace_suspended` with the neutral notice (no reason, no code), and after unsuspending the next push is reviewed; one notice per period and pull request | `limited-workspace.e2e.ts` |
+| #285-T07 | A member's pages and answers, the Owner's, and every comment on the pull requests: no tier model id, key, price, amount or cost; the data of a run says its cost is hidden; the member has no Manage plan and the hand-over route refuses them | `limited-workspace.e2e.ts` |
+| #285-T08 | An Owner clicks Manage plan, the browser is led to the operator's page with a token, the script redeems it: workspace id, slug, role and an opaque user id, once, no email or repository; the second redeem is `422 invalid_token` | `limited-workspace.e2e.ts` |
+| #285-T09 | The workspace on its own key, while A has used what it may: reviewed with its own key and the instance's model (no tier model), its usage is `own` with no tier and is kept apart from A's, its pages are those of a workspace on its own key (a model field, no Quality choice, nothing says the instance provides the models) | `limited-workspace.e2e.ts` |
+| #285-T10 | (follow-up of #283) The Quality choice of a managed workspace with the entitlements and the tiers seeded: three levels, all available, no model field, an Owner chooses High and saves, a reload shows it, and the review of T05 ran on the model of the High tier | `limited-workspace.e2e.ts` |
+| #285-T11 | (follow-up of #282) The plan page for a limited workspace: the label, the counts per kind, the percentage bar with its words, the paused notice, the state after a reset and after runs, for a member and for an Owner | `limited-workspace.e2e.ts` |
+
+- **What they do not cover:** Dynamic Review with a tier (the integration tests for the claim cover the model of a Dynamic tier;
+  there is no Dynamic journey here), the Dispatcher and the Worker (`e2e-hosted`), a real provider's metadata, the
+  safety lag with two instances, and an operator's real page (the journey answers it).
+- **Run them alone** with a build in place: `ARGS="--project=operator --project=operator-plain"` (the `prepare` project and the projects
+  they depend on run first); they need the runner installed and the tiktoken encoding cached like the journey with the real runner.
 
 
 Images (`docker/smoke/`, bash): `app.sh <image>` starts the app image with a fresh named volume on
