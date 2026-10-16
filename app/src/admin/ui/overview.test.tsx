@@ -25,6 +25,7 @@ function view(overrides: Partial<AdminSettingsView> = {}): AdminSettingsView {
     },
     maxWorkspacesPerUser: { value: 10, ...never },
     dynamicReview: { value: false, ...never },
+    planManagementUrl: { value: null, ...never },
     smtp: { value: null, password: "none", ...never },
     operatorLlmKey: { state: "not_configured" },
     workspaceCount: 1,
