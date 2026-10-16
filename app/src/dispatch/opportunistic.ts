@@ -5,8 +5,10 @@
 // is awake anyway, so these requests (after their response) release the leases that ran out and send what is due:
 // a Worker that vanished is noticed when the next request arrives, not two hours later.
 //
-// Cheap by construction: at most once per interval per process, and never while a sweep (or another such run)
-// holds the sweep's lock. Everything it does is also done by the sweep; both are safe to repeat.
+// Cheap by construction: at most once per interval per process, and under a lock of its own (`OPPORTUNISTIC_LOCK`),
+// not the sweep's: the cron runs every two hours and is not repeated by the platform, so a run of this work that held
+// the sweep's lock at that moment would make the whole sweep a no-op. Everything it does is also done by the sweep;
+// both are safe to repeat, and every send is fenced in its row.
 import type { RunnerQueue } from "../jobs/runner-queue.ts";
 import type { TryLockResult } from "../db/try-lock.ts";
 import { DEFAULT_SEND_LIMIT, type DispatchService } from "./service.ts";
@@ -19,7 +21,7 @@ export const OPPORTUNISTIC_MIN_JOB_AGE_MS = 40_000;
 export type OpportunisticOutcome = "ran" | "throttled" | "locked" | "failed";
 
 export type OpportunisticDependencies = {
-  /** Runs the work under the sweep's try-lock. */
+  /** Runs the work under the try-lock of the repair work (not the sweep's). */
   withLock: <T>(work: () => Promise<T>) => Promise<TryLockResult<T>>;
   queue: Pick<RunnerQueue, "expireStaleJobs">;
   /** Absent in poll mode: nothing is sent, leases are still released. */

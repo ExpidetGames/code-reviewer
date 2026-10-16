@@ -8,7 +8,8 @@
 // and a pooled connection held across it could starve it (with a pool of one, deadlock it). The lock is
 // released when the work ends, when the client is closed or when its connection dies, so a crashed instance
 // cannot leave it locked (a transaction lock, not a session lock, so a pooler cannot strand it). Keys are two integers; the namespaces in use are listed here so that none is used
-// twice: 195 is the Dynamic Review gate (`dynamic-review-lock.ts`), 328 the sweep.
+// twice: 195 is the Dynamic Review gate (`dynamic-review-lock.ts`), 328 the sweep (id 1) and the repair work
+// of other requests (id 2, #395).
 //
 // SQLite: one process owns the file, so a set of keys held in memory is the same guarantee.
 import type { Kysely } from "kysely";
@@ -20,6 +21,13 @@ export type LockKey = { namespace: number; id: number };
 
 /** The one run of the cron sweep at a time (#328). */
 export const SWEEP_LOCK: LockKey = { namespace: 328, id: 1 };
+
+/**
+ * The one run of the repair work of the requests that touch the database at a time (#395). A key of its own: the
+ * sweep runs every two hours and is not repeated by the platform, so a run of the repair work that held the sweep's
+ * key at that moment would make the whole sweep a no-op. The two may overlap; each step of both is safe to repeat.
+ */
+export const OPPORTUNISTIC_LOCK: LockKey = { namespace: 328, id: 2 };
 
 export type TryLockResult<T> =
   { acquired: true; value: T } | { acquired: false };

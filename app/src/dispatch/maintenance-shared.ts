@@ -6,7 +6,7 @@
 // here, after its response was sent (`runAfterResponse`).
 import "server-only";
 import { getDatabase } from "../db/startup.ts";
-import { SWEEP_LOCK, tryWithLock } from "../db/try-lock.ts";
+import { OPPORTUNISTIC_LOCK, tryWithLock } from "../db/try-lock.ts";
 import { getRunnerQueue } from "../jobs/shared.ts";
 import {
   createJobEndedReaction,
@@ -67,7 +67,7 @@ function getMaintenance(env: Env): OpportunisticMaintenance | undefined {
   // Poll mode: no Dispatcher, and the long-lived server has its own timers.
   if (dispatch === undefined) return undefined;
   maintenance ??= createOpportunisticMaintenance({
-    withLock: (work) => tryWithLock(getDatabase(), SWEEP_LOCK, work),
+    withLock: (work) => tryWithLock(getDatabase(), OPPORTUNISTIC_LOCK, work),
     queue: getRunnerQueue(),
     dispatch,
   });

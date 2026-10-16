@@ -116,6 +116,10 @@ export default defineConfig({
         GITHUB_API_BASE_URL: e2eEnv.githubUrl,
         // Without this flag the server refuses the two overrides above.
         ALLOW_TEST_GITHUB_ENDPOINTS: "true",
+        // The Dispatcher of a journey is started by the journey: a wider window for the inline retries than a slow
+        // runner needs to start it (src/dispatch/test-timing.ts).
+        ALLOW_TEST_DISPATCH_TIMING: "true",
+        TEST_DISPATCH_INLINE_RETRY_DELAYS_MS: "2000,6000,10000",
         // The dispatcher credential of the claim; the Workers never see it.
         RUNNER_TOKEN: hostedEnv.dispatcherToken,
         // The hosted deployment: a queued job wakes the Dispatcher with a signed call, and the sweep is the clock.

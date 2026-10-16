@@ -36,6 +36,13 @@ import {
   markInstanceSetUp,
 } from "../../src/test-support/workspaces.ts";
 
+// #395: what the routes start between two sweeps; here the two entry points are spies.
+const maintenance = vi.hoisted(() => ({
+  touched: vi.fn(),
+  jobEnded: vi.fn(),
+}));
+vi.mock("../../src/dispatch/maintenance-shared.ts", () => maintenance);
+
 const RUNNER_TOKEN = "route-file-runner-token-91ac-5d2e8b7f0c14";
 const LLM_KEY = "route-file-llm-key-77de";
 const HEAD = "1f3a5c7e9b2d4f60a8c1e3b5d7f90a2c4e6b8d01";
@@ -201,6 +208,8 @@ function runnerRequest(
 }
 
 beforeEach(() => {
+  maintenance.touched.mockClear();
+  maintenance.jobEnded.mockClear();
   vi.spyOn(console, "info").mockImplementation(() => undefined);
 });
 
@@ -461,5 +470,79 @@ describe("the runner API route files", () => {
       401, 401, 401,
     ]);
     expect(none.status).toBe(204);
+  });
+});
+
+describe("what the route files start between two sweeps (#395)", () => {
+  // #395-T09
+  it("reports a job a Dispatcher gave back, and a job a runner completed, and starts the repair work on a heartbeat", async () => {
+    const routes = await startRoutes();
+    await queueJobThroughWebhook(routes);
+    // The deliveries that queued the job started the repair work themselves (webhook route tests).
+    maintenance.touched.mockClear();
+    const [{ id }] = (await getDatabase()
+      .selectFrom("jobs")
+      .select("id")
+      .execute()) as [{ id: string }];
+    const dispatcher = {
+      "content-type": "application/json",
+      authorization: `Bearer ${RUNNER_TOKEN}`,
+      "x-runner-id": "dispatcher-a",
+    };
+    const split = await routes.claim.POST(
+      runnerRequest(
+        "claim",
+        { engines: ["pr-agent"], features: ["worker_credential"], jobId: id },
+        dispatcher,
+      ),
+    );
+    const { job } = await split.json();
+
+    // The Dispatcher gives the job back after a launch that failed.
+    await routes.release.POST(
+      runnerRequest(
+        `jobs/${job.id}/release`,
+        { credential: job.credential, reason: "launch_failed" },
+        dispatcher,
+      ),
+      { params: Promise.resolve({ id: job.id }) },
+    );
+    expect(maintenance.jobEnded).toHaveBeenCalledWith({
+      jobId: id,
+      repositoryId: expect.any(String),
+      prNumber: 7,
+      requeued: true,
+    });
+    expect(maintenance.touched).not.toHaveBeenCalled();
+
+    // A runner takes it, beats and completes it.
+    const claim = await routes.claim.POST(runnerRequest("claim", undefined));
+    const claimed = (await claim.json()).job;
+    await routes.heartbeat.POST(
+      runnerRequest(`jobs/${id}/heartbeat`, { leaseToken: claimed.leaseToken }),
+      { params: Promise.resolve({ id }) },
+    );
+    expect(maintenance.touched).toHaveBeenCalledTimes(1);
+    maintenance.jobEnded.mockClear();
+    const done = await routes.complete.POST(
+      runnerRequest(`jobs/${id}/complete`, {
+        leaseToken: claimed.leaseToken,
+        result: {
+          ok: true,
+          durationMs: 5,
+          commentUrl: null,
+          errorCode: null,
+          errorMessage: null,
+          logTail: "",
+          logTruncated: false,
+          usage: null,
+        },
+      }),
+      { params: Promise.resolve({ id }) },
+    );
+    expect(done.status).toBe(200);
+    expect(maintenance.jobEnded).toHaveBeenCalledWith(
+      expect.objectContaining({ jobId: id, requeued: false }),
+    );
   });
 });

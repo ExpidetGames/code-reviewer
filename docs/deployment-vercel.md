@@ -453,7 +453,7 @@ After that:
 3. Only if you operate `managed` workspaces (section 3.5): save the operator's key under **LLM key** (`/admin/llm`) now.
    It is optional for the first deployment and the smoke test.
 
-Do not open test pull requests yet: no Dispatcher exists, so a job would only wait (it would only wait; the first request that touches the database after step 7, or the sweep, sends it).
+Do not open test pull requests yet: no Dispatcher exists, so a job would only wait (it would only wait; once the Dispatcher exists, the next push, or the sweep, sends it).
 
 ### Step 4. Build the golden snapshot
 
@@ -709,10 +709,10 @@ promptly is done by the request that causes it, after its response (`after()`), 
 |---|---|
 | A review of a new pull request, of a push, a person's *Review now* | The App's enqueue hook sends the wake-up in the request that queued the job. There is no debounce. A push to a pull request whose review is still waiting replaces that waiting job; a review that is running finishes first, and the new job is sent when it ends (the next row) |
 | A wake-up that failed (a 5xx, a timeout, no connection, `429`/`503` with a short `Retry-After`) | The same request repeats it up to three more times (pauses of 1, 3 and 8 seconds, at most 35 seconds in all). `Retry-After` is honoured if it is 10 seconds or less. A refusal (`DISPATCH_REJECTED`) is never repeated: an operator has to look |
-| A job that waited behind the pool cap or behind the running job of its pull request | When a job ends (the Worker's result, a release), the App sends the waiting jobs, the one of the same pull request first, as many as the pool cap `RUNNER_DISPATCH_MAX_RUNNING` has free slots (one job per freed slot when it is not set) |
-| A job given back after a failed launch (`launch_failed`, `worker_exited`) | The release sends it again at once; a retry time of a few seconds is waited for |
+| A job that waited behind the pool cap or behind the running job of its pull request | When a job ends (the Worker's result, a release), the App sends the waiting jobs, the one of the same pull request first, until as many wake-ups were accepted as the pool cap `RUNNER_DISPATCH_MAX_RUNNING` has free slots (one per freed slot when it is not set); a job that waits only for the running job of its own pull request is not asked |
+| A job given back after a failed launch (`launch_failed`, `worker_exited`) | The release frees its slot first, then sends the job again once its retry time has passed (the Dispatcher gives it back with 30 seconds; the request waits for it if it fits in about 45 seconds, else the next request that touches the database or the sweep sends it) |
 | The notice on a refused pull request (#281) | Posted after the response of the claim that refused the job |
-| The lease of a Worker that vanished, and the calls that are due again | The next **delivery** of the GitHub webhook, **heartbeat** or **result** of any Worker releases the leases that ran out and sends what is due, after its response, at most once every 30 seconds per function instance and never while a sweep runs. In a quiet system there may be none of these |
+| The lease of a Worker that vanished, and the calls that are due again | The next **delivery** of the GitHub webhook that queued a job (not an unused event or a duplicate), **heartbeat** or **result** of any Worker releases the leases that ran out and sends what is due, after its response, at most once every 30 seconds per function instance, under a lock of its own so that it can never make the cron a no-op. In a quiet system there may be none of these |
 
 **Only the sweep (and so up to about 2 hours late), when nothing else happens:**
 
@@ -720,6 +720,7 @@ promptly is done by the request that causes it, after its response (`after()`), 
 |---|---|
 | A running job whose Worker vanished, in a quiet system (no delivery, no heartbeat of another job) | Its lease runs out after two minutes, and the job is requeued by the first request above, or by the sweep, or by a claim: **up to 2 hours**; the pull request shows "Running" meanwhile |
 | A job nobody claimed for `RUNNER_DISPATCH_GIVE_UP_SECONDS` (`dispatch_unavailable`) | The give-up time plus **up to 2 hours** (the time is counted when the sweep runs) |
+| A job that waited for the pool cap while the job that freed the slot ended by a **lease that ran out** (a Worker that vanished, nobody told the app) | Sent by the next request that touches the database once its row time (2 minutes after the refusal) has passed, else by the sweep: **up to 2 hours** |
 | A dispatch the Dispatcher stopped (`not_capable`) | Asked again by the sweep, **every 2 hours** instead of every 10 minutes |
 | A wake-up that kept failing after the inline repeats | Resent by the next request that touches the database (as above) or by the sweep, on the row's back-off |
 | A refusal notice whose post failed | Tried again at the next refusal on that pull request or by the sweep |

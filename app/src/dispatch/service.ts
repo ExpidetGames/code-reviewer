@@ -59,6 +59,8 @@ export const INLINE_RETRY_MAX_WAIT_MS = 10_000;
  * Dispatcher gives a job back with 30 seconds, so that it does not start again in a hot loop (#395).
  */
 export const REDISPATCH_MAX_WAIT_MS = 35_000;
+/** Added to the wait for a retry time: a timer can fire a little before the clock of the database says it is time. */
+export const REDISPATCH_SLACK_MS = 250;
 /** The answers worth another try at once. A refusal (`rejected`) needs an operator and is never repeated inline. */
 const TRANSIENT_CODES: readonly DispatchResultCode[] = [
   "rate_limited",
@@ -92,19 +94,23 @@ export type DispatchService = {
    */
   sendJob(job: DueDispatchJob): Promise<boolean>;
   /**
-   * #395: a slot freed (a job ended). Sends up to `limit` queued jobs that were told "not now" (the pool cap, the
-   * running job of their pull request, a busy Dispatcher), the job of `first` before the others, whatever time their
-   * row says. Never rejects.
+   * #395: a slot freed (a job ended). Asks the queued jobs that were told "not now" (the pool cap, the running job of
+   * their pull request), the job of `first` before the others, whatever time their row says, until `limit` wake-ups
+   * were **accepted** or the candidates (at most 20) are used up: a job that is refused again does not use the slot.
+   * No send is started after `deadline` (a time of the monotonic clock of the service). Returns how many wake-ups
+   * were accepted. Never rejects.
    */
   sendWaiting(options: {
     limit: number;
     first?: PullRequestRef;
+    deadline?: number;
   }): Promise<{ sent: number }>;
   /**
-   * #395: a job was given back to the queue after a launch that failed: its dispatch is due again now and is sent
-   * (a retry time of the job that is a few seconds away is waited for). Never rejects.
+   * #395: a job was given back to the queue after a launch that failed: its dispatch is due again and is sent when
+   * its retry time has passed, waited for inside the request if that fits before `deadline`; else the next sender
+   * (a later request, the sweep) sends it. Never rejects.
    */
-  redispatch(jobId: string): Promise<void>;
+  redispatch(jobId: string, options?: { deadline?: number }): Promise<void>;
 };
 
 type JobToSend = DueDispatchJob;
@@ -204,6 +210,7 @@ export function createDispatchService(options: {
     job: JobToSend,
     first: DispatchUpdate,
     began: number,
+    deadline = Number.POSITIVE_INFINITY,
   ): Promise<void> {
     let update = first;
     for (const delay of retryDelays) {
@@ -213,6 +220,7 @@ export function createDispatchService(options: {
       if (pause > INLINE_RETRY_MAX_WAIT_MS) return;
       if (monotonicMs() - began + pause + timeoutMs > INLINE_RETRY_BUDGET_MS)
         return;
+      if (monotonicMs() + pause + timeoutMs > deadline) return;
       await sleep(pause);
       // The job may have been taken (or ended) in the meantime; the call is repeated only for a queued job.
       if ((await dispatches.dueJob(job.jobId, now())) === undefined) return;
@@ -245,13 +253,16 @@ export function createDispatchService(options: {
     {
       waiting = false,
       retryFrom,
+      deadline,
     }: {
       waiting?: boolean;
       /** Repeat a transient failure inline, within the budget that started at this `monotonicMs()` (#395). */
       retryFrom?: number;
+      /** No inline repeat is started that would end after this time of the monotonic clock. */
+      deadline?: number;
     } = {},
-  ): Promise<boolean> {
-    return guarded(job.jobId, false, async () => {
+  ): Promise<DispatchUpdate | false> {
+    return guarded<DispatchUpdate | false>(job.jobId, false, async () => {
       let row = await dispatches.get(job.jobId);
       if (row === undefined) {
         // A queued job without a row: the hook never ran or lost its write. Due now.
@@ -271,15 +282,16 @@ export function createDispatchService(options: {
       const update = await claimAndSend(job, row);
       if (update === false) return false;
       // A Dispatcher that is still busy with the launch that just failed answers `429`: ask again in a moment.
-      if (retryFrom !== undefined) await retryInline(job, update, retryFrom);
-      return true;
+      if (retryFrom !== undefined)
+        await retryInline(job, update, retryFrom, deadline);
+      return update;
     });
   }
 
   /** Sends the jobs of a listing, a few at a time; how many were sent. */
   async function sendAll(
     jobs: DueDispatchJob[],
-    sendEach: (job: DueDispatchJob) => Promise<boolean>,
+    sendEach: (job: DueDispatchJob) => Promise<DispatchUpdate | false>,
   ): Promise<number> {
     let sent = 0;
     const queue = [...jobs];
@@ -288,7 +300,7 @@ export function createDispatchService(options: {
         { length: Math.min(SEND_CONCURRENCY, queue.length) },
         async () => {
           for (let job = queue.shift(); job !== undefined; job = queue.shift())
-            if (await sendEach(job)) sent += 1;
+            if ((await sendEach(job)) !== false) sent += 1;
         },
       ),
     );
@@ -330,37 +342,60 @@ export function createDispatchService(options: {
       });
     },
 
-    sendJob: (job) => sendOne(job),
+    sendJob: async (job) => (await sendOne(job)) !== false,
 
-    async sendWaiting({ limit, first }) {
+    async sendWaiting({ limit, first, deadline = Number.POSITIVE_INFINITY }) {
       if (limit <= 0) return { sent: 0 };
-      let waiting: DueDispatchJob[];
+      let candidates: DueDispatchJob[];
       try {
-        waiting = await dispatches.listWaiting(now(), limit, first);
+        candidates = await dispatches.listWaiting(
+          now(),
+          DEFAULT_SEND_LIMIT,
+          first,
+        );
       } catch (error) {
         log.error(
           `[dispatch] DISPATCH_FAILED job=none${errorCode(error) === undefined ? "" : ` code=${String(errorCode(error))}`}`,
         );
         return { sent: 0 };
       }
-      return {
-        sent: await sendAll(waiting, (job) => sendOne(job, { waiting: true })),
-      };
+      // One slot is one accepted wake-up: a job that is refused again (its pull request is busy, the pool is
+      // full after all) does not use it, so the next candidate is asked, a batch of the missing number at a time.
+      let accepted = 0;
+      while (accepted < limit && candidates.length > 0) {
+        if (monotonicMs() >= deadline) break;
+        const batch = candidates.splice(
+          0,
+          Math.min(limit - accepted, SEND_CONCURRENCY),
+        );
+        const updates = await Promise.all(
+          batch.map((job) => sendOne(job, { waiting: true, deadline })),
+        );
+        accepted += updates.filter(
+          (update) => update !== false && update.lastCode === "accepted",
+        ).length;
+      }
+      return { sent: accepted };
     },
 
-    async redispatch(jobId) {
+    async redispatch(jobId, { deadline = Number.POSITIVE_INFINITY } = {}) {
       await guarded(jobId, undefined, async () => {
         const began = monotonicMs();
         const at = now();
         const runAfter = await dispatches.resetForResend(jobId, at);
         if (runAfter === undefined) return;
         // The retry time of the job (the Dispatcher gives a job back with 30 seconds) is waited for inside this
-        // request; a longer one is the next sender's.
-        const wait = runAfter.getTime() - at.getTime();
+        // request when it fits before the deadline and the limit of the function; else the next sender sends it.
+        const wait = Math.max(0, runAfter.getTime() - at.getTime());
         if (wait > REDISPATCH_MAX_WAIT_MS) return;
-        if (wait > 0) await sleep(wait);
+        if (wait > 0) {
+          if (monotonicMs() + wait + REDISPATCH_SLACK_MS + timeoutMs > deadline)
+            return;
+          await sleep(wait + REDISPATCH_SLACK_MS);
+        }
         const job = await dispatches.dueJob(jobId, now());
-        if (job !== undefined) await sendOne(job, { retryFrom: began });
+        if (job !== undefined)
+          await sendOne(job, { retryFrom: began, deadline });
       });
     },
 

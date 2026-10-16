@@ -31,11 +31,16 @@ export async function handleDispatchSweepCron(
   const headers = { "cache-control": "no-store" };
   try {
     const outcome = await tryWithLock(db(), SWEEP_LOCK, () => sweep().run());
-    if (!outcome.acquired)
+    if (!outcome.acquired) {
+      // The platform does not repeat a cron that runs every two hours: a run that did nothing has to be seen (#395).
+      console.warn(
+        "[sweep] DISPATCH_SWEEP_SKIPPED: another sweep was still running, so this run did nothing.",
+      );
       return Response.json(
         { status: "skipped", reason: "already_running" },
         { headers },
       );
+    }
     const { failedSteps, ...counts } = outcome.value;
     if (failedSteps.length > 0)
       // The steps that did work are in the log line of the run; the answer says which ones did not.

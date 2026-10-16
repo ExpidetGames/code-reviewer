@@ -21,7 +21,7 @@ describe("the retired wait of a push before its review starts", () => {
 
       expect(line).toContain("REVIEW_DEBOUNCE_SECONDS");
       expect(line).toContain("no effect");
-      expect(line).toContain("superseded");
+      expect(line).not.toContain("superseded");
       expect(line).not.toContain(`"${value}"`);
       expect(line).not.toContain(` ${value} `);
     },

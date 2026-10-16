@@ -159,7 +159,8 @@ test.describe("what the hosted deployment does when the Dispatcher, the platform
       return dispatch !== null && dispatch.consecutiveFailures >= 1;
     });
 
-    // Back before the third repeat (one second, then three more, then eight).
+    // Back before the last repeat: the lane widens the pauses of the repeats to 2, 6 and 10 seconds, so a slow runner
+    // that needs several seconds to start the Dispatcher is still inside the window.
     await startDispatcher();
 
     const run = runsOf(page, REPOSITORY.fullName, number);

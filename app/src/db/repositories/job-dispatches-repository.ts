@@ -30,15 +30,19 @@ export type DispatchRow = {
 };
 
 /**
- * The answers that mean "not now, ask again when something frees up" (#395): the Dispatcher said `not_claimable` (the
- * pool cap, or the running job of the same pull request) or it was busy or unavailable. A row with one of these
- * codes is sent again when a job ends, without waiting for its time.
+ * The answer that means "not now, ask again when something frees up" (#395): the Dispatcher said `not_claimable` (the
+ * pool cap, or the running job of the same pull request). A row with this code is sent again when a job ends,
+ * whatever time it says. A busy or unavailable Dispatcher (`429`/`503`) is not in the list: its `Retry-After` is the
+ * time of the row, and the row is sent when it is due.
  */
-export const WAITING_DISPATCH_CODES = [
-  "ignored_not_claimable",
-  "rate_limited",
-  "unavailable",
-] as const;
+export const WAITING_DISPATCH_CODES = ["ignored_not_claimable"] as const;
+
+/**
+ * A waiting row is sent again only when its last call is at least this old. A call in flight holds the row (its
+ * lease is the row's time) and `claimSend` compares that time only, so without this a second event that read the row
+ * after the first claim would take the lease over and send the job twice. A call times out after 8 seconds.
+ */
+export const WAITING_MIN_GAP_MS = 9_000;
 
 /** The pull request whose waiting job goes first when a slot frees (the one whose job just ended). */
 export type PullRequestRef = { repositoryId: string; prNumber: number };
@@ -80,9 +84,11 @@ export type JobDispatchesRepository = {
     minAgeMs?: number,
   ): Promise<DueDispatchJob[]>;
   /**
-   * #395: the queued, due jobs whose last call was answered "not now" (`WAITING_DISPATCH_CODES`) and that were sent
-   * at least once, whatever time their row says: a slot freed, so they are asked again. The job of `first` (the pull
-   * request whose job just ended) comes first, then the oldest. Never a `stopped` row.
+   * #395: the queued, due jobs whose last call was answered "not now" (`WAITING_DISPATCH_CODES`) at least
+   * `WAITING_MIN_GAP_MS` ago, whatever time their row says: a slot freed, so they are asked again. A job whose own
+   * pull request still has a running job is left out: it would be refused again and take the place of a job that
+   * waits for the pool cap only. The job of `first` (the pull request whose job just ended) comes first, then the
+   * oldest. Never a `stopped` row.
    */
   listWaiting(
     now: Date,
@@ -252,7 +258,26 @@ export function createJobDispatchesRepository(
         .where("jobs.run_after", "<=", timestamp)
         .where("job_dispatches.state", "=", "pending")
         .where("job_dispatches.attempts", ">", 0)
-        .where("job_dispatches.last_code", "in", [...WAITING_DISPATCH_CODES]);
+        .where("job_dispatches.last_code", "in", [...WAITING_DISPATCH_CODES])
+        .where(
+          "job_dispatches.last_attempt_at",
+          "<=",
+          formatTimestamp(new Date(at.getTime() - WAITING_MIN_GAP_MS)),
+        )
+        // Not blocked by its own pull request: one job runs per pull request, and a refusal for that reason says
+        // nothing about a free slot.
+        .where((eb) =>
+          eb.not(
+            eb.exists(
+              eb
+                .selectFrom("jobs as busy")
+                .select("busy.id")
+                .where("busy.status", "=", "running")
+                .whereRef("busy.repository_id", "=", "jobs.repository_id")
+                .whereRef("busy.pr_number", "=", "jobs.pr_number"),
+            ),
+          ),
+        );
       if (first !== undefined)
         query = query.orderBy(
           sql`case when jobs.repository_id = ${first.repositoryId} and jobs.pr_number = ${first.prNumber} then 0 else 1 end`,

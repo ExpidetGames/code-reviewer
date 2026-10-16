@@ -12,7 +12,8 @@
 //   3. the project switched this kind off  -> skipped (`autoReviewOnOpen` for opened, reopened and
 //                                             ready for review, `autoReviewOnPush` for new commits)
 //   4. otherwise a job is created and is due at once, a push included (#395): there is no debounce. A
-//      new push replaces the waiting job of the older commit and supersedes its running one (the queue).
+//      new push replaces the waiting job of the older commit (the queue); a review that is already running
+//      finishes first, and the new job runs after it.
 //
 // Pull requests from forks and pull requests opened by bots are reviewed like any other.
 import type { PullRequestRef, ReviewTrigger } from "../integrations/types.ts";

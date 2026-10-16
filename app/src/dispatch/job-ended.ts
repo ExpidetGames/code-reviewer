@@ -5,13 +5,20 @@
 //
 // - a slot freed (a job finished, failed or was given back): the queued jobs that the Dispatcher turned away
 //   with "not now" (the pool cap, the running job of their pull request) are sent, the job of the pull request
-//   that just ended first, and no more than there are free slots. Without `RUNNER_DISPATCH_MAX_RUNNING` the app does
-//   not know the cap, and a freed slot is one job.
-// - a job that was given back after a launch that failed (queued again) is sent again at once.
+//   that just ended first, until as many wake-ups were accepted as there are free slots (a job that is refused again
+//   does not use one). Without `RUNNER_DISPATCH_MAX_RUNNING` the app does not know the cap, and a freed slot is one job.
+// - a job that was given back after a launch that failed (queued again) is sent again once its retry time has passed,
+//   after the slot was dealt with, and only if that fits in the budget of the request.
 //
 // It runs after the response of the call that ended the job (`after()`), never delays or fails it, and never throws.
 import type { DispatchService } from "./service.ts";
 import { DEFAULT_SEND_LIMIT } from "./service.ts";
+
+/**
+ * How long one reaction may take from its start: it runs after the response of a call whose function lives 60
+ * seconds (`app/vercel.json`), and a send that was started ends within 8 more.
+ */
+export const JOB_ENDED_BUDGET_MS = 45_000;
 
 /** A job that just ended or went back to the queue. */
 export type JobEndedEvent = {
@@ -30,6 +37,8 @@ export type JobEndedDependencies = {
   countRunning: () => Promise<number>;
   /** The pool cap, or null when this side does not know it (`RUNNER_DISPATCH_MAX_RUNNING`). */
   maxRunning: () => number | null;
+  /** A monotonic clock in milliseconds; the deadline is counted on the clock of the dispatch service. */
+  monotonicMs?: () => number;
   log?: Pick<Console, "error">;
 };
 
@@ -37,9 +46,11 @@ export function createJobEndedReaction(
   deps: JobEndedDependencies,
 ): JobEndedReaction {
   const log = deps.log ?? console;
+  const monotonicMs = deps.monotonicMs ?? (() => performance.now());
   return async (event) => {
     try {
-      if (event.requeued) await deps.dispatch.redispatch(event.jobId);
+      const deadline = monotonicMs() + JOB_ENDED_BUDGET_MS;
+      // The freed slot first: a job that waits for it must not wait for the retry time of a job given back.
       const cap = deps.maxRunning();
       const free =
         cap === null
@@ -48,7 +59,10 @@ export function createJobEndedReaction(
       await deps.dispatch.sendWaiting({
         limit: free,
         first: { repositoryId: event.repositoryId, prNumber: event.prNumber },
+        deadline,
       });
+      if (event.requeued)
+        await deps.dispatch.redispatch(event.jobId, { deadline });
     } catch {
       // Nothing a database or a Dispatcher said is logged: a connection string can be in it.
       log.error("[dispatch] JOB_ENDED_DISPATCH_FAILED");

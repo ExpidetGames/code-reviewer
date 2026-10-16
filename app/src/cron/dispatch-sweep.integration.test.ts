@@ -161,6 +161,7 @@ describe.each(databases)("the dispatch sweep route on %s", (name, open) => {
 
   // #328-T06
   it("skips a run that starts while another one is still working, and answers it", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const t = await setup();
     const job = await t.lapsed();
     let release!: () => void;
@@ -195,6 +196,10 @@ describe.each(databases)("the dispatch sweep route on %s", (name, open) => {
       status: "skipped",
       reason: "already_running",
     });
+    // #395: the platform does not repeat a cron that is two hours apart: a run that did nothing is in the log.
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("DISPATCH_SWEEP_SKIPPED"),
+    );
     expect(finished.status).toBe(200);
     expect((await finished.json()) as { status: string }).toMatchObject({
       status: "ok",

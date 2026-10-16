@@ -91,16 +91,25 @@ The sweep runs **every 2 hours**, a safety net (next section). Everything the no
 causes it, after the response (`after()`), with no timer and no queue, and only while `RUNNER_DISPATCH=webhook`:
 
 - **A job ended or was given back** (`job-ended.ts`; the Worker's result, the runner API's `complete`, a Dispatcher's
-  `release`): `sendWaiting` sends the queued jobs that were answered `not_claimable` (the pool cap, the running job of
-  their pull request) or by a busy Dispatcher (`429`/`503`), whatever time their row says: the job of the same pull
-  request first, no more than there are free slots below `RUNNER_DISPATCH_MAX_RUNNING` (one job when the cap is not
-  set), oldest first. A job that was **given back** (queued again) is sent again at once by `redispatch`; a retry
-  time of up to 10 seconds is waited for. An acknowledged job (`202`) is not "waiting": its own look comes after the
-  acknowledgement timeout.
-- **A request touched the database** (`opportunistic.ts`; an accepted GitHub delivery, a Worker's or runner's
-  heartbeat and result): the leases that ran out are released (`expireStaleJobs`) and `sendDue` sends what is due. At most
-  once per 30 seconds per function instance, and never while the sweep (or another such run) holds the sweep's lock.
-  Both are also done by the sweep; each is safe to repeat.
+  `release`): the **freed slot first**. `sendWaiting` asks the queued jobs that were answered `not_claimable` (the pool
+  cap, the running job of their pull request), whatever time their row says, the job of the same pull request first,
+  then the oldest, **until as many wake-ups were accepted as there are free slots** below
+  `RUNNER_DISPATCH_MAX_RUNNING` (one when the cap is not set), at most 20 candidates: a job that is refused again does
+  not use the slot. Left out: a job whose own pull request has a running job (it would be refused again), a job whose
+  last call is younger than 9 seconds (`WAITING_MIN_GAP_MS`: a call in flight holds the row, and two events must not
+  send one job twice) and a job the Dispatcher answered `429`/`503` (its `Retry-After` is its time; it is sent when due).
+  **Then** a job that was **given back** (queued again) is sent again by `redispatch`: its retry time is waited for
+  inside the request when it fits (the Dispatcher gives a job back with 30 seconds; a little slack is added because a
+  timer can fire early), else the next sender sends it. One deadline of 45 seconds from the start of the reaction
+  (`JOB_ENDED_BUDGET_MS`) covers both, so that the request, whose function lives 60 seconds, is not cut in the middle
+  of a send. An acknowledged job (`202`) is not "waiting": its own look comes after the acknowledgement timeout.
+- **A request touched the database** (`opportunistic.ts`; a GitHub delivery that queued a job, dropped waiting ones or
+  changed an installation, and not an unused event, a duplicate or an ignored one: `webhooks/touch-policy.ts`; a Worker's or
+  runner's heartbeat and result): the leases that ran out are released (`expireStaleJobs`) and `sendDue` sends what is
+  due. At most once per 30 seconds per function instance, under a lock **of its own** (`OPPORTUNISTIC_LOCK`), not the
+  sweep's: the two may overlap, so a run of this work can never make the cron a no-op. Both are also done by the sweep;
+  every send is fenced by the compare and set on the row, so overlapping senders send a call once. A sweep that
+  finds the sweep's lock held is logged (`DISPATCH_SWEEP_SKIPPED`).
 
 ## The cron sweep (#328)
 

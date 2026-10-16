@@ -67,9 +67,11 @@ GitHub is not asked.
   pull request (the claim ends it as `pull_request_closed` if it is still waiting). The window is a few
   milliseconds; the review is wasted, not harmful.
 - **Every push starts a review.** There is no debounce since #395: a push is due at once, and a review
-  that is still waiting for a runner is replaced by the one of the newer commit. A pull request that
-  gets many pushes in a row is reviewed once per push that found a free runner; the cost of a run that
-  was replaced while it ran is the subject of the supersede (`src/jobs/README.md`).
+  that is still waiting for a runner is replaced by the one of the newer commit. A review that is already
+  running finishes first (one job runs per pull request) and the new one runs after it, so a pull request
+  that gets many pushes in a row is reviewed once for the first push and once for the newest one, plus the
+  ones that found a free runner in between. Stopping a running review that a push made stale is a separate
+  change (the supersede, not part of #395).
 - **The head check is best effort** (it fails open, see above).
 
 ### Failures and redelivery
