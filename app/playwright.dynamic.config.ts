@@ -131,7 +131,6 @@ export default defineConfig({
         LLM_MODEL: llmEnv.model,
         LLM_MAX_TOKENS: llmEnv.maxTokens,
         // A push is reviewed after a second instead of after 90.
-        REVIEW_DEBOUNCE_SECONDS: "1",
         NEXT_TELEMETRY_DISABLED: "1",
       },
       url: e2eEnv.pipelineAppUrl,
@@ -162,7 +161,6 @@ export default defineConfig({
         ALLOW_TEST_LLM_ENDPOINTS: "true",
         LLM_MODEL: llmEnv.model,
         LLM_MAX_TOKENS: llmEnv.maxTokens,
-        REVIEW_DEBOUNCE_SECONDS: "1",
         NEXT_TELEMETRY_DISABLED: "1",
       },
       url: hostedEnv.appUrl,

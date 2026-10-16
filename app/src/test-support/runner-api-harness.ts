@@ -45,6 +45,7 @@ import { knownSecretsFromEnv } from "../runner-api/redact.ts";
 import { createReviewSettingsJobOptionsSource } from "../runner-api/review-settings-job-options.ts";
 import { configuredRunnerToken } from "../runner-api/token-auth.ts";
 import type { RunnerApiLogger } from "../runner-api/logger.ts";
+import type { ReportDeps } from "../runner-api/report.ts";
 import { createAppSettingsRepository } from "../db/repositories/app-settings-repository.ts";
 import { createProjectsRepository } from "../db/repositories/projects-repository.ts";
 import { createJobProjectHooks } from "../jobs/project-hooks.ts";
@@ -99,6 +100,8 @@ export async function startRunnerApiHarness(
     projects?: boolean;
     /** Wraps the job queue the API uses, for example to make one call fail. */
     wrapQueue?: (queue: TestQueue) => TestQueue;
+    /** #395: what the running server does when a job ends or a call touched the database. */
+    hooks?: Pick<ReportDeps, "jobEnded" | "activity">;
     limits?: Partial<JobQueueLimits>;
     /** Replaces or (with undefined) removes variables of the app's environment. */
     env?: Record<string, string | undefined>;
@@ -347,6 +350,7 @@ export async function startRunnerApiHarness(
         ? {}
         : { modelCapabilities: options.modelCapabilities }),
       claimedKeys,
+      ...(options.hooks ?? {}),
       now: fixture.clock.now,
       logger,
       heartbeatIntervalSeconds: 30,

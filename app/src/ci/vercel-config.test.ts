@@ -64,13 +64,13 @@ describe("app/vercel.json", () => {
     expect([day, month]).toEqual(["*", "*"]);
   });
 
-  // #328-T06
-  it("sweeps every minute, once", () => {
+  // #395-T01
+  it("sweeps every two hours, once: a safety net, so the scale-to-zero database can sleep between webhooks", () => {
     const sweep = (config.crons ?? []).filter(
       ({ path }) => path === "/api/internal/dispatch-sweep",
     );
     expect(sweep).toEqual([
-      { path: "/api/internal/dispatch-sweep", schedule: "* * * * *" },
+      { path: "/api/internal/dispatch-sweep", schedule: "0 */2 * * *" },
     ]);
   });
 

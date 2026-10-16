@@ -62,11 +62,12 @@ GitHub ──webhook──▶ App ──queues the job, then signed POST /dispat
    and the credential go in on **stdin only**.
 4. The Worker fetches its job from the App (this is where the git token and the model key are minted, for this job
    only), heartbeats, delivers the result and exits. The Dispatcher stops the VM.
-5. The App's cron sweep (once a minute) repairs what can go wrong in between: lapsed leases, resends of wake-ups
-   that nobody acknowledged, jobs nobody claimed in time. **It is also the only thing that sends the wake-up for a job
-   that is not due yet when it is queued**: an automatic review after a push waits the debounce (90 seconds by default)
-   and is sent by the first sweep after that (section 5.7). The per-minute cron is therefore **required**, not a
-   convenience.
+5. The App's cron sweep (**every 2 hours**) is a safety net for what goes wrong in between: lapsed leases, resends of
+   wake-ups that nobody acknowledged, jobs nobody claimed in time, notices that failed, the cleanup. **The normal
+   flow never waits for it**: a review is sent when it is queued, a job that waited for a slot is sent when the slot
+   frees, and a failed wake-up is repeated inside the request that made it (section 5.7). The sweep is sparse on
+   purpose: a serverless Postgres that scales to zero (Neon, for one) goes to sleep after about five minutes without a
+   query, and a cron every minute would keep it awake, and billed, around the clock.
 
 ### The two modes
 
@@ -84,28 +85,26 @@ GitHub ──webhook──▶ App ──queues the job, then signed POST /dispat
   command (`pnpm setup-code`), and `/api/health` answers `503` with `{"status":"error","code":"SCHEMA_BEHIND"}` while
   the database lacks a migration of this version.
 - Two crons (`app/vercel.json`): `/api/internal/repository-sync` once a day and `/api/internal/dispatch-sweep` **every
-  minute**. Both need `CRON_SECRET`.
+  2 hours**. Both need `CRON_SECRET`.
 
 ## 2. What you need first
 
 **Vercel.**
 
 - A team on a plan that allows what `app/vercel.json` and `dispatcher/vercel.json` ask for: a cron that runs **every
-  minute** and, for the Dispatcher, a function
+  2 hours** (the Dispatcher's reaper runs every 5 minutes) and, for the Dispatcher, a function
   `maxDuration` of **1800 seconds**. 1800 s is the *extended* maximum for Pro and Enterprise teams on Node.js 22 or 24
   and is a **beta limit**; 800 s is the generally available maximum and Hobby is limited to 300 s
   (`dispatcher/README.md`, "The Sandbox-Launcher"). Check your plan's current limits before you start: they are the
   platform's and they change.
-- **The per-minute cron is a hard requirement.** It is the App's sweep (`/api/internal/dispatch-sweep`). In webhook
-  mode a push-triggered review (a job that waits the debounce, 90 seconds by default) is sent to the Dispatcher **only**
-  by that sweep, so **without it push-triggered reviews never start**; an unacknowledged wake-up, a send that failed and a job
-  given back after a failed launch are never resent either, and the lease of a Worker that stopped reporting expires
-  only late, when another job happens to be claimed. Reviews that are due when they are queued (a pull request
-  opened, reopened or marked ready, a person's *Review now*, or any job when `REVIEW_DEBOUNCE_SECONDS` is `0`) are
-  sent at once by the enqueue hook and need the cron only if that first send fails. Even with the cron, a debounced review starts **up to about 60 seconds later**
-  than on the self-hosted path, where the runner polls every few seconds: it becomes due, then waits for the next
-  sweep (the platform may run a cron a little after its minute). A plan that allows only daily crons cannot run this
-  deployment; the daily `repository-sync` is not a substitute.
+- **The 2 hour cron is a safety net, and it is required.** It is the App's sweep (`/api/internal/dispatch-sweep`). The
+  normal path does not depend on it: a review is sent to the Dispatcher by the request that queued it (a push starts
+  its review at once; there is no debounce), a call that failed is repeated a few times inside that request, and a
+  job that waited behind the pool cap or behind the running job of its pull request is sent when that slot frees.
+  What only the sweep repairs, and how long that can take, is in section 5.7. Without it a lost Worker, a call that
+  keeps failing and a job nobody claims are noticed late or never (the requests of the day, a delivery or a heartbeat,
+  repair some of it). A plan that allows only daily crons cannot run this deployment; the daily `repository-sync` is
+  not a substitute.
 - Access to Vercel Sandbox for the team, in region `fra1`. Every project and snapshot of this deployment is in `fra1`
   and there is **no failover region** (snapshots are region-bound).
 - Two projects, from the same Git repository:
@@ -259,17 +258,16 @@ every secret: at least 32 characters, no white space or control characters.
 | `DATABASE_URL` | yes | **yes** | The **app role's** Postgres URL (`postgres://` or `postgresql://`; SQLite is refused in serverless mode). **A direct or session-mode connection, never a transaction pooler** (section 2). |
 | `DATABASE_POOL_MAX` | optional | no | Connections per function instance, 1 to 20, default 3. Every instance has its own pool: keep it small. |
 | `RUNNER_TOKEN` | yes | **yes** | The **dispatcher credential**: what the Dispatcher claims jobs with. At least 32 characters. **Same value as the Dispatcher's `RUNNER_TOKEN`.** There is one token, no overlap while rotating (section 5.2). |
-| `CRON_SECRET` | yes | **yes** | Vercel sends it as `Authorization: Bearer ...` to both cron routes. At least 32 characters. Without it every cron call is refused (`401`): no wake-up is resent, lapsed leases expire only late (when another job is claimed) and **push-triggered reviews never start** (section 5.7). Vercel adds the header by itself once the variable exists. |
+| `CRON_SECRET` | yes | **yes** | Vercel sends it as `Authorization: Bearer ...` to both cron routes. At least 32 characters. Without it every cron call is refused (`401`): the safety net of section 5.7 does not run (stuck jobs, lapsed leases of a quiet system, `dispatch_unavailable`, notices that failed). Vercel adds the header by itself once the variable exists. |
 | `RUNNER_DISPATCH` | yes, **in step 7** | no | `webhook`. Leave it unset (`poll`) until step 7: in poll mode nothing wakes a Dispatcher. |
 | `RUNNER_WEBHOOK_URL` | with `webhook` | no | The Dispatcher's wake-up endpoint: `https://<dispatcher production domain>/dispatch`. https, no credentials in it. |
 | `RUNNER_WEBHOOK_SECRET` | with `webhook` | **yes** | The key the App signs the wake-up call with. At least 32 characters. **Same value as the Dispatcher's `DISPATCHER_SIGNING_SECRET`.** Different from every other secret. |
 | `RUNNER_WEBHOOK_KEY_ID` | optional | no | The key's name, `a-z 0-9 _ -`, at most 32 characters, default `k1`. **Same value as the Dispatcher's `DISPATCHER_SIGNING_KEY_ID`.** Change it on every rotation. |
 | `RUNNER_WEBHOOK_SECRET_PREVIOUS`, `RUNNER_WEBHOOK_KEY_ID_PREVIOUS` | optional | **yes** (secret) | The key being replaced, both or neither. Only checked and carried; the App signs with the current key only. |
 | `RUNNER_WEBHOOK_BYPASS_TOKEN` | only if the Dispatcher is protected | **yes** | The project's Protection Bypass for Automation secret, sent as `x-vercel-protection-bypass`. Different from the signing secret. |
-| `RUNNER_DISPATCH_MAX_RUNNING` | **set it** | no | The pool cap the sweep keeps to when it sends wake-ups, 1 to 1000. **Must equal the Dispatcher's `DISPATCHER_MAX_RUNNING`.** Unset, the App still works (the claim enforces the Dispatcher's cap) but the sweep wakes the Dispatcher for jobs it cannot take. |
-| `RUNNER_DISPATCH_GIVE_UP_SECONDS` | optional | no | A job that waited this long without a claim fails with `dispatch_unavailable`. 60 to 604800, default **3600** in webhook mode, off in poll mode, `0` turns it off. It is also the longest a job may queue while the pool is full: set it above the queue you accept. |
+| `RUNNER_DISPATCH_MAX_RUNNING` | **set it** | no | The pool cap the App keeps to when it sends wake-ups for jobs that waited for a slot, 1 to 1000. **Must equal the Dispatcher's `DISPATCHER_MAX_RUNNING`.** Unset, the App still works (the claim enforces the Dispatcher's cap) but a freed slot wakes one waiting job at a time and the sweep wakes the Dispatcher for jobs it cannot take. |
+| `RUNNER_DISPATCH_GIVE_UP_SECONDS` | optional | no | A job that waited this long without a claim fails with `dispatch_unavailable`, when the next sweep looks at it (**up to 2 hours later than the time itself**). 60 to 604800, default **3600** in webhook mode, off in poll mode, `0` turns it off. It is also the longest a job may queue while the pool is full: set it above the queue you accept. |
 | `OPERATOR_API_TOKEN` | optional | **yes** | Switches on the operator API (`/api/operator/v1`: workspaces, entitlements and limits, usage). Unset, the API does not exist (404). At least 32 characters, different from `RUNNER_TOKEN` and `APP_SECRET`. |
-| `REVIEW_DEBOUNCE_SECONDS` | optional | no | How long a push waits before its review may start, 0 to 600, default 90. |
 | `LLM_MODEL`, `LLM_MAX_TOKENS` | optional | no | The instance's model and context window. For workspaces on their own key they are only the defaults a review setting can override. A **`managed` workspace** (section 3.5) does not use them: the models of its reviews are the ones you set per tier through the operator API (`PUT /api/operator/v1/model-tiers`, section 3.5), and its token budget is cut to the window of that model. `LLM_MODEL` is an OpenRouter name, default `anthropic/claude-haiku-5.5`; a model for Dynamic jobs must be tool-capable (`dynamic-review.md`, "The model"). The LLM key is **not** an environment variable. |
 
 Not set in the project, on purpose:
@@ -425,7 +423,7 @@ not run against this database, `503` without a code means the database is not re
 function log the start line says the operator API state (`[operator-api] off` or `on`).
 
 Also check that the crons exist (the project's Cron Jobs settings list two) and that the sweep is not refused: its
-runs show `200` once `CRON_SECRET` is set (`401 CRON_UNAUTHORIZED` means the variable is missing or not 32
+runs (every 2 hours) show `200` once `CRON_SECRET` is set (`401 CRON_UNAUTHORIZED` means the variable is missing or not 32
 characters, and the deployment was made before it was set).
 
 ### Step 3. The setup code, then the first-run setup in the browser
@@ -455,7 +453,7 @@ After that:
 3. Only if you operate `managed` workspaces (section 3.5): save the operator's key under **LLM key** (`/admin/llm`) now.
    It is optional for the first deployment and the smoke test.
 
-Do not open test pull requests yet: no Dispatcher exists, so a job would only wait (the sweep sends it after step 7).
+Do not open test pull requests yet: no Dispatcher exists, so a job would only wait (it would only wait; once the Dispatcher exists, the next push, or the sweep, sends it).
 
 ### Step 4. Build the golden snapshot
 
@@ -536,12 +534,12 @@ In the App project add `RUNNER_DISPATCH=webhook`, `RUNNER_WEBHOOK_URL=https://<d
 with `DEPLOY_CONFIG_INVALID` naming the variables (never the values).
 
 **Switch soon after step 3, and before pull requests are opened.** In poll mode the give-up is off. The first
-webhook-mode sweep applies `RUNNER_DISPATCH_GIVE_UP_SECONDS` (default 3600) to every job that has been queued longer
+webhook-mode sweep (it runs every 2 hours) applies `RUNNER_DISPATCH_GIVE_UP_SECONDS` (default 3600) to every job that has been queued longer
 than that: such a job is **not woken, it fails with `dispatch_unavailable`** (no attempt is counted, and the next push or
 *Review now* runs it again). Steps 4 to 6 take well under an hour, and you opened no pull request before this step,
 so normally nothing waits. If something does, let it fail and trigger it again, or raise the give-up time for the
-switch and lower it afterwards. Jobs queued for less than the give-up time are woken by the first sweep within a
-minute.
+switch and lower it afterwards. Jobs queued for less than the give-up time are woken by the first request that
+touches the database (a delivery, a heartbeat) or by the next sweep.
 
 ### Step 8. Smoke test: a Diff review, then a Dynamic review
 
@@ -552,9 +550,10 @@ minute.
 - The platform lists one VM named `cr-diff-<job id>-<random>` while it works (dashboard, or `Sandbox.list`), and it
   is gone, or stopped, afterwards.
 - A run that stays `queued` for more than a few minutes: section 5.3.
-- **Push to the open pull request** once the first review is done: the new review does not start at once. It starts
-  after the debounce (90 seconds) plus up to about a minute for the next sweep (section 5.7). If it never starts, the
-  sweep is not running.
+- **Push to the open pull request** while the first review is still running, or after it: the new review starts at
+  once (there is no debounce), unless the previous review of the pull request is still running: one job runs per
+  pull request, and the new job is sent when the running one ends. If it does not start within a minute of that,
+  look at section 5.3 and the Dispatcher log.
 
 **Dynamic.** Dynamic Review is off for an instance until the admin turns it on, and it is only available when
 the canary of step 6 passed with `opencode`:
@@ -568,7 +567,7 @@ the canary of step 6 passed with `opencode`:
 4. The Run shows the kind, the model and a result URL, and the summary comment is published.
 
 **Done when:** one Diff run and one Dynamic run have succeeded, the Dispatcher log shows no `launch_failed`, the
-sweep answers `200` every minute, and no VM of the test is left running.
+sweep answers `200` (its runs are two hours apart), and no VM of the test is left running.
 
 ## 5. Operations
 
@@ -614,10 +613,10 @@ configured one is refused by the Launcher until you do it.
 | Secret | How |
 |---|---|
 | **Webhook signing key** (`RUNNER_WEBHOOK_SECRET`, `DISPATCHER_SIGNING_SECRET`) | No gap, in this order: (1) in the Dispatcher project set the new key as current (`DISPATCHER_SIGNING_KEY_ID`, `DISPATCHER_SIGNING_SECRET`) and the old one as `..._PREVIOUS`, redeploy; (2) in the App project set the new key (`RUNNER_WEBHOOK_KEY_ID`, `RUNNER_WEBHOOK_SECRET`), redeploy; (3) after at least 5 minutes (the receiver's clock tolerance) remove the previous key from the Dispatcher and redeploy. Use a **new key id** each time. |
-| **`RUNNER_TOKEN`** (the dispatcher credential) | The App accepts exactly one, so there is a short gap: set the new value in the App and the Dispatcher projects and in the `hosted-canary` environment, redeploy **both**. Claims that arrive between the two deployments fail and the job stays queued, to be resent by the sweep; running Workers are not affected (they use their per-job credential, not this token). Do it when the queue is quiet. |
+| **`RUNNER_TOKEN`** (the dispatcher credential) | The App accepts exactly one, so there is a short gap: set the new value in the App and the Dispatcher projects and in the `hosted-canary` environment, redeploy **both**. Claims that arrive between the two deployments fail and the job stays queued, to be resent when the next job ends, by the next request that touches the database or by the sweep; running Workers are not affected (they use their per-job credential, not this token). Do it when the queue is quiet. |
 | **Vercel access** | With OIDC (no `VERCEL_TOKEN` in the Dispatcher project) there is nothing to rotate for the Launcher. For the snapshot pipeline: create a new access token (a dedicated one, with an expiry if the dashboard offers it: section 3.4), update `VERCEL_TOKEN` in `hosted-snapshot` (and in the Dispatcher project if you chose token auth there, then redeploy), run a harmless check (a snapshot run, or the canary), then revoke the old token. |
 | **Bypass secret** | Regenerate it in the Dispatcher project's Deployment Protection settings, then update `RUNNER_WEBHOOK_BYPASS_TOKEN` (App, redeploy) and `VERCEL_AUTOMATION_BYPASS_SECRET` (`hosted-canary`). Wake-ups fail with `DISPATCH_REJECTED` in between. |
-| **`CRON_SECRET`** (App and Dispatcher, two separate values) | Change it in the project, redeploy. Vercel sends the new value to the next cron call; until the deployment is live the calls are refused (`401`) and a minute of the sweep is lost. |
+| **`CRON_SECRET`** (App and Dispatcher, two separate values) | Change it in the project, redeploy. Vercel sends the new value to the next cron call; until the deployment is live the calls are refused (`401`) and one run of the sweep is lost (the next one, two hours later, covers it). |
 | **`OPERATOR_API_TOKEN`** | Change it, redeploy, give the operator's client the new one. |
 | **`APP_SECRET`** | Not rotatable: changing it signs everybody out and makes every stored credential (GitHub App key, mail password, workspace LLM keys) unreadable. |
 
@@ -697,30 +696,41 @@ of it reports `SCHEMA_BEHIND`. Update the Dispatcher after the App when a releas
 (`GET /api/runners/v1/version` lists the App's features; a Dispatcher that finds one missing answers `503` and claims
 nothing).
 
-### 5.7 What depends on the per-minute sweep
+### 5.7 What depends on the 2 hour sweep
 
-The App's sweep (`GET /api/internal/dispatch-sweep`, every minute, `CRON_SECRET`) is part of the path of a review,
-not only a repair service (`app/src/dispatch/README.md`, "The cron sweep"). In webhook mode:
+The App's sweep (`GET /api/internal/dispatch-sweep`, every 2 hours, `CRON_SECRET`) is a **safety net** for the cases
+below, not part of the path of a review (`app/src/dispatch/README.md`, "The cron sweep" and "Between two sweeps"). The
+sweep is sparse so that a Postgres that scales to zero can sleep between webhooks; everything that has to happen
+promptly is done by the request that causes it, after its response (`after()`), with no timer and no queue.
 
-| Job | Who sends the wake-up | Without the sweep |
-|---|---|---|
-| Due when queued: opened, reopened, ready for review, *Review now*, any job with `REVIEW_DEBOUNCE_SECONDS=0` | The App's enqueue hook, at once; **a send that fails is retried only by the sweep** | Works if the first send succeeds; a failed send is never retried |
-| **Not due yet** when queued: an automatic review after a push (debounce, 90 s by default) | **The sweep**, when the job becomes due | **Never starts** |
-| A wake-up nobody acknowledged, or a job given back after a failed launch | The sweep, at the next run after the acknowledgement timeout (2 minutes) | Never resent |
-| A running job whose Worker stopped reporting | The sweep expires its lease and requeues it | Expires late: every claim also expires lapsed leases (`claimNext`), so it ends only when some job, possibly the next one of the same pull request, is claimed |
-| A job nobody claimed for `RUNNER_DISPATCH_GIVE_UP_SECONDS` | The sweep fails it with `dispatch_unavailable` | Waits forever |
+**The normal flow, without the sweep (webhook mode):**
 
-So a debounced review starts after **the debounce plus up to about 60 seconds** (it is sent at the first sweep after it
-is due; Vercel may run a cron slightly late), against a few seconds on a self-hosted runner. If a team finds that too
-slow, `REVIEW_DEBOUNCE_SECONDS=0` makes automatic reviews due at once, so the enqueue hook sends them without waiting for the
-sweep, at the price of one review per push instead of one per burst of pushes.
+| What | Who does it, and when |
+|---|---|
+| A review of a new pull request, of a push, a person's *Review now* | The App's enqueue hook sends the wake-up in the request that queued the job. There is no debounce. A push to a pull request whose review is still waiting replaces that waiting job; a review that is running finishes first, and the new job is sent when it ends (the next row) |
+| A wake-up that failed (a 5xx, a timeout, no connection, `429`/`503` with a short `Retry-After`) | The same request repeats it up to three more times (pauses of 1, 3 and 8 seconds, at most 35 seconds in all). `Retry-After` is honoured if it is 10 seconds or less. A refusal (`DISPATCH_REJECTED`) is never repeated: an operator has to look |
+| A job that waited behind the pool cap or behind the running job of its pull request | When a job ends (the Worker's result, a release), the App sends the waiting jobs, the one of the same pull request first, until as many wake-ups were accepted as the pool cap `RUNNER_DISPATCH_MAX_RUNNING` has free slots (one per freed slot when it is not set); a job that waits only for the running job of its own pull request is not asked |
+| A job given back after a failed launch (`launch_failed`, `worker_exited`) | The release frees its slot first, then sends the job again once its retry time has passed (the Dispatcher gives it back with 30 seconds; the request waits for it if it fits in about 45 seconds, else the next request that touches the database or the sweep sends it) |
+| The notice on a refused pull request (#281) | Posted after the response of the claim that refused the job |
+| The lease of a Worker that vanished, and the calls that are due again | The next **delivery** of the GitHub webhook that queued a job (not an unused event or a duplicate), **heartbeat** or **result** of any Worker releases the leases that ran out and sends what is due, after its response, at most once every 30 seconds per function instance, under a lock of its own so that it can never make the cron a no-op. In a quiet system there may be none of these |
+
+**Only the sweep (and so up to about 2 hours late), when nothing else happens:**
+
+| What | Bound |
+|---|---|
+| A running job whose Worker vanished, in a quiet system (no delivery, no heartbeat of another job) | Its lease runs out after two minutes, and the job is requeued by the first request above, or by the sweep, or by a claim: **up to 2 hours**; the pull request shows "Running" meanwhile |
+| A job nobody claimed for `RUNNER_DISPATCH_GIVE_UP_SECONDS` (`dispatch_unavailable`) | The give-up time plus **up to 2 hours** (the time is counted when the sweep runs) |
+| A job that waited for the pool cap while the job that freed the slot ended by a **lease that ran out** (a Worker that vanished, nobody told the app) | Sent by the next request that touches the database once its row time (2 minutes after the refusal) has passed, else by the sweep: **up to 2 hours** |
+| A dispatch the Dispatcher stopped (`not_capable`) | Asked again by the sweep, **every 2 hours** instead of every 10 minutes |
+| A wake-up that kept failing after the inline repeats | Resent by the next request that touches the database (as above) or by the sweep, on the row's back-off |
+| A refusal notice whose post failed | Tried again at the next refusal on that pull request or by the sweep |
+| The cleanup (rate limit counters, unverified accounts, remembered job keys, old dispatch rows) | Once per sweep, so every 2 hours (it only runs once per hour) |
 
 **To see that it runs:** the App project's Cron Jobs settings list `/api/internal/dispatch-sweep` and its runs answer
-`200`; the log shows `[sweep] requeued=.. given_up=.. sent=..` for every run that did something (a debounced review that
-was sent shows as `sent=1`); `401 CRON_UNAUTHORIZED` means `CRON_SECRET` is missing or short, and `404` means the App is
-not in serverless mode (`APP_RUNTIME`). The cron runs only for the **production** deployment, so a staged or preview
-deployment never sweeps. If a push-triggered review does not start within the debounce plus about two minutes, look at
-the sweep first, then at section 5.3.
+`200`; the log shows `[sweep] requeued=.. given_up=.. sent=..` for every run that did something; `401 CRON_UNAUTHORIZED`
+means `CRON_SECRET` is missing or short, and `404` means the App is not in serverless mode (`APP_RUNTIME`). The cron
+runs only for the **production** deployment, so a staged or preview deployment never sweeps. A review that does not
+start within a minute is not a sweep problem: look at section 5.3 and at the Dispatcher's log first.
 
 ## 6. Sizing the Worker VMs
 
@@ -816,14 +826,14 @@ A self-hosted installation and a hosted one never share a database or a GitHub A
   does not move to another tier or to `LLM_MODEL`. The models never reach a workspace; a Dynamic model has to support tool
   calls (checked when you save it). Save the tiers before you set a workspace to `managed`.
 - **A Worker whose end the Dispatcher does not see still holds its slot until its lease lapses** (two minutes after its
-  last heartbeat); only the next sweep then puts the job back, and the pull request shows "Running" meanwhile. A Worker
+  last heartbeat); only the next request that touches the database or the next sweep (up to 2 hours) then puts the job back, and the pull request shows "Running" meanwhile. A Worker
   that exits non-zero before it has reported a result is released at once when the Dispatcher sees the container end
   (`worker_exited`, section 5.3). The lease is still the safeguard where it does not: the wait for the container failed
   (`worker_wait_failed`: what became of the Worker is unknown, so nothing is released), the Dispatcher's function ended
   before the container did, and a Launcher that does not supervise the Worker. The attempt is lost either way (three, then
   `failed`); the delay is the cost.
-- **A debounced review starts up to about 60 seconds later than self-hosted**, and only while the per-minute cron
-  runs (section 5.7); the first automatic review of a pull request (opened) is sent at once.
+- **Hosted starts within seconds, like self-hosted**: a push is sent when it is queued, with no debounce. What is
+  up to 2 hours late is only the repair of abnormal cases (section 5.7).
 - **The capability probe.** One answer per Dispatcher *instance*, held in memory for `DISPATCHER_PROBE_TTL_SECONDS`
   (1 hour). The first Dynamic wake-up after the hour, and the first one on every **cold instance**, finds nothing
   proven, starts a probe (one canary VM, tens of seconds) and is answered `503` with `Retry-After: 20`; Dynamic jobs

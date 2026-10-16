@@ -419,7 +419,7 @@ export function createJobsRepository(
             .executeTakeFirst();
           if (active !== undefined) {
             await recordComment(active.id);
-            // A person does not wait for a debounce: a waiting job that was held back (an automatic
+            // A person does not wait: a waiting job that was held back (a job given back with a retry time
             // job after `synchronize`) is due now.
             const pulledForward =
               active.status === "queued" &&
@@ -478,7 +478,7 @@ export function createJobsRepository(
 
         // 4. An automatic job replaces the waiting automatic jobs of the same pull request, command
         // and arguments: they would review an older state. Jobs a person asked for are never
-        // replaced (they skip the debounce an automatic job waits out), and a running job is left
+        // replaced (they are never replaced by a push), and a running job is left
         // alone.
         let supersededJobIds: string[] = [];
         if (input.triggerKind === "webhook") {

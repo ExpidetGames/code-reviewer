@@ -32,6 +32,13 @@ import {
   markInstanceSetUp,
 } from "../../src/test-support/workspaces.ts";
 
+// #395: the repair work of the requests that touch the database is started by the route; here it is a spy.
+const touched = vi.hoisted(() => vi.fn());
+vi.mock("../../src/dispatch/maintenance-shared.ts", () => ({
+  touched,
+  jobEnded: vi.fn(),
+}));
+
 type Route = typeof import("../../src/app/api/webhooks/github-app/route.ts");
 
 const fakes: FakeGithub[] = [];
@@ -71,6 +78,7 @@ async function startRoute(
 }
 
 beforeEach(() => {
+  touched.mockClear();
   vi.spyOn(console, "info").mockImplementation(() => undefined);
 });
 
@@ -272,5 +280,106 @@ describe("the webhook route file", () => {
     const { route } = await startRoute();
 
     expect(Object.keys(route).sort()).toEqual(["POST"]);
+  });
+
+  describe("the repair work of the requests that touch the database (#395)", () => {
+    async function readyRoute() {
+      const started = await startRoute();
+      started.github.fake.addInstallation({
+        id: 4242,
+        account: { login: "acme", id: 5001, type: "Organization" },
+      });
+      started.github.fake.setRepositories(4242, [
+        { id: 7001, fullName: "acme/widgets" },
+      ]);
+      await linkTestInstallation(
+        getDatabase(),
+        await defaultWorkspaceId(getDatabase()),
+        { id: "4242", accountLogin: "acme", accountId: 5001 },
+      );
+      await started.route.POST(
+        webhookDelivery({
+          event: "installation",
+          payload: webhookFixture("installation.created"),
+          secret: TEST_WEBHOOK_SECRET,
+        }),
+      );
+      started.github.fake.addPullRequest("acme/widgets", {
+        number: 7,
+        title: "Add widget caching",
+        state: "open",
+        headSha: "1f3a5c7e9b2d4f60a8c1e3b5d7f90a2c4e6b8d01",
+        headRef: "feature/caching",
+        baseRef: "main",
+        author: { login: "alice", id: 1001 },
+      });
+      const [repository] = await createRepositoriesRepository(
+        getDatabase(),
+        await defaultWorkspaceId(getDatabase()),
+      ).list();
+      await projectServiceFor(
+        await defaultWorkspaceId(getDatabase()),
+      ).activateProject(repository!.id);
+      touched.mockClear();
+      return started.route;
+    }
+
+    const opened = (deliveryId: string) =>
+      webhookDelivery({
+        event: "pull_request",
+        payload: webhookFixture("pull_request.opened"),
+        secret: TEST_WEBHOOK_SECRET,
+        deliveryId,
+      });
+
+    // #395-T11
+    it("starts after a delivery that queued a job, once, and not for the same delivery again (a duplicate)", async () => {
+      const route = await readyRoute();
+
+      const first = await route.POST(opened("delivery-t11"));
+      const again = await route.POST(opened("delivery-t11"));
+
+      expect(await first.json()).toMatchObject({ outcome: "trigger_enqueued" });
+      expect(await again.json()).toMatchObject({ outcome: "duplicate" });
+      expect(touched).toHaveBeenCalledTimes(1);
+    });
+
+    // #395-T11
+    it("does not start after a delivery of an event the app does not use, and the response is the same as ever", async () => {
+      const route = await readyRoute();
+
+      const response = await route.POST(
+        webhookDelivery({
+          event: "star",
+          payload: { action: "created" },
+          secret: TEST_WEBHOOK_SECRET,
+          deliveryId: "delivery-star",
+        }),
+      );
+
+      expect(response.status).toBe(202);
+      expect(await response.json()).toEqual({
+        status: "accepted",
+        outcome: "event_not_used",
+      });
+      expect(touched).not.toHaveBeenCalled();
+    });
+
+    // #395-T11
+    it("does not start after a delivery that was refused: a wrong signature, a body that is not JSON", async () => {
+      const route = await readyRoute();
+
+      const unsigned = await route.POST(
+        webhookDelivery({
+          event: "pull_request",
+          payload: webhookFixture("pull_request.opened"),
+          secret: "not-the-secret-of-this-installation-000000",
+          deliveryId: "delivery-bad",
+        }),
+      );
+
+      expect(unsigned.status).toBe(401);
+      expect(touched).not.toHaveBeenCalled();
+    });
   });
 });

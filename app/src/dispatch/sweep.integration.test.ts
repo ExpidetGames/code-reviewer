@@ -81,6 +81,8 @@ async function setupOn(
     fetch: receiver.fetch,
     now: fixture.clock.now,
     timeoutMs: 40,
+    // The resends below are driven by the test (`sendDue`); the retries inside the request have their own test.
+    inlineRetryDelaysMs: [],
     log: {
       warn: (line) => logs.warn.push(line),
       error: (line) => logs.error.push(line),
@@ -254,9 +256,9 @@ describe.each(databases)("the dispatch sweep on %s", (name, open) => {
     });
   });
 
-  describe("debounced jobs", () => {
+  describe("jobs that are not due yet", () => {
     // #328-T03
-    it("dispatches a job whose debounce is over with the next run, and not before", async () => {
+    it("dispatches a job that became due with the next run, and not before", async () => {
       const t = await setup();
       const runAfter = new Date(t.fixture.clock.now().getTime() + 90 * SECOND);
       const { job } = await t.enqueue({ runAfter });

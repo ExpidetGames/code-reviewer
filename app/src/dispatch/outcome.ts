@@ -46,6 +46,8 @@ export type DispatchUpdate = {
   lastCode: DispatchResultCode;
   /** True for an answer an operator has to look at (the code is logged at error level). */
   alert: boolean;
+  /** What the Dispatcher asked to wait (`Retry-After`), cut to `MAX_RETRY_AFTER_SECONDS`; left out when it asked none. */
+  retryAfterMs?: number;
 };
 
 /** The wait after the `failures`-th failure in a row (1 for the first). */
@@ -65,6 +67,7 @@ export function decideOutcome(
     lastStatus: number | null,
     delayMs: number,
     alert = false,
+    retryAfterMs = 0,
   ): DispatchUpdate => ({
     state: "pending",
     nextDispatchAt: at(delayMs),
@@ -73,6 +76,7 @@ export function decideOutcome(
     lastStatus,
     lastCode,
     alert,
+    ...(retryAfterMs > 0 ? { retryAfterMs } : {}),
   });
 
   switch (result.kind) {
@@ -114,6 +118,8 @@ export function decideOutcome(
         result.status === 429 ? "rate_limited" : "unavailable",
         result.status,
         Math.max(failureDelayMs(failures), header),
+        false,
+        header,
       );
     }
     case "server_error":
