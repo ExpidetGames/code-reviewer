@@ -8,7 +8,6 @@ import {
   LLM_NOT_CONFIGURED_ERROR,
   LlmAccessError,
   createLlmAccess,
-  instanceChoosesModel,
   maskSecretInText,
   revealLlmAccess,
 } from "./access.ts";
@@ -101,33 +100,5 @@ describe("masking a secret in a text", () => {
 
   it("masks a secret that contains another one as a whole", () => {
     expect(maskSecretInText("a abcd b", "abcd", "bc")).toBe("a [redacted] b");
-  });
-});
-
-describe("whose model a workspace reviews with (#276)", () => {
-  // #276-P2
-  it("is the instance's while the workspace uses the operator's key, working or not", () => {
-    expect(instanceChoosesModel({ configured: true, source: "operator" })).toBe(
-      true,
-    );
-    for (const reason of [
-      "operator_key_missing",
-      "operator_key_unreadable",
-    ] as const)
-      expect(instanceChoosesModel({ configured: false, reason })).toBe(true);
-  });
-
-  // #276-P2
-  it("is the workspace's for its own key, with or without one, and unknown when the entitlements cannot be read", () => {
-    expect(
-      instanceChoosesModel({ configured: true, source: "workspace" }),
-    ).toBe(false);
-    for (const reason of [
-      "no_key",
-      "key_unreadable",
-      "key_binding_mismatch",
-      "entitlements_invalid",
-    ] as const)
-      expect(instanceChoosesModel({ configured: false, reason })).toBe(false);
   });
 });

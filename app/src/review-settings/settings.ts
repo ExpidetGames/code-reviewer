@@ -45,6 +45,31 @@ export type ReviewSettings = {
 
 export type ReviewSettingField = keyof ReviewSettings;
 
+/** The fields that name a model. A workspace on the operator's key neither reads nor writes them (#283). */
+export const MODEL_SETTING_FIELDS = [
+  "model",
+  "fallbackModel",
+] as const satisfies readonly ReviewSettingField[];
+
+/** The settings without the fields that name a model (#283). */
+export function withoutModelFields<
+  T extends Partial<Record<(typeof MODEL_SETTING_FIELDS)[number], unknown>>,
+>(settings: T): Omit<T, (typeof MODEL_SETTING_FIELDS)[number]> {
+  const copy = { ...settings };
+  for (const field of MODEL_SETTING_FIELDS) delete copy[field];
+  return copy;
+}
+
+/**
+ * The settings as a reader sees them. For a workspace on the operator's key the model fields are absent (#283):
+ * the workspace does not know the model, so no answer and no page carries one.
+ */
+export type ReadableReviewSettings = Omit<
+  ReviewSettings,
+  (typeof MODEL_SETTING_FIELDS)[number]
+> &
+  Partial<Pick<ReviewSettings, (typeof MODEL_SETTING_FIELDS)[number]>>;
+
 /**
  * The one review kind a project selects (#193, #194). Diff Review is the existing PR-Agent review;
  * Dynamic Review is the read-only agent of the epic. A project has exactly one.

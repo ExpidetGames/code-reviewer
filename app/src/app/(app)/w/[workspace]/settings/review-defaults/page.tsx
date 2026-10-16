@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { Metadata } from "next";
-import { instanceChoosesModel } from "@/llm/access";
-import { getWorkspaceLlm } from "@/llm/shared";
 import { reviewSettingsServiceFor } from "@/review-settings/shared";
 import { planPageLinkedFor } from "@/usage/shared";
 import {
@@ -32,9 +30,6 @@ export default async function ReviewDefaultsSettingsPage({
     <GlobalSettingsPageContent
       workspaceSlug={workspace.slug}
       canEdit={can(role, "manage_review_defaults")}
-      modelChosenByInstance={instanceChoosesModel(
-        await getWorkspaceLlm().summaryFor(workspaceId),
-      )}
       showPlan={showPlan}
       data={data}
     />

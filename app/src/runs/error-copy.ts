@@ -37,7 +37,7 @@ export const ERROR_COPY: Readonly<Record<string, string>> = {
   entitlements_invalid:
     "The plan settings of this workspace could not be read, so this run did not start and no AI model was used. Ask whoever manages this workspace's plan to check them.",
   managed_tier_unavailable:
-    "The model level chosen for this project is not available on this server right now, so this run did not start and no AI model was used. A workspace Owner or Admin should contact whoever runs this instance.",
+    "The quality level chosen for this project is not available right now, so this run did not start and no AI model was used. A workspace Owner or Admin can choose another level in the review settings of the project. If no level is available, contact whoever runs this instance.",
 
   // The claim of the runner API
   llm_not_configured:

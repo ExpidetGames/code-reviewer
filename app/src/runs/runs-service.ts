@@ -92,6 +92,7 @@ export function createRunsService(deps: {
           stored.project,
           answeredAt,
           deps.redact,
+          stored.onManagedTier,
         ),
       };
     },

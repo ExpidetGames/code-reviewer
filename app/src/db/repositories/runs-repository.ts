@@ -20,8 +20,11 @@ import {
   toJob,
 } from "./jobs-repository.ts";
 
-/** A job with the `owner/name` of the repository it is about. */
-export type StoredRun = { job: Job; project: string };
+/**
+ * A job with the `owner/name` of the repository it is about, and whether it ran on a managed quality level (#283: its
+ * usage record names one).
+ */
+export type StoredRun = { job: Job; project: string; onManagedTier: boolean };
 /** A job as the list shows it: the listed fields only. */
 export type StoredRunRow = { job: RunRowSource; project: string };
 
@@ -123,14 +126,24 @@ export function createRunsRepository(
       const row = await db
         .selectFrom("jobs")
         .innerJoin("repositories", "repositories.id", "jobs.repository_id")
+        .leftJoin("usage_records", (join) =>
+          join
+            .onRef("usage_records.job_id", "=", "jobs.id")
+            .on("usage_records.workspace_id", "=", workspaceId),
+        )
         .selectAll("jobs")
         .select("repositories.full_name as project")
+        .select("usage_records.model_tier as model_tier")
         .where("jobs.workspace_id", "=", workspaceId)
         .where("jobs.id", "=", id)
         .executeTakeFirst();
       if (row === undefined) return undefined;
-      const { project, ...job } = row;
-      return { job: toJob(job), project };
+      const { project, model_tier: modelTier, ...job } = row;
+      return {
+        job: toJob(job),
+        project,
+        onManagedTier: modelTier !== null,
+      };
     },
 
     async latestPerRepository(repositoryIds) {

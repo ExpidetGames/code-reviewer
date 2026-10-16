@@ -43,6 +43,8 @@ function model(
       modelTier: "built_in",
     },
     cost: estimateReviewCost(effective),
+    managed: false,
+    tierAvailability: null,
     lastSaved: null,
     ...(dynamic === undefined ? {} : { dynamic }),
   };

@@ -86,19 +86,6 @@ export function instanceAccessOf(
   }
 }
 
-/**
- * Whether the instance chooses the model of a workspace's reviews: it uses the operator's key (the key mode is
- * `managed`), working or not. The review settings of such a workspace stay stored and take no effect (#276).
- */
-export function instanceChoosesModel(
-  summary:
-    | { configured: true; source: LlmAccessSource }
-    | { configured: false; reason: LlmNotConfiguredReason },
-): boolean {
-  const access = instanceAccessOf(summary);
-  return access === "provided" || access === "key_unavailable";
-}
-
 export const createLlmAccess = createLlmConfig;
 
 /** Stable codes of `LlmAccessError`. */
@@ -139,6 +126,9 @@ export function revealLlmAccess(access: LlmAccess): LlmAccess {
 
 const MASK = "[redacted]";
 
+/** What stands in a text where the id of a managed tier's model was (#283). */
+export const MODEL_MASK = "[model]";
+
 // The forms a secret takes in an error text besides the plain one: percent-encoded (in a URL),
 // escaped for JSON (in a logged body) and base64 (in an `Authorization: Basic` header or a dump).
 function forms(secret: string): string[] {
@@ -157,12 +147,24 @@ function forms(secret: string): string[] {
  * and the current one.
  */
 export function maskSecretInText(text: string, ...secrets: string[]): string {
+  return replaceForms(text, secrets, MASK);
+}
+
+/**
+ * Replaces the ids of managed tier models in a text with `[model]` (#283), in the same forms as a secret. The id of a
+ * tier's model is operator data a workspace must not read, but it is not a credential: the mask says what was there.
+ */
+export function maskModelInText(text: string, ...models: string[]): string {
+  return replaceForms(text, models, MODEL_MASK);
+}
+
+function replaceForms(text: string, values: string[], mask: string): string {
   let masked = text;
-  // Longest first, so a secret that contains another one is masked as a whole.
-  const all = secrets
-    .filter((secret) => secret !== "")
+  // Longest first, so a value that contains another one is masked as a whole.
+  const all = values
+    .filter((value) => value !== "")
     .flatMap(forms)
     .sort((a, b) => b.length - a.length);
-  for (const form of all) masked = masked.split(form).join(MASK);
+  for (const form of all) masked = masked.split(form).join(mask);
   return masked;
 }

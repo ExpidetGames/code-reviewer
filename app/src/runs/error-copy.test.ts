@@ -49,13 +49,15 @@ describe("the sentences for error codes", () => {
     }
   });
 
-  // #280: until the tier control exists (#283) the copy must not point at one.
-  it("tells a person about an unavailable model level without pointing to a control that does not exist", () => {
+  // #283: the control exists now, so the copy points at it, still without naming a model.
+  it("tells a person about an unavailable quality level and where to choose another one", () => {
     const { text } = describeErrorCode("managed_tier_unavailable");
 
+    expect(text).toMatch(/quality level/);
     expect(text).toMatch(/Owner or Admin/);
+    expect(text).toMatch(/review settings/);
     expect(text).toMatch(/whoever runs this instance/);
-    expect(text).not.toMatch(/settings page|Choose another/i);
+    expect(text).not.toMatch(/\bmodel\b(?! was used)/);
   });
 
   // #200: the codes a Dynamic project's run can end with are read by people on the Runs pages.

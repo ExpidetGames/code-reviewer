@@ -970,6 +970,74 @@ def test_by_default_the_job_writes_one_summary_comment_through_the_github_api_of
         github.stop()
 
 
+# #283-T08
+def test_the_published_summary_never_names_the_model_of_the_job(tmp_path: Path) -> None:
+    token = "ghs_dummy-installation-token-0123456789"
+    model = "acme-tier/deep-reviewer-7"
+    github = FakeGithubComments(token=token)
+    preparer = Preparer(tmp_path / "export", structured_script())
+    try:
+        with reading_upstream() as upstream:
+            result = runner.run_dynamic_job(
+                job_for(
+                    f"{upstream.url}/v1",
+                    model=model,
+                    upstream_model=model,
+                    pr_url=f"{github.url}/octo/repo/pull/7",
+                    git_base_url=github.url,
+                    git_token=token,
+                ),
+                None,
+                0.0,
+                environment(),
+                engines=ALL_ENGINES,
+                prepare=preparer,
+            )
+
+        assert result.ok, result.log_tail
+        # The model did the work (it is the model of the requests) and is nowhere in the comment.
+        assert {body["model"] for _, body in upstream.requests} == {model}
+        assert len(github.comments) == 1
+        published = json.dumps(github.comments)
+        assert "deep-reviewer" not in published
+        assert "acme-tier" not in published
+    finally:
+        github.stop()
+
+
+# #283-T08
+def test_the_failure_note_never_names_the_model_of_the_job(tmp_path: Path) -> None:
+    token = "ghs_dummy-installation-token-0123456789"
+    model = "acme-tier/deep-reviewer-7"
+    github = FakeGithubComments(token=token)
+    try:
+        with FakeUpstream() as upstream:
+            result = runner.run_dynamic_job(
+                job_for(
+                    f"{upstream.url}/v1",
+                    model=model,
+                    upstream_model=model,
+                    pr_url=f"{github.url}/octo/repo/pull/7",
+                    git_base_url=github.url,
+                    git_token=token,
+                ),
+                None,
+                0.0,
+                environment(),
+                engines=ALL_ENGINES,
+                prepare=refusing_checkout(),
+            )
+
+        assert result.error_code is ErrorCode.CHECKOUT_INCOMPLETE
+        assert len(github.comments) == 1
+        published = json.dumps(github.comments)
+        assert "Dynamic Review did not complete" in published
+        assert "deep-reviewer" not in published
+        assert "acme-tier" not in published
+    finally:
+        github.stop()
+
+
 # #253-R05
 def test_a_second_job_for_the_same_pull_request_edits_the_summary_comment_and_adds_none(
     tmp_path: Path,
