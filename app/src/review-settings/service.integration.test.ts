@@ -130,6 +130,45 @@ describe("the global defaults", () => {
     expect(project.effective.maxTokens).toBe(70_000);
   });
 
+  // #280-T10
+  it("have the tier medium when nothing sets it, the workspace default for every project, and the project's own over it", async () => {
+    const app = await setupReviewSettings();
+    await app.projects.activate(app.first.id);
+
+    const fresh = await app.service.getProjectSettings(app.first.id);
+    expect(fresh.effective.modelTier).toBe("medium");
+    expect(fresh.sources.modelTier).toBe("built_in");
+
+    await app.service.updateGlobalSettings({ modelTier: "low" }, "octocat");
+    const inherited = await app.service.getProjectSettings(app.first.id);
+    expect(inherited.effective.modelTier).toBe("low");
+    expect(inherited.sources.modelTier).toBe("global");
+
+    await app.service.updateProjectSettings(app.first.id, {
+      modelTier: "high",
+    });
+    const own = await app.service.getProjectSettings(app.first.id);
+    expect(own.effective.modelTier).toBe("high");
+    expect(own.sources.modelTier).toBe("project");
+    expect(own.inherited.modelTier).toBe("low");
+    expect(
+      (await app.service.resolveForRepository(app.first.id))?.settings
+        .modelTier,
+    ).toBe("high");
+  });
+
+  // #280-T10
+  it("refuse a tier that does not exist", async () => {
+    const app = await setupReviewSettings();
+
+    await expect(
+      app.service.updateGlobalSettings({ modelTier: "ultra" }, "octocat"),
+    ).rejects.toMatchObject({
+      code: "REVIEW_SETTINGS_INVALID",
+      issues: [{ field: "modelTier", code: "INVALID_FORMAT" }],
+    });
+  });
+
   // CR-25-T07
   it("refuse invalid settings with the fields that are wrong, and store nothing", async () => {
     const app = await setupReviewSettings();
@@ -191,6 +230,43 @@ describe("the token budget against the context window of the model", () => {
 
     expect(view.effective.maxTokens).toBe(500_000);
     expect(view.cost.exceedsContext).toEqual([]);
+  });
+
+  // #280-T09
+  it("is not checked against a model for a workspace on the operator's key: it does not know the model", async () => {
+    const app = await setupReviewSettings(undefined, {
+      operatorsModels: true,
+    });
+    await app.projects.activate(app.first.id);
+
+    const global = await app.service.updateGlobalSettings(
+      { maxTokens: 1_000_000 },
+      "octocat",
+    );
+    const project = await app.service.updateProjectSettings(app.first.id, {
+      maxTokens: 1_200_000,
+      model: "deepseek/deepseek-v3.2",
+    });
+
+    expect(global.effective.maxTokens).toBe(1_000_000);
+    expect(global.cost.exceedsContext).toEqual([]);
+    expect(project.effective.maxTokens).toBe(1_200_000);
+    expect(project.cost.exceedsContext).toEqual([]);
+  });
+
+  // #280-T09
+  it("is still checked for a workspace on its own key, in the same situation", async () => {
+    const app = await setupReviewSettings();
+    await app.projects.activate(app.first.id);
+
+    await expect(
+      app.service.updateProjectSettings(app.first.id, {
+        maxTokens: 1_200_000,
+        model: "deepseek/deepseek-v3.2",
+      }),
+    ).rejects.toMatchObject({
+      issues: [{ field: "maxTokens", code: "EXCEEDS_MODEL_CONTEXT" }],
+    });
   });
 
   it("refuses a model that is too small for the budget in effect and blames the model", async () => {

@@ -55,6 +55,8 @@ async function loadRoutes() {
     (await import("../../src/app/api/operator/v1/plan-management/route.ts")) as unknown as Route;
   const handoffRedeem =
     (await import("../../src/app/api/operator/v1/handoff/redeem/route.ts")) as unknown as Route;
+  const modelTiers =
+    (await import("../../src/app/api/operator/v1/model-tiers/route.ts")) as unknown as Route;
   return {
     list,
     entitlements,
@@ -66,6 +68,7 @@ async function loadRoutes() {
     usageSummary,
     planManagement,
     handoffRedeem,
+    modelTiers,
   };
 }
 
@@ -199,6 +202,32 @@ describe("the operator API route files while the API is on", () => {
     expect(wrong.status).toBe(401);
     expect(unknown.status).toBe(404);
     expect(await unknown.json()).toEqual({ version: 1, error: "not_found" });
+  });
+
+  // #280-T01
+  it("serve the model tiers through the real wiring, and the answer holds what was put", async () => {
+    vi.stubEnv("OPERATOR_API_TOKEN", TOKEN);
+    await startDatabase();
+    const routes = await loadRoutes();
+    vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const body = { tiers: { high: { diff: "vendor/high-diff" } } };
+
+    const put = (await routes.modelTiers.PUT(
+      request("PUT", TOKEN, body) as never,
+    )) as Response;
+    const get = (await routes.modelTiers.GET(
+      request("GET", TOKEN) as never,
+    )) as Response;
+    const wrong = (await routes.modelTiers.GET(
+      request("GET", "wrong") as never,
+    )) as Response;
+
+    expect(put.status).toBe(200);
+    expect(await get.json()).toMatchObject({
+      version: 1,
+      tiers: { high: { diff: "vendor/high-diff", dynamic: null } },
+    });
+    expect(wrong.status).toBe(401);
   });
 
   // #278-T07

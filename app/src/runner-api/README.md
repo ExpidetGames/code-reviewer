@@ -107,7 +107,14 @@ id (for which a refused job answers `204`, like any job that cannot be claimed).
    (`claimed-keys.ts`); if that fails the job is given back and the runner gets a 500 without a key.
    **Options** of the job come next (`JobOptionsSource`, below): the model and token budget of the
    review settings replace the instance's model and context window (`llm.model`, `llm.maxTokens`), and
-   the other options go into `env`. `llm.baseUrl`, `llm.requireParameters` and `llm.fallbackModels` are never
+   the other options go into `env`. **On the operator's key** (#280, `src/model-tiers/README.md`) the model is not the
+   workspace's: the project's tier (`modelTier`, `medium` by default) is noted in the usage record, and the operator's
+   model for that tier and the job's review kind replaces `llm.model` (Diff) or the Dynamic model, with the capabilities
+   of #279 read for it. A tier without a model ends the job as `failed` with **`managed_tier_unavailable`** (the log
+   line names the tier and the kind, never a model), with no key and no token made, and never moves to another tier.
+   The token budget is the workspace's, cut to the context window of the tier's model when the provider states one.
+   The model is remembered with the key, so the result a runner reports is stripped of it (`usage.model` becomes
+   `null`, text is masked). The Worker's first fetch decides the same again. `llm.baseUrl`, `llm.requireParameters` and `llm.fallbackModels` are never
    sent (the LLM configuration has no base URL, and the MVP has no fallback chain); the runner adds
    OpenRouter's `provider.require_parameters` to every request for OpenRouter by itself (#270).
    Once the access is resolved, the claim notes whose key the job runs on in its usage record

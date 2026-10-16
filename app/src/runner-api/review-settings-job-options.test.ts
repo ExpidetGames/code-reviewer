@@ -107,6 +107,37 @@ describe("the job options of a claimed job", () => {
     expect(options.env).toStrictEqual({});
   });
 
+  // #280-T04
+  it("carries the model tier of the project's effective settings for both kinds", async () => {
+    const tiered = (kind: ProjectReviewKind, tier?: "low" | "high") =>
+      createReviewSettingsJobOptionsSource({
+        settings: () => ({
+          resolveForRepository: async () => ({
+            ...resolveReviewSettings({
+              builtIn: builtInReviewSettings("diff-model"),
+              ...(tier === undefined ? {} : { project: { modelTier: tier } }),
+            }),
+            dynamic: resolveProjectDynamicSettings({
+              builtIn: builtInProjectDynamicSettings(),
+              project: { reviewKind: kind },
+              defaultSkill: "the shipped skill",
+            }),
+          }),
+        }),
+      });
+
+    expect(
+      (await tiered("diff", "high").optionsFor(job("diff"))).modelTier,
+    ).toBe("high");
+    expect(
+      (await tiered("dynamic", "low").optionsFor(job("dynamic"))).modelTier,
+    ).toBe("low");
+    // #280-T10: medium when nothing sets it.
+    expect((await tiered("diff").optionsFor(job("diff"))).modelTier).toBe(
+      "medium",
+    );
+  });
+
   // #195 finding 2
   it("gives a claimed Diff job the PR-Agent options even after the project turned Dynamic", async () => {
     const options = await sourceFor("dynamic").optionsFor(job("diff"));

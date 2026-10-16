@@ -292,12 +292,20 @@ export function createReviewSettingsService(deps: {
    * test of another behavior wants; the running server always passes the real one.
    */
   modelCapabilities?: ModelCapabilityChecker;
+  /**
+   * Whether the models of this workspace's reviews are the operator's, not its own (its key mode is `managed`, #280).
+   * Then the workspace does not know the model, so its token budget is not checked against the context window of
+   * the stored model, which does not apply (the claim clamps the budget to the window of the tier's model). Default:
+   * never.
+   */
+  operatorsModels?: () => Promise<boolean>;
 }): ReviewSettingsService {
   const { appSettings, projects } = deps;
   const dynamicDefaults =
     deps.dynamicDefaults ?? (() => builtInProjectDynamicSettings());
   const defaultSkill = deps.defaultSkill ?? readDefaultReviewSkill;
   const hooks = deps.hooks ?? noopReviewSettingsHooks;
+  const operatorsModels = deps.operatorsModels ?? (async () => false);
 
   async function readGlobal() {
     const stored = await appSettings.get(REVIEW_DEFAULTS_KEY);
@@ -316,12 +324,15 @@ export function createReviewSettingsService(deps: {
   function viewOf(
     effective: EffectiveReviewSettings,
     overrides: ReviewSettingsOverrides,
+    operators: boolean,
   ): ViewBase {
+    const cost = estimateReviewCost(effective.settings);
     return {
       overrides,
       effective: effective.settings,
       sources: effective.sources,
-      cost: estimateReviewCost(effective.settings),
+      // The stored model does not apply to a workspace on the operator's key, so it cannot be too small for the budget.
+      cost: operators ? { ...cost, exceedsContext: [] } : cost,
     };
   }
 
@@ -368,7 +379,7 @@ export function createReviewSettingsService(deps: {
       global: global.overrides,
     });
     return {
-      ...viewOf(effective, global.overrides),
+      ...viewOf(effective, global.overrides, await operatorsModels()),
       builtIn,
       updatedAt: global.updatedAt,
       updatedBy: global.updatedBy,
@@ -388,7 +399,7 @@ export function createReviewSettingsService(deps: {
       project: overrides,
     });
     return {
-      ...viewOf(effective, overrides),
+      ...viewOf(effective, overrides, await operatorsModels()),
       repositoryId,
       projectId: project?.id ?? null,
       active: project?.active ?? false,
@@ -446,11 +457,12 @@ export function createReviewSettingsService(deps: {
 
     async updateGlobalSettings(input, actor) {
       const overrides = checked(input);
-      refuseBudgetAboveContext(
-        overrides,
-        resolveReviewSettings({ builtIn: deps.builtIn(), global: overrides })
-          .settings,
-      );
+      if (!(await operatorsModels()))
+        refuseBudgetAboveContext(
+          overrides,
+          resolveReviewSettings({ builtIn: deps.builtIn(), global: overrides })
+            .settings,
+        );
       await appSettings.set(REVIEW_DEFAULTS_KEY, overrides, actor);
       return globalView();
     },
@@ -462,14 +474,15 @@ export function createReviewSettingsService(deps: {
     async updateProjectSettings(repositoryId, input) {
       const patch = checkedProject(input);
       const warnings = await checkDynamicModel(patch.dynamic.dynamicModel);
-      refuseBudgetAboveContext(
-        patch.review,
-        resolveReviewSettings({
-          builtIn: deps.builtIn(),
-          global: (await readGlobal()).overrides,
-          project: patch.review,
-        }).settings,
-      );
+      if (!(await operatorsModels()))
+        refuseBudgetAboveContext(
+          patch.review,
+          resolveReviewSettings({
+            builtIn: deps.builtIn(),
+            global: (await readGlobal()).overrides,
+            project: patch.review,
+          }).settings,
+        );
       let previousKind: ProjectReviewKind = "diff";
       let kindChanged = false;
       const project = await projects.updateSettingsWith(

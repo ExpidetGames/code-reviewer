@@ -21,18 +21,19 @@ A save **replaces the whole set** of its layer: a field left out is inherited ag
 allow list may change both layers (no admin role in the MVP); `app_settings.updated_by` records who saved
 the global defaults last.
 
-| Field               | Meaning                                                                                                                | Built-in value                                 | Limits                                                           |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------- |
-| `model`             | The model (as the provider spells it, no prefix); the key is not a review setting but the workspace's own (`src/llm/`) | `LLM_MODEL`, else `anthropic/claude-haiku-5.5` | the pattern the runner accepts                                   |
-| `fallbackModel`     | Tried when the model fails; `null` = none                                                                              | none                                           | same pattern                                                     |
-| `extraInstructions` | Project rules for the model, free text                                                                                 | none                                           | 4000 characters, no control characters                           |
-| `maxFindings`       | The most findings one review lists                                                                                     | 5                                              | 1 to 30                                                          |
-| `maxTokens`         | Token budget of a review (`llm.maxTokens`)                                                                             | 100000 (PR-Agent's own: 32000)                 | 8000 to 2000000, not above the model's context window (if known) |
-| `largePrChunking`   | Review a large pull request in chunks instead of leaving files out                                                     | on                                             | boolean                                                          |
-| `inlineKeyIssues`   | Also post every finding as an inline comment                                                                           | off                                            | boolean                                                          |
-| `autoReviewOnOpen`  | Review when a pull request is opened, reopened or marked ready                                                         | on                                             | boolean                                                          |
-| `autoReviewOnPush`  | Review again when commits are pushed                                                                                   | on                                             | boolean                                                          |
-| `allowedCommands`   | The comment commands people may use (`review`; the removed commands became `[]` on upgrade)                            | `["review"]`                                   | a subset of `["review"]`, no duplicates                          |
+| Field               | Meaning                                                                                                                                                                | Built-in value                                 | Limits                                                           |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------- |
+| `model`             | The model (as the provider spells it, no prefix); the key is not a review setting but the workspace's own (`src/llm/`)                                                 | `LLM_MODEL`, else `anthropic/claude-haiku-5.5` | the pattern the runner accepts                                   |
+| `fallbackModel`     | Tried when the model fails; `null` = none                                                                                                                              | none                                           | same pattern                                                     |
+| `extraInstructions` | Project rules for the model, free text                                                                                                                                 | none                                           | 4000 characters, no control characters                           |
+| `maxFindings`       | The most findings one review lists                                                                                                                                     | 5                                              | 1 to 30                                                          |
+| `maxTokens`         | Token budget of a review (`llm.maxTokens`)                                                                                                                             | 100000 (PR-Agent's own: 32000)                 | 8000 to 2000000, not above the model's context window (if known) |
+| `largePrChunking`   | Review a large pull request in chunks instead of leaving files out                                                                                                     | on                                             | boolean                                                          |
+| `inlineKeyIssues`   | Also post every finding as an inline comment                                                                                                                           | off                                            | boolean                                                          |
+| `autoReviewOnOpen`  | Review when a pull request is opened, reopened or marked ready                                                                                                         | on                                             | boolean                                                          |
+| `autoReviewOnPush`  | Review again when commits are pushed                                                                                                                                   | on                                             | boolean                                                          |
+| `allowedCommands`   | The comment commands people may use (`review`; the removed commands became `[]` on upgrade)                                                                            | `["review"]`                                   | a subset of `["review"]`, no duplicates                          |
+| `modelTier`         | The quality level of a workspace on the operator's key (#280): which of the operator's models backs its reviews, never shown. Ignored unless the key mode is `managed` | `medium`                                       | `low`, `medium` or `high` (`INVALID_FORMAT` otherwise)           |
 
 The limits are `REVIEW_SETTING_LIMITS`; `validate.ts` checks every field and reports each problem as
 `{ field, code }` with a stable code (`REVIEW_SETTING_ISSUE_CODES`), never with the value.
@@ -46,7 +47,14 @@ The token budget must fit into the context window of the models the saved settin
 fallback model, counted in the model's own tokens, only for models the price table knows):
 otherwise the save is refused with `EXCEEDS_MODEL_CONTEXT` on `maxTokens` (or on the model, when the
 request only changed the model). A combination that a later change of another layer made too large is
-not blamed on an unrelated save; `cost.exceedsContext` lists it for the UI.
+not blamed on an unrelated save; `cost.exceedsContext` lists it for the UI. **For a workspace on the operator's key**
+(key mode `managed`, #280) none of this applies: the stored model is not the one that runs and the user does not know
+the one that does, so the save does not check `maxTokens` against a model and `cost.exceedsContext` is empty; the claim
+cuts the budget to the window of the tier's model (`src/model-tiers/README.md`).
+
+`modelTier` is not sent to the runner: it is read by the claim of a job on the operator's key, which swaps the model
+for the operator's model of the tier. The settings form carries a stored tier through a save without a control for it
+(the control is #283), so saving the form never changes it.
 
 ## From settings to a runner job
 

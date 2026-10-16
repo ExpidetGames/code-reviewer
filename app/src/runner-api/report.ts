@@ -17,6 +17,7 @@ import {
   type RunnerResult,
 } from "./contract.ts";
 import type { ClaimedKeys } from "./claimed-keys.ts";
+import { maskSecretInText } from "../llm/access.ts";
 import { redactResult } from "./redact.ts";
 import type { RunnerApiLogger } from "./logger.ts";
 import {
@@ -35,8 +36,19 @@ export type ReportDeps = {
    * fails gives an empty list rather than failing the completion.
    */
   knownSecrets: (workspaceId: string) => Promise<readonly string[]>;
-  /** The LLM key each job was handed with its claim; it may differ from the current one. Read from the database. */
-  claimedKeys: Pick<ClaimedKeys, "keysOf">;
+  /**
+   * The LLM key each job was handed with its claim, which may differ from the current one, and the model of a managed
+   * tier it was handed (#280). Read from the database.
+   */
+  claimedKeys: Pick<ClaimedKeys, "keysOf" | "modelsOf">;
+  /**
+   * Whether the job ran on a managed tier (its usage record names one), and every model id the operator has
+   * configured for the tiers right now (#280). The remembered model of the job is not enough: its row may be
+   * unreadable, and the runner may spell the model differently.
+   */
+  tierModels: (
+    job: Job,
+  ) => Promise<{ managed: boolean; models: readonly string[] }>;
 };
 
 /**
@@ -48,6 +60,28 @@ export const RUNNER_SHUTDOWN_CODE = "runner_shutdown";
 /** The code a failed job is stored with: a code the runner is known to use, or `unknown`. */
 export function mapRunnerErrorCode(code: string): string {
   return RUNNER_ERROR_CODES.some((known) => known === code) ? code : "unknown";
+}
+
+/**
+ * The result without the model of a managed tier (#280): `usage.model` is not reported (null) whatever the runner calls
+ * the model, and the ids are masked in the text fields at any length (the generic rule that follows ignores secrets
+ * shorter than a credential could be). `hide` is whether the job ran on a tier.
+ */
+function withoutTierModel(
+  result: RunnerResult,
+  models: readonly string[],
+  hide: boolean,
+): RunnerResult {
+  if (!hide) return result;
+  const mask = (text: string) => maskSecretInText(text, ...models);
+  return {
+    ...result,
+    logTail: mask(result.logTail),
+    errorMessage:
+      result.errorMessage === null ? null : mask(result.errorMessage),
+    commentUrl: result.commentUrl === null ? null : mask(result.commentUrl),
+    usage: result.usage === null ? null : { ...result.usage, model: null },
+  };
 }
 
 function invalid(parsed: Extract<Parsed<unknown>, { ok: false }>): Response {
@@ -140,11 +174,23 @@ export async function finishJob(
   // same report always gives the same stored value, which is what makes a repetition recognisable.
   // The key of the claim and the current one: the key may have been rotated while the job ran, and the
   // claim may have been served by another app instance (the key of the claim is in the database).
-  const stored = redactResult(reported, [
-    ...(await deps.knownSecrets(job.workspaceId)),
-    ...(await deps.claimedKeys.keysOf(jobId)),
-    ...extraSecrets,
-  ]);
+  //
+  // The model of a managed tier is operator data a workspace must never read (#280): the job may repeat it in its
+  // log or its error, and reports it as `usage.model`, which a Runs page shows. The model the job was handed is
+  // remembered with its keys, so it is taken out whichever app instance serves the completion and whatever the
+  // operator changed since; the tokens and the cost of the usage stay.
+  const remembered = await deps.claimedKeys.modelsOf(jobId);
+  const tier = await deps.tierModels(job);
+  const models = [...new Set([...remembered, ...tier.models])];
+  const stored = redactResult(
+    withoutTierModel(reported, models, tier.managed || remembered.length > 0),
+    [
+      ...(await deps.knownSecrets(job.workspaceId)),
+      ...(await deps.claimedKeys.keysOf(jobId)),
+      ...models,
+      ...extraSecrets,
+    ],
+  );
   const outcome: JobOutcome =
     stored.errorCode === null
       ? { ok: true, result: stored }

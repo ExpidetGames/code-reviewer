@@ -47,6 +47,34 @@ describe("the built-in review settings", () => {
   });
 });
 
+describe("the model tier setting", () => {
+  // #280-T10
+  it("is medium when nothing sets it", () => {
+    expect(builtIn.modelTier).toBe("medium");
+    expect(resolveReviewSettings({ builtIn }).settings.modelTier).toBe(
+      "medium",
+    );
+  });
+
+  // #280-T10
+  it("follows the workspace default, and the project's own tier wins over it", () => {
+    const global = resolveReviewSettings({
+      builtIn,
+      global: { modelTier: "low" },
+    });
+    const project = resolveReviewSettings({
+      builtIn,
+      global: { modelTier: "low" },
+      project: { modelTier: "high" },
+    });
+
+    expect(global.settings.modelTier).toBe("low");
+    expect(global.sources.modelTier).toBe("global");
+    expect(project.settings.modelTier).toBe("high");
+    expect(project.sources.modelTier).toBe("project");
+  });
+});
+
 describe("resolving the settings of a project", () => {
   // CR-25-T01
   it("is the global defaults when the project overrides nothing", () => {

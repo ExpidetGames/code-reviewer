@@ -617,7 +617,13 @@ describe("the hosted deployment guide as a procedure", () => {
     expect(keys).toContain("Upgrade every App instance first");
     expect(keys).toContain("`llm_not_configured`");
     expect(keys).toContain("`operator_key_missing`");
-    expect(flat(keys)).toContain("`LLM_MODEL` and `LLM_MAX_TOKENS` apply");
+    // #280: the model of a managed workspace is the operator's per tier, not the instance default.
+    expect(keys).toContain("PUT /api/operator/v1/model-tiers");
+    expect(keys).toContain("`managed_tier_unavailable`");
+    expect(flat(keys)).toContain(
+      "`LLM_MODEL` and `LLM_MAX_TOKENS` are not used",
+    );
+    expect(flat(keys)).not.toContain("`LLM_MODEL` and `LLM_MAX_TOKENS` apply");
     expect(guide).not.toMatch(/#276[^\n]*pending/i);
     expect(guide).not.toMatch(/until it merges, every workspace/);
     expect(read("app/src/llm/README.md")).toContain("/admin/llm");
