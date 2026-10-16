@@ -24,6 +24,10 @@ async def settle(rounds: int = 40) -> None:
         await asyncio.sleep(0)
 
 
+# What the manual clock's wall time is at its zero (seconds since the epoch).
+WALL_EPOCH = 1_800_000_000.0
+
+
 class ManualClock:
     """Sleeping tasks wake up when `advance` moves time past their due time, in order."""
 
@@ -34,6 +38,9 @@ class ManualClock:
 
     def monotonic(self) -> float:
         return self.now
+
+    def wall(self) -> float:
+        return WALL_EPOCH + self.now
 
     async def sleep(self, seconds: float) -> None:
         if seconds <= 0:
@@ -127,12 +134,15 @@ class FakeProcess:
     async def wait(self) -> ProcessOutcome:
         return await asyncio.shield(self._done)
 
-    def notify_superseded(self) -> None:
+    def notify_superseded(self) -> bool:
         self.superseded_notices += 1
         if self.on_superseded is not None:
             self.on_superseded(self)
+        return self.notify_result
 
     on_superseded: Callable[["FakeProcess"], None] | None = None
+    # What `notify_superseded` answers: False is a signal that could not be sent.
+    notify_result: bool = True
 
     async def terminate(self) -> None:
         self.terminated = True
@@ -171,6 +181,9 @@ class FakeApi:
         self.heartbeat_errors: list[ApiError] = []
         # #396: the heartbeats answer `superseded` from this many heartbeats on (None: never).
         self.superseded_from: int | None = None
+        # The lease end the superseded answer names, in seconds from the clock's zero (None: it
+        # does not name one, as a mixed-version app).
+        self.lease_expires_after: float | None = None
         self.completions: list[tuple[str, str, Mapping[str, Any]]] = []
         self.complete_errors: list[ApiError] = []
         self.complete_reply = CompleteReply("succeeded", False)
@@ -192,10 +205,13 @@ class FakeApi:
         self.heartbeats.append((job_id, lease_token))
         if self.heartbeat_errors:
             raise self.heartbeat_errors.pop(0)
-        return HeartbeatReply(
-            superseded=self.superseded_from is not None
-            and len(self.heartbeats) >= self.superseded_from
+        superseded = (
+            self.superseded_from is not None and len(self.heartbeats) >= self.superseded_from
         )
+        lease = (
+            WALL_EPOCH + self.lease_expires_after if self.lease_expires_after is not None else None
+        )
+        return HeartbeatReply(superseded=superseded, lease_expires_at=lease)
 
     async def complete(
         self, job_id: str, lease_token: str, result: Mapping[str, Any]

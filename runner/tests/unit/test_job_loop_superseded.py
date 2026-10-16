@@ -11,13 +11,12 @@ superseded behaves as it always did."""
 import json
 from typing import Any
 
+import pytest
 from loop_support import Harness, make_claim, outcome, run, settle
 
-from code_reviewer_runner.job_loop.host import (
-    SUPERSEDE_MIN_PROCESS_AGE_SECONDS,
-    SUPERSEDED_DRAIN_SECONDS,
-)
+from code_reviewer_runner.job_loop.host import SUPERSEDED_DRAIN_SECONDS
 from code_reviewer_runner.result import NO_RESULT_REASON
+from code_reviewer_runner.supersede_timing import KILL_MARGIN_SECONDS
 
 
 def superseded_line(**overrides: Any) -> bytes:
@@ -55,7 +54,6 @@ def test_the_process_is_told_once_keeps_its_heartbeats_and_its_result_is_deliver
         await harness.clock.advance(30)  # first heartbeat: not superseded
         assert process.superseded_notices == 0
         await harness.clock.advance(30)  # second heartbeat: superseded
-        await harness.clock.advance(SUPERSEDE_MIN_PROCESS_AGE_SECONDS)
         await settle()
         # A third beat in the meantime does not tell it twice.
         await settle()
@@ -72,7 +70,9 @@ def test_the_process_is_told_once_keeps_its_heartbeats_and_its_result_is_deliver
 
 
 # #396-T03
-def test_a_young_process_is_not_told_before_it_can_have_its_handler() -> None:
+def test_a_process_is_told_at_the_first_superseded_answer_however_young_it_is() -> None:
+    # The process is started with the signal blocked (a real-process test proves it), so the host
+    # does not have to guess an age: a signal before the handler exists is held, not fatal.
     async def scenario() -> None:
         harness = Harness()
         harness.api.claims = [make_claim(1)]
@@ -80,9 +80,11 @@ def test_a_young_process_is_not_told_before_it_can_have_its_handler() -> None:
         await harness.start()
         process = harness.launcher.processes[0]
 
-        await harness.clock.advance(30)  # heartbeat: superseded, but the process is only 30 s old
+        await harness.clock.advance(30)  # the first heartbeat, the process is 30 s old
         await settle()
-        assert process.superseded_notices == 1  # 30 s is older than the minimum age
+
+        assert process.superseded_notices == 1
+        await harness.stop()
 
     run(scenario)
 
@@ -103,6 +105,7 @@ def test_a_process_that_does_not_stop_is_ended_after_the_drain_and_its_cost_is_u
         await harness.clock.advance(SUPERSEDED_DRAIN_SECONDS - 1)
         await settle()
         assert process.running
+        assert not process.terminated
 
         await harness.clock.advance(2)
         await settle()
@@ -113,6 +116,104 @@ def test_a_process_that_does_not_stop_is_ended_after_the_drain_and_its_cost_is_u
         assert delivered["errorCode"] == "superseded"
         assert delivered["errorReason"] == NO_RESULT_REASON
         assert delivered.get("usage") is None
+        await harness.stop()
+
+    run(scenario)
+
+
+# #396-T04
+def test_the_drain_ends_before_the_lease_the_answer_names() -> None:
+    # The lease ends 90 s from the start; the answer comes at 30 s. The drain would last 120 s, but
+    # the process is ended `KILL_MARGIN_SECONDS` before the lease, so the report arrives inside it.
+    async def scenario() -> None:
+        harness = Harness()
+        harness.api.claims = [make_claim(1)]
+        harness.api.superseded_from = 1
+        harness.api.lease_expires_after = 90.0
+        await harness.start()
+        process = harness.launcher.processes[0]
+
+        await harness.clock.advance(30)  # told; 60 s of lease left
+        await settle()
+        await harness.clock.advance(60 - KILL_MARGIN_SECONDS - 1)  # one second before the end
+        await settle()
+        assert not process.terminated
+
+        await harness.clock.advance(2)
+        await settle()
+
+        assert process.terminated
+        assert len(harness.api.completions) == 1
+        assert harness.api.completions[0][2]["errorCode"] == "superseded"
+        await harness.stop()
+
+    run(scenario)
+
+
+# #396-T04
+def test_a_lease_far_away_does_not_stretch_the_drain() -> None:
+    async def scenario() -> None:
+        harness = Harness()
+        harness.api.claims = [make_claim(1)]
+        harness.api.superseded_from = 1
+        harness.api.lease_expires_after = 10_000.0
+        await harness.start()
+        process = harness.launcher.processes[0]
+
+        await harness.clock.advance(30)
+        await settle()
+        await harness.clock.advance(SUPERSEDED_DRAIN_SECONDS + 1)
+        await settle()
+
+        assert process.terminated
+        await harness.stop()
+
+    run(scenario)
+
+
+# #396-T04
+def test_a_process_that_dies_after_it_was_told_is_reported_as_superseded() -> None:
+    # Killed for memory, a crash: the host names the end, and it is `superseded`, not a failed run
+    # of the quota. What the process left (here: no result) stays.
+    async def scenario() -> None:
+        harness = Harness()
+        harness.api.claims = [make_claim(1)]
+        harness.api.superseded_from = 1
+        await harness.start()
+        process = harness.launcher.processes[0]
+        process.on_superseded = lambda p: p.finish(outcome(exit_code=137, stdout=b""))
+
+        await harness.clock.advance(30)
+        await settle()
+
+        assert len(harness.api.completions) == 1
+        assert harness.api.completions[0][2]["errorCode"] == "superseded"
+        assert harness.api.completions[0][2]["ok"] is False
+        await harness.stop()
+
+    run(scenario)
+
+
+# #396-T04
+def test_a_signal_that_could_not_be_sent_is_logged_and_the_drain_bound_still_ends_the_process(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    async def scenario() -> None:
+        harness = Harness()
+        harness.api.claims = [make_claim(1)]
+        harness.api.superseded_from = 1
+        await harness.start()
+        process = harness.launcher.processes[0]
+        process.notify_result = False
+
+        with caplog.at_level("WARNING"):
+            await harness.clock.advance(30)
+            await settle()
+        assert "SUPERSEDE_SIGNAL_NOT_SENT" in caplog.text
+
+        await harness.clock.advance(SUPERSEDED_DRAIN_SECONDS + 1)
+        await settle()
+        assert process.terminated
         await harness.stop()
 
     run(scenario)

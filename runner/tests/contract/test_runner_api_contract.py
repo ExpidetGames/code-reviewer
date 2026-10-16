@@ -833,3 +833,36 @@ def test_the_contract_knows_the_supersede_feature_the_heartbeat_field_and_the_re
     from code_reviewer_runner.result import ErrorCode
 
     assert ErrorCode.SUPERSEDED.value == "superseded"
+
+
+# #396-T14: the timing of a superseded run is stated once in the contract; the runner's constants
+# and the app's (a test there) are held equal to it.
+def test_the_supersede_timing_constants_equal_the_contract() -> None:
+    from code_reviewer_runner.job_loop import api
+    from code_reviewer_runner.job_loop.host import SUPERSEDED_DRAIN_SECONDS
+    from code_reviewer_runner.supersede_timing import (
+        CLAIM_SECONDS,
+        KILL_MARGIN_SECONDS,
+        LONGEST_MODEL_REQUEST_SECONDS,
+        MAX_HEARTBEAT_INTERVAL_SECONDS,
+        REPORT_GRACE_SECONDS,
+    )
+
+    timing = cast(dict[str, Any], _load(SCHEMA_PATH)["$defs"]["SupersedeTiming"]["properties"])
+    stated = {name: spec["const"] for name, spec in timing.items()}
+
+    assert stated == {
+        "maxHeartbeatIntervalSeconds": MAX_HEARTBEAT_INTERVAL_SECONDS,
+        "longestModelRequestSeconds": LONGEST_MODEL_REQUEST_SECONDS,
+        "workerDrainSeconds": SUPERSEDED_DRAIN_SECONDS,
+        "killMarginSeconds": KILL_MARGIN_SECONDS,
+        "claimSeconds": CLAIM_SECONDS,
+        "reportGraceSeconds": REPORT_GRACE_SECONDS,
+    }
+    # What the Worker really does: the heartbeat interval never exceeds the stated maximum, the
+    # drain is the longest request, and the claim holds a heartbeat, a drain and the margin.
+    assert api.MAX_HEARTBEAT_INTERVAL_SECONDS == MAX_HEARTBEAT_INTERVAL_SECONDS
+    assert SUPERSEDED_DRAIN_SECONDS == LONGEST_MODEL_REQUEST_SECONDS
+    assert CLAIM_SECONDS >= (
+        MAX_HEARTBEAT_INTERVAL_SECONDS + LONGEST_MODEL_REQUEST_SECONDS + KILL_MARGIN_SECONDS
+    )

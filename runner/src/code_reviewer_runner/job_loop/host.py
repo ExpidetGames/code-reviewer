@@ -21,15 +21,15 @@ Rules the code below follows (see the CR-29 decisions):
 - The secrets of a job (git token, LLM key, lease token) reach the process through its stdin only,
   and no log line or result the host produces contains them.
 - A lost lease (409 on a heartbeat) ends the process and sends nothing more for that job.
-- A heartbeat answer that says the run was superseded (#396) tells the job process once (`SIGUSR1`)
-  and the
-  host goes on: it keeps beating, waits for the process to end by itself (it finishes the model
-  requests in
-  flight, sends no more, publishes nothing), delivers its result (`superseded`, with the usage) and
-  ends
-  `SUPERSEDED`. A process that has not ended `SUPERSEDED_DRAIN_SECONDS` after it was told is ended
-  and its
-  usage is reported as unknown.
+- A heartbeat answer that says the run was superseded (#396) tells the job process once
+  (`SIGUSR1`, which it was started with blocked, so an early signal is held until its handler
+  exists) and the host goes on: it keeps beating, waits for the process to end by itself (it
+  finishes the model requests in flight, sends no more, publishes nothing), delivers its result
+  (`superseded`, with the usage) and ends `SUPERSEDED`. A process that has not ended by
+  `SUPERSEDED_DRAIN_SECONDS` after it was told, or `KILL_MARGIN_SECONDS` before the lease the
+  answer named, is ended and its usage is reported as unknown. Whatever ends it, the result of a
+  run that was told is `superseded` (not `runner_error` or `timeout`). The numbers are in
+  `supersede_timing.py`.
 - A hard stop (the end of the grace period, or a SIGTERM of a Worker) ends the process and reports
   `runner_shutdown`, which the app gives back to the queue (a repeated report may be answered with
   409, which is fine).
@@ -84,6 +84,10 @@ from code_reviewer_runner.job_loop.reporting import (
 from code_reviewer_runner.lease_check import LeaseState
 from code_reviewer_runner.pr_agent_config import PASSTHROUGH_VARIABLES
 from code_reviewer_runner.result import ErrorCode
+from code_reviewer_runner.supersede_timing import (
+    KILL_MARGIN_SECONDS,
+    SUPERSEDED_DRAIN_SECONDS,
+)
 
 TIMEOUT_VARIABLE = "RUNNER_JOB_TIMEOUT_SECONDS"
 # #260: the lease check right before a Dynamic run publishes. Up to three tries, a second and two
@@ -102,15 +106,6 @@ DYNAMIC_PASSTHROUGH_VARIABLES = (
     "RUNNER_DYNAMIC_PROXY_PORT",
     "RUNNER_DYNAMIC_ENGINE_PORT",
 )
-# #396: a process that was told that its run was superseded finishes the model requests in flight
-# and ends by
-# itself. It is waited for this long (the time of a model request is bounded far below it), then it
-# is ended.
-SUPERSEDED_DRAIN_SECONDS = 120.0
-# The process installs its handler for the signal in the first lines of `main()`; a process younger
-# than this
-# is not signalled yet (the default action of `SIGUSR1` would end it without a result).
-SUPERSEDE_MIN_PROCESS_AGE_SECONDS = 10.0
 # A shutdown report is tried for this long; the process is going away either way.
 SHUTDOWN_REPORT_WINDOW_SECONDS = 10.0
 _FIRST_RETRY_SECONDS = 1.0
@@ -195,6 +190,30 @@ class _RunState:
 
     # The app said the run was superseded (a heartbeat answer, or the lease check before a write).
     superseded: asyncio.Event = field(default_factory=asyncio.Event)
+    # The end of the lease as the answer that said so named it (seconds since the epoch); the drain
+    # ends before it.
+    lease_expires_at: float | None = None
+
+    def learn_of_supersede(self, lease_expires_at: float | None) -> None:
+        """The app said the run was superseded; the first answer's lease bounds the drain."""
+        if not self.superseded.is_set():
+            self.lease_expires_at = lease_expires_at
+            self.superseded.set()
+
+
+def _as_superseded(result: Result) -> Result:
+    """The result of a run that was told it was superseded, whatever ended it.
+
+    The process names its own end `superseded` (`runner.as_superseded`). A process that died after
+    it was told (killed for memory, a crash, the hard timeout) leaves the host to name the end, and
+    the host says `runner_error` or `timeout`: that would be stored as a failed run of the quota.
+    The run was replaced, so it says so; the usage and the reason it carries stay (a request in
+    flight makes the cost unknown). A shutdown stays a shutdown (the job is given back), a success
+    stays a success (it had published), and `superseded` stays.
+    """
+    if result["ok"] or result["errorCode"] in (RUNNER_SHUTDOWN, ErrorCode.SUPERSEDED.value):
+        return result
+    return {**result, "errorCode": ErrorCode.SUPERSEDED.value}
 
 
 def _end_of(result: Result, delivery: Delivery, superseded: bool = False) -> JobEnd:
@@ -376,6 +395,8 @@ class JobHost:
             await self._after_process(job)
         if result is None:
             return JobEnd.LEASE_LOST
+        if state.superseded.is_set():
+            result = _as_superseded(result)
         shutdown = result["errorCode"] == RUNNER_SHUTDOWN
         delivery = await self._report(
             claimed,
@@ -452,7 +473,7 @@ class JobHost:
                 self._clock.sleep(self._settings.job_timeout + self._settings.kill_margin)
             ),
             asyncio.ensure_future(self._hard_stop.wait()),
-            asyncio.ensure_future(self._drain(claimed, process, state, started)),
+            asyncio.ensure_future(self._drain(claimed, process, state)),
         ]
         _, lost_wait, timeout, shutdown, drained = helpers
         try:
@@ -486,8 +507,7 @@ class JobHost:
             )
         if drained.done() and not drained.cancelled():
             # The run was told that it was superseded and did not stop by itself: it is ended here,
-            # and what
-            # it used is unknown (a model request may have been in flight).
+            # and what it used is unknown (a model request may have been in flight).
             self._log.warning(
                 "job %s: the superseded run did not stop in time, the process was ended", claimed.id
             )
@@ -525,29 +545,36 @@ class JobHost:
             self._log.error("the job process could not be ended cleanly (%s)", type(error).__name__)
             return None
 
-    async def _drain(
-        self, claimed: ClaimedJob, process: RunningProcess, state: _RunState, started: float
-    ) -> None:
-        """Once the run is superseded (#396): tell the process, then give it
-        `SUPERSEDED_DRAIN_SECONDS`.
+    async def _drain(self, claimed: ClaimedJob, process: RunningProcess, state: _RunState) -> None:
+        """Once the run is superseded (#396): tell the process, then wait for it to drain.
 
-        Returns when that time is over (the caller ends the process); never returns while the run is
-        not
-        superseded. The process is signalled once, and not before it is old enough to have its
-        handler.
+        Returns when the time is over (the caller ends the process); never returns while the run is
+        not superseded. The process is signalled once, at once: it was started with the signal
+        blocked, so one that comes before its handler exists is held, not fatal. The wait is the
+        longest model request (`SUPERSEDED_DRAIN_SECONDS`), but ends `KILL_MARGIN_SECONDS` before
+        the lease the app named: the app keeps the claim for the heartbeat, the longest request and
+        a margin (`supersede_timing.py`), so the result is reported while the claim holds.
         """
         await state.superseded.wait()
-        age = self._clock.monotonic() - started
-        if age < SUPERSEDE_MIN_PROCESS_AGE_SECONDS:
-            await self._clock.sleep(SUPERSEDE_MIN_PROCESS_AGE_SECONDS - age)
         self._log.info("job %s: superseded by a newer push, the process is told", claimed.id)
         try:
-            process.notify_superseded()
+            told = process.notify_superseded()
         except Exception as error:
             self._log.warning(
                 "job %s: the process could not be told (%s)", claimed.id, type(error).__name__
             )
-        await self._clock.sleep(SUPERSEDED_DRAIN_SECONDS)
+        else:
+            if not told:
+                self._log.warning(
+                    "job %s: the process could not be told (SUPERSEDE_SIGNAL_NOT_SENT); "
+                    "only the drain bound stops it",
+                    claimed.id,
+                )
+        wait = SUPERSEDED_DRAIN_SECONDS
+        if state.lease_expires_at is not None:
+            until_lease = state.lease_expires_at - self._clock.wall() - KILL_MARGIN_SECONDS
+            wait = min(wait, until_lease)
+        await self._clock.sleep(max(wait, 0.0))
 
     async def _heartbeats(
         self, claimed: ClaimedJob, lost: asyncio.Event, state: _RunState | None = None
@@ -557,7 +584,7 @@ class JobHost:
             try:
                 reply = await self._api.heartbeat(claimed.id, claimed.lease_token)
                 if reply.superseded and state is not None:
-                    state.superseded.set()
+                    state.learn_of_supersede(reply.lease_expires_at)
             except LeaseLost:
                 lost.set()
                 return
@@ -600,7 +627,7 @@ class JobHost:
                     continue
                 return LeaseState.UNCONFIRMED
             if reply.superseded:
-                state.superseded.set()
+                state.learn_of_supersede(reply.lease_expires_at)
                 return LeaseState.SUPERSEDED
             return LeaseState.HELD
         return LeaseState.UNCONFIRMED  # pragma: no cover  (the last attempt returns above)

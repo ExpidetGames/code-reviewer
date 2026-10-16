@@ -21,6 +21,7 @@ import re
 import urllib.request
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Protocol
 
 from code_reviewer_runner import __version__
@@ -89,6 +90,9 @@ class HeartbeatReply:
     # #396: a newer push replaced this run; it must stop gracefully. Absent in the answer means
     # False.
     superseded: bool = False
+    # When the lease ends, in seconds since the epoch, as the answer names it (None: absent or
+    # unreadable). A superseded run drains until shortly before it (`host.py`).
+    lease_expires_at: float | None = None
 
 
 def parse_heartbeat(reply: Reply, job_id: str) -> HeartbeatReply:
@@ -102,7 +106,21 @@ def parse_heartbeat(reply: Reply, job_id: str) -> HeartbeatReply:
     job = as_object(body.get("job")) if body and body.get("version") == 1 else None
     if job is None or job.get("id") != job_id:
         raise ApiUnavailable("the heartbeat answer does not match the contract", 200)
-    return HeartbeatReply(superseded=job.get("superseded") is True)
+    return HeartbeatReply(
+        superseded=job.get("superseded") is True,
+        lease_expires_at=_epoch(job.get("leaseExpiresAt")),
+    )
+
+
+def _epoch(value: object) -> float | None:
+    """The time of a contract `Timestamp` as seconds since the epoch, or None for anything else."""
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return None if parsed.tzinfo is None else parsed.timestamp()
 
 
 class RunnerApi(Protocol):

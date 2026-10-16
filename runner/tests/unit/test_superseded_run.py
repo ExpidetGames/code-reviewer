@@ -398,3 +398,67 @@ def test_a_signal_during_a_diff_run_through_main_ends_it_superseded_and_prints_o
     assert result["usage"]["costUsd"] == pytest.approx(0.0042)
     assert result["commentUrl"] is None
     assert published == []
+
+
+# -- The note of a failed run ------------------------------------------------------------------
+
+
+def failed_result(code: ErrorCode = ErrorCode.DYNAMIC_BUDGET_EXCEEDED) -> JobResult:
+    return JobResult(
+        ok=False,
+        duration_ms=10,
+        comment_url=None,
+        error_code=code,
+        log_tail="the run failed",
+    )
+
+
+# #396-T10: the note's own write found the run replaced (the re-check right before the write).
+def test_a_failure_note_that_finds_the_run_superseded_turns_the_result_into_superseded() -> None:
+    from code_reviewer_runner.dynamic_review.publish import PublishError
+
+    signal = SupersedeSignal()
+
+    def write(job: Job, code: ErrorCode, reason: str | None) -> Published | None:
+        raise PublishError(ErrorCode.SUPERSEDED, "the run was superseded")
+
+    result = runner.add_failure_note(
+        dynamic_job(), failed_result(), None, write, started=0.0, superseded=signal
+    )
+
+    assert result.error_code is ErrorCode.SUPERSEDED
+    assert result.log_tail.startswith("superseded:")
+    assert signal.is_set()
+
+
+# #396-T10: any other refusal of the note stays a line in the log and keeps the code.
+def test_a_failure_note_that_is_refused_for_another_reason_keeps_the_code() -> None:
+    from code_reviewer_runner.dynamic_review.publish import PublishError
+
+    def write(job: Job, code: ErrorCode, reason: str | None) -> Published | None:
+        raise PublishError(ErrorCode.GIT_UNAVAILABLE, "no")
+
+    result = runner.add_failure_note(
+        dynamic_job(), failed_result(), None, write, superseded=SupersedeSignal()
+    )
+
+    assert result.error_code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
+    assert "not written (git_unavailable)" in result.log_tail
+
+
+# #396-T11: the lease check answers before the note is written.
+def test_a_failure_note_is_not_written_for_a_run_the_lease_check_calls_superseded() -> None:
+    signal = SupersedeSignal()
+    written: list[str] = []
+
+    result = runner.add_failure_note(
+        dynamic_job(),
+        failed_result(),
+        lambda: LeaseState.SUPERSEDED,
+        noting(written, "note"),
+        superseded=signal,
+    )
+
+    assert written == []
+    assert result.error_code is ErrorCode.SUPERSEDED
+    assert signal.is_set()

@@ -105,6 +105,10 @@ class FakeAppProcess:
     def lose_lease(self, job_id: str) -> None:
         self._call("POST", "/__fake/lose-lease", {"jobId": job_id})
 
+    def supersede(self, job_id: str) -> None:
+        """A newer push replaced the run: the heartbeats answer `superseded` from now on."""
+        self._call("POST", "/__fake/supersede", {"jobId": job_id})
+
     def requests(self) -> list[dict[str, Any]]:
         return self._call("GET", "/__fake/requests")
 

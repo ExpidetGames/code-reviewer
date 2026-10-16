@@ -124,6 +124,7 @@ from code_reviewer_runner.supersede import (
     handling_the_signal,
     install_write_guard,
 )
+from code_reviewer_runner.supersede_timing import SUPERSEDED_DRAIN_SECONDS
 from code_reviewer_runner.usage_probe import UsageProbe
 
 PROGRAM_NAME = "code-reviewer-run-job"
@@ -197,14 +198,26 @@ def _unreported_use(usage: Usage | None, meter: DiffCostMeter | None) -> str | N
     return NO_RESULT_REASON
 
 
+def _may_write(superseded: SupersedeSignal) -> Callable[[], bool]:
+    return lambda: not superseded.is_set()
+
+
+def _publish_checked(
+    superseded: SupersedeSignal,
+) -> Callable[[Job, DynamicFindings], Published]:
+    def publish(job: Job, findings: DynamicFindings) -> Published:
+        return publish_run(job, findings, may_write=_may_write(superseded))
+
+    return publish
+
+
 def as_superseded(result: JobResult, started: float, detail: str) -> JobResult:
     """The result of a run that was told it was superseded (#396), whatever else it came to.
 
     A run that published before it heard of it (`ok`) stays what it is: its review is on the pull
     request. Any other end is `superseded`: nothing was published after the signal (the write guard,
     and the Dynamic path checks first), and the usage the run measured stays, with the reason it
-    carries
-    (an unmeasured request in flight makes the cost unknown, as for any run).
+    carries (an unmeasured request in flight makes the cost unknown, as for any run).
     """
     if result.ok:
         return result
@@ -489,11 +502,17 @@ def run_dynamic_job(
         superseded=superseded,
     )
     # A run that was superseded (#396) ends `superseded` with its ledger's usage and writes nothing,
-    # not
-    # even the note of a failure: that code has no sentence.
+    # not even the note of a failure: that code has no sentence.
     if superseded.is_set():
         result = as_superseded(result, started, SUPERSEDED_DETAIL)
-    return add_failure_note(job, result, lease_check, publish_failure or publish_failure_note)
+
+    def note(job: Job, code: ErrorCode, reason: str | None) -> Published | None:
+        # The last check, right before the one write (see "publishes nothing" in the README).
+        return publish_failure_note(job, code, reason, may_write=_may_write(superseded))
+
+    return add_failure_note(
+        job, result, lease_check, publish_failure or note, started=started, superseded=superseded
+    )
 
 
 def add_failure_note(
@@ -501,9 +520,15 @@ def add_failure_note(
     result: JobResult,
     lease_check: LeaseCheck | None,
     write: Callable[[Job, ErrorCode, str | None], Published | None],
+    *,
+    started: float = 0.0,
+    superseded: SupersedeSignal = PROCESS_SIGNAL,
 ) -> JobResult:
     """Leaves the note of a failed run in the summary comment and returns the result unchanged but
     for one line of the log (#299).
+
+    A run the host knows to be superseded (the lease check answers so, which can be before the
+    process got the signal) is a `superseded` run, not a failure with its old code (#396).
 
     Only a code with a fixed sentence writes (`failure_note.FAILURE_SENTENCES`); `lease_lost`, a
     refused token and the rest stay in the Runs view. A job that is no longer ours writes nothing,
@@ -513,11 +538,18 @@ def add_failure_note(
     code = result.error_code
     if result.ok or code is None or code not in FAILURE_SENTENCES:
         return result
-    if lease_check is not None and lease_check() is not LeaseState.HELD:
+    if lease_check is not None and (state := lease_check()) is not LeaseState.HELD:
+        if state is LeaseState.SUPERSEDED:
+            superseded.set()
+            return as_superseded(result, started, SUPERSEDED_DETAIL)
         return result
     try:
         written = write(job, code, result.error_reason)
     except PublishError as error:
+        if error.code is ErrorCode.SUPERSEDED:
+            # The re-check right before the write found the run replaced: nothing was written.
+            superseded.set()
+            return as_superseded(result, started, SUPERSEDED_DETAIL)
         return _with_note_line(result, f"failure note: not written ({error.code.value})")
     except Exception:
         return _with_note_line(result, "failure note: not written")
@@ -668,12 +700,15 @@ def _run_dynamic_job(
                     launch=prepared.launch,
                     node_bin=environment.get(DYNAMIC_NODE_BIN_VARIABLE) or None,
                     ripgrep=ripgrep,
+                    superseded=superseded.is_set,
                 )
                 answer = engine.run()
                 turn_note = _turn_note(engine.turn_seconds)
                 recovery_note = engine.recovery
             finally:
-                server.stop()
+                # A request the engine had in flight when the run ended is waited for if the run was
+                # superseded: its answer is measured, so the cost is known instead of lost (#396).
+                server.stop(drain_seconds=SUPERSEDED_DRAIN_SECONDS if superseded.is_set() else 0.0)
     except CheckoutError as error:
         return _failure(
             error.code,
@@ -712,7 +747,10 @@ def _run_dynamic_job(
         # A review that was wrapped up at its limit says so in the summary; the reason is the
         # ledger's, never the model's.
         findings = replace(answer.findings, stopped_early=ledger.stopped_early)
-        published = (publish or publish_run)(job, findings)
+        # The check is repeated right before the one write (`may_write`); a signal after it is too
+        # late for any process, and is the reason the README does not call "publishes nothing"
+        # absolute.
+        published = (publish or _publish_checked(superseded))(job, findings)
     except PublishError as error:
         return _failure(error.code, error.detail, started, capture, usage=usage_probe.usage())
     summary = (

@@ -12,6 +12,7 @@ import asyncio
 import json
 import threading
 from collections.abc import Iterator
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -185,6 +186,13 @@ def test_a_superseded_heartbeat_answer_is_in_the_contract_and_is_understood(
     reply = asyncio.run(api.heartbeat(recorder.job_id, CREDENTIAL))
 
     assert reply.superseded is True
+    # The lease end of the answer reaches the host: the drain ends before it.
+    assert (
+        reply.lease_expires_at
+        == datetime.fromisoformat(
+            example("WorkerHeartbeatResponse")["job"]["leaseExpiresAt"]
+        ).timestamp()
+    )
     answer = {**example("WorkerHeartbeatResponse")}
     answer["job"] = {**answer["job"], "superseded": True}
     assert valid("WorkerHeartbeatResponse", answer)

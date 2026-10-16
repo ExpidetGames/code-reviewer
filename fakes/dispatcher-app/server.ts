@@ -20,6 +20,9 @@
 //   POST /__fake/enqueue   {id?, reviewKind?}   adds a queued job, answers {id}
 //   POST /__fake/script    {route, steps}       the next requests of that route get the steps in order
 //   POST /__fake/lose-lease {jobId}             heartbeat and result of that job answer 409
+//   POST /__fake/supersede {jobId}              the heartbeats of that job answer `superseded: true` (to a
+//                                               Worker that named the feature `supersede`), with a lease
+//                                               ending SUPERSEDED_CLAIM_SECONDS after the call (not extended)
 //   POST /__fake/job-status {jobId, status}     sets the status the job state call answers
 //   GET  /__fake/requests                       every call so far: {method, route, jobId, status}
 //   GET  /__fake/results[?jobId=<id>]           the results delivered so far
@@ -38,6 +41,8 @@ function readJson(path: string): Record<string, unknown> {
 }
 
 const LEASE_SECONDS = 120;
+/** The claim of a superseded run (`claimSeconds` of `SupersedeTiming` in the contract). */
+const SUPERSEDED_CLAIM_SECONDS = 240;
 const HEARTBEAT_SECONDS = 30;
 const MAX_ATTEMPTS = 3;
 const MAX_BODY_BYTES = 64 * 1024;
@@ -114,6 +119,8 @@ export type DispatcherAppFake = {
   enqueue(options?: EnqueueOptions): string;
   script(route: Route, steps: Step[]): void;
   loseLease(jobId: string): void;
+  /** A newer push replaced the run: its heartbeats answer `superseded` and the lease is not extended (#396). */
+  supersede(jobId: string): void;
   /** Sets the status the job state call answers for a job (the App's other statuses than a claim reaches). */
   setJobStatus(jobId: string, status: JobStatus): void;
   results(jobId: string): unknown[];
@@ -132,6 +139,11 @@ type JobState = {
   credential: string | null;
   runnerId: string | null;
   leaseLost: boolean;
+  /** #396: the App superseded the run; only a Worker that named the feature is told. */
+  superseded: boolean;
+  supersedeFeature: boolean;
+  /** The end of the claim of a superseded run; its heartbeats keep it (the App sets it once, at the push). */
+  leaseEndsAt: string | null;
   results: Array<Record<string, unknown>>;
 };
 
@@ -261,6 +273,9 @@ export async function startDispatcherAppFake(
       credential: null,
       runnerId: null,
       leaseLost: false,
+      superseded: false,
+      supersedeFeature: false,
+      leaseEndsAt: null,
       results: [],
     });
     return id;
@@ -334,6 +349,9 @@ export async function startDispatcherAppFake(
     job.status = "running";
     job.claims += 1;
     job.leaseLost = false;
+    job.superseded = false;
+    job.supersedeFeature = false;
+    job.leaseEndsAt = null;
     job.runnerId = runnerId;
     job.credential = credentialFor(job.id, job.claims);
     if (split)
@@ -414,6 +432,7 @@ export async function startDispatcherAppFake(
     // An optional job field reaches only a Worker that names the feature (the input is closed).
     if (dynamic !== undefined && !features.includes("dynamic_capabilities"))
       delete dynamic.capabilities;
+    job.supersedeFeature = features.includes("supersede");
     return {
       status: 200,
       body: {
@@ -581,7 +600,8 @@ export async function startDispatcherAppFake(
     if (raw === "too_large") return { route, jobId, reply: errorReply(413) };
     const body = parseObject(raw.text);
     if (body === null) return { route, jobId, reply: errorReply(400) };
-    if (route === "heartbeat")
+    if (route === "heartbeat") {
+      const superseded = job.superseded && job.supersedeFeature;
       return {
         route,
         jobId,
@@ -592,11 +612,17 @@ export async function startDispatcherAppFake(
             job: {
               id: job.id,
               heartbeatAt: iso(),
-              leaseExpiresAt: iso(LEASE_SECONDS),
+              // A superseded run's lease is not extended: the drain ends before it (#396).
+              leaseExpiresAt:
+                superseded && job.leaseEndsAt !== null
+                  ? job.leaseEndsAt
+                  : iso(LEASE_SECONDS),
+              ...(superseded ? { superseded: true } : {}),
             },
           },
         },
       };
+    }
     return { route, jobId, reply: handleResult(job, body) };
   }
 
@@ -671,6 +697,10 @@ export async function startDispatcherAppFake(
       fake.setJobStatus(body.jobId, body.status as JobStatus);
       return { status: 200, body: { ok: true } };
     }
+    if (name === "supersede" && typeof body.jobId === "string") {
+      fake.supersede(body.jobId);
+      return { status: 200, body: { ok: true } };
+    }
     if (name === "lose-lease" && typeof body.jobId === "string") {
       fake.loseLease(body.jobId);
       return { status: 200, body: { ok: true } };
@@ -708,6 +738,12 @@ export async function startDispatcherAppFake(
     loseLease(jobId) {
       const job = jobs.get(jobId);
       if (job !== undefined) job.leaseLost = true;
+    },
+    supersede(jobId) {
+      const job = jobs.get(jobId);
+      if (job === undefined) return;
+      job.superseded = true;
+      job.leaseEndsAt = iso(SUPERSEDED_CLAIM_SECONDS);
     },
     setJobStatus(jobId, status) {
       const job = jobs.get(jobId);

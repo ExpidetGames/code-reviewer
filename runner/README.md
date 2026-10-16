@@ -610,26 +610,64 @@ and the enum agree. Callers branch on the code, never on the text.
 
 When a new push arrives while an automatic review is running, the app supersedes the running one. A runner or
 Worker that names the claim feature `supersede` (`CLAIM_FEATURES`, `WORKER_FEATURES`) is told through its
-heartbeat: `job.superseded: true`. The job host then sends the job process `SIGUSR1`, once (never to the group, and
-not before the process is ten seconds old, so that its handler is in place), keeps beating, and waits for the process
-to end by itself. The process (`supersede.py`):
+heartbeat: `job.superseded: true`. The job host then sends the job process `SIGUSR1`, once, to the leader only and
+at once (see "The signal" below), keeps beating, and waits for the process to end by itself. The process
+(`supersede.py`):
 
 - **lets every model request in flight finish**, so its cost is measured: the Diff meter (`diff_cost.py`) and the
-  Dynamic ledger count it as they always do;
+  Dynamic ledger count it as they always do. The Dynamic path also keeps its model proxy up until those requests are
+  answered (`ProxyServer.stop(drain_seconds)`), and its watch ends the engine's turn at the signal instead of waiting
+  for the next request;
 - **refuses every further model request**: the Diff meter raises `SupersededError` before anything is sent, and the
   Dynamic model proxy answers `403` with the code `superseded` (the engine ends; there is no retry);
 - **publishes nothing**: every write of PR-Agent's GitHub provider is a no-op from then on (`install_write_guard`,
-  installed last so it is outermost: comments, edits, labels, reactions, check runs and the "Failed to ..." notices);
-  the Dynamic path checks before its summary, its finding reconciliation and the note of a failure, and the lease check
-  answers `superseded`;
+  installed last so it is outermost: comments, edits, labels, reactions, check runs and the "Failed to ..." notices;
+  `test_supersede_guard_complete.py` reads the provider and fails for a write method nobody guarded). The Dynamic path
+  checks before its summary, its finding reconciliation and the note of a failure, **and once more right before the one
+  write** (`Publisher.may_write`), and the lease check answers `superseded`;
 - **ends `superseded`** with the usage it measured (an exact cost when every call was priced, unknown otherwise). A
-  run that had published before it heard of it keeps its success.
+  run that had published before it heard of it keeps its success. Whatever ended the run after the signal (a failure
+  note that found the run replaced, a crash, a kill), the result carries the code `superseded`, not the failure it
+  would have been.
 
 The host delivers that result (the same call as any result), ends `SUPERSEDED`, the Worker exits `0` and the Sandbox
-or container is torn down; the loop of a self-hosted runner goes on to its next job. A process that has not ended
-`SUPERSEDED_DRAIN_SECONDS` (120) after it was told is ended by the host, and its result is `superseded` with an
-unknown cost (`no_result_from_process`). A runner or Worker of an earlier release never names the feature, so the
-app never supersedes its jobs and nothing changes for it.
+or container is torn down; the loop of a self-hosted runner goes on to its next job. A runner or Worker of an earlier
+release never names the feature, so the app never supersedes its jobs and nothing changes for it.
+
+### How long it takes (the drain model)
+
+```
+push --(next heartbeat, at most 60 s)--> the host knows and tells the process
+     --(the requests in flight finish, each within 120 s)--> the result is reported
+```
+
+The numbers are in one place on each side (`supersede_timing.py` here, `app/src/jobs/supersede-timing.ts` in the app)
+and in the contract (`SupersedeTiming` in `contracts/runner-api.v1.json`); a test on each side holds them equal. The
+app keeps the claim for 240 s (a heartbeat, the longest model request, a margin), so a result reported inside the
+drain always arrives while the claim holds. The host waits for the process at most `SUPERSEDED_DRAIN_SECONDS` (120,
+the longest model request: PR-Agent's `ai_timeout` and the proxy's timeout), but ends it `KILL_MARGIN_SECONDS` (20)
+before the lease that the heartbeat answer named (`job.leaseExpiresAt`: for a superseded run the app sets it once, at
+the push, to the end of the claim, 240 s later, and heartbeats do not extend it), so the result is reported inside the lease even when the push came late in the claim. A process that
+is still running then is ended by the host (its group, SIGTERM then SIGKILL) and its result is `superseded` with an
+unknown cost (`no_result_from_process`).
+
+### The signal
+
+The host starts the job process with `SIGUSR1` **blocked** (the mask is set around `Popen` in the host's thread and
+restored at once; it survives the `exec`). A signal that arrives before the process has installed its handler stays
+pending instead of ending the process, and `handling_the_signal` unblocks it after the handler exists. So the host does
+not guess an age for the process, and the signal is sent at the first superseded answer. If the signal cannot be sent
+(the process is gone), the host logs `SUPERSEDE_SIGNAL_NOT_SENT` and the drain bound still ends the process. The
+handler only sets a plain flag (`SupersedeSignal`), never a lock: an `Event` could deadlock a thread that held it when
+the signal came.
+
+### What "publishes nothing" can promise
+
+It is best effort at the last step. The Dynamic path re-checks right before the one GitHub call it makes, but the check
+and the call are not one atomic step: a signal that arrives in between does not stop that call, and a request that was
+already sent to GitHub cannot be taken back. The window is the length of one request to GitHub (milliseconds), against
+a run of minutes, and the next review replaces the summary. The Diff path is guarded at the provider method, which is
+the same window per write.
 
 ## The review comment size limit
 

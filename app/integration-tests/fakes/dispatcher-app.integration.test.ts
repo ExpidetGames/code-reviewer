@@ -252,6 +252,50 @@ describe("the fake App", () => {
     expect(result.status).toBe(409);
   });
 
+  // #396-T05
+  it("supersedes a run on demand: the heartbeat says so to a Worker that named the feature and keeps the lease", async () => {
+    const fake = await start();
+    fake.enqueue({ id: JOB });
+    const { job } = await claim(fake);
+    const credential = job?.job.credential ?? "";
+    const details = async (features: string) =>
+      (await (
+        await workerCall(
+          fake,
+          "GET",
+          `/api/workers/v1/jobs/${JOB}?features=${features}`,
+          credential,
+        )
+      ).json()) as { job: { leaseExpiresAt: string } };
+    const beat = async () =>
+      (await (
+        await workerCall(
+          fake,
+          "POST",
+          `/api/workers/v1/jobs/${JOB}/heartbeat`,
+          credential,
+          {},
+        )
+      ).json()) as { job: { superseded?: boolean; leaseExpiresAt: string } };
+
+    // A Worker that did not name the feature is never told, so it cannot misread the answer.
+    await details("dynamic_capabilities");
+    fake.supersede(JOB);
+    const silent = await beat();
+    valid(worker, "WorkerHeartbeatResponse", silent);
+    expect(silent.job.superseded).toBeUndefined();
+
+    const named = await details("dynamic_capabilities,supersede");
+    const told = await beat();
+    valid(worker, "WorkerHeartbeatResponse", told);
+    expect(told.job.superseded).toBe(true);
+    // The claim of a superseded run is longer than a lease, set once and not extended by a beat.
+    expect(Date.parse(told.job.leaseExpiresAt)).toBeGreaterThan(
+      Date.parse(named.job.leaseExpiresAt),
+    );
+    expect((await beat()).job.leaseExpiresAt).toBe(told.job.leaseExpiresAt);
+  });
+
   // #318-T08
   it("waits as scripted, through the injected sleeper (no real delay)", async () => {
     const waited: number[] = [];

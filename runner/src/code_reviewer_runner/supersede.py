@@ -22,7 +22,6 @@ The signal is process wide, like the process: one run per process. Tests build t
 """
 
 import signal
-import threading
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from typing import Any
@@ -35,19 +34,25 @@ class SupersededError(Exception):
 
 
 class SupersedeSignal:
-    """True once the run was told that it was superseded. Safe to set from a signal handler."""
+    """True once the run was told that it was superseded. Safe to set from a signal handler.
+
+    A plain attribute, not a `threading.Event`: `Event.set()` takes a lock that is not reentrant,
+    and a handler that ran while the interrupted code held it would deadlock. Assigning a bool is
+    atomic in CPython and takes no lock; the other threads (the proxy, the watch of the engine)
+    poll it.
+    """
 
     def __init__(self) -> None:
-        self._event = threading.Event()
+        self._set = False
 
     def set(self) -> None:
-        self._event.set()
+        self._set = True
 
     def is_set(self) -> bool:
-        return self._event.is_set()
+        return self._set
 
     def clear(self) -> None:
-        self._event.clear()
+        self._set = False
 
 
 # The one of this process. The job process is one run, so a module level value is the run's.
@@ -56,8 +61,13 @@ PROCESS_SIGNAL = SupersedeSignal()
 
 @contextmanager
 def handling_the_signal(target: SupersedeSignal = PROCESS_SIGNAL) -> Generator[None]:
-    """Turns `SIGUSR1` into `target.set()` for the duration. Not the main thread: nothing to
-    install."""
+    """Turns `SIGUSR1` into `target.set()` for the duration (not in a thread other than the main).
+
+    The job host starts the process with `SIGUSR1` blocked (`job_loop/process.py`), because the
+    default action of the signal ends the process and no handler can exist before Python runs. A
+    signal that arrives before this point stays pending; unblocking it once the handler is installed
+    delivers it to the handler. No guess about how long the start takes is needed.
+    """
 
     def on_signal(signum: int, frame: object) -> None:
         target.set()
@@ -67,9 +77,11 @@ def handling_the_signal(target: SupersedeSignal = PROCESS_SIGNAL) -> Generator[N
     except ValueError:
         yield
         return
+    old_mask = signal.pthread_sigmask(signal.SIG_UNBLOCK, {SUPERSEDE_SIGNAL})
     try:
         yield
     finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, old_mask)
         signal.signal(SUPERSEDE_SIGNAL, previous)
 
 
@@ -78,10 +90,8 @@ class WriteGuardError(Exception):
 
 
 # Every method of PR-Agent's GitHub provider that changes something on GitHub, and what a guarded
-# call
-# returns instead (None unless the caller reads a truth value). A method that is missing is an
-# error:
-# the guard fails closed, like the other patches, and the PR-Agent version is pinned.
+# call returns instead (None unless the caller reads a truth value). A method that is missing is an
+# error: the guard fails closed, like the other patches, and the PR-Agent version is pinned.
 GUARDED_WRITES: dict[str, Any] = {
     "publish_description": None,
     "publish_persistent_comment": None,

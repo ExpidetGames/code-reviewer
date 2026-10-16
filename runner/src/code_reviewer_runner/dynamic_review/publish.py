@@ -41,7 +41,7 @@ head; the next push reviews again.
 """
 
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 
 from code_reviewer_runner.dynamic_findings import DynamicFindings, Finding
@@ -104,6 +104,9 @@ class Publisher:
     pr_number: int
     web_base: str = ""
     redactor: Redactor | None = None
+    # Asked right before the one write (#396): False means the run was superseded since the checks
+    # before, and nothing is written.
+    may_write: Callable[[], bool] | None = None
 
     def publish(
         self,
@@ -269,7 +272,15 @@ class Publisher:
         except RenderError as error:
             raise PublishError(error.code, error.detail) from None
 
+    def _may_write_now(self) -> None:
+        if self.may_write is not None and not self.may_write():
+            raise PublishError(
+                ErrorCode.SUPERSEDED,
+                "the run was superseded by a newer push, so nothing was written",
+            )
+
     def _write(self, existing: Comment | None, body: str, head_sha: str) -> Published:
+        self._may_write_now()
         if existing is not None:
             return self._edit(existing.id, body)
         try:
@@ -285,6 +296,7 @@ class Publisher:
         return Published(comment_url=created.url, created=True)
 
     def _edit(self, comment_id: str, body: str) -> Published:
+        self._may_write_now()
         try:
             edited = self.client.edit_comment(comment_id, body)
         except GitHubError as error:
@@ -375,7 +387,11 @@ def _redact_finding(finding: Finding, redactor: Redactor) -> Finding:
     )
 
 
-def publisher_for(job: Job, client: CommentsClient | None = None) -> Publisher:
+def publisher_for(
+    job: Job,
+    client: CommentsClient | None = None,
+    may_write: Callable[[], bool] | None = None,
+) -> Publisher:
     """The publisher one Dynamic job writes through: its narrowed installation token, its bot
     login and the workspace-less comment routes of its repository. The engine (#197) calls this
     once it has validated the run's findings. `client` replaces the HTTP client (the preparation
@@ -394,10 +410,13 @@ def publisher_for(job: Job, client: CommentsClient | None = None) -> Publisher:
         pr_number=int(match.group(1)),
         web_base=web_base_of(job.git.base_url),
         redactor=Redactor(job.secrets),
+        may_write=may_write,
     )
 
 
-def publish_run(job: Job, run: DynamicFindings) -> Published:
+def publish_run(
+    job: Job, run: DynamicFindings, may_write: Callable[[], bool] | None = None
+) -> Published:
     """Writes one finished run into the persistent summary comment of the job's own pull request.
 
     The step the supervisor takes once the engine's findings are validated (#201): after it, the
@@ -409,7 +428,7 @@ def publish_run(job: Job, run: DynamicFindings) -> Published:
         raise PublishError(
             ErrorCode.DYNAMIC_POLICY_VIOLATION, "a Dynamic job without checkout facts"
         )
-    return publisher_for(job).publish(
+    return publisher_for(job, may_write=may_write).publish(
         run,
         head_sha=base.head_sha,
         previous_reviewed_sha=base.previous_reviewed_sha,
@@ -418,7 +437,12 @@ def publish_run(job: Job, run: DynamicFindings) -> Published:
     )
 
 
-def publish_failure_note(job: Job, code: ErrorCode, reason: str | None) -> Published | None:
+def publish_failure_note(
+    job: Job,
+    code: ErrorCode,
+    reason: str | None,
+    may_write: Callable[[], bool] | None = None,
+) -> Published | None:
     """Writes the note of a failed Dynamic run into the summary comment of the job's own pull
     request (#299). Returns None when this failure writes nothing. Raises `PublishError` when the
     write fails; the caller keeps the failure it already has and never lets this change it."""
@@ -430,7 +454,7 @@ def publish_failure_note(job: Job, code: ErrorCode, reason: str | None) -> Publi
     note = failure_note_for(code, reason, base.head_sha)
     if note is None:
         return None
-    return publisher_for(job).publish_failure(
+    return publisher_for(job, may_write=may_write).publish_failure(
         note,
         head_sha=base.head_sha,
         previous_reviewed_sha=base.previous_reviewed_sha,

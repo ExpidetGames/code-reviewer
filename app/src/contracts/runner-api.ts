@@ -613,6 +613,18 @@ export interface HeartbeatRequest {
   leaseToken: LeaseToken;
   [k: string]: unknown;
 }
+/**
+ * #397, #396: the numbers behind the supersede of a running run, stated once for both sides; a test on each side compares its own constants with these. They are not part of any request or answer. The Worker learns of the push at its next heartbeat (at most 'maxHeartbeatIntervalSeconds'), tells its process at once, and lets the model requests in flight finish: each takes at most 'longestModelRequestSeconds', so the Worker drains for at most 'workerDrainSeconds' (the same number) and ends its process 'killMarginSeconds' before the lease named in the heartbeat answer, whichever comes first. The app keeps the claim for 'claimSeconds' from the push (heartbeats answer 'superseded', the report is taken), which is the heartbeat interval, the longest request and a margin of 60 seconds. It takes a report for 'reportGraceSeconds' more, the time before which it does not settle the usage record with an unknown cost. A report after that is refused with 409, like a heartbeat. A Worker takes the end of its drain from the 'leaseExpiresAt' of the heartbeat answer that said 'superseded': the app sets the lease of a superseded run once, at the push, to 'claimSeconds' after it, and heartbeats do not extend it.
+ */
+export interface SupersedeTiming {
+  maxHeartbeatIntervalSeconds?: 60;
+  longestModelRequestSeconds?: 120;
+  workerDrainSeconds?: 120;
+  killMarginSeconds?: 20;
+  claimSeconds?: 240;
+  reportGraceSeconds?: 60;
+  [k: string]: unknown;
+}
 /*
  */
 export interface HeartbeatResponse {
