@@ -5,6 +5,7 @@
 // integration-tests/compatibility/runner-api-contract.integration.test.ts (the sets are compared
 // with the file, and real answers and the request checks are validated against it).
 import type { ReviewCommand } from "../integrations/types.ts";
+import type { JobStatus } from "../jobs/job-status.ts";
 import type { ProjectReviewKind } from "../review-settings/settings.ts";
 import {
   RUNNER_ENGINES,
@@ -22,7 +23,15 @@ export type ClaimEngine = RunnerEngine;
  * `dynamic_capabilities`: it reads `dynamic.capabilities` of a Dynamic job. A job field a previous-release
  * runner would refuse (its job input is closed) is only sent to a runner that names the feature.
  */
-export const CLAIM_FEATURES = ["dynamic_capabilities"] as const;
+export const CLAIM_FEATURES = [
+  "dynamic_capabilities",
+  // #320: the caller is a Dispatcher and gets the split answer (`SplitClaimResponse`): a per-job
+  // credential and no job input, no git token and no model key.
+  "worker_credential",
+  // #396: the runner stops gracefully when a heartbeat answers `job.superseded`. A running job is superseded by a
+  // newer push only when its holder named it (#397); a Worker names it in its job details request.
+  "supersede",
+] as const;
 export type ClaimFeature = (typeof CLAIM_FEATURES)[number];
 
 /**
@@ -32,10 +41,76 @@ export type ClaimFeature = (typeof CLAIM_FEATURES)[number];
 export type ClaimRequest = {
   engines?: ClaimEngine[];
   features?: ClaimFeature[];
+  /** #322: claim exactly this job (a Dispatcher woken by the dispatch webhook). */
+  jobId?: string;
+  /** #322: the pool cap: 204 while this many jobs of the caller's `X-Runner-Id` are running. */
+  maxRunning?: number;
+};
+
+/** #322: the range of `ClaimRequest.maxRunning`. */
+export const MAX_RUNNING_RANGE = { min: 1, max: 1000 } as const;
+
+/**
+ * #322: what this app lists in `VersionResponse.features` (`KnownAppFeature` in the contract). A
+ * Dispatcher reads the list before it claims, so an app that lacks one of them (a previous release,
+ * which would ignore `jobId` and `maxRunning`) is never asked.
+ */
+export const APP_FEATURES = [
+  "worker_api",
+  "claim_by_job_id",
+  "pool_cap",
+  "release",
+] as const;
+export type AppFeature = (typeof APP_FEATURES)[number];
+
+/** #322: 200 from `GET /api/runners/v1/version` (`VersionResponse`). */
+export type VersionResponse = {
+  version: typeof RUNNER_API_VERSION;
+  appVersion: string;
+  features: AppFeature[];
+};
+
+/**
+ * #322: the body of `POST /api/runners/v1/jobs/{id}/release` (`ReleaseRequest`): the per-job credential of
+ * the claim, why the job is given back and, optionally, how long it must not be offered again.
+ */
+export type ReleaseRequest = {
+  credential: string;
+  reason: string;
+  retryAfterSeconds?: number;
+};
+
+/** #322: the range of `ReleaseRequest.retryAfterSeconds`. */
+export const RELEASE_RETRY_AFTER_RANGE = { min: 1, max: 86_400 } as const;
+
+/** #322: 200 from the release (`ReleaseResponse`). */
+export type ReleaseResponse = {
+  version: typeof RUNNER_API_VERSION;
+  job: { id: string; status: "queued" | "failed" };
+};
+
+/**
+ * #364: 200 from `GET /api/runners/v1/jobs/{id}` (`JobStateResponse`): the status of a job and nothing else, for a
+ * Dispatcher that decides whether the VM of a job is a leftover.
+ */
+export type JobStateResponse = {
+  version: typeof RUNNER_API_VERSION;
+  job: {
+    id: string;
+    status: JobStatus;
+    /** #397: a superseded job whose claim is still valid (its Worker drains). Left out otherwise. */
+    draining?: true;
+  };
 };
 
 /** The path prefix of this version; the version is part of the URL. */
 export const RUNNER_API_PATH = "/api/runners/v1" as const;
+
+/** #320: the path prefix of the Worker API, which a per-job credential (not the runner token) opens. */
+export const WORKER_API_PATH = "/api/workers/v1" as const;
+
+/** #320: how many times the Worker of one claim may fetch the job details (each mints a fresh token). */
+export const MAX_WORKER_FETCHES = 3;
 
 /** Every request body is read up to this size; a larger one is refused with 413. */
 export const RUNNER_MAX_BODY_BYTES = 64 * 1024;
@@ -93,6 +168,8 @@ export const RUNNER_ERROR_CODES = [
   "dynamic_accounting_failed",
   "dynamic_model_features_unsupported",
   "lease_lost",
+  // #396: the run was replaced by a newer push; it stopped gracefully and reports what it used.
+  "superseded",
 ] as const;
 export type RunnerErrorCode = (typeof RUNNER_ERROR_CODES)[number];
 
@@ -135,6 +212,9 @@ export const RUNNER_API_ERROR_CODES = [
   "RUNNER_BODY_TOO_LARGE",
   "RUNNER_GIT_ACCESS_UNAVAILABLE",
   "RUNNER_INTERNAL_ERROR",
+  // The Worker API (#318, served from #320): a credential that is not the job's, and a job the app ended.
+  "WORKER_CREDENTIAL_INVALID",
+  "RUNNER_JOB_ENDED",
 ] as const;
 export type RunnerApiErrorCode = (typeof RUNNER_API_ERROR_CODES)[number];
 
@@ -244,11 +324,48 @@ export type ClaimResponse = {
   };
 };
 
+/**
+ * #320: the answer of a claim that names the feature `worker_credential` (`SplitClaimResponse`). The
+ * Dispatcher gets the per-job credential and no job input: the git token and the model key reach only
+ * the Worker, which fetches them with the credential (`WorkerJobDetailsResponse`).
+ */
+export type SplitClaimResponse = {
+  version: typeof RUNNER_API_VERSION;
+  job: {
+    id: string;
+    credential: string;
+    reviewKind: ReviewKind;
+    leaseExpiresAt: string;
+    heartbeatIntervalSeconds: number;
+  };
+};
+
+/** #320: 200 from `GET /api/workers/v1/jobs/{id}` (`WorkerJobDetailsResponse`). */
+export type WorkerJobDetailsResponse = {
+  version: typeof RUNNER_API_VERSION;
+  job: {
+    id: string;
+    leaseExpiresAt: string;
+    heartbeatIntervalSeconds: number;
+    tokenExpiresAt: string | null;
+    input: RunnerJobInput;
+  };
+};
+
+/** #320: the body of `POST /api/workers/v1/jobs/{id}/result` (`WorkerResultRequest`). */
+export type WorkerResultRequest = { result: RunnerResult };
+
 export type HeartbeatRequest = { leaseToken: string };
 
 export type HeartbeatResponse = {
   version: typeof RUNNER_API_VERSION;
-  job: { id: string; heartbeatAt: string; leaseExpiresAt: string };
+  job: {
+    id: string;
+    heartbeatAt: string;
+    leaseExpiresAt: string;
+    /** #396: a newer push replaced this run (only for a claim that named the feature `supersede`). */
+    superseded?: boolean;
+  };
 };
 
 export type RunnerUsage = {
@@ -293,6 +410,9 @@ export type CompleteResponse = {
    * `queued`: the runner reported `runner_shutdown`, the job was given back and waits again (it fails
    * instead when that was the last allowed attempt).
    */
-  job: { id: string; status: "succeeded" | "failed" | "queued" };
+  job: {
+    id: string;
+    status: "succeeded" | "failed" | "queued" | "superseded";
+  };
   alreadyCompleted: boolean;
 };

@@ -24,6 +24,8 @@ import { createJobsRepository } from "./jobs-repository.ts";
 import { createProjectsRepository } from "./projects-repository.ts";
 import { createRepositoriesRepository } from "./repositories-repository.ts";
 import { createRunsRepository } from "./runs-repository.ts";
+import { createPlanHandoffTokensRepository } from "./plan-handoff-tokens-repository.ts";
+import { createRefusalNoticesRepository } from "./refusal-notices-repository.ts";
 import { createUsageRecordsRepository } from "./usage-records-repository.ts";
 
 const SHA = "b".repeat(40);
@@ -43,6 +45,8 @@ function reposOf(db: Kysely<Database>, workspaceId: string) {
     workspaceSecrets: createWorkspaceSecretsRepository(db, workspaceId),
     entitlements: createWorkspaceEntitlementsRepository(db, workspaceId),
     usage: createUsageRecordsRepository(db, workspaceId),
+    notices: createRefusalNoticesRepository(db, workspaceId),
+    planHandoff: createPlanHandoffTokensRepository(db, workspaceId),
   };
 }
 type Repos = ReturnType<typeof reposOf>;
@@ -56,12 +60,23 @@ function entitlementsOf(tag: string, overrides: { planLabel?: string } = {}) {
       diffRunsPerPeriod: 10,
       dynamicRunsPerPeriod: null,
       managedCostLimitMicroUsd: 1000,
+      ownKeyCostLimitMicroUsd: null,
     },
     periodStart: "2026-10-01T00:00:00.000Z",
     suspended: false,
     suspensionCode: null,
   };
 }
+
+/** The pull request and period of the notice every seeded workspace has. */
+function noticeKeyOf(repositoryId: string) {
+  return {
+    repositoryId,
+    prNumber: 7,
+    periodStart: "2026-10-01T00:00:00.000Z",
+  };
+}
+const NOTICE_OPTIONS = { leaseMs: 60_000, maxAttempts: 3 };
 
 /** One workspace with an integration, a repository, a project, a job and a setting. */
 async function seed(
@@ -203,6 +218,20 @@ async function seed(
       completionTokens: 5,
     });
   }
+  // The notice of a refused review on the seeded pull request (#281).
+  const taken = await repos.notices.begin(
+    noticeKeyOf(repository.id),
+    "quota_exhausted",
+    NOTICE_OPTIONS,
+  );
+  if (!taken.acquired) throw new Error("seeding failed");
+  // The handoff token of the Owner of the workspace (#284).
+  await repos.planHandoff.issue({
+    tokenHash: `handoff-${tag}`,
+    userId: `user-${tag}`,
+    role: "owner",
+    ttlMs: 5 * 60 * 1000,
+  });
   await repos.workspaceSecrets.put({
     name: "llm_api_key",
     binding: `binding-${tag}`,
@@ -220,6 +249,7 @@ async function seed(
     integration,
     repository,
     job: enqueued.job,
+    notice: taken.notice,
     externalRepositoryId: `repo-${tag}`,
   };
 }
@@ -269,6 +299,18 @@ async function rowsOf(db: Kysely<Database>, workspaceId: string) {
       .selectAll()
       .where("workspace_id", "=", workspaceId)
       .orderBy("id")
+      .execute(),
+    refusalNotices: await db
+      .selectFrom("refusal_notices")
+      .selectAll()
+      .where("workspace_id", "=", workspaceId)
+      .orderBy("id")
+      .execute(),
+    planHandoffTokens: await db
+      .selectFrom("plan_handoff_tokens")
+      .selectAll()
+      .where("workspace_id", "=", workspaceId)
+      .orderBy("token_hash")
       .execute(),
     entitlements: await db
       .selectFrom("workspace_entitlements")
@@ -770,6 +812,11 @@ const CASES: Case[] = [
     expectAnswer: (answer) => expect(answer).toBeUndefined(),
   },
   {
+    name: "usage.setModelTier",
+    run: (a, b) => a.usage.setModelTier(b.job.id, "high"),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
     name: "usage.settle",
     run: (a, b) =>
       a.usage.settle(b.job.id, {
@@ -778,6 +825,12 @@ const CASES: Case[] = [
         promptTokens: 1,
         completionTokens: 1,
       }),
+    // Another workspace's job is not there: nothing was settled.
+    expectAnswer: (answer) => expect(answer).toBe(false),
+  },
+  {
+    name: "usage.markSuperseded",
+    run: (a, b) => a.usage.markSuperseded([b.job.id]),
     expectAnswer: (answer) => expect(answer).toBeUndefined(),
   },
   {
@@ -796,15 +849,71 @@ const CASES: Case[] = [
     expectAnswer: (answer) => expect(answer).toEqual({ diff: 1, dynamic: 0 }),
   },
   {
-    name: "usage.sumSettledManagedCostMicroUsd",
+    name: "usage.sumSettledCostMicroUsd",
     run: (a) =>
-      a.usage.sumSettledManagedCostMicroUsd("2000-01-01T00:00:00.000Z"),
+      a.usage.sumSettledCostMicroUsd("2000-01-01T00:00:00.000Z", "managed"),
     expectAnswer: (answer) => expect(answer).toBe(0),
   },
   {
     name: "usage.pageSettled",
     run: (a) => a.usage.pageSettled({ limit: 50 }),
     expectAnswer: (answer) => expect(answer).toMatchObject({ records: [] }),
+  },
+  {
+    name: "usage.summarize",
+    run: (a) =>
+      a.usage.summarize({
+        from: "2000-01-01T00:00:00.000Z",
+        to: "2100-01-01T00:00:00.000Z",
+      }),
+    expectAnswer: (answer) =>
+      expect(answer).toEqual([
+        expect.objectContaining({ recordCount: 1, settledCount: 0 }),
+      ]),
+  },
+  // refusal notices: B's pull request is not one of A's, so A neither sees, takes nor changes B's notice
+  {
+    name: "notices.find",
+    run: (a, b) => a.notices.find(noticeKeyOf(b.repository.id)),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
+    name: "notices.begin",
+    run: (a, b) =>
+      a.notices.begin(
+        { ...noticeKeyOf(b.repository.id), prNumber: 8 },
+        "quota_exhausted",
+        NOTICE_OPTIONS,
+      ),
+    expectAnswer: (answer) => expect(answer).toEqual({ acquired: false }),
+  },
+  {
+    name: "notices.markPosted",
+    run: (a, b) => a.notices.markPosted(b.notice.id),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
+    name: "notices.markDropped",
+    run: (a, b) => a.notices.markDropped(b.notice.id),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
+    name: "notices.failed",
+    run: (a, b) =>
+      a.notices.failed(b.notice.id, new Date("2099-01-01T00:00:00.000Z")),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  // handoff tokens: making one under A for B's Owner revokes nothing of B's
+  {
+    name: "planHandoff.issue",
+    run: (a, b) =>
+      a.planHandoff.issue({
+        tokenHash: "handoff-from-a",
+        userId: b.userId,
+        role: "owner",
+        ttlMs: 5 * 60 * 1000,
+      }),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
   },
   // runs
   {
@@ -1039,10 +1148,22 @@ describe("two workspaces", () => {
       diff: 3,
       dynamic: 0,
     });
-    expect(await reposB.usage.sumSettledManagedCostMicroUsd(since)).toBe(500);
+    expect(await reposB.usage.sumSettledCostMicroUsd(since, "managed")).toBe(
+      500,
+    );
     expect(
       (await reposB.usage.pageSettled({ limit: 10 })).records,
     ).toHaveLength(1);
+    const groups = await reposB.usage.summarize({
+      from: since,
+      to: "2100-01-01T00:00:00.000Z",
+    });
+    const total = (
+      field: "recordCount" | "settledCount" | "knownCostMicroUsd",
+    ) => groups.reduce((sum, group) => sum + group[field], 0);
+    expect(total("recordCount")).toBe(3);
+    expect(total("settledCount")).toBe(1);
+    expect(total("knownCostMicroUsd")).toBe(500);
   });
 
   // DM-10

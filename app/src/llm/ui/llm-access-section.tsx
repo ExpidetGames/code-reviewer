@@ -12,18 +12,57 @@ import {
   CardTitle,
 } from "../../components/ui/card.tsx";
 import { HelpDisclosure } from "../../components/help-disclosure.tsx";
+import { instanceAccessOf } from "../access.ts";
 import type { WorkspaceLlmSummary } from "../assemble.ts";
 import type { WorkspaceLlmKeyStatus } from "../workspace-key.ts";
 import type { LlmKeyApi } from "./api.ts";
 import { LlmAccessForm } from "./llm-access-form.tsx";
 
-function SourceNote({ summary }: { summary: WorkspaceLlmSummary }) {
-  if (!summary.configured) return null;
-  if (summary.source === "workspace") return null;
+/**
+ * A workspace whose key mode is managed has no key form, whatever its role: the instance provides the access, the
+ * workspace's own key (if it has one) is stored and not used, and nothing of it is shown.
+ */
+function InstanceAccessCard({
+  access,
+}: {
+  access: NonNullable<ReturnType<typeof instanceAccessOf>>;
+}) {
   return (
-    <p className="text-sm text-muted-foreground">
-      Reviews of this workspace use the key of the operator.
-    </p>
+    <Card role="region" aria-labelledby="llm-key-heading">
+      <CardHeader>
+        <CardTitle>
+          <h2
+            id="llm-key-heading"
+            className="text-lg font-semibold tracking-tight"
+          >
+            LLM access
+          </h2>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-2">
+        {access === "settings_unreadable" ? (
+          <p>
+            This instance cannot set up LLM access for this workspace at the
+            moment, so reviews cannot run. Contact the administrator of this
+            instance.
+          </p>
+        ) : (
+          <>
+            <p>LLM access for this workspace is provided by this instance.</p>
+            <p className="text-sm text-muted-foreground">
+              Reviews do not use a key of this workspace, so there is nothing to
+              enter here: this workspace does not use a key of its own.
+            </p>
+            {access === "key_unavailable" ? (
+              <p>
+                The access is not available at the moment, so reviews cannot
+                run. Contact the administrator of this instance.
+              </p>
+            ) : null}
+          </>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -42,6 +81,9 @@ export function LlmAccessSection({
   /** Only tests pass this. */
   api?: LlmKeyApi;
 }) {
+  const instanceAccess = instanceAccessOf(summary);
+  if (instanceAccess !== null)
+    return <InstanceAccessCard access={instanceAccess} />;
   return (
     <Card role="region" aria-labelledby="llm-key-heading">
       <CardHeader>
@@ -61,7 +103,6 @@ export function LlmAccessSection({
           shown again. The operator of this instance holds the key that encrypts
           it and can technically decrypt it.
         </HelpDisclosure>
-        <SourceNote summary={summary} />
         {canManage ? (
           <LlmAccessForm
             // Not keyed on the status: the page's data changes after a save (`router.refresh()`),

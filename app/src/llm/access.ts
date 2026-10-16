@@ -26,7 +26,7 @@ export type LlmAccess = LlmConfig;
 export const LLM_ACCESS_SOURCES = [
   /** The key the workspace entered itself (BYOK). */
   "workspace",
-  /** The operator's key, when the operator offers included usage (a stub that is off, for now). */
+  /** The operator's own key: the workspace's key mode is `managed` (src/workspaces/entitlements.ts). */
   "operator",
 ] as const;
 export type LlmAccessSource = (typeof LLM_ACCESS_SOURCES)[number];
@@ -39,6 +39,12 @@ export const LLM_NOT_CONFIGURED_REASONS = [
   "key_unreadable",
   /** The workspace's key was made for another provider than the one it would be sent to. */
   "key_binding_mismatch",
+  /** The workspace's key mode is `managed` and the operator has stored no key. */
+  "operator_key_missing",
+  /** The workspace's key mode is `managed` and the operator's key is stored but cannot be read. */
+  "operator_key_unreadable",
+  /** The entitlements of the workspace cannot be read, so it is not known whose key applies. */
+  "entitlements_invalid",
 ] as const;
 export type LlmNotConfiguredReason =
   (typeof LLM_NOT_CONFIGURED_REASONS)[number];
@@ -52,6 +58,33 @@ export type LlmAccessResult =
       /** Which variables are wrong. Names and codes only, never a value. */
       issues: readonly LlmConfigIssue[];
     };
+
+/**
+ * What the pages know about a workspace whose access is not its own key (#276). `provided`: the instance's key
+ * serves it (the key mode is `managed`). `key_unavailable`: it is `managed` and the instance has no usable key.
+ * `settings_unreadable`: the entitlements cannot be read, so it is not known whose key applies; the jobs fail
+ * closed. Null: an ordinary workspace with its own key, whether it has one or not.
+ */
+export type InstanceAccess =
+  "provided" | "key_unavailable" | "settings_unreadable";
+
+export function instanceAccessOf(
+  summary:
+    | { configured: true; source: LlmAccessSource }
+    | { configured: false; reason: LlmNotConfiguredReason },
+): InstanceAccess | null {
+  if (summary.configured)
+    return summary.source === "operator" ? "provided" : null;
+  switch (summary.reason) {
+    case "operator_key_missing":
+    case "operator_key_unreadable":
+      return "key_unavailable";
+    case "entitlements_invalid":
+      return "settings_unreadable";
+    default:
+      return null;
+  }
+}
 
 export const createLlmAccess = createLlmConfig;
 
@@ -93,6 +126,9 @@ export function revealLlmAccess(access: LlmAccess): LlmAccess {
 
 const MASK = "[redacted]";
 
+/** What stands in a text where the id of a managed tier's model was (#283). */
+export const MODEL_MASK = "[model]";
+
 // The forms a secret takes in an error text besides the plain one: percent-encoded (in a URL),
 // escaped for JSON (in a logged body) and base64 (in an `Authorization: Basic` header or a dump).
 function forms(secret: string): string[] {
@@ -111,12 +147,24 @@ function forms(secret: string): string[] {
  * and the current one.
  */
 export function maskSecretInText(text: string, ...secrets: string[]): string {
+  return replaceForms(text, secrets, MASK);
+}
+
+/**
+ * Replaces the ids of managed tier models in a text with `[model]` (#283), in the same forms as a secret. The id of a
+ * tier's model is operator data a workspace must not read, but it is not a credential: the mask says what was there.
+ */
+export function maskModelInText(text: string, ...models: string[]): string {
+  return replaceForms(text, models, MODEL_MASK);
+}
+
+function replaceForms(text: string, values: string[], mask: string): string {
   let masked = text;
-  // Longest first, so a secret that contains another one is masked as a whole.
-  const all = secrets
-    .filter((secret) => secret !== "")
+  // Longest first, so a value that contains another one is masked as a whole.
+  const all = values
+    .filter((value) => value !== "")
     .flatMap(forms)
     .sort((a, b) => b.length - a.length);
-  for (const form of all) masked = masked.split(form).join(MASK);
+  for (const form of all) masked = masked.split(form).join(mask);
   return masked;
 }

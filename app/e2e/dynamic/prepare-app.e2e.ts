@@ -6,6 +6,7 @@
 // e2e/setup/prepare-apps.e2e.ts does for the apps of the other journeys.
 import { expect, test } from "@playwright/test";
 import { e2eEnv } from "../helpers/e2e-env";
+import { hostedEnv } from "../helpers/hosted-env";
 import { enterGithubApp, setUpApp } from "../helpers/setup";
 
 test("the app of the Dynamic lane is set up before the journey runs", async ({
@@ -15,5 +16,16 @@ test("the app of the Dynamic lane is set up before the journey runs", async ({
   await enterGithubApp(e2eEnv.pipelineAppUrl);
 
   const page = await request.get(e2eEnv.pipelineAppUrl, { maxRedirects: 0 });
+  expect(page.status()).toBe(307);
+});
+
+// #332: the second app of the lane, in the hosted deployment's dispatch mode (a server's setup code is in its log).
+test("the app of the hosted journey of the Dynamic lane is set up before it runs", async ({
+  request,
+}) => {
+  await setUpApp(hostedEnv.appUrl, hostedEnv.logFiles.app);
+  await enterGithubApp(hostedEnv.appUrl);
+
+  const page = await request.get(hostedEnv.appUrl, { maxRedirects: 0 });
   expect(page.status()).toBe(307);
 });

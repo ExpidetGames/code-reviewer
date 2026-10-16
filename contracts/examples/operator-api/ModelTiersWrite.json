@@ -1,0 +1,10 @@
+{
+  "tiers": {
+    "low": { "diff": "provider/low-diff-model" },
+    "medium": { "diff": "provider/medium-diff-model", "dynamic": null },
+    "high": {
+      "diff": "provider/high-diff-model",
+      "dynamic": "provider/high-dynamic-model"
+    }
+  }
+}

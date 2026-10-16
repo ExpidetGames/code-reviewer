@@ -48,7 +48,14 @@ function view(overrides: Partial<AdminSettingsView> = {}): AdminSettingsView {
     },
     maxWorkspacesPerUser: { value: 10, ...never },
     dynamicReview: { value: false, ...never },
+    planManagementUrl: { value: null, ...never },
     smtp: { value: null, password: "none", ...never },
+    operatorLlmKey: { state: "not_configured" },
+    modelTiers: {
+      low: { diff: false, dynamic: false },
+      medium: { diff: false, dynamic: false },
+      high: { diff: false, dynamic: false },
+    },
     workspaceCount: 1,
     githubConfigured: false,
     mailConfigured: false,
@@ -238,6 +245,113 @@ describe("the Dynamic Review card of the instance form", () => {
   });
 });
 
+describe("the plan management card of the instance form", () => {
+  // #284-T11
+  it("says what the page is for, in generic words, and is empty while there is none", () => {
+    render(<InstanceForm settings={view()} />);
+
+    const card = screen.getByRole("group", { name: "Plan management page" });
+    expect(
+      (within(card).getByLabelText("Address of the page") as HTMLInputElement)
+        .value,
+    ).toBe("");
+    expect(card.textContent).toMatch(/operator-configured page/i);
+    expect(card.textContent).toMatch(/https/i);
+  });
+
+  // #284-T02
+  it("sends only the address, and nothing else, when only the address changed", async () => {
+    const { api, change } = apiAnswering(SAVED);
+    render(<InstanceForm settings={view()} api={api} />);
+
+    await userEvent.type(
+      screen.getByLabelText("Address of the page"),
+      "https://plans.example/manage",
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "Save instance settings" }),
+    );
+
+    await waitFor(() => expect(change).toHaveBeenCalledTimes(1));
+    expect(change).toHaveBeenCalledWith({
+      planManagementUrl: "https://plans.example/manage",
+    });
+  });
+
+  // #284-T01
+  it("removes the page when the field is emptied", async () => {
+    const { api, change } = apiAnswering(SAVED);
+    render(
+      <InstanceForm
+        settings={view({
+          planManagementUrl: {
+            value: "https://plans.example/manage",
+            updatedBy: null,
+            updatedAt: null,
+          },
+        })}
+        api={api}
+      />,
+    );
+
+    await userEvent.clear(screen.getByLabelText("Address of the page"));
+    await userEvent.click(
+      screen.getByRole("button", { name: "Save instance settings" }),
+    );
+
+    await waitFor(() => expect(change).toHaveBeenCalledTimes(1));
+    expect(change).toHaveBeenCalledWith({ planManagementUrl: null });
+  });
+
+  // #284-T11
+  it.each([
+    ["url_not_https", /must start with https/i],
+    ["url_has_credentials", /user name or password/i],
+    ["url_has_fragment", /must not contain a # fragment/i],
+    ["url_invalid", /not a valid address/i],
+    ["url_too_long", /too long/i],
+  ])(
+    "shows the reason for %s next to the field and moves focus to it",
+    async (code, text) => {
+      const { api } = apiAnswering(
+        refused("invalid_input", [{ field: "planManagementUrl", code }]),
+      );
+      render(<InstanceForm settings={view()} api={api} />);
+
+      await userEvent.type(
+        screen.getByLabelText("Address of the page"),
+        "http://plans.example/",
+      );
+      await userEvent.click(
+        screen.getByRole("button", { name: "Save instance settings" }),
+      );
+
+      const field = screen.getByLabelText("Address of the page");
+      expect(await screen.findByText(text)).toBeTruthy();
+      expect(field.getAttribute("aria-invalid")).toBe("true");
+      await waitFor(() => expect(document.activeElement).toBe(field));
+    },
+  );
+
+  it("does not save the other settings when only the address changed", async () => {
+    const { api, change } = apiAnswering(SAVED);
+    render(<InstanceForm settings={view()} api={api} />);
+
+    await userEvent.type(
+      screen.getByLabelText("Address of the page"),
+      "https://plans.example/",
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "Save instance settings" }),
+    );
+
+    await waitFor(() => expect(change).toHaveBeenCalled());
+    expect(change.mock.calls.map(([sent]) => Object.keys(sent))).toEqual([
+      ["planManagementUrl"],
+    ]);
+  });
+});
+
 describe("the instance form", () => {
   // #98-AD-07
   it("sends the chosen tenancy and says on the card that it was saved", async () => {
@@ -405,7 +519,7 @@ describe("the instance form", () => {
   it("says that a setting was never changed", () => {
     render(<InstanceForm settings={view()} />);
 
-    expect(screen.getAllByText(/Never changed/)).toHaveLength(3);
+    expect(screen.getAllByText(/Never changed/)).toHaveLength(4);
   });
 
   it("shows the server's reason for a number that is not allowed", async () => {

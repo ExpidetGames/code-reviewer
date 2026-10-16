@@ -5,6 +5,7 @@
 // repository: the extra options of the four PR-Agent tools (`env`) and the model and the token budget
 // of the job.
 import type { Job } from "../jobs/job-types.ts";
+import type { ModelTier } from "../model-tiers/tiers.ts";
 
 export type JobOptions = {
   /**
@@ -12,6 +13,12 @@ export type JobOptions = {
    * four tools); anything else ends the job as `job_env_invalid`, because the runner would refuse it.
    */
   env: Record<string, string>;
+  /**
+   * #280: the model tier of the project's effective settings. It only has an effect for a job that runs on the
+   * operator's key (the claim swaps `llm.model` and the Dynamic model for the operator's model of the tier); for any
+   * other job it is ignored. Left out: `medium`.
+   */
+  modelTier?: ModelTier;
   llm?: {
     /** Replaces the model of the LLM access for this job. Null or left out: keep it. */
     model?: string | null;

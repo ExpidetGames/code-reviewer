@@ -19,6 +19,7 @@ import {
 } from "../../components/ui/card.tsx";
 import type { GithubConfigView } from "../../github-config/service.ts";
 import { GITHUB_SIGN_IN_NOT_ENABLED } from "../../github-config/ui/messages.ts";
+import { MODEL_TIERS } from "../../model-tiers/tiers.ts";
 import { UNREADABLE_SECRET_CAUSE } from "../../secrets/messages.ts";
 import type { AdminSettingsView } from "../service.ts";
 import { ImportNotice } from "./import-notice.tsx";
@@ -38,7 +39,8 @@ function SetupRow({
   status: RowStatus;
   summary: string;
   hint?: string;
-  href: string;
+  /** Left out for a setting that has no page of its own (the model tiers: the operator API sets them). */
+  href?: string;
 }) {
   const Icon = status === "ok" ? CheckCircle2 : TriangleAlert;
   return (
@@ -58,13 +60,15 @@ function SetupRow({
           <p className="text-sm text-muted-foreground">{hint}</p>
         )}
       </div>
-      <Link
-        href={href}
-        aria-label={`Configure ${title}`}
-        className="shrink-0 rounded-sm text-sm font-medium text-primary underline-offset-4 hover:underline no-underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-      >
-        Configure
-      </Link>
+      {href === undefined ? null : (
+        <Link
+          href={href}
+          aria-label={`Configure ${title}`}
+          className="shrink-0 rounded-sm text-sm font-medium text-primary underline-offset-4 hover:underline no-underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+        >
+          Configure
+        </Link>
+      )}
     </li>
   );
 }
@@ -89,6 +93,51 @@ function mailRow(settings: AdminSettingsView): {
     summary: "Not configured",
     hint: "Nobody can verify an email address or reset a password by mail.",
   };
+}
+
+function operatorKeyRow(settings: AdminSettingsView): {
+  status: RowStatus;
+  summary: string;
+  hint?: string;
+} {
+  const key = settings.operatorLlmKey;
+  if (key.state === "unreadable")
+    return {
+      status: "warn",
+      summary: "Saved, cannot be read",
+      hint: "Workspaces that use the key of the instance cannot run reviews until it is entered again.",
+    };
+  if (key.state === "configured")
+    return {
+      status: "ok",
+      summary:
+        key.lastFour === null
+          ? "Configured"
+          : `Configured (ending in ${key.lastFour})`,
+    };
+  return {
+    status: "ok",
+    summary: "Not configured",
+    hint: "Optional. Only workspaces that use the key of the instance need it.",
+  };
+}
+
+const TIER_LABELS = { low: "Low", medium: "Medium", high: "High" } as const;
+
+/** "Low: Diff only, Medium: not configured, High: Diff and Dynamic": whether, never which model (#280). */
+function modelTiersSummary(tiers: AdminSettingsView["modelTiers"]): string {
+  return MODEL_TIERS.map((tier) => {
+    const { diff, dynamic } = tiers[tier];
+    const state =
+      diff && dynamic
+        ? "Diff and Dynamic"
+        : diff
+          ? "Diff only"
+          : dynamic
+            ? "Dynamic only"
+            : "not configured";
+    return `${TIER_LABELS[tier]}: ${state}`;
+  }).join(", ");
 }
 
 function githubRow(
@@ -149,8 +198,9 @@ function secretsNotice(count: number): AttentionNotice {
     detail: (
       <>
         {UNREADABLE_SECRET_CAUSE} Enter it again under{" "}
-        <Link href="/admin/integrations">Integrations</Link> or{" "}
-        <Link href="/admin/mail">Mail</Link>; if you changed APP_SECRET by
+        <Link href="/admin/integrations">Integrations</Link>,{" "}
+        <Link href="/admin/mail">Mail</Link> or{" "}
+        <Link href="/admin/llm">LLM key</Link>; if you changed APP_SECRET by
         mistake, restore the old value.
       </>
     ),
@@ -198,6 +248,7 @@ export function Overview({
   ];
   const mail = mailRow(settings);
   const githubItem = githubRow(github, settings.githubConfigured);
+  const operatorKey = operatorKeyRow(settings);
   return (
     <>
       <NeedsAttention notices={attention} maxRows={3} />
@@ -229,6 +280,21 @@ export function Overview({
                 ? {}
                 : { hint: githubItem.hint })}
               href="/admin/integrations"
+            />
+            <SetupRow
+              title="LLM key of the instance"
+              status={operatorKey.status}
+              summary={operatorKey.summary}
+              {...(operatorKey.hint === undefined
+                ? {}
+                : { hint: operatorKey.hint })}
+              href="/admin/llm"
+            />
+            <SetupRow
+              title="Managed model tiers"
+              status="ok"
+              summary={modelTiersSummary(settings.modelTiers)}
+              hint="Optional. Which model backs each tier is set through the operator API and is not shown here. A workspace on the key of the instance cannot run a review of a kind its tier has no model for."
             />
             <SetupRow
               title="Tenancy"

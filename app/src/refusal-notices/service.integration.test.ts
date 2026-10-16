@@ -1,0 +1,588 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// The notice a pull request gets when a review is refused for a limit or a suspension (#281), end to end on the
+// claim: a real queue and database, the real GitHub App provider and client against the fake GitHub, and the
+// notice service wired as the running server does it. No model is involved anywhere.
+import { describe, expect, it } from "vitest";
+import { createRefusalNoticesRepository } from "../db/repositories/refusal-notices-repository.ts";
+import { createWorkspaceEntitlementsRepository } from "../db/repositories/workspace-entitlements-repository.ts";
+import {
+  startRunnerApiHarness,
+  type RunnerApiHarness,
+} from "../test-support/runner-api-harness.ts";
+import { sha } from "../test-support/jobs.ts";
+import type { EntitlementsData } from "../workspaces/entitlements.ts";
+import { MAX_ATTEMPTS, RETRY_WAIT_MS } from "./service.ts";
+
+const PERIOD_1 = "2026-10-01T00:00:00.000Z";
+// Earlier than the fixture clock (2026-10-10): a period never starts in the future.
+const PERIOD_2 = "2026-10-05T00:00:00.000Z";
+const MINUTE = 60 * 1000;
+
+function entitlements(
+  overrides: Partial<EntitlementsData> = {},
+): EntitlementsData {
+  return {
+    planLabel: "plan",
+    keyMode: "own",
+    limits: {
+      diffRunsPerPeriod: 0,
+      dynamicRunsPerPeriod: null,
+      managedCostLimitMicroUsd: null,
+      ownKeyCostLimitMicroUsd: null,
+    },
+    periodStart: PERIOD_1,
+    suspended: false,
+    suspensionCode: null,
+    ...overrides,
+  };
+}
+
+const SUSPENDED = entitlements({
+  limits: {
+    diffRunsPerPeriod: null,
+    dynamicRunsPerPeriod: null,
+    managedCostLimitMicroUsd: null,
+    ownKeyCostLimitMicroUsd: null,
+  },
+  suspended: true,
+  suspensionCode: "overdue",
+});
+
+async function limit(h: RunnerApiHarness, data: EntitlementsData) {
+  await createWorkspaceEntitlementsRepository(
+    h.db,
+    h.workspaceId,
+    h.clock.now,
+  ).put(data, null);
+}
+
+async function start(
+  options: Parameters<typeof startRunnerApiHarness>[0] extends infer O
+    ? O extends { refusalNotices?: infer N }
+      ? N
+      : never
+    : never = {},
+) {
+  return startRunnerApiHarness({ refusalNotices: options });
+}
+
+/** Queues a review, lets the claim refuse it and waits for the notice. */
+async function refuse(
+  h: RunnerApiHarness,
+  overrides: Parameters<RunnerApiHarness["enqueueNew"]>[0] = {},
+) {
+  const job = await h.enqueueNew(overrides);
+  expect((await h.claim()).status).toBe(204);
+  await h.notices.settled();
+  return job;
+}
+
+/** The comments on a pull request of the repository the fixture's jobs are in. */
+const comments = (h: RunnerApiHarness, pr = 7) =>
+  h.notices.comments(h.repository.fullName, pr);
+
+describe("the refusal of a limit", () => {
+  // #281-T01
+  it("posts exactly one comment on the pull request, as the app, without a runner credential or a model call", async () => {
+    const h = await start();
+    await limit(h, entitlements());
+
+    const job = await refuse(h);
+
+    expect(comments(h)).toHaveLength(1);
+    expect(comments(h)[0]).toMatchObject({ login: "code-reviewer-test[bot]" });
+    expect(comments(h)[0]?.body).toContain("No review ran for this change.");
+    expect(comments(h)[0]?.body).toContain(
+      "used the reviews included for the current period",
+    );
+    expect(await h.queue.get(job.id)).toMatchObject({
+      status: "failed",
+      errorCode: "quota_exhausted",
+      attempts: 0,
+    });
+    // Nothing a runner or a model needs exists: no usage record, no stored key, and the only token GitHub issued
+    // is the narrow one of the notice (it cannot read code or change a pull request).
+    expect(
+      await h.db.selectFrom("usage_records").selectAll().execute(),
+    ).toEqual([]);
+    expect(
+      await h.db.selectFrom("job_claimed_keys").selectAll().execute(),
+    ).toEqual([]);
+    expect(
+      h.fake
+        .tokenRequests()
+        .filter((request) => request.repositoryIds !== null),
+    ).toEqual([
+      expect.objectContaining({
+        repositoryIds: [Number(h.repository.externalId)],
+        permissions: { issues: "write", metadata: "read" },
+      }),
+    ]);
+    expect(h.fake.revokedInstallationTokens()).toHaveLength(1);
+  });
+
+  // #281-T02
+  it("posts nothing more for a second push and a manual review on the same pull request in the same period", async () => {
+    const h = await start();
+    await limit(h, entitlements());
+    await refuse(h);
+
+    await refuse(h, { headSha: sha("b") });
+    await refuse(h, { headSha: sha("c"), triggerKind: "manual" });
+    await refuse(h, { headSha: sha("d"), triggerKind: "comment", args: "" });
+
+    expect(comments(h)).toHaveLength(1);
+    // The later refusals asked GitHub nothing about comments: the record answered.
+    expect(
+      h.fake
+        .requests()
+        .filter((r) => r.method === "POST" && r.path.endsWith("/comments")),
+    ).toHaveLength(1);
+  });
+
+  it("posts on another pull request of the same period", async () => {
+    const h = await start();
+    await limit(h, entitlements());
+
+    await refuse(h);
+    await refuse(h, { prNumber: 8, headSha: sha("b") });
+
+    expect(comments(h, 7)).toHaveLength(1);
+    expect(comments(h, 8)).toHaveLength(1);
+  });
+
+  // #281-T03
+  it("may post again once the period start has moved forward and the limit is hit again", async () => {
+    const h = await start();
+    await limit(h, entitlements());
+    await refuse(h);
+
+    await limit(h, entitlements({ periodStart: PERIOD_2 }));
+    await refuse(h, { headSha: sha("b") });
+
+    expect(comments(h)).toHaveLength(2);
+    expect(comments(h)[0]?.body).toContain(`period=${PERIOD_1}`);
+    expect(comments(h)[1]?.body).toContain(`period=${PERIOD_2}`);
+    // The first one was neither edited nor removed.
+    expect(comments(h)[0]?.revision).toBe(1);
+  });
+});
+
+describe("the refusal of a suspended workspace", () => {
+  // #281-T04
+  it("posts a neutral comment with no reason", async () => {
+    const h = await start();
+    await limit(h, SUSPENDED);
+
+    await refuse(h);
+
+    const [comment] = comments(h);
+    expect(comment?.body).toContain("No review ran for this change.");
+    expect(comment?.body).toContain("Reviews are paused for this workspace.");
+    expect(comment?.body).not.toMatch(/overdue|reason|because/i);
+  });
+
+  // #281-T04
+  it("posts once for the whole backlog of the workspace", async () => {
+    const h = await start();
+    await limit(h, SUSPENDED);
+    await h.enqueueNew({ prNumber: 7 });
+    await h.enqueueNew({ prNumber: 8, headSha: sha("b") });
+
+    expect((await h.claim()).status).toBe(204);
+    await h.notices.settled();
+
+    expect(comments(h, 7)).toHaveLength(1);
+    expect(comments(h, 8)).toHaveLength(1);
+  });
+});
+
+describe("the link", () => {
+  // #281-T09
+  it("has none when the instance has no plan page", async () => {
+    const h = await start();
+    await limit(h, entitlements());
+
+    await refuse(h);
+
+    expect(comments(h)[0]?.body).not.toMatch(/https?:\/\//);
+  });
+
+  // #284-T01
+  it("posts the notice without a link when the link cannot be worked out", async () => {
+    const h = await start({
+      planPageUrl: () =>
+        Promise.reject(new Error("the settings could not be read")),
+    });
+    await limit(h, entitlements());
+
+    await refuse(h);
+
+    expect(comments(h)).toHaveLength(1);
+    expect(comments(h)[0]?.body).not.toMatch(/https?:\/\//);
+  });
+
+  it("points to the plan page of the workspace when the instance has one", async () => {
+    const h = await start({
+      planPageUrl: (slug) => `https://app.example/w/${slug}/settings/plan`,
+    });
+    await limit(h, entitlements());
+
+    await refuse(h);
+
+    expect(comments(h)[0]?.body).toMatch(
+      /\(https:\/\/app\.example\/w\/[a-z0-9-]+\/settings\/plan\)/,
+    );
+  });
+});
+
+describe("what gets no notice", () => {
+  // #281-T07
+  it("a closed pull request", async () => {
+    const h = await start();
+    await limit(h, entitlements());
+
+    await refuse(h, { prNumber: 9, headSha: sha("c") });
+    await refuse(h, { prNumber: 10, headSha: sha("d") });
+
+    expect(comments(h, 9)).toEqual([]);
+    expect(comments(h, 10)).toEqual([]);
+    expect(h.notices.lines).toEqual([]);
+  });
+
+  // #281-T07
+  it("a draft that the automatic review would skip, but a draft somebody asked a review for does", async () => {
+    const h = await start();
+    h.fake.addPullRequest(h.repository.fullName, {
+      number: 11,
+      title: "Work in progress",
+      state: "open",
+      draft: true,
+      headSha: sha("e"),
+      headRef: "wip",
+      baseRef: "main",
+      author: { login: "alice", id: 1001 },
+    });
+    await limit(h, entitlements());
+
+    await refuse(h, {
+      prNumber: 11,
+      headSha: sha("e"),
+      triggerKind: "webhook",
+    });
+    expect(comments(h, 11)).toEqual([]);
+
+    await refuse(h, { prNumber: 11, headSha: sha("f"), triggerKind: "manual" });
+    expect(comments(h, 11)).toHaveLength(1);
+  });
+
+  // #281-T10
+  it("an instance with no entitlements: nothing is refused and nothing is posted", async () => {
+    const h = await start();
+    const job = await h.enqueueNew();
+
+    const claimed = await h.claim();
+    await h.notices.settled();
+
+    expect(claimed.status).toBe(200);
+    expect((await h.queue.get(job.id))?.status).toBe("running");
+    expect(h.notices.refusals).toEqual([]);
+    expect(comments(h)).toEqual([]);
+  });
+
+  // #281-T10
+  it("a workspace that is under its limit", async () => {
+    const h = await start();
+    await limit(
+      h,
+      entitlements({
+        limits: {
+          diffRunsPerPeriod: 5,
+          dynamicRunsPerPeriod: null,
+          managedCostLimitMicroUsd: null,
+          ownKeyCostLimitMicroUsd: null,
+        },
+      }),
+    );
+    await h.enqueueNew();
+
+    expect((await h.claim()).status).toBe(200);
+    await h.notices.settled();
+
+    expect(comments(h)).toEqual([]);
+  });
+
+  it("the other refusals of the claim (entitlements that cannot be read)", async () => {
+    const h = await start();
+    await h.db
+      .insertInto("workspace_entitlements")
+      .values({
+        workspace_id: h.workspaceId,
+        plan_label: "plan",
+        key_mode: "own",
+        limits: "{ damaged",
+        period_start: PERIOD_1,
+        suspended: 0,
+        suspension_code: null,
+        updated_by: null,
+        updated_at: PERIOD_1,
+      })
+      .execute();
+
+    const job = await refuse(h);
+
+    expect(await h.queue.get(job.id)).toMatchObject({
+      errorCode: "entitlements_invalid",
+    });
+    expect(comments(h)).toEqual([]);
+  });
+});
+
+describe("when GitHub refuses the comment", () => {
+  // #281-T06
+  it.each([
+    ["403", { status: 403 }, "INTEGRATION_ACCESS_CONNECTION_SUSPENDED"],
+    ["404", { status: 404 }, "INTEGRATION_ACCESS_CONNECTION_GONE"],
+    ["500", { status: 500 }, "INTEGRATION_ACCESS_UNAVAILABLE"],
+  ] as const)(
+    "leaves the job as it was and logs one line with the code (%s)",
+    async (_name, failure, code) => {
+      const h = await start();
+      await limit(h, entitlements());
+      h.fake.fail({ pathIncludes: "/issues/7/comments", ...failure });
+
+      const job = await refuse(h);
+
+      expect(await h.queue.get(job.id)).toMatchObject({
+        status: "failed",
+        errorCode: "quota_exhausted",
+      });
+      expect(comments(h)).toEqual([]);
+      expect(h.notices.lines).toHaveLength(1);
+      expect(h.notices.lines[0]).toContain("REFUSAL_NOTICE_FAILED");
+      expect(h.notices.lines[0]).toContain(code);
+      // No title, name, token or body in the line.
+      expect(h.notices.lines[0]).not.toMatch(/acme|widgets|ghs_|No review ran/);
+    },
+  );
+
+  // #281-T06
+  it("leaves the job as it was when GitHub does not answer in time", async () => {
+    const h = await start({ githubRequestTimeoutMs: 300 });
+    await limit(h, entitlements());
+    h.fake.fail({ pathIncludes: "/issues/7/comments", hang: true });
+
+    const job = await refuse(h);
+
+    expect(await h.queue.get(job.id)).toMatchObject({
+      status: "failed",
+      errorCode: "quota_exhausted",
+    });
+    expect(h.notices.lines).toHaveLength(1);
+    expect(h.notices.lines[0]).toContain("INTEGRATION_ACCESS_UNAVAILABLE");
+  });
+
+  // #281-T06
+  it("does not try again at every push: it waits, and gives up after a few attempts", async () => {
+    const h = await start();
+    await limit(h, entitlements());
+    h.fake.fail({ pathIncludes: "/issues/7/comments", status: 403 });
+    // Every request about the comments of the pull request (a retry looks before it posts).
+    const posts = () =>
+      h.fake.requests().filter((r) => r.path.endsWith("/issues/7/comments"))
+        .length;
+    await refuse(h);
+    expect(posts()).toBe(1);
+
+    // Pushes within the wait make no request at GitHub for the comment.
+    await refuse(h, { headSha: sha("b") });
+    await refuse(h, { headSha: sha("c") });
+    expect(posts()).toBe(1);
+
+    // After the wait the next refusal tries once more; and so on, up to the attempts.
+    for (let attempt = 2; attempt <= MAX_ATTEMPTS; attempt += 1) {
+      h.clock.advance(RETRY_WAIT_MS * (attempt - 1) + MINUTE);
+      await refuse(h, {
+        headSha: sha(`${attempt}0`.slice(0, 1) === "2" ? "d" : "e"),
+      });
+      expect(posts()).toBe(attempt);
+    }
+    h.clock.advance(24 * 60 * MINUTE);
+    await refuse(h, { headSha: sha("f") });
+    expect(posts()).toBe(MAX_ATTEMPTS);
+    expect(
+      await createRefusalNoticesRepository(h.db, h.workspaceId).find({
+        repositoryId: h.repositoryId,
+        prNumber: 7,
+        periodStart: PERIOD_1,
+      }),
+    ).toMatchObject({ state: "pending", attempts: MAX_ATTEMPTS });
+  });
+
+  // #281-T06
+  it("is tried again by the sweep after the wait, and then posts once", async () => {
+    const h = await start();
+    await limit(h, entitlements());
+    h.fake.fail({ pathIncludes: "/issues/7/comments", status: 500, times: 1 });
+    await refuse(h);
+    expect(comments(h)).toEqual([]);
+
+    // Before the wait nothing is due.
+    expect(await h.notices.service().retryDue()).toEqual({ tried: 0 });
+    h.clock.advance(RETRY_WAIT_MS + MINUTE);
+
+    expect(await h.notices.service().retryDue()).toEqual({ tried: 1 });
+    expect(comments(h)).toHaveLength(1);
+    expect(await h.notices.service().retryDue()).toEqual({ tried: 0 });
+    expect(comments(h)).toHaveLength(1);
+  });
+
+  // #281-T08
+  it("does not post a second time when an attempt posted and stopped before it noted it", async () => {
+    const h = await start();
+    await limit(h, entitlements());
+    await refuse(h);
+    expect(comments(h)).toHaveLength(1);
+    // The first instance posted, then stopped before it marked the record: the record is pending again.
+    await h.db
+      .updateTable("refusal_notices")
+      .set({ state: "pending", posted_at: null, next_attempt_at: PERIOD_1 })
+      .execute();
+
+    expect(await h.notices.service().retryDue()).toEqual({ tried: 1 });
+
+    expect(comments(h)).toHaveLength(1);
+    expect(
+      await createRefusalNoticesRepository(h.db, h.workspaceId).find({
+        repositoryId: h.repositoryId,
+        prNumber: 7,
+        periodStart: PERIOD_1,
+      }),
+    ).toMatchObject({ state: "posted" });
+  });
+});
+
+describe("a notice that cannot be attempted when it is due again", () => {
+  /** Rows that wait for another attempt, made the way a failed first attempt leaves them. */
+  async function dueRows(h: RunnerApiHarness, prNumbers: number[]) {
+    const notices = createRefusalNoticesRepository(
+      h.db,
+      h.workspaceId,
+      h.clock.now,
+    );
+    for (const prNumber of prNumbers) {
+      await notices.begin(
+        { repositoryId: h.repositoryId, prNumber, periodStart: PERIOD_1 },
+        "quota_exhausted",
+        { leaseMs: MINUTE, maxAttempts: MAX_ATTEMPTS },
+      );
+      h.clock.advance(1000);
+    }
+    h.clock.advance(5 * MINUTE);
+    return notices;
+  }
+  const keyOf = (h: RunnerApiHarness, prNumber: number) => ({
+    repositoryId: h.repositoryId,
+    prNumber,
+    periodStart: PERIOD_1,
+  });
+  const UNREADABLE = Array.from({ length: 22 }, (_, index) => 101 + index);
+
+  // #281-P2
+  it("drops the ones whose pull request is gone, so a newer one is still posted", async () => {
+    const h = await start();
+    // 22 pull requests the fake does not know (404), then one that is there and newer.
+    const notices = await dueRows(h, [...UNREADABLE, 7]);
+
+    await h.notices.service().retryDue();
+    await h.notices.service().retryDue();
+
+    expect(comments(h, 7)).toHaveLength(1);
+    expect(await notices.find(keyOf(h, 101))).toMatchObject({
+      state: "dropped",
+    });
+    expect(await notices.find(keyOf(h, 7))).toMatchObject({ state: "posted" });
+  });
+
+  // #281-P2
+  it("counts an attempt for the ones GitHub cannot answer for now, so a newer one is still posted and none is read for ever", async () => {
+    const h = await start();
+    for (const prNumber of UNREADABLE)
+      h.fake.addPullRequest(h.repository.fullName, {
+        number: prNumber,
+        title: "Change",
+        state: "open",
+        headSha: sha("a"),
+        headRef: `feature/${prNumber}`,
+        baseRef: "main",
+        author: { login: "alice", id: 1001 },
+      });
+    // `/pulls/10x`, `/pulls/11x`, `/pulls/12x` fail; `/pulls/7` does not.
+    h.fake.fail({ pathIncludes: "/pulls/1", status: 500 });
+    const notices = await dueRows(h, [...UNREADABLE, 7]);
+    const reads = () =>
+      h.fake.requests().filter((r) => /\/pulls\/1\d\d$/.test(r.path)).length;
+
+    await h.notices.service().retryDue();
+    await h.notices.service().retryDue();
+
+    expect(comments(h, 7)).toHaveLength(1);
+    // They wait now (not due, not dropped) and were counted.
+    expect(await notices.find(keyOf(h, 101))).toMatchObject({
+      state: "pending",
+      attempts: 2,
+    });
+
+    // However many runs follow, no row is read more than the attempts allow.
+    for (let run = 0; run < 6; run += 1) {
+      h.clock.advance(60 * MINUTE);
+      await h.notices.service().retryDue();
+      await h.notices.service().retryDue();
+    }
+    expect(reads()).toBeLessThanOrEqual(UNREADABLE.length * MAX_ATTEMPTS);
+    expect(await notices.find(keyOf(h, 101))).toMatchObject({
+      state: "pending",
+      attempts: MAX_ATTEMPTS,
+    });
+  });
+
+  // #281-P2
+  it("drops a notice whose connection is no longer active", async () => {
+    const h = await start();
+    const notices = await dueRows(h, [7]);
+    await h.db
+      .updateTable("integrations")
+      .set({ status: "disabled" })
+      .execute();
+
+    expect(await h.notices.service().retryDue()).toEqual({ tried: 1 });
+
+    expect(await notices.find(keyOf(h, 7))).toMatchObject({ state: "dropped" });
+    expect(comments(h, 7)).toEqual([]);
+    expect(await h.notices.service().retryDue()).toEqual({ tried: 0 });
+  });
+});
+
+describe("two app instances", () => {
+  // #281-T08
+  it("post one comment when they refuse jobs of the same pull request at the same time", async () => {
+    const h = await start({ deliver: "manual" });
+    await limit(h, entitlements());
+    await h.enqueueNew();
+    expect((await h.claim()).status).toBe(204);
+    await h.enqueueNew({ headSha: sha("b") });
+    expect((await h.claim()).status).toBe(204);
+    const [first, second] = h.notices.refusals;
+    if (first === undefined || second === undefined)
+      throw new Error("expected two refusals");
+    const instances = [h.notices.another(), h.notices.another()];
+
+    await Promise.all([
+      instances[0]?.onRefused(first),
+      instances[1]?.onRefused(second),
+    ]);
+
+    expect(comments(h)).toHaveLength(1);
+  });
+});

@@ -2,6 +2,7 @@
 
 // What the runs pages say when a poll fails: the generic notice (the last data stays, the page keeps
 // trying), and the sentence for a failure that ends polling for good.
+import { NOT_AVAILABLE_TO_YOU } from "../../copy/messages.ts";
 import {
   TRANSPORT_FAILURE_COPY,
   describeTransportFailure,
@@ -25,7 +26,9 @@ export function describePollFailure(
   const sentence =
     code === "RUN_NOT_FOUND"
       ? RUN_GONE_TEXT
-      : (describeTransportFailure(code) ??
-        TRANSPORT_FAILURE_COPY.UNEXPECTED_RESPONSE);
+      : code === "not_found"
+        ? NOT_AVAILABLE_TO_YOU
+        : (describeTransportFailure(code) ??
+          TRANSPORT_FAILURE_COPY.UNEXPECTED_RESPONSE);
   return `${sentence}${STOPPED_SUFFIX}`;
 }

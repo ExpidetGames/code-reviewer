@@ -3,7 +3,7 @@
 // Where the webhook route hands a review trigger over. The route knows nothing about jobs: it
 // translates a delivery into a `ReviewTrigger` and calls the intake. The intake of the running app
 // is `createJobQueueReviewTriggerIntake` (job-queue-intake.ts), wired in `shared.ts`. The trigger
-// policy (drafts, settings, debounce, stale commits) is decided before the intake, by the handler
+// policy (drafts, settings, stale commits) is decided before the intake, by the handler
 // with `automatic-review-policy.ts`.
 import type {
   Integration,
@@ -17,12 +17,6 @@ export type ReviewTriggerSource = {
   deliveryId: string;
   /** `X-GitHub-Event`, for example "pull_request". */
   event: string;
-};
-
-/** What the policy decided about a trigger, beyond the trigger itself. */
-export type EnqueueOptions = {
-  /** The job is not handed to a runner before this moment (the debounce of a push). Default: now. */
-  runAfter?: Date;
 };
 
 export type ReviewTriggerIntake = {
@@ -51,7 +45,6 @@ export type ReviewTriggerIntake = {
     trigger: ReviewTrigger,
     integration: Integration,
     source: ReviewTriggerSource,
-    options?: EnqueueOptions,
   ): Promise<void>;
 
   /**

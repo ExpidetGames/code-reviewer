@@ -90,7 +90,7 @@ export type EnqueueJobInput = {
    * delivery id it arrives.
    */
   commentId?: string | null;
-  /** Defaults to now. A debounce is a later `runAfter`. */
+  /** Defaults to now. A later `runAfter` holds the job back (a job given back with a retry time). */
   runAfter?: Date;
 };
 
@@ -141,11 +141,25 @@ export const JOB_ERROR_CODES = [
   "dynamic_review_disabled",
   /** Cancelled because the job's command was removed from the product (#203). */
   "command_removed",
+  /** Failed because no Dispatcher took the job within the give-up time of a hosted deployment (#328). */
+  "dispatch_unavailable",
+  /** Failed at claim because an operator suspended the workspace's reviews (#277). */
+  "workspace_suspended",
+  /** Failed at claim because the workspace used up a limit of its period (#277; the log names which). */
+  "quota_exhausted",
+  /** Failed at claim because the workspace's entitlements could not be read; never treated as unlimited (#277). */
+  "entitlements_invalid",
 ] as const;
 export type JobErrorCode = (typeof JOB_ERROR_CODES)[number];
 
 export type HeartbeatResult =
   | { status: "ok"; job: Job }
+  /**
+   * #397: a newer push replaced this run. The claim is still valid for the drain window, so the holder can finish
+   * the model requests in flight and report what they cost; its lease is not extended. The holder must stop
+   * sending model requests and publish nothing.
+   */
+  | { status: "superseded"; job: Job }
   /**
    * The caller does not hold the job: its lease token is not the current one (the lease was lost and
    * the job requeued or handed on, even to the same runner id), the job is finished, or it ran past
@@ -160,6 +174,15 @@ export type CompleteResult =
   /** The job was completed before with a different outcome. */
   | { status: "outcome_conflict"; job: Job }
   | { status: "not_holder" };
+
+/** #320: what counting a fetch of the job details of a claim answered. */
+export type CountFetchResult =
+  /** One more fetch is counted; the Worker may go on. */
+  | "counted"
+  /** The claim holds, but its fetches are used up. */
+  | "exhausted"
+  /** The caller does not hold the job (any more). */
+  | "not_holder";
 
 export type CancelClaimedResult =
   { status: "cancelled"; job: Job } | { status: "not_holder" };
@@ -179,4 +202,16 @@ export type ReleaseResult =
  * runner id) can no longer heartbeat, complete or release it. It is deliberately not part of `Job`:
  * it is handed to the holder once and never listed or logged.
  */
-export type ClaimResult = { job: Job; leaseToken: string } | null;
+export type ClaimResult = {
+  job: Job;
+  /**
+   * What the queue fences the claim on. For a claim made with `workerCredential` this is the stored
+   * (hashed) form of the credential, never the credential itself.
+   */
+  leaseToken: string;
+  /**
+   * #320: the per-job credential of a claim made with `workerCredential`, shown here once so the
+   * claim response can hand it out. It is not stored anywhere: the database keeps only its hash.
+   */
+  credential?: string;
+} | null;

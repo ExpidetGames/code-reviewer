@@ -32,6 +32,13 @@ BODIES = (
     "CompleteRequest",
     "CompleteResponse",
     "ErrorResponse",
+    # #318: the Dispatcher API additions (the claim by a Dispatcher, release, version).
+    "SplitClaimResponse",
+    "ReleaseRequest",
+    "ReleaseResponse",
+    "VersionResponse",
+    # #364: the job state a Dispatcher reads to find the VMs of jobs that ended.
+    "JobStateResponse",
 )
 
 Document = dict[str, Any]
@@ -267,6 +274,76 @@ def test_a_failed_result_may_carry_the_link_of_a_review_that_was_posted_but_shor
     )
 
     assert _accepts("RunnerResult", result)
+
+
+# #273-T07
+def test_the_examples_of_a_failed_result_with_usage_are_valid() -> None:
+    schema: Document = _load(SCHEMA_PATH)
+    examples: list[Document] = schema["$defs"]["RunnerResult"]["examples"]
+
+    assert len(examples) >= 2
+    for example in examples:
+        assert example["ok"] is False
+        assert example["usage"]["aiCalls"] > 0
+        assert _accepts("RunnerResult", example)
+        assert _accepts("CompleteRequest", {**_example("CompleteRequest"), "result": example})
+    # One of them shows the unknown cost next to the counters.
+    assert {example["usage"]["costUsd"] is None for example in examples} == {True, False}
+
+
+# #273-T07: what the runner prints for a failed run that used the model is what the file says.
+@pytest.mark.parametrize("cost", [0.0042, None])
+def test_the_failed_result_the_runner_prints_after_a_model_call_is_valid(
+    cost: float | None,
+) -> None:
+    from code_reviewer_runner.result import ErrorCode, JobResult, Usage
+
+    result = JobResult(
+        ok=False,
+        duration_ms=1200,
+        comment_url=None,
+        error_code=ErrorCode.DYNAMIC_BUDGET_EXCEEDED,
+        log_tail="dynamic_budget_exceeded: the cost limit is used up",
+        usage=Usage(
+            model="vendor/model-name",
+            prompt_tokens=300,
+            completion_tokens=30,
+            total_tokens=330,
+            ai_calls=3,
+            fallback_used=False,
+            cost_usd=cost,
+        ),
+    )
+
+    assert _accepts("RunnerResult", result.to_json())
+
+
+# #274-T07: what the runner prints for a Diff run with its exact cost is what the file says.
+@pytest.mark.parametrize("cost", [0.6, 0.00037035, 0.0, None])
+def test_the_result_of_a_diff_run_with_its_exact_cost_is_valid(cost: float | None) -> None:
+    from decimal import Decimal
+
+    from code_reviewer_runner.result import JobResult, Usage
+
+    result = JobResult(
+        ok=True,
+        duration_ms=41200,
+        comment_url="https://github.com/octo/repo/pull/7#issuecomment-1",
+        error_code=None,
+        log_tail="",
+        usage=Usage(
+            model="openrouter/vendor/model-name",
+            prompt_tokens=3000,
+            completion_tokens=450,
+            total_tokens=3450,
+            ai_calls=3,
+            fallback_used=False,
+            cost_usd=None if cost is None else float(Decimal(repr(cost))),
+        ),
+    )
+
+    assert _accepts("RunnerResult", result.to_json())
+    assert result.to_json()["usage"]["costUsd"] == cost
 
 
 # #296-T10
@@ -738,3 +815,54 @@ def test_the_claim_request_may_advertise_that_the_runner_reads_model_capabilitie
     assert not _accepts("ClaimRequest", {"features": [1]})
     assert not _accepts("ClaimRequest", {"features": ["Bad Name"]})
     assert "features" in _example("ClaimRequest")
+
+
+# #396-T14: the feature a runner names to be superseded gracefully, the field of the heartbeat
+# answer and the code.
+def test_the_contract_knows_the_supersede_feature_the_heartbeat_field_and_the_result_code() -> None:
+    assert _accepts("ClaimRequest", {"engines": ["pr-agent"], "features": ["supersede"]})
+    heartbeat = _example("HeartbeatResponse")
+    assert _accepts("HeartbeatResponse", heartbeat)
+    superseded = {**heartbeat, "job": {**heartbeat["job"], "superseded": True}}
+    assert _accepts("HeartbeatResponse", superseded)
+    assert not _accepts(
+        "HeartbeatResponse", {**heartbeat, "job": {**heartbeat["job"], "superseded": 1}}
+    )
+    result = {**_example("CompleteRequest")["result"], "ok": False, "errorCode": "superseded"}
+    assert _accepts("RunnerResult", result)
+    from code_reviewer_runner.result import ErrorCode
+
+    assert ErrorCode.SUPERSEDED.value == "superseded"
+
+
+# #396-T14: the timing of a superseded run is stated once in the contract; the runner's constants
+# and the app's (a test there) are held equal to it.
+def test_the_supersede_timing_constants_equal_the_contract() -> None:
+    from code_reviewer_runner.job_loop import api
+    from code_reviewer_runner.job_loop.host import SUPERSEDED_DRAIN_SECONDS
+    from code_reviewer_runner.supersede_timing import (
+        CLAIM_SECONDS,
+        KILL_MARGIN_SECONDS,
+        LONGEST_MODEL_REQUEST_SECONDS,
+        MAX_HEARTBEAT_INTERVAL_SECONDS,
+        REPORT_GRACE_SECONDS,
+    )
+
+    timing = cast(dict[str, Any], _load(SCHEMA_PATH)["$defs"]["SupersedeTiming"]["properties"])
+    stated = {name: spec["const"] for name, spec in timing.items()}
+
+    assert stated == {
+        "maxHeartbeatIntervalSeconds": MAX_HEARTBEAT_INTERVAL_SECONDS,
+        "longestModelRequestSeconds": LONGEST_MODEL_REQUEST_SECONDS,
+        "workerDrainSeconds": SUPERSEDED_DRAIN_SECONDS,
+        "killMarginSeconds": KILL_MARGIN_SECONDS,
+        "claimSeconds": CLAIM_SECONDS,
+        "reportGraceSeconds": REPORT_GRACE_SECONDS,
+    }
+    # What the Worker really does: the heartbeat interval never exceeds the stated maximum, the
+    # drain is the longest request, and the claim holds a heartbeat, a drain and the margin.
+    assert api.MAX_HEARTBEAT_INTERVAL_SECONDS == MAX_HEARTBEAT_INTERVAL_SECONDS
+    assert SUPERSEDED_DRAIN_SECONDS == LONGEST_MODEL_REQUEST_SECONDS
+    assert CLAIM_SECONDS >= (
+        MAX_HEARTBEAT_INTERVAL_SECONDS + LONGEST_MODEL_REQUEST_SECONDS + KILL_MARGIN_SECONDS
+    )

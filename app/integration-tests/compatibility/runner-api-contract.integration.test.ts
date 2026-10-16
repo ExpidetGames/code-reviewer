@@ -431,6 +431,70 @@ describe("what the app accepts from a runner", () => {
     expect(parseCompleteRequest(examples.get("CompleteRequest")).ok).toBe(true);
   });
 
+  // #273-T07: the examples of a failed result with usage are valid, and the app reads them as the
+  // runner sends them.
+  it("accepts the examples of a failed result that carries the usage of its calls", () => {
+    const examples = readContract().$defs.RunnerResult?.examples as Record<
+      string,
+      unknown
+    >[];
+
+    expect(examples.length).toBeGreaterThanOrEqual(2);
+    for (const result of examples) {
+      expect(result.ok).toBe(false);
+      expect(contract.check("RunnerResult", result).valid).toBe(true);
+      const body = {
+        leaseToken: "6f1d2c9a-5b3e-4a77-9c0d-8e2f1a4b7c33",
+        result,
+      };
+      expect(contract.check("CompleteRequest", body).valid).toBe(true);
+      const parsed = parseCompleteRequest(body);
+      expect(parsed.ok).toBe(true);
+      if (parsed.ok) expect(parsed.value.result.usage).not.toBeNull();
+    }
+    expect(
+      new Set(
+        examples.map(
+          (result) => (result.usage as { costUsd: unknown }).costUsd === null,
+        ),
+      ),
+    ).toEqual(new Set([true, false]));
+  });
+
+  // #274-T07: the result of a Diff Review with its exact cost is valid in the schema and in the app,
+  // and the app reads the cost as the runner printed it.
+  it("accepts the exact cost of a Diff Review unchanged", () => {
+    for (const costUsd of [0.6, 0.00037035, 0, null]) {
+      const result = {
+        ok: true,
+        durationMs: 41200,
+        commentUrl: "https://github.com/octo/repo/pull/7#issuecomment-1",
+        errorCode: null,
+        logTail: "",
+        logTruncated: false,
+        usage: {
+          model: "openrouter/vendor/model-name",
+          promptTokens: 3000,
+          completionTokens: 450,
+          totalTokens: 3450,
+          aiCalls: 3,
+          fallbackUsed: false,
+          costUsd,
+        },
+      };
+      const body = {
+        leaseToken: "6f1d2c9a-5b3e-4a77-9c0d-8e2f1a4b7c33",
+        result,
+      };
+
+      expect(contract.check("RunnerResult", result).valid).toBe(true);
+      expect(contract.check("CompleteRequest", body).valid).toBe(true);
+      const parsed = parseCompleteRequest(body);
+      expect(parsed.ok).toBe(true);
+      if (parsed.ok) expect(parsed.value.result.usage?.costUsd).toBe(costUsd);
+    }
+  });
+
   // #195-T06: the claim request is judged exactly like the contract. An absent body is the
   // previous-release caller and means pr-agent only; an empty or unknown or duplicated engine list is
   // refused before any job is claimed.
@@ -457,6 +521,32 @@ describe("what the app accepts from a runner", () => {
       ["a feature that is no name", { features: [1] }],
       ["a feature with a bad name", { features: ["Bad Name"] }],
       ["too many features", { features: Array(17).fill("some_feature") }],
+      // #322-T12
+      [
+        "a job id and a cap",
+        {
+          engines: ["pr-agent"],
+          features: ["worker_credential"],
+          jobId: "0b9f6f4e-3c1a-4d9e-8f43-2a7d5e1c9b10",
+          maxRunning: 4,
+        },
+      ],
+      ["the lowest cap", { maxRunning: 1 }],
+      ["the highest cap", { maxRunning: 1000 }],
+      ["a cap of 0", { maxRunning: 0 }],
+      ["a negative cap", { maxRunning: -1 }],
+      ["a cap over 1000", { maxRunning: 1001 }],
+      ["a cap that is no integer", { maxRunning: 2.5 }],
+      ["a cap as text", { maxRunning: "4" }],
+      ["a null cap", { maxRunning: null }],
+      ["a job id that is no UUID", { jobId: "abc" }],
+      ["a job id with a path in it", { jobId: "../etc/passwd" }],
+      [
+        "a job id with a suffix",
+        { jobId: "0b9f6f4e-3c1a-4d9e-8f43-2a7d5e1c9b10x" },
+      ],
+      ["a job id as a number", { jobId: 7 }],
+      ["a null job id", { jobId: null }],
     ];
 
     for (const [name, body] of cases)

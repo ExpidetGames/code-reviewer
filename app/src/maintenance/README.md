@@ -8,7 +8,10 @@ used more than a week ago (a week, so that someone who holds a link and its pass
 (`job_claimed_keys`, `src/runner-api/claimed-keys.ts`) a week after the job finished, so a key that was rotated away
 does not stay in the database for ever. `startup.ts` runs it when the production server starts and then every hour, from
 `src/instrumentation.ts`, like the backup timer (no timer in other environments); a failing run is logged by its
-code and tried again at the next hour.
+code and tried again at the next hour. A serverless instance (`APP_RUNTIME=serverless`) runs no timer: the cron sweep of
+a hosted deployment (#328, `src/dispatch/README.md`) runs the same cleanup once when the hour has changed, so the work is
+the same and only the clock differs. It also removes the `job_dispatches` rows (#326) of jobs that finished a week ago
+(`JOB_DISPATCH_KEEP_MS`).
 
 ## Sign-ups that never verified
 

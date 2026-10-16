@@ -18,6 +18,11 @@
 //
 // Nothing in here logs or keeps a credential: the revealed access exists only as a local value that
 // is built as late as possible and dropped with the response.
+//
+// #320: a claim that names the feature `worker_credential` (a Dispatcher) runs steps 1 to 3 only and
+// answers with a per-job credential and no input. Step 4 (`buildJobInput`: the job's input, with the git
+// credentials and the model key) runs when the Worker fetches the job (`worker-fetch.ts`), by the same
+// code, so the Dispatcher never sees a secret of the job.
 import "server-only";
 import type { AttemptedShas } from "../db/repositories/jobs-repository.ts";
 import type { IntegrationsRepository } from "../db/repositories/integrations-repository.ts";
@@ -28,12 +33,14 @@ import type { IntegrationRegistry } from "../integrations/registry.ts";
 import type {
   GitAccess,
   GitPlatform,
+  Integration,
   IntegrationType,
   RepoRef,
   ReviewCommand,
 } from "../integrations/types.ts";
 import type { RunnerQueue } from "../jobs/runner-queue.ts";
 import type { ClaimResult, Job, JobErrorCode } from "../jobs/job-types.ts";
+import type { ResolvedEntitlements } from "../workspaces/entitlements.ts";
 import { revealLlmAccess, type LlmAccessResult } from "../llm/access.ts";
 import {
   MAX_LLM_CONTEXT_TOKENS,
@@ -45,7 +52,18 @@ import {
   type UsageKeyMode,
 } from "../usage/usage-records.ts";
 import { dynamicCapabilitiesOf } from "../llm/dynamic-capabilities.ts";
-import type { ModelCapabilityChecker } from "../llm/model-capabilities.ts";
+import type {
+  ModelCapabilityChecker,
+  ModelCapabilityResult,
+} from "../llm/model-capabilities.ts";
+import type { ModelTierSource } from "../model-tiers/service.ts";
+import {
+  clampMaxTokens,
+  DEFAULT_MODEL_TIER,
+  UNKNOWN_WINDOW_MAX_TOKENS,
+  type ModelTier,
+} from "../model-tiers/tiers.ts";
+import type { ProjectReviewKind } from "../review-settings/settings.ts";
 import type { ClaimedKeys } from "./claimed-keys.ts";
 import type { ClaimGuard } from "./claim-guard.ts";
 import {
@@ -57,11 +75,13 @@ import {
   type DynamicModelCapabilities,
   type DynamicReviewOptions,
   type RunnerJobInput,
+  type SplitClaimResponse,
 } from "./contract.ts";
 import type { RunnerEngine } from "../jobs/runner-capabilities.ts";
 import type { JobOptions, JobOptionsSource } from "./job-options.ts";
 import { describeError, type RunnerApiLogger } from "./logger.ts";
 import { errorResponse, jsonResponse, noContent } from "./responses.ts";
+import type { ClaimOptions } from "../db/repositories/runner-jobs-repository.ts";
 
 /**
  * The codes a job gets when it ends at claim time. Branch on these, not on messages. The queue's
@@ -86,6 +106,9 @@ export const CLAIM_FAILURE_CODES = [
   "dynamic_config_invalid",
   // #279: the provider's metadata says the model lacks tool calling or a required tool choice.
   "dynamic_model_features_unsupported",
+  // #280: the job runs on the operator's key and the operator configured no model for the project's tier and the
+  // job's review kind. Never a move to another tier or to the instance default model.
+  "managed_tier_unavailable",
 ] as const;
 
 /** Why a job is given back (the code becomes the job's error code if it was the last attempt). */
@@ -93,6 +116,10 @@ export const CLAIM_RELEASE_REASONS = [
   "git_access_unavailable",
   "pull_request_unavailable",
   "claim_failed",
+  // #320: the Dispatcher could not start the Worker (reported with the Worker API's result call).
+  "launch_failed",
+  // #375: the Worker's container ended with an error before it reported a result (the Dispatcher's release call).
+  "worker_exited",
 ] as const;
 
 /** When the platform does not say how long to wait. */
@@ -134,12 +161,28 @@ export type ClaimDeps = {
    */
   loadLlm: (workspaceId: string) => Promise<LlmAccessResult>;
   /**
+   * The effective entitlements of ONE workspace right now (`readEffectiveEntitlements`). The Worker's fetch asks
+   * for the standing of the workspace (suspended, unreadable) before it hands out a key, because the claim that
+   * admitted the job is behind it (#276).
+   */
+  entitlementsFor: (workspaceId: string) => Promise<ResolvedEntitlements>;
+  /**
    * Notes whose key the claimed job runs on in its usage record (src/usage/README.md). The claim reserved the
    * record already, as `own`; this corrects it once the access is resolved. A failure gives the job back.
    */
   recordKeyMode: (job: Job, keyMode: UsageKeyMode) => Promise<void>;
-  /** Where the key handed out with a claim is noted (encrypted, in the database), so a rotated key can still be masked. */
-  claimedKeys: Pick<ClaimedKeys, "remember">;
+  /**
+   * Notes the managed tier a job that runs on the operator's key was given in its usage record (#280): the name,
+   * never the model. The claim reserved the record already; a failure gives the job back.
+   */
+  recordModelTier: (job: Job, tier: ModelTier) => Promise<void>;
+  /** Which model backs a tier for a kind of review (#280): operator data, read when a managed job is claimed. */
+  modelTiers: ModelTierSource;
+  /**
+   * Where the key handed out with a claim is noted (encrypted, in the database), so a rotated key can still be masked,
+   * and the model of a managed tier (#280), so it can be masked in the result even if the operator changes the tier.
+   */
+  claimedKeys: Pick<ClaimedKeys, "remember" | "rememberModel">;
   /**
    * #279: where the metadata of a Dynamic job's model is read when its claim is built (the provider's
    * public endpoint metadata, cached for a short time). Left out, a claim reads none and a Dynamic job
@@ -151,19 +194,55 @@ export type ClaimDeps = {
   heartbeatIntervalSeconds: number;
 };
 
-type Prepared =
-  | { kind: "ready"; response: ClaimResponse }
+/** Why a job does not go on: it ends, it is cancelled, or it is given back to try again later. */
+export type Refusal =
   | { kind: "refused"; errorCode: string; detail?: string }
   | { kind: "cancelled"; errorCode: JobErrorCode }
   | { kind: "retry"; reason: string; retryAfterSeconds: number };
 
-function refuse(errorCode: string, detail?: string): Prepared {
+type Prepared =
+  | { kind: "ready"; response: ClaimResponse; tierModel: string | null }
+  /** #320: the claim of a Dispatcher: the credential and no input. */
+  | { kind: "split"; response: SplitClaimResponse }
+  | Refusal;
+
+/** What the checks of a job established; the input of the job is built from it. */
+export type Checked = {
+  kind: "checked";
+  llm: Extract<LlmAccessResult, { ok: true }>;
+  command: ReviewCommand;
+  options: JobOptions;
+  llmOptions: { model?: string; maxTokens?: number };
+  /** The Dynamic options of a Dynamic job; null for a Diff job. */
+  dynamic: DynamicReviewOptions | null;
+  integration: Integration;
+  repo: RepoRef;
+  prUrl: string;
+  baseRef: string;
+  /**
+   * #280: the tier and the operator's model for it, when the job runs on the operator's key; null otherwise. The model
+   * is already in `options` and `dynamic`; it is kept here so the claim can clamp the token budget to its window and
+   * remember it for masking.
+   */
+  tier: { name: ModelTier; model: string } | null;
+};
+
+/** What `buildJobInput` made: the input of the job and when its git token stops working. */
+export type Built = {
+  kind: "built";
+  input: RunnerJobInput;
+  tokenExpiresAt: string | null;
+  /** The operator's model of the tier the job runs at, or null; remembered for masking (#280). */
+  tierModel: string | null;
+};
+
+function refuse(errorCode: string, detail?: string): Refusal {
   return detail === undefined
     ? { kind: "refused", errorCode }
     : { kind: "refused", errorCode, detail };
 }
 
-function retryAfterOf(error: unknown): number {
+export function retryAfterOf(error: unknown): number {
   const seconds =
     error instanceof IntegrationError ? error.retryAfterSeconds : null;
   return Math.min(
@@ -215,6 +294,27 @@ function llmOptionsOf(
     chosen.maxTokens = maxTokens;
   }
   return chosen;
+}
+
+/**
+ * The options of a job on the operator's key (#280): the operator's model of the project's tier replaces the project's
+ * model (Diff) or Dynamic model, the workspace's fallback model is dropped, and the project's token budget stays (it is
+ * clamped to the model's window when the job's input is built). Everything else (the tool options, the Dynamic skill
+ * and limits) is the project's. What the workspace named never reaches the runner.
+ */
+function withTierModel(
+  options: JobOptions,
+  kind: ProjectReviewKind,
+  model: string,
+): JobOptions {
+  const maxTokens = options.llm?.maxTokens;
+  return {
+    env: options.env,
+    llm: { model, ...(maxTokens == null ? {} : { maxTokens }) },
+    ...(kind === "dynamic" && options.dynamic !== undefined
+      ? { dynamic: { ...options.dynamic, model } }
+      : {}),
+  };
 }
 
 /** `/review` takes no arguments; it is the only command a claim may hand out (#203). */
@@ -291,24 +391,23 @@ type ModelCapabilitiesDecision =
   | { kind: "unsupported" };
 
 /**
- * #279: what the provider's metadata says about the job's Dynamic model, read when the claim is built (a
- * short cache sits in front of the provider, so this is not a request per claim). Three outcomes:
+ * #279: what the provider's metadata says about the job's Dynamic model (`result`, read by the caller when the claim is
+ * built: a short cache sits in front of the provider, so this is not a request per claim). Three outcomes:
  *
- * - A model whose metadata says it cannot do what Dynamic Review needs ends the job, whatever runner
- *   claimed it, before any credential exists.
- * - Metadata that cannot be read (provider unreachable, model unknown to it, no usable window) sends
- *   nothing and the claim goes on: the runner falls back to its own descriptor, and nothing is invented.
- * - Otherwise the descriptor goes to a runner that advertised `dynamic_capabilities` and only to such a
- *   runner: the job input of a previous-release runner is closed and would refuse the key.
+ * - A model whose metadata says it cannot do what Dynamic Review needs ends the job, whatever runner claimed it, before
+ *   any credential exists.
+ * - Metadata that cannot be read (provider unreachable, model unknown to it, no usable window) sends nothing and the
+ *   claim goes on: the runner falls back to its own descriptor, and nothing is invented.
+ * - Otherwise the descriptor goes to a runner that advertised `dynamic_capabilities` and only to such a runner: the
+ *   job input of a previous-release runner is closed and would refuse the key.
  */
-async function modelCapabilitiesOf(
+function modelCapabilitiesOf(
   deps: ClaimDeps,
   job: Job,
-  model: string,
+  result: ModelCapabilityResult | undefined,
   features: readonly ClaimFeature[],
-): Promise<ModelCapabilitiesDecision> {
-  if (deps.modelCapabilities === undefined) return { kind: "none" };
-  const result = await deps.modelCapabilities.check(model);
+): ModelCapabilitiesDecision {
+  if (result === undefined) return { kind: "none" };
   if (result.outcome === "unsupported") return { kind: "unsupported" };
   const fallback = (why: string): ModelCapabilitiesDecision => {
     deps.logger.info(
@@ -324,14 +423,41 @@ async function modelCapabilitiesOf(
   return { kind: "send", capabilities };
 }
 
-async function prepare(
-  deps: ClaimDeps,
-  claimed: NonNullable<ClaimResult>,
-  engines: readonly RunnerEngine[],
-  features: readonly ClaimFeature[],
-): Promise<Prepared> {
-  const { job, leaseToken } = claimed;
+/** The context window of a model the provider's metadata states, or null (it was not read, or states none). */
+function contextWindowOf(
+  result: ModelCapabilityResult | undefined,
+): number | null {
+  if (result === undefined) return null;
+  return result.outcome === "supported" || result.outcome === "unsupported"
+    ? result.capabilities.contextLength
+    : null;
+}
 
+/** How `checkJob` is asked. */
+export type CheckOptions = {
+  /**
+   * The engines the claimant advertised. A Dynamic job needs `opencode`. `null` when that was already
+   * decided at claim (the Worker's fetch): the job is Dynamic because the claim allowed it.
+   */
+  engines: readonly RunnerEngine[] | null;
+  /**
+   * What a pull request that cannot be read means. At claim (false) every failure but "not found" gives
+   * the job back to try later, as it always did. At the Worker's fetch (true) a permanent failure of the
+   * connection (the installation was removed, the app is suspended, the scope was refused) ends the job
+   * with its stable code instead, like the same failure when the credentials are created.
+   */
+  classifyReadFailures: boolean;
+};
+
+/**
+ * Steps 1 to 3 of the module comment: the guard, the LLM access, the options of the job and the pull
+ * request. Nothing here creates or reveals a credential of the job.
+ */
+export async function checkJob(
+  deps: ClaimDeps,
+  job: Job,
+  { engines, classifyReadFailures }: CheckOptions,
+): Promise<Checked | Refusal> {
   const decision = await deps.guard.check(job);
   if (!decision.allow)
     return decision.outcome === "cancel"
@@ -357,7 +483,27 @@ async function prepare(
 
   const command = commandOf(job);
   if (command === null) return refuse("job_args_invalid");
-  const options = await deps.jobOptions.optionsFor(job);
+  // On the operator's own key the operator chooses the model, never the tenant (#276): the workspace chooses a tier
+  // (#280) and the model is the one the operator configured for that tier and this kind of review. The model and
+  // fallback model of the review settings stay stored without taking effect. A tier without a model fails the job
+  // closed: no silent move to another tier, and not to the instance's default model either. A workspace on its own
+  // key is untouched: its settings apply and the tier is ignored.
+  const stored = await deps.jobOptions.optionsFor(job);
+  let options = stored;
+  let tier: Checked["tier"] = null;
+  if (llm.source === "operator") {
+    const name = stored.modelTier ?? DEFAULT_MODEL_TIER;
+    await deps.recordModelTier(job, name);
+    const model = await deps.modelTiers.modelFor(name, job.reviewKind);
+    // The log names the tier and the kind, never a model.
+    if (model === null)
+      return refuse(
+        "managed_tier_unavailable",
+        `tier=${name} kind=${job.reviewKind}`,
+      );
+    tier = { name, model };
+    options = withTierModel(stored, job.reviewKind, model);
+  }
   if (Object.keys(options.env).some((key) => !RUNNER_ENV_KEY_PATTERN.test(key)))
     return refuse("job_env_invalid");
   const llmOptions = llmOptionsOf(options);
@@ -368,7 +514,7 @@ async function prepare(
   const dynamic =
     job.reviewKind === "dynamic" ? dynamicOptionsOf(options) : null;
   if (job.reviewKind === "dynamic") {
-    if (!engines.includes("opencode"))
+    if (engines !== null && !engines.includes("opencode"))
       return refuse("dynamic_engine_unavailable");
     if (dynamic === null) return refuse("dynamic_config_invalid");
   }
@@ -421,6 +567,13 @@ async function prepare(
     deps.logger.error(
       `[runner-api] job=${job.id} the pull request could not be read: ${describeError(error)}`,
     );
+    if (
+      classifyReadFailures &&
+      error instanceof IntegrationError &&
+      !error.retryable &&
+      error.code.startsWith("INTEGRATION_ACCESS_")
+    )
+      return refuse(accessFailureCode(error));
     return {
       kind: "retry",
       reason: "pull_request_unavailable",
@@ -428,23 +581,68 @@ async function prepare(
     };
   }
 
+  return {
+    kind: "checked",
+    llm,
+    command,
+    options,
+    llmOptions,
+    dynamic,
+    integration,
+    repo,
+    prUrl,
+    baseRef,
+    tier,
+  };
+}
+
+/**
+ * Step 4 of the module comment, the only place that creates credentials for a job: the model's
+ * capabilities (#279), the git credentials for exactly this repository, and the job's input with the
+ * key revealed. Both the legacy claim and the Worker's fetch call it. The revealed copy is a plain
+ * object that only lives until the response is built.
+ */
+export async function buildJobInput(
+  deps: ClaimDeps,
+  job: Job,
+  checked: Checked,
+  features: readonly ClaimFeature[],
+): Promise<Built | Refusal> {
+  const {
+    llm,
+    command,
+    options,
+    llmOptions,
+    dynamic,
+    integration,
+    repo,
+    tier,
+  } = checked;
+  const provider = deps.registry.resolve(integration.type);
+
   // #279: the model's capabilities. The read can wait on the provider, so it comes after every cheap
-  // local refusal above, and still before the git credentials are created.
+  // local refusal above, and still before the git credentials are created. A job on a managed tier (#280) reads
+  // its model's metadata too, Diff or Dynamic, for the context window its token budget is clamped to: one read
+  // serves both (a Dynamic job's model is the tier's).
+  const modelToRead = dynamic !== null ? dynamic.model : (tier?.model ?? null);
+  // The claim of a managed job asks as a claim (an outage costs one wait, not one per claim) and names the tier in the
+  // log line instead of the model.
+  const metadata =
+    modelToRead === null || deps.modelCapabilities === undefined
+      ? undefined
+      : await deps.modelCapabilities.check(
+          modelToRead,
+          tier === null ? {} : { forClaim: true, logAs: `tier=${tier.name}` },
+        );
   let capabilities: DynamicModelCapabilities | undefined;
   if (dynamic !== null) {
-    const decision = await modelCapabilitiesOf(
-      deps,
-      job,
-      dynamic.model,
-      features,
-    );
+    const decision = modelCapabilitiesOf(deps, job, metadata, features);
     if (decision.kind === "unsupported")
       return refuse("dynamic_model_features_unsupported");
     if (decision.kind === "send") capabilities = decision.capabilities;
   }
 
-  // The one place that creates credentials for a job. The revealed copy is a plain object that only
-  // lives until the response is built.
+  // The one place that creates credentials for a job.
   let git: GitAccess;
   try {
     git = revealGitAccess(await provider.jobAccess(integration, repo));
@@ -468,7 +666,19 @@ async function prepare(
   // The instance's model and context window are the defaults; the review settings of the project
   // replace them. The job never carries `fallbackModels`: the MVP has no fallback chain.
   const llmAccess = revealLlmAccess(llm.access);
-  const maxTokens = llmOptions.maxTokens ?? llmAccess.contextWindowTokens;
+  // The workspace's own key: its budget, else the instance's context window. A managed job: the workspace's budget
+  // (the instance's window belongs to another model), cut to the window of the tier's model when that is known
+  // (#280), else to the window last read for it, else to a documented bound: never sent unclamped. The workspace
+  // cannot know the model, so its settings are not checked against it.
+  const maxTokens =
+    tier === null
+      ? (llmOptions.maxTokens ?? llmAccess.contextWindowTokens)
+      : clampMaxTokens(
+          llmOptions.maxTokens ?? UNKNOWN_WINDOW_MAX_TOKENS,
+          contextWindowOf(metadata) ??
+            deps.modelCapabilities?.lastKnownContextLength?.(tier.model) ??
+            null,
+        );
   // #199: the head of the last successful Dynamic review of this pull request, so the dynamic job
   // can compare against it. A Diff job never carries a base, so it is not looked up.
   const previousReviewedSha =
@@ -484,7 +694,7 @@ async function prepare(
   const input: RunnerJobInput =
     dynamic === null
       ? {
-          prUrl,
+          prUrl: checked.prUrl,
           command,
           git: {
             provider: "github",
@@ -501,14 +711,14 @@ async function prepare(
           env: options.env,
         }
       : {
-          prUrl,
+          prUrl: checked.prUrl,
           command,
           reviewKind: "dynamic",
           dynamic:
             capabilities === undefined ? dynamic : { ...dynamic, capabilities },
           base: claimBaseOf(
             repo.fullName,
-            baseRef,
+            checked.baseRef,
             job.headSha,
             previousReviewedSha,
             attempted,
@@ -528,7 +738,56 @@ async function prepare(
           env: {},
         };
   return {
+    kind: "built",
+    input,
+    tokenExpiresAt: git.expiresAt,
+    tierModel: tier?.model ?? null,
+  };
+}
+
+async function prepare(
+  deps: ClaimDeps,
+  claimed: NonNullable<ClaimResult>,
+  engines: readonly RunnerEngine[],
+  features: readonly ClaimFeature[],
+  split: boolean,
+): Promise<Prepared> {
+  const { job, leaseToken } = claimed;
+  const checked = await checkJob(deps, job, {
+    engines,
+    classifyReadFailures: false,
+  });
+  if (checked.kind !== "checked") return checked;
+
+  // #320: a Dispatcher gets the per-job credential and nothing of the job's input; the Worker fetches
+  // that (and with it the git token and the model key) with the credential.
+  if (split) {
+    if (claimed.credential === undefined)
+      throw new Error(`Claim of job ${job.id} has no credential.`);
+    if (job.leaseExpiresAt === null)
+      throw new Error(`Claimed job ${job.id} has no lease expiry.`);
+    return {
+      kind: "split",
+      response: {
+        version: RUNNER_API_VERSION,
+        job: {
+          id: job.id,
+          credential: claimed.credential,
+          reviewKind: job.reviewKind,
+          leaseExpiresAt: job.leaseExpiresAt,
+          heartbeatIntervalSeconds: deps.heartbeatIntervalSeconds,
+        },
+      },
+    };
+  }
+
+  const built = await buildJobInput(deps, job, checked, features);
+  if (built.kind !== "built") return built;
+  if (job.leaseExpiresAt === null)
+    throw new Error(`Claimed job ${job.id} has no lease expiry.`);
+  return {
     kind: "ready",
+    tierModel: built.tierModel,
     response: {
       version: RUNNER_API_VERSION,
       job: {
@@ -536,21 +795,27 @@ async function prepare(
         leaseToken,
         leaseExpiresAt: job.leaseExpiresAt,
         heartbeatIntervalSeconds: deps.heartbeatIntervalSeconds,
-        tokenExpiresAt: git.expiresAt,
-        input,
+        tokenExpiresAt: built.tokenExpiresAt,
+        input: built.input,
       },
     },
   };
 }
 
+/**
+ * Who a job is ended for, as the log names it: the claim of a runner (`claim runner=a`, stage `claim`)
+ * or the fetch of a Worker (`fetch worker`, stage `fetch`, #320). Never a secret.
+ */
+export type Origin = { label: string; stage: "claim" | "fetch" };
+
 /** Ends a claimed job as failed with a code; the runner is not told. Throws if the queue fails. */
-async function endJob(
+export async function endJob(
   deps: ClaimDeps,
   claimed: NonNullable<ClaimResult>,
-  runnerId: string,
+  origin: Origin,
   errorCode: string,
   detail?: string,
-): Promise<void> {
+): Promise<"ended" | "not_holder"> {
   const result = await deps.queue.complete(claimed.job.id, claimed.leaseToken, {
     ok: false,
     errorCode,
@@ -558,13 +823,14 @@ async function endJob(
   if (result.status !== "completed") {
     // Not ours any more (the lease ran out in the meantime); whoever holds the job now decides.
     deps.logger.error(
-      `[runner-api] claim runner=${runnerId} job=${claimed.job.id} could not be ended at claim: ${result.status}`,
+      `[runner-api] ${origin.label} job=${claimed.job.id} could not be ended at ${origin.stage}: ${result.status}`,
     );
-    return;
+    return "not_holder";
   }
   deps.logger.info(
-    `[runner-api] claim runner=${runnerId} job=${claimed.job.id} ended at claim: ${errorCode}${detail === undefined || detail === "" ? "" : ` (${detail})`}`,
+    `[runner-api] ${origin.label} job=${claimed.job.id} ended at ${origin.stage}: ${errorCode}${detail === undefined || detail === "" ? "" : ` (${detail})`}`,
   );
+  return "ended";
 }
 
 /**
@@ -573,12 +839,12 @@ async function endJob(
  * touched; the other waiting jobs of the repository were cancelled by the deactivation. Throws if the
  * queue fails; the caller gives the job back.
  */
-async function cancelJob(
+export async function cancelJob(
   deps: ClaimDeps,
   claimed: NonNullable<ClaimResult>,
-  runnerId: string,
+  origin: Origin,
   errorCode: JobErrorCode,
-): Promise<void> {
+): Promise<"cancelled" | "not_holder"> {
   const result = await deps.queue.cancelClaimed(
     claimed.job.id,
     claimed.leaseToken,
@@ -587,17 +853,18 @@ async function cancelJob(
   if (result.status === "not_holder") {
     // Not ours any more (the lease ran out in the meantime); whoever holds the job now decides.
     deps.logger.error(
-      `[runner-api] claim runner=${runnerId} job=${claimed.job.id} could not be cancelled at claim: not_holder`,
+      `[runner-api] ${origin.label} job=${claimed.job.id} could not be cancelled at ${origin.stage}: not_holder`,
     );
-    return;
+    return "not_holder";
   }
   deps.logger.info(
-    `[runner-api] claim runner=${runnerId} job=${claimed.job.id} cancelled at claim: ${errorCode}`,
+    `[runner-api] ${origin.label} job=${claimed.job.id} cancelled at ${origin.stage}: ${errorCode}`,
   );
+  return "cancelled";
 }
 
 /** Gives the job back after an unexpected failure, so it is not stuck under a lease nobody uses. */
-async function giveBack(
+export async function giveBack(
   deps: ClaimDeps,
   claimed: NonNullable<ClaimResult>,
   reason: string,
@@ -622,21 +889,41 @@ export async function handleClaim(
   runnerId: string,
   engines: readonly RunnerEngine[],
   features: readonly ClaimFeature[] = [],
+  target: { jobId?: string; maxRunning?: number } = {},
 ): Promise<Response> {
+  // #320: a Dispatcher names `worker_credential` and gets a per-job credential instead of the input.
+  const split = features.includes("worker_credential");
+  const origin: Origin = { label: `claim runner=${runnerId}`, stage: "claim" };
   for (let refused = 0; refused < MAX_REFUSED_PER_REQUEST; refused += 1) {
-    const claimed = await deps.queue.claimNext(runnerId, engines);
+    // #322: `jobId` and `maxRunning` are passed to the queue only when the caller sent them, so the
+    // claim of a runner of the previous release makes exactly the call it made before.
+    const claimOptions: ClaimOptions = {
+      ...(split ? { workerCredential: true } : {}),
+      // #397: a Dispatcher is not the holder; its Worker says so with its job details request.
+      ...(!split && features.includes("supersede")
+        ? { acceptsSupersede: true }
+        : {}),
+      ...(target.jobId === undefined ? {} : { jobId: target.jobId }),
+      ...(target.maxRunning === undefined
+        ? {}
+        : { maxRunning: target.maxRunning }),
+    };
+    const claimed =
+      Object.keys(claimOptions).length > 0
+        ? await deps.queue.claimNext(runnerId, engines, claimOptions)
+        : await deps.queue.claimNext(runnerId, engines);
     if (claimed === null) return noContent();
 
     // Whatever goes wrong from here on, the job is given back instead of staying under a lease that
     // nobody uses (it would only run out after two minutes).
     try {
-      const prepared = await prepare(deps, claimed, engines, features);
+      const prepared = await prepare(deps, claimed, engines, features, split);
 
       if (prepared.kind === "refused") {
         await endJob(
           deps,
           claimed,
-          runnerId,
+          origin,
           prepared.errorCode,
           prepared.detail,
         );
@@ -644,7 +931,7 @@ export async function handleClaim(
       }
 
       if (prepared.kind === "cancelled") {
-        await cancelJob(deps, claimed, runnerId, prepared.errorCode);
+        await cancelJob(deps, claimed, origin, prepared.errorCode);
         continue;
       }
 
@@ -656,11 +943,19 @@ export async function handleClaim(
           new Date(deps.now().getTime() + prepared.retryAfterSeconds * 1000),
         );
         deps.logger.info(
-          `[runner-api] claim runner=${runnerId} job=${claimed.job.id} given back: ${prepared.reason}`,
+          `[runner-api] ${origin.label} job=${claimed.job.id} given back: ${prepared.reason}`,
         );
         return errorResponse(503, "RUNNER_GIT_ACCESS_UNAVAILABLE", {
           retryAfterSeconds: prepared.retryAfterSeconds,
         });
+      }
+
+      if (prepared.kind === "split") {
+        // The credential is in the response and nowhere else: not in the log line, not in the database.
+        deps.logger.info(
+          `[runner-api] ${origin.label} job=${claimed.job.id} command=${claimed.job.command} credential issued`,
+        );
+        return jsonResponse(200, prepared.response);
       }
 
       // Before the key leaves with the response: if it cannot be remembered, the job is given back (below)
@@ -669,13 +964,18 @@ export async function handleClaim(
         claimed.job.id,
         prepared.response.job.input.llm.apiKey,
       );
+      if (prepared.tierModel !== null)
+        await deps.claimedKeys.rememberModel(
+          claimed.job.id,
+          prepared.tierModel,
+        );
       deps.logger.info(
-        `[runner-api] claim runner=${runnerId} job=${claimed.job.id} command=${claimed.job.command}`,
+        `[runner-api] ${origin.label} job=${claimed.job.id} command=${claimed.job.command}`,
       );
       return jsonResponse(200, prepared.response);
     } catch (error) {
       deps.logger.error(
-        `[runner-api] claim runner=${runnerId} job=${claimed.job.id} failed: ${describeError(error)}`,
+        `[runner-api] ${origin.label} job=${claimed.job.id} failed: ${describeError(error)}`,
       );
       await giveBack(deps, claimed, "claim_failed");
       return errorResponse(500, "RUNNER_INTERNAL_ERROR");

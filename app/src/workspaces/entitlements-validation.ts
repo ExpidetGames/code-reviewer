@@ -18,6 +18,12 @@ export const ENTITLEMENT_ERROR_CODES = [
   "key_mode_invalid",
   "limits_invalid",
   "limit_invalid",
+  /**
+   * A managed cost limit next to the own key (#277): `managedCostLimitMicroUsd` only counts runs on the
+   * operator's key, so it would be stored and never read. Refused on a write; a stored entry of that shape
+   * still reads (the limit is ignored). The own key has a limit of its own, `ownKeyCostLimitMicroUsd` (#361).
+   */
+  "cost_limit_requires_managed_key",
   "period_start_invalid",
   "period_start_in_future",
   "period_start_backwards",
@@ -38,7 +44,9 @@ export const PERIOD_START_FUTURE_TOLERANCE_MS = 5 * 60 * 1000;
  * list. Writes still require every key (a caller states every limit explicitly). The three first limits are
  * not on the list: every entry has them.
  */
-export const LIMITS_ADDED_LATER: readonly LimitName[] = [];
+export const LIMITS_ADDED_LATER: readonly LimitName[] = [
+  "ownKeyCostLimitMicroUsd", // #361
+];
 
 const SUSPENSION_CODE_PATTERN = /^[a-z][a-z0-9_-]*$/;
 // What a label may not contain: control characters (C0, C1, DEL), formatting characters (zero width joiners,
@@ -167,6 +175,17 @@ function check(input: unknown, mode: CheckMode): EntitlementsValidation {
     return limits.field === undefined
       ? { ok: false, code: limits.code }
       : { ok: false, code: limits.code, field: limits.field };
+
+  if (
+    !mode.reading &&
+    input.keyMode === "own" &&
+    limits.value.managedCostLimitMicroUsd !== null
+  )
+    return {
+      ok: false,
+      code: "cost_limit_requires_managed_key",
+      field: "managedCostLimitMicroUsd",
+    };
 
   const periodStart = canonicalUtcTime(input.periodStart);
   if (periodStart === undefined)

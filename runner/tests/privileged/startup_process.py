@@ -9,10 +9,12 @@ and then reports what a loop in that state, its threads, a job process and the e
 still do. A test can then judge the report without trusting the process under test: the effect on
 the kernel is read back from `/proc` and from `nft` itself.
 
-    startup_process.py [--no-nft]
+    startup_process.py [--no-nft] [--fallback]
 
 `--no-nft` makes the nft tool unavailable to the startup step only, which is how a host without
-`nf_tables` looks to it.
+`nf_tables` looks to it. `--fallback` tells the startup step, through the `detect` seam it offers
+to tests, that the kernel has no `inet` table or no `reject` (#345): the `ip`-family rules and
+IPv6 switched off. Without it the step asks the real kernel, which CI hosts have complete.
 """
 
 import json
@@ -33,14 +35,19 @@ from privileged_support import (
 )
 
 from code_reviewer_runner.dynamic_review import netguard
+from code_reviewer_runner.dynamic_review.ipv6_off import ipv6_problem, verify_ipv6_off
 from code_reviewer_runner.dynamic_review.netguard import (
+    EgressMode,
     IsolationError,
+    table_family,
     table_name,
     verify_confinement,
 )
 from code_reviewer_runner.dynamic_review.static_isolation import (
+    EgressSetup,
     capability_sets,
     require_startup_capabilities_gone,
+    secure_startup,
 )
 from code_reviewer_runner.job_loop import service
 from code_reviewer_runner.job_loop.settings import settings_from_environment
@@ -80,12 +87,13 @@ def capabilities_of_a_thread() -> dict[str, int]:
     return found
 
 
-def nft_commands(nft: str) -> dict[str, int]:
+def nft_commands(nft: str, mode: EgressMode) -> dict[str, int]:
     """Whether the supervisor can still read or change the rules: every command must fail."""
+    family = table_family(mode)
     commands = {
         "list": ["list", "tables"],
-        "add": ["add", "table", "inet", "code_reviewer_probe"],
-        "delete": ["delete", "table", "inet", table_name(ENGINE_UID)],
+        "add": ["add", "table", family, "code_reviewer_probe"],
+        "delete": ["delete", "table", family, table_name(ENGINE_UID)],
         "flush": ["flush", "ruleset"],
     }
     return {
@@ -110,22 +118,29 @@ def main(argv: list[str]) -> int:
     nft = shutil.which("nft", path="/usr/sbin:/sbin:" + TRUSTED_PATH)
     assert nft is not None, "nft is not installed"
     settings = settings_from_environment(RUNNER_ENVIRONMENT)
+    startup = service.secure_startup
+    if "--fallback" in argv:
+        # The test seam of the startup step; the production entry point never passes it.
+        def startup(uid: int, ports: Any) -> EgressSetup:
+            return secure_startup(uid, ports, detect=lambda: EgressMode.FALLBACK)
+
     searched = netguard._NFT_PATH  # pyright: ignore[reportPrivateUsage]
     if "--no-nft" in argv:
         # Where the startup step looks for nft: nowhere. The tests' own nft calls are unaffected.
         netguard._NFT_PATH = "/nonexistent"  # pyright: ignore[reportPrivateUsage]
     try:
-        installed = service.prepare_dynamic_runtime(settings)
+        setup = service.prepare_dynamic_runtime(settings, startup=startup)
     finally:
         netguard._NFT_PATH = searched  # pyright: ignore[reportPrivateUsage]
     with slot_proxy():
         report = {
-            "installed": installed,
+            "installed": setup.rules_installed,
+            "mode": setup.mode.value,
             "loop": capability_sets(Path("/proc/self/status").read_text()),
             "thread": capabilities_of_a_thread(),
             "job_process": capabilities_of_a_child(None),
             "engine": capabilities_of_a_child((ENGINE_UID, ENGINE_GID)),
-            "nft": nft_commands(nft),
+            "nft": nft_commands(nft, setup.mode),
             "job_process_nft": json.loads(
                 subprocess.run(
                     [
@@ -145,6 +160,8 @@ def main(argv: list[str]) -> int:
             ),
             "capabilities_check": judged(require_startup_capabilities_gone),
             "probe": judged(lambda: verify_confinement(ENGINE_UID, ENGINE_GID, PROXY_PORT)),
+            "ipv6_problem": ipv6_problem(),
+            "ipv6_proof": judged(lambda: verify_ipv6_off(ENGINE_UID, ENGINE_GID)),
         }
     print(json.dumps(report))
     return 0

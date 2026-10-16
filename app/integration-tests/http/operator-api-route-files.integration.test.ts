@@ -43,7 +43,33 @@ async function loadRoutes() {
     (await import("../../src/app/api/operator/v1/entitlements/default/route.ts")) as unknown as Route;
   const rest =
     (await import("../../src/app/api/operator/v1/[...path]/route.ts")) as unknown as Route;
-  return { list, entitlements, defaults, rest };
+  const usage =
+    (await import("../../src/app/api/operator/v1/usage/route.ts")) as unknown as Route;
+  const unknownCost =
+    (await import("../../src/app/api/operator/v1/usage/unknown-cost/route.ts")) as unknown as Route;
+  const workspaceUsage =
+    (await import("../../src/app/api/operator/v1/workspaces/[id]/usage/route.ts")) as unknown as Route;
+  const usageSummary =
+    (await import("../../src/app/api/operator/v1/workspaces/[id]/usage/summary/route.ts")) as unknown as Route;
+  const planManagement =
+    (await import("../../src/app/api/operator/v1/plan-management/route.ts")) as unknown as Route;
+  const handoffRedeem =
+    (await import("../../src/app/api/operator/v1/handoff/redeem/route.ts")) as unknown as Route;
+  const modelTiers =
+    (await import("../../src/app/api/operator/v1/model-tiers/route.ts")) as unknown as Route;
+  return {
+    list,
+    entitlements,
+    defaults,
+    rest,
+    usage,
+    unknownCost,
+    workspaceUsage,
+    usageSummary,
+    planManagement,
+    handoffRedeem,
+    modelTiers,
+  };
 }
 
 function request(method: string, token?: string, body?: unknown): Request {
@@ -138,6 +164,7 @@ describe("the operator API route files while the API is on", () => {
         diffRunsPerPeriod: 10,
         dynamicRunsPerPeriod: null,
         managedCostLimitMicroUsd: null,
+        ownKeyCostLimitMicroUsd: null,
       },
       suspended: false,
       suspensionCode: null,
@@ -175,6 +202,140 @@ describe("the operator API route files while the API is on", () => {
     expect(wrong.status).toBe(401);
     expect(unknown.status).toBe(404);
     expect(await unknown.json()).toEqual({ version: 1, error: "not_found" });
+  });
+
+  // #280-T01
+  it("serve the model tiers through the real wiring, and the answer holds what was put", async () => {
+    vi.stubEnv("OPERATOR_API_TOKEN", TOKEN);
+    await startDatabase();
+    const routes = await loadRoutes();
+    vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const body = { tiers: { high: { diff: "vendor/high-diff" } } };
+
+    const put = (await routes.modelTiers.PUT(
+      request("PUT", TOKEN, body) as never,
+    )) as Response;
+    const get = (await routes.modelTiers.GET(
+      request("GET", TOKEN) as never,
+    )) as Response;
+    const wrong = (await routes.modelTiers.GET(
+      request("GET", "wrong") as never,
+    )) as Response;
+
+    expect(put.status).toBe(200);
+    expect(await get.json()).toMatchObject({
+      version: 1,
+      tiers: { high: { diff: "vendor/high-diff", dynamic: null } },
+    });
+    expect(wrong.status).toBe(401);
+  });
+
+  // #278-T07
+  it("serve the usage routes through the real wiring, and refuse a wrong token", async () => {
+    vi.stubEnv("OPERATOR_API_TOKEN", TOKEN);
+    const workspaceId = await startDatabase();
+    const routes = await loadRoutes();
+    const context = { params: Promise.resolve({ id: workspaceId }) };
+    const from = "2026-10-01T00:00:00.000Z";
+    const to = "2026-11-01T00:00:00.000Z";
+    const withQuery = (query: string, token: string) =>
+      new Request(`https://app.test/api/operator/v1/x?${query}`, {
+        method: "GET",
+        headers: { authorization: `Bearer ${token}` },
+      });
+
+    const feed = (await routes.usage.GET(
+      request("GET", TOKEN) as never,
+    )) as Response;
+    const mine = (await routes.workspaceUsage.GET(
+      request("GET", TOKEN) as never,
+      context as never,
+    )) as Response;
+    const summary = (await routes.usageSummary.GET(
+      withQuery(`from=${from}&to=${to}`, TOKEN) as never,
+      context as never,
+    )) as Response;
+    const wrong = (await routes.usage.GET(
+      request("GET", "wrong") as never,
+    )) as Response;
+
+    expect(feed.status).toBe(200);
+    expect(await feed.json()).toEqual({
+      version: 1,
+      items: [],
+      nextCursor: null,
+    });
+    expect(mine.status).toBe(200);
+    expect(await summary.json()).toMatchObject({ workspaceId, groups: [] });
+    expect(wrong.status).toBe(401);
+  });
+
+  // #385-T01
+  it("serve the count of unknown costs through the real wiring, and refuse a wrong token", async () => {
+    vi.stubEnv("OPERATOR_API_TOKEN", TOKEN);
+    await startDatabase();
+    const routes = await loadRoutes();
+    const query = "from=2026-10-01T00:00:00.000Z&to=2026-11-01T00:00:00.000Z";
+    const withQuery = (token: string) =>
+      new Request(
+        `https://app.test/api/operator/v1/usage/unknown-cost?${query}`,
+        {
+          method: "GET",
+          headers: { authorization: `Bearer ${token}` },
+        },
+      );
+
+    const counts = (await routes.unknownCost.GET(
+      withQuery(TOKEN) as never,
+    )) as Response;
+    const wrong = (await routes.unknownCost.GET(
+      withQuery("wrong") as never,
+    )) as Response;
+
+    // A fresh instance has nothing unknown to count: nothing is listed and nothing was written for it.
+    expect(counts.status).toBe(200);
+    expect(await counts.json()).toEqual({
+      version: 1,
+      from: "2026-10-01T00:00:00.000Z",
+      to: "2026-11-01T00:00:00.000Z",
+      counts: [],
+      nextAfter: null,
+    });
+    expect(wrong.status).toBe(401);
+  });
+
+  // #284-T09
+  it("serve the plan management setting and the redemption through the real wiring, and refuse a wrong token", async () => {
+    vi.stubEnv("OPERATOR_API_TOKEN", TOKEN);
+    await startDatabase();
+    const routes = await loadRoutes();
+    vi.spyOn(console, "info").mockImplementation(() => undefined);
+
+    const put = (await routes.planManagement.PUT(
+      request("PUT", TOKEN, { url: "https://plans.example/p" }) as never,
+    )) as Response;
+    const get = (await routes.planManagement.GET(
+      request("GET", TOKEN) as never,
+    )) as Response;
+    const redeem = (await routes.handoffRedeem.POST(
+      request("POST", TOKEN, { token: "a".repeat(43) }) as never,
+    )) as Response;
+    const wrong = (await routes.handoffRedeem.POST(
+      request("POST", "wrong", { token: "a".repeat(43) }) as never,
+    )) as Response;
+    const get405 = (await routes.handoffRedeem.GET(
+      request("GET", TOKEN) as never,
+    )) as Response;
+
+    expect(put.status).toBe(200);
+    expect(await get.json()).toEqual({
+      version: 1,
+      planManagementUrl: "https://plans.example/p",
+    });
+    expect(redeem.status).toBe(422);
+    expect(await redeem.json()).toEqual({ version: 1, error: "invalid_token" });
+    expect(wrong.status).toBe(401);
+    expect(get405.status).toBe(405);
   });
 
   // #275-T03

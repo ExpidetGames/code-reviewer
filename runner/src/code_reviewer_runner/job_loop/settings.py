@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from urllib.parse import urlsplit
 
 from code_reviewer_runner.capabilities import ENGINE_DIFF
-from code_reviewer_runner.dynamic_review.netguard import IsolationError
+from code_reviewer_runner.dynamic_review.netguard import EgressMode, IsolationError
 from code_reviewer_runner.dynamic_review.static_isolation import SlotPorts, slot_ports
 from code_reviewer_runner.dynamic_review.supervisor import (
     DEFAULT_ENGINE_ID,
@@ -87,6 +87,35 @@ class LoopSettings:
     # The fixed proxy and engine ports of the single Dynamic slot, set with `dynamic_engine_user`:
     # the engine user's nft rules are installed once at startup for exactly these (#244).
     dynamic_ports: SlotPorts | None = None
+    # Which ruleset confines the engine user, as the startup step found the kernel (#345). Set by
+    # the service after startup, never read from the environment; the loop hands it to the Dynamic
+    # job processes, which prove the matching properties again.
+    dynamic_egress_mode: EgressMode = EgressMode.FULL
+
+
+@dataclass(frozen=True)
+class WorkerSettings:
+    """What a Worker (`code-reviewer-worker --once`, #323) reads from its environment.
+
+    The same job-process settings as the loop, and none of its claiming: no token, no app URL (the
+    start document has the URL and the per-job credential), no slots, no polling.
+    """
+
+    job_timeout: float = DEFAULT_JOB_TIMEOUT_SECONDS
+    kill_margin: float = 10.0
+    terminate_grace: float = 5.0
+    backoff_max: float = 60.0
+    request_timeout: float = 30.0
+    complete_retry_window: float = 600.0
+    engines: tuple[str, ...] = (ENGINE_DIFF,)
+    dynamic_command: tuple[str, ...] | None = None
+    dynamic_ripgrep: str | None = None
+    job_command: tuple[str, ...] = field(default_factory=default_job_command)
+    diff_job_user: tuple[int, int] | None = None
+    dynamic_engine_user: tuple[int, int] | None = None
+    dynamic_ports: SlotPorts | None = None
+    # The ruleset startup installed (#345), as in `LoopSettings`: set after startup, not read.
+    dynamic_egress_mode: EgressMode = EgressMode.FULL
 
 
 def _number(
@@ -234,5 +263,24 @@ def settings_from_environment(environment: Mapping[str, str]) -> LoopSettings:
             DEFAULT_SHUTDOWN_GRACE_SECONDS,
             0,
             MAX_SHUTDOWN_GRACE_SECONDS,
+        ),
+    )
+
+
+def worker_settings_from_environment(environment: Mapping[str, str]) -> WorkerSettings:
+    """The Worker's settings: `RUNNER_JOB_TIMEOUT_SECONDS`, `PR_AGENT_COMMAND` (test stacks only),
+    `RUNNER_DIFF_JOB_USER` and the Dynamic slot's variables, exactly as the loop reads them."""
+    diff_job_user = _diff_job_user(environment)
+    return WorkerSettings(
+        job_command=_job_command(environment),
+        diff_job_user=diff_job_user,
+        dynamic_engine_user=_dynamic_engine_user(environment, diff_job_user),
+        dynamic_ports=_dynamic_ports(environment, diff_job_user),
+        job_timeout=_number(
+            environment,
+            "RUNNER_JOB_TIMEOUT_SECONDS",
+            DEFAULT_JOB_TIMEOUT_SECONDS,
+            1,
+            MAX_JOB_TIMEOUT_SECONDS,
         ),
     )

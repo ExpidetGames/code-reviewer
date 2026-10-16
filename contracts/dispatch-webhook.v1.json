@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ExpidetGames/code-reviewer/contracts/dispatch-webhook.v1.json",
+  "title": "Code Reviewer dispatch webhook, version 1",
+  "description": "The signed wake-up call of the Webhook-Trigger (#316, #318): after a job is enqueued the app sends POST <dispatch URL> to the Dispatcher, which then claims exactly that job (claim by job id is the idempotency point; a replay finds a job that is not due and gets 204). The body is DispatchWebhook: closed, at most 1 KiB, no secret and no repository data. Headers: Content-Type: application/json; X-Dispatch-Timestamp (Unix seconds, decimal); X-Dispatch-Id (the dispatchId of the body); X-Dispatch-Key-Id (which signing key, to rotate with a current and a previous key); X-Dispatch-Signature: 'v1=' followed by the lower case hexadecimal HMAC-SHA-256, keyed with the secret of that key id (UTF-8 text), over the UTF-8 text 'v1:{timestamp}:{dispatchId}:{rawBody}' where rawBody is the request body exactly as sent. The signing secret is distinct from every other secret. A receiver checks, in this order: content type and size; the headers' form (malformed); the timestamp within the tolerance of its own clock, 300 seconds either way (expired); the key id against its current and previous key (unknown_key); the signature in constant time (bad_signature); only then parses the body against DispatchWebhook (closed schema) and requires its dispatchId to equal the header. The verdicts and a vector for each are in dispatch-signing-vectors.json (DispatchSigningVectors). A receiver answers at once: 202 DispatchAccepted, 200 DispatchIgnored, 429 or 503 with Retry-After, and 401/400/413 with the runner API's ErrorResponse for what it refuses, the same for every kind of refusal. Both ends read this file: the app (app/integration-tests/compatibility), the runner (runner/tests/contract) and the Dispatcher project check its examples.",
+  "version": 1,
+  "$defs": {
+    "DispatchWebhook": {
+      "description": "The body of the wake-up call. Closed: an unknown field, such as a secret, a token, a credential, a signature or repository data, is refused. A sender never adds one and a receiver refuses a body that has one.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "type",
+        "jobId",
+        "reviewKind",
+        "attempt",
+        "dispatchId",
+        "sentAt"
+      ],
+      "properties": {
+        "version": { "const": 1 },
+        "type": { "const": "job.ready" },
+        "jobId": { "$ref": "runner-api.v1.json#/$defs/JobId" },
+        "reviewKind": { "$ref": "runner-api.v1.json#/$defs/ReviewKind" },
+        "attempt": {
+          "description": "The number of the attempt the job is on (1 for the first).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "dispatchId": {
+          "description": "The id of this call, new for every send of the same job (a UUID).",
+          "$ref": "runner-api.v1.json#/$defs/JobId"
+        },
+        "sentAt": { "$ref": "runner-api.v1.json#/$defs/Timestamp" }
+      }
+    },
+    "KnownDispatchIgnoredReason": {
+      "description": "Why a receiver answered 200 ignored. `not_claimable`: the claim of that job answered 204 (not due, running, finished, cancelled, superseded, or the pool cap is reached); the app resends after its acknowledgement timeout. `not_capable`: the receiver cannot run that review kind; the app stops resending that kind. A reader accepts any reason of the right form.",
+      "type": "string",
+      "enum": ["not_claimable", "not_capable"]
+    },
+    "DispatchAccepted": {
+      "description": "202 from the receiver: the wake-up call is verified and the claim goes on in the background.",
+      "type": "object",
+      "required": ["version", "status"],
+      "properties": {
+        "version": { "const": 1 },
+        "status": { "const": "accepted" }
+      }
+    },
+    "DispatchIgnored": {
+      "description": "200 from the receiver: verified, and there is nothing to start.",
+      "type": "object",
+      "required": ["version", "status", "reason"],
+      "properties": {
+        "version": { "const": 1 },
+        "status": { "const": "ignored" },
+        "reason": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$" }
+      }
+    },
+    "DispatchSigningVectors": {
+      "description": "The file dispatch-signing-vectors.json: signing keys of the example (dummy values), the tolerance, and requests as a receiver sees them with the verdict each must get. A consumer (the app's sender and the Dispatcher's receiver, in TypeScript, and the runner suite in Python) computes the verdict itself and compares. Header names are lower case.",
+      "type": "object",
+      "required": ["version", "toleranceSeconds", "keys", "vectors"],
+      "properties": {
+        "version": { "const": 1 },
+        "toleranceSeconds": { "type": "integer", "minimum": 1 },
+        "keys": {
+          "type": "object",
+          "required": ["current", "previous"],
+          "additionalProperties": false,
+          "properties": {
+            "current": { "$ref": "#/$defs/DispatchSigningKey" },
+            "previous": { "$ref": "#/$defs/DispatchSigningKey" }
+          }
+        },
+        "vectors": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "now", "headers", "body", "expected"],
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "now": {
+                "description": "The receiver's clock, Unix seconds.",
+                "type": "integer"
+              },
+              "headers": {
+                "type": "object",
+                "additionalProperties": { "type": "string" }
+              },
+              "body": {
+                "description": "The raw body exactly as received.",
+                "type": "string"
+              },
+              "expected": {
+                "type": "string",
+                "enum": ["ok", "malformed", "expired", "unknown_key", "bad_signature"]
+              }
+            }
+          }
+        }
+      }
+    },
+    "DispatchSigningKey": {
+      "description": "A signing key of the example. The secret is a dummy; a real one is at least 32 characters and unique to this purpose.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kid", "secret"],
+      "properties": {
+        "kid": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,31}$" },
+        "secret": { "type": "string", "minLength": 32 }
+      }
+    }
+  }
+}

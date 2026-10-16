@@ -4,14 +4,40 @@
 // real repositories, a recording logger, and a `call` that builds requests like an operator's client does.
 // `notFound` throws a marker, because in the running server it is Next.js's `notFound()`.
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
+import { createPlanHandoffRedeemRepository } from "../db/repositories/plan-handoff-redeem-repository.ts";
+import { createPlanHandoffTokensRepository } from "../db/repositories/plan-handoff-tokens-repository.ts";
+import { createUsageFeedRepository } from "../db/repositories/usage-feed-repository.ts";
+import { createUsageRecordsRepository } from "../db/repositories/usage-records-repository.ts";
 import { createWorkspaceEntitlementsRepository } from "../db/repositories/workspace-entitlements-repository.ts";
 import { createWorkspacesRepository } from "../db/repositories/workspaces-repository.ts";
+import type { ModelCapabilityChecker } from "../llm/model-capabilities.ts";
+import { createModelTiersService } from "../model-tiers/service.ts";
 import { createOperatorApi } from "../operator-api/api.ts";
 import type { OperatorRoute } from "../operator-api/contract.ts";
 import { createTestDatabase } from "./test-database.ts";
+import { createUsageSeeder } from "./usage-seed.ts";
 import { addWorkspace, defaultWorkspaceId } from "./workspaces.ts";
 
 export const TEST_OPERATOR_TOKEN = "test-operator-token-3b8e1d-6a40f2c97e15";
+
+/** A provider that vouches for every model: tool calling and tool choice, a 200k window. */
+const qualifyingModels: ModelCapabilityChecker = {
+  check: async () => ({
+    outcome: "supported",
+    capabilities: {
+      tools: true,
+      toolChoice: true,
+      toolChoiceRequired: true,
+      responseFormat: true,
+      structuredOutputs: true,
+      maxCompletionTokens: 8192,
+      smallestCompletionTokens: 8192,
+      contextLength: 200_000,
+      inputUsdPerMtok: null,
+      outputUsdPerMtok: null,
+    },
+  }),
+};
 
 export class NotFoundMarker extends Error {
   constructor() {
@@ -45,13 +71,42 @@ export function routeOf(path: string): OperatorRoute {
     rest[1] !== undefined
   )
     return { kind: "workspace-entitlements", workspaceId: rest[1] };
+  if (rest.length === 1 && rest[0] === "usage") return { kind: "usage" };
+  if (rest.length === 2 && rest[0] === "usage" && rest[1] === "unknown-cost")
+    return { kind: "usage-unknown-cost" };
+  if (
+    rest.length === 3 &&
+    rest[0] === "workspaces" &&
+    rest[2] === "usage" &&
+    rest[1] !== undefined
+  )
+    return { kind: "workspace-usage", workspaceId: rest[1] };
+  if (
+    rest.length === 4 &&
+    rest[0] === "workspaces" &&
+    rest[2] === "usage" &&
+    rest[3] === "summary" &&
+    rest[1] !== undefined
+  )
+    return { kind: "workspace-usage-summary", workspaceId: rest[1] };
   if (rest.length === 2 && rest[0] === "entitlements" && rest[1] === "default")
     return { kind: "default-entitlements" };
+  if (rest.length === 1 && rest[0] === "plan-management")
+    return { kind: "plan-management" };
+  if (rest.length === 1 && rest[0] === "model-tiers")
+    return { kind: "model-tiers" };
+  if (rest.length === 2 && rest[0] === "handoff" && rest[1] === "redeem")
+    return { kind: "handoff-redeem" };
   return { kind: "unknown" };
 }
 
 export async function startOperatorApiHarness(
-  options: { token?: string | undefined; now?: Date } = {},
+  options: {
+    token?: string | undefined;
+    now?: Date;
+    /** #280: what the provider's metadata says about a Dynamic model of a tier; default: every model qualifies. */
+    modelCapabilities?: ModelCapabilityChecker;
+  } = {},
 ) {
   const { db } = await createTestDatabase();
   const workspaceId = await defaultWorkspaceId(db);
@@ -65,6 +120,13 @@ export async function startOperatorApiHarness(
     entitlementsFor: (id) =>
       createWorkspaceEntitlementsRepository(db, id, () => now),
     settings: createInstanceSettingsRepository(db, () => now),
+    usageFeed: createUsageFeedRepository(db),
+    usageFor: (id) => createUsageRecordsRepository(db, id, () => now),
+    handoffs: createPlanHandoffRedeemRepository(db, () => now),
+    modelTiers: createModelTiersService({
+      settings: createInstanceSettingsRepository(db, () => now),
+      modelCapabilities: options.modelCapabilities ?? qualifyingModels,
+    }),
     now: () => now,
     logger: {
       info: (line) => lines.push(line),
@@ -112,6 +174,10 @@ export async function startOperatorApiHarness(
     lines,
     errors,
     api,
+    usage: createUsageSeeder(db),
+    /** The handoff tokens of a workspace, made the way the route makes them. */
+    handoffTokens: (id: string) =>
+      createPlanHandoffTokensRepository(db, id, () => now),
     setNow: (next: Date) => {
       now = next;
     },

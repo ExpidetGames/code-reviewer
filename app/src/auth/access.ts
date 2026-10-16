@@ -42,11 +42,18 @@ export const PUBLIC_PATHS: readonly PublicPath[] = [
   { path: "/invitation", match: "exact" },
   // The runner authenticates with its own shared token, not with a session.
   { path: "/api/runners", match: "prefix" },
+  // A Worker authenticates with the per-job credential of its claim (#320), not with a session.
+  { path: "/api/workers", match: "prefix" },
   // The operator API (#275) authenticates with its own bearer token, not with a session. Only the versioned
   // prefix: it answers 404 as a missing path until OPERATOR_API_TOKEN is set. Not under /api/admin.
   { path: "/api/operator/v1", match: "prefix" },
   // GitHub authenticates a webhook with its signature, not with a session.
   { path: "/api/webhooks", match: "prefix" },
+  // The platform's cron (serverless mode, vercel.json) authenticates with CRON_SECRET, not with a session;
+  // the route is a 404 on a server (src/cron/). One exact path per job: nothing below /api/internal is open.
+  { path: "/api/internal/repository-sync", match: "exact" },
+  // The same cron, once a minute: lapsed leases, resends, the give-up and the cleanup (#328).
+  { path: "/api/internal/dispatch-sweep", match: "exact" },
 ];
 
 /**

@@ -11,6 +11,7 @@ const NO_LIMITS = {
   diffRunsPerPeriod: null,
   dynamicRunsPerPeriod: null,
   managedCostLimitMicroUsd: null,
+  ownKeyCostLimitMicroUsd: null,
 };
 
 const WORKSPACE_ROW: EntitlementsData = {
@@ -20,6 +21,7 @@ const WORKSPACE_ROW: EntitlementsData = {
     diffRunsPerPeriod: 100,
     dynamicRunsPerPeriod: 10,
     managedCostLimitMicroUsd: 5_000_000,
+    ownKeyCostLimitMicroUsd: 2_000_000,
   },
   periodStart: "2026-10-01T00:00:00.000Z",
   suspended: false,
@@ -33,6 +35,7 @@ const DEFAULT: EntitlementsData = {
     diffRunsPerPeriod: 5,
     dynamicRunsPerPeriod: 0,
     managedCostLimitMicroUsd: null,
+    ownKeyCostLimitMicroUsd: null,
   },
   periodStart: "2026-09-01T00:00:00.000Z",
   suspended: true,

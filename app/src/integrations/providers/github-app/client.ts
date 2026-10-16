@@ -60,6 +60,15 @@ export type JobTokenScope = {
   permissions: InstallationPermissions;
 };
 
+/** A comment below a pull request, as far as the app needs it. */
+export type IssueComment = {
+  /** The comment id as text. */
+  id: string;
+  body: string;
+  /** The login of the author (`<slug>[bot]` for the app's own comments). */
+  authorLogin: string;
+};
+
 export type GithubAppClient = {
   /**
    * The app itself (`GET /app`, App JWT): proves that the key belongs to the app id, and says what the
@@ -97,6 +106,30 @@ export type GithubAppClient = {
     repoFullName: string,
     login: string,
   ): Promise<CollaboratorPermission>;
+  /**
+   * Comments below a pull request, all pages, read with a token of its own limited to `scope` (minted for
+   * this call and switched off after it). `since` (ISO 8601) asks GitHub only for the comments changed
+   * after it. Nothing here is a pull request's own text: the caller looks only at the author and a marker.
+   */
+  listIssueComments(
+    installationId: string,
+    scope: JobTokenScope,
+    repoFullName: string,
+    prNumber: number,
+    options?: { since?: string },
+  ): Promise<IssueComment[]>;
+  /**
+   * Writes a comment below a pull request as the app, with a token of its own limited to `scope` (minted
+   * for this call and switched off after it, also when the call fails). Rejects with the stable code of the
+   * answer (403 `GITHUB_APP_FORBIDDEN`, 404 `GITHUB_APP_NOT_FOUND`, ...); the body is never part of a message.
+   */
+  createIssueComment(
+    installationId: string,
+    scope: JobTokenScope,
+    repoFullName: string,
+    prNumber: number,
+    body: string,
+  ): Promise<{ id: string }>;
   /**
    * Mints a fresh installation access token, never from the cache, limited to the given repositories
    * and permissions. The one place a token for a job is created. Refuses (without a request) a scope
@@ -176,6 +209,19 @@ function toRepository(value: unknown, call: string): RemoteRepository {
     fullName: value.full_name,
     url: value.html_url,
   };
+}
+
+function toIssueComment(value: unknown): IssueComment {
+  const user = isRecord(value) ? value.user : undefined;
+  if (
+    !isRecord(value) ||
+    typeof value.id !== "number" ||
+    typeof value.body !== "string" ||
+    !isRecord(user) ||
+    typeof user.login !== "string"
+  )
+    throw shapeError("GET /repos/{owner}/{repo}/issues/{n}/comments");
+  return { id: String(value.id), body: value.body, authorLogin: user.login };
 }
 
 function checkInstallationId(installationId: string): void {
@@ -514,6 +560,23 @@ export function createGithubAppClient(
     }
   }
 
+  /**
+   * Runs a call with a token of its own, limited to `scope`, and switches the token off afterwards (best
+   * effort, also when the call failed): a notice is the only caller, so no token outlives the post.
+   */
+  async function withScopedToken<T>(
+    installationId: string,
+    scope: JobTokenScope,
+    run: (token: string) => Promise<T>,
+  ): Promise<T> {
+    const minted = await mint(installationId, scope);
+    try {
+      return await run(minted.token);
+    } finally {
+      await revokeInstallationToken(minted.token);
+    }
+  }
+
   return {
     async getApp() {
       const json = await request(appJwt(), "GET", "/app");
@@ -693,6 +756,52 @@ export function createGithubAppClient(
             return "none" as const;
           throw error;
         }
+      });
+    },
+
+    async listIssueComments(
+      installationId,
+      scope,
+      repoFullName,
+      prNumber,
+      options = {},
+    ) {
+      checkInstallationId(installationId);
+      checkPullRequestNumber(prNumber);
+      const since =
+        options.since === undefined
+          ? ""
+          : `?since=${encodeURIComponent(options.since)}`;
+      const path = `${repoPath(repoFullName)}/issues/${prNumber}/comments${since}`;
+      return withScopedToken(installationId, scope, (token) =>
+        allPages(
+          async () => token,
+          path,
+          (json) => {
+            if (!Array.isArray(json))
+              throw shapeError("GET /repos/{owner}/{repo}/issues/{n}/comments");
+            return json;
+          },
+          (item) => toIssueComment(item),
+        ),
+      );
+    },
+
+    async createIssueComment(
+      installationId,
+      scope,
+      repoFullName,
+      prNumber,
+      body,
+    ) {
+      checkInstallationId(installationId);
+      checkPullRequestNumber(prNumber);
+      const path = `${repoPath(repoFullName)}/issues/${prNumber}/comments`;
+      return withScopedToken(installationId, scope, async (token) => {
+        const json = await request(token, "POST", path, { body });
+        if (!isRecord(json) || typeof json.id !== "number")
+          throw shapeError("POST /repos/{owner}/{repo}/issues/{n}/comments");
+        return { id: String(json.id) };
       });
     },
 

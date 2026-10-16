@@ -25,6 +25,7 @@ export async function loadGlobalSettingsPage(deps: {
 export function GlobalSettingsPageContent({
   workspaceSlug,
   canEdit = true,
+  showPlan = false,
   data,
   api,
 }: {
@@ -32,11 +33,17 @@ export function GlobalSettingsPageContent({
   workspaceSlug: string;
   /** Whether the person may change the defaults (an Admin or an Owner). */
   canEdit?: boolean;
+  /** The workspace has entitlements (#282): the settings navigation lists the Plan page. */
+  showPlan?: boolean;
   data: GlobalSettingsPageData;
   api?: SettingsApi;
 }) {
   return (
-    <SettingsScreen workspaceSlug={workspaceSlug} current="review-defaults">
+    <SettingsScreen
+      workspaceSlug={workspaceSlug}
+      current="review-defaults"
+      showPlan={showPlan}
+    >
       <div className="flex flex-col gap-4">
         <p className="text-sm text-muted-foreground">
           Every project uses these unless it sets a value of its own on its

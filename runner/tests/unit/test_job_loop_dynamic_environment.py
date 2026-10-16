@@ -19,6 +19,7 @@ from code_reviewer_runner.capabilities import (
     ENGINES_VARIABLE,
     RIPGREP_PATH_VARIABLE,
 )
+from code_reviewer_runner.dynamic_review.netguard import EGRESS_MODE_VARIABLE, EgressMode
 
 COMMAND_VARIABLE = "RUNNER_OPENCODE_COMMAND"
 OPERATOR = {
@@ -100,6 +101,49 @@ def test_a_diff_job_process_gets_no_dynamic_variable() -> None:
         ]
         assert ENGINES_VARIABLE not in env and COMMAND_VARIABLE not in env
         assert RIPGREP_PATH_VARIABLE not in env
+        await harness.stop()
+
+    run(scenario)
+
+
+# #345-T10: the ruleset startup installed reaches the Dynamic job process, which proves its
+# properties again (IPv6 off in fallback mode).
+def test_a_dynamic_job_process_gets_the_egress_mode_startup_decided() -> None:
+    async def scenario() -> None:
+        for mode in EgressMode:
+            harness = Harness(
+                **USERS,
+                engines=ALL_ENGINES,
+                dynamic_command=("/usr/local/bin/opencode",),
+                dynamic_egress_mode=mode,
+                environment=OPERATOR,
+            )
+            harness.api.claims = [make_claim(1, **dynamic_document())]
+            await harness.start()
+
+            assert harness.launcher.processes[0].spec.env[EGRESS_MODE_VARIABLE] == mode.value
+            await harness.stop()
+
+    run(scenario)
+
+
+# #345-T11: the container's environment cannot pick the mode, the loop's finding is the only source
+# (and a Diff job process gets none).
+def test_the_egress_mode_in_the_container_environment_is_ignored_and_a_diff_job_gets_none() -> None:
+    async def scenario() -> None:
+        harness = Harness(
+            **USERS,
+            engines=ALL_ENGINES,
+            dynamic_command=("/usr/local/bin/opencode",),
+            dynamic_egress_mode=EgressMode.FULL,
+            environment={**OPERATOR, EGRESS_MODE_VARIABLE: "fallback"},
+        )
+        harness.api.claims = [make_claim(1, **dynamic_document()), make_claim(2)]
+        await harness.start()
+
+        dynamic, diff = (process.spec.env for process in harness.launcher.processes[:2])
+        assert dynamic[EGRESS_MODE_VARIABLE] == "full"
+        assert EGRESS_MODE_VARIABLE not in diff
         await harness.stop()
 
     run(scenario)

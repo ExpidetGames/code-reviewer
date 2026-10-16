@@ -29,10 +29,11 @@ import {
   validateEntitlements,
 } from "../../workspaces/entitlements-validation.ts";
 import type { StoredGithubApp } from "../../github-config/settings.ts";
+import type { ManagedModelTiers } from "../../model-tiers/tiers.ts";
 import type { ImportNotice } from "../../legacy-import/notice.ts";
 import type { SmtpSettings } from "../../mail/smtp-settings.ts";
 import type { Database } from "../schema.ts";
-import { voidRecordsOfEndedJobs } from "./usage-records-sweep.ts";
+import { closeRecordsOfEndedJobs } from "./usage-records-sweep.ts";
 
 /** The value of each setting, by key. A new setting adds its key and type here. */
 export type InstanceSettingValues = {
@@ -86,6 +87,19 @@ export type InstanceSettingValues = {
    * `validateEntitlements` refuses and a `periodStart` earlier than the stored one.
    */
   default_entitlements: EntitlementsData;
+  /**
+   * #284: the operator-configured page an Owner or Admin is handed over to ("Manage plan"; src/plan-handoff/): an
+   * absolute `https:` address, checked by `checkPlanManagementUrl` when it is saved and again when it is read. No row:
+   * there is no such page, no button and no route, and no refusal notice links to the plan page.
+   */
+  plan_management_url: string;
+  /**
+   * #280: which model backs each managed tier, per kind of review (src/model-tiers/): `{ low?: { diff?, dynamic? }, ... }`
+   * with OpenRouter model ids. **Operator data**: written through the operator API only, read by the claim of a job of a
+   * managed workspace; the ids are never shown to a workspace and not to the admin portal (it shows whether a tier is
+   * configured). No row: no tier is configured, and a managed job fails closed (`managed_tier_unavailable`).
+   */
+  managed_model_tiers: ManagedModelTiers;
 };
 export type InstanceSettingKey = keyof InstanceSettingValues;
 /**
@@ -168,7 +182,7 @@ export function createInstanceSettingsRepository(
         .where("status", "=", "queued")
         .execute();
       // A job that waited again after a lost lease keeps a reserved usage record; it no longer counts.
-      await voidRecordsOfEndedJobs(trx);
+      await closeRecordsOfEndedJobs(trx, timestamp);
       return result;
     };
     return db.isTransaction ? run(db) : db.transaction().execute(run);

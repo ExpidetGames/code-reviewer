@@ -6,6 +6,8 @@ Nothing here talks to a real network: the sentinels and the "model" are loopback
 tests own, and the Git objects are made locally by `fakes/dynamic_git`.
 """
 
+import contextlib
+import errno
 import json
 import os
 import shutil
@@ -26,8 +28,14 @@ from fakes.dynamic_git.fixtures import GitFixture, git
 
 from code_reviewer_runner.dynamic_findings import DynamicFindings
 from code_reviewer_runner.dynamic_review.checkout import PreparedContent, prepare_content
+from code_reviewer_runner.dynamic_review.ipv6_off import disable_ipv6
 from code_reviewer_runner.dynamic_review.limits import Budget, Limits
-from code_reviewer_runner.dynamic_review.netguard import NetworkConfinement, table_name
+from code_reviewer_runner.dynamic_review.netguard import (
+    EgressMode,
+    NetworkConfinement,
+    table_family,
+    table_name,
+)
 from code_reviewer_runner.dynamic_review.pr_context import PreparationContext, metadata_text
 from code_reviewer_runner.dynamic_review.publish import Published
 from code_reviewer_runner.dynamic_review.static_isolation import (
@@ -79,6 +87,34 @@ PRODUCTION_CAPABILITIES = {**JOB_CAPABILITIES, **STARTUP_CAPABILITIES}
 # of the job phase name them, and a job's model proxy and engine use them.
 PROXY_PORT = DEFAULT_PROXY_PORT
 ENGINE_PORT = DEFAULT_ENGINE_PORT
+
+
+# Which egress ruleset the job phase of this run is forced to (#345). Production decides it from the
+# kernel (`netguard.select_egress_mode`); the suite's fallback pass pretends the kernel has no
+# `inet` through the `detect` seam of the startup step (`job_phase.py`). This variable belongs to
+# the test harness: no module of the runner reads it (a unit test pins that).
+FORCE_FALLBACK_VARIABLE = "CR_PRIVILEGED_EGRESS_MODE"
+EGRESS_MODE = (
+    EgressMode.FALLBACK
+    if os.environ.get(FORCE_FALLBACK_VARIABLE) == "fallback"
+    else EgressMode.FULL
+)
+# What a refused connection looks like to the user: an immediate error from the reject, never a
+# timeout. How long it takes is not part of that: a SYN retransmit may add a second.
+REFUSED = {errno.EACCES, errno.ECONNREFUSED, errno.EHOSTUNREACH, errno.ENETUNREACH}
+
+
+def blocked(result: dict[str, Any], mode: EgressMode) -> bool:
+    """True when a connection attempt (from `connect_as`) did not get through, as the mode says.
+
+    The full ruleset refuses at once: the strict assertion, an errno of `REFUSED`, no timeout. The
+    fallback ruleset drops, so a timeout (no errno) is the expected outcome there as well.
+    """
+    if result["connected"]:
+        return False
+    if mode is EgressMode.FULL:
+        return result["errno"] in REFUSED
+    return result["errno"] is None or result["errno"] in REFUSED
 
 
 # The environment of the Dynamic runner's loop (compose.dynamic.yml) as far as startup reads it.
@@ -180,25 +216,63 @@ def slot_proxy() -> AbstractContextManager[int]:
     return listener(port=PROXY_PORT)
 
 
-@contextmanager
-def installed_rules(proxy_port: int, engine_port: int) -> Generator[None]:
-    """The engine user's rules for these ports, installed like the startup does, removed after.
+def _ipv6_settings() -> dict[Path, str]:
+    conf = Path("/proc/sys/net/ipv6/conf")
+    return {
+        entry / "disable_ipv6": (entry / "disable_ipv6").read_text()
+        for entry in conf.iterdir()
+        if (entry / "disable_ipv6").exists()
+    }
 
-    Needs NET_ADMIN, so only the startup phase of the suite can use it. The job phase has the
-    runner's own static rules and no way to touch them.
-    """
-    NetworkConfinement(ENGINE_UID).apply(proxy_port, engine_port)
+
+@contextmanager
+def ipv6_settings_restored() -> Generator[None]:
+    """Whatever a test does to the IPv6 settings of the namespace, they are as before afterwards."""
+    before = _ipv6_settings()
     try:
         yield
     finally:
-        nft = shutil.which("nft", path="/usr/sbin:/sbin:" + TRUSTED_PATH)
-        assert nft is not None
-        subprocess.run(
-            [nft, "delete", "table", "inet", table_name(ENGINE_UID)],
-            capture_output=True,
-            timeout=10,
-            check=False,
-        )
+        for path, value in before.items():
+            path.write_text(value)
+
+
+@contextmanager
+def ipv6_switched_off() -> Generator[None]:
+    """IPv6 off by the production step (`disable_ipv6`), the previous settings back afterwards."""
+    with ipv6_settings_restored():
+        disable_ipv6()
+        yield
+
+
+@contextmanager
+def installed_rules(
+    proxy_port: int, engine_port: int, mode: EgressMode = EgressMode.FULL
+) -> Generator[None]:
+    """The engine user's rules for these ports, installed like the startup does, removed after.
+
+    Needs NET_ADMIN, so only the startup phase of the suite can use it. The job phase has the
+    runner's own static rules and no way to touch them. The fallback rules do not see IPv6, so
+    that mode runs with IPv6 switched off, as the startup step leaves it.
+    """
+    with contextlib.ExitStack() as stack:
+        if mode is EgressMode.FALLBACK:
+            stack.enter_context(ipv6_switched_off())
+        NetworkConfinement(ENGINE_UID, mode=mode).apply(proxy_port, engine_port)
+        try:
+            yield
+        finally:
+            delete_rules(mode)
+
+
+def delete_rules(mode: EgressMode) -> None:
+    nft = shutil.which("nft", path="/usr/sbin:/sbin:" + TRUSTED_PATH)
+    assert nft is not None
+    subprocess.run(
+        [nft, "delete", "table", table_family(mode), table_name(ENGINE_UID)],
+        capture_output=True,
+        timeout=10,
+        check=False,
+    )
 
 
 def free_port() -> int:

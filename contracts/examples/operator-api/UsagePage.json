@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "items": [
+    {
+      "id": "8c1d6f3a-2b57-4e9d-a1c4-70e5b9d3f284",
+      "workspaceId": "7d1f3a52-9c1e-4b86-a0d2-5e3c8f1b4a60",
+      "jobId": "1f0a9b7c-3d52-4c68-8e14-b6a2d9c05e37",
+      "reviewKind": "dynamic",
+      "keyMode": "managed",
+      "modelTier": "standard",
+      "costMicroUsd": 12346,
+      "promptTokens": 18250,
+      "completionTokens": 930,
+      "settledAt": "2026-10-14T11:02:41.318Z",
+      "reason": null
+    },
+    {
+      "id": "a47e0b92-6c18-4d35-9f21-c3d8e5b1076a",
+      "workspaceId": "7d1f3a52-9c1e-4b86-a0d2-5e3c8f1b4a60",
+      "jobId": "5e2c7d18-9a43-4b60-b7f5-0d91c3a68e42",
+      "reviewKind": "diff",
+      "keyMode": "own",
+      "modelTier": null,
+      "costMicroUsd": null,
+      "promptTokens": null,
+      "completionTokens": null,
+      "settledAt": "2026-10-14T11:03:09.004Z",
+      "reason": null
+    }
+  ],
+  "nextCursor": "MXwyMDI2LTEwLTE0VDExOjAzOjA5LjAwNFp8YTQ3ZTBiOTItNmMxOC00ZDM1LTlmMjEtYzNkOGU1YjEwNzZh"
+}

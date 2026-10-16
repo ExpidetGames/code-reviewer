@@ -19,6 +19,7 @@ import { GlobalSettingsPageContent } from "../../review-settings/ui/global-setti
 import {
   builtInReviewSettings,
   type ReviewSettingField,
+  withoutModelFields,
 } from "../../review-settings/settings.ts";
 import {
   describeConfigStatus,
@@ -31,6 +32,12 @@ import { GeneralSettingsPageContent } from "./general-settings-page.tsx";
 
 afterEach(cleanup);
 
+const ALL_TIERS = {
+  low: { diff: true, dynamic: true },
+  medium: { diff: true, dynamic: true },
+  high: { diff: true, dynamic: true },
+};
+
 const BUILT_IN = builtInReviewSettings("anthropic/claude-haiku-5.5");
 const GLOBAL_DATA = {
   model: modelFromGlobalView({
@@ -40,6 +47,8 @@ const GLOBAL_DATA = {
       Object.keys(BUILT_IN).map((field) => [field, "built_in"]),
     ) as Record<ReviewSettingField, "built_in">,
     cost: estimateReviewCost(BUILT_IN),
+    modelManagedByInstance: false,
+    tierAvailability: null,
     builtIn: BUILT_IN,
     updatedAt: null,
     updatedBy: null,
@@ -124,5 +133,32 @@ describe("the workspace settings sub-pages", () => {
       expect(within(nav).getAllByRole("link")).toHaveLength(4);
       unmount();
     }
+  });
+});
+
+describe("the review defaults of a workspace that uses the instance's key (#283)", () => {
+  // #283-T01
+  it("shows the Quality choice instead of the model fields, and no model name", () => {
+    const readable = withoutModelFields(BUILT_IN);
+    render(
+      <GlobalSettingsPageContent
+        workspaceSlug="acme"
+        data={{
+          model: {
+            ...GLOBAL_DATA.model,
+            inherited: readable,
+            effective: readable,
+            cost: null,
+            managed: true,
+            tierAvailability: ALL_TIERS,
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getByRole("radiogroup", { name: "Quality" })).toBeTruthy();
+    expect(screen.queryByLabelText("Model")).toBeNull();
+    expect(screen.queryByLabelText("Fallback model")).toBeNull();
+    expect(document.body.innerHTML).not.toContain(BUILT_IN.model);
   });
 });

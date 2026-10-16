@@ -14,7 +14,8 @@ Code Reviewer wraps PR-Agent: it runs PR-Agent against pull requests and adds a 
 | `runner/` | Worker that runs PR-Agent: Python, uv |
 | `compose.yml` | The whole stack on one machine (app and runner), see "Run with Docker Compose" |
 | `compose.coolify.yml` | The same stack for Coolify (built from the repository, no published port) plus the Dynamic runner, see "Deploy on Coolify" |
-| `docs/` | Guides for operators: [`docs/deployment-coolify.md`](docs/deployment-coolify.md) (deploying on Coolify), [`docs/github-app.md`](docs/github-app.md) (creating and installing the team's GitHub App) |
+| `docs/` | Guides for operators: [`docs/deployment-coolify.md`](docs/deployment-coolify.md) (deploying on Coolify), [`docs/deployment-vercel.md`](docs/deployment-vercel.md) (the hosted deployment on Vercel), [`docs/dispatcher.md`](docs/dispatcher.md) (the Dispatcher and Worker vocabulary and interfaces), [`docs/github-app.md`](docs/github-app.md) (creating and installing the team's GitHub App) |
+| `dispatcher/` | The Dispatcher of the hosted deployment (TypeScript on Hono) and the golden snapshot pipeline, see [`dispatcher/README.md`](dispatcher/README.md) |
 | `docs/decisions/` | Architecture decision records, see [`docs/decisions/README.md`](docs/decisions/README.md) |
 | `fakes/` | Fake servers and fixtures used by the tests |
 | `TESTING.md` | Testing strategy |
@@ -337,6 +338,16 @@ comes from, the first-run setup with the setup code, storage and backups ([`app/
 updates and rollback, and a first-run checklist. Coolify builds the images from this repository with the
 Compose file `compose.coolify.yml`. `docker/smoke/instance.sh <base-url>` checks a running instance (health,
 login page, webhook and runner API refuse what they must).
+
+## Deploy on Vercel (hosted)
+
+[`docs/deployment-vercel.md`](docs/deployment-vercel.md) is the guide for the hosted deployment: the App as a
+serverless Vercel project, a Dispatcher (`dispatcher/`) as a second one, and every review job run by a short-lived
+Worker in a fresh Vercel Sandbox VM. It covers the architecture and the vocabulary ([`docs/dispatcher.md`](docs/dispatcher.md)),
+the prerequisites (an external Postgres with two roles, the GitHub environments), every environment variable of both
+projects and which must match, the ordered first deployment (migrate, App, setup code, golden snapshot, Dispatcher,
+canary, webhook mode, smoke test), operations (rebuilding the snapshot, rotating secrets, reading the error codes,
+rollback) and the known limits. Self-hosted installations (Docker Compose, Coolify) are not affected.
 
 ## Lint, typecheck, test
 

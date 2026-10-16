@@ -41,6 +41,8 @@ export type PullRequestDelivery = {
   title: string;
   /** The head commit of the pull request after the event. */
   headSha: string;
+  /** The `X-GitHub-Delivery` id; a new one for every call unless a journey sends the same delivery twice. */
+  deliveryId?: string;
 };
 
 /** The answer of the webhook route for an accepted delivery: `{ status: "accepted", outcome }`. */
@@ -89,7 +91,7 @@ export async function deliverPullRequestEvent(
     headers: {
       "content-type": "application/json",
       "x-github-event": "pull_request",
-      "x-github-delivery": randomUUID(),
+      "x-github-delivery": delivery.deliveryId ?? randomUUID(),
       "x-hub-signature-256": signWebhookBody(
         body,
         e2eEnv.githubAppWebhookSecret,

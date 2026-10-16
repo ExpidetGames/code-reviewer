@@ -228,6 +228,13 @@ export interface JobsTable {
    * when the job is requeued, kept on a finished job so that a repeated report is recognised.
    */
   lease_token: string | null;
+  /**
+   * How many times the Worker of the current claim fetched the job details (#320, at most 3). Reset by
+   * every claim, so it only counts for a claim made with a per-job credential. Not a `Job` field.
+   */
+  worker_fetches: ColumnType<number, number | undefined, number>;
+  /** #397: 1 when the holder of the claim understands that its run can be superseded (the feature `supersede`). */
+  accepts_supersede: ColumnType<number, number | undefined, number>;
   claimed_at: string | null;
   heartbeat_at: string | null;
   lease_expires_at: string | null;
@@ -266,6 +273,27 @@ export interface RateLimitsTable {
   /** ISO 8601 text in UTC: when the current window began. */
   window_started_at: string;
   count: number;
+}
+
+/** The setup code of a serverless deployment (src/db/repositories/setup-codes-repository.ts, src/setup/). At most one row. */
+export interface SetupCodesTable {
+  /** The id of this issuance of the code; the setup session is bound to it. */
+  id: string;
+  /** Always 1 and unique: the table cannot hold a second row, and the replacement is one upsert on it. */
+  slot: number;
+  /** Hex of a keyed hash (HMAC with a key derived from `APP_SECRET`) of the id and the code. */
+  code_hash: string;
+  /** ISO 8601 text in UTC. */
+  created_at: string;
+  /** ISO 8601 text in UTC. */
+  expires_at: string;
+  /** ISO 8601 text in UTC; set when the correct code was used. */
+  used_at: string | null;
+  /** Wrong attempts (counted before the comparison, so concurrent guesses cannot exceed the limit). */
+  failures: number;
+  /** ISO 8601 text in UTC: when the current rate limit window began. */
+  window_started_at: string | null;
+  attempts_in_window: number;
 }
 
 /** An encrypted credential of the instance (src/db/repositories/secrets-repository.ts, src/secrets/). */
@@ -318,7 +346,7 @@ export interface WorkspaceEntitlementsTable {
   plan_label: string;
   /** `own` or `managed` (KEY_MODES). */
   key_mode: string;
-  /** JSON text: `diffRunsPerPeriod`, `dynamicRunsPerPeriod`, `managedCostLimitMicroUsd`, each a count or null. */
+  /** JSON text: `diffRunsPerPeriod`, `dynamicRunsPerPeriod`, `managedCostLimitMicroUsd`, `ownKeyCostLimitMicroUsd` (#361; absent in an entry from before it), each a count or null. */
   limits: string;
   /** ISO 8601 text in UTC: usage counts from here. Never moves to an earlier time. */
   period_start: string;
@@ -358,6 +386,8 @@ export interface UsageRecordsTable {
   reserved_at: string;
   /** ISO 8601 text in UTC; only a settled record has it. */
   settled_at: string | null;
+  /** Why the record was settled without a report of its run (SETTLED_REASONS); null when the run reported. */
+  settled_reason: string | null;
 }
 
 /** The LLM key handed to a runner with the claim of a job, encrypted (src/runner-api/claimed-keys.ts). */
@@ -370,6 +400,73 @@ export interface JobClaimedKeysTable {
   key_version: number;
   /** ISO 8601 text in UTC. */
   created_at: string;
+}
+
+/** Where the signed wake-up call of a job stands (src/dispatch/README.md); only written in webhook mode. */
+export interface JobDispatchesTable {
+  job_id: string;
+  /** `pending`, `acked` or `stopped` (`DISPATCH_STATES`). */
+  state: string;
+  /** How many times the call was claimed for sending (0 while it never was). */
+  attempts: number;
+  /** Failed sends in a row; the schedule of the next wait. */
+  consecutive_failures: number;
+  /** ISO 8601 text in UTC: when the job is to be sent (again). While a send is in flight: when its claim ends. */
+  next_dispatch_at: string;
+  acked_at: string | null;
+  last_attempt_at: string | null;
+  /** The HTTP status of the last answer, null when there was none. */
+  last_status: number | null;
+  /** A name of `DISPATCH_RESULT_CODES`. */
+  last_code: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * The notice of a refused review that one pull request got in one period (#281). Unique by workspace, repository,
+ * pull request and period start: that is what keeps a second push from posting again.
+ */
+export interface RefusalNoticesTable {
+  id: string;
+  workspace_id: string;
+  repository_id: string;
+  pr_number: number;
+  /** The `period_start` of the entitlements the refusal was decided under (ISO 8601 text in UTC). */
+  period_start: string;
+  /** A NoticeCode: the refusal the notice is about (`quota_exhausted` or `workspace_suspended`). */
+  code: string;
+  /** `pending`, `posted` or `dropped` (`NOTICE_STATES`). */
+  state: string;
+  /** How many times a post was started; bounded by the code. */
+  attempts: number;
+  /** ISO 8601 text in UTC: when a post may be started again. While one is in flight: when its claim ends. */
+  next_attempt_at: string;
+  /** ISO 8601 text in UTC; only a posted notice has it. */
+  posted_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * A single-use token that hands an Owner or Admin over to the operator-configured plan page (#284,
+ * src/plan-handoff/). Only the hash of the token is kept.
+ */
+export interface PlanHandoffTokensTable {
+  /** SHA-256 of the token, hex. */
+  token_hash: string;
+  workspace_id: string;
+  user_id: string;
+  /** The role the person had when the token was made: `owner` or `admin`. */
+  role: string;
+  /** ISO 8601 text in UTC. */
+  created_at: string;
+  /** ISO 8601 text in UTC. */
+  expires_at: string;
+  /** ISO 8601 text in UTC, or null while the token is unused. */
+  used_at: string | null;
+  /** ISO 8601 text in UTC, or null; set when a newer token of the same person in the same workspace replaced it. */
+  revoked_at: string | null;
 }
 
 /** A single-use link to set a new password; only the hash of the token is kept (src/auth/password-reset.ts). */
@@ -521,11 +618,15 @@ export interface Database {
   app_settings: AppSettingsTable;
   instance_settings: InstanceSettingsTable;
   rate_limits: RateLimitsTable;
+  setup_codes: SetupCodesTable;
   secrets: SecretsTable;
   workspace_secrets: WorkspaceSecretsTable;
   workspace_entitlements: WorkspaceEntitlementsTable;
   usage_records: UsageRecordsTable;
   job_claimed_keys: JobClaimedKeysTable;
+  job_dispatches: JobDispatchesTable;
+  refusal_notices: RefusalNoticesTable;
+  plan_handoff_tokens: PlanHandoffTokensTable;
   password_reset_tokens: PasswordResetTokensTable;
   email_verification_tokens: EmailVerificationTokensTable;
   signed_states: SignedStatesTable;

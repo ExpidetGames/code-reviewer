@@ -78,6 +78,7 @@ app/src/ci
 app/vitest.config.mts
 app/playwright.config.ts
 app/playwright.dynamic.config.ts
+app/playwright.hosted.config.ts
 runner/tests
 runner/test-results
 

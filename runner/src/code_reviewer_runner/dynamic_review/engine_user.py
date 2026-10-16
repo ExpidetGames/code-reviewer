@@ -30,7 +30,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .netguard import IsolationError, verify_confinement
+from .ipv6_off import verify_ipv6_off
+from .netguard import EgressMode, IsolationError, verify_confinement
 from .static_isolation import (
     DEFAULT_ENGINE_PORT,
     DEFAULT_PROXY_PORT,
@@ -72,14 +73,22 @@ def user_pids(uid: int) -> list[int]:
     return found
 
 
-def sweep_user(uid: int, gid: int) -> bool:
+class SweepUnavailable(Exception):
+    """The sweep could not be made at all (no `python3`, the subprocess cannot start or hangs).
+
+    Not the same as a process that survived: that is a `False` of the sweep, this is no sweep.
+    """
+
+
+def try_sweep_user(uid: int, gid: int) -> bool:
     """Kill every process of user `uid`, wherever it went. True when none is left.
 
-    Needs the privilege to become that user (the supervisor and the job loop both are root).
+    Raises `SweepUnavailable` when the sweep could not be made. Needs the privilege to become that
+    user (the supervisor and the job loop both are root).
     """
     python = shutil.which("python3", path=_TRUSTED_PATH)
     if python is None:
-        return False
+        raise SweepUnavailable("python3 is not installed")
     for _ in range(_SWEEP_ROUNDS):
         if not user_pids(uid):
             return True
@@ -97,9 +106,17 @@ def sweep_user(uid: int, gid: int) -> bool:
                 env={"PATH": _TRUSTED_PATH},
             )
         except (OSError, subprocess.TimeoutExpired):
-            return False
+            raise SweepUnavailable("the sweep process could not run") from None
         time.sleep(0.02)
     return not user_pids(uid)
+
+
+def sweep_user(uid: int, gid: int) -> bool:
+    """`try_sweep_user` for callers that treat a sweep that could not be made as "not ended"."""
+    try:
+        return try_sweep_user(uid, gid)
+    except SweepUnavailable:
+        return False
 
 
 def listener_uids(port: int, tables: dict[str, str]) -> set[int]:
@@ -147,6 +164,9 @@ class EngineLaunch:
     # The ports of the single Dynamic slot, which the static network rules allow (#244).
     proxy_port: int = DEFAULT_PROXY_PORT
     engine_port: int = DEFAULT_ENGINE_PORT
+    # Which ruleset startup installed (#345); the fallback one does not see IPv6, so a job in that
+    # mode proves IPv6 off again before its engine starts.
+    egress_mode: EgressMode = EgressMode.FULL
     _verified: bool = field(default=False, init=False)
 
     # -- starting -------------------------------------------------------------
@@ -178,6 +198,8 @@ class EngineLaunch:
         after (`static_isolation.py`); nothing is installed per job. This checks that the ports in
         use are the ones the rules allow, that this process really holds neither `NET_ADMIN` nor
         `SETPCAP` and that the probe, run as the engine user, reaches the proxy and nothing else.
+        With the fallback ruleset (#345) it also proves that IPv6, which that ruleset does not
+        see, is off.
 
         The first call also ends whatever the user still runs: a job process that was killed
         without a chance to clean up (SIGKILL, an OOM kill) leaves its engine behind, and the
@@ -190,6 +212,8 @@ class EngineLaunch:
         require_startup_capabilities_gone()
         if not self._verified:
             verify_confinement(self.uid, self.gid, proxy_port)
+            if self.egress_mode is EgressMode.FALLBACK:
+                verify_ipv6_off(self.uid, self.gid)
             self._verified = True
 
     def owns_listener(self, port: int, *, tables: dict[str, str] | None = None) -> bool:
@@ -213,4 +237,12 @@ class EngineLaunch:
         return self.sweep()
 
 
-__all__ = ["EngineLaunch", "IsolationError", "listener_uids", "sweep_user", "user_pids"]
+__all__ = [
+    "EngineLaunch",
+    "IsolationError",
+    "SweepUnavailable",
+    "listener_uids",
+    "sweep_user",
+    "try_sweep_user",
+    "user_pids",
+]

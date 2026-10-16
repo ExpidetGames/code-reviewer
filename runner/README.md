@@ -43,7 +43,10 @@ fixed proxy port `RUNNER_DYNAMIC_PROXY_PORT`, default 10180, and the engine's ow
 from the bounding set and from its own sets: the container is created with them (`cap_add`), but the
 loop, every job process and the engine never hold them, so `nft` fails for all of them. If the drop
 cannot be confirmed the runner does not start; if the rules cannot be installed the capabilities are
-dropped anyway and every Dynamic job fails with `dynamic_isolation_self_check_failed`. Per job it (1)
+dropped anyway and every Dynamic job fails with `dynamic_isolation_self_check_failed`. The ruleset is
+the full one (`table inet`, `reject`) wherever the kernel supports it; on a kernel with only the
+nf_tables `ip` family the startup step installs an `ip` + `drop` fallback and switches IPv6 off, which
+the self-check proves (`ipv6_off.py`, reason `ipv6_not_disabled`; #345, `docs/dynamic-review.md`). Per job it (1)
 prepares and seals the read-only export for the dedicated engine user
 (`export_isolation.prepared_checkout`, which also leases that user and its group exclusively), (2)
 checks that its own process holds neither capability and proves the static rules with a probe run as
@@ -121,6 +124,93 @@ Rules (the CR-29 decisions; tests in `tests/unit/test_job_loop*.py` and `tests/i
 - The codes the loop adds to the ones of the table below: `runner_shutdown`. `timeout` and
   `runner_error` are also reported by the loop itself.
 
+### The Worker: `code-reviewer-worker --once` (#323)
+
+The hosted deployment (#316) runs every job in a Worker that knows nothing but the app URL, the job id and a
+**per-job credential**. `code-reviewer-worker --once` is that Worker: it reads one JSON document from **stdin**,
+`{"appUrl": "...", "jobId": "<uuid>", "credential": "crj_..."}` (never the arguments or the environment; other
+keys are ignored), fetches the job over the Worker API (`contracts/worker-api.v1.json`, `/api/workers/v1`), runs it
+through the same job host as the loop (`job_loop/host.py`: the same job process, heartbeats, hard timeout, lease check
+before the Dynamic summary, masking, delivery with retry and engine-user sweep), delivers the result and exits. The
+legacy loop (`code-reviewer-runner`, claiming with `RUNNER_TOKEN`) is unchanged and remains the default.
+
+| Exit | Meaning |
+|---|---|
+| 0 | the job succeeded, or it was given back to the queue (SIGTERM/SIGINT during the job: `runner_shutdown` is delivered, there is no grace period) |
+| 1 | the job failed, the app no longer held it (409 on a heartbeat: the process group is ended and nothing is delivered), or the result could not be delivered |
+| 2 | the Worker could not start the job; the log line names a stable code (`worker_input_invalid`, `worker_settings_invalid`, `worker_app_unsupported`, `worker_app_unreachable`, `worker_credential_invalid`, `worker_job_ended`, `worker_job_given_back`, `worker_fetch_refused`) |
+
+- **Settings** are the variables of the job process that the loop reads too (`RUNNER_JOB_TIMEOUT_SECONDS`,
+  `PR_AGENT_COMMAND` for test stacks, `RUNNER_DIFF_JOB_USER` and the Dynamic slot's variables), and the same
+  startup self-check decides whether `opencode` is advertised. There is no `RUNNER_TOKEN` and no `RUNNER_API_URL`.
+- **An app without the Worker API is refused** before anything is fetched or started: a `GET /api/runners/v1/version?jobId=<its job>` (the App accepts the job credential there only with the job id, #322)
+  that lists no `worker_api`, or a Worker API route that answers with something other than the contract's error body
+  (an app from before the hosted deployment), ends with `worker_app_unsupported`. The Worker holds the job credential,
+  not the dispatcher credential, so a `401` on `/version` is not a refusal; the details call decides.
+- **A Dynamic job whose engine is not advertised** is not started: `dynamic_engine_unavailable` is delivered.
+- **The fetch** is tried at most three times, the number the contract allows per claim (pauses of 1 and 2 seconds, at least the app's `Retry-After`). A
+  credential the app does not accept, a job the app ended, and a `503` that gave the job back are final.
+- **The credential** is in memory only. It is a secret of the masker from the first log line, so no log line or result
+  holds it, and it is never given to the job process: that gets the job (with the git token and the model key) on stdin
+  and a minimal environment, as in the loop. A usage error does not echo the arguments.
+
+### Entry modes of the image, the engines file and `worker-reap` (#324)
+
+One image, one entry point, four modes. `code-reviewer-runner [mode]` takes the mode as its argument; without one
+it takes `RUNNER_MODE`; without that it is `legacy`, so an installation that sets nothing starts the job loop as it
+always did. An unknown mode is a usage error (exit 2) that does not echo what was typed.
+
+| Mode | What it does |
+|---|---|
+| `legacy` (default) | The job loop above: claims with `RUNNER_TOKEN` and runs jobs itself. |
+| `worker-once` | One Worker (above): `{appUrl, jobId, credential}` on stdin, one job, exit code 0, 1 or 2. Same as `code-reviewer-worker --once`. |
+| `probe` | Runs the startup and prints one line of JSON, the verdict, then exits. No token, URL or credential is read. |
+| `dispatch` | The Dispatcher. This image carries no Dispatcher bundle yet (#334): the startup runs, then exit 2, `dispatcher_bundle_missing`. |
+
+**The startup is the same in every mode** and runs once, first thing in the container, before any thread, job process
+or (in `worker-once`) the start document exists: the engine user's network rules, the end of `NET_ADMIN` and
+`SETPCAP`, then the self-check that decides whether `opencode` is advertised (`job_loop/service.py`, `run_startup`).
+`worker-once`, `probe` and `code-reviewer-worker --once` also require the **read-only root filesystem** of the
+hardened container spec: on a writable root `opencode` is not advertised (`root_filesystem_writable`). The legacy
+loop does not ask for it, as before. A container that cannot drop `NET_ADMIN` (no `SETPCAP`) does not start in
+`legacy` and `worker-once` (exit 2) and answers `probe` with `capabilities_not_dropped`.
+
+**The verdict** (`probe`'s one line of stdout; logs go to stderr):
+
+```json
+{"version":1,"engines":["pr-agent","opencode"],"reasons":[]}
+```
+
+`engines` are the engines the container may advertise; when `opencode` is missing `reasons` holds the stable reason
+from the list of `docs/dynamic-review.md` ("Startup self-check"), for example `network_rules_not_installed` (no
+`NET_ADMIN` or `nft`), `capabilities_not_dropped`, `root_filesystem_writable` or `not_a_dynamic_runner`. It holds no
+other text and no value of the environment. The exit status says whether the probe ran, not whether the container
+passed: 0 with a verdict (also `pr-agent` only), 2 when the settings are unusable and there is no verdict. A launcher
+that wants `opencode` checks that it is in `engines`.
+
+**The engines file.** Every start writes the same verdict to `/run/code-reviewer-engines.json` so that a launcher
+inside the container (#334) reads the result of the init self-check instead of repeating it, which would need the
+capabilities that are gone. It is written only by root on a `/run` that is a tmpfs, with mode 0600 (the three tmpfs of
+the hardened container spec make it so), by a temporary file and a rename, so a link planted at the name is replaced
+and never followed. The file of an earlier start is removed before the startup runs: a start that fails leaves none.
+Not root: no file, and nothing is logged (the default runner is not root and has nothing to hide). A `/run` that is not a tmpfs, or a write that fails: no file, and the reason (`not_on_tmpfs`, `write_failed`) is logged as a warning. The file is
+an aid, never a gate.
+
+**`worker-reap`** ends what the engine user still runs. A launcher that kills a Worker from outside ends the group
+of the Worker itself, while it still holds the group's leader (never signal a group id that is no longer yours,
+`process_group.py`), then runs `worker-reap`: a `kill(-1, SIGKILL)` made as the engine user, the same sweep the Worker
+host makes after a Dynamic job. It takes no target (no pid, no group id: the part of the process-group rules that is
+a launcher's stays with the launcher), reads the same variables as the runner, needs the root supervisor and exits
+0 (nothing of the engine user runs, or the container has no engine user), 1 (a process survived) or 2 (the sweep could not be made: not root, unusable settings, no `python3`,
+`sweep_unavailable`).
+
+**Images.** `runner/Dockerfile` makes `runtime` (the default target, PR-Agent only), `dynamic` (self-hosted
+Dynamic) and `sandbox`, the Worker image of the hosted deployment. `sandbox` has exactly the Worker layers of
+`dynamic` (the shared stage `dynamic-worker`: the same pins, user layout and self-check) and no Dispatcher bundle:
+the Sandbox VM runs `worker-once` or `probe`, nothing else. The bundle of #334 is added to `dynamic` and `runtime`
+after that stage, never to it. Build: `docker build -f runner/Dockerfile --target sandbox -t code-reviewer-runner-sandbox .`
+(`make test-images` builds and smoke tests all three). Publishing it is #330.
+
 The sizing of a container (memory per process, default concurrency) is in
 `docs/spike/cr-13-measurements.md`.
 
@@ -174,11 +264,42 @@ a fallback model reports `usage.fallbackUsed`.
 The result is exactly one line of JSON on stdout: `ok`, `durationMs`, `commentUrl` (or `null`),
 `errorCode` (or `null`), `logTail` (redacted, at most 4 KB), `logTruncated` (true if the runner's log sink, which sees PR-Agent's records at INFO and above,
 held more than the tail shows; output on stdout and stderr is not counted) and `usage` (model, tokens, cost).
+A failed result carries `usage` too, when the run made at least one model call before it failed (a timeout at
+the end, an answer the validator refuses, a publish error, a lost lease, an error nobody expected); a run that
+failed before its first model call reports `null`. The cost follows the rule of a successful run: exact, or
+`null` when any call was unpriced (the token counters are reported either way), never zero for an unknown
+cost. A Dynamic run reads its ledger (`usage_probe.py`, also from the watchdog that ends a run that does not
+stop); a Diff run reports the tokens PR-Agent measured and the cost its meter measured ("Cost of a Diff run",
+below). Some ends report no usage although the model may have been
+used; the app then counts the run with an unknown cost (`settled`, reason `no_result`, `src/usage/README.md`)
+and never as void:
+- the Diff watchdog ends a command that blocks the event loop (`timeout`, `errorReason`
+  `no_result_from_process`) while the meter says a request was sent that the provider did not certainly
+  refuse (PR-Agent's own counters live in the blocked loop; the meter is lock guarded and safe to read from the
+  watchdog's thread, #363);
+- a Diff command fails (it raises, times out, or reports a failure) with no usage although a request was sent
+  that the provider did not certainly refuse: one still in flight, cut off, or an answer PR-Agent did not count
+  (`errorReason` `no_result_from_process`, #363; see "Cost of a Diff run", below);
+- the loop ends a job process at its hard timeout (`timeout`, reason `no_result_from_process`), the process
+  is killed by a signal, exits without a result line, or prints a result that disagrees with its exit code
+  (`runner_error`, the same reason);
+- a failed result carries a usage the loop cannot read (reason `unreadable_usage`);
+- the runner prints nothing at all and the lease runs out on the last attempt, the app's own hard limit ends the
+  job, or the runner is shut down on the last attempt (no `complete`, or `runner_shutdown`: the app decides).
+
+Not counted at all (void): a failure before the process started (the job could not be parsed or the process
+could not be launched), a Dynamic run that failed before its first model call, and a Diff command that failed
+before it sent any request or whose only requests the provider refused before generating anything (a bad key,
+a rate limit).
 The exit code is 0 for `ok` and 1 otherwise. The environment variable `RUNNER_JOB_TIMEOUT_SECONDS`
 (read from the process environment, not handed to PR-Agent) makes the runner stop the command and
 report `timeout`: first by cancelling it, and if it does not react (a call that blocks the process)
-three seconds later by printing the result and ending the process. The caller should still kill the
-process after its own deadline.
+three seconds later by printing the result and ending the process. Both are counted from the first line of
+`main()` of the job process, not from the start of the command (#387): the imports and the settings copy of a cold
+start take seconds, and a limit counted after them could land behind the three seconds of the
+process end. A start-up that used up the whole timeout ends with the clean `timeout` result and the
+command is never started; a Dynamic run gets the part of the timeout that is left as its deadline.
+The caller should still kill the process after its own deadline.
 
 ## Dynamic Review prompts (#198)
 
@@ -481,8 +602,72 @@ and the enum agree. Callers branch on the code, never on the text.
 | `dynamic_accounting_failed` | The Dynamic Review's model usage could not be established or accounted for |
 | `dynamic_model_features_unsupported` | The configured model does not support the tool calling or structured output Dynamic Review requires, or OpenRouter found no provider that supports every parameter of a request (404, #270); there is no fallback model or provider |
 | `lease_lost` | A Dynamic job was no longer held by this runner (lease lost, job cancelled) or could not be confirmed as held right before it would have written its summary; nothing was written (#260) |
+| `superseded` | A newer push replaced this run while it was running (#396): it finished the model requests in flight, sent no more, published nothing and reports what it used. Not a failure of the job ("A superseded run", below) |
 | `timeout` | The command did not finish within `RUNNER_JOB_TIMEOUT_SECONDS` (also reported by the job loop for a process it had to end) |
 | `unknown` | Something failed that no rule recognises |
+
+## A superseded run (#396)
+
+When a new push arrives while an automatic review is running, the app supersedes the running one. A runner or
+Worker that names the claim feature `supersede` (`CLAIM_FEATURES`, `WORKER_FEATURES`) is told through its
+heartbeat: `job.superseded: true`. The job host then sends the job process `SIGUSR1`, once, to the leader only and
+at once (see "The signal" below), keeps beating, and waits for the process to end by itself. The process
+(`supersede.py`):
+
+- **lets every model request in flight finish**, so its cost is measured: the Diff meter (`diff_cost.py`) and the
+  Dynamic ledger count it as they always do. The Dynamic path also keeps its model proxy up until those requests are
+  answered (`ProxyServer.stop(drain_seconds)`), and its watch ends the engine's turn at the signal instead of waiting
+  for the next request;
+- **refuses every further model request**: the Diff meter raises `SupersededError` before anything is sent, and the
+  Dynamic model proxy answers `403` with the code `superseded` (the engine ends; there is no retry);
+- **publishes nothing**: every write of PR-Agent's GitHub provider is a no-op from then on (`install_write_guard`,
+  installed last so it is outermost: comments, edits, labels, reactions, check runs and the "Failed to ..." notices;
+  `test_supersede_guard_complete.py` reads the provider and fails for a write method nobody guarded). The Dynamic path
+  checks before its summary, its finding reconciliation and the note of a failure, **and once more right before the one
+  write** (`Publisher.may_write`), and the lease check answers `superseded`;
+- **ends `superseded`** with the usage it measured (an exact cost when every call was priced, unknown otherwise). A
+  run that had published before it heard of it keeps its success. Whatever ended the run after the signal (a failure
+  note that found the run replaced, a crash, a kill), the result carries the code `superseded`, not the failure it
+  would have been.
+
+The host delivers that result (the same call as any result), ends `SUPERSEDED`, the Worker exits `0` and the Sandbox
+or container is torn down; the loop of a self-hosted runner goes on to its next job. A runner or Worker of an earlier
+release never names the feature, so the app never supersedes its jobs and nothing changes for it.
+
+### How long it takes (the drain model)
+
+```
+push --(next heartbeat, at most 60 s)--> the host knows and tells the process
+     --(the requests in flight finish, each within 120 s)--> the result is reported
+```
+
+The numbers are in one place on each side (`supersede_timing.py` here, `app/src/jobs/supersede-timing.ts` in the app)
+and in the contract (`SupersedeTiming` in `contracts/runner-api.v1.json`); a test on each side holds them equal. The
+app keeps the claim for 240 s (a heartbeat, the longest model request, a margin), so a result reported inside the
+drain always arrives while the claim holds. The host waits for the process at most `SUPERSEDED_DRAIN_SECONDS` (120,
+the longest model request: PR-Agent's `ai_timeout` and the proxy's timeout), but ends it `KILL_MARGIN_SECONDS` (20)
+before the lease that the heartbeat answer named (`job.leaseExpiresAt`: for a superseded run the app sets it once, at
+the push, to the end of the claim, 240 s later, and heartbeats do not extend it), so the result is reported inside the lease even when the push came late in the claim. A process that
+is still running then is ended by the host (its group, SIGTERM then SIGKILL) and its result is `superseded` with an
+unknown cost (`no_result_from_process`).
+
+### The signal
+
+The host starts the job process with `SIGUSR1` **blocked** (the mask is set around `Popen` in the host's thread and
+restored at once; it survives the `exec`). A signal that arrives before the process has installed its handler stays
+pending instead of ending the process, and `handling_the_signal` unblocks it after the handler exists. So the host does
+not guess an age for the process, and the signal is sent at the first superseded answer. If the signal cannot be sent
+(the process is gone), the host logs `SUPERSEDE_SIGNAL_NOT_SENT` and the drain bound still ends the process. The
+handler only sets a plain flag (`SupersedeSignal`), never a lock: an `Event` could deadlock a thread that held it when
+the signal came.
+
+### What "publishes nothing" can promise
+
+It is best effort at the last step. The Dynamic path re-checks right before the one GitHub call it makes, but the check
+and the call are not one atomic step: a signal that arrives in between does not stop that call, and a request that was
+already sent to GitHub cannot be taken back. The window is the length of one request to GitHub (milliseconds), against
+a run of minutes, and the next review replaces the summary. The Diff path is guarded at the provider method, which is
+the same window per write.
 
 ## The review comment size limit
 
@@ -561,6 +746,15 @@ How a job becomes PR-Agent configuration (`pr_agent_config.py`, `pr_agent_runtim
   `aws`, `vertexai` and every provider section PR-Agent reads a key or endpoint from). A unit test
   feeds a malicious file with all of these through PR-Agent's own merge function; another compares
   the provider sections with PR-Agent's own list, so a new provider after an upgrade is noticed.
+- **The review comment never names the model** (#280). PR-Agent can append the model to the comment it publishes:
+  `config.output_run_details` adds the "Agent run details" section with the model, and
+  `config.output_relevant_configurations` adds a `config` section with `model`, `model_weak` and `model_reasoning`.
+  Both are off by default, but a repository's `.pr_agent.toml` could switch them on. The model of a managed tier is
+  operator data that a workspace must not read, so the runner sets both to `false` for every job (all workspaces,
+  not only managed ones) and both are in `PROTECTED_SETTINGS`. Pinned by `tests/unit/test_repo_settings_guard.py`,
+  `tests/unit/test_pr_agent_config.py` and, with the real PR-Agent against the fake LLM and a repository file that
+  tries it, `tests/engine/test_engine_hostile_repo.py`. A review that listed the model in these sections before
+  loses them; nothing else in the comment changes.
   A job cannot set the options the runner pins itself (`PR_REVIEWER__FINAL_UPDATE_MESSAGE`,
   `PR_REVIEWER__ENABLE_REVIEW_LABELS_SECURITY` and `_EFFORT`): `invalid_job`.
 - **Where `.pr_agent.toml` comes from.** PR-Agent 0.47.0 reads it from the **default branch** of the
@@ -614,6 +808,85 @@ provider and expresses no preference, so it is no provider-specific routing (epi
   test double that added the address also sets `llm.requireParameters: true` (the wrapper
   `fakes/pr-agent/run_job_against_fake_llm.py` does; the field is refused without `baseUrl`, so no
   job for the real provider can switch the requirement off).
+
+## Cost of a Diff run (#274)
+
+`usage.costUsd` of a Diff run is exact in the same sense as that of a Dynamic run (#267): the sum, as
+decimals, of the charge the model provider **states** for every call (`usage.cost` of OpenRouter's
+answer), and `null` as soon as one call has no stated charge. The result carries a JSON number, so the value
+is the nearest double of that exact decimal sum (no more digits than a double holds). It is never derived
+from a price table, a per-token rate or the token counts, and an unknown cost is never zero. It applies to every Diff job, whoever
+pays for the key; the tokens and the number of calls stay PR-Agent's own measurement.
+
+**The decision (a spike inside #274).** PR-Agent calls the model itself through LiteLLM, and its own sum
+(`RunDetails.total_cost_usd`) is not usable: when an answer states no charge it prices the call from
+LiteLLM's table, which can be missing, stale or different from what was charged, and it counts only the calls
+PR-Agent accepted. Three ways to measure it were weighed:
+
+1. *Route PR-Agent through the loopback accounting proxy of the Dynamic Review.* Not chosen. The proxy exists
+   because the Dynamic engine is untrusted and must not hold the credential; PR-Agent already holds the job's
+   key in its own process, so a proxy would add a server, a per-job capability and a second place that holds
+   the credential, and it would read the very same `usage.cost` field.
+2. *Read the charge from LiteLLM's response object.* **Chosen.** LiteLLM passes OpenRouter's `usage.cost`
+   through, for a plain answer and for the last chunk of a stream (verified with LiteLLM 1.103.0), so the
+   figure is the provider's, the same one the proxy reads. Reading it needs no new network surface: the request
+   path, the destination, the key and `provider.require_parameters` (#270) are untouched.
+3. *Look up the generation record of each request id after the run.* Not chosen: one more call to OpenRouter
+   per request after the run, which may not be available yet, for a figure that is already in the answer.
+
+**How it works** (`diff_cost.py`). PR-Agent calls LiteLLM through one function, `acompletion` in its handler
+module; the runner wraps it for the length of the job (like the other patches, refused when the function is
+missing or not a coroutine function, undone afterwards) and sees every answer, also one PR-Agent throws away
+afterwards (an empty reply is billed). `config.output_run_cost` is `false`, so PR-Agent prices nothing and
+`total_cost_usd` is never read. That flag only controls PR-Agent's own pricing and the "Estimated API cost"
+line of the opt-in run-details section (`config.output_run_details`, which the runner now sets to `false`
+and pins, see below), and the default review comment is unchanged. The setting is pinned, so a repository
+settings file cannot switch it back on. The rules, pinned by `tests/unit/test_diff_cost_meter.py`,
+`tests/unit/test_runner.py` and `tests/engine/test_engine_cost.py`:
+
+| Case | Cost |
+|---|---|
+| Every call states a charge of zero or more | the exact decimal sum (a stated zero is a known zero) |
+| A call whose answer states none (no `usage`, no `cost`, a value that is not a finite number of zero or more), also a stream whose last chunk has none | `null`, tokens still reported |
+| `response_cost` (LiteLLM's own figure, usage or hidden parameters) | never read |
+| An answer PR-Agent rejects afterwards (empty content) and a fallback model answers | both answers are counted |
+| A request refused before any generation: status 429, 401, 402, 403, or request validation 400, 404, 422 (the statuses of `_REJECTED_BEFORE_GENERATION`), and a fallback model answers | the failed attempt states no usage and no charge and costs nothing; only the answers count |
+| Every other end: any 5xx, 408, a gateway timeout (504, 524), a status nobody knows, an exception without a status of the provider, a request that ended without an answer (timeout, lost connection, cancelled, a stream not read to its end) | `null`: it may have been billed and nobody can say. Some runs with a failed 5xx attempt therefore report `null`; unknown is the safe direction |
+| An HTTP 200 answer whose body is an error (LiteLLM raises a 5xx exception for it, with the `usage` it carries unread) | `null`, as every 5xx. LiteLLM raises the same exception for a body that says 429 as for a real 429, so such a body is read as a refusal: the meter cannot tell them apart |
+| A call that carries a retry count (`num_retries`, `max_retries`, not zero) | never counted, the cost stays `null`: LiteLLM may send several requests inside one call and only the last answer would be seen. The runner pins `config.num_retries` to 0 (a repository settings file cannot change it), so PR-Agent's own attempts, each passing the meter, are the only retries |
+| A stated charge above 1000 USD for one call, or a sum above 100000 USD for a run | `null`: no provider states such a figure, and a huge value must not become an infinite number in the result |
+| A call PR-Agent counted that did not go through the wrapped function | `null` |
+| Several calls at once (a chunked review) | all counted |
+| No answer at all | `null` (not zero) |
+
+A Diff run that fails reports the same cost rule after its calls (#273): a call still in flight when the run
+ends makes the cost `null`, which also closes the case of a partly priced sum reported as exact.
+
+**A Diff run that fails while a request is in flight (#363).** PR-Agent counts only the calls that came back
+(`num_ai_calls`), so a command that raises, reports a failure or times out while its first request is still in
+flight, or whose request the provider accepted and then failed, has no usage. The model may still have worked on
+it. The meter already knows which requests are open, so the runner reads that instead of counting on its own
+(`DiffCostMeter.may_have_used_the_model`): true when a request is in flight, was cut off or cancelled, ended with
+anything but a refusal before generation, or came back (also an answer PR-Agent threw away). A failed Diff result
+that has no usage and for which the meter says so carries `errorReason` `no_result_from_process`, the reason the app
+already counts as `settled` / `no_result` with unknown cost and tokens (never `void`, never zero). The contract
+does not change: the signal is the existing optional `errorReason`.
+
+| Failed Diff run | Result |
+|---|---|
+| A request is in flight (the command raised, reported a failure or timed out), or an answer came back that PR-Agent did not count | no `usage`, `errorReason` `no_result_from_process` |
+| A call came back and another request is in flight | `usage` with the tokens PR-Agent counted and `costUsd` `null`; no reason (the usage settles the run) |
+| No request was sent, or the only requests were refused before generation (429, 401, 402, 403, 400, 404, 422) | no `usage`, no reason: the app voids the run |
+| Success | unchanged, never a reason |
+
+The watchdog that ends a command blocking the event loop reads the same meter (`main` creates a `MeterSlot` before
+it starts the watchdog and hands it to `run_job`, which fills it when the meter is installed; the counters are
+read under the meter's lock, with no await or I/O). A loop that blocked before its first request, or before the
+meter existed, stays void; one that blocked with a request open reports the reason.
+
+Tests: `tests/unit/test_runner.py`, `tests/unit/test_diff_cost_meter.py`,
+`tests/integration/test_diff_cost_litellm.py` (the real LiteLLM against a loopback provider) and
+`tests/engine/test_engine_cost.py`.
 
 ## Identity patch
 

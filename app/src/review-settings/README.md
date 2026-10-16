@@ -2,7 +2,9 @@
 
 What a review can be tuned by, with sensible built-in values, global defaults for the whole workspace
 and overrides per project. The settings end up in the runner job (`llm.model`, `llm.maxTokens`, `env`)
-through one pure function.
+through one pure function. On a workspace whose key mode is `managed` (the operator's own key, `src/llm/README.md`)
+the model, token budget and Dynamic model are stored but **not used**: the instance chooses the model, and the form
+shows a note instead of those fields (#276).
 
 ## Layers
 
@@ -19,18 +21,19 @@ A save **replaces the whole set** of its layer: a field left out is inherited ag
 allow list may change both layers (no admin role in the MVP); `app_settings.updated_by` records who saved
 the global defaults last.
 
-| Field               | Meaning                                                                                                                | Built-in value                                 | Limits                                                           |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------- |
-| `model`             | The model (as the provider spells it, no prefix); the key is not a review setting but the workspace's own (`src/llm/`) | `LLM_MODEL`, else `anthropic/claude-haiku-5.5` | the pattern the runner accepts                                   |
-| `fallbackModel`     | Tried when the model fails; `null` = none                                                                              | none                                           | same pattern                                                     |
-| `extraInstructions` | Project rules for the model, free text                                                                                 | none                                           | 4000 characters, no control characters                           |
-| `maxFindings`       | The most findings one review lists                                                                                     | 5                                              | 1 to 30                                                          |
-| `maxTokens`         | Token budget of a review (`llm.maxTokens`)                                                                             | 100000 (PR-Agent's own: 32000)                 | 8000 to 2000000, not above the model's context window (if known) |
-| `largePrChunking`   | Review a large pull request in chunks instead of leaving files out                                                     | on                                             | boolean                                                          |
-| `inlineKeyIssues`   | Also post every finding as an inline comment                                                                           | off                                            | boolean                                                          |
-| `autoReviewOnOpen`  | Review when a pull request is opened, reopened or marked ready                                                         | on                                             | boolean                                                          |
-| `autoReviewOnPush`  | Review again when commits are pushed                                                                                   | on                                             | boolean                                                          |
-| `allowedCommands`   | The comment commands people may use (`review`; the removed commands became `[]` on upgrade)                            | `["review"]`                                   | a subset of `["review"]`, no duplicates                          |
+| Field               | Meaning                                                                                                                                                                | Built-in value                                 | Limits                                                           |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------- |
+| `model`             | The model (as the provider spells it, no prefix); the key is not a review setting but the workspace's own (`src/llm/`)                                                 | `LLM_MODEL`, else `anthropic/claude-haiku-5.5` | the pattern the runner accepts                                   |
+| `fallbackModel`     | Tried when the model fails; `null` = none                                                                                                                              | none                                           | same pattern                                                     |
+| `extraInstructions` | Project rules for the model, free text                                                                                                                                 | none                                           | 4000 characters, no control characters                           |
+| `maxFindings`       | The most findings one review lists                                                                                                                                     | 5                                              | 1 to 30                                                          |
+| `maxTokens`         | Token budget of a review (`llm.maxTokens`)                                                                                                                             | 100000 (PR-Agent's own: 32000)                 | 8000 to 2000000, not above the model's context window (if known) |
+| `largePrChunking`   | Review a large pull request in chunks instead of leaving files out                                                                                                     | on                                             | boolean                                                          |
+| `inlineKeyIssues`   | Also post every finding as an inline comment                                                                                                                           | off                                            | boolean                                                          |
+| `autoReviewOnOpen`  | Review when a pull request is opened, reopened or marked ready                                                                                                         | on                                             | boolean                                                          |
+| `autoReviewOnPush`  | Review again when commits are pushed                                                                                                                                   | on                                             | boolean                                                          |
+| `allowedCommands`   | The comment commands people may use (`review`; the removed commands became `[]` on upgrade)                                                                            | `["review"]`                                   | a subset of `["review"]`, no duplicates                          |
+| `modelTier`         | The quality level of a workspace on the operator's key (#280): which of the operator's models backs its reviews, never shown. Ignored unless the key mode is `managed` | `medium`                                       | `low`, `medium` or `high` (`INVALID_FORMAT` otherwise)           |
 
 The limits are `REVIEW_SETTING_LIMITS`; `validate.ts` checks every field and reports each problem as
 `{ field, code }` with a stable code (`REVIEW_SETTING_ISSUE_CODES`), never with the value.
@@ -44,7 +47,49 @@ The token budget must fit into the context window of the models the saved settin
 fallback model, counted in the model's own tokens, only for models the price table knows):
 otherwise the save is refused with `EXCEEDS_MODEL_CONTEXT` on `maxTokens` (or on the model, when the
 request only changed the model). A combination that a later change of another layer made too large is
-not blamed on an unrelated save; `cost.exceedsContext` lists it for the UI.
+not blamed on an unrelated save; `cost.exceedsContext` lists it for the UI. **For a workspace on the operator's key**
+(key mode `managed`, #280) none of this applies: the stored model is not the one that runs and the user does not know
+the one that does, so the save does not check `maxTokens` against a model and `cost.exceedsContext` is empty; the claim
+cuts the budget to the window of the tier's model (`src/model-tiers/README.md`).
+
+`modelTier` is not sent to the runner: it is read by the claim of a job on the operator's key, which swaps the model
+for the operator's model of the tier.
+
+## A workspace on the operator's key chooses a quality level, not a model (#283)
+
+For a workspace whose key mode is `managed` (`operatorsModels` of the service, read on every call) the models are the
+operator's and the workspace never sees them (`src/model-tiers/README.md`):
+
+- **The views carry no model.** `getGlobalSettings`, `getProjectSettings` and the answer of a save have no `model`, no
+  `fallbackModel` and no Dynamic model: not in `effective`, `overrides`, `builtIn`, `inherited`, `sources` or
+  `dynamic`. `cost` is `null` (the estimate would be for a model that is not used). They add
+  `modelManagedByInstance: true` and `tierAvailability`, whether each level has a model for each review kind (yes or
+  no, from the operator's configuration, never which model). Other workspaces get `modelManagedByInstance: false`,
+  `tierAvailability: null` and the views exactly as before.
+- **A write may not set a model.** A body with `model` or `fallbackModel` (and, for a project, `dynamicModel`, also
+  `null`) is refused `400 REVIEW_SETTINGS_INVALID` with an issue `{ field, code: "MODEL_MANAGED_BY_INSTANCE" }` for
+  every such field, judged on the names before any value, and nothing is stored. `modelTier` is accepted at the
+  workspace defaults and the project, with the usual layering.
+- **Stored models are kept.** The models a workspace saved on its own key stay stored: a save from a managed
+  workspace carries them through (the defaults replace their layer as a whole, so the service puts the stored
+  `model`/`fallbackModel` back; the Dynamic model is a project-only field that a save already keeps). The workspace
+  gets them back if it returns to its own key.
+- **The form** (`ui/quality-choice.tsx`, copy in `src/copy/model-quality.ts`) shows one **Quality** choice, Low, Medium
+  or High, each with a sentence about speed and depth and no model, vendor or cost, in place of the model, fallback
+  model, Dynamic model, model suggestions and cost estimate. The token budget stays. A level without a model for the
+  kind in force (the project's kind; every kind on the workspace defaults) is shown "Not available" without saying why
+  and cannot be chosen; the level in force stays selectable and a note says reviews would not start. The form reads
+  everything from the view (`managed`, `tierAvailability`), so a save that changes the key mode adapts the next answer.
+- **The instance admin is not special inside a workspace (decision).** An instance admin who is a member of a managed
+  workspace gets the same stripped view and the same refusal as its other members: the view depends on the workspace's
+  key mode, never on the user. The operator sees and sets which model backs each level through the operator API
+  (`GET|PUT /api/operator/v1/model-tiers`) and sees whether each level is configured in the instance portal, not inside a
+  customer workspace. The admin's view of a workspace on its own key (the admin's usual one) is unchanged.
+- **Fail closed for display.** The models are hidden whenever the key mode is anything but `own`, so a workspace whose
+  entitlements cannot be read (`unreadable`) also shows no model field and no estimate, and refuses a model write; its
+  jobs fail closed in that state too.
+- **A reset keeps the stored models.** `DELETE` on a project removes every override but the models saved on the
+  workspace's own key (`model`, `fallbackModel`, Dynamic model), like a save does.
 
 ## From settings to a runner job
 
@@ -134,13 +179,13 @@ Admin or an Owner (`manage_review_defaults`); the settings of a project are read
 a workspace that is not the person's) and by `withWorkspace(...)` (called first). A change must come from
 this site (`Sec-Fetch-Site`/`Origin`), be `application/json` and at most 64 KB.
 
-| Route                                                                  | Does                                                                                                            |
-| ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `GET /api/w/:workspace/review-settings`                                | the global defaults: `overrides`, `effective`, `sources`, `builtIn`, `cost`, `limits`, `updatedAt`, `updatedBy` |
-| `PUT /api/w/:workspace/review-settings`                                | body `{ "settings": { ... } }`, replaces the global defaults                                                    |
-| `GET /api/w/:workspace/repositories/:repositoryId/project/settings`    | the project's `overrides`, `effective`, `sources`, `inherited`, `cost`, `limits`                                |
-| `PUT /api/w/:workspace/repositories/:repositoryId/project/settings`    | body `{ "settings": { ... } }`, replaces the project's overrides                                                |
-| `DELETE /api/w/:workspace/repositories/:repositoryId/project/settings` | removes the project's overrides                                                                                 |
+| Route                                                                  | Does                                                                                                                                                          |
+| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/w/:workspace/review-settings`                                | the global defaults: `overrides`, `effective`, `sources`, `builtIn`, `cost`, `modelManagedByInstance`, `tierAvailability`, `limits`, `updatedAt`, `updatedBy` |
+| `PUT /api/w/:workspace/review-settings`                                | body `{ "settings": { ... } }`, replaces the global defaults                                                                                                  |
+| `GET /api/w/:workspace/repositories/:repositoryId/project/settings`    | the project's `overrides`, `effective`, `sources`, `inherited`, `cost`, `limits`                                                                              |
+| `PUT /api/w/:workspace/repositories/:repositoryId/project/settings`    | body `{ "settings": { ... } }`, replaces the project's overrides                                                                                              |
+| `DELETE /api/w/:workspace/repositories/:repositoryId/project/settings` | removes the project's overrides                                                                                                                               |
 
 A repository that was never activated can be read (the defaults, `projectId` null, `active` false) and
 saved: the first save creates its project with `active = 0`, so the settings are in place when it is
@@ -248,7 +293,8 @@ skill's identity and the size limit.
 The workspace settings are sub-pages with a sub-nav (#178). `/w/:workspace/settings` is **General** (the
 workspace name, the read-only instance, tenancy and member facts and the one "Needs attention" strip);
 `/w/:workspace/settings/review-defaults` holds the form for the global defaults;
-`/w/:workspace/settings/llm` holds the workspace key; `/w/:workspace/settings/advanced` holds the
+`/w/:workspace/settings/llm` holds the workspace key; `/w/:workspace/settings/plan` shows what the operator allows
+the workspace and what it has used (#282, listed only for a workspace with entitlements); `/w/:workspace/settings/advanced` holds the
 destructive actions (removing the key, resetting every default). A project has its own settings page
 (`/w/:workspace/projects/:repositoryId`) next to its "Review now" page (#174). The form
 (`ui/settings-form.tsx`) shows the value in force and where it comes from (built-in, global, this project);

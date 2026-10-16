@@ -2,6 +2,7 @@
 
 import type { Metadata } from "next";
 import { reviewSettingsServiceFor } from "@/review-settings/shared";
+import { planPageLinkedFor } from "@/usage/shared";
 import {
   GlobalSettingsPageContent,
   loadGlobalSettingsPage,
@@ -19,13 +20,17 @@ export default async function ReviewDefaultsSettingsPage({
   const { workspace: slug } = await params;
   const { workspace, role } = await requireWorkspace(slug);
   const workspaceId = workspace.id;
-  const data = await loadGlobalSettingsPage({
-    settings: reviewSettingsServiceFor(workspaceId),
-  });
+  const [data, showPlan] = await Promise.all([
+    loadGlobalSettingsPage({
+      settings: reviewSettingsServiceFor(workspaceId),
+    }),
+    planPageLinkedFor(workspaceId),
+  ]);
   return (
     <GlobalSettingsPageContent
       workspaceSlug={workspace.slug}
       canEdit={can(role, "manage_review_defaults")}
+      showPlan={showPlan}
       data={data}
     />
   );

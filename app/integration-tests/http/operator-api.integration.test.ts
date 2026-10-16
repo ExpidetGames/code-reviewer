@@ -5,6 +5,7 @@
 // contract file in compatibility/operator-api-contract.integration.test.ts; the route files in
 // operator-api-route-files.integration.test.ts.
 import { describe, expect, it } from "vitest";
+import { createSecretStore } from "../../src/secrets/store.ts";
 import {
   NotFoundMarker,
   startOperatorApiHarness,
@@ -18,6 +19,7 @@ const ENTITLEMENTS = {
     diffRunsPerPeriod: 100,
     dynamicRunsPerPeriod: null,
     managedCostLimitMicroUsd: 5_000_000,
+    ownKeyCostLimitMicroUsd: null,
   },
   periodStart: "2026-10-01T00:00:00.000Z",
   suspended: false,
@@ -211,6 +213,64 @@ describe("the entitlements of a workspace", () => {
     expect(JSON.stringify(body)).not.toContain("updatedBy");
   });
 
+  // #361-T12
+  it("stores the own-key cost limit with either key mode and reads it back, 0 and null included", async () => {
+    const h = await startOperatorApiHarness();
+    for (const [keyMode, managed, own] of [
+      ["own", null, 2_000_000],
+      ["own", null, 0],
+      ["managed", 5_000_000, 2_000_000],
+      ["managed", 5_000_000, null],
+    ] as const) {
+      const body = {
+        ...ENTITLEMENTS,
+        keyMode,
+        limits: {
+          ...ENTITLEMENTS.limits,
+          managedCostLimitMicroUsd: managed,
+          ownKeyCostLimitMicroUsd: own,
+        },
+      };
+
+      const put = await h.call("PUT", path(h.workspaceId), { body });
+      const read = await json(await h.call("GET", path(h.workspaceId)));
+
+      expect(put.status).toBe(200);
+      expect(read).toMatchObject({
+        stored: { limits: { ownKeyCostLimitMicroUsd: own } },
+        effective: { limits: { ownKeyCostLimitMicroUsd: own } },
+      });
+    }
+  });
+
+  // #361-T01
+  it("reads a row stored before the own-key limit existed as unlimited on that limit", async () => {
+    const h = await startOperatorApiHarness();
+    await h.call("PUT", path(h.workspaceId), { body: ENTITLEMENTS });
+    await h.db
+      .updateTable("workspace_entitlements")
+      .set({
+        limits: JSON.stringify({
+          diffRunsPerPeriod: 100,
+          dynamicRunsPerPeriod: null,
+          managedCostLimitMicroUsd: 5_000_000,
+        }),
+      })
+      .execute();
+
+    const read = await json(await h.call("GET", path(h.workspaceId)));
+
+    expect(read).toMatchObject({
+      stored: {
+        limits: {
+          managedCostLimitMicroUsd: 5_000_000,
+          ownKeyCostLimitMicroUsd: null,
+        },
+      },
+      effective: { kind: "limited" },
+    });
+  });
+
   // #275-T05
   it("records the operator API as the actor and changes nothing when the same body comes twice", async () => {
     const h = await startOperatorApiHarness();
@@ -254,7 +314,28 @@ describe("the entitlements of a workspace", () => {
   it.each([
     [{ ...ENTITLEMENTS, planLabel: "" }, "plan_label_invalid"],
     [{ ...ENTITLEMENTS, keyMode: "shared" }, "key_mode_invalid"],
+    // #277: the cost limit only counts runs on the operator's key
+    [{ ...ENTITLEMENTS, keyMode: "own" }, "cost_limit_requires_managed_key"],
     [{ ...ENTITLEMENTS, limits: { diffRunsPerPeriod: 1 } }, "limits_invalid"],
+    // #361: a write states the own-key cost limit too, and it is a count or null
+    [
+      {
+        ...ENTITLEMENTS,
+        limits: {
+          diffRunsPerPeriod: 1,
+          dynamicRunsPerPeriod: null,
+          managedCostLimitMicroUsd: null,
+        },
+      },
+      "limits_invalid",
+    ],
+    [
+      {
+        ...ENTITLEMENTS,
+        limits: { ...ENTITLEMENTS.limits, ownKeyCostLimitMicroUsd: -1 },
+      },
+      "limit_invalid",
+    ],
     [
       {
         ...ENTITLEMENTS,
@@ -709,11 +790,11 @@ describe("what the writes log", () => {
     });
 
     expect(h.lines).toEqual([
-      `[operator-api] put workspace=${h.workspaceId} fields=planLabel,keyMode,periodStart,suspended,suspensionCode,limits.diffRunsPerPeriod,limits.dynamicRunsPerPeriod,limits.managedCostLimitMicroUsd result=ok`,
+      `[operator-api] put workspace=${h.workspaceId} fields=planLabel,keyMode,periodStart,suspended,suspensionCode,limits.diffRunsPerPeriod,limits.dynamicRunsPerPeriod,limits.managedCostLimitMicroUsd,limits.ownKeyCostLimitMicroUsd result=ok`,
       `[operator-api] put workspace=${h.workspaceId} fields=suspended,suspensionCode result=ok`,
       `[operator-api] put workspace=${h.workspaceId} fields=- result=key_mode_invalid`,
       `[operator-api] delete workspace=${h.workspaceId} fields=- result=ok`,
-      `[operator-api] put workspace=default fields=planLabel,keyMode,periodStart,suspended,suspensionCode,limits.diffRunsPerPeriod,limits.dynamicRunsPerPeriod,limits.managedCostLimitMicroUsd result=ok`,
+      `[operator-api] put workspace=default fields=planLabel,keyMode,periodStart,suspended,suspensionCode,limits.diffRunsPerPeriod,limits.dynamicRunsPerPeriod,limits.managedCostLimitMicroUsd,limits.ownKeyCostLimitMicroUsd result=ok`,
     ]);
     expect(h.lines.join("\n")).not.toContain("label-that-is-a-value");
     expect(h.lines.join("\n")).not.toContain("unpaid");
@@ -739,5 +820,71 @@ describe("what the writes log", () => {
     expect(text).not.toContain("@");
     expect(text).not.toContain("Acme");
     expect(text).not.toContain(TEST_OPERATOR_TOKEN);
+  });
+});
+
+describe("the operator's own LLM key", () => {
+  const KEY = "sk-or-v1-operator-key-0123456789abcdef-wxyz";
+  const path = (id: string) => `/api/operator/v1/workspaces/${id}/entitlements`;
+
+  // #276-T07
+  it("has no call at all: whoever holds the API token can neither read nor write it", async () => {
+    const h = await startOperatorApiHarness();
+    await createSecretStore({
+      db: h.db,
+      appSecret: "operator-api-test-app-secret-0123456789-01",
+    }).save("operator_llm_key", KEY, { updatedBy: null, showLastFour: true });
+    const answers: string[] = [];
+
+    for (const path of [
+      "/api/operator/v1/llm-key",
+      "/api/operator/v1/operator-llm-key",
+      "/api/operator/v1/secrets",
+      "/api/operator/v1/settings",
+      `/api/operator/v1/workspaces/${h.workspaceId}/llm-key`,
+    ])
+      for (const method of ["GET", "PUT", "POST", "DELETE"]) {
+        const response = await h.call(method, path, {
+          body:
+            method === "PUT" || method === "POST" ? { apiKey: KEY } : undefined,
+        });
+        expect(response.status).toBe(404);
+        answers.push(await response.text());
+      }
+
+    // Nothing the API reads or answers holds the key or says that there is one.
+    await h.call("PUT", path(h.workspaceId), { body: ENTITLEMENTS });
+    for (const read of [
+      "/api/operator/v1/workspaces",
+      path(h.workspaceId),
+      "/api/operator/v1/entitlements/default",
+      "/api/operator/v1/usage",
+      `/api/operator/v1/workspaces/${h.workspaceId}/usage`,
+    ])
+      answers.push(await (await h.call("GET", read)).text());
+    expect(answers.join("\n")).not.toContain(KEY);
+    expect(answers.join("\n")).not.toContain("wxyz");
+    expect(answers.join("\n")).not.toContain("operator_llm_key");
+    expect(h.lines.join("\n")).not.toContain(KEY);
+  });
+
+  // #276-T07
+  it("cannot be set through the entitlements either: a field that is no entitlement is refused", async () => {
+    const h = await startOperatorApiHarness();
+
+    for (const extra of [
+      { operatorLlmKey: KEY },
+      { apiKey: KEY },
+      { llmKey: { apiKey: KEY } },
+    ]) {
+      const response = await h.call("PUT", path(h.workspaceId), {
+        body: { ...ENTITLEMENTS, ...extra },
+      });
+      expect(response.status).toBe(422);
+      expect(await response.text()).not.toContain(KEY);
+    }
+    expect(await h.db.selectFrom("secrets").select("name").execute()).toEqual(
+      [],
+    );
   });
 });

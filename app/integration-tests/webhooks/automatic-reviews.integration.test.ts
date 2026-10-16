@@ -27,7 +27,6 @@ import {
   startWebhookHarness,
 } from "../../src/test-support/webhook-harness.ts";
 import { createAutomaticReviewSettingsSource } from "../../src/webhooks/automatic-review-settings.ts";
-import { AUTOMATIC_REVIEW_DEBOUNCE_MS } from "../../src/webhooks/automatic-review-policy.ts";
 import { createGithubAppWebhookHandler } from "../../src/webhooks/github-app-handler.ts";
 import { createJobQueueReviewTriggerIntake } from "../../src/webhooks/job-queue-intake.ts";
 import { defaultWorkspaceId } from "../../src/test-support/workspaces.ts";
@@ -70,7 +69,6 @@ function payload(fixture: string, changes: PullRequestChanges = {}) {
 async function startHarness(
   options: {
     activateProject?: boolean;
-    debounceMs?: number;
     headCheckTimeoutMs?: number;
     /** How long one request to the fake GitHub may take (the harness default: 5 seconds). */
     requestTimeoutMs?: number;
@@ -126,11 +124,9 @@ async function startHarness(
       intake,
     }),
     automatic: {
-      debounceMs: options.debounceMs ?? AUTOMATIC_REVIEW_DEBOUNCE_MS,
       ...(options.headCheckTimeoutMs === undefined
         ? {}
         : { headCheckTimeoutMs: options.headCheckTimeoutMs }),
-      now,
     },
     logger: {
       info: (line) => routeLog.push(line),
@@ -256,8 +252,8 @@ describe("a pull request that is opened", () => {
 });
 
 describe("a pull request that is pushed to", () => {
-  // CR-31-T05
-  it("creates a job that waits for the debounce time, and only then lets a runner have it", async () => {
+  // #395-T04
+  it("creates a job that is due at once, so a runner can have it without any wait", async () => {
     const t = await startHarness();
     t.h.fake.updatePullRequest("acme/widgets", 7, { headSha: HEAD_2 });
 
@@ -266,27 +262,16 @@ describe("a pull request that is pushed to", () => {
     });
 
     const [job] = await t.jobs();
-    expect(job).toMatchObject({ headSha: HEAD_2, status: "queued" });
-    expect(job?.runAfter).toBe(
-      new Date(START.getTime() + AUTOMATIC_REVIEW_DEBOUNCE_MS).toISOString(),
-    );
-    expect(await t.queue.claimNext("runner-1")).toBeNull();
-    t.advance(AUTOMATIC_REVIEW_DEBOUNCE_MS);
+    expect(job).toMatchObject({
+      headSha: HEAD_2,
+      status: "queued",
+      runAfter: START.toISOString(),
+    });
     expect((await t.queue.claimNext("runner-1"))?.job.headSha).toBe(HEAD_2);
   });
 
-  it("waits as long as the configured debounce time says", async () => {
-    const t = await startHarness({ debounceMs: 60_000 });
-
-    await t.send("pull_request.synchronize");
-
-    expect((await t.jobs())[0]?.runAfter).toBe(
-      new Date(START.getTime() + 60_000).toISOString(),
-    );
-  });
-
   // CR-31-T06
-  it("keeps exactly one waiting job when another push arrives within the wait, with the newest commit and a new wait", async () => {
+  it("keeps exactly one waiting job when another push arrives before a runner took the first, with the newest commit", async () => {
     const t = await startHarness();
     t.h.fake.updatePullRequest("acme/widgets", 7, { headSha: HEAD_2 });
     await t.send("pull_request.synchronize", {
@@ -304,9 +289,7 @@ describe("a pull request that is pushed to", () => {
     const waiting = jobs.find((job) => job.status === "queued");
     expect(waiting).toMatchObject({ headSha: HEAD_3 });
     expect(waiting?.runAfter).toBe(
-      new Date(
-        START.getTime() + 40_000 + AUTOMATIC_REVIEW_DEBOUNCE_MS,
-      ).toISOString(),
+      new Date(START.getTime() + 40_000).toISOString(),
     );
     expect(jobs.find((job) => job.headSha === HEAD_2)).toMatchObject({
       status: "superseded",
@@ -393,9 +376,7 @@ describe("a pull request that is pushed to", () => {
       {
         headSha: HEAD_1,
         status: "queued",
-        runAfter: new Date(
-          START.getTime() + AUTOMATIC_REVIEW_DEBOUNCE_MS,
-        ).toISOString(),
+        runAfter: START.toISOString(),
       },
     ]);
     const log = t.routeLog.join("\n");
@@ -544,7 +525,7 @@ describe("a pull request that is closed", () => {
       expect(await t.jobs()).toMatchObject([
         { status: "cancelled", errorCode: "pull_request_closed" },
       ]);
-      t.advance(AUTOMATIC_REVIEW_DEBOUNCE_MS * 10);
+      t.advance(900_000);
       expect(await t.queue.claimNext("runner-1")).toBeNull();
     },
   );
@@ -714,7 +695,7 @@ describe("a draft pull request", () => {
       errorCode: "pull_request_draft",
     });
     expect((await t.queue.get(personId))?.status).toBe("queued");
-    t.advance(AUTOMATIC_REVIEW_DEBOUNCE_MS * 2);
+    t.advance(180_000);
     expect((await t.queue.claimNext("runner-1"))?.job.id).toBe(personId);
     expect(await t.queue.claimNext("runner-1")).toBeNull();
   });

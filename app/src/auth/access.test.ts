@@ -16,10 +16,18 @@ describe("which paths are public", () => {
     "/api/auth",
     "/api/runners/v1/claim",
     "/api/runners/v1/jobs/42/heartbeat",
+    // #320-T25: a Worker sends its per-job credential, not a session.
+    "/api/workers/v1/jobs/42",
+    "/api/workers/v1/jobs/42/heartbeat",
+    "/api/workers/v1/jobs/42/result",
     "/api/operator/v1/workspaces",
     "/api/operator/v1/workspaces/abc/entitlements",
     "/api/operator/v1/entitlements/default",
     "/api/webhooks/github-app",
+    // #319-T10: the platform's cron has no session; CRON_SECRET is its credential.
+    "/api/internal/repository-sync",
+    // #328-T07: the once-a-minute sweep, with the same credential.
+    "/api/internal/dispatch-sweep",
   ])("lets %s through without a session", (pathname) => {
     expect(isPublicPath(pathname)).toBe(true);
   });
@@ -43,6 +51,8 @@ describe("which paths are public", () => {
     "/api/operator/v2/workspaces",
     "/api/operator/admin",
     "/api/admin/workspaces",
+    "/api/internal",
+    "/api/internal/anything-new",
   ])("requires a session for %s", (pathname) => {
     expect(isPublicPath(pathname)).toBe(false);
   });
@@ -57,6 +67,7 @@ describe("which paths are public", () => {
     "/api/authentication",
     "/api/auth-admin",
     "/api/runnersx",
+    "/api/workersx/v1/jobs/42",
     "/api/runners-admin/jobs",
     "/api/webhooksx",
     "/API/health",
@@ -65,6 +76,10 @@ describe("which paths are public", () => {
     "/api//runners/v1/claim",
     "/api/%72unners/v1/claim",
     "/x/api/runners/v1/claim",
+    "/api/internal/repository-sync/extra",
+    "/api/internal/repository-syncx",
+    "/api/internal/dispatch-sweep/extra",
+    "/api/internal/dispatch-sweepx",
     "/api/operator/v1x/workspaces",
     "/api/operator/v10/workspaces",
     "/api/operator//v1/workspaces",
@@ -91,8 +106,11 @@ describe("which paths are public", () => {
       { path: "/api/verify-email", match: "prefix" },
       { path: "/invitation", match: "exact" },
       { path: "/api/runners", match: "prefix" },
+      { path: "/api/workers", match: "prefix" },
       { path: "/api/operator/v1", match: "prefix" },
       { path: "/api/webhooks", match: "prefix" },
+      { path: "/api/internal/repository-sync", match: "exact" },
+      { path: "/api/internal/dispatch-sweep", match: "exact" },
     ]);
   });
 });

@@ -100,6 +100,8 @@ const ISSUE_COPY: Record<ReviewSettingIssueCode, (field: string) => string> = {
     "This model does not support tool calling, which Dynamic Review needs. Choose another model.",
   DYNAMIC_MODEL_UNKNOWN: () =>
     `The provider lists no model with this name. Check the spelling, for example ${DEFAULT_DYNAMIC_MODEL}.`,
+  MODEL_MANAGED_BY_INSTANCE: () =>
+    "This instance provides the AI models for this workspace. Choose a quality level instead.",
 };
 
 function hasIssueCopy(code: string): code is ReviewSettingIssueCode {

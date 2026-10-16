@@ -12,8 +12,11 @@ has built the environment from the job.
 
 import asyncio
 import copy
+import math
+import time
 from typing import TYPE_CHECKING, Any
 
+from code_reviewer_runner.diff_cost import DiffCostMeter
 from code_reviewer_runner.job import Job
 from code_reviewer_runner.pr_agent_config import (
     build_option_settings,
@@ -23,12 +26,29 @@ from code_reviewer_runner.pr_agent_config import (
 )
 from code_reviewer_runner.repo_settings_guard import RepoSettingsGuard
 from code_reviewer_runner.result import Usage
+from code_reviewer_runner.usage_probe import UsageProbe
 
 if TYPE_CHECKING:
     from pr_agent.algo.run_details import RunDetails
 
 
-def _usage(details: "RunDetails | None") -> Usage | None:
+def _cost_usd(details: "RunDetails", meter: DiffCostMeter | None) -> float | None:
+    """The exact cost of the run (#274): the charges the provider stated, or None.
+
+    PR-Agent's own sum (`total_cost_usd`) is never read: it can come from a price table, and it
+    counts only the calls PR-Agent accepted. A call PR-Agent counted but the meter never saw
+    (it did not pass through the metered function) is a call nobody priced.
+    """
+    if meter is None:
+        return None
+    cost = meter.cost_usd()
+    if cost is None or meter.answered_calls < details.num_ai_calls:
+        return None
+    number = float(cost)
+    return number if math.isfinite(number) else None
+
+
+def _usage(details: "RunDetails | None", meter: DiffCostMeter | None = None) -> Usage | None:
     if details is None:
         return None
     return Usage(
@@ -38,7 +58,7 @@ def _usage(details: "RunDetails | None") -> Usage | None:
         total_tokens=details.total_tokens,
         ai_calls=details.num_ai_calls,
         fallback_used=details.fallback_used,
-        cost_usd=float(details.total_cost_usd) if details.known_cost_call_count else None,
+        cost_usd=_cost_usd(details, meter),
     )
 
 
@@ -65,15 +85,32 @@ def configure_settings(job: Job, settings: Any, guard: RepoSettingsGuard) -> Non
 
 
 async def execute(
-    job: Job, guard: RepoSettingsGuard, timeout_seconds: float | None = None
+    job: Job,
+    guard: RepoSettingsGuard,
+    deadline: float | None = None,
+    probe: UsageProbe | None = None,
+    meter: DiffCostMeter | None = None,
 ) -> tuple[bool, bool, Usage | None]:
     """Run the command inside a request scope; returns (handled, command_failed, usage).
+
+    `deadline` is the moment (on `time.monotonic()`) the soft timeout ends the command, counted from
+    the start of the job (the first line of `main()`) and not from here: the imports and the
+    settings copy below can take seconds on a cold start, and the hard timeout of the entry point is
+    counted from there too, so a deadline counted from here could land after it (#387). A deadline
+    that has passed by the time the command would start ends the run with `JobTimeout`, and the
+    command is never started.
+
+    `probe` is given what PR-Agent measured however the command ends, also when it raises or runs
+    out of time, so a run that fails after its model call can still report what it used (#273).
+
+    `meter` is what the runner's wrapper of PR-Agent's model function measured: the cost of the run
+    is the sum of the charges the provider stated, never PR-Agent's own figure (#274).
 
     `guard` is told which settings the runner has configured, right before the command starts, so
     it can put them back after a repository settings file was merged.
 
     Raises `InvalidOption` (before anything is sent anywhere) for an option of the job whose value
-    does not fit its type.
+    does not fit its type, and `JobTimeout` when the deadline passed before the command could start.
     """
     from pr_agent.agent.pr_agent import PRAgent
     from pr_agent.algo.run_details import command_failed, get_run_details, init_run_details
@@ -92,7 +129,10 @@ async def execute(
         # Awaited directly (no task): the run details live in a ContextVar of this task.
         # Only an await can be cancelled; the hard timeout of the entry point covers a call that
         # blocks the event loop.
-        timeout = asyncio.timeout(timeout_seconds)
+        remaining = None if deadline is None else deadline - time.monotonic()
+        if remaining is not None and remaining <= 0:
+            raise JobTimeout
+        timeout = asyncio.timeout(remaining)
         try:
             async with timeout:
                 handled = await PRAgent().handle_request(
@@ -102,4 +142,8 @@ async def execute(
             if timeout.expired():
                 raise JobTimeout from None
             raise
-        return handled is True, command_failed(), _usage(get_run_details())
+        finally:
+            # The tools start a collector of their own; the one in place now is the last one.
+            if probe is not None:
+                probe.record(_usage(get_run_details(), meter))
+        return handled is True, command_failed(), _usage(get_run_details(), meter)

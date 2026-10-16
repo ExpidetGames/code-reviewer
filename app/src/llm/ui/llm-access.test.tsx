@@ -400,3 +400,132 @@ describe("the hint 'LLM not configured'", () => {
     expect(screen.getByText("The saved LLM key cannot be read")).toBeTruthy();
   });
 });
+
+describe("a workspace whose LLM access is provided by the instance (#276)", () => {
+  const PROVIDED: WorkspaceLlmSummary = {
+    configured: true,
+    source: "operator",
+  };
+  const UNAVAILABLE: WorkspaceLlmSummary = {
+    configured: false,
+    reason: "operator_key_missing",
+  };
+
+  // #276-T09
+  it("shows an Admin or an Owner no key form and a note that access is provided, though the workspace has a key of its own", () => {
+    const { container } = section({
+      keyStatus: CONFIGURED,
+      summary: PROVIDED,
+    });
+
+    expect(screen.queryByLabelText("API key")).toBeNull();
+    expect(container.querySelector("form")).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: /save key|test key|remove key/i }),
+    ).toBeNull();
+    expect(container.textContent).toContain(
+      "LLM access for this workspace is provided by this instance.",
+    );
+    expect(container.textContent).toContain("does not use a key of its own");
+    // The key of the workspace is stored and ignored: nothing of it is shown while it is not used.
+    expect(container.textContent).not.toMatch(/cdef|openrouter/);
+  });
+
+  // #276-T09
+  it("shows a Member the same note", () => {
+    const admin = section({ keyStatus: CONFIGURED, summary: PROVIDED });
+    const adminText = admin.container.textContent;
+    cleanup();
+
+    const member = section({
+      canManage: false,
+      keyStatus: CONFIGURED,
+      summary: PROVIDED,
+    });
+
+    expect(member.container.textContent).toContain(
+      "LLM access for this workspace is provided by this instance.",
+    );
+    expect(member.container.textContent).not.toContain(
+      "Only an Admin or an Owner",
+    );
+    expect(adminText).toContain("provided by this instance");
+    expect(screen.queryByLabelText("API key")).toBeNull();
+  });
+
+  // #276-T09
+  it("says when the instance has no key to give, with no form either: the workspace cannot fix it", () => {
+    for (const reason of [
+      "operator_key_missing",
+      "operator_key_unreadable",
+    ] as const)
+      for (const canManage of [true, false]) {
+        const { container, unmount } = section({
+          canManage,
+          keyStatus: CONFIGURED,
+          summary: { configured: false, reason },
+        });
+
+        expect(screen.queryByLabelText("API key")).toBeNull();
+        expect(container.textContent).toContain(
+          "LLM access for this workspace is provided by this instance.",
+        );
+        expect(container.textContent).toContain(
+          "not available at the moment, so reviews cannot run",
+        );
+        unmount();
+      }
+  });
+
+  // #276-T09
+  it("keeps the form of a workspace that is not managed, even when the instance has a key", () => {
+    section({ keyStatus: NONE, summary: MISSING });
+
+    expect(screen.getByLabelText("API key")).toBeTruthy();
+    expect(document.body.textContent).not.toContain(
+      "provided by this instance",
+    );
+  });
+
+  // #276-T09
+  it("does not ask a workspace for a key it cannot use: the hint says the instance has no access to give, and does not link to the form", () => {
+    const { container } = render(
+      <LlmAccessNotice workspaceSlug="acme" summary={UNAVAILABLE} canManage />,
+    );
+
+    expect(screen.getByText("LLM access is not available")).toBeTruthy();
+    expect(container.textContent).toContain("administrator of this instance");
+    expect(screen.queryByRole("link")).toBeNull();
+    expect(container.textContent).not.toMatch(/Add a key|add one/);
+  });
+
+  // #276-T09
+  it("says the same for a key that cannot be read, and for entitlements that cannot be read", () => {
+    for (const reason of [
+      "operator_key_unreadable",
+      "entitlements_invalid",
+    ] as const) {
+      const { container, unmount } = render(
+        <LlmAccessNotice
+          workspaceSlug="acme"
+          summary={{ configured: false, reason }}
+          canManage={false}
+        />,
+      );
+
+      expect(screen.getByText("LLM access is not available")).toBeTruthy();
+      expect(screen.queryByRole("link")).toBeNull();
+      expect(container.textContent).not.toMatch(/sk-|APP_SECRET/);
+      unmount();
+    }
+  });
+
+  // #276-T09
+  it("shows nothing while the instance provides access", () => {
+    const { container } = render(
+      <LlmAccessNotice workspaceSlug="acme" summary={PROVIDED} canManage />,
+    );
+
+    expect(container.textContent).toBe("");
+  });
+});

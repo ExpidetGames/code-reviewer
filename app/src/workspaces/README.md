@@ -138,27 +138,37 @@ characters without control or formatting characters (they end up in mails and pa
 ## Entitlements
 
 An operator who serves many workspaces can state, per workspace, what it may do (#271; epic #268). The data
-model, and the operator API that sets it (#275): no page, nothing is enforced yet (the usage records, the managed key
-and the enforcement are later issues of the epic). A self-hosted instance configures nothing and nothing changes.
+model, and the operator API that sets it (#275): no page. The limits and the suspension are enforced when a job is
+claimed (#277, `src/usage/README.md`, "Limits and suspension at claim"); the key mode decides whose LLM key a job uses (#276, `src/llm/README.md`). A self-hosted instance configures nothing and nothing changes.
 
 - **Data.** One row per workspace in `workspace_entitlements` (`src/db/repositories/workspace-entitlements-repository.ts`)
   and one instance setting `default_entitlements` for the workspaces without a row. Both hold the same fields:
   `planLabel` (a label for display and audit, at most 64 printable characters; the code never branches on it),
-  `keyMode` (`own` or `managed`), `limits` (`diffRunsPerPeriod`, `dynamicRunsPerPeriod`,
-  `managedCostLimitMicroUsd`, each a non-negative integer up to 2^53-1 or `null` for unlimited), `periodStart` (usage
+  `keyMode` (`own` or `managed`: whose LLM key the reviews use, the workspace's own or the operator's), `limits` (`diffRunsPerPeriod`, `dynamicRunsPerPeriod`,
+  `managedCostLimitMicroUsd`, `ownKeyCostLimitMicroUsd`, each a non-negative integer up to 2^53-1 or `null` for
+  unlimited; the two cost limits are micro-USD of measured model cost and each watches the runs on one key mode: the
+  operator's key and the workspace's own, #361), `periodStart` (usage
   counts from here), `suspended` and `suspensionCode`.
 - **Resolver.** `resolveEntitlements(row, default)` in `entitlements.ts` is the one place that interprets the data. A
   row wins entirely (no field-wise merge with the default); without a row the default applies; with neither the
   answer is `{ kind: "unlimited" }` (own key, no limits, not suspended). A limited answer says whether it came from
   the `workspace` or the `default`. It copies the named fields only: the user id and the time of the last save
   that a stored row carries never reach the answer.
+- **Reading them for one workspace.** `readEffectiveEntitlements(db, workspaceId)` in `effective-entitlements.ts`
+  reads the workspace's row and, only without one, the default, and resolves them: the claim's admission (#277) and the
+  choice of the LLM key (#276) both go through it, so they cannot read the entitlements differently.
 - **Unreadable data fails closed.** The columns of a row and the JSON of the default are checked when they are
   read, with the rules of a write (`readEntitlements`). An entry that exists but cannot be read (damaged JSON,
   limits with a missing or bad value, an unknown key mode) is never "unlimited": the resolver answers
   `{ kind: "invalid", code: "entitlements_invalid", source }`, and nothing throws. A row of the workspace that is
-  unreadable wins over a good default, like any row. The caller that enforces (#277) must refuse the claim with
-  that code and a clear message; repairing the entry is a valid `put`. Reading ignores keys it does not know (an
+  unreadable wins over a good default, like any row. The claim (#277) refuses with
+  that code (`entitlements_invalid`; the Runs pages explain it); repairing the entry is a valid `put`. Reading ignores keys it does not know (an
   older app reads what a newer one wrote) and does not ask the clock.
+- **The cost limits (#361).** `managedCostLimitMicroUsd` bounds the settled cost of the runs that used the operator's key,
+  `ownKeyCostLimitMicroUsd` the runs that used the workspace's own. A job is checked against the limit of the key it runs
+  on, and the sums count records by their own key mode, so switching a workspace between the two never moves cost from
+  one limit to the other. Both are soft caps and neither bounds a run whose cost is unknown
+  (`src/usage/README.md`, "Limits and suspension at claim").
 - **Adding a limit later.** A new limit goes into `LIMIT_NAMES` and, so that existing entries stay readable, into
   `LIMITS_ADDED_LATER` (`entitlements-validation.ts`): when reading, its missing key means `null` (unlimited), which
   is true because no such limit existed when the entry was written. Writes still require every key. (The alternative
@@ -168,12 +178,19 @@ and the enforcement are later issues of the epic). A self-hosted instance config
   spaces including the no-break space, combining marks, Hangul fillers and the blank braille pattern do not count;
   no control, formatting, private use or line separator characters; unassigned code points are not judged, so the
   answer does not depend on the Unicode version of Node), `key_mode_invalid`, `limits_invalid` (not an object, a
-  missing or an unknown key), `limit_invalid` (with the name of the limit), `period_start_invalid`,
+  missing or an unknown key), `limit_invalid` (with the name of the limit), `cost_limit_requires_managed_key` (#277: a
+  managed cost limit, even 0, with the key mode `own`, which nothing would read; refused on a write only, a stored entry
+  of that shape is still read and its limit ignored. The own-key limit `ownKeyCostLimitMicroUsd` is allowed with either
+  key mode, #361), `period_start_invalid`,
   `period_start_in_future` (more than five minutes ahead), `period_start_backwards` (earlier than the stored one;
   the same value again is accepted), `suspended_invalid`, `suspension_code_invalid` (lower case letters, digits,
   `_` and `-`, starting with a letter, at most 64 characters; checked even when not suspended). A valid code is
   kept only while suspended: clearing the suspension clears the code. The repositories throw `EntitlementsError`
   with the code.
+- **The plan page (#282).** Every member can read `/w/<slug>/settings/plan`: the plan label, the used and allowed runs
+  of each review kind, the share of the cost limit as a percentage (never an amount), the start of the period and a
+  notice while reviews are paused. The settings navigation lists it only for a workspace with entitlements
+  (`src/usage/README.md`, "The plan page").
 - **The operator API (#275).** `src/operator-api/README.md` and `contracts/operator-api.v1.json`. It decided the
   three follow-ups of #271: a body without `periodStart` keeps the stored start (a stale start cannot block an unrelated
   update); `DELETE` of a workspace's row is offered and ends the "never backwards" guard for it (documented, not
@@ -186,7 +203,8 @@ Deleting workspaces, transferring data, SSO and teams below the workspace are ou
 is bound to a workspace by an Owner or Admin (`manage_connections`) through "Connect GitHub" on the Connections page; the
 rules are in `src/installation-binding/README.md`, and the synchronization of a workspace reads its own connections only
 (`POST /api/w/:workspace/integrations/sync`; the whole instance's stays the instance admin's). The workspace LLM key is
-in place (`src/llm/`, `manage_llm_key`: an Admin or an Owner sets it, every member sees whether there is one). The workspace
+in place (`src/llm/`, `manage_llm_key`: an Admin or an Owner sets it, every member sees whether there is one). "Manage plan"
+(`manage_plan`, an Admin or an Owner) hands the person over to the operator-configured plan page (`src/plan-handoff/`). The workspace
 pages tell a member only that GitHub is not set up and to ask the instance admin; the names of the variables are the
 instance admin's to read (`src/config-status/`). Whether reviews have an LLM key is the workspace's own matter: the hint
 "LLM not configured" tells a Member to ask an Admin or an Owner of the workspace (`src/llm/ui/`).

@@ -16,6 +16,7 @@ from pathlib import Path
 
 from privileged_support import (
     CAPABILITIES,
+    EGRESS_MODE,
     ENGINE_GID,
     ENGINE_UID,
     Repo,
@@ -27,6 +28,7 @@ from privileged_support import (
 
 from code_reviewer_runner import runner
 from code_reviewer_runner.capabilities import ALL_ENGINES
+from code_reviewer_runner.dynamic_review.netguard import EGRESS_MODE_VARIABLE
 from code_reviewer_runner.dynamic_review.supervisor import (
     ENGINE_GID_VARIABLE,
     ENGINE_UID_VARIABLE,
@@ -43,6 +45,7 @@ def main(argv: list[str]) -> int:
         runner.RIPGREP_PATH_VARIABLE: ripgrep(),
         ENGINE_UID_VARIABLE: str(ENGINE_UID),
         ENGINE_GID_VARIABLE: str(ENGINE_GID),
+        EGRESS_MODE_VARIABLE: EGRESS_MODE.value,
     }
     with runner._unwind_on_sigterm():  # pyright: ignore[reportPrivateUsage]
         result = runner.run_dynamic_job(

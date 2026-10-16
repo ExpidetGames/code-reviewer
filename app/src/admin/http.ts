@@ -12,10 +12,17 @@
 //                             { "limits": { "maxWorkspacesPerUser": number } }
 //                             { "dynamicReview": { "enabled": boolean } }   the Dynamic Review rollout gate
 //                             (contracts/README.md: off cancels the waiting Dynamic jobs, running ones finish)
+//                             { "planManagementUrl": "https://..." | null }   the operator-configured page "Manage plan"
+//                             hands an Owner or Admin over to (#284; src/plan-handoff/): absolute https, no credentials,
+//                             no fragment; null removes it and with it the button and the route
 //                             { "smtp": { host, port, security, user, password, clearPassword,
 //                                         senderAddress, senderName, allowSelfSigned } | null }
 //                             (the password is write-only: an empty one keeps the stored one, and no
 //                             answer ever contains it; null removes the mail server)
+//                             { "operatorLlmKey": { "apiKey": "..." } | null }   the operator's own LLM key, used by
+//                             the workspaces whose key mode is `managed` (#276; src/llm/operator-key.ts). Write-only:
+//                             the answers carry its status and the last four characters, never the key; null
+//                             removes it. Only an instance admin gets here, and the operator API has no such call
 //                             { "importNotice": { "dismiss": true } }   hides the notice that the import of an
 //                             existing installation left (src/legacy-import/)
 //   POST /api/admin/mail/test sends a test mail to the admin's own address with the saved settings;
@@ -103,7 +110,9 @@ const SETTING_KEYS = [
   "signInMethods",
   "limits",
   "dynamicReview",
+  "planManagementUrl",
   "smtp",
+  "operatorLlmKey",
   "importNotice",
 ] as const;
 
@@ -169,8 +178,15 @@ export function createAdminRouteHandlers({
             return service.changeSignInMethods(who.id, fields.signInMethods);
           case "dynamicReview":
             return service.changeDynamicReview(who.id, fields.dynamicReview);
+          case "planManagementUrl":
+            return service.changePlanManagementUrl(
+              who.id,
+              fields.planManagementUrl,
+            );
           case "smtp":
             return service.changeSmtp(who.id, fields.smtp);
+          case "operatorLlmKey":
+            return service.changeOperatorLlmKey(who.id, fields.operatorLlmKey);
           case "importNotice": {
             const change = fields.importNotice;
             if (

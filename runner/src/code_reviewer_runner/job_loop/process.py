@@ -19,6 +19,7 @@ import asyncio
 import contextlib
 import os
 import shutil
+import signal
 import socket
 import subprocess
 import tempfile
@@ -34,6 +35,7 @@ from code_reviewer_runner.lease_check import (
     LeaseState,
 )
 from code_reviewer_runner.process_group import end_group, has_exited
+from code_reviewer_runner.supersede import SUPERSEDE_SIGNAL
 
 # The result line of a job is small (a log tail of 4 KB and a few numbers). Anything above this
 # is not a result.
@@ -99,6 +101,12 @@ class RunningProcess(Protocol):
 
     async def terminate(self) -> None:
         """End the process and everything it started: SIGTERM first, SIGKILL after the grace."""
+        ...
+
+    def notify_superseded(self) -> bool:
+        """Tell the process that its run was superseded (#396): `SIGUSR1` to the leader only, never
+        the group. False when the signal could not be sent (the process has ended, or the signal
+        was refused): the caller logs it, and the drain bound is then the only stop."""
         ...
 
 
@@ -244,6 +252,18 @@ class _SubprocessJob:
     async def wait(self) -> ProcessOutcome:
         return await asyncio.shield(self._collected)
 
+    def notify_superseded(self) -> bool:
+        # Under the lock that guards the end of the group, and only while the leader is unreaped: a
+        # reaped leader frees its pid (#233).
+        with self._group_lock:
+            if has_exited(self._process):
+                return False
+            try:
+                os.kill(self._process.pid, SUPERSEDE_SIGNAL)
+            except (ProcessLookupError, PermissionError):
+                return False
+            return True
+
     async def terminate(self) -> None:
         # SIGTERM first and SIGKILL after the grace; also after a clean exit of the leader, so a
         # helper that ignores SIGTERM goes too.
@@ -273,19 +293,27 @@ class SubprocessLauncher:
             if ends is not None:
                 pass_fds = (ends[1].fileno(),)
                 environment[LEASE_CHECK_FD_VARIABLE] = str(ends[1].fileno())
-            process = subprocess.Popen(
-                spec.argv,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                env=environment,
-                cwd=workdir,
-                start_new_session=True,
-                pass_fds=pass_fds,
-                user=uid,
-                group=gid,
-                extra_groups=[] if uid is not None else None,
-            )
+            # `SIGUSR1` (a run that was superseded) ends a process that has no handler yet. It is
+            # blocked in this thread while the process is made: the mask survives the exec, a
+            # signal that comes early stays pending, and the process unblocks it once its handler
+            # exists (`supersede.handling_the_signal`).
+            previous_mask = signal.pthread_sigmask(signal.SIG_BLOCK, {SUPERSEDE_SIGNAL})
+            try:
+                process = subprocess.Popen(
+                    spec.argv,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    env=environment,
+                    cwd=workdir,
+                    start_new_session=True,
+                    pass_fds=pass_fds,
+                    user=uid,
+                    group=gid,
+                    extra_groups=[] if uid is not None else None,
+                )
+            finally:
+                signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
             pipes = await _connect_pipes(process)
             if ends is not None and spec.lease_check is not None:
                 ends[1].close()  # the process holds its end now

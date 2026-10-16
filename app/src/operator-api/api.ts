@@ -10,18 +10,32 @@
 //   3. method    one the route does not offer                                                   405
 //   4. body      GET and DELETE carry none                                                     400
 //   5. workspace the id in the path names a workspace                                          404 workspace_not_found
-//   6. work      PUT: application/json, up to 16 KiB, one JSON value (415 / 413 / 400), then
-//                read, replace or remove
+//   6. work      PUT and POST: application/json, up to 16 KiB, one JSON value (415 / 413 / 400), then
+//                read, replace or remove; usage: the query (400 request_invalid / cursor_invalid / period_invalid)
+//                then the read (usage.ts)
 //
 // Nothing before step 1 reads the request body or touches the database. The API is separate from the browser
 // session of `/api/admin/*`: no cookie is looked at.
 import "server-only";
+import type { PlanHandoffRedeemRepository } from "../db/repositories/plan-handoff-redeem-repository.ts";
 import type { InstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
 import type {
   StoredEntitlements,
   WorkspaceEntitlementsRepository,
 } from "../db/repositories/workspace-entitlements-repository.ts";
+import type { UsageFeedRepository } from "../db/repositories/usage-feed-repository.ts";
+import type { UsageRecordsRepository } from "../db/repositories/usage-records-repository.ts";
 import type { WorkspacesRepository } from "../db/repositories/workspaces-repository.ts";
+import type { ModelTiersService } from "../model-tiers/service.ts";
+import { MODEL_TIERS, tiersView } from "../model-tiers/tiers.ts";
+import {
+  readPlanManagementUrl,
+  savePlanManagementUrl,
+} from "../plan-handoff/settings.ts";
+import {
+  hashHandoffToken,
+  isWellFormedHandoffToken,
+} from "../plan-handoff/token.ts";
 import { describeError } from "../runner-api/logger.ts";
 import { bearerTokenOf } from "../runner-api/token-auth.ts";
 import { readLimitedBody } from "../webhooks/limited-body.ts";
@@ -33,6 +47,7 @@ import {
 import { EntitlementsError } from "../workspaces/entitlements-validation.ts";
 import {
   DEFAULT_PAGE_SIZE,
+  USAGE_SAFETY_LAG_MS,
   MAX_FIELD_LENGTH,
   MAX_PAGE_SIZE,
   OPERATOR_ID_PATTERN,
@@ -42,6 +57,8 @@ import {
 } from "./contract.ts";
 import { errorResponse, jsonResponse, unauthorized } from "./responses.ts";
 import { operatorTokensMatch } from "./token.ts";
+import { createUsageHandlers } from "./usage.ts";
+import { validateSafetyLagMs } from "./usage-cursor.ts";
 import {
   changedFieldNames,
   defaultView,
@@ -60,6 +77,16 @@ export type OperatorApiDeps = {
   workspaces: WorkspacesRepository;
   entitlementsFor: (workspaceId: string) => WorkspaceEntitlementsRepository;
   settings: InstanceSettingsRepository;
+  /** The settled usage records of every workspace (the feed). */
+  usageFeed: UsageFeedRepository;
+  /** The usage records of one workspace (its page and its summary). */
+  usageFor: (workspaceId: string) => UsageRecordsRepository;
+  /** The redemption of the handoff tokens of the "Manage plan" button (#284). */
+  handoffs: PlanHandoffRedeemRepository;
+  /** Which model backs each managed tier (#280): the only way in or out of that configuration. */
+  modelTiers: ModelTiersService;
+  /** How old a settlement must be before it is served; default `USAGE_SAFETY_LAG_MS`. Validated when the API is made. */
+  usageSafetyLagMs?: number;
   now: () => Date;
   logger: OperatorApiLogger;
   /** Ends the request with the answer of a path that does not exist (Next.js's `notFound`). */
@@ -117,6 +144,15 @@ function parsePage(url: URL): Parsed<{ after?: string; limit: number }> {
 }
 
 export function createOperatorApi(deps: OperatorApiDeps): OperatorApi {
+  const usage = createUsageHandlers({
+    feed: deps.usageFeed,
+    usageFor: deps.usageFor,
+    now: deps.now,
+    safetyLagMs: validateSafetyLagMs(
+      deps.usageSafetyLagMs ?? USAGE_SAFETY_LAG_MS,
+    ),
+  });
+
   /** The log line of a write: names of changed fields and the result code, never a value. */
   function logWrite(
     action: "put" | "delete",
@@ -254,22 +290,149 @@ export function createOperatorApi(deps: OperatorApiDeps): OperatorApi {
     return jsonResponse(200, { default: defaultView(stored) });
   }
 
+  function isObject(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+  }
+
+  /**
+   * `POST /handoff/redeem` `{ token }`: who a handoff token was made for, once. Every reason for not answering is the
+   * same `invalid_token`; the answer holds ids and a role only, and the log a workspace id and a result code.
+   */
+  async function redeemHandoff(request: Request): Promise<Response> {
+    const body = await readJson(request);
+    if (!body.ok) return body.response;
+    const value = body.value;
+    if (
+      !isObject(value) ||
+      Object.keys(value).length !== 1 ||
+      typeof value.token !== "string"
+    )
+      return errorResponse(400, "request_invalid");
+    const redeemed = isWellFormedHandoffToken(value.token)
+      ? await deps.handoffs.redeem(hashHandoffToken(value.token))
+      : undefined;
+    if (redeemed === undefined) {
+      deps.logger.info(
+        "[operator-api] handoff workspace=- result=invalid_token",
+      );
+      return errorResponse(422, "invalid_token");
+    }
+    deps.logger.info(
+      `[operator-api] handoff workspace=${redeemed.workspaceId} result=ok`,
+    );
+    return jsonResponse(200, {
+      workspaceId: redeemed.workspaceId,
+      workspaceSlug: redeemed.workspaceSlug,
+      userId: redeemed.userId,
+      role: redeemed.role,
+    });
+  }
+
+  async function planManagementAnswer(): Promise<Response> {
+    return jsonResponse(200, {
+      planManagementUrl: await readPlanManagementUrl(deps.settings),
+    });
+  }
+
+  /** `GET|PUT|DELETE /plan-management`: the page "Manage plan" hands people over to (#284). */
+  async function planManagement(request: Request): Promise<Response> {
+    if (request.method === "GET") return planManagementAnswer();
+    if (request.method === "DELETE") {
+      await savePlanManagementUrl(deps.settings, null, null);
+      deps.logger.info("[operator-api] delete plan-management result=ok");
+      return planManagementAnswer();
+    }
+    const body = await readJson(request);
+    if (!body.ok) return body.response;
+    const value = body.value;
+    if (
+      !isObject(value) ||
+      Object.keys(value).length !== 1 ||
+      !("url" in value)
+    )
+      return errorResponse(400, "request_invalid");
+    // `null` would remove the page: that is what DELETE is for, so here it is just not a valid address.
+    const saved = await savePlanManagementUrl(
+      deps.settings,
+      value.url === null ? "" : value.url,
+      null,
+    );
+    if (!saved.ok) {
+      deps.logger.info(
+        `[operator-api] put plan-management result=${saved.code}`,
+      );
+      return errorResponse(422, saved.code);
+    }
+    deps.logger.info("[operator-api] put plan-management result=ok");
+    return planManagementAnswer();
+  }
+
+  async function modelTiersAnswer(): Promise<Response> {
+    return jsonResponse(200, {
+      tiers: tiersView(await deps.modelTiers.read()),
+    });
+  }
+
+  /**
+   * `GET|PUT /model-tiers` (#280): which model backs each tier. The log line names the tiers that have a model and the
+   * result, never an id. A refusal of the request is 400, one of the models is 422.
+   */
+  async function modelTiers(request: Request): Promise<Response> {
+    if (request.method === "GET") return modelTiersAnswer();
+    const body = await readJson(request);
+    if (!body.ok) return body.response;
+    const saved = await deps.modelTiers.save(body.value, null);
+    if (!saved.ok) {
+      deps.logger.info(`[operator-api] put model-tiers result=${saved.code}`);
+      return errorResponse(
+        saved.code === "request_invalid" ? 400 : 422,
+        saved.code,
+        {
+          ...(saved.field === undefined ? {} : { field: saved.field }),
+        },
+      );
+    }
+    const configured = MODEL_TIERS.filter(
+      (tier) => saved.tiers[tier] !== undefined,
+    );
+    deps.logger.info(
+      `[operator-api] put model-tiers tiers=${configured.length === 0 ? "-" : configured.join(",")} result=ok`,
+    );
+    return modelTiersAnswer();
+  }
+
   async function work(
     request: Request,
     route: OperatorRoute,
   ): Promise<Response> {
     switch (route.kind) {
+      case "model-tiers":
+        return modelTiers(request);
+      case "handoff-redeem":
+        return redeemHandoff(request);
+      case "plan-management":
+        return planManagement(request);
       case "workspaces":
         return listWorkspaces(request);
       case "default-entitlements":
         return defaultEntitlements(request);
-      case "workspace-entitlements": {
+      case "usage":
+        return usage.feed(request);
+      case "usage-unknown-cost":
+        return usage.unknownCost(request);
+      case "workspace-entitlements":
+      case "workspace-usage":
+      case "workspace-usage-summary": {
         const id = route.workspaceId;
         const workspace = OPERATOR_ID_PATTERN.test(id)
           ? await deps.workspaces.get(id)
           : undefined;
         if (workspace === undefined)
           return errorResponse(404, "workspace_not_found");
+        if (route.kind === "workspace-usage")
+          return usage.workspaceFeed(request, workspace.id);
+        if (route.kind === "workspace-usage-summary")
+          return usage.summary(request, workspace.id);
         return workspaceEntitlements(request, workspace.id);
       }
       case "unknown":
@@ -291,7 +454,11 @@ export function createOperatorApi(deps: OperatorApiDeps): OperatorApi {
           return errorResponse(405, "method_not_allowed", {
             headers: { Allow: allowed.join(", ") },
           });
-        if (request.method !== "PUT" && carriesBody(request))
+        if (
+          request.method !== "PUT" &&
+          request.method !== "POST" &&
+          carriesBody(request)
+        )
           return errorResponse(400, "body_not_allowed");
         return await work(request, route);
       } catch (error) {

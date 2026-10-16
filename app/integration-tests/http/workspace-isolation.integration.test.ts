@@ -106,6 +106,17 @@ const ENTRIES: Entry[] = [
     takesNoIds: true,
   },
   {
+    // #282-T07: the plan and usage view of the workspace in the address, for every member.
+    name: "GET plan",
+    route: "/api/w/[workspace]/plan",
+    method: "GET",
+    minRole: MINIMUM_ROLE.view,
+    path: () => "/plan",
+    params: () => ({}),
+    file: "plan/route.ts",
+    takesNoIds: true,
+  },
+  {
     name: "GET runs/[id]",
     route: "/api/w/[workspace]/runs/[id]",
     method: "GET",
@@ -245,6 +256,16 @@ const ENTRIES: Entry[] = [
     body: () => ({}),
     params: () => ({}),
     file: "llm-key/test/route.ts",
+    takesNoIds: true,
+  },
+  {
+    name: "POST plan-handoff",
+    route: "/api/w/[workspace]/plan-handoff",
+    method: "POST",
+    minRole: MINIMUM_ROLE.manage_plan,
+    path: () => "/plan-handoff",
+    params: () => ({}),
+    file: "plan-handoff/route.ts",
     takesNoIds: true,
   },
   {
@@ -470,6 +491,12 @@ async function start() {
     { kind: "everyone" },
     null,
   );
+  // The instance has a plan management page: without one, "Manage plan" is a missing path for everybody.
+  await createInstanceSettingsRepository(getDatabase()).set(
+    "plan_management_url",
+    "https://plans.example/manage",
+    null,
+  );
   // The registry reads the environment on first use, so the route files load after it was set.
   vi.resetModules();
   const alpha = await seedWorkspace("alpha", {
@@ -527,7 +554,8 @@ async function start() {
         | "repositories"
         | "jobs"
         | "invitations"
-        | "workspace_members",
+        | "workspace_members"
+        | "plan_handoff_tokens",
     ) =>
       db
         .selectFrom(table)
@@ -545,6 +573,7 @@ async function start() {
       jobs: await select("jobs"),
       invitations: await select("invitations"),
       members: await select("workspace_members"),
+      planHandoffTokens: await select("plan_handoff_tokens"),
       projects: await db
         .selectFrom("projects")
         .innerJoin("repositories", "repositories.id", "projects.repository_id")

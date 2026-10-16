@@ -5,7 +5,7 @@
 // Review, and, while Dynamic Review is chosen, its model and review skill. The card never implies that
 // Dynamic Review works while the instance has not enabled it (#195 gate): the option says so and
 // choosing it shows what happens to the runs. Switching is confirmed by the form when it is saved.
-import { useId } from "react";
+import { useId, type ReactNode } from "react";
 import { Alert, alertVariants } from "../../components/ui/alert.tsx";
 import { Badge } from "../../components/ui/badge.tsx";
 import { FieldDescription, FieldLabel } from "../../components/ui/field.tsx";
@@ -61,7 +61,12 @@ export function ReviewKindFieldset({
   hiddenProblem,
   kindError,
   handlers,
+  quality,
 }: {
+  /**
+   * The quality choice of a workspace on the operator's key (#283): it takes the place of the Dynamic model field.
+   */
+  quality?: ReactNode;
   view: ProjectDynamicView;
   values: DynamicFormValues;
   errors: Partial<Record<string, string>>;
@@ -177,15 +182,19 @@ export function ReviewKindFieldset({
 
       {dynamic ? (
         <>
-          <SettingsTextField
-            name="dynamicModel"
-            label="Dynamic Review model"
-            hint={`The model the agent uses. Type the name of any model your provider serves; the default is ${view.defaults.dynamicModel}.`}
-            error={errors.dynamicModel}
-            origin={modelOrigin}
-            value={values.dynamicModel}
-            onChange={handlers.setModel}
-          />
+          {quality !== undefined ? (
+            quality
+          ) : (
+            <SettingsTextField
+              name="dynamicModel"
+              label="Dynamic Review model"
+              hint={`The model the agent uses. Type the name of any model your provider serves; the default is ${view.defaults.dynamicModel ?? ""}.`}
+              error={errors.dynamicModel}
+              origin={modelOrigin}
+              value={values.dynamicModel}
+              onChange={handlers.setModel}
+            />
+          )}
           <SkillEditor
             view={view}
             values={values}

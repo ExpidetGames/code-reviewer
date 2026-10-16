@@ -199,6 +199,134 @@ describe("changing a setting", () => {
     );
   });
 
+  // #280-T01
+  it("shows only whether each model tier is configured, never a model id, and has no way to change them", async () => {
+    const portal = await startPortal();
+    const read = async () =>
+      await (
+        await portal.visit("/api/admin/settings", {
+          cookies: portal.adminCookies,
+        })
+      ).text();
+    expect(JSON.parse(await read())).toMatchObject({
+      modelTiers: {
+        low: { diff: false, dynamic: false },
+        medium: { diff: false, dynamic: false },
+        high: { diff: false, dynamic: false },
+      },
+    });
+
+    await createInstanceSettingsRepository(portal.db).set(
+      "managed_model_tiers",
+      {
+        low: { diff: "hidden-vendor/portal-low" },
+        high: {
+          diff: "hidden-vendor/portal-high",
+          dynamic: "hidden-vendor/portal-dyn",
+        },
+      },
+      null,
+    );
+
+    const text = await read();
+    expect(JSON.parse(text)).toMatchObject({
+      modelTiers: {
+        low: { diff: true, dynamic: false },
+        medium: { diff: false, dynamic: false },
+        high: { diff: true, dynamic: true },
+      },
+    });
+    expect(text).not.toContain("hidden-vendor");
+    // The portal cannot write them: the operator API is the only way.
+    const refused = await put(portal, {
+      modelTiers: { low: { diff: "hidden-vendor/other" } },
+    });
+    expect(refused.status).toBe(422);
+    expect(
+      await createInstanceSettingsRepository(portal.db).get(
+        "managed_model_tiers",
+      ),
+    ).toMatchObject({ low: { diff: "hidden-vendor/portal-low" } });
+  });
+
+  // #284-T11
+  it("shows the plan management page as unset, saves a valid https address and shows who did it", async () => {
+    const portal = await startPortal();
+    const before = await portal.visit("/api/admin/settings", {
+      cookies: portal.adminCookies,
+    });
+    expect(await before.json()).toMatchObject({
+      planManagementUrl: { value: null, updatedBy: null },
+    });
+
+    const saved = await put(portal, {
+      planManagementUrl: "https://plans.example",
+    });
+
+    expect(saved.status).toBe(200);
+    expect(await saved.json()).toMatchObject({
+      ok: true,
+      settings: {
+        planManagementUrl: {
+          value: "https://plans.example/",
+          updatedBy: { id: portal.adminId, email: "admin@example.com" },
+        },
+      },
+    });
+  });
+
+  // #284-T11
+  it.each([
+    ["http:", "http://plans.example/", "url_not_https"],
+    ["credentials", "https://user:pw@plans.example/", "url_has_credentials"],
+    ["a fragment", "https://plans.example/#top", "url_has_fragment"],
+    ["a relative address", "/plans", "url_invalid"],
+    ["a number", 7, "url_invalid"],
+  ])("refuses %s and keeps what was saved", async (_name, value, code) => {
+    const portal = await startPortal();
+    await put(portal, { planManagementUrl: "https://plans.example/" });
+
+    const response = await put(portal, { planManagementUrl: value });
+
+    expect(response.status).toBe(422);
+    expect(await response.json()).toEqual({
+      error: "invalid_input",
+      issues: [{ field: "planManagementUrl", code }],
+    });
+    expect((await portal.service.readSettings()).planManagementUrl.value).toBe(
+      "https://plans.example/",
+    );
+  });
+
+  // #284-T01
+  it("removes the page with null, so there is no Manage plan again", async () => {
+    const portal = await startPortal();
+    await put(portal, { planManagementUrl: "https://plans.example/" });
+
+    const response = await put(portal, { planManagementUrl: null });
+
+    expect(response.status).toBe(200);
+    expect(
+      (await portal.service.readSettings()).planManagementUrl.value,
+    ).toBeNull();
+  });
+
+  // #284-T07
+  it("refuses a change from another site", async () => {
+    const portal = await startPortal();
+
+    const response = await put(
+      portal,
+      { planManagementUrl: "https://plans.example/" },
+      { "sec-fetch-site": "cross-site" },
+    );
+
+    expect(response.status).toBe(403);
+    expect(
+      (await portal.service.readSettings()).planManagementUrl.value,
+    ).toBeNull();
+  });
+
   // #106-IM-07
   it("hides the notice of the import for good, and refuses a request that is not a dismissal", async () => {
     const portal = await startPortal();

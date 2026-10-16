@@ -84,3 +84,59 @@ def test_the_wrapper_adds_the_address_of_the_fake_and_asks_for_required_paramete
     handed_on = json.loads((package / "job.json").read_text())
     assert handed_on["llm"]["baseUrl"] == "http://127.0.0.1:1/api/v1"
     assert handed_on["llm"]["requireParameters"] is True
+
+
+GUARD = Path(__file__).parents[1] / "engine" / "connect_guard"
+
+# A stand-in that reaches for an address that is not loopback (the guard refuses at the name
+# lookup, before any packet) and reports how that ended.
+FOREIGN_CONNECTION = """
+import socket
+from pathlib import Path
+try:
+    socket.create_connection(("192.0.2.1", 9), timeout=1)
+    outcome = "connected"
+except OSError as error:
+    outcome = f"refused: {error}"
+Path(__file__).with_name("outcome.txt").write_text(outcome)
+"""
+
+
+# #332-T10
+def test_the_wrapper_puts_the_job_process_behind_the_connect_guard_when_it_is_given_one(
+    tmp_path: Path,
+) -> None:
+    package = tmp_path / "code_reviewer_runner"
+    package.mkdir()
+    (package / "__init__.py").write_text("")
+    (package / "runner.py").write_text(FOREIGN_CONNECTION)
+    log = tmp_path / "connections.jsonl"
+
+    done = subprocess.run(
+        [sys.executable, str(WRAPPER), "http://127.0.0.1:1/api/v1", str(GUARD), str(log)],
+        input="{}",
+        text=True,
+        env={"PATH": os.environ.get("PATH", ""), "PYTHONPATH": str(tmp_path)},
+        capture_output=True,
+        check=False,
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert (package / "outcome.txt").read_text().startswith("refused")
+    recorded = [json.loads(line) for line in log.read_text().splitlines()]
+    assert recorded == [{"kind": "resolve", "target": "192.0.2.1:9", "allowed": False}]
+
+
+# #332-T10
+def test_the_wrapper_adds_no_guard_unless_it_is_given_both_arguments(tmp_path: Path) -> None:
+    done = subprocess.run(
+        [sys.executable, str(WRAPPER), "http://127.0.0.1:1/api/v1", str(GUARD)],
+        input="{}",
+        text=True,
+        env={"PATH": os.environ.get("PATH", "")},
+        capture_output=True,
+        check=False,
+    )
+
+    assert done.returncode == 2
+    assert "usage" in done.stderr

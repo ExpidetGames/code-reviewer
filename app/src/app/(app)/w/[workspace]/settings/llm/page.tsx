@@ -3,6 +3,7 @@
 import type { Metadata } from "next";
 import { getWorkspaceLlm } from "@/llm/shared";
 import { LlmSettingsPageContent } from "@/llm/ui/llm-settings-page";
+import { planPageLinkedFor } from "@/usage/shared";
 import { requireWorkspace } from "@/workspaces/access-runtime";
 import { can } from "@/workspaces/permissions";
 
@@ -35,9 +36,10 @@ async function LlmSettingsContent({
   canManage: boolean;
 }) {
   const llm = getWorkspaceLlm();
-  const [keyStatus, summary] = await Promise.all([
+  const [keyStatus, summary, showPlan] = await Promise.all([
     llm.keyServiceFor(workspaceId).status(),
     llm.summaryFor(workspaceId),
+    planPageLinkedFor(workspaceId),
   ]);
   return (
     <LlmSettingsPageContent
@@ -45,6 +47,7 @@ async function LlmSettingsContent({
       canManage={canManage}
       keyStatus={keyStatus}
       summary={summary}
+      showPlan={showPlan}
     />
   );
 }

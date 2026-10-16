@@ -35,6 +35,8 @@ describe("the presentation of a run status", () => {
     expect(RUN_STATUS_PRESENTATION.succeeded.label).toBe("Succeeded");
     expect(RUN_STATUS_PRESENTATION.failed.label).toBe("Failed");
     expect(RUN_STATUS_PRESENTATION.cancelled.label).toBe("Cancelled");
+    // #397-T11: a run a newer push replaced is its own state, whether it waited or ran.
+    expect(RUN_STATUS_PRESENTATION.superseded.label).toBe("Superseded");
   });
 
   it("offers every status exactly once in the filter order", () => {

@@ -41,6 +41,7 @@ from code_reviewer_runner.capabilities import (
     engines_from_environment,
 )
 from code_reviewer_runner.comment_recorder import CommentRecorder, install_comment_recorder
+from code_reviewer_runner.diff_cost import CostMeterError, DiffCostMeter, install_cost_meter
 from code_reviewer_runner.dynamic_findings import (
     DROPPED_INVALID,
     DROPPED_OUTSIDE_EXPORT,
@@ -110,12 +111,21 @@ from code_reviewer_runner.require_parameters_patch import (
     RequireParametersPatchError,
     apply_require_parameters_patch,
 )
-from code_reviewer_runner.result import ErrorCode, JobResult
+from code_reviewer_runner.result import NO_RESULT_REASON, ErrorCode, JobResult, Usage
 from code_reviewer_runner.review_state_watch import (
     ReviewStateWatch,
     WatchError,
     install_review_state_watch,
 )
+from code_reviewer_runner.supersede import (
+    PROCESS_SIGNAL,
+    SupersedeSignal,
+    WriteGuardError,
+    handling_the_signal,
+    install_write_guard,
+)
+from code_reviewer_runner.supersede_timing import SUPERSEDED_DRAIN_SECONDS
+from code_reviewer_runner.usage_probe import UsageProbe
 
 PROGRAM_NAME = "code-reviewer-run-job"
 _ERROR_LEVEL = 40
@@ -136,9 +146,11 @@ def _failure(
     *,
     reason: str | None = None,
     facts: Sequence[str] = (),
+    usage: Usage | None = None,
 ) -> JobResult:
     """A failed result. `reason` is the stable finer name of the failure; `facts` are extra lines
-    that belong with the verdict (counts and stable names only, never repository content)."""
+    that belong with the verdict (counts and stable names only, never repository content).
+    `usage` is what the run used before it failed, when it reached the model (#273)."""
     tail, truncated = capture.snapshot() if capture is not None else ("", False)
     # The code, the reason and the detail are the most important part: they stay, the old log
     # lines make room.
@@ -153,14 +165,105 @@ def _failure(
         error_code=code,
         log_tail=fit_to_bytes(header + (f"\n{fitted}" if fitted else ""), MAX_TAIL_BYTES),
         log_truncated=truncated or fitted != tail,
+        usage=usage,
         error_reason=reason,
     )
 
 
+class MeterSlot:
+    """Where the meter of the Diff run in progress is found by the watchdog thread (#363).
+
+    `main` creates it before it starts the watchdog and hands it to `run_job`, which fills it as
+    soon as the meter is installed: the way a Dynamic run hands its `UsageProbe` over. The meter is
+    guarded by a lock and its counters are read without any await or I/O, so the watchdog can read
+    it from its own thread while the event loop is blocked. Empty means no request can have been
+    sent.
+    """
+
+    def __init__(self) -> None:
+        self.meter: DiffCostMeter | None = None
+
+
+def _unreported_use(usage: Usage | None, meter: DiffCostMeter | None) -> str | None:
+    """The reason of a failed Diff run whose model use PR-Agent did not measure (#363).
+
+    PR-Agent counts only the calls that came back. A run that ends while a request is in flight (or
+    after an answer it threw away) has no usage, but the model may have worked on it, so the result
+    says that and the app counts the run with an unknown cost instead of voiding it. A run that
+    reported usage needs no reason, and one that sent no request (or only requests the provider
+    refused) stays without one.
+    """
+    if usage is not None or meter is None or not meter.may_have_used_the_model:
+        return None
+    return NO_RESULT_REASON
+
+
+def _may_write(superseded: SupersedeSignal) -> Callable[[], bool]:
+    return lambda: not superseded.is_set()
+
+
+def _publish_checked(
+    superseded: SupersedeSignal,
+) -> Callable[[Job, DynamicFindings], Published]:
+    def publish(job: Job, findings: DynamicFindings) -> Published:
+        return publish_run(job, findings, may_write=_may_write(superseded))
+
+    return publish
+
+
+def as_superseded(result: JobResult, started: float, detail: str) -> JobResult:
+    """The result of a run that was told it was superseded (#396), whatever else it came to.
+
+    A run that published before it heard of it (`ok`) stays what it is: its review is on the pull
+    request. Any other end is `superseded`: nothing was published after the signal (the write guard,
+    and the Dynamic path checks first), and the usage the run measured stays, with the reason it
+    carries (an unmeasured request in flight makes the cost unknown, as for any run).
+    """
+    if result.ok:
+        return result
+    header = f"{ErrorCode.SUPERSEDED.value}: {detail}"
+    tail = fit_to_bytes(f"{header}\n{result.log_tail}", MAX_TAIL_BYTES)
+    return replace(
+        result,
+        comment_url=None,
+        error_code=ErrorCode.SUPERSEDED,
+        log_tail=tail,
+        log_truncated=result.log_truncated or tail != f"{header}\n{result.log_tail}",
+    )
+
+
+SUPERSEDED_DETAIL = (
+    "a newer push replaced this run; no further model request was made and nothing was published"
+)
+
+
 def run_job(
-    job: Job, capture: LogCapture, started: float, timeout_seconds: float | None = None
+    job: Job,
+    capture: LogCapture,
+    started: float,
+    timeout_seconds: float | None = None,
+    meter_slot: MeterSlot | None = None,
+    superseded: SupersedeSignal = PROCESS_SIGNAL,
 ) -> JobResult:
-    """Run the job's command with PR-Agent. Never raises: every failure becomes a result."""
+    """Run the job's command with PR-Agent. Never raises: every failure becomes a result.
+
+    `meter_slot` is given the meter of the run as soon as it exists, so the watchdog can tell
+    whether a request was sent when it has to end a command that blocks the event loop (#363).
+
+    A run that is superseded meanwhile (#396) finishes the model requests in flight, sends no more,
+    writes nothing to GitHub and ends `superseded` with the usage it measured."""
+    result = _run_diff_job(job, capture, started, timeout_seconds, meter_slot, superseded)
+    return as_superseded(result, started, SUPERSEDED_DETAIL) if superseded.is_set() else result
+
+
+def _run_diff_job(
+    job: Job,
+    capture: LogCapture,
+    started: float,
+    timeout_seconds: float | None,
+    meter_slot: MeterSlot | None,
+    superseded: SupersedeSignal,
+) -> JobResult:
     # Everything that is patched into PR-Agent is undone in the end, whichever install fails.
     patches = ExitStack()
     try:
@@ -173,8 +276,21 @@ def run_job(
             if job.llm.require_parameters:
                 # Every OpenRouter request carries `provider.require_parameters` (#270).
                 patches.callback(apply_require_parameters_patch())
+            # The cost of the run is what the provider states for every answer (#274).
+            meter, undo_meter = install_cost_meter(superseded=superseded)
+            patches.callback(undo_meter)
+            if meter_slot is not None:
+                meter_slot.meter = meter
         except IdentityPatchError as error:
             return _failure(error.code, error.detail, started, capture)
+        except CostMeterError as error:
+            # Fails closed: a run that cannot be measured is not started.
+            return _failure(
+                ErrorCode.RUNNER_ERROR,
+                f"cannot measure the model cost of PR-Agent: {error}",
+                started,
+                capture,
+            )
         except RequireParametersPatchError as error:
             # Fails closed: no request goes out without the field. The cause is named in the result.
             return _failure(
@@ -205,10 +321,32 @@ def run_job(
         guard, undo_guard = install_repo_settings_guard()
         patches.callback(undo_guard)
         try:
-            handled, failed_flag, usage = asyncio.run(execute(job, guard, timeout_seconds))
-        except JobTimeout:
+            # Last, so it is the outermost: once the run is superseded nothing reaches GitHub
+            # (#396).
+            _writes, undo_writes = install_write_guard(superseded)
+        except WriteGuardError as error:
             return _failure(
-                ErrorCode.TIMEOUT, "the command did not finish in time", started, capture
+                ErrorCode.RUNNER_ERROR,
+                f"cannot guard the writes of PR-Agent: {error}",
+                started,
+                capture,
+            )
+        patches.callback(undo_writes)
+        # What PR-Agent measured is kept for a command that fails after its model call (#273).
+        probe = UsageProbe()
+        try:
+            # The soft timeout counts from `started`, like the watchdog (#387).
+            deadline = None if timeout_seconds is None else started + timeout_seconds
+            handled, failed_flag, usage = asyncio.run(execute(job, guard, deadline, probe, meter))
+        except JobTimeout:
+            usage = probe.usage()
+            return _failure(
+                ErrorCode.TIMEOUT,
+                "the command did not finish in time",
+                started,
+                capture,
+                usage=usage,
+                reason=_unreported_use(usage, meter),
             )
         except InvalidOption as error:
             # The key is an env name that parse_job validated; the value is never echoed.
@@ -223,7 +361,15 @@ def run_job(
         except BaseException as error:  # SystemExit and friends from a library included
             capture.add(_ERROR_LEVEL, "ERROR", "handle_request raised", error)
             code = classify_failure(capture.exceptions, capture.error_messages)
-            return _failure(code or ErrorCode.UNKNOWN, "the command raised", started, capture)
+            usage = probe.usage()
+            return _failure(
+                code or ErrorCode.UNKNOWN,
+                "the command raised",
+                started,
+                capture,
+                usage=usage,
+                reason=_unreported_use(usage, meter),
+            )
     finally:
         patches.close()
 
@@ -248,6 +394,8 @@ def run_job(
             error_code = ErrorCode.COMMAND_FAILED
         error_code = error_code or ErrorCode.UNKNOWN
     log_tail, log_truncated = capture.snapshot()
+    # A failed command reports usage only when it reached the model.
+    reported = usage if ok else probe.usage()
     return JobResult(
         ok=ok,
         duration_ms=_elapsed_ms(started),
@@ -255,7 +403,8 @@ def run_job(
         error_code=error_code,
         log_tail=log_tail,
         log_truncated=log_truncated,
-        usage=usage,
+        usage=reported,
+        error_reason=None if ok else _unreported_use(reported, meter),
     )
 
 
@@ -315,6 +464,8 @@ def run_dynamic_job(
     publish: Callable[[Job, DynamicFindings], Published] | None = None,
     lease_check: LeaseCheck | None = None,
     publish_failure: Callable[[Job, ErrorCode, str | None], Published | None] | None = None,
+    usage_probe: UsageProbe | None = None,
+    superseded: SupersedeSignal = PROCESS_SIGNAL,
 ) -> JobResult:
     """Run a Dynamic job with the read-only stock engine (#197) and publish its summary (#201).
 
@@ -331,6 +482,11 @@ def run_dynamic_job(
 
     A failure that a developer can understand or act on also leaves a short note in the pull
     request's summary comment (#299, `add_failure_note`); the note never changes the result.
+
+    A run that fails after at least one model call reports what it used (#273): the counters of the
+    ledger, and the cost only when every call was priced. `usage_probe` lets the caller read the
+    same from outside when the run does not end by returning (an error nobody expected, the
+    watchdog).
     """
     result = _run_dynamic_job(
         job,
@@ -342,8 +498,21 @@ def run_dynamic_job(
         prepare=prepare,
         publish=publish,
         lease_check=lease_check,
+        usage_probe=usage_probe or UsageProbe(),
+        superseded=superseded,
     )
-    return add_failure_note(job, result, lease_check, publish_failure or publish_failure_note)
+    # A run that was superseded (#396) ends `superseded` with its ledger's usage and writes nothing,
+    # not even the note of a failure: that code has no sentence.
+    if superseded.is_set():
+        result = as_superseded(result, started, SUPERSEDED_DETAIL)
+
+    def note(job: Job, code: ErrorCode, reason: str | None) -> Published | None:
+        # The last check, right before the one write (see "publishes nothing" in the README).
+        return publish_failure_note(job, code, reason, may_write=_may_write(superseded))
+
+    return add_failure_note(
+        job, result, lease_check, publish_failure or note, started=started, superseded=superseded
+    )
 
 
 def add_failure_note(
@@ -351,9 +520,15 @@ def add_failure_note(
     result: JobResult,
     lease_check: LeaseCheck | None,
     write: Callable[[Job, ErrorCode, str | None], Published | None],
+    *,
+    started: float = 0.0,
+    superseded: SupersedeSignal = PROCESS_SIGNAL,
 ) -> JobResult:
     """Leaves the note of a failed run in the summary comment and returns the result unchanged but
     for one line of the log (#299).
+
+    A run the host knows to be superseded (the lease check answers so, which can be before the
+    process got the signal) is a `superseded` run, not a failure with its old code (#396).
 
     Only a code with a fixed sentence writes (`failure_note.FAILURE_SENTENCES`); `lease_lost`, a
     refused token and the rest stay in the Runs view. A job that is no longer ours writes nothing,
@@ -363,11 +538,18 @@ def add_failure_note(
     code = result.error_code
     if result.ok or code is None or code not in FAILURE_SENTENCES:
         return result
-    if lease_check is not None and lease_check() is not LeaseState.HELD:
+    if lease_check is not None and (state := lease_check()) is not LeaseState.HELD:
+        if state is LeaseState.SUPERSEDED:
+            superseded.set()
+            return as_superseded(result, started, SUPERSEDED_DETAIL)
         return result
     try:
         written = write(job, code, result.error_reason)
     except PublishError as error:
+        if error.code is ErrorCode.SUPERSEDED:
+            # The re-check right before the write found the run replaced: nothing was written.
+            superseded.set()
+            return as_superseded(result, started, SUPERSEDED_DETAIL)
         return _with_note_line(result, f"failure note: not written ({error.code.value})")
     except Exception:
         return _with_note_line(result, "failure note: not written")
@@ -393,6 +575,8 @@ def _run_dynamic_job(
     prepare: ContentPreparer | None = None,
     publish: Callable[[Job, DynamicFindings], Published] | None = None,
     lease_check: LeaseCheck | None = None,
+    usage_probe: UsageProbe,
+    superseded: SupersedeSignal = PROCESS_SIGNAL,
 ) -> JobResult:
     dynamic = job.dynamic
     base = job.base
@@ -431,13 +615,29 @@ def _run_dynamic_job(
     except LimitError as error:
         return _failure(error.code, error.detail, started, capture)
 
+    # The run has what is left of the timeout, which counts from `started` (the first line of
+    # `main()`) like the watchdog's does (#387). A run that starts late is therefore stopped by its
+    # own deadline, with the clean result and what it used, before the watchdog could end it; the
+    # wrap-up and the recovery reserve of the ledger are taken from this deadline, so they stay
+    # consistent with it.
     deadline = TOTAL_DEADLINE_SECONDS
     if timeout_seconds is not None:
-        deadline = min(deadline, timeout_seconds)
+        remaining = timeout_seconds - (time.monotonic() - started)
+        if remaining <= 0:
+            return _failure(
+                ErrorCode.TIMEOUT,
+                "the command did not finish in time",
+                started,
+                capture,
+                usage=usage_probe.usage(),
+            )
+        deadline = min(deadline, remaining)
     try:
         ledger = dynamic_ledger(capabilities, environment, deadline)
     except LimitError as error:
         return _failure(error.code, error.detail, started, capture)
+    # From here on every failure says what the model calls so far cost (nothing before the first).
+    usage_probe.watch(lambda: ledger.usage(job.llm.model))
     upstream = job.llm.base_url or "https://openrouter.ai/api/v1"
     # One unguessable capability per job: the proxy demands it, the engine config carries it.
     capability = new_proxy_capability()
@@ -452,6 +652,8 @@ def _run_dynamic_job(
             capabilities=capabilities,
             capability=capability,
             require_parameters=job.llm.require_parameters,
+            # Once superseded (#396) the proxy refuses every new request; one in flight finishes.
+            superseded=superseded.is_set,
         )
     except LimitError as error:
         # The destination cannot serve the run: fail before the engine starts, with no fallback.
@@ -498,12 +700,15 @@ def _run_dynamic_job(
                     launch=prepared.launch,
                     node_bin=environment.get(DYNAMIC_NODE_BIN_VARIABLE) or None,
                     ripgrep=ripgrep,
+                    superseded=superseded.is_set,
                 )
                 answer = engine.run()
                 turn_note = _turn_note(engine.turn_seconds)
                 recovery_note = engine.recovery
             finally:
-                server.stop()
+                # A request the engine had in flight when the run ended is waited for if the run was
+                # superseded: its answer is measured, so the cost is known instead of lost (#396).
+                server.stop(drain_seconds=SUPERSEDED_DRAIN_SECONDS if superseded.is_set() else 0.0)
     except CheckoutError as error:
         return _failure(
             error.code,
@@ -512,30 +717,42 @@ def _run_dynamic_job(
             capture,
             reason=error.reason.value,
             facts=[f"checkout: {error.metrics.describe()}"] if error.metrics else [],
+            usage=usage_probe.usage(),
         )
 
     if answer.error is not None:
         detail = answer.error.detail + (f" [{turn_note}]" if turn_note else "")
-        return _failure(answer.error.code, detail, started, capture)
+        return _failure(answer.error.code, detail, started, capture, usage=usage_probe.usage())
     assert answer.findings is not None
     # The summary is written by this supervisor, never by the engine, and only for a run whose
     # findings passed every check above: any earlier failure leaves the previous comment untouched.
     # A run whose job is no longer ours (lease lost, cancelled) writes nothing (#260). Without a
     # check (a process the loop did not start) there is no lease to ask about.
+    if superseded.is_set():
+        return _failure(
+            ErrorCode.SUPERSEDED, SUPERSEDED_DETAIL, started, capture, usage=usage_probe.usage()
+        )
     if lease_check is not None and (state := lease_check()) is not LeaseState.HELD:
+        if state is LeaseState.SUPERSEDED:
+            return _failure(
+                ErrorCode.SUPERSEDED, SUPERSEDED_DETAIL, started, capture, usage=usage_probe.usage()
+            )
         detail = (
             "the lease could not be confirmed, so nothing was written"
             if state is LeaseState.UNCONFIRMED
             else "the job is no longer held by this runner, so nothing was written"
         )
-        return _failure(ErrorCode.LEASE_LOST, detail, started, capture)
+        return _failure(ErrorCode.LEASE_LOST, detail, started, capture, usage=usage_probe.usage())
     try:
         # A review that was wrapped up at its limit says so in the summary; the reason is the
         # ledger's, never the model's.
         findings = replace(answer.findings, stopped_early=ledger.stopped_early)
-        published = (publish or publish_run)(job, findings)
+        # The check is repeated right before the one write (`may_write`); a signal after it is too
+        # late for any process, and is the reason the README does not call "publishes nothing"
+        # absolute.
+        published = (publish or _publish_checked(superseded))(job, findings)
     except PublishError as error:
-        return _failure(error.code, error.detail, started, capture)
+        return _failure(error.code, error.detail, started, capture, usage=usage_probe.usage())
     summary = (
         f"dynamic review: {len(answer.findings.findings)} findings against {base.head_sha}; "
         f"{ledger.model_calls} model calls, {ledger.tool_calls} tool calls, {ledger.files} files"
@@ -678,22 +895,62 @@ def _unwind_on_sigterm() -> Generator[None]:
         signal.signal(signal.SIGTERM, previous)
 
 
+def _probe_usage(probe: UsageProbe | None) -> Usage | None:
+    """The usage a failure may carry. Reading it must never stop the failure from being reported."""
+    try:
+        return probe.usage() if probe is not None else None
+    except Exception:
+        return None
+
+
+def _watchdog_reason(probe: UsageProbe | None, meter_slot: MeterSlot | None) -> str | None:
+    """The `errorReason` of a run the watchdog ends. A Dynamic run (a probe) reads its ledger."""
+    if probe is not None:
+        return None
+    if meter_slot is None:
+        return NO_RESULT_REASON
+    try:
+        return _unreported_use(None, meter_slot.meter)
+    except Exception:
+        # Reading must never stop the failure from being reported; unreadable means unknown.
+        return NO_RESULT_REASON
+
+
 def _start_watchdog(
     seconds: float,
     channel: _ResultChannel,
     started: float,
     capture: LogCapture | None,
     secrets: Sequence[str],
+    probe: UsageProbe | None = None,
+    meter_slot: MeterSlot | None = None,
 ) -> threading.Timer:
-    """Last resort for a command that blocks the event loop and so ignores the soft timeout."""
+    """Last resort for a command that blocks the event loop and so ignores the soft timeout.
+
+    A Dynamic run hands over its `probe`: the ledger can be read from this thread, so the result
+    still says what the run used (#273). A Diff command keeps its measurements in the context of
+    the blocked event loop, which this thread cannot read; its timeout result carries none, but the
+    meter of its model function is lock guarded and safe to read from here: a run that sent no
+    request stays void, and one with a request open (or answered but uncounted) is reported as
+    possibly used (#363). A watchdog without a meter slot cannot tell and reports the reason.
+    """
 
     def fire() -> None:
         # A Dynamic engine runs in its own process group (it can outlive this process); end it
         # before this process ends, so no engine or helper survives the timeout (#197-T07).
         shutdown_engines()
+        usage = _probe_usage(probe)
+        # A Diff command's usage lives in the blocked event loop and cannot be read from here, but
+        # its meter can: the reason says that the model may have been used (#273, #363).
+        reason = _watchdog_reason(probe, meter_slot)
         try:
             result = _failure(
-                ErrorCode.TIMEOUT, "the command did not stop in time", started, capture
+                ErrorCode.TIMEOUT,
+                "the command did not stop in time",
+                started,
+                capture,
+                usage=usage,
+                reason=reason,
             )
         except Exception:
             result = JobResult(
@@ -703,6 +960,8 @@ def _start_watchdog(
                 error_code=ErrorCode.TIMEOUT,
                 log_tail="timeout: the command did not stop in time",
                 log_truncated=True,
+                usage=usage,
+                error_reason=reason,
             )
         try:
             written = channel.write(result, secrets)
@@ -723,7 +982,20 @@ def main(
     stdin: TextIO | None = None,
     stdout: TextIO | None = None,
 ) -> int:
-    """Entry point of the console script. Returns the process exit code."""
+    """Entry point of the console script. Returns the process exit code.
+
+    `SIGUSR1` means that the run was superseded (#396): the handler is in place for the whole
+    run."""
+    with handling_the_signal():
+        return _main(argv, stdin=stdin, stdout=stdout)
+
+
+def _main(
+    argv: Sequence[str] | None = None,
+    *,
+    stdin: TextIO | None = None,
+    stdout: TextIO | None = None,
+) -> int:
     started = time.monotonic()
     try:
         _build_parser().parse_args(argv)
@@ -753,8 +1025,10 @@ def main(
         # A Dynamic job is never run by PR-Agent (#195/#197). It gets the same process-level timeout
         # as a Diff job; on expiry the watchdog ends the engine's process group too (#197-T07).
         dynamic_timeout = _timeout_from(saved_env)
+        # What the run used so far, for the paths that end it without a normal return (#273).
+        dynamic_probe = UsageProbe()
         dynamic_watchdog = (
-            _start_watchdog(dynamic_timeout, channel, started, None, job.secrets)
+            _start_watchdog(dynamic_timeout, channel, started, None, job.secrets, dynamic_probe)
             if dynamic_timeout
             else None
         )
@@ -768,11 +1042,18 @@ def main(
                     dynamic_timeout,
                     engines=engines_from_environment(saved_env),
                     lease_check=lease_check_from_environment(saved_env, required=True),
+                    usage_probe=dynamic_probe,
                 )
         except KeyboardInterrupt:
             raise
         except BaseException:
-            result = _failure(ErrorCode.RUNNER_ERROR, "unexpected runner error", started, None)
+            result = _failure(
+                ErrorCode.RUNNER_ERROR,
+                "unexpected runner error",
+                started,
+                None,
+                usage=_probe_usage(dynamic_probe),
+            )
         finally:
             if dynamic_watchdog is not None:
                 dynamic_watchdog.cancel()
@@ -782,8 +1063,10 @@ def main(
     capture = LogCapture(redactor)
     saved_streams: tuple[Any, Any] = (sys.stdout, sys.stderr)
     timeout_seconds = _timeout_from(saved_env)
+    # Where the watchdog finds the meter of the run, once `run_job` has installed it (#363).
+    meter_slot = MeterSlot()
     watchdog = (
-        _start_watchdog(timeout_seconds, channel, started, capture, job.secrets)
+        _start_watchdog(timeout_seconds, channel, started, capture, job.secrets, None, meter_slot)
         if timeout_seconds
         else None
     )
@@ -799,7 +1082,7 @@ def main(
         os.environ.clear()
         os.environ.update(build_environment(job, saved_env))
         try:
-            result = run_job(job, capture, started, timeout_seconds)
+            result = run_job(job, capture, started, timeout_seconds, meter_slot=meter_slot)
         except KeyboardInterrupt:
             raise
         except BaseException as error:

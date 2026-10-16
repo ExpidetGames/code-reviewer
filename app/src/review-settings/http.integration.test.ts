@@ -13,7 +13,10 @@ import {
   type ModelCapabilityChecker,
 } from "../llm/model-capabilities.ts";
 import { cleanUpAfterTest } from "../test-support/test-database.ts";
-import { setupReviewSettings } from "../test-support/review-settings-harness.ts";
+import {
+  ALL_TIERS_CONFIGURED,
+  setupReviewSettings,
+} from "../test-support/review-settings-harness.ts";
 import {
   REVIEW_SETTINGS_REQUEST_MAX_BYTES,
   createReviewSettingsRouteHandlers,
@@ -495,5 +498,192 @@ describe("the check of the Dynamic model over HTTP", () => {
       dynamic: { effective: { dynamicModel: "vendor/any" } },
       warnings: [{ field: "dynamicModel", code: "DYNAMIC_MODEL_UNVERIFIED" }],
     });
+  });
+});
+
+// #283: the routes of a workspace on the operator's key carry the quality level and no model.
+describe("the settings routes of a workspace on the operator's key", () => {
+  async function managed() {
+    const app = await setupReviewSettings(undefined, {
+      operatorsModels: true,
+      tierAvailability: ALL_TIERS_CONFIGURED,
+    });
+    await app.projects.activate(app.first.id);
+    const handlers = createReviewSettingsRouteHandlers({
+      requireUser: async () => USER,
+      service: app.service,
+    });
+    const put = (path: string, body: unknown) =>
+      new Request(`${URL_BASE}${path}`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    const projectPath = `/api/repositories/${app.first.id}/project/settings`;
+    return { ...app, handlers, put, projectPath };
+  }
+
+  // #283-T07
+  it("answer the level and no model field, and no model name, for the defaults and a project", async () => {
+    const app = await managed();
+    await app.service.updateProjectSettings(app.first.id, {
+      modelTier: "high",
+    });
+
+    const responses = [
+      await app.handlers.getGlobal(
+        new Request(`${URL_BASE}/api/review-settings`),
+      ),
+      await app.handlers.getProject(
+        new Request(`${URL_BASE}${app.projectPath}`),
+        app.first.id,
+      ),
+    ];
+
+    const bodies: unknown[] = [];
+    for (const response of responses) {
+      const text = await response.text();
+      expect(response.status).toBe(200);
+      expect(text).not.toMatch(/"(model|fallbackModel|dynamicModel)"/);
+      expect(text).not.toContain("deepseek");
+      bodies.push(JSON.parse(text));
+    }
+    for (const body of bodies)
+      expect(body).toMatchObject({ modelManagedByInstance: true, cost: null });
+    expect(bodies[1]).toMatchObject({ effective: { modelTier: "high" } });
+  });
+
+  // #283-T01
+  it("accept the level at the defaults and at a project", async () => {
+    const app = await managed();
+
+    const global = await app.handlers.putGlobal(
+      app.put("/api/review-settings", { settings: { modelTier: "low" } }),
+    );
+    const project = await app.handlers.putProject(
+      app.put(app.projectPath, { settings: { modelTier: "high" } }),
+      app.first.id,
+    );
+
+    expect(global.status).toBe(200);
+    expect(await global.json()).toMatchObject({
+      overrides: { modelTier: "low" },
+    });
+    expect(project.status).toBe(200);
+    expect(await project.json()).toMatchObject({
+      overrides: { modelTier: "high" },
+    });
+  });
+
+  // #283-T04
+  it.each([
+    ["model", { model: "acme-x/y-1" }],
+    ["fallbackModel", { fallbackModel: "acme-x/y-1" }],
+  ])(
+    "refuse %s in a write of the defaults with 400 and the code MODEL_MANAGED_BY_INSTANCE",
+    async (field, settings) => {
+      const app = await managed();
+
+      const response = await app.handlers.putGlobal(
+        app.put("/api/review-settings", { settings }),
+      );
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({
+        error: "REVIEW_SETTINGS_INVALID",
+        issues: [{ field, code: "MODEL_MANAGED_BY_INSTANCE" }],
+      });
+      expect(await app.appSettingRows()).toEqual([]);
+    },
+  );
+
+  // #283-T04
+  it.each([
+    ["model", { model: "acme-x/y-1" }],
+    ["dynamicModel", { dynamicModel: "acme-x/y-1" }],
+  ])(
+    "refuse %s in a write of a project with 400 and the code MODEL_MANAGED_BY_INSTANCE",
+    async (field, settings) => {
+      const app = await managed();
+
+      const response = await app.handlers.putProject(
+        app.put(app.projectPath, { settings }),
+        app.first.id,
+      );
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({
+        error: "REVIEW_SETTINGS_INVALID",
+        issues: [{ field, code: "MODEL_MANAGED_BY_INSTANCE" }],
+      });
+    },
+  );
+
+  // #283-T02
+  it("leave a workspace on its own key as before: the model is answered and accepted", async () => {
+    const app = await setup();
+
+    const response = await app.putProject({
+      settings: { model: "acme-x/y-1" },
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      effective: { model: "acme-x/y-1" },
+      modelManagedByInstance: false,
+    });
+  });
+
+  // #283-T09
+  it("show an instance admin on a workspace with its own key everything they showed before", async () => {
+    const admin = {
+      id: "admin",
+      githubLogin: "operator",
+      isInstanceAdmin: true,
+    } as unknown as SessionUser;
+    const app = await setup(async () => admin);
+
+    const read = await app.handlers.getProject(
+      new Request(`${URL_BASE}${app.projectPath}`),
+      app.first.id,
+    );
+    const saved = await app.putProject({
+      settings: { model: "acme-x/y-1", maxFindings: 3 },
+    });
+
+    expect(await read.json()).toMatchObject({
+      effective: { model: "deepseek/deepseek-v3.2" },
+      dynamic: { effective: { dynamicModel: expect.any(String) } },
+      cost: { warn: false },
+      modelManagedByInstance: false,
+    });
+    expect(saved.status).toBe(200);
+    expect(await saved.json()).toMatchObject({
+      overrides: { model: "acme-x/y-1", maxFindings: 3 },
+    });
+  });
+
+  // #283-T09
+  it("give an instance admin who is a member of a workspace on the operator's key the same view as its members", async () => {
+    const admin = {
+      id: "admin",
+      githubLogin: "operator",
+      isInstanceAdmin: true,
+    } as unknown as SessionUser;
+    const app = await setupReviewSettings(undefined, {
+      operatorsModels: true,
+      tierAvailability: ALL_TIERS_CONFIGURED,
+    });
+    const handlers = createReviewSettingsRouteHandlers({
+      requireUser: async () => admin,
+      service: app.service,
+    });
+
+    const response = await handlers.getGlobal(
+      new Request(`${URL_BASE}/api/review-settings`),
+    );
+
+    // The operator reads the models through the operator API and the instance portal, not through a workspace.
+    expect(await response.text()).not.toMatch(/"model"|deepseek/);
   });
 });

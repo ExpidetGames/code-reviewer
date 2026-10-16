@@ -12,6 +12,8 @@ opens a database or writes SQL. The one exception is `src/backup/` (backup and r
 | `driver.ts`                 | `databaseDriver(db)`: which engine a connection speaks, for the one dialect-specific statement (the claim)                                                                                                                                                          |
 | `dialect.ts`                | Kysely's SQLite dialect with `begin immediate` transactions and transactional DDL                                                                                                                                                                                   |
 | `migrate.ts`, `migrations/` | `migrateToLatest(db)` and the ordered list of migrations                                                                                                                                                                                                            |
+| `schema-status.ts`          | `readSchemaStatus(db)`: whether every migration of this version has been applied, read-only (serverless `/api/health`)                                                                                                                                              |
+| `migrate-cli.ts`            | `pnpm migrate`: the migrations against `DATABASE_URL_MIGRATE` behind a session advisory lock, for the serverless mode                                                                                                                                               |
 | `startup.ts`                | What the server does on start; `getDatabase()` hands the connection out                                                                                                                                                                                             |
 | `schema.ts`                 | Row types of every table (`Database`)                                                                                                                                                                                                                               |
 | `codecs.ts`                 | The only code that knows how JSON, booleans and timestamps are stored                                                                                                                                                                                               |
@@ -81,6 +83,41 @@ the transaction) as a parameter for this reason: pass `trx` to them inside a tra
 better-sqlite3 is synchronous: while a write waits for a lock held by another connection, the whole
 Node thread waits. That is fine for the short transactions in this app. Keep transactions short and
 never hold one open across an `await` on something slow (network, model, subprocess).
+
+## Serverless mode
+
+`APP_RUNTIME=serverless` (selected by itself when the hosting platform sets `VERCEL=1`; `src/runtime/mode.ts`)
+is for functions that start cold, many at a time. The default, `server`, is the long-lived process
+described everywhere else in this file and is unchanged. In serverless mode:
+
+- **Postgres only.** SQLite is refused (`DATABASE_SERVERLESS_NEEDS_POSTGRES`; the message names no value),
+  and the SQLite driver is never loaded (`startup.ts` imports `connection.ts` only when a server starts).
+- **A lazy, small pool.** `getDatabase()` opens the pool on its first call, and the pool connects on the first
+  query, so a cold instance that never reads the database never connects. `DATABASE_POOL_MAX` defaults to 3
+  (1 to 20: every instance has its own pool), idle connections close after 5 seconds, and the pool is
+  handed to the platform's hook (`attachDatabasePool` of `@vercel/functions`), which keeps the instance
+  alive until they have closed.
+- **No start-up work.** `src/startup-serverless.ts` only checks the settings, and a bad one throws (it never
+  calls `process.exit`, which would end the function). No migration, no backup of an old database, no
+  legacy import, no setup code in memory (it lives in the database: `pnpm setup-code`, `src/setup/README.md`), no sync with GitHub, no
+  cleanup or backup timer. The repositories are synchronized by the webhooks and by a daily cron
+  (`src/cron/`, route `/api/internal/repository-sync`, `CRON_SECRET`); the hourly cleanup, the expiry of lapsed leases and
+  the resends are done by a once-a-minute sweep (`/api/internal/dispatch-sweep`, #328, `src/dispatch/README.md`).
+- **Migrations are a command.** `pnpm migrate` connects with `DATABASE_URL_MIGRATE` (a DIRECT Postgres
+  connection: a pooler that ends the session between statements would drop the advisory lock), takes the
+  session advisory lock `code-reviewer:migrate` for the whole run, applies what is pending and exits 0, or
+  prints one line with the error code and exits 1. Run it at deployment time, before the new version takes
+  traffic. The app never migrates: `GET /api/health` answers 503 `{"status":"error","code":"SCHEMA_BEHIND"}`
+  while the database lacks a migration of this version (`schema-status.ts`; read-only, and a complete
+  schema is not asked about again).
+- **Mixed versions during a rollout.** Old instances keep running while the new version is deployed. The
+  order is: migrate, then deploy. A migration therefore must work for the version that is still running:
+  add tables and columns (nullable, or with a default); drop or rename in a later release, once no instance
+  of the old version is left. A database that is AHEAD of an instance (it knows fewer migrations) is
+  healthy for that instance. An instance deployed before its migration reports `SCHEMA_BEHIND` on
+  `/api/health` (503), but **nothing makes the platform hold traffic back** for that: a production deployment is promoted
+  when it is built, whatever `/api/health` says. So the order is a rule for the operator, not something the platform
+  enforces: run `pnpm migrate` first, then deploy (`docs/deployment-vercel.md`, section 5.6).
 
 ## Migrations
 
@@ -171,8 +208,14 @@ sections 2.2, 2.3 and 2.10):
 - `rate_limits` (key, `window_started_at`, `count`): shared counters with a window for the endpoints that
   must limit the same way whichever app instance a request reaches (`rate-limits-repository.ts`, `hit` is
   one statement, so attempts that arrive together are all counted). The email and password sign in
-  uses it (`src/auth/sign-in-limit.ts`); the setup code has its own counters in memory, by design.
+  uses it (`src/auth/sign-in-limit.ts`); the setup code has its own counters (in memory on a server, in `setup_codes` in a serverless deployment).
 - `users.is_instance_admin` (0 or 1, default 0): set for the account the setup creates.
+
+Migration `20261015110000_create_setup_codes` (#321): `setup_codes` (`id`, `code_hash`, `created_at`, `expires_at`,
+`used_at`, `failures`, `window_started_at`, `attempts_in_window`) holds the first-run setup code of a serverless
+deployment, at most one row (`setup-codes-repository.ts`, `src/setup/database-code-store.ts`). The code is stored as a
+keyed hash only. A server never reads or writes the table. The migration is additive, so an instance from before it
+keeps working while the migration runs (it never reads the table).
 
 None of these is customer data, so none is workspace scoped (`scoping.test.ts` lists them as instance
 level).
@@ -270,6 +313,50 @@ Migration `20261014150000_create_usage_records` (#272; epic #268). It adds an em
   larger number as unknown). The id is text; readers page through the settled records by `(settled_at, id)`. Rows are
   never deleted. See `src/usage/README.md`.
 
+Migration `20261015200000_add_usage_record_settled_reason` (#273). It adds one nullable column, `settled_reason`, to
+`usage_records` and touches no row: why a record was settled without a report of its run (`no_result`). A check
+allows only that value. A previous release's app instance never names the column, so it keeps working against the
+migrated database; its writes leave the reason empty.
+
+### Job dispatches
+
+Migration `20261015120000_create_job_dispatches` (#326; epic #316). It adds an empty table and touches no existing row,
+so an app of the previous release on the same database is unaffected:
+
+- `job_dispatches` (`job_id` primary key and foreign key to `jobs`, `state` `pending`/`acked`/`stopped`, `attempts`,
+  `consecutive_failures`, `next_dispatch_at`, `acked_at`, `last_attempt_at`, `last_status`, `last_code`, `created_at`,
+  `updated_at`): where the signed wake-up call of a job stands (`job-dispatches-repository.ts`, instance level: the
+  sender and the sweep work from a job id and the table holds no repository data). Written only with
+  `RUNNER_DISPATCH=webhook`; in the default poll mode it stays empty. A partial index serves the due rows. The sweep
+  (#328) removes the rows of jobs that finished a week ago and makes a `stopped` row pending again after 10 minutes.
+  See `src/dispatch/README.md`.
+
+### Refusal notices
+
+Migration `20261016090000_create_refusal_notices` (#281; epic #268). It adds an empty table and touches no existing row,
+so an app of the previous release on the same database is unaffected (it never reads the table):
+
+- `refusal_notices` (`id`, `workspace_id` and `repository_id` foreign keys, `pr_number`, `period_start`, `code`
+  `quota_exhausted`/`workspace_suspended`, `state` `pending`/`posted`/`dropped`, `attempts`, `next_attempt_at`,
+  `posted_at`, `created_at`, `updated_at`): the record that a pull request got the notice of a refused review in a
+  period. Scoped (`refusal-notices-repository.ts`); a unique index on workspace, repository, pull request and period
+  start is the dedupe, a partial index serves the cron sweep's read of the due ones (`refusal-notices-sweep.ts`,
+  instance level). See `src/refusal-notices/README.md`.
+
+### Plan handoff tokens
+
+Migration `20261016120000_create_plan_handoff_tokens` (#284; epic #268). It adds an empty table and touches no existing
+row, so an app of the previous release on the same database is unaffected (it never reads the table):
+
+- `plan_handoff_tokens` (`token_hash` primary key: the SHA-256 of a token of 256 random bits, never the token;
+  `workspace_id` and `user_id` foreign keys, `user_id` `on delete cascade`; `role` `owner`/`admin`, the role at the click;
+  `created_at`, `expires_at` five minutes later, `used_at`, `revoked_at`): the single-use hand-over of an Owner or Admin
+  to the operator-configured plan page. Making one is scoped (`plan-handoff-tokens-repository.ts`: it revokes the same
+  person's unused tokens of the workspace and inserts, in one transaction); redeeming one is by the hash alone and
+  instance level (`plan-handoff-redeem-repository.ts`: one guarded `update … returning`, then the role is read again).
+  Rows are removed a day after they expired (`src/maintenance/cleanup.ts`); the table is listed in the user merge
+  (`github-signin/merge.ts`, ends with the retired user). See `src/plan-handoff/README.md`.
+
 ## Workspace scoping
 
 Every repository that reads or writes customer data is created for one workspace:
@@ -288,11 +375,15 @@ workspace is simply not there: fetching, changing or deleting it behaves like a 
 
 Not scoped, each for a reason (the list is in `scoping.test.ts`):
 
-| Module                                                               | Why                                                                                                                                                                                                                                                                               |
-| -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `app-meta`, `allowed-login-pins`, `webhook-deliveries`, `workspaces` | Not customer data (facts about the installation, the sign-in allow list, delivery ids, the owners themselves)                                                                                                                                                                     |
-| `integration-directory-repository.ts`                                | Reads integrations of any workspace. A webhook names an installation before anybody knows the workspace, and the synchronization walks every connection. It only reads, and the answer carries `workspaceId`; everything done next goes through scoped repositories               |
-| `runner-jobs-repository.ts`                                          | The lease side of the job queue (claim, heartbeat, complete, release, expiry). Runners serve the whole instance with one token, so a claim hands out the oldest due job of any workspace; every change is fenced by the lease token, and the job it returns carries `workspaceId` |
+| Module                                                               | Why                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `app-meta`, `allowed-login-pins`, `webhook-deliveries`, `workspaces` | Not customer data (facts about the installation, the sign-in allow list, delivery ids, the owners themselves)                                                                                                                                                                                                                                                                                                                    |
+| `integration-directory-repository.ts`                                | Reads integrations of any workspace. A webhook names an installation before anybody knows the workspace, and the synchronization walks every connection. It only reads, and the answer carries `workspaceId`; everything done next goes through scoped repositories                                                                                                                                                              |
+| `usage-feed-repository.ts`                                           | The settled usage records of every workspace in one ordered feed, and the grouped count of runs that settled without a cost per workspace and key mode (#385), for the operator API (#278): the operator serves many workspaces from one token. It only reads (never a `reserved` or `void` record), and every record and count carries `workspaceId`; the reads of one workspace go through the scoped usage records repository |
+| `runner-jobs-repository.ts`                                          | The lease side of the job queue (claim, heartbeat, complete, release, expiry). Runners serve the whole instance with one token, so a claim hands out the oldest due job of any workspace; every change is fenced by the lease token, and the job it returns carries `workspaceId`                                                                                                                                                |
+| `claim-admission.ts`                                                 | The check of the entitlements of a job the claim just took (#277), inside the claim transaction of the lease side of the queue, for whichever workspace the job is in. It reads, through repositories created for that job's workspace (the instance default and the workspace row it locks are not customer data), and decides; the ending of a refused job is the lease side's own statement                                   |
+| `plan-handoff-redeem-repository.ts`                                  | The redemption of a handoff token by the external plan page through the operator API (#284). The caller holds only the token, so there is no workspace to scope to before it is looked up by its hash; it never lists, and the answer names the workspace the token was made for. Making a token is the scoped plan handoff tokens repository; the clean-up only deletes expired rows                                            |
+| `refusal-notices-sweep.ts`                                           | The notices of refused reviews that are due to be posted again (#281), for the cron sweep that serves the whole instance. It only reads the `pending` rows whose wait is over, and every answer carries `workspaceId`; the record itself goes through the scoped refusal notices repository                                                                                                                                      |
 
 A signed-in user works in the workspace named by the address (`/w/<slug>`) and only in one they are a member
 of (`src/workspaces/README.md`); the repositories of members and invitations below follow the same rule,
@@ -322,7 +413,8 @@ and are exempt.
 
 ## Using the connection
 
-`getDatabase()` (`startup.ts`) returns the connection that the server opened in `register()`. It
+`getDatabase()` (`startup.ts`) returns the connection that the server opened in `register()` (in
+serverless mode it opens the pool on its first call, see "Serverless mode"). It
 works at request time only: `next build` workers (page data collection, prerendering) never call
 `register`, so a route or component that reads the database while it is being prerendered gets
 "The database is not initialized". Read the database in code that only runs per request (route
@@ -423,3 +515,10 @@ container; a developer starts a throwaway `postgres:18`). `src/test-support/post
 creates one database per test (`createPostgresTestDatabase`), migrated to the latest schema and
 dropped afterwards; `connectPostgres` opens a second connection to the same database for
 two-instance tests. `pg` is the Postgres driver, in the app image next to `better-sqlite3`.
+
+The serverless mode is tested at three levels: the unit suite also runs in CI with `APP_RUNTIME=serverless`
+(job `app-serverless`; the tests of the server start pin `APP_RUNTIME=server`), the lazy database and the
+refusals are unit tests (`startup.serverless.test.ts`, `config.serverless.test.ts`,
+`../instrumentation.serverless.test.ts`), and `pnpm migrate`, the schema check and the cold-instance health
+answer are Postgres integration tests (`migrate-cli.integration.test.ts`, `schema-status.integration.test.ts`,
+`../health/health-schema.integration.test.ts`).
