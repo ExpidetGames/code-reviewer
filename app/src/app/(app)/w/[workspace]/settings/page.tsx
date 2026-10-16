@@ -6,6 +6,7 @@ import { configAudienceOf } from "@/config-status/status";
 import { createInstanceSettingsRepository } from "@/db/repositories/instance-settings-repository";
 import { getDatabase } from "@/db/startup";
 import { getWorkspaceLlm } from "@/llm/shared";
+import { getPlanManagementUrl } from "@/plan-handoff/shared";
 import { requireWorkspace } from "@/workspaces/access-runtime";
 import { can } from "@/workspaces/permissions";
 import { getMembersService } from "@/workspaces/shared";
@@ -29,6 +30,7 @@ export default async function GeneralSettingsPage({
       workspaceName={workspace.name}
       canRename={can(role, "rename_workspace")}
       canManageLlmKey={can(role, "manage_llm_key")}
+      canManagePlan={can(role, "manage_plan")}
       user={user}
     />
   );
@@ -40,6 +42,7 @@ async function GeneralSettingsContent({
   workspaceName,
   canRename,
   canManageLlmKey,
+  canManagePlan,
   user,
 }: {
   workspaceId: string;
@@ -47,21 +50,27 @@ async function GeneralSettingsContent({
   workspaceName: string;
   canRename: boolean;
   canManageLlmKey: boolean;
+  /** What the role allows; the button needs the instance's plan management page as well. */
+  canManagePlan: boolean;
   user: { isInstanceAdmin: boolean };
 }) {
-  const [config, llmSummary, tenancy, members] = await Promise.all([
-    // Only the instance admin gets the names of the variables that are wrong.
-    getConfigStatusFor(user),
-    getWorkspaceLlm().summaryFor(workspaceId),
-    createInstanceSettingsRepository(getDatabase()).get("tenancy"),
-    getMembersService().list(workspaceId),
-  ]);
+  const [config, llmSummary, tenancy, members, planManagementUrl] =
+    await Promise.all([
+      // Only the instance admin gets the names of the variables that are wrong.
+      getConfigStatusFor(user),
+      getWorkspaceLlm().summaryFor(workspaceId),
+      createInstanceSettingsRepository(getDatabase()).get("tenancy"),
+      getMembersService().list(workspaceId),
+      // Only asked for somebody the role lets through: a Member's page never reads the setting.
+      canManagePlan ? getPlanManagementUrl() : Promise.resolve(null),
+    ]);
   return (
     <GeneralSettingsPageContent
       workspaceSlug={workspaceSlug}
       workspaceName={workspaceName}
       canRename={canRename}
       canManageLlmKey={canManageLlmKey}
+      canManagePlan={canManagePlan && planManagementUrl !== null}
       audience={configAudienceOf(user)}
       tenancy={tenancy === "multi" ? "multi" : "single"}
       memberCount={members.length}

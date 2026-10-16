@@ -23,6 +23,7 @@ import type {
 import type { WorkspaceLlmSummary } from "../../llm/assemble.ts";
 import { llmAccessAttention } from "../../llm/ui/llm-access-notice.tsx";
 import type { WorkspaceApi } from "./api.ts";
+import { ManagePlanCard } from "../../plan-handoff/ui/manage-plan-card.tsx";
 import { LegacyLlmHashRedirect } from "./legacy-llm-hash-redirect.tsx";
 import { RenameForm } from "./rename-form.tsx";
 import { SettingsScreen } from "./settings-shell.tsx";
@@ -42,6 +43,7 @@ export function GeneralSettingsPageContent({
   workspaceName,
   canRename,
   canManageLlmKey,
+  canManagePlan = false,
   audience = "member",
   tenancy,
   memberCount,
@@ -55,6 +57,8 @@ export function GeneralSettingsPageContent({
   canRename: boolean;
   /** An Admin or an Owner may change the workspace key; the LLM hint links them to it. */
   canManageLlmKey: boolean;
+  /** An Owner or Admin, and the instance has a plan management page: the "Manage plan" button is shown. */
+  canManagePlan?: boolean;
   audience?: ConfigAudience;
   tenancy: "single" | "multi";
   memberCount: number;
@@ -97,6 +101,9 @@ export function GeneralSettingsPageContent({
             )}
           </CardContent>
         </Card>
+        {canManagePlan ? (
+          <ManagePlanCard workspaceSlug={workspaceSlug} />
+        ) : null}
         <Card role="region" aria-labelledby="instance-heading">
           <CardHeader>
             <SectionTitle id="instance-heading">Instance</SectionTitle>
