@@ -93,6 +93,7 @@ describe("the migrations of both epics", () => {
       "20261015120000_create_job_dispatches",
       "20261015200000_add_usage_record_settled_reason",
       "20261016090000_create_refusal_notices",
+      "20261016120000_create_plan_handoff_tokens",
     ]);
   });
 
@@ -147,6 +148,7 @@ describe("starting the database", () => {
       "kysely_migration",
       "kysely_migration_lock",
       "password_reset_tokens",
+      "plan_handoff_tokens",
       "projects",
       "rate_limits",
       "refusal_notices",

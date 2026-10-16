@@ -44,6 +44,7 @@ import { migration as createSetupCodes } from "./20261015110000_create_setup_cod
 import { migration as createJobDispatches } from "./20261015120000_create_job_dispatches.ts";
 import { migration as addUsageRecordSettledReason } from "./20261015200000_add_usage_record_settled_reason.ts";
 import { migration as createRefusalNotices } from "./20261016090000_create_refusal_notices.ts";
+import { migration as createPlanHandoffTokens } from "./20261016120000_create_plan_handoff_tokens.ts";
 
 const migrations: Record<string, Migration> = {
   "0001_create_app_meta": createAppMeta,
@@ -88,6 +89,7 @@ const migrations: Record<string, Migration> = {
   "20261015120000_create_job_dispatches": createJobDispatches,
   "20261015200000_add_usage_record_settled_reason": addUsageRecordSettledReason,
   "20261016090000_create_refusal_notices": createRefusalNotices,
+  "20261016120000_create_plan_handoff_tokens": createPlanHandoffTokens,
 };
 
 export const migrationProvider: MigrationProvider = {
