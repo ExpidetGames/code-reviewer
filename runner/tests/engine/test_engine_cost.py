@@ -113,12 +113,13 @@ def test_the_stated_charge_is_reported_for_a_model_the_table_knows(
     assert result["usage"]["costUsd"] == exact(0.123, len(llm.requests))
 
 
-# #274-T03: the primary model answers with an error, the fallback model answers.
-def test_a_fallback_after_an_error_answer_reports_the_cost_of_the_answer_that_came_back(
+# #274-T03: the primary model is refused before any generation (a rate limit), the fallback model
+# answers.
+def test_a_fallback_after_a_refusal_reports_the_cost_of_the_answer_that_came_back(
     engine: Engine, github: FakeGithub, llm: FakeLlm
 ) -> None:
     llm.cost = 0.002
-    llm.by_model[MODEL] = Reply(status=500, message="upstream failed")
+    llm.by_model[MODEL] = Reply(status=429, message="rate limited")
 
     result = engine.run(job=with_fallback(engine)).result
 
@@ -165,3 +166,35 @@ def test_the_measurement_adds_nothing_to_the_request_and_sends_it_only_to_the_jo
         assert request.body["provider"] == {"require_parameters": True}
     assert outcome.connections != []
     assert all(connection["allowed"] for connection in outcome.connections)
+
+
+# #274-T03: LiteLLM sends a request again inside one call when `num_retries` is set, and the meter
+# would see only the last answer. A repository file cannot set it: the failing model is asked as
+# often as without the file.
+def test_a_repository_file_cannot_make_litellm_retry_inside_one_call(
+    engine: Engine, github: FakeGithub, llm: FakeLlm
+) -> None:
+    llm.override = Reply(status=500, message="upstream failed")
+
+    engine.run("review")
+    asked_without_the_file = len(llm.requests)
+    github.put_file(".pr_agent.toml", "[config]\nnum_retries = 3\n")
+    engine.run("review")
+    asked_with_the_file = len(llm.requests) - asked_without_the_file
+
+    assert asked_without_the_file >= 1
+    assert asked_with_the_file == asked_without_the_file
+
+
+# #274-T03: the same run reports no exact cost when the model failed with a server error.
+def test_a_run_whose_model_failed_with_a_server_error_reports_no_cost(
+    engine: Engine, github: FakeGithub, llm: FakeLlm
+) -> None:
+    llm.cost = 0.002
+    llm.by_model[MODEL] = Reply(status=500, message="upstream failed")
+
+    result = engine.run(job=with_fallback(engine)).result
+
+    assert result["ok"] is True
+    assert result["usage"]["fallbackUsed"] is True
+    assert result["usage"]["costUsd"] is None

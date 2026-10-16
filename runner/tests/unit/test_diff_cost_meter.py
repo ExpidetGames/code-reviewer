@@ -16,9 +16,15 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from litellm.exceptions import APIConnectionError, InternalServerError, RateLimitError, Timeout
+from litellm.exceptions import APIConnectionError, Timeout
 
-from code_reviewer_runner.diff_cost import CostMeterError, DiffCostMeter, install_cost_meter
+from code_reviewer_runner.diff_cost import (
+    MAX_CALL_COST_USD,
+    MAX_RUN_COST_USD,
+    CostMeterError,
+    DiffCostMeter,
+    install_cost_meter,
+)
 
 Completion = Callable[..., Awaitable[Any]]
 
@@ -121,6 +127,80 @@ def test_the_request_is_handed_on_exactly_as_pr_agent_built_it(installed: Instal
     assert seen == [((), request)]
 
 
+# #274-T03: LiteLLM may send the request again inside one call; only the last answer would be seen.
+@pytest.mark.parametrize(
+    "options",
+    [{"num_retries": 2}, {"max_retries": 3}, {"num_retries": "2"}, {"max_retries": True}],
+    ids=repr,
+)
+def test_a_call_that_carries_a_retry_count_is_not_counted_and_keeps_the_cost_unknown(
+    installed: Install, options: dict[str, Any]
+) -> None:
+    seen: list[dict[str, Any]] = []
+
+    async def completion(*args: Any, **kwargs: Any) -> Any:
+        seen.append(dict(kwargs))
+        return answer(0.01)
+
+    boundary, meter = installed(completion)
+
+    async def run() -> None:
+        await boundary.acompletion(model="m", messages=[], **options)
+        await boundary.acompletion(model="m", messages=[])
+
+    asyncio.run(run())
+
+    assert seen == [{"model": "m", "messages": [], **options}, {"model": "m", "messages": []}]
+    assert meter.cost_usd() is None
+
+
+@pytest.mark.parametrize(
+    "options", [{}, {"num_retries": 0, "max_retries": 0}, {"num_retries": None}]
+)
+def test_a_call_without_a_retry_count_is_counted(
+    installed: Install, options: dict[str, Any]
+) -> None:
+    boundary, meter = installed(replying(answer(0.01)))
+
+    async def run() -> None:
+        await boundary.acompletion(model="m", messages=[], **options)
+
+    asyncio.run(run())
+
+    assert meter.cost_usd() == Decimal("0.01")
+
+
+# #274-T02: a charge no provider states is not a cost, and a sum that is no number is not reported.
+def test_a_huge_stated_charge_is_not_a_cost(installed: Install) -> None:
+    boundary, meter = installed(replying(answer(1e308)))
+
+    asyncio.run(call(boundary))
+
+    assert meter.cost_usd() is None
+
+
+def test_a_run_whose_sum_is_above_the_ceiling_has_no_cost(installed: Install) -> None:
+    # Every charge is plausible for one call, the sum of them is not for a run.
+    count = int(MAX_RUN_COST_USD / MAX_CALL_COST_USD) + 1
+    boundary, meter = installed(replying(*[answer(float(MAX_CALL_COST_USD)) for _ in range(count)]))
+
+    async def run() -> None:
+        for _ in range(count):
+            await call(boundary)
+
+    asyncio.run(run())
+
+    assert meter.cost_usd() is None
+
+
+def test_a_charge_just_inside_the_ceiling_is_a_cost(installed: Install) -> None:
+    boundary, meter = installed(replying(answer(float(MAX_CALL_COST_USD))))
+
+    asyncio.run(call(boundary))
+
+    assert meter.cost_usd() == MAX_CALL_COST_USD
+
+
 # #274-T02
 def test_one_call_without_a_stated_cost_makes_the_cost_unknown(installed: Install) -> None:
     boundary, meter = installed(replying(answer(0.01), answer(), answer(0.02)))
@@ -208,19 +288,22 @@ def test_the_stated_charge_wins_over_anything_litellm_derived(installed: Install
     assert meter.cost_usd() == Decimal("0.0123")
 
 
-# #274-T03
-@pytest.mark.parametrize(
-    "error",
-    [
-        RateLimitError("rate limited", "openrouter", "vendor/model"),
-        InternalServerError("upstream failed", "openrouter", "vendor/model"),
-    ],
-    ids=["429", "500"],
-)
-def test_an_error_answer_of_the_provider_costs_nothing_and_does_not_make_the_cost_unknown(
-    installed: Install, error: Exception
+def status_error(status: int) -> Exception:
+    """An exception that carries this status, like LiteLLM's. The integration test of the meter
+    (`tests/integration/test_diff_cost_litellm.py`) gets the real ones from LiteLLM."""
+    from litellm.exceptions import APIError
+
+    return APIError(status, "the provider answered", "openrouter", "vendor/model")
+
+
+# #274-T03: only an error that comes before any generation costs nothing.
+@pytest.mark.parametrize("status", [400, 401, 403, 404, 422, 429])
+def test_a_request_rejected_before_any_generation_costs_nothing_and_keeps_the_cost_known(
+    installed: Install, status: int
 ) -> None:
-    # The primary model fails with an error answer, the fallback model answers.
+    # The primary model is refused, the fallback model answers.
+    error = status_error(status)
+    assert getattr(error, "status_code") == status  # noqa: B009
     boundary, meter = installed(replying(error, answer(0.02)))
 
     async def run() -> None:
@@ -231,6 +314,40 @@ def test_an_error_answer_of_the_provider_costs_nothing_and_does_not_make_the_cos
     asyncio.run(run())
 
     assert meter.cost_usd() == Decimal("0.02")
+
+
+# #274-T03: LiteLLM's status is not always the provider's (an HTTP 200 with an error body is raised
+# as a 502), and a server or gateway error may come while the provider is still working.
+@pytest.mark.parametrize("status", [500, 502, 503, 504, 524, 599, 418])
+def test_a_server_error_or_a_status_nobody_knows_leaves_the_cost_unknown(
+    installed: Install, status: int
+) -> None:
+    error = status_error(status)
+    assert getattr(error, "status_code") == status  # noqa: B009
+    boundary, meter = installed(replying(error, answer(0.02)))
+
+    async def run() -> None:
+        with pytest.raises(type(error)):
+            await call(boundary)
+        await call(boundary)
+
+    asyncio.run(run())
+
+    assert meter.cost_usd() is None
+
+
+# #274-T03: an exception without a status of the provider is not a refusal.
+def test_an_exception_without_a_status_leaves_the_cost_unknown(installed: Install) -> None:
+    boundary, meter = installed(replying(RuntimeError("something"), answer(0.02)))
+
+    async def run() -> None:
+        with pytest.raises(RuntimeError):
+            await call(boundary)
+        await call(boundary)
+
+    asyncio.run(run())
+
+    assert meter.cost_usd() is None
 
 
 # #274-T03

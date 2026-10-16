@@ -730,8 +730,9 @@ provider and expresses no preference, so it is no provider-specific routing (epi
 
 `usage.costUsd` of a Diff run is exact in the same sense as that of a Dynamic run (#267): the sum, as
 decimals, of the charge the model provider **states** for every call (`usage.cost` of OpenRouter's
-answer), and `null` as soon as one call has no stated charge. It is never derived from a price table, a
-per-token rate or the token counts, and an unknown cost is never zero. It applies to every Diff job, whoever
+answer), and `null` as soon as one call has no stated charge. The result carries a JSON number, so the value
+is the nearest double of that exact decimal sum (no more digits than a double holds). It is never derived
+from a price table, a per-token rate or the token counts, and an unknown cost is never zero. It applies to every Diff job, whoever
 pays for the key; the tokens and the number of calls stay PR-Agent's own measurement.
 
 **The decision (a spike inside #274).** PR-Agent calls the model itself through LiteLLM, and its own sum
@@ -754,7 +755,11 @@ PR-Agent accepted. Three ways to measure it were weighed:
 module; the runner wraps it for the length of the job (like the other patches, refused when the function is
 missing or not a coroutine function, undone afterwards) and sees every answer, also one PR-Agent throws away
 afterwards (an empty reply is billed). `config.output_run_cost` is `false`, so PR-Agent prices nothing and
-`total_cost_usd` is never read. The rules, pinned by `tests/unit/test_diff_cost_meter.py`,
+`total_cost_usd` is never read. That flag only controls PR-Agent's own pricing and the "Estimated API cost"
+line of the opt-in run-details section (`config.output_run_details`, off by default and not set by the
+runner): a repository that had switched run details on no longer sees an estimated cost line there, while the
+tokens, the number of calls and the time stay, and the default review comment is unchanged. The setting is
+pinned, so a repository settings file cannot switch it back on. The rules, pinned by `tests/unit/test_diff_cost_meter.py`,
 `tests/unit/test_runner.py` and `tests/engine/test_engine_cost.py`:
 
 | Case | Cost |
@@ -763,8 +768,11 @@ afterwards (an empty reply is billed). `config.output_run_cost` is `false`, so P
 | A call whose answer states none (no `usage`, no `cost`, a value that is not a finite number of zero or more), also a stream whose last chunk has none | `null`, tokens still reported |
 | `response_cost` (LiteLLM's own figure, usage or hidden parameters) | never read |
 | An answer PR-Agent rejects afterwards (empty content) and a fallback model answers | both answers are counted |
-| A request the provider answered with an error status (429, 5xx, ...) and a fallback model answers | the failed attempt states no usage and no charge and costs nothing; only the answers count |
-| A request that ended without an answer (timeout, lost connection, cancelled, a stream not read to its end) | `null`: it may have been billed and nobody can say |
+| A request refused before any generation: status 429, 401, 402, 403, or request validation 400, 404, 422 (the statuses of `_REJECTED_BEFORE_GENERATION`), and a fallback model answers | the failed attempt states no usage and no charge and costs nothing; only the answers count |
+| Every other end: any 5xx, 408, a gateway timeout (504, 524), a status nobody knows, an exception without a status of the provider, a request that ended without an answer (timeout, lost connection, cancelled, a stream not read to its end) | `null`: it may have been billed and nobody can say. Some runs with a failed 5xx attempt therefore report `null`; unknown is the safe direction |
+| An HTTP 200 answer whose body is an error (LiteLLM raises a 5xx exception for it, with the `usage` it carries unread) | `null`, as every 5xx. LiteLLM raises the same exception for a body that says 429 as for a real 429, so such a body is read as a refusal: the meter cannot tell them apart |
+| A call that carries a retry count (`num_retries`, `max_retries`, not zero) | never counted, the cost stays `null`: LiteLLM may send several requests inside one call and only the last answer would be seen. The runner pins `config.num_retries` to 0 (a repository settings file cannot change it), so PR-Agent's own attempts, each passing the meter, are the only retries |
+| A stated charge above 1000 USD for one call, or a sum above 100000 USD for a run | `null`: no provider states such a figure, and a huge value must not become an infinite number in the result |
 | A call PR-Agent counted that did not go through the wrapped function | `null` |
 | Several calls at once (a chunked review) | all counted |
 | No answer at all | `null` (not zero) |

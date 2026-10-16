@@ -18,10 +18,17 @@ wrapped here, which sees every answer that comes back, also one that PR-Agent th
   decimals, so it does not drift the way float sums do;
 - an answer without such a charge (none stated, no usage, a value that is no cost) is an unpriced
   call, and the cost is unknown;
-- a request the provider answered with an error status states no usage and no cost, and costs
-  nothing: it is left out, which is what makes a fallback model after a failed first model exact;
-- a request that ended without an answer (timeout, lost connection, cancelled, a stream that was not
-  read to its end) may have been billed and nobody can say: the cost is unknown.
+- a request that was certainly rejected before any generation (the statuses in
+  `_REJECTED_BEFORE_GENERATION`: rate limit, authentication, payment, permission, request
+  validation) states no usage and costs nothing: it is left out, which is what makes a fallback
+  model after such a failure exact;
+- every other end may have been billed and nobody can say, so the cost is unknown: a server error
+  (LiteLLM raises one also for an HTTP 200 answer whose body is an error, and a gateway timeout
+  comes while the provider may still be working), a timeout, a lost connection, a status nobody
+  knows, a cancelled request, a stream that was not read to its end;
+- a call that carries a retry count (`num_retries`, `max_retries`) is never counted: LiteLLM may
+  send several requests inside it and only the last answer would be seen. The runner pins the
+  retries to zero (`pr_agent_config.py`); this is the second defence.
 
 PR-Agent's own pricing is switched off (`config.output_run_cost`, `pr_agent_config.py`), so no price
 table is consulted anywhere.
@@ -45,9 +52,17 @@ _HANDLER_MODULE = "pr_agent.algo.ai_handlers.litellm_ai_handler"
 _FUNCTION = "acompletion"
 # Set on the replacement, so a second application finds the real function instead of wrapping it.
 _ORIGINAL_ATTRIBUTE = "__diff_cost_meter_original__"
-# Errors with an HTTP status that are not an answer: LiteLLM gives a lost connection the status 500
+# The only statuses that mean the provider refused the request before it generated anything. Any
+# other status (every 5xx, 408, 504/524 of a gateway, an unknown one) leaves the request open.
+_REJECTED_BEFORE_GENERATION = frozenset({400, 401, 402, 403, 404, 422, 429})
+# Errors that carry a status but are not an answer: LiteLLM gives a lost connection the status 500
 # and a client timeout 408, but the provider never answered.
 _NO_ANSWER_CLASSES = frozenset({"APIConnectionError", "APITimeoutError", "Timeout"})
+# The sanity ceiling of a stated charge and of the sum of a run, in USD. No provider states a
+# charge near it; a value above it is not a cost anybody can trust (and 1e308 added twice would
+# not even be a number in the result).
+MAX_CALL_COST_USD = Decimal(1_000)
+MAX_RUN_COST_USD = Decimal(100_000)
 
 
 class CostMeterError(Exception):
@@ -61,24 +76,45 @@ def _field(source: Any, name: str) -> Any:
 
 
 def _stated_charge(usage: Any) -> Decimal | None:
-    """What the provider says the call cost: `usage.cost`, never `response_cost` (LiteLLM's own)."""
+    """What the provider says the call cost: `usage.cost`, never `response_cost` (LiteLLM's own).
+
+    A charge above the sanity ceiling is no cost anybody can trust: the call is unpriced.
+    """
     if usage is None:
         return None
-    return exact_cost(_field(usage, "cost"))
+    charge = exact_cost(_field(usage, "cost"))
+    if charge is None or charge > MAX_CALL_COST_USD:
+        return None
+    return charge
 
 
 def _is_stream(response: Any) -> bool:
     return not isinstance(response, dict) and hasattr(response, "__aiter__")
 
 
-def _is_error_answer(error: BaseException) -> bool:
-    """True when the provider answered with an error status: nothing was used or charged."""
+def _is_rejection(error: BaseException) -> bool:
+    """True only for an error that is known to come before any generation: nothing was charged.
+
+    LiteLLM's `status_code` is not always the HTTP status of the provider's answer (an HTTP 200 with
+    an error body becomes a 5xx exception), so only the statuses of a plain refusal count.
+    """
     if any(cls.__name__ in _NO_ANSWER_CLASSES for cls in type(error).__mro__):
         return False
     status = getattr(error, "status_code", None)
     if isinstance(status, bool) or not isinstance(status, int):
         return False
-    return 400 <= status < 600 and status != 408
+    return status in _REJECTED_BEFORE_GENERATION
+
+
+def _carries_a_retry(kwargs: dict[str, Any]) -> bool:
+    """True when the call lets LiteLLM or its client send the request again by itself."""
+    for name in ("num_retries", "max_retries"):
+        value = kwargs.get(name)
+        if value is None:
+            continue
+        if isinstance(value, bool) or not isinstance(value, int) or value != 0:
+            return True
+    return False
 
 
 def _chunk_usage(chunk: Any) -> Any:
@@ -108,6 +144,8 @@ class DiffCostMeter:
         """
         with self._lock:
             if self._open or self._unpriced or not self._priced:
+                return None
+            if self._total > MAX_RUN_COST_USD:
                 return None
             return self._total
 
@@ -177,10 +215,13 @@ def install_cost_meter(
     @wraps(original)
     async def metered(*args: Any, **kwargs: Any) -> Any:
         meter.begin()
+        if _carries_a_retry(kwargs):
+            # Requests we cannot count one by one: the call is handed on unchanged and stays open.
+            return await original(*args, **kwargs)
         try:
             response = await original(*args, **kwargs)
         except BaseException as error:
-            if _is_error_answer(error):
+            if _is_rejection(error):
                 meter.refused()
             # Any other end leaves the request open: it may have been billed.
             raise

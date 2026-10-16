@@ -12,6 +12,7 @@ has built the environment from the job.
 
 import asyncio
 import copy
+import math
 from typing import TYPE_CHECKING, Any
 
 from code_reviewer_runner.diff_cost import DiffCostMeter
@@ -42,7 +43,8 @@ def _cost_usd(details: "RunDetails", meter: DiffCostMeter | None) -> float | Non
     cost = meter.cost_usd()
     if cost is None or meter.answered_calls < details.num_ai_calls:
         return None
-    return float(cost)
+    number = float(cost)
+    return number if math.isfinite(number) else None
 
 
 def _usage(details: "RunDetails | None", meter: DiffCostMeter | None = None) -> Usage | None:

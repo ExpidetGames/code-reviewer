@@ -241,6 +241,8 @@ def test_typed_settings_switch_review_labels_progress_comments_and_the_update_me
     assert settings["config.publish_output_progress"] is False
     assert settings["config.use_global_settings_file"] is False
     assert settings["config.output_run_cost"] is False
+    # #274: no hidden retry inside one model call (the cost meter would miss the first request).
+    assert settings["config.num_retries"] == 0
     assert settings["config.fallback_models"] == []
     assert settings["pr_reviewer.final_update_message"] is False
     assert settings["pr_reviewer.enable_review_labels_security"] is False
