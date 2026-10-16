@@ -18,7 +18,7 @@ import {
   createModelTiersService,
   type ModelTiersService,
 } from "../model-tiers/service.ts";
-import type { ManagedModelTiers } from "../model-tiers/tiers.ts";
+import { allTierModels, type ManagedModelTiers } from "../model-tiers/tiers.ts";
 import type { ModelCapabilityChecker } from "../llm/model-capabilities.ts";
 import { createRunnerApi } from "../runner-api/api.ts";
 import {
@@ -327,6 +327,16 @@ export async function startRunnerApiHarness(
           fixture.clock.now,
         ).setKeyMode(job.id, keyMode),
       modelTiers,
+      tierModels: async (job) => {
+        const record = await createUsageRecordsRepository(
+          fixture.db,
+          job.workspaceId,
+          fixture.clock.now,
+        ).get(job.id);
+        return record?.modelTier == null
+          ? { managed: false, models: [] }
+          : { managed: true, models: allTierModels(await modelTiers.read()) };
+      },
       recordModelTier: (job, tier) =>
         createUsageRecordsRepository(
           fixture.db,

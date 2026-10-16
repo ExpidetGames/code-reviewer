@@ -138,6 +138,14 @@ export function modelOfTier(
   return tiers[tier]?.[kind] ?? null;
 }
 
+/** Every model id the configuration holds, once each (for masking: any of them may not show in a workspace's text). */
+export function allTierModels(tiers: ManagedModelTiers): string[] {
+  const ids = MODEL_TIERS.flatMap((tier) =>
+    TIER_REVIEW_KINDS.map((kind) => tiers[tier]?.[kind]),
+  );
+  return [...new Set(ids.filter((id): id is string => id !== undefined))];
+}
+
 /** What the operator API answers: the whole shape, null where nothing is configured. */
 export function tiersView(tiers: ManagedModelTiers): ModelTiersView {
   const view = {} as ModelTiersView;

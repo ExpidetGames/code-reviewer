@@ -41,6 +41,14 @@ export type ReportDeps = {
    * tier it was handed (#280). Read from the database.
    */
   claimedKeys: Pick<ClaimedKeys, "keysOf" | "modelsOf">;
+  /**
+   * Whether the job ran on a managed tier (its usage record names one), and every model id the operator has
+   * configured for the tiers right now (#280). The remembered model of the job is not enough: its row may be
+   * unreadable, and the runner may spell the model differently.
+   */
+  tierModels: (
+    job: Job,
+  ) => Promise<{ managed: boolean; models: readonly string[] }>;
 };
 
 /**
@@ -55,29 +63,24 @@ export function mapRunnerErrorCode(code: string): string {
 }
 
 /**
- * The result without the model a managed tier gave the job (#280): `usage.model` is not reported (null) when it names
- * one, and the id is masked in the text fields at any length (the generic rule that follows ignores secrets shorter
- * than a credential could be).
+ * The result without the model of a managed tier (#280): `usage.model` is not reported (null) whatever the runner calls
+ * the model, and the ids are masked in the text fields at any length (the generic rule that follows ignores secrets
+ * shorter than a credential could be). `hide` is whether the job ran on a tier.
  */
 function withoutTierModel(
   result: RunnerResult,
   models: readonly string[],
+  hide: boolean,
 ): RunnerResult {
-  if (models.length === 0) return result;
+  if (!hide) return result;
   const mask = (text: string) => maskSecretInText(text, ...models);
-  const reported = result.usage?.model ?? null;
   return {
     ...result,
     logTail: mask(result.logTail),
     errorMessage:
       result.errorMessage === null ? null : mask(result.errorMessage),
     commentUrl: result.commentUrl === null ? null : mask(result.commentUrl),
-    usage:
-      result.usage === null
-        ? null
-        : reported !== null && models.some((model) => reported.includes(model))
-          ? { ...result.usage, model: null }
-          : result.usage,
+    usage: result.usage === null ? null : { ...result.usage, model: null },
   };
 }
 
@@ -176,13 +179,18 @@ export async function finishJob(
   // log or its error, and reports it as `usage.model`, which a Runs page shows. The model the job was handed is
   // remembered with its keys, so it is taken out whichever app instance serves the completion and whatever the
   // operator changed since; the tokens and the cost of the usage stay.
-  const models = await deps.claimedKeys.modelsOf(jobId);
-  const stored = redactResult(withoutTierModel(reported, models), [
-    ...(await deps.knownSecrets(job.workspaceId)),
-    ...(await deps.claimedKeys.keysOf(jobId)),
-    ...models,
-    ...extraSecrets,
-  ]);
+  const remembered = await deps.claimedKeys.modelsOf(jobId);
+  const tier = await deps.tierModels(job);
+  const models = [...new Set([...remembered, ...tier.models])];
+  const stored = redactResult(
+    withoutTierModel(reported, models, tier.managed || remembered.length > 0),
+    [
+      ...(await deps.knownSecrets(job.workspaceId)),
+      ...(await deps.claimedKeys.keysOf(jobId)),
+      ...models,
+      ...extraSecrets,
+    ],
+  );
   const outcome: JobOutcome =
     stored.errorCode === null
       ? { ok: true, result: stored }

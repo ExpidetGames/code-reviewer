@@ -657,6 +657,94 @@ describe("the model of a tier stays on the server", () => {
     });
   });
 
+  const usageOf = (model: string) => ({
+    model,
+    promptTokens: 10,
+    completionTokens: 5,
+    totalTokens: 15,
+    aiCalls: 1,
+    fallbackUsed: false,
+    costUsd: 0.01,
+    stoppedEarly: null,
+  });
+
+  // #280-T08
+  it("is never reported as the model of a run on a tier, whatever the runner calls it", async () => {
+    const h = await start({
+      keyMode: "managed",
+      project: { modelTier: "high" },
+    });
+    const { job } = await h.claimed();
+
+    await h.complete(job.id, job.leaseToken, {
+      // A dated, canonical spelling of the model that is not the id the job was handed.
+      usage: usageOf("openrouter/other-slug/tier-high-diff-20261001"),
+    });
+
+    const stored = (await h.queue.get(job.id))?.result as {
+      usage: { model: string | null; promptTokens: number };
+    };
+    expect(stored.usage).toMatchObject({ model: null, promptTokens: 10 });
+  });
+
+  // #280-T08
+  it("masks the models the operator has configured now as well as the one the job was handed", async () => {
+    const h = await start({
+      keyMode: "managed",
+      project: { modelTier: "high" },
+    });
+    const { job } = await h.claimed();
+    await h.setTiers({ ...TIERS, high: { diff: "tier/high-diff-v2" } });
+
+    await h.complete(job.id, job.leaseToken, {
+      logTail: "handed tier/high-diff, now tier/high-diff-v2 and tier/low-dyn",
+    });
+
+    const stored = JSON.stringify((await h.queue.get(job.id))?.result);
+    for (const model of ["tier/high-diff", "tier/low-dyn"])
+      expect(stored).not.toContain(model);
+    expect(stored).not.toContain("tier/");
+  });
+
+  // #280-T08
+  it("still hides the model when the sealed row of the job cannot be read", async () => {
+    const h = await start({
+      keyMode: "managed",
+      project: { modelTier: "high" },
+    });
+    const { job } = await h.claimed();
+    await h.db.updateTable("job_claimed_keys").set({ nonce: "AAAA" }).execute();
+    expect(await h.claimedKeys.modelsOf(job.id)).toEqual([]);
+
+    await h.complete(job.id, job.leaseToken, {
+      logTail: "model tier/high-diff answered",
+      usage: usageOf("openrouter/tier/high-diff"),
+    });
+
+    const stored = JSON.stringify((await h.queue.get(job.id))?.result);
+    expect(stored).not.toContain("tier/");
+    expect(JSON.parse(stored).usage.model).toBeNull();
+    expect(stored).toContain("[redacted] answered");
+  });
+
+  // #280-T08
+  it("keeps reporting the model of a run on the workspace's own key, even when it looks like a tier model", async () => {
+    const h = await start({
+      keyMode: "own",
+      project: { model: "tier/high-diff" },
+    });
+    const { job } = await h.claimed();
+
+    await h.complete(job.id, job.leaseToken, {
+      usage: usageOf("openrouter/tier/high-diff"),
+    });
+
+    const stored = (await h.queue.get(job.id))?.result as {
+      usage: { model: string };
+    };
+    expect(stored.usage.model).toBe("openrouter/tier/high-diff");
+  });
+
   // #280-T08
   it("is masked in the text of a result even when the id is too short for the generic secret rule", async () => {
     const h = await start({
