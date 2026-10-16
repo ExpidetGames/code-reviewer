@@ -9,11 +9,16 @@
 export const KEY_MODES = ["own", "managed"] as const;
 export type KeyMode = (typeof KEY_MODES)[number];
 
-/** Every limit is a count (or micro-USD of measured model cost) per period, or null for unlimited. */
+/**
+ * Every limit is a count (or micro-USD of measured model cost) per period, or null for unlimited. The two cost
+ * limits watch one key mode each: `managedCostLimitMicroUsd` the runs on the operator's key,
+ * `ownKeyCostLimitMicroUsd` the runs on the workspace's own key (#361).
+ */
 export const LIMIT_NAMES = [
   "diffRunsPerPeriod",
   "dynamicRunsPerPeriod",
   "managedCostLimitMicroUsd",
+  "ownKeyCostLimitMicroUsd",
 ] as const;
 export type LimitName = (typeof LIMIT_NAMES)[number];
 export type EntitlementLimits = Record<LimitName, number | null>;
@@ -74,6 +79,7 @@ function limited(
       diffRunsPerPeriod: entry.limits.diffRunsPerPeriod,
       dynamicRunsPerPeriod: entry.limits.dynamicRunsPerPeriod,
       managedCostLimitMicroUsd: entry.limits.managedCostLimitMicroUsd,
+      ownKeyCostLimitMicroUsd: entry.limits.ownKeyCostLimitMicroUsd,
     },
     periodStart: entry.periodStart,
     suspended: entry.suspended,

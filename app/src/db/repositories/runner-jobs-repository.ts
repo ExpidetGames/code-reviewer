@@ -54,7 +54,10 @@ import { claimOldestDueJob, claimOldestDueJobPostgres } from "./jobs-claim.ts";
 import { toJob } from "./jobs-repository.ts";
 import { createUsageRecordsRepository } from "./usage-records-repository.ts";
 import { closeRecordsOfEndedJobs } from "./usage-records-sweep.ts";
-import { settlementOfOutcome } from "../../usage/usage-records.ts";
+import {
+  settlementOfOutcome,
+  type UnknownCostSettlement,
+} from "../../usage/usage-records.ts";
 
 /** What `expireStaleJobs` did. */
 export type ExpiryReport = {
@@ -89,6 +92,12 @@ export type RunnerJobsRepositoryOptions = {
    * nothing reads (an entry stored before that shape was refused on write). Same rules as `onRefused`.
    */
   onIgnoredCostLimit?: (workspaceId: string) => void;
+  /**
+   * #361: called once for every usage record that settled without a known cost, after the transaction that settled
+   * it committed. A cost limit does not bound such a run, so this is the signal to watch them: ids only, never a
+   * figure or a name. Same rules as `onRefused` (a callback that throws is logged and ignored).
+   */
+  onUnknownCostSettled?: (settlement: UnknownCostSettlement) => void;
 };
 
 /**
@@ -278,6 +287,23 @@ export function createRunnerJobsRepository(
   }
 
   /**
+   * A transaction that collects the runs it settled without a known cost and reports them once it committed
+   * (#361): the alert never fires for a transaction that rolled back.
+   */
+  async function inAlertingTransaction<T>(
+    run: (
+      executor: Kysely<Database>,
+      unknownCost: UnknownCostSettlement[],
+    ) => Promise<T>,
+  ): Promise<T> {
+    const unknownCost: UnknownCostSettlement[] = [];
+    const result = await inTransaction((trx) => run(trx, unknownCost));
+    for (const settlement of unknownCost)
+      notify(() => options.onUnknownCostSettled?.(settlement));
+    return result;
+  }
+
+  /**
    * One attempt of a running job is lost (its lease ran out, or its holder gave it back). This is the
    * single rule for that: on the last allowed attempt the job fails with `errorCode`, otherwise it
    * goes back to the queue and its holder is dropped. Runner and claim time stay on a failed job (and
@@ -445,6 +471,7 @@ export function createRunnerJobsRepository(
   async function expire(
     executor: Kysely<Database>,
     current: Date,
+    unknownCost: UnknownCostSettlement[],
   ): Promise<ExpiryReport> {
     const timestamp = formatTimestamp(current);
     // Before the expiry passes or claim: reserve all live candidates in the same row order. The
@@ -484,7 +511,7 @@ export function createRunnerJobsRepository(
     // A job whose runner keeps the lease alive but never finishes. Lost leases come first: a job
     // whose runner vanished long ago is retried, not failed for taking long.
     const timedOut = await failTimedOut(executor, {}, current);
-    await closeRecordsOfEndedJobs(executor, timestamp);
+    unknownCost.push(...(await closeRecordsOfEndedJobs(executor, timestamp)));
     return {
       requeued: lost.requeued,
       leaseExpired: lost.failed,
@@ -498,6 +525,7 @@ export function createRunnerJobsRepository(
     executor: Kysely<Database>,
     current: Date,
     waitedMs: number,
+    unknownCost: UnknownCostSettlement[],
   ): Promise<number> {
     const timestamp = formatTimestamp(current);
     const waitedBefore = formatTimestamp(
@@ -534,7 +562,7 @@ export function createRunnerJobsRepository(
       })
       .where(waiting)
       .executeTakeFirst();
-    await closeRecordsOfEndedJobs(executor, timestamp);
+    unknownCost.push(...(await closeRecordsOfEndedJobs(executor, timestamp)));
     return Number(result.numUpdatedRows);
   }
 
@@ -612,9 +640,9 @@ export function createRunnerJobsRepository(
     async claimNext(runnerId, engines = DEFAULT_ENGINES, claimOptions = {}) {
       const refusals: ClaimRefusal[] = [];
       const ignoredCostLimits = new Set<string>();
-      const claimed = await inTransaction(async (trx) => {
+      const claimed = await inAlertingTransaction(async (trx, unknownCost) => {
         const current = now();
-        await expire(trx, current);
+        await expire(trx, current, unknownCost);
         // The credential is only ever returned; the database gets its hash as the lease token.
         const credential =
           claimOptions.workerCredential === true ? newCredential() : undefined;
@@ -667,7 +695,12 @@ export function createRunnerJobsRepository(
                 current,
               );
               // Any of them may have had a record that counted (claimed before, lost its lease).
-              await closeRecordsOfEndedJobs(trx, formatTimestamp(current));
+              unknownCost.push(
+                ...(await closeRecordsOfEndedJobs(
+                  trx,
+                  formatTimestamp(current),
+                )),
+              );
               for (const job of ended)
                 refusals.push({
                   jobId: job.id,
@@ -683,7 +716,12 @@ export function createRunnerJobsRepository(
             await refuseClaimedJob(trx, row.id, admission.errorCode, current);
             // A job claimed again after a lost lease had a record that counted: it ends with the job.
             if (hadRecord)
-              await closeRecordsOfEndedJobs(trx, formatTimestamp(current));
+              unknownCost.push(
+                ...(await closeRecordsOfEndedJobs(
+                  trx,
+                  formatTimestamp(current),
+                )),
+              );
             refusals.push({
               jobId: row.id,
               workspaceId: row.workspace_id,
@@ -751,40 +789,45 @@ export function createRunnerJobsRepository(
     },
 
     heartbeat(jobId, leaseToken) {
-      return inTransaction<HeartbeatResult>(async (trx) => {
-        const current = now();
-        const timestamp = formatTimestamp(current);
-        // The hard limit does not depend on anyone else's claim: the holder that is past it learns
-        // so here, and the job fails.
-        const timedOut = await failTimedOut(
-          trx,
-          { claim: { jobId, leaseToken } },
-          current,
-        );
-        if (timedOut > 0) await closeRecordsOfEndedJobs(trx, timestamp);
-        const row = await trx
-          .updateTable("jobs")
-          .set({
-            heartbeat_at: timestamp,
-            lease_expires_at: formatTimestamp(
-              new Date(current.getTime() + limits.leaseMs),
-            ),
-            updated_at: timestamp,
-          })
-          .where(runningWhere({ claim: { jobId, leaseToken } }))
-          .returningAll()
-          .executeTakeFirst();
-        return row === undefined
-          ? { status: "not_holder" }
-          : { status: "ok", job: toJob(row) };
-      });
+      return inAlertingTransaction<HeartbeatResult>(
+        async (trx, unknownCost) => {
+          const current = now();
+          const timestamp = formatTimestamp(current);
+          // The hard limit does not depend on anyone else's claim: the holder that is past it learns
+          // so here, and the job fails.
+          const timedOut = await failTimedOut(
+            trx,
+            { claim: { jobId, leaseToken } },
+            current,
+          );
+          if (timedOut > 0)
+            unknownCost.push(
+              ...(await closeRecordsOfEndedJobs(trx, timestamp)),
+            );
+          const row = await trx
+            .updateTable("jobs")
+            .set({
+              heartbeat_at: timestamp,
+              lease_expires_at: formatTimestamp(
+                new Date(current.getTime() + limits.leaseMs),
+              ),
+              updated_at: timestamp,
+            })
+            .where(runningWhere({ claim: { jobId, leaseToken } }))
+            .returningAll()
+            .executeTakeFirst();
+          return row === undefined
+            ? { status: "not_holder" }
+            : { status: "ok", job: toJob(row) };
+        },
+      );
     },
 
     complete(jobId, leaseToken, outcome) {
       const target: JobStatus = outcome.ok ? "succeeded" : "failed";
       const errorCode = outcome.ok ? null : outcome.errorCode;
       const result = outcome.result ?? null;
-      return inTransaction<CompleteResult>(async (trx) => {
+      return inAlertingTransaction<CompleteResult>(async (trx, unknownCost) => {
         const timestamp = formatTimestamp(now());
         const finished = await trx
           .updateTable("jobs")
@@ -801,11 +844,21 @@ export function createRunnerJobsRepository(
           .executeTakeFirst();
         if (finished !== undefined) {
           // Settled from what the runner reported, in the same transaction as the job's end.
+          const settlement = settlementOfOutcome(outcome);
           await createUsageRecordsRepository(
             trx,
             finished.workspace_id,
             now,
-          ).settle(finished.id, settlementOfOutcome(outcome));
+          ).settle(finished.id, settlement);
+          // #361: no cost limit bounds a run without a cost; it is reported so it can be watched.
+          if (
+            settlement.state === "settled" &&
+            settlement.costMicroUsd === null
+          )
+            unknownCost.push({
+              workspaceId: finished.workspace_id,
+              jobId: finished.id,
+            });
           return { status: "completed", job: toJob(finished) };
         }
 
@@ -832,7 +885,7 @@ export function createRunnerJobsRepository(
     },
 
     release(jobId, leaseToken, reason, releaseOptions = {}) {
-      return inTransaction<ReleaseResult>(async (trx) => {
+      return inAlertingTransaction<ReleaseResult>(async (trx, unknownCost) => {
         const timestamp = formatTimestamp(now());
         // A removed command (#203) that is given back is cancelled, never requeued: no attempt of it
         // may ever run again. Only the current holder (the lease token) may cancel it this way.
@@ -850,7 +903,7 @@ export function createRunnerJobsRepository(
           .returningAll()
           .executeTakeFirst();
         if (removed !== undefined) {
-          await closeRecordsOfEndedJobs(trx, timestamp);
+          unknownCost.push(...(await closeRecordsOfEndedJobs(trx, timestamp)));
           return { status: "cancelled", job: toJob(removed) };
         }
         const lost = await loseAttempt(
@@ -864,7 +917,7 @@ export function createRunnerJobsRepository(
         );
         if (lost.failed === 0 && lost.requeued === 0)
           return { status: "not_holder" };
-        await closeRecordsOfEndedJobs(trx, timestamp);
+        unknownCost.push(...(await closeRecordsOfEndedJobs(trx, timestamp)));
         const row = await trx
           .selectFrom("jobs")
           .selectAll()
@@ -886,11 +939,15 @@ export function createRunnerJobsRepository(
     },
 
     expireStaleJobs() {
-      return inTransaction((trx) => expire(trx, now()));
+      return inAlertingTransaction((trx, unknownCost) =>
+        expire(trx, now(), unknownCost),
+      );
     },
 
     failUndispatched(waitedMs) {
-      return inTransaction((trx) => failUndispatched(trx, now(), waitedMs));
+      return inAlertingTransaction((trx, unknownCost) =>
+        failUndispatched(trx, now(), waitedMs, unknownCost),
+      );
     },
 
     async countRunning() {
@@ -903,27 +960,29 @@ export function createRunnerJobsRepository(
     },
 
     cancelClaimed(jobId, leaseToken, errorCode) {
-      return inTransaction<CancelClaimedResult>(async (trx) => {
-        const timestamp = formatTimestamp(now());
-        // Not a transition of the shared table (`canTransition`): `cancelWaiting` derives its statuses
-        // from that table and a deactivation must never cancel running jobs. This one statement is the
-        // only way a running job becomes cancelled, and only for the holder of the claim.
-        const row = await trx
-          .updateTable("jobs")
-          .set({
-            status: "cancelled",
-            error_code: errorCode,
-            lease_expires_at: null,
-            finished_at: timestamp,
-            updated_at: timestamp,
-          })
-          .where(runningWhere({ claim: { jobId, leaseToken } }))
-          .returningAll()
-          .executeTakeFirst();
-        if (row === undefined) return { status: "not_holder" };
-        await closeRecordsOfEndedJobs(trx, timestamp);
-        return { status: "cancelled", job: toJob(row) };
-      });
+      return inAlertingTransaction<CancelClaimedResult>(
+        async (trx, unknownCost) => {
+          const timestamp = formatTimestamp(now());
+          // Not a transition of the shared table (`canTransition`): `cancelWaiting` derives its statuses
+          // from that table and a deactivation must never cancel running jobs. This one statement is the
+          // only way a running job becomes cancelled, and only for the holder of the claim.
+          const row = await trx
+            .updateTable("jobs")
+            .set({
+              status: "cancelled",
+              error_code: errorCode,
+              lease_expires_at: null,
+              finished_at: timestamp,
+              updated_at: timestamp,
+            })
+            .where(runningWhere({ claim: { jobId, leaseToken } }))
+            .returningAll()
+            .executeTakeFirst();
+          if (row === undefined) return { status: "not_holder" };
+          unknownCost.push(...(await closeRecordsOfEndedJobs(trx, timestamp)));
+          return { status: "cancelled", job: toJob(row) };
+        },
+      );
     },
   };
 }

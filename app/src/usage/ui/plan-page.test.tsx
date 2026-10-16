@@ -161,6 +161,33 @@ describe("the cost limit on the plan page", () => {
     expect(container.textContent).not.toMatch(/\d+[.,]\d+/);
   });
 
+  // #361 (plan page)
+  it("shows the same bar, unknown runs and soft cap notice for a workspace on its own key", () => {
+    const { container } = page(
+      limited({
+        managed: false,
+        cost: { percentUsed: 100, unknownCostCount: 2 },
+      }),
+    );
+
+    expect(
+      screen.getByRole("progressbar", {
+        name: "100 % of the usage limit used",
+      }),
+    ).toBeTruthy();
+    expect(
+      screen.getByText(/The limit is reached\. New reviews are not started/),
+    ).toBeTruthy();
+    expect(
+      screen.getByText(
+        "2 finished reviews could not be measured and are not in this percentage.",
+      ),
+    ).toBeTruthy();
+    expect(screen.getByText(/not exact/i)).toBeTruthy();
+    expect(screen.queryByText(/provided by this instance/)).toBeNull();
+    expect(container.innerHTML).not.toMatch(MONEY);
+  });
+
   it("says the limit is reached at 100 % and that it is a soft cap", () => {
     page(
       limited({

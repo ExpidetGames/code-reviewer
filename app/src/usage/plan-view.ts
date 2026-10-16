@@ -4,7 +4,8 @@
 // period, reduced to what a member may see. Pure: no database, no clock. This is the boundary to the browser, so
 // it copies named fields only:
 // - run counts against their limit (`null` is no limit),
-// - the cost limit as one whole percentage, never an amount of money or a measured cost, in any unit,
+// - the cost limit of the key the workspace runs on (the operator's, or its own) as one whole percentage, never an
+//   amount of money or a measured cost, in any unit,
 // - the plan label, the start of the period and two flags (managed, paused),
 // and never the reason of a suspension, where the entitlements came from, a model, a key or anything of a job.
 import type { ProjectReviewKind } from "../review-settings/settings.ts";
@@ -14,10 +15,13 @@ import type { ResolvedEntitlements } from "../workspaces/entitlements.ts";
 export type PlanUsage = {
   /** Runs that count towards a limit (`reserved` and `settled`), per review kind. */
   runs: Record<ProjectReviewKind, number>;
-  /** The measured cost of the settled runs on the operator's key, micro-USD. Never leaves this module. */
-  managedCostMicroUsd: number;
-  /** Settled runs on the operator's key whose cost is unknown: the percentage does not include them. */
-  managedUnknownCostCount: number;
+  /**
+   * The measured cost of the settled runs on the key the workspace runs on (the operator's, or its own),
+   * micro-USD. Never leaves this module.
+   */
+  costMicroUsd: number;
+  /** Settled runs on that key whose cost is unknown: the percentage does not include them. */
+  unknownCostCount: number;
 };
 
 export type RunUsageView = {
@@ -48,7 +52,7 @@ export type PlanView =
       /** ISO 8601 UTC: usage is counted from here. The app does not know when the period ends. */
       periodStart: string;
       runs: Record<ProjectReviewKind, RunUsageView>;
-      /** Present only when a cost limit applies to this workspace. */
+      /** Present only when a cost limit applies to the key this workspace runs on. */
       cost: CostUsageView | null;
     };
 
@@ -69,7 +73,11 @@ export function buildPlanView(
   if (entitlements.kind === "unlimited") return { kind: "unlimited" };
   if (entitlements.kind === "invalid") return { kind: "unreadable" };
   const managed = entitlements.keyMode === "managed";
-  const costLimit = entitlements.limits.managedCostLimitMicroUsd;
+  // The claim watches the limit of the key a job runs on (src/usage/README.md): a limit of the other key mode
+  // is read by nothing for this workspace now, so the page does not show it.
+  const costLimit = managed
+    ? entitlements.limits.managedCostLimitMicroUsd
+    : entitlements.limits.ownKeyCostLimitMicroUsd;
   return {
     kind: "limited",
     planLabel: entitlements.planLabel,
@@ -86,14 +94,12 @@ export function buildPlanView(
         limit: entitlements.limits.dynamicRunsPerPeriod,
       },
     },
-    // The claim only watches the cost of a workspace on the operator's key (src/usage/README.md): a limit next
-    // to the key mode `own` is read by nothing, so the page does not show it.
     cost:
-      managed && costLimit !== null
-        ? {
-            percentUsed: costPercentUsed(usage.managedCostMicroUsd, costLimit),
-            unknownCostCount: usage.managedUnknownCostCount,
-          }
-        : null,
+      costLimit === null
+        ? null
+        : {
+            percentUsed: costPercentUsed(usage.costMicroUsd, costLimit),
+            unknownCostCount: usage.unknownCostCount,
+          },
   };
 }

@@ -10,6 +10,7 @@ counting. It measures nothing itself: it stores the `usage.costUsd` that the run
 | `usage-records.ts`                               | Pure: the states, `costUsdToMicroUsd`, `settlementOfOutcome`, `keyModeOfAccessSource` |
 | `../db/repositories/usage-records-repository.ts` | Scoped to one workspace: `reserve`, `setKeyMode`, `settle`, `get` and the three reads |
 | `enforce-entitlements.ts`                        | Pure: `decideAdmission`, the order of the checks of a claim (below)                   |
+| `unknown-cost-alert.ts`                          | Pure: the one log line for a run that settled without a cost (#361, below)            |
 | `plan-view.ts`, `usage-summary.ts`               | The plan page's view of a workspace and the read that builds it (#282, below)         |
 | `http.ts`, `shared.ts`, `ui/`                    | The polling answer of the plan page, its wiring and the page (#282, below)            |
 | `../db/repositories/claim-admission.ts`          | Instance level: resolves the entitlements inside the claim transaction and decides    |
@@ -88,11 +89,13 @@ split claim of a Dispatcher and the claim by job id.
 3. The run limit of the job's kind (`diffRunsPerPeriod`, `dynamicRunsPerPeriod`): the records of that kind (`reserved`
    or `settled`) reserved at or after `period_start` at or above the limit refuse with `quota_exhausted` (detail
    `diff_runs` or `dynamic_runs`). `0` allows none, `null` is unlimited and is not read.
-4. The cost limit (`managedCostLimitMicroUsd`), for a workspace whose key mode is `managed` (the operator's key): the
-   sum of the settled managed `cost_micro_usd` reserved at or after `period_start` at or above the limit refuses with
-   `quota_exhausted` (detail `managed_cost`). A settled run with an unknown cost adds nothing to the sum, never a
-   zero and never a guess, and it still counts in 3; the operator API's summary lists such runs apart
-   (`unknownCostCount`), so they can be watched. A workspace on its own key is never blocked by this limit.
+4. The cost limit of the key the job runs on (#361): `managedCostLimitMicroUsd` for a workspace whose key mode is
+   `managed` (the operator's key), `ownKeyCostLimitMicroUsd` for one whose key mode is `own` (its own key). The sum
+   of the settled `cost_micro_usd` of **that key mode** reserved at or after `period_start` at or above the limit
+   refuses with `quota_exhausted` (detail `managed_cost` or `own_key_cost`). A settled run with an unknown cost adds
+   nothing to the sum, never a zero and never a guess, and it still counts in 3; the operator API's summary lists
+   such runs apart (`unknownCostCount`), and every one of them is reported when it settles (below). Neither limit
+   blocks a job of the other key mode.
 
 A refused job ends `failed` with the code, in the claim transaction: no attempt is counted, no runner hears of it, no
 credential or key is created, no record is written, and its holder, start time and lease are cleared (the Runs list
@@ -116,23 +119,40 @@ entitlements still stop it, and its record is then voided.
   end above it by what the runs in flight at that moment cost; the overshoot is bounded by the number of concurrent
   runs times the per-run bounds, and it is recorded as usage like any other. A run with an unknown cost is not bounded
   at all by this limit.
-- **Which runs the cost limit watches.** Those of a workspace whose entitlements say `managed`; the sum counts the
-  records whose key mode is `managed`. A key mode `managed` whose operator key is missing is not a quota matter (#276)
-  and keeps its own code (`llm_not_configured`). The key mode of the entitlements also picks the key (#276), and the record
-  is corrected to the key the job really uses on both claim paths, so the cost limit counts exactly the runs that spent the
-  operator's key. **A cost limit next to the key mode `own` is read by nothing.** An operator can no longer
-  write that shape (`cost_limit_requires_managed_key`, 422); an entry stored before that keeps working exactly as it
-  did, the limit is ignored, and the claim logs it once per workspace and process (`onIgnoredCostLimit`). Limiting the
-  cost of runs on the workspace's own key is a separate limit (#361).
+- **Which runs a cost limit watches (#361).** Each limit watches one key mode, **decided by the record, not by the
+  entitlements now**: the sum of a key mode counts the settled records whose own `key_mode` is that mode, and the
+  claim checks the limit of the key mode the job will run on. That key mode is known at claim time: the key mode of the
+  entitlements picks the key (#276, `keyModeForJob`), and the claim route resolves the same entitlements, so the claim
+  needs no second lookup and its one-transaction check and reservation stay as they are. The record is corrected
+  to the key the job really uses on both claim paths (`setKeyMode`), so a limit counts exactly the runs that spent
+  that key. A workspace switched between `own` and `managed` in the middle of a period keeps the records of each mode
+  under the limit of that mode: the own-key records stay under `ownKeyCostLimitMicroUsd` while it is `managed`, and
+  come back into play if it is switched back. A key mode `managed` whose operator key is missing is not a quota matter
+  (#276) and keeps its own code (`llm_not_configured`).
+- **`ownKeyCostLimitMicroUsd` (#361)** is allowed with either key mode. **A managed cost limit next to the key mode `own`
+  is read by nothing.** An operator can no longer write that shape (`cost_limit_requires_managed_key`, 422); an entry
+  stored before that keeps working exactly as it did, the limit is ignored, and the claim logs it once per workspace
+  and process (`onIgnoredCostLimit`). The own-key limit has no such rule: next to `managed` it is dormant until the
+  workspace is switched back, and it keeps counting the own-key records it already has. Entries stored before the limit
+  existed read it as `null` (unlimited, `LIMITS_ADDED_LATER`).
+- **Unknown cost (#361).** A settled run with an unknown cost adds nothing to either sum, so a workspace whose runs all
+  settle without a cost is bounded only by its run limits: **the cost limits do not bound unknown-cost runs.** Each such
+  settlement is reported, once the transaction that made it committed, with one log line carrying the job id and the
+  workspace id and nothing else (`unknownCostAlertLine`, `onUnknownCostSettled`; no figure, no model, no name): a run
+  that settled with a usage whose cost is missing (`complete`), and a run that ended with no result (`no_result`: the
+  sweep returns what it settled). The operator API's summary lists the same runs (`unknownCostCount`) for a
+  reader that prefers to poll. Alerting on the line (or the count) is the operator's way of watching what the limit
+  cannot bound.
 - **Locking.** The claim already runs under the instance gate lock of the queue (Postgres) or the write lock of the
   connection (SQLite), which serializes claims. On Postgres the workspace row is also locked `for no key update` (an
   insert that only references it does not wait), so the count stays exact if the gate is ever narrowed. The lock and
   the count are taken only when a limit applies to the job (`readsUsage`: the limit of its kind, or the cost limit of
-  a `managed` workspace); a workspace that is unlimited, suspended, unreadable or without such a limit reads no usage
-  and takes no lock. What every claim pays is three point reads (its row, or the instance default, and the job's own
+  the key mode it runs on); a workspace that is unlimited, suspended, unreadable or without such a limit reads no usage
+  and takes no lock (a `null` limit is never read). What every claim pays is three point reads (its row, or the instance default, and the job's own
   record).
 - **Indexes.** The count is one query on `usage_records_workspace_reserved` (workspace, kind, reserved time). The cost
-  sum only runs for a managed workspace with a cost limit and reads that workspace's records of the period.
+  sum only runs for a workspace with a cost limit for its key mode and reads that workspace's records of that key
+  mode in the period.
 - **Order with the project guard.** The entitlements are decided inside `claimNext`, before the claim guard (a
   project that was switched off) sees the job. A job of a suspended workspace whose project is also switched off
   therefore fails as `workspace_suspended` instead of being cancelled as `project_deactivated`. Switching a project off
@@ -140,6 +160,12 @@ entitlements still stop it, and its record is then voided.
 - **Mixed versions.** Nothing in the schema changed. An app instance from before #277 still claims, reserves records
   and ignores the entitlements; it shows an unknown code (`quota_exhausted`) with the general sentence if it ever lists
   a job that a newer instance refused. During a rolling upgrade a job claimed by an old instance is not checked.
+- **Mixed versions of the own-key limit (#361).** No schema change: the limit lives in the JSON of the stored limits.
+  An instance from before it reads an entry that holds it (reading ignores a limit it does not know) and claims
+  without checking it, so **upgrade every instance before an own-key limit is set**; an entry stored before it reads the
+  limit as `null` on a new instance. Writes must state it: a `PUT` that lacks the key is refused (`limits_invalid`) by
+  a new instance, and a `PUT` that carries it is refused by an old one (a write refuses an unknown limit, so a typo
+  cannot pass), so an external service updates its writes together with the rollout.
 
 ## Reads
 
@@ -147,8 +173,9 @@ Repository functions, the operator API that serves them (#278, `src/operator-api
 workspace (#282, below).
 
 - `countByKind(since)`: records that count (`reserved`, `settled`) reserved at or after `since`, per review kind.
-- `sumSettledManagedCostMicroUsd(since)`: the cost of settled records of managed runs reserved at or after `since` (a run belongs to the period it started in, for the count and for the cost alike);
-  an unknown cost adds nothing.
+- `sumSettledCostMicroUsd(since, keyMode)`: the cost of settled records of the runs on that key mode (`own` or `managed`,
+  the record's own `key_mode`) reserved at or after `since` (a run belongs to the period it started in, for the count and
+  for the cost alike); an unknown cost adds nothing.
 - `pageSettled({ after, limit, settledBefore?, from?, to? })`: settled records ordered by `(settled_at, id)` after a
   cursor, with the cursor for the next page. Never `reserved` or `void` records. `settledBefore` keeps back what was
   settled at or after that time (the operator API passes now minus the safety lag); `from` (included) and `to`
@@ -198,12 +225,13 @@ named fields only:
 
 - **Counts.** "N of limit" or "N used, no limit"; "limit reached" is said in words when `used >= limit`.
 - **The cost limit is shown as a percentage, never as an amount.** A bar (`role="progressbar"`, whose name and
-  `aria-valuetext` are the visible sentence "62 % of the usage limit used") appears only for a workspace on the
-  operator's key (`managed`) that has a `managedCostLimitMicroUsd`: the claim watches nothing else, and a limit next
-  to the key mode `own` is read by nothing (above), so it is not shown. The percentage is the settled managed cost
-  in the period divided by the limit, **rounded down** (100 means the limit is reached, as the claim refuses at
+  `aria-valuetext` are the visible sentence "62 % of the usage limit used") appears only when the
+  key the workspace runs on has a cost limit (#361): `managedCostLimitMicroUsd` for the operator's key (`managed`),
+  `ownKeyCostLimitMicroUsd` for its own key. The claim watches nothing else, and a managed limit next to the key mode
+  `own` is read by nothing (above), so it is not shown; neither is the limit of the other key mode. The percentage is
+  the settled cost of that key mode in the period divided by the limit, **rounded down** (100 means the limit is reached, as the claim refuses at
   `used >= limit`) and **at most 100**: a run that was in flight when the limit was reached may take the total past it,
-  and the page does not claim to know by how much. The page says that it is not exact (soft cap). A limit of 0 reads 100. Settled runs whose cost is unknown are counted apart ("2 finished reviews could not be measured and are not in
+  and the page does not claim to know by how much. The page says that it is not exact (soft cap). A limit of 0 reads 100. Settled runs of that key mode whose cost is unknown are counted apart ("2 finished reviews could not be measured and are not in
   this percentage"), never as zero. Neither the API nor the DOM holds an amount, a currency or the measured cost, in
   any unit; the measured sum does not leave `buildPlanView`.
 - **A managed workspace** is told that the instance provides the models. The page never shows a model, a tier, a key or
@@ -219,6 +247,13 @@ named fields only:
   instance first).
 
 ## Tests
+
+The own-key cost limit (#361): `enforce-entitlements.test.ts` (the decision and which limit reads which sum),
+`jobs/claim-limits.integration.test.ts` (the claim on SQLite and Postgres: reached, the other key mode, a switch in the
+middle of a period, unknown cost, `0` and `null`, a moved period, a lost lease, a race at the soft cap, another
+workspace, the unknown-cost alert), `unknown-cost-alert.test.ts` (what the line may say),
+`usage-records-repository.integration.test.ts` (the sum per key mode), `workspaces/entitlements-validation.test.ts` and
+the operator API contract test (`integration-tests/compatibility/operator-api-contract.integration.test.ts`).
 
 `usage-records.test.ts` (rounding and settlement rules), `usage-records-repository.integration.test.ts` and the
 Postgres twin, `integration-tests/http/runner-api-usage.integration.test.ts` (claim, completion, lease loss),

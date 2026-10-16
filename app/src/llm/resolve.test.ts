@@ -175,6 +175,7 @@ describe("the key mode of a job, from the entitlements of its workspace", () => 
     diffRunsPerPeriod: null,
     dynamicRunsPerPeriod: null,
     managedCostLimitMicroUsd: null,
+    ownKeyCostLimitMicroUsd: null,
   };
   const entitlements = (keyMode: "own" | "managed") =>
     ({

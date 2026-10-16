@@ -643,7 +643,7 @@ describe("the hosted deployment guide as a procedure", () => {
     expect(guide).not.toContain("leases never expire");
     expect(guide).not.toContain("nothing else ends it");
     expect(read("app/src/db/repositories/runner-jobs-repository.ts")).toMatch(
-      /async claimNext[\s\S]{0,400}await expire\(trx, current\)/,
+      /async claimNext[\s\S]{0,400}await expire\(trx, current, unknownCost\)/,
     );
     expect(needs).toContain(
       "A plan that allows only daily crons cannot run this deployment",

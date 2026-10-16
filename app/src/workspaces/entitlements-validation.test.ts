@@ -16,8 +16,18 @@ function limits(overrides: Record<string, unknown> = {}): unknown {
     diffRunsPerPeriod: null,
     dynamicRunsPerPeriod: null,
     managedCostLimitMicroUsd: null,
+    ownKeyCostLimitMicroUsd: null,
     ...overrides,
   };
+}
+
+/** The limits of an entry without one of them, as an entry stored before that limit existed has it. */
+function limitsWithout(name: string): unknown {
+  return Object.fromEntries(
+    Object.entries(limits() as Record<string, unknown>).filter(
+      ([key]) => key !== name,
+    ),
+  );
 }
 
 function input(overrides: Record<string, unknown> = {}): unknown {
@@ -46,6 +56,7 @@ describe("validating entitlements", () => {
           diffRunsPerPeriod: 10,
           dynamicRunsPerPeriod: null,
           managedCostLimitMicroUsd: 0,
+          ownKeyCostLimitMicroUsd: null,
         },
         periodStart: "2026-10-01T02:00:00.000Z",
         suspended: false,
@@ -316,6 +327,96 @@ describe("the cost limit and the key mode (#277)", () => {
   });
 });
 
+describe("the cost limit of the own key (#361)", () => {
+  // #361-T11
+  it("accepts a count, 0 and null, and refuses what is not a count", () => {
+    for (const keyMode of ["own", "managed"])
+      for (const cost of [null, 0, 1, 2 ** 53 - 1])
+        expect(
+          validateEntitlements(
+            input({
+              keyMode,
+              limits: limits({ ownKeyCostLimitMicroUsd: cost }),
+            }),
+            NOW,
+          ),
+        ).toMatchObject({
+          ok: true,
+          value: { limits: { ownKeyCostLimitMicroUsd: cost } },
+        });
+    for (const bad of [-1, 1.5, "5", 2 ** 53, true, undefined])
+      expect(
+        validateEntitlements(
+          input({
+            keyMode: "own",
+            limits: limits({ ownKeyCostLimitMicroUsd: bad }),
+          }),
+          NOW,
+        ),
+      ).toEqual({
+        ok: false,
+        code: "limit_invalid",
+        field: "ownKeyCostLimitMicroUsd",
+      });
+  });
+
+  // #361-T11
+  it("is allowed next to the own key, where the managed cost limit is still refused", () => {
+    expect(
+      validateEntitlements(
+        input({
+          keyMode: "own",
+          limits: limits({ ownKeyCostLimitMicroUsd: 5_000_000 }),
+        }),
+        NOW,
+      ),
+    ).toMatchObject({ ok: true });
+    expect(
+      validateEntitlements(
+        input({
+          keyMode: "own",
+          limits: limits({
+            managedCostLimitMicroUsd: 1,
+            ownKeyCostLimitMicroUsd: 5_000_000,
+          }),
+        }),
+        NOW,
+      ),
+    ).toEqual({
+      ok: false,
+      code: "cost_limit_requires_managed_key",
+      field: "managedCostLimitMicroUsd",
+    });
+  });
+
+  // #361-T11
+  it("is required on a write, like every limit", () => {
+    const without = limitsWithout("ownKeyCostLimitMicroUsd");
+
+    expect(validateEntitlements(input({ limits: without }), NOW)).toMatchObject(
+      { ok: false, code: "limits_invalid" },
+    );
+  });
+
+  // #361-T01
+  it("reads as unlimited when an entry stored before the limit existed lacks it", () => {
+    const before = limitsWithout("ownKeyCostLimitMicroUsd");
+
+    expect(readEntitlements(input({ limits: before }))).toMatchObject({
+      limits: { ownKeyCostLimitMicroUsd: null },
+    });
+  });
+
+  // #361-T11
+  it("is not defaulted on read when it is stored but damaged", () => {
+    expect(
+      readEntitlements(
+        input({ limits: limits({ ownKeyCostLimitMicroUsd: "5" }) }),
+      ),
+    ).toBeUndefined();
+  });
+});
+
 describe("validating limits", () => {
   it("treats a missing key as unlimited only for a limit that is declared as added later", () => {
     const partial = { diffRunsPerPeriod: 1, managedCostLimitMicroUsd: null };
@@ -324,12 +425,18 @@ describe("validating limits", () => {
       ok: false,
       code: "limits_invalid",
     });
-    expect(validateLimits(partial, ["dynamicRunsPerPeriod"])).toEqual({
+    expect(
+      validateLimits(partial, [
+        "dynamicRunsPerPeriod",
+        "ownKeyCostLimitMicroUsd",
+      ]),
+    ).toEqual({
       ok: true,
       value: {
         diffRunsPerPeriod: 1,
         dynamicRunsPerPeriod: null,
         managedCostLimitMicroUsd: null,
+        ownKeyCostLimitMicroUsd: null,
       },
     });
   });
@@ -343,6 +450,7 @@ describe("reading stored entitlements", () => {
       diffRunsPerPeriod: 1,
       dynamicRunsPerPeriod: null,
       managedCostLimitMicroUsd: 0,
+      ownKeyCostLimitMicroUsd: 2_000_000,
     },
     periodStart: "2026-10-01T00:00:00.000Z",
     suspended: true,

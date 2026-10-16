@@ -23,6 +23,7 @@ import {
   type JobQueueFixture,
 } from "../test-support/jobs.ts";
 import { addWorkspace } from "../test-support/workspaces.ts";
+import { readEffectiveEntitlements } from "../workspaces/effective-entitlements.ts";
 import type {
   EntitlementLimits,
   EntitlementsData,
@@ -64,6 +65,7 @@ function entitlements(overrides: EntitlementOverrides = {}): EntitlementsData {
       diffRunsPerPeriod: null,
       dynamicRunsPerPeriod: null,
       managedCostLimitMicroUsd: null,
+      ownKeyCostLimitMicroUsd: null,
       ...limits,
     },
   };
@@ -553,6 +555,560 @@ describe.each(databases)("the limits at claim on %s", (name, open) => {
       const job = await enqueue(fixture);
 
       expect((await fixture.queue.claimNext("runner-a"))?.job.id).toBe(job.id);
+    },
+  );
+
+  /** A runner queue of the instance that records what the claim refused and why. */
+  function recordingQueue(fixture: JobQueueFixture) {
+    const refusals: Array<{
+      jobId: string;
+      errorCode: string;
+      detail?: string;
+    }> = [];
+    const queue = createRunnerQueue(fixture.db, {
+      now: fixture.clock.now,
+      onRefused: ({ jobId, errorCode, detail }) =>
+        refusals.push({
+          jobId,
+          errorCode,
+          ...(detail === undefined ? {} : { detail }),
+        }),
+    });
+    return { queue, refusals };
+  }
+
+  // #361-T01
+  run(
+    "reads an entry stored before the own-key limit existed as unlimited, and claims as before",
+    async () => {
+      const fixture = await start();
+      await setEntitlements(fixture, { limits: { diffRunsPerPeriod: 5 } });
+      // The JSON of a stored entry from before the limit: it lacks the key.
+      await fixture.db
+        .updateTable("workspace_entitlements")
+        .set({
+          limits: JSON.stringify({
+            diffRunsPerPeriod: 5,
+            dynamicRunsPerPeriod: null,
+            managedCostLimitMicroUsd: null,
+          }),
+        })
+        .execute();
+      await runToCompletion(fixture, { costUsd: 99, managed: false });
+      const job = await enqueue(fixture);
+
+      expect((await fixture.queue.claimNext("runner-a"))?.job.id).toBe(job.id);
+      expect(
+        await readEffectiveEntitlements(
+          fixture.db,
+          fixture.workspaceId,
+          fixture.clock.now,
+        ),
+      ).toMatchObject({
+        kind: "limited",
+        limits: { diffRunsPerPeriod: 5, ownKeyCostLimitMicroUsd: null },
+      });
+    },
+  );
+
+  // #361-T02
+  run(
+    "fails an own-key job once the settled own-key cost reaches the limit, with no record",
+    async () => {
+      const fixture = await start();
+      await setEntitlements(fixture, {
+        keyMode: "own",
+        limits: { ownKeyCostLimitMicroUsd: 5_000_000 },
+      });
+      await runToCompletion(fixture, { costUsd: 3, managed: false });
+      await runToCompletion(fixture, { costUsd: 2, managed: false });
+      const refused = await enqueue(fixture);
+      const { queue, refusals } = recordingQueue(fixture);
+
+      expect(await queue.claimNext("runner-a")).toBeNull();
+
+      expect(await fixture.queue.get(refused.id)).toMatchObject({
+        status: "failed",
+        errorCode: "quota_exhausted",
+        runnerId: null,
+        claimedAt: null,
+        attempts: 0,
+      });
+      expect(refusals).toEqual([
+        {
+          jobId: refused.id,
+          errorCode: "quota_exhausted",
+          detail: "own_key_cost",
+        },
+      ]);
+      expect(await recordsOf(fixture).get(refused.id)).toBeUndefined();
+      expect(await allRecords(fixture)).toHaveLength(2);
+    },
+  );
+
+  // #361-T02
+  run(
+    "lets an own-key job run while the own-key cost is below the limit",
+    async () => {
+      const fixture = await start();
+      await setEntitlements(fixture, {
+        limits: { ownKeyCostLimitMicroUsd: 5_000_000 },
+      });
+      await runToCompletion(fixture, { costUsd: 4.999999, managed: false });
+      const job = await enqueue(fixture);
+
+      expect((await fixture.queue.claimNext("runner-a"))?.job.id).toBe(job.id);
+    },
+  );
+
+  // #361-T02
+  run(
+    "refuses a Dynamic job at the own-key cost limit as well as a Diff job",
+    async () => {
+      const fixture = await start();
+      await setEntitlements(fixture, {
+        limits: { ownKeyCostLimitMicroUsd: 1_000_000 },
+      });
+      await runToCompletion(fixture, { costUsd: 1, managed: false });
+      const dynamic = await enqueue(fixture, "dynamic");
+
+      expect(await fixture.queue.claimNext("runner-a", ENGINES)).toBeNull();
+
+      expect(await fixture.queue.get(dynamic.id)).toMatchObject({
+        status: "failed",
+        errorCode: "quota_exhausted",
+      });
+    },
+  );
+
+  // #361-T03
+  run(
+    "does not let the managed cost limit block an own-key job, nor the own-key limit a managed job",
+    async () => {
+      const fixture = await start();
+      // Managed cost used up; the workspace now runs on its own key.
+      await setEntitlements(fixture, {
+        keyMode: "managed",
+        limits: { managedCostLimitMicroUsd: 1_000_000 },
+      });
+      await runToCompletion(fixture, { costUsd: 1, managed: true });
+      await setEntitlements(fixture, {
+        keyMode: "own",
+        limits: { ownKeyCostLimitMicroUsd: 5_000_000 },
+      });
+      const own = await enqueue(fixture);
+      expect((await fixture.queue.claimNext("runner-a"))?.job.id).toBe(own.id);
+
+      // Own-key cost used up; the workspace now runs on the operator's key.
+      await runToCompletion(fixture, { costUsd: 9, managed: false });
+      await setEntitlements(fixture, {
+        keyMode: "managed",
+        limits: {
+          managedCostLimitMicroUsd: 5_000_000,
+          ownKeyCostLimitMicroUsd: 5_000_000,
+        },
+      });
+      const managed = await enqueue(fixture);
+      expect((await fixture.queue.claimNext("runner-b"))?.job.id).toBe(
+        managed.id,
+      );
+    },
+  );
+
+  // #361-T03
+  run(
+    "refuses a managed job at the managed limit with its own detail even when the own-key limit is set",
+    async () => {
+      const fixture = await start();
+      await setEntitlements(fixture, {
+        keyMode: "managed",
+        limits: {
+          managedCostLimitMicroUsd: 1_000_000,
+          ownKeyCostLimitMicroUsd: 1_000_000,
+        },
+      });
+      await runToCompletion(fixture, { costUsd: 1, managed: true });
+      await enqueue(fixture);
+      const { queue, refusals } = recordingQueue(fixture);
+
+      expect(await queue.claimNext("runner-a")).toBeNull();
+
+      expect(refusals).toMatchObject([{ detail: "managed_cost" }]);
+    },
+  );
+
+  // #361-T04
+  run(
+    "keeps the records of each key mode under the limit of that mode when the workspace is switched mid-period",
+    async () => {
+      const fixture = await start();
+      // The managed cost limit cannot be written next to the own key (#277), so the own phases carry only
+      // the own-key limit.
+      const ownLimits = { ownKeyCostLimitMicroUsd: 2_000_000 };
+      const limits = { ...ownLimits, managedCostLimitMicroUsd: 2_000_000 };
+      await setEntitlements(fixture, { keyMode: "own", limits: ownLimits });
+      await runToCompletion(fixture, { costUsd: 2, managed: false });
+      const { queue, refusals } = recordingQueue(fixture);
+      const ownRefused = await enqueue(fixture);
+      expect(await queue.claimNext("runner-a")).toBeNull();
+      expect(refusals).toMatchObject([
+        { jobId: ownRefused.id, detail: "own_key_cost" },
+      ]);
+
+      // Switched to the operator's key: the own-key cost is not part of its sum.
+      await setEntitlements(fixture, { keyMode: "managed", limits });
+      await runToCompletion(fixture, { costUsd: 1.5, managed: true });
+      const managedOk = await enqueue(fixture);
+      expect((await queue.claimNext("runner-b"))?.job.id).toBe(managedOk.id);
+      await recordsOf(fixture).setKeyMode(managedOk.id, "managed");
+      await fixture.queue.complete(
+        managedOk.id,
+        await fixture.tokenOf(managedOk.id),
+        {
+          ok: true,
+          result: {
+            ok: true,
+            usage: { promptTokens: 1, completionTokens: 1, costUsd: 1 },
+          },
+        },
+      );
+      const managedRefused = await enqueue(fixture);
+      expect(await queue.claimNext("runner-c")).toBeNull();
+      expect(refusals.at(-1)).toMatchObject({
+        jobId: managedRefused.id,
+        detail: "managed_cost",
+      });
+
+      // Back on the own key: the earlier own-key records are still under the own-key limit.
+      await setEntitlements(fixture, { keyMode: "own", limits: ownLimits });
+      const again = await enqueue(fixture);
+      expect(await queue.claimNext("runner-d")).toBeNull();
+      expect(refusals.at(-1)).toMatchObject({
+        jobId: again.id,
+        detail: "own_key_cost",
+      });
+    },
+  );
+
+  // #361-T05
+  run(
+    "counts a settled own-key record of unknown cost as a run and adds nothing to the cost",
+    async () => {
+      const fixture = await start();
+      await setEntitlements(fixture, {
+        limits: {
+          diffRunsPerPeriod: 2,
+          ownKeyCostLimitMicroUsd: 1_000_000,
+        },
+      });
+      await runToCompletion(fixture, { costUsd: null, managed: false });
+      await runToCompletion(fixture, { costUsd: 0.5, managed: false });
+      const refused = await enqueue(fixture);
+      const { queue, refusals } = recordingQueue(fixture);
+
+      // Two runs counted (the limit of 2); the cost sum is 0.5 of 1.0, so only the count refuses.
+      expect(await queue.claimNext("runner-a")).toBeNull();
+
+      expect(refusals).toEqual([
+        {
+          jobId: refused.id,
+          errorCode: "quota_exhausted",
+          detail: "diff_runs",
+        },
+      ]);
+    },
+  );
+
+  // #361-T05
+  run(
+    "does not let unknown costs refuse an own-key job on their own",
+    async () => {
+      const fixture = await start();
+      await setEntitlements(fixture, {
+        limits: { ownKeyCostLimitMicroUsd: 1 },
+      });
+      await runToCompletion(fixture, { costUsd: null, managed: false });
+      await runToCompletion(fixture, { costUsd: null, managed: false });
+      const job = await enqueue(fixture);
+
+      expect((await fixture.queue.claimNext("runner-a"))?.job.id).toBe(job.id);
+    },
+  );
+
+  // #361-T06
+  run("refuses every own-key job when the own-key limit is 0", async () => {
+    const fixture = await start();
+    await setEntitlements(fixture, {
+      limits: { ownKeyCostLimitMicroUsd: 0 },
+    });
+    const job = await enqueue(fixture);
+    const { queue, refusals } = recordingQueue(fixture);
+
+    expect(await queue.claimNext("runner-a")).toBeNull();
+
+    expect(refusals).toMatchObject([{ jobId: job.id, detail: "own_key_cost" }]);
+    expect(await allRecords(fixture)).toEqual([]);
+  });
+
+  // #361-T06
+  run(
+    "runs own-key jobs without bound when the own-key limit is null",
+    async () => {
+      const fixture = await start();
+      await setEntitlements(fixture, {
+        limits: { ownKeyCostLimitMicroUsd: null },
+      });
+      await runToCompletion(fixture, { costUsd: 1000, managed: false });
+      const job = await enqueue(fixture);
+
+      expect((await fixture.queue.claimNext("runner-a"))?.job.id).toBe(job.id);
+    },
+  );
+
+  // #361-T07
+  run(
+    "stops counting earlier own-key cost the moment the period start moves forward",
+    async () => {
+      const fixture = await start();
+      await setEntitlements(fixture, {
+        limits: { ownKeyCostLimitMicroUsd: 1_000_000 },
+      });
+      await runToCompletion(fixture, { costUsd: 1, managed: false });
+      const refused = await enqueue(fixture);
+      expect(await fixture.queue.claimNext("runner-a")).toBeNull();
+      expect((await fixture.queue.get(refused.id))?.status).toBe("failed");
+      fixture.clock.advance(10 * SECOND);
+      await setEntitlements(fixture, {
+        limits: { ownKeyCostLimitMicroUsd: 1_000_000 },
+        periodStart: fixture.clock.now().toISOString(),
+      });
+      fixture.clock.advance(10 * SECOND);
+      const allowed = await enqueue(fixture);
+
+      expect((await fixture.queue.claimNext("runner-b"))?.job.id).toBe(
+        allowed.id,
+      );
+    },
+  );
+
+  // #361-T08
+  run(
+    "runs a job claimed again after a lost lease at the own-key limit, with the one record it has",
+    async () => {
+      const fixture = await start();
+      await setEntitlements(fixture, {
+        limits: { ownKeyCostLimitMicroUsd: 1_000_000 },
+      });
+      await runToCompletion(fixture, { costUsd: 0.9, managed: false });
+      const job = await enqueue(fixture);
+      expect((await fixture.queue.claimNext("runner-a"))?.job.id).toBe(job.id);
+      fixture.clock.advance(3 * MINUTE);
+
+      const again = await fixture.queue.claimNext("runner-b");
+
+      expect(again?.job).toMatchObject({ id: job.id, attempts: 1 });
+      expect(await allRecords(fixture)).toHaveLength(2);
+      expect(await recordsOf(fixture).get(job.id)).toMatchObject({
+        state: "reserved",
+      });
+    },
+  );
+
+  // #361-T09
+  run(
+    "lets runs in flight pass a soft cap, never more than the runs in flight, while the count limit stays exact",
+    async () => {
+      const fixture = await start();
+      await setEntitlements(fixture, {
+        limits: {
+          diffRunsPerPeriod: 4,
+          ownKeyCostLimitMicroUsd: 1_000_000,
+        },
+      });
+      await runToCompletion(fixture, { costUsd: 0.9, managed: false });
+      for (let index = 0; index < 8; index += 1) await enqueue(fixture);
+
+      // Eight claims at once below the cost limit: the runs in flight cost nothing yet, so only the count
+      // (4 minus the 1 that settled) bounds how many start.
+      const answers = await Promise.all(
+        Array.from({ length: 8 }, (_, index) =>
+          fixture.queue.claimNext(`runner-${index}`),
+        ),
+      );
+      const started = answers.filter((answer) => answer !== null);
+      expect(started).toHaveLength(3);
+      expect(await allRecords(fixture)).toHaveLength(4);
+
+      // Each of the three settles above what is left of the limit: the overshoot is what they cost.
+      for (const claimed of started)
+        await fixture.queue.complete(claimed.job.id, claimed.leaseToken, {
+          ok: true,
+          result: {
+            ok: true,
+            usage: { promptTokens: 1, completionTokens: 1, costUsd: 0.5 },
+          },
+        });
+      const total = await recordsOf(fixture).sumSettledCostMicroUsd(
+        PERIOD_START,
+        "own",
+      );
+      expect(total).toBe(2_400_000);
+      // Over the limit by no more than what the runs in flight cost.
+      expect(total - 1_000_000).toBeLessThanOrEqual(started.length * 500_000);
+      const next = await enqueue(fixture);
+      expect(await fixture.queue.claimNext("runner-late")).toBeNull();
+      expect((await fixture.queue.get(next.id))?.errorCode).toBe(
+        "quota_exhausted",
+      );
+    },
+  );
+
+  // #361-T10
+  run(
+    "raises one alert with the workspace and job ids when a run settles without a cost, and none when it has one",
+    async () => {
+      const fixture = await start();
+      const alerts: unknown[] = [];
+      const queue = createRunnerQueue(fixture.db, {
+        now: fixture.clock.now,
+        onUnknownCostSettled: (event) => alerts.push(event),
+      });
+      const unknown = await enqueue(fixture);
+      const known = await enqueue(fixture);
+      const first = await queue.claimNext("runner-a");
+      const second = await queue.claimNext("runner-b");
+      const usage = (costUsd: number | null) => ({
+        ok: true as const,
+        result: {
+          ok: true,
+          usage: { promptTokens: 1, completionTokens: 1, costUsd },
+        },
+      });
+
+      await queue.complete(unknown.id, first?.leaseToken ?? "", usage(null));
+      await queue.complete(known.id, second?.leaseToken ?? "", usage(0.25));
+      // Reporting the same outcome again settles nothing and alerts nothing.
+      await queue.complete(unknown.id, first?.leaseToken ?? "", usage(null));
+
+      expect(alerts).toEqual([
+        { workspaceId: fixture.workspaceId, jobId: unknown.id },
+      ]);
+    },
+  );
+
+  // #361-T10
+  run(
+    "raises the alert for a run that ended with no result, whose cost is unknown too",
+    async () => {
+      const fixture = await start();
+      const alerts: Array<{ workspaceId: string; jobId: string }> = [];
+      const queue = createRunnerQueue(fixture.db, {
+        now: fixture.clock.now,
+        onUnknownCostSettled: (event) => alerts.push(event),
+      });
+      const job = await enqueue(fixture);
+      // Only the last attempt ends a job without a result: the lease runs out on it.
+      await fixture.db
+        .updateTable("jobs")
+        .set({ attempts: 2 })
+        .where("id", "=", job.id)
+        .execute();
+      await queue.claimNext("runner-a");
+      fixture.clock.advance(3 * MINUTE);
+      await queue.expireStaleJobs();
+
+      expect((await fixture.queue.get(job.id))?.status).toBe("failed");
+      expect(await recordsOf(fixture).get(job.id)).toMatchObject({
+        state: "settled",
+        settledReason: "no_result",
+        costMicroUsd: null,
+      });
+      expect(alerts).toEqual([
+        { workspaceId: fixture.workspaceId, jobId: job.id },
+      ]);
+    },
+  );
+
+  // #361-T10
+  run("never lets a throwing alert callback fail the completion", async () => {
+    const fixture = await start();
+    const errors: string[] = [];
+    const spy = vi.spyOn(console, "error").mockImplementation((line) => {
+      errors.push(String(line));
+    });
+    const queue = createRunnerQueue(fixture.db, {
+      now: fixture.clock.now,
+      onUnknownCostSettled: () => {
+        throw new Error("callback failed");
+      },
+    });
+    const job = await enqueue(fixture);
+    const claimed = await queue.claimNext("runner-a");
+
+    try {
+      const completed = await queue.complete(
+        job.id,
+        claimed?.leaseToken ?? "",
+        {
+          ok: true,
+          result: {
+            ok: true,
+            usage: { promptTokens: 1, completionTokens: 1, costUsd: null },
+          },
+        },
+      );
+      expect(completed.status).toBe("completed");
+    } finally {
+      spy.mockRestore();
+    }
+    expect(errors.join("")).not.toContain("callback failed");
+  });
+
+  // #361-T13
+  run(
+    "leaves another workspace alone when one is at its own-key limit",
+    async () => {
+      const fixture = await start();
+      await setEntitlements(fixture, {
+        limits: { ownKeyCostLimitMicroUsd: 0 },
+      });
+      const refused = await enqueue(fixture);
+      fixture.clock.advance(1000);
+      const other = await addWorkspace(fixture.db, "other");
+      const otherJob = await enqueueInWorkspace(fixture, other);
+
+      const claimed = await fixture.queue.claimNext("runner-a");
+
+      expect(claimed?.job).toMatchObject({ id: otherJob, workspaceId: other });
+      expect((await fixture.queue.get(refused.id))?.errorCode).toBe(
+        "quota_exhausted",
+      );
+    },
+  );
+
+  // #361-T13
+  run(
+    "does not count the own-key cost of another workspace against this one",
+    async () => {
+      const fixture = await start();
+      const other = await addWorkspace(fixture.db, "other");
+      await setEntitlements(fixture, {
+        limits: { ownKeyCostLimitMicroUsd: 1_000_000 },
+      });
+      // The other workspace spent a lot on its own key; the usage record is in its scope.
+      const otherJob = await enqueueInWorkspace(fixture, other);
+      const claimed = await fixture.queue.claimNext("runner-a");
+      expect(claimed?.job.id).toBe(otherJob);
+      await fixture.queue.complete(otherJob, claimed?.leaseToken ?? "", {
+        ok: true,
+        result: {
+          ok: true,
+          usage: { promptTokens: 1, completionTokens: 1, costUsd: 50 },
+        },
+      });
+      const job = await enqueue(fixture);
+
+      expect((await fixture.queue.claimNext("runner-b"))?.job.id).toBe(job.id);
     },
   );
 

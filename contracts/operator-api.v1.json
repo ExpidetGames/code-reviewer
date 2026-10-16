@@ -20,7 +20,7 @@
       "pattern": "^[A-Za-z0-9_-]{1,64}$"
     },
     "ApiErrorCode": {
-      "description": "Callers branch on the code. 401 unauthorized; 404 not_found (unknown path) or workspace_not_found; 405 method_not_allowed (with an Allow header); 400 body_not_allowed (a GET or DELETE with a body), request_invalid (not JSON, or a bad query such as a limit out of range), cursor_invalid (a usage cursor that is not one of the API's) or period_invalid (a usage 'from' or 'to' that is not a timestamp, a period that is empty, or a summary without both); 413 body_too_large; 415 unsupported_media_type; 409 period_start_backwards; 422 the other codes of a refused entitlement, among them cost_limit_requires_managed_key for a cost limit next to keyMode 'own' (the codes of the workspace entitlements validation, with 'field' naming the limit or key concerned); 422 also invalid_token (a handoff token that is unknown, used, expired, revoked or whose person lost the role: one answer for all) and the codes of a refused plan management address (url_invalid, url_not_https, url_has_credentials, url_has_fragment, url_too_long); 500 internal_error.",
+      "description": "Callers branch on the code. 401 unauthorized; 404 not_found (unknown path) or workspace_not_found; 405 method_not_allowed (with an Allow header); 400 body_not_allowed (a GET or DELETE with a body), request_invalid (not JSON, or a bad query such as a limit out of range), cursor_invalid (a usage cursor that is not one of the API's) or period_invalid (a usage 'from' or 'to' that is not a timestamp, a period that is empty, or a summary without both); 413 body_too_large; 415 unsupported_media_type; 409 period_start_backwards; 422 the other codes of a refused entitlement, among them cost_limit_requires_managed_key for a managed cost limit next to keyMode 'own' (the codes of the workspace entitlements validation, with 'field' naming the limit or key concerned); 422 also invalid_token (a handoff token that is unknown, used, expired, revoked or whose person lost the role: one answer for all) and the codes of a refused plan management address (url_invalid, url_not_https, url_has_credentials, url_has_fragment, url_too_long); 500 internal_error.",
       "type": "string",
       "enum": [
         "unauthorized",
@@ -79,7 +79,8 @@
       "required": [
         "diffRunsPerPeriod",
         "dynamicRunsPerPeriod",
-        "managedCostLimitMicroUsd"
+        "managedCostLimitMicroUsd",
+        "ownKeyCostLimitMicroUsd"
       ],
       "properties": {
         "diffRunsPerPeriod": {
@@ -101,7 +102,16 @@
           "maximum": 9007199254740991
         },
         "managedCostLimitMicroUsd": {
-          "description": "A count (or micro-USD of measured model cost) per period, or null for unlimited.",
+          "description": "Micro-USD of measured model cost per period for the runs on the operator's key, or null for unlimited. A soft cap. Refused next to keyMode 'own' (cost_limit_requires_managed_key).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "ownKeyCostLimitMicroUsd": {
+          "description": "Micro-USD of measured model cost per period for the runs on the workspace's own key (#361), or null for unlimited. A soft cap: a run that starts below it can end above it by what the runs in flight cost, and a run whose cost is unknown is not bounded by it. Entries stored before the limit existed read as null.",
           "type": [
             "integer",
             "null"
@@ -117,7 +127,8 @@
       "required": [
         "diffRunsPerPeriod",
         "dynamicRunsPerPeriod",
-        "managedCostLimitMicroUsd"
+        "managedCostLimitMicroUsd",
+        "ownKeyCostLimitMicroUsd"
       ],
       "properties": {
         "diffRunsPerPeriod": {
@@ -139,7 +150,16 @@
           "maximum": 9007199254740991
         },
         "managedCostLimitMicroUsd": {
-          "description": "A count (or micro-USD of measured model cost) per period, or null for unlimited.",
+          "description": "Micro-USD of measured model cost per period for the runs on the operator's key, or null for unlimited. A soft cap. Refused next to keyMode 'own' (cost_limit_requires_managed_key).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "ownKeyCostLimitMicroUsd": {
+          "description": "Micro-USD of measured model cost per period for the runs on the workspace's own key (#361), or null for unlimited. A soft cap: a run that starts below it can end above it by what the runs in flight cost, and a run whose cost is unknown is not bounded by it. Entries stored before the limit existed read as null.",
           "type": [
             "integer",
             "null"
@@ -197,7 +217,7 @@
       }
     },
     "EntitlementsWrite": {
-      "description": "The body of PUT /workspaces/{id}/entitlements and PUT /entitlements/default: the whole entitlements, replacing what was stored. Unknown keys are refused (a typo must not pass). 'periodStart' may be left out: the stored start is kept, or the period starts now when nothing is stored. A start earlier than the stored one is refused (period_start_backwards, 409) and one more than five minutes ahead as period_start_in_future. A write is idempotent. A numeric limit above 2^53-1 is refused (limit_invalid) instead of being rounded. Removing a workspace's row (DELETE) ends the 'never backwards' guard for that workspace: a later PUT without periodStart begins now. A cost limit (managedCostLimitMicroUsd, even 0) next to keyMode 'own' is refused (cost_limit_requires_managed_key): it only counts runs on the operator's key, so it would never be read. An entry of that shape that was stored earlier keeps working: it is read as before and the limit is ignored.",
+      "description": "The body of PUT /workspaces/{id}/entitlements and PUT /entitlements/default: the whole entitlements, replacing what was stored. Unknown keys are refused (a typo must not pass). 'periodStart' may be left out: the stored start is kept, or the period starts now when nothing is stored. A start earlier than the stored one is refused (period_start_backwards, 409) and one more than five minutes ahead as period_start_in_future. A write is idempotent. A numeric limit above 2^53-1 is refused (limit_invalid) instead of being rounded. Removing a workspace's row (DELETE) ends the 'never backwards' guard for that workspace: a later PUT without periodStart begins now. A managed cost limit (managedCostLimitMicroUsd, even 0) next to keyMode 'own' is refused (cost_limit_requires_managed_key): it only counts runs on the operator's key, so it would never be read. An entry of that shape that was stored earlier keeps working: it is read as before and the limit is ignored. The workspace's own key has its own cost limit, ownKeyCostLimitMicroUsd (#361), which is allowed with either key mode and decides by the key a run actually used; every write states it, an entry stored before it existed reads it as null.",
       "type": "object",
       "required": [
         "planLabel",

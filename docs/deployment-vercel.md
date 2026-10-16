@@ -783,7 +783,9 @@ A self-hosted installation and a hosted one never share a database or a GitHub A
 - **The cost limit of a workspace is a soft cap** (`managedCostLimitMicroUsd`): cost is known only when a run settles,
   so runs in flight are not in the sum and a workspace can end above its limit by what the concurrent runs cost. The run
   limits are exact. A run with an unknown cost counts for nothing (`unknownCostCount` in the operator API's summary).
-  A limit for runs on a workspace's own key is #361. Limits and the key mode are set through the operator API; the
+  The runs on a workspace's own key have a limit of their own
+  (`ownKeyCostLimitMicroUsd`, same rules); an unknown cost is not bounded by either, and the app logs one line for each
+  run that settles without a cost (job and workspace id only) so they can be watched. Limits and the key mode are set through the operator API; the
   operator's own key (section 3.5) is saved by the instance admin only, and a workspace set to `managed` before every App
   instance runs the release that knows the key mode is served by the wrong key and outside the limit.
 - **A managed workspace has no model of its own**: the instance's `LLM_MODEL` and `LLM_MAX_TOKENS` apply to all of them

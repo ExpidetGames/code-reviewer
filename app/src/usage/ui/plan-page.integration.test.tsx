@@ -44,6 +44,7 @@ const ENTITLEMENTS: EntitlementsData = {
     diffRunsPerPeriod: 5,
     dynamicRunsPerPeriod: 2,
     managedCostLimitMicroUsd: 10_000_000,
+    ownKeyCostLimitMicroUsd: null,
   },
   periodStart: "2026-10-01T00:00:00.000Z",
   suspended: false,
@@ -106,6 +107,39 @@ describe("the plan page file", () => {
     expect(markup).toContain("0 of 2");
     expect(markup).toContain("62 % of the usage limit used");
     expect(markup).toContain(">Plan</a>");
+    expect(markup).not.toMatch(/6200000|10000000|6\.2|\$|USD/);
+  });
+
+  // #361 (plan page)
+  it("shows the percentage of the own-key cost limit, with the unknown runs apart and no amount, for a workspace on its own key", async () => {
+    const { db, workspaceId } = await start();
+    await createWorkspaceEntitlementsRepository(db, workspaceId).put(
+      {
+        ...ENTITLEMENTS,
+        keyMode: "own",
+        limits: {
+          ...ENTITLEMENTS.limits,
+          managedCostLimitMicroUsd: null,
+          ownKeyCostLimitMicroUsd: 10_000_000,
+        },
+      },
+      null,
+    );
+    const seeder = createUsageSeeder(db);
+    for (const costMicroUsd of [3_000_000, 3_200_000, null])
+      await seeder.seed({
+        workspaceId,
+        reservedAt: "2026-10-05T10:00:00.000Z",
+        keyMode: "own",
+        costMicroUsd,
+      });
+
+    const markup = await html();
+
+    expect(markup).toContain("62 % of the usage limit used");
+    expect(markup).toContain("1 finished review could not be measured");
+    expect(markup).toContain("not exact");
+    expect(markup).not.toContain("provided by this instance");
     expect(markup).not.toMatch(/6200000|10000000|6\.2|\$|USD/);
   });
 
