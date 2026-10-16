@@ -381,7 +381,8 @@ There is no silent fallback to another model or to a Diff review.
 
 The limits are fixed in the code (`runner/src/code_reviewer_runner/dynamic_review/budget.py`) or are
 trusted runner configuration; no project setting or pull request text widens them, and the
-wall-clock limit is the minimum of 600 seconds and the runner's job timeout.
+wall-clock limit is the minimum of 600 seconds and what is left of the runner's job timeout, which
+counts from the start of the process (#387), so the watchdog cannot overtake the run's own deadline.
 
 **The one budget is money (#290).** A Dynamic run is bounded by an operator cost limit in USD, not by
 tokens, model calls, tool calls or files: a tool loop sends its whole history again with every call,

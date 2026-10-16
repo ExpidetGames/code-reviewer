@@ -23,6 +23,7 @@ the report file as JSON; the scenario decides what the double does:
     hostile    log text with quotes, newlines, escape sequences, an embedded result JSON and the
                secrets inside a git URL (plain and URL-encoded), then fail with an exception
     slow       wait on an await far longer than RUNNER_JOB_TIMEOUT_SECONDS
+    slow_start like slow, behind a start-up that lasts SLOW_START_SECONDS after the process began
     hang       block the whole process (no await) far longer than RUNNER_JOB_TIMEOUT_SECONDS
 """
 
@@ -39,8 +40,14 @@ from typing import Any
 
 from code_reviewer_runner import runner
 
+STARTED_AT = time.monotonic()
 SCENARIO = sys.argv[1]
 REPORT = Path(sys.argv[2])
+# How long the start-up of `slow_start` lasts, counted from the start of this process. The wait is
+# until that moment, not for a time on top of the imports, so it is the same on a fast and on a slow
+# machine. It is longer than the 3 s the watchdog allows after the timeout, and the tests give the
+# job a timeout that the start-up exceeds, but by less than that allowance.
+SLOW_START_SECONDS = 4.5
 # From here on the runner must see the argv of the installed console script, nothing more.
 ARGV_SEEN_BY_RUNNER = list(sys.argv)
 sys.argv = ["code-reviewer-run-job"]
@@ -150,7 +157,7 @@ def install_double() -> None:
         if SCENARIO == "publish":
             publish_review()
             return True
-        if SCENARIO == "slow":
+        if SCENARIO in ("slow", "slow_start"):
             await asyncio.sleep(120)
             return True
         if SCENARIO == "hang":
@@ -252,12 +259,27 @@ def install_double() -> None:
     )
 
 
+def slow_down_the_start() -> None:
+    """The settings of the job are copied last in the start-up (after the imports): that is slow."""
+    from code_reviewer_runner import pr_agent_runtime
+
+    configure = pr_agent_runtime.configure_settings
+
+    def slowed(*args: Any, **kwargs: Any) -> None:
+        time.sleep(max(STARTED_AT + SLOW_START_SECONDS - time.monotonic(), 0.0))
+        configure(*args, **kwargs)
+
+    pr_agent_runtime.configure_settings = slowed
+
+
 _real_check = runner.check_pr_agent_version
 
 
 def check_then_install(*args: Any, **kwargs: Any) -> None:
     _real_check(*args, **kwargs)
     install_double()
+    if SCENARIO == "slow_start":
+        slow_down_the_start()
 
 
 runner.check_pr_agent_version = check_then_install

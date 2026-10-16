@@ -372,15 +372,61 @@ def test_a_command_that_awaits_too_long_is_stopped_with_the_timeout_code(tmp_pat
     assert result["durationMs"] >= 3000
 
 
+# #387-T06: the command runs (the start-up is over before the 6 s timeout) and blocks the loop, so
+# only the watchdog can end it, after the timeout and the grace, with its own text and reason.
 def test_a_command_that_blocks_the_whole_process_is_ended_by_the_watchdog(tmp_path: Path) -> None:
-    process, _ = run_double(
-        "hang", tmp_path, extra_env={"RUNNER_JOB_TIMEOUT_SECONDS": "3"}, timeout=40
+    process, seen = run_double(
+        "hang", tmp_path, extra_env={"RUNNER_JOB_TIMEOUT_SECONDS": "6"}, timeout=60
+    )
+
+    result = result_of(process)
+    assert seen["calls"] == 1  # the command was started and is what blocked
+    assert process.returncode == 1
+    assert result["errorCode"] == "timeout"
+    assert result["errorReason"] == "no_result_from_process"
+    assert result["logTail"].startswith(
+        "timeout [no_result_from_process]: the command did not stop"
+    )
+    assert 9000 <= result["durationMs"] < 20_000  # the 6 s timeout and the 3 s grace
+
+
+# #387-T01: the soft timeout counts from the start of the process. The start-up (4.5 s) is longer
+# than the 3 s the watchdog allows after the 4 s timeout, but ends before the watchdog (7 s): the
+# deadline has passed by then, so the job ends with the clean soft result and the command never
+# starts. Counted from the start of the command, the soft timeout would land at 8.5 s, after the
+# watchdog. The margin to the watchdog is 2.5 s of import time on top of the 4.5 s.
+def test_a_slow_start_does_not_let_the_watchdog_overtake_the_soft_timeout(tmp_path: Path) -> None:
+    process, seen = run_double(
+        "slow_start", tmp_path, extra_env={"RUNNER_JOB_TIMEOUT_SECONDS": "4"}, timeout=40
     )
 
     result = result_of(process)
     assert process.returncode == 1
+    assert result["ok"] is False
     assert result["errorCode"] == "timeout"
-    assert result["durationMs"] < 20_000
+    assert result["logTail"].startswith("timeout: the command did not finish in time")
+    assert "errorReason" not in result  # the watchdog's result names "no_result_from_process"
+    assert seen == {}  # the command never started
+    assert 4500 <= result["durationMs"] < 7000  # ended by the soft timeout, before the watchdog
+
+
+# #387-T05
+def test_a_job_that_finishes_inside_the_timeout_reports_what_it_reported_without_one(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "without").mkdir()
+    (tmp_path / "within").mkdir()
+    without, _ = run_double("publish", tmp_path / "without")
+    within, seen = run_double(
+        "publish", tmp_path / "within", extra_env={"RUNNER_JOB_TIMEOUT_SECONDS": "60"}
+    )
+
+    result = result_of(within)
+    assert within.returncode == 0
+    assert result["ok"] is True
+    assert result["commentUrl"] == "https://github.com/octo/repo/pull/7#c1"
+    assert result.get("usage") == result_of(without).get("usage")
+    assert seen["calls"] == 1
 
 
 def test_the_timeout_variable_of_the_parent_is_not_handed_to_pr_agent(tmp_path: Path) -> None:

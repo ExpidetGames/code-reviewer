@@ -37,6 +37,10 @@ REVIEW_MARKER = "<!-- pr-agent:review:full -->"
 
 Double = Callable[..., Awaitable[bool]]
 
+# The soft timeout counts from the start of the job (#387): a test that needs its command to run
+# before the timeout gives the start-up (settings copy) room to finish first.
+STARTS_WITHIN = 1.5
+
 
 def current_settings() -> Any:  # Any: PR-Agent ships no type information
     from pr_agent.config_loader import get_settings
@@ -567,7 +571,7 @@ def test_a_diff_run_that_times_out_after_its_model_call_reports_the_usage_pr_age
     use_double(monkeypatch, double)
     capture = LogCapture(Redactor([TOKEN, API_KEY]))
 
-    result = runner.run_job(make_job(), capture, time.monotonic(), timeout_seconds=0.2)
+    result = runner.run_job(make_job(), capture, time.monotonic(), timeout_seconds=STARTS_WITHIN)
 
     assert result.error_code is ErrorCode.TIMEOUT
     assert result.usage is not None
@@ -589,7 +593,7 @@ def test_a_diff_run_that_times_out_with_a_request_in_flight_reports_the_tokens_a
     use_double(monkeypatch, double)
     capture = LogCapture(Redactor([TOKEN, API_KEY]))
 
-    result = runner.run_job(make_job(), capture, time.monotonic(), timeout_seconds=0.2)
+    result = runner.run_job(make_job(), capture, time.monotonic(), timeout_seconds=STARTS_WITHIN)
 
     assert result.error_code is ErrorCode.TIMEOUT
     assert result.usage is not None
@@ -1163,6 +1167,77 @@ def test_the_watchdog_of_a_diff_run_says_it_left_no_result(
     assert result["errorCode"] == "timeout"
     assert result["errorReason"] == "no_result_from_process"
     assert result["usage"] is None
+
+
+# #387-T02: the soft deadline is counted from the start of the process, so the start-up (import,
+# settings copy) shrinks the time the command has, and the watchdog cannot overtake it.
+def test_the_soft_deadline_of_a_diff_run_is_the_start_of_the_process_plus_the_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    deadlines: list[float | None] = []
+    real_execute = runner.execute
+
+    async def spy(job: Job, guard: Any, deadline: float | None = None, *rest: Any) -> Any:
+        deadlines.append(deadline)
+        return await real_execute(job, guard, deadline, *rest)
+
+    async def double() -> bool:
+        provider_with_pull().publish_comment(f"## PR Reviewer Guide\n\n{REVIEW_MARKER}\n\nbody")
+        return True
+
+    use_double(monkeypatch, double)
+    monkeypatch.setattr(runner, "execute", spy)
+    started = time.monotonic() - 40.0  # a start-up that already used 40 of the 60 seconds
+
+    result = runner.run_job(make_job(), LogCapture(Redactor([])), started, timeout_seconds=60.0)
+
+    assert result.ok is True
+    assert deadlines == [started + 60.0]  # not "now + 60"
+
+
+def test_a_diff_run_without_a_timeout_has_no_soft_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    deadlines: list[float | None] = []
+    real_execute = runner.execute
+
+    async def spy(job: Job, guard: Any, deadline: float | None = None, *rest: Any) -> Any:
+        deadlines.append(deadline)
+        return await real_execute(job, guard, deadline, *rest)
+
+    async def double() -> bool:
+        provider_with_pull().publish_comment(f"## PR Reviewer Guide\n\n{REVIEW_MARKER}\n\nbody")
+        return True
+
+    use_double(monkeypatch, double)
+    monkeypatch.setattr(runner, "execute", spy)
+
+    result = runner.run_job(make_job(), LogCapture(Redactor([])), time.monotonic())
+
+    assert result.ok is True
+    assert deadlines == [None]
+
+
+# #387-T03: a start-up that used up the whole timeout ends the job with the clean timeout result
+# and never starts the command.
+def test_a_diff_run_whose_deadline_passed_during_the_start_up_never_starts_the_command(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def double() -> bool:
+        return True
+
+    calls = use_double(monkeypatch, double)
+    started = time.monotonic() - 10.0  # the start-up took 10 s of a 2 s timeout
+
+    result = runner.run_job(make_job(), LogCapture(Redactor([])), started, timeout_seconds=2.0)
+
+    assert calls == []
+    assert result.ok is False
+    assert result.error_code is ErrorCode.TIMEOUT
+    assert result.error_reason is None  # the soft path, not the watchdog's unknown outcome
+    assert result.log_tail.startswith("timeout: the command did not finish in time")
+    assert result.exit_code == 1
+    assert result.usage is None  # nothing ran, so nothing was used
 
 
 class FakeClock:

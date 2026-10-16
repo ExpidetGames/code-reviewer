@@ -12,6 +12,7 @@ import os
 import re
 import socket
 import sys
+import time
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
@@ -1174,3 +1175,39 @@ def test_the_note_of_a_run_whose_log_holds_repository_text_holds_none_of_it(
             assert fragment not in body
     finally:
         github.stop()
+
+
+# #387-T04: a run that starts late gets the time that is left, so a hung provider ends it at the
+# soft timeout of the process (counted from its start) and never at the watchdog's.
+def test_a_dynamic_run_after_a_slow_start_is_ended_by_the_time_that_is_left(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    deadlines: list[float] = []
+    real = runner.dynamic_ledger
+
+    def spy(capabilities: Any, environment: Any, deadline: float) -> Any:
+        deadlines.append(deadline)
+        return real(capabilities, environment, deadline)
+
+    monkeypatch.setattr(runner, "dynamic_ledger", spy)
+    script = {"proxy_calls": 1, "answer": "structured", "findings": findings(), "results": {}}
+    began = time.monotonic()
+
+    with FakeUpstream(hold=60.0) as upstream:
+        result = runner.run_dynamic_job(
+            job_for(f"{upstream.url}/v1"),
+            None,
+            began - 4.0,  # a start-up of 4 s, beyond the 3 s the watchdog allows after the timeout
+            environment(),
+            5.0,
+            engines=ALL_ENGINES,
+            prepare=Preparer(tmp_path / "export", script),
+            publish=RecordingPublisher(),
+        )
+
+    (deadline,) = deadlines
+    assert 0 < deadline <= 1.0  # the 5 s timeout minus the 4 s that are gone
+    assert result.ok is False
+    assert result.error_code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
+    assert result.error_reason is None  # the run's own result, not the watchdog's unknown outcome
+    assert time.monotonic() - began < 15.0
