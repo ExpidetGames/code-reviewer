@@ -51,7 +51,7 @@ describe("the address of the operator-configured plan page", () => {
       url: "https://plans.example/",
     });
     expect(
-      checkPlanManagementUrl("  HTTPS://Billing.Example:8443/plans?x=1  "),
+      checkPlanManagementUrl("  HTTPS://Plans.Example:8443/plans?x=1  "),
     ).toEqual({ ok: true, url: "https://plans.example:8443/plans?x=1" });
   });
 });
