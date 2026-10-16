@@ -11,6 +11,10 @@ prompt and the key that arrived) and answers from scripts:
   prompt of the request, so one endpoint serves all four commands;
 - a fixed error status for every request (429, 401, ...), optionally quoting the received key in the
   message like "Incorrect API key provided";
+- a reply for one model (`by_model`), so a test can fail or empty the primary model and let a
+  fallback model answer;
+- the charge of every answer in `usage.cost`, like OpenRouter states it (#274; `cost`, None leaves
+  it out);
 - a held request: the server waits until the client hangs up (or the test releases it), and says
   whether the client did, so a test can prove the connection was closed without sleeping.
 
@@ -85,6 +89,10 @@ class FakeLlm:
     replies: dict[str, str] = field(default_factory=lambda: {})
     # Answers every request when set, whatever it asks for.
     override: Reply | None = None
+    # The reply for the requests that name one model (before `replies`; `override` still wins).
+    by_model: dict[str, Reply] = field(default_factory=lambda: {})
+    # The charge of an answer in USD, stated in `usage.cost` like OpenRouter; None leaves it out.
+    cost: float | None = 0.00042
     # Error messages quote the key that arrived, like a provider that says "Incorrect API key".
     echo_key_in_errors: bool = False
     requests: list[LlmRequest] = field(default_factory=lambda: [])
@@ -157,6 +165,8 @@ class FakeLlm:
     def _reply_for(self, request: LlmRequest) -> Reply:
         if self.override is not None:
             return self.override
+        if request.model in self.by_model:
+            return self.by_model[request.model]
         kind = classify(request)
         if kind not in self.replies:
             return Reply(status=500, message=f"the fake LLM has no reply for a {kind} prompt")
@@ -182,7 +192,7 @@ class FakeLlm:
                 message = f"Incorrect API key provided: {request.authorization.split(' ')[-1]}"
             self._send(handler, reply.status, {"error": {"message": message, "code": reply.status}})
             return
-        self._send(handler, 200, completion(request.model, reply.content))
+        self._send(handler, 200, completion(request.model, reply.content, self.cost))
 
     def _hold(self, handler: BaseHTTPRequestHandler) -> bool:
         """Wait until released or hung up. Returns True if the request should still be answered."""
@@ -211,8 +221,12 @@ class FakeLlm:
             return
 
 
-def completion(model: str, content: str) -> dict[str, Any]:
-    """A non-streaming chat completion in the OpenAI wire format."""
+def completion(model: str, content: str, cost: float | None = None) -> dict[str, Any]:
+    """A non-streaming chat completion in the OpenAI wire format. `cost` is the charge the provider
+    states in `usage.cost` (OpenRouter does), left out when None."""
+    usage: dict[str, Any] = {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150}
+    if cost is not None:
+        usage["cost"] = cost
     return {
         "id": "chatcmpl-fake",
         "object": "chat.completion",
@@ -225,7 +239,7 @@ def completion(model: str, content: str) -> dict[str, Any]:
                 "finish_reason": "stop",
             }
         ],
-        "usage": {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150},
+        "usage": usage,
     }
 
 

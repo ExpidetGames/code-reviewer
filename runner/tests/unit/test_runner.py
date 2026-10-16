@@ -257,23 +257,76 @@ def test_a_command_the_tool_marked_as_failed_makes_the_job_fail(
     assert result.error_code is ErrorCode.COMMAND_FAILED
 
 
-def test_token_usage_and_cost_from_the_run_details_are_reported(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    async def double() -> bool:
-        from decimal import Decimal
+HANDLER_MODULE = "pr_agent.algo.ai_handlers.litellm_ai_handler"
 
-        from pr_agent.algo.run_details import get_run_details
 
+HANGS = "the request never gets an answer"
+
+
+def provider(
+    monkeypatch: pytest.MonkeyPatch, *replies: float | str | BaseException | None
+) -> Callable[[], Awaitable[None]]:
+    """The model provider a Diff run reaches, answering with these charges (`usage.cost`) in turn.
+
+    LiteLLM's function in PR-Agent's handler is replaced before the run starts, so the runner
+    meters the very function it meters in production. `None` is an answer that states no charge,
+    an exception a request that fails, `HANGS` one that is never answered. The result is what a
+    double awaits to make the run ask the model once per reply and have PR-Agent note what it
+    measured (the counters of its own run details, which carry a cost of their own that must not
+    be reported).
+    """
+    from decimal import Decimal
+
+    from pr_agent.algo.run_details import get_run_details
+
+    pending = list(replies)
+
+    async def acompletion(*args: Any, **kwargs: Any) -> Any:
+        reply = pending.pop(0)
+        if isinstance(reply, BaseException):
+            raise reply
+        if isinstance(reply, str):
+            await asyncio.sleep(30)
+        usage: dict[str, Any] = {
+            "prompt_tokens": 600,
+            "completion_tokens": 150,
+            "total_tokens": 750,
+        }
+        if reply is not None:
+            usage["cost"] = reply
+        return {"choices": [], "usage": usage}
+
+    monkeypatch.setattr(import_module(HANDLER_MODULE), "acompletion", acompletion)
+
+    async def ask() -> None:
+        module = import_module(HANDLER_MODULE)
         details = get_run_details()
         assert details is not None
-        details.model_used = "openrouter/deepseek/deepseek-chat"
-        details.prompt_tokens = 1200
-        details.completion_tokens = 300
-        details.total_tokens = 1500
-        details.num_ai_calls = 2
-        details.known_cost_call_count = 2
-        details.total_cost_usd = Decimal("0.0042")
+        for _ in replies:
+            try:
+                await module.acompletion(model="openrouter/deepseek/deepseek-chat", messages=[])
+            except Exception:
+                continue
+            details.model_used = "openrouter/deepseek/deepseek-chat"
+            details.prompt_tokens += 600
+            details.completion_tokens += 150
+            details.total_tokens += 750
+            details.num_ai_calls += 1
+            # What PR-Agent itself would report from a price table: never what the run reports.
+            details.known_cost_call_count += 1
+            details.total_cost_usd += Decimal("0.5")
+
+    return ask
+
+
+# #274-T01
+def test_token_usage_from_pr_agent_and_the_exact_cost_of_the_provider_are_reported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ask = provider(monkeypatch, 0.0021, 0.0021)
+
+    async def double() -> bool:
+        await ask()
         return True
 
     use_double(monkeypatch, double)
@@ -292,6 +345,24 @@ def test_token_usage_and_cost_from_the_run_details_are_reported(
     }
 
 
+# #274-T01: three calls of 0.1, 0.2 and 0.3 add up to 0.6 as decimals; as floats they would not.
+def test_the_reported_cost_is_the_exact_decimal_sum_of_the_charges(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ask = provider(monkeypatch, 0.1, 0.2, 0.3)
+
+    async def double() -> bool:
+        await ask()
+        return True
+
+    use_double(monkeypatch, double)
+
+    result, _ = run()
+
+    assert result.usage is not None
+    assert result.usage.cost_usd == 0.6
+
+
 def test_cost_is_null_when_no_call_could_be_priced(monkeypatch: pytest.MonkeyPatch) -> None:
     async def double() -> bool:
         # A run that succeeded: a review was posted (a failed run reports usage only after a call).
@@ -306,29 +377,163 @@ def test_cost_is_null_when_no_call_could_be_priced(monkeypatch: pytest.MonkeyPat
     assert result.usage.cost_usd is None
 
 
-def record_calls(*, priced: int, unpriced: int = 0) -> None:
-    """What PR-Agent's run details hold after `priced` + `unpriced` successful model calls."""
-    from decimal import Decimal
+# #274-T02: the tokens stay, the cost is all or nothing (#273 follow-up: two calls, one priced).
+@pytest.mark.parametrize("replies", [(0.0021, None), (None, 0.0021), (None, None)])
+def test_a_call_without_a_stated_charge_makes_the_cost_null_and_keeps_the_tokens(
+    monkeypatch: pytest.MonkeyPatch, replies: tuple[float | None, ...]
+) -> None:
+    ask = provider(monkeypatch, *replies)
 
-    from pr_agent.algo.run_details import get_run_details
+    async def double() -> bool:
+        await ask()
+        return True
 
-    details = get_run_details()
-    assert details is not None
-    details.model_used = "openrouter/deepseek/deepseek-chat"
-    details.prompt_tokens = 1200
-    details.completion_tokens = 300
-    details.total_tokens = 1500
-    details.num_ai_calls = priced + unpriced
-    details.known_cost_call_count = priced
-    details.total_cost_usd = Decimal("0.0042") if priced else Decimal("0")
+    use_double(monkeypatch, double)
+
+    result, _ = run()
+
+    assert result.usage is not None
+    assert result.usage.ai_calls == 2
+    assert result.usage.total_tokens == 1500
+    assert result.usage.cost_usd is None
+
+
+# #274-T08: PR-Agent's own sum comes from a price table when the answer states nothing.
+def test_the_cost_pr_agent_worked_out_itself_is_not_reported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ask = provider(monkeypatch, None)
+
+    async def double() -> bool:
+        await ask()
+        return True
+
+    use_double(monkeypatch, double)
+
+    result, _ = run()
+
+    assert result.usage is not None
+    assert result.usage.cost_usd is None
+
+
+# #274-T08
+def test_pr_agent_is_not_asked_to_price_calls_at_all(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[Any] = []
+
+    async def double() -> bool:
+        seen.append(current_settings().get("config.output_run_cost"))
+        return True
+
+    use_double(monkeypatch, double)
+
+    run()
+
+    assert seen == [False]
+
+
+# #274-T03: PR-Agent counted a call that did not go through the metered function.
+def test_a_call_the_meter_did_not_see_makes_the_cost_null(monkeypatch: pytest.MonkeyPatch) -> None:
+    ask = provider(monkeypatch, 0.0021)
+
+    async def double() -> bool:
+        await ask()
+        from pr_agent.algo.run_details import get_run_details
+
+        details = get_run_details()
+        assert details is not None
+        details.num_ai_calls += 1
+        return True
+
+    use_double(monkeypatch, double)
+
+    result, _ = run()
+
+    assert result.usage is not None
+    assert result.usage.ai_calls == 2
+    assert result.usage.cost_usd is None
+
+
+# #274-T03: the first model fails with an error answer, the fallback model answers.
+def test_a_fallback_after_a_failed_first_attempt_reports_the_cost_of_the_answer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ask = provider(monkeypatch, RateLimitError("limited", "openrouter", "m"), 0.0042)
+
+    async def double() -> bool:
+        await ask()
+        return True
+
+    use_double(monkeypatch, double)
+
+    result, _ = run()
+
+    assert result.usage is not None
+    assert result.usage.ai_calls == 1
+    assert result.usage.cost_usd == 0.0042
+
+
+# #274-T03
+def test_a_first_attempt_that_got_no_answer_makes_the_cost_of_the_run_null(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ask = provider(monkeypatch, Timeout("no answer", "m", "openrouter"), 0.0042)
+
+    async def double() -> bool:
+        await ask()
+        return True
+
+    use_double(monkeypatch, double)
+
+    result, _ = run()
+
+    assert result.usage is not None
+    assert result.usage.ai_calls == 1
+    assert result.usage.cost_usd is None
+
+
+# #274-T02: when a model call is met by its install problem, nothing is sent.
+def test_a_function_the_cost_meter_cannot_wrap_stops_the_job_before_handle_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def double() -> bool:
+        return True
+
+    calls = use_double(monkeypatch, double)
+    monkeypatch.delattr(import_module(HANDLER_MODULE), "acompletion")
+
+    result, _ = run()
+
+    assert result.ok is False
+    assert result.error_code is ErrorCode.RUNNER_ERROR
+    assert calls == []
+
+
+# #274-T01
+def test_the_cost_meter_is_undone_after_the_job(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = import_module(HANDLER_MODULE)
+    before = module.acompletion
+    seen: list[bool] = []
+
+    async def double() -> bool:
+        seen.append(module.acompletion is not before)
+        return True
+
+    use_double(monkeypatch, double)
+
+    run()
+
+    assert seen == [True]
+    assert module.acompletion is before
 
 
 # #273-T04
 def test_a_diff_run_that_raises_after_its_model_call_reports_the_usage_pr_agent_measured(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    ask = provider(monkeypatch, 0.0021, 0.0021)
+
     async def double() -> bool:
-        record_calls(priced=2)
+        await ask()
         raise RuntimeError("the comment could not be posted")
 
     use_double(monkeypatch, double)
@@ -352,8 +557,10 @@ def test_a_diff_run_that_raises_after_its_model_call_reports_the_usage_pr_agent_
 def test_a_diff_run_that_times_out_after_its_model_call_reports_the_usage_pr_agent_measured(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    ask = provider(monkeypatch, 0.0021, 0.0021)
+
     async def double() -> bool:
-        record_calls(priced=2)
+        await ask()
         await asyncio.sleep(30)
         return True
 
@@ -368,12 +575,36 @@ def test_a_diff_run_that_times_out_after_its_model_call_reports_the_usage_pr_age
     assert result.usage.cost_usd == 0.0042
 
 
+# #274-T02, #273-T04: a request in flight when the run ends may have been billed, so the priced call
+# before it is not the exact cost of the run (the partial sum of #363's case).
+def test_a_diff_run_that_times_out_with_a_request_in_flight_reports_the_tokens_and_no_cost(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ask = provider(monkeypatch, 0.0021, HANGS)
+
+    async def double() -> bool:
+        await ask()
+        return True
+
+    use_double(monkeypatch, double)
+    capture = LogCapture(Redactor([TOKEN, API_KEY]))
+
+    result = runner.run_job(make_job(), capture, time.monotonic(), timeout_seconds=0.2)
+
+    assert result.error_code is ErrorCode.TIMEOUT
+    assert result.usage is not None
+    assert result.usage.total_tokens == 750
+    assert result.usage.cost_usd is None
+
+
 # #273-T04
 def test_a_diff_run_that_fails_after_its_model_call_with_a_failure_comment_reports_the_usage(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    ask = provider(monkeypatch, 0.0021, 0.0021)
+
     async def double() -> bool:
-        record_calls(priced=2)
+        await ask()
         return False
 
     use_double(monkeypatch, double)
@@ -388,8 +619,10 @@ def test_a_diff_run_that_fails_after_its_model_call_with_a_failure_comment_repor
 def test_a_diff_run_with_an_unpriced_call_that_fails_reports_the_tokens_and_no_cost(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    ask = provider(monkeypatch, None, None)
+
     async def double() -> bool:
-        record_calls(priced=0, unpriced=2)
+        await ask()
         raise RuntimeError("failed")
 
     use_double(monkeypatch, double)

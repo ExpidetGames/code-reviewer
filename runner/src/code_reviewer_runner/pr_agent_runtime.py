@@ -12,8 +12,10 @@ has built the environment from the job.
 
 import asyncio
 import copy
+import math
 from typing import TYPE_CHECKING, Any
 
+from code_reviewer_runner.diff_cost import DiffCostMeter
 from code_reviewer_runner.job import Job
 from code_reviewer_runner.pr_agent_config import (
     build_option_settings,
@@ -29,7 +31,23 @@ if TYPE_CHECKING:
     from pr_agent.algo.run_details import RunDetails
 
 
-def _usage(details: "RunDetails | None") -> Usage | None:
+def _cost_usd(details: "RunDetails", meter: DiffCostMeter | None) -> float | None:
+    """The exact cost of the run (#274): the charges the provider stated, or None.
+
+    PR-Agent's own sum (`total_cost_usd`) is never read: it can come from a price table, and it
+    counts only the calls PR-Agent accepted. A call PR-Agent counted but the meter never saw
+    (it did not pass through the metered function) is a call nobody priced.
+    """
+    if meter is None:
+        return None
+    cost = meter.cost_usd()
+    if cost is None or meter.answered_calls < details.num_ai_calls:
+        return None
+    number = float(cost)
+    return number if math.isfinite(number) else None
+
+
+def _usage(details: "RunDetails | None", meter: DiffCostMeter | None = None) -> Usage | None:
     if details is None:
         return None
     return Usage(
@@ -39,7 +57,7 @@ def _usage(details: "RunDetails | None") -> Usage | None:
         total_tokens=details.total_tokens,
         ai_calls=details.num_ai_calls,
         fallback_used=details.fallback_used,
-        cost_usd=float(details.total_cost_usd) if details.known_cost_call_count else None,
+        cost_usd=_cost_usd(details, meter),
     )
 
 
@@ -70,11 +88,15 @@ async def execute(
     guard: RepoSettingsGuard,
     timeout_seconds: float | None = None,
     probe: UsageProbe | None = None,
+    meter: DiffCostMeter | None = None,
 ) -> tuple[bool, bool, Usage | None]:
     """Run the command inside a request scope; returns (handled, command_failed, usage).
 
     `probe` is given what PR-Agent measured however the command ends, also when it raises or runs
     out of time, so a run that fails after its model call can still report what it used (#273).
+
+    `meter` is what the runner's wrapper of PR-Agent's model function measured: the cost of the run
+    is the sum of the charges the provider stated, never PR-Agent's own figure (#274).
 
     `guard` is told which settings the runner has configured, right before the command starts, so
     it can put them back after a repository settings file was merged.
@@ -112,5 +134,5 @@ async def execute(
         finally:
             # The tools start a collector of their own; the one in place now is the last one.
             if probe is not None:
-                probe.record(_usage(get_run_details()))
-        return handled is True, command_failed(), _usage(get_run_details())
+                probe.record(_usage(get_run_details(), meter))
+        return handled is True, command_failed(), _usage(get_run_details(), meter)

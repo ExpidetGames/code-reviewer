@@ -318,6 +318,34 @@ def test_the_failed_result_the_runner_prints_after_a_model_call_is_valid(
     assert _accepts("RunnerResult", result.to_json())
 
 
+# #274-T07: what the runner prints for a Diff run with its exact cost is what the file says.
+@pytest.mark.parametrize("cost", [0.6, 0.00037035, 0.0, None])
+def test_the_result_of_a_diff_run_with_its_exact_cost_is_valid(cost: float | None) -> None:
+    from decimal import Decimal
+
+    from code_reviewer_runner.result import JobResult, Usage
+
+    result = JobResult(
+        ok=True,
+        duration_ms=41200,
+        comment_url="https://github.com/octo/repo/pull/7#issuecomment-1",
+        error_code=None,
+        log_tail="",
+        usage=Usage(
+            model="openrouter/vendor/model-name",
+            prompt_tokens=3000,
+            completion_tokens=450,
+            total_tokens=3450,
+            ai_calls=3,
+            fallback_used=False,
+            cost_usd=None if cost is None else float(Decimal(repr(cost))),
+        ),
+    )
+
+    assert _accepts("RunnerResult", result.to_json())
+    assert result.to_json()["usage"]["costUsd"] == cost
+
+
 # #296-T10
 def test_every_checkout_reason_of_the_runner_is_in_the_contract_once() -> None:
     from code_reviewer_runner.dynamic_review.limits import CheckoutReason

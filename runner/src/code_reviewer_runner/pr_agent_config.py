@@ -115,7 +115,13 @@ def build_typed_settings(job: Job) -> dict[str, bool | int | str | list[str]]:
         "config.publish_output_progress": False,
         # Settings come from the job, the repository file and the PR-Agent defaults only.
         "config.use_global_settings_file": False,
-        "config.output_run_cost": True,
+        # PR-Agent prices a call from a price table when the answer states no charge. The cost of
+        # a run is measured from the provider's own `usage.cost` instead (`diff_cost.py`, #274).
+        "config.output_run_cost": False,
+        # LiteLLM and its client send a request again inside one call when this is set (or left to
+        # their defaults): the meter would see only the last answer. Retries are PR-Agent's own
+        # attempts, each of which passes the meter (#274).
+        "config.num_retries": 0,
         # The job's list, or none: the default fallback model belongs to another vendor.
         "config.fallback_models": [
             with_openrouter_prefix(model) for model in job.llm.fallback_models
