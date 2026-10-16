@@ -72,6 +72,26 @@ describe("golden snapshot workflow", () => {
     expect(condition).toContain("github.event_name == 'workflow_dispatch'");
   });
 
+  // #333-ref-guard
+  it("runs only from main and development, like the canary, so a manual run on another branch cannot use the environment's secrets", () => {
+    const condition = String(job.if);
+
+    expect(condition).toContain("github.ref == 'refs/heads/main'");
+    expect(condition).toContain("github.ref == 'refs/heads/development'");
+    // The ref condition is ANDed with the others, not an alternative to them.
+    expect(condition).toMatch(
+      /repository == '[^']+' && \(github\.ref == 'refs\/heads\/main' \|\| github\.ref == 'refs\/heads\/development'\) && \(/,
+    );
+    expect(condition.match(/github\.ref ==/g)).toHaveLength(2);
+    // The same two branches as the canary workflow.
+    const canary = readFileSync(
+      `${repoRoot}.github/workflows/dispatcher-canary.yml`,
+      "utf8",
+    );
+    expect(canary).toContain("github.ref == 'refs/heads/main'");
+    expect(canary).toContain("github.ref == 'refs/heads/development'");
+  });
+
   // #330-extra-workflow
   it("has one job, read-only for the repository, in a protected environment, with no OIDC or write permission", () => {
     expect(jobs).toHaveLength(1);
