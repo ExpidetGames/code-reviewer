@@ -269,7 +269,8 @@ the end, an answer the validator refuses, a publish error, a lost lease, an erro
 failed before its first model call reports `null`. The cost follows the rule of a successful run: exact, or
 `null` when any call was unpriced (the token counters are reported either way), never zero for an unknown
 cost. A Dynamic run reads its ledger (`usage_probe.py`, also from the watchdog that ends a run that does not
-stop); a Diff run reports what PR-Agent measured. Some ends report no usage although the model may have been
+stop); a Diff run reports the tokens PR-Agent measured and the cost its meter measured ("Cost of a Diff run",
+below). Some ends report no usage although the model may have been
 used; the app then counts the run with an unknown cost (`settled`, reason `no_result`, `src/usage/README.md`)
 and never as void:
 - the Diff watchdog ends a command that blocks the event loop (`timeout`, `errorReason`
@@ -283,8 +284,7 @@ and never as void:
 
 Not counted at all (void): a failure before the process started (the job could not be parsed or the process
 could not be launched) and a Dynamic run that failed before its first model call. A Diff command that fails while its first call is still in
-flight reports zero calls, because PR-Agent counts only calls that came back: it is void (a known gap, see the
-follow-up of #273).
+flight reports zero calls, because PR-Agent counts only calls that came back: it is void (a known gap, #363).
 The exit code is 0 for `ok` and 1 otherwise. The environment variable `RUNNER_JOB_TIMEOUT_SECONDS`
 (read from the process environment, not handed to PR-Agent) makes the runner stop the command and
 report `timeout`: first by cancelling it, and if it does not react (a call that blocks the process)
@@ -725,6 +725,53 @@ provider and expresses no preference, so it is no provider-specific routing (epi
   test double that added the address also sets `llm.requireParameters: true` (the wrapper
   `fakes/pr-agent/run_job_against_fake_llm.py` does; the field is refused without `baseUrl`, so no
   job for the real provider can switch the requirement off).
+
+## Cost of a Diff run (#274)
+
+`usage.costUsd` of a Diff run is exact in the same sense as that of a Dynamic run (#267): the sum, as
+decimals, of the charge the model provider **states** for every call (`usage.cost` of OpenRouter's
+answer), and `null` as soon as one call has no stated charge. It is never derived from a price table, a
+per-token rate or the token counts, and an unknown cost is never zero. It applies to every Diff job, whoever
+pays for the key; the tokens and the number of calls stay PR-Agent's own measurement.
+
+**The decision (a spike inside #274).** PR-Agent calls the model itself through LiteLLM, and its own sum
+(`RunDetails.total_cost_usd`) is not usable: when an answer states no charge it prices the call from
+LiteLLM's table, which can be missing, stale or different from what was charged, and it counts only the calls
+PR-Agent accepted. Three ways to measure it were weighed:
+
+1. *Route PR-Agent through the loopback accounting proxy of the Dynamic Review.* Not chosen. The proxy exists
+   because the Dynamic engine is untrusted and must not hold the credential; PR-Agent already holds the job's
+   key in its own process, so a proxy would add a server, a per-job capability and a second place that holds
+   the credential, and it would read the very same `usage.cost` field.
+2. *Read the charge from LiteLLM's response object.* **Chosen.** LiteLLM passes OpenRouter's `usage.cost`
+   through, for a plain answer and for the last chunk of a stream (verified with LiteLLM 1.103.0), so the
+   figure is the provider's, the same one the proxy reads. Reading it needs no new network surface: the request
+   path, the destination, the key and `provider.require_parameters` (#270) are untouched.
+3. *Look up the generation record of each request id after the run.* Not chosen: one more call to OpenRouter
+   per request after the run, which may not be available yet, for a figure that is already in the answer.
+
+**How it works** (`diff_cost.py`). PR-Agent calls LiteLLM through one function, `acompletion` in its handler
+module; the runner wraps it for the length of the job (like the other patches, refused when the function is
+missing or not a coroutine function, undone afterwards) and sees every answer, also one PR-Agent throws away
+afterwards (an empty reply is billed). `config.output_run_cost` is `false`, so PR-Agent prices nothing and
+`total_cost_usd` is never read. The rules, pinned by `tests/unit/test_diff_cost_meter.py`,
+`tests/unit/test_runner.py` and `tests/engine/test_engine_cost.py`:
+
+| Case | Cost |
+|---|---|
+| Every call states a charge of zero or more | the exact decimal sum (a stated zero is a known zero) |
+| A call whose answer states none (no `usage`, no `cost`, a value that is not a finite number of zero or more), also a stream whose last chunk has none | `null`, tokens still reported |
+| `response_cost` (LiteLLM's own figure, usage or hidden parameters) | never read |
+| An answer PR-Agent rejects afterwards (empty content) and a fallback model answers | both answers are counted |
+| A request the provider answered with an error status (429, 5xx, ...) and a fallback model answers | the failed attempt states no usage and no charge and costs nothing; only the answers count |
+| A request that ended without an answer (timeout, lost connection, cancelled, a stream not read to its end) | `null`: it may have been billed and nobody can say |
+| A call PR-Agent counted that did not go through the wrapped function | `null` |
+| Several calls at once (a chunked review) | all counted |
+| No answer at all | `null` (not zero) |
+
+A Diff run that fails reports the same cost rule after its calls (#273): a call still in flight when the run
+ends makes the cost `null`, which also closes the case of a partly priced sum reported as exact. A Diff run
+that fails while its first call is still in flight reports no usage at all (#363).
 
 ## Identity patch
 

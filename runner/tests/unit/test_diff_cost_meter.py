@@ -96,6 +96,31 @@ def test_the_answer_itself_is_handed_on_unchanged(installed: Install) -> None:
     assert asyncio.run(call(boundary)) is reply
 
 
+# #274-T06: the meter only watches; the request goes where and how PR-Agent built it.
+def test_the_request_is_handed_on_exactly_as_pr_agent_built_it(installed: Install) -> None:
+    seen: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+
+    async def completion(*args: Any, **kwargs: Any) -> Any:
+        seen.append((args, dict(kwargs)))
+        return answer(0.01)
+
+    boundary, _ = installed(completion)
+    request: dict[str, Any] = {
+        "model": "openrouter/vendor/model",
+        "messages": [{"role": "user", "content": "review this"}],
+        "api_base": "https://openrouter.ai/api/v1",
+        "api_key": "dummy-key",
+        "extra_body": {"provider": {"require_parameters": True}},
+    }
+
+    async def send() -> None:
+        await boundary.acompletion(**request)
+
+    asyncio.run(send())
+
+    assert seen == [((), request)]
+
+
 # #274-T02
 def test_one_call_without_a_stated_cost_makes_the_cost_unknown(installed: Install) -> None:
     boundary, meter = installed(replying(answer(0.01), answer(), answer(0.02)))
