@@ -90,7 +90,9 @@ or kind that is left out or `null` is not configured); it replaces the whole con
 (`400 request_invalid`, `field` names the place). A model id the review settings would refuse is `422 model_id_invalid`
 (`field` such as `high.diff`, never the value). A **Dynamic** model is checked against the provider's public metadata and
 refused with `422` `DYNAMIC_MODEL_TOOLS_UNSUPPORTED`, `DYNAMIC_MODEL_UNKNOWN` or `DYNAMIC_MODEL_UNVERIFIED` (unlike a
-user's choice in the review settings, a model that cannot be verified is refused here); nothing is stored on a refusal. The
+user's choice in the review settings, a model that cannot be verified is refused here). A **Diff** model is refused
+`422 MODEL_UNKNOWN` when the provider does not list it, and accepted when it needs no tool support or the provider
+cannot be reached. The models of one `PUT` are read at the same time. Nothing is stored on a refusal. The
 log line is `[operator-api] put model-tiers tiers=<tiers with a model|-> result=<ok|code>`: never an id.
 
 **The ids are operator data**: they are served to the holder of this token and used for the job the runner gets; no

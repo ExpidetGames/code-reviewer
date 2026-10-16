@@ -31,7 +31,11 @@ Nothing else reads the setting except the claim of a job (below).
   without tool calling or tool choice is refused `DYNAMIC_MODEL_TOOLS_UNSUPPORTED`, an unknown one
   `DYNAMIC_MODEL_UNKNOWN`, and one whose metadata cannot be read `DYNAMIC_MODEL_UNVERIFIED`. Unlike the save of a user's
   Dynamic model (a warning), an unverifiable model is **refused** here, because this is operator configuration. Nothing
-  is stored on a refusal. A Diff model is not checked.
+  is stored on a refusal.
+- **A Diff model is checked for existence.** The provider's metadata is read for it too: a model the provider does
+  not list is refused `MODEL_UNKNOWN` (a typo would fail every job of the tier with `model_unknown`), while one that
+  needs no tool support, or whose metadata cannot be read because the provider is unreachable, is accepted. All
+  distinct models of a `PUT` are read at the same time, so a `PUT` waits for one timeout, not one per model.
 - The model of a tier is checked on write, but a provider can change later: the run-time check of #279
   (`dynamic_model_features_unsupported`) still applies to every Dynamic job.
 - A stored value that this version would not accept (damaged, edited by hand) reads as not configured, so the job
@@ -59,8 +63,12 @@ and the first fetch of a Worker):
 3. The capabilities of a Dynamic job are read for the tier's model (#279), as for any Dynamic model.
 4. **The token budget is clamped.** The workspace's `maxTokens` stays the workspace's, and is cut to the context window
    of the tier's model when the provider's metadata states one (`clampMaxTokens`; the same read serves the capabilities
-   of a Dynamic job). Without a stated window the budget is sent as it is. The instance's `LLM_MAX_TOKENS` belongs to the
-   instance's own model and is not used for a managed job. The settings pages and routes of a managed workspace do not
+   of a Dynamic job). When a fresh read fails, the window last read for that model (kept a day) is used; when none was
+   ever read, the budget is cut to `UNKNOWN_WINDOW_MAX_TOKENS` (100,000, the built-in budget): **a managed job's budget
+   is never sent unclamped**, whatever the workspace saved (up to two million). The instance's `LLM_MAX_TOKENS` belongs
+   to the instance's own model and is not used for a managed job.
+   The claim asks as a claim: an answer that is not `supported` is remembered 45 seconds, so a provider outage costs
+   one wait of the 5 second timeout per model per 45 seconds instead of one per claim (`src/llm/README.md`). The settings pages and routes of a managed workspace do not
    check `maxTokens` against the stored model's window either (`operatorsModels` of the settings service): the user
    does not know the model.
 
@@ -72,13 +80,22 @@ The id of a tier's model goes to the operator API and to the runner (it needs it
   page, not in the usage record (`model_tier` is a name; the operator API serves only a value that looks like a tier
   name) and not in the plan or usage views.
 - **Not in the result of a run.** The runner reports the model it used (`usage.model`) and its log or error may repeat it.
-  The model a job was handed is remembered with its keys, encrypted (`runner-api/claimed-keys.ts`, `modelsOf`), so it is
-  masked in the stored result whichever app instance serves the completion and whatever the operator changed since:
-  `usage.model` becomes `null` and the id in any text becomes `[redacted]`. Tokens, calls and cost stay, so the Runs
+  For a job that ran on a tier (its usage record names one) `usage.model` is **always** set to `null`, whatever the
+  runner calls the model, and the ids in any text become `[redacted]`: the model the job was handed (remembered with its
+  keys, encrypted, `runner-api/claimed-keys.ts`, `modelsOf`) **and every model the operator has configured now**, so the
+  result is masked on any app instance, after any change of the tiers, and even if the remembered row cannot be read.
+  A run on the workspace's own key reports its model as before. Tokens, calls and cost stay, so the Runs
   page and the limits are unaffected.
-- Not in a log line: the claim names the tier and the kind (`tier=high kind=diff`), the operator API names the tiers that
-  have a model and the result code.
-- Not in error copy: `managed_tier_unavailable` says that the chosen level is not available, not which model it would be.
+- **Not in a published pull request comment.** The model is the runner's business, and PR-Agent can print it into the
+  review comment. The runner sets `config.output_run_details` and `config.output_relevant_configurations` to `false`
+  for every job and pins them against a repository's `.pr_agent.toml` (`runner/README.md`). The Dynamic summary and the
+  refusal notices never print a model.
+- Not in a log line a workspace member can see, and in the server log only where the operator needs it: the claim names
+  the tier and the kind (`tier=high kind=diff`), the metadata read of a managed claim logs `model=tier=high` instead of
+  the id, the operator API names the tiers that have a model and the result code. The operator's own `PUT` of a model is
+  read from the provider and logged by the checker with the id (server log, the operator's).
+- Not in error copy: `managed_tier_unavailable` says that the chosen level is not available and that a workspace Owner or
+  Admin should contact whoever runs the instance (until #283 there is no control to point at), not which model it would be.
 
 `integration-tests/http/model-tiers-privacy.integration.test.ts` configures tiers with ids no other test uses, runs
 managed Diff and Dynamic jobs, and searches every answer a member can read for any of them.

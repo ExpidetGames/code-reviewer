@@ -672,6 +672,15 @@ How a job becomes PR-Agent configuration (`pr_agent_config.py`, `pr_agent_runtim
   `aws`, `vertexai` and every provider section PR-Agent reads a key or endpoint from). A unit test
   feeds a malicious file with all of these through PR-Agent's own merge function; another compares
   the provider sections with PR-Agent's own list, so a new provider after an upgrade is noticed.
+- **The review comment never names the model** (#280). PR-Agent can append the model to the comment it publishes:
+  `config.output_run_details` adds the "Agent run details" section with the model, and
+  `config.output_relevant_configurations` adds a `config` section with `model`, `model_weak` and `model_reasoning`.
+  Both are off by default, but a repository's `.pr_agent.toml` could switch them on. The model of a managed tier is
+  operator data that a workspace must not read, so the runner sets both to `false` for every job (all workspaces,
+  not only managed ones) and both are in `PROTECTED_SETTINGS`. Pinned by `tests/unit/test_repo_settings_guard.py`,
+  `tests/unit/test_pr_agent_config.py` and, with the real PR-Agent against the fake LLM and a repository file that
+  tries it, `tests/engine/test_engine_hostile_repo.py`. A review that listed the model in these sections before
+  loses them; nothing else in the comment changes.
   A job cannot set the options the runner pins itself (`PR_REVIEWER__FINAL_UPDATE_MESSAGE`,
   `PR_REVIEWER__ENABLE_REVIEW_LABELS_SECURITY` and `_EFFORT`): `invalid_job`.
 - **Where `.pr_agent.toml` comes from.** PR-Agent 0.47.0 reads it from the **default branch** of the
@@ -756,10 +765,9 @@ module; the runner wraps it for the length of the job (like the other patches, r
 missing or not a coroutine function, undone afterwards) and sees every answer, also one PR-Agent throws away
 afterwards (an empty reply is billed). `config.output_run_cost` is `false`, so PR-Agent prices nothing and
 `total_cost_usd` is never read. That flag only controls PR-Agent's own pricing and the "Estimated API cost"
-line of the opt-in run-details section (`config.output_run_details`, off by default and not set by the
-runner): a repository that had switched run details on no longer sees an estimated cost line there, while the
-tokens, the number of calls and the time stay, and the default review comment is unchanged. The setting is
-pinned, so a repository settings file cannot switch it back on. The rules, pinned by `tests/unit/test_diff_cost_meter.py`,
+line of the opt-in run-details section (`config.output_run_details`, which the runner now sets to `false`
+and pins, see below), and the default review comment is unchanged. The setting is pinned, so a repository
+settings file cannot switch it back on. The rules, pinned by `tests/unit/test_diff_cost_meter.py`,
 `tests/unit/test_runner.py` and `tests/engine/test_engine_cost.py`:
 
 | Case | Cost |

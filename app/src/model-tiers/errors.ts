@@ -6,6 +6,8 @@
 // configuration, not a user's choice.
 export const MODEL_TIER_ERROR_CODES = [
   "model_id_invalid",
+  /** A Diff model the provider's metadata does not list (a typo would fail every job of the tier at run time). */
+  "MODEL_UNKNOWN",
   "DYNAMIC_MODEL_TOOLS_UNSUPPORTED",
   "DYNAMIC_MODEL_UNKNOWN",
   "DYNAMIC_MODEL_UNVERIFIED",

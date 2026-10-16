@@ -156,8 +156,25 @@ describe("the managed model tiers of the instance", () => {
     expect(await service.read()).toEqual({ low: { dynamic: "vendor/good" } });
   });
 
-  it("ask the provider about the Dynamic models only, once each", async () => {
-    const { service, asked } = await start();
+  it("ask the provider about every distinct model once, in parallel", async () => {
+    const { db } = await createTestDatabase();
+    const settings = createInstanceSettingsRepository(db);
+    const asked: string[] = [];
+    let running = 0;
+    let most = 0;
+    const service = createModelTiersService({
+      settings,
+      modelCapabilities: {
+        check: async (modelId) => {
+          asked.push(modelId);
+          running += 1;
+          most = Math.max(most, running);
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          running -= 1;
+          return SUPPORTED;
+        },
+      },
+    });
 
     await service.save(
       {
@@ -169,7 +186,74 @@ describe("the managed model tiers of the instance", () => {
       null,
     );
 
-    expect(asked).toEqual(["vendor/shared"]);
+    expect([...asked].sort()).toEqual([
+      "vendor/high-diff",
+      "vendor/low-diff",
+      "vendor/shared",
+    ]);
+    expect(most).toBe(3);
+  });
+
+  // #280-P3
+  it("refuse a Diff model the provider does not know, and store nothing", async () => {
+    const { service, settings } = await start((modelId) =>
+      modelId === "vendor/mdel" ? { outcome: "unknown_model" } : SUPPORTED,
+    );
+
+    expect(
+      await service.save({ tiers: { low: { diff: "vendor/mdel" } } }, null),
+    ).toEqual({ ok: false, code: "MODEL_UNKNOWN", field: "low.diff" });
+    expect(await settings.get("managed_model_tiers")).toBeUndefined();
+  });
+
+  // #280-P3
+  it("accept a Diff model that needs no tool support or cannot be verified right now", async () => {
+    const noTools = await start(() => ({
+      outcome: "unsupported",
+      capabilities: { ...SUPPORTED.capabilities!, tools: false },
+    }));
+    const unreachable = await start(() => ({ outcome: "unverifiable" }));
+
+    expect(
+      (
+        await noTools.service.save(
+          { tiers: { low: { diff: "vendor/a" } } },
+          null,
+        )
+      ).ok,
+    ).toBe(true);
+    expect(
+      (
+        await unreachable.service.save(
+          { tiers: { high: { diff: "vendor/b" } } },
+          null,
+        )
+      ).ok,
+    ).toBe(true);
+    expect(await unreachable.service.read()).toEqual({
+      high: { diff: "vendor/b" },
+    });
+  });
+
+  // #280-P3
+  it("report the first refusal in the order of the tiers, whatever order the reads finish in", async () => {
+    const { service } = await start(() => ({ outcome: "unknown_model" }));
+
+    expect(
+      await service.save(
+        {
+          tiers: {
+            high: { diff: "vendor/high-diff" },
+            low: { dynamic: "vendor/low-dyn" },
+          },
+        },
+        null,
+      ),
+    ).toEqual({
+      ok: false,
+      code: "DYNAMIC_MODEL_UNKNOWN",
+      field: "low.dynamic",
+    });
   });
 
   it("refuse a body that is not valid before asking anybody", async () => {

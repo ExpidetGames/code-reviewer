@@ -203,9 +203,14 @@ states no window yields no descriptor. Nothing is invented. The claim of a Dynam
 
 The request goes to the provider's fixed address (`endpoint.ts`; the test stack points it at the fake LLM with
 the existing switch), sends no credential, follows no redirect, has a timeout and the size limit, and the fetch is
-a parameter. **Outbound call:** the app asks `openrouter.ai` (HTTPS 443, no key) on every save of a Dynamic model and on every claim of a Dynamic job whose model is not in the cache (#279); a host that cannot reach it waits at most 5 seconds and gets the `DYNAMIC_MODEL_UNVERIFIED` warning (`docs/deployment-coolify.md`). The log line holds the model id and the outcome class only (`MODEL_CAPABILITY_CHECK`).
+a parameter. **Outbound call:** the app asks `openrouter.ai` (HTTPS 443, no key) on every save of a Dynamic model and on every claim of a Dynamic job whose model is not in the cache (#279); a host that cannot reach it waits at most 5 seconds and gets the `DYNAMIC_MODEL_UNVERIFIED` warning (`docs/deployment-coolify.md`). The log line holds the model id and the outcome class only (`MODEL_CAPABILITY_CHECK`); the claim of a managed
+job (#280) passes `logAs` and the line names its tier (`model=tier=high`) instead of the id.
 `createModelCapabilityChecker` remembers a `supported` answer in memory for five minutes (at most 200 models), so
-saving the same model repeatedly asks once; no other outcome is remembered. The settings save is its first user
+saving the same model repeatedly asks once; for a settings save no other outcome is remembered. **The claim of a
+managed job asks with `forClaim`** (#280): it also remembers an answer that is not `supported` for 45 seconds, so a
+provider outage costs one wait of the 5 second timeout per model, not one per claim and Worker fetch, and the checker
+keeps the last context window it read for a model for a day (`lastKnownContextLength`), which the claim clamps the
+token budget to while the provider cannot be asked (`src/model-tiers/README.md`). The settings save is its first user
 (`src/review-settings/README.md`, "Saving a Dynamic model checks it"); the run-time enforcement is the runner
 proxy's (`dynamic_model_features_unsupported`).
 

@@ -6,6 +6,9 @@
 // model fails the job closed; a workspace on its own key is untouched. The model ids are operator data: they reach the
 // runner and nothing a workspace member can read.
 import { describe, expect, it } from "vitest";
+import { startLlmFake } from "../../../fakes/llm/server.ts";
+import { createModelCapabilityChecker } from "../../src/llm/model-capabilities.ts";
+import { cleanUpAfterTest } from "../../src/test-support/test-database.ts";
 import { createUsageRecordsRepository } from "../../src/db/repositories/usage-records-repository.ts";
 import { createWorkspaceEntitlementsRepository } from "../../src/db/repositories/workspace-entitlements-repository.ts";
 import type {
@@ -788,6 +791,36 @@ describe("the model of a tier stays on the server", () => {
       usage: { model: string };
     };
     expect(stored.usage.model).toBe("openrouter/tier/high-diff");
+  });
+
+  // #280-T08
+  it("is not in the log line of the metadata read of a managed claim: the line names the tier", async () => {
+    const llmFake = await startLlmFake();
+    cleanUpAfterTest(() => llmFake.close());
+    llmFake.setModel("tier/high-diff", [
+      {
+        supported_parameters: ["tools", "tool_choice"],
+        context_length: 70_000,
+      },
+    ]);
+    const lines: string[] = [];
+    const h = await start({
+      keyMode: "managed",
+      project: { maxTokens: 150_000, modelTier: "high" },
+      harness: {
+        modelCapabilities: createModelCapabilityChecker({
+          baseUrl: () => llmFake.baseUrl,
+          log: (line) => lines.push(line),
+        }),
+      },
+    });
+
+    const { job } = await h.claimed();
+
+    expect(job.input.llm.maxTokens).toBe(70_000);
+    expect(lines).toEqual([
+      "[llm] MODEL_CAPABILITY_CHECK: model=tier=high outcome=supported",
+    ]);
   });
 
   // #280-T08

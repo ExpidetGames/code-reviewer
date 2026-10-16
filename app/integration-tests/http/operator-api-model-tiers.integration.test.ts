@@ -168,15 +168,25 @@ describe("GET and PUT /model-tiers", () => {
     });
   });
 
-  it("does not ask the provider about a Diff model", async () => {
-    const h = await start(() => ({ outcome: "unverifiable" }));
-
-    const put = await h.call("PUT", PATH, {
-      body: { tiers: { low: { diff: "vendor/diff-only" } } },
+  // #280-P3
+  it("asks the provider about a Diff model too: refuses one it does not know, accepts one it cannot reach", async () => {
+    const unknown = await start(() => ({ outcome: "unknown_model" }));
+    const refused = await unknown.call("PUT", PATH, {
+      body: { tiers: { low: { diff: "vendor/mdel" } } },
+    });
+    expect(refused.status).toBe(422);
+    expect(await json(refused)).toEqual({
+      version: 1,
+      error: "MODEL_UNKNOWN",
+      field: "low.diff",
     });
 
-    expect(put.status).toBe(200);
-    expect(h.asked).toEqual([]);
+    const unreachable = await start(() => ({ outcome: "unverifiable" }));
+    const accepted = await unreachable.call("PUT", PATH, {
+      body: { tiers: { low: { diff: "vendor/diff-only" } } },
+    });
+    expect(accepted.status).toBe(200);
+    expect(unreachable.asked).toEqual(["vendor/diff-only"]);
   });
 
   it("refuses a model id with a space, naming the place and not the value", async () => {
