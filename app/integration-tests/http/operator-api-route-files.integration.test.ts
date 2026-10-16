@@ -161,6 +161,7 @@ describe("the operator API route files while the API is on", () => {
         diffRunsPerPeriod: 10,
         dynamicRunsPerPeriod: null,
         managedCostLimitMicroUsd: null,
+        ownKeyCostLimitMicroUsd: null,
       },
       suspended: false,
       suspensionCode: null,

@@ -35,6 +35,7 @@ function limited(
       diffRunsPerPeriod: null,
       dynamicRunsPerPeriod: null,
       managedCostLimitMicroUsd: null,
+      ownKeyCostLimitMicroUsd: null,
       ...overrides.limits,
     },
     periodStart: PERIOD_START,
@@ -45,7 +46,14 @@ function limited(
 
 /** A usage source that records what was asked of it. */
 function usageOf(
-  state: { diff?: number; dynamic?: number; cost?: number } = {},
+  state: {
+    diff?: number;
+    dynamic?: number;
+    /** The settled cost of the managed records. */
+    cost?: number;
+    /** The settled cost of the own-key records. */
+    ownCost?: number;
+  } = {},
 ): AdmissionUsage & { asked: string[] } {
   const asked: string[] = [];
   return {
@@ -54,9 +62,9 @@ function usageOf(
       asked.push(`runs:${kind}:${since}`);
       return (kind === "diff" ? state.diff : state.dynamic) ?? 0;
     },
-    async managedCostSince(since: string) {
-      asked.push(`cost:${since}`);
-      return state.cost ?? 0;
+    async costSince(keyMode: "own" | "managed", since: string) {
+      asked.push(`cost:${keyMode}:${since}`);
+      return (keyMode === "managed" ? state.cost : state.ownCost) ?? 0;
     },
   };
 }
@@ -178,6 +186,95 @@ describe("deciding whether a claimed job may run", () => {
     ).toMatchObject({ allow: false, detail: "managed_cost" });
   });
 
+  // #361-T02
+  it("refuses an own-key job at or above the own-key cost limit, and runs it below", async () => {
+    const entitlements = limited({
+      keyMode: "own",
+      limits: { ownKeyCostLimitMicroUsd: 5_000_000 },
+    });
+
+    expect(
+      await decideAdmission(
+        entitlements,
+        "diff",
+        usageOf({ ownCost: 4_999_999 }),
+      ),
+    ).toEqual({ allow: true });
+    expect(
+      await decideAdmission(
+        entitlements,
+        "diff",
+        usageOf({ ownCost: 5_000_000 }),
+      ),
+    ).toEqual({
+      allow: false,
+      errorCode: "quota_exhausted",
+      detail: "own_key_cost",
+      periodStart: PERIOD_START,
+    });
+  });
+
+  // #361-T03
+  it("reads the cost of the key mode the job runs on and the limit of that mode only", async () => {
+    const limits = {
+      managedCostLimitMicroUsd: 5_000_000,
+      ownKeyCostLimitMicroUsd: 1,
+    };
+    const managed = usageOf({ cost: 0, ownCost: 9_000_000 });
+    const own = usageOf({ cost: 9_000_000, ownCost: 0 });
+
+    // The managed cost limit does not block an own-key job, and the own-key limit does not block a managed one.
+    expect(
+      await decideAdmission(
+        limited({ keyMode: "managed", limits }),
+        "diff",
+        managed,
+      ),
+    ).toEqual({ allow: true });
+    expect(managed.asked).toEqual([`cost:managed:${PERIOD_START}`]);
+    expect(
+      await decideAdmission(
+        limited({ keyMode: "own", limits: { ownKeyCostLimitMicroUsd: 1 } }),
+        "diff",
+        own,
+      ),
+    ).toEqual({ allow: true });
+    expect(own.asked).toEqual([`cost:own:${PERIOD_START}`]);
+  });
+
+  // #361-T06
+  it("refuses every own-key job when the own-key cost limit is 0, and reads no usage for null", async () => {
+    expect(
+      await decideAdmission(
+        limited({ keyMode: "own", limits: { ownKeyCostLimitMicroUsd: 0 } }),
+        "diff",
+        usageOf(),
+      ),
+    ).toMatchObject({ allow: false, detail: "own_key_cost" });
+    const unlimited = usageOf({ ownCost: 9_000_000 });
+    expect(
+      await decideAdmission(
+        limited({ keyMode: "own", limits: { ownKeyCostLimitMicroUsd: null } }),
+        "diff",
+        unlimited,
+      ),
+    ).toEqual({ allow: true });
+    expect(unlimited.asked).toEqual([]);
+  });
+
+  // #361-T05
+  it("decides the run count before the own-key cost", async () => {
+    expect(
+      await decideAdmission(
+        limited({
+          limits: { diffRunsPerPeriod: 1, ownKeyCostLimitMicroUsd: 1 },
+        }),
+        "diff",
+        usageOf({ diff: 1, ownCost: 1 }),
+      ),
+    ).toMatchObject({ allow: false, detail: "diff_runs" });
+  });
+
   // #277-T05
   it("refuses a suspended workspace first, whatever its usage and limits", async () => {
     const usage = usageOf({ diff: 100, cost: 100 });
@@ -254,6 +351,7 @@ describe("deciding whether a claimed job may run", () => {
       "diff_runs",
       "dynamic_runs",
       "managed_cost",
+      "own_key_cost",
     ]);
   });
 });
@@ -273,6 +371,24 @@ describe("which entitlements need the usage of the workspace", () => {
     expect(
       readsUsage(
         limited({ suspended: true, limits: { diffRunsPerPeriod: 1 } }),
+        "diff",
+      ),
+    ).toBe(false);
+  });
+
+  // #361-T06
+  it("needs it for the own-key cost limit of an own key, and not for one next to the managed key", () => {
+    const cost = { ownKeyCostLimitMicroUsd: 1 };
+
+    expect(readsUsage(limited({ keyMode: "own", limits: cost }), "diff")).toBe(
+      true,
+    );
+    expect(
+      readsUsage(limited({ keyMode: "managed", limits: cost }), "diff"),
+    ).toBe(false);
+    expect(
+      readsUsage(
+        limited({ keyMode: "own", limits: { ownKeyCostLimitMicroUsd: null } }),
         "diff",
       ),
     ).toBe(false);

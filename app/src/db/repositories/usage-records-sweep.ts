@@ -7,7 +7,10 @@
 import "server-only";
 import { sql, type Kysely } from "kysely";
 import type { Database } from "../schema.ts";
-import { NO_RESULT_JOB_ERROR_CODES } from "../../usage/usage-records.ts";
+import {
+  NO_RESULT_JOB_ERROR_CODES,
+  type UnknownCostSettlement,
+} from "../../usage/usage-records.ts";
 
 /** The statuses a job never leaves (src/jobs/job-status.ts). */
 const ENDED_JOB_STATUSES = ["succeeded", "failed", "cancelled", "superseded"];
@@ -25,12 +28,15 @@ const ENDED_JOB_STATUSES = ["succeeded", "failed", "cancelled", "superseded"];
  *
  * Two statements over the reserved records only (a partial index), each driven by those few records and probing
  * their job by primary key, so the work does not grow with the history of ended jobs.
+ *
+ * Returns the records it settled without a cost (the first statement), so the caller can raise the alert for
+ * unknown costs once its transaction committed (#361).
  */
 export async function closeRecordsOfEndedJobs(
   executor: Kysely<Database>,
   settledAt: string,
-): Promise<void> {
-  await executor
+): Promise<UnknownCostSettlement[]> {
+  const settled = await executor
     .updateTable("usage_records")
     .set({
       state: "settled",
@@ -49,6 +55,7 @@ export async function closeRecordsOfEndedJobs(
           .where("jobs.error_code", "in", [...NO_RESULT_JOB_ERROR_CODES]),
       ),
     )
+    .returning(["workspace_id", "job_id"])
     .execute();
   await executor
     .updateTable("usage_records")
@@ -64,4 +71,8 @@ export async function closeRecordsOfEndedJobs(
       ),
     )
     .execute();
+  return settled.map((row) => ({
+    workspaceId: row.workspace_id,
+    jobId: row.job_id,
+  }));
 }

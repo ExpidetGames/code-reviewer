@@ -77,7 +77,10 @@ describePostgres("the usage records on Postgres", () => {
     });
     await records.setKeyMode(job.id, "managed");
     expect(
-      await records.sumSettledManagedCostMicroUsd("2000-01-01T00:00:00.000Z"),
+      await records.sumSettledCostMicroUsd(
+        "2000-01-01T00:00:00.000Z",
+        "managed",
+      ),
     ).toBe(0);
   });
 
@@ -125,7 +128,10 @@ describePostgres("the usage records on Postgres", () => {
     });
 
     expect(
-      await records.sumSettledManagedCostMicroUsd("2000-01-01T00:00:00.000Z"),
+      await records.sumSettledCostMicroUsd(
+        "2000-01-01T00:00:00.000Z",
+        "managed",
+      ),
     ).toBe(2_000_000_000);
     expect(await records.get(job.id)).toMatchObject({
       costMicroUsd: 2_000_000_000,

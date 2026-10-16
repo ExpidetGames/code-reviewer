@@ -71,6 +71,8 @@ export function createTestQueue(
     reviewKind?: ReviewKindResolver;
     /** #277: called for every job the claim refused, after the claim committed. */
     onRefused?: RunnerJobsRepositoryOptions["onRefused"];
+    /** #361: called for every record that settled without a known cost, after the transaction committed. */
+    onUnknownCostSettled?: RunnerJobsRepositoryOptions["onUnknownCostSettled"];
   } = {},
 ): TestQueue {
   return {

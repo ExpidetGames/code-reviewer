@@ -18,6 +18,7 @@ export function fieldsOf(data: EntitlementsData): EntitlementsData {
       diffRunsPerPeriod: data.limits.diffRunsPerPeriod,
       dynamicRunsPerPeriod: data.limits.dynamicRunsPerPeriod,
       managedCostLimitMicroUsd: data.limits.managedCostLimitMicroUsd,
+      ownKeyCostLimitMicroUsd: data.limits.ownKeyCostLimitMicroUsd,
     },
     periodStart: data.periodStart,
     suspended: data.suspended,

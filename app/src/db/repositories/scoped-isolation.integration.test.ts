@@ -60,6 +60,7 @@ function entitlementsOf(tag: string, overrides: { planLabel?: string } = {}) {
       diffRunsPerPeriod: 10,
       dynamicRunsPerPeriod: null,
       managedCostLimitMicroUsd: 1000,
+      ownKeyCostLimitMicroUsd: null,
     },
     periodStart: "2026-10-01T00:00:00.000Z",
     suspended: false,
@@ -842,9 +843,9 @@ const CASES: Case[] = [
     expectAnswer: (answer) => expect(answer).toEqual({ diff: 1, dynamic: 0 }),
   },
   {
-    name: "usage.sumSettledManagedCostMicroUsd",
+    name: "usage.sumSettledCostMicroUsd",
     run: (a) =>
-      a.usage.sumSettledManagedCostMicroUsd("2000-01-01T00:00:00.000Z"),
+      a.usage.sumSettledCostMicroUsd("2000-01-01T00:00:00.000Z", "managed"),
     expectAnswer: (answer) => expect(answer).toBe(0),
   },
   {
@@ -1141,7 +1142,9 @@ describe("two workspaces", () => {
       diff: 3,
       dynamic: 0,
     });
-    expect(await reposB.usage.sumSettledManagedCostMicroUsd(since)).toBe(500);
+    expect(await reposB.usage.sumSettledCostMicroUsd(since, "managed")).toBe(
+      500,
+    );
     expect(
       (await reposB.usage.pageSettled({ limit: 10 })).records,
     ).toHaveLength(1);

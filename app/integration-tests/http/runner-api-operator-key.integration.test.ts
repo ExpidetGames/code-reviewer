@@ -30,6 +30,7 @@ function entitlements(
       diffRunsPerPeriod: null,
       dynamicRunsPerPeriod: null,
       managedCostLimitMicroUsd: null,
+      ownKeyCostLimitMicroUsd: null,
     },
     periodStart: "2026-10-01T00:00:00.000Z",
     suspended: false,
@@ -232,6 +233,7 @@ describe("the key mode of the usage record", () => {
           diffRunsPerPeriod: null,
           dynamicRunsPerPeriod: null,
           managedCostLimitMicroUsd: 1000,
+          ownKeyCostLimitMicroUsd: null,
         },
       },
     });
@@ -465,6 +467,7 @@ describe("the Worker's fetch after the workspace's standing changed (#276)", () 
           diffRunsPerPeriod: 1,
           dynamicRunsPerPeriod: null,
           managedCostLimitMicroUsd: 1,
+          ownKeyCostLimitMicroUsd: null,
         },
       },
     });

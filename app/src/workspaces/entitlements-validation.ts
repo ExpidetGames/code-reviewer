@@ -19,9 +19,9 @@ export const ENTITLEMENT_ERROR_CODES = [
   "limits_invalid",
   "limit_invalid",
   /**
-   * A cost limit next to the own key (#277): the cost limit only counts runs on the operator's key, so it
-   * would be stored and never read. Refused on a write; a stored entry of that shape still reads (the limit
-   * is ignored).
+   * A managed cost limit next to the own key (#277): `managedCostLimitMicroUsd` only counts runs on the
+   * operator's key, so it would be stored and never read. Refused on a write; a stored entry of that shape
+   * still reads (the limit is ignored). The own key has a limit of its own, `ownKeyCostLimitMicroUsd` (#361).
    */
   "cost_limit_requires_managed_key",
   "period_start_invalid",
@@ -44,7 +44,9 @@ export const PERIOD_START_FUTURE_TOLERANCE_MS = 5 * 60 * 1000;
  * list. Writes still require every key (a caller states every limit explicitly). The three first limits are
  * not on the list: every entry has them.
  */
-export const LIMITS_ADDED_LATER: readonly LimitName[] = [];
+export const LIMITS_ADDED_LATER: readonly LimitName[] = [
+  "ownKeyCostLimitMicroUsd", // #361
+];
 
 const SUSPENSION_CODE_PATTERN = /^[a-z][a-z0-9_-]*$/;
 // What a label may not contain: control characters (C0, C1, DEL), formatting characters (zero width joiners,

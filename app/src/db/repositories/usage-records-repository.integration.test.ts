@@ -315,11 +315,65 @@ describe("counting", () => {
     await t.records.settle(own!.id, SETTLED(9_000_000));
 
     expect(
-      await t.records.sumSettledManagedCostMicroUsd("2026-10-14T12:00:00.000Z"),
+      await t.records.sumSettledCostMicroUsd(
+        "2026-10-14T12:00:00.000Z",
+        "managed",
+      ),
     ).toBe(1_500_250);
     expect(
-      await t.records.sumSettledManagedCostMicroUsd("2026-10-14T12:00:00.001Z"),
+      await t.records.sumSettledCostMicroUsd(
+        "2026-10-14T12:00:00.001Z",
+        "managed",
+      ),
     ).toBe(0);
+  });
+
+  // #361-T05
+  it("sums the settled cost of the runs of each key mode on its own, and treats an unknown cost as nothing", async () => {
+    const t = await setup();
+    const [ownA, ownB, ownUnknown, managed, ownReserved] = [
+      await t.newJob(),
+      await t.newJob(),
+      await t.newJob(),
+      await t.newJob(),
+      await t.newJob(),
+    ];
+    if (ownReserved === undefined) throw new Error("setup");
+    await t.records.reserve(ownA!.id, "own");
+    await t.records.reserve(ownB!.id, "own");
+    await t.records.reserve(ownUnknown!.id, "own");
+    await t.records.reserve(managed!.id, "managed");
+    await t.records.reserve(ownReserved.id, "own");
+    t.setNow("2026-10-14T12:30:00.000Z");
+    await t.records.settle(ownA!.id, SETTLED(1_000_000));
+    await t.records.settle(ownB!.id, SETTLED(40));
+    await t.records.settle(ownUnknown!.id, SETTLED(null));
+    await t.records.settle(managed!.id, SETTLED(9_000_000));
+
+    const since = "2026-10-14T12:00:00.000Z";
+    expect(await t.records.sumSettledCostMicroUsd(since, "own")).toBe(
+      1_000_040,
+    );
+    expect(await t.records.sumSettledCostMicroUsd(since, "managed")).toBe(
+      9_000_000,
+    );
+    expect(
+      await t.records.sumSettledCostMicroUsd("2026-10-14T12:00:00.001Z", "own"),
+    ).toBe(0);
+  });
+
+  // #361-T04: a record counts under the key it was settled with, whatever the entitlements say now.
+  it("counts a record under the key mode corrected on it while it was reserved", async () => {
+    const t = await setup();
+    const job = await t.newJob();
+    await t.records.reserve(job.id, "own");
+    await t.records.setKeyMode(job.id, "managed");
+    t.setNow("2026-10-14T12:30:00.000Z");
+    await t.records.settle(job.id, SETTLED(700));
+
+    const since = "2026-10-14T12:00:00.000Z";
+    expect(await t.records.sumSettledCostMicroUsd(since, "managed")).toBe(700);
+    expect(await t.records.sumSettledCostMicroUsd(since, "own")).toBe(0);
   });
 
   // The period of a run is the one it started in, for the count and for the cost alike.
@@ -335,13 +389,17 @@ describe("counting", () => {
       diff: 0,
       dynamic: 0,
     });
-    expect(await t.records.sumSettledManagedCostMicroUsd(nextPeriod)).toBe(0);
+    expect(await t.records.sumSettledCostMicroUsd(nextPeriod, "managed")).toBe(
+      0,
+    );
     const thisPeriod = "2026-10-14T00:00:00.000Z";
     expect(await t.records.countByKind(thisPeriod)).toEqual({
       diff: 1,
       dynamic: 0,
     });
-    expect(await t.records.sumSettledManagedCostMicroUsd(thisPeriod)).toBe(700);
+    expect(await t.records.sumSettledCostMicroUsd(thisPeriod, "managed")).toBe(
+      700,
+    );
   });
 });
 

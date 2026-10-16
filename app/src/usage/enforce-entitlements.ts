@@ -8,6 +8,8 @@ import type { JobErrorCode } from "../jobs/job-types.ts";
 import type { ProjectReviewKind } from "../review-settings/settings.ts";
 import {
   ENTITLEMENTS_INVALID_CODE,
+  type EntitlementLimits,
+  type KeyMode,
   type ResolvedEntitlements,
 } from "../workspaces/entitlements.ts";
 
@@ -24,6 +26,7 @@ export const QUOTA_DETAILS = [
   "diff_runs",
   "dynamic_runs",
   "managed_cost",
+  "own_key_cost",
 ] as const;
 export type QuotaDetail = (typeof QUOTA_DETAILS)[number];
 
@@ -44,9 +47,24 @@ export type Admission =
 export type AdmissionUsage = {
   /** Records of the kind that count (`reserved` and `settled`) reserved at or after `since`. */
   runsSince(kind: ProjectReviewKind, since: string): Promise<number>;
-  /** The known cost of the settled managed records reserved at or after `since`, micro-USD. */
-  managedCostSince(since: string): Promise<number>;
+  /**
+   * The known cost of the settled records of `keyMode` reserved at or after `since`, micro-USD. A record counts
+   * under its own key mode, not the one the entitlements say now (#361).
+   */
+  costSince(keyMode: KeyMode, since: string): Promise<number>;
 };
+
+/**
+ * The cost limit that watches a key mode, and the detail of its refusal. A run is bounded by the limit of the key
+ * it runs on, so the two never block each other (#361).
+ */
+const COST_LIMIT_OF_KEY_MODE = {
+  managed: { limit: "managedCostLimitMicroUsd", detail: "managed_cost" },
+  own: { limit: "ownKeyCostLimitMicroUsd", detail: "own_key_cost" },
+} as const satisfies Record<
+  KeyMode,
+  { limit: keyof EntitlementLimits; detail: QuotaDetail }
+>;
 
 const RUN_LIMIT_OF_KIND = {
   diff: { limit: "diffRunsPerPeriod", detail: "diff_runs" },
@@ -68,15 +86,13 @@ export function readsUsage(
   if (entitlements.kind !== "limited" || entitlements.suspended) return false;
   const { limits } = entitlements;
   if (limits[RUN_LIMIT_OF_KIND[reviewKind].limit] !== null) return true;
-  return (
-    entitlements.keyMode === "managed" &&
-    limits.managedCostLimitMicroUsd !== null
-  );
+  return limits[COST_LIMIT_OF_KEY_MODE[entitlements.keyMode].limit] !== null;
 }
 
 /**
- * A cost limit stored next to the own key: nothing reads it. An operator can no longer write that shape
- * (`cost_limit_requires_managed_key`), but an entry stored earlier keeps working and the limit is ignored.
+ * A managed cost limit stored next to the own key: nothing reads it (the own key has `ownKeyCostLimitMicroUsd`).
+ * An operator can no longer write that shape (`cost_limit_requires_managed_key`), but an entry stored earlier
+ * keeps working and the limit is ignored.
  */
 export function ignoresCostLimit(entitlements: ResolvedEntitlements): boolean {
   return (
@@ -118,8 +134,10 @@ function exhausted(detail: QuotaDetail, periodStart: string): Admission {
  * 1. entitlements that cannot be read: refused (`entitlements_invalid`), never read as unlimited;
  * 2. a suspended workspace: `workspace_suspended`;
  * 3. the run limit of the job's kind: the runs of that kind in the period at or above it (0 allows none) refuse;
- * 4. the cost limit, for a workspace that runs on the operator's key (`keyMode` `managed`): the settled managed
- *    cost of the period at or above it refuses. A run with an unknown cost adds nothing to the sum (it still
+ * 4. the cost limit of the key the job runs on: `managedCostLimitMicroUsd` for the operator's key,
+ *    `ownKeyCostLimitMicroUsd` for the workspace's own (#361). The key is the one the entitlements pick (the
+ *    claim route resolves the access the same way), and the sum counts the settled records of that key mode in
+ *    the period; at or above the limit refuses. A run with an unknown cost adds nothing to the sum (it still
  *    counts in 3). The limit is a soft cap: runs in flight are not in the sum.
  *
  * A limit of `null` is not read at all.
@@ -148,13 +166,14 @@ export async function decideAdmission(
   )
     return exhausted(runs.detail, periodStart);
 
-  const costLimit = limits.managedCostLimitMicroUsd;
+  const { keyMode } = entitlements;
+  const cost = COST_LIMIT_OF_KEY_MODE[keyMode];
+  const costLimit = limits[cost.limit];
   if (
     costLimit !== null &&
-    entitlements.keyMode === "managed" &&
-    (await usage.managedCostSince(periodStart)) >= costLimit
+    (await usage.costSince(keyMode, periodStart)) >= costLimit
   )
-    return exhausted("managed_cost", periodStart);
+    return exhausted(cost.detail, periodStart);
 
   return { allow: true };
 }

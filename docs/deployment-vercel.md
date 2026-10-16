@@ -354,6 +354,12 @@ Vercel) reads `DISPATCHER_SHUTDOWN_GRACE_SECONDS` and `PORT`.
 - **Upgrade every App instance first.** An instance of a release before #276 does not know the key mode: it would run a
   managed workspace's jobs on the workspace's own key and model and outside the cost limit. Roll the new App out
   completely before the first workspace is set to `managed`.
+- **The cost limit of runs on a workspace's own key** (`ownKeyCostLimitMicroUsd`, #361) is part of the same body, and a
+  write must state it. That makes the rollout a cutover: a `PUT` without the key is refused (`422 limits_invalid`) by an
+  instance that knows it, and a `PUT` with it is refused by one that does not. **Upgrade every App instance first**
+  (an old instance reads the limit and ignores it), **then** switch the writer (your billing service) to send
+  `ownKeyCostLimitMicroUsd` in every body, `null` where there is no limit. A `422` during the rollout window means the
+  writer reached an instance of the other release: treat it as retry-later, not as a refused plan.
 - **The model is yours, per tier,** while a job runs on the operator's key (#280): the workspace chooses a tier (`low`,
   `medium` or `high`, `medium` unless it chose another) and the model of that tier for the kind of review (Diff or
   Dynamic) is the one you set with `PUT /api/operator/v1/model-tiers` (`{ "tiers": { "low": { "diff": "…",
@@ -361,7 +367,8 @@ Vercel) reads `DISPATCHER_SHUTDOWN_GRACE_SECONDS` and `PORT`.
   refused). `LLM_MODEL` and `LLM_MAX_TOKENS` are not used, and the workspace's `model` and Dynamic model review settings
   have no effect (they apply again if the workspace goes back to `own`). A tier without a model for a kind fails the job
   with `managed_tier_unavailable`; it never moves to another tier. The workspace's token budget is cut to the context
-  window of the tier's model when OpenRouter states one. The model ids are visible to you and the runner only: not to a
+  window of the tier's model when OpenRouter states one (the last window read when it cannot be asked, else 100,000
+  tokens: it is never sent unclamped); a Diff model that OpenRouter does not list is refused too. The model ids are visible to you and the runner only: not to a
   workspace, not in the admin portal (it shows whether a tier is configured), not in a result, a record or a log. Save
   the tiers before you set a workspace to `managed`, and roll the new App out completely first.
   The workspace's Settings, LLM access page shows a note instead of a key form.
@@ -792,7 +799,9 @@ A self-hosted installation and a hosted one never share a database or a GitHub A
 - **The cost limit of a workspace is a soft cap** (`managedCostLimitMicroUsd`): cost is known only when a run settles,
   so runs in flight are not in the sum and a workspace can end above its limit by what the concurrent runs cost. The run
   limits are exact. A run with an unknown cost counts for nothing (`unknownCostCount` in the operator API's summary).
-  A limit for runs on a workspace's own key is #361. Limits and the key mode are set through the operator API; the
+  The runs on a workspace's own key have a limit of their own
+  (`ownKeyCostLimitMicroUsd`, same rules); an unknown cost is not bounded by either, and the app logs one line for each
+  run that settles without a cost (job and workspace id only) so they can be watched. Limits and the key mode are set through the operator API; the
   operator's own key (section 3.5) is saved by the instance admin only, and a workspace set to `managed` before every App
   instance runs the release that knows the key mode is served by the wrong key and outside the limit.
 - **A managed workspace has no model of its own**: it chooses a tier (`low`, `medium`, `high`) and the models behind the
