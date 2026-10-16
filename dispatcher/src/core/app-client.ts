@@ -55,7 +55,12 @@ export type JobStateResult =
   { kind: "known"; status: JobStatus } | { kind: "unreadable" };
 
 export type HeartbeatResult = "ok" | "lease_lost" | "failed";
-export type ReleaseResult = "released" | "not_holder" | "failed";
+/**
+ * `ended`: 409, the job is over for this claim (it has its result, or was cancelled): expected after a Worker that
+ * delivered its result and then exited with an error, and a no-op. `not_holder`: 401 or 404, the credential is not
+ * the job's claim (a newer claim, a made-up one) or the job is unknown.
+ */
+export type ReleaseResult = "released" | "ended" | "not_holder" | "failed";
 /** Why the core gives a job back: the Worker did not start (`launch_failed`), or it ended with an error after it did. */
 export type ReleaseReason = KnownReleaseReason;
 
@@ -261,7 +266,8 @@ export function createAppClient(options: AppClientOptions) {
       );
       if (response === null) return "failed";
       if (response.status === 200) return "released";
-      if ([401, 404, 409].includes(response.status)) return "not_holder";
+      if (response.status === 409) return "ended";
+      if ([401, 404].includes(response.status)) return "not_holder";
       return "failed";
     },
   };

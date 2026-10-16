@@ -72,7 +72,8 @@ runs that kind; nothing is claimed), `429` or `503` with `Retry-After`.
    When that callback is called with a non-zero exit code, the core releases the job with `worker_exited` instead of
    waiting about two minutes for the lease to lapse (#375). Exit 0 releases nothing. The call is made by the App against the
    job credential: a job that already has its result, or that a newer claim holds, is answered `409`/`401` and nothing
-   changes (`release_not_holder` is logged and not retried). The release is tried three times; if the App cannot be
+   changes (a `409`, the expected answer after a Worker that delivered its result and exited 1, is logged at info as
+   `release_job_ended`; a `401`/`404` as the warning `release_not_holder`; neither is retried). The release is tried three times; if the App cannot be
    reached it logs `release_failed` with the reason and the lease ends the job as before.
 6. Logs go through a masker: the dispatcher token, the signing secrets and anything shaped like a job credential or an
    `Authorization` value are replaced. Only stable codes are logged for an error, never its text.
@@ -177,7 +178,7 @@ Every failure before the hand-over stops the VM by name and ends in a `LaunchErr
 flag. The core releases the job with `launch_failed` and the App counts the attempt (three attempts, then `failed`), no
 matter whether the flag is set; it is for logs and for the operator. A Worker that ends with an error _after_ the hand-over
 is released the same way with the reason `worker_exited` (the Runs page shows that code; log lines `worker_exited` with the
-`exitCode`, then `released` or `release_not_holder` or `release_failed`, each with the `reason`).
+`exitCode`, then `released`, `release_job_ended`, `release_not_holder` or `release_failed`, each with the `reason`).
 
 | Code                                                                      | Retryable                    | Cause                                                                                                                                                                                                                                                                                |
 | ------------------------------------------------------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |

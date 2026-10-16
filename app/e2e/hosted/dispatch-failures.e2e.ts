@@ -13,7 +13,9 @@
 //  - a Worker dies in the middle of a review: the Dispatcher sees its container end with an error, gives the job back at
 //    once (no wait for the lease), the sweep announces it again and a second Worker finishes it (#332-T06, #375-T09);
 //  - a Worker that took over and keeps ending with an error: every end gives the job back within seconds and costs an
-//    attempt, and after three the run fails with `worker_exited` (#375-T02).
+//    attempt, and after three the run fails with `worker_exited` (#375-T02);
+//  - a Worker dies and the Dispatcher cannot see its container end (`worker_wait_failed`): nothing is released, the lease
+//    runs out, the sweep requeues the job and a second Worker finishes it (#375-T10).
 import { expect, test, type Page } from "@playwright/test";
 import { startLlmFake, type FakeLlm } from "../../../fakes/llm/server.ts";
 import { e2eEnv } from "../helpers/e2e-env";
@@ -421,5 +423,59 @@ test.describe("what the hosted deployment does when the Dispatcher, the platform
     expect(comments).toHaveLength(1);
     expect(comments[0]?.revision).toBe(1);
     expect(fakeLlm().requests()).toHaveLength(2);
+  });
+
+  // #375-T10
+  test("a Worker dies and the Dispatcher cannot see its container end: nothing is released, the lease runs out, the sweep puts the job back and a second Worker finishes it", async ({
+    page,
+    request,
+  }) => {
+    await startDispatcher();
+    // The Dispatcher's wait for each container fails like a broken log stream: what became of the Worker is unknown.
+    theDispatcher().breakWaits(true);
+    fakeLlm().hold(true);
+    const { number } = await openPullRequest(page, request, 25, "9");
+    const job = await onlyJobOf(REPOSITORY.fullName, number);
+    await eventually("the first Worker to ask the model", async () => {
+      return fakeLlm().requests().length === 1;
+    });
+    const first = required(
+      theDispatcher().workersOf(job.id)[0],
+      "The first Worker",
+    );
+
+    theDispatcher().killContainer(first);
+    fakeLlm().hold(false);
+    theDispatcher().breakWaits(false);
+
+    // Three failed waits and the Dispatcher gives up knowing: it logs a stable code and leaves the job to its lease.
+    await eventually("the Dispatcher to give up the wait", async () => {
+      return theDispatcher().output().includes("worker_wait_failed");
+    });
+    expect(theDispatcher().output()).not.toContain('"reason":"worker_exited"');
+    expect(await onlyJobOf(REPOSITORY.fullName, number)).toMatchObject({
+      status: "running",
+      attempts: 0,
+    });
+
+    // Two minutes without a heartbeat: the cron sweep ends the lease and puts the job back.
+    await letTimePass(job.id, 150);
+    const swept = await runSweep(request);
+    expect(swept.expired).toMatchObject({ requeued: 1 });
+
+    const run = runsOf(page, REPOSITORY.fullName, number);
+    await page.reload();
+    await expect(run.locator("[data-status]")).toContainText(
+      "Succeeded",
+      RUN_TIMEOUT,
+    );
+    expect(await onlyJobOf(REPOSITORY.fullName, number)).toMatchObject({
+      status: "succeeded",
+      attempts: 1,
+    });
+    expect(theDispatcher().workersOf(job.id)).toHaveLength(2);
+    expect(
+      await getPullRequestComments(request, REPOSITORY.fullName, number),
+    ).toHaveLength(1);
   });
 });

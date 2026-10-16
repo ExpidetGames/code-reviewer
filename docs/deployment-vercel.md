@@ -788,11 +788,13 @@ A self-hosted installation and a hosted one never share a database or a GitHub A
   instance runs the release that knows the key mode is served by the wrong key and outside the limit.
 - **A managed workspace has no model of its own**: the instance's `LLM_MODEL` and `LLM_MAX_TOKENS` apply to all of them
   until managed quality tiers exist (#280, #283).
-- **A Worker that exits non-zero before it has reported a result holds its slot until its lease lapses** (two minutes after
-  its last heartbeat); only the next sweep then puts the job back, and the pull request shows "Running" meanwhile. A Worker
-  that cannot start at all (a bad image or configuration) costs those two minutes on every attempt. The attempt is lost
-  either way (three, then `failed`); the delay is the cost. The Dispatcher already logs `worker_exited` but does not
-  release the job: follow-up #375.
+- **A Worker whose end the Dispatcher does not see still holds its slot until its lease lapses** (two minutes after its
+  last heartbeat); only the next sweep then puts the job back, and the pull request shows "Running" meanwhile. A Worker
+  that exits non-zero before it has reported a result is released at once when the Dispatcher sees the container end
+  (`worker_exited`, section 5.3). The lease is still the safeguard where it does not: the wait for the container failed
+  (`worker_wait_failed`: what became of the Worker is unknown, so nothing is released), the Dispatcher's function ended
+  before the container did, and a Launcher that does not supervise the Worker. The attempt is lost either way (three, then
+  `failed`); the delay is the cost.
 - **A debounced review starts up to about 60 seconds later than self-hosted**, and only while the per-minute cron
   runs (section 5.7); the first automatic review of a pull request (opened) is sent at once.
 - **The capability probe.** One answer per Dispatcher *instance*, held in memory for `DISPATCHER_PROBE_TTL_SECONDS`
@@ -813,7 +815,6 @@ A self-hosted installation and a hosted one never share a database or a GitHub A
 
 ## 10. Follow-ups
 
-- #375: the Dispatcher releases a job at once when its Worker exits non-zero before a result: then the limit in section 9 goes.
 - #334 and #335 the self-hosted split and flipping its default: then section 8 gets its step table.
 - A deploy workflow that runs `pnpm migrate` and the canary in order is not part of the repository; today steps 1, 2,
   5 and 6 are manual.

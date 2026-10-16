@@ -661,7 +661,12 @@ describe("the Dispatcher core after the hand-over", () => {
     expect(releases()).toStrictEqual([
       { method: "POST", route: "release", jobId, status: 409 },
     ]);
-    expect(logger.text()).toContain("release_not_holder");
+    // Expected, so not a warning: the Worker delivered a failed result and exited 1. A refusal of the claim is a warning.
+    expect(
+      logger.lines.some((line) => line.startsWith("info release_job_ended")),
+    ).toBe(true);
+    expect(logger.text()).not.toContain("release_not_holder");
+    expect(logger.text()).not.toContain("warn ");
     expect(logger.text()).not.toContain('"released"');
     expect(app.results(jobId)).toHaveLength(1);
     // The job is finished, not queued: nothing is claimed for it.
@@ -698,7 +703,9 @@ describe("the Dispatcher core after the hand-over", () => {
     expect(releases().slice(before)).toStrictEqual([
       { method: "POST", route: "release", jobId, status: 401 },
     ]);
-    expect(logger.text()).toContain("release_not_holder");
+    expect(
+      logger.lines.some((line) => line.startsWith("warn release_not_holder")),
+    ).toBe(true);
     // The new claim is untouched: the job is still running for it, and nothing is claimed twice.
     expect((await core.handle({ jobId, reviewKind: "diff" })).outcome).toBe(
       "ignored",

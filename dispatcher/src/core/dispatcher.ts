@@ -294,7 +294,7 @@ export function createDispatcherCore(deps: CoreDependencies): DispatcherCore {
    * The Worker's container ended after the hand-over (#375). Exit 0 is a Worker that is done (or that gave the job
    * back itself): nothing to release. Any other code is a Worker that may have died before it delivered a result,
    * and the App decides: it gives the job back when this claim still holds it and does nothing for a job that has a
-   * result or another claim (the credential fences it, `release_not_holder` below). Never rejects.
+   * result (`release_job_ended`, info) or another claim (`release_not_holder`, warn): the credential fences it. Never rejects.
    */
   async function workerExited(
     job: ClaimedJob,
@@ -318,6 +318,11 @@ export function createDispatcherCore(deps: CoreDependencies): DispatcherCore {
       );
       if (result === "released") {
         logger.info("released", { jobId: job.id, reason, ...extra });
+        return;
+      }
+      if (result === "ended") {
+        // Not a problem: the Worker delivered its result (and may have exited 1 after a failed one). Nothing to give back.
+        logger.info("release_job_ended", { jobId: job.id, reason, ...extra });
         return;
       }
       if (result === "not_holder") {
