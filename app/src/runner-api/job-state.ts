@@ -10,6 +10,7 @@ import { errorResponse, jsonResponse } from "./responses.ts";
 
 export type JobStateDeps = {
   queue: Pick<RunnerQueue, "get">;
+  now?: () => Date;
 };
 
 export async function handleJobState(
@@ -18,8 +19,21 @@ export async function handleJobState(
 ): Promise<Response> {
   const job = await deps.queue.get(jobId);
   if (job === undefined) return errorResponse(404, "RUNNER_JOB_NOT_FOUND");
+  // #397: a superseded job whose claim has not run out is draining: its Worker finishes the requests in flight and
+  // reports. The Dispatcher keeps its VM until then.
+  const draining =
+    job.status === "superseded" &&
+    job.claimedAt !== null &&
+    job.result === null &&
+    job.leaseExpiresAt !== null &&
+    Date.parse(job.leaseExpiresAt) >
+      (deps.now ?? (() => new Date()))().getTime();
   return jsonResponse(200, {
     version: RUNNER_API_VERSION,
-    job: { id: job.id, status: job.status },
+    job: {
+      id: job.id,
+      status: job.status,
+      ...(draining ? { draining: true } : {}),
+    },
   } satisfies JobStateResponse);
 }

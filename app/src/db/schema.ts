@@ -233,6 +233,8 @@ export interface JobsTable {
    * every claim, so it only counts for a claim made with a per-job credential. Not a `Job` field.
    */
   worker_fetches: ColumnType<number, number | undefined, number>;
+  /** #397: 1 when the holder of the claim understands that its run can be superseded (the feature `supersede`). */
+  accepts_supersede: ColumnType<number, number | undefined, number>;
   claimed_at: string | null;
   heartbeat_at: string | null;
   lease_expires_at: string | null;

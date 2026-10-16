@@ -20,8 +20,14 @@ export type UsageState = (typeof USAGE_STATES)[number];
  * runner (it died, its lease ran out on the last attempt, it ran past the hard limit), so the model may have been
  * used and nobody can say how much: the record counts, with an unknown cost and unknown tokens. A run that
  * reported its usage, failed or not, has no reason.
+ *
+ * `superseded` (#397): a newer push replaced the run while it ran. It is not a run of the quota (it is left out of the
+ * run counts and the limits on runs), but what it consumed is usage like any other: the record carries the cost and
+ * tokens the run reported, an unknown cost stays unknown, and a cost limit still counts the known cost. The record
+ * is marked when the run is superseded (while it is still `reserved`, draining) and settled when the Worker reports
+ * or the drain ends.
  */
-export const SETTLED_REASONS = ["no_result"] as const;
+export const SETTLED_REASONS = ["no_result", "superseded"] as const;
 export type SettledReason = (typeof SETTLED_REASONS)[number];
 
 /**
@@ -142,6 +148,30 @@ function errorReasonOf(result: unknown): string | null {
   const reason = (result as { errorReason?: unknown }).errorReason;
   return typeof reason === "string" ? reason : null;
 }
+
+/**
+ * How the result of a run that was superseded settles its record (#397): as any result does (the usage it reported,
+ * its cost exact or unknown), with the reason `superseded` so that it is not counted as a run. A result without a
+ * usage that shows no call leaves the record void, as for any run. A run that was ended without a usable result
+ * (the host ended its process) is settled with everything unknown.
+ */
+export function settlementOfSupersededOutcome(
+  outcome: JobOutcome,
+): UsageSettlement {
+  const settlement = settlementOfOutcome(outcome);
+  return settlement.state === "settled"
+    ? { ...settlement, reason: "superseded" }
+    : settlement;
+}
+
+/** A superseded run whose Worker never reported: the model may have been used and nobody can say how much. */
+export const SUPERSEDED_NO_REPORT: UsageSettlement = {
+  state: "settled",
+  costMicroUsd: null,
+  promptTokens: null,
+  completionTokens: null,
+  reason: "superseded",
+};
 
 const NO_RESULT: UsageSettlement = {
   state: "settled",

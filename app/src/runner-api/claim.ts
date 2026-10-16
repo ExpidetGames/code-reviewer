@@ -899,6 +899,10 @@ export async function handleClaim(
     // claim of a runner of the previous release makes exactly the call it made before.
     const claimOptions: ClaimOptions = {
       ...(split ? { workerCredential: true } : {}),
+      // #397: a Dispatcher is not the holder; its Worker says so with its job details request.
+      ...(!split && features.includes("supersede")
+        ? { acceptsSupersede: true }
+        : {}),
       ...(target.jobId === undefined ? {} : { jobId: target.jobId }),
       ...(target.maxRunning === undefined
         ? {}

@@ -384,6 +384,10 @@ export interface WorkerHeartbeatResponse {
      * ISO 8601, UTC.
      */
     leaseExpiresAt: string;
+    /**
+     * #396: true when a newer push replaced this run; see HeartbeatResponse in runner-api.v1.json. Sent only to a Worker that named the feature `supersede` in its details request.
+     */
+    superseded?: boolean;
     [k: string]: unknown;
   };
   [k: string]: unknown;
@@ -423,9 +427,9 @@ export interface WorkerResultResponse {
      */
     id: string;
     /**
-     * succeeded or failed: the job is finished. queued: the job was given back (runner_shutdown, launch_failed) and waits for another claim; it fails instead if that was the last allowed attempt.
+     * succeeded or failed: the job is finished. queued: the job was given back (runner_shutdown, launch_failed) and waits for another claim; it fails instead if that was the last allowed attempt. superseded (#397): the run was replaced by a newer push; its result is stored once and the job stays superseded.
      */
-    status: "succeeded" | "failed" | "queued";
+    status: "succeeded" | "failed" | "queued" | "superseded";
     [k: string]: unknown;
   };
   alreadyCompleted: boolean;

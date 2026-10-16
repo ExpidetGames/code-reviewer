@@ -63,9 +63,11 @@ export type UsagePageOptions = {
 export type UsageSummaryGroup = {
   reviewKind: ProjectReviewKind;
   keyMode: UsageKeyMode;
-  /** Runs that count (`reserved` and `settled`; never `void`). */
+  /** Runs that count (`reserved` and `settled`; never `void`, never a run that was superseded). */
   recordCount: number;
   settledCount: number;
+  /** Runs a newer push replaced (#397): not counted above, but their cost and unknown costs are in the sums below. */
+  supersededCount: number;
   /** Sum of the known cost of the settled runs, micro-USD. */
   knownCostMicroUsd: number;
   /** Settled runs whose cost is unknown. */
@@ -95,15 +97,22 @@ export type UsageRecordsRepository = {
   /**
    * Ends the record of a job: `settled` with the cost and tokens, or `void`. Only a `reserved` record
    * changes, so repeating it does nothing. A job without a record (it was claimed before records existed)
-   * gets one in its final state, with key mode `own`.
+   * gets one in its final state, with key mode `own`. Returns whether this call changed or created the record
+   * (false: it was final already, or the job is not this workspace's).
    */
-  settle(jobId: string, settlement: UsageSettlement): Promise<void>;
+  settle(jobId: string, settlement: UsageSettlement): Promise<boolean>;
   /**
    * Voids the `reserved` records of this workspace whose job has ended without reporting (cancelled, replaced,
    * or otherwise final), so a run that was dropped while it waited again no longer counts. Called in the
    * transaction of every transition that ends a waiting job.
    */
   voidEndedJobs(): Promise<void>;
+  /**
+   * #397: marks the `reserved` records of these jobs of this workspace as superseded runs (reason `superseded`): the
+   * run was replaced by a newer push and is draining. It stays `reserved` until its Worker reports or the drain ends,
+   * but it no longer counts as a run of the quota, and `voidEndedJobs` leaves it alone.
+   */
+  markSuperseded(jobIds: readonly string[]): Promise<void>;
   get(jobId: string): Promise<UsageRecord | undefined>;
   /** Records that count (`reserved` and `settled`, never `void`) reserved at or after `since`, per review kind. */
   countByKind(since: string): Promise<Record<ProjectReviewKind, number>>;
@@ -206,7 +215,7 @@ export function createUsageRecordsRepository(
 
     async settle(jobId, settlement) {
       const job = await jobOf(jobId);
-      if (job === undefined) return;
+      if (job === undefined) return false;
       const timestamp = formatTimestamp(now());
       const final =
         settlement.state === "settled"
@@ -227,7 +236,7 @@ export function createUsageRecordsRepository(
               settled_reason: null,
             };
       // One statement: a reserved record is ended, a final one is left alone, a missing one is created.
-      await db
+      const changed = await db
         .insertInto("usage_records")
         .values({
           id: newId(),
@@ -246,6 +255,19 @@ export function createUsageRecordsRepository(
             .where("usage_records.state", "=", "reserved")
             .where("usage_records.workspace_id", "=", workspaceId),
         )
+        .returning("id")
+        .executeTakeFirst();
+      return changed !== undefined;
+    },
+
+    async markSuperseded(jobIds) {
+      if (jobIds.length === 0) return;
+      await db
+        .updateTable("usage_records")
+        .set({ settled_reason: "superseded" })
+        .where("workspace_id", "=", workspaceId)
+        .where("job_id", "in", [...jobIds])
+        .where("state", "=", "reserved")
         .execute();
     },
 
@@ -254,6 +276,8 @@ export function createUsageRecordsRepository(
         .updateTable("usage_records")
         .set({ state: "void" })
         .where("workspace_id", "=", workspaceId)
+        // A run that was superseded while it ran keeps its record until it reports (#397).
+        .where("settled_reason", "is", null)
         // A literal, not a bound value, so the planner can use the partial index of the reserved records.
         .where("state", "=", sql.lit("reserved"))
         // Driven by the few reserved records, each probing its job by primary key.
@@ -286,6 +310,13 @@ export function createUsageRecordsRepository(
         .select(["review_kind", (eb) => eb.fn.countAll().as("runs")])
         .where("workspace_id", "=", workspaceId)
         .where("state", "in", ["reserved", "settled"])
+        // A run that a newer push replaced is not a run of the quota (#397); its cost still counts as usage.
+        .where((eb) =>
+          eb.or([
+            eb("settled_reason", "is", null),
+            eb("settled_reason", "<>", "superseded"),
+          ]),
+        )
         .where("reserved_at", ">=", since)
         .groupBy("review_kind")
         .execute();
@@ -340,8 +371,15 @@ export function createUsageRecordsRepository(
         .select([
           "review_kind",
           "key_mode",
-          (eb) => eb.fn.countAll().as("records"),
-          sql`sum(case when state = 'settled' then 1 else 0 end)`.as("settled"),
+          sql`sum(case when settled_reason is null or settled_reason <> 'superseded' then 1 else 0 end)`.as(
+            "records",
+          ),
+          sql`sum(case when state = 'settled' and (settled_reason is null or settled_reason <> 'superseded') then 1 else 0 end)`.as(
+            "settled",
+          ),
+          sql`sum(case when settled_reason = 'superseded' then 1 else 0 end)`.as(
+            "superseded",
+          ),
           (eb) => eb.fn.sum("cost_micro_usd").as("cost"),
           sql`sum(case when state = 'settled' and cost_micro_usd is null then 1 else 0 end)`.as(
             "unknown",
@@ -360,6 +398,7 @@ export function createUsageRecordsRepository(
         keyMode: row.key_mode as UsageKeyMode,
         recordCount: Number(row.records),
         settledCount: Number(row.settled),
+        supersededCount: Number(row.superseded),
         knownCostMicroUsd: Number(row.cost ?? 0),
         unknownCostCount: Number(row.unknown),
       }));

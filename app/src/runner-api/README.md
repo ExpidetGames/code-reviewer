@@ -332,7 +332,10 @@ Worker. It cannot count what runs, so the app counts for it. Three additions, al
 RUNNER_JOB_NOT_FOUND`, both before anything else is read. A Dispatcher's reaper asks it to find the Sandbox
   VMs of jobs that ended (`dispatcher/README.md`, "The reaper"). It is not in `APP_FEATURES`: a Dispatcher
   does not need it to claim, and one that meets an app without the route reads a `404` without an error body as
-  "state unknown".
+  "state unknown". **#397:** a superseded job whose claim is still valid (its Worker is finishing the model requests in
+  flight and has not reported) answers `draining: true` next to its status; the reaper keeps its VM until then. The
+  field is left out otherwise, and a Dispatcher that does not know it sees a superseded job as ended (the VM is
+  reaped after the usual age).
 
 **Mixed versions.** No migration. A previous-release app does not know `jobId` or `maxRunning` and would
 claim the _next_ job and ignore the cap, and has no `release` or `version` route (`404`): a Dispatcher
@@ -342,6 +345,36 @@ same queue call and the same SQL as before; a runner of the previous release is 
 behind an old Dispatcher is not either (nobody sends the new fields). The job state call is the same kind
 of addition: a new Dispatcher with an app without it keeps claiming and its reaper falls back to the maximum
 lifetime of a VM; an old Dispatcher never calls it.
+
+## A superseded run (#397)
+
+A new push supersedes the running automatic review of the pull request when its holder understands it: a runner whose
+claim names the feature `supersede` (not a Dispatcher's split claim, which is not the holder), or a Worker whose job
+details request names it (`?features=supersede`; the app notes it on the job, `accepts_supersede`). The other calls
+keep their meaning and the rest is additive:
+
+- **Heartbeat** (`/api/runners/v1/jobs/:id/heartbeat`, `/api/workers/v1/jobs/:id/heartbeat`): `200` with
+  `job.superseded: true`, while the claim lasts; the lease is **not** extended (it ends at the claim window, 240
+  seconds after the push: the Worker's next heartbeat, at most 60, its own drain, 120, and a margin; see
+  `SupersedeTiming` in `contracts/runner-api.v1.json`). After that, or after the report, the usual `409`.
+- **Complete / result:** accepted **once** for a superseded claim: `200` with `job.status: "superseded"`; the job
+  stays `superseded`, the result is stored (it can carry `errorCode: "superseded"`, the runner's own code), and the
+  usage record is settled from the usage it reports with the reason `superseded` (`src/usage/README.md`). The same
+  report again is `200 alreadyCompleted`, another one `409 RUNNER_RESULT_CONFLICT`. **A report that comes after the
+  claim ran out** is still taken for a grace of 60 seconds (the sweep does not settle the record before), so a Worker
+  that used its whole drain is billed its exact cost whenever some claim happens to expire leases; **after the
+  grace** it is refused with `409` (`RUNNER_LEASE_LOST`), like a heartbeat, and nothing is stored: the record was
+  (or is about to be) settled once with an unknown cost, and a record is not changed after it may have been served.
+- **Job details** of a superseded claim: `409 RUNNER_JOB_ENDED`, like any ended job. A release of one
+  (`worker_exited` after a Worker that exits with an error) is `409`/`401` and changes nothing.
+
+**Mixed versions of the supersede (#397).** One migration adds `jobs.accepts_supersede` (default 0) and widens the
+check of `usage_records.settled_reason`; an app of the previous release ignores both. A job is superseded only when
+its holder named `supersede`, so a runner or Worker of an earlier release is never superseded and nothing changes
+for it. **A push during the boot of the VM is not superseded:** a Dispatcher's claim is not the holder's (`!split`),
+and the flag is set by the Worker's first job details request, so a push between the claim and that request finds a
+running job that does not accept it. The new job waits behind the stale run as before; this is by design and safe,
+not a missed supersede to chase. A Dispatcher that does not read `draining` sees a superseded job as ended.
 
 ## Hooks
 

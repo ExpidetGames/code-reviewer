@@ -32,8 +32,32 @@ and that amounts are not negative.
 claim --> reserved --complete with usage (failed or not), or a run that succeeded--> settled   (counts, with cost and tokens)
                    --job ended with no result from a runner that held it---------> settled   (counts, cost and tokens unknown, reason no_result)
                    --failed without usage, or ended before any runner began------> void      (does not count)
+                   --superseded while it ran (#397)-----------> still reserved, marked `superseded` (not a run of the quota)
+                        --the Worker reports-----------------> settled  (cost and tokens as reported, reason superseded)
+                        --no report within window + grace-----> settled  (cost and tokens unknown, reason superseded)
 ```
 
+- **A superseded run (#397).** A newer push replaced a run that was running (`src/jobs/README.md`, "Supersession"). Its
+  record is marked at that moment (`settled_reason = 'superseded'` on the still `reserved` record) and from then on:
+  - it is **not a run of the free quota**: `countByKind` (the run limits at claim, the plan page) and the summary's
+    `recordCount`/`settledCount` leave it out, and `voidEndedJobs` and the sweep leave it alone while it drains
+    (the summary lists such runs in `supersededCount`);
+  - what it measured **is usage like any other**: the Worker's report settles it with the cost and tokens it reported
+    (an exact cost when every call was priced), billed like the cost of any run (`usage_records`, the feed, the
+    sums that the cost limits watch). An unknown cost stays unknown, adds nothing to a sum and is never billed
+    (it is raised as an unknown-cost settlement like any other, #361); a report that shows no model call
+    voids the record;
+  - the claim of a superseded run lasts 240 seconds (a Worker learns of the push at its next heartbeat, at most 60
+    seconds, then drains for at most 120, plus a margin; `src/jobs/supersede-timing.ts`, stated in the contract as
+    `SupersedeTiming`), and a report is taken for 60 seconds more. A Worker that uses its whole drain is therefore
+    billed its exact cost, whether or not some claim expired leases in between;
+  - if no report comes within window and grace, the record settles with an unknown cost and unknown tokens (the
+    request in flight may have been charged and nobody can say). A report that comes after that is refused (`409`): a
+    record is settled once, and a reader of the usage feed may have it. The unknown cost is raised once, by the sweep
+    that settled it, and a report that changes nothing raises none.
+    The feed shows `reason: "superseded"` (`contracts/operator-api.v1.json`), so a billing reader can tell it from a normal
+    run. The cost limits still apply to it: its known cost counts towards `managedCostLimitMicroUsd` or
+    `ownKeyCostLimitMicroUsd` of the period it started in.
 - **Reserve.** `claimNext` inserts the record in the transaction of the claim, so a job a runner holds always has
   one. A job claimed again after a lost lease keeps its record (`job_id` is unique): it never counts twice.
   The claim does not know the key yet, so the record starts as `own`; the claim route corrects it with `setKeyMode`

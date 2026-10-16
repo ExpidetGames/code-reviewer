@@ -48,6 +48,7 @@ import type {
 import { encodeJson, formatTimestamp } from "../codecs.ts";
 import { databaseDriver, type DatabaseDriver } from "../driver.ts";
 import type { Database } from "../schema.ts";
+import { SUPERSEDED_REPORT_GRACE_MS } from "../../jobs/supersede-timing.ts";
 import { isJobIndependentRefusal } from "../../usage/enforce-entitlements.ts";
 import { admitClaimedJob, type ClaimRefusal } from "./claim-admission.ts";
 import { claimOldestDueJob, claimOldestDueJobPostgres } from "./jobs-claim.ts";
@@ -56,6 +57,7 @@ import { createUsageRecordsRepository } from "./usage-records-repository.ts";
 import { closeRecordsOfEndedJobs } from "./usage-records-sweep.ts";
 import {
   settlementOfOutcome,
+  settlementOfSupersededOutcome,
   type UnknownCostSettlement,
 } from "../../usage/usage-records.ts";
 
@@ -186,6 +188,11 @@ export type RunnerJobsRepository = {
    * a lease token.
    */
   get(id: string): Promise<Job | undefined>;
+  /**
+   * #397: notes that the holder of the running claim `leaseToken` belongs to understands that its run can be
+   * superseded. One statement fenced by the token; false for any other token or a job that is not running.
+   */
+  noteSupersede(jobId: string, leaseToken: string): Promise<boolean>;
   /** Deals with leases and runtimes that ran out. `claimNext` does this first on every call. */
   expireStaleJobs(): Promise<ExpiryReport>;
   /**
@@ -228,6 +235,12 @@ export type ClaimOptions = {
    * dealt with: see `claimNext`.
    */
   maxRunning?: number;
+  /**
+   * #397: the caller understands that its run can be superseded (the claim named the feature `supersede`). A running
+   * job is superseded by a newer push only then; a Worker says so with its job details request instead
+   * (`noteSupersede`).
+   */
+  acceptsSupersede?: boolean;
 };
 
 /** Which running jobs an attempt-losing statement applies to. */
@@ -656,6 +669,9 @@ export function createRunnerJobsRepository(
           leaseToken,
           now: current,
           leaseExpiresAt: new Date(current.getTime() + limits.leaseMs),
+          ...(claimOptions.acceptsSupersede === true
+            ? { acceptsSupersede: true }
+            : {}),
         };
         const reviewKinds = reviewKindsForEngines(engines);
         // #322: the pool cap. Atomic because a claim is the only way a job becomes running and every
@@ -819,11 +835,34 @@ export function createRunnerJobsRepository(
             .where(runningWhere({ claim: { jobId, leaseToken } }))
             .returningAll()
             .executeTakeFirst();
-          return row === undefined
+          if (row !== undefined) return { status: "ok", job: toJob(row) };
+          // #397: a run a newer push replaced keeps its claim for the drain window, so its holder can finish the
+          // requests in flight and report. It is told so; the lease is not extended.
+          const superseded = await trx
+            .selectFrom("jobs")
+            .selectAll()
+            .where("id", "=", jobId)
+            .where("lease_token", "=", leaseToken)
+            .where("status", "=", "superseded")
+            .where("claimed_at", "is not", null)
+            .where("result", "is", null)
+            .where("lease_expires_at", ">", timestamp)
+            .executeTakeFirst();
+          return superseded === undefined
             ? { status: "not_holder" }
-            : { status: "ok", job: toJob(row) };
+            : { status: "superseded", job: toJob(superseded) };
         },
       );
+    },
+
+    async noteSupersede(jobId, leaseToken) {
+      const row = await db
+        .updateTable("jobs")
+        .set({ accepts_supersede: 1 })
+        .where(runningWhere({ claim: { jobId, leaseToken } }))
+        .returning("id")
+        .executeTakeFirst();
+      return row !== undefined;
     },
 
     complete(jobId, leaseToken, outcome) {
@@ -848,13 +887,15 @@ export function createRunnerJobsRepository(
         if (finished !== undefined) {
           // Settled from what the runner reported, in the same transaction as the job's end.
           const settlement = settlementOfOutcome(outcome);
-          await createUsageRecordsRepository(
+          const settled = await createUsageRecordsRepository(
             trx,
             finished.workspace_id,
             now,
           ).settle(finished.id, settlement);
-          // #361: no cost limit bounds a run without a cost; it is reported so it can be watched.
+          // #361: no cost limit bounds a run without a cost; it is reported so it can be watched (once: when this
+          // call settled the record, not when it was settled already).
           if (
+            settled &&
             settlement.state === "settled" &&
             settlement.costMicroUsd === null
           )
@@ -875,6 +916,56 @@ export function createRunnerJobsRepository(
           .executeTakeFirst();
         if (row === undefined) return { status: "not_holder" };
         const job = toJob(row);
+        if (job.status === "superseded") {
+          // #397: the report of a run a newer push replaced is stored once and settles its record (the cost it
+          // measured is usage, the run is not counted as a run of the quota). The job stays `superseded`. Another
+          // report, after the first, is judged by the same rule as for any job.
+          if (row.claimed_at === null) return { status: "not_holder" };
+          if (row.result !== null)
+            return isDeepStrictEqual(job.result, result)
+              ? { status: "already_completed", job }
+              : { status: "outcome_conflict", job };
+          const timestamp = formatTimestamp(now());
+          // The claim lasts the drain window and the report is taken for a grace after it, the time before which
+          // the sweep does not settle the record (`closeRecordsOfEndedJobs`). Later the record is (or may be)
+          // settled with an unknown cost already, and a record is settled once: the report is refused, like a
+          // heartbeat, instead of being stored with a cost that is not applied.
+          if (
+            row.lease_expires_at === null ||
+            Date.parse(row.lease_expires_at) + SUPERSEDED_REPORT_GRACE_MS <=
+              now().getTime()
+          )
+            return { status: "not_holder" };
+          const stored = await trx
+            .updateTable("jobs")
+            .set({
+              result: result === null ? null : encodeJson(result),
+              updated_at: timestamp,
+            })
+            .where("id", "=", jobId)
+            .where("lease_token", "=", leaseToken)
+            .where("status", "=", "superseded")
+            .where("result", "is", null)
+            .returningAll()
+            .executeTakeFirst();
+          if (stored === undefined) return { status: "not_holder" };
+          const settlement = settlementOfSupersededOutcome(outcome);
+          const settled = await createUsageRecordsRepository(
+            trx,
+            stored.workspace_id,
+            now,
+          ).settle(stored.id, settlement);
+          if (
+            settled &&
+            settlement.state === "settled" &&
+            settlement.costMicroUsd === null
+          )
+            unknownCost.push({
+              workspaceId: stored.workspace_id,
+              jobId: stored.id,
+            });
+          return { status: "completed", job: toJob(stored) };
+        }
         if (job.status !== "succeeded" && job.status !== "failed")
           return { status: "not_holder" };
         const sameOutcome =

@@ -46,6 +46,7 @@ import {
   type Job,
   type JobErrorCode,
 } from "../../jobs/job-types.ts";
+import { SUPERSEDED_DRAIN_MS } from "../../jobs/supersede-timing.ts";
 import { databaseDriver } from "../driver.ts";
 import { decodeJson, formatTimestamp } from "../codecs.ts";
 import type { Database, JobsTable } from "../schema.ts";
@@ -85,6 +86,8 @@ export type PreviousReviewedShaInput = {
 
 export type JobsRepositoryOptions = {
   now?: () => Date;
+  /** #397: see `jobs/supersede-timing.ts`. */
+  supersededDrainMs?: number;
   newId?: () => string;
   /**
    * #195: resolves a job's review kind from the project's settings, inside the enqueue transaction so
@@ -215,6 +218,7 @@ export function createJobsRepository(
 ): JobsRepository {
   const now = options.now ?? (() => new Date());
   const newId = options.newId ?? (() => crypto.randomUUID());
+  const supersededDrainMs = options.supersededDrainMs ?? SUPERSEDED_DRAIN_MS;
   // The jobs of one pull request and review kind in this workspace (#199, #255).
   const scopeOf = (input: PreviousReviewedShaInput) =>
     db
@@ -476,22 +480,35 @@ export function createJobsRepository(
           .executeTakeFirstOrThrow();
         await recordComment(id);
 
-        // 4. An automatic job replaces the waiting automatic jobs of the same pull request, command
-        // and arguments: they would review an older state. Jobs a person asked for are never
-        // replaced (they are never replaced by a push), and a running job is left
-        // alone.
+        // 4. An automatic job replaces the automatic jobs of the same pull request, command and arguments
+        // that would review an older state. Jobs a person asked for are never replaced.
+        //  - A waiting one is dropped: it never ran, its reserved record no longer counts.
+        //  - A running one is superseded (#397) only when its holder understands it
+        //    (`accepts_supersede`, the feature `supersede` of #396): it keeps its claim for the drain window, is
+        //    told by its next heartbeat, finishes the model requests in flight and reports what it used. One of an
+        //    earlier release is left alone, and the new job waits behind it as before.
         let supersededJobIds: string[] = [];
         if (input.triggerKind === "webhook") {
-          const waiting = await samePullRequest()
-            .select("id")
-            .where("args", "=", input.args)
-            .where("trigger_kind", "=", "webhook")
-            .where("status", "in", statusesThatCanBecome("superseded"))
-            .where("id", "!=", id)
+          const older = () =>
+            samePullRequest()
+              .select("id")
+              .where("args", "=", input.args)
+              .where("trigger_kind", "=", "webhook")
+              .where("id", "!=", id);
+          const waiting = await older()
+            .where("status", "=", "queued")
             .execute();
-          supersededJobIds = waiting.map((row) => row.id);
-          if (supersededJobIds.length > 0) {
-            await trx
+          const running = await older()
+            .where("status", "=", "running")
+            .where("accepts_supersede", "=", 1)
+            .execute();
+          const records = createUsageRecordsRepository(trx, workspaceId, now);
+          // The ids come from the rows the updates changed, not from the selects: the list stays honest whatever
+          // the locking does.
+          const droppedIds: string[] = [];
+          const drainingIds: string[] = [];
+          if (waiting.length > 0) {
+            const changed = await trx
               .updateTable("jobs")
               .set({
                 status: "superseded",
@@ -499,16 +516,44 @@ export function createJobsRepository(
                 finished_at: timestamp,
                 updated_at: timestamp,
               })
-              .where("id", "in", supersededJobIds)
-              .where("status", "in", statusesThatCanBecome("superseded"))
+              .where(
+                "id",
+                "in",
+                waiting.map((row) => row.id),
+              )
+              .where("status", "=", "queued")
+              .returning("id")
               .execute();
-            // Only when jobs were replaced: their reserved records no longer count.
-            await createUsageRecordsRepository(
-              trx,
-              workspaceId,
-              now,
-            ).voidEndedJobs();
+            droppedIds.push(...changed.map((row) => row.id));
           }
+          if (running.length > 0) {
+            const changed = await trx
+              .updateTable("jobs")
+              .set({
+                status: "superseded",
+                superseded_by: id,
+                finished_at: timestamp,
+                lease_expires_at: formatTimestamp(
+                  new Date(current.getTime() + supersededDrainMs),
+                ),
+                updated_at: timestamp,
+              })
+              .where(
+                "id",
+                "in",
+                running.map((row) => row.id),
+              )
+              .where("status", "=", "running")
+              .returning("id")
+              .execute();
+            drainingIds.push(...changed.map((row) => row.id));
+            // Its record stays reserved until the Worker reports (or the drain ends), but it is marked: a
+            // superseded run is not a run of the quota (src/usage/README.md).
+            await records.markSuperseded(drainingIds);
+          }
+          supersededJobIds = [...droppedIds, ...drainingIds];
+          // Only when jobs were replaced: the reserved records of the waiting ones no longer count.
+          if (droppedIds.length > 0) await records.voidEndedJobs();
         }
 
         return { status: "created", job: toJob(inserted), supersededJobIds };
@@ -589,9 +634,17 @@ export function createJobsRepository(
       let query = scopeOf(input)
         .select("head_sha")
         .where("status", "!=", "succeeded")
-        // Only a job that ran can have published: failed, or a lost attempt (requeue, released claim).
+        // Only a job that ran can have published: failed, a lost attempt (requeue, released claim), or a run
+        // that was superseded while it ran (#397: it may have written its summary just before it heard of it).
         .where((eb) =>
-          eb.or([eb("status", "=", "failed"), eb("attempts", ">", 0)]),
+          eb.or([
+            eb("status", "=", "failed"),
+            eb("attempts", ">", 0),
+            eb.and([
+              eb("status", "=", "superseded"),
+              eb("claimed_at", "is not", null),
+            ]),
+          ]),
         )
         .where("id", "!=", input.excludeJobId)
         .where("created_at", "<", claimed.created_at);

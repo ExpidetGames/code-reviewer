@@ -337,7 +337,7 @@ export function RunDetail({
     });
   if (run.supersededBy !== null)
     diagnosticItems.push({
-      term: "Replaced by",
+      term: "Superseded by",
       description: (
         <Link
           href={workspacePath(

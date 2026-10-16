@@ -140,6 +140,8 @@ export async function createJobQueueFixture(
     dynamicReview?: boolean;
     /** #277: called for every job the claim of the queue refused, after the claim committed. */
     onRefused?: RunnerJobsRepositoryOptions["onRefused"];
+    /** #361: called for every record that settled without a known cost, after the transaction committed. */
+    onUnknownCostSettled?: RunnerJobsRepositoryOptions["onUnknownCostSettled"];
   } = {},
 ): Promise<JobQueueFixture> {
   const created = options.database
@@ -195,6 +197,9 @@ export async function createJobQueueFixture(
     ...(options.onRefused === undefined
       ? {}
       : { onRefused: options.onRefused }),
+    ...(options.onUnknownCostSettled === undefined
+      ? {}
+      : { onUnknownCostSettled: options.onUnknownCostSettled }),
     dynamicReviewEnabled:
       options.dynamicReview === true ? allowDynamicReview : undefined,
   });

@@ -574,6 +574,7 @@ describe("summarizing a period", () => {
         keyMode: "managed",
         recordCount: 3,
         settledCount: 2,
+        supersededCount: 0,
         knownCostMicroUsd: 200,
         unknownCostCount: 1,
       },
@@ -582,6 +583,7 @@ describe("summarizing a period", () => {
         keyMode: "own",
         recordCount: 1,
         settledCount: 1,
+        supersededCount: 0,
         knownCostMicroUsd: 100,
         unknownCostCount: 0,
       },
@@ -590,6 +592,7 @@ describe("summarizing a period", () => {
         keyMode: "managed",
         recordCount: 1,
         settledCount: 1,
+        supersededCount: 0,
         knownCostMicroUsd: 4000,
         unknownCostCount: 0,
       },
@@ -618,6 +621,7 @@ describe("summarizing a period", () => {
       expect.objectContaining({
         recordCount: 1,
         settledCount: 1,
+        supersededCount: 0,
         knownCostMicroUsd: 99999,
       }),
     ]);

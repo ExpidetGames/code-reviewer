@@ -527,7 +527,7 @@
       "pattern": "^[A-Za-z0-9_-]+$"
     },
     "UsageReason": {
-      "description": "Why a record carries no measurement, as a short code (lowercase letters, digits and '_'), or null. A reader ignores a code it does not know. 'no_result': the job ended without any result from the runner that held it (it died, its lease ran out on the last attempt, it ran past the hard limit), so the model may have been used and the cost and the tokens are unknown. A run that reported its usage, failed or not, carries no reason; an unpriced run has a null cost and its tokens.",
+      "description": "Why a record carries no measurement, as a short code (lowercase letters, digits and '_'), or null. A reader ignores a code it does not know. 'no_result': the job ended without any result from the runner that held it (it died, its lease ran out on the last attempt, it ran past the hard limit), so the model may have been used and the cost and the tokens are unknown. A run that reported its usage, failed or not, carries no reason; an unpriced run has a null cost and its tokens. 'superseded' (#397): a newer push replaced the run while it ran. It is not a run of the free quota, but what it measured is usage like any other: the cost and tokens are those it reported (or both unknown, when its Worker never reported) and are billed like the cost of any run, an unknown cost never.",
       "type": [
         "string",
         "null"
@@ -658,13 +658,14 @@
       }
     },
     "UsageSummaryGroup": {
-      "description": "What one workspace ran in the period, for one kind of review and one key mode. 'recordCount' counts the runs that count towards a limit (running or settled; void runs are left out), 'settledCount' those among them that are settled, 'knownCostMicroUsd' adds up the cost of the settled runs whose cost is known, and 'unknownCostCount' counts the settled runs whose cost is not known (they add nothing to the sum).",
+      "description": "What one workspace ran in the period, for one kind of review and one key mode. 'recordCount' counts the runs that count towards a limit (running or settled; void runs are left out), 'settledCount' those among them that are settled, 'supersededCount' the runs a newer push replaced (#397: they are not counted in 'recordCount' or 'settledCount', but their known cost is in 'knownCostMicroUsd' and their unknown costs in 'unknownCostCount'), 'knownCostMicroUsd' adds up the cost of the settled runs whose cost is known, and 'unknownCostCount' counts the settled runs whose cost is not known (they add nothing to the sum).",
       "type": "object",
       "required": [
         "reviewKind",
         "keyMode",
         "recordCount",
         "settledCount",
+        "supersededCount",
         "knownCostMicroUsd",
         "unknownCostCount"
       ],
@@ -689,6 +690,11 @@
           "maximum": 9007199254740991
         },
         "settledCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "supersededCount": {
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991

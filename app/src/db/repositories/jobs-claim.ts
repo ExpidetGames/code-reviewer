@@ -27,6 +27,8 @@ import type { Database, JobsTable } from "../schema.ts";
 export type JobClaim = {
   runnerId: string;
   leaseToken: string;
+  /** #397: the holder understands that its run can be superseded (the feature `supersede`). */
+  acceptsSupersede?: boolean;
   now: Date;
   leaseExpiresAt: Date;
 };
@@ -113,6 +115,7 @@ function claimQuery(
         runner_id = ${claim.runnerId},
         lease_token = ${claim.leaseToken},
         worker_fetches = 0,
+        accepts_supersede = ${claim.acceptsSupersede === true ? 1 : 0},
         claimed_at = ${now},
         heartbeat_at = ${now},
         lease_expires_at = ${formatTimestamp(claim.leaseExpiresAt)},
