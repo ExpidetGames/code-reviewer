@@ -63,6 +63,7 @@ const PUBLIC_ROUTES = [
   "/api/operator/v1/workspaces/[id]/usage",
   "/api/operator/v1/workspaces/[id]/usage/summary",
   "/api/operator/v1/usage",
+  "/api/operator/v1/usage/unknown-cost",
   "/api/operator/v1/entitlements/default",
   "/api/operator/v1/plan-management",
   "/api/operator/v1/model-tiers",

@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// The three usage routes of the operator API (#278), as functions of their collaborators like api.ts, which calls
+// The usage routes of the operator API (#278, #385), as functions of their collaborators like api.ts, which calls
 // them after the credential, the route, the method, the body and the workspace have been checked:
 //
 //   GET /usage                          the settled records of every workspace, after a cursor
+//   GET /usage/unknown-cost             per workspace and key mode, the runs of a period that settled without a cost
 //   GET /workspaces/{id}/usage          the same for one workspace, with `from` and `to` on the time of settlement
 //   GET /workspaces/{id}/usage/summary  what one workspace ran in a period, per review kind and key mode
 //
@@ -16,10 +17,19 @@ import type {
   UsageRecordsPage,
   UsageRecordsRepository,
 } from "../db/repositories/usage-records-repository.ts";
-import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, isTimestamp } from "./contract.ts";
+import {
+  DEFAULT_PAGE_SIZE,
+  MAX_PAGE_SIZE,
+  OPERATOR_ID_PATTERN,
+  isTimestamp,
+} from "./contract.ts";
 import { errorResponse, jsonResponse } from "./responses.ts";
 import { decodeUsageCursor, encodeUsageCursor } from "./usage-cursor.ts";
-import { usageItemView, usageSummaryGroupView } from "./usage-views.ts";
+import {
+  unknownCostCountView,
+  usageItemView,
+  usageSummaryGroupView,
+} from "./usage-views.ts";
 
 export type UsageDeps = {
   feed: UsageFeedRepository;
@@ -30,25 +40,33 @@ export type UsageDeps = {
 
 type Parsed<T> = { ok: true; value: T } | { ok: false; response: Response };
 
+/** The `limit` of a page request: absent is the default, anything but 1 to the maximum is `request_invalid`. */
+function parseLimit(url: URL): Parsed<number> {
+  const limitText = url.searchParams.get("limit");
+  if (limitText === null) return { ok: true, value: DEFAULT_PAGE_SIZE };
+  const invalid = {
+    ok: false,
+    response: errorResponse(400, "request_invalid"),
+  } as const;
+  if (!/^\d{1,4}$/.test(limitText)) return invalid;
+  const limit = Number(limitText);
+  if (limit < 1 || limit > MAX_PAGE_SIZE) return invalid;
+  return { ok: true, value: limit };
+}
+
 /** `after` and `limit` of a page request. A cursor that is not ours is `cursor_invalid`, any other bad value `request_invalid`. */
 function parsePage(
   url: URL,
 ): Parsed<{ after: UsageCursor | undefined; limit: number }> {
-  const limitText = url.searchParams.get("limit");
-  let limit = DEFAULT_PAGE_SIZE;
-  if (limitText !== null) {
-    if (!/^\d{1,4}$/.test(limitText))
-      return { ok: false, response: errorResponse(400, "request_invalid") };
-    limit = Number(limitText);
-    if (limit < 1 || limit > MAX_PAGE_SIZE)
-      return { ok: false, response: errorResponse(400, "request_invalid") };
-  }
+  const limit = parseLimit(url);
+  if (!limit.ok) return limit;
   const cursor = url.searchParams.get("after");
-  if (cursor === null) return { ok: true, value: { after: undefined, limit } };
+  if (cursor === null)
+    return { ok: true, value: { after: undefined, limit: limit.value } };
   const after = decodeUsageCursor(cursor);
   if (after === null)
     return { ok: false, response: errorResponse(400, "cursor_invalid") };
-  return { ok: true, value: { after, limit } };
+  return { ok: true, value: { after, limit: limit.value } };
 }
 
 /** A time of the query: absent is fine where the caller allows it; present, it must be a real `Timestamp`. */
@@ -124,6 +142,37 @@ export function createUsageHandlers(deps: UsageDeps) {
           settledBefore: settledBefore(),
         }),
       );
+    },
+
+    /**
+     * `GET /usage/unknown-cost`: the period is required, and `after` is a workspace id (the list of workspaces pages
+     * the same way), not a cursor: the answer is a total of the runs that started in the period, not a position in a
+     * feed, so there is no safety lag.
+     */
+    async unknownCost(request: Request): Promise<Response> {
+      const url = new URL(request.url);
+      const limit = parseLimit(url);
+      if (!limit.ok) return limit.response;
+      const after = url.searchParams.get("after");
+      if (after !== null && !OPERATOR_ID_PATTERN.test(after))
+        return errorResponse(400, "request_invalid");
+      const period = parsePeriod(url, true);
+      if (!period.ok) return period.response;
+      const { from, to } = period.value;
+      if (from === undefined || to === undefined)
+        return errorResponse(400, "period_invalid");
+      const page = await deps.feed.unknownCostCounts({
+        from,
+        to,
+        after: after ?? undefined,
+        limit: limit.value,
+      });
+      return jsonResponse(200, {
+        from,
+        to,
+        counts: page.counts.map(unknownCostCountView),
+        nextAfter: page.nextAfter,
+      });
     },
 
     /** `GET /workspaces/{id}/usage/summary`: a period is required. */
