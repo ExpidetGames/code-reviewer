@@ -75,6 +75,12 @@ count, no price, no model name, no reason for a suspension.
 operator-configured page the plan page hands over to); until it exists `getRefusalNoticeService` passes
 `planPageUrl: () => null` and no notice has a link. When #284 lands, wiring its setting there is the only change.
 
+## Not covered
+
+- Other refusals (`llm_not_configured`, `entitlements_invalid`, a gate that is off) get no notice: out of scope of #281.
+- A workspace suspended in the seconds between a Dispatcher's claim and the Worker's fetch (`runner-api/worker-fetch.ts`,
+  `standingRefusal`) ends the job with `workspace_suspended` without a notice; the next refused push posts it.
+
 ## Mixed versions
 
 The table is new and empty; no existing row changes and no contract changes. An app instance from before this change
