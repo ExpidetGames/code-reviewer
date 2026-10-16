@@ -384,6 +384,10 @@ export interface WorkerHeartbeatResponse {
      * ISO 8601, UTC.
      */
     leaseExpiresAt: string;
+    /**
+     * #396: true when a newer push replaced this run; see HeartbeatResponse in runner-api.v1.json. Sent only to a Worker that named the feature `supersede` in its details request.
+     */
+    superseded?: boolean;
     [k: string]: unknown;
   };
   [k: string]: unknown;

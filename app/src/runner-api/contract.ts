@@ -160,6 +160,8 @@ export const RUNNER_ERROR_CODES = [
   "dynamic_accounting_failed",
   "dynamic_model_features_unsupported",
   "lease_lost",
+  // #396: the run was replaced by a newer push; it stopped gracefully and reports what it used.
+  "superseded",
 ] as const;
 export type RunnerErrorCode = (typeof RUNNER_ERROR_CODES)[number];
 
@@ -349,7 +351,13 @@ export type HeartbeatRequest = { leaseToken: string };
 
 export type HeartbeatResponse = {
   version: typeof RUNNER_API_VERSION;
-  job: { id: string; heartbeatAt: string; leaseExpiresAt: string };
+  job: {
+    id: string;
+    heartbeatAt: string;
+    leaseExpiresAt: string;
+    /** #396: a newer push replaced this run (only for a claim that named the feature `supersede`). */
+    superseded?: boolean;
+  };
 };
 
 export type RunnerUsage = {
