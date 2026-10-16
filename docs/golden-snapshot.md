@@ -84,13 +84,14 @@ check refuses it, and the fix is a rebuild). Also rebuild when the pinned Docker
 
 1. Run the workflow, passing the snapshot id in use as `pinned_snapshot`.
 2. Read the record from the summary or the artifact.
-3. Run the canary (#331) on the new snapshot: deploy the Dispatcher to a preview URL with the new `SANDBOX_SNAPSHOT_ID` and
+3. Run the canary (#331) on the new snapshot: deploy the Dispatcher as a staged production deployment (`vercel deploy --prod --skip-domain`,
+   not a preview: a preview has no production variables) with the new `SANDBOX_SNAPSHOT_ID` and
    `SANDBOX_IMAGE_DIGEST` and run the _Dispatcher canary_ workflow (`.github/workflows/dispatcher-canary.yml`, or
-   `pnpm --dir dispatcher probe:canary --url <preview>`) against it: it calls `POST /probe`, which runs the image's `probe`
+   `pnpm --dir dispatcher probe:canary --url <staged deployment>`) against it: it calls `POST /probe`, which runs the image's `probe`
    mode in a fresh VM from the snapshot, and fails unless `opencode` is advertised (`dispatcher/README.md`, "The capability
    probe"). The workflow sends the dispatcher credential only to a host listed in the repository variable
    `DISPATCHER_CANARY_HOSTS`, only runs from `main` and `development`, and needs the environment `hosted-canary` protected
-   (selected branches `main` and `development`, required reviewers: `dispatcher/README.md`, "The deploy canary"). Only when it passes, configure the Dispatcher project with the new `snapshotId` and `imageDigest` and redeploy it.
+   (selected branches `main` and `development`, required reviewers: `dispatcher/README.md`, "The deploy canary"). Only when it passes, promote that deployment (`vercel promote`); `docs/deployment-vercel.md`, section 5.1, has the steps, including the allow-list of hosts and the protection bypass.
 4. The previous snapshot stays until the next build's retention removes it.
 
 ## Roll back to the previous snapshot

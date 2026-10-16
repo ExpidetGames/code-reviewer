@@ -338,8 +338,8 @@ protect itself: _Deployment branches and tags_: **selected branches**, `main` an
 run its own copy of the canary code with the environment's secrets); _Required reviewers_: at least one person other than whoever
 starts the run; no secret of any other purpose in it. `RUNNER_TOKEN` there is the Dispatcher project's dispatcher credential;
 rotate it with the Dispatcher project's. The sequence of a release: deploy the Dispatcher to a URL
-that carries the candidate `SANDBOX_SNAPSHOT_ID` and `SANDBOX_IMAGE_DIGEST` (a preview deployment, or the new production
-deployment before it is promoted), run the canary against it, promote only on exit 0. After a golden snapshot rebuild
+that carries the candidate `SANDBOX_SNAPSHOT_ID` and `SANDBOX_IMAGE_DIGEST` (a staged production deployment, `vercel deploy --prod --skip-domain`: a preview deployment does not have the
+production variables; see `docs/deployment-vercel.md`, section 5.1), run the canary against it, promote only on exit 0. After a golden snapshot rebuild
 (`docs/golden-snapshot.md`) the same step proves the new snapshot before the Dispatcher project is switched to it.
 
 **The engine uid and the VM's agent channel (#317).** The spike found that no process in the VM can open an `AF_VSOCK` socket

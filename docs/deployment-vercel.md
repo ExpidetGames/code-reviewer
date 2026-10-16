@@ -104,39 +104,81 @@ GitHub ──webhook──▶ App ──queues the job, then signed POST /dispat
 
   Both need Node.js 24 (`engines` in both `package.json` files, `.nvmrc`). Set the Node.js version of each project to
   24.x if the project's default differs.
-- Crons run **only for the production deployment** of a project. A preview deployment never sweeps (App) and never reaps (Dispatcher).
+- Crons run **only for the production deployment** of a project. A preview or staged deployment never sweeps (App) and never reaps (Dispatcher).
 - A production domain for each project. The **App's URL must be reachable without a login** by GitHub (webhooks), by
   the Worker inside the VM (it calls the App's Worker API and has no way to send a bypass header) and by Vercel's cron.
   Do not put Vercel's Deployment Protection in front of the App's production domain. The Dispatcher is called only
   by the App and by the canary; if you protect it, use Protection Bypass for Automation and set the bypass secret in the two places
   named in section 3.
 
-**An external Postgres** (Postgres 18 is what CI tests against, see `compose.large.yml`) reachable from Vercel's
-`fra1` functions and from the machine that runs `pnpm migrate`, with TLS. You need **two roles** and **two URLs**:
+**An external Postgres, version 15 or newer** (Postgres 18 is what CI tests against, see `compose.large.yml`),
+reachable from Vercel's `fra1` functions and from the machine that runs `pnpm migrate`, with TLS. You need **two
+roles** and **two URLs**:
 
 | Role | URL | Used by | Needs |
 |---|---|---|---|
-| **migrate** | `DATABASE_URL_MIGRATE`, a **direct** connection (not a transaction pooler: the migration holds a session advisory lock that a pooler would drop) | `pnpm migrate` and `pnpm setup-code`, run by you, never by a Vercel function | Owns the database and its schema: creates and alters tables and indexes |
-| **app** | `DATABASE_URL`, may be a pooler | The App's functions | Reads and writes the tables the migrate role created; no DDL |
+| **migrate** | `DATABASE_URL_MIGRATE`, a **direct** connection (no pooler: the migration holds a session advisory lock) | `pnpm migrate` and `pnpm setup-code`, run by you, never by a Vercel function | Owns the database and its schema: creates and alters tables and indexes |
+| **app** | `DATABASE_URL`, a **direct or session-mode** connection, **never a transaction pooler** | The App's functions | Reads and writes the tables the migrate role created; no DDL |
 
-The migrations create tables and indexes only (no extension, type, function or sequence), so the app role needs `usage`
-on the schema and `select, insert, update, delete` on the tables, including tables created later:
+**Why `DATABASE_URL` must not be a transaction pooler.** The App serializes the integration sync of one GitHub
+installation with a *session-level* advisory lock (`pg_advisory_lock`, then `pg_advisory_unlock` on the same session:
+`withPostgresAdvisoryLock` in `app/src/db/postgres.ts`; it runs on installation webhooks and in the daily
+`repository-sync`). Behind a pooler that hands out a different server connection per transaction, the lock and its
+unlock can land on different backends: the serialization is lost, and a lock can stay held on a pooled backend so that
+later syncs of that installation wait forever. A direct connection is right, and so is a pooler in **session mode**
+(one client keeps one server connection for its whole session). Transaction mode and statement mode are not fine.
+Keep `DATABASE_POOL_MAX` small (default 3, 20 at most): every function instance has its own pool, so the number of
+connections your database must accept is the number of instances times that. The sweep's own lock is a transaction
+lock and would survive a transaction pooler; the sync lock is why the URL cannot (follow-up: #371).
 
-```sql
--- as an administrator; replace the placeholders, keep the passwords out of shell history
-create role cr_migrate login password '<generated>';
-create role cr_app login password '<generated>';
+The migrations create tables and indexes only (no extension, type, function or sequence), so the app role needs
+`usage` on the schema and `select, insert, update, delete` on the tables, including the tables created later. Run the
+commands from a terminal; the three secrets (the admin password and the two role passwords) are read or generated into
+shell variables, never typed into a command line, so they stay out of the shell history and the process list. Role
+passwords are **hex** (`openssl rand -hex 32`), which cannot break a `postgres://` URL the way a base64 password with
+`/`, `+` or `@` does.
+
+```sh
+read -rs -p 'Postgres admin password: ' PGPASSWORD; export PGPASSWORD; echo
+MIGRATE_PW=$(openssl rand -hex 32); APP_PW=$(openssl rand -hex 32)
+# 1. Roles and database, as the administrator, connected to any database:
+psql -h <host> -U <admin> -d postgres -v ON_ERROR_STOP=1 <<SQL
+create role cr_migrate login password '$MIGRATE_PW';
+create role cr_app login password '$APP_PW';
 create database code_reviewer owner cr_migrate;
--- connected to code_reviewer:
+SQL
+# 2. The schema's privileges, as the administrator, connected to the new database:
+psql -h <host> -U <admin> -d code_reviewer -v ON_ERROR_STOP=1 <<SQL
 revoke all on schema public from public;
+grant usage, create on schema public to cr_migrate;
 grant usage on schema public to cr_app;
-alter default privileges for role cr_migrate in schema public
+SQL
+# 3. Default privileges, as the migrate role (it owns the tables, so they cover every table it creates from now on):
+PGPASSWORD=$MIGRATE_PW psql -h <host> -U cr_migrate -d code_reviewer -v ON_ERROR_STOP=1 <<SQL
+alter default privileges in schema public
   grant select, insert, update, delete on tables to cr_app;
+SQL
 ```
 
-The test suite runs with a single owner role; **this split has not been exercised by CI**. After the first
-`pnpm migrate`, the smoke test of step 8 is the proof: if the app role lacks a privilege, the statement that failed
-names it in the function log. If in doubt, run the App with the migrate role's URL first and tighten later.
+If the admin is not a superuser (managed Postgres), creating a database *owned by* another role needs the admin to be
+a member of that role (`grant cr_migrate to <admin>;` first, or your provider's way of doing it). Copy the two
+passwords into your password manager now (`printf '%s\n' "$MIGRATE_PW" "$APP_PW"` prints them once, to the terminal
+only), then `unset MIGRATE_PW APP_PW`. Steps 1 and 2 show how the URLs are built from them without printing or
+recording them.
+
+The privileges of step 3 only cover tables that `cr_migrate` creates **after** it. If the smoke test or the logs show
+`permission denied for table ...` (migrate was run before step 3, or by another role), repair it; do not widen the
+role:
+
+```sh
+read -rs -p 'cr_migrate password: ' PGPASSWORD; export PGPASSWORD; echo
+psql -h <host> -U cr_migrate -d code_reviewer -v ON_ERROR_STOP=1 <<SQL
+grant select, insert, update, delete on all tables in schema public to cr_app;
+SQL
+```
+
+The role split is exercised in CI (`app/src/db/role-split.integration.test.ts` runs exactly the SQL above against a real
+Postgres: migrate as `cr_migrate`, then health, read and write as `cr_app`, and the repair).
 
 Back up the database yourself (the App starts no backup scheduler with Postgres) and keep a copy of `APP_SECRET`
 **apart from it**: a database restored without its `APP_SECRET` loses every stored credential
@@ -151,8 +193,8 @@ environment variable.
 
 | Environment | Holds | Protection to set |
 |---|---|---|
-| `hosted-snapshot` | secrets `VERCEL_TOKEN`, `VERCEL_TEAM_ID`, `VERCEL_PROJECT_ID` (of the **Dispatcher's** Vercel project) | Deployment branches: selected branches `main` and `development` only. Required reviewers: at least one person other than whoever starts the run. The workflow does not check the branch itself, so without the branch rule a manual run could execute any branch's code with the token. |
-| `hosted-canary` | secret `RUNNER_TOKEN` (the same value as the Dispatcher project's), and `VERCEL_AUTOMATION_BYPASS_SECRET` only if the Dispatcher is behind Deployment Protection | Deployment branches: selected branches `main` and `development` only. Required reviewers as above. Nothing of any other purpose in it. |
+| `hosted-snapshot` | secrets `VERCEL_TOKEN`, `VERCEL_TEAM_ID`, `VERCEL_PROJECT_ID` (of the **Dispatcher's** Vercel project) | Deployment branches: selected branches `main` and `development` only. Required reviewers, with **Prevent self-review** switched on (otherwise whoever starts the run can approve it). The workflow does not check the branch itself, so without the branch rule a manual run could execute any branch's code with the token. |
+| `hosted-canary` | secret `RUNNER_TOKEN` (the same value as the Dispatcher project's), and `VERCEL_AUTOMATION_BYPASS_SECRET` only if the Dispatcher is behind Deployment Protection | Deployment branches: selected branches `main` and `development` only. Required reviewers with **Prevent self-review**, as above. Nothing of any other purpose in it. |
 
 Plus one repository variable, `DISPATCHER_CANARY_HOSTS`: the exact host name(s) of the Dispatcher, comma separated
 (no scheme, no path). Unset or empty, the canary refuses every URL. Leave `GOLDEN_SNAPSHOT_ENABLED` unset for now
@@ -172,15 +214,27 @@ Vercel and never write it in a file, a log or an issue. Placeholders for every v
 ### Generating the secrets
 
 Every secret below is random and **different from every other secret** (the App refuses a signing secret that equals
-another credential of the App, the Dispatcher one that equals its `RUNNER_TOKEN`). Create each with its own call:
+another credential of the App, the Dispatcher one that equals its `RUNNER_TOKEN`). Generate each one into a shell
+variable and hand it straight to its destination, so that the value is never typed into a command line, never printed
+and never in the shell history:
 
 ```sh
-openssl rand -hex 32      # RUNNER_TOKEN, CRON_SECRET, RUNNER_WEBHOOK_SECRET, OPERATOR_API_TOKEN: 64 characters
-openssl rand -base64 32   # APP_SECRET
+# a 64 character secret: RUNNER_TOKEN, CRON_SECRET (one per project), RUNNER_WEBHOOK_SECRET, OPERATOR_API_TOKEN
+SECRET=$(openssl rand -hex 32)
+printf '%s' "$SECRET" | vercel env add RUNNER_TOKEN production --sensitive     # in the linked project's directory
+# the same value into the second place that needs it, then forget it:
+printf '%s' "$SECRET" | gh secret set RUNNER_TOKEN --env hosted-canary
+unset SECRET
+# APP_SECRET, a different call:
+SECRET=$(openssl rand -base64 32); printf '%s' "$SECRET" | vercel env add APP_SECRET production --sensitive; unset SECRET
 ```
 
-Keep the values in your password manager. Rules the code enforces: at least 32 characters, no white space or control
-characters.
+`vercel env add NAME production` reads the value from standard input when it is piped (`vercel link` the project's
+directory first, `app/` or `dispatcher/`). `printf` is a shell built-in with the value in a variable, so the value is not in the
+history or the process list; `echo "<value>" | ...`, which the CLI's own examples show, would put it in the history. The
+dashboard (Settings, Environment Variables) works too, with *Sensitive* on. Keep a copy of `APP_SECRET`, and only that
+one, in your password manager: it is the one value that cannot be rotated (section 5.2). Rules the code enforces for
+every secret: at least 32 characters, no white space or control characters.
 
 ### 3.1 The App project
 
@@ -188,8 +242,8 @@ characters.
 |---|---|---|---|
 | `APP_RUNTIME` | yes, set it | no | `serverless`. Vercel sets `VERCEL=1` and that selects serverless by itself, but set it explicitly so a typo cannot start the other mode. Any other value than `server` or `serverless` stops the start (`APP_RUNTIME_INVALID`). |
 | `APP_SECRET` | yes | **yes** | The master key: signs sessions and encrypts the credentials in the database. At least 32 characters. Never reused between environments. Changing it signs everybody out and makes stored credentials unreadable. |
-| `BETTER_AUTH_URL` | yes | no | The public https address of the App, no path (its production domain). GitHub sends people back to `<this>/api/auth/callback/github`. |
-| `DATABASE_URL` | yes | **yes** | The **app role's** Postgres URL (`postgres://` or `postgresql://`; SQLite is refused in serverless mode). May be a pooler. |
+| `BETTER_AUTH_URL` | yes, **before the first deployment** | no | The public https address of the App, no path (its production domain, so add the domain to the project first). Without it the App refuses to start (`AUTH_CONFIG_INVALID`). GitHub sends people back to `<this>/api/auth/callback/github`. |
+| `DATABASE_URL` | yes | **yes** | The **app role's** Postgres URL (`postgres://` or `postgresql://`; SQLite is refused in serverless mode). **A direct or session-mode connection, never a transaction pooler** (section 2). |
 | `DATABASE_POOL_MAX` | optional | no | Connections per function instance, 1 to 20, default 3. Every instance has its own pool: keep it small. |
 | `RUNNER_TOKEN` | yes | **yes** | The **dispatcher credential**: what the Dispatcher claims jobs with. At least 32 characters. **Same value as the Dispatcher's `RUNNER_TOKEN`.** There is one token, no overlap while rotating (section 5.2). |
 | `CRON_SECRET` | yes | **yes** | Vercel sends it as `Authorization: Bearer ...` to both cron routes. At least 32 characters. Without it every cron call is refused (`401`): leases never expire and no wake-up is resent. Vercel adds the header by itself once the variable exists. |
@@ -203,13 +257,16 @@ characters.
 | `RUNNER_DISPATCH_GIVE_UP_SECONDS` | optional | no | A job that waited this long without a claim fails with `dispatch_unavailable`. 60 to 604800, default **3600** in webhook mode, off in poll mode, `0` turns it off. It is also the longest a job may queue while the pool is full: set it above the queue you accept. |
 | `OPERATOR_API_TOKEN` | optional | **yes** | Switches on the operator API (`/api/operator/v1`: workspaces, entitlements and limits, usage). Unset, the API does not exist (404). At least 32 characters, different from `RUNNER_TOKEN` and `APP_SECRET`. |
 | `REVIEW_DEBOUNCE_SECONDS` | optional | no | How long a push waits before its review may start, 0 to 600, default 90. |
-| `LLM_MODEL`, `LLM_MAX_TOKENS` | optional | no | Instance settings for PR-Agent's model. The LLM key is **not** an environment variable: every workspace enters its own (Settings, LLM access). |
+| `LLM_MODEL`, `LLM_MAX_TOKENS` | optional | no | The instance's model and context window. For workspaces on their own key they are only the defaults a review setting can override. For **`managed` workspaces** (section 3.5) they are the **model pin**: the instance, not the workspace, chooses the model, for Diff and for Dynamic jobs. `LLM_MODEL` is an OpenRouter name, default `anthropic/claude-haiku-5.5`; a model for Dynamic jobs must be tool-capable (`dynamic-review.md`, "The model"). The LLM key is **not** an environment variable. |
 
 Not set in the project, on purpose:
 
 - `DATABASE_URL_MIGRATE`: the direct URL of the **migrate role**. Only `pnpm migrate` and `pnpm setup-code` read it,
   from the shell you run them in. The App never reads it; do not give it to a function.
-- `VERCEL`: set by the platform. `NODE_ENV`: set by Next.js.
+- `VERCEL`: set by the platform.
+- `NODE_ENV`, `NEXT_RUNTIME`: set by Next.js.
+- `DATABASE_PATH`: the file of the SQLite image, unused with Postgres.
+- `BETTER_AUTH_SECRET`: the deprecated name of `APP_SECRET`; a new instance never sets it.
 - The `GITHUB_*`, `ALLOWED_GITHUB_*`, `LLM_PROVIDER` and `LLM_API_KEY` variables: legacy, for an update of an old
   installation. A hosted instance never sets them.
 - `BACKUP_*`, `DATABASE_BUSY_TIMEOUT_MS`: SQLite only.
@@ -240,7 +297,7 @@ A refusal at start names the variable, never its value (`ConfigError`: `required
 | `DISPATCHER_PROBE_TIMEOUT_SECONDS` | optional | no | How long a probe may take, canary VM included, 30 to 600, default 150. |
 | `RUNNER_DYNAMIC_CAPABILITIES` | optional | no | Narrows the model's capabilities for Dynamic jobs and the canary: a JSON object on one line, at most 4096 characters. Normally unset (`docs/dynamic-review.md`, "The model"). Read only when `DISPATCHER_ENGINES` includes `opencode`. |
 | `RUNNER_DYNAMIC_MAX_COST_USD` | optional | no | The most one Dynamic run may cost, a plain positive decimal such as `2.5`. Unset: the Worker's default. |
-| `CRON_SECRET` | yes, with the snapshot | **yes** | The secret Vercel's cron sends to the reaper route (`/api/cron/reap-sandboxes`, every 5 minutes) as `Authorization: Bearer ...`. At least 32 characters, different from `RUNNER_TOKEN` and every signing secret, and **a value of its own: do not reuse the App project's `CRON_SECRET`**. The route exists only when `SANDBOX_SNAPSHOT_ID` is set. Unset, every caller gets `401` and the log warns `reaper_cron_secret_missing`: nothing stops a VM that outlived its job (section 5.5). A malformed value stops the start. |
+| `CRON_SECRET` | yes, with the snapshot | **yes** | The secret Vercel's cron sends to the reaper route (`/api/cron/reap-sandboxes`, every 5 minutes) as `Authorization: Bearer ...`. At least 32 characters, different from `RUNNER_TOKEN` and every signing secret, and **a value of its own: do not reuse the App project's `CRON_SECRET`**. The route exists only when `SANDBOX_SNAPSHOT_ID` is set. Unset, every caller gets `401` and the log warns `reaper_cron_secret_missing`: nothing stops a VM that outlived its job (section 5.5). A malformed value (short, or equal to another secret) stops the start when the snapshot is set; without the snapshot it is ignored with a warning. |
 | `VERCEL_TOKEN`, `VERCEL_TEAM_ID`, `VERCEL_PROJECT_ID` | all three or none | **yes** (the token) | Platform access by access token. **None: the Dispatcher uses the project's own OIDC token**, which Vercel provides inside a function and which needs nothing to rotate. Prefer that. |
 
 Not set by you: `VERCEL_OIDC_TOKEN` (the platform provides it). Only the Node entry (`pnpm start`, not used on
@@ -263,10 +320,34 @@ Vercel) reads `DISPATCHER_SHUTDOWN_GRACE_SECONDS` and `PORT`.
 
 | Where | Name | Meaning |
 |---|---|---|
-| environment `hosted-snapshot` | `VERCEL_TOKEN`, `VERCEL_TEAM_ID`, `VERCEL_PROJECT_ID` | Platform access for the snapshot build. The token is an access token with access to the **Dispatcher's** project; the pipeline hands it to the platform client and to nothing else |
+| environment `hosted-snapshot` | `VERCEL_TOKEN`, `VERCEL_TEAM_ID`, `VERCEL_PROJECT_ID` | Platform access for the snapshot build; `VERCEL_PROJECT_ID` is the **Dispatcher's** project. The pipeline hands the token to the platform client and to nothing else. **A Vercel access token acts for its owner in the whole team (or account) it is created for, not for one project**, whatever `VERCEL_PROJECT_ID` says: create it from a dedicated account that has the lowest team role that can create Sandboxes and snapshots, give it an expiry if the dashboard offers one (and a calendar reminder to rotate it before that day), and if the dashboard offers a token limited to the one project, use that. |
 | environment `hosted-canary` | `RUNNER_TOKEN`, `VERCEL_AUTOMATION_BYPASS_SECRET` (optional) | The canary's credential and the bypass |
 | repository variable | `DISPATCHER_CANARY_HOSTS` | The only host(s) the canary may send the credential to |
 | repository variable | `GOLDEN_SNAPSHOT_ENABLED` | `true` makes a push to `main` build a snapshot. Unset: only manual runs |
+
+### 3.5 LLM keys: a workspace's own, or the operator's
+
+- **`own` (the default).** Every workspace enters its own OpenRouter key (Settings, LLM access); it is stored
+  encrypted with `APP_SECRET`. A workspace without one fails its runs with `llm_not_configured`.
+- **`managed`.** The operator's own key serves the workspaces whose entitlements say `keyMode: "managed"`. The
+  instance admin saves that key in the admin portal under **LLM key** (`/admin/llm`): OpenRouter, write-only, encrypted
+  in the database with `APP_SECRET` (so whoever holds the database and `APP_SECRET` can decrypt it), never shown again,
+  never in a log, a Runs page or an answer of the operator API, and never given to the Dispatcher: the Worker receives
+  it from the App when it fetches its job. It is **not** an environment variable and **not** a call of the operator API.
+- **Setting a workspace to `managed`** is an entitlement, set with the operator API (`OPERATOR_API_TOKEN` must be set):
+  `PUT /api/operator/v1/workspaces/{id}/entitlements` with `"keyMode": "managed"`, the whole entitlements body
+  (`contracts/operator-api.v1.json`). A cost limit (`managedCostLimitMicroUsd`) needs `managed` and is a soft cap
+  (section 9). The change takes effect at the next claim; a running job is not touched.
+- **Upgrade every App instance first.** An instance of a release before #276 does not know the key mode: it would run a
+  managed workspace's jobs on the workspace's own key and model and outside the cost limit. Roll the new App out
+  completely before the first workspace is set to `managed`.
+- **The model is the instance's** while a job runs on the operator's key: `LLM_MODEL` and `LLM_MAX_TOKENS` apply and the
+  workspace's `model`, `maxTokens` and Dynamic model review settings are not used (they take effect again if the
+  workspace goes back to `own`). The workspace's Settings, LLM access page shows a note instead of a key form.
+- **No usable operator key** (none saved, or one that cannot be decrypted, for example after a changed `APP_SECRET`):
+  every job of a managed workspace fails with **`llm_not_configured`**, and the log names `operator_key_missing` or
+  `operator_key_unreadable`. Save the key in the admin portal and the next job runs. Save it **before** you set the
+  first workspace to `managed`.
 
 ## 4. First deployment, step by step
 
@@ -275,9 +356,14 @@ Do the steps in this order (migrate, App, setup code, snapshot, Dispatcher, cana
 ### Step 1. Migrate the database
 
 ```sh
-export DATABASE_URL_MIGRATE='postgres://cr_migrate:<password>@<direct host>:5432/code_reviewer?sslmode=require'
+read -rs -p 'cr_migrate password: ' MIGRATE_PW; echo
+export DATABASE_URL_MIGRATE="postgres://cr_migrate:${MIGRATE_PW}@<direct host>:5432/code_reviewer?sslmode=require"
+unset MIGRATE_PW
 pnpm --dir app migrate
 ```
+
+(`read -rs` keeps the password out of the history and the process list. The URL stays in this shell only; close the
+shell when you are done with steps 1 to 3.)
 
 `pnpm migrate` takes the advisory lock `code-reviewer:migrate`, applies every pending migration in one transaction
 and exits 0 (`[migrate] applied N migration(s): ...` or `[migrate] the schema is up to date, nothing to apply.`) or
@@ -289,9 +375,18 @@ itself.
 
 ### Step 2. Deploy the App (still in poll mode)
 
-Create the App project (root directory `app/`), set the variables of section 3.1 **except** the `RUNNER_DISPATCH` and
-`RUNNER_WEBHOOK_*` ones, and deploy the production branch. Give the production deployment its domain and set
-`BETTER_AUTH_URL` to it.
+1. Create the App project (root directory `app/`) and add its **production domain** first: `BETTER_AUTH_URL` must be
+   that address, and the App refuses to start without it.
+2. Set the variables of section 3.1 **except** the `RUNNER_DISPATCH` and `RUNNER_WEBHOOK_*` ones (poll mode is the
+   default; webhook mode is step 7), including `BETTER_AUTH_URL` and `CRON_SECRET`, with the commands of "Generating the
+   secrets". The database URL of the app role, read from a prompt and piped, never printed:
+
+   ```sh
+   read -rs -p 'cr_app password: ' APP_PW; echo
+   printf '%s' "postgres://cr_app:${APP_PW}@<host>:5432/code_reviewer?sslmode=require" | vercel env add DATABASE_URL production --sensitive
+   unset APP_PW
+   ```
+3. Deploy the production branch.
 
 **Check:** `https://<app>/api/health` answers `200 {"status":"ok"}`. `503` with `SCHEMA_BEHIND` means step 1 was
 not run against this database, `503` without a code means the database is not reachable with `DATABASE_URL`. In the
@@ -307,10 +402,11 @@ A serverless instance has no log the operator reads, so the setup code is made b
 `APP_SECRET` as the deployment:
 
 ```sh
-APP_RUNTIME=serverless APP_SECRET='<the same value>' pnpm --dir app setup-code
+read -rs -p 'APP_SECRET of the deployment: ' APP_SECRET; echo; export APP_SECRET
+APP_RUNTIME=serverless pnpm --dir app setup-code
 ```
 
-(with `DATABASE_URL_MIGRATE` still exported). It prints `[setup-code] Setup code: <6 digits>`, valid for 60
+(with `DATABASE_URL_MIGRATE` still exported; `unset APP_SECRET` afterwards). It prints `[setup-code] Setup code: <6 digits>`, valid for 60
 minutes; running it again makes a new code and ends the old one. It refuses to print to anything but a terminal
 (`SETUP_CODE_NOT_A_TERMINAL`; `--allow-pipe` overrides, only if you know where the output goes), on a database
 that is behind (`SETUP_CODE_SCHEMA_BEHIND`: run step 1) and on an instance that is already set up
@@ -324,6 +420,8 @@ After that:
    hosted instance's **own** App.
 2. Install the App on one test repository, activate the repository as a project, and in the workspace enter an LLM
    key (Settings, LLM access). Without it a run ends `llm_not_configured`.
+3. Only if you operate `managed` workspaces (section 3.5): save the operator's key under **LLM key** (`/admin/llm`) now.
+   It is optional for the first deployment and the smoke test.
 
 Do not open test pull requests yet: no Dispatcher exists, so a job would only wait (the sweep sends it after step 7).
 
@@ -336,13 +434,13 @@ is built from the commit **inside that VM**, with no registry and no registry cr
 1. Create the **Dispatcher project** now (root directory `dispatcher/`, no variables yet, no deployment needed): the
    token and project id of the `hosted-snapshot` environment point at it, because the Launcher creates job VMs in the
    project it runs in and the snapshot has to be in that project.
-2. Set the three secrets of `hosted-snapshot` (section 3.4).
+2. Set the three secrets of `hosted-snapshot` (section 3.4), for example `printf '%s' "$TOKEN" | gh secret set VERCEL_TOKEN --env hosted-snapshot` with the token read into `TOKEN` by `read -rs`.
 3. Actions, *Golden snapshot*, *Run workflow* on `development` (or the release tag's branch): `target` stays
    `sandbox`; `pinned_snapshot` stays empty on the first run. A reviewer approves the environment.
 4. About two minutes later the run summary shows the **record**:
 
    ```json
-   { "version": 1, "snapshotId": "snap_...", "imageDigest": "sha256:<64 hex>", "region": "fra1", "target": "sandbox", "commit": "..." }
+   { "version": 1, "snapshotId": "snap_...", "imageDigest": "sha256:<64 hex>", "builtAt": "<UTC time>", "region": "fra1", "target": "sandbox", "commit": "<sha>" }
    ```
 
    It is also the artifact `golden-snapshot-record` (90 days). Keep it: `snapshotId` and `imageDigest` go into the
@@ -367,10 +465,17 @@ initialises, so a bad value shows as failing requests and a log line that names 
 (`SANDBOX_SNAPSHOT_ID is required`, `DISPATCHER_WORKER_CONFIG is invalid`, ...), not as a failed build. If you
 protect the project with Deployment Protection, every path answers the platform's login page until the bypass header
 is sent: confirm `curl -s -o /dev/null -w '%{http_code}' -H 'x-vercel-protection-bypass: <secret>' https://<dispatcher>/health`
-prints `200` before step 7, or every wake-up waits half an hour (section 5.3). Also check that the Dispatcher's Cron Jobs settings list the reaper and that its first runs answer `200` (`401` means `CRON_SECRET` is missing in this project).
+prints `200` before step 7, or every wake-up waits half an hour (section 5.3).
 
-Then add the Dispatcher's production host to the repository variable `DISPATCHER_CANARY_HOSTS` and the
-Dispatcher's `RUNNER_TOKEN` to the `hosted-canary` environment (and the bypass secret, if it is protected).
+Check the reaper too: the Dispatcher's Cron Jobs settings list it, and its first runs answer `200` (`401` means
+`CRON_SECRET` is missing or malformed in this project). **If the project is behind Deployment Protection, that the
+platform's cron gets past it is not verified** (I could not confirm it from the platform's documentation): look at the
+first run, and if it is refused, either switch protection off for the production domain (the Dispatcher checks a
+signature or a credential on every route that does anything) or reap by hand (section 5.5).
+
+Then add the Dispatcher's production host (exact, no scheme or path) to the repository variable
+`DISPATCHER_CANARY_HOSTS` and the Dispatcher's `RUNNER_TOKEN` to the `hosted-canary` environment (and the bypass secret,
+if it is protected).
 
 ### Step 6. Run the canary
 
@@ -385,8 +490,9 @@ read the stable reasons in the output (`dispatcher/README.md`, "The capability p
 one of the closed `ProbeFailure` list, for a `denied` verdict the reasons of the startup self-check in
 [`dynamic-review.md`](dynamic-review.md)) and do not go on. Exit 2 means a wrong URL or option and nothing was sent.
 
-Running the canary on a preview deployment of the next release **before** promoting it is the normal release
-sequence; for the very first deployment the production deployment is the candidate.
+For the very first deployment the production deployment is the candidate, as above. **For every later release the
+candidate is a staged production deployment** (section 5.1): that is the only place where the new snapshot can be proven
+before production uses it.
 
 ### Step 7. Switch the App to webhook mode
 
@@ -395,8 +501,15 @@ In the App project add `RUNNER_DISPATCH=webhook`, `RUNNER_WEBHOOK_URL=https://<d
 (= `DISPATCHER_MAX_RUNNING`) and, if needed, `RUNNER_WEBHOOK_BYPASS_TOKEN`. Redeploy.
 
 **Check:** the deployment starts. A webhook mode with a missing URL, a short or reused signing secret stops the start
-with `DEPLOY_CONFIG_INVALID` naming the variables (never the values). The jobs that waited since step 3 are woken by
-the next sweep within a minute.
+with `DEPLOY_CONFIG_INVALID` naming the variables (never the values).
+
+**Switch soon after step 3, and before pull requests are opened.** In poll mode the give-up is off. The first
+webhook-mode sweep applies `RUNNER_DISPATCH_GIVE_UP_SECONDS` (default 3600) to every job that has been queued longer
+than that: such a job is **not woken, it fails with `dispatch_unavailable`** (no attempt is counted, and the next push or
+*Review now* runs it again). Steps 4 to 6 take well under an hour, and you opened no pull request before this step,
+so normally nothing waits. If something does, let it fail and trigger it again, or raise the give-up time for the
+switch and lower it afterwards. Jobs queued for less than the give-up time are woken by the first sweep within a
+minute.
 
 ### Step 8. Smoke test: a Diff review, then a Dynamic review
 
@@ -434,10 +547,28 @@ The full procedure is in [`golden-snapshot.md`](golden-snapshot.md), "Rebuild"; 
    deletes old builders and their snapshots after a successful run (it keeps the newest two and every pin): a snapshot
    in use that is neither is **deleted**, and the Dispatcher then fails every job with `sandbox_snapshot_missing`.
 2. Take the new record from the summary.
-3. Deploy the Dispatcher to a preview (or the production deployment before promoting) with the new
-   `SANDBOX_SNAPSHOT_ID` and `SANDBOX_IMAGE_DIGEST`, run the **canary** on it (step 6). Only on exit 0 switch the
-   production Dispatcher and redeploy.
-4. On the run after that, pass the **new** snapshot id as the pin.
+3. Put the new `SANDBOX_SNAPSHOT_ID` and `SANDBOX_IMAGE_DIGEST` into the Dispatcher project's **production**
+   variables **without promoting anything**: a variable change affects only deployments made afterwards, so the live
+   deployment keeps the old pair. Then make a **staged production deployment**, which uses the production variables
+   but is not assigned the production domains:
+
+   ```sh
+   cd dispatcher && vercel deploy --prod --skip-domain      # prints the deployment URL
+   ```
+
+   Why not a preview deployment: a preview gets the project's *Preview* variables, which the guide does not set (it would
+   fail at start for want of `RUNNER_TOKEN` and the snapshot pair), its host changes with every deployment, and neither
+   the reaper nor any cron runs there.
+4. Prove it. The canary refuses a host that is not in the repository variable `DISPATCHER_CANARY_HOSTS` (exact host
+   names, comma separated), and the staged deployment has a host of its own: add it to the variable first. If the project's
+   Deployment Protection covers generated deployment URLs, the canary needs the project's bypass secret as
+   `VERCEL_AUTOMATION_BYPASS_SECRET` in `hosted-canary`; with protection off it needs nothing more. Run the *Dispatcher
+   canary* workflow with `url` = the staged deployment (step 6). The probe creates its canary VM from the **new** snapshot, because
+   that deployment carries the new pair.
+5. Only on exit 0 promote: `vercel promote <deployment-url>`. On a failure, do not promote; put the old pair back into the
+   variables (a later deployment must not pick the new pair up by accident) and delete the staged deployment.
+6. Remove the staged deployment's host from `DISPATCHER_CANARY_HOSTS` (the credential must go only to hosts you mean
+   it for), and on the next snapshot run pass the **new** snapshot id as the pin.
 
 `GOLDEN_SNAPSHOT_ENABLED=true` makes every push to `main` build a snapshot, but nothing changes a deployment by
 itself: marking a snapshot current is always this manual step, and a rebuilt image whose digest differs from the
@@ -449,7 +580,7 @@ configured one is refused by the Launcher until you do it.
 |---|---|
 | **Webhook signing key** (`RUNNER_WEBHOOK_SECRET`, `DISPATCHER_SIGNING_SECRET`) | No gap, in this order: (1) in the Dispatcher project set the new key as current (`DISPATCHER_SIGNING_KEY_ID`, `DISPATCHER_SIGNING_SECRET`) and the old one as `..._PREVIOUS`, redeploy; (2) in the App project set the new key (`RUNNER_WEBHOOK_KEY_ID`, `RUNNER_WEBHOOK_SECRET`), redeploy; (3) after at least 5 minutes (the receiver's clock tolerance) remove the previous key from the Dispatcher and redeploy. Use a **new key id** each time. |
 | **`RUNNER_TOKEN`** (the dispatcher credential) | The App accepts exactly one, so there is a short gap: set the new value in the App and the Dispatcher projects and in the `hosted-canary` environment, redeploy **both**. Claims that arrive between the two deployments fail and the job stays queued, to be resent by the sweep; running Workers are not affected (they use their per-job credential, not this token). Do it when the queue is quiet. |
-| **Vercel access** | With OIDC (no `VERCEL_TOKEN` in the Dispatcher project) there is nothing to rotate for the Launcher. For the snapshot pipeline: create a new access token, update `VERCEL_TOKEN` in `hosted-snapshot` (and in the Dispatcher project if you chose token auth there, then redeploy), run a harmless check (a snapshot run, or the canary), then revoke the old token. |
+| **Vercel access** | With OIDC (no `VERCEL_TOKEN` in the Dispatcher project) there is nothing to rotate for the Launcher. For the snapshot pipeline: create a new access token (a dedicated one, with an expiry if the dashboard offers it: section 3.4), update `VERCEL_TOKEN` in `hosted-snapshot` (and in the Dispatcher project if you chose token auth there, then redeploy), run a harmless check (a snapshot run, or the canary), then revoke the old token. |
 | **Bypass secret** | Regenerate it in the Dispatcher project's Deployment Protection settings, then update `RUNNER_WEBHOOK_BYPASS_TOKEN` (App, redeploy) and `VERCEL_AUTOMATION_BYPASS_SECRET` (`hosted-canary`). Wake-ups fail with `DISPATCH_REJECTED` in between. |
 | **`CRON_SECRET`** (App and Dispatcher, two separate values) | Change it in the project, redeploy. Vercel sends the new value to the next cron call; until the deployment is live the calls are refused (`401`) and a minute of the sweep is lost. |
 | **`OPERATOR_API_TOKEN`** | Change it, redeploy, give the operator's client the new one. |
@@ -470,7 +601,7 @@ A run's error code is shown on the Runs pages with a fixed sentence. Three belon
 Others you will meet: `no_capable_runner` (a Dynamic job nobody could run for 30 minutes: the probe says no, or
 `DISPATCHER_ENGINES` has no `opencode`), `dynamic_review_disabled` (the gate is off), `lease_expired` (the Worker
 stopped reporting), `quota_exhausted`, `workspace_suspended` and `entitlements_invalid` (the workspace's limits, set
-through the operator API), `llm_not_configured` (the workspace has no LLM key). The wake-up call's answers (`202`,
+through the operator API), `llm_not_configured` (the workspace has no LLM key, or it is `managed` and the operator has no usable key: section 3.5). The wake-up call's answers (`202`,
 `200 ignored` with `not_claimable` or `not_capable`, `429`, `503`) and the App's back-off are in
 `app/src/dispatch/README.md`, "What an answer means".
 
@@ -508,7 +639,9 @@ deployment that outlived their purpose.
   `REAP_LIST_FAILED` means the platform's listing failed; nothing was stopped and the next run tries again.
 - **To check it:** Vercel's Cron Jobs settings of the Dispatcher project show the runs. During the smoke test, list the
   project's VMs after a job: none should be left running with a `cr-` name.
-- **If it does not run** (no `CRON_SECRET`, no snapshot configured, a plan that does not allow the cron), list the
+- **Deployment Protection:** whether the platform's cron is let through when the Dispatcher project is protected is not
+  verified (step 5 says how to look).
+- **If it does not run** (no `CRON_SECRET`, no snapshot configured, protection in the way, a plan that does not allow the cron), list the
   project's VMs now and then (names start with `cr-`, tags `app`, `kind`, `job`) and stop any that is older than a job
   can be. Leftover builders of the snapshot pipeline (`code-reviewer-golden-builder-*`) are handled in
   [`golden-snapshot.md`](golden-snapshot.md).
@@ -589,7 +722,7 @@ A self-hosted installation and a hosted one never share a database or a GitHub A
   error bodies are undocumented, so it is not verified against the live API (`dispatcher/README.md`).
 - **The whole chain**: signed wake-up, claim, VM, Worker, result on a real GitHub pull request. The end-to-end
   journeys are #332, **pending**; this guide's step 8 is the manual version.
-- **The reaper** against the live platform (section 5.5).
+- **The reaper** against the live platform (section 5.5), and whether the platform's cron reaches it while the Dispatcher project is behind Deployment Protection.
 - The **database role split** of section 2.
 - **Dynamic Review memory**: the worst case in a 2 GB VM is unmeasured (section 6).
 - The **golden snapshot** passed its checks in two real runs (the pinned Docker versions, the scan, the probe line).
@@ -602,8 +735,11 @@ A self-hosted installation and a hosted one never share a database or a GitHub A
 - **The cost limit of a workspace is a soft cap** (`managedCostLimitMicroUsd`): cost is known only when a run settles,
   so runs in flight are not in the sum and a workspace can end above its limit by what the concurrent runs cost. The run
   limits are exact. A run with an unknown cost counts for nothing (`unknownCostCount` in the operator API's summary).
-  A limit for runs on a workspace's own key is #361. Limits are set through the operator API; the operator's own LLM
-  key (managed key mode) is **#276, pending**: until it merges, every workspace brings its own key.
+  A limit for runs on a workspace's own key is #361. Limits and the key mode are set through the operator API; the
+  operator's own key (section 3.5) is saved by the instance admin only, and a workspace set to `managed` before every App
+  instance runs the release that knows the key mode is served by the wrong key and outside the limit.
+- **A managed workspace has no model of its own**: the instance's `LLM_MODEL` and `LLM_MAX_TOKENS` apply to all of them
+  until managed quality tiers exist (#280, #283).
 - **The capability probe.** One answer per Dispatcher *instance*, held in memory for `DISPATCHER_PROBE_TTL_SECONDS`
   (1 hour). The first Dynamic wake-up after the hour, and the first one on every **cold instance**, finds nothing
   proven, starts a probe (one canary VM, tens of seconds) and is answered `503` with `Retry-After: 20`; Dynamic jobs
@@ -623,7 +759,6 @@ A self-hosted installation and a hosted one never share a database or a GitHub A
 ## 10. Follow-ups
 
 - #332 the end-to-end journeys: then step 8 has an automated twin.
-- #276 the operator's own LLM key: then section 9 and the admin documentation change.
 - #334 and #335 the self-hosted split and flipping its default: then section 8 gets its step table.
 - A deploy workflow that runs `pnpm migrate` and the canary in order is not part of the repository; today steps 1, 2,
   5 and 6 are manual.
