@@ -9,6 +9,7 @@ import { dispatchHook } from "../dispatch/shared.ts";
 import { createJobQueue, type JobQueue } from "./job-queue.ts";
 import { configuredNoCapableRunnerMs } from "./job-limits.ts";
 import { noticeOfRefusal } from "../refusal-notices/shared.ts";
+import { unknownCostAlertLine } from "../usage/unknown-cost-alert.ts";
 import { createRunnerQueue, type RunnerQueue } from "./runner-queue.ts";
 
 /**
@@ -41,12 +42,17 @@ export function getRunnerQueue(): RunnerQueue {
       // #281: the pull request gets one notice per period, posted after the response of the claim.
       noticeOfRefusal(refusal);
     },
-    // #277: a cost limit next to the own key is read by nothing; say so once, with the id of the workspace only.
+    // #361: a run settled without a known cost, which no cost limit bounds. One line per run so it can be watched:
+    // the ids only, never a figure, a model or a name.
+    onUnknownCostSettled: (settlement) => {
+      console.warn(unknownCostAlertLine(settlement));
+    },
+    // #277: a managed cost limit next to the own key is read by nothing; say so once, with the id of the workspace only.
     onIgnoredCostLimit: (workspaceId) => {
       if (ignoredCostLimitLogged.has(workspaceId)) return;
       ignoredCostLimitLogged.add(workspaceId);
       console.info(
-        `[queue] workspace=${workspaceId} has a cost limit next to the own key; the limit is ignored (cost_limit_requires_managed_key)`,
+        `[queue] workspace=${workspaceId} has a managed cost limit next to the own key; the limit is ignored (cost_limit_requires_managed_key)`,
       );
     },
   });

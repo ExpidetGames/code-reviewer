@@ -145,7 +145,9 @@ claimed (#277, `src/usage/README.md`, "Limits and suspension at claim"); the key
   and one instance setting `default_entitlements` for the workspaces without a row. Both hold the same fields:
   `planLabel` (a label for display and audit, at most 64 printable characters; the code never branches on it),
   `keyMode` (`own` or `managed`: whose LLM key the reviews use, the workspace's own or the operator's), `limits` (`diffRunsPerPeriod`, `dynamicRunsPerPeriod`,
-  `managedCostLimitMicroUsd`, each a non-negative integer up to 2^53-1 or `null` for unlimited), `periodStart` (usage
+  `managedCostLimitMicroUsd`, `ownKeyCostLimitMicroUsd`, each a non-negative integer up to 2^53-1 or `null` for
+  unlimited; the two cost limits are micro-USD of measured model cost and each watches the runs on one key mode: the
+  operator's key and the workspace's own, #361), `periodStart` (usage
   counts from here), `suspended` and `suspensionCode`.
 - **Resolver.** `resolveEntitlements(row, default)` in `entitlements.ts` is the one place that interprets the data. A
   row wins entirely (no field-wise merge with the default); without a row the default applies; with neither the
@@ -162,6 +164,11 @@ claimed (#277, `src/usage/README.md`, "Limits and suspension at claim"); the key
   unreadable wins over a good default, like any row. The claim (#277) refuses with
   that code (`entitlements_invalid`; the Runs pages explain it); repairing the entry is a valid `put`. Reading ignores keys it does not know (an
   older app reads what a newer one wrote) and does not ask the clock.
+- **The cost limits (#361).** `managedCostLimitMicroUsd` bounds the settled cost of the runs that used the operator's key,
+  `ownKeyCostLimitMicroUsd` the runs that used the workspace's own. A job is checked against the limit of the key it runs
+  on, and the sums count records by their own key mode, so switching a workspace between the two never moves cost from
+  one limit to the other. Both are soft caps and neither bounds a run whose cost is unknown
+  (`src/usage/README.md`, "Limits and suspension at claim").
 - **Adding a limit later.** A new limit goes into `LIMIT_NAMES` and, so that existing entries stay readable, into
   `LIMITS_ADDED_LATER` (`entitlements-validation.ts`): when reading, its missing key means `null` (unlimited), which
   is true because no such limit existed when the entry was written. Writes still require every key. (The alternative
@@ -172,8 +179,9 @@ claimed (#277, `src/usage/README.md`, "Limits and suspension at claim"); the key
   no control, formatting, private use or line separator characters; unassigned code points are not judged, so the
   answer does not depend on the Unicode version of Node), `key_mode_invalid`, `limits_invalid` (not an object, a
   missing or an unknown key), `limit_invalid` (with the name of the limit), `cost_limit_requires_managed_key` (#277: a
-  cost limit, even 0, with the key mode `own`, which nothing would read; refused on a write only, a stored entry of that
-  shape is still read and its limit ignored), `period_start_invalid`,
+  managed cost limit, even 0, with the key mode `own`, which nothing would read; refused on a write only, a stored entry
+  of that shape is still read and its limit ignored. The own-key limit `ownKeyCostLimitMicroUsd` is allowed with either
+  key mode, #361), `period_start_invalid`,
   `period_start_in_future` (more than five minutes ahead), `period_start_backwards` (earlier than the stored one;
   the same value again is accepted), `suspended_invalid`, `suspension_code_invalid` (lower case letters, digits,
   `_` and `-`, starting with a letter, at most 64 characters; checked even when not suspended). A valid code is

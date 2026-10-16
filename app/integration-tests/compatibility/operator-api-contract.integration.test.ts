@@ -53,6 +53,7 @@ const WRITE = {
     diffRunsPerPeriod: 100,
     dynamicRunsPerPeriod: null,
     managedCostLimitMicroUsd: 5_000_000,
+    ownKeyCostLimitMicroUsd: null,
   },
   periodStart: "2026-10-01T00:00:00.000Z",
   suspended: false,
@@ -459,6 +460,21 @@ describe("what the app accepts", () => {
       keyMode: "own",
       limits: { ...WRITE.limits, managedCostLimitMicroUsd: null },
     },
+    // #361: the own key takes the cost limit of its own, and the operator's key may carry one too (a workspace
+    // can be switched between the two).
+    {
+      ...WRITE,
+      keyMode: "own",
+      limits: {
+        ...WRITE.limits,
+        managedCostLimitMicroUsd: null,
+        ownKeyCostLimitMicroUsd: 2_000_000,
+      },
+    },
+    {
+      ...WRITE,
+      limits: { ...WRITE.limits, ownKeyCostLimitMicroUsd: 0 },
+    },
     { ...WRITE, limits: { ...WRITE.limits, diffRunsPerPeriod: 0 } },
     {
       ...WRITE,
@@ -466,6 +482,7 @@ describe("what the app accepts", () => {
         diffRunsPerPeriod: null,
         dynamicRunsPerPeriod: null,
         managedCostLimitMicroUsd: null,
+        ownKeyCostLimitMicroUsd: null,
       },
     },
     { ...WRITE, suspended: true, suspensionCode: "unpaid" },
@@ -491,6 +508,18 @@ describe("what the app accepts", () => {
     { ...WRITE, periodStart: "yesterday" },
     { ...WRITE, extra: 1 },
     { ...WRITE, limits: { diffRunsPerPeriod: 1 } },
+    // #361: a write states every limit, the own-key one too; and it is a count or null.
+    {
+      ...WRITE,
+      limits: {
+        diffRunsPerPeriod: 1,
+        dynamicRunsPerPeriod: null,
+        managedCostLimitMicroUsd: null,
+      },
+    },
+    { ...WRITE, limits: { ...WRITE.limits, ownKeyCostLimitMicroUsd: -1 } },
+    { ...WRITE, limits: { ...WRITE.limits, ownKeyCostLimitMicroUsd: 1.5 } },
+    { ...WRITE, limits: { ...WRITE.limits, ownKeyCostLimitMicroUsd: "5" } },
     { ...WRITE, limits: { ...WRITE.limits, diffRunsPerPeriod: -1 } },
     { ...WRITE, limits: { ...WRITE.limits, diffRunsPerPeriod: 1.5 } },
     { ...WRITE, limits: { ...WRITE.limits, diffRunsPerPeriod: "5" } },
