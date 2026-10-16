@@ -98,10 +98,11 @@ GitHub ──webhook──▶ App ──queues the job, then signed POST /dispat
   platform's and they change.
 - **The per-minute cron is a hard requirement.** It is the App's sweep (`/api/internal/dispatch-sweep`). In webhook
   mode a push-triggered review (a job that waits the debounce, 90 seconds by default) is sent to the Dispatcher **only**
-  by that sweep, so **without it push-triggered reviews never start**; leases never expire and an unacknowledged wake-up
-  or a job given back after a failed launch is never resent either. Reviews that are due when they are queued (a pull
-  request opened, reopened or marked ready, a person's *Review now*, or any job when `REVIEW_DEBOUNCE_SECONDS` is `0`)
-  are sent at once and do not need it. Even with the cron, a debounced review starts **up to about 60 seconds later**
+  by that sweep, so **without it push-triggered reviews never start**; an unacknowledged wake-up, a send that failed and a job
+  given back after a failed launch are never resent either, and the lease of a Worker that stopped reporting expires
+  only late, when another job happens to be claimed. Reviews that are due when they are queued (a pull request
+  opened, reopened or marked ready, a person's *Review now*, or any job when `REVIEW_DEBOUNCE_SECONDS` is `0`) are
+  sent at once by the enqueue hook and need the cron only if that first send fails. Even with the cron, a debounced review starts **up to about 60 seconds later**
   than on the self-hosted path, where the runner polls every few seconds: it becomes due, then waits for the next
   sweep (the platform may run a cron a little after its minute). A plan that allows only daily crons cannot run this
   deployment; the daily `repository-sync` is not a substitute.
@@ -258,7 +259,7 @@ every secret: at least 32 characters, no white space or control characters.
 | `DATABASE_URL` | yes | **yes** | The **app role's** Postgres URL (`postgres://` or `postgresql://`; SQLite is refused in serverless mode). **A direct or session-mode connection, never a transaction pooler** (section 2). |
 | `DATABASE_POOL_MAX` | optional | no | Connections per function instance, 1 to 20, default 3. Every instance has its own pool: keep it small. |
 | `RUNNER_TOKEN` | yes | **yes** | The **dispatcher credential**: what the Dispatcher claims jobs with. At least 32 characters. **Same value as the Dispatcher's `RUNNER_TOKEN`.** There is one token, no overlap while rotating (section 5.2). |
-| `CRON_SECRET` | yes | **yes** | Vercel sends it as `Authorization: Bearer ...` to both cron routes. At least 32 characters. Without it every cron call is refused (`401`): leases never expire, no wake-up is resent and **push-triggered reviews never start** (section 5.7). Vercel adds the header by itself once the variable exists. |
+| `CRON_SECRET` | yes | **yes** | Vercel sends it as `Authorization: Bearer ...` to both cron routes. At least 32 characters. Without it every cron call is refused (`401`): no wake-up is resent, lapsed leases expire only late (when another job is claimed) and **push-triggered reviews never start** (section 5.7). Vercel adds the header by itself once the variable exists. |
 | `RUNNER_DISPATCH` | yes, **in step 7** | no | `webhook`. Leave it unset (`poll`) until step 7: in poll mode nothing wakes a Dispatcher. |
 | `RUNNER_WEBHOOK_URL` | with `webhook` | no | The Dispatcher's wake-up endpoint: `https://<dispatcher production domain>/dispatch`. https, no credentials in it. |
 | `RUNNER_WEBHOOK_SECRET` | with `webhook` | **yes** | The key the App signs the wake-up call with. At least 32 characters. **Same value as the Dispatcher's `DISPATCHER_SIGNING_SECRET`.** Different from every other secret. |
@@ -682,10 +683,10 @@ not only a repair service (`app/src/dispatch/README.md`, "The cron sweep"). In w
 
 | Job | Who sends the wake-up | Without the sweep |
 |---|---|---|
-| Due when queued: opened, reopened, ready for review, *Review now*, any job with `REVIEW_DEBOUNCE_SECONDS=0` | The App's enqueue hook, at once | Works |
+| Due when queued: opened, reopened, ready for review, *Review now*, any job with `REVIEW_DEBOUNCE_SECONDS=0` | The App's enqueue hook, at once; **a send that fails is retried only by the sweep** | Works if the first send succeeds; a failed send is never retried |
 | **Not due yet** when queued: an automatic review after a push (debounce, 90 s by default) | **The sweep**, when the job becomes due | **Never starts** |
 | A wake-up nobody acknowledged, or a job given back after a failed launch | The sweep, at the next run after the acknowledgement timeout (2 minutes) | Never resent |
-| A running job whose Worker stopped reporting | The sweep expires its lease and requeues it | Stays `running`; nothing else ends it |
+| A running job whose Worker stopped reporting | The sweep expires its lease and requeues it | Expires late: every claim also expires lapsed leases (`claimNext`), so it ends only when some job, possibly the next one of the same pull request, is claimed |
 | A job nobody claimed for `RUNNER_DISPATCH_GIVE_UP_SECONDS` | The sweep fails it with `dispatch_unavailable` | Waits forever |
 
 So a debounced review starts after **the debounce plus up to about 60 seconds** (it is sent at the first sweep after it

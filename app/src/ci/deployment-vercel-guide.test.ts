@@ -635,6 +635,16 @@ describe("the hosted deployment guide as a procedure", () => {
     expect(needs).toContain("The per-minute cron is a hard requirement.");
     expect(needs).toContain("without it push-triggered reviews never start");
     expect(needs).toContain("up to about 60 seconds later");
+    // Leases do not stop expiring without the cron: every claim expires the lapsed ones, so it is late, not never.
+    expect(needs).toContain(
+      "the lease of a Worker that stopped reporting expires only late, when another job happens to be claimed",
+    );
+    expect(needs).toContain("need the cron only if that first send fails");
+    expect(guide).not.toContain("leases never expire");
+    expect(guide).not.toContain("nothing else ends it");
+    expect(read("app/src/db/repositories/runner-jobs-repository.ts")).toMatch(
+      /async claimNext[\s\S]{0,400}await expire\(trx, current\)/,
+    );
     expect(needs).toContain(
       "A plan that allows only daily crons cannot run this deployment",
     );
@@ -646,6 +656,12 @@ describe("the hosted deployment guide as a procedure", () => {
     );
     expect(sweep).toContain("**Not due yet** when queued");
     expect(sweep).toContain("**Never starts**");
+    expect(sweep).toContain(
+      "a send that fails is retried only by the sweep** | Works if the first send succeeds; a failed send is never retried",
+    );
+    expect(sweep).toContain(
+      "Expires late: every claim also expires lapsed leases (`claimNext`)",
+    );
     expect(sweep).toContain("the debounce plus up to about 60 seconds");
     expect(sweep).toContain("`REVIEW_DEBOUNCE_SECONDS=0`");
     expect(

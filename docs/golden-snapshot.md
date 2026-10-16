@@ -65,7 +65,8 @@ _Actions > Golden snapshot > Run workflow_ (inputs: `target`, default `sandbox`;
 Dispatcher uses now). To rebuild automatically on every release, set the repository variable
 `GOLDEN_SNAPSHOT_ENABLED` to `true`: a push to `main` then runs it. Without it the push does nothing. It never runs for a
 pull request, and the job runs only from `main` and `development` (its own condition, as the canary's, because a manual
-run executes the code of the branch it is started on; the environment's branch rule is the second layer). Locally the same command works with the three variables exported and `--context` made with
+run executes the code of the branch it is started on; the environment's branch rule is the second layer). Locally the
+same command works with the three variables exported and `--context` made with
 `git archive --format=tar.gz --output /tmp/context.tgz HEAD` (never run it against a platform account you do not mean
 to change).
 
