@@ -221,7 +221,9 @@ export default defineConfig({
       dependencies: ["prepare", "connect"],
     },
   ],
-  // Six servers. The fake GitHub stands in for github.com (sign in) and api.github.com; the app
+  // Six apps under test (the seventh port, `E2E_PORT` + 5, is the one the update journey starts itself) and the two
+  // fake servers they share, GitHub and SMTP; the journeys start their own fake LLMs. The apps take consecutive ports
+  // from `E2E_PORT` up to `E2E_PORT` + 6. The fake GitHub stands in for github.com (sign in) and api.github.com; the app
   // under test is pointed at it by environment variables. The journeys always run against a
   // production build, never the dev server, with a fresh SQLite file in the (git-ignored)
   // test-results folder; the app migrates it on start. All values are fixed dummies.

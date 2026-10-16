@@ -466,7 +466,7 @@ for the reviews. No new product code, no new fake: the fake LLM already offers t
 - **Apps.** `plain-instance.e2e.ts` (project `operator-plain`) runs on the app of the real-runner journey (the second app), after that
   journey (`dependencies: ["jobs"]`; two runners must not poll one app): an instance with no `OPERATOR_API_TOKEN` and no entitlements.
   `limited-workspace.e2e.ts` (project `operator`) has an app of its own, the seventh, a `next start` of the same build on
-  `E2E_OPERATOR_PORT` (default `E2E_PORT` + 6), multi-tenant, with `OPERATOR_API_TOKEN` (a dummy in `e2eEnv.operatorApiToken`), the
+  `E2E_OPERATOR_PORT` (default `E2E_PORT` + 6; the apps of the lane sit on consecutive ports from `E2E_PORT`, so two checkouts less than seven ports apart collide, give each its own `E2E_PORT`), multi-tenant, with `OPERATOR_API_TOKEN` (a dummy in `e2eEnv.operatorApiToken`), the
   instance's `LLM_MODEL` and `LLM_MAX_TOKENS` and `LLM_API_BASE_URL` at the journey's fake LLM (`E2E_OPERATOR_LLM_PORT`, random in
   65500-65534, which answers the reviews and the model metadata of the tiers). It has two workspaces made the way people make them
   (sign-up, "Create a workspace", "Connect GitHub" through the fake's installation page: `e2e/helpers/multi-tenant.ts`): A takes the
@@ -481,10 +481,11 @@ for the reviews. No new product code, no new fake: the fake LLM already offers t
   a reader that is caught up, with the condition as the wait (`pollUsage`); the summary has no lag and is used where the journey does not
   need the feed itself. Two reads of the feed cost about 50 s of waiting in the journey; nothing is sped up by writing rows.
 - **The privacy search** (`expectNothingSecret`) looks, in every page and answer a member or an Owner of workspace A can read (the pages
-  of the workspace, the settings, the plan, every run and its data, and the comments on the pull requests, refusal notices included), for
+  of the workspace, the settings, the plan, the project and its review page, the LLM key status, the pull requests, every run and its data, the
+  DOM and the visible text of the plan, the Runs list, a run and the review defaults once hydrated, and the comments on the pull requests, refusal notices included), for
   the ids of all six tier models and their parts, the operator's key (and all of it but its last four characters), the code of the
   suspension, the operator token, the prices the provider's metadata states, a measured cost and an amount of money. It proves
-  itself first with texts that must fail it. The usage feed, which is the operator's, may hold the cost and nothing else of the list.
+  itself first with a table of texts that must fail it, one per kind of secret, each with the failure that names it, and one that must pass (the feed's cost). The usage feed, which is the operator's, may hold the cost and nothing else of the list.
 
 | Case | What it proves | File |
 |---|---|---|
@@ -493,12 +494,12 @@ for the reviews. No new product code, no new fake: the fake LLM already offers t
 | #285-T03 | A third review: the run ends `quota_exhausted` (the sentence says no model was used), one notice on the pull request that leads to the plan page and not to the operator's, no model call, no review; a push in the same period adds no second notice | `limited-workspace.e2e.ts` |
 | #285-T04 | The usage feed: two settled records with the measured cost (100 micro-USD), the tokens and the tier `medium`, in order, no model, repository, person or key; the summary says two runs, none unknown; the count of unknown costs is empty; read again at the end it holds all four records of A (`medium`, `medium`, `high`, `high`) and the one of B (own key, no tier) | `limited-workspace.e2e.ts` |
 | #285-T05 | The script moves `periodStart` forward: the plan page goes from "2 of 2, limit reached" to "0 of 2", the next push is reviewed (on the model of the chosen level) | `limited-workspace.e2e.ts` |
-| #285-T06 | The script suspends the workspace: the plan page says reviews are paused, the next review is refused `workspace_suspended` with the neutral notice (no reason, no code), and after unsuspending the next push is reviewed; one notice per period and pull request | `limited-workspace.e2e.ts` |
+| #285-T06 | The script suspends the workspace: the plan page says reviews are paused, the next review is refused `workspace_suspended` with the neutral notice (no reason, no code), the workspace on its own key is reviewed meanwhile, and after unsuspending the next push is reviewed; one notice per period and pull request | `limited-workspace.e2e.ts` |
 | #285-T07 | A member's pages and answers, the Owner's, and every comment on the pull requests: no tier model id, key, price, amount or cost; the data of a run says its cost is hidden; the member has no Manage plan and the hand-over route refuses them | `limited-workspace.e2e.ts` |
 | #285-T08 | An Owner clicks Manage plan, the browser is led to the operator's page with a token, the script redeems it: workspace id, slug, role and an opaque user id, once, no email or repository; the second redeem is `422 invalid_token` | `limited-workspace.e2e.ts` |
-| #285-T09 | The workspace on its own key, while A has used what it may: reviewed with its own key and the instance's model (no tier model), its usage is `own` with no tier and is kept apart from A's, its pages are those of a workspace on its own key (a model field, no Quality choice, nothing says the instance provides the models) | `limited-workspace.e2e.ts` |
+| #285-T09 | The workspace on its own key, while A is at its limit (A's next review is refused `quota_exhausted`, and in T06 while A is suspended): reviewed with its own key and the instance's model (no tier model), its usage is `own` with no tier and is kept apart from A's, its pages are those of a workspace on its own key (a model field, no Quality choice, nothing says the instance provides the models) | `limited-workspace.e2e.ts` |
 | #285-T10 | (follow-up of #283) The Quality choice of a managed workspace with the entitlements and the tiers seeded: three levels, all available, no model field, an Owner chooses High and saves, a reload shows it, and the review of T05 ran on the model of the High tier | `limited-workspace.e2e.ts` |
-| #285-T11 | (follow-up of #282) The plan page for a limited workspace: the label, the counts per kind, the percentage bar with its words, the paused notice, the state after a reset and after runs, for a member and for an Owner | `limited-workspace.e2e.ts` |
+| #285-T11 | (follow-up of #282) The plan page for a limited workspace: the label, the counts per kind (Diff and Dynamic), the percentage bar with its exact words (50 % after two runs of four runs' worth of cost, 0 % after the reset, 25 % after one run), the paused notice, for a member and for an Owner | `limited-workspace.e2e.ts` |
 
 - **What they do not cover:** Dynamic Review with a tier (the integration tests for the claim cover the model of a Dynamic tier;
   there is no Dynamic journey here), the Dispatcher and the Worker (`e2e-hosted`), a real provider's metadata, the

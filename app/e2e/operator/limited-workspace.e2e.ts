@@ -21,6 +21,7 @@ import {
   test,
   type APIRequestContext,
   type BrowserContext,
+  type Locator,
   type Page,
 } from "@playwright/test";
 import { startLlmFake, type FakeLlm } from "../../../fakes/llm/server.ts";
@@ -54,31 +55,31 @@ import { deliverPullRequestEvent } from "../helpers/webhooks";
 // Workspace A, the limited one, and workspace B, on its own key. Each owns its account, organization, installation
 // and repository (ids no other journey uses).
 const ownerA: GithubAccount = {
-  id: 7700001,
+  id: 7710001,
   login: "limits-owner-a",
   name: "Limits Owner A",
   email: "limits-owner-a@example.test",
 };
 const ownerB: GithubAccount = {
-  id: 7700002,
+  id: 7710002,
   login: "limits-owner-b",
   name: "Limits Owner B",
   email: "limits-owner-b@example.test",
 };
 const ORG_A = {
   login: "limits-org-a",
-  id: 7800001,
+  id: 7810001,
   type: "Organization",
 } as const;
 const ORG_B = {
   login: "limits-org-b",
-  id: 7800002,
+  id: 7810002,
   type: "Organization",
 } as const;
-const INSTALLATION_A = 9800001;
-const INSTALLATION_B = 9800002;
-const REPO_A = { id: 9810001, fullName: "limits-org-a/widgets" };
-const REPO_B = { id: 9810002, fullName: "limits-org-b/gadgets" };
+const INSTALLATION_A = 9810001;
+const INSTALLATION_B = 9810002;
+const REPO_A = { id: 9811001, fullName: "limits-org-a/widgets" };
+const REPO_B = { id: 9811002, fullName: "limits-org-b/gadgets" };
 const OWNER_A_EMAIL = "limits-a@e2e.test";
 const OWNER_B_EMAIL = "limits-b@e2e.test";
 const MEMBER_EMAIL = "limits-member@e2e.test";
@@ -103,11 +104,14 @@ const TIER_MODELS = {
 } as const;
 // What the provider's metadata says the tier models cost, per token (as the provider writes it): distinctive
 // figures, so that a page that shows a price, per token or per million tokens, is found.
-const PROMPT_PRICE_PER_TOKEN = "0.000000731";
-const COMPLETION_PRICE_PER_TOKEN = "0.000002917";
-const PRICE_FIGURES = ["0.731", "2.917", "0.000000731", "0.000002917"];
+const PROMPT_PRICE_PER_TOKEN = "0.0000007319";
+const COMPLETION_PRICE_PER_TOKEN = "0.0000029173";
+const PRICE_FIGURES = ["0.7319", "2.9173", "0.0000007319", "0.0000029173"];
 // The fake LLM reports this cost with every answer (usage.cost, in US dollars): 100 micro-USD.
 const REPORTED_COST_MICRO_USD = 100;
+// The cost limit of workspace A (micro-USD of measured cost per period): four runs' worth, so that two runs read as
+// exactly 50 % on the plan page and one as 25 %.
+const COST_LIMIT_MICRO_USD = 4 * REPORTED_COST_MICRO_USD;
 const REVIEW_MARKER = "<!-- pr-agent:review:full -->";
 const NOTICE_MARKER = "<!-- code-reviewer:refusal-notice";
 const SUSPENSION_CODE = "e2e_operator_hold";
@@ -335,19 +339,8 @@ test.describe("a limited workspace on an instance with the operator API on", () 
       suspended: false,
       suspensionCode: null,
     });
-    const defaults = await script().putDefaultEntitlements({
-      planLabel: PLAN_LABEL,
-      keyMode: "managed",
-      limits: {
-        diffRunsPerPeriod: 2,
-        dynamicRunsPerPeriod: null,
-        // Far above what this journey spends: the plan page shows a bar for it, which is the page to search.
-        managedCostLimitMicroUsd: 1_000_000,
-        ownKeyCostLimitMicroUsd: null,
-      },
-      suspended: false,
-      suspensionCode: null,
-    });
+    const defaults =
+      await script().putDefaultEntitlements(DEFAULT_ENTITLEMENTS);
     periodStartA = (defaults as { default: { periodStart: string } }).default
       .periodStart;
 
@@ -552,6 +545,10 @@ test.describe("a limited workspace on an instance with the operator API on", () 
     // Before the reset the plan page says that the limit is reached, as the refusals did.
     await page.goto(`/w/${slugA}/settings/plan`);
     await expect(page.getByText("2 of 2, limit reached")).toBeVisible();
+    await expect(page.getByText("0 used, no limit")).toBeVisible();
+    await expect(page.getByRole("progressbar")).toHaveAccessibleName(
+      "50 % of the usage limit used",
+    );
 
     periodStartA = new Date().toISOString();
     await script().putDefaultEntitlements({
@@ -559,10 +556,12 @@ test.describe("a limited workspace on an instance with the operator API on", () 
       periodStart: periodStartA,
     });
     await page.reload();
-    await expect(
-      page.getByText("0 of 2", { exact: false }).first(),
-    ).toBeVisible();
+    await expect(page.getByText("0 of 2", { exact: true })).toBeVisible();
     await expect(page.getByText("2 of 2, limit reached")).toHaveCount(0);
+    // The runs of the old period are not in the cost of the new one.
+    await expect(page.getByRole("progressbar")).toHaveAccessibleName(
+      "0 % of the usage limit used",
+    );
 
     await deliver(request, "A", {
       action: "synchronize",
@@ -581,11 +580,14 @@ test.describe("a limited workspace on an instance with the operator API on", () 
     expect(asked[0]?.model).toContain(TIER_MODELS.high.diff);
     expect(reviewsOf(await commentsOf(request, REPO_A, 3))).toHaveLength(1);
     await page.goto(`/w/${slugA}/settings/plan`);
-    await expect(page.getByText("1 of 2")).toBeVisible();
+    await expect(page.getByText("1 of 2", { exact: true })).toBeVisible();
+    await expect(page.getByRole("progressbar")).toHaveAccessibleName(
+      "25 % of the usage limit used",
+    );
   });
 
   // #285-T06
-  test("the script suspends the workspace: the next review is refused with the neutral notice, and unsuspending restores it", async ({
+  test("the script suspends the workspace: the next review is refused with the neutral notice, a workspace on its own key is still reviewed, and unsuspending restores it", async ({
     request,
   }) => {
     test.setTimeout(240_000);
@@ -614,6 +616,7 @@ test.describe("a limited workspace on an instance with the operator API on", () 
     await expect(
       runsOf(page, REPO_A.fullName, 3).locator("[data-status]"),
     ).toHaveText([/Failed/, /Succeeded/, /Failed/, /Failed/], RUN_TIMEOUT);
+    // The refusal is the answer to this push: the model was not asked.
     expect(fakeLlm().requests()).toHaveLength(0);
     const refused = runsOf(page, REPO_A.fullName, 3).first();
     await refused.getByRole("link", { name: `${REPO_A.fullName} #3` }).click();
@@ -640,6 +643,16 @@ test.describe("a limited workspace on an instance with the operator API on", () 
     expect(notices[1]?.body).not.toContain(SUSPENSION_CODE);
     expect(notices[1]?.body).toContain(`/w/${slugA}/settings/plan`);
 
+    // While A is suspended, the workspace on its own key is reviewed, with its own key and model (T09 has the rest).
+    await openRuns(ownKeyPage(), slugB);
+    await deliver(request, "B", { action: "opened", number: 1, variant: "6" });
+    await expect(
+      runsOf(ownKeyPage(), REPO_B.fullName, 1).locator("[data-status]"),
+    ).toContainText("Succeeded", RUN_TIMEOUT);
+    const askedWhileSuspended = fakeLlm().requests();
+    expect(askedWhileSuspended).toHaveLength(1);
+    expect(askedWhileSuspended[0]?.authorization).toBe(`Bearer ${OWN_KEY_B}`);
+
     // Unsuspended, the next push is reviewed again (the second of two in this period).
     await script().putDefaultEntitlements({
       ...DEFAULT_ENTITLEMENTS,
@@ -658,7 +671,11 @@ test.describe("a limited workspace on an instance with the operator API on", () 
       [/Succeeded/, /Failed/, /Succeeded/, /Failed/, /Failed/],
       RUN_TIMEOUT,
     );
-    expect(fakeLlm().requests()).toHaveLength(1);
+    expect(
+      fakeLlm()
+        .requests()
+        .filter((item) => item.authorization === `Bearer ${OPERATOR_KEY}`),
+    ).toHaveLength(1);
 
     // One notice per period and pull request, not one per refusal: the two refusals of the first period (T03) left
     // one, the refusal of the second period left one.
@@ -729,9 +746,11 @@ test.describe("a limited workspace on an instance with the operator API on", () 
         "The models for your reviews are provided by this instance.",
       ),
     ).toBeVisible();
+    // Two runs of four runs' worth of cost: exactly half, and the Dynamic line is there too.
     await expect(member.getByRole("progressbar")).toHaveAccessibleName(
-      /^\d+ % of the usage limit used$/,
+      "50 % of the usage limit used",
     );
+    await expect(member.getByText("0 used, no limit")).toBeVisible();
     await expect(
       member.getByRole("button", { name: "Manage plan" }),
     ).toHaveCount(0);
@@ -739,6 +758,18 @@ test.describe("a limited workspace on an instance with the operator API on", () 
     // Every page and answer a member can read, and the same for the Owner.
     const memberTexts = await collectViews(member, slugA, REPO_A.fullName);
     const ownerTexts = await collectViews(ownerPage(), slugA, REPO_A.fullName);
+    // What the browser shows once the pages are hydrated and have polled: the DOM and the visible text of the plan,
+    // the runs, a run and the review defaults, for the member and for the Owner.
+    const runIds = (
+      JSON.parse(
+        memberTexts.find(([name]) => name === `/api/w/${slugA}/runs`)?.[1] ??
+          "{}",
+      ) as { runs?: Array<{ id: string }> }
+    ).runs?.map((run) => run.id);
+    const firstRun = runIds?.[0];
+    expect(firstRun, "the workspace has a run").toBeDefined();
+    const memberDom = await renderedViews(member, slugA, String(firstRun));
+    const ownerDom = await renderedViews(ownerPage(), slugA, String(firstRun));
     const commentTexts: Array<[string, string]> = [];
     for (const number of [1, 2, 3])
       for (const comment of await commentsOf(request, REPO_A, number))
@@ -747,16 +778,8 @@ test.describe("a limited workspace on an instance with the operator API on", () 
           comment.body,
         ]);
     expect(commentTexts.length).toBeGreaterThanOrEqual(5);
-    // The search finds what it looks for: a text that holds a tier model id, a key, a price or an amount fails it.
-    for (const leak of [
-      `reviewed by ${TIER_MODELS.low.diff}`,
-      `key ${OPERATOR_KEY}`,
-      `price ${PRICE_FIGURES[0]} per million`,
-      "costs $12.50",
-    ])
-      await expect(
-        expectNothingSecret([["a control", leak]], "control"),
-      ).rejects.toThrow();
+    // The search finds what it looks for (a table of texts that must fail it, one row per kind of secret).
+    await expectTheSearchBites();
     expect(memberTexts.length).toBeGreaterThan(10);
     // A run on a quality level shows no cost (the data of the run says so): that is why none is found below.
     expect(
@@ -769,6 +792,10 @@ test.describe("a limited workspace on an instance with the operator API on", () 
     await expectNothingSecret(
       [
         ...memberTexts,
+        ...memberDom,
+        ...ownerDom.map(
+          ([name, text]) => [`Owner: ${name}`, text] as [string, string],
+        ),
         ...ownerTexts.map(
           ([name, text]) => [`Owner: ${name}`, text] as [string, string],
         ),
@@ -784,19 +811,37 @@ test.describe("a limited workspace on an instance with the operator API on", () 
   });
 
   // #285-T09
-  test("a workspace on its own key on the same instance is unaffected by the limits, the suspension and the tiers of the other", async ({
+  test("a workspace on its own key on the same instance is unaffected by the limit, the suspension and the tiers of the other", async ({
     request,
   }) => {
     test.setTimeout(240_000);
     const page = ownKeyPage();
-    // Workspace A has used what it may in this period, so a review of A would be refused now.
+    // Workspace A has used what it may in this period (T06 left it at its limit): its next review is refused.
+    await ownerPage().goto(`/w/${slugA}/settings/plan`);
+    await expect(ownerPage().getByText("2 of 2, limit reached")).toBeVisible();
+    await deliver(request, "A", { action: "opened", number: 4, variant: "7" });
     await openRuns(ownerPage(), slugA);
-    await expect(ownerPage().locator("[data-run-id]").first()).toBeVisible();
-
-    await openRuns(page, slugB);
-    await deliver(request, "B", { action: "opened", number: 1, variant: "6" });
+    const refusedRun = runsOf(ownerPage(), REPO_A.fullName, 4);
+    await expect(refusedRun.locator("[data-status]")).toContainText(
+      "Failed",
+      RUN_TIMEOUT,
+    );
+    await refusedRun
+      .getByRole("link", { name: `${REPO_A.fullName} #4` })
+      .click();
     await expect(
-      runsOf(page, REPO_B.fullName, 1).locator("[data-status]"),
+      ownerPage()
+        .locator('[data-slot="run-detail"]')
+        .filter({ visible: true })
+        .getByText("quota_exhausted"),
+    ).toBeVisible();
+    expect(fakeLlm().requests()).toHaveLength(0);
+
+    // At that moment, the workspace on its own key is reviewed.
+    await openRuns(page, slugB);
+    await deliver(request, "B", { action: "opened", number: 2, variant: "8" });
+    await expect(
+      runsOf(page, REPO_B.fullName, 2).locator("[data-status]"),
     ).toContainText("Succeeded", RUN_TIMEOUT);
 
     // It was reviewed with its own key and its own model: not the operator's key, not a tier model.
@@ -807,10 +852,26 @@ test.describe("a limited workspace on an instance with the operator API on", () 
     for (const tier of Object.values(TIER_MODELS))
       for (const id of Object.values(tier))
         expect(asked[0]?.model).not.toContain(id);
-    expect(reviewsOf(await commentsOf(request, REPO_B, 1))).toHaveLength(1);
+    for (const number of [1, 2])
+      expect(reviewsOf(await commentsOf(request, REPO_B, number))).toHaveLength(
+        1,
+      );
+    // The refusal notice of A, like every comment of A, holds nothing of the tiers.
+    await expect
+      .poll(
+        async () => noticesOf(await commentsOf(request, REPO_A, 4)).length,
+        RUN_TIMEOUT,
+      )
+      .toBe(1);
+    await expectNothingSecret(
+      (await commentsOf(request, REPO_A, 4)).map(
+        (comment) => ["a comment on pull request 4", comment.body] as const,
+      ) as Array<[string, string]>,
+      "workspace A",
+    );
 
-    // The usage of the two workspaces is kept apart: B's run is its own key, no tier, a measured cost; A's records
-    // did not change (the summary has no safety lag).
+    // The usage of the two workspaces is kept apart: B's runs are its own key, no tier, a measured cost; A's records
+    // did not change, and the refused review of A left none (the summary has no safety lag).
     const summaryB = await script().call(
       "GET",
       `/workspaces/${workspaceIdB}/usage/summary?${period(periodStartA)}`,
@@ -820,9 +881,9 @@ test.describe("a limited workspace on an instance with the operator API on", () 
         {
           reviewKind: "diff",
           keyMode: "own",
-          recordCount: 1,
-          settledCount: 1,
-          knownCostMicroUsd: REPORTED_COST_MICRO_USD,
+          recordCount: 2,
+          settledCount: 2,
+          knownCostMicroUsd: 2 * REPORTED_COST_MICRO_USD,
           unknownCostCount: 0,
         },
       ],
@@ -846,7 +907,7 @@ test.describe("a limited workspace on an instance with the operator API on", () 
         "The models for your reviews are provided by this instance.",
       ),
     ).toHaveCount(0);
-    await expect(page.getByText("1 used, no limit")).toBeVisible();
+    await expect(page.getByText("2 used, no limit").first()).toBeVisible();
   });
 
   // #285-T04 (continued): the feed after everything.
@@ -871,12 +932,13 @@ test.describe("a limited workspace on an instance with the operator API on", () 
     expect(records.every((record) => record.workspaceId === workspaceIdA)).toBe(
       true,
     );
-    const own = await pollUsage(script(), workspaceIdB, 1);
-    expect(own[0]).toMatchObject({
-      keyMode: "own",
-      modelTier: null,
-      costMicroUsd: REPORTED_COST_MICRO_USD,
-    });
+    const own = await pollUsage(script(), workspaceIdB, 2);
+    for (const record of own)
+      expect(record).toMatchObject({
+        keyMode: "own",
+        modelTier: null,
+        costMicroUsd: REPORTED_COST_MICRO_USD,
+      });
     await expectNothingSecret(
       [["the usage feed", JSON.stringify([...records, ...own])]],
       "the feed",
@@ -891,7 +953,7 @@ const DEFAULT_ENTITLEMENTS = {
   limits: {
     diffRunsPerPeriod: 2,
     dynamicRunsPerPeriod: null,
-    managedCostLimitMicroUsd: 1_000_000,
+    managedCostLimitMicroUsd: COST_LIMIT_MICRO_USD,
     ownKeyCostLimitMicroUsd: null,
   },
   suspended: false,
@@ -979,6 +1041,7 @@ async function collectViews(
     `/w/${slug}/members`,
     `/w/${slug}/runs`,
     `/api/w/${slug}/plan`,
+    `/api/w/${slug}/llm-key`,
     `/api/w/${slug}/runs`,
     `/api/w/${slug}/review-settings`,
   ])
@@ -987,10 +1050,13 @@ async function collectViews(
   const projects =
     texts.find(([name]) => name.endsWith("/projects"))?.[1] ?? "";
   const href = new RegExp(`/w/${slug}/projects/([^"/?#]+)`).exec(projects);
-  if (href?.[1] !== undefined) {
-    await read(`/w/${slug}/projects/${href[1]}`);
-    await read(`/api/w/${slug}/repositories/${href[1]}/project/settings`);
-  }
+  const repositoryId = href?.[1];
+  if (repositoryId === undefined)
+    throw new Error("The Projects page has no link to the project.");
+  await read(`/w/${slug}/projects/${repositoryId}`);
+  await read(`/w/${slug}/projects/${repositoryId}/review`);
+  await read(`/api/w/${slug}/repositories/${repositoryId}/project/settings`);
+  await read(`/api/w/${slug}/repositories/${repositoryId}/pull-requests`);
   expect(projects, "the Projects page lists the repository").toContain(
     repository,
   );
@@ -1007,6 +1073,154 @@ async function collectViews(
     "the runs of the workspace",
   ).toBeGreaterThanOrEqual(5);
   return texts;
+}
+
+/**
+ * What a browser shows of the pages that load and poll their data (the plan page, the Runs list, a run, the review
+ * defaults) once they are hydrated: the DOM and the visible text, named after the page.
+ */
+async function renderedViews(
+  page: Page,
+  slug: string,
+  runId: string,
+): Promise<Array<[string, string]>> {
+  const texts: Array<[string, string]> = [];
+  const take = async (name: string, path: string, ready: Locator) => {
+    await page.goto(path);
+    await expect(ready.first()).toBeVisible();
+    // Hydrated: React has taken the document over, so what is read next is what the browser shows.
+    await page.waitForFunction(() =>
+      Object.keys(document).some((key) => key.startsWith("__reactContainer")),
+    );
+    texts.push([`${name} (DOM)`, await page.content()]);
+    texts.push([`${name} (text)`, await page.locator("body").innerText()]);
+  };
+  await take(
+    "the plan page",
+    `/w/${slug}/settings/plan`,
+    page.getByText(PLAN_LABEL),
+  );
+  await take(
+    "the Runs list",
+    `/w/${slug}/runs`,
+    page.getByRole("heading", { level: 1, name: "Runs" }),
+  );
+  await take(
+    "a run",
+    `/w/${slug}/runs/${runId}`,
+    page.locator('[data-slot="run-detail"]').filter({ visible: true }),
+  );
+  await take(
+    "the review defaults",
+    `/w/${slug}/settings/review-defaults`,
+    page.locator('[data-field="modelTier"]'),
+  );
+  return texts;
+}
+
+const CONTROLS: Array<{
+  name: string;
+  text: string;
+  options?: { costIsTheOperators?: boolean };
+  /** What the failure says, or null when the text must pass. */
+  fails: string | null;
+}> = [
+  {
+    name: "the id of a tier model",
+    text: `reviewed by ${TIER_MODELS.low.diff}`,
+    fails: `a control holds ${TIER_MODELS.low.diff}`,
+  },
+  {
+    name: "the name of a tier model without its vendor",
+    text: "model medium-dyn-m4k9",
+    fails: "a control holds medium-dyn-m4k9",
+  },
+  {
+    name: "the operator's key",
+    text: `key ${OPERATOR_KEY}`,
+    fails: `a control holds ${OPERATOR_KEY}`,
+  },
+  {
+    name: "the operator's key without its last four characters",
+    text: `key ${OPERATOR_KEY.slice(0, -4)}`,
+    fails: `a control holds ${OPERATOR_KEY.slice(0, -4)}`,
+  },
+  {
+    name: "the code of a suspension",
+    text: `paused because ${SUSPENSION_CODE}`,
+    fails: `a control holds ${SUSPENSION_CODE}`,
+  },
+  {
+    name: "the operator's token",
+    text: `token ${e2eEnv.operatorApiToken}`,
+    fails: `a control holds ${e2eEnv.operatorApiToken}`,
+  },
+  {
+    name: "a price",
+    text: `${PRICE_FIGURES[0]} per million`,
+    fails: `a control holds the price ${PRICE_FIGURES[0]}`,
+  },
+  {
+    name: "a measured cost",
+    text: "cost 0.0001",
+    fails: "a control holds a measured cost",
+  },
+  {
+    name: "a measured cost with trailing zeros",
+    text: "cost 0.00010",
+    fails: "a control holds a measured cost",
+  },
+  {
+    name: "a measured cost in the data of a run",
+    text: '{"costUsd":0.5}',
+    fails: "a control holds a measured cost",
+  },
+  {
+    name: "an amount with a currency sign",
+    text: "costs $12.50",
+    fails: "a control holds an amount of money",
+  },
+  {
+    name: "an amount with a currency code",
+    text: "12 EUR a month",
+    fails: "a control holds an amount of money",
+  },
+  {
+    // The operator's feed carries the cost, so the bypass lets exactly that through ...
+    name: "a measured cost, for the operator's feed",
+    text: '{"costMicroUsd":100} 0.0001',
+    options: { costIsTheOperators: true },
+    fails: null,
+  },
+  {
+    // ... and nothing else of the list.
+    name: "a tier model id, for the operator's feed",
+    text: `{"costMicroUsd":100,"model":"${TIER_MODELS.high.diff}"}`,
+    options: { costIsTheOperators: true },
+    fails: `a control holds ${TIER_MODELS.high.diff}`,
+  },
+  {
+    name: "a price, for the operator's feed",
+    text: `${PRICE_FIGURES[1]}`,
+    options: { costIsTheOperators: true },
+    fails: `a control holds the price ${PRICE_FIGURES[1]}`,
+  },
+];
+
+/** The search is not vacuous: every kind of secret it looks for fails it, with the failure that names it. */
+async function expectTheSearchBites(): Promise<void> {
+  for (const control of CONTROLS) {
+    const search = expectNothingSecret(
+      [["a control", control.text]],
+      "control",
+      control.options,
+    );
+    if (control.fails === null) await search;
+    else
+      await expect(search, control.name).rejects.toThrow(
+        `control: ${control.fails}`,
+      );
+  }
 }
 
 /**
@@ -1031,17 +1245,20 @@ async function expectNothingSecret(
   ];
   for (const [name, text] of texts) {
     for (const secret of secrets)
-      expect(text, `${where}: ${name} holds ${secret}`).not.toContain(secret);
-    for (const figure of PRICE_FIGURES)
-      expect(text, `${where}: ${name} holds the price ${figure}`).not.toContain(
-        figure,
+      expect(around(text, secret), `${where}: ${name} holds ${secret}`).toBe(
+        "",
       );
+    for (const figure of PRICE_FIGURES)
+      expect(
+        around(text, figure),
+        `${where}: ${name} holds the price ${figure}`,
+      ).toBe("");
     if (options.costIsTheOperators === true) continue;
     // A measured cost (the fake reports 0.0001 US dollars with every answer) and an amount of money: a currency sign
     // or a currency code next to a number.
     // The name of a cost field with no figure (`"costUsd":null`, `"costHidden":true`) is no leak; a figure is.
     const cost =
-      /0\.0001\b|1e-4|(?:costUsd|costMicroUsd|cost_micro_usd)[\\"\s:]*\d/.exec(
+      /0\.0001\d*|1e-4|(?:costUsd|costMicroUsd|cost_micro_usd)[\\"\s:]*\d/.exec(
         text,
       );
     expect(
@@ -1067,4 +1284,10 @@ function readableText(text: string): string {
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
     .replace(/<style[\s\S]*?<\/style>/gi, " ")
     .replace(/<[^>]*>/g, " ");
+}
+
+/** Where `needle` is in `text`, with what is around it, or "" when it is not there (for a failure that shows the place). */
+function around(text: string, needle: string): string {
+  const at = text.indexOf(needle);
+  return at < 0 ? "" : text.slice(Math.max(0, at - 100), at + 100);
 }

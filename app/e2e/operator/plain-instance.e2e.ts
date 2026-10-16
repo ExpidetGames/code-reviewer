@@ -25,13 +25,13 @@ import { startRunner, type RunnerProcess } from "../helpers/runner-process";
 import { deliverPullRequestEvent } from "../helpers/webhooks";
 
 const account: GithubAccount = {
-  id: 7400101,
+  id: 7410101,
   login: "plain-instance",
   name: "Plain Instance",
   email: "plain-instance@example.test",
 };
-const INSTALLATION_ID = 9500101;
-const REPOSITORY = { id: 9600101, fullName: "plain-instance/widgets" };
+const INSTALLATION_ID = 9510101;
+const REPOSITORY = { id: 9610101, fullName: "plain-instance/widgets" };
 const OWNER = { login: account.login, id: account.id };
 const REVIEW_MARKER = "<!-- pr-agent:review:full -->";
 const RUN_TIMEOUT = { timeout: 120_000 };
@@ -90,7 +90,7 @@ test.describe("an instance without an operator token and without entitlements", 
   }
 
   // #285-T01
-  test("a pull request is reviewed as before and the operator routes are missing paths", async ({
+  test("@smoke a pull request is reviewed as before and the operator routes are missing paths", async ({
     page,
     request,
   }) => {
