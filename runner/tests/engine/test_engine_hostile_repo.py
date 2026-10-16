@@ -99,9 +99,10 @@ def test_a_repository_file_cannot_move_a_request_a_credential_the_model_or_the_b
     assert all(connection["allowed"] for connection in outcome.connections)
 
 
-# #280: the model of a managed tier is operator data; PR-Agent can print the model into the comment it publishes
-# ("Agent run details", the `config` section of the relevant configurations), so a repository file must not switch
-# either on. Real PR-Agent, the file delivered by the fake GitHub.
+# #280: the model of a managed tier is operator data. PR-Agent can print the model into the
+# comment it publishes ("Agent run details", the `config` section of the relevant
+# configurations), so a repository file must not switch either on. Real PR-Agent, the file
+# delivered by the fake GitHub.
 def test_a_repository_file_cannot_put_the_model_into_the_published_review(
     engine: Engine, github: FakeGithub, llm: FakeLlm
 ) -> None:

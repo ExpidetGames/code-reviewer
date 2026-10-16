@@ -284,7 +284,7 @@ def test_the_comment_sections_that_print_the_model_are_pinned() -> None:
     assert "config.output_relevant_configurations" in PROTECTED_SETTINGS
 
 
-# #280: without the guard the file does turn them on (the reason for the pin; revisit on a PR-Agent upgrade)
+# #280: without the guard the file does turn them on (the reason for the pin)
 def test_without_the_guard_the_file_would_print_the_model_into_the_comment(scope: Path) -> None:
     configured(RepoSettingsGuard())
 
