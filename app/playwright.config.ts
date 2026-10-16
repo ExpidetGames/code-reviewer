@@ -205,12 +205,17 @@ export default defineConfig({
     // fake GitHub, so it waits for the journey that does the same on the fifth app.
     {
       name: "operator-plain",
+      // No retry: the set-up of the group changes the app (a switch that would be clicked off again), so an attempt
+      // that fails is reported as it failed.
+      retries: 0,
       use: { ...browser, baseURL: e2eEnv.pipelineAppUrl },
       testMatch: /e2e\/operator\/plain-instance\.e2e\.ts$/,
       dependencies: ["jobs"],
     },
     {
       name: "operator",
+      // No retry: a second attempt would sign the same people up again and connect installations that are connected.
+      retries: 0,
       use: { ...browser, baseURL: e2eEnv.operatorAppUrl },
       testMatch: /e2e\/operator\/limited-workspace\.e2e\.ts$/,
       dependencies: ["prepare", "connect"],

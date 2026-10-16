@@ -599,6 +599,11 @@ test.describe("a limited workspace on an instance with the operator API on", () 
     await expect(
       page.getByText("Reviews are paused", { exact: true }),
     ).toBeVisible();
+    // The page says that reviews are paused and nothing of why: not the code the script sent.
+    await expectNothingSecret(
+      [["the paused plan page", await page.content()]],
+      "a paused workspace",
+    );
 
     await deliver(request, "A", {
       action: "synchronize",
@@ -616,6 +621,10 @@ test.describe("a limited workspace on an instance with the operator API on", () 
       .locator('[data-slot="run-detail"]')
       .filter({ visible: true });
     await expect(detail.getByText("workspace_suspended")).toBeVisible();
+    await expectNothingSecret(
+      [["the run of a paused workspace", await page.content()]],
+      "a paused workspace",
+    );
 
     // The notice of the new period says that reviews are paused, with no reason and no code.
     await expect

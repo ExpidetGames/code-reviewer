@@ -503,6 +503,8 @@ for the reviews. No new product code, no new fake: the fake LLM already offers t
 - **What they do not cover:** Dynamic Review with a tier (the integration tests for the claim cover the model of a Dynamic tier;
   there is no Dynamic journey here), the Dispatcher and the Worker (`e2e-hosted`), a real provider's metadata, the
   safety lag with two instances, and an operator's real page (the journey answers it).
+- **No retry.** Both projects have `retries: 0` (the one retry of CI would start the group again on an app the first attempt changed: the
+  same people signing up, installations already connected). A failed attempt is reported as it failed.
 - **Run them alone** with a build in place: `ARGS="--project=operator --project=operator-plain"` (the `prepare` project and the projects
   they depend on run first); they need the runner installed and the tiktoken encoding cached like the journey with the real runner.
 
