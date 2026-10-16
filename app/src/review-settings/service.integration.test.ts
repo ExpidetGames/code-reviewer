@@ -130,6 +130,45 @@ describe("the global defaults", () => {
     expect(project.effective.maxTokens).toBe(70_000);
   });
 
+  // #280-T10
+  it("have the tier medium when nothing sets it, the workspace default for every project, and the project's own over it", async () => {
+    const app = await setupReviewSettings();
+    await app.projects.activate(app.first.id);
+
+    const fresh = await app.service.getProjectSettings(app.first.id);
+    expect(fresh.effective.modelTier).toBe("medium");
+    expect(fresh.sources.modelTier).toBe("built_in");
+
+    await app.service.updateGlobalSettings({ modelTier: "low" }, "octocat");
+    const inherited = await app.service.getProjectSettings(app.first.id);
+    expect(inherited.effective.modelTier).toBe("low");
+    expect(inherited.sources.modelTier).toBe("global");
+
+    await app.service.updateProjectSettings(app.first.id, {
+      modelTier: "high",
+    });
+    const own = await app.service.getProjectSettings(app.first.id);
+    expect(own.effective.modelTier).toBe("high");
+    expect(own.sources.modelTier).toBe("project");
+    expect(own.inherited.modelTier).toBe("low");
+    expect(
+      (await app.service.resolveForRepository(app.first.id))?.settings
+        .modelTier,
+    ).toBe("high");
+  });
+
+  // #280-T10
+  it("refuse a tier that does not exist", async () => {
+    const app = await setupReviewSettings();
+
+    await expect(
+      app.service.updateGlobalSettings({ modelTier: "ultra" }, "octocat"),
+    ).rejects.toMatchObject({
+      code: "REVIEW_SETTINGS_INVALID",
+      issues: [{ field: "modelTier", code: "INVALID_FORMAT" }],
+    });
+  });
+
   // CR-25-T07
   it("refuse invalid settings with the fields that are wrong, and store nothing", async () => {
     const app = await setupReviewSettings();
