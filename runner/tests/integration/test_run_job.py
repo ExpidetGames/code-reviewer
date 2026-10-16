@@ -395,8 +395,8 @@ def test_a_command_that_awaits_too_long_is_stopped_with_the_timeout_code(tmp_pat
     assert result["durationMs"] >= timeout * 1000
 
 
-# #387-T06: the command runs and blocks the loop, so only the watchdog can end it, after the
-# timeout and the grace, with its own text and reason.
+# #387-T06, #363-T03: the command runs and blocks the loop, so only the watchdog can end it, after
+# the timeout and the grace, with its own text. It sent no model request: void, so no reason.
 def test_a_command_that_blocks_the_whole_process_is_ended_by_the_watchdog(tmp_path: Path) -> None:
     process, seen, timeout = run_until_the_command_starts("hang", tmp_path, 4)
 
@@ -404,11 +404,29 @@ def test_a_command_that_blocks_the_whole_process_is_ended_by_the_watchdog(tmp_pa
     assert seen["calls"] == 1  # the command was started and is what blocked
     assert process.returncode == 1
     assert result["errorCode"] == "timeout"
+    assert "errorReason" not in result
+    assert result["usage"] is None
+    assert result["logTail"].startswith("timeout: the command did not stop")
+    assert (timeout + 3) * 1000 <= result["durationMs"] < 40_000  # the timeout and the grace
+
+
+# #363-T01, #363-T02: the command blocked the loop with a model request sent and never answered:
+# the watchdog reads the meter from its own thread and says the model may have been used.
+def test_the_watchdog_says_the_model_may_have_been_used_when_a_request_is_open(
+    tmp_path: Path,
+) -> None:
+    process, seen, timeout = run_until_the_command_starts("hang_with_request", tmp_path, 4)
+
+    result = result_of(process)
+    assert seen["calls"] == 1
+    assert process.returncode == 1
+    assert result["errorCode"] == "timeout"
     assert result["errorReason"] == "no_result_from_process"
+    assert result["usage"] is None
     assert result["logTail"].startswith(
         "timeout [no_result_from_process]: the command did not stop"
     )
-    assert (timeout + 3) * 1000 <= result["durationMs"] < 40_000  # the timeout and the grace
+    assert (timeout + 3) * 1000 <= result["durationMs"] < 40_000
 
 
 # #387-T01: the soft timeout counts from the start of the job (the first line of `main()`). The

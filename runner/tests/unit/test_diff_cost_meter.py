@@ -589,3 +589,174 @@ def test_the_real_pr_agent_still_has_the_function_the_meter_wraps() -> None:
         undo()
 
     assert module.acompletion is original
+
+
+# #363-T03: no request was sent, so the model was not used.
+def test_a_run_that_sent_no_request_did_not_use_the_model(installed: Install) -> None:
+    _, meter = installed(replying())
+
+    assert meter.may_have_used_the_model is False
+
+
+# #363-T01: a request in flight may have been billed.
+def test_a_request_in_flight_may_have_used_the_model(installed: Install) -> None:
+    release = asyncio.Event()
+
+    async def waits(*args: Any, **kwargs: Any) -> Any:
+        await release.wait()
+        return answer(0.01)
+
+    boundary, meter = installed(waits)
+
+    async def run() -> tuple[bool, bool]:
+        asking = asyncio.ensure_future(call(boundary))
+        await asyncio.sleep(0.01)
+        in_flight = meter.may_have_used_the_model
+        release.set()
+        await asking
+        return in_flight, meter.may_have_used_the_model
+
+    assert asyncio.run(run()) == (True, True)
+
+
+# #363-T01: a request that was cancelled (the soft timeout) stays one that may have been billed.
+def test_a_request_that_is_cancelled_may_have_used_the_model(installed: Install) -> None:
+    async def never_answers(*args: Any, **kwargs: Any) -> Any:
+        await asyncio.sleep(30)
+
+    boundary, meter = installed(never_answers)
+
+    async def run() -> None:
+        with pytest.raises(TimeoutError):
+            async with asyncio.timeout(0.05):
+                await call(boundary)
+
+    asyncio.run(run())
+
+    assert meter.may_have_used_the_model is True
+
+
+# #363-T01: an answer counts, priced or not, also one PR-Agent throws away afterwards.
+@pytest.mark.parametrize("reply", [answer(0.01), answer(None)], ids=["priced", "unpriced"])
+def test_an_answer_that_came_back_may_have_used_the_model(installed: Install, reply: Any) -> None:
+    boundary, meter = installed(replying(reply))
+
+    asyncio.run(call(boundary))
+
+    assert meter.may_have_used_the_model is True
+
+
+# #363-T01: a server error, a lost connection and a timeout leave the request open.
+@pytest.mark.parametrize("status", [500, 502, 504, 408, 418])
+def test_a_request_that_failed_on_the_provider_side_may_have_used_the_model(
+    installed: Install, status: int
+) -> None:
+    boundary, meter = installed(replying(status_error(status)))
+
+    async def run() -> None:
+        with pytest.raises(Exception):  # noqa: B017 # the error under test is the one handed on
+            await call(boundary)
+
+    asyncio.run(run())
+
+    assert meter.may_have_used_the_model is True
+
+
+# #363-T03: only a refusal before any generation is no use of the model.
+@pytest.mark.parametrize("status", [400, 401, 402, 403, 404, 422, 429])
+def test_a_request_refused_before_any_generation_did_not_use_the_model(
+    installed: Install, status: int
+) -> None:
+    boundary, meter = installed(replying(status_error(status)))
+
+    async def run() -> None:
+        with pytest.raises(Exception):  # noqa: B017 # the error under test is the one handed on
+            await call(boundary)
+
+    asyncio.run(run())
+
+    assert meter.may_have_used_the_model is False
+
+
+# #363-T03: a refusal and then an answer of a fallback model is a run that used the model.
+def test_a_refusal_followed_by_an_answer_may_have_used_the_model(installed: Install) -> None:
+    boundary, meter = installed(replying(status_error(429), answer(0.01)))
+
+    async def run() -> None:
+        with pytest.raises(Exception):  # noqa: B017 # the error under test is the one handed on
+            await call(boundary)
+        await call(boundary)
+
+    asyncio.run(run())
+
+    assert meter.may_have_used_the_model is True
+
+
+# #363-T01: a call that carries a retry count stays open, so it may have used the model.
+def test_a_call_that_carries_a_retry_count_may_have_used_the_model(installed: Install) -> None:
+    boundary, meter = installed(replying(answer(0.01)))
+
+    async def run() -> None:
+        await boundary.acompletion(model="openrouter/vendor/model", messages=[], num_retries=2)
+
+    asyncio.run(run())
+
+    assert meter.may_have_used_the_model is True
+
+
+# #363-T01: one request refused before generation and a second one still in flight.
+def test_a_refused_request_and_a_request_in_flight_may_have_used_the_model(
+    installed: Install,
+) -> None:
+    release = asyncio.Event()
+    replies: list[Any] = [status_error(429)]
+
+    async def completion(*args: Any, **kwargs: Any) -> Any:
+        if replies:
+            raise replies.pop(0)
+        await release.wait()
+        return answer(0.01)
+
+    boundary, meter = installed(completion)
+
+    async def run() -> bool:
+        with pytest.raises(Exception):  # noqa: B017 # the refusal is the error under test
+            await call(boundary)
+        assert meter.may_have_used_the_model is False  # only the refusal so far
+        asking = asyncio.ensure_future(call(boundary))
+        await asyncio.sleep(0.01)
+        in_flight = meter.may_have_used_the_model
+        release.set()
+        await asking
+        return in_flight
+
+    assert asyncio.run(run()) is True
+
+
+# #363-T01: a stream cut half way is a request that may have been billed.
+def test_a_stream_cut_half_way_may_have_used_the_model(installed: Install) -> None:
+    boundary, meter = installed(stream_of(text_chunk(), then=RuntimeError("cut off")))
+
+    async def run() -> None:
+        with pytest.raises(RuntimeError):
+            await drain(await call(boundary))
+
+    asyncio.run(run())
+
+    assert meter.may_have_used_the_model is True
+
+
+# #363-T01: a stream nobody read to its end is a request that may have been billed.
+def test_a_stream_that_is_not_drained_may_have_used_the_model(installed: Install) -> None:
+    boundary, meter = installed(
+        stream_of(text_chunk(), SimpleNamespace(choices=[], usage=answer(0.03).usage))
+    )
+
+    async def run() -> None:
+        stream = await call(boundary)
+        async for _ in stream:
+            break  # the consumer stops early and leaves the stream suspended
+
+    asyncio.run(run())
+
+    assert meter.may_have_used_the_model is True

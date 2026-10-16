@@ -155,6 +155,17 @@ class DiffCostMeter:
         with self._lock:
             return self._priced + self._unpriced
 
+    @property
+    def may_have_used_the_model(self) -> bool:
+        """True when a request was sent that the provider did not certainly refuse (#363).
+
+        A request in flight, cancelled or cut off, or one that was answered, whether or not PR-Agent
+        counted the answer: the model may have worked and may have billed. A request refused before
+        any generation is no use of the model, and a run that sent no request never used it.
+        """
+        with self._lock:
+            return bool(self._open or self._priced or self._unpriced)
+
     def begin(self) -> None:
         """A request is sent."""
         with self._lock:

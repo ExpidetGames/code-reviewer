@@ -25,6 +25,8 @@ the report file as JSON; the scenario decides what the double does:
     slow       wait on an await far longer than RUNNER_JOB_TIMEOUT_SECONDS
     slow_start like slow, behind a start-up that lasts SLOW_START_SECONDS after the process began
     hang       block the whole process (no await) far longer than RUNNER_JOB_TIMEOUT_SECONDS
+    hang_with_request
+               send a model request that is never answered, then block like `hang` (#363)
 """
 
 import asyncio
@@ -122,6 +124,16 @@ def install_double() -> None:
 
     get_settings: Any = untyped_get_settings  # Any: PR-Agent ships no type information
 
+    if SCENARIO == "hang_with_request":
+        from importlib import import_module
+
+        async def never_answers(*args: Any, **kwargs: Any) -> Any:
+            await asyncio.sleep(120)
+
+        # The runner meters whatever function is there when it starts the run (after this).
+        handler_module: Any = import_module("pr_agent.algo.ai_handlers.litellm_ai_handler")
+        handler_module.acompletion = never_answers
+
     async def handle_request(
         self: Any, pr_url: str, request: Any, notify: Any = None, propagate_tool_errors: Any = None
     ) -> bool:
@@ -161,6 +173,15 @@ def install_double() -> None:
             await asyncio.sleep(120)
             return True
         if SCENARIO == "hang":
+            time.sleep(120)
+            return True
+        if SCENARIO == "hang_with_request":
+            from importlib import import_module
+
+            module = import_module("pr_agent.algo.ai_handlers.litellm_ai_handler")
+            asking = asyncio.ensure_future(module.acompletion(model="m", messages=[]))
+            await asyncio.sleep(0)  # the request is sent and never answered
+            assert not asking.done()
             time.sleep(120)
             return True
         if SCENARIO == "repo":
