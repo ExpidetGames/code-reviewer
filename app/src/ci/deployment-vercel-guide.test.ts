@@ -685,6 +685,27 @@ describe("the hosted deployment guide as a procedure", () => {
     expect(configuredDebounceMs({})).toBe(90_000);
   });
 
+  // #333-e2e
+  it("points to the hosted e2e lane that exists, no longer calls #332 pending, and states the Worker-exit limit with its follow-up", () => {
+    const limits = flat(section("## 9. Known limits and what is not verified"));
+    const ci = read(".github/workflows/ci.yml");
+
+    expect(ci).toMatch(/^ {2}e2e-hosted:/m);
+    expect(read("Makefile")).toMatch(/^test-e2e-hosted:/m);
+    expect(read("TESTING.md")).toContain("Hosted e2e lane");
+    expect(limits).toContain("the lane **`e2e-hosted`** (#332;");
+    expect(limits).toContain("`make test-e2e-hosted`");
+    expect(limits).toContain("`E2E_DATABASE_URL`");
+    expect(guide).not.toMatch(/#332[^\n]*pending/i);
+    expect(guide).not.toMatch(/pending[^\n]*#332/i);
+    expect(limits).toContain(
+      "A Worker that exits non-zero before it has reported a result holds its slot until its lease lapses",
+    );
+    expect(limits).toContain("follow-up #375");
+    expect(section("## 10. Follow-ups")).toContain("- #375:");
+    expect(limits).toContain("on **your** Postgres provider");
+  });
+
   // #333-db-readme
   it("no longer relies on the platform holding traffic back from a deployment that is ahead of the database", () => {
     const readmeOfTheDatabase = flat(read("app/src/db/README.md"));

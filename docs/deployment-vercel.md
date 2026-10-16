@@ -761,10 +761,16 @@ A self-hosted installation and a hosted one never share a database or a GitHub A
   tests run against the doubles in `fakes/`.
 - The **mapping of the platform's errors** to launch codes goes by status and by words of the message; the platform's
   error bodies are undocumented, so it is not verified against the live API (`dispatcher/README.md`).
-- **The whole chain**: signed wake-up, claim, VM, Worker, result on a real GitHub pull request. The end-to-end
-  journeys are #332, **pending**; this guide's step 8 is the manual version.
+- **The whole chain on the real platform**: signed wake-up, claim, VM, Worker, result on a real GitHub pull request.
+  CI runs the whole flow on fakes in the lane **`e2e-hosted`** (#332; `make test-e2e-hosted`, which needs a Postgres
+  in `E2E_DATABASE_URL`; `TESTING.md`, "Hosted e2e lane"): the App in serverless mode on Postgres, the Dispatcher, the
+  real Worker and PR-Agent, the Sandbox-Launcher over the local Sandbox double, and the failure journeys (Dispatcher
+  down, give-up, launch failures, a Worker that dies, the pool cap, a probe that fails, secrets in logs); the privileged
+  lane `e2e-dynamic` adds the Dynamic journey with the real container's hardening. None of it touches Vercel, a real
+  GitHub or a real model: this guide's step 8 is the manual twin on the real platform.
 - **The reaper** against the live platform (section 5.5), and whether the platform's cron reaches it while the Dispatcher project is behind Deployment Protection.
-- The **database role split** of section 2.
+- The **database role split** of section 2 on **your** Postgres provider. CI runs the guide's SQL against a plain
+  `postgres:18` (`app/src/db/role-split.integration.test.ts`); a managed provider's rules for roles and owners may differ.
 - **Dynamic Review memory**: the worst case in a 2 GB VM is unmeasured (section 6).
 - The **golden snapshot** passed its checks in two real runs (the pinned Docker versions, the scan, the probe line).
   Retention was broken on the real platform in those runs and fixed in #365; its behavior on the real platform since
@@ -781,6 +787,11 @@ A self-hosted installation and a hosted one never share a database or a GitHub A
   instance runs the release that knows the key mode is served by the wrong key and outside the limit.
 - **A managed workspace has no model of its own**: the instance's `LLM_MODEL` and `LLM_MAX_TOKENS` apply to all of them
   until managed quality tiers exist (#280, #283).
+- **A Worker that exits non-zero before it has reported a result holds its slot until its lease lapses** (two minutes after
+  its last heartbeat); only the next sweep then puts the job back, and the pull request shows "Running" meanwhile. A Worker
+  that cannot start at all (a bad image or configuration) costs those two minutes on every attempt. The attempt is lost
+  either way (three, then `failed`); the delay is the cost. The Dispatcher already logs `worker_exited` but does not
+  release the job: follow-up #375.
 - **A debounced review starts up to about 60 seconds later than self-hosted**, and only while the per-minute cron
   runs (section 5.7); the first automatic review of a pull request (opened) is sent at once.
 - **The capability probe.** One answer per Dispatcher *instance*, held in memory for `DISPATCHER_PROBE_TTL_SECONDS`
@@ -801,7 +812,7 @@ A self-hosted installation and a hosted one never share a database or a GitHub A
 
 ## 10. Follow-ups
 
-- #332 the end-to-end journeys: then step 8 has an automated twin.
+- #375: the Dispatcher releases a job at once when its Worker exits non-zero before a result: then the limit in section 9 goes.
 - #334 and #335 the self-hosted split and flipping its default: then section 8 gets its step table.
 - A deploy workflow that runs `pnpm migrate` and the canary in order is not part of the repository; today steps 1, 2,
   5 and 6 are manual.
