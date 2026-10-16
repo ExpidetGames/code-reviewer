@@ -5,6 +5,7 @@
 // scoped-isolation.integration.test.ts; the claim and the completion that drive the records are in
 // integration-tests/http/runner-api-usage.integration.test.ts.
 import { sql } from "kysely";
+import { TIER_NAME_PATTERN } from "../../operator-api/contract.ts";
 import { describe, expect, it } from "vitest";
 import { createJobQueueFixture } from "../../test-support/jobs.ts";
 import { createUsageRecordsRepository } from "./usage-records-repository.ts";
@@ -93,6 +94,32 @@ describe("reserving a record", () => {
     await t.records.settle(job.id, SETTLED(5));
     await t.records.setKeyMode(job.id, "own");
     expect((await t.records.get(job.id))?.keyMode).toBe("managed");
+  });
+
+  // #280-T04
+  it("notes the tier of a reserved record, and of nothing else", async () => {
+    const t = await setup();
+    const job = await t.newJob();
+    await t.records.reserve(job.id, "managed");
+    expect((await t.records.get(job.id))?.modelTier).toBeNull();
+
+    await t.records.setModelTier(job.id, "high");
+    expect((await t.records.get(job.id))?.modelTier).toBe("high");
+
+    await t.records.settle(job.id, SETTLED(5));
+    await t.records.setModelTier(job.id, "low");
+    expect((await t.records.get(job.id))?.modelTier).toBe("high");
+  });
+
+  // #280-T04
+  it("keeps the tier within the name the operator API shows", async () => {
+    const t = await setup();
+    const job = await t.newJob();
+    await t.records.reserve(job.id, "managed");
+
+    await t.records.setModelTier(job.id, "medium");
+
+    expect((await t.records.get(job.id))?.modelTier).toMatch(TIER_NAME_PATTERN);
   });
 
   it("refuses a key mode the table does not know", async () => {
@@ -288,11 +315,65 @@ describe("counting", () => {
     await t.records.settle(own!.id, SETTLED(9_000_000));
 
     expect(
-      await t.records.sumSettledManagedCostMicroUsd("2026-10-14T12:00:00.000Z"),
+      await t.records.sumSettledCostMicroUsd(
+        "2026-10-14T12:00:00.000Z",
+        "managed",
+      ),
     ).toBe(1_500_250);
     expect(
-      await t.records.sumSettledManagedCostMicroUsd("2026-10-14T12:00:00.001Z"),
+      await t.records.sumSettledCostMicroUsd(
+        "2026-10-14T12:00:00.001Z",
+        "managed",
+      ),
     ).toBe(0);
+  });
+
+  // #361-T05
+  it("sums the settled cost of the runs of each key mode on its own, and treats an unknown cost as nothing", async () => {
+    const t = await setup();
+    const [ownA, ownB, ownUnknown, managed, ownReserved] = [
+      await t.newJob(),
+      await t.newJob(),
+      await t.newJob(),
+      await t.newJob(),
+      await t.newJob(),
+    ];
+    if (ownReserved === undefined) throw new Error("setup");
+    await t.records.reserve(ownA!.id, "own");
+    await t.records.reserve(ownB!.id, "own");
+    await t.records.reserve(ownUnknown!.id, "own");
+    await t.records.reserve(managed!.id, "managed");
+    await t.records.reserve(ownReserved.id, "own");
+    t.setNow("2026-10-14T12:30:00.000Z");
+    await t.records.settle(ownA!.id, SETTLED(1_000_000));
+    await t.records.settle(ownB!.id, SETTLED(40));
+    await t.records.settle(ownUnknown!.id, SETTLED(null));
+    await t.records.settle(managed!.id, SETTLED(9_000_000));
+
+    const since = "2026-10-14T12:00:00.000Z";
+    expect(await t.records.sumSettledCostMicroUsd(since, "own")).toBe(
+      1_000_040,
+    );
+    expect(await t.records.sumSettledCostMicroUsd(since, "managed")).toBe(
+      9_000_000,
+    );
+    expect(
+      await t.records.sumSettledCostMicroUsd("2026-10-14T12:00:00.001Z", "own"),
+    ).toBe(0);
+  });
+
+  // #361-T04: a record counts under the key it was settled with, whatever the entitlements say now.
+  it("counts a record under the key mode corrected on it while it was reserved", async () => {
+    const t = await setup();
+    const job = await t.newJob();
+    await t.records.reserve(job.id, "own");
+    await t.records.setKeyMode(job.id, "managed");
+    t.setNow("2026-10-14T12:30:00.000Z");
+    await t.records.settle(job.id, SETTLED(700));
+
+    const since = "2026-10-14T12:00:00.000Z";
+    expect(await t.records.sumSettledCostMicroUsd(since, "managed")).toBe(700);
+    expect(await t.records.sumSettledCostMicroUsd(since, "own")).toBe(0);
   });
 
   // The period of a run is the one it started in, for the count and for the cost alike.
@@ -308,13 +389,17 @@ describe("counting", () => {
       diff: 0,
       dynamic: 0,
     });
-    expect(await t.records.sumSettledManagedCostMicroUsd(nextPeriod)).toBe(0);
+    expect(await t.records.sumSettledCostMicroUsd(nextPeriod, "managed")).toBe(
+      0,
+    );
     const thisPeriod = "2026-10-14T00:00:00.000Z";
     expect(await t.records.countByKind(thisPeriod)).toEqual({
       diff: 1,
       dynamic: 0,
     });
-    expect(await t.records.sumSettledManagedCostMicroUsd(thisPeriod)).toBe(700);
+    expect(await t.records.sumSettledCostMicroUsd(thisPeriod, "managed")).toBe(
+      700,
+    );
   });
 });
 
@@ -400,5 +485,145 @@ describe("the page of settled records", () => {
       settledAt: "2026-10-14T12:01:00.000Z",
       id: page.records[0]?.id,
     });
+  });
+});
+
+describe("reading the records for the operator API", () => {
+  // #278-T02
+  it("serves only records settled strictly before the bound", async () => {
+    const t = await setup();
+    const [a, b, c] = [await t.newJob(), await t.newJob(), await t.newJob()];
+    for (const job of [a, b, c]) await t.records.reserve(job.id, "own");
+    for (const [job, at] of [
+      [a, "2026-10-14T12:00:01.000Z"],
+      [b, "2026-10-14T12:00:02.000Z"],
+      [c, "2026-10-14T12:00:03.000Z"],
+    ] as const) {
+      t.setNow(at);
+      await t.records.settle(job.id, SETTLED(1));
+    }
+
+    const page = await t.records.pageSettled({
+      limit: 10,
+      settledBefore: "2026-10-14T12:00:03.000Z",
+    });
+
+    expect(page.records.map((record) => record.jobId)).toEqual([a.id, b.id]);
+  });
+
+  // #278-T08
+  it("filters a page on the time of settlement, from included and to excluded", async () => {
+    const t = await setup();
+    const [a, b, c] = [await t.newJob(), await t.newJob(), await t.newJob()];
+    for (const job of [a, b, c]) await t.records.reserve(job.id, "own");
+    for (const [job, at] of [
+      [a, "2026-10-14T12:00:01.000Z"],
+      [b, "2026-10-14T12:00:02.000Z"],
+      [c, "2026-10-14T12:00:03.000Z"],
+    ] as const) {
+      t.setNow(at);
+      await t.records.settle(job.id, SETTLED(1));
+    }
+
+    const page = await t.records.pageSettled({
+      limit: 10,
+      from: "2026-10-14T12:00:02.000Z",
+      to: "2026-10-14T12:00:03.000Z",
+    });
+
+    expect(page.records.map((record) => record.jobId)).toEqual([b.id]);
+  });
+});
+
+describe("summarizing a period", () => {
+  async function seeded() {
+    const t = await setup();
+    const jobs = [];
+    for (let i = 0; i < 7; i += 1)
+      jobs.push(await t.newJob(i === 3 ? "dynamic" : "diff"));
+    const at = (n: number) => `2026-10-14T12:0${n}:00.000Z`;
+    t.setNow(at(1));
+    await t.records.reserve(jobs[0]!.id, "own");
+    await t.records.reserve(jobs[1]!.id, "managed");
+    await t.records.reserve(jobs[2]!.id, "managed");
+    await t.records.reserve(jobs[3]!.id, "managed");
+    await t.records.reserve(jobs[4]!.id, "managed");
+    await t.records.reserve(jobs[5]!.id, "managed");
+    t.setNow(at(0));
+    await t.records.reserve(jobs[6]!.id, "managed");
+    t.setNow(at(2));
+    await t.records.settle(jobs[0]!.id, SETTLED(100));
+    await t.records.settle(jobs[1]!.id, SETTLED(200));
+    await t.records.settle(jobs[2]!.id, SETTLED(null));
+    await t.records.settle(jobs[3]!.id, SETTLED(4000));
+    await t.records.settle(jobs[4]!.id, { state: "void" });
+    // jobs[5] stays reserved; jobs[6] was reserved before the period.
+    await t.records.settle(jobs[6]!.id, SETTLED(99999));
+    return { t, jobs, at };
+  }
+
+  // #278-T05
+  it("counts per kind and key mode, sums the known cost and counts the unknown ones apart", async () => {
+    const { t, at } = await seeded();
+
+    const groups = await t.records.summarize({ from: at(1), to: at(5) });
+
+    expect(groups).toEqual([
+      {
+        reviewKind: "diff",
+        keyMode: "managed",
+        recordCount: 3,
+        settledCount: 2,
+        supersededCount: 0,
+        knownCostMicroUsd: 200,
+        unknownCostCount: 1,
+      },
+      {
+        reviewKind: "diff",
+        keyMode: "own",
+        recordCount: 1,
+        settledCount: 1,
+        supersededCount: 0,
+        knownCostMicroUsd: 100,
+        unknownCostCount: 0,
+      },
+      {
+        reviewKind: "dynamic",
+        keyMode: "managed",
+        recordCount: 1,
+        settledCount: 1,
+        supersededCount: 0,
+        knownCostMicroUsd: 4000,
+        unknownCostCount: 0,
+      },
+    ]);
+  });
+
+  // #278-T05
+  it("leaves out void records and gives nothing for a period without runs", async () => {
+    const { t } = await seeded();
+
+    expect(
+      await t.records.summarize({
+        from: "2030-01-01T00:00:00.000Z",
+        to: "2030-02-01T00:00:00.000Z",
+      }),
+    ).toEqual([]);
+  });
+
+  // #278-T05
+  it("dates a run by the time it started, like the count of the limits, and excludes the end of the period", async () => {
+    const { t, at } = await seeded();
+
+    const groups = await t.records.summarize({ from: at(0), to: at(1) });
+
+    expect(groups).toEqual([
+      expect.objectContaining({
+        recordCount: 1,
+        settledCount: 1,
+        supersededCount: 0,
+        knownCostMicroUsd: 99999,
+      }),
+    ]);
   });
 });

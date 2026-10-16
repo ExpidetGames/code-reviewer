@@ -23,6 +23,8 @@ const MESSAGES: Record<RunnerApiErrorCode, string> = {
   RUNNER_GIT_ACCESS_UNAVAILABLE:
     "Credentials for the job could not be created right now. Try again later.",
   RUNNER_INTERNAL_ERROR: "The request could not be handled.",
+  WORKER_CREDENTIAL_INVALID: "A valid credential for this job is required.",
+  RUNNER_JOB_ENDED: "The job was ended and cannot be continued.",
 };
 
 export function jsonResponse(
@@ -76,6 +78,24 @@ export function unauthorized(): Response {
       error: {
         code: "RUNNER_UNAUTHORIZED",
         message: MESSAGES.RUNNER_UNAUTHORIZED,
+      },
+    } satisfies ErrorResponse,
+    { "WWW-Authenticate": "Bearer" },
+  );
+}
+
+/**
+ * The one answer of the Worker API to a credential that is not the job's: missing, malformed, the
+ * dispatcher credential, for another job, of an earlier claim, or for a job that does not exist. Same
+ * status, headers and body in every case, so it says nothing about which jobs exist or how close a guess was.
+ */
+export function workerUnauthorized(): Response {
+  return jsonResponse(
+    401,
+    {
+      error: {
+        code: "WORKER_CREDENTIAL_INVALID",
+        message: MESSAGES.WORKER_CREDENTIAL_INVALID,
       },
     } satisfies ErrorResponse,
     { "WWW-Authenticate": "Bearer" },

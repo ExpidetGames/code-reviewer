@@ -587,3 +587,117 @@ describe("remembering a positive answer", () => {
     expect(app.calls).toHaveLength(4);
   });
 });
+
+describe("the claim path of the checker (#280)", () => {
+  function setup(answers: Array<() => Response>) {
+    let now = 1_000_000;
+    const calls: string[] = [];
+    const lines: string[] = [];
+    const checker = createModelCapabilityChecker({
+      baseUrl: () => BASE,
+      ttlMs: 60_000,
+      now: () => now,
+      log: (line) => lines.push(line),
+      fetchImpl: (url) => {
+        calls.push(url);
+        const answer = answers[Math.min(calls.length, answers.length) - 1];
+        return Promise.resolve(
+          answer === undefined ? endpointsAnswer([]) : answer(),
+        );
+      },
+    });
+    return {
+      checker,
+      calls,
+      lines,
+      advance(ms: number) {
+        now += ms;
+      },
+    };
+  }
+
+  const withWindow = (contextLength: number) => () =>
+    endpointsAnswer([
+      {
+        supported_parameters: ["tools", "tool_choice"],
+        context_length: contextLength,
+      },
+    ]);
+  const unreachable = () => new Response("down", { status: 503 });
+
+  // #280-T09
+  it("remembers an answer that is not supported for a short time, so a provider outage costs one wait, not one per claim", async () => {
+    const app = setup([unreachable, withWindow(200_000)]);
+
+    for (let i = 0; i < 3; i += 1)
+      expect(
+        (await app.checker.check("vendor/model", { forClaim: true })).outcome,
+      ).toBe("unverifiable");
+    expect(app.calls).toHaveLength(1);
+
+    app.advance(46_000);
+    expect(
+      (await app.checker.check("vendor/model", { forClaim: true })).outcome,
+    ).toBe("supported");
+    expect(app.calls).toHaveLength(2);
+  });
+
+  // #280-T09
+  it("does not remember it for a settings save, which must see the provider as it is now", async () => {
+    const app = setup([unreachable, withWindow(200_000)]);
+
+    expect((await app.checker.check("vendor/model")).outcome).toBe(
+      "unverifiable",
+    );
+    expect((await app.checker.check("vendor/model")).outcome).toBe("supported");
+    expect(app.calls).toHaveLength(2);
+  });
+
+  // #280-T09
+  it("keeps the last context window it read much longer than a supported answer, for when a fresh read fails", async () => {
+    const app = setup([withWindow(200_000), unreachable]);
+    expect(app.checker.lastKnownContextLength?.("vendor/model")).toBeNull();
+
+    await app.checker.check("vendor/model", { forClaim: true });
+    app.advance(10 * 60_000);
+    expect(
+      (await app.checker.check("vendor/model", { forClaim: true })).outcome,
+    ).toBe("unverifiable");
+
+    expect(app.checker.lastKnownContextLength?.("vendor/model")).toBe(200_000);
+    app.advance(23 * 60 * 60_000);
+    expect(app.checker.lastKnownContextLength?.("vendor/model")).toBe(200_000);
+    app.advance(2 * 60 * 60_000);
+    expect(app.checker.lastKnownContextLength?.("vendor/model")).toBeNull();
+  });
+
+  // #280-T09
+  it("replaces the last known window with a newer read, and does not invent one when the metadata states none", async () => {
+    const app = setup([
+      withWindow(200_000),
+      () =>
+        endpointsAnswer([{ supported_parameters: ["tools", "tool_choice"] }]),
+      withWindow(64_000),
+    ]);
+
+    await app.checker.check("vendor/model", { forClaim: true });
+    app.advance(61_000);
+    await app.checker.check("vendor/model", { forClaim: true });
+    expect(app.checker.lastKnownContextLength?.("vendor/model")).toBe(200_000);
+
+    app.advance(61_000);
+    await app.checker.check("vendor/model", { forClaim: true });
+    expect(app.checker.lastKnownContextLength?.("vendor/model")).toBe(64_000);
+  });
+
+  // #280-T08
+  it("logs what it is told to instead of the model id", async () => {
+    const app = setup([withWindow(200_000)]);
+
+    await app.checker.check("vendor/model", { logAs: "tier=high" });
+
+    expect(app.lines).toEqual([
+      "[llm] MODEL_CAPABILITY_CHECK: model=tier=high outcome=supported",
+    ]);
+  });
+});

@@ -27,7 +27,7 @@ of a repository is one lookup per repository on the index `jobs_repository_recen
 
 | Status       | Label     | Meaning                                                                                                |
 | ------------ | --------- | ------------------------------------------------------------------------------------------------------ |
-| `queued`     | Waiting   | Waiting for a runner (or for its debounce)                                                             |
+| `queued`     | Waiting   | Waiting for a runner (or for its retry time)                                                           |
 | `running`    | Running   | A runner holds it                                                                                      |
 | `succeeded`  | Succeeded | The review was published                                                                               |
 | `failed`     | Failed    | Ended without a review; the error code is translated                                                   |
@@ -40,7 +40,7 @@ is shown. The "Started by" line is `Automatic`, `Comment by <login>` or `Started
 The **review kind** the run was queued for (#200, `Diff Review` or `Dynamic Review`, `review-settings/kind-names.ts`)
 is a "Review kind" fact in the detail summary; the list marks only a Dynamic Review run with a small
 badge, since Diff Review is the default. The codes a Dynamic project's run can end with
-(`dynamic_review_disabled`, `no_capable_runner` and the Dynamic failure codes) are translated in
+(`dynamic_review_disabled`, `no_capable_runner`, `dispatch_unavailable` (#328: no Worker was started within the give-up time of a hosted deployment), the three refusals for the plan of the workspace (#277: `workspace_suspended`, `quota_exhausted`, `entitlements_invalid`; their sentences say a run did not start and no model was used, and carry no number) and the Dynamic failure codes) are translated in
 `error-copy.ts` like every other code; a test requires a sentence for each.
 
 ## Polling
@@ -71,7 +71,10 @@ calls and the cost, which stays `null` ("Not available") when the runner could n
 Review reports the sum of the charges its provider reported for every call, or `null`; it never
 guesses a price. The detail shows the cost to four decimals, and a positive cost below $0.0001 reads
 "Less than $0.0001", never "$0.0000". The prompt/completion split and the fallback flag stay on the
-server; the list carries no usage. The log is cleaned (terminal escapes and control characters out)
+server; the list carries no usage. **A run on a managed quality level** (#283; its usage record names a tier) shows
+no model and no cost: `usage.costUsd` is `null` and `costHidden` is `true`, and the page has no Cost row, because the
+cost with the tokens would give the price per token and so the model; the tokens and the call count stay. The operator
+reads the cost through the operator API. The log is cleaned (terminal escapes and control characters out)
 and passed through the same redaction the runner API uses for results, with the secrets the app
 knows. Everything that came from outside (project name, login, a historical question of a removed `/ask` run, the log)
 is rendered as text. The links made from stored data are the comment link and the pull request link, and only when they are `https://github.com/` addresses

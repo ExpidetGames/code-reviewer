@@ -28,7 +28,8 @@ export function initialDynamicValues(
 ): DynamicFormValues {
   return {
     reviewKind: view.effective.reviewKind,
-    dynamicModel: view.effective.dynamicModel,
+    // Absent for a workspace on the operator's key (#283); the form has no field for it then.
+    dynamicModel: view.effective.dynamicModel ?? "",
     skillMode: view.reviewSkillIsDefault ? "default" : "custom",
     skillText: view.effective.reviewSkill,
     draft: null,

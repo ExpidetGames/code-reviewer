@@ -6,6 +6,12 @@ import { configAudienceOf } from "@/config-status/status";
 import { createInstanceSettingsRepository } from "@/db/repositories/instance-settings-repository";
 import { getDatabase } from "@/db/startup";
 import { getWorkspaceLlm } from "@/llm/shared";
+import {
+  planHandoffErrorOf,
+  type PlanHandoffErrorCode,
+} from "@/plan-handoff/errors";
+import { getPlanManagementUrl } from "@/plan-handoff/shared";
+import { planPageLinkedFor } from "@/usage/shared";
 import { requireWorkspace } from "@/workspaces/access-runtime";
 import { can } from "@/workspaces/permissions";
 import { getMembersService } from "@/workspaces/shared";
@@ -19,8 +25,11 @@ export const metadata: Metadata = { title: "Settings · General" };
 // member only.
 export default async function GeneralSettingsPage({
   params,
+  searchParams,
 }: PageProps<"/w/[workspace]/settings">) {
   const { workspace: slug } = await params;
+  // A refused click on "Manage plan" comes back here with a code (src/plan-handoff/errors.ts).
+  const planError = planHandoffErrorOf((await searchParams).plan_error);
   const { workspace, role, user } = await requireWorkspace(slug);
   return (
     <GeneralSettingsContent
@@ -29,6 +38,8 @@ export default async function GeneralSettingsPage({
       workspaceName={workspace.name}
       canRename={can(role, "rename_workspace")}
       canManageLlmKey={can(role, "manage_llm_key")}
+      canManagePlan={can(role, "manage_plan")}
+      planError={planError}
       user={user}
     />
   );
@@ -40,6 +51,8 @@ async function GeneralSettingsContent({
   workspaceName,
   canRename,
   canManageLlmKey,
+  canManagePlan,
+  planError,
   user,
 }: {
   workspaceId: string;
@@ -47,21 +60,31 @@ async function GeneralSettingsContent({
   workspaceName: string;
   canRename: boolean;
   canManageLlmKey: boolean;
+  /** What the role allows; the button needs the instance's plan management page as well. */
+  canManagePlan: boolean;
+  planError: PlanHandoffErrorCode | null;
   user: { isInstanceAdmin: boolean };
 }) {
-  const [config, llmSummary, tenancy, members] = await Promise.all([
-    // Only the instance admin gets the names of the variables that are wrong.
-    getConfigStatusFor(user),
-    getWorkspaceLlm().summaryFor(workspaceId),
-    createInstanceSettingsRepository(getDatabase()).get("tenancy"),
-    getMembersService().list(workspaceId),
-  ]);
+  const [config, llmSummary, tenancy, members, planManagementUrl, showPlan] =
+    await Promise.all([
+      // Only the instance admin gets the names of the variables that are wrong.
+      getConfigStatusFor(user),
+      getWorkspaceLlm().summaryFor(workspaceId),
+      createInstanceSettingsRepository(getDatabase()).get("tenancy"),
+      getMembersService().list(workspaceId),
+      // Only asked for somebody the role lets through: a Member's page never reads the setting.
+      canManagePlan ? getPlanManagementUrl() : Promise.resolve(null),
+      planPageLinkedFor(workspaceId),
+    ]);
   return (
     <GeneralSettingsPageContent
       workspaceSlug={workspaceSlug}
       workspaceName={workspaceName}
       canRename={canRename}
       canManageLlmKey={canManageLlmKey}
+      canManagePlan={canManagePlan && planManagementUrl !== null}
+      {...(planError === null ? {} : { planError })}
+      showPlan={showPlan}
       audience={configAudienceOf(user)}
       tenancy={tenancy === "multi" ? "multi" : "single"}
       memberCount={members.length}

@@ -15,6 +15,21 @@ import { builtInReviewSettings } from "../review-settings/settings.ts";
 import { readDefaultReviewSkill } from "../review-settings/default-skill.ts";
 import type { ModelCapabilityChecker } from "../llm/model-capabilities.ts";
 import type { ReviewSettingsHooks } from "../review-settings/hooks.ts";
+import type { TierAvailability } from "../model-tiers/tiers.ts";
+
+/** No tier has a model for any kind. */
+export const NO_TIERS_CONFIGURED: TierAvailability = {
+  low: { diff: false, dynamic: false },
+  medium: { diff: false, dynamic: false },
+  high: { diff: false, dynamic: false },
+};
+
+/** Every tier has a model for both kinds. */
+export const ALL_TIERS_CONFIGURED: TierAvailability = {
+  low: { diff: true, dynamic: true },
+  medium: { diff: true, dynamic: true },
+  high: { diff: true, dynamic: true },
+};
 
 export const TEST_MODEL = "deepseek/deepseek-v3.2";
 
@@ -53,6 +68,10 @@ export async function setupReviewSettings(
   options: {
     hooks?: ReviewSettingsHooks;
     modelCapabilities?: ModelCapabilityChecker;
+    /** #280: whether the workspace's models are the operator's (its key mode is `managed`); default false. */
+    operatorsModels?: boolean;
+    /** #283: which tiers have a model for which kind of review; default none (a managed workspace sees all as unavailable). */
+    tierAvailability?: TierAvailability;
   } = {},
 ) {
   const database = db ?? (await createTestDatabase()).db;
@@ -61,11 +80,16 @@ export async function setupReviewSettings(
   const projects = createProjectsRepository(database, workspaceId);
   const appSettings = createAppSettingsRepository(database, workspaceId);
   let model = TEST_MODEL;
+  let operatorsModels = options.operatorsModels === true;
+  let tierAvailability: TierAvailability =
+    options.tierAvailability ?? NO_TIERS_CONFIGURED;
   const service = createReviewSettingsService({
     appSettings,
     projects,
     builtIn: () => builtInReviewSettings(model),
     defaultSkill: () => TEST_DEFAULT_SKILL,
+    operatorsModels: async () => operatorsModels,
+    tierAvailability: async () => tierAvailability,
     ...(options.hooks === undefined ? {} : { hooks: options.hooks }),
     ...(options.modelCapabilities === undefined
       ? {}
@@ -81,6 +105,13 @@ export async function setupReviewSettings(
     service,
     setInstanceModel(next: string) {
       model = next;
+    },
+    /** #283: the workspace's key mode changes (own key to managed and back). */
+    setOperatorsModels(next: boolean) {
+      operatorsModels = next;
+    },
+    setTierAvailability(next: TierAvailability) {
+      tierAvailability = next;
     },
     appSettingRows: () =>
       database.selectFrom("app_settings").selectAll().execute(),

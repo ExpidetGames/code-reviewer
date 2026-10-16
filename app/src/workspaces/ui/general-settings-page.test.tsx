@@ -31,6 +31,7 @@ import {
 } from "../../config-status/status.ts";
 import type { WorkspaceLlmSummary } from "../../llm/assemble.ts";
 import { testGithubAppStatus } from "../../test-support/github-app.ts";
+import type { PlanHandoffErrorCode } from "../../plan-handoff/errors.ts";
 import { GeneralSettingsPageContent } from "./general-settings-page.tsx";
 
 afterEach(() => {
@@ -56,11 +57,15 @@ function general({
   audience = "operator" as ConfigAudience,
   canRename = true,
   llmSummary = WORKS,
+  canManagePlan,
+  planError,
 }: {
   config?: ConfigStatus;
   audience?: ConfigAudience;
   canRename?: boolean;
   llmSummary?: WorkspaceLlmSummary;
+  canManagePlan?: boolean;
+  planError?: PlanHandoffErrorCode;
 } = {}) {
   return render(
     <GeneralSettingsPageContent
@@ -73,9 +78,73 @@ function general({
       memberCount={4}
       config={config}
       llmSummary={llmSummary}
+      {...(canManagePlan === undefined ? {} : { canManagePlan })}
+      {...(planError === undefined ? {} : { planError })}
     />,
   );
 }
+
+describe("Manage plan on the General settings sub-page", () => {
+  // #284-T01
+  it("is not there while the instance has no plan management page, whatever the role", () => {
+    general();
+    expect(screen.queryByRole("button", { name: "Manage plan" })).toBeNull();
+    cleanup();
+    general({ canManagePlan: false });
+
+    expect(screen.queryByRole("button", { name: "Manage plan" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Plan" })).toBeNull();
+  });
+
+  // #284-T02
+  it("posts to the handoff route of the workspace, as a plain form, for somebody who may manage the plan", () => {
+    const { container } = general({ canManagePlan: true });
+
+    const button = screen.getByRole("button", { name: "Manage plan" });
+    const form = button.closest("form");
+    expect(form?.getAttribute("method")?.toLowerCase()).toBe("post");
+    expect(form?.getAttribute("action")).toBe("/api/w/acme/plan-handoff");
+    expect(button.getAttribute("type")).toBe("submit");
+    // No field: nothing of the page travels with the click, and no link points out of the app.
+    expect(form?.querySelectorAll("input")).toHaveLength(0);
+    expect(container.querySelectorAll("a[href^='http']")).toHaveLength(0);
+  });
+
+  // #284-T02
+  it("says what happens in generic words, and names no price, provider or company", () => {
+    general({ canManagePlan: true });
+
+    const region = screen.getByRole("region", { name: "Plan" });
+    expect(region.textContent).toMatch(/operator-configured page/i);
+    expect(region.textContent).toMatch(/Owner or Admin/);
+    expect(region.textContent).not.toMatch(/[$€£]|price/i);
+  });
+});
+
+describe("a refused click on Manage plan", () => {
+  // #284-P3
+  it.each([
+    ["rate_limited", /Too many attempts/],
+    ["cross_site_request", /did not come from this page/],
+  ] as const)(
+    "says why for %s, as an alert next to the button",
+    (code, text) => {
+      general({ canManagePlan: true, planError: code });
+
+      const region = screen.getByRole("region", { name: "Plan" });
+      expect(within(region).getByRole("alert").textContent).toMatch(text);
+      expect(
+        within(region).getByRole("button", { name: "Manage plan" }),
+      ).toBeTruthy();
+    },
+  );
+
+  it("says nothing when the click was not refused", () => {
+    general({ canManagePlan: true });
+
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+});
 
 describe("the General settings sub-page", () => {
   // #178-T01

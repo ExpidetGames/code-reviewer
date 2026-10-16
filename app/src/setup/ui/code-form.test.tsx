@@ -31,6 +31,54 @@ function codeInput(): HTMLElement {
   return screen.getByRole("textbox", { name: "Setup code" });
 }
 
+describe("the setup code form in a serverless deployment", () => {
+  // #321-T01
+  it("points at pnpm setup-code instead of the log of the app", () => {
+    render(
+      <CodeForm
+        hosting="serverless"
+        api={{ submitCode: vi.fn(), complete: vi.fn() }}
+      />,
+    );
+
+    expect(screen.getByText(/pnpm setup-code/)).toBeTruthy();
+    expect(screen.queryByText(/docker compose logs app/)).toBeNull();
+  });
+
+  // #321-T01
+  it("says what to do when the code is used up", async () => {
+    const user = userEvent.setup();
+    render(
+      <CodeForm
+        hosting="serverless"
+        api={{
+          submitCode: vi.fn(async () => ({
+            ok: false as const,
+            code: "code_used",
+            status: 409,
+            issues: [],
+          })),
+          complete: vi.fn(),
+        }}
+      />,
+    );
+
+    await user.type(codeInput(), "482913");
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+
+    expect((await screen.findByText(/already used/)).textContent).toMatch(
+      /pnpm setup-code/,
+    );
+  });
+
+  // #321-T04
+  it("keeps the instruction of a server by default", () => {
+    render(<CodeForm api={{ submitCode: vi.fn(), complete: vi.fn() }} />);
+
+    expect(screen.getByText(/docker compose logs app/)).toBeTruthy();
+  });
+});
+
 describe("the setup code form", () => {
   // #97-SU-05
   it("sends the code and goes on when it is accepted", async () => {

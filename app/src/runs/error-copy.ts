@@ -26,8 +26,18 @@ export const ERROR_COPY: Readonly<Record<string, string>> = {
     "The project's review kind was changed before this run could start, so the waiting run was cancelled.",
   no_capable_runner:
     "No runner that can run this kind of review picked up the run within the time limit, so it was cancelled. It will run again on the next push or review request.",
+  dispatch_unavailable:
+    "No worker picked up this run within the time limit, so it was stopped. The service that starts workers may be down or fully busy. It will run again on the next push or review request.",
   dynamic_review_disabled:
     "Dynamic Review is not switched on for this instance yet, so this run could not start. Ask whoever runs the server to turn it on, or switch the project to Diff Review on its settings page.",
+  workspace_suspended:
+    "Reviews are paused for this workspace, so this run did not start and no AI model was used. Ask whoever manages this workspace's plan.",
+  quota_exhausted:
+    "This workspace has used up what its plan allows for the current period, so this run did not start and no AI model was used. Reviews start again when the period renews or the limit is raised.",
+  entitlements_invalid:
+    "The plan settings of this workspace could not be read, so this run did not start and no AI model was used. Ask whoever manages this workspace's plan to check them.",
+  managed_tier_unavailable:
+    "The quality level chosen for this project is not available right now, so this run did not start and no AI model was used. A workspace Owner or Admin can choose another level in the review settings of the project. If no level is available, contact whoever runs this instance.",
 
   // The claim of the runner API
   llm_not_configured:
@@ -55,6 +65,10 @@ export const ERROR_COPY: Readonly<Record<string, string>> = {
     "The pull request could not be read from GitHub, even after several tries.",
   claim_failed:
     "The server could not prepare this run, even after several tries.",
+  launch_failed:
+    "The worker for this run could not be started, even after several tries.",
+  worker_exited:
+    "The worker for this run stopped with an error before it reported a result, even after several tries.",
 
   // The runner
   invalid_job: "The runner refused the job because it was incomplete.",
@@ -109,6 +123,8 @@ export const ERROR_COPY: Readonly<Record<string, string>> = {
     "The configured model does not support the features Dynamic Review requires. Choose another model.",
   lease_lost:
     "When the review was ready, the job was no longer held by its runner or this could not be confirmed, so nothing was written. The next push reviews again.",
+  superseded:
+    "A newer push replaced this run while it was running, so it was stopped and published nothing.",
   unknown: "The run failed for a reason this version does not know.",
 };
 

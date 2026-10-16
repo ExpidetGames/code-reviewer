@@ -16,54 +16,56 @@ No error carries a value of the request or the response: they hold secrets.
 """
 
 import asyncio
-import http.client
 import json
 import re
-import urllib.error
 import urllib.request
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Protocol
 
 from code_reviewer_runner import __version__
 from code_reviewer_runner.capabilities import ENGINE_DIFF
+from code_reviewer_runner.job_loop.http import (
+    MAX_RETRY_AFTER_SECONDS,
+    ApiError,
+    ApiRejected,
+    ApiUnavailable,
+    LeaseLost,
+    Reply,
+    build_opener,
+    error_code,
+    parse_json,
+    retry_after,
+    send,
+)
 from code_reviewer_runner.job_loop.jsonvalues import as_object
 
 _JOB_ID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
-MAX_RESPONSE_BYTES = 1024 * 1024
 # A heartbeat interval above this would let the 2 minute lease run out between two beats.
 MAX_HEARTBEAT_INTERVAL_SECONDS = 60
-MAX_RETRY_AFTER_SECONDS = 15 * 60
 
+
+# The errors and the reply type live in http.py (the Worker API client uses them too); they are
+# part of this module's interface as before.
+__all__ = [
+    "CLAIM_FEATURES",
+    "MAX_HEARTBEAT_INTERVAL_SECONDS",
+    "MAX_RETRY_AFTER_SECONDS",
+    "ApiError",
+    "ApiRejected",
+    "ApiUnavailable",
+    "ClaimedJob",
+    "CompleteReply",
+    "HeartbeatReply",
+    "HttpRunnerApi",
+    "LeaseLost",
+    "RunnerApi",
+]
 
 # What this runner understands beyond its engines (ClaimRequest.features in the contract).
-CLAIM_FEATURES: tuple[str, ...] = ("dynamic_capabilities",)
-
-
-class ApiError(Exception):
-    """Base of the errors below. `status` is the HTTP status, or None without an answer."""
-
-    def __init__(self, message: str, status: int | None = None) -> None:
-        super().__init__(message)
-        self.status = status
-
-
-class ApiUnavailable(ApiError):
-    def __init__(
-        self, message: str, status: int | None = None, retry_after: float | None = None
-    ) -> None:
-        super().__init__(message, status)
-        self.retry_after = retry_after
-
-
-class LeaseLost(ApiError):
-    pass
-
-
-class ApiRejected(ApiError):
-    def __init__(self, message: str, status: int, code: str | None) -> None:
-        super().__init__(message, status)
-        self.code = code
+# `supersede` (#396): it stops gracefully when a heartbeat answers `job.superseded`.
+CLAIM_FEATURES: tuple[str, ...] = ("dynamic_capabilities", "supersede")
 
 
 @dataclass(frozen=True)
@@ -81,55 +83,54 @@ class CompleteReply:
     already_completed: bool
 
 
+@dataclass(frozen=True)
+class HeartbeatReply:
+    """What the app said to a heartbeat that it accepted."""
+
+    # #396: a newer push replaced this run; it must stop gracefully. Absent in the answer means
+    # False.
+    superseded: bool = False
+    # When the lease ends, in seconds since the epoch, as the answer names it (None: absent or
+    # unreadable). A superseded run drains until shortly before it (`host.py`).
+    lease_expires_at: float | None = None
+
+
+def parse_heartbeat(reply: Reply, job_id: str) -> HeartbeatReply:
+    """The accepted heartbeat: a 200 is the app's "yes" only as the contract's answer for this very
+    job.
+
+    A gateway or a captive portal that answers 200 to everything is not the app (#260). `superseded`
+    counts only as the boolean `true`; anything else is "not superseded".
+    """
+    body = as_object(parse_json(reply))
+    job = as_object(body.get("job")) if body and body.get("version") == 1 else None
+    if job is None or job.get("id") != job_id:
+        raise ApiUnavailable("the heartbeat answer does not match the contract", 200)
+    return HeartbeatReply(
+        superseded=job.get("superseded") is True,
+        lease_expires_at=_epoch(job.get("leaseExpiresAt")),
+    )
+
+
+def _epoch(value: object) -> float | None:
+    """The time of a contract `Timestamp` as seconds since the epoch, or None for anything else."""
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return None if parsed.tzinfo is None else parsed.timestamp()
+
+
 class RunnerApi(Protocol):
     async def claim(self) -> ClaimedJob | None: ...
 
-    async def heartbeat(self, job_id: str, lease_token: str) -> None: ...
+    async def heartbeat(self, job_id: str, lease_token: str) -> HeartbeatReply: ...
 
     async def complete(
         self, job_id: str, lease_token: str, result: Mapping[str, Any]
     ) -> CompleteReply: ...
-
-
-class _NoRedirects(urllib.request.HTTPRedirectHandler):
-    """A redirect would carry the token to wherever it points: refuse it instead."""
-
-    def redirect_request(self, *args: Any, **kwargs: Any) -> None:  # type: ignore[override]
-        return None
-
-
-@dataclass(frozen=True)
-class _Reply:
-    status: int
-    headers: Mapping[str, str]
-    body: bytes
-
-
-def _retry_after(headers: Mapping[str, str]) -> float | None:
-    raw = headers.get("Retry-After")
-    if raw is None:
-        return None
-    try:
-        seconds = float(raw)
-    except ValueError:
-        return None
-    return min(max(seconds, 0.0), MAX_RETRY_AFTER_SECONDS) if seconds == seconds else None
-
-
-def _json(reply: _Reply) -> Any:
-    try:
-        return json.loads(reply.body.decode("utf-8"))
-    except (ValueError, UnicodeDecodeError):
-        return None
-
-
-def _error_code(reply: _Reply) -> str | None:
-    body = as_object(_json(reply))
-    error = as_object(body.get("error")) if body else None
-    code = error.get("code") if error else None
-    if isinstance(code, str) and re.fullmatch(r"[A-Z_]{1,64}", code):
-        return code
-    return None
 
 
 class HttpRunnerApi:
@@ -150,7 +151,7 @@ class HttpRunnerApi:
         self._engines = engines or (ENGINE_DIFF,)
         self._timeout = request_timeout
         # No proxy: the token must only go to the app, and the app is reached directly.
-        self._opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirects)
+        self._opener = build_opener()
 
     # -- the three calls ----------------------------------------------------------------------
 
@@ -171,18 +172,13 @@ class HttpRunnerApi:
             raise self._failure(reply)
         return self._parse_claim(reply)
 
-    async def heartbeat(self, job_id: str, lease_token: str) -> None:
+    async def heartbeat(self, job_id: str, lease_token: str) -> HeartbeatReply:
         reply = await asyncio.to_thread(
             self._send, f"/jobs/{self._safe_id(job_id)}/heartbeat", {"leaseToken": lease_token}
         )
         if reply.status != 200:
             raise self._failure(reply)
-        # #260: a 200 is the app's "yes" only as the contract's answer for this very job. A gateway
-        # or a captive portal that answers 200 to everything is not the app.
-        body = as_object(_json(reply))
-        job = as_object(body.get("job")) if body and body.get("version") == 1 else None
-        if job is None or job.get("id") != job_id:
-            raise ApiUnavailable("the heartbeat answer does not match the contract", 200)
+        return parse_heartbeat(reply, job_id)
 
     async def complete(
         self, job_id: str, lease_token: str, result: Mapping[str, Any]
@@ -194,7 +190,7 @@ class HttpRunnerApi:
         )
         if reply.status != 200:
             raise self._failure(reply)
-        body = as_object(_json(reply))
+        body = as_object(parse_json(reply))
         job = as_object(body.get("job")) if body else None
         status = job.get("status") if job else None
         return CompleteReply(
@@ -210,7 +206,7 @@ class HttpRunnerApi:
             raise ApiRejected("the job id is not a UUID", 400, None)
         return job_id
 
-    def _send(self, path: str, body: Mapping[str, Any] | None) -> _Reply:
+    def _send(self, path: str, body: Mapping[str, Any] | None) -> Reply:
         data = json.dumps(body, separators=(",", ":")).encode("ascii") if body is not None else b""
         request = urllib.request.Request(
             f"{self._base_url}/api/runners/v1{path}",
@@ -224,40 +220,27 @@ class HttpRunnerApi:
                 "User-Agent": f"code-reviewer-runner/{__version__}",
             },
         )
-        try:
-            with self._opener.open(request, timeout=self._timeout) as response:
-                return _Reply(
-                    response.status, dict(response.headers), response.read(MAX_RESPONSE_BYTES)
-                )
-        except urllib.error.HTTPError as error:
-            try:
-                body_bytes = error.read(MAX_RESPONSE_BYTES)
-            except Exception:
-                body_bytes = b""
-            return _Reply(error.code, dict(error.headers), body_bytes)
-        except (urllib.error.URLError, http.client.HTTPException, OSError, ValueError) as error:
-            # The class of the error is enough: its text can hold the URL.
-            raise ApiUnavailable(f"no answer from the app ({type(error).__name__})") from None
+        return send(self._opener, request, self._timeout)
 
     @staticmethod
-    def _failure(reply: _Reply) -> ApiError:
+    def _failure(reply: Reply) -> ApiError:
         status = reply.status
-        code = _error_code(reply)
+        code = error_code(reply)
         if status in (409, 404):
             return LeaseLost(f"the app says the job is not held (HTTP {status})", status)
         if status >= 500 or status in (401, 408, 425, 429):
             return ApiUnavailable(
                 f"the app cannot serve the request (HTTP {status})",
                 status,
-                _retry_after(reply.headers),
+                retry_after(reply.headers),
             )
         if 300 <= status < 400:
             return ApiUnavailable(f"the app answered with a redirect (HTTP {status})", status)
         return ApiRejected(f"the app refused the request (HTTP {status})", status, code)
 
     @staticmethod
-    def _parse_claim(reply: _Reply) -> ClaimedJob:
-        body = as_object(_json(reply))
+    def _parse_claim(reply: Reply) -> ClaimedJob:
+        body = as_object(parse_json(reply))
         job = as_object(body.get("job")) if body and body.get("version") == 1 else None
         job_id = job.get("id") if job else None
         lease_token = job.get("leaseToken") if job else None

@@ -30,6 +30,7 @@ export function createReviewSettingsJobOptionsSource(deps: {
           // A Dynamic job gets the project's model and skill, and **no** PR-Agent env: those options
           // grant nothing to the read-only agent and must never be promoted into its permissions.
           env: {},
+          modelTier: resolved.settings.modelTier,
           llm: {
             model: resolved.dynamic.dynamicModel,
             maxTokens: resolved.settings.maxTokens,
@@ -43,7 +44,11 @@ export function createReviewSettingsJobOptionsSource(deps: {
       // A Diff job keeps the PR-Agent options of the effective Diff settings, even if the project was
       // switched to Dynamic after it was claimed. `toRunnerSettings` never depends on the kind.
       const { llm, env, fallbackModels } = toRunnerSettings(resolved.settings);
-      return { env, llm: { ...llm, fallbackModels } };
+      return {
+        env,
+        modelTier: resolved.settings.modelTier,
+        llm: { ...llm, fallbackModels },
+      };
     },
   };
 }

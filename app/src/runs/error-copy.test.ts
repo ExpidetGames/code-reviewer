@@ -49,6 +49,17 @@ describe("the sentences for error codes", () => {
     }
   });
 
+  // #283: the control exists now, so the copy points at it, still without naming a model.
+  it("tells a person about an unavailable quality level and where to choose another one", () => {
+    const { text } = describeErrorCode("managed_tier_unavailable");
+
+    expect(text).toMatch(/quality level/);
+    expect(text).toMatch(/Owner or Admin/);
+    expect(text).toMatch(/review settings/);
+    expect(text).toMatch(/whoever runs this instance/);
+    expect(text).not.toMatch(/\bmodel\b(?! was used)/);
+  });
+
   // #200: the codes a Dynamic project's run can end with are read by people on the Runs pages.
   it("tells a person what to do about a Dynamic Review that is not enabled, and about a model the engine cannot use", () => {
     expect(describeErrorCode("dynamic_review_disabled").text).toMatch(
@@ -64,6 +75,24 @@ describe("the sentences for error codes", () => {
     expect(describeErrorCode("dynamic_config_invalid").text).toMatch(
       /project page/,
     );
+  });
+
+  // #277-T12
+  it("explains a refusal for the plan of the workspace in one sentence, without a number or a figure", () => {
+    for (const code of [
+      "workspace_suspended",
+      "quota_exhausted",
+      "entitlements_invalid",
+    ]) {
+      const { text, known } = describeErrorCode(code);
+
+      expect(known).toBe(true);
+      expect(text).toMatch(/^[A-Z][^.]*\.(?: [A-Z][^.]*\.)*$/);
+      expect(text).not.toMatch(/\d/);
+      expect(text).not.toMatch(/[$€£%]/);
+      expect(text).toMatch(/did not start/);
+      expect(text).toMatch(/no AI model was used/);
+    }
   });
 
   // #290-T06

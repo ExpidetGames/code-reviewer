@@ -5,10 +5,15 @@
 // the caller gets the generic 500 of the API and the log gets the cause, never a token.
 import "server-only";
 import { notFound } from "next/navigation";
+import { createPlanHandoffRedeemRepository } from "../db/repositories/plan-handoff-redeem-repository.ts";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
+import { createUsageFeedRepository } from "../db/repositories/usage-feed-repository.ts";
+import { createUsageRecordsRepository } from "../db/repositories/usage-records-repository.ts";
 import { createWorkspaceEntitlementsRepository } from "../db/repositories/workspace-entitlements-repository.ts";
 import { createWorkspacesRepository } from "../db/repositories/workspaces-repository.ts";
 import { getDatabase } from "../db/startup.ts";
+import { modelCapabilities } from "../llm/shared.ts";
+import { createModelTiersService } from "../model-tiers/service.ts";
 import { consoleRunnerApiLogger, describeError } from "../runner-api/logger.ts";
 import { createOperatorApi, type OperatorApi } from "./api.ts";
 import type { OperatorRoute } from "./contract.ts";
@@ -23,6 +28,13 @@ export function getOperatorApi(): OperatorApi {
     entitlementsFor: (workspaceId) =>
       createWorkspaceEntitlementsRepository(db, workspaceId),
     settings: createInstanceSettingsRepository(db),
+    usageFeed: createUsageFeedRepository(db),
+    usageFor: (workspaceId) => createUsageRecordsRepository(db, workspaceId),
+    handoffs: createPlanHandoffRedeemRepository(db),
+    modelTiers: createModelTiersService({
+      settings: createInstanceSettingsRepository(db),
+      modelCapabilities,
+    }),
     now: () => new Date(),
     logger: consoleRunnerApiLogger,
     notFound,

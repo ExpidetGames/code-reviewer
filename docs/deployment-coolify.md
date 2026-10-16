@@ -5,6 +5,10 @@ repositories. Plan for about two hours, most of it waiting for DNS, the build an
 against Coolify's current documentation (links in each step); the first deployment with the customer is
 what verifies it on a real instance, see [What is verified](#what-is-verified).
 
+This guide is for a self-hosted installation, which keeps working unchanged. The hosted deployment on Vercel
+(a serverless App, a Dispatcher and a Worker per job in a Sandbox VM) has its own guide, [`deployment-vercel.md`](deployment-vercel.md);
+its section "Self-hosted and Coolify" says what does not change here.
+
 What you end up with: one Coolify application of type *Docker Compose*, built from this repository,
 with three containers: the **app** (web UI, API, webhook receiver, SQLite database, daily backups) behind
 Coolify's proxy under your domain with HTTPS, the **runner** (runs PR-Agent) that has no domain and
@@ -208,7 +212,6 @@ value), set Literal.
 | `LLM_PROVIDER` | optional | `openrouter` | The only provider for now; this is the default. |
 | `LLM_MODEL` | optional | An OpenRouter model name | Default `anthropic/claude-haiku-5.5`. The review settings in the UI can choose another model per project. The update also copies a model that differs from the default into the review defaults of the default workspace, so removing this variable later does not change the model. |
 | `LLM_MAX_TOKENS` | optional | Context window of a model PR-Agent does not know | Leave empty for known models. |
-| `REVIEW_DEBOUNCE_SECONDS` | optional | A number from 0 to 600 | How long a push to a pull request waits before its automatic review starts. Empty: 90. |
 | `DATABASE_BUSY_TIMEOUT_MS` | optional | A number of milliseconds | How long a database write waits for a lock. Empty: 5000. |
 | `BACKUP_TIME` | optional | `HH:MM` in UTC, or `off` | When the app backs up the database every day. Empty: `02:30`. Use `off` only together with a Coolify scheduled task, [section 8](#8-storage-and-backups). |
 | `RUNNER_CONCURRENCY` | optional | A whole number from 1 to 32 | How many reviews the runner runs at once, [section 9](#9-runner-sizing-and-runner_concurrency). Empty: 3 (right for the runner's 2 GiB). Raise it only together with `RUNNER_MEMORY_LIMIT`. |
@@ -229,9 +232,12 @@ Variables that exist in `.env.example` but that you **do not set on Coolify**:
 | `APP_PORT`, `APP_BIND_ADDRESS` | not used | Only `compose.yml` publishes a port. |
 | `GITHUB_APP_PRIVATE_KEY_PATH` | not used | The Compose file mounts no key file; use `GITHUB_APP_PRIVATE_KEY`. |
 | `DATABASE_URL`, `DATABASE_POOL_MAX` | not used | Only the large (Postgres) topology sets them; on Coolify the database is the SQLite file in the data volume ([deployment-large.md](deployment-large.md)). |
+| `APP_RUNTIME`, `VERCEL`, `DATABASE_URL_MIGRATE`, `CRON_SECRET` | not used | For a hosted deployment on a serverless platform only: the runtime mode (`server` is the default and what Coolify runs), the platform's own marker, the direct database URL of `pnpm migrate`, and the secret of the platform's cron (the daily sync and the once-a-minute sweep). Leave them unset; the app then behaves exactly as described in this guide. |
+| `RUNNER_DISPATCH`, `RUNNER_WEBHOOK_URL`, `RUNNER_WEBHOOK_SECRET`, `RUNNER_WEBHOOK_KEY_ID`, `RUNNER_WEBHOOK_SECRET_PREVIOUS`, `RUNNER_WEBHOOK_KEY_ID_PREVIOUS`, `RUNNER_WEBHOOK_BYPASS_TOKEN`, `RUNNER_DISPATCH_GIVE_UP_SECONDS`, `RUNNER_DISPATCH_MAX_RUNNING` | not used | For a hosted deployment with a Dispatcher only: with `RUNNER_DISPATCH=webhook` the app sends a signed wake-up call to the Dispatcher after it queued a job ([`app/src/dispatch/README.md`](../app/src/dispatch/README.md)). Here the runner polls, which is the default (`poll`). Leave them unset. |
 | `BACKUP_DIR` | not used | The image fixes it to `/backups`, the mount point of the backup volume. |
 | `ALLOW_TEST_GITHUB_ENDPOINTS`, `GITHUB_OAUTH_BASE_URL`, `GITHUB_API_BASE_URL` | not used | For the test stack with a fake GitHub only. Never set them in a real deployment. |
 | `ALLOW_TEST_LLM_ENDPOINTS`, `LLM_API_BASE_URL` | not used | For the test stack with a fake LLM only (the "test key" button). Never set them in a real deployment. |
+| `ALLOW_TEST_DISPATCH_TIMING`, `TEST_DISPATCH_INLINE_RETRY_DELAYS_MS` | not used | For the test lane that starts its own Dispatcher only (longer pauses between the repeats of a wake-up). Never set them in a real deployment. |
 | `RUNNER_API_URL` | fixed | The Compose file sets it to `http://app:3000`, the app over the Docker network. It is not a setting. |
 | `RUNNER_SHUTDOWN_GRACE_SECONDS` | not used | How long running reviews may finish after a stop. The Compose file leaves the runner's 60 seconds and gives the runner `stop_grace_period: 90s` for it ([section 9](#stopping-the-runner)); the two belong together. |
 | `PR_AGENT_COMMAND` | not used | Replaces PR-Agent by another command, for test stacks with a fake. The runner would hand that command every job with its GitHub token and LLM key. The Compose files never pass it on; never set it. |
@@ -704,7 +710,7 @@ in cannot sign up on their own until you recreate the access.
 `GITHUB_APP_PRIVATE_KEY`, `GITHUB_APP_WEBHOOK_SECRET`, `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`,
 `ALLOWED_GITHUB_LOGINS`, `ALLOWED_GITHUB_ORG`, `LLM_PROVIDER`, `LLM_API_KEY` and, once `APP_SECRET` has its value,
 `BETTER_AUTH_SECRET`. Keep `BETTER_AUTH_URL`, `APP_SECRET`, `RUNNER_TOKEN` and the operational settings
-(`REVIEW_DEBOUNCE_SECONDS`, `BACKUP_TIME`, `RUNNER_*`, `LLM_MODEL`, `LLM_MAX_TOKENS`). Save, redeploy, and check that
+(`BACKUP_TIME`, `RUNNER_*`, `LLM_MODEL`, `LLM_MAX_TOKENS`). Save, redeploy, and check that
 the log no longer says `LEGACY_VARIABLES_IGNORED`, that nothing asks for a setup code, and that a test pull request
 is reviewed. An old variable that stays does no harm (it is ignored), but the secrets in it are then stored in two
 places.

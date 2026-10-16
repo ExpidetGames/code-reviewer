@@ -5,17 +5,28 @@
 // source of job options are used (see README.md for what replaces them when the projects land).
 import "server-only";
 import { createIntegrationsRepository } from "../db/repositories/integrations-repository.ts";
+import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
+import { createModelTiersService } from "../model-tiers/service.ts";
+import { allTierModels } from "../model-tiers/tiers.ts";
 import { createUsageRecordsRepository } from "../db/repositories/usage-records-repository.ts";
 import { createJobsRepository } from "../db/repositories/jobs-repository.ts";
 import { createRepositoriesRepository } from "../db/repositories/repositories-repository.ts";
 import { getDatabase } from "../db/startup.ts";
 import { integrationRegistry } from "../integrations/registry.ts";
+import { jobEnded, touched } from "../dispatch/maintenance-shared.ts";
 import { getRunnerQueue } from "../jobs/shared.ts";
 import { resolveAppSecret } from "../crypto/app-secret.ts";
+import { readEffectiveEntitlements } from "../workspaces/effective-entitlements.ts";
 import { getWorkspaceLlm, modelCapabilities } from "../llm/shared.ts";
 import { projectServiceFor } from "../projects/shared.ts";
 import { reviewSettingsServiceFor } from "../review-settings/shared.ts";
 import { createRunnerApi, type RunnerApi } from "./api.ts";
+import { APP_VERSION } from "./app-version.ts";
+import {
+  createWorkerApi,
+  type WorkerApi,
+  type WorkerApiDeps,
+} from "./worker-api.ts";
 import { createClaimedKeys, type ClaimedKeys } from "./claimed-keys.ts";
 import { createProjectClaimGuard } from "./project-claim-guard.ts";
 import { HEARTBEAT_INTERVAL_SECONDS } from "./contract.ts";
@@ -38,11 +49,20 @@ function getClaimedKeys(): ClaimedKeys {
   });
 }
 
-/** The runner API of the running server. */
-export function getRunnerApi(): RunnerApi {
+/**
+ * The collaborators both APIs share: the runner API (claim, heartbeat, complete) and the Worker API
+ * (#320, details, heartbeat, result) are two doors to the same queue, checks and redaction.
+ */
+function sharedDeps(): WorkerApiDeps {
   const db = getDatabase();
+  // #280: which model backs a tier. Only the claim and the masking of a result read it; the checks of a save are the
+  // operator API's.
+  const modelTiers = createModelTiersService({
+    settings: createInstanceSettingsRepository(db),
+    modelCapabilities,
+  });
   const llm = getWorkspaceLlm();
-  return createRunnerApi({
+  return {
     // Runners serve the whole instance: the queue is not scoped, and everything the claim looks up
     // for a job is looked up in the job's own workspace.
     queue: getRunnerQueue(),
@@ -76,25 +96,62 @@ export function getRunnerApi(): RunnerApi {
     }),
     // The LLM access of the workspace of the claimed job: its own key, never another workspace's (src/llm).
     loadLlm: (workspaceId) => llm.accessFor(workspaceId),
+    // The standing of the job's workspace, asked by the Worker's fetch before it hands out a key (#276).
+    entitlementsFor: (workspaceId) =>
+      readEffectiveEntitlements(db, workspaceId),
     // Whose key the job runs on, in its usage record; scoped to the job's own workspace.
     recordKeyMode: (job, keyMode) =>
       createUsageRecordsRepository(db, job.workspaceId).setKeyMode(
         job.id,
         keyMode,
       ),
-    // #279: the metadata of a Dynamic job's model, read when its claim is built.
+    // #280: the managed tier of a job on the operator's key, in its usage record (the name, never the model).
+    recordModelTier: (job, tier) =>
+      createUsageRecordsRepository(db, job.workspaceId).setModelTier(
+        job.id,
+        tier,
+      ),
+    // #280: which model backs a tier for a kind of review. Only the claim reads it; the checks of a save are the
+    // operator API's, so the service here never writes.
+    modelTiers,
+    tierModels: async (job) => {
+      const record = await createUsageRecordsRepository(
+        db,
+        job.workspaceId,
+      ).get(job.id);
+      return record?.modelTier == null
+        ? { managed: false, models: [] }
+        : { managed: true, models: allTierModels(await modelTiers.read()) };
+    },
+    // #279: the metadata of a job's model (Dynamic, and a managed tier's), read when its claim is built.
     modelCapabilities,
     claimedKeys: getClaimedKeys(),
+    // #395: what happens between two sweeps. Both run after the response and do nothing in poll mode.
+    jobEnded,
+    activity: () => touched(),
     now: () => new Date(),
     logger: consoleRunnerApiLogger,
     heartbeatIntervalSeconds: HEARTBEAT_INTERVAL_SECONDS,
-    runnerToken: () => configuredRunnerToken(process.env),
     // The runner token and the current LLM key of the job's workspace (the key of the claim is in the database).
     knownSecrets: async (workspaceId) => [
       ...knownSecretsFromEnv(process.env),
       ...(await llm.currentKeysFor(workspaceId).catch(() => [])),
     ],
+  };
+}
+
+/** The runner API of the running server. */
+export function getRunnerApi(): RunnerApi {
+  return createRunnerApi({
+    ...sharedDeps(),
+    runnerToken: () => configuredRunnerToken(process.env),
+    appVersion: APP_VERSION,
   });
+}
+
+/** The Worker API of the running server (#320). It has no use for `RUNNER_TOKEN`: a per-job credential opens it. */
+export function getWorkerApi(): WorkerApi {
+  return createWorkerApi(sharedDeps());
 }
 
 /**
@@ -110,6 +167,20 @@ export async function withRunnerApi(
   } catch (error) {
     consoleRunnerApiLogger.error(
       `[runner-api] the API could not be set up: ${describeError(error)}`,
+    );
+    return errorResponse(500, "RUNNER_INTERNAL_ERROR");
+  }
+}
+
+/** What the Worker API's route files call; the same kind of answer as `withRunnerApi` if it cannot be set up. */
+export async function withWorkerApi(
+  call: (api: WorkerApi) => Promise<Response>,
+): Promise<Response> {
+  try {
+    return await call(getWorkerApi());
+  } catch (error) {
+    consoleRunnerApiLogger.error(
+      `[worker-api] the API could not be set up: ${describeError(error)}`,
     );
     return errorResponse(500, "RUNNER_INTERNAL_ERROR");
   }

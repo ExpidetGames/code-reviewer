@@ -9,6 +9,7 @@
 import Link from "next/link";
 import type { AttentionNotice } from "../../components/needs-attention.tsx";
 import { NeedsAttention } from "../../components/needs-attention.tsx";
+import { instanceAccessOf } from "../access.ts";
 import type { WorkspaceLlmSummary } from "../assemble.ts";
 import { workspacePath } from "../../workspaces/paths.ts";
 
@@ -22,6 +23,21 @@ export function llmAccessAttention({
   canManage: boolean;
 }): AttentionNotice | null {
   if (summary.configured) return null;
+  // The access comes from the instance, or the instance cannot say whose key applies: the workspace has no
+  // form to fix it with, so no link to one.
+  if (instanceAccessOf(summary) !== null)
+    return {
+      id: "llm_access",
+      severity: "error",
+      title: "LLM access is not available",
+      detail: (
+        <>
+          Reviews of this workspace cannot run right now: this instance cannot
+          set up its LLM access at the moment. Contact the administrator of this
+          instance.
+        </>
+      ),
+    };
   const unreadable = summary.reason === "key_unreadable";
   const settingsPath = workspacePath(workspaceSlug, "/settings/llm");
   return {

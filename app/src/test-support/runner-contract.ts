@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// The contracts (contracts/runner-api.v1.json by default, contracts/operator-api.v1.json) as validators, for tests that check a real
+// The contracts (contracts/runner-api.v1.json by default, contracts/operator-api.v1.json, worker-api, dispatch-webhook, worker-container) as validators, for tests that check a real
 // answer or request against the file. The file is read from disk, not copied: it is the one source.
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
@@ -50,6 +50,13 @@ export function createContractValidator(
   // `version` is documentation of the file itself, not a validation keyword.
   ajv.addKeyword("version");
   ajv.addSchema(schema);
+  // The contract files of the hosted deployment (#318) refer to each other by relative reference
+  // (the Worker API reuses RunnerJobInput), so every sibling is known to the validator.
+  for (const name of readdirSync(CONTRACTS_DIRECTORY)) {
+    if (!name.endsWith(".v1.json") || name === file) continue;
+    const sibling = readContract(name);
+    if (sibling.$id !== schema.$id) ajv.addSchema(sibling);
+  }
   return {
     check(definition, document) {
       const validate = ajv.getSchema(`${schema.$id}#/$defs/${definition}`);

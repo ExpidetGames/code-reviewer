@@ -10,13 +10,20 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { estimateReviewCost } from "../cost.ts";
 import { DEFAULT_REVIEW_SKILL } from "../default-skill.ts";
+import {
+  QUALITY_CHOSEN_UNAVAILABLE,
+  QUALITY_LEVELS,
+  QUALITY_UNAVAILABLE_BADGE,
+} from "../../copy/model-quality.ts";
 import type { ProjectDynamicView } from "../service.ts";
 import {
   builtInReviewSettings,
   DEFAULT_DYNAMIC_MODEL,
   PROJECT_DYNAMIC_LIMITS,
   type ReviewSettings,
+  withoutModelFields,
 } from "../settings.ts";
+import type { TierAvailability } from "../../model-tiers/tiers.ts";
 import type { SettingsApi } from "./api.ts";
 import type { SettingsFormModel } from "./form-model.ts";
 import { SettingsForm } from "./settings-form.tsx";
@@ -70,10 +77,59 @@ function projectModel(
     effective,
     sources,
     cost: estimateReviewCost(effective),
+    managed: false,
+    tierAvailability: null,
     lastSaved: null,
     dynamic: DYNAMIC_VIEW,
   };
 }
+
+/** The form model of a workspace on the operator's key (#283): no model field, no Dynamic model, no estimate. */
+function managedModel(
+  options: {
+    overrides?: SettingsFormModel["overrides"];
+    kind?: "diff" | "dynamic";
+    availability?: TierAvailability;
+    mode?: "project" | "global";
+  } = {},
+): SettingsFormModel {
+  const overrides = options.overrides ?? {};
+  const readable = withoutModelFields(BUILT_IN);
+  const effective = { ...readable, ...overrides };
+  const sources = Object.fromEntries(
+    Object.keys(BUILT_IN).map((field) => [
+      field,
+      Object.hasOwn(overrides, field) ? "project" : "built_in",
+    ]),
+  ) as SettingsFormModel["sources"];
+  const effectiveDynamic = { ...DYNAMIC_VIEW.effective };
+  const defaultsDynamic = { ...DYNAMIC_VIEW.defaults };
+  delete effectiveDynamic.dynamicModel;
+  delete defaultsDynamic.dynamicModel;
+  const dynamic: ProjectDynamicView = {
+    ...DYNAMIC_VIEW,
+    effective: { ...effectiveDynamic, reviewKind: options.kind ?? "diff" },
+    defaults: defaultsDynamic,
+  };
+  return {
+    mode: options.mode ?? "project",
+    inherited: readable,
+    overrides,
+    effective,
+    sources,
+    cost: null,
+    managed: true,
+    tierAvailability: options.availability ?? ALL_TIERS,
+    lastSaved: null,
+    ...((options.mode ?? "project") === "project" ? { dynamic } : {}),
+  };
+}
+
+const ALL_TIERS: TierAvailability = {
+  low: { diff: true, dynamic: true },
+  medium: { diff: true, dynamic: true },
+  high: { diff: true, dynamic: true },
+};
 
 /** The JSON a settings route answers with for a project, built from a model. */
 function answerFor(model: SettingsFormModel) {
@@ -681,5 +737,302 @@ describe("the settings form", () => {
       .getByLabelText("Fallback model", { exact: true })
       .closest("[data-field]") as HTMLElement;
     expect(within(field).getByText(/Stored but not used yet/)).toBeTruthy();
+  });
+});
+
+describe("the settings form of a workspace on the operator's key (#283)", () => {
+  const level = (name: "Low" | "Medium" | "High") =>
+    screen.getByRole("radio", { name: new RegExp(`^${name}`) });
+
+  // #283-T01
+  it("offers one Quality choice of Low, Medium and High instead of the model fields", () => {
+    render(
+      <SettingsForm
+        workspaceSlug="acme"
+        initial={managedModel()}
+        api={fakeApi().api}
+      />,
+    );
+
+    const group = screen.getByRole("radiogroup", { name: "Quality" });
+    expect(
+      within(group)
+        .getAllByRole("radio")
+        .map((radio) =>
+          radio.closest("[data-level]")?.getAttribute("data-level"),
+        ),
+    ).toEqual(["low", "medium", "high"]);
+    expect(level("Medium").getAttribute("aria-checked")).toBe("true");
+    expect(screen.queryByLabelText("Model")).toBeNull();
+    expect(screen.queryByLabelText("Fallback model")).toBeNull();
+    expect(screen.queryByLabelText("Dynamic Review model")).toBeNull();
+    // The rest of the form is as it was, the token budget included.
+    expect(screen.getByLabelText("Token budget")).toBeTruthy();
+    expect(screen.getByLabelText("Most findings per review")).toBeTruthy();
+  });
+
+  // #283-T01
+  it("describes each level by speed and depth, from the copy module", () => {
+    render(
+      <SettingsForm
+        workspaceSlug="acme"
+        initial={managedModel()}
+        api={fakeApi().api}
+      />,
+    );
+
+    for (const entry of QUALITY_LEVELS) {
+      const card = screen
+        .getByRole("radio", { name: new RegExp(`^${entry.label}`) })
+        .closest("[data-level]") as HTMLElement;
+      expect(within(card).getByText(entry.description)).toBeTruthy();
+    }
+  });
+
+  // #283-T01
+  it("shows no model name, no model list and no cost estimate anywhere", () => {
+    render(
+      <SettingsForm
+        workspaceSlug="acme"
+        initial={managedModel()}
+        api={fakeApi().api}
+      />,
+    );
+
+    const html = document.body.innerHTML;
+    expect(document.querySelector("datalist")).toBeNull();
+    expect(html).not.toContain("claude-haiku");
+    expect(html).not.toContain(DEFAULT_DYNAMIC_MODEL);
+    expect(screen.queryByText(/Estimated cost/i)).toBeNull();
+    expect(document.body.textContent).not.toMatch(/chosen by this instance/);
+  });
+
+  // #283-T01
+  it("sends the chosen level, and no model field, when it is saved", async () => {
+    const user = userEvent.setup();
+    const { api, save } = fakeApi();
+    render(
+      <SettingsForm workspaceSlug="acme" initial={managedModel()} api={api} />,
+    );
+
+    await user.click(level("High"));
+    await user.click(screen.getByRole("button", { name: /save/i }));
+
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(save.mock.calls[0]?.[0]).toEqual({ modelTier: "high" });
+  });
+
+  // #283-T01
+  it("sends nothing about the models when something else is saved", async () => {
+    const user = userEvent.setup();
+    const { api, save } = fakeApi();
+    render(
+      <SettingsForm workspaceSlug="acme" initial={managedModel()} api={api} />,
+    );
+
+    await changeSomething(user);
+    await user.click(screen.getByRole("button", { name: /save/i }));
+
+    const body = JSON.stringify(save.mock.calls[0]);
+    expect(body).toContain("maxFindings");
+    expect(body).not.toMatch(/model"|fallbackModel|dynamicModel/);
+  });
+
+  // #283-T01
+  it("shows where the level comes from and takes an own level back with Reset to default", async () => {
+    const user = userEvent.setup();
+    render(
+      <SettingsForm
+        workspaceSlug="acme"
+        initial={managedModel({ overrides: { modelTier: "low" } })}
+        api={fakeApi().api}
+      />,
+    );
+
+    expect(level("Low").getAttribute("aria-checked")).toBe("true");
+    const field = screen
+      .getByRole("radiogroup", { name: "Quality" })
+      .closest("[data-field]") as HTMLElement;
+    expect(within(field).getByText("Set for this project")).toBeTruthy();
+
+    await user.click(
+      screen.getByRole("button", { name: "Reset to default for Quality" }),
+    );
+
+    expect(level("Medium").getAttribute("aria-checked")).toBe("true");
+  });
+
+  // #283-T01
+  it("has the same choice on the workspace defaults", async () => {
+    const user = userEvent.setup();
+    const { api, save } = fakeApi();
+    render(
+      <SettingsForm
+        workspaceSlug="acme"
+        initial={managedModel({ mode: "global" })}
+        api={api}
+      />,
+    );
+
+    expect(screen.getByRole("radiogroup", { name: "Quality" })).toBeTruthy();
+    expect(screen.queryByLabelText("Model")).toBeNull();
+    await user.click(level("Low"));
+    await user.click(screen.getByRole("button", { name: /save/i }));
+
+    expect(save.mock.calls[0]?.[0]).toEqual({ modelTier: "low" });
+  });
+
+  // #283-T01
+  it("replaces the Dynamic Review model by the same choice", () => {
+    render(
+      <SettingsForm
+        workspaceSlug="acme"
+        initial={managedModel({ kind: "dynamic" })}
+        dynamicReviewEnabled
+        api={fakeApi().api}
+      />,
+    );
+
+    expect(screen.getByRole("radiogroup", { name: "Quality" })).toBeTruthy();
+    expect(screen.getAllByRole("radiogroup", { name: "Quality" })).toHaveLength(
+      1,
+    );
+    expect(screen.queryByLabelText("Dynamic Review model")).toBeNull();
+    // The skill is still the project's own.
+    expect(screen.getAllByText(/Review skill/i).length).toBeGreaterThan(0);
+  });
+
+  // #283-T01
+  it("says a level is not available, without saying why, and does not let it be chosen", async () => {
+    const user = userEvent.setup();
+    const { api, save } = fakeApi();
+    render(
+      <SettingsForm
+        workspaceSlug="acme"
+        initial={managedModel({
+          availability: {
+            low: { diff: true, dynamic: true },
+            medium: { diff: true, dynamic: true },
+            high: { diff: false, dynamic: false },
+          },
+        })}
+        api={api}
+      />,
+    );
+
+    const high = level("High");
+    const card = high.closest("[data-level]") as HTMLElement;
+    expect(within(card).getByText(QUALITY_UNAVAILABLE_BADGE)).toBeTruthy();
+    expect((high as HTMLButtonElement).disabled).toBe(true);
+    expect(level("Low").hasAttribute("disabled")).toBe(false);
+    await user.click(high);
+    await user.click(screen.getByRole("button", { name: /save/i }));
+    expect(save).not.toHaveBeenCalled();
+    expect(document.body.textContent).not.toContain(QUALITY_CHOSEN_UNAVAILABLE);
+  });
+
+  // #283-T01
+  it("warns when the chosen level is not available, and keeps it selectable so nothing changes silently", () => {
+    render(
+      <SettingsForm
+        workspaceSlug="acme"
+        initial={managedModel({
+          overrides: { modelTier: "high" },
+          availability: {
+            low: { diff: true, dynamic: true },
+            medium: { diff: true, dynamic: true },
+            high: { diff: false, dynamic: false },
+          },
+        })}
+        api={fakeApi().api}
+      />,
+    );
+
+    expect(screen.getByText(QUALITY_CHOSEN_UNAVAILABLE)).toBeTruthy();
+    expect(level("High").getAttribute("aria-checked")).toBe("true");
+    expect(level("High").hasAttribute("disabled")).toBe(false);
+  });
+
+  // #283-T01
+  it("judges a level for the kind of review of the project: Diff and Dynamic can differ", async () => {
+    const user = userEvent.setup();
+    render(
+      <SettingsForm
+        workspaceSlug="acme"
+        initial={managedModel({
+          overrides: { modelTier: "low" },
+          availability: {
+            low: { diff: true, dynamic: false },
+            medium: { diff: true, dynamic: true },
+            high: { diff: true, dynamic: true },
+          },
+        })}
+        dynamicReviewEnabled
+        api={fakeApi().api}
+      />,
+    );
+
+    expect(screen.queryByText(QUALITY_CHOSEN_UNAVAILABLE)).toBeNull();
+    await user.click(screen.getByRole("radio", { name: /^Dynamic Review/ }));
+
+    expect(screen.getByText(QUALITY_CHOSEN_UNAVAILABLE)).toBeTruthy();
+  });
+
+  // #283-T01
+  it("judges a level on the workspace defaults for every kind", () => {
+    render(
+      <SettingsForm
+        workspaceSlug="acme"
+        initial={managedModel({
+          mode: "global",
+          availability: {
+            low: { diff: true, dynamic: true },
+            medium: { diff: true, dynamic: false },
+            high: { diff: true, dynamic: true },
+          },
+        })}
+        api={fakeApi().api}
+      />,
+    );
+
+    expect(screen.getByText(QUALITY_CHOSEN_UNAVAILABLE)).toBeTruthy();
+  });
+
+  // #283-T02
+  it("shows the model fields exactly as before for a workspace on its own key, and no Quality choice", () => {
+    render(
+      <SettingsForm
+        workspaceSlug="acme"
+        initial={projectModel({ model: "vendor/project-model" })}
+        api={fakeApi().api}
+      />,
+    );
+
+    expect((screen.getByLabelText("Model") as HTMLInputElement).value).toBe(
+      "vendor/project-model",
+    );
+    expect(screen.getByLabelText("Fallback model")).toBeTruthy();
+    expect(screen.getByLabelText("Token budget")).toBeTruthy();
+    expect(document.querySelector("datalist")).not.toBeNull();
+    expect(screen.queryByRole("radiogroup", { name: "Quality" })).toBeNull();
+    expect(document.body.textContent).toContain("Estimated cost");
+  });
+
+  // #283-T02
+  it("still sends the stored level of an own-key workspace through a save, without a control for it", async () => {
+    const user = userEvent.setup();
+    const { api, save } = fakeApi();
+    render(
+      <SettingsForm
+        workspaceSlug="acme"
+        initial={projectModel({ modelTier: "high" })}
+        api={api}
+      />,
+    );
+
+    await changeSomething(user);
+    await user.click(screen.getByRole("button", { name: /save/i }));
+
+    expect(save.mock.calls[0]?.[0]).toMatchObject({ modelTier: "high" });
   });
 });

@@ -159,3 +159,21 @@ def test_a_diff_job_process_gets_no_lease_check() -> None:
         await harness.stop()
 
     run(scenario)
+
+
+# #396-T11
+def test_a_run_the_app_says_was_superseded_stays_superseded_without_asking_again() -> None:
+    async def scenario() -> None:
+        harness = dynamic_harness()
+        spec = await started_spec(harness)
+        assert spec.lease_check is not None
+        harness.api.superseded_from = len(harness.api.heartbeats) + 1
+
+        assert await spec.lease_check() is LeaseState.SUPERSEDED
+        asked = len(harness.api.heartbeats)
+        assert await spec.lease_check() is LeaseState.SUPERSEDED
+
+        assert len(harness.api.heartbeats) == asked
+        await harness.stop()
+
+    run(scenario)

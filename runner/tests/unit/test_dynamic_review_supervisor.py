@@ -18,6 +18,7 @@ from test_dynamic_review_run import dynamic_job
 
 from code_reviewer_runner.dynamic_review import supervisor
 from code_reviewer_runner.dynamic_review.limits import CheckoutError
+from code_reviewer_runner.dynamic_review.netguard import EGRESS_MODE_VARIABLE, EgressMode
 from code_reviewer_runner.dynamic_review.supervisor import (
     DEFAULT_ENGINE_ID,
     ENGINE_GID_VARIABLE,
@@ -155,3 +156,64 @@ def test_a_job_does_not_start_when_the_leftovers_of_the_user_cannot_be_ended(
         on_lease()
 
     assert caught.value.code is ErrorCode.DYNAMIC_ISOLATION_SELF_CHECK_FAILED
+
+
+# #345-T12: the mode the loop decided reaches the engine launch; nothing else does.
+@pytest.mark.parametrize(
+    ("value", "mode"),
+    [(None, EgressMode.FULL), ("full", EgressMode.FULL), ("fallback", EgressMode.FALLBACK)],
+)
+def test_the_production_preparation_hands_the_launch_the_egress_mode_of_the_loop(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, value: str | None, mode: EgressMode
+) -> None:
+    launches = launch_with(monkeypatch, tmp_path, value)
+
+    assert launches[0].egress_mode is mode
+
+
+# #345-T12
+def test_an_unknown_egress_mode_stops_the_job_before_anything_is_checked_out(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    checked_out: list[str] = []
+
+    @contextmanager
+    def fake_checkout(*args: Any, **options: Any) -> Generator[tuple[Any, Any]]:
+        checked_out.append("checkout")
+        yield SimpleNamespace(export=tmp_path), SimpleNamespace(root=tmp_path, environment={})
+
+    monkeypatch.setattr(supervisor, "prepared_checkout", fake_checkout)
+    environment = {
+        ENGINE_UID_VARIABLE: "20001",
+        ENGINE_GID_VARIABLE: "20002",
+        EGRESS_MODE_VARIABLE: "inet",
+    }
+
+    with pytest.raises(CheckoutError) as caught, production_preparer(environment)(dynamic_job()):
+        pass
+
+    assert caught.value.code is ErrorCode.DYNAMIC_ISOLATION_SELF_CHECK_FAILED
+    assert checked_out == []
+
+
+def launch_with(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, value: str | None) -> list[Any]:
+    launches: list[Any] = []
+
+    @contextmanager
+    def fake_checkout(
+        job: Job, parent: Path, identity: Any, **options: Any
+    ) -> Generator[tuple[Any, Any]]:
+        yield (
+            SimpleNamespace(export=tmp_path),
+            SimpleNamespace(root=tmp_path, environment={"HOME": "h", "TMPDIR": "t"}),
+        )
+
+    monkeypatch.setattr(supervisor, "prepared_checkout", fake_checkout)
+    monkeypatch.chdir(tmp_path)
+    environment = {ENGINE_UID_VARIABLE: "20001", ENGINE_GID_VARIABLE: "20002"}
+    if value is not None:
+        environment[EGRESS_MODE_VARIABLE] = value
+    with production_preparer(environment)(dynamic_job()) as prepared:
+        assert isinstance(prepared, Prepared)
+        launches.append(prepared.launch)
+    return launches

@@ -48,11 +48,31 @@ const PUBLIC_ROUTES = [
   "/api/runners/v1/claim",
   "/api/runners/v1/jobs/[id]/heartbeat",
   "/api/runners/v1/jobs/[id]/complete",
+  // A Dispatcher gives a job back and reads the version with the same token (#322).
+  "/api/runners/v1/jobs/[id]/release",
+  "/api/runners/v1/version",
+  // A Dispatcher reads the status of a job with the same token (#364).
+  "/api/runners/v1/jobs/[id]",
+  // A Worker sends the per-job credential of its claim (src/runner-api/README.md, #320).
+  "/api/workers/v1/jobs/[id]",
+  "/api/workers/v1/jobs/[id]/heartbeat",
+  "/api/workers/v1/jobs/[id]/result",
   // The operator sends its own bearer token; the routes do not exist until it is set (src/operator-api/README.md).
   "/api/operator/v1/workspaces",
   "/api/operator/v1/workspaces/[id]/entitlements",
+  "/api/operator/v1/workspaces/[id]/usage",
+  "/api/operator/v1/workspaces/[id]/usage/summary",
+  "/api/operator/v1/usage",
+  "/api/operator/v1/usage/unknown-cost",
   "/api/operator/v1/entitlements/default",
+  "/api/operator/v1/plan-management",
+  "/api/operator/v1/model-tiers",
+  "/api/operator/v1/handoff/redeem",
   "/api/operator/v1/[...path]",
+  // The platform's cron sends CRON_SECRET; the route is a 404 outside serverless mode (src/cron/, #319).
+  "/api/internal/repository-sync",
+  // The same cron, once a minute: the sweep of a hosted deployment, a 404 outside serverless mode (#328).
+  "/api/internal/dispatch-sweep",
 ] as const;
 const PROTECTED_ROUTES = [
   "/",
@@ -63,6 +83,7 @@ const PROTECTED_ROUTES = [
   "/instance-portal/integrations",
   "/instance-portal/integrations/github",
   "/instance-portal/limits",
+  "/instance-portal/llm",
   "/instance-portal/mail",
   "/instance-portal/setup",
   "/instance-portal/setup/instance",
@@ -94,6 +115,7 @@ const PROTECTED_ROUTES = [
   "/w/[workspace]/settings",
   "/w/[workspace]/settings/advanced",
   "/w/[workspace]/settings/llm",
+  "/w/[workspace]/settings/plan",
   "/w/[workspace]/settings/review-defaults",
 ] as const;
 // Data routes: a visitor without a session gets 401 instead of a redirect.
@@ -123,6 +145,8 @@ const PROTECTED_DATA_ROUTES = [
   "/api/w/[workspace]/invitations/[invitationId]/resend",
   "/api/w/[workspace]/llm-key",
   "/api/w/[workspace]/llm-key/test",
+  "/api/w/[workspace]/plan",
+  "/api/w/[workspace]/plan-handoff",
   "/api/w/[workspace]/members/[userId]",
   "/api/w/[workspace]/repositories/[repositoryId]/project",
   "/api/w/[workspace]/repositories/[repositoryId]/project/settings",
@@ -212,7 +236,11 @@ describe("a request without a session", () => {
   it("may open the paths of the runner and the webhooks, which carry their own authentication", async () => {
     const app = await createGuardedApp();
 
-    for (const path of ["/api/runners/v1/claim", "/api/webhooks/github-app"]) {
+    for (const path of [
+      "/api/runners/v1/claim",
+      "/api/workers/v1/jobs/42",
+      "/api/webhooks/github-app",
+    ]) {
       expect(passesThrough(await app.visit(path, undefined, "POST"))).toBe(
         true,
       );

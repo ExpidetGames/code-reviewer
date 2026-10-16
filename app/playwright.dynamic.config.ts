@@ -8,10 +8,14 @@
 // `make test-e2e-dynamic` (it uses sudo), not directly.
 //
 // Ports: the app listens on E2E_PIPELINE_PORT (default E2E_PORT + 1) and nothing else of the lane listens
-// on a fixed port (the fake GitHub takes a random one, the fake LLM another); never 3000 or 3100.
+// on a fixed port (the fake GitHub takes a random one, the fake LLM another); never 3000 or 3100. The hosted
+// journey (#332, e2e/dynamic/hosted-dynamic.e2e.ts) has a second app, in the hosted deployment's dispatch mode, on
+// E2E_HOSTED_PORT (default 3617) with the Dispatcher on the next one: the Dispatcher starts the Worker in the container's
+// root, capabilities and read-only root (runner/scripts/dynamic_e2e_worker_container.sh), with the pinned OpenCode.
 import { createPublicKey, generateKeyPairSync } from "node:crypto";
 import { defineConfig, devices } from "@playwright/test";
 import { e2eEnv, llmEnv } from "./e2e/helpers/e2e-env";
+import { hostedEnv } from "./e2e/helpers/hosted-env";
 
 for (const port of [e2eEnv.appPort, e2eEnv.pipelineAppPort])
   if (port === 3000 || port === 3100)
@@ -77,6 +81,14 @@ export default defineConfig({
       testMatch: /dynamic-review\.e2e\.ts$/,
       dependencies: ["prepare"],
     },
+    // The hosted deployment's Dynamic journey (#332): the same lane, the real Dispatcher and a Worker that is started
+    // by its Sandbox-Launcher instead of polling. It runs after the journey of the runner, never next to it.
+    {
+      name: "hosted",
+      use: { ...browser, baseURL: hostedEnv.appUrl },
+      testMatch: /hosted-dynamic\.e2e\.ts$/,
+      dependencies: ["prepare", "journey"],
+    },
   ],
   webServer: [
     {
@@ -119,10 +131,39 @@ export default defineConfig({
         LLM_MODEL: llmEnv.model,
         LLM_MAX_TOKENS: llmEnv.maxTokens,
         // A push is reviewed after a second instead of after 90.
-        REVIEW_DEBOUNCE_SECONDS: "1",
         NEXT_TELEMETRY_DISABLED: "1",
       },
       url: e2eEnv.pipelineAppUrl,
+      reuseExistingServer: false,
+      timeout: 60_000,
+    },
+    {
+      // The second app: the same build, a database of its own, and the hosted deployment's dispatch mode (a queued job
+      // wakes the Dispatcher with a signed call). There is no sweep in this mode (the cron route is the serverless
+      // mode's), which the journey does not need: the probe has passed before the call comes.
+      command:
+        `rm -rf test-results/e2e-hosted-dynamic-data ${hostedEnv.directory} && ` +
+        `mkdir -p test-results/e2e-hosted-dynamic-data ${hostedEnv.directory} && ` +
+        `./node_modules/.bin/next start --hostname 127.0.0.1 --port ${String(hostedEnv.appPort)} > ${hostedEnv.logFiles.app} 2>&1`,
+      env: {
+        APP_SECRET: e2eEnv.appSecret,
+        GITHUB_OAUTH_BASE_URL: e2eEnv.githubUrl,
+        GITHUB_API_BASE_URL: e2eEnv.githubUrl,
+        RUNNER_TOKEN: hostedEnv.dispatcherToken,
+        ALLOW_TEST_GITHUB_ENDPOINTS: "true",
+        DATABASE_PATH: "test-results/e2e-hosted-dynamic-data/app.db",
+        BETTER_AUTH_URL: hostedEnv.appUrl,
+        RUNNER_DISPATCH: "webhook",
+        RUNNER_WEBHOOK_URL: `${hostedEnv.dispatcherUrl}/dispatch`,
+        RUNNER_WEBHOOK_KEY_ID: hostedEnv.webhookKeyId,
+        RUNNER_WEBHOOK_SECRET: hostedEnv.webhookSecret,
+        LLM_API_BASE_URL: e2eEnv.modelLlmFakeApiUrl,
+        ALLOW_TEST_LLM_ENDPOINTS: "true",
+        LLM_MODEL: llmEnv.model,
+        LLM_MAX_TOKENS: llmEnv.maxTokens,
+        NEXT_TELEMETRY_DISABLED: "1",
+      },
+      url: hostedEnv.appUrl,
       reuseExistingServer: false,
       timeout: 60_000,
     },

@@ -35,6 +35,7 @@ jobs:
       pull-requests: read
     outputs:
       app: ${{ steps.filter.outputs.app }}
+      dispatcher: ${{ steps.filter.outputs.dispatcher }}
       runner: ${{ steps.filter.outputs.runner }}
       workflows: ${{ steps.filter.outputs.workflows }}
       licenses: ${{ steps.filter.outputs.licenses }}
@@ -48,6 +49,14 @@ jobs:
           filters: |
             app:
               - '**'
+              - '!runner/**'
+              - '!*.md'
+              - '!fakes/**/*.md'
+            # The Dispatcher (#327) also reads contracts/ and fakes/, so those count; the app and the
+            # runner jobs still run for its changes (the app's project-boundary test lives there).
+            dispatcher:
+              - '**'
+              - '!app/**'
               - '!runner/**'
               - '!*.md'
               - '!fakes/**/*.md'
@@ -106,6 +115,10 @@ jobs:
         run: pnpm lint
       - name: Typecheck
         run: pnpm typecheck
+      # The TypeScript types generated from contracts/*.v1.json are committed (app/src/contracts and
+      # dispatcher/src/contracts); a stale file fails with the command that regenerates it (#318).
+      - name: Check the generated contract types
+        run: pnpm contracts:check
       - name: Unit tests
         run: pnpm test
       - name: Integration tests on the host
@@ -120,6 +133,95 @@ jobs:
         env:
           NEXT_TELEMETRY_DISABLED: "1"
         run: pnpm build
+
+  # The same unit suite as app-fast, run with APP_RUNTIME=serverless (#319): the server start is pinned
+  # to its own mode inside the tests that cover it, everything else must hold in both modes. No
+  # database service: unit tests never connect to one.
+  app-serverless:
+    name: "App: unit tests in serverless mode"
+    needs: changes
+    if: ${{ github.event_name == 'push' || github.base_ref == 'main' || needs.changes.outputs.app == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: app/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Unit tests
+        env:
+          APP_RUNTIME: serverless
+        run: pnpm test
+
+  # The Dispatcher (#327): TypeScript on Hono, its own pnpm project. No database and no network service:
+  # its tests run against the fake App of fakes/dispatcher-app on loopback.
+  dispatcher-fast:
+    name: "Dispatcher: static & tests"
+    needs: changes
+    if: ${{ github.event_name == 'push' || github.base_ref == 'main' || needs.changes.outputs.dispatcher == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: dispatcher
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: dispatcher/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+          cache-dependency-path: dispatcher/pnpm-lock.yaml
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Check formatting
+        run: pnpm format:check
+      - name: Lint
+        run: pnpm lint
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Unit tests
+        run: pnpm test
+      - name: Integration tests on the host
+        run: pnpm test:int
+
+  # The privileged lane of the Sandbox-Launcher (#329-T09, T10): `make test-sandbox-local` builds the `sandbox`
+  # target on the runner's Docker daemon and runs the Launcher's local mode against it and the fake App, so
+  # `docker run <image id>` with the full rendered flag set (IPv6 sysctls, memory and swap, capabilities, tmpfs) is
+  # proven on a real daemon, and nothing of one job is left for the next. The container reaches the fake App on the
+  # docker0 gateway. No login, no push, the read-only token.
+  sandbox-local:
+    name: "Dispatcher: Sandbox-Launcher with a real Docker daemon"
+    needs: changes
+    if: ${{ github.event_name == 'pull_request' && (github.base_ref == 'main' || needs.changes.outputs.dispatcher == 'true' || needs.changes.outputs.runner == 'true') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: dispatcher/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+          cache-dependency-path: dispatcher/pnpm-lock.yaml
+      - name: Install the dispatcher dependencies
+        run: pnpm --dir dispatcher install --frozen-lockfile
+      - name: Run the Sandbox-Launcher against a real Docker daemon
+        run: make test-sandbox-local
 
   runner-fast:
     name: "Runner: static & tests"
@@ -139,6 +241,10 @@ jobs:
           version: "0.13.0"
           enable-cache: true
           cache-dependency-glob: runner/uv.lock
+      # The Worker tests (#323) start the fake App of fakes/dispatcher-app, a Node script.
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
       - name: Install dependencies
         run: uv sync --locked
       - name: Lint
@@ -234,6 +340,93 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
 
+  # The hosted lane (#332): the whole hosted flow with the real code of the App (serverless mode, over the Postgres
+  # service container below), the Dispatcher (a process, started by the journeys) and the Worker (`worker-once` and
+  # `probe`, started by the Dispatcher's Sandbox-Launcher through the `docker` stand-in of fakes/sandbox/bin), over the
+  # loopback fakes: GitHub, the model and the Sandbox platform's local mode. No Docker daemon, no secret, no network
+  # beyond loopback (the tiktoken encoding of PR-Agent is the one download, as in the e2e job). The same journeys with
+  # the Dynamic Worker under the container's capabilities and read-only root are in the privileged lane (e2e-dynamic).
+  e2e-hosted:
+    name: "E2E: hosted deployment on fakes"
+    needs: changes
+    if: ${{ github.event_name == 'push' || github.base_ref == 'main' || needs.changes.outputs.app == 'true' || needs.changes.outputs.runner == 'true' || needs.changes.outputs.dispatcher == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    # The lane makes its own database on this server (E2E_DATABASE_URL). The credentials are throwaway: CI uses no
+    # repository secret.
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: app/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+      - name: Install the app's dependencies
+        working-directory: app
+        run: pnpm install --frozen-lockfile
+      # The Dispatcher is a project of its own: the journeys start its test host (dispatcher/src/test-support).
+      - name: Install the Dispatcher's dependencies
+        working-directory: dispatcher
+        run: pnpm install --frozen-lockfile
+      - name: Install the browser and its system libraries
+        working-directory: app
+        run: pnpm exec playwright install --with-deps chromium
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.13.0"
+          enable-cache: true
+          cache-dependency-glob: runner/uv.lock
+      - name: Install the runner
+        working-directory: runner
+        run: uv sync --locked
+      - name: Restore the tiktoken encoding
+        uses: actions/cache@v4
+        with:
+          path: /tmp/data-gym-cache
+          key: tiktoken-o200k_base-v1
+      - name: Prime the tiktoken cache
+        working-directory: runner
+        run: uv run python scripts/prime_tiktoken_cache.py
+      # Playwright builds the app and serves the production build itself (playwright.hosted.config.ts), after the
+      # migrations of `pnpm migrate`, like a deployment does. Every journey runs, on every pull request.
+      - name: Run the hosted journeys
+        working-directory: app
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+          E2E_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+        run: pnpm test:e2e:hosted
+      - name: Upload the Playwright report and the logs
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-hosted-report-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            app/playwright-report
+            app/test-results
+          retention-days: 14
+          if-no-files-found: ignore
+
   # The privileged Dynamic lane (#253, #201-T01): the journey of a pull request through the real app,
   # the real Dynamic runner (root, the capabilities of compose.dynamic.yml, its own startup self-check)
   # and the real pinned OpenCode as the engine user, against the loopback fakes only. It needs root, so
@@ -267,6 +460,10 @@ jobs:
           cache-dependency-path: app/pnpm-lock.yaml
       - name: Install dependencies
         working-directory: app
+        run: pnpm install --frozen-lockfile
+      # The hosted journey of the lane (#332) starts the Dispatcher's test host.
+      - name: Install the Dispatcher's dependencies
+        working-directory: dispatcher
         run: pnpm install --frozen-lockfile
       - name: Install the browser and its system libraries
         working-directory: app
@@ -313,7 +510,7 @@ jobs:
   licenses:
     name: "Licenses: dependency check"
     needs: changes
-    if: ${{ github.event_name == 'push' || github.base_ref == 'main' || needs.changes.outputs.app == 'true' || needs.changes.outputs.runner == 'true' || needs.changes.outputs.licenses == 'true' }}
+    if: ${{ github.event_name == 'push' || github.base_ref == 'main' || needs.changes.outputs.app == 'true' || needs.changes.outputs.dispatcher == 'true' || needs.changes.outputs.runner == 'true' || needs.changes.outputs.licenses == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     defaults:
@@ -330,6 +527,9 @@ jobs:
           cache: pnpm
           cache-dependency-path: app/pnpm-lock.yaml
       - name: Install the app dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install the dispatcher dependencies
+        working-directory: dispatcher
         run: pnpm install --frozen-lockfile
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
@@ -411,6 +611,10 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
+      # The smoke test runs the fake App (Node) on the host (worker-once, #324).
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Build the image
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
@@ -440,6 +644,49 @@ jobs:
             echo "an engine was installed on an unpinned platform" >&2
             exit 1
           fi
+
+  # The Sandbox image (#324): the `sandbox` target of the same Dockerfile, the Worker image of the
+  # hosted deployment. Its smoke test runs every check of the Dynamic image on it and proves the
+  # entry modes with the production flags (probe, worker-once against the fake App, the engines
+  # file), that it carries no Dispatcher bundle and that its layers are those of the `dynamic`
+  # image, which is built here too (from the cache of the job above). Not published: #330 builds
+  # and delivers it.
+  image-runner-sandbox:
+    name: "Image: Sandbox runner build & smoke test"
+    needs: changes
+    if: ${{ github.event_name == 'pull_request' && (github.base_ref == 'main' || needs.changes.outputs.runner == 'true') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      # The smoke test runs the fake App (Node) and the engine suite's fakes (Python, standard library)
+      # on the host.
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build the dynamic image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: runner/Dockerfile
+          target: dynamic
+          load: true
+          push: false
+          tags: code-reviewer-runner-dynamic:ci
+          cache-from: type=gha,scope=runner-dynamic
+      - name: Build the sandbox image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: runner/Dockerfile
+          target: sandbox
+          load: true
+          push: false
+          tags: code-reviewer-runner-sandbox:ci
+          cache-from: type=gha,scope=runner-dynamic
+      - name: Smoke test the image
+        run: docker/smoke/runner.sh code-reviewer-runner-sandbox:ci sandbox code-reviewer-runner-dynamic:ci
 
   # The Docker Compose stack (compose.yml): both images are built here and the stack is started
   # with dummy settings by docker/smoke/compose.sh. Nothing is pushed; the job has no login and only
@@ -496,7 +743,7 @@ jobs:
   # fails on any failed or cancelled job and accepts skipped jobs (path filter).
   ci-passed:
     name: All checks passed?
-    needs: [changes, app-fast, runner-fast, engine, e2e, e2e-dynamic, licenses, image-app, image-runner, image-runner-dynamic, compose, actionlint]
+    needs: [changes, app-fast, app-serverless, dispatcher-fast, runner-fast, engine, e2e, e2e-hosted, e2e-dynamic, licenses, image-app, image-runner, image-runner-dynamic, image-runner-sandbox, sandbox-local, compose, actionlint]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5

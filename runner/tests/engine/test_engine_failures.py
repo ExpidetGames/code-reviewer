@@ -14,7 +14,7 @@ import time
 import pytest
 from fake_github import BOT_LOGIN, Comment, FakeGithub
 from fake_llm import FakeLlm, Reply
-from harness import Engine
+from harness import Engine, JobProcess, Outcome
 
 REVIEW_MARKER = "<!-- pr-agent:review:full -->"
 
@@ -77,9 +77,11 @@ def test_a_model_that_never_answers_ends_with_the_timeout_code_and_no_process_is
     engine: Engine, github: FakeGithub, llm: FakeLlm
 ) -> None:
     llm.override = Reply(hold=True)
-    job = engine.start(extra_env={"RUNNER_JOB_TIMEOUT_SECONDS": "3"})
-
-    outcome = job.finish(_stdin(engine))
+    # The timeout counts from the start of the process (#387), and the real PR-Agent takes seconds
+    # to start on a slow machine. A start-up that outlasts the timeout ends the job cleanly before
+    # the model is asked, which is not what this test is about: the model request tells whether
+    # the command started, and if it did not the job is run again with twice the time.
+    job, outcome = _run_until_the_model_is_asked(engine, llm, 3)
 
     assert outcome.returncode != 0
     result = outcome.result
@@ -89,6 +91,18 @@ def test_a_model_that_never_answers_ends_with_the_timeout_code_and_no_process_is
     assert llm.wait_for_disconnect() is True
     assert job.is_gone()
     assert review_comments(github) == []
+
+
+def _run_until_the_model_is_asked(
+    engine: Engine, llm: FakeLlm, timeout_seconds: int
+) -> tuple[JobProcess, Outcome]:
+    for attempt in range(3):
+        timeout = timeout_seconds * 2**attempt
+        job = engine.start(extra_env={"RUNNER_JOB_TIMEOUT_SECONDS": str(timeout)})
+        outcome = job.finish(_stdin(engine))
+        if llm.requests or attempt == 2:
+            return job, outcome
+    raise AssertionError("unreachable")
 
 
 def _stdin(engine: Engine) -> str:

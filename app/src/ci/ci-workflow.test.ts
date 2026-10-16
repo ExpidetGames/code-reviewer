@@ -113,6 +113,20 @@ describe("CI workflow triggers and jobs", () => {
     expect(environment?.TEST_DATABASE_URL).toMatch(/^postgres:\/\//);
   });
 
+  // #319-T06
+  it("runs the unit suite a second time in serverless mode, so the two runtime modes cannot drift", () => {
+    const job = jobNamed("app-serverless");
+    const unit = steps(job).find((step) => step.run === "pnpm test");
+    const environment = unit?.env as Record<string, string> | undefined;
+
+    expect(environment?.APP_RUNTIME).toBe("serverless");
+    expect(String(job.if)).toContain("needs.changes.outputs.app == 'true'");
+    expect(jobNamed("ci-passed").needs).toContain("app-serverless");
+    // Nothing here may be able to reach a database: the suite is the unit one.
+    expect(job.services).toBeUndefined();
+    expect(commandLines(job)).not.toContain("pnpm test:int");
+  });
+
   // CR-16-T01
   it("checks lint, formatting, types and the unit, integration and contract tests of the runner", () => {
     const lines = commandLines(jobNamed("runner-fast"));
@@ -282,6 +296,31 @@ describe("CI compose job", () => {
   });
 });
 
+describe("CI contract types check", () => {
+  // #318-T02
+  it("checks the generated contract types in the app job, after the typecheck", () => {
+    const lines = commandLines(jobNamed("app-fast"));
+
+    expect(lines).toContain("pnpm contracts:check");
+    expect(lines.indexOf("pnpm contracts:check")).toBeGreaterThan(
+      lines.indexOf("pnpm typecheck"),
+    );
+  });
+
+  // #318-T02
+  it("is part of make verify, so the check can be run before opening a pull request", () => {
+    const makefile = readFileSync(`${repoRoot}Makefile`, "utf8");
+
+    expect(makefile).toMatch(/^verify: .*\bcheck-contracts\b/m);
+    expect(makefile).toMatch(
+      /^check-contracts:\n\t\$\(APP\) contracts:check$/m,
+    );
+    expect(makefile).toMatch(
+      /^generate-contracts:\n\t\$\(APP\) contracts:generate$/m,
+    );
+  });
+});
+
 describe("CI license job", () => {
   // #118-T01
   it("installs both parts from their lockfiles and runs the dependency license check", () => {
@@ -353,6 +392,78 @@ describe("CI license job", () => {
 
     expect(makefile).toMatch(/^verify: .*\bcheck-licenses\b/m);
     expect(makefile).toMatch(/^check-licenses:\n\t\$\(APP\) licenses:check$/m);
+  });
+});
+
+describe("CI Dispatcher job", () => {
+  // #327 (CI wiring)
+  it("checks formatting, lint, types and the unit and integration tests of the Dispatcher from its own lockfile", () => {
+    const job = jobNamed("dispatcher-fast");
+    const lines = commandLines(job);
+
+    expect(job.defaults?.run?.["working-directory"]).toBe("dispatcher");
+    for (const command of [
+      "pnpm install --frozen-lockfile",
+      "pnpm format:check",
+      "pnpm lint",
+      "pnpm typecheck",
+      "pnpm test",
+      "pnpm test:int",
+    ]) {
+      expect(lines, command).toContain(command);
+    }
+    expect(lines.indexOf("pnpm install --frozen-lockfile")).toBeLessThan(
+      lines.indexOf("pnpm test"),
+    );
+    expect(
+      steps(job).find((step) => step.uses?.startsWith("pnpm/action-setup@"))
+        ?.with?.package_json_file,
+    ).toBe("dispatcher/package.json");
+    expect(
+      steps(job).find((step) => step.uses?.startsWith("actions/setup-node@"))
+        ?.with?.["cache-dependency-path"],
+    ).toBe("dispatcher/pnpm-lock.yaml");
+  });
+
+  // #327 (CI wiring)
+  it("runs for Dispatcher changes, for every pull request into main and for pushes, and is part of the aggregate check", () => {
+    const condition = String(jobNamed("dispatcher-fast").if);
+
+    expect(condition).toContain("github.event_name == 'push'");
+    expect(condition).toContain("github.base_ref == 'main'");
+    expect(condition).toContain("needs.changes.outputs.dispatcher == 'true'");
+    expect(jobNamed("dispatcher-fast").needs).toBe("changes");
+    expect(jobNamed("ci-passed").needs).toContain("dispatcher-fast");
+    expect(jobNamed("changes").outputs).toHaveProperty("dispatcher");
+  });
+
+  // #327 (CI wiring)
+  it("installs the Dispatcher's dependencies in the license job and runs it for Dispatcher changes", () => {
+    const job = jobNamed("licenses");
+    const install = steps(job).find(
+      (step) => step.name === "Install the dispatcher dependencies",
+    );
+
+    expect(install?.["working-directory"]).toBe("dispatcher");
+    expect(install?.run).toBe("pnpm install --frozen-lockfile");
+    expect(steps(job).indexOf(install as Step)).toBeLessThan(
+      steps(job).findIndex((step) => step.run === "pnpm licenses:check"),
+    );
+    expect(String(job.if)).toContain(
+      "needs.changes.outputs.dispatcher == 'true'",
+    );
+  });
+
+  // #327 (CI wiring)
+  it("is wired into every make target that covers a part, and into make verify through them", () => {
+    const makefile = readFileSync(`${repoRoot}Makefile`, "utf8");
+
+    expect(makefile).toMatch(/^lint: .*\blint-dispatcher\b/m);
+    expect(makefile).toMatch(/^typecheck: .*\btypecheck-dispatcher\b/m);
+    expect(makefile).toMatch(/^test-unit: .*\btest-unit-dispatcher\b/m);
+    expect(makefile).toMatch(/^verify: lint typecheck /m);
+    expect(makefile).toContain("$(DISPATCHER) test:int\n");
+    expect(makefile).toContain("$(DISPATCHER) install --frozen-lockfile\n");
   });
 });
 
@@ -479,6 +590,24 @@ describe("CI workflow path filter", () => {
       expect(touched("app", file), `app ${file}`).toBe(true);
       expect(touched("runner", file), `runner ${file}`).toBe(true);
     }
+  });
+
+  // #327 (CI wiring)
+  it("sends a Dispatcher change, and a change to the contracts or the fakes it reads, to the Dispatcher job, and an app-only or runner-only change not", () => {
+    for (const file of [
+      "dispatcher/src/app.ts",
+      "dispatcher/README.md",
+      "contracts/dispatch-webhook.v1.json",
+      "fakes/dispatcher-app/server.ts",
+      "Makefile",
+    ])
+      expect(touched("dispatcher", file), file).toBe(true);
+    for (const file of [
+      "app/src/db/index.ts",
+      "runner/src/code_reviewer_runner/cli.py",
+      "README.md",
+    ])
+      expect(touched("dispatcher", file), file).toBe(false);
   });
 
   // CR-16-T09

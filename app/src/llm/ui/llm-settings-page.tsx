@@ -14,6 +14,7 @@ export function LlmSettingsPageContent({
   canManage,
   keyStatus,
   summary,
+  showPlan = false,
   api,
 }: {
   workspaceSlug: string;
@@ -21,11 +22,17 @@ export function LlmSettingsPageContent({
   canManage: boolean;
   keyStatus: WorkspaceLlmKeyStatus;
   summary: WorkspaceLlmSummary;
+  /** The workspace has entitlements (#282): the settings navigation lists the Plan page. */
+  showPlan?: boolean;
   /** Only tests pass this. */
   api?: LlmKeyApi;
 }) {
   return (
-    <SettingsScreen workspaceSlug={workspaceSlug} current="llm">
+    <SettingsScreen
+      workspaceSlug={workspaceSlug}
+      current="llm"
+      showPlan={showPlan}
+    >
       <div className="max-w-[44rem]">
         <LlmAccessSection
           workspaceSlug={workspaceSlug}

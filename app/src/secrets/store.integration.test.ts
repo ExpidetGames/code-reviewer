@@ -366,9 +366,11 @@ describe("the status of every secret", () => {
       "github_app_client_secret",
       "github_app_private_key",
       "github_app_webhook_secret",
+      "operator_llm_key",
       "smtp_password",
     ]);
     expect(statuses.map(({ state }) => state)).toEqual([
+      "not_configured",
       "not_configured",
       "not_configured",
       "not_configured",

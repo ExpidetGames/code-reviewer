@@ -64,9 +64,10 @@ async function ProjectSettingsContent({
   });
   if (data.kind === "not_found") notFound();
   // The workspace's LLM hint is a row of the page's one "Needs attention" strip, not its own region.
+  const llmSummary = await getWorkspaceLlm().summaryFor(workspaceId);
   const llmNotice = llmAccessAttention({
     workspaceSlug,
-    summary: await getWorkspaceLlm().summaryFor(workspaceId),
+    summary: llmSummary,
     canManage: canManageLlmKey,
   });
   return (

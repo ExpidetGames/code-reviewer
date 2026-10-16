@@ -27,6 +27,8 @@ import type { Database, JobsTable } from "../schema.ts";
 export type JobClaim = {
   runnerId: string;
   leaseToken: string;
+  /** #397: the holder understands that its run can be superseded (the feature `supersede`). */
+  acceptsSupersede?: boolean;
   now: Date;
   leaseExpiresAt: Date;
 };
@@ -43,15 +45,19 @@ const MAX_CLAIM_ATTEMPTS = 100;
  * runner's engines can run. A pull request with a running job is skipped, so at most one job runs per
  * pull request; the first eligible job of another pull request goes instead. An unsupported job is
  * never selected, so it keeps waiting without an attempt being counted or credentials being created.
- * Call it inside a transaction, after expired leases have been dealt with.
+ * With `jobId` (#322) only that job can be selected, under every rule above: a job that is not due, not
+ * queued, of another kind or blocked by a running job of its pull request is not claimed, and the answer
+ * is undefined. Call it inside a transaction, after expired leases have been dealt with.
  */
 export async function claimOldestDueJob(
   executor: Kysely<Database>,
   claim: JobClaim,
   reviewKinds: readonly ProjectReviewKind[],
+  jobId?: string,
 ): Promise<Selectable<JobsTable> | undefined> {
   const { rows } = await claimQuery(executor, claim, reviewKinds, {
     skipLocked: false,
+    jobId,
   });
   return rows[0];
 }
@@ -65,6 +71,7 @@ export async function claimOldestDueJobPostgres(
   executor: Kysely<Database>,
   claim: JobClaim,
   reviewKinds: readonly ProjectReviewKind[],
+  jobId?: string,
 ): Promise<Selectable<JobsTable> | undefined> {
   // One savepoint for the whole attempt loop: a rolled-back-to savepoint stays usable, and the outer
   // transaction can keep going after each unique violation.
@@ -73,6 +80,7 @@ export async function claimOldestDueJobPostgres(
     try {
       const { rows } = await claimQuery(executor, claim, reviewKinds, {
         skipLocked: true,
+        jobId,
       });
       return rows[0];
     } catch (error) {
@@ -91,7 +99,7 @@ function claimQuery(
   executor: Kysely<Database>,
   claim: JobClaim,
   reviewKinds: readonly ProjectReviewKind[],
-  { skipLocked }: { skipLocked: boolean },
+  { skipLocked, jobId }: { skipLocked: boolean; jobId: string | undefined },
 ) {
   const now = formatTimestamp(claim.now);
   // #195: the runner only gets jobs of a kind one of its engines can run. A caller with no engines is
@@ -106,6 +114,8 @@ function claimQuery(
     set status = 'running',
         runner_id = ${claim.runnerId},
         lease_token = ${claim.leaseToken},
+        worker_fetches = 0,
+        accepts_supersede = ${claim.acceptsSupersede === true ? 1 : 0},
         claimed_at = ${now},
         heartbeat_at = ${now},
         lease_expires_at = ${formatTimestamp(claim.leaseExpiresAt)},
@@ -116,6 +126,7 @@ function claimQuery(
       where due.status = 'queued'
         and due.command = 'review'
         and due.review_kind in (${kinds})
+        ${jobId === undefined ? sql`` : sql`and due.id = ${jobId}`}
         and due.run_after <= ${now}
         and not exists (
           select 1

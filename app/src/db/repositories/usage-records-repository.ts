@@ -11,8 +11,10 @@ import { sql, type Kysely, type Selectable } from "kysely";
 import { formatTimestamp } from "../codecs.ts";
 import type { Database, UsageRecordsTable } from "../schema.ts";
 import type { WorkspaceId } from "../workspace-scope.ts";
+import type { ModelTier } from "../../model-tiers/tiers.ts";
 import type { ProjectReviewKind } from "../../review-settings/settings.ts";
 import type {
+  SettledReason,
   UsageKeyMode,
   UsageSettlement,
   UsageState,
@@ -25,7 +27,7 @@ export type UsageRecord = {
   jobId: string;
   reviewKind: ProjectReviewKind;
   keyMode: UsageKeyMode;
-  /** The managed model tier; null until the tiers exist. */
+  /** The managed model tier the run used (#280); null for a run on the workspace's own key. The name, never the model. */
   modelTier: string | null;
   state: UsageState;
   /** Millionths of a US dollar; null when unknown. Only a settled record has one. */
@@ -35,10 +37,42 @@ export type UsageRecord = {
   reservedAt: string;
   /** Null until the record is settled (a void record has none). */
   settledAt: string | null;
+  /** Why it was settled without a report of its run (`no_result`); null when the run reported, and while not settled. */
+  settledReason: SettledReason | null;
 };
 
 /** Where a reader stopped in the settled records: the next page starts after this `(settledAt, id)`. */
 export type UsageCursor = { settledAt: string; id: string };
+
+/** A page of settled records is read with these bounds (all optional). Times are ISO 8601 text in UTC. */
+export type UsagePageOptions = {
+  after?: UsageCursor | undefined;
+  limit: number;
+  /**
+   * Only records settled strictly before this time. The operator API passes "now minus the safety lag", so that a
+   * record that commits late is never behind a position a reader already holds (src/operator-api/README.md).
+   */
+  settledBefore?: string | undefined;
+  /** Only records settled at or after this time. */
+  from?: string | undefined;
+  /** Only records settled before this time. */
+  to?: string | undefined;
+};
+
+/** What one workspace ran in a period, for one kind of review and one key mode. */
+export type UsageSummaryGroup = {
+  reviewKind: ProjectReviewKind;
+  keyMode: UsageKeyMode;
+  /** Runs that count (`reserved` and `settled`; never `void`, never a run that was superseded). */
+  recordCount: number;
+  settledCount: number;
+  /** Runs a newer push replaced (#397): not counted above, but their cost and unknown costs are in the sums below. */
+  supersededCount: number;
+  /** Sum of the known cost of the settled runs, micro-USD. */
+  knownCostMicroUsd: number;
+  /** Settled runs whose cost is unknown. */
+  unknownCostCount: number;
+};
 
 export type UsageRecordsPage = {
   records: UsageRecord[];
@@ -56,30 +90,49 @@ export type UsageRecordsRepository = {
   /** Corrects the key mode of a record that is still `reserved`; any other record is left as it is. */
   setKeyMode(jobId: string, keyMode: UsageKeyMode): Promise<void>;
   /**
+   * Notes the managed tier a job runs at (#280) on a record that is still `reserved`; any other record is left as it
+   * is. The tier name only: the model behind it is never recorded.
+   */
+  setModelTier(jobId: string, tier: ModelTier): Promise<void>;
+  /**
    * Ends the record of a job: `settled` with the cost and tokens, or `void`. Only a `reserved` record
    * changes, so repeating it does nothing. A job without a record (it was claimed before records existed)
-   * gets one in its final state, with key mode `own`.
+   * gets one in its final state, with key mode `own`. Returns whether this call changed or created the record
+   * (false: it was final already, or the job is not this workspace's).
    */
-  settle(jobId: string, settlement: UsageSettlement): Promise<void>;
+  settle(jobId: string, settlement: UsageSettlement): Promise<boolean>;
   /**
    * Voids the `reserved` records of this workspace whose job has ended without reporting (cancelled, replaced,
    * or otherwise final), so a run that was dropped while it waited again no longer counts. Called in the
    * transaction of every transition that ends a waiting job.
    */
   voidEndedJobs(): Promise<void>;
+  /**
+   * #397: marks the `reserved` records of these jobs of this workspace as superseded runs (reason `superseded`): the
+   * run was replaced by a newer push and is draining. It stays `reserved` until its Worker reports or the drain ends,
+   * but it no longer counts as a run of the quota, and `voidEndedJobs` leaves it alone.
+   */
+  markSuperseded(jobIds: readonly string[]): Promise<void>;
   get(jobId: string): Promise<UsageRecord | undefined>;
   /** Records that count (`reserved` and `settled`, never `void`) reserved at or after `since`, per review kind. */
   countByKind(since: string): Promise<Record<ProjectReviewKind, number>>;
-  /** The cost of the settled records of managed runs reserved at or after `since` (the period of the run, as in `countByKind`); an unknown cost adds nothing. */
-  sumSettledManagedCostMicroUsd(since: string): Promise<number>;
+  /**
+   * The cost of the settled records of the runs on `keyMode` reserved at or after `since` (the period of the run,
+   * as in `countByKind`); an unknown cost adds nothing. A record counts under the key mode it was settled with,
+   * whatever the entitlements say now (#361).
+   */
+  sumSettledCostMicroUsd(since: string, keyMode: UsageKeyMode): Promise<number>;
   /** Settled records after the cursor, ordered by `(settledAt, id)`; never a `reserved` or `void` record. */
-  pageSettled(options: {
-    after?: UsageCursor | undefined;
-    limit: number;
-  }): Promise<UsageRecordsPage>;
+  pageSettled(options: UsagePageOptions): Promise<UsageRecordsPage>;
+  /**
+   * The runs that started in `[from, to)` (a run belongs to the period it started in, as for the limits), per
+   * review kind and key mode, ordered by kind then key mode. A kind and key mode without runs is not listed.
+   */
+  summarize(period: { from: string; to: string }): Promise<UsageSummaryGroup[]>;
 };
 
-function toRecord(row: Selectable<UsageRecordsTable>): UsageRecord {
+/** A row of the table as the rest of the app sees it (shared with the instance level feed). */
+export function toUsageRecord(row: Selectable<UsageRecordsTable>): UsageRecord {
   return {
     id: row.id,
     workspaceId: row.workspace_id,
@@ -93,7 +146,13 @@ function toRecord(row: Selectable<UsageRecordsTable>): UsageRecord {
     completionTokens: row.completion_tokens,
     reservedAt: row.reserved_at,
     settledAt: row.settled_at,
+    settledReason: row.settled_reason as SettledReason | null,
   };
+}
+
+/** The rows after a cursor in `(settled_at, id)` order, as a condition on `usage_records`. */
+export function afterUsageCursor(after: UsageCursor) {
+  return sql<boolean>`(settled_at > ${after.settledAt} or (settled_at = ${after.settledAt} and id > ${after.id}))`;
 }
 
 /** The statuses a job never leaves (src/jobs/job-status.ts). */
@@ -144,9 +203,19 @@ export function createUsageRecordsRepository(
         .execute();
     },
 
+    async setModelTier(jobId, tier) {
+      await db
+        .updateTable("usage_records")
+        .set({ model_tier: tier })
+        .where("job_id", "=", jobId)
+        .where("workspace_id", "=", workspaceId)
+        .where("state", "=", "reserved")
+        .execute();
+    },
+
     async settle(jobId, settlement) {
       const job = await jobOf(jobId);
-      if (job === undefined) return;
+      if (job === undefined) return false;
       const timestamp = formatTimestamp(now());
       const final =
         settlement.state === "settled"
@@ -156,6 +225,7 @@ export function createUsageRecordsRepository(
               prompt_tokens: settlement.promptTokens,
               completion_tokens: settlement.completionTokens,
               settled_at: timestamp,
+              settled_reason: settlement.reason ?? null,
             }
           : {
               state: "void",
@@ -163,9 +233,10 @@ export function createUsageRecordsRepository(
               prompt_tokens: null,
               completion_tokens: null,
               settled_at: null,
+              settled_reason: null,
             };
       // One statement: a reserved record is ended, a final one is left alone, a missing one is created.
-      await db
+      const changed = await db
         .insertInto("usage_records")
         .values({
           id: newId(),
@@ -184,6 +255,19 @@ export function createUsageRecordsRepository(
             .where("usage_records.state", "=", "reserved")
             .where("usage_records.workspace_id", "=", workspaceId),
         )
+        .returning("id")
+        .executeTakeFirst();
+      return changed !== undefined;
+    },
+
+    async markSuperseded(jobIds) {
+      if (jobIds.length === 0) return;
+      await db
+        .updateTable("usage_records")
+        .set({ settled_reason: "superseded" })
+        .where("workspace_id", "=", workspaceId)
+        .where("job_id", "in", [...jobIds])
+        .where("state", "=", "reserved")
         .execute();
     },
 
@@ -192,6 +276,8 @@ export function createUsageRecordsRepository(
         .updateTable("usage_records")
         .set({ state: "void" })
         .where("workspace_id", "=", workspaceId)
+        // A run that was superseded while it ran keeps its record until it reports (#397).
+        .where("settled_reason", "is", null)
         // A literal, not a bound value, so the planner can use the partial index of the reserved records.
         .where("state", "=", sql.lit("reserved"))
         // Driven by the few reserved records, each probing its job by primary key.
@@ -215,7 +301,7 @@ export function createUsageRecordsRepository(
         .where("job_id", "=", jobId)
         .where("workspace_id", "=", workspaceId)
         .executeTakeFirst();
-      return row === undefined ? undefined : toRecord(row);
+      return row === undefined ? undefined : toUsageRecord(row);
     },
 
     async countByKind(since) {
@@ -224,6 +310,13 @@ export function createUsageRecordsRepository(
         .select(["review_kind", (eb) => eb.fn.countAll().as("runs")])
         .where("workspace_id", "=", workspaceId)
         .where("state", "in", ["reserved", "settled"])
+        // A run that a newer push replaced is not a run of the quota (#397); its cost still counts as usage.
+        .where((eb) =>
+          eb.or([
+            eb("settled_reason", "is", null),
+            eb("settled_reason", "<>", "superseded"),
+          ]),
+        )
         .where("reserved_at", ">=", since)
         .groupBy("review_kind")
         .execute();
@@ -233,34 +326,35 @@ export function createUsageRecordsRepository(
       return counts;
     },
 
-    async sumSettledManagedCostMicroUsd(since) {
+    async sumSettledCostMicroUsd(since, keyMode) {
       const row = await db
         .selectFrom("usage_records")
         .select((eb) => eb.fn.sum("cost_micro_usd").as("total"))
         .where("workspace_id", "=", workspaceId)
         .where("state", "=", "settled")
-        .where("key_mode", "=", "managed")
+        .where("key_mode", "=", keyMode)
         .where("reserved_at", ">=", since)
         .executeTakeFirst();
       return Number(row?.total ?? 0);
     },
 
-    async pageSettled({ after, limit }) {
+    async pageSettled({ after, limit, settledBefore, from, to }) {
       let query = db
         .selectFrom("usage_records")
         .selectAll()
         .where("workspace_id", "=", workspaceId)
         .where("state", "=", "settled");
-      if (after !== undefined)
-        query = query.where(
-          sql<boolean>`(settled_at > ${after.settledAt} or (settled_at = ${after.settledAt} and id > ${after.id}))`,
-        );
+      if (after !== undefined) query = query.where(afterUsageCursor(after));
+      if (settledBefore !== undefined)
+        query = query.where("settled_at", "<", settledBefore);
+      if (from !== undefined) query = query.where("settled_at", ">=", from);
+      if (to !== undefined) query = query.where("settled_at", "<", to);
       const rows = await query
         .orderBy("settled_at")
         .orderBy("id")
         .limit(limit)
         .execute();
-      const records = rows.map(toRecord);
+      const records = rows.map(toUsageRecord);
       const last = records.at(-1);
       return {
         records,
@@ -269,6 +363,45 @@ export function createUsageRecordsRepository(
             ? after
             : { settledAt: last.settledAt, id: last.id },
       };
+    },
+
+    async summarize({ from, to }) {
+      const rows = await db
+        .selectFrom("usage_records")
+        .select([
+          "review_kind",
+          "key_mode",
+          sql`sum(case when settled_reason is null or settled_reason <> 'superseded' then 1 else 0 end)`.as(
+            "records",
+          ),
+          sql`sum(case when state = 'settled' and (settled_reason is null or settled_reason <> 'superseded') then 1 else 0 end)`.as(
+            "settled",
+          ),
+          sql`sum(case when settled_reason = 'superseded' then 1 else 0 end)`.as(
+            "superseded",
+          ),
+          (eb) => eb.fn.sum("cost_micro_usd").as("cost"),
+          sql`sum(case when state = 'settled' and cost_micro_usd is null then 1 else 0 end)`.as(
+            "unknown",
+          ),
+        ])
+        .where("workspace_id", "=", workspaceId)
+        .where("state", "in", ["reserved", "settled"])
+        .where("reserved_at", ">=", from)
+        .where("reserved_at", "<", to)
+        .groupBy(["review_kind", "key_mode"])
+        .orderBy("review_kind")
+        .orderBy("key_mode")
+        .execute();
+      return rows.map((row) => ({
+        reviewKind: row.review_kind as ProjectReviewKind,
+        keyMode: row.key_mode as UsageKeyMode,
+        recordCount: Number(row.records),
+        settledCount: Number(row.settled),
+        supersededCount: Number(row.superseded),
+        knownCostMicroUsd: Number(row.cost ?? 0),
+        unknownCostCount: Number(row.unknown),
+      }));
     },
   };
 }

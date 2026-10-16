@@ -37,7 +37,7 @@
       "enum": ["diff", "dynamic"]
     },
     "ClaimRequest": {
-      "description": "The optional body of POST /api/runners/v1/claim (#195): the engines the calling runner can run. Absent or empty means ['pr-agent'] (a previous-release runner). Unknown or duplicated engine names are refused with 400 RUNNER_REQUEST_INVALID before any job is claimed. #279 adds the optional `features`: what else this runner understands. The app sends a job optional fields a previous-release runner would reject (the job input is closed) only to a runner that names the matching feature, so `dynamic_capabilities` means the runner reads `dynamic.capabilities`. Unknown feature names are ignored, so a newer runner can name features an older app does not know. Unknown fields are ignored, as everywhere in v1.",
+      "description": "The optional body of POST /api/runners/v1/claim (#195): the engines the calling runner can run. Absent or empty means ['pr-agent'] (a previous-release runner). Unknown or duplicated engine names are refused with 400 RUNNER_REQUEST_INVALID before any job is claimed. #279 adds the optional `features`: what else this runner understands. The app sends a job optional fields a previous-release runner would reject (the job input is closed) only to a runner that names the matching feature, so `dynamic_capabilities` means the runner reads `dynamic.capabilities`. Unknown feature names are ignored, so a newer runner can name features an older app does not know. Unknown fields are ignored, as everywhere in v1. #318 adds the Dispatcher's fields: `jobId` claims exactly that job (anything else, such as a job that is not due, already running, finished, cancelled or of a kind the advertised engines cannot run, is 204), `maxRunning` is the pool cap (the claim is 204 while that many jobs of the same X-Runner-Id are running), and the feature `worker_credential` selects the split answer (SplitClaimResponse: a per-job credential and no job input). Without that feature the answer is the legacy ClaimResponse, unchanged.",
       "type": "object",
       "properties": {
         "engines": {
@@ -51,8 +51,28 @@
           "type": "array",
           "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$" },
           "maxItems": 16
+        },
+        "jobId": {
+          "description": "#318: claim exactly this job (a Dispatcher woken by the dispatch webhook). Absent: the next due job, as before.",
+          "$ref": "#/$defs/JobId"
+        },
+        "maxRunning": {
+          "description": "#318: the pool cap. The app counts the running jobs whose X-Runner-Id equals this request's and answers 204 at or above the cap, inside the claim transaction.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
         }
       }
+    },
+    "KnownClaimFeature": {
+      "description": "The claim features this version of the contract defines (`features` in ClaimRequest). A reader ignores a feature name it does not know. `dynamic_capabilities` (#279): the runner reads `dynamic.capabilities`. `worker_credential` (#318): the caller is a Dispatcher and wants the split answer; the job input and its secrets reach only the Worker, with the per-job credential. `supersede` (#396): the runner understands `job.superseded` in a heartbeat answer and stops gracefully (it finishes the model requests in flight, sends no more, publishes nothing, reports its result and usage). The app supersedes a running job only when the claim named it. A Worker names it in the `features` of its details request.",
+      "type": "string",
+      "enum": ["dynamic_capabilities", "worker_credential", "supersede"]
+    },
+    "WorkerCredential": {
+      "description": "#318: the per-job credential. 256 random bits, base64url without padding, behind the prefix `crj_`. The app mints it at claim; it is valid only for that job and only while the claim holds, and it is the one thing a Worker holds (Authorization: Bearer). Secret: never log it, never put it in an argument, an environment variable or a file; the Dispatcher passes it to the Worker on stdin.",
+      "type": "string",
+      "pattern": "^crj_[A-Za-z0-9_-]{43}$"
     },
     "DynamicReview": {
       "description": "#195: the Dynamic options of a tagged job. Model, skill and the output limit only. A closed object: there is no fixed core, permission, executable command, endpoint or upstream URL here, so a job can never widen what the read-only agent may do. The skill is literal data.",
@@ -188,7 +208,8 @@
         "dynamic_budget_exceeded",
         "dynamic_accounting_failed",
         "dynamic_model_features_unsupported",
-        "lease_lost"
+        "lease_lost",
+        "superseded"
       ]
     },
     "JobEnv": {
@@ -316,6 +337,18 @@
       "required": ["leaseToken"],
       "properties": { "leaseToken": { "$ref": "#/$defs/LeaseToken" } }
     },
+    "SupersedeTiming": {
+      "description": "#397, #396: the numbers behind the supersede of a running run, stated once for both sides; a test on each side compares its own constants with these. They are not part of any request or answer. The Worker learns of the push at its next heartbeat (at most 'maxHeartbeatIntervalSeconds'), tells its process at once, and lets the model requests in flight finish: each takes at most 'longestModelRequestSeconds', so the Worker drains for at most 'workerDrainSeconds' (the same number) and ends its process 'killMarginSeconds' before the lease named in the heartbeat answer, whichever comes first. The app keeps the claim for 'claimSeconds' from the push (heartbeats answer 'superseded', the report is taken), which is the heartbeat interval, the longest request and a margin of 60 seconds. It takes a report for 'reportGraceSeconds' more, the time before which it does not settle the usage record with an unknown cost. A report after that is refused with 409, like a heartbeat. A Worker takes the end of its drain from the 'leaseExpiresAt' of the heartbeat answer that said 'superseded': the app sets the lease of a superseded run once, at the push, to 'claimSeconds' after it, and heartbeats do not extend it.",
+      "type": "object",
+      "properties": {
+        "maxHeartbeatIntervalSeconds": { "const": 60 },
+        "longestModelRequestSeconds": { "const": 120 },
+        "workerDrainSeconds": { "const": 120 },
+        "killMarginSeconds": { "const": 20 },
+        "claimSeconds": { "const": 240 },
+        "reportGraceSeconds": { "const": 60 }
+      }
+    },
     "HeartbeatResponse": {
       "type": "object",
       "required": ["version", "job"],
@@ -327,7 +360,11 @@
           "properties": {
             "id": { "$ref": "#/$defs/JobId" },
             "heartbeatAt": { "$ref": "#/$defs/Timestamp" },
-            "leaseExpiresAt": { "$ref": "#/$defs/Timestamp" }
+            "leaseExpiresAt": { "$ref": "#/$defs/Timestamp" },
+            "superseded": {
+              "description": "#396: true when a newer push replaced this run. Sent only to a claim that named the feature `supersede`; absent means not superseded. The runner finishes the model requests in flight, sends no more, publishes nothing, reports its result (errorCode `superseded`, with usage) and exits.",
+              "type": "boolean"
+            }
           }
         }
       }
@@ -351,7 +388,7 @@
         "aiCalls": { "type": "integer", "minimum": 0 },
         "fallbackUsed": { "type": "boolean" },
         "costUsd": {
-          "description": "The cost in US dollars, or null when it is not known. A Dynamic Review reports the exact sum of the charges its model provider reported for every call, and null when any call has no reported charge; it never estimates one.",
+          "description": "The cost in US dollars, or null when it is not known. A Dynamic Review and a Diff Review report the exact sum of the charges their model provider stated for every call, and null when any call has no stated charge or ended without an answer that could have been billed; neither estimates one from tokens or a price table.",
           "type": ["number", "null"],
           "minimum": 0
         },
@@ -392,9 +429,48 @@
         "logTail": { "type": "string", "maxLength": 8192 },
         "logTruncated": { "type": "boolean" },
         "usage": {
+          "description": "What the run used. A failed result carries it too, whenever the run made at least one model call before it failed (a timeout at the end, an answer the validator refuses, a publish error): the app counts such a run exactly like a successful one. A run that failed before its first model call reports null. The cost follows the same rule as for a successful run: exact, or null when any call is unpriced; the token counters are reported either way.",
           "oneOf": [{ "$ref": "#/$defs/RunnerUsage" }, { "type": "null" }]
         }
       },
+      "examples": [
+        {
+          "ok": false,
+          "durationMs": 187340,
+          "commentUrl": null,
+          "errorCode": "dynamic_budget_exceeded",
+          "errorMessage": "the cost limit is used up",
+          "logTail": "dynamic_budget_exceeded: the cost limit is used up",
+          "logTruncated": false,
+          "usage": {
+            "model": "vendor/model-name",
+            "promptTokens": 30000,
+            "completionTokens": 2100,
+            "totalTokens": 32100,
+            "aiCalls": 3,
+            "fallbackUsed": false,
+            "costUsd": 0.0042
+          }
+        },
+        {
+          "ok": false,
+          "durationMs": 91200,
+          "commentUrl": null,
+          "errorCode": "dynamic_accounting_failed",
+          "errorMessage": "the provider did not report the cost of a call",
+          "logTail": "dynamic_accounting_failed: the provider did not report the cost of a call",
+          "logTruncated": false,
+          "usage": {
+            "model": "vendor/model-name",
+            "promptTokens": 20000,
+            "completionTokens": 1400,
+            "totalTokens": 21400,
+            "aiCalls": 2,
+            "fallbackUsed": false,
+            "costUsd": null
+          }
+        }
+      ],
       "allOf": [
         {
           "if": {
@@ -427,17 +503,125 @@
           "properties": {
             "id": { "$ref": "#/$defs/JobId" },
             "status": {
-              "description": "succeeded or failed: the job is finished. queued: the runner reported runner_shutdown, the job was given back and waits for another runner (it fails instead if that was the last allowed attempt).",
+              "description": "succeeded or failed: the job is finished. queued: the runner reported runner_shutdown, the job was given back and waits for another runner (it fails instead if that was the last allowed attempt). superseded (#397): the run was replaced by a newer push; its report is stored once and the job stays superseded.",
               "type": "string",
-              "enum": ["succeeded", "failed", "queued"]
+              "enum": ["succeeded", "failed", "queued", "superseded"]
             }
           }
         },
         "alreadyCompleted": { "type": "boolean" }
       }
     },
+    "SplitClaimResponse": {
+      "description": "#318: 200 from POST /api/runners/v1/claim when the request names the feature `worker_credential`. The job's input, the git token and the model key are not in it: the Worker fetches them with the credential (GET /api/workers/v1/jobs/{id}), so the answer to the Dispatcher carries none of them. The credential itself opens the details call, so whoever holds it can fetch them: the Dispatcher is trusted to hand it to the Worker on stdin and to use it for nothing else (the app does not bind a credential to a process). 204 without a body means there is nothing to do. Cache-Control is always no-store. The credential is a secret.",
+      "type": "object",
+      "required": ["version", "job"],
+      "properties": {
+        "version": { "const": 1 },
+        "job": {
+          "type": "object",
+          "required": [
+            "id",
+            "credential",
+            "reviewKind",
+            "leaseExpiresAt",
+            "heartbeatIntervalSeconds"
+          ],
+          "properties": {
+            "id": { "$ref": "#/$defs/JobId" },
+            "credential": { "$ref": "#/$defs/WorkerCredential" },
+            "reviewKind": { "$ref": "#/$defs/ReviewKind" },
+            "leaseExpiresAt": { "$ref": "#/$defs/Timestamp" },
+            "heartbeatIntervalSeconds": {
+              "description": "How often the lease must be extended; the Dispatcher heartbeats with the credential until the Worker takes over.",
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        }
+      }
+    },
+    "KnownReleaseReason": {
+      "description": "Why a Dispatcher gives a claimed job back. `launch_failed`: the Worker could not be started. `worker_exited`: the Worker was started and its container ended with a non-zero exit code before it reported a result (#375); the call is a no-op (409 RUNNER_JOB_ENDED, or 401 for a claim that is gone) when the job already has its result or another claim holds it. Either way the app counts a lost attempt (three attempts, then the job fails, with the reason as its error code). A reader accepts any reason of the right form (ReleaseRequest) and treats an unknown one like launch_failed, so an app that does not know `worker_exited` still gives the job back.",
+      "type": "string",
+      "enum": ["launch_failed", "worker_exited"]
+    },
+    "ReleaseRequest": {
+      "description": "#318: POST /api/runners/v1/jobs/{id}/release, with the dispatcher credential (RUNNER_TOKEN) in Authorization and the job credential in the body. Gives the job back to the queue (or fails it on the last attempt).",
+      "type": "object",
+      "required": ["credential", "reason"],
+      "properties": {
+        "credential": { "$ref": "#/$defs/WorkerCredential" },
+        "reason": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$" },
+        "retryAfterSeconds": {
+          "description": "Do not offer the job again before this many seconds have passed.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400
+        }
+      }
+    },
+    "ReleaseResponse": {
+      "description": "#318: 200 from the release. `queued`: the job waits for another claim; `failed`: that was the last allowed attempt.",
+      "type": "object",
+      "required": ["version", "job"],
+      "properties": {
+        "version": { "const": 1 },
+        "job": {
+          "type": "object",
+          "required": ["id", "status"],
+          "properties": {
+            "id": { "$ref": "#/$defs/JobId" },
+            "status": { "type": "string", "enum": ["queued", "failed"] }
+          }
+        }
+      }
+    },
+    "JobStateResponse": {
+      "description": "#364: 200 from GET /api/runners/v1/jobs/{id} (the dispatcher credential only; a per-job credential is refused). What a Dispatcher asks to decide whether the VM of a job is a leftover: the job's status and nothing else, no job input, lease, repository or credential. `running`: the app holds the job under a lease. Any other status: it does not (`queued` also covers a lease that lapsed and a job that was given back). A reader that meets a status it does not know treats the job as running. An unknown id is 404 RUNNER_JOB_NOT_FOUND. An app of a previous release has no such route (a 404 without an ErrorResponse body); it is not a required feature, so a reader goes on without it.",
+      "type": "object",
+      "required": ["version", "job"],
+      "properties": {
+        "version": { "const": 1 },
+        "job": {
+          "type": "object",
+          "required": ["id", "status"],
+          "properties": {
+            "id": { "$ref": "#/$defs/JobId" },
+            "status": {
+              "type": "string",
+              "enum": ["queued", "running", "succeeded", "failed", "superseded", "cancelled"]
+            },
+            "draining": {
+              "description": "#397: true for a superseded job whose claim is still valid: its Worker is finishing the model requests in flight and reporting what they cost. A Dispatcher keeps the VM of a draining job until the claim ends (the reaper). Absent means not draining; a reader that does not know the field sees a superseded job as ended.",
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    "KnownAppFeature": {
+      "description": "The features an app lists in VersionResponse.features. A reader ignores a name it does not know and refuses to run against an app that lacks one it needs. `worker_api`: /api/workers/v1 exists. `claim_by_job_id`: ClaimRequest.jobId is honoured. `pool_cap`: ClaimRequest.maxRunning is honoured. `release`: the release call exists.",
+      "type": "string",
+      "enum": ["worker_api", "claim_by_job_id", "pool_cap", "release"]
+    },
+    "VersionResponse": {
+      "description": "#318: 200 from GET /api/runners/v1/version (dispatcher credential; #322: a Worker may also send its per-job credential with ?jobId=<its job>, which must be the running claim of that job). Lets a Dispatcher or a Worker detect an app that is too old before it claims anything. An app of a previous release has no such route (404), which means it is too old. `version` is the runner API version; `appVersion` is the build of the app, for logs.",
+      "type": "object",
+      "required": ["version", "appVersion", "features"],
+      "properties": {
+        "version": { "const": 1 },
+        "appVersion": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "features": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$" },
+          "maxItems": 64,
+          "uniqueItems": true
+        }
+      }
+    },
     "ApiErrorCode": {
-      "description": "Every error of the API has one of these codes. 401 RUNNER_UNAUTHORIZED, 400 RUNNER_ID_INVALID / RUNNER_REQUEST_INVALID, 404 RUNNER_JOB_NOT_FOUND, 409 RUNNER_LEASE_LOST / RUNNER_RESULT_CONFLICT, 413 RUNNER_BODY_TOO_LARGE, 503 RUNNER_GIT_ACCESS_UNAVAILABLE (with Retry-After), 500 RUNNER_INTERNAL_ERROR.",
+      "description": "Every error of the API has one of these codes. 401 RUNNER_UNAUTHORIZED, 400 RUNNER_ID_INVALID / RUNNER_REQUEST_INVALID, 404 RUNNER_JOB_NOT_FOUND, 409 RUNNER_LEASE_LOST / RUNNER_RESULT_CONFLICT, 413 RUNNER_BODY_TOO_LARGE, 503 RUNNER_GIT_ACCESS_UNAVAILABLE (with Retry-After), 500 RUNNER_INTERNAL_ERROR. #318 adds 401 WORKER_CREDENTIAL_INVALID (a Worker route got a credential that is not the job's: wrong job, unknown, expired or from an earlier claim; also the fourth call of the details route in one claim, whose three calls are spent: the Worker has nothing left to fetch and stops, the claim itself is not lost) and 409 RUNNER_JOB_ENDED (the app ended the job, for example after a permanent access failure at fetch; the Worker stops).",
       "type": "string",
       "enum": [
         "RUNNER_UNAUTHORIZED",
@@ -448,7 +632,9 @@
         "RUNNER_RESULT_CONFLICT",
         "RUNNER_BODY_TOO_LARGE",
         "RUNNER_GIT_ACCESS_UNAVAILABLE",
-        "RUNNER_INTERNAL_ERROR"
+        "RUNNER_INTERNAL_ERROR",
+        "WORKER_CREDENTIAL_INVALID",
+        "RUNNER_JOB_ENDED"
       ]
     },
     "ErrorResponse": {

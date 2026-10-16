@@ -15,6 +15,7 @@ import {
   GENERIC_FAILURE,
 } from "../../ui/transport-messages.ts";
 import type { RequestIssue } from "../../ui/json-request.ts";
+import { describeLlmKeyIssue } from "../../llm/ui/messages.ts";
 
 const FAILURE_COPY: Record<string, string> = {
   cross_site_request: CROSS_SITE_REQUEST,
@@ -84,6 +85,22 @@ export function describeAdminIssue(issue: RequestIssue): string {
     case "clear_password_invalid":
     case "allow_plain_text_login_invalid":
     case "allow_self_signed_invalid":
+      return GENERIC_FAILURE;
+    case "api_key_required":
+      return "Enter the API key. There is nothing to save.";
+    case "api_key_invalid":
+      return describeLlmKeyIssue(issue.code);
+    case "url_not_https":
+      return "The address must start with https://. Plain http is not accepted.";
+    case "url_has_credentials":
+      return "The address must not contain a user name or password.";
+    case "url_has_fragment":
+      return "The address must not contain a # fragment.";
+    case "url_too_long":
+      return "The address is too long (2048 characters at most).";
+    case "url_invalid":
+      return "This is not a valid address. Enter an absolute address that starts with https://, without spaces.";
+    case "operator_llm_key_invalid":
       return GENERIC_FAILURE;
     case "sender_required":
       return "Enter the address the mail is sent from.";

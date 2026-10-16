@@ -46,6 +46,7 @@ const ENTITLEMENTS: EntitlementsData = {
     diffRunsPerPeriod: 100,
     dynamicRunsPerPeriod: null,
     managedCostLimitMicroUsd: 5_000_000,
+    ownKeyCostLimitMicroUsd: null,
   },
   periodStart: "2026-10-01T00:00:00.000Z",
   suspended: false,

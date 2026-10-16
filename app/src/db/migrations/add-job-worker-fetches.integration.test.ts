@@ -1,0 +1,122 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// #320: the migration that adds the fetch counter of the Worker API must run on a database made by the
+// previous release's migrations, keep every job and give each one a count of 0, and leave the default
+// in place so that an older app instance, which does not name the column, still inserts jobs.
+import { describe, expect, it } from "vitest";
+import type { MigrationProvider } from "kysely/migration";
+import { openDatabase } from "../connection.ts";
+import { migrateToLatest } from "../migrate.ts";
+import { createTestDirectory } from "../../test-support/test-database.ts";
+import { migrationProvider } from "./index.ts";
+
+const THIS_MIGRATION = "20261015100000_add_job_worker_fetches";
+
+const beforeThisMigration: MigrationProvider = {
+  async getMigrations() {
+    return Object.fromEntries(
+      Object.entries(await migrationProvider.getMigrations()).filter(
+        ([name]) => name < THIS_MIGRATION,
+      ),
+    );
+  },
+};
+
+const T = "2026-10-15T08:00:00.000Z";
+
+describe("the migration of the Worker API's fetch counter", () => {
+  // #320-T24
+  it("gives every existing job a count of 0 and keeps its lease token", async () => {
+    const directory = await createTestDirectory();
+    const db = openDatabase({
+      driver: "sqlite",
+      path: `${directory}/app.db`,
+      busyTimeoutMs: 5000,
+    });
+    try {
+      await migrateToLatest(db, beforeThisMigration);
+      await db
+        .insertInto("workspaces")
+        .values({
+          id: "w-1",
+          name: "acme",
+          slug: "acme",
+          created_by: null,
+          created_at: T,
+        })
+        .execute();
+      await db
+        .insertInto("integrations")
+        .values({
+          id: "i-1",
+          workspace_id: "w-1",
+          type: "github_app",
+          display_name: "acme",
+          external_id: "4242",
+          config: "{}",
+          credentials: null,
+          webhook_secret: null,
+          status: "active",
+          created_at: T,
+          updated_at: T,
+        })
+        .execute();
+      await db
+        .insertInto("repositories")
+        .values({
+          id: "r-1",
+          workspace_id: "w-1",
+          integration_id: "i-1",
+          external_id: "7001",
+          full_name: "acme/widgets",
+          url: "https://github.test/acme/widgets",
+          active: 1,
+          created_at: T,
+          updated_at: T,
+        })
+        .execute();
+      await db
+        .insertInto("jobs")
+        .values({
+          id: "j-running",
+          workspace_id: "w-1",
+          repository_id: "r-1",
+          pr_number: 8,
+          pr_url: "https://github.test/acme/widgets/pull/8",
+          head_sha: "a".repeat(40),
+          command: "review",
+          args: "",
+          trigger_kind: "webhook",
+          actor_login: "octocat",
+          delivery_id: "d-1",
+          status: "running",
+          run_after: T,
+          attempts: 0,
+          runner_id: "runner-1",
+          lease_token: "lease-1",
+          claimed_at: T,
+          heartbeat_at: T,
+          lease_expires_at: T,
+          result: null,
+          error_code: null,
+          superseded_by: null,
+          created_at: T,
+          updated_at: T,
+          finished_at: null,
+        })
+        .execute();
+
+      await migrateToLatest(db, migrationProvider);
+
+      const rows = await db.selectFrom("jobs").selectAll().execute();
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        id: "j-running",
+        lease_token: "lease-1",
+        worker_fetches: 0,
+      });
+    } finally {
+      await db.destroy();
+    }
+  });
+});

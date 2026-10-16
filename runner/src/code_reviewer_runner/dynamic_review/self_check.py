@@ -8,6 +8,8 @@ before the job loop claims anything. `opencode` is advertised only when every pr
   the Dynamic runner of `compose.dynamic.yml` has them; the default runner never passes);
 * the engine user exists, with its own group, and is not root;
 * the static network rules were installed and `NET_ADMIN`/`SETPCAP` are gone from this process;
+* where the kernel gave only the `ip`-family fallback ruleset (#345), IPv6 is off and proven so
+  (`ipv6_off.py`): that ruleset does not see IPv6;
 * the engine binary and `rg` are the pinned files (size and SHA-256 of `opencode-pin.json` and
   `ripgrep-pin.json`), regular files owned by the trusted owner that nobody else can write, and the
   binary reports the pinned version when run as the engine user, offline. The pin files are held to
@@ -42,7 +44,8 @@ from code_reviewer_runner.capabilities import IsolationSelfCheckError
 from code_reviewer_runner.job_loop.jsonvalues import as_object
 from code_reviewer_runner.result import ErrorCode
 
-from .netguard import PROXY_HOST, IsolationError, verify_confinement
+from .ipv6_off import verify_ipv6_off
+from .netguard import PROXY_HOST, EgressMode, IsolationError, verify_confinement
 from .static_isolation import SlotPorts, require_startup_capabilities_gone
 
 _CHUNK = 1024 * 1024
@@ -59,6 +62,8 @@ class SelfCheckReason(StrEnum):
     ENGINE_USER_INVALID = "engine_user_invalid"
     NETWORK_RULES_NOT_INSTALLED = "network_rules_not_installed"
     CAPABILITIES_NOT_DROPPED = "capabilities_not_dropped"
+    ROOT_FILESYSTEM_WRITABLE = "root_filesystem_writable"
+    IPV6_NOT_DISABLED = "ipv6_not_disabled"
     PIN_UNREADABLE = "pin_unreadable"
     PIN_UNTRUSTED = "pin_untrusted"
     ENGINE_BINARY_MISSING = "engine_binary_missing"
@@ -80,6 +85,13 @@ class SelfCheckFailed(IsolationSelfCheckError):
 
 
 @dataclass(frozen=True)
+class SelfCheckResult:
+    """What a passing check says: which egress ruleset the engine user is confined by."""
+
+    egress_mode: EgressMode
+
+
+@dataclass(frozen=True)
 class ToolPaths:
     """Where the Dynamic image installs the engine, `rg` and the pins they are checked against."""
 
@@ -98,6 +110,7 @@ DEFAULT_TOOLS = ToolPaths(
 
 GroupOf = Callable[[int], int | None]
 Probe = Callable[[int, int, int], None]
+Ipv6Proof = Callable[[int, int], None]
 VersionAsUser = Callable[[Path, int, int], str]
 
 
@@ -117,6 +130,18 @@ def group_of(uid: int) -> int | None:
         return pwd.getpwuid(uid).pw_gid
     except KeyError:
         return None
+
+
+def root_filesystem_read_only(root: Path = Path("/")) -> bool:
+    """True when the root filesystem is mounted read-only (`docker run --read-only`, #249).
+
+    The mount flag is what a process in the container sees; a path that cannot be examined is not
+    judged read-only.
+    """
+    try:
+        return bool(os.statvfs(root).f_flag & os.ST_RDONLY)
+    except OSError:
+        return False
 
 
 def startup_probe(uid: int, gid: int, proxy_port: int) -> None:
@@ -316,8 +341,18 @@ def check_dynamic_runner(
     user_group: GroupOf = group_of,
     probe: Probe = startup_probe,
     version_as_user: VersionAsUser = version_as_user,
-) -> None:
-    """Raise `SelfCheckFailed` unless every property holds. Cheap checks first, the probe last."""
+    egress_mode: EgressMode = EgressMode.FULL,
+    ipv6_proof: Ipv6Proof = verify_ipv6_off,
+    root_read_only: Callable[[], bool] | None = None,
+) -> SelfCheckResult:
+    """Raise `SelfCheckFailed` unless every property holds. Cheap checks first, the probe last.
+
+    Returns the egress mode the check passed with. `egress_mode` is what startup decided from the
+    kernel's answer (`static_isolation.secure_startup`): in fallback mode IPv6 must be proven off.
+    `root_read_only` is given by the entry modes of the Worker image (#324): the hardened container
+    spec runs the image with a read-only root, so a Worker or probe on a writable root is no such
+    container and does not advertise `opencode`. Unset (the legacy loop), the root is not judged.
+    """
     if user is None or ports is None:
         raise SelfCheckFailed(
             SelfCheckReason.NOT_A_DYNAMIC_RUNNER, "no engine user is configured for this runner"
@@ -344,6 +379,19 @@ def check_dynamic_runner(
             SelfCheckReason.CAPABILITIES_NOT_DROPPED,
             "a capability only startup may hold was not dropped",
         ) from None
+    if root_read_only is not None and not root_read_only():
+        raise SelfCheckFailed(
+            SelfCheckReason.ROOT_FILESYSTEM_WRITABLE,
+            "the root filesystem of the container is writable",
+        )
+    if egress_mode is EgressMode.FALLBACK:
+        try:
+            ipv6_proof(uid, gid)
+        except IsolationError:
+            raise SelfCheckFailed(
+                SelfCheckReason.IPV6_NOT_DISABLED,
+                "IPv6 is not proven off, and the fallback network rules do not cover it",
+            ) from None
     platform = platform or platform_key()
     where = _Where(trusted_owner, chain_root, lstat)
     engine_pin = _verify_executable(
@@ -380,3 +428,4 @@ def check_dynamic_runner(
             SelfCheckReason.NETWORK_PROBE_FAILED,
             "the engine user's network is not confined to the model proxy",
         ) from None
+    return SelfCheckResult(egress_mode=egress_mode)

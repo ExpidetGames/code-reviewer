@@ -86,6 +86,8 @@ describe("the claim of a job", () => {
   // #272-T01
   it("records the operator's key as managed", async () => {
     const h = await startRunnerApiHarness({
+      // A job on the operator's key needs a model for its tier (#280); which one is not what this test is about.
+      modelTiers: { medium: { diff: "tier/medium-diff" } },
       loadLlm: async () => ({
         ok: true,
         source: "operator",
@@ -226,6 +228,181 @@ describe("the completion of a job", () => {
     });
   });
 
+  // #273-T05
+  it("settles the record of a failed result with the usage it reports", async () => {
+    const h = await startRunnerApiHarness();
+    const job = await claimedJob(h);
+    h.clock.advance(41 * 1000);
+
+    const response = await h.complete(job.id, job.leaseToken, {
+      ok: false,
+      errorCode: "dynamic_budget_exceeded",
+      errorMessage: "the cost limit is used up",
+      commentUrl: null,
+      usage: {
+        model: TEST_LLM_MODEL,
+        promptTokens: 300,
+        completionTokens: 30,
+        totalTokens: 330,
+        aiCalls: 3,
+        fallbackUsed: false,
+        stoppedEarly: null,
+        costUsd: 0.0035,
+      },
+    });
+
+    expect(response.status).toBe(200);
+    expect(await h.queue.get(job.id)).toMatchObject({ status: "failed" });
+    expect(await recordsOf(h).get(job.id)).toMatchObject({
+      state: "settled",
+      settledReason: null,
+      costMicroUsd: 3500,
+      promptTokens: 300,
+      completionTokens: 30,
+      settledAt: h.clock.now().toISOString(),
+    });
+  });
+
+  // #273-T05: an unknown cost of a failed run is unknown, never 0, and the run is still counted.
+  it("settles the record of a failed result whose cost is unknown with a null cost and its tokens", async () => {
+    const h = await startRunnerApiHarness();
+    const job = await claimedJob(h);
+
+    await h.complete(job.id, job.leaseToken, {
+      ok: false,
+      errorCode: "dynamic_accounting_failed",
+      errorMessage: "the provider did not report the cost of a call",
+      commentUrl: null,
+      usage: {
+        model: TEST_LLM_MODEL,
+        promptTokens: 200,
+        completionTokens: 20,
+        totalTokens: 220,
+        aiCalls: 2,
+        fallbackUsed: false,
+        stoppedEarly: null,
+        costUsd: null,
+      },
+    });
+
+    expect(await recordsOf(h).get(job.id)).toMatchObject({
+      state: "settled",
+      costMicroUsd: null,
+      promptTokens: 200,
+      completionTokens: 20,
+    });
+  });
+
+  // #273-T06: the loop of the runner ended a job process that held the job (hard timeout, killed, no
+  // result line): the model may have been used.
+  it("settles the record with an unknown cost when the runner's loop reports a process that left no result", async () => {
+    const h = await startRunnerApiHarness();
+    const job = await claimedJob(h);
+
+    await h.complete(job.id, job.leaseToken, {
+      ok: false,
+      errorCode: "timeout",
+      errorReason: "no_result_from_process",
+      errorMessage:
+        "the job did not finish within the time limit and was ended",
+      commentUrl: null,
+      usage: null,
+    });
+
+    expect(await h.queue.get(job.id)).toMatchObject({
+      status: "failed",
+      errorCode: "timeout",
+    });
+    expect(await recordsOf(h).get(job.id)).toMatchObject({
+      state: "settled",
+      settledReason: "no_result",
+      costMicroUsd: null,
+      promptTokens: null,
+      settledAt: h.clock.now().toISOString(),
+    });
+  });
+
+  // #363-T05: a Diff command failed while its model call was in flight. PR-Agent counted no call, so the
+  // runner sends no usage at all (the key is absent) and says that the model may have been used.
+  it("settles a failed Diff result with the reason and no usage as a run with an unknown cost", async () => {
+    const h = await startRunnerApiHarness();
+    const job = await claimedJob(h);
+
+    await h.complete(job.id, job.leaseToken, {
+      ok: false,
+      errorCode: "llm_timeout",
+      errorReason: "no_result_from_process",
+      errorMessage: "the model did not answer in time",
+      commentUrl: null,
+      usage: undefined, // left out of the JSON: the Diff runner sends no usage key
+    });
+
+    expect(await recordsOf(h).get(job.id)).toMatchObject({
+      state: "settled",
+      settledReason: "no_result",
+      costMicroUsd: null,
+      promptTokens: null,
+      completionTokens: null,
+      settledAt: h.clock.now().toISOString(),
+    });
+  });
+
+  // #363-T05: the runner's own result line always carries the key, as `"usage": null`.
+  it("settles a failed Diff result with the reason and an explicit null usage as a run with an unknown cost", async () => {
+    const h = await startRunnerApiHarness();
+    const job = await claimedJob(h);
+
+    await h.complete(job.id, job.leaseToken, {
+      ok: false,
+      errorCode: "llm_timeout",
+      errorReason: "no_result_from_process",
+      errorMessage: "the model did not answer in time",
+      commentUrl: null,
+      usage: null,
+    });
+
+    expect(await recordsOf(h).get(job.id)).toMatchObject({
+      state: "settled",
+      settledReason: "no_result",
+      costMicroUsd: null,
+      promptTokens: null,
+      completionTokens: null,
+      settledAt: h.clock.now().toISOString(),
+    });
+  });
+
+  // #363-T03: a Diff command that failed before it sent a request has neither usage nor reason: void.
+  it("still voids a failed Diff result without usage and without the reason", async () => {
+    const h = await startRunnerApiHarness();
+    const job = await claimedJob(h);
+
+    await h.complete(job.id, job.leaseToken, {
+      ok: false,
+      errorCode: "git_auth",
+      errorMessage: "the pull request could not be read",
+      commentUrl: null,
+      usage: undefined,
+    });
+
+    expect((await recordsOf(h).get(job.id))?.state).toBe("void");
+  });
+
+  // #273-T08: a runner of an earlier release sends the same failure without the reason: as before.
+  it("still voids a timeout without usage and without the reason", async () => {
+    const h = await startRunnerApiHarness();
+    const job = await claimedJob(h);
+
+    await h.complete(job.id, job.leaseToken, {
+      ok: false,
+      errorCode: "timeout",
+      errorMessage: "the command did not finish in time",
+      commentUrl: null,
+      usage: null,
+    });
+
+    expect((await recordsOf(h).get(job.id))?.state).toBe("void");
+  });
+
   // #272-T07
   it("does not change the record again when the same result is reported twice", async () => {
     const h = await startRunnerApiHarness();
@@ -276,8 +453,8 @@ describe("the completion of a job", () => {
 });
 
 describe("a job that ends without reporting", () => {
-  // #272-T04
-  it("voids the record when the last attempt loses its lease", async () => {
+  // #273-T06
+  it("settles the record with an unknown cost, and says why, when the last attempt loses its lease", async () => {
     const h = await startRunnerApiHarness();
     const job = await h.enqueueNew();
     await h.db
@@ -294,7 +471,31 @@ describe("a job that ends without reporting", () => {
       status: "failed",
       errorCode: "lease_expired",
     });
-    expect((await recordsOf(h).get(job.id))?.state).toBe("void");
+    expect(await recordsOf(h).get(job.id)).toMatchObject({
+      state: "settled",
+      settledReason: "no_result",
+      costMicroUsd: null,
+      promptTokens: null,
+      completionTokens: null,
+      settledAt: h.clock.now().toISOString(),
+    });
+  });
+
+  // #273-T06: a lease that runs out on an earlier attempt is not the end of the job: the record
+  // stays reserved and counts once.
+  it("keeps the record reserved while the job is tried again after a lost lease", async () => {
+    const h = await startRunnerApiHarness();
+    const job = await h.enqueueNew();
+    await h.claimed();
+    h.clock.advance(3 * MINUTE);
+
+    await h.queue.expireStaleJobs();
+
+    expect((await h.queue.get(job.id))?.status).toBe("queued");
+    expect(await recordsOf(h).get(job.id)).toMatchObject({
+      state: "reserved",
+      settledReason: null,
+    });
   });
 
   // #272-T04
@@ -343,8 +544,8 @@ describe("a job that ends without reporting", () => {
     expect((await recordsOf(h).get(job.id))?.state).toBe("void");
   });
 
-  // #272-T04
-  it("voids the record when the job runs past the hard limit", async () => {
+  // #273-T06
+  it("settles the record with an unknown cost when the job runs past the hard limit", async () => {
     const h = await startRunnerApiHarness();
     const job = await claimedJob(h);
     for (let minute = 0; minute < 40; minute += 1) {
@@ -352,8 +553,43 @@ describe("a job that ends without reporting", () => {
       await h.heartbeat(job.id, job.leaseToken);
     }
 
+    expect(await h.queue.get(job.id)).toMatchObject({
+      status: "failed",
+      errorCode: "timeout",
+    });
+    expect(await recordsOf(h).get(job.id)).toMatchObject({
+      state: "settled",
+      settledReason: "no_result",
+      costMicroUsd: null,
+    });
+  });
+
+  // #273-T06: a runner that is shut down on the last attempt may have used the model; it could not
+  // say how much.
+  it("settles the record with an unknown cost when a runner that is shut down gives the job back on its last attempt", async () => {
+    const h = await startRunnerApiHarness();
+    const job = await h.enqueueNew();
+    await h.db
+      .updateTable("jobs")
+      .set({ attempts: 2 })
+      .where("id", "=", job.id)
+      .execute();
+    const claimed = await h.claimed();
+
+    await h.complete(job.id, claimed.job.leaseToken, {
+      ok: false,
+      errorCode: "runner_shutdown",
+      errorMessage: "stopping",
+      commentUrl: null,
+      usage: null,
+    });
+
     expect((await h.queue.get(job.id))?.status).toBe("failed");
-    expect((await recordsOf(h).get(job.id))?.state).toBe("void");
+    expect(await recordsOf(h).get(job.id)).toMatchObject({
+      state: "settled",
+      settledReason: "no_result",
+      costMicroUsd: null,
+    });
   });
 
   // #272-T04

@@ -28,10 +28,11 @@ from code_reviewer_runner.capabilities import (
     IsolationSelfCheckError,
     self_check_outcome,
 )
-from code_reviewer_runner.dynamic_review.netguard import IsolationError
+from code_reviewer_runner.dynamic_review.netguard import EgressMode, IsolationError
 from code_reviewer_runner.dynamic_review.self_check import (
     DEFAULT_TOOLS,
     SelfCheckReason,
+    SelfCheckResult,
     ToolPaths,
     check_dynamic_runner,
 )
@@ -114,7 +115,10 @@ class World:
     def probe(self, uid: int, gid: int, port: int) -> None:
         self.calls.append(f"probe:{uid}:{gid}:{port}")
 
-    def run(self, **changes: Any) -> None:
+    def ipv6_proof(self, uid: int, gid: int) -> None:
+        self.calls.append(f"ipv6:{uid}:{gid}")
+
+    def run(self, **changes: Any) -> SelfCheckResult:
         arguments: dict[str, Any] = {
             "user": USER,
             "ports": PORTS,
@@ -127,10 +131,11 @@ class World:
             "capabilities_gone": self.capabilities_gone,
             "user_group": group_of_the_same_number,
             "probe": self.probe,
+            "ipv6_proof": self.ipv6_proof,
             "version_as_user": reports_the_pinned_version,
             **changes,
         }
-        check_dynamic_runner(**arguments)
+        return check_dynamic_runner(**arguments)
 
 
 @pytest.fixture
@@ -165,6 +170,67 @@ def test_a_runner_with_every_property_passes_and_probes_as_the_engine_user(world
     world.run()
 
     assert world.calls == ["capabilities", "probe:10101:10101:10180"]
+
+
+# #345-T10
+@pytest.mark.parametrize("mode", list(EgressMode))
+def test_the_result_names_the_egress_mode_the_check_passed_with(
+    world: World, mode: EgressMode
+) -> None:
+    result = world.run(egress_mode=mode)
+
+    assert result == SelfCheckResult(egress_mode=mode)
+
+
+# #345-T19: no mode given is the full one, and nothing about IPv6 is asked of such a host.
+def test_a_host_with_the_full_ruleset_is_checked_exactly_as_before(world: World) -> None:
+    result = world.run()
+
+    assert result.egress_mode is EgressMode.FULL
+    assert world.calls == ["capabilities", "probe:10101:10101:10180"]
+    world.calls.clear()
+    world.run(egress_mode=EgressMode.FULL)
+    assert not any(call.startswith("ipv6") for call in world.calls)
+
+
+# #345-T10
+def test_in_fallback_mode_the_ipv6_proof_runs_for_the_engine_user_before_the_network_probe(
+    world: World,
+) -> None:
+    world.run(egress_mode=EgressMode.FALLBACK)
+
+    assert world.calls == ["capabilities", "ipv6:10101:10101", "probe:10101:10101:10180"]
+
+
+# #345-T09
+def test_in_fallback_mode_ipv6_that_is_not_proven_off_is_refused_with_its_own_reason(
+    world: World,
+) -> None:
+    def ipv6_on(uid: int, gid: int) -> None:
+        raise IsolationError("IPv6 is not switched off on every interface")
+
+    error = refused(world, egress_mode=EgressMode.FALLBACK, ipv6_proof=ipv6_on)
+
+    assert error.code is ErrorCode.DYNAMIC_ISOLATION_SELF_CHECK_FAILED
+    assert getattr(error, "reason", None) is SelfCheckReason.IPV6_NOT_DISABLED
+    assert SelfCheckReason.IPV6_NOT_DISABLED.value == "ipv6_not_disabled"
+    assert not any(call.startswith("probe") for call in world.calls)
+    assert "10101" not in str(error)
+
+
+# #345-T09: and a runner in that state never advertises `opencode`.
+def test_a_fallback_runner_whose_ipv6_is_on_serves_diff_only(world: World) -> None:
+    def ipv6_on(uid: int, gid: int) -> None:
+        raise IsolationError("an IPv6 address exists")
+
+    engines, error = self_check_outcome(
+        lambda: world.run(egress_mode=EgressMode.FALLBACK, ipv6_proof=ipv6_on)
+    )
+
+    assert engines == (ENGINE_DIFF,)
+    assert error is not None and getattr(error, "reason", None) is SelfCheckReason.IPV6_NOT_DISABLED
+    engines, error = self_check_outcome(lambda: world.run(egress_mode=EgressMode.FALLBACK))
+    assert engines == ALL_ENGINES and error is None
 
 
 # #202-T09
@@ -562,3 +628,33 @@ def test_the_default_tool_locations_are_the_ones_the_image_installs() -> None:
     assert f"{DEFAULT_TOOLS.opencode_pin.parent}/" in dockerfile
     for pin in (DEFAULT_TOOLS.opencode_pin, DEFAULT_TOOLS.ripgrep_pin):
         assert f"runner/{pin.name}" in dockerfile
+
+
+# #324-T02: a root filesystem that is writable is no hardened container; the entry modes of the
+# Worker image ask for the check, the legacy loop does not (it never had it).
+def test_a_writable_root_filesystem_fails_the_check_when_it_is_asked_for(world: World) -> None:
+    error = refused(world, root_read_only=lambda: False)
+
+    assert isinstance(error, IsolationSelfCheckError)
+    assert getattr(error, "reason", None) is SelfCheckReason.ROOT_FILESYSTEM_WRITABLE
+    assert world.calls == ["capabilities"]  # before the tools are read and before the probe
+
+
+# #324-T01
+def test_a_read_only_root_filesystem_passes_the_check_when_it_is_asked_for(world: World) -> None:
+    world.run(root_read_only=lambda: True)
+
+    assert world.calls == ["capabilities", "probe:10101:10101:10180"]
+
+
+# #324-T08: not asked for, not judged: the legacy loop behaves as it always did.
+def test_the_root_filesystem_is_not_judged_unless_it_is_asked_for(world: World) -> None:
+    world.run()  # no root_read_only: a writable test machine passes
+
+
+def test_the_real_root_check_reads_the_mount_flag(tmp_path: Path) -> None:
+    from code_reviewer_runner.dynamic_review.self_check import root_filesystem_read_only
+
+    # The test machine's root is writable; a directory that does not exist is not read-only.
+    assert root_filesystem_read_only(tmp_path) is False
+    assert root_filesystem_read_only(tmp_path / "missing") is False

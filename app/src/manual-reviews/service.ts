@@ -5,7 +5,7 @@
 // asks the platform, never the browser, for the facts of the pull request: whether it is open and
 // which commit is its head. The job goes through the same queue intake as every other trigger, as a
 // `manual` job with the person's login; the queue returns the waiting or running job instead of a
-// second one, and a manual job is due at once (no debounce).
+// second one, and a manual job is due at once.
 import type { IntegrationsRepository } from "../db/repositories/integrations-repository.ts";
 import type { RepositoriesRepository } from "../db/repositories/repositories-repository.ts";
 import {

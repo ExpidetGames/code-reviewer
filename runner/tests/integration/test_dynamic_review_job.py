@@ -12,7 +12,8 @@ import os
 import re
 import socket
 import sys
-from collections.abc import Generator
+import time
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -812,7 +813,10 @@ class RecordingPublisher:
         self.preparer = preparer
         self.fail = fail
 
-    def __call__(self, job: Any, found: DynamicFindings) -> Published:
+    def __call__(
+        self, job: Any, found: DynamicFindings, may_write: Callable[[], bool] | None = None
+    ) -> Published:
+        # `may_write` is the supersede check the entry point passes right before the write (#396).
         self.calls.append((job, found))
         if self.preparer is not None:
             self.preparer.events.append("published")
@@ -965,6 +969,74 @@ def test_by_default_the_job_writes_one_summary_comment_through_the_github_api_of
         assert result.comment_url == github.comments[0]["html_url"]
         # Only the job's own pull request was touched, and only through its comments.
         assert all("/issues/" in path for _, path in github.requests)
+    finally:
+        github.stop()
+
+
+# #283-T08
+def test_the_published_summary_never_names_the_model_of_the_job(tmp_path: Path) -> None:
+    token = "ghs_dummy-installation-token-0123456789"
+    model = "acme-tier/deep-reviewer-7"
+    github = FakeGithubComments(token=token)
+    preparer = Preparer(tmp_path / "export", structured_script())
+    try:
+        with reading_upstream() as upstream:
+            result = runner.run_dynamic_job(
+                job_for(
+                    f"{upstream.url}/v1",
+                    model=model,
+                    upstream_model=model,
+                    pr_url=f"{github.url}/octo/repo/pull/7",
+                    git_base_url=github.url,
+                    git_token=token,
+                ),
+                None,
+                0.0,
+                environment(),
+                engines=ALL_ENGINES,
+                prepare=preparer,
+            )
+
+        assert result.ok, result.log_tail
+        # The model did the work (it is the model of the requests) and is nowhere in the comment.
+        assert {body["model"] for _, body in upstream.requests} == {model}
+        assert len(github.comments) == 1
+        published = json.dumps(github.comments)
+        assert "deep-reviewer" not in published
+        assert "acme-tier" not in published
+    finally:
+        github.stop()
+
+
+# #283-T08
+def test_the_failure_note_never_names_the_model_of_the_job(tmp_path: Path) -> None:
+    token = "ghs_dummy-installation-token-0123456789"
+    model = "acme-tier/deep-reviewer-7"
+    github = FakeGithubComments(token=token)
+    try:
+        with FakeUpstream() as upstream:
+            result = runner.run_dynamic_job(
+                job_for(
+                    f"{upstream.url}/v1",
+                    model=model,
+                    upstream_model=model,
+                    pr_url=f"{github.url}/octo/repo/pull/7",
+                    git_base_url=github.url,
+                    git_token=token,
+                ),
+                None,
+                0.0,
+                environment(),
+                engines=ALL_ENGINES,
+                prepare=refusing_checkout(),
+            )
+
+        assert result.error_code is ErrorCode.CHECKOUT_INCOMPLETE
+        assert len(github.comments) == 1
+        published = json.dumps(github.comments)
+        assert "Dynamic Review did not complete" in published
+        assert "deep-reviewer" not in published
+        assert "acme-tier" not in published
     finally:
         github.stop()
 
@@ -1174,3 +1246,39 @@ def test_the_note_of_a_run_whose_log_holds_repository_text_holds_none_of_it(
             assert fragment not in body
     finally:
         github.stop()
+
+
+# #387-T04: a run that starts late gets the time that is left, so a hung provider ends it at the
+# soft timeout of the process (counted from its start) and never at the watchdog's.
+def test_a_dynamic_run_after_a_slow_start_is_ended_by_the_time_that_is_left(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    deadlines: list[float] = []
+    real = runner.dynamic_ledger
+
+    def spy(capabilities: Any, environment: Any, deadline: float) -> Any:
+        deadlines.append(deadline)
+        return real(capabilities, environment, deadline)
+
+    monkeypatch.setattr(runner, "dynamic_ledger", spy)
+    script = {"proxy_calls": 1, "answer": "structured", "findings": findings(), "results": {}}
+    began = time.monotonic()
+
+    with FakeUpstream(hold=60.0) as upstream:
+        result = runner.run_dynamic_job(
+            job_for(f"{upstream.url}/v1"),
+            None,
+            began - 4.0,  # a start-up of 4 s, beyond the 3 s the watchdog allows after the timeout
+            environment(),
+            5.0,
+            engines=ALL_ENGINES,
+            prepare=Preparer(tmp_path / "export", script),
+            publish=RecordingPublisher(),
+        )
+
+    (deadline,) = deadlines
+    assert 0 < deadline <= 1.0  # the 5 s timeout minus the 4 s that are gone
+    assert result.ok is False
+    assert result.error_code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
+    assert result.error_reason is None  # the run's own result, not the watchdog's unknown outcome
+    assert time.monotonic() - began < 15.0

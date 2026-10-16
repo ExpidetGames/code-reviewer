@@ -30,6 +30,10 @@ class LeaseState(StrEnum):
     HELD = "held"
     # The app says the job is not ours: the lease was lost, or the job was cancelled or finished.
     LOST = "lost"
+    # A newer push replaced this run (#396): the answer of the app, or what the job host learned
+    # from it
+    # already. The job is still held, but it must write nothing.
+    SUPERSEDED = "superseded"
     # No answer: the app could not be reached, or the loop did not answer in time.
     UNCONFIRMED = "unconfirmed"
 

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// The setup code and everything that protects it, kept in the memory of one process
+// The setup code and everything that protects it, kept in the memory of one process (a server; a serverless
+// deployment keeps it in the database, database-code-store.ts, #321)
 // (docs/decisions/0001-editions-setup-and-accounts.md, section 2.2):
 //
 // - a fresh 6-digit code from a cryptographically secure source, of which only a keyed hash is kept;
@@ -55,6 +56,17 @@ export type SetupCodeStore = {
   currentIssueId(): string | null;
   /** Forgets the code (the setup is complete). */
   invalidate(): void;
+};
+
+/**
+ * What the setup routes need from a code store, in a form both stores satisfy: the in-memory store of a
+ * server answers directly, the database store of a serverless deployment (database-code-store.ts)
+ * answers with promises. The routes `await` every call.
+ */
+export type SetupCodeGuard = {
+  attempt(submitted: unknown): SetupCodeAttempt | Promise<SetupCodeAttempt>;
+  currentIssueId(): string | null | Promise<string | null>;
+  invalidate(): void | Promise<void>;
 };
 
 type StoreOptions = {

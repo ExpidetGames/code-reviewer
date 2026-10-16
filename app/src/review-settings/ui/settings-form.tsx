@@ -64,6 +64,7 @@ import {
   resetField,
   setBoolean,
   setCommand,
+  setModelTier,
   setText,
   type BooleanField,
   type FormState,
@@ -71,6 +72,7 @@ import {
 } from "./form-state.ts";
 import { adoptCards, planProjectSave, type SaveStep } from "./project-save.ts";
 import { ModelFieldset } from "./model-fieldset.tsx";
+import { QualityChoice } from "./quality-choice.tsx";
 import { KIND_NAMES } from "../kind-names.ts";
 import {
   GATE_OFF_WARNING,
@@ -79,7 +81,10 @@ import {
 } from "./review-kind-fieldset.tsx";
 import { ReviewFieldset } from "./review-fieldset.tsx";
 import { WhenFieldset } from "./when-fieldset.tsx";
-import type { SettingsFieldHandlers } from "./settings-fields.tsx";
+import {
+  settingsOrigin,
+  type SettingsFieldHandlers,
+} from "./settings-fields.tsx";
 import {
   describeIssue,
   describeSaveFailure,
@@ -433,6 +438,23 @@ export function SettingsForm({
     setSkill: (text) => edit(setSkillText(state, text), "reviewSkill"),
     resetSkill: () => edit(resetSkill(state, shippedSkill), "reviewSkill"),
   };
+  // The workspace reviews on the operator's key (#283): a quality level takes the place of the model fields.
+  const quality = (reviewKind: ProjectReviewKind | "every") => (
+    <QualityChoice
+      value={state.values.modelTier}
+      availability={model.tierAvailability}
+      kind={reviewKind}
+      origin={settingsOrigin({
+        model,
+        state,
+        name: "modelTier",
+        label: "Quality",
+        onReset: () => handlers.reset("modelTier"),
+      })}
+      error={errors.modelTier}
+      onChange={(tier) => edit(setModelTier(state, tier), "modelTier")}
+    />
+  );
   const disabled = busy || readOnly;
   const saveLabel =
     model.mode === "project" ? "Save review settings" : "Save review defaults";
@@ -446,11 +468,13 @@ export function SettingsForm({
         noValidate
         className="flex flex-col gap-6"
       >
-        <datalist id={datalistId}>
-          {Object.keys(MODEL_PRICES).map((name) => (
-            <option key={name} value={name} />
-          ))}
-        </datalist>
+        {model.managed ? null : (
+          <datalist id={datalistId}>
+            {Object.keys(MODEL_PRICES).map((name) => (
+              <option key={name} value={name} />
+            ))}
+          </datalist>
+        )}
 
         {projectView !== undefined && state.dynamic !== undefined ? (
           <ReviewKindFieldset
@@ -462,6 +486,7 @@ export function SettingsForm({
             hiddenProblem={hiddenProblem}
             kindError={kindError}
             handlers={kindHandlers}
+            quality={model.managed ? quality("dynamic") : undefined}
           />
         ) : null}
         {kind === "diff" ? (
@@ -473,6 +498,11 @@ export function SettingsForm({
             handlers={handlers}
             cost={cost}
             datalistId={datalistId}
+            quality={
+              model.managed
+                ? quality(projectView === undefined ? "every" : "diff")
+                : undefined
+            }
           />
         ) : null}
         <ReviewFieldset

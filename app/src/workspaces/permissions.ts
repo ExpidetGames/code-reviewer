@@ -9,7 +9,7 @@
 //   the settings of a project.
 // - Admin: everything a Member can, plus what the workspace is made of: connections, repositories (which
 //   projects are switched on), the review defaults and the LLM key, and Members and their invitations
-//   (invite, remove, revoke; Members only).
+//   (invite, remove, revoke; Members only), and the hand-over to the plan page of the operator.
 // - Owner: everything an Admin can, plus Admins and Owners (invite, change roles, remove) and renaming the
 //   workspace.
 //
@@ -34,6 +34,8 @@ export const WORKSPACE_ACTIONS = [
   "manage_connections",
   /** The workspace's own LLM key. */
   "manage_llm_key",
+  /** Be handed over to the operator-configured plan page (src/plan-handoff/). */
+  "manage_plan",
   /** The list of members. */
   "view_members",
   /** The list of pending invitations (who is invited and with which role). */
@@ -58,6 +60,7 @@ export const MINIMUM_ROLE: Record<WorkspaceAction, WorkspaceRole> = {
   manage_review_defaults: "admin",
   manage_connections: "admin",
   manage_llm_key: "admin",
+  manage_plan: "admin",
   view_members: "member",
   view_invitations: "admin",
   manage_invitations: "admin",

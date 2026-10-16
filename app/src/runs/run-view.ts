@@ -86,6 +86,11 @@ export type RunDetailView = RunRowView & {
   supersededBy: string | null;
   /** The usage the runner reported, or null (a run that never reached a model, or an older result). */
   usage: RunUsageView | null;
+  /**
+   * The run was on a managed quality level (#283): its cost is not shown (`usage.costUsd` is null). With the tokens it
+   * would give a price per token, which tells the model; the operator reads the cost through the operator API.
+   */
+  costHidden: boolean;
 };
 
 /** What the list can be narrowed by: one repository, one status. */
@@ -296,6 +301,8 @@ export function toRunDetailView(
   now: Date,
   /** Removes secrets from the log (the second line of defense after the runner and the result check). */
   redact: (text: string) => string = (text) => text,
+  /** Whether the run was on a managed quality level (its usage record names one): its cost is not shown. */
+  onManagedTier = false,
 ): RunDetailView {
   const stored = readStoredResult(job.result);
   const cleaned = redact(cleanLog(stored.logTail));
@@ -326,15 +333,19 @@ export function toRunDetailView(
       truncated: stored.logTruncated || overlong,
     },
     supersededBy: job.supersededBy,
-    usage: usageView(job, redact),
+    usage: usageView(job, redact, onManagedTier),
+    costHidden: onManagedTier,
   };
 }
 
 function usageView(
   job: Job,
   redact: (text: string) => string,
+  onManagedTier: boolean,
 ): RunUsageView | null {
-  const usage = readStoredUsage(job.result);
+  const stored = readStoredUsage(job.result);
+  const usage =
+    stored !== null && onManagedTier ? { ...stored, costUsd: null } : stored;
   if (usage === null || usage.model === null) return usage;
   // Redaction can lengthen the name: cut again, after it.
   return {

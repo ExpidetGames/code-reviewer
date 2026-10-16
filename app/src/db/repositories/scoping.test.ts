@@ -24,7 +24,9 @@ const SCOPED = [
   "integrations-repository.ts",
   "invitations-repository.ts",
   "jobs-repository.ts",
+  "plan-handoff-tokens-repository.ts",
   "projects-repository.ts",
+  "refusal-notices-repository.ts",
   "repositories-repository.ts",
   "runs-repository.ts",
   "usage-records-repository.ts",
@@ -36,7 +38,7 @@ const SCOPED = [
 /**
  * Not scoped, each for a reason that has to hold:
  * - the tables are not customer data (app_meta, allowed_login_pins, webhook_deliveries, workspaces,
- *   instance_settings, rate_limits, secrets);
+ *   instance_settings, rate_limits, secrets, setup_codes);
  * - integration-directory: webhooks and the synchronization find a connection before the workspace is
  *   known; it only reads and the answer names the workspace;
  * - invitation-directory: a person who opens an invitation link holds only the token, and the list of the
@@ -51,9 +53,27 @@ const SCOPED = [
  * - jobs-claim: the one SQL statement of the runner side, not a repository;
  * - legacy-users: the import of an existing installation (src/legacy-import/) reads the users of the earlier
  *   sign in with their GitHub identity and marks them as imported; users belong to no workspace;
+ * - usage-feed: the settled usage records of every workspace for the operator API (#278) and the count of runs that
+ *   settled without a cost per workspace and key mode (#385), which serve the whole instance from one token; it only
+ *   reads, takes the optional bound of the safety lag, and every item and count names its workspace. The reads of one workspace (its page and its summary) go through the scoped usage records repository;
  * - usage-records-sweep: the sweep of usage records for instance level code that ends jobs of any workspace (the
  *   lease side of the queue, the switch-off of Dynamic Review); one statement that only voids `reserved` records of
  *   jobs that have ended, and it takes no workspace on purpose;
+ * - claim-admission: the check of the entitlements of a claimed job (#277), made inside the claim transaction of
+ *   the lease side of the queue for whichever workspace the job is in; it reads, and everything it reads goes
+ *   through repositories created for that job's workspace (the instance default and the workspace row it locks
+ *   are not customer data);
+ * - refusal-notices-sweep: the notices of refused reviews that are due to be posted again (#281), for the cron sweep that
+ *   serves the whole instance; it only reads the rows that wait for a retry, and every answer names its workspace. The
+ *   record itself goes through the scoped refusal notices repository;
+ * - job-dispatches: where the signed wake-up call of a job stands (#326). The sender holds the job it just queued and
+ *   the sweep works through the whole instance, like the lease side of the queue; the table has a job id and
+ *   counters, no repository data, and is only written in webhook mode;
+ * - plan-handoff-redeem: the redemption of a handoff token by the external plan page (#284, operator API). The caller
+ *   holds only the token, so there is no workspace to scope to before the token is looked up by its hash; it never
+ *   lists, the answer names its own workspace, and the one statement that uses a token up and the check of the member's
+ *   role both run on the workspace the token was made for. Making a token goes through the scoped plan handoff tokens
+ *   repository; the clean-up deletes expired rows of every workspace and reads nothing;
  * - job-claimed-keys: the encrypted LLM key handed out with the claim of a job. It is keyed by the job and read
  *   only by the runner API when that job is completed (the job and its workspace are known there); it never
  *   lists, and a key is only ever looked up by the id of a job the caller holds.
@@ -61,17 +81,23 @@ const SCOPED = [
 const INSTANCE_LEVEL = [
   "allowed-login-pins-repository.ts",
   "app-meta-repository.ts",
+  "claim-admission.ts",
   "installation-link-request-directory-repository.ts",
   "instance-settings-repository.ts",
   "integration-directory-repository.ts",
   "invitation-directory-repository.ts",
   "job-claimed-keys-repository.ts",
+  "job-dispatches-repository.ts",
   "jobs-claim.ts",
   "legacy-users-repository.ts",
+  "plan-handoff-redeem-repository.ts",
   "rate-limits-repository.ts",
+  "refusal-notices-sweep.ts",
   "runner-jobs-repository.ts",
   "secrets-repository.ts",
+  "setup-codes-repository.ts",
   "unclaimed-installations-repository.ts",
+  "usage-feed-repository.ts",
   "usage-records-sweep.ts",
   "webhook-deliveries-repository.ts",
   "workspaces-repository.ts",

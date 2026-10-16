@@ -19,6 +19,7 @@ workspace the signed-in user works in) and `getRunnerQueue()` (`shared.ts`). The
 | `job-input.ts`    | `validateEnqueueInput`: field level checks before anything is written                                                                                                                                                                                                                                                        |
 | `job-types.ts`    | `Job`, the inputs and results, the trigger kinds and the error codes the queue itself writes                                                                                                                                                                                                                                 |
 | `job-limits.ts`   | Lease, maximum runtime and maximum attempts, with their defaults                                                                                                                                                                                                                                                             |
+| `shared.ts`       | `jobQueueFor(workspaceId)`, `getRunnerQueue()`: the queues of the running server. `jobQueueFor` attaches the dispatch hook (below)                                                                                                                                                                                           |
 | `errors.ts`       | `JobQueueError` with the stable codes `JOB_INPUT_INVALID` (with `fieldErrors`) and `JOB_REPOSITORY_UNKNOWN`                                                                                                                                                                                                                  |
 
 Every job belongs to the workspace of its repository (`jobs.workspace_id`; the database refuses a job
@@ -31,14 +32,29 @@ by the code that enqueues (the trigger policy of the webhook handler, CR-31), no
 ```
 queued --claim--> running --complete--> succeeded | failed
 queued --newer automatic job--> superseded     running --lease lost or release--> queued (attempts + 1)
+running --newer automatic job, holder understands it--> superseded (drains, #397)
 queued --project off / PR closed--> cancelled  running --last attempt lost, or too long--> failed
 queued --review kind changed--> cancelled
+queued --claim refused by the workspace's entitlements--> failed (never runs, no attempt, no usage record; #277)
 ```
 
 `succeeded`, `failed`, `superseded` and `cancelled` are final; nothing leads back from them. A
 superseded job keeps `superseded_by`; a cancelled or failed job keeps its `error_code`
 (`project_deactivated`, `pull_request_closed`, `review_kind_changed`, `lease_expired`, `timeout`, or
 the code a runner reported).
+
+## Entitlements at claim (#277)
+
+`claimNext` is also where what an operator allows a workspace is enforced (`src/usage/README.md`, "Limits and
+suspension at claim"). After the oldest due job is taken, inside the same transaction and before its usage record is
+reserved, `admitClaimedJob` (`db/repositories/claim-admission.ts`) resolves the entitlements of the job's workspace
+and decides. A refused job is ended `failed` right there, with `workspace_suspended`, `quota_exhausted` or
+`entitlements_invalid`; no attempt is counted, it is never handed out, it has no usage record, its holder, start time
+and lease are cleared, and `claimNext` tries the next job. A suspension or unreadable entitlements fail all the
+workspace's due jobs in one statement; a limit refuses job by job, at most 25 per call, then `null`. `onRefused` (an option of `createRunnerQueue`, wired to a
+log line and, for a limit or a suspension, the pull request notice of #281 in `shared.ts`) is called after the commit, once per refused job, with the code, the
+period start and, for a quota, which limit. A claim by job id that is refused answers `null`, like any job that cannot be claimed. An instance whose
+workspaces have no entitlements (and no default) does the same two reads per claim and nothing else.
 
 ## The review kind of a job (#195)
 
@@ -81,6 +97,13 @@ later of creation and `run_after`, so a scheduled delay does not consume the wai
 already claimed (`attempts > 0` after lease loss/release) follow the existing lease/attempt/backoff
 policy instead, independently of which runner polls first.
 
+A hosted deployment (`RUNNER_DISPATCH=webhook`, #316) has a second bound, from the cron sweep (#328,
+`src/dispatch/README.md`): a job that was queued for `RUNNER_DISPATCH_GIVE_UP_SECONDS` (default 3600) without any
+Dispatcher claiming it **fails** with `dispatch_unavailable` (`failUndispatched` of the runner queue), with no attempt
+counted; the time counts from the later of `run_after` and the last time the job was queued. In poll mode this is off
+unless the operator sets the variable. The same sweep expires lapsed leases (`expireStaleJobs`), which a claim did
+and, with nobody claiming, nothing else would.
+
 When the project's review kind changes, #194's `ReviewSettingsHooks.onProjectSettingsChanged` calls
 `cancelWaitingForReviewKindChange` in the settings transaction: the project's waiting jobs become
 `cancelled` with `review_kind_changed`, a running job finishes, and a rejecting hook rolls the
@@ -106,16 +129,34 @@ settings change (and the cancellation) back. The hook is `createJobReviewSetting
 3. **Jobs a person started** (`comment`, `manual`): exempt from the head commit rule, but there is never a
    duplicate of a waiting or running job for the same pull request, command and arguments
    (`already_active`): the existing job is returned, and if it is waiting behind a `run_after` in the
-   future (a debounced automatic job) it is made due now, because a person does not wait for a
-   debounce. Different arguments are different jobs (`/review` takes none; a historical person job
+   future (a job given back with a retry time) it is made due now, because a person does not wait.
+   Different arguments are different jobs (`/review` takes none; a historical person job
    with arguments is still its own job).
-4. **Supersession.** A new automatic job replaces the waiting _automatic_ jobs of the same pull request,
-   command and arguments (status `superseded`, `superseded_by` set). Waiting `comment` and `manual`
-   jobs are never replaced, and a running job is never touched: the new job waits behind it, because
-   only one job per pull request runs at a time.
+4. **Supersession.** A new automatic job replaces the _automatic_ jobs of the same pull request, review kind,
+   command and arguments that would review an older state (status `superseded`, `superseded_by` set, in the
+   transaction of the enqueue):
+   - a **waiting** one is dropped; it never ran;
+   - a **running** one (#397) is superseded **only if its holder understands it** (`accepts_supersede`, set by a
+     claim that names the feature `supersede`, or by the Worker's job details request; #396). Jobs of a runner or
+     Worker of an earlier release are left alone and the new job waits behind them as before. A running job a
+     person started (`comment`, `manual`) is never superseded, and a person's job never supersedes anything.
 
-`run_after` is `now` unless the caller passes a later time (the debounce of `synchronize` is policy and
-is decided by the webhook handler's trigger policy, CR-31). A manual job is due at once. The start button
+   A superseded **running** job **drains**: it keeps `runner_id`, its lease token and its claim time; `finished_at` is
+   set; `lease_expires_at` is set to the claim window (`SUPERSEDED_DRAIN_MS` in `supersede-timing.ts`, 240 seconds: the Worker's next heartbeat, at most 60, its own drain, 120, the longest model request, and a margin) and is not extended
+   by heartbeats. The Worker's host reads the end of the window from `leaseExpiresAt` in the heartbeat answer and ends its
+   process `KILL_MARGIN_SECONDS` (20) before it, so the report arrives while the claim holds. Its heartbeats are answered `superseded` (`job.superseded: true`) while the window lasts, so
+   its Worker stops sending model requests, finishes the ones in flight and reports; its **report is accepted
+   once** and stored (the job stays `superseded`; it settles the usage record, below), also a little after the window
+   (a grace of 60 seconds, `SUPERSEDED_REPORT_GRACE_MS`). Only when window and grace are over without a report does the
+   next claim, sweep or request that expires leases settle the record with an unknown cost; a report after that is
+   refused (`409`).
+   The unique index that allows one running job per pull request (`jobs_one_running_per_pull_request_unique`) is on
+   `status = 'running'`, so the draining job does not hold the pull request: **the new job is claimable at
+   once** and both run for a short time. `attemptedShas` names the head of a superseded job that ran, like a failed
+   one, so the publisher recognises a comment it may have written just before it heard of it.
+
+`run_after` is `now` unless the caller passes a later time (only a job given back with a retry time waits; there is
+no debounce of `synchronize` since #395). A manual job is due at once. The start button
 (CR-33, `src/manual-reviews/README.md`) is the producer of `manual` jobs; it passes the head commit and the
 pull request address it got from the platform and the login of the signed in person.
 
@@ -123,6 +164,13 @@ Unique indexes enforce the promises even if the code were wrong: one job per del
 per comment of a repository (the primary key of `job_comments`, migration `20261011090000_create_job_comments`),
 one automatic job per head commit and command in the slot-holding statuses, one running job per pull
 request.
+
+**The enqueue hook (#326).** `createJobQueue(db, workspaceId, { onEnqueued })` calls `onEnqueued(result)` with what
+`enqueue` returned (a new job or an existing one) once its transaction has committed, never for a refused enqueue,
+and ignores a hook that throws. The running server passes the dispatch hook through `jobQueueFor` (`shared.ts`),
+which is how a job queued by the GitHub webhook, a comment or the start button wakes a Dispatcher when
+`RUNNER_DISPATCH=webhook`; by default there is no hook (`src/dispatch/README.md`). A producer must get its queue
+from `jobQueueFor` (`src/dispatch/producers.test.ts`).
 
 ## Claiming, leases, attempts
 
@@ -140,7 +188,9 @@ request.
    job or nothing.
 
 The claim also reserves the job's usage record (`usage_records`, `src/usage/README.md`) in the same
-transaction, `complete` settles it, and every transition that ends a job without `complete` voids it.
+transaction, `complete` settles it, and every transition that ends a job without `complete` closes it: settled with an
+unknown cost (`no_result`) when a runner held the job and sent no result (lease lost on the last attempt, hard limit,
+runner shut down on the last attempt), void for every other end.
 
 That statement is the only dialect specific code (`src/db/repositories/jobs-claim.ts`); a port to
 Postgres changes it (`FOR UPDATE SKIP LOCKED`) and nothing else.
@@ -197,9 +247,8 @@ checked in code review.
 - **CR-31 (triggers).** Done: the webhook handler applies the trigger policy before the intake
   (`src/webhooks/README.md`, "The trigger policy for automatic reviews"). It checks the active
   project, skips drafts and switched-off settings, compares a push with the pull request's current
-  head commit (`getPullRequest`) _before_ enqueueing, debounces `synchronize` through `runAfter`
-  (default 90 seconds, `REVIEW_DEBOUNCE_SECONDS`) and calls `discardWaitingForPr` when a pull request
-  closes.
+  head commit (`getPullRequest`) _before_ enqueueing and calls `discardWaitingForPr` when a pull request
+  closes. It debounced `synchronize` through `runAfter` until #395, which removed the wait: a push is due at once.
 - **CR-24 (projects).** Done (CR-46): `createJobProjectHooks` (`project-hooks.ts`) calls `cancelWaitingForRepository` in the transaction of the deactivation; `src/projects/shared.ts` plugs it in.
 - **CR-28/CR-29 (runner).** The runner API exists (`src/runner-api/README.md`); it uses `release` for
   "token creation failed". Its claim guard skips and cancels jobs of repositories

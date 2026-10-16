@@ -5,6 +5,8 @@
 // budget, with the estimated cost of one review at the foot (the cost belongs next to the model it
 // depends on, not at the end of the form). Every field shows where its value comes from and can be
 // taken back to the layer below with "Reset to default".
+import type { ReactNode } from "react";
+import { QUALITY_HEADING } from "../../copy/model-quality.ts";
 import type { ReviewCostGuard } from "../cost.ts";
 import {
   SettingsCard,
@@ -37,7 +39,13 @@ export function ModelFieldset({
   handlers,
   cost,
   datalistId,
+  quality,
 }: SettingsFieldsetProps & {
+  /**
+   * The quality choice of a workspace on the operator's key (#283). It takes the place of the model, the fallback
+   * model and the cost estimate; the token budget stays.
+   */
+  quality?: ReactNode;
   cost: ReviewCostGuard | null;
   /** The id of the `<datalist>` of known model names, rendered by the container. */
   datalistId: string;
@@ -53,6 +61,25 @@ export function ModelFieldset({
       label,
       onReset: () => handlers.reset(name),
     });
+  const budget = (
+    <SettingsTextField
+      name="maxTokens"
+      label="Token budget"
+      hint={tokenBudgetHint()}
+      error={errors.maxTokens}
+      origin={origin("maxTokens", "Token budget")}
+      value={state.values.maxTokens}
+      onChange={(value) => handlers.setText("maxTokens", value)}
+      inputMode="numeric"
+    />
+  );
+  if (quality !== undefined)
+    return (
+      <SettingsCard title={QUALITY_HEADING} disabled={disabled}>
+        {quality}
+        {budget}
+      </SettingsCard>
+    );
   return (
     <SettingsCard title="Model" disabled={disabled}>
       <SettingsTextField
@@ -76,16 +103,7 @@ export function ModelFieldset({
         list={datalistId}
         placeholder="None"
       />
-      <SettingsTextField
-        name="maxTokens"
-        label="Token budget"
-        hint={tokenBudgetHint()}
-        error={errors.maxTokens}
-        origin={origin("maxTokens", "Token budget")}
-        value={state.values.maxTokens}
-        onChange={(value) => handlers.setText("maxTokens", value)}
-        inputMode="numeric"
-      />
+      {budget}
       <CostSummary cost={cost} />
     </SettingsCard>
   );

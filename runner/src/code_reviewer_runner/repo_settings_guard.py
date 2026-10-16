@@ -49,6 +49,11 @@ PROTECTED_SETTINGS = (
     "config.config_branch",
     "config.enable_per_directory_settings",
     "config.output_run_cost",
+    # Both add the model (and `model_weak`, `model_reasoning`) to the published review comment. A
+    # tier's model is operator data a workspace must not read (#280), so a repository file must
+    # not switch them on.
+    "config.output_run_details",
+    "config.output_relevant_configurations",
     "config.verbosity_level",
     "config.extra_config_url",
     "config.secret_provider",
@@ -64,6 +69,7 @@ PROTECTED_SETTINGS = (
     "config.additional_reasoning_effort_models",
     "config.no_temperature_models",
     "config.retry_same_model_on_timeout",
+    "config.num_retries",
     "config.add_user_to_requests",
     "config.enable_claude_extended_thinking",
     "config.extended_thinking_budget_tokens",
