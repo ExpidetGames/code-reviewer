@@ -28,6 +28,9 @@ export const CLAIM_FEATURES = [
   // #320: the caller is a Dispatcher and gets the split answer (`SplitClaimResponse`): a per-job
   // credential and no job input, no git token and no model key.
   "worker_credential",
+  // #396: the runner stops gracefully when a heartbeat answers `job.superseded`. A running job is superseded by a
+  // newer push only when its holder named it (#397); a Worker names it in its job details request.
+  "supersede",
 ] as const;
 export type ClaimFeature = (typeof CLAIM_FEATURES)[number];
 
