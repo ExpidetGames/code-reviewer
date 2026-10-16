@@ -27,6 +27,8 @@ from code_reviewer_runner.diff_cost import DiffCostMeter, install_cost_meter
 
 CHARGE = 0.01
 
+litellm.suppress_debug_info = True
+
 
 @dataclass
 class Step:
