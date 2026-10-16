@@ -20,21 +20,24 @@ import type { EntitlementsData } from "../../src/workspaces/entitlements.ts";
 
 const OPERATOR_KEY = "plain-operator-key-0001-aaaaaaaa";
 const TIERS = {
-  low: { diff: "secretco/tier-low-diff", dynamic: "secretco/tier-low-dyn" },
+  low: {
+    diff: "hidden-vendor/tier-low-diff",
+    dynamic: "hidden-vendor/tier-low-dyn",
+  },
   medium: {
-    diff: "secretco/tier-medium-diff",
-    dynamic: "secretco/tier-medium-dyn",
+    diff: "hidden-vendor/tier-medium-diff",
+    dynamic: "hidden-vendor/tier-medium-dyn",
   },
   high: {
-    diff: "secretco/tier-high-diff:extended",
-    dynamic: "secretco/tier-high-dyn",
+    diff: "hidden-vendor/tier-high-diff:extended",
+    dynamic: "hidden-vendor/tier-high-dyn",
   },
 };
 const MODEL_IDS = Object.values(TIERS).flatMap((models) =>
   Object.values(models),
 );
 // What a search for "any model id of any tier" looks for: the ids, and the part that names the maker.
-const NEEDLES = [...MODEL_IDS, "secretco", "tier-high", "tier-low"];
+const NEEDLES = [...MODEL_IDS, "hidden-vendor", "tier-high", "tier-low"];
 
 function managed(overrides: Partial<EntitlementsData> = {}): EntitlementsData {
   return {
@@ -195,10 +198,10 @@ describe("what a workspace member can read after managed runs", () => {
   it("holds the model of a tier the operator configured later neither: the settings never carried it", async () => {
     const h = await start();
     await run(h, "diff");
-    await h.setTiers({ ...TIERS, high: { diff: "secretco/new-high" } });
+    await h.setTiers({ ...TIERS, high: { diff: "hidden-vendor/new-high" } });
 
     const text = await whatAMemberCanRead(h);
 
-    expect(text).not.toContain("secretco");
+    expect(text).not.toContain("hidden-vendor");
   });
 });

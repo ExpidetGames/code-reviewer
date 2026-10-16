@@ -219,8 +219,11 @@ describe("changing a setting", () => {
     await createInstanceSettingsRepository(portal.db).set(
       "managed_model_tiers",
       {
-        low: { diff: "secretco/portal-low" },
-        high: { diff: "secretco/portal-high", dynamic: "secretco/portal-dyn" },
+        low: { diff: "hidden-vendor/portal-low" },
+        high: {
+          diff: "hidden-vendor/portal-high",
+          dynamic: "hidden-vendor/portal-dyn",
+        },
       },
       null,
     );
@@ -233,17 +236,17 @@ describe("changing a setting", () => {
         high: { diff: true, dynamic: true },
       },
     });
-    expect(text).not.toContain("secretco");
+    expect(text).not.toContain("hidden-vendor");
     // The portal cannot write them: the operator API is the only way.
     const refused = await put(portal, {
-      modelTiers: { low: { diff: "secretco/other" } },
+      modelTiers: { low: { diff: "hidden-vendor/other" } },
     });
     expect(refused.status).toBe(422);
     expect(
       await createInstanceSettingsRepository(portal.db).get(
         "managed_model_tiers",
       ),
-    ).toMatchObject({ low: { diff: "secretco/portal-low" } });
+    ).toMatchObject({ low: { diff: "hidden-vendor/portal-low" } });
   });
 
   // #284-T11
