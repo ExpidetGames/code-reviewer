@@ -382,7 +382,7 @@ lifetime of a VM; an old Dispatcher never calls it.
 
 ## Where the trigger policy lives
 
-The trigger policy (CR-31: drafts, the review settings, the debounce of a push, the check against
+The trigger policy (CR-31: drafts, the review settings, the check against
 the current head commit, dropping the waiting jobs of a closed pull request) and the project gate
 (CR-24, CR-5) are wired in the webhook handler (`src/webhooks/README.md`), so the runner API only sees
 jobs the policy let through.

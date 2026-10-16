@@ -4,7 +4,7 @@
 // with the real service, the real GitHub App provider and client against the fake GitHub, the real
 // job queue and a real SQLite file. The rules are those of the other triggers: an active project, a
 // command the project allows, an open pull request that GitHub itself confirms, one job at a time
-// for the same pull request and command, and no debounce.
+// for the same pull request and command.
 import { describe, expect, it } from "vitest";
 import {
   HEAD_SHA as HEAD,
@@ -226,7 +226,7 @@ describe("starting a command for a pull request", () => {
       deliveryId: null,
       status: "queued",
     });
-    // No debounce: the job may be claimed right now.
+    // The job may be claimed right now.
     expect(new Date(jobs[0]?.runAfter ?? "").getTime()).toBeLessThanOrEqual(
       Date.now(),
     );
@@ -394,7 +394,7 @@ describe("starting a command for a pull request", () => {
     expect(await queue.list()).toHaveLength(1);
   });
 
-  it("makes a debounced automatic job due now instead of adding a second one", async () => {
+  it("makes a held back automatic job due now instead of adding a second one", async () => {
     const { h, service, repository, queue } = await start();
     h.fake.addPullRequest("acme/widgets", pullRequest(7));
     const automatic = await queue.enqueue({

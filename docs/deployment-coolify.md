@@ -212,7 +212,6 @@ value), set Literal.
 | `LLM_PROVIDER` | optional | `openrouter` | The only provider for now; this is the default. |
 | `LLM_MODEL` | optional | An OpenRouter model name | Default `anthropic/claude-haiku-5.5`. The review settings in the UI can choose another model per project. The update also copies a model that differs from the default into the review defaults of the default workspace, so removing this variable later does not change the model. |
 | `LLM_MAX_TOKENS` | optional | Context window of a model PR-Agent does not know | Leave empty for known models. |
-| `REVIEW_DEBOUNCE_SECONDS` | optional | A number from 0 to 600 | How long a push to a pull request waits before its automatic review starts. Empty: 90. |
 | `DATABASE_BUSY_TIMEOUT_MS` | optional | A number of milliseconds | How long a database write waits for a lock. Empty: 5000. |
 | `BACKUP_TIME` | optional | `HH:MM` in UTC, or `off` | When the app backs up the database every day. Empty: `02:30`. Use `off` only together with a Coolify scheduled task, [section 8](#8-storage-and-backups). |
 | `RUNNER_CONCURRENCY` | optional | A whole number from 1 to 32 | How many reviews the runner runs at once, [section 9](#9-runner-sizing-and-runner_concurrency). Empty: 3 (right for the runner's 2 GiB). Raise it only together with `RUNNER_MEMORY_LIMIT`. |
@@ -238,6 +237,7 @@ Variables that exist in `.env.example` but that you **do not set on Coolify**:
 | `BACKUP_DIR` | not used | The image fixes it to `/backups`, the mount point of the backup volume. |
 | `ALLOW_TEST_GITHUB_ENDPOINTS`, `GITHUB_OAUTH_BASE_URL`, `GITHUB_API_BASE_URL` | not used | For the test stack with a fake GitHub only. Never set them in a real deployment. |
 | `ALLOW_TEST_LLM_ENDPOINTS`, `LLM_API_BASE_URL` | not used | For the test stack with a fake LLM only (the "test key" button). Never set them in a real deployment. |
+| `ALLOW_TEST_DISPATCH_TIMING`, `TEST_DISPATCH_INLINE_RETRY_DELAYS_MS` | not used | For the test lane that starts its own Dispatcher only (longer pauses between the repeats of a wake-up). Never set them in a real deployment. |
 | `RUNNER_API_URL` | fixed | The Compose file sets it to `http://app:3000`, the app over the Docker network. It is not a setting. |
 | `RUNNER_SHUTDOWN_GRACE_SECONDS` | not used | How long running reviews may finish after a stop. The Compose file leaves the runner's 60 seconds and gives the runner `stop_grace_period: 90s` for it ([section 9](#stopping-the-runner)); the two belong together. |
 | `PR_AGENT_COMMAND` | not used | Replaces PR-Agent by another command, for test stacks with a fake. The runner would hand that command every job with its GitHub token and LLM key. The Compose files never pass it on; never set it. |
@@ -710,7 +710,7 @@ in cannot sign up on their own until you recreate the access.
 `GITHUB_APP_PRIVATE_KEY`, `GITHUB_APP_WEBHOOK_SECRET`, `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`,
 `ALLOWED_GITHUB_LOGINS`, `ALLOWED_GITHUB_ORG`, `LLM_PROVIDER`, `LLM_API_KEY` and, once `APP_SECRET` has its value,
 `BETTER_AUTH_SECRET`. Keep `BETTER_AUTH_URL`, `APP_SECRET`, `RUNNER_TOKEN` and the operational settings
-(`REVIEW_DEBOUNCE_SECONDS`, `BACKUP_TIME`, `RUNNER_*`, `LLM_MODEL`, `LLM_MAX_TOKENS`). Save, redeploy, and check that
+(`BACKUP_TIME`, `RUNNER_*`, `LLM_MODEL`, `LLM_MAX_TOKENS`). Save, redeploy, and check that
 the log no longer says `LEGACY_VARIABLES_IGNORED`, that nothing asks for a setup code, and that a test pull request
 is reviewed. An old variable that stays does no harm (it is ignored), but the secrets in it are then stored in two
 places.

@@ -50,14 +50,9 @@ async function start(
     kind?: ProjectReviewKind;
     gate?: boolean;
     activateProject?: boolean;
-    debounceMs?: number;
   } = {},
 ) {
-  const h = await startWebhookHarness({
-    ...(options.debounceMs === undefined
-      ? {}
-      : { debounceMs: options.debounceMs }),
-  });
+  const h = await startWebhookHarness();
   const workspaceId = await defaultWorkspaceId(h.db);
   const queue = createTestQueue(h.db, workspaceId);
   const settings = createReviewSettingsService({
@@ -164,7 +159,7 @@ describe("an automatic review of a pull request event", () => {
 
   // #201-T03
   it("replaces the waiting Dynamic job by one Dynamic job of the new head after a push", async () => {
-    const { h, send, queue } = await start({ kind: "dynamic", debounceMs: 0 });
+    const { h, send, queue } = await start({ kind: "dynamic" });
     await send("pull_request", payload("pull_request.opened"), {
       deliveryId: "d-1",
     });
@@ -194,7 +189,6 @@ describe("an automatic review of a pull request event", () => {
   it("queues no second job for a redelivery, a replayed body under a new delivery id, or a stale push", async () => {
     const { h, send, kinds, queue } = await start({
       kind: "dynamic",
-      debounceMs: 0,
     });
     const opened = payload("pull_request.opened");
     await send("pull_request", opened, { deliveryId: "d-1" });
@@ -440,7 +434,6 @@ describe("a project that changes its kind while reviews are pending or running",
   it("cancels the pending Dynamic review and queues the next event as exactly one Diff job", async () => {
     const { h, send, settings, repository, queue } = await start({
       kind: "dynamic",
-      debounceMs: 0,
     });
     await send("pull_request", payload("pull_request.opened"), {
       deliveryId: "d-1",
@@ -474,7 +467,6 @@ describe("a project that changes its kind while reviews are pending or running",
   it("lets the running Dynamic review finish under its kind and starts no second review of the pull request meanwhile", async () => {
     const { h, send, settings, repository, queue } = await start({
       kind: "dynamic",
-      debounceMs: 0,
     });
     await send("pull_request", payload("pull_request.opened"), {
       deliveryId: "d-1",

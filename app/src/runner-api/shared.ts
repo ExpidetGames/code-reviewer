@@ -13,6 +13,7 @@ import { createJobsRepository } from "../db/repositories/jobs-repository.ts";
 import { createRepositoriesRepository } from "../db/repositories/repositories-repository.ts";
 import { getDatabase } from "../db/startup.ts";
 import { integrationRegistry } from "../integrations/registry.ts";
+import { jobEnded, touched } from "../dispatch/maintenance-shared.ts";
 import { getRunnerQueue } from "../jobs/shared.ts";
 import { resolveAppSecret } from "../crypto/app-secret.ts";
 import { readEffectiveEntitlements } from "../workspaces/effective-entitlements.ts";
@@ -125,6 +126,9 @@ function sharedDeps(): WorkerApiDeps {
     // #279: the metadata of a job's model (Dynamic, and a managed tier's), read when its claim is built.
     modelCapabilities,
     claimedKeys: getClaimedKeys(),
+    // #395: what happens between two sweeps. Both run after the response and do nothing in poll mode.
+    jobEnded,
+    activity: () => touched(),
     now: () => new Date(),
     logger: consoleRunnerApiLogger,
     heartbeatIntervalSeconds: HEARTBEAT_INTERVAL_SECONDS,

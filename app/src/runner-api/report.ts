@@ -19,6 +19,7 @@ import {
 import type { ClaimedKeys } from "./claimed-keys.ts";
 import { maskModelInText } from "../llm/access.ts";
 import { redactResult } from "./redact.ts";
+import type { JobEndedEvent } from "../dispatch/job-ended.ts";
 import type { RunnerApiLogger } from "./logger.ts";
 import {
   parseCompleteRequest,
@@ -49,7 +50,24 @@ export type ReportDeps = {
   tierModels: (
     job: Job,
   ) => Promise<{ managed: boolean; models: readonly string[] }>;
+  /**
+   * #395: a job ended or went back to the queue through this call. The running server uses it to send the jobs that
+   * were waiting for the slot, after the response; it never throws and never delays the answer.
+   */
+  jobEnded?: (event: JobEndedEvent) => void;
+  /** #395: an authenticated call touched the database (a heartbeat, a result): the running server may do repair work. */
+  activity?: () => void;
 };
+
+/** What `jobEnded` is told about a job. */
+export function endOf(job: Job, requeued: boolean): JobEndedEvent {
+  return {
+    jobId: job.id,
+    repositoryId: job.repositoryId,
+    prNumber: job.prNumber,
+    requeued,
+  };
+}
 
 /**
  * The code a runner reports when it is shut down while it holds a job (CR-29). The job did not fail
@@ -113,6 +131,7 @@ export async function handleHeartbeat(
   const { job } = result;
   if (job.heartbeatAt === null || job.leaseExpiresAt === null)
     throw new Error(`Heartbeat of job ${jobId} left no times.`);
+  deps.activity?.();
   return jsonResponse(200, {
     version: RUNNER_API_VERSION,
     job: {
@@ -217,6 +236,7 @@ export async function finishJob(
     deps.logger.info(
       `[runner-api] complete ${who} job=${jobId} given back: ${stored.errorCode} (${released.status})`,
     );
+    deps.jobEnded?.(endOf(released.job, released.status === "requeued"));
     return jsonResponse(200, {
       version: RUNNER_API_VERSION,
       job: {
@@ -247,6 +267,9 @@ export async function finishJob(
       deps.logger.info(
         `[runner-api] complete ${who} job=${jobId} status=${status}${result.status === "already_completed" ? " (repeated)" : ""}`,
       );
+      if (result.status === "completed")
+        deps.jobEnded?.(endOf(result.job, false));
+      deps.activity?.();
       return jsonResponse(200, {
         version: RUNNER_API_VERSION,
         job: { id: result.job.id, status },

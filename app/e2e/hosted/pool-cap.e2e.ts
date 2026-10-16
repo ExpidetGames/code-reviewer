@@ -2,8 +2,8 @@
 
 // The pool cap of the hosted deployment (#332-T08): the Dispatcher claims for a pool of one. While the Worker of the first
 // job runs, the call for a second job claims nothing (the app enforces the cap at the claim, atomically), so no
-// second sandbox is created; the job waits in the queue, and when the slot is free the app's sweep sends it again and it
-// runs. The Worker of the first job is held (its container is started and does nothing) so that "while it runs" is a state
+// second sandbox is created; the job waits in the queue, and when the slot is free the app sends it again (when the first
+// job's result arrives, no sweep: #395) and it runs. The Worker of the first job is held (its container is started and does nothing) so that "while it runs" is a state
 // the journey controls rather than a race.
 import { expect, test } from "@playwright/test";
 import { startLlmFake, type FakeLlm } from "../../../fakes/llm/server.ts";
@@ -22,7 +22,6 @@ import {
   OWNER,
   runSweep,
   setUpReviewedRepositories,
-  sweepUntil,
 } from "../helpers/hosted-instance";
 import {
   headSha,
@@ -133,7 +132,8 @@ test.describe("a pool of one Worker", () => {
       "Succeeded",
       RUN_TIMEOUT,
     );
-    await sweepUntil(request, "the second job to be sent", async () => {
+    // The result of the first job freed the slot, and the app sent the waiting job at once: no sweep.
+    await eventually("the second job to be sent", async () => {
       return theDispatcher.workersOf(second.id).length === 1;
     });
     const secondRun = runsOf(page, REPOSITORY.fullName, 31);

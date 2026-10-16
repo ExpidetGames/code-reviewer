@@ -10,6 +10,7 @@
 // `worker_exited` (#375: it started and its container ended with an error before it reported a result); a job that
 // already has its result, or that another claim holds, is refused by the same fence and nothing changes.
 import "server-only";
+import type { JobEndedEvent } from "../dispatch/job-ended.ts";
 import type { RunnerQueue } from "../jobs/runner-queue.ts";
 import { workerLeaseToken } from "../jobs/worker-credential.ts";
 import { RUNNER_API_VERSION, type ReleaseResponse } from "./contract.ts";
@@ -25,6 +26,8 @@ export type ReleaseDeps = {
   queue: Pick<RunnerQueue, "get" | "holding" | "release">;
   logger: RunnerApiLogger;
   now: () => Date;
+  /** #395: the job went back to the queue (or failed on its last attempt); see `ReportDeps.jobEnded`. */
+  jobEnded?: (event: JobEndedEvent) => void;
 };
 
 /** The reason a job fails with when a Dispatcher gives it back; a reason the app does not know becomes this one. */
@@ -80,6 +83,12 @@ export async function handleRelease(
   deps.logger.info(
     `[runner-api] release runner=${runnerId} job=${jobId} reason=${parsed.value.reason} (${released.status})`,
   );
+  deps.jobEnded?.({
+    jobId: released.job.id,
+    repositoryId: released.job.repositoryId,
+    prNumber: released.job.prNumber,
+    requeued: released.status === "requeued",
+  });
   return jsonResponse(200, {
     version: RUNNER_API_VERSION,
     job: {

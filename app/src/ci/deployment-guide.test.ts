@@ -196,8 +196,9 @@ describe("the Coolify guide and the environment variables", () => {
     expect(table).toContain(`Empty: \`${DEFAULT_BACKUP_TIME}\``);
     expect(table).toContain(`Empty: ${String(DEFAULT_BUSY_TIMEOUT_MS)}`);
     expect(table).toContain(`Default \`${DEFAULT_LLM_MODEL}\``);
-    expect(table).toContain("Empty: 90");
-    expect(envExample).toContain("default of 90");
+    // #395: the debounce of automatic reviews is retired; its variable is in no table and no example.
+    expect(table).not.toContain("REVIEW_DEBOUNCE_SECONDS");
+    expect(envExample).not.toContain("REVIEW_DEBOUNCE_SECONDS");
   });
 
   // CR-39-T03
