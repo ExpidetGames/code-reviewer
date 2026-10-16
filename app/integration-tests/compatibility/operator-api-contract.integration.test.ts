@@ -6,6 +6,7 @@
 // are the lists of the file. An external client is built against this file.
 import { describe, expect, it } from "vitest";
 import { createInstanceSettingsRepository } from "../../src/db/repositories/instance-settings-repository.ts";
+import { planReturnPath } from "../../src/plan-handoff/return-path.ts";
 import {
   checkPlanManagementUrl,
   MAX_PLAN_MANAGEMENT_URL_LENGTH,
@@ -221,6 +222,17 @@ describe("the plan handoff part of the contract file", () => {
       version: 1,
       planManagementUrl: stored.ok ? stored.url : null,
     });
+  });
+
+  // #284-P2
+  it("names the return path the app has, from the one constant", () => {
+    const defs = readContract(OPERATOR_CONTRACT_FILE).$defs as unknown as {
+      HandoffRedeemResponse: { description: string };
+    };
+
+    expect(defs.HandoffRedeemResponse.description).toContain(
+      planReturnPath("SLUG").replace("SLUG", "<workspaceSlug>"),
+    );
   });
 
   // #284-T03

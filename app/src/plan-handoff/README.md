@@ -29,11 +29,11 @@ An Owner or Admin sees **Manage plan** in the workspace settings (General, card 
 `POST /api/w/<slug>/plan-handoff` (`http.ts`, order of the checks):
 
 1. **configured**: no usable page, a missing path (Next's `notFound()`), before the session is looked at;
-2. **same site**: `Sec-Fetch-Site` / `Origin` (`src/http/request-checks.ts`), else `403 cross_site_request`;
+2. **same site**: `Sec-Fetch-Site` / `Origin` (`src/http/request-checks.ts`), else the browser is sent back to the settings page of the workspace with `plan_error=cross_site_request` (below);
 3. **access**: the session and the role, `manage_plan` (Admin and Owner), else the refusals of every workspace route
    (`401`, `404` for another workspace, `403 forbidden` for a Member) and no token is made;
 4. **limit**: 10 clicks per person and workspace in 10 minutes, in the shared `rate_limits` table (`limits.ts`), else
-   `429 rate_limited` with `Retry-After`;
+   else the same, with `plan_error=rate_limited`;
 5. **token**: made and stored, and the browser gets `303` to the page with `?handoff=<token>`.
 
 The body and the query of the request are never read, so **the target is the setting and nothing of the request**:
@@ -45,7 +45,7 @@ line `[plan-handoff] workspace=<id> result=ok|rate_limited` (an id and a code; n
 256 random bits (43 base64url characters, `token.ts`). The database keeps only its **SHA-256 hash**
 (`plan_handoff_tokens`, `src/db/README.md`), bound to the workspace, the person and the role they have at the moment of
 the click, valid for **5 minutes** and **single use**. A new token of the same person in the same workspace revokes the
-unused older ones (one transaction, `plan-handoff-tokens-repository.ts`). It is not signed: it is an unguessable
+unused older ones (one transaction, `plan-handoff-tokens-repository.ts`; on Postgres the transaction first locks the person's membership row, so two clicks at the same time still leave exactly one live token). It is not signed: it is an unguessable
 reference that only a database row gives meaning to, which is what makes revocation and the single use exact on every
 app instance.
 
@@ -70,14 +70,26 @@ side.
 
 ## Coming back
 
-The service sends people back to **`/w/<slug>/settings/plan`** of this app. The path is fixed here and nothing in a
-request chooses it, so the app has no return redirect to abuse. That page is the plan page of #282; until it is there,
-the path is a missing page.
+The service sends people back to the path of `planReturnPath` (`return-path.ts`): **`/w/<slug>/settings`** of this app, the
+General settings page, which has the "Manage plan" card. The path is fixed here and nothing in a request chooses it, so
+the app has no return redirect to abuse. The one constant `PLAN_RETURN_PATH_SECTION` decides it: **when the plan page of
+#282 lands it becomes `/plan`** (`/w/<slug>/settings/plan`), for the refusal notice link and, with the description in the
+contract, for the operator's page, in one change. #282 has to be on `development` before the next `development` to
+`main` pull request.
+
+## A refused click
+
+The button is a plain form post, so the browser shows what the route answers. A refusal that a person can cause by
+clicking (`cross_site_request`, `rate_limited`) therefore answers `303` back to `/w/<slug>/settings?plan_error=<code>`
+with an empty body (`errors.ts`; the slug is encoded into one path segment, so the target is always a path of this app).
+The page reads the code against the closed list, shows the sentence next to the button and shows nothing for any other
+value. A Member (who has no button), a lost session and a workspace that is not the person's keep the usual JSON answers
+of every workspace route.
 
 ## The refusal notice
 
 A refused review's comment on the pull request (`src/refusal-notices/`) links to that same plan page of the workspace
-(`/w/<slug>/settings/plan` on this app, never the operator's page) exactly while a page is configured
+(`planReturnPath` on this app, never the operator's page) exactly while a page is configured
 (`src/refusal-notices/plan-link.ts`).
 
 ## Mixed versions

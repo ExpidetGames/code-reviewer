@@ -5,9 +5,9 @@
 // ends the request on failure:
 //
 //   1. configured   no usable `plan_management_url`: the answer of a path that does not exist (Next's `notFound`)
-//   2. same site    `Sec-Fetch-Site` / `Origin` (src/http/request-checks.ts)          403 cross_site_request
+//   2. same site    `Sec-Fetch-Site` / `Origin` (src/http/request-checks.ts)          303 back, plan_error=cross_site_request
 //   3. access       the session and the role (`manage_plan`: an Admin or an Owner)    401 / 404 / 403, access-response.ts
-//   4. limit        per person and workspace                                         429 rate_limited + Retry-After
+//   4. limit        per person and workspace                                         303 back, plan_error=rate_limited
 //   5. token        made, stored as a hash, and the browser is sent to the page         303
 //
 // The request body and query are never read: the target of the redirect is the instance setting and nothing of the
@@ -17,6 +17,10 @@
 import { isCrossSite } from "../http/request-checks.ts";
 import type { WorkspaceAccess } from "../workspaces/access.ts";
 import type { HandoffRole } from "../db/repositories/plan-handoff-tokens-repository.ts";
+import {
+  settingsPathWithPlanError,
+  type PlanHandoffErrorCode,
+} from "./errors.ts";
 import { handoffLocation } from "./url.ts";
 
 const NO_STORE = { "cache-control": "no-store" };
@@ -49,26 +53,19 @@ export type WithAccess = (
 ) => Promise<Response>;
 
 export type PlanHandoffRoute = {
-  post(request: Request, withAccess: WithAccess): Promise<Response>;
+  post(
+    request: Request,
+    slug: string,
+    withAccess: WithAccess,
+  ): Promise<Response>;
 };
 
-function refusal(
-  status: number,
-  error: "cross_site_request" | "rate_limited",
-  retryAfterSeconds?: number,
-): Response {
-  return Response.json(
-    { error },
-    {
-      status,
-      headers: {
-        ...NO_STORE,
-        ...(retryAfterSeconds === undefined
-          ? {}
-          : { "retry-after": String(retryAfterSeconds) }),
-      },
-    },
-  );
+/** A refused click: back to the settings page of the workspace, which says why (errors.ts). Never a body. */
+function refusal(slug: string, code: PlanHandoffErrorCode): Response {
+  return new Response(null, {
+    status: 303,
+    headers: { ...NO_STORE, location: settingsPathWithPlanError(slug, code) },
+  });
 }
 
 export function createPlanHandoffRoute({
@@ -78,10 +75,10 @@ export function createPlanHandoffRoute({
   log,
 }: PlanHandoffRouteDependencies): PlanHandoffRoute {
   return {
-    async post(request, withAccess) {
+    async post(request, slug, withAccess) {
       const page = await planManagementUrl();
       if (page === null) return notFound();
-      if (isCrossSite(request)) return refusal(403, "cross_site_request");
+      if (isCrossSite(request)) return refusal(slug, "cross_site_request");
       return withAccess(async (access) => {
         // The matrix lets an Admin and an Owner through; the token is bound to the role, which can only be one of them.
         const role = access.role;
@@ -100,7 +97,7 @@ export function createPlanHandoffRoute({
           log.info(
             `[plan-handoff] workspace=${workspaceId} result=rate_limited`,
           );
-          return refusal(429, "rate_limited", made.retryAfterSeconds);
+          return refusal(slug, "rate_limited");
         }
         log.info(`[plan-handoff] workspace=${workspaceId} result=ok`);
         return new Response(null, {

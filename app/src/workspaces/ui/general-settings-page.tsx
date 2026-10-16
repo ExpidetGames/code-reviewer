@@ -23,6 +23,7 @@ import type {
 import type { WorkspaceLlmSummary } from "../../llm/assemble.ts";
 import { llmAccessAttention } from "../../llm/ui/llm-access-notice.tsx";
 import type { WorkspaceApi } from "./api.ts";
+import type { PlanHandoffErrorCode } from "../../plan-handoff/errors.ts";
 import { ManagePlanCard } from "../../plan-handoff/ui/manage-plan-card.tsx";
 import { LegacyLlmHashRedirect } from "./legacy-llm-hash-redirect.tsx";
 import { RenameForm } from "./rename-form.tsx";
@@ -44,6 +45,7 @@ export function GeneralSettingsPageContent({
   canRename,
   canManageLlmKey,
   canManagePlan = false,
+  planError,
   audience = "member",
   tenancy,
   memberCount,
@@ -59,6 +61,8 @@ export function GeneralSettingsPageContent({
   canManageLlmKey: boolean;
   /** An Owner or Admin, and the instance has a plan management page: the "Manage plan" button is shown. */
   canManagePlan?: boolean;
+  /** Why the last click on "Manage plan" was refused, from the address of the page (`plan_error`). */
+  planError?: PlanHandoffErrorCode;
   audience?: ConfigAudience;
   tenancy: "single" | "multi";
   memberCount: number;
@@ -102,7 +106,10 @@ export function GeneralSettingsPageContent({
           </CardContent>
         </Card>
         {canManagePlan ? (
-          <ManagePlanCard workspaceSlug={workspaceSlug} />
+          <ManagePlanCard
+            workspaceSlug={workspaceSlug}
+            {...(planError === undefined ? {} : { error: planError })}
+          />
         ) : null}
         <Card role="region" aria-labelledby="instance-heading">
           <CardHeader>

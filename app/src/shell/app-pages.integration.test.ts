@@ -89,9 +89,10 @@ const APP_PAGES = [
   {
     path: "/w/acme/settings",
     render: () =>
-      SettingsPage({ params: Promise.resolve(WORKSPACE) } as Parameters<
-        typeof SettingsPage
-      >[0]),
+      SettingsPage({
+        params: Promise.resolve(WORKSPACE),
+        searchParams: Promise.resolve({}),
+      } as Parameters<typeof SettingsPage>[0]),
   },
   {
     path: "/w/acme/members",

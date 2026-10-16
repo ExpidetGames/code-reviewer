@@ -31,6 +31,7 @@ import {
 } from "../../config-status/status.ts";
 import type { WorkspaceLlmSummary } from "../../llm/assemble.ts";
 import { testGithubAppStatus } from "../../test-support/github-app.ts";
+import type { PlanHandoffErrorCode } from "../../plan-handoff/errors.ts";
 import { GeneralSettingsPageContent } from "./general-settings-page.tsx";
 
 afterEach(() => {
@@ -57,12 +58,14 @@ function general({
   canRename = true,
   llmSummary = WORKS,
   canManagePlan,
+  planError,
 }: {
   config?: ConfigStatus;
   audience?: ConfigAudience;
   canRename?: boolean;
   llmSummary?: WorkspaceLlmSummary;
   canManagePlan?: boolean;
+  planError?: PlanHandoffErrorCode;
 } = {}) {
   return render(
     <GeneralSettingsPageContent
@@ -76,6 +79,7 @@ function general({
       config={config}
       llmSummary={llmSummary}
       {...(canManagePlan === undefined ? {} : { canManagePlan })}
+      {...(planError === undefined ? {} : { planError })}
     />,
   );
 }
@@ -114,6 +118,31 @@ describe("Manage plan on the General settings sub-page", () => {
     expect(region.textContent).toMatch(/operator-configured page/i);
     expect(region.textContent).toMatch(/Owner or Admin/);
     expect(region.textContent).not.toMatch(/[$€£]|price/i);
+  });
+});
+
+describe("a refused click on Manage plan", () => {
+  // #284-P3
+  it.each([
+    ["rate_limited", /Too many attempts/],
+    ["cross_site_request", /did not come from this page/],
+  ] as const)(
+    "says why for %s, as an alert next to the button",
+    (code, text) => {
+      general({ canManagePlan: true, planError: code });
+
+      const region = screen.getByRole("region", { name: "Plan" });
+      expect(within(region).getByRole("alert").textContent).toMatch(text);
+      expect(
+        within(region).getByRole("button", { name: "Manage plan" }),
+      ).toBeTruthy();
+    },
+  );
+
+  it("says nothing when the click was not refused", () => {
+    general({ canManagePlan: true });
+
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });
 

@@ -15,7 +15,7 @@ export async function POST(
   // Needs the request and the database, so it never runs at build time.
   await connection();
   const { workspace } = await context.params;
-  return getPlanHandoffRoute().post(request, (handler) =>
+  return getPlanHandoffRoute().post(request, workspace, (handler) =>
     withWorkspace(workspace, "manage_plan", handler),
   );
 }

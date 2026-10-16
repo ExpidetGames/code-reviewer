@@ -37,6 +37,11 @@ describe("the address of the operator-configured plan page", () => {
     ["not a string", 42, "url_invalid"],
     ["null", null, "url_invalid"],
     [
+      "more than the allowed length once normalised (1000 characters that become six bytes each)",
+      `https://plans.example/${"ä".repeat(1000)}`,
+      "url_too_long",
+    ],
+    [
       "more than the allowed length",
       `https://plans.example/${"a".repeat(MAX_PLAN_MANAGEMENT_URL_LENGTH)}`,
       "url_too_long",

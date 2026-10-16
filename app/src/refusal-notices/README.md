@@ -85,12 +85,12 @@ are paused for this workspace, with no reason), and to contact an Owner or Admin
 count, no price, no model name, no reason for a suspension.
 
 **The link.** While the instance has an operator-configured plan management page (`plan_management_url`, #284) the
-sentence links to `/w/<slug>/settings/plan` of the app (`plan-page.ts`, the configured address of the app, never a request);
+sentence links to the plan page of the app, `planReturnPath` (`src/plan-handoff/return-path.ts`: `/w/<slug>/settings` until #282 has a page of its own, then `/w/<slug>/settings/plan`; `plan-page.ts`, the configured address of the app, never a request);
 without one there is no link at all. `getRefusalNoticeService` passes `createPlanPageUrlResolver` (`plan-link.ts`), which reads the setting every
 time a notice is made, so switching the page on or off takes effect at once. The link is never the operator's page and
 carries no token: an Owner or Admin who follows it finds "Manage plan" on the plan page (#282) and is handed over from
 there (`src/plan-handoff/README.md`). A setting that cannot be read costs the notice only its link. The plan page
-itself is #282's; until it exists, the path is a missing page.
+itself is #282's; until it exists, the link leads to the General settings, which has the "Manage plan" card.
 
 ## Not covered
 

@@ -3,7 +3,7 @@
 // The instance setting `plan_management_url`: the one operator-configured page an Owner or Admin is handed over to
 // (README.md). Only an instance admin or the operator API can change it, and what is stored has to pass
 // `checkPlanManagementUrl`, so the redirect that follows is never built from a request. The return path of the other
-// side is fixed in this app (`/w/<slug>/settings/plan`), so there is no open redirect in either direction.
+// side is fixed in this app (`return-path.ts`), so there is no open redirect in either direction.
 
 export const PLAN_MANAGEMENT_URL_ERROR_CODES = [
   /** Not a URL, or not an absolute `https://` address in a plain form. */
@@ -55,6 +55,9 @@ export function checkPlanManagementUrl(input: unknown): PlanManagementUrlCheck {
     return { ok: false, code: "url_has_credentials" };
   if (parsed.hash !== "" || text.includes("#"))
     return { ok: false, code: "url_has_fragment" };
+  // The stored form is what is checked again on read: it can be much longer than the text (`ä` is six bytes).
+  if (parsed.href.length > MAX_PLAN_MANAGEMENT_URL_LENGTH)
+    return { ok: false, code: "url_too_long" };
   return { ok: true, url: parsed.href };
 }
 

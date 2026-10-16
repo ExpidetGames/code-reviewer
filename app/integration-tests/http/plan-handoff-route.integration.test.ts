@@ -297,16 +297,19 @@ describe("everybody else", () => {
     ["an Origin of another host", { origin: "https://evil.example" }],
     ["an Origin that is null", { origin: "null" }],
   ])(
-    "refuses a request that is %s, and makes no token",
+    "refuses a request that is %s by sending the browser back to the settings, and makes no token",
     async (_name, headers) => {
       const t = await start();
       t.as("owner");
 
       const response = await t.post(headers);
 
-      expect(response.status).toBe(403);
-      expect(await response.json()).toEqual({ error: "cross_site_request" });
-      expect(response.headers.get("location")).toBeNull();
+      expect(response.status).toBe(303);
+      expect(response.headers.get("location")).toBe(
+        "/w/alpha/settings?plan_error=cross_site_request",
+      );
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      expect(await response.text()).toBe("");
       expect(await t.tokens()).toEqual([]);
     },
   );
@@ -322,12 +325,15 @@ describe("everybody else", () => {
     });
 
     expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toMatch(
+      /^https:\/\/plans\.example\/manage\?handoff=/,
+    );
   });
 });
 
 describe("the limit", () => {
   // #284-T08
-  it("refuses the request after too many clicks with Retry-After, and makes no more tokens", async () => {
+  it("refuses the request after too many clicks by sending the browser back to the settings, and makes no more tokens", async () => {
     const t = await start();
     t.as("owner");
     for (let click = 0; click < PLAN_HANDOFF_MAX; click += 1)
@@ -335,11 +341,30 @@ describe("the limit", () => {
 
     const refused = await t.post();
 
-    expect(refused.status).toBe(429);
-    expect(await refused.json()).toEqual({ error: "rate_limited" });
-    expect(Number(refused.headers.get("retry-after"))).toBeGreaterThan(0);
-    expect(refused.headers.get("location")).toBeNull();
+    expect(refused.status).toBe(303);
+    expect(refused.headers.get("location")).toBe(
+      "/w/alpha/settings?plan_error=rate_limited",
+    );
+    expect(await refused.text()).toBe("");
     expect(await t.tokens()).toHaveLength(PLAN_HANDOFF_MAX);
+  });
+
+  // #284-T08
+  it("keeps the slug of the address out of the path it sends the browser back to", async () => {
+    const t = await start();
+    t.as("owner");
+
+    const response = await t.post(
+      { "sec-fetch-site": "cross-site" },
+      "..%2F..%2Fevil.example",
+    );
+
+    const location = response.headers.get("location") ?? "";
+    expect(location.startsWith("/w/")).toBe(true);
+    expect(location.startsWith("//")).toBe(false);
+    expect(new URL(location, "https://app.test").origin).toBe(
+      "https://app.test",
+    );
   });
 
   // #284-T08

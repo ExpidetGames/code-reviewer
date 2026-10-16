@@ -87,6 +87,39 @@ describePostgres("the handoff tokens on Postgres", () => {
     expect(await t.redeem.redeem("other")).toMatchObject({ userId: "admin" });
   });
 
+  // #284-T12
+  it("leaves exactly one live token when two clicks of one person make a token at the same time", async () => {
+    for (let round = 0; round < 5; round += 1) {
+      const t = await setup();
+
+      await Promise.all(
+        Array.from({ length: 6 }, (_, index) =>
+          t.tokens.issue({
+            tokenHash: `h${String(index)}`,
+            userId: "owner",
+            role: "owner",
+            ttlMs: FIVE_MINUTES,
+          }),
+        ),
+      );
+
+      const live = await t.db
+        .selectFrom("plan_handoff_tokens")
+        .select("token_hash")
+        .where("user_id", "=", "owner")
+        .where("revoked_at", "is", null)
+        .where("used_at", "is", null)
+        .execute();
+      expect(live).toHaveLength(1);
+      const answers = await Promise.all(
+        live.length === 1
+          ? [0, 1, 2, 3, 4, 5].map((i) => t.redeem.redeem(`h${String(i)}`))
+          : [],
+      );
+      expect(answers.filter((answer) => answer !== undefined)).toHaveLength(1);
+    }
+  });
+
   // #284-T06
   it("refuses a role that may not manage the plan", async () => {
     const t = await setup();
