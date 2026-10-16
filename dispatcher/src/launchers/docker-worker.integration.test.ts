@@ -256,6 +256,30 @@ describe("the docker stand-in of the hosted lane", () => {
     expect(existsSync(join(directory, "started"))).toBe(true);
   });
 
+  // #380-T03
+  it("has written .name, .pid and .env as soon as .args is listed, also for a container that is held", async () => {
+    await program("true");
+    const gate = join(directory, "gate");
+    await writeFile(gate, "");
+    const vm = await vmWith({ E2E_WORKER_GATE: gate });
+    const started = await vm.start({
+      label: "w",
+      cmd: "docker",
+      args: flags("worker-once"),
+    });
+
+    await waitFor(
+      () => recorded(".args").length === 1,
+      "the container to be recorded",
+    );
+    expect(recorded(".name")).toHaveLength(1);
+    expect(recorded(".pid")).toHaveLength(1);
+    expect(recorded(".env")).toHaveLength(1);
+    expect(recorded(".tmp")).toEqual([]);
+    await rm(gate);
+    await started.wait();
+  });
+
   // #332-T06
   it("ends everything a container runs when it is removed, also a process in a session of its own", async () => {
     await program(
