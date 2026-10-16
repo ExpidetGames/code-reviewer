@@ -21,6 +21,8 @@ export async function startGithubAppHarness(
      * clock; a fake passed in keeps its own clock, so `clock.advance` does not move it.
      */
     fake?: FakeGithub;
+    /** The slug the fake's comments are authored with (`<slug>[bot]`). Default: the fake's own. */
+    appSlug?: string;
   } = {},
 ): Promise<GithubAppHarness> {
   let nowMs = Date.UTC(2026, 9, 10, 12, 0, 0);
@@ -30,7 +32,12 @@ export async function startGithubAppHarness(
       nowMs += ms;
     },
   };
-  const fake = options.fake ?? (await startTestGithub({ now: clock.now }));
+  const fake =
+    options.fake ??
+    (await startTestGithub({
+      now: clock.now,
+      ...(options.appSlug === undefined ? {} : { appSlug: options.appSlug }),
+    }));
   return {
     fake,
     clock,

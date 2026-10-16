@@ -51,8 +51,8 @@ and decides. A refused job is ended `failed` right there, with `workspace_suspen
 `entitlements_invalid`; no attempt is counted, it is never handed out, it has no usage record, its holder, start time
 and lease are cleared, and `claimNext` tries the next job. A suspension or unreadable entitlements fail all the
 workspace's due jobs in one statement; a limit refuses job by job, at most 25 per call, then `null`. `onRefused` (an option of `createRunnerQueue`, wired to a
-log line in `shared.ts`) is called after the commit, once per refused job, with the code and, for a quota, which
-limit. A claim by job id that is refused answers `null`, like any job that cannot be claimed. An instance whose
+log line and, for a limit or a suspension, the pull request notice of #281 in `shared.ts`) is called after the commit, once per refused job, with the code, the
+period start and, for a quota, which limit. A claim by job id that is refused answers `null`, like any job that cannot be claimed. An instance whose
 workspaces have no entitlements (and no default) does the same two reads per claim and nothing else.
 
 ## The review kind of a job (#195)

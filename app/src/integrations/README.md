@@ -42,6 +42,12 @@ interface IntegrationProvider {
   parseEvent(i: Integration, req: Request): Promise<IntegrationEvent>;
   canTrigger(i: Integration, t: ReviewTrigger): Promise<boolean>;
   jobAccess(i: Integration, repo: RepoRef): Promise<GitAccess>;
+  postPullRequestNotice?(
+    i: Integration,
+    repo: RepoRef,
+    n: number,
+    notice: { body: string; marker: string; lookForEarlierSince?: string },
+  ): Promise<"posted" | "already_there">;
   getPullRequest(
     i: Integration,
     repo: RepoRef,
@@ -102,6 +108,12 @@ only end a request sooner. The 5 second head check of the webhook handler is the
 another kind (422) is `..._FAILED`, not a refused scope. `getPullRequest` keeps `INTEGRATION_PULL_REQUEST_NOT_FOUND` for a
 404 of the call itself; a 404 of the token request (`GithubAppError.duringTokenRequest`) is a removed
 installation (`..._CONNECTION_GONE`). A page never has to know a platform's own codes.
+
+`postPullRequestNotice` (#281, `src/refusal-notices/README.md`) writes one comment below a pull request as the
+app, with a token of its own limited to the repository and to the comment permission and switched off afterwards (never
+the credentials of a job). With `lookForEarlierSince` it first looks for the app's own comment that holds `marker`
+(only the app's own: anybody can copy a marker) and posts nothing if there is one. A failure is an `IntegrationError` with the
+same provider neutral access codes as the reads above, and never holds a token or the body.
 
 ### Rules for implementations
 

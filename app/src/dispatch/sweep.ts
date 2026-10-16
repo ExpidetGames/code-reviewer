@@ -13,7 +13,9 @@
 //     `STOPPED_REVIVE_MS`: the Dispatcher may have been updated or its engines may be back.
 //  4. `send`: the jobs that are due and not yet called, or whose call is due again, within the pool cap
 //     (`RUNNER_DISPATCH_MAX_RUNNING`): at most as many as there are free slots.
-//  5. `cleanup`: the hourly cleanup a long-lived server runs on a timer, once when the hour has changed.
+//  5. `notices`: the notices of refused reviews whose post failed and whose wait is over (#281), at most one
+//     batch, each tried a few times at most.
+//  6. `cleanup`: the hourly cleanup a long-lived server runs on a timer, once when the hour has changed.
 //
 // A step that fails is logged by its name and does not stop the others; the next run tries again. Nothing a
 // database or an answer said is ever logged: a connection string can be in it.
@@ -37,6 +39,7 @@ export const SWEEP_STEPS = [
   "give_up",
   "revive",
   "send",
+  "notices",
   "cleanup",
 ] as const;
 export type SweepStep = (typeof SWEEP_STEPS)[number];
@@ -53,6 +56,8 @@ export type SweepReport = {
   givenUp: number;
   revived: number;
   sent: number;
+  /** How many notices of refused reviews were tried again (#281). */
+  noticesTried: number;
   cleanedUp: boolean;
   /** The steps that failed in this run. */
   failedSteps: SweepStep[];
@@ -71,6 +76,8 @@ export type SweepDependencies = {
   dispatch?: Pick<DispatchService, "sendDue">;
   meta: Pick<AppMetaRepository, "get" | "set">;
   cleanup: () => Promise<CleanupResult>;
+  /** #281: tries the notices of refused reviews that are due again. Left out, none is tried. */
+  notices?: { retryDue(): Promise<{ tried: number }> };
   settings: SweepSettings;
   log?: SweepLog;
 };
@@ -87,6 +94,7 @@ export function createDispatchSweep(deps: SweepDependencies): DispatchSweep {
       givenUp: 0,
       revived: 0,
       sent: 0,
+      noticesTried: 0,
       cleanedUp: false,
       failedSteps: [],
     };
@@ -127,6 +135,11 @@ export function createDispatchSweep(deps: SweepDependencies): DispatchSweep {
         if (free > 0) report.sent = (await dispatch.sendDue(free)).sent;
       });
     }
+    const notices = deps.notices;
+    if (notices !== undefined)
+      await step("notices", async () => {
+        report.noticesTried = (await notices.retryDue()).tried;
+      });
     await step("cleanup", async () => {
       const hour = Math.floor(now().getTime() / HOUR_MS);
       const done = Number(await deps.meta.get(CLEANUP_HOUR_KEY));

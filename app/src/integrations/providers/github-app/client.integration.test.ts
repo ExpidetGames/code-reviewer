@@ -707,3 +707,149 @@ describe("minting an installation token", () => {
     expect(status).toBe(401);
   });
 });
+
+// #281: the notice of a refused review is written with a token narrowed to the one repository and to the
+// comment permissions, and switched off again once the call is done.
+const NOTICE_SCOPE = {
+  repositoryIds: [7001],
+  permissions: { issues: "write", metadata: "read" },
+} as const;
+
+describe("comments below a pull request, written and read with a narrow token", () => {
+  async function withPullRequest() {
+    const { fake, client } = await setup();
+    fake.addPullRequest("acme/widgets", {
+      number: 7,
+      title: "Add widget caching",
+      state: "open",
+      headSha: "abc123",
+      headRef: "feature/caching",
+      baseRef: "main",
+      author: { login: "alice", id: 1001 },
+    });
+    return { fake, client };
+  }
+
+  // #281-T01
+  it("posts a comment as the bot of the app with a token limited to the repository and the comment permission", async () => {
+    const { fake, client } = await withPullRequest();
+
+    const created = await client.createIssueComment(
+      "4242",
+      NOTICE_SCOPE,
+      "acme/widgets",
+      7,
+      "hello",
+    );
+
+    expect(created.id).toMatch(/^\d+$/);
+    expect(fake.pullRequestComments("acme/widgets", 7)).toMatchObject([
+      { body: "hello", login: "fake-app[bot]" },
+    ]);
+    expect(fake.tokenRequests()).toEqual([
+      {
+        installationId: 4242,
+        repositories: null,
+        repositoryIds: [7001],
+        permissions: { issues: "write", metadata: "read" },
+      },
+    ]);
+  });
+
+  it("switches the token off after the call, whether it worked or not", async () => {
+    const { fake, client } = await withPullRequest();
+
+    await client.createIssueComment(
+      "4242",
+      NOTICE_SCOPE,
+      "acme/widgets",
+      7,
+      "a",
+    );
+    expect(fake.revokedInstallationTokens()).toHaveLength(1);
+
+    await failureOf(
+      client.createIssueComment("4242", NOTICE_SCOPE, "acme/widgets", 99, "b"),
+    );
+    expect(fake.revokedInstallationTokens()).toHaveLength(2);
+  });
+
+  it("lists the comments of a pull request with their author", async () => {
+    const { fake, client } = await withPullRequest();
+    fake.addPullRequestComment("acme/widgets", 7, "from the bot");
+    fake.addPullRequestComment("acme/widgets", 7, "from a person", "alice");
+
+    const comments = await client.listIssueComments(
+      "4242",
+      NOTICE_SCOPE,
+      "acme/widgets",
+      7,
+      { since: "2026-10-10T00:00:00.000Z" },
+    );
+
+    expect(comments).toEqual([
+      expect.objectContaining({
+        body: "from the bot",
+        authorLogin: "fake-app[bot]",
+      }),
+      expect.objectContaining({ body: "from a person", authorLogin: "alice" }),
+    ]);
+  });
+
+  it("asks only for the comments changed since a time", async () => {
+    const { fake, client } = await withPullRequest();
+    // Only a request that carries the filter is answered with the failure.
+    fake.fail({ queryIncludes: "since=2026-10-10", status: 500 });
+
+    await failureOf(
+      client.listIssueComments("4242", NOTICE_SCOPE, "acme/widgets", 7, {
+        since: "2026-10-10T00:00:00.000Z",
+      }),
+    );
+    expect(
+      await client.listIssueComments("4242", NOTICE_SCOPE, "acme/widgets", 7),
+    ).toEqual([]);
+  });
+
+  // #281-T06
+  it.each([
+    [403, "GITHUB_APP_FORBIDDEN"],
+    [404, "GITHUB_APP_NOT_FOUND"],
+    [502, "GITHUB_APP_UNAVAILABLE"],
+  ] as const)(
+    "fails with a stable code when GitHub answers %s",
+    async (status, code) => {
+      const { fake, client } = await withPullRequest();
+      fake.fail({ pathIncludes: "/issues/7/comments", status });
+
+      expect(
+        await failureOf(
+          client.createIssueComment(
+            "4242",
+            NOTICE_SCOPE,
+            "acme/widgets",
+            7,
+            "x",
+          ),
+        ),
+      ).toMatchObject({ code });
+      expect(fake.pullRequestComments("acme/widgets", 7)).toEqual([]);
+    },
+  );
+
+  it("refuses a repository name or a number that is not one, before any request", async () => {
+    const { fake, client } = await withPullRequest();
+
+    await failureOf(
+      client.createIssueComment("4242", NOTICE_SCOPE, "../x", 7, "x"),
+    );
+    await failureOf(
+      client.createIssueComment("4242", NOTICE_SCOPE, "acme/widgets", 0, "x"),
+    );
+    await failureOf(
+      client.listIssueComments("abc", NOTICE_SCOPE, "acme/widgets", 7),
+    );
+
+    expect(fake.requests()).toEqual([]);
+  });
+});

@@ -329,6 +329,18 @@ so an app of the previous release on the same database is unaffected:
   (#328) removes the rows of jobs that finished a week ago and makes a `stopped` row pending again after 10 minutes.
   See `src/dispatch/README.md`.
 
+### Refusal notices
+
+Migration `20261016090000_create_refusal_notices` (#281; epic #268). It adds an empty table and touches no existing row,
+so an app of the previous release on the same database is unaffected (it never reads the table):
+
+- `refusal_notices` (`id`, `workspace_id` and `repository_id` foreign keys, `pr_number`, `period_start`, `code`
+  `quota_exhausted`/`workspace_suspended`, `state` `pending`/`posted`/`dropped`, `attempts`, `next_attempt_at`,
+  `posted_at`, `created_at`, `updated_at`): the record that a pull request got the notice of a refused review in a
+  period. Scoped (`refusal-notices-repository.ts`); a unique index on workspace, repository, pull request and period
+  start is the dedupe, a partial index serves the cron sweep's read of the due ones (`refusal-notices-sweep.ts`,
+  instance level). See `src/refusal-notices/README.md`.
+
 ## Workspace scoping
 
 Every repository that reads or writes customer data is created for one workspace:
@@ -354,6 +366,7 @@ Not scoped, each for a reason (the list is in `scoping.test.ts`):
 | `usage-feed-repository.ts`                                           | The settled usage records of every workspace in one ordered feed, for the operator API (#278): the operator serves many workspaces from one token. It only reads (never a `reserved` or `void` record), and every record carries `workspaceId`; the reads of one workspace go through the scoped usage records repository                                                                      |
 | `runner-jobs-repository.ts`                                          | The lease side of the job queue (claim, heartbeat, complete, release, expiry). Runners serve the whole instance with one token, so a claim hands out the oldest due job of any workspace; every change is fenced by the lease token, and the job it returns carries `workspaceId`                                                                                                              |
 | `claim-admission.ts`                                                 | The check of the entitlements of a job the claim just took (#277), inside the claim transaction of the lease side of the queue, for whichever workspace the job is in. It reads, through repositories created for that job's workspace (the instance default and the workspace row it locks are not customer data), and decides; the ending of a refused job is the lease side's own statement |
+| `refusal-notices-sweep.ts`                                           | The notices of refused reviews that are due to be posted again (#281), for the cron sweep that serves the whole instance. It only reads the `pending` rows whose wait is over, and every answer carries `workspaceId`; the record itself goes through the scoped refusal notices repository                                                                                                    |
 
 A signed-in user works in the workspace named by the address (`/w/<slug>`) and only in one they are a member
 of (`src/workspaces/README.md`); the repositories of members and invitations below follow the same rule,

@@ -9,6 +9,7 @@ import { getDatabase } from "../db/startup.ts";
 import { getRunnerQueue } from "../jobs/shared.ts";
 import { cleanUpExpiredRows } from "../maintenance/cleanup.ts";
 import { getMailSender } from "../mail/shared.ts";
+import { getRefusalNoticeService } from "../refusal-notices/shared.ts";
 import { DispatchConfigError, getDispatchService } from "./shared.ts";
 import { createDispatchSweep, type DispatchSweep } from "./sweep.ts";
 import { loadSweepSettings } from "./sweep-settings.ts";
@@ -32,6 +33,8 @@ export function getDispatchSweep(
     dispatches: createJobDispatchesRepository(db),
     ...(dispatch === undefined ? {} : { dispatch }),
     meta: createAppMetaRepository(db),
+    // #281: the notices of refused reviews whose post failed.
+    notices: getRefusalNoticeService(),
     cleanup: () =>
       cleanUpExpiredRows(db, undefined, {
         // Read when it matters, never remembered: the admin can add or remove the mail server at any time.

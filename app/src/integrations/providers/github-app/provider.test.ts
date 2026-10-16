@@ -811,3 +811,137 @@ describe("a missing configuration", () => {
     expect(await provider.listRepositories(integration)).toHaveLength(1);
   });
 });
+
+describe("posting the notice of a refused review (#281)", () => {
+  const notice = {
+    body: "No review ran.\n<!-- marker -->",
+    marker: "<!-- marker -->",
+  };
+
+  // #281-T01
+  it("posts the body below the pull request with a token limited to the repository and the comment permission", async () => {
+    const { client, provider } = setup();
+
+    expect(
+      await provider.postPullRequestNotice?.(integration, widgets, 7, notice),
+    ).toBe("posted");
+
+    expect(
+      client.calls.filter((call) => call.method === "createIssueComment"),
+    ).toEqual([
+      {
+        method: "createIssueComment",
+        args: [
+          "4242",
+          {
+            repositoryIds: [7001],
+            permissions: { issues: "write", metadata: "read" },
+          },
+          "acme/widgets",
+          7,
+          notice.body,
+        ],
+      },
+    ]);
+  });
+
+  // #281-T08
+  it("does not post when its own comment with the marker is there already, and says so", async () => {
+    const { client, provider } = setup({
+      comments: {
+        "acme/widgets#7": [
+          {
+            id: "1",
+            body: notice.body,
+            authorLogin: "code-reviewer-test[bot]",
+          },
+        ],
+      },
+    });
+
+    expect(
+      await provider.postPullRequestNotice?.(integration, widgets, 7, {
+        ...notice,
+        lookForEarlierSince: "2026-10-10T00:00:00.000Z",
+      }),
+    ).toBe("already_there");
+
+    expect(client.calls.map((call) => call.method)).not.toContain(
+      "createIssueComment",
+    );
+  });
+
+  // #281-T08
+  it("posts when the marker is only in a comment of somebody else, or the earlier look finds nothing", async () => {
+    const { client, provider } = setup({
+      comments: {
+        "acme/widgets#7": [
+          // Somebody copied the marker: only the app's own comment counts.
+          { id: "1", body: notice.body, authorLogin: "mallory" },
+        ],
+      },
+    });
+
+    expect(
+      await provider.postPullRequestNotice?.(integration, widgets, 7, {
+        ...notice,
+        lookForEarlierSince: "2026-10-10T00:00:00.000Z",
+      }),
+    ).toBe("posted");
+    expect(client.calls.map((call) => call.method)).toContain(
+      "createIssueComment",
+    );
+  });
+
+  it("does not look at the comments when it is not asked to", async () => {
+    const { client, provider } = setup();
+
+    await provider.postPullRequestNotice?.(integration, widgets, 7, notice);
+
+    expect(client.calls.map((call) => call.method)).not.toContain(
+      "listIssueComments",
+    );
+  });
+
+  // #281-T06
+  it.each([
+    ["GITHUB_APP_FORBIDDEN", "INTEGRATION_ACCESS_CONNECTION_SUSPENDED"],
+    ["GITHUB_APP_NOT_FOUND", "INTEGRATION_ACCESS_CONNECTION_GONE"],
+    ["GITHUB_APP_UNAVAILABLE", "INTEGRATION_ACCESS_UNAVAILABLE"],
+  ] as const)(
+    "turns %s into the provider neutral code %s",
+    async (githubCode, code) => {
+      const { provider } = setup({
+        commentFailure: new GithubAppError(githubCode, "GitHub answered."),
+      });
+
+      const error = await provider
+        .postPullRequestNotice?.(integration, widgets, 7, notice)
+        .then(
+          () => undefined,
+          (reason: unknown) => reason,
+        );
+
+      expect(error).toMatchObject({ code });
+    },
+  );
+
+  it("refuses a repository that does not belong to the integration, without any request", async () => {
+    const { client, provider } = setup();
+
+    const error = await provider
+      .postPullRequestNotice?.(
+        integration,
+        { ...widgets, integrationId: "another" },
+        7,
+        notice,
+      )
+      .then(
+        () => undefined,
+        (reason: unknown) => reason,
+      );
+
+    expect(error).toMatchObject({ code: "INTEGRATION_ACCESS_SCOPE_REFUSED" });
+    expect(client.calls).toEqual([]);
+  });
+});
