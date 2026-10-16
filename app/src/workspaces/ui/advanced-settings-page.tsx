@@ -16,6 +16,7 @@ export function AdvancedSettingsPageContent({
   canManageKey,
   keyConfigured,
   canResetDefaults,
+  showPlan = false,
   removeApi,
   resetApi,
 }: {
@@ -26,12 +27,18 @@ export function AdvancedSettingsPageContent({
   keyConfigured: boolean;
   /** An Admin or an Owner (`manage_review_defaults`): they may reset the defaults. */
   canResetDefaults: boolean;
+  /** The workspace has entitlements (#282): the settings navigation lists the Plan page. */
+  showPlan?: boolean;
   /** Only tests pass these. */
   removeApi?: LlmKeyApi;
   resetApi?: Pick<SettingsApi, "save">;
 }) {
   return (
-    <SettingsScreen workspaceSlug={workspaceSlug} current="advanced">
+    <SettingsScreen
+      workspaceSlug={workspaceSlug}
+      current="advanced"
+      showPlan={showPlan}
+    >
       <div className="flex max-w-[64rem] flex-col gap-6">
         {canManageKey ? (
           <RemoveWorkspaceKey

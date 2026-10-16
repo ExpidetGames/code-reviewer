@@ -2,6 +2,7 @@
 
 import type { Metadata } from "next";
 import { getWorkspaceLlm } from "@/llm/shared";
+import { planPageLinkedFor } from "@/usage/shared";
 import { requireWorkspace } from "@/workspaces/access-runtime";
 import { can } from "@/workspaces/permissions";
 import { AdvancedSettingsPageContent } from "@/workspaces/ui/advanced-settings-page";
@@ -17,13 +18,17 @@ export default async function AdvancedSettingsPage({
   const { workspace: slug } = await params;
   const { workspace, role } = await requireWorkspace(slug);
   const workspaceId = workspace.id;
-  const keyStatus = await getWorkspaceLlm().keyServiceFor(workspaceId).status();
+  const [keyStatus, showPlan] = await Promise.all([
+    getWorkspaceLlm().keyServiceFor(workspaceId).status(),
+    planPageLinkedFor(workspaceId),
+  ]);
   return (
     <AdvancedSettingsPageContent
       workspaceSlug={workspace.slug}
       canManageKey={can(role, "manage_llm_key")}
       keyConfigured={keyStatus.state !== "not_configured"}
       canResetDefaults={can(role, "manage_review_defaults")}
+      showPlan={showPlan}
     />
   );
 }

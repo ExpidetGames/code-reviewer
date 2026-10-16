@@ -179,6 +179,10 @@ claimed (#277, `src/usage/README.md`, "Limits and suspension at claim"); the key
   `_` and `-`, starting with a letter, at most 64 characters; checked even when not suspended). A valid code is
   kept only while suspended: clearing the suspension clears the code. The repositories throw `EntitlementsError`
   with the code.
+- **The plan page (#282).** Every member can read `/w/<slug>/settings/plan`: the plan label, the used and allowed runs
+  of each review kind, the share of the cost limit as a percentage (never an amount), the start of the period and a
+  notice while reviews are paused. The settings navigation lists it only for a workspace with entitlements
+  (`src/usage/README.md`, "The plan page").
 - **The operator API (#275).** `src/operator-api/README.md` and `contracts/operator-api.v1.json`. It decided the
   three follow-ups of #271: a body without `periodStart` keeps the stored start (a stale start cannot block an unrelated
   update); `DELETE` of a workspace's row is offered and ends the "never backwards" guard for it (documented, not
