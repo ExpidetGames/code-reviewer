@@ -13,6 +13,7 @@ has built the environment from the job.
 import asyncio
 import copy
 import math
+import time
 from typing import TYPE_CHECKING, Any
 
 from code_reviewer_runner.diff_cost import DiffCostMeter
@@ -86,11 +87,18 @@ def configure_settings(job: Job, settings: Any, guard: RepoSettingsGuard) -> Non
 async def execute(
     job: Job,
     guard: RepoSettingsGuard,
-    timeout_seconds: float | None = None,
+    deadline: float | None = None,
     probe: UsageProbe | None = None,
     meter: DiffCostMeter | None = None,
 ) -> tuple[bool, bool, Usage | None]:
     """Run the command inside a request scope; returns (handled, command_failed, usage).
+
+    `deadline` is the moment (on `time.monotonic()`) the soft timeout ends the command, counted from
+    the start of the job (the first line of `main()`) and not from here: the imports and the
+    settings copy below can take seconds on a cold start, and the hard timeout of the entry point is
+    counted from there too, so a deadline counted from here could land after it (#387). A deadline
+    that has passed by the time the command would start ends the run with `JobTimeout`, and the
+    command is never started.
 
     `probe` is given what PR-Agent measured however the command ends, also when it raises or runs
     out of time, so a run that fails after its model call can still report what it used (#273).
@@ -102,7 +110,7 @@ async def execute(
     it can put them back after a repository settings file was merged.
 
     Raises `InvalidOption` (before anything is sent anywhere) for an option of the job whose value
-    does not fit its type.
+    does not fit its type, and `JobTimeout` when the deadline passed before the command could start.
     """
     from pr_agent.agent.pr_agent import PRAgent
     from pr_agent.algo.run_details import command_failed, get_run_details, init_run_details
@@ -121,7 +129,10 @@ async def execute(
         # Awaited directly (no task): the run details live in a ContextVar of this task.
         # Only an await can be cancelled; the hard timeout of the entry point covers a call that
         # blocks the event loop.
-        timeout = asyncio.timeout(timeout_seconds)
+        remaining = None if deadline is None else deadline - time.monotonic()
+        if remaining is not None and remaining <= 0:
+            raise JobTimeout
+        timeout = asyncio.timeout(remaining)
         try:
             async with timeout:
                 handled = await PRAgent().handle_request(
