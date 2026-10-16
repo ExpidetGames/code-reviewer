@@ -606,12 +606,13 @@ Any secret that was ever in a log, a chat or an issue is rotated the same way.
 
 ### 5.3 Reading what the Runs page and the logs say
 
-A run's error code is shown on the Runs pages with a fixed sentence. Three belong to the hosted deployment:
+A run's error code is shown on the Runs pages with a fixed sentence. Four belong to the hosted deployment:
 
 | Where | Code | Meaning and what to do |
 |---|---|---|
 | Runs page | `dispatch_unavailable` | The job waited `RUNNER_DISPATCH_GIVE_UP_SECONDS` (60 minutes by default) without anyone claiming it, no attempt is counted, and the next push or review request runs it again. Look at the **App's** sweep and send logs (`DISPATCH_SEND_FAILED`, `DISPATCH_REJECTED`) and at the Dispatcher's log. Usual causes: `RUNNER_WEBHOOK_URL` or the signing key do not match (`DISPATCH_REJECTED`: a wrong URL or secret looks like this and the App waits 30 minutes between tries), the Dispatcher is down or protected, `SANDBOX_SNAPSHOT_ID` is unset (`not_capable`), the pool is full for longer than the give-up time, or the sweep itself is refused (`CRON_SECRET`). |
 | Runs page | `launch_failed` | The Worker could not be started even after three attempts. The cause is a launch code in the **Dispatcher's** log (line `launch_failed`, field `code`, plus `retryable`): the table in `dispatcher/README.md` ("The Sandbox-Launcher") lists them (`sandbox_auth_failed`, `sandbox_snapshot_missing`, `image_mismatch`, `docker_not_ready`, `worker_exited_early`, ...). |
+| Runs page | `worker_exited` | The Worker was started and took over, but its container ended with an error before it reported a result, three times. The Dispatcher gave the job back as soon as it saw the end, instead of after the two minute lease. The Dispatcher's log has `worker_exited` with the `exitCode` (2: the Worker could not set up, for example a bad image or configuration; 137: killed, usually out of memory: raise the container's memory limit) and `released` with the same `reason`. |
 | Dispatcher log only | `capability_not_proven` | A Dynamic job was claimed but no fresh passing probe answer counted at launch. The job is released as `launch_failed` (so the Runs page shows that). It means the probe went stale or failed between the claim and the launch, or the canary VM cannot prove the hardening: run the canary, read the reasons, and see `dynamic_isolation_self_check_failed` in [`dynamic-review.md`](dynamic-review.md). Diff jobs are not affected. |
 
 Others you will meet: `no_capable_runner` (a Dynamic job nobody could run for 30 minutes: the probe says no, or
@@ -787,11 +788,13 @@ A self-hosted installation and a hosted one never share a database or a GitHub A
   instance runs the release that knows the key mode is served by the wrong key and outside the limit.
 - **A managed workspace has no model of its own**: the instance's `LLM_MODEL` and `LLM_MAX_TOKENS` apply to all of them
   until managed quality tiers exist (#280, #283).
-- **A Worker that exits non-zero before it has reported a result holds its slot until its lease lapses** (two minutes after
-  its last heartbeat); only the next sweep then puts the job back, and the pull request shows "Running" meanwhile. A Worker
-  that cannot start at all (a bad image or configuration) costs those two minutes on every attempt. The attempt is lost
-  either way (three, then `failed`); the delay is the cost. The Dispatcher already logs `worker_exited` but does not
-  release the job: follow-up #375.
+- **A Worker whose end the Dispatcher does not see still holds its slot until its lease lapses** (two minutes after its
+  last heartbeat); only the next sweep then puts the job back, and the pull request shows "Running" meanwhile. A Worker
+  that exits non-zero before it has reported a result is released at once when the Dispatcher sees the container end
+  (`worker_exited`, section 5.3). The lease is still the safeguard where it does not: the wait for the container failed
+  (`worker_wait_failed`: what became of the Worker is unknown, so nothing is released), the Dispatcher's function ended
+  before the container did, and a Launcher that does not supervise the Worker. The attempt is lost either way (three, then
+  `failed`); the delay is the cost.
 - **A debounced review starts up to about 60 seconds later than self-hosted**, and only while the per-minute cron
   runs (section 5.7); the first automatic review of a pull request (opened) is sent at once.
 - **The capability probe.** One answer per Dispatcher *instance*, held in memory for `DISPATCHER_PROBE_TTL_SECONDS`
@@ -812,7 +815,6 @@ A self-hosted installation and a hosted one never share a database or a GitHub A
 
 ## 10. Follow-ups
 
-- #375: the Dispatcher releases a job at once when its Worker exits non-zero before a result: then the limit in section 9 goes.
 - #334 and #335 the self-hosted split and flipping its default: then section 8 gets its step table.
 - A deploy workflow that runs `pnpm migrate` and the canary in order is not part of the repository; today steps 1, 2,
   5 and 6 are manual.

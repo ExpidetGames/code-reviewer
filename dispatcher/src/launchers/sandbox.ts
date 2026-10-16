@@ -10,7 +10,8 @@
 //   2. vm-prepare.sh as root (cgroup fix, dockerd), then the image in the VM must be the configured id
 //   3. `docker run --interactive` with the rendered flags; the start document goes through stdin only
 //   4. resolve once the Worker has taken over (sandbox-host.ts); the core heartbeats until then
-//   5. when the container ends, stop the VM by name. If nothing does, the VM timeout ends it.
+//   5. when the container ends, stop the VM by name. If nothing does, the VM timeout ends it. An end with a non-zero
+//      exit code is also told to the core (`spec.onWorkerExit`), which gives the job back at once (#375).
 // Every failure before the hand-over stops the VM by name and ends in a `LaunchError` with a stable code. A VM is
 // never reused. The port to the platform is sandbox-service.ts; `vercel-sandbox.ts` is the one file that knows
 // the SDK.
@@ -317,16 +318,36 @@ export function createSandboxLauncher(
     }
   }
 
+  /** Tells the core that the Worker ended with an error. Never rejects: what the core does is its own logging. */
+  async function notifyExit(
+    jobId: string,
+    onWorkerExit: LaunchSpec["onWorkerExit"],
+    exitCode: number,
+  ): Promise<void> {
+    if (exitCode === 0 || onWorkerExit === undefined) return;
+    try {
+      await onWorkerExit(exitCode);
+    } catch {
+      // The core never rejects; a Launcher must not depend on that, and the lease ends the job anyway.
+      logger.warn("worker_exit_report_failed", { jobId });
+    }
+  }
+
+  /** Supervision keeps the job id and the core's callback, not the spec: the credential stays the core's. */
   function supervise(
     name: string,
     jobId: string,
+    onWorkerExit: LaunchSpec["onWorkerExit"],
     running: Promise<{ exitCode: number }>,
   ): void {
     const work = running.then(
       async (result) => {
         logger.info("worker_exited", { jobId, exitCode: result.exitCode });
-        // Only a confirmed exit stops the VM.
-        await stopQuietly(name, jobId);
+        // Only a confirmed exit stops the VM, and the VM does not wait for the App: both at once.
+        await Promise.all([
+          stopQuietly(name, jobId),
+          notifyExit(jobId, onWorkerExit, result.exitCode),
+        ]);
       },
       (error: unknown) => {
         // The container's fate is unknown (the log stream or the network broke): it may be reviewing. The VM is
@@ -412,7 +433,7 @@ export function createSandboxLauncher(
         );
         running.catch((error: unknown) => host.fail(error));
         await host.handover;
-        supervise(name, spec.jobId, running);
+        supervise(name, spec.jobId, spec.onWorkerExit, running);
       } catch (error) {
         throw await failLaunch(name, spec, signal, error, {
           code: "worker_start_failed",

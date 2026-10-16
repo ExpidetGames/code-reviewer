@@ -15,11 +15,14 @@
 //   E2E_IMAGE_ID          the image id the stand-in reports and the Launcher requires (required)
 //   E2E_CONTROL_DIR       a directory a journey writes to steer this process: `fail-create` holds a number, and the
 //                         next that many VM creations fail like a platform that is down (the file is counted down)
+//                         `break-wait` (a file): from then on the `wait()` of every Worker container started fails like a
+//                         broken log stream, so the Dispatcher never learns how the container ended (`worker_wait_failed`,
+//                         #375): the lease is the only safeguard
 //   E2E_HANDOVER_SECONDS  how long the container runs before the Worker counts as having taken over (default 1)
 //   E2E_*                 everything else with this prefix goes to the stand-in's environment (`docker-worker.sh`)
 //
 // One line of JSON per event on stdout, through the same masker as the deployment's.
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { LocalSandboxService } from "../../../fakes/sandbox/local.ts";
 import { createBackgroundTracker } from "../background.ts";
@@ -94,11 +97,32 @@ const local = new LocalSandboxService({
     ),
   ),
 });
+/** True while `<dir>/break-wait` exists: the journey wants Workers whose end the Dispatcher cannot see. */
+function waitIsBroken(): boolean {
+  return (
+    controlDirectory !== undefined &&
+    existsSync(join(controlDirectory, "break-wait"))
+  );
+}
+
 const service: SandboxService = {
   async create(options, signal) {
     if (consumeCreateFailure(controlDirectory))
       throw new SandboxServiceError("unavailable");
-    return local.create(options, signal);
+    const vm = await local.create(options, signal);
+    return {
+      name: vm.name,
+      exec: (request, execSignal) => vm.exec(request, execSignal),
+      async start(request) {
+        const process = await vm.start(request);
+        if (!waitIsBroken() || request.label !== "docker-run") return process;
+        return {
+          writeStdin: (data) => process.writeStdin(data),
+          closeStdin: () => process.closeStdin(),
+          wait: () => Promise.reject(new Error("the log stream broke")),
+        };
+      },
+    };
   },
   stop: (name) => local.stop(name),
 };
