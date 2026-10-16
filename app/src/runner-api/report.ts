@@ -35,8 +35,11 @@ export type ReportDeps = {
    * fails gives an empty list rather than failing the completion.
    */
   knownSecrets: (workspaceId: string) => Promise<readonly string[]>;
-  /** The LLM key each job was handed with its claim; it may differ from the current one. Read from the database. */
-  claimedKeys: Pick<ClaimedKeys, "keysOf">;
+  /**
+   * The LLM key each job was handed with its claim, which may differ from the current one, and the model of a managed
+   * tier it was handed (#280). Read from the database.
+   */
+  claimedKeys: Pick<ClaimedKeys, "keysOf" | "modelsOf">;
 };
 
 /**
@@ -48,6 +51,21 @@ export const RUNNER_SHUTDOWN_CODE = "runner_shutdown";
 /** The code a failed job is stored with: a code the runner is known to use, or `unknown`. */
 export function mapRunnerErrorCode(code: string): string {
   return RUNNER_ERROR_CODES.some((known) => known === code) ? code : "unknown";
+}
+
+/** The result without the model a managed tier gave the job: `usage.model` is not reported (null) when it names one. */
+function withoutTierModel(
+  result: RunnerResult,
+  models: readonly string[],
+): RunnerResult {
+  const reported = result.usage?.model ?? null;
+  if (
+    result.usage === null ||
+    reported === null ||
+    !models.some((model) => reported.includes(model))
+  )
+    return result;
+  return { ...result, usage: { ...result.usage, model: null } };
 }
 
 function invalid(parsed: Extract<Parsed<unknown>, { ok: false }>): Response {
@@ -140,9 +158,16 @@ export async function finishJob(
   // same report always gives the same stored value, which is what makes a repetition recognisable.
   // The key of the claim and the current one: the key may have been rotated while the job ran, and the
   // claim may have been served by another app instance (the key of the claim is in the database).
-  const stored = redactResult(reported, [
+  //
+  // The model of a managed tier is operator data a workspace must never read (#280): the job may repeat it in its
+  // log or its error, and reports it as `usage.model`, which a Runs page shows. The model the job was handed is
+  // remembered with its keys, so it is taken out whichever app instance serves the completion and whatever the
+  // operator changed since; the tokens and the cost of the usage stay.
+  const models = await deps.claimedKeys.modelsOf(jobId);
+  const stored = redactResult(withoutTierModel(reported, models), [
     ...(await deps.knownSecrets(job.workspaceId)),
     ...(await deps.claimedKeys.keysOf(jobId)),
+    ...models,
     ...extraSecrets,
   ]);
   const outcome: JobOutcome =

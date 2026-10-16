@@ -13,6 +13,12 @@ import { loadGithubAppConfig } from "../integrations/registry.ts";
 import type { JobQueueLimits } from "../jobs/job-limits.ts";
 import type { LlmAccessResult } from "../llm/access.ts";
 import { createWorkspaceLlm } from "../llm/assemble.ts";
+import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
+import {
+  createModelTiersService,
+  type ModelTiersService,
+} from "../model-tiers/service.ts";
+import type { ManagedModelTiers } from "../model-tiers/tiers.ts";
 import type { ModelCapabilityChecker } from "../llm/model-capabilities.ts";
 import { createRunnerApi } from "../runner-api/api.ts";
 import {
@@ -105,6 +111,12 @@ export async function startRunnerApiHarness(
     loadLlm?: (workspaceId: string) => Promise<LlmAccessResult>;
     /** #279: where a Dynamic claim reads the model metadata from. Left out, the claim reads none. */
     modelCapabilities?: ModelCapabilityChecker;
+    /**
+     * #280: the operator's configuration of the managed tiers, stored as the operator API stores it. Left out: no
+     * tier is configured, and a job on the operator's key fails closed (`managed_tier_unavailable`). It can be
+     * changed later with `h.setTiers`.
+     */
+    modelTiers?: ManagedModelTiers;
     /**
      * #281: wires the notice of a refused review like the running server does (`h.notices`). With
      * `deliver: "manual"` the refusals are only collected (`h.notices.refusals`) and the test hands them on.
@@ -240,6 +252,15 @@ export async function startRunnerApiHarness(
     ),
     builtIn: () => builtInReviewSettings(env.LLM_MODEL ?? TEST_LLM_MODEL),
   });
+  // The operator's tiers, read by the claim. The metadata check only matters when saving through the service; the
+  // harness stores the configuration as it is given, like the operator API did before.
+  const instanceSettings = createInstanceSettingsRepository(fixture.db);
+  const modelTiers: ModelTiersService = createModelTiersService({
+    settings: instanceSettings,
+    modelCapabilities: { check: async () => ({ outcome: "unverifiable" }) },
+  });
+  if (options.modelTiers !== undefined)
+    await instanceSettings.set("managed_model_tiers", options.modelTiers, null);
   // One app instance: its own collaborators, over the SAME database, queue and fakes. The LLM access is put
   // together as the running server does it: the key of the job's own workspace. A second instance (`anotherInstance`) shares nothing but
   // the database, which is what several app instances do.
@@ -305,6 +326,13 @@ export async function startRunnerApiHarness(
           job.workspaceId,
           fixture.clock.now,
         ).setKeyMode(job.id, keyMode),
+      modelTiers,
+      recordModelTier: (job, tier) =>
+        createUsageRecordsRepository(
+          fixture.db,
+          job.workspaceId,
+          fixture.clock.now,
+        ).setModelTier(job.id, tier),
       ...(options.modelCapabilities === undefined
         ? {}
         : { modelCapabilities: options.modelCapabilities }),
@@ -641,6 +669,10 @@ export async function startRunnerApiHarness(
     env,
     /** The LLM access of each workspace, as the claim resolves it: `llm.keyServiceFor(id).save(...)` sets a workspace key. */
     llm,
+    /** The operator's tiers as the claim reads them; `setTiers` stores a configuration without the metadata check. */
+    modelTiers,
+    setTiers: (tiers: ManagedModelTiers) =>
+      instanceSettings.set("managed_model_tiers", tiers, null),
     setLlmKey,
     claimedKeys,
     registry,

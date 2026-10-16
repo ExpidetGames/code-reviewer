@@ -114,3 +114,64 @@ describe("the keys remembered for a job", () => {
     expect(await keys.keysOf(job.id)).toEqual(["plain-key-two-0002"]);
   });
 });
+
+describe("the tier models remembered for a job (#280)", () => {
+  // #280-T08
+  it("keeps the model next to the keys, each list apart, encrypted", async () => {
+    const { db, job, keys } = await start();
+
+    await keys.remember(job.id, "plain-key-one-0001");
+    await keys.rememberModel(job.id, "tier/the-model");
+    await keys.remember(job.id, "plain-key-two-0002");
+
+    expect(await keys.keysOf(job.id)).toEqual([
+      "plain-key-one-0001",
+      "plain-key-two-0002",
+    ]);
+    expect(await keys.modelsOf(job.id)).toEqual(["tier/the-model"]);
+    expect(
+      JSON.stringify(
+        await db.selectFrom("job_claimed_keys").selectAll().execute(),
+      ),
+    ).not.toContain("tier/the-model");
+  });
+
+  // #280-T08
+  it("does not spend a place twice on one model, forgets the oldest past the bound, and never takes a key's place", async () => {
+    const { job, keys } = await start();
+    for (const key of ["key-a-0001", "key-b-0002", "key-c-0003"])
+      await keys.remember(job.id, key);
+
+    for (const model of ["m/one", "m/one", "m/two", "m/three", "m/four"])
+      await keys.rememberModel(job.id, model);
+
+    expect(await keys.keysOf(job.id)).toEqual([
+      "key-a-0001",
+      "key-b-0002",
+      "key-c-0003",
+    ]);
+    expect(await keys.modelsOf(job.id)).toEqual(["m/two", "m/three", "m/four"]);
+  });
+
+  // #280-T08
+  it("answers no model for a job that has none, or a row of the earlier format", async () => {
+    const { db, job, keys, clock } = await start();
+    expect(await keys.modelsOf(job.id)).toEqual([]);
+    const sealed = encryptSecret(
+      APP_SECRET,
+      { table: "job_claimed_keys", rowId: job.id, field: "api_key" },
+      "plain-key-legacy-0000",
+    );
+    await createJobClaimedKeysRepository(db, clock.now).put({
+      jobId: job.id,
+      ciphertext: sealed.ciphertext,
+      nonce: sealed.nonce,
+      keyVersion: sealed.keyVersion,
+    });
+
+    expect(await keys.modelsOf(job.id)).toEqual([]);
+    await keys.rememberModel(job.id, "tier/the-model");
+    expect(await keys.keysOf(job.id)).toEqual(["plain-key-legacy-0000"]);
+    expect(await keys.modelsOf(job.id)).toEqual(["tier/the-model"]);
+  });
+});

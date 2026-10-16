@@ -15,8 +15,14 @@
 // (src/maintenance/cleanup.ts). A key is not forgotten when its job completes: a repeated completion is compared
 // on the stored form and must be masked the same way.
 //
-// The value is never logged and never leaves this module except as the list `keysOf` returns to the code that
-// masks a result. A row that cannot be read (another `APP_SECRET`, a changed row) is skipped: masking is best
+// #280: next to the keys it remembers the **models** a job was handed on the operator's managed tiers (`models` in the
+// same sealed text). The id of a tier's model is operator data that a workspace must never read, and the runner's
+// result may repeat it (the model it reports, a log line); the operator can change a tier at any time, so the model
+// the job really got is kept to mask it in the result, whichever app instance serves the completion. An app instance
+// of the previous release reads `keys` and ignores `models`.
+//
+// The value is never logged and never leaves this module except as the lists `keysOf` and `modelsOf` return to the
+// code that masks a result. A row that cannot be read (another `APP_SECRET`, a changed row) is skipped: masking is best
 // effort, and the shape of a credential is still masked (`redact.ts`).
 import type { Kysely } from "kysely";
 import { decryptSecret, encryptSecret } from "../crypto/secret-box.ts";
@@ -37,24 +43,39 @@ export type ClaimedKeys = {
   remember(jobId: string, apiKey: string): Promise<void>;
   /** The keys handed out for the job, oldest first (empty if unknown or unreadable). */
   keysOf(jobId: string): Promise<string[]>;
+  /**
+   * Remembers the model of a managed tier that `jobId` was handed (#280), next to those handed out for it before
+   * (at most `CLAIMED_KEYS_PER_JOB`, a model already remembered takes no new place).
+   */
+  rememberModel(jobId: string, model: string): Promise<void>;
+  /** The tier models handed out for the job, oldest first (empty if none, unknown or unreadable). */
+  modelsOf(jobId: string): Promise<string[]>;
 };
 
-/** The keys in a sealed text: the list of the current format, or the one plain key of the earlier one. */
-function keysIn(text: string): string[] {
+type Sealed = { keys: string[]; models: string[] };
+
+function strings(value: unknown): string[] | undefined {
+  return Array.isArray(value) &&
+    value.every((entry): entry is string => typeof entry === "string")
+    ? value
+    : undefined;
+}
+
+/** The lists in a sealed text: the current format, or the one plain key of the earlier one. */
+function contentOf(text: string): Sealed {
   try {
     const parsed: unknown = JSON.parse(text);
-    if (
-      typeof parsed === "object" &&
-      parsed !== null &&
-      "keys" in parsed &&
-      Array.isArray(parsed.keys) &&
-      parsed.keys.every((key): key is string => typeof key === "string")
-    )
-      return parsed.keys;
+    if (typeof parsed === "object" && parsed !== null && "keys" in parsed) {
+      const keys = strings(parsed.keys);
+      if (keys !== undefined) {
+        const models = "models" in parsed ? strings(parsed.models) : undefined;
+        return { keys, models: models ?? [] };
+      }
+    }
   } catch {
     // Not JSON: a key of the earlier format.
   }
-  return [text];
+  return { keys: [text], models: [] };
 }
 
 export function createClaimedKeys({
@@ -75,11 +96,11 @@ export function createClaimedKeys({
   async function read(
     rows: ReturnType<typeof createJobClaimedKeysRepository>,
     jobId: string,
-  ): Promise<string[]> {
+  ): Promise<Sealed> {
     const row = await rows.get(jobId);
-    if (row === undefined) return [];
+    if (row === undefined) return { keys: [], models: [] };
     try {
-      return keysIn(
+      return contentOf(
         decryptSecret(appSecret(), location(jobId), {
           keyVersion: row.keyVersion,
           nonce: row.nonce,
@@ -87,32 +108,41 @@ export function createClaimedKeys({
         }),
       );
     } catch {
-      return [];
+      return { keys: [], models: [] };
     }
   }
-  return {
-    async remember(jobId, apiKey) {
-      // Read and write in one transaction, so two fetches of a job do not drop each other's key.
-      await db.transaction().execute(async (trx) => {
-        const rows = createJobClaimedKeysRepository(trx, now);
-        const known = await read(rows, jobId);
-        const keys = known.includes(apiKey)
-          ? known
-          : [...known, apiKey].slice(-CLAIMED_KEYS_PER_JOB);
-        const sealed = encryptSecret(
-          appSecret(),
-          location(jobId),
-          JSON.stringify({ keys }),
-        );
-        await rows.put({
-          jobId,
-          ciphertext: sealed.ciphertext,
-          nonce: sealed.nonce,
-          keyVersion: sealed.keyVersion,
-        });
+  /** Adds a value to one of the two lists and writes both, in one transaction, so two fetches do not drop each other's. */
+  async function add(
+    jobId: string,
+    list: keyof Sealed,
+    value: string,
+  ): Promise<void> {
+    await db.transaction().execute(async (trx) => {
+      const rows = createJobClaimedKeysRepository(trx, now);
+      const known = await read(rows, jobId);
+      const current = known[list];
+      const next = current.includes(value)
+        ? current
+        : [...current, value].slice(-CLAIMED_KEYS_PER_JOB);
+      const sealed = encryptSecret(
+        appSecret(),
+        location(jobId),
+        JSON.stringify({ ...known, [list]: next }),
+      );
+      await rows.put({
+        jobId,
+        ciphertext: sealed.ciphertext,
+        nonce: sealed.nonce,
+        keyVersion: sealed.keyVersion,
       });
-    },
-
-    keysOf: (jobId) => read(createJobClaimedKeysRepository(db, now), jobId),
+    });
+  }
+  return {
+    remember: (jobId, apiKey) => add(jobId, "keys", apiKey),
+    rememberModel: (jobId, model) => add(jobId, "models", model),
+    keysOf: async (jobId) =>
+      (await read(createJobClaimedKeysRepository(db, now), jobId)).keys,
+    modelsOf: async (jobId) =>
+      (await read(createJobClaimedKeysRepository(db, now), jobId)).models,
   };
 }

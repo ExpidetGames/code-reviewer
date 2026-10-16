@@ -52,7 +52,17 @@ import {
   type UsageKeyMode,
 } from "../usage/usage-records.ts";
 import { dynamicCapabilitiesOf } from "../llm/dynamic-capabilities.ts";
-import type { ModelCapabilityChecker } from "../llm/model-capabilities.ts";
+import type {
+  ModelCapabilityChecker,
+  ModelCapabilityResult,
+} from "../llm/model-capabilities.ts";
+import type { ModelTierSource } from "../model-tiers/service.ts";
+import {
+  clampMaxTokens,
+  DEFAULT_MODEL_TIER,
+  type ModelTier,
+} from "../model-tiers/tiers.ts";
+import type { ProjectReviewKind } from "../review-settings/settings.ts";
 import type { ClaimedKeys } from "./claimed-keys.ts";
 import type { ClaimGuard } from "./claim-guard.ts";
 import {
@@ -95,6 +105,9 @@ export const CLAIM_FAILURE_CODES = [
   "dynamic_config_invalid",
   // #279: the provider's metadata says the model lacks tool calling or a required tool choice.
   "dynamic_model_features_unsupported",
+  // #280: the job runs on the operator's key and the operator configured no model for the project's tier and the
+  // job's review kind. Never a move to another tier or to the instance default model.
+  "managed_tier_unavailable",
 ] as const;
 
 /** Why a job is given back (the code becomes the job's error code if it was the last attempt). */
@@ -157,8 +170,18 @@ export type ClaimDeps = {
    * record already, as `own`; this corrects it once the access is resolved. A failure gives the job back.
    */
   recordKeyMode: (job: Job, keyMode: UsageKeyMode) => Promise<void>;
-  /** Where the key handed out with a claim is noted (encrypted, in the database), so a rotated key can still be masked. */
-  claimedKeys: Pick<ClaimedKeys, "remember">;
+  /**
+   * Notes the managed tier a job that runs on the operator's key was given in its usage record (#280): the name,
+   * never the model. The claim reserved the record already; a failure gives the job back.
+   */
+  recordModelTier: (job: Job, tier: ModelTier) => Promise<void>;
+  /** Which model backs a tier for a kind of review (#280): operator data, read when a managed job is claimed. */
+  modelTiers: ModelTierSource;
+  /**
+   * Where the key handed out with a claim is noted (encrypted, in the database), so a rotated key can still be masked,
+   * and the model of a managed tier (#280), so it can be masked in the result even if the operator changes the tier.
+   */
+  claimedKeys: Pick<ClaimedKeys, "remember" | "rememberModel">;
   /**
    * #279: where the metadata of a Dynamic job's model is read when its claim is built (the provider's
    * public endpoint metadata, cached for a short time). Left out, a claim reads none and a Dynamic job
@@ -177,7 +200,7 @@ export type Refusal =
   | { kind: "retry"; reason: string; retryAfterSeconds: number };
 
 type Prepared =
-  | { kind: "ready"; response: ClaimResponse }
+  | { kind: "ready"; response: ClaimResponse; tierModel: string | null }
   /** #320: the claim of a Dispatcher: the credential and no input. */
   | { kind: "split"; response: SplitClaimResponse }
   | Refusal;
@@ -195,6 +218,12 @@ export type Checked = {
   repo: RepoRef;
   prUrl: string;
   baseRef: string;
+  /**
+   * #280: the tier and the operator's model for it, when the job runs on the operator's key; null otherwise. The model
+   * is already in `options` and `dynamic`; it is kept here so the claim can clamp the token budget to its window and
+   * remember it for masking.
+   */
+  tier: { name: ModelTier; model: string } | null;
 };
 
 /** What `buildJobInput` made: the input of the job and when its git token stops working. */
@@ -202,6 +231,8 @@ export type Built = {
   kind: "built";
   input: RunnerJobInput;
   tokenExpiresAt: string | null;
+  /** The operator's model of the tier the job runs at, or null; remembered for masking (#280). */
+  tierModel: string | null;
 };
 
 function refuse(errorCode: string, detail?: string): Refusal {
@@ -265,16 +296,23 @@ function llmOptionsOf(
 }
 
 /**
- * The options of a job on the operator's key: the model of the instance replaces the project's model (Diff and
- * Dynamic), and the project's token budget is dropped so the instance's own context window applies. Everything
- * else (the tool options, the Dynamic skill and limits) is the project's.
+ * The options of a job on the operator's key (#280): the operator's model of the project's tier replaces the project's
+ * model (Diff) or Dynamic model, the workspace's fallback model is dropped, and the project's token budget stays (it is
+ * clamped to the model's window when the job's input is built). Everything else (the tool options, the Dynamic skill
+ * and limits) is the project's. What the workspace named never reaches the runner.
  */
-function withInstanceModel(options: JobOptions, model: string): JobOptions {
+function withTierModel(
+  options: JobOptions,
+  kind: ProjectReviewKind,
+  model: string,
+): JobOptions {
+  const maxTokens = options.llm?.maxTokens;
   return {
     env: options.env,
-    ...(options.dynamic === undefined
-      ? {}
-      : { dynamic: { ...options.dynamic, model } }),
+    llm: { model, ...(maxTokens == null ? {} : { maxTokens }) },
+    ...(kind === "dynamic" && options.dynamic !== undefined
+      ? { dynamic: { ...options.dynamic, model } }
+      : {}),
   };
 }
 
@@ -352,24 +390,23 @@ type ModelCapabilitiesDecision =
   | { kind: "unsupported" };
 
 /**
- * #279: what the provider's metadata says about the job's Dynamic model, read when the claim is built (a
- * short cache sits in front of the provider, so this is not a request per claim). Three outcomes:
+ * #279: what the provider's metadata says about the job's Dynamic model (`result`, read by the caller when the claim is
+ * built: a short cache sits in front of the provider, so this is not a request per claim). Three outcomes:
  *
- * - A model whose metadata says it cannot do what Dynamic Review needs ends the job, whatever runner
- *   claimed it, before any credential exists.
- * - Metadata that cannot be read (provider unreachable, model unknown to it, no usable window) sends
- *   nothing and the claim goes on: the runner falls back to its own descriptor, and nothing is invented.
- * - Otherwise the descriptor goes to a runner that advertised `dynamic_capabilities` and only to such a
- *   runner: the job input of a previous-release runner is closed and would refuse the key.
+ * - A model whose metadata says it cannot do what Dynamic Review needs ends the job, whatever runner claimed it, before
+ *   any credential exists.
+ * - Metadata that cannot be read (provider unreachable, model unknown to it, no usable window) sends nothing and the
+ *   claim goes on: the runner falls back to its own descriptor, and nothing is invented.
+ * - Otherwise the descriptor goes to a runner that advertised `dynamic_capabilities` and only to such a runner: the
+ *   job input of a previous-release runner is closed and would refuse the key.
  */
-async function modelCapabilitiesOf(
+function modelCapabilitiesOf(
   deps: ClaimDeps,
   job: Job,
-  model: string,
+  result: ModelCapabilityResult | undefined,
   features: readonly ClaimFeature[],
-): Promise<ModelCapabilitiesDecision> {
-  if (deps.modelCapabilities === undefined) return { kind: "none" };
-  const result = await deps.modelCapabilities.check(model);
+): ModelCapabilitiesDecision {
+  if (result === undefined) return { kind: "none" };
   if (result.outcome === "unsupported") return { kind: "unsupported" };
   const fallback = (why: string): ModelCapabilitiesDecision => {
     deps.logger.info(
@@ -383,6 +420,16 @@ async function modelCapabilitiesOf(
   if (!features.includes("dynamic_capabilities")) return { kind: "none" };
   deps.logger.info(`[runner-api] job=${job.id} model capabilities sent`);
   return { kind: "send", capabilities };
+}
+
+/** The context window of a model the provider's metadata states, or null (it was not read, or states none). */
+function contextWindowOf(
+  result: ModelCapabilityResult | undefined,
+): number | null {
+  if (result === undefined) return null;
+  return result.outcome === "supported" || result.outcome === "unsupported"
+    ? result.capabilities.contextLength
+    : null;
 }
 
 /** How `checkJob` is asked. */
@@ -435,14 +482,27 @@ export async function checkJob(
 
   const command = commandOf(job);
   if (command === null) return refuse("job_args_invalid");
-  // On the operator's own key the operator chooses the model, never the tenant (#276): the instance's default
-  // model and output allowance apply, and the model and token budget of the review settings stay stored
-  // without taking effect. Until managed tiers exist (#280).
+  // On the operator's own key the operator chooses the model, never the tenant (#276): the workspace chooses a tier
+  // (#280) and the model is the one the operator configured for that tier and this kind of review. The model and
+  // fallback model of the review settings stay stored without taking effect. A tier without a model fails the job
+  // closed: no silent move to another tier, and not to the instance's default model either. A workspace on its own
+  // key is untouched: its settings apply and the tier is ignored.
   const stored = await deps.jobOptions.optionsFor(job);
-  const options =
-    llm.source === "operator"
-      ? withInstanceModel(stored, llm.access.model)
-      : stored;
+  let options = stored;
+  let tier: Checked["tier"] = null;
+  if (llm.source === "operator") {
+    const name = stored.modelTier ?? DEFAULT_MODEL_TIER;
+    await deps.recordModelTier(job, name);
+    const model = await deps.modelTiers.modelFor(name, job.reviewKind);
+    // The log names the tier and the kind, never a model.
+    if (model === null)
+      return refuse(
+        "managed_tier_unavailable",
+        `tier=${name} kind=${job.reviewKind}`,
+      );
+    tier = { name, model };
+    options = withTierModel(stored, job.reviewKind, model);
+  }
   if (Object.keys(options.env).some((key) => !RUNNER_ENV_KEY_PATTERN.test(key)))
     return refuse("job_env_invalid");
   const llmOptions = llmOptionsOf(options);
@@ -531,6 +591,7 @@ export async function checkJob(
     repo,
     prUrl,
     baseRef,
+    tier,
   };
 }
 
@@ -546,20 +607,30 @@ export async function buildJobInput(
   checked: Checked,
   features: readonly ClaimFeature[],
 ): Promise<Built | Refusal> {
-  const { llm, command, options, llmOptions, dynamic, integration, repo } =
-    checked;
+  const {
+    llm,
+    command,
+    options,
+    llmOptions,
+    dynamic,
+    integration,
+    repo,
+    tier,
+  } = checked;
   const provider = deps.registry.resolve(integration.type);
 
   // #279: the model's capabilities. The read can wait on the provider, so it comes after every cheap
-  // local refusal above, and still before the git credentials are created.
+  // local refusal above, and still before the git credentials are created. A job on a managed tier (#280) reads
+  // its model's metadata too, Diff or Dynamic, for the context window its token budget is clamped to: one read
+  // serves both (a Dynamic job's model is the tier's).
+  const modelToRead = dynamic !== null ? dynamic.model : (tier?.model ?? null);
+  const metadata =
+    modelToRead === null || deps.modelCapabilities === undefined
+      ? undefined
+      : await deps.modelCapabilities.check(modelToRead);
   let capabilities: DynamicModelCapabilities | undefined;
   if (dynamic !== null) {
-    const decision = await modelCapabilitiesOf(
-      deps,
-      job,
-      dynamic.model,
-      features,
-    );
+    const decision = modelCapabilitiesOf(deps, job, metadata, features);
     if (decision.kind === "unsupported")
       return refuse("dynamic_model_features_unsupported");
     if (decision.kind === "send") capabilities = decision.capabilities;
@@ -589,7 +660,17 @@ export async function buildJobInput(
   // The instance's model and context window are the defaults; the review settings of the project
   // replace them. The job never carries `fallbackModels`: the MVP has no fallback chain.
   const llmAccess = revealLlmAccess(llm.access);
-  const maxTokens = llmOptions.maxTokens ?? llmAccess.contextWindowTokens;
+  // The workspace's own key: its budget, else the instance's context window. A managed job: the workspace's budget
+  // (the instance's window belongs to another model), cut to the window of the tier's model when that is known
+  // (#280); the workspace cannot know the model, so its settings are not checked against it.
+  const budget =
+    tier === null
+      ? (llmOptions.maxTokens ?? llmAccess.contextWindowTokens)
+      : (llmOptions.maxTokens ?? null);
+  const maxTokens =
+    tier === null || budget === null
+      ? budget
+      : clampMaxTokens(budget, contextWindowOf(metadata));
   // #199: the head of the last successful Dynamic review of this pull request, so the dynamic job
   // can compare against it. A Diff job never carries a base, so it is not looked up.
   const previousReviewedSha =
@@ -648,7 +729,12 @@ export async function buildJobInput(
           },
           env: {},
         };
-  return { kind: "built", input, tokenExpiresAt: git.expiresAt };
+  return {
+    kind: "built",
+    input,
+    tokenExpiresAt: git.expiresAt,
+    tierModel: tier?.model ?? null,
+  };
 }
 
 async function prepare(
@@ -693,6 +779,7 @@ async function prepare(
     throw new Error(`Claimed job ${job.id} has no lease expiry.`);
   return {
     kind: "ready",
+    tierModel: built.tierModel,
     response: {
       version: RUNNER_API_VERSION,
       job: {
@@ -865,6 +952,11 @@ export async function handleClaim(
         claimed.job.id,
         prepared.response.job.input.llm.apiKey,
       );
+      if (prepared.tierModel !== null)
+        await deps.claimedKeys.rememberModel(
+          claimed.job.id,
+          prepared.tierModel,
+        );
       deps.logger.info(
         `[runner-api] ${origin.label} job=${claimed.job.id} command=${claimed.job.command}`,
       );

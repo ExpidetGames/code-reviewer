@@ -11,6 +11,7 @@ import { sql, type Kysely, type Selectable } from "kysely";
 import { formatTimestamp } from "../codecs.ts";
 import type { Database, UsageRecordsTable } from "../schema.ts";
 import type { WorkspaceId } from "../workspace-scope.ts";
+import type { ModelTier } from "../../model-tiers/tiers.ts";
 import type { ProjectReviewKind } from "../../review-settings/settings.ts";
 import type {
   SettledReason,
@@ -26,7 +27,7 @@ export type UsageRecord = {
   jobId: string;
   reviewKind: ProjectReviewKind;
   keyMode: UsageKeyMode;
-  /** The managed model tier; null until the tiers exist. */
+  /** The managed model tier the run used (#280); null for a run on the workspace's own key. The name, never the model. */
   modelTier: string | null;
   state: UsageState;
   /** Millionths of a US dollar; null when unknown. Only a settled record has one. */
@@ -86,6 +87,11 @@ export type UsageRecordsRepository = {
   reserve(jobId: string, keyMode: UsageKeyMode): Promise<void>;
   /** Corrects the key mode of a record that is still `reserved`; any other record is left as it is. */
   setKeyMode(jobId: string, keyMode: UsageKeyMode): Promise<void>;
+  /**
+   * Notes the managed tier a job runs at (#280) on a record that is still `reserved`; any other record is left as it
+   * is. The tier name only: the model behind it is never recorded.
+   */
+  setModelTier(jobId: string, tier: ModelTier): Promise<void>;
   /**
    * Ends the record of a job: `settled` with the cost and tokens, or `void`. Only a `reserved` record
    * changes, so repeating it does nothing. A job without a record (it was claimed before records existed)
@@ -178,6 +184,16 @@ export function createUsageRecordsRepository(
       await db
         .updateTable("usage_records")
         .set({ key_mode: keyMode })
+        .where("job_id", "=", jobId)
+        .where("workspace_id", "=", workspaceId)
+        .where("state", "=", "reserved")
+        .execute();
+    },
+
+    async setModelTier(jobId, tier) {
+      await db
+        .updateTable("usage_records")
+        .set({ model_tier: tier })
         .where("job_id", "=", jobId)
         .where("workspace_id", "=", workspaceId)
         .where("state", "=", "reserved")
