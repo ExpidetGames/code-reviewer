@@ -28,9 +28,13 @@ import {
 } from "../jobs/worker-credential.ts";
 import { discardBody, readJsonBody } from "./body.ts";
 import type { ClaimDeps } from "./claim.ts";
-import { RUNNER_API_VERSION, type HeartbeatResponse } from "./contract.ts";
 import { describeError } from "./logger.ts";
-import { finishJob, RUNNER_SHUTDOWN_CODE, type ReportDeps } from "./report.ts";
+import {
+  finishJob,
+  heartbeatAnswer,
+  RUNNER_SHUTDOWN_CODE,
+  type ReportDeps,
+} from "./report.ts";
 import { parseJobId, parseWorkerResultRequest } from "./requests.ts";
 import {
   errorResponse,
@@ -44,7 +48,7 @@ export const WORKER_RELEASE_CODES = [RUNNER_SHUTDOWN_CODE, "launch_failed"];
 
 export type WorkerApiDeps = ClaimDeps &
   ReportDeps & {
-    queue: Pick<RunnerQueue, "holding" | "countFetch">;
+    queue: Pick<RunnerQueue, "holding" | "countFetch" | "noteSupersede">;
   };
 
 export type WorkerApi = {
@@ -71,6 +75,8 @@ function endedByApp(job: Job): boolean {
   switch (job.status) {
     case "running":
     case "succeeded":
+    // #397: a run a newer push replaced may still report (its claim is the credential's).
+    case "superseded":
       return false;
     case "failed":
       return job.result === null;
@@ -128,7 +134,8 @@ export function createWorkerApi(deps: WorkerApiDeps): WorkerApi {
         if (!who.ok) return who.response;
         const refused = await discardBody(request);
         if (refused !== null) return refused;
-        if (who.job.status !== "running") return ended();
+        if (who.job.status !== "running" && who.job.status !== "superseded")
+          return ended();
         const result = await deps.queue.heartbeat(jobId, who.leaseToken);
         if (result.status === "not_holder") {
           // The job ended between the check and the heartbeat (the hard time limit fails it here), or
@@ -141,18 +148,11 @@ export function createWorkerApi(deps: WorkerApiDeps): WorkerApi {
               ? errorResponse(409, "RUNNER_LEASE_LOST")
               : ended();
         }
-        const { job } = result;
-        if (job.heartbeatAt === null || job.leaseExpiresAt === null)
-          throw new Error(`Heartbeat of job ${jobId} left no times.`);
         deps.activity?.();
-        return jsonResponse(200, {
-          version: RUNNER_API_VERSION,
-          job: {
-            id: job.id,
-            heartbeatAt: job.heartbeatAt,
-            leaseExpiresAt: job.leaseExpiresAt,
-          },
-        } satisfies HeartbeatResponse);
+        return jsonResponse(
+          200,
+          heartbeatAnswer(result.job, result.status === "superseded"),
+        );
       } catch (error) {
         return unexpected("heartbeat", error);
       }

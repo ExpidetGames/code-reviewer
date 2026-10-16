@@ -140,7 +140,7 @@ describe("the project list with repositories", () => {
 
     const [waiting, replaced] = repositoryRows();
     expect(waiting?.textContent).toContain("Waiting");
-    expect(replaced?.textContent).toContain("Replaced");
+    expect(replaced?.textContent).toContain("Superseded");
   });
 
   it("links the last run to the runs of that project", () => {

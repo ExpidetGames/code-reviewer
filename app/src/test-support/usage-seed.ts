@@ -23,8 +23,8 @@ export type SeededUsage = {
   reservedAt?: string;
   /** Default for a settled record: `reservedAt`. */
   settledAt?: string;
-  /** Why a settled record carries no measurement (`no_result`). */
-  settledReason?: "no_result" | null;
+  /** Why a settled record carries no measurement (`no_result`), or that a newer push replaced the run (`superseded`). */
+  settledReason?: "no_result" | "superseded" | null;
   /** What the job's stored result says; the feed must never show it. */
   jobResult?: unknown;
 };

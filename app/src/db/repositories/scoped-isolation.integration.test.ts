@@ -825,6 +825,12 @@ const CASES: Case[] = [
         promptTokens: 1,
         completionTokens: 1,
       }),
+    // Another workspace's job is not there: nothing was settled.
+    expectAnswer: (answer) => expect(answer).toBe(false),
+  },
+  {
+    name: "usage.markSuperseded",
+    run: (a, b) => a.usage.markSuperseded([b.job.id]),
     expectAnswer: (answer) => expect(answer).toBeUndefined(),
   },
   {

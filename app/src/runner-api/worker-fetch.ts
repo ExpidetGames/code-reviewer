@@ -41,7 +41,7 @@ import type { RunnerQueue } from "../jobs/runner-queue.ts";
 const ORIGIN: Origin = { label: "fetch worker", stage: "fetch" };
 
 type FetchDeps = ClaimDeps & {
-  queue: Pick<RunnerQueue, "holding" | "countFetch" | "get">;
+  queue: Pick<RunnerQueue, "holding" | "countFetch" | "get" | "noteSupersede">;
 };
 
 export async function handleFetch(
@@ -66,6 +66,10 @@ export async function handleFetch(
     );
     return workerUnauthorized();
   }
+
+  // #397: this Worker stops gracefully when its run is superseded, so a newer push may supersede it.
+  if (features.includes("supersede"))
+    await deps.queue.noteSupersede(job.id, leaseToken);
 
   const claimed = { job, leaseToken };
   try {

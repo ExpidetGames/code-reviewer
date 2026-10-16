@@ -10,7 +10,8 @@
 //   - older than its maximum lifetime: stopped, whatever the App says (its own timeout, or the configured one, plus a
 //     grace period: by then the platform's own timeout has failed to end it)
 //   - a canary (no job): kept, only its lifetime ends it
-//   - a job VM: stopped when the App says its job is not `running`; kept when it is, and kept when the App's answer
+//   - a job VM: stopped when the App says its job is not `running`; kept when it is, kept while the job is draining (a
+//     superseded run whose Worker is finishing its requests and reporting, #397), and kept when the App's answer
 //     cannot be read (fail safe: only the lifetime stops it then)
 //
 // Stopping is by the listed name; a failed stop is counted and retried by the next run. Nothing here logs a credential
@@ -190,7 +191,13 @@ export function createReaper(options: ReaperOptions): Reaper {
           candidate.shape.kind === "job"
             ? states.get(candidate.shape.jobId)
             : undefined;
-        if (state?.kind === "known" && state.status !== "running")
+        // A superseded job that drains (#397) is not over: its Worker is finishing the requests in flight and
+        // reporting what they cost, so its VM stays until the claim ends.
+        if (
+          state?.kind === "known" &&
+          state.status !== "running" &&
+          state.draining !== true
+        )
           verdicts.set(candidate, "stop_job_ended");
         else {
           verdicts.set(candidate, "keep");

@@ -52,7 +52,16 @@ export type JobStatus = (typeof JOB_STATUSES)[number];
 
 /** What the App said about a job. `unreadable` is every other case: no answer, a refusal, an App without the call. */
 export type JobStateResult =
-  { kind: "known"; status: JobStatus } | { kind: "unreadable" };
+  | {
+      kind: "known";
+      status: JobStatus;
+      /**
+       * #397: a superseded job whose claim is still valid: its Worker is finishing the model requests in flight and
+       * reporting what they cost. Present (true) only then.
+       */
+      draining?: true;
+    }
+  | { kind: "unreadable" };
 
 export type HeartbeatResult = "ok" | "lease_lost" | "failed";
 /**
@@ -86,7 +95,11 @@ export function parseSplitClaim(body: unknown): ClaimedJob | null {
 
 const jobStateAnswer = z.object({
   version: z.literal(1),
-  job: z.object({ id: z.string(), status: z.enum(JOB_STATUSES) }),
+  job: z.object({
+    id: z.string(),
+    status: z.enum(JOB_STATUSES),
+    draining: z.boolean().optional(),
+  }),
 });
 
 const versionAnswer = z.object({
@@ -208,7 +221,13 @@ export function createAppClient(options: AppClientOptions) {
       );
       if (!parsed.success || parsed.data.job.id !== jobId)
         return { kind: "unreadable" };
-      return { kind: "known", status: parsed.data.job.status };
+      return {
+        kind: "known",
+        status: parsed.data.job.status,
+        ...(parsed.data.job.draining === true
+          ? { draining: true as const }
+          : {}),
+      };
     },
 
     async claim(body: ClaimRequestBody): Promise<ClaimResult> {

@@ -676,9 +676,9 @@ export interface CompleteResponse {
   job: {
     id: JobId;
     /**
-     * succeeded or failed: the job is finished. queued: the runner reported runner_shutdown, the job was given back and waits for another runner (it fails instead if that was the last allowed attempt).
+     * succeeded or failed: the job is finished. queued: the runner reported runner_shutdown, the job was given back and waits for another runner (it fails instead if that was the last allowed attempt). superseded (#397): the run was replaced by a newer push; its report is stored once and the job stays superseded.
      */
-    status: "succeeded" | "failed" | "queued";
+    status: "succeeded" | "failed" | "queued" | "superseded";
     [k: string]: unknown;
   };
   alreadyCompleted: boolean;
@@ -740,6 +740,10 @@ export interface JobStateResponse {
       | "failed"
       | "superseded"
       | "cancelled";
+    /**
+     * #397: true for a superseded job whose claim is still valid: its Worker is finishing the model requests in flight and reporting what they cost. A Dispatcher keeps the VM of a draining job until the claim ends (the reaper). Absent means not draining; a reader that does not know the field sees a superseded job as ended.
+     */
+    draining?: boolean;
     [k: string]: unknown;
   };
   [k: string]: unknown;

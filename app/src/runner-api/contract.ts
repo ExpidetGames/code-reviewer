@@ -95,7 +95,12 @@ export type ReleaseResponse = {
  */
 export type JobStateResponse = {
   version: typeof RUNNER_API_VERSION;
-  job: { id: string; status: JobStatus };
+  job: {
+    id: string;
+    status: JobStatus;
+    /** #397: a superseded job whose claim is still valid (its Worker drains). Left out otherwise. */
+    draining?: true;
+  };
 };
 
 /** The path prefix of this version; the version is part of the URL. */
@@ -405,6 +410,9 @@ export type CompleteResponse = {
    * `queued`: the runner reported `runner_shutdown`, the job was given back and waits again (it fails
    * instead when that was the last allowed attempt).
    */
-  job: { id: string; status: "succeeded" | "failed" | "queued" };
+  job: {
+    id: string;
+    status: "succeeded" | "failed" | "queued" | "superseded";
+  };
   alreadyCompleted: boolean;
 };

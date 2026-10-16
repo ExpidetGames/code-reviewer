@@ -132,6 +132,27 @@ describe("the reaper: which VMs are leftovers", () => {
     expect(report).toMatchObject({ stopped: 0, kept: 1 });
   });
 
+  // #397-T12
+  it("keeps the VM of a superseded job that is draining, and stops it once the drain is over", async () => {
+    const t = setup();
+    const name = t.jobVm(JOB_A, TYPICAL);
+    t.states.set(JOB_A, {
+      kind: "known",
+      status: "superseded",
+      draining: true,
+    });
+
+    const kept = await t.reaper.run();
+
+    expect(t.fake.stops).toStrictEqual([]);
+    expect(kept).toMatchObject({ stopped: 0, kept: 1 });
+
+    t.states.set(JOB_A, { kind: "known", status: "superseded" });
+    await t.reaper.run();
+
+    expect(t.fake.stops).toStrictEqual([name]);
+  });
+
   // #364-T06
   it("never touches a VM younger than two minutes, and does not even ask about its job", async () => {
     const t = setup();

@@ -40,6 +40,7 @@ export function usageSummaryGroupView(group: UsageSummaryGroup) {
     keyMode: group.keyMode,
     recordCount: group.recordCount,
     settledCount: group.settledCount,
+    supersededCount: group.supersededCount,
     knownCostMicroUsd: group.knownCostMicroUsd,
     unknownCostCount: group.unknownCostCount,
   };
