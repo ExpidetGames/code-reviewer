@@ -4,9 +4,15 @@
 // Postgres: which running jobs are superseded, that the new job is claimable at once while the old one drains, what
 // the heartbeat and the report of the superseded claim do, and what the usage record of such a run is: not a run of
 // the quota, its measured cost counted, an unknown cost unknown.
+import { readFileSync } from "node:fs";
 import type { Kysely } from "kysely";
 import { describe, expect, it } from "vitest";
-import { SUPERSEDED_DRAIN_MS } from "../db/repositories/jobs-repository.ts";
+import {
+  MAX_WORKER_HEARTBEAT_INTERVAL_SECONDS,
+  SUPERSEDED_DRAIN_MS,
+  SUPERSEDED_REPORT_GRACE_MS,
+  WORKER_DRAIN_SECONDS,
+} from "./supersede-timing.ts";
 import { createUsageRecordsRepository } from "../db/repositories/usage-records-repository.ts";
 import { createJobsRepository } from "../db/repositories/jobs-repository.ts";
 import type { Database } from "../db/schema.ts";
@@ -52,8 +58,10 @@ describe.each(databases)("superseding a running review on %s", (name, open) => {
 
   async function start() {
     const database = await open?.();
+    const unknown: string[] = [];
     const fixture = await createJobQueueFixture({
       ...(database === undefined ? {} : { database }),
+      onUnknownCostSettled: (settlement) => unknown.push(settlement.jobId),
     });
     const records = createUsageRecordsRepository(
       fixture.db,
@@ -73,7 +81,7 @@ describe.each(databases)("superseding a running review on %s", (name, open) => {
       if (claimed === null) throw new Error("the job was not claimed");
       return claimed;
     }
-    return { fixture, records, running };
+    return { fixture, records, running, unknown };
   }
 
   // #397-T02
@@ -279,7 +287,10 @@ describe.each(databases)("superseding a running review on %s", (name, open) => {
       await fixture.enqueue({ headSha: sha("b") });
       expect((await records.get(old.job.id))?.state).toBe("reserved");
 
-      fixture.clock.advance(SUPERSEDED_DRAIN_MS - 1000);
+      // The claim lasts the drain window and a report is still taken for a grace after it: the sweep waits for both.
+      fixture.clock.advance(
+        SUPERSEDED_DRAIN_MS + SUPERSEDED_REPORT_GRACE_MS - 1000,
+      );
       await fixture.queue.expireStaleJobs();
       expect((await records.get(old.job.id))?.state).toBe("reserved");
       fixture.clock.advance(2000);
@@ -364,6 +375,231 @@ describe.each(databases)("superseding a running review on %s", (name, open) => {
       });
 
       expect(attempted.shas).toEqual([sha("a")]);
+    },
+  );
+
+  // #397-T05
+  run(
+    "keeps the claim for as long as a Worker may need: its next heartbeat, its own drain and a margin",
+    async () => {
+      // The heartbeat of a Worker is 30 seconds and at most 60, then it drains for 120 (#399).
+      expect(MAX_WORKER_HEARTBEAT_INTERVAL_SECONDS).toBe(60);
+      expect(WORKER_DRAIN_SECONDS).toBe(120);
+      expect(SUPERSEDED_DRAIN_MS).toBeGreaterThanOrEqual(
+        (MAX_WORKER_HEARTBEAT_INTERVAL_SECONDS + WORKER_DRAIN_SECONDS + 30) *
+          1000,
+      );
+      // One definition for both projects: the contract file states the same numbers.
+      const timing = JSON.parse(
+        readFileSync(
+          new URL("../../../contracts/runner-api.v1.json", import.meta.url),
+          "utf8",
+        ),
+      ).$defs.SupersedeTiming.properties;
+      expect(timing.maxHeartbeatIntervalSeconds.const).toBe(
+        MAX_WORKER_HEARTBEAT_INTERVAL_SECONDS,
+      );
+      expect(timing.workerDrainSeconds.const).toBe(WORKER_DRAIN_SECONDS);
+      expect(timing.claimSeconds.const * 1000).toBe(SUPERSEDED_DRAIN_MS);
+      expect(timing.reportGraceSeconds.const * 1000).toBe(
+        SUPERSEDED_REPORT_GRACE_MS,
+      );
+    },
+  );
+
+  describe("a report that comes late (#397 review, P2-1)", () => {
+    const outcome = {
+      ok: false as const,
+      errorCode: "superseded",
+      result: SUPERSEDED_RESULT,
+    };
+
+    /** The Worker that learns of the push at its slowest heartbeat and then uses its whole drain. */
+    async function slowestWorker() {
+      const t = await start();
+      const old = await t.running({ headSha: sha("a") });
+      await t.fixture.enqueue({ headSha: sha("b") });
+      t.fixture.clock.advance(MAX_WORKER_HEARTBEAT_INTERVAL_SECONDS * 1000);
+      const told = await t.fixture.queue.heartbeat(old.job.id, old.leaseToken);
+      expect(told.status).toBe("superseded");
+      t.fixture.clock.advance(WORKER_DRAIN_SECONDS * 1000 + 1000);
+      return { ...t, old };
+    }
+
+    // #397-T06
+    run(
+      "settles the exact cost of a Worker that used its whole drain, also when a claim expired leases meanwhile",
+      async () => {
+        const { fixture, records, old, unknown } = await slowestWorker();
+        await fixture.queue.expireStaleJobs();
+
+        const done = await fixture.queue.complete(
+          old.job.id,
+          old.leaseToken,
+          outcome,
+        );
+
+        expect(done.status).toBe("completed");
+        expect(await records.get(old.job.id)).toMatchObject({
+          state: "settled",
+          settledReason: "superseded",
+          costMicroUsd: 4200,
+        });
+        expect(unknown).toEqual([]);
+      },
+    );
+
+    // #397-T06
+    run(
+      "still takes the report after the claim ran out, for a grace, whether or not a sweep ran in between",
+      async () => {
+        for (const sweep of [false, true]) {
+          const { fixture, records, old, unknown } = await slowestWorker();
+          fixture.clock.advance(
+            SUPERSEDED_DRAIN_MS -
+              (MAX_WORKER_HEARTBEAT_INTERVAL_SECONDS + WORKER_DRAIN_SECONDS) *
+                1000 +
+              1000,
+          );
+          // Past the lease, inside the grace.
+          if (sweep) await fixture.queue.expireStaleJobs();
+
+          const done = await fixture.queue.complete(
+            old.job.id,
+            old.leaseToken,
+            outcome,
+          );
+
+          expect({ sweep, status: done.status }).toEqual({
+            sweep,
+            status: "completed",
+          });
+          expect(await records.get(old.job.id)).toMatchObject({
+            state: "settled",
+            costMicroUsd: 4200,
+          });
+          expect(unknown).toEqual([]);
+        }
+      },
+    );
+
+    // #397-T06
+    run(
+      "refuses a report after the grace, with a sweep in between or not, and the cost is then unknown, never billed twice or guessed",
+      async () => {
+        for (const sweepFirst of [false, true]) {
+          const { fixture, records, old, unknown } = await slowestWorker();
+          fixture.clock.advance(
+            SUPERSEDED_DRAIN_MS + SUPERSEDED_REPORT_GRACE_MS,
+          );
+          if (sweepFirst) await fixture.queue.expireStaleJobs();
+
+          const done = await fixture.queue.complete(
+            old.job.id,
+            old.leaseToken,
+            outcome,
+          );
+          await fixture.queue.expireStaleJobs();
+
+          expect({ sweepFirst, status: done.status }).toEqual({
+            sweepFirst,
+            status: "not_holder",
+          });
+          expect(await records.get(old.job.id)).toMatchObject({
+            state: "settled",
+            settledReason: "superseded",
+            costMicroUsd: null,
+          });
+          // The unknown cost is raised once, by the sweep that settled it, not by the refused report.
+          expect(unknown).toEqual([old.job.id]);
+          expect((await fixture.queue.get(old.job.id))?.result).toBeNull();
+        }
+      },
+    );
+  });
+
+  // #397-T06
+  run(
+    "keeps a superseded run that finished successfully superseded: its cost settles, it is not the baseline of the new run, its head is an attempted one",
+    async () => {
+      const { fixture, records, running } = await start();
+      const old = await running({ headSha: sha("a") });
+      // Jobs created in the same millisecond have no known order (`attemptedShas`).
+      fixture.clock.advance(1000);
+      const pushed = await fixture.enqueue({ headSha: sha("b") });
+      if (pushed.status !== "created")
+        throw new Error("the push was not queued");
+
+      const done = await fixture.queue.complete(old.job.id, old.leaseToken, {
+        ok: true,
+        result: {
+          ...SUPERSEDED_RESULT,
+          ok: true,
+          errorCode: null,
+          commentUrl: "https://github.test/acme/widgets/pull/7#issuecomment-1",
+        },
+      });
+
+      expect(done.status).toBe("completed");
+      expect((await fixture.queue.get(old.job.id))?.status).toBe("superseded");
+      expect(await records.get(old.job.id)).toMatchObject({
+        state: "settled",
+        settledReason: "superseded",
+        costMicroUsd: 4200,
+      });
+      const jobs = createJobsRepository(fixture.db, fixture.workspaceId, {
+        now: fixture.clock.now,
+      });
+      const scope = {
+        repositoryId: fixture.repositoryId,
+        prNumber: 7,
+        reviewKind: "diff" as const,
+        excludeJobId: pushed.job.id,
+      };
+      // Not a succeeded review: the next run does not compare against it, and its comment is a state the publisher accounts for.
+      expect(await jobs.previousReviewedSha(scope)).toBeNull();
+      expect((await jobs.attemptedShas(scope)).shas).toEqual([sha("a")]);
+    },
+  );
+
+  // #397-T04
+  run(
+    "settles the old run and queues the new one in whatever order a push and the report of the old run meet",
+    async () => {
+      const t = await start();
+      for (let round = 0; round < 8; round += 1) {
+        const prNumber = 30 + round;
+        const prUrl = `https://github.test/acme/widgets/pull/${String(prNumber)}`;
+        const old = await t.running({ prNumber, prUrl, headSha: sha("a") });
+        const [pushed, done] = await Promise.all([
+          t.fixture.enqueue({ prNumber, prUrl, headSha: sha("b") }),
+          t.fixture.queue.complete(old.job.id, old.leaseToken, {
+            ok: true,
+            result: { ...SUPERSEDED_RESULT, ok: true, errorCode: null },
+          }),
+        ]);
+
+        expect(done.status).toBe("completed");
+        expect(pushed.status).toBe("created");
+        const final = (await t.fixture.queue.get(old.job.id))?.status;
+        // Whoever came first: the report finished it, or the push superseded it and the report was taken after.
+        expect(["succeeded", "superseded"]).toContain(final);
+        expect(await t.records.get(old.job.id)).toMatchObject({
+          state: "settled",
+          costMicroUsd: 4200,
+        });
+        const running = await t.fixture.db
+          .selectFrom("jobs")
+          .select("id")
+          .where("pr_number", "=", prNumber)
+          .where("status", "=", "running")
+          .execute();
+        expect(running).toEqual([]);
+        expect(
+          pushed.status === "created" &&
+            (await t.fixture.queue.get(pushed.job.id))?.status,
+        ).toBe("queued");
+      }
     },
   );
 });

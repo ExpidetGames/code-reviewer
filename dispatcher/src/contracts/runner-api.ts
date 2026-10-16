@@ -613,6 +613,16 @@ export interface HeartbeatRequest {
   leaseToken: LeaseToken;
   [k: string]: unknown;
 }
+/**
+ * #397: the numbers behind the supersede of a running run, stated once for both sides; a test on each side compares its own constants with these. They are not part of any request or answer. The Worker (#399) learns of the push at its next heartbeat (at most 'maxHeartbeatIntervalSeconds') and drains for at most 'workerDrainSeconds'; the app keeps the claim for 'claimSeconds' from the push (heartbeats answer 'superseded', the report is taken) and takes a report for 'reportGraceSeconds' more, the time before which it does not settle the usage record with an unknown cost. A report after that is refused with 409, like a heartbeat.
+ */
+export interface SupersedeTiming {
+  maxHeartbeatIntervalSeconds?: 60;
+  workerDrainSeconds?: 120;
+  claimSeconds?: 240;
+  reportGraceSeconds?: 60;
+  [k: string]: unknown;
+}
 /*
  */
 export interface HeartbeatResponse {

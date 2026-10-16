@@ -5,6 +5,7 @@
 // Worker), the heartbeat of the superseded claim says so, its report is stored once and the job stays superseded,
 // and the job state call says that it drains.
 import { describe, expect, it } from "vitest";
+import { SUPERSEDED_DRAIN_MS } from "../../src/jobs/supersede-timing.ts";
 import {
   goodResult,
   startRunnerApiHarness,
@@ -118,7 +119,7 @@ describe("the heartbeat of a superseded claim", () => {
     const h = await startRunnerApiHarness();
     const { old, worker } = await supersededWorker(h);
 
-    h.clock.advance(151_000);
+    h.clock.advance(SUPERSEDED_DRAIN_MS + 1000);
     const response = await h.worker.heartbeat(old.id, worker.credential);
 
     expect(response.status).toBe(409);
@@ -222,7 +223,7 @@ describe("the job state call", () => {
     const h = await startRunnerApiHarness();
     const { old, pushed } = await supersededWorker(h);
 
-    h.clock.advance(151_000);
+    h.clock.advance(SUPERSEDED_DRAIN_MS + 1000);
     expect(await (await h.jobState(old.id)).json()).toMatchObject({
       job: { status: "superseded" },
     });

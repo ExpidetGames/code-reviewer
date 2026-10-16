@@ -48,6 +48,7 @@ import type {
 import { encodeJson, formatTimestamp } from "../codecs.ts";
 import { databaseDriver, type DatabaseDriver } from "../driver.ts";
 import type { Database } from "../schema.ts";
+import { SUPERSEDED_REPORT_GRACE_MS } from "../../jobs/supersede-timing.ts";
 import { isJobIndependentRefusal } from "../../usage/enforce-entitlements.ts";
 import { admitClaimedJob, type ClaimRefusal } from "./claim-admission.ts";
 import { claimOldestDueJob, claimOldestDueJobPostgres } from "./jobs-claim.ts";
@@ -886,13 +887,15 @@ export function createRunnerJobsRepository(
         if (finished !== undefined) {
           // Settled from what the runner reported, in the same transaction as the job's end.
           const settlement = settlementOfOutcome(outcome);
-          await createUsageRecordsRepository(
+          const settled = await createUsageRecordsRepository(
             trx,
             finished.workspace_id,
             now,
           ).settle(finished.id, settlement);
-          // #361: no cost limit bounds a run without a cost; it is reported so it can be watched.
+          // #361: no cost limit bounds a run without a cost; it is reported so it can be watched (once: when this
+          // call settled the record, not when it was settled already).
           if (
+            settled &&
             settlement.state === "settled" &&
             settlement.costMicroUsd === null
           )
@@ -923,6 +926,16 @@ export function createRunnerJobsRepository(
               ? { status: "already_completed", job }
               : { status: "outcome_conflict", job };
           const timestamp = formatTimestamp(now());
+          // The claim lasts the drain window and the report is taken for a grace after it, the time before which
+          // the sweep does not settle the record (`closeRecordsOfEndedJobs`). Later the record is (or may be)
+          // settled with an unknown cost already, and a record is settled once: the report is refused, like a
+          // heartbeat, instead of being stored with a cost that is not applied.
+          if (
+            row.lease_expires_at === null ||
+            Date.parse(row.lease_expires_at) + SUPERSEDED_REPORT_GRACE_MS <=
+              now().getTime()
+          )
+            return { status: "not_holder" };
           const stored = await trx
             .updateTable("jobs")
             .set({
@@ -937,12 +950,13 @@ export function createRunnerJobsRepository(
             .executeTakeFirst();
           if (stored === undefined) return { status: "not_holder" };
           const settlement = settlementOfSupersededOutcome(outcome);
-          await createUsageRecordsRepository(
+          const settled = await createUsageRecordsRepository(
             trx,
             stored.workspace_id,
             now,
           ).settle(stored.id, settlement);
           if (
+            settled &&
             settlement.state === "settled" &&
             settlement.costMicroUsd === null
           )

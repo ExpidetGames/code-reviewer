@@ -6,6 +6,8 @@
 // jobs of one workspace is `voidEndedJobs()` of usage-records-repository.ts.
 import "server-only";
 import { sql, type Kysely } from "kysely";
+import { SUPERSEDED_REPORT_GRACE_MS } from "../../jobs/supersede-timing.ts";
+import { formatTimestamp } from "../codecs.ts";
 import type { Database } from "../schema.ts";
 import {
   NO_RESULT_JOB_ERROR_CODES,
@@ -24,7 +26,7 @@ const ENDED_JOB_STATUSES = ["succeeded", "failed", "cancelled", "superseded"];
  *   limit, its runner was shut down on the last attempt) may have used the model: its record is `settled` with an
  *   unknown cost and unknown tokens, and the reason `no_result`. Counting it is the conservative reading (#273).
  * - A run that was superseded while it ran (#397) has its record marked `superseded` and keeps it reserved while its
- *   Worker drains. When the claim ran out without a report (the drain is over), the record is `settled` with an
+ *   Worker drains. When the claim ran out, and the grace for a late report after it, without a report, the record is `settled` with an
  *   unknown cost and unknown tokens: the model may have been in use for the request in flight, and nothing is
  *   guessed. It does not count as a run of the quota (the reason), and an unknown cost is never billed.
  * - Any other ended job (cancelled, replaced while it waited, refused at claim, given back before the runner began,
@@ -61,6 +63,9 @@ export async function closeRecordsOfEndedJobs(
     )
     .returning(["workspace_id", "job_id"])
     .execute();
+  const reportsClosedBefore = formatTimestamp(
+    new Date(Date.parse(settledAt) - SUPERSEDED_REPORT_GRACE_MS),
+  );
   const drained = await executor
     .updateTable("usage_records")
     .set({ state: "settled", settled_at: settledAt })
@@ -74,7 +79,8 @@ export async function closeRecordsOfEndedJobs(
           .whereRef("jobs.id", "=", "usage_records.job_id")
           .where("jobs.status", "=", "superseded")
           .where("jobs.claimed_at", "is not", null)
-          .where("jobs.lease_expires_at", "<=", settledAt),
+          // The claim ran out and the grace for a late report too (`SUPERSEDED_REPORT_GRACE_MS`).
+          .where("jobs.lease_expires_at", "<=", reportsClosedBefore),
       ),
     )
     .returning(["workspace_id", "job_id"])

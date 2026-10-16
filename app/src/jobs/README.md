@@ -142,11 +142,13 @@ settings change (and the cancellation) back. The hook is `createJobReviewSetting
      person started (`comment`, `manual`) is never superseded, and a person's job never supersedes anything.
 
    A superseded **running** job **drains**: it keeps `runner_id`, its lease token and its claim time; `finished_at` is
-   set; `lease_expires_at` is set to the drain window (`SUPERSEDED_DRAIN_MS`, 150 seconds) and is not extended
+   set; `lease_expires_at` is set to the claim window (`SUPERSEDED_DRAIN_MS` in `supersede-timing.ts`, 240 seconds: the Worker's next heartbeat, at most 60, its own drain, 120, and a margin) and is not extended
    by heartbeats. Its heartbeats are answered `superseded` (`job.superseded: true`) while the window lasts, so
    its Worker stops sending model requests, finishes the ones in flight and reports; its **report is accepted
-   once** and stored (the job stays `superseded`; it settles the usage record, below). When the window ends without
-   a report, the next claim, sweep or request that expires leases settles the record with an unknown cost.
+   once** and stored (the job stays `superseded`; it settles the usage record, below), also a little after the window
+   (a grace of 60 seconds, `SUPERSEDED_REPORT_GRACE_MS`). Only when window and grace are over without a report does the
+   next claim, sweep or request that expires leases settle the record with an unknown cost; a report after that is
+   refused (`409`).
    The unique index that allows one running job per pull request (`jobs_one_running_per_pull_request_unique`) is on
    `status = 'running'`, so the draining job does not hold the pull request: **the new job is claimable at
    once** and both run for a short time. `attemptedShas` names the head of a superseded job that ran, like a failed

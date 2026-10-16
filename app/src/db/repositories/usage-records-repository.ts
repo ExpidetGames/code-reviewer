@@ -97,9 +97,10 @@ export type UsageRecordsRepository = {
   /**
    * Ends the record of a job: `settled` with the cost and tokens, or `void`. Only a `reserved` record
    * changes, so repeating it does nothing. A job without a record (it was claimed before records existed)
-   * gets one in its final state, with key mode `own`.
+   * gets one in its final state, with key mode `own`. Returns whether this call changed or created the record
+   * (false: it was final already, or the job is not this workspace's).
    */
-  settle(jobId: string, settlement: UsageSettlement): Promise<void>;
+  settle(jobId: string, settlement: UsageSettlement): Promise<boolean>;
   /**
    * Voids the `reserved` records of this workspace whose job has ended without reporting (cancelled, replaced,
    * or otherwise final), so a run that was dropped while it waited again no longer counts. Called in the
@@ -214,7 +215,7 @@ export function createUsageRecordsRepository(
 
     async settle(jobId, settlement) {
       const job = await jobOf(jobId);
-      if (job === undefined) return;
+      if (job === undefined) return false;
       const timestamp = formatTimestamp(now());
       const final =
         settlement.state === "settled"
@@ -235,7 +236,7 @@ export function createUsageRecordsRepository(
               settled_reason: null,
             };
       // One statement: a reserved record is ended, a final one is left alone, a missing one is created.
-      await db
+      const changed = await db
         .insertInto("usage_records")
         .values({
           id: newId(),
@@ -254,7 +255,9 @@ export function createUsageRecordsRepository(
             .where("usage_records.state", "=", "reserved")
             .where("usage_records.workspace_id", "=", workspaceId),
         )
-        .execute();
+        .returning("id")
+        .executeTakeFirst();
+      return changed !== undefined;
     },
 
     async markSuperseded(jobIds) {

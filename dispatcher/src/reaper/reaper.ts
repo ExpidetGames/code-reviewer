@@ -10,7 +10,8 @@
 //   - older than its maximum lifetime: stopped, whatever the App says (its own timeout, or the configured one, plus a
 //     grace period: by then the platform's own timeout has failed to end it)
 //   - a canary (no job): kept, only its lifetime ends it
-//   - a job VM: stopped when the App says its job is not `running`; kept when it is, and kept when the App's answer
+//   - a job VM: stopped when the App says its job is not `running`; kept when it is, kept while the job is draining (a
+//     superseded run whose Worker is finishing its requests and reporting, #397), and kept when the App's answer
 //     cannot be read (fail safe: only the lifetime stops it then)
 //
 // Stopping is by the listed name; a failed stop is counted and retried by the next run. Nothing here logs a credential

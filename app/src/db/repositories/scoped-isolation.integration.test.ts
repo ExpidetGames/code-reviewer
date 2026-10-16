@@ -825,7 +825,8 @@ const CASES: Case[] = [
         promptTokens: 1,
         completionTokens: 1,
       }),
-    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+    // Another workspace's job is not there: nothing was settled.
+    expectAnswer: (answer) => expect(answer).toBe(false),
   },
   {
     name: "usage.markSuperseded",

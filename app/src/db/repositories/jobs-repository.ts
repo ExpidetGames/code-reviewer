@@ -46,6 +46,7 @@ import {
   type Job,
   type JobErrorCode,
 } from "../../jobs/job-types.ts";
+import { SUPERSEDED_DRAIN_MS } from "../../jobs/supersede-timing.ts";
 import { databaseDriver } from "../driver.ts";
 import { decodeJson, formatTimestamp } from "../codecs.ts";
 import type { Database, JobsTable } from "../schema.ts";
@@ -83,16 +84,9 @@ export type PreviousReviewedShaInput = {
   excludeJobId: string;
 };
 
-/**
- * #397: how long the claim of a run that was superseded stays valid, so that its Worker can finish the model
- * requests in flight and report what they cost. The Worker ends its run by itself within `SUPERSEDED_DRAIN_SECONDS`
- * (120) of being told; this is a little more.
- */
-export const SUPERSEDED_DRAIN_MS = 150_000;
-
 export type JobsRepositoryOptions = {
   now?: () => Date;
-  /** #397: see `SUPERSEDED_DRAIN_MS`. */
+  /** #397: see `jobs/supersede-timing.ts`. */
   supersededDrainMs?: number;
   newId?: () => string;
   /**
@@ -508,12 +502,13 @@ export function createJobsRepository(
             .where("status", "=", "running")
             .where("accepts_supersede", "=", 1)
             .execute();
-          const waitingIds = waiting.map((row) => row.id);
-          const runningIds = running.map((row) => row.id);
-          supersededJobIds = [...waitingIds, ...runningIds];
           const records = createUsageRecordsRepository(trx, workspaceId, now);
-          if (waitingIds.length > 0) {
-            await trx
+          // The ids come from the rows the updates changed, not from the selects: the list stays honest whatever
+          // the locking does.
+          const droppedIds: string[] = [];
+          const drainingIds: string[] = [];
+          if (waiting.length > 0) {
+            const changed = await trx
               .updateTable("jobs")
               .set({
                 status: "superseded",
@@ -521,12 +516,18 @@ export function createJobsRepository(
                 finished_at: timestamp,
                 updated_at: timestamp,
               })
-              .where("id", "in", waitingIds)
+              .where(
+                "id",
+                "in",
+                waiting.map((row) => row.id),
+              )
               .where("status", "=", "queued")
+              .returning("id")
               .execute();
+            droppedIds.push(...changed.map((row) => row.id));
           }
-          if (runningIds.length > 0) {
-            await trx
+          if (running.length > 0) {
+            const changed = await trx
               .updateTable("jobs")
               .set({
                 status: "superseded",
@@ -537,15 +538,22 @@ export function createJobsRepository(
                 ),
                 updated_at: timestamp,
               })
-              .where("id", "in", runningIds)
+              .where(
+                "id",
+                "in",
+                running.map((row) => row.id),
+              )
               .where("status", "=", "running")
+              .returning("id")
               .execute();
+            drainingIds.push(...changed.map((row) => row.id));
             // Its record stays reserved until the Worker reports (or the drain ends), but it is marked: a
             // superseded run is not a run of the quota (src/usage/README.md).
-            await records.markSuperseded(runningIds);
+            await records.markSuperseded(drainingIds);
           }
+          supersededJobIds = [...droppedIds, ...drainingIds];
           // Only when jobs were replaced: the reserved records of the waiting ones no longer count.
-          if (supersededJobIds.length > 0) await records.voidEndedJobs();
+          if (droppedIds.length > 0) await records.voidEndedJobs();
         }
 
         return { status: "created", job: toJob(inserted), supersededJobIds };

@@ -389,7 +389,7 @@ billed, until its own timeout (job timeout plus margin). The reaper is the secon
   margin for a canary; plus two minutes of grace; a reported timeout above the longest possible one is not believed):
   stopped, whatever the App says. A canary has no job, so only that ends it. A job VM: stopped when the App says its job
   is not `running` (`GET /api/runners/v1/jobs/{id}` with the dispatcher credential, one call per job).
-- **A draining job (#397).** A superseded job whose claim is still valid (`draining: true` in the job state): its Worker is finishing the model requests in flight and reporting what they cost. The VM stays until the claim ends (the Worker's report, or the App's drain window of 150 seconds), then it is a leftover like any other. An App that does not send the field, or a Dispatcher that does not read it, treats a superseded job as ended.
+- **A draining job (#397).** A superseded job whose claim is still valid (`draining: true` in the job state): its Worker is finishing the model requests in flight and reporting what they cost. The VM stays until the claim ends (the Worker's report, or the App's claim window of 240 seconds), then it is a leftover like any other. An App that does not send the field, or a Dispatcher that does not read it, treats a superseded job as ended.
 - **Fail safe.** If the App's answer cannot be read (no answer, a refusal, a server error, an App without the call, an
   unknown job or status, a body of another shape) the VM is kept: only its lifetime can stop it then. A failed listing
   stops nothing and answers `500 REAP_LIST_FAILED`.
