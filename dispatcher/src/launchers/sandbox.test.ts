@@ -771,6 +771,119 @@ describe("findings of the review of #354", () => {
   );
 });
 
+/** What the Launcher tells the core when the Worker's container ends after the hand-over (#375). */
+describe("the Sandbox-Launcher and the end of a Worker that took over", () => {
+  /** A launched job whose spec brings a recording `onWorkerExit`. */
+  async function handedOver(report: (exitCode: number) => Promise<void>) {
+    const launcher = build();
+    const calls: number[] = [];
+    const result = await launch(
+      launcher,
+      spec({
+        onWorkerExit: (exitCode) => {
+          calls.push(exitCode);
+          return report(exitCode);
+        },
+      }),
+    );
+    expect(result).toStrictEqual({ ok: true });
+    return { launcher, calls, name: service.creates[0]?.name ?? "" };
+  }
+
+  // #375-T01
+  it("tells the core the exit code when the container ends with an error after the hand-over, and stops the VM", async () => {
+    const { launcher, calls, name } = await handedOver(() => Promise.resolve());
+
+    service.exitProcess(name, 2);
+    await launcher.idle();
+
+    expect(calls).toStrictEqual([2]);
+    expect(service.stops).toStrictEqual([name]);
+    expect(logger.text()).toContain('"exitCode":2');
+    expect(logger.text()).not.toContain(CREDENTIAL);
+  });
+
+  // #375-T04
+  it("tells the core nothing when the container ends with 0, and still stops the VM", async () => {
+    const { launcher, calls, name } = await handedOver(() => Promise.resolve());
+
+    service.exitProcess(name, 0);
+    await launcher.idle();
+
+    expect(calls).toStrictEqual([]);
+    expect(service.stops).toStrictEqual([name]);
+  });
+
+  // #375-T05
+  it("tells the core nothing and leaves the VM alone when the wait for the container fails", async () => {
+    const { launcher, calls, name } = await handedOver(() => Promise.resolve());
+
+    service.failWaits(10, new Error("the log stream broke"));
+    service.dropWaits(name, new Error("the log stream broke"));
+    const idle = launcher.idle();
+    await settle();
+    await clock.advance(120_000);
+    await idle;
+
+    expect(calls).toStrictEqual([]);
+    expect(service.stops).toStrictEqual([]);
+    expect(service.running()).toStrictEqual([name]);
+    expect(logger.text()).toContain("worker_wait_failed");
+  });
+
+  // #375-T05
+  it("does not tell the core of a container that ended with an error before the hand-over: the launch fails instead", async () => {
+    const launcher = build();
+    const calls: number[] = [];
+    const ended = launcher
+      .launch(
+        spec({
+          onWorkerExit: (exitCode) => {
+            calls.push(exitCode);
+            return Promise.resolve();
+          },
+        }),
+        new AbortController().signal,
+      )
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+    await settle();
+    service.exitProcess(service.creates[0]?.name ?? "", 2);
+
+    expect(((await ended) as LaunchError).code).toBe("worker_exited_early");
+    await launcher.idle();
+    // The core releases that job with launch_failed once; a second release for the same end would count twice.
+    expect(calls).toStrictEqual([]);
+  });
+
+  // #375-T07
+  it("stops the VM even when the core's answer fails or never comes", async () => {
+    const failing = await handedOver(() =>
+      Promise.reject(new Error(`boom ${CREDENTIAL}`)),
+    );
+    service.exitProcess(failing.name, 137);
+    await failing.launcher.idle();
+    expect(service.stops).toStrictEqual([failing.name]);
+    expect(logger.text()).toContain("worker_exit_report_failed");
+    expect(logger.text()).not.toContain(CREDENTIAL);
+  });
+
+  // #375-T07
+  it("does not hold the VM back while the core is still talking to the App", async () => {
+    const { calls, name } = await handedOver(
+      () => new Promise(() => undefined),
+    );
+
+    service.exitProcess(name, 2);
+    await settle();
+
+    expect(calls).toStrictEqual([2]);
+    expect(service.stops).toStrictEqual([name]);
+  });
+});
+
 describe("the Sandbox-Launcher in the Dispatcher core", () => {
   // #329-T12
   it("makes the core release the job with launch_failed and count the attempt when the platform refuses", async () => {
@@ -811,6 +924,55 @@ describe("the Sandbox-Launcher in the Dispatcher core", () => {
       expect(logger.text()).toContain("sandbox_quota_exceeded");
       expect(logger.text()).toContain('"retryable":true');
       expect(logger.text()).not.toContain(DISPATCHER_TOKEN);
+    } finally {
+      await app.close();
+    }
+  });
+
+  // #375-T01
+  it("makes the core release the job with worker_exited at once when the Worker's container ends with 2 after the hand-over", async () => {
+    const app = await startApp();
+    try {
+      const jobId = app.enqueue();
+      const core = createDispatcherCore({
+        settings: settingsFor(app.url, { engines: ["pr-agent"] }),
+        launcher: build(),
+        logger,
+        clock,
+      });
+      const started = core.handle({ jobId, reviewKind: "diff" });
+      // The claim goes over real HTTP: the container is started when the App has answered, not after a fixed wait.
+      await waitFor(() => dockerRun() !== undefined, "the container to start");
+      await settle();
+      await clock.advance(SANDBOX_HANDOVER_SECONDS * 1000);
+      const result = await started;
+      expect(result.outcome).toBe("started");
+      if (result.outcome !== "started") return;
+      await result.background;
+      // The Worker took over and the core is done with the launch: nothing released yet.
+      expect(
+        app.requests().filter((request) => request.route === "release"),
+      ).toStrictEqual([]);
+
+      service.exitProcess(service.creates[0]?.name ?? "", 2);
+      // The App answered, and the core has logged what it did with the answer.
+      await waitFor(
+        () => logger.text().includes('"reason":"worker_exited"'),
+        "the release",
+      );
+
+      expect(
+        app.requests().filter((request) => request.route === "release"),
+      ).toStrictEqual([
+        { method: "POST", route: "release", jobId, status: 200 },
+      ]);
+      expect(logger.text()).toContain('"reason":"worker_exited"');
+      expect(logger.text()).not.toContain(DISPATCHER_TOKEN);
+      expect(logger.text()).not.toContain(CREDENTIAL);
+      // The job is queued again for the next claim.
+      expect((await core.handle({ jobId, reviewKind: "diff" })).outcome).toBe(
+        "started",
+      );
     } finally {
       await app.close();
     }

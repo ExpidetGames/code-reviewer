@@ -89,6 +89,16 @@ export type HostedDispatcher = {
   holdWorkers(on: boolean): void;
   /** The next `count` VM creations fail like a platform that is down. */
   failNextCreations(count: number): void;
+  /**
+   * From now on every Worker container lives past the hand-over and then ends with `exitCode`, without a result (a Worker
+   * that took over and died); `null` lets them run again. Not the probe's container.
+   */
+  endWorkersWith(exitCode: number | null): void;
+  /**
+   * From now on the Dispatcher cannot see how a Worker container ends (its `wait()` fails like a broken log stream,
+   * `worker_wait_failed`): it releases nothing and the lease is the only safeguard. `false` ends it for later containers.
+   */
+  breakWaits(on: boolean): void;
   /** Ends the whole tree of a container at once, like a container that is killed. */
   killContainer(container: Container): void;
   /** SIGTERM, then SIGKILL. Everything the process started is stopped with it. */
@@ -162,6 +172,9 @@ export async function startHostedDispatcher(options: {
   mkdirSync(absolute(hostedEnv.controlDirectory), { recursive: true });
   const gate = absolute(`${hostedEnv.controlDirectory}/hold-workers`);
   rmSync(gate, { force: true });
+  const exitFile = absolute(`${hostedEnv.controlDirectory}/exit-workers`);
+  rmSync(exitFile, { force: true });
+  rmSync(absolute(`${hostedEnv.controlDirectory}/break-wait`), { force: true });
 
   const environment: Record<string, string> = {
     PATH: process.env.PATH ?? "",
@@ -190,6 +203,7 @@ export async function startHostedDispatcher(options: {
     E2E_DOCKER_DIR: absolute(hostedEnv.dockerDirectory),
     E2E_WORKER_COMMAND: program,
     E2E_WORKER_GATE: gate,
+    E2E_WORKER_EXIT_FILE: exitFile,
     E2E_WORKER_ONCE_UNSET: (
       options.unsetForWorkerOnce ?? ["RUNNER_DIFF_JOB_USER"]
     ).join(" "),
@@ -285,6 +299,15 @@ export async function startHostedDispatcher(options: {
     holdWorkers(on) {
       if (on) writeFileSync(gate, "");
       else rmSync(gate, { force: true });
+    },
+    breakWaits(on) {
+      const file = absolute(`${hostedEnv.controlDirectory}/break-wait`);
+      if (on) writeFileSync(file, "");
+      else rmSync(file, { force: true });
+    },
+    endWorkersWith(exitCode) {
+      if (exitCode === null) rmSync(exitFile, { force: true });
+      else writeFileSync(exitFile, String(exitCode));
     },
     failNextCreations(count) {
       writeFileSync(

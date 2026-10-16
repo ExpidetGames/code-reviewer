@@ -421,6 +421,79 @@ describe("the release", () => {
     });
   });
 
+  // #375-T02
+  it("stores worker_exited as the error code of a job whose Worker keeps ending with an error, after counting each attempt", async () => {
+    const h = await startRunnerApiHarness();
+    const job = await h.enqueueNew();
+    const statuses: string[] = [];
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const credential = await claimFor(h, job.id);
+      const response = await h.release(job.id, {
+        credential,
+        reason: "worker_exited",
+      });
+      expect(response.status).toBe(200);
+      statuses.push((await response.json()).job.status);
+    }
+
+    expect(statuses).toStrictEqual(["queued", "queued", "failed"]);
+    expect(await h.queue.get(job.id)).toMatchObject({
+      status: "failed",
+      errorCode: "worker_exited",
+      attempts: 3,
+    });
+  });
+
+  // #375-T03
+  it("answers a release of a job that already delivered its result as a no-op, and the result stands", async () => {
+    const h = await startRunnerApiHarness();
+    const job = await h.enqueueNew();
+    const credential = await claimFor(h, job.id);
+    await h.worker.result(job.id, credential);
+    const before = await h.snapshotJobs();
+
+    const response = await h.release(job.id, {
+      credential,
+      reason: "worker_exited",
+      retryAfterSeconds: 30,
+    });
+
+    expect(response.status).toBe(409);
+    expect((await errorOf(response)).code).toBe("RUNNER_JOB_ENDED");
+    expect(await h.snapshotJobs()).toStrictEqual(before);
+    expect(await h.queue.get(job.id)).toMatchObject({
+      status: "succeeded",
+      attempts: 0,
+    });
+  });
+
+  // #375-T06
+  it("refuses a release with a stale credential after a requeue and a new claim, and the new claim is untouched", async () => {
+    const h = await startRunnerApiHarness();
+    const job = await h.enqueueNew();
+    const first = await claimFor(h, job.id);
+    // The first Worker's lease lapses and the job is claimed again.
+    h.clock.advance(3 * MINUTE);
+    const second = await claimFor(h, job.id);
+    const before = await h.snapshotJobs();
+
+    const response = await h.release(job.id, {
+      credential: first,
+      reason: "worker_exited",
+    });
+
+    expect(response.status).toBe(401);
+    expect((await errorOf(response)).code).toBe("WORKER_CREDENTIAL_INVALID");
+    expect(await h.snapshotJobs()).toStrictEqual(before);
+    expect(await h.queue.get(job.id)).toMatchObject({ status: "running" });
+    // The second claim still holds the job: it can heartbeat and give it back itself.
+    expect(
+      (await h.release(job.id, { credential: second, reason: "worker_exited" }))
+        .status,
+    ).toBe(200);
+  });
+
   // #322-T09
   it("is refused with the credential of another job, and nothing changes", async () => {
     const h = await startRunnerApiHarness();

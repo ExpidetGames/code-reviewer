@@ -65,6 +65,8 @@ export const ERROR_COPY: Readonly<Record<string, string>> = {
     "The server could not prepare this run, even after several tries.",
   launch_failed:
     "The worker for this run could not be started, even after several tries.",
+  worker_exited:
+    "The worker for this run stopped with an error before it reported a result, even after several tries.",
 
   // The runner
   invalid_job: "The runner refused the job because it was incomplete.",

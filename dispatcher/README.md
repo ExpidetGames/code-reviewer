@@ -66,7 +66,15 @@ runs that kind; nothing is claimed), `429` or `503` with `Retry-After`.
    job credential every `heartbeatIntervalSeconds` so the two minute lease does not lapse. The launch has five
    minutes. At the deadline, or on a shutdown, the signal aborts and the job is released with `launch_failed` (the
    App counts it as a failed attempt). When a heartbeat shows the lease is lost the launch is stopped and nothing is
-   released. The credential is held in memory only, in the scope of that one launch, and is dropped after the hand-over.
+   released. The credential is held in memory only: in the scope of that one launch, and, for a Launcher that watches the
+   Worker after the hand-over (the Sandbox-Launcher), in the callback `spec.onWorkerExit` until that supervision ends.
+   After the hand-over the core never heartbeats again: the Worker owns the lease.
+   When that callback is called with a non-zero exit code, the core releases the job with `worker_exited` instead of
+   waiting about two minutes for the lease to lapse (#375). Exit 0 releases nothing. The call is made by the App against the
+   job credential: a job that already has its result, or that a newer claim holds, is answered `409`/`401` and nothing
+   changes (a `409`, the expected answer after a Worker that delivered its result and exited 1, is logged at info as
+   `release_job_ended`; a `401`/`404` as the warning `release_not_holder`; neither is retried). The release is tried three times; if the App cannot be
+   reached it logs `release_failed` with the reason and the lease ends the job as before.
 6. Logs go through a masker: the dispatcher token, the signing secrets and anything shaped like a job credential or an
    `Authorization` value are replaced. Only stable codes are logged for an error, never its text.
 
@@ -150,7 +158,13 @@ Per job, after the core has claimed it:
    22.6 s with a running container, so the container ends first). A `wait()` that fails (a broken log stream or network
    during a long job) is asked again, three tries in all; if it still fails, what became of the container is unknown, so
    the VM is **not** stopped under a Worker that may be reviewing: `worker_wait_failed` is logged and the VM timeout ends
-   it. There is no `poweroff` in the image (spike T13).
+   it, and **nothing is released** (what became of the Worker is unknown, the lease is the safeguard). There is no
+   `poweroff` in the image (spike T13).
+   A confirmed end with a **non-zero** exit code (a setup error 2, a crash, an out-of-memory kill 137, a Worker that
+   failed to deliver its result with 1) is also reported to the core (`spec.onWorkerExit`, #375), at the same time as the
+   VM is stopped: the core releases the job with `worker_exited` and the App counts a lost attempt. Exit 0 reports nothing.
+   An exit with an error _before_ the hand-over is not reported this way: the launch fails with `worker_exited_early` and the
+   core releases the job once, with `launch_failed`.
 
 **The function lifetime and the VM timeout.** The supervision of step 5 is work held in `waitUntil`, so it lives as long as
 the Dispatcher's function may. `vercel.json` sets `maxDuration` of `src/index.ts` explicitly to **1800 s** and the region
@@ -162,7 +176,9 @@ creation. A reaper that stops leftover VMs by their tags is a follow-up of #316,
 
 Every failure before the hand-over stops the VM by name and ends in a `LaunchError` with a stable code and a `retryable`
 flag. The core releases the job with `launch_failed` and the App counts the attempt (three attempts, then `failed`), no
-matter whether the flag is set; it is for logs and for the operator.
+matter whether the flag is set; it is for logs and for the operator. A Worker that ends with an error _after_ the hand-over
+is released the same way with the reason `worker_exited` (the Runs page shows that code; log lines `worker_exited` with the
+`exitCode`, then `released`, `release_job_ended`, `release_not_holder` or `release_failed`, each with the `reason`).
 
 | Code                                                                      | Retryable                    | Cause                                                                                                                                                                                                                                                                                |
 | ------------------------------------------------------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |

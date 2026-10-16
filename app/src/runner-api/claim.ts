@@ -104,6 +104,8 @@ export const CLAIM_RELEASE_REASONS = [
   "claim_failed",
   // #320: the Dispatcher could not start the Worker (reported with the Worker API's result call).
   "launch_failed",
+  // #375: the Worker's container ended with an error before it reported a result (the Dispatcher's release call).
+  "worker_exited",
 ] as const;
 
 /** When the platform does not say how long to wait. */

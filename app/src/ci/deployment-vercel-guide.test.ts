@@ -686,7 +686,7 @@ describe("the hosted deployment guide as a procedure", () => {
   });
 
   // #333-e2e
-  it("points to the hosted e2e lane that exists, no longer calls #332 pending, and states the Worker-exit limit with its follow-up", () => {
+  it("points to the hosted e2e lane that exists, no longer calls #332 pending, and states what still relies on the lease after #375", () => {
     const limits = flat(section("## 9. Known limits and what is not verified"));
     const ci = read(".github/workflows/ci.yml");
 
@@ -698,11 +698,13 @@ describe("the hosted deployment guide as a procedure", () => {
     expect(limits).toContain("`E2E_DATABASE_URL`");
     expect(guide).not.toMatch(/#332[^\n]*pending/i);
     expect(guide).not.toMatch(/pending[^\n]*#332/i);
+    // #375: a Worker that exits with an error is released at once; the lease stays the safeguard where the end is not seen.
     expect(limits).toContain(
-      "A Worker that exits non-zero before it has reported a result holds its slot until its lease lapses",
+      "A Worker whose end the Dispatcher does not see still holds its slot until its lease lapses",
     );
-    expect(limits).toContain("follow-up #375");
-    expect(section("## 10. Follow-ups")).toContain("- #375:");
+    expect(limits).toContain("`worker_wait_failed`");
+    expect(limits).not.toContain("follow-up #375");
+    expect(section("## 10. Follow-ups")).not.toContain("- #375:");
     expect(limits).toContain("on **your** Postgres provider");
   });
 

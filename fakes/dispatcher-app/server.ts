@@ -375,6 +375,9 @@ export async function startDispatcherAppFake(
       typeof body.reason !== "string"
     )
       return errorReply(401, "WORKER_CREDENTIAL_INVALID");
+    // Like the App: a job that has its result is not given back, and its result stands (#375).
+    if (job.status === "succeeded" || job.status === "failed")
+      return errorReply(409, "RUNNER_JOB_ENDED");
     const status = requeue(job);
     return { status: 200, body: { version: 1, job: { id: job.id, status } } };
   }
