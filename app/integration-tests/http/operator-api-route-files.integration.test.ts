@@ -45,6 +45,8 @@ async function loadRoutes() {
     (await import("../../src/app/api/operator/v1/[...path]/route.ts")) as unknown as Route;
   const usage =
     (await import("../../src/app/api/operator/v1/usage/route.ts")) as unknown as Route;
+  const unknownCost =
+    (await import("../../src/app/api/operator/v1/usage/unknown-cost/route.ts")) as unknown as Route;
   const workspaceUsage =
     (await import("../../src/app/api/operator/v1/workspaces/[id]/usage/route.ts")) as unknown as Route;
   const usageSummary =
@@ -61,6 +63,7 @@ async function loadRoutes() {
     defaults,
     rest,
     usage,
+    unknownCost,
     workspaceUsage,
     usageSummary,
     planManagement,
@@ -264,6 +267,40 @@ describe("the operator API route files while the API is on", () => {
     });
     expect(mine.status).toBe(200);
     expect(await summary.json()).toMatchObject({ workspaceId, groups: [] });
+    expect(wrong.status).toBe(401);
+  });
+
+  // #385-T01
+  it("serve the count of unknown costs through the real wiring, and refuse a wrong token", async () => {
+    vi.stubEnv("OPERATOR_API_TOKEN", TOKEN);
+    await startDatabase();
+    const routes = await loadRoutes();
+    const query = "from=2026-10-01T00:00:00.000Z&to=2026-11-01T00:00:00.000Z";
+    const withQuery = (token: string) =>
+      new Request(
+        `https://app.test/api/operator/v1/usage/unknown-cost?${query}`,
+        {
+          method: "GET",
+          headers: { authorization: `Bearer ${token}` },
+        },
+      );
+
+    const counts = (await routes.unknownCost.GET(
+      withQuery(TOKEN) as never,
+    )) as Response;
+    const wrong = (await routes.unknownCost.GET(
+      withQuery("wrong") as never,
+    )) as Response;
+
+    // A fresh instance has nothing unknown to count: nothing is listed and nothing was written for it.
+    expect(counts.status).toBe(200);
+    expect(await counts.json()).toEqual({
+      version: 1,
+      from: "2026-10-01T00:00:00.000Z",
+      to: "2026-11-01T00:00:00.000Z",
+      counts: [],
+      nextAfter: null,
+    });
     expect(wrong.status).toBe(401);
   });
 

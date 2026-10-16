@@ -11,6 +11,7 @@ counting. It measures nothing itself: it stores the `usage.costUsd` that the run
 | `../db/repositories/usage-records-repository.ts` | Scoped to one workspace: `reserve`, `setKeyMode`, `settle`, `get` and the three reads |
 | `enforce-entitlements.ts`                        | Pure: `decideAdmission`, the order of the checks of a claim (below)                   |
 | `unknown-cost-alert.ts`                          | Pure: the one log line for a run that settled without a cost (#361, below)            |
+| `../db/repositories/usage-feed-repository.ts`    | Instance level: the feed of settled records and the count of unknown costs (#385)     |
 | `plan-view.ts`, `usage-summary.ts`               | The plan page's view of a workspace and the read that builds it (#282, below)         |
 | `http.ts`, `shared.ts`, `ui/`                    | The polling answer of the plan page, its wiring and the page (#282, below)            |
 | `../db/repositories/claim-admission.ts`          | Instance level: resolves the entitlements inside the claim transaction and decides    |
@@ -144,9 +145,9 @@ entitlements still stop it, and its record is then voided.
   workspace id and nothing else (`unknownCostAlertLine`, `onUnknownCostSettled`; no figure, no model, no name): a run
   that settled with a usage whose cost is missing (`complete`), and a run that ended with no result (`no_result`: the
   sweep returns what it settled). A lost lease that is requeued settles nothing and raises nothing. A queue built on a database
-  that is already a transaction reports nothing, as it cannot see its caller's commit. The operator API's summary lists the same runs (`unknownCostCount`) for a
-  reader that prefers to poll. Alerting on the line (or the count) is the operator's way of watching what the limit
-  cannot bound.
+  that is already a transaction reports nothing, as it cannot see its caller's commit. The operator API counts the same runs per workspace and key mode (below), for a
+  reader that polls instead of reading logs. Alerting on the line (or the count) is the operator's way of watching
+  what the limit cannot bound.
 - **Locking.** The claim already runs under the instance gate lock of the queue (Postgres) or the write lock of the
   connection (SQLite), which serializes claims. On Postgres the workspace row is also locked `for no key update` (an
   insert that only references it does not wait), so the count stays exact if the gate is ever narrowed. The lock and
@@ -187,7 +188,8 @@ workspace (#282, below).
 - `summarize({ from, to })`: the runs that started in `[from, to)` (the period rule of the counts), per review kind and
   key mode: runs that count, settled runs, the sum of the known cost, settled runs with an unknown cost.
 - The instance level `usage-feed-repository.ts` (`pageSettled({ after, limit, settledBefore? })`) is the same page for
-  **every** workspace, for the operator API's feed. It is classified as instance level in `scoping.test.ts`: it only
+  **every** workspace, for the operator API's feed; its `unknownCostCounts({ from, to, after?, limit })` counts the
+  runs that settled without a cost per workspace and key mode (#385, below). It is classified as instance level in `scoping.test.ts`: it only
   reads, and every record names its workspace.
 
 ### The feed and the safety lag
@@ -205,6 +207,47 @@ anyway. `integration-tests/http/operator-api-usage.integration.test.ts` and
 the guarantee.
 
 Records are small and kept; there is no retention job.
+
+## Counting unknown costs (#385)
+
+A cost limit adds up known costs only (above), so the operator has to be able to see the runs it cannot bound,
+**per workspace and per key mode**: the key mode decides which limit is leaking (`managedCostLimitMicroUsd` for the
+operator's key, `ownKeyCostLimitMicroUsd` for the workspace's own), and the log line names neither the key nor a
+rate. The count is a plain integer for each `(workspace, key mode)` and period, served by the operator API
+(`GET /api/operator/v1/usage/unknown-cost`, `src/operator-api/README.md`), so an external service can alert on it
+without log access.
+
+- **The records are the count.** There is no second store. The counter lives where the settlement happens because it
+  _is_ the settled record: a `settled` record whose `cost_micro_usd` is null. The settlement writes that record in
+  the transaction that ends the job (`complete`) or that sweeps a job that ended with no result (`no_result`), so a
+  count read from the records cannot drift from them, cannot count a rolled back transaction, and cannot count a
+  settlement twice (a record is immutable once settled and a job has one record). A separate counter row would have
+  to be incremented in that same transaction and could only ever disagree with the records; a read that groups them
+  cannot.
+- **What counts.** A `settled` record with an unknown cost: a run that reported its usage without a cost, a run that
+  succeeded without any usage, and a run that ended with no result from its runner (`settled_reason = no_result`).
+  A `reserved` record (still running), a `void` record, a record with a known cost (a cost of `0` is known) and a job
+  that lost its lease and was requeued (its record stays `reserved`) never count. A repeated completion changes
+  nothing.
+- **The period rule is that of the summary and of the limits:** a run belongs to the period it started in
+  (`reserved_at`), so a figure here equals the `unknownCostCount` of the workspace's summary added up over the review
+  kinds of a key mode. It is a total, not a position in a feed: there is no safety lag. The count of a period can
+  grow until its last run has settled; an alert on a rate reads the same period twice and compares.
+- **The key mode is the record's own,** corrected from the resolved LLM access before the run (`setKeyMode`), so it is
+  the key that was spent, not the one the entitlements name today.
+- **Reading.** `usageFeed.unknownCostCounts({ from, to, after?, limit })` in the instance level
+  `usage-feed-repository.ts` (it only reads, and every row names its workspace): one grouped query over the records of
+  the period, paged by whole workspaces (`limit` workspaces after the workspace id `after`), ordered by workspace id then
+  key mode. A workspace and key mode without an unknown cost is not listed. One workspace's own figures are the
+  `unknownCostCount` of its summary; a workspace never sees another's.
+- **Off by default.** Nothing is written for this and no setting exists: an instance without entitlements settles
+  records as before, and the read is a path of the operator API, which answers 404 until `OPERATOR_API_TOKEN` is set.
+- **No index yet.** The read filters the period on `reserved_at` across every workspace; no index leads with it, so it
+  scans the records of the period's range as far as the planner can. Records are small and the call is a poll, not a
+  hot path; add a partial index on unknown-cost settled records if a deployment polls often over a very large table (hundreds of thousands of records, or a poll more than once a minute). Suggested shape: `(workspace_id, reserved_at) where state = 'settled' and cost_micro_usd is null`. The query must then write `state = 'settled'` as a literal (`sql.lit('settled')`, as `voidEndedJobs` does for its partial index): Kysely binds a plain value as a parameter, and the planner does not choose a partial index for a bound value.
+- **Mixed versions.** No schema change and no new setting. An instance of an earlier release has no such path (the
+  operator API answers `404 not_found`); a reader that polls it during a rollout must treat that as "not yet", and
+  read the summary of each workspace meanwhile. The log line is unchanged.
 
 ## The plan page (#282)
 
@@ -251,6 +294,11 @@ named fields only:
   instance first).
 
 ## Tests
+
+The count of unknown costs (#385): `../db/repositories/unknown-cost-counts.integration.test.ts` (SQLite and Postgres:
+known and unknown cost, both key modes, `no_result` once, a lost lease, a rolled back transaction, the period, another
+workspace, concurrent completions, paging) and the operator API's usage tests
+(`integration-tests/http/operator-api-usage.integration.test.ts`, the contract test and the route-file test).
 
 The own-key cost limit (#361): `enforce-entitlements.test.ts` (the decision and which limit reads which sum),
 `jobs/claim-limits.integration.test.ts` (the claim on SQLite and Postgres: reached, the other key mode, a switch in the

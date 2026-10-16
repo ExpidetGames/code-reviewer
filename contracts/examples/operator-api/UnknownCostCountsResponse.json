@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "from": "2026-10-01T00:00:00.000Z",
+  "to": "2026-11-01T00:00:00.000Z",
+  "counts": [
+    {
+      "workspaceId": "7d1f3a52-9c1e-4b86-a0d2-5e3c8f1b4a60",
+      "keyMode": "managed",
+      "unknownCostCount": 2
+    },
+    {
+      "workspaceId": "7d1f3a52-9c1e-4b86-a0d2-5e3c8f1b4a60",
+      "keyMode": "own",
+      "unknownCostCount": 1
+    }
+  ],
+  "nextAfter": null
+}
