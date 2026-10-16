@@ -34,7 +34,9 @@ concurrency:
 jobs:
   build:
     name: Build, check and record the golden snapshot
-    if: ${{ github.repository == 'ExpidetGames/code-reviewer' && (github.event_name == 'workflow_dispatch' || vars.GOLDEN_SNAPSHOT_ENABLED == 'true') }}
+    # The job's own condition (a manual run executes the code of the branch it is started on, with the environment's
+    # secrets): only main and development, as the canary. The environment's own branch rule is the second layer.
+    if: ${{ github.repository == 'ExpidetGames/code-reviewer' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/development') && (github.event_name == 'workflow_dispatch' || vars.GOLDEN_SNAPSHOT_ENABLED == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     # Holds VERCEL_TOKEN, VERCEL_TEAM_ID and VERCEL_PROJECT_ID; protect it with a required reviewer if wanted.
