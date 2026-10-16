@@ -133,7 +133,6 @@ export default defineConfig({
         LLM_API_BASE_URL: e2eEnv.modelLlmFakeApiUrl,
         ALLOW_TEST_LLM_ENDPOINTS: "true",
         // A push is reviewed after a second instead of after 90.
-        REVIEW_DEBOUNCE_SECONDS: "1",
       },
       url: `${hostedEnv.appUrl}/api/health`,
       reuseExistingServer: false,

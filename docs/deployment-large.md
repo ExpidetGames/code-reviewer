@@ -63,7 +63,6 @@ others on the next request. The environment keeps only the technical and operati
 | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` | for the example | Used to build `DATABASE_URL` and to configure the `postgres` service |
 | `DATABASE_POOL_MAX` | no | The most connections the pool opens (default 10). Raise it with more app instances |
 | `RUNNER_CONCURRENCY`, `RUNNER_JOB_TIMEOUT_SECONDS`, `RUNNER_POLL_INTERVAL_SECONDS`, `RUNNER_ID` | no | How a runner works; see `compose.yml` |
-| `REVIEW_DEBOUNCE_SECONDS` | no | The debounce of automatic reviews |
 | `GITHUB_APP_*`, `ALLOWED_GITHUB_*`, `LLM_API_KEY` | no | Imported once by an update from before accounts, then ignored. GitHub, mail, the sign-up rule and per-workspace LLM keys are configured in the admin portal |
 
 `DATABASE_BUSY_TIMEOUT_MS`, `BACKUP_TIME` and `BACKUP_DIR` belong to the small (SQLite) topology and

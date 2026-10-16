@@ -6,13 +6,11 @@ import { describe, expect, it } from "vitest";
 import { builtInReviewSettings } from "../review-settings/settings.ts";
 import type { ReviewTrigger } from "../integrations/types.ts";
 import {
-  AUTOMATIC_REVIEW_DEBOUNCE_MS,
   checkAgainstCurrentPullRequest,
   decideAutomaticTrigger,
   type PullRequestTrigger,
 } from "./automatic-review-policy.ts";
 
-const NOW = new Date("2026-10-10T12:00:00.000Z");
 const HEAD = "1f3a5c7e9b2d4f60a8c1e3b5d7f90a2c4e6b8d01";
 
 function trigger(
@@ -47,8 +45,6 @@ function decide(
   return decideAutomaticTrigger({
     trigger: t,
     settings,
-    now: NOW,
-    debounceMs: AUTOMATIC_REVIEW_DEBOUNCE_MS,
     ...overrides,
   });
 }
@@ -134,32 +130,10 @@ describe("the settings that switch automatic reviews off", () => {
 });
 
 describe("when the job is due", () => {
-  // CR-31-T05
-  it("makes a push wait for the debounce time", () => {
-    expect(decide(trigger({ kind: "updated" }))).toEqual({
-      action: "enqueue",
-      runAfter: new Date(NOW.getTime() + 90_000),
-    });
-  });
-
-  it("uses the configured wait", () => {
-    expect(decide(trigger({ kind: "updated" }), { debounceMs: 5_000 })).toEqual(
-      {
-        action: "enqueue",
-        runAfter: new Date(NOW.getTime() + 5_000),
-      },
-    );
-  });
-
-  it("debounces the push only: an opened trigger is due at once", () => {
-    expect(decide(trigger({ kind: "opened" }))).toEqual({
-      action: "enqueue",
-      runAfter: null,
-    });
-  });
-
-  it("waits 90 seconds by default, between the one and two minutes the story asks for", () => {
-    expect(AUTOMATIC_REVIEW_DEBOUNCE_MS).toBe(90_000);
+  // #395-T03
+  it("makes no trigger wait: a push is due at once, like an opened pull request", () => {
+    for (const kind of ["updated", "opened"] as const)
+      expect(decide(trigger({ kind }))).toEqual({ action: "enqueue" });
   });
 });
 

@@ -12,7 +12,7 @@ through. The signature of the delivery is its authentication.
 | ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `github-app-handler.ts`                              | `createGithubAppWebhookHandler(deps)`: the steps below                                                                                                                                               |
 | `limited-body.ts`                                    | `readLimitedBody`: reads the body as text and stops at the limit, whatever `Content-Length` claims                                                                                                   |
-| `automatic-review-policy.ts`                         | The trigger policy for pull request events: drafts, the settings, the debounce of a push, the commit still being the head (pure functions)                                                           |
+| `automatic-review-policy.ts`                         | The trigger policy for pull request events: drafts, the settings, the commit still being the head (pure functions)                                                                                   |
 | `automatic-review-settings.ts`, `debounce-config.ts` | Where the policy gets the project's settings from, and the configured wait of a push (`REVIEW_DEBOUNCE_SECONDS`)                                                                                     |
 | `review-trigger-intake.ts`                           | `ReviewTriggerIntake`: where a review trigger goes (`enqueueReviewTrigger(trigger, integration, source, options)`) and where a closed pull request drops its waiting jobs                            |
 | `job-queue-intake.ts`                                | `createJobQueueReviewTriggerIntake`: the intake of the running app, a thin mapping from a trigger to a job in the queue (`src/jobs`)                                                                 |
@@ -63,12 +63,13 @@ GitHub is not asked.
 ### Known limits of the automatic reviews
 
 - **Closed while a push is being handled.** A `closed` delivery handled between the head check and
-  the enqueue of a concurrent `synchronize` finds nothing to cancel, so that job waits out its
-  debounce and reviews a closed pull request. The window is a few milliseconds; the review is wasted,
-  not harmful.
-- **Frequent pushes postpone the review.** The debounce is trailing and has no maximum wait in the
-  MVP: every push replaces the waiting job and restarts the wait, so a pull request that gets a push
-  less than every 90 seconds is not reviewed until the pushes stop.
+  the enqueue of a concurrent `synchronize` finds nothing to cancel, so that job reviews a closed
+  pull request (the claim ends it as `pull_request_closed` if it is still waiting). The window is a few
+  milliseconds; the review is wasted, not harmful.
+- **Every push starts a review.** There is no debounce since #395: a push is due at once, and a review
+  that is still waiting for a runner is replaced by the one of the newer commit. A pull request that
+  gets many pushes in a row is reviewed once per push that found a free runner; the cost of a run that
+  was replaced while it ran is the subject of the supersede (`src/jobs/README.md`).
 - **The head check is best effort** (it fails open, see above).
 
 ### Failures and redelivery
@@ -124,14 +125,14 @@ therefore the queue's: it deduplicates on (pull request, head commit, command), 
 A `pull_request` delivery with an active project goes through `decideAutomaticTrigger`
 (`automatic-review-policy.ts`) before the intake. The handler gives it the settings of the
 repository's project (`createAutomaticReviewSettingsSource`: project over global over built-in, see
-`src/review-settings/README.md`), the clock and the debounce. In this order:
+`src/review-settings/README.md`). In this order:
 
-| Rule                                                                                                                                       | Outcome                                                                                                                                                     |
-| ------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| The delivery says the pull request is `closed` (a late `synchronize` or `reopened`)                                                        | `trigger_skipped`, reason `pull_request_closed`                                                                                                             |
-| The pull request is a draft                                                                                                                | `trigger_skipped`, reason `draft`; `ready_for_review` arrives as an `opened` trigger and starts the review                                                  |
-| The project switched this kind off: `autoReviewOnOpen` covers opened, reopened and ready for review, `autoReviewOnPush` covers new commits | `trigger_skipped`, reason `automatic_review_disabled`                                                                                                       |
-| Otherwise                                                                                                                                  | a job (after the head check below); `opened`, `reopened` and `ready_for_review` are due at once, only `synchronize` waits (`runAfter` = now + the debounce) |
+| Rule                                                                                                                                       | Outcome                                                                                                                               |
+| ------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
+| The delivery says the pull request is `closed` (a late `synchronize` or `reopened`)                                                        | `trigger_skipped`, reason `pull_request_closed`                                                                                       |
+| The pull request is a draft                                                                                                                | `trigger_skipped`, reason `draft`; `ready_for_review` arrives as an `opened` trigger and starts the review                            |
+| The project switched this kind off: `autoReviewOnOpen` covers opened, reopened and ready for review, `autoReviewOnPush` covers new commits | `trigger_skipped`, reason `automatic_review_disabled`                                                                                 |
+| Otherwise                                                                                                                                  | a job (after the head check below), due at once: `opened`, `reopened`, `ready_for_review` and `synchronize` alike (no debounce, #395) |
 
 A trigger that passed these rules is then compared with GitHub (`getPullRequest`, one call per
 pull request trigger; the trigger kind cannot tell `opened` from `reopened` and `ready_for_review`, so
@@ -146,10 +147,9 @@ the head of the payload: the job queue is durable and the runner already copes w
 so a blip must not cost the review of a push (GitHub never redelivers a failed delivery by itself).
 The only price is that during such a blip a late delivery for an older commit is not recognised.
 
-The wait is `REVIEW_DEBOUNCE_SECONDS` (default 90, whole seconds from 0 to 600; anything else is
-ignored and the default is used). The queue supersedes the waiting job of the older commit, so
-several pushes in a row produce one review that starts one wait after the last push; a job that runs
-already is never touched, the new one waits behind it.
+There is no wait: `REVIEW_DEBOUNCE_SECONDS` is retired (#395) and only logs a start-up warning when it is
+still set. The queue replaces the waiting job of the older commit; a job that runs already is not
+touched, the new one waits behind it (one job runs per pull request).
 
 A pull request that is closed or merged (`pull_request_closed`) calls
 `intake.discardWaitingJobs`: **all** its waiting jobs are cancelled with `pull_request_closed`, the
@@ -200,12 +200,11 @@ and knows nothing about jobs. The intake of the running app is `createJobQueueRe
 (`job-queue-intake.ts`, wired in `shared.ts` by `getJobQueueReviewTriggerIntake`): it looks up the
 `repositories` row of the trigger's repository and enqueues a job with the delivery id.
 
-- `opened` and `updated` become an automatic `webhook` job for the command `review` (due at
-  `options.runAfter` when the policy set one: the debounce of a push); a `command` trigger becomes a
+- `opened` and `updated` become an automatic `webhook` job for the command `review`, due at once; a `command` trigger becomes a
   `comment` job with its command and arguments.
 - `discardWaitingJobs(repo, integration, prNumber)` cancels every waiting job of a closed pull request (also comment and manual ones); `discardWaitingAutomaticJobs` cancels only the automatic ones (a pull request turned into a draft).
-- It is a thin mapping on purpose. It adds **no trigger policy**: drafts, the settings and the
-  debounce of `synchronize` are decided before it, by the handler with `automatic-review-policy.ts`.
+- It is a thin mapping on purpose. It adds **no trigger policy**: drafts and the settings
+  are decided before it, by the handler with `automatic-review-policy.ts`.
   Whether a repository has an active project is decided before the intake too, by the route
   (`projects` in the handler's dependencies, see `src/projects/README.md`): the intake only ever sees
   triggers of active projects.

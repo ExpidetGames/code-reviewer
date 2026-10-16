@@ -90,7 +90,7 @@ export type EnqueueJobInput = {
    * delivery id it arrives.
    */
   commentId?: string | null;
-  /** Defaults to now. A debounce is a later `runAfter`. */
+  /** Defaults to now. A later `runAfter` holds the job back (a job given back with a retry time). */
   runAfter?: Date;
 };
 

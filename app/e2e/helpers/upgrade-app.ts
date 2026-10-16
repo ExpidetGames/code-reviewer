@@ -158,7 +158,6 @@ function environmentOfTheServer(): Record<string, string> {
     ALLOW_TEST_GITHUB_ENDPOINTS: "true",
     GITHUB_API_BASE_URL: e2eEnv.githubUrl,
     GITHUB_OAUTH_BASE_URL: e2eEnv.githubUrl,
-    REVIEW_DEBOUNCE_SECONDS: "1",
     LLM_MODEL: "test/fake-model",
     LLM_MAX_TOKENS: "32000",
   };

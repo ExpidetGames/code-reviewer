@@ -300,7 +300,6 @@ export default defineConfig({
         // does. The model and the context window of a model PR-Agent does not know still are.
         LLM_MODEL: llmEnv.model,
         LLM_MAX_TOKENS: llmEnv.maxTokens,
-        REVIEW_DEBOUNCE_SECONDS: "1",
       },
       url: e2eEnv.pipelineAppUrl,
       reuseExistingServer: false,
@@ -365,7 +364,6 @@ export default defineConfig({
         ALLOW_TEST_LLM_ENDPOINTS: "true",
         LLM_MODEL: llmEnv.model,
         LLM_MAX_TOKENS: llmEnv.maxTokens,
-        REVIEW_DEBOUNCE_SECONDS: "1",
       },
       url: e2eEnv.operatorAppUrl,
       reuseExistingServer: false,

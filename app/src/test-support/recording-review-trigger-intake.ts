@@ -8,7 +8,6 @@ import type {
   ReviewTrigger,
 } from "../integrations/types.ts";
 import type {
-  EnqueueOptions,
   ReviewTriggerIntake,
   ReviewTriggerSource,
 } from "../webhooks/review-trigger-intake.ts";
@@ -20,8 +19,6 @@ export type RecordingReviewTriggerIntake = ReviewTriggerIntake & {
   readonly integrations: Integration[];
   /** The delivery each trigger came from. */
   readonly sources: ReviewTriggerSource[];
-  /** The options that came with each trigger (the `runAfter` of a debounced push). */
-  readonly options: EnqueueOptions[];
   /** The pull requests whose waiting jobs were asked to be discarded, in order. */
   readonly discarded: { repo: RepoRef; prNumber: number }[];
   /** The pull requests whose waiting automatic jobs were asked to be discarded (drafts). */
@@ -39,7 +36,6 @@ export function createRecordingReviewTriggerIntake(): RecordingReviewTriggerInta
   const triggers: ReviewTrigger[] = [];
   const integrations: Integration[] = [];
   const sources: ReviewTriggerSource[] = [];
-  const options: EnqueueOptions[] = [];
   const discarded: { repo: RepoRef; prNumber: number }[] = [];
   const discardedAutomatic: { repo: RepoRef; prNumber: number }[] = [];
   let calls = 0;
@@ -50,7 +46,6 @@ export function createRecordingReviewTriggerIntake(): RecordingReviewTriggerInta
     triggers,
     integrations,
     sources,
-    options,
     discarded,
     discardedAutomatic,
     get calls() {
@@ -65,7 +60,7 @@ export function createRecordingReviewTriggerIntake(): RecordingReviewTriggerInta
     delay(ms) {
       delayMs = ms;
     },
-    async enqueueReviewTrigger(trigger, integration, source, enqueueOptions) {
+    async enqueueReviewTrigger(trigger, integration, source) {
       calls++;
       if (delayMs > 0)
         await new Promise((resolve) => setTimeout(resolve, delayMs));
@@ -73,7 +68,6 @@ export function createRecordingReviewTriggerIntake(): RecordingReviewTriggerInta
       triggers.push(trigger);
       integrations.push(integration);
       sources.push(source);
-      options.push(enqueueOptions ?? {});
     },
     async discardWaitingJobs(repo, _integration, prNumber) {
       calls++;

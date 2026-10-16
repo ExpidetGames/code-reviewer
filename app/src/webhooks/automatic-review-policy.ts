@@ -11,16 +11,13 @@
 //                                             arrives as an `opened` trigger and starts the review)
 //   3. the project switched this kind off  -> skipped (`autoReviewOnOpen` for opened, reopened and
 //                                             ready for review, `autoReviewOnPush` for new commits)
-//   4. otherwise a job is created; only a push (`updated`) waits, so several pushes in a row
-//      produce one review. The queue replaces the waiting job of the older commit.
+//   4. otherwise a job is created and is due at once, a push included (#395): there is no debounce. A
+//      new push replaces the waiting job of the older commit and supersedes its running one (the queue).
 //
 // Pull requests from forks and pull requests opened by bots are reviewed like any other.
 import type { PullRequestRef, ReviewTrigger } from "../integrations/types.ts";
 import { isAutomaticReviewEnabled } from "../review-settings/effective.ts";
 import type { ReviewSettings } from "../review-settings/settings.ts";
-
-/** How long a push waits before its review may start (the story asks for one to two minutes). */
-export const AUTOMATIC_REVIEW_DEBOUNCE_MS = 90_000;
 
 /** The triggers a pull request event produces; a comment command is not one of them. */
 export type PullRequestTrigger = Extract<
@@ -43,30 +40,19 @@ export const AUTOMATIC_SKIP_REASONS = [
 export type AutomaticSkipReason = (typeof AUTOMATIC_SKIP_REASONS)[number];
 
 export type AutomaticDecision =
-  | {
-      action: "enqueue";
-      /** When the job may start; `null` means at once. */
-      runAfter: Date | null;
-    }
-  | { action: "skip"; reason: AutomaticSkipReason };
+  { action: "enqueue" } | { action: "skip"; reason: AutomaticSkipReason };
 
 export function decideAutomaticTrigger(input: {
   trigger: PullRequestTrigger;
   settings: ReviewSettings;
-  now: Date;
-  debounceMs: number;
 }): AutomaticDecision {
-  const { trigger, settings, now, debounceMs } = input;
+  const { trigger, settings } = input;
   if (trigger.state !== "open")
     return { action: "skip", reason: "pull_request_closed" };
   if (trigger.draft) return { action: "skip", reason: "draft" };
   if (!isAutomaticReviewEnabled(settings, trigger.kind))
     return { action: "skip", reason: "automatic_review_disabled" };
-  return {
-    action: "enqueue",
-    runAfter:
-      trigger.kind === "updated" ? new Date(now.getTime() + debounceMs) : null,
-  };
+  return { action: "enqueue" };
 }
 
 /**
