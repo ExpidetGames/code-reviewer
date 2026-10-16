@@ -67,6 +67,13 @@ export type ModelCapabilityResult =
 export const MODEL_METADATA_TIMEOUT_MS = 5_000;
 export const MODEL_METADATA_MAX_BYTES = 256 * 1024;
 export const MODEL_CAPABILITY_CACHE_MS = 5 * 60 * 1000;
+/**
+ * How long the claim path remembers an answer that is not `supported` (#280): a provider outage then costs one wait of
+ * `MODEL_METADATA_TIMEOUT_MS` per model and this time, not one per claim.
+ */
+export const MODEL_CAPABILITY_FAILURE_CACHE_MS = 45 * 1000;
+/** How long the last context window read for a model is kept, to clamp a token budget while the provider cannot be asked. */
+export const MODEL_CONTEXT_WINDOW_KEEP_MS = 24 * 60 * 60 * 1000;
 const MAX_CACHED_MODELS = 200;
 
 type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
@@ -293,6 +300,7 @@ export async function checkModelCapabilities({
   fetchImpl = fetch,
   timeoutMs = MODEL_METADATA_TIMEOUT_MS,
   log = console.error,
+  logAs,
 }: {
   /** The provider's API address (src/llm/endpoint.ts), never a value from a request. */
   baseUrl: string;
@@ -300,21 +308,43 @@ export async function checkModelCapabilities({
   fetchImpl?: FetchLike;
   timeoutMs?: number;
   log?: (line: string) => void;
+  /** What the log line names instead of the model id (the claim of a managed job names its tier, #280). */
+  logAs?: string;
 }): Promise<ModelCapabilityResult> {
   const path = metadataPath(modelId);
   const result =
     path === null
       ? UNKNOWN_MODEL
       : await ask(baseUrl, path, fetchImpl, timeoutMs);
-  const printable = MODEL_NAME_PATTERN.test(modelId) ? modelId : "(invalid)";
+  const printable =
+    logAs ?? (MODEL_NAME_PATTERN.test(modelId) ? modelId : "(invalid)");
   log(
     `[llm] MODEL_CAPABILITY_CHECK: model=${printable} outcome=${result.outcome}`,
   );
   return result;
 }
 
+/** How a caller asks the checker. */
+export type ModelCapabilityCheckOptions = {
+  /**
+   * The claim path (#280): an answer that is not `supported` is remembered for a short time, so a provider outage
+   * does not stall every claim. A settings save leaves it out and always sees the provider as it is now.
+   */
+  forClaim?: boolean;
+  /** What the log line names instead of the model id; a managed claim names its tier, which a member may know. */
+  logAs?: string;
+};
+
 export type ModelCapabilityChecker = {
-  check(modelId: string): Promise<ModelCapabilityResult>;
+  check(
+    modelId: string,
+    options?: ModelCapabilityCheckOptions,
+  ): Promise<ModelCapabilityResult>;
+  /**
+   * The context window the last successful read of this model stated, kept for a day (null: never read or stated
+   * none). The claim clamps the token budget of a managed job to it when a fresh read fails.
+   */
+  lastKnownContextLength?(modelId: string): number | null;
 };
 
 /** `checkModelCapabilities` that remembers `supported` answers in memory for `ttlMs`. */
@@ -324,6 +354,8 @@ export function createModelCapabilityChecker({
   timeoutMs,
   log,
   ttlMs = MODEL_CAPABILITY_CACHE_MS,
+  failureTtlMs = MODEL_CAPABILITY_FAILURE_CACHE_MS,
+  windowKeepMs = MODEL_CONTEXT_WINDOW_KEEP_MS,
   now = Date.now,
 }: {
   /** Read on every ask, so a changed address (the test stack's switch) is followed. */
@@ -332,18 +364,36 @@ export function createModelCapabilityChecker({
   timeoutMs?: number;
   log?: (line: string) => void;
   ttlMs?: number;
+  failureTtlMs?: number;
+  windowKeepMs?: number;
   now?: () => number;
 }): ModelCapabilityChecker {
-  const remembered = new Map<
-    string,
-    { until: number; result: ModelCapabilityResult }
-  >();
+  type Entry = { until: number; result: ModelCapabilityResult };
+  const remembered = new Map<string, Entry>();
+  const failures = new Map<string, Entry>();
+  const windows = new Map<string, { until: number; tokens: number }>();
+
+  /** Bounded: drop the oldest entries first (a Map keeps insertion order). */
+  function put<V>(map: Map<string, V>, key: string, value: V): void {
+    map.delete(key);
+    while (map.size >= MAX_CACHED_MODELS) {
+      const oldest = map.keys().next();
+      if (oldest.done === true) break;
+      map.delete(oldest.value);
+    }
+    map.set(key, value);
+  }
 
   return {
-    async check(modelId) {
+    async check(modelId, options = {}) {
       const hit = remembered.get(modelId);
       if (hit !== undefined && hit.until > now()) return hit.result;
       remembered.delete(modelId);
+      if (options.forClaim === true) {
+        const failed = failures.get(modelId);
+        if (failed !== undefined && failed.until > now()) return failed.result;
+        failures.delete(modelId);
+      }
 
       const result = await checkModelCapabilities({
         baseUrl: baseUrl(),
@@ -351,17 +401,31 @@ export function createModelCapabilityChecker({
         ...(fetchImpl === undefined ? {} : { fetchImpl }),
         ...(timeoutMs === undefined ? {} : { timeoutMs }),
         ...(log === undefined ? {} : { log }),
+        ...(options.logAs === undefined ? {} : { logAs: options.logAs }),
       });
-      if (result.outcome !== "supported") return result;
-
-      // Bounded: drop the oldest entries first (a Map keeps insertion order).
-      while (remembered.size >= MAX_CACHED_MODELS) {
-        const oldest = remembered.keys().next();
-        if (oldest.done === true) break;
-        remembered.delete(oldest.value);
-      }
-      remembered.set(modelId, { until: now() + ttlMs, result });
+      if (
+        "capabilities" in result &&
+        result.capabilities.contextLength !== null
+      )
+        put(windows, modelId, {
+          until: now() + windowKeepMs,
+          tokens: result.capabilities.contextLength,
+        });
+      if (result.outcome === "supported")
+        put(remembered, modelId, { until: now() + ttlMs, result });
+      else if (options.forClaim === true)
+        put(failures, modelId, { until: now() + failureTtlMs, result });
       return result;
+    },
+
+    lastKnownContextLength(modelId) {
+      const kept = windows.get(modelId);
+      if (kept === undefined) return null;
+      if (kept.until <= now()) {
+        windows.delete(modelId);
+        return null;
+      }
+      return kept.tokens;
     },
   };
 }

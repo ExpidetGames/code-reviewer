@@ -60,6 +60,7 @@ import type { ModelTierSource } from "../model-tiers/service.ts";
 import {
   clampMaxTokens,
   DEFAULT_MODEL_TIER,
+  UNKNOWN_WINDOW_MAX_TOKENS,
   type ModelTier,
 } from "../model-tiers/tiers.ts";
 import type { ProjectReviewKind } from "../review-settings/settings.ts";
@@ -624,10 +625,15 @@ export async function buildJobInput(
   // its model's metadata too, Diff or Dynamic, for the context window its token budget is clamped to: one read
   // serves both (a Dynamic job's model is the tier's).
   const modelToRead = dynamic !== null ? dynamic.model : (tier?.model ?? null);
+  // The claim of a managed job asks as a claim (an outage costs one wait, not one per claim) and names the tier in the
+  // log line instead of the model.
   const metadata =
     modelToRead === null || deps.modelCapabilities === undefined
       ? undefined
-      : await deps.modelCapabilities.check(modelToRead);
+      : await deps.modelCapabilities.check(
+          modelToRead,
+          tier === null ? {} : { forClaim: true, logAs: `tier=${tier.name}` },
+        );
   let capabilities: DynamicModelCapabilities | undefined;
   if (dynamic !== null) {
     const decision = modelCapabilitiesOf(deps, job, metadata, features);
@@ -662,15 +668,17 @@ export async function buildJobInput(
   const llmAccess = revealLlmAccess(llm.access);
   // The workspace's own key: its budget, else the instance's context window. A managed job: the workspace's budget
   // (the instance's window belongs to another model), cut to the window of the tier's model when that is known
-  // (#280); the workspace cannot know the model, so its settings are not checked against it.
-  const budget =
+  // (#280), else to the window last read for it, else to a documented bound: never sent unclamped. The workspace
+  // cannot know the model, so its settings are not checked against it.
+  const maxTokens =
     tier === null
       ? (llmOptions.maxTokens ?? llmAccess.contextWindowTokens)
-      : (llmOptions.maxTokens ?? null);
-  const maxTokens =
-    tier === null || budget === null
-      ? budget
-      : clampMaxTokens(budget, contextWindowOf(metadata));
+      : clampMaxTokens(
+          llmOptions.maxTokens ?? UNKNOWN_WINDOW_MAX_TOKENS,
+          contextWindowOf(metadata) ??
+            deps.modelCapabilities?.lastKnownContextLength?.(tier.model) ??
+            null,
+        );
   // #199: the head of the last successful Dynamic review of this pull request, so the dynamic job
   // can compare against it. A Diff job never carries a base, so it is not looked up.
   const previousReviewedSha =

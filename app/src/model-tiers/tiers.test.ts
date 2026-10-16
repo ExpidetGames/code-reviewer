@@ -11,6 +11,7 @@ import {
   modelOfTier,
   readStoredTiers,
   tiersView,
+  UNKNOWN_WINDOW_MAX_TOKENS,
 } from "./tiers.ts";
 import { TIER_NAME_PATTERN } from "../operator-api/contract.ts";
 
@@ -181,10 +182,17 @@ describe("the token budget of a managed job", () => {
   });
 
   // #280-T09
-  it("is left alone when it fits, or when the window is not known", () => {
+  it("is left alone when it fits", () => {
     expect(clampMaxTokens(100_000, 200_000)).toBe(100_000);
     expect(clampMaxTokens(200_000, 200_000)).toBe(200_000);
-    expect(clampMaxTokens(500_000, null)).toBe(500_000);
+  });
+
+  // #280-T09
+  it("is never sent unclamped: with no window known it is cut to a conservative bound", () => {
+    expect(UNKNOWN_WINDOW_MAX_TOKENS).toBe(100_000);
+    expect(clampMaxTokens(2_000_000, null)).toBe(UNKNOWN_WINDOW_MAX_TOKENS);
+    expect(clampMaxTokens(500_000, null)).toBe(UNKNOWN_WINDOW_MAX_TOKENS);
+    expect(clampMaxTokens(50_000, null)).toBe(50_000);
   });
 
   // #280-T09

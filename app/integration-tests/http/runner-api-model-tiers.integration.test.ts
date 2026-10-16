@@ -12,7 +12,10 @@ import type {
   ModelCapabilityChecker,
   ModelCapabilityResult,
 } from "../../src/llm/model-capabilities.ts";
-import type { ManagedModelTiers } from "../../src/model-tiers/tiers.ts";
+import {
+  UNKNOWN_WINDOW_MAX_TOKENS,
+  type ManagedModelTiers,
+} from "../../src/model-tiers/tiers.ts";
 import {
   startRunnerApiHarness,
   type RunnerApiHarness,
@@ -494,7 +497,7 @@ describe("a workspace that is not on the operator's key", () => {
 
 describe("the token budget of a job on the operator's key", () => {
   // #280-T09
-  it("is the workspace's budget when the tier model's window is not known", async () => {
+  it("is cut to the documented bound when the tier model's window is not known and the provider is not asked", async () => {
     const h = await start({
       keyMode: "managed",
       project: { maxTokens: 150_000, modelTier: "high" },
@@ -502,7 +505,47 @@ describe("the token budget of a job on the operator's key", () => {
 
     const { job } = await h.claimed();
 
-    expect(job.input.llm.maxTokens).toBe(150_000);
+    expect(job.input.llm.maxTokens).toBe(UNKNOWN_WINDOW_MAX_TOKENS);
+  });
+
+  // #280-T09
+  it("is the workspace's budget when it is below the bound and no window is known", async () => {
+    const h = await start({
+      keyMode: "managed",
+      project: { maxTokens: 50_000 },
+    });
+
+    expect((await h.claimed()).job.input.llm.maxTokens).toBe(50_000);
+  });
+
+  // #280-T09
+  it("uses the last window read for the model when the provider cannot be asked now", async () => {
+    let answer: ModelCapabilityResult = supported(64_000);
+    const asked: Array<{ model: string; options: unknown }> = [];
+    let known: number | null = null;
+    const checker: ModelCapabilityChecker = {
+      check: async (model, options) => {
+        asked.push({ model, options });
+        if (answer.outcome === "supported") known = 64_000;
+        return answer;
+      },
+      lastKnownContextLength: () => known,
+    };
+    const h = await start({
+      keyMode: "managed",
+      project: { maxTokens: 150_000, modelTier: "high" },
+      harness: { modelCapabilities: checker },
+    });
+    expect((await h.claimed()).job.input.llm.maxTokens).toBe(64_000);
+    answer = { outcome: "unverifiable" };
+    await h.enqueueNew({ prNumber: 8 });
+
+    expect((await h.claimed()).job.input.llm.maxTokens).toBe(64_000);
+    // The claim asks as a claim, and names the tier, not the model, in the log line.
+    expect(asked[1]).toEqual({
+      model: "tier/high-diff",
+      options: { forClaim: true, logAs: "tier=high" },
+    });
   });
 
   // #280-T09
@@ -551,7 +594,7 @@ describe("the token budget of a job on the operator's key", () => {
   });
 
   // #280-T09
-  it("stays as it is when the provider cannot be asked", async () => {
+  it("is cut to the bound when the provider cannot be asked and no window was ever read", async () => {
     const meta = provider(() => ({ outcome: "unverifiable" }));
     const h = await start({
       keyMode: "managed",
@@ -559,7 +602,9 @@ describe("the token budget of a job on the operator's key", () => {
       harness: { modelCapabilities: meta.checker },
     });
 
-    expect((await h.claimed()).job.input.llm.maxTokens).toBe(150_000);
+    expect((await h.claimed()).job.input.llm.maxTokens).toBe(
+      UNKNOWN_WINDOW_MAX_TOKENS,
+    );
   });
 
   // #280-T09
