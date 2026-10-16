@@ -108,6 +108,9 @@ function rowsOf(text: string): Row[] {
     });
 }
 
+/** Line breaks and runs of white space as one space, so a sentence can be wrapped anywhere in the guide. */
+const flat = (text: string): string => text.replace(/\s+/g, " ");
+
 const GOOD_TOKEN = "r".repeat(40);
 const WEBHOOK = {
   RUNNER_TOKEN: GOOD_TOKEN,
@@ -495,7 +498,6 @@ describe("the hosted deployment guide as a procedure", () => {
   ];
   const step = (number: number): string =>
     section(`### Step ${String(number)}. ${TITLES[number - 1] as string}`);
-  const flat = (text: string): string => text.replace(/\s+/g, " ");
 
   // #333-T01
   it("has the steps of the first deployment in the order the work asks for", () => {
@@ -622,6 +624,64 @@ describe("the hosted deployment guide as a procedure", () => {
     expect(read("app/src/operator-api/README.md")).toContain(
       "Upgrade every app instance before setting any workspace to `managed`",
     );
+  });
+
+  // #333-cron
+  it("says that the per-minute cron is required, what is lost without it and how late a debounced review starts", () => {
+    const needs = flat(section("## 2. What you need first"));
+    const sweep = flat(section("### 5.7 What depends on the per-minute sweep"));
+    const appReadme = flat(read("app/src/dispatch/README.md"));
+
+    expect(needs).toContain("The per-minute cron is a hard requirement.");
+    expect(needs).toContain("without it push-triggered reviews never start");
+    expect(needs).toContain("up to about 60 seconds later");
+    expect(needs).toContain(
+      "A plan that allows only daily crons cannot run this deployment",
+    );
+    expect(flat(section("## 1. What you are deploying"))).toContain(
+      "is also the only thing that sends the wake-up for a job that is not due yet",
+    );
+    expect(flat(section("### 3.1 The App project"))).toContain(
+      "**push-triggered reviews never start** (section 5.7)",
+    );
+    expect(sweep).toContain("**Not due yet** when queued");
+    expect(sweep).toContain("**Never starts**");
+    expect(sweep).toContain("the debounce plus up to about 60 seconds");
+    expect(sweep).toContain("`REVIEW_DEBOUNCE_SECONDS=0`");
+    expect(
+      flat(
+        section("### Step 8. Smoke test: a Diff review, then a Dynamic review"),
+      ),
+    ).toContain("**Push to the open pull request**");
+    expect(
+      flat(section("## 9. Known limits and what is not verified")),
+    ).toContain(
+      "A debounced review starts up to about 60 seconds later than self-hosted",
+    );
+    // What the guide says is what the App's own documentation says about the sweep and the debounce.
+    expect(appReadme).toContain(
+      "A job that is not due yet (the 90 second debounce of an automatic review) only gets its row with `next_dispatch_at = run_after`; the sweep sends it when it is due.",
+    );
+    expect(appReadme).toContain("a debounced job that became due");
+    expect(appReadme).toContain(
+      "`GET /api/internal/dispatch-sweep`, once a minute",
+    );
+    expect(configuredDebounceMs({})).toBe(90_000);
+  });
+
+  // #333-db-readme
+  it("no longer relies on the platform holding traffic back from a deployment that is ahead of the database", () => {
+    const readmeOfTheDatabase = flat(read("app/src/db/README.md"));
+
+    expect(readmeOfTheDatabase).not.toContain(
+      "keeps routing to the previous deployment",
+    );
+    expect(readmeOfTheDatabase).toContain(
+      "nothing makes the platform hold traffic back",
+    );
+    expect(
+      flat(section("### 5.6 Updating the App or the Dispatcher")),
+    ).toContain("Do not rely on the platform to hold traffic back");
   });
 
   // #333-T04

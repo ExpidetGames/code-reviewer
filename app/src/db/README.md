@@ -114,8 +114,10 @@ described everywhere else in this file and is unchanged. In serverless mode:
   order is: migrate, then deploy. A migration therefore must work for the version that is still running:
   add tables and columns (nullable, or with a default); drop or rename in a later release, once no instance
   of the old version is left. A database that is AHEAD of an instance (it knows fewer migrations) is
-  healthy for that instance. An instance deployed before its migration reports `SCHEMA_BEHIND` and the
-  platform keeps routing to the previous deployment until it is healthy.
+  healthy for that instance. An instance deployed before its migration reports `SCHEMA_BEHIND` on
+  `/api/health` (503), but **nothing makes the platform hold traffic back** for that: a production deployment is promoted
+  when it is built, whatever `/api/health` says. So the order is a rule for the operator, not something the platform
+  enforces: run `pnpm migrate` first, then deploy (`docs/deployment-vercel.md`, section 5.6).
 
 ## Migrations
 
