@@ -223,9 +223,9 @@ def run_job(
         # What PR-Agent measured is kept for a command that fails after its model call (#273).
         probe = UsageProbe()
         try:
-            handled, failed_flag, usage = asyncio.run(
-                execute(job, guard, timeout_seconds, probe, meter)
-            )
+            # The soft timeout counts from `started`, like the watchdog (#387).
+            deadline = None if timeout_seconds is None else started + timeout_seconds
+            handled, failed_flag, usage = asyncio.run(execute(job, guard, deadline, probe, meter))
         except JobTimeout:
             return _failure(
                 ErrorCode.TIMEOUT,
@@ -470,9 +470,23 @@ def _run_dynamic_job(
     except LimitError as error:
         return _failure(error.code, error.detail, started, capture)
 
+    # The run has what is left of the timeout, which counts from `started` (the first line of
+    # `main()`) like the watchdog's does (#387). A run that starts late is therefore stopped by its
+    # own deadline, with the clean result and what it used, before the watchdog could end it; the
+    # wrap-up and the recovery reserve of the ledger are taken from this deadline, so they stay
+    # consistent with it.
     deadline = TOTAL_DEADLINE_SECONDS
     if timeout_seconds is not None:
-        deadline = min(deadline, timeout_seconds)
+        remaining = timeout_seconds - (time.monotonic() - started)
+        if remaining <= 0:
+            return _failure(
+                ErrorCode.TIMEOUT,
+                "the command did not finish in time",
+                started,
+                capture,
+                usage=usage_probe.usage(),
+            )
+        deadline = min(deadline, remaining)
     try:
         ledger = dynamic_ledger(capabilities, environment, deadline)
     except LimitError as error:

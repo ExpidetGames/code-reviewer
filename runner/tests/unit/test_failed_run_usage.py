@@ -15,7 +15,7 @@ from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 from test_dynamic_review_run import CAPABILITIES, dynamic_document, dynamic_job
@@ -25,6 +25,7 @@ from code_reviewer_runner.capabilities import ALL_ENGINES
 from code_reviewer_runner.dynamic_findings import DynamicFindings
 from code_reviewer_runner.dynamic_review.adapter import EngineAnswer, EngineError
 from code_reviewer_runner.dynamic_review.budget import (
+    TOTAL_DEADLINE_SECONDS,
     BudgetLedger,
     DynamicLimits,
     LimitError,
@@ -163,12 +164,15 @@ def run(
     publish: Any = None,
     lease: LeaseState = LeaseState.HELD,
     prepare: Any = None,
+    started: float = 0.0,
+    timeout: float | None = None,
 ) -> JobResult:
     return runner.run_dynamic_job(
         dynamic_job(),
         None,
-        0.0,
+        started,
         ENVIRONMENT,
+        timeout,
         engines=ALL_ENGINES,
         prepare=prepare or preparing(tmp_path),
         publish=publish or (lambda job, found: Published("https://github.test/c/1", True)),
@@ -356,3 +360,87 @@ def test_the_watchdog_reports_what_the_run_used_up_to_then(monkeypatch: pytest.M
     assert "errorReason" not in result  # the counters were read: nothing is unknown
     assert result["usage"]["aiCalls"] == 1
     assert result["usage"]["costUsd"] == 0.01
+
+
+class WaitsForTheDeadline(ScriptedEngine):
+    """Makes one priced model call, then asks for another one only once the deadline has passed."""
+
+    ledgers: ClassVar[list[BudgetLedger]] = []
+
+    def run(self) -> EngineAnswer:
+        self.ledgers.append(self.ledger)
+        reservation = self.ledger.reserve_call("x" * 400, output_tokens=10)
+        self.ledger.settle_call(
+            reservation, prompt_tokens=100, completion_tokens=10, cost=Decimal("0.001")
+        )
+        while self.ledger.remaining_seconds() > 0:
+            time.sleep(0.01)
+        try:
+            self.ledger.reserve_call("x" * 400, output_tokens=10)
+        except LimitError as error:
+            return EngineAnswer(None, EngineError(error.code, error.detail))
+        raise AssertionError("the deadline must have stopped the call")
+
+
+# #387-T04: the process spent most of its timeout before the ledger started (a cold start), so the
+# run gets what is left of it: its deadline ends before the watchdog's and says what it used.
+def test_a_dynamic_run_after_a_slow_start_gets_only_the_time_that_is_left_and_reports_its_usage(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(runner, "DynamicEngine", WaitsForTheDeadline)
+    WaitsForTheDeadline.ledgers.clear()
+    began = time.monotonic()
+
+    # 4 s of a 4.5 s timeout went to the start-up, which is more than the watchdog's grace.
+    result = run(tmp_path, started=began - 4.0, timeout=4.5)
+
+    (ledger,) = WaitsForTheDeadline.ledgers
+    assert 0 < ledger.limits.deadline_seconds <= 0.5  # not 4.5, and not the 600 s default
+    assert result.error_code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
+    assert result.usage is not None
+    assert result.usage.ai_calls == 1
+    assert result.usage.cost_usd == 0.001
+    # The run's own deadline is the process' soft timeout: it ends before the hard one would.
+    assert time.monotonic() - began < 0.5 + runner.HARD_TIMEOUT_GRACE_SECONDS
+
+
+def test_a_dynamic_run_keeps_its_own_total_deadline_when_the_timeout_leaves_more_time(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    deadlines: list[float] = []
+    real = runner.dynamic_ledger
+
+    def spy(capabilities: Any, environment: Mapping[str, str], deadline: float) -> BudgetLedger:
+        deadlines.append(deadline)
+        return real(capabilities, environment, deadline)
+
+    monkeypatch.setattr(runner, "dynamic_ledger", spy)
+    script(monkeypatch)
+
+    run(tmp_path, started=time.monotonic() - 100.0, timeout=100_000.0)
+    run(tmp_path)  # without a timeout
+
+    assert deadlines == [TOTAL_DEADLINE_SECONDS, TOTAL_DEADLINE_SECONDS]
+
+
+# #387-T03: a start-up that used up the whole timeout ends the job with the clean timeout result
+# before the proxy, the checkout or the engine exists.
+def test_a_dynamic_run_whose_timeout_passed_during_the_start_up_never_starts_the_engine(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def never_prepared(job: Job) -> Any:
+        raise AssertionError("a run without time must not prepare a checkout")
+
+    class NeverStarted(ScriptedEngine):
+        def run(self) -> EngineAnswer:
+            raise AssertionError("a run without time must not start the engine")
+
+    monkeypatch.setattr(runner, "DynamicEngine", NeverStarted)
+
+    result = run(tmp_path, prepare=never_prepared, started=time.monotonic() - 10.0, timeout=2.0)
+
+    assert result.ok is False
+    assert result.error_code is ErrorCode.TIMEOUT
+    assert result.error_reason is None
+    assert result.log_tail.startswith("timeout: the command did not finish in time")
+    assert result.usage is None

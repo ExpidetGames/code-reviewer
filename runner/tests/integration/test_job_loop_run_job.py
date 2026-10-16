@@ -97,14 +97,21 @@ def test_credentials_that_pr_agent_prints_never_reach_the_app(app: FakeApp, tmp_
     assert TOKEN not in sent and API_KEY not in sent
 
 
-# CR-29-T07
+# CR-29-T07, #387-T07
+# The runner counts its soft timeout from the start of its process, so the clean result does not
+# depend on how long the start-up takes. The 4 s timeout leaves the watchdog 7 s from the start, and
+# `slow_start` (4.5 s of start-up, see the double) is the case a start-up counted on top of the
+# timeout would lose. The start-up (the imports, 3 s on a loaded server) may take up to 7 s.
+@pytest.mark.parametrize("scenario", ["slow", "slow_start"])
 def test_the_runner_reports_its_own_timeout_before_the_loop_has_to_end_it(
-    app: FakeApp, tmp_path: Path
+    app: FakeApp, tmp_path: Path, scenario: str
 ) -> None:
     app.queue.append(claim_response(job_id(1), job_input()))
 
-    run_loop(app, tmp_path, "slow", job_timeout=2.0, kill_margin=30.0)
+    run_loop(app, tmp_path, scenario, job_timeout=4.0, kill_margin=30.0)
 
     result = app.completions[0]["result"]
     assert (result["ok"], result["errorCode"]) == (False, "timeout")
-    assert result["logTail"].startswith("timeout:")  # written by the runner itself
+    # Written by the runner itself and not by its watchdog, which names a reason.
+    assert result["logTail"].startswith("timeout: the command did not finish in time")
+    assert "errorReason" not in result
