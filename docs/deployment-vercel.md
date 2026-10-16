@@ -270,7 +270,7 @@ every secret: at least 32 characters, no white space or control characters.
 | `RUNNER_DISPATCH_GIVE_UP_SECONDS` | optional | no | A job that waited this long without a claim fails with `dispatch_unavailable`. 60 to 604800, default **3600** in webhook mode, off in poll mode, `0` turns it off. It is also the longest a job may queue while the pool is full: set it above the queue you accept. |
 | `OPERATOR_API_TOKEN` | optional | **yes** | Switches on the operator API (`/api/operator/v1`: workspaces, entitlements and limits, usage). Unset, the API does not exist (404). At least 32 characters, different from `RUNNER_TOKEN` and `APP_SECRET`. |
 | `REVIEW_DEBOUNCE_SECONDS` | optional | no | How long a push waits before its review may start, 0 to 600, default 90. |
-| `LLM_MODEL`, `LLM_MAX_TOKENS` | optional | no | The instance's model and context window. For workspaces on their own key they are only the defaults a review setting can override. For **`managed` workspaces** (section 3.5) they are the **model pin**: the instance, not the workspace, chooses the model, for Diff and for Dynamic jobs. `LLM_MODEL` is an OpenRouter name, default `anthropic/claude-haiku-5.5`; a model for Dynamic jobs must be tool-capable (`dynamic-review.md`, "The model"). The LLM key is **not** an environment variable. |
+| `LLM_MODEL`, `LLM_MAX_TOKENS` | optional | no | The instance's model and context window. For workspaces on their own key they are only the defaults a review setting can override. A **`managed` workspace** (section 3.5) does not use them: the models of its reviews are the ones you set per tier through the operator API (`PUT /api/operator/v1/model-tiers`, section 3.5), and its token budget is cut to the window of that model. `LLM_MODEL` is an OpenRouter name, default `anthropic/claude-haiku-5.5`; a model for Dynamic jobs must be tool-capable (`dynamic-review.md`, "The model"). The LLM key is **not** an environment variable. |
 
 Not set in the project, on purpose:
 
@@ -354,9 +354,17 @@ Vercel) reads `DISPATCHER_SHUTDOWN_GRACE_SECONDS` and `PORT`.
 - **Upgrade every App instance first.** An instance of a release before #276 does not know the key mode: it would run a
   managed workspace's jobs on the workspace's own key and model and outside the cost limit. Roll the new App out
   completely before the first workspace is set to `managed`.
-- **The model is the instance's** while a job runs on the operator's key: `LLM_MODEL` and `LLM_MAX_TOKENS` apply and the
-  workspace's `model`, `maxTokens` and Dynamic model review settings are not used (they take effect again if the
-  workspace goes back to `own`). The workspace's Settings, LLM access page shows a note instead of a key form.
+- **The model is yours, per tier,** while a job runs on the operator's key (#280): the workspace chooses a tier (`low`,
+  `medium` or `high`, `medium` unless it chose another) and the model of that tier for the kind of review (Diff or
+  Dynamic) is the one you set with `PUT /api/operator/v1/model-tiers` (`{ "tiers": { "low": { "diff": "…",
+  "dynamic": "…" }, … } }`; a Dynamic model must support tool calls, which the call checks, and one it cannot verify is
+  refused). `LLM_MODEL` and `LLM_MAX_TOKENS` are not used, and the workspace's `model` and Dynamic model review settings
+  have no effect (they apply again if the workspace goes back to `own`). A tier without a model for a kind fails the job
+  with `managed_tier_unavailable`; it never moves to another tier. The workspace's token budget is cut to the context
+  window of the tier's model when OpenRouter states one. The model ids are visible to you and the runner only: not to a
+  workspace, not in the admin portal (it shows whether a tier is configured), not in a result, a record or a log. Save
+  the tiers before you set a workspace to `managed`, and roll the new App out completely first.
+  The workspace's Settings, LLM access page shows a note instead of a key form.
 - **No usable operator key** (none saved, or one that cannot be decrypted, for example after a changed `APP_SECRET`):
   every job of a managed workspace fails with **`llm_not_configured`**, and the log names `operator_key_missing` or
   `operator_key_unreadable`. Save the key in the admin portal and the next job runs. Save it **before** you set the
