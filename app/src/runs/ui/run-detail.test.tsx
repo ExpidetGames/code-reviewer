@@ -183,6 +183,22 @@ describe("the usage of a run", () => {
     expect(shown(0)).not.toContain("Not available");
   });
 
+  // #283-T07
+  it("shows no model for a run on a managed tier, whose usage carries none, and keeps the tokens and cost", () => {
+    const { container } = render(
+      <RunDetail
+        workspaceSlug="acme"
+        initial={snap(detail({ usage: { ...usage, model: null } }))}
+        api={apiAnswering([])}
+      />,
+    );
+
+    expect(screen.queryByText("Model")).toBeNull();
+    expect(container.querySelector('[data-slot="run-model"]')).toBeNull();
+    expect(text(container)).toContain("12,900 tokens in 7 model calls");
+    expect(text(container)).toContain("$0.04");
+  });
+
   // #201-T29
   it("shows no model and no usage for a run that never reached a model", () => {
     const { container } = render(

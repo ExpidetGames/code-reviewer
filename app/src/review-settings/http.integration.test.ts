@@ -633,4 +633,57 @@ describe("the settings routes of a workspace on the operator's key", () => {
       modelManagedByInstance: false,
     });
   });
+
+  // #283-T09
+  it("show an instance admin on a workspace with its own key everything they showed before", async () => {
+    const admin = {
+      id: "admin",
+      githubLogin: "operator",
+      isInstanceAdmin: true,
+    } as unknown as SessionUser;
+    const app = await setup(async () => admin);
+
+    const read = await app.handlers.getProject(
+      new Request(`${URL_BASE}${app.projectPath}`),
+      app.first.id,
+    );
+    const saved = await app.putProject({
+      settings: { model: "acme-x/y-1", maxFindings: 3 },
+    });
+
+    expect(await read.json()).toMatchObject({
+      effective: { model: "deepseek/deepseek-v3.2" },
+      dynamic: { effective: { dynamicModel: expect.any(String) } },
+      cost: { warn: false },
+      modelManagedByInstance: false,
+    });
+    expect(saved.status).toBe(200);
+    expect(await saved.json()).toMatchObject({
+      overrides: { model: "acme-x/y-1", maxFindings: 3 },
+    });
+  });
+
+  // #283-T09
+  it("give an instance admin who is a member of a workspace on the operator's key the same view as its members", async () => {
+    const admin = {
+      id: "admin",
+      githubLogin: "operator",
+      isInstanceAdmin: true,
+    } as unknown as SessionUser;
+    const app = await setupReviewSettings(undefined, {
+      operatorsModels: true,
+      tierAvailability: ALL_TIERS_CONFIGURED,
+    });
+    const handlers = createReviewSettingsRouteHandlers({
+      requireUser: async () => admin,
+      service: app.service,
+    });
+
+    const response = await handlers.getGlobal(
+      new Request(`${URL_BASE}/api/review-settings`),
+    );
+
+    // The operator reads the models through the operator API and the instance portal, not through a workspace.
+    expect(await response.text()).not.toMatch(/"model"|deepseek/);
+  });
 });

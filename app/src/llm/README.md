@@ -81,8 +81,8 @@ admin portal (**LLM key**, `/admin/llm`; `src/admin/ui/operator-llm-key-form.tsx
   its own key; the workspace's `maxTokens` is kept and cut to the context window of the tier's model when it is known.
   A tier without a model fails the job with `managed_tier_unavailable`: no move to another tier and not to the
   instance's `LLM_MODEL`, which a managed job no longer uses at all. The model of a tier never reaches a workspace
-  (not the settings, a page, a result, a record or a log). The settings pages replace the model fields with a note
-  (`instanceChoosesModel`); the tier control is #283.
+  (not the settings, a page, a result, a record or a log). The settings pages replace the model fields with a Quality
+  choice (Low, Medium, High; `src/review-settings/README.md`, #283).
 - **The Worker's fetch asks for the standing again.** A workspace suspended after the claim, or whose entitlements
   became unreadable, gets no key: the job ends with the code of the claim (`runner-api/README.md`). Quotas are not
   counted again.

@@ -365,11 +365,15 @@ Vercel) reads `DISPATCHER_SHUTDOWN_GRACE_SECONDS` and `PORT`.
   Dynamic) is the one you set with `PUT /api/operator/v1/model-tiers` (`{ "tiers": { "low": { "diff": "…",
   "dynamic": "…" }, … } }`; a Dynamic model must support tool calls, which the call checks, and one it cannot verify is
   refused). `LLM_MODEL` and `LLM_MAX_TOKENS` are not used, and the workspace's `model` and Dynamic model review settings
-  have no effect (they apply again if the workspace goes back to `own`). A tier without a model for a kind fails the job
+  have no effect (they apply again if the workspace goes back to `own`). The workspace's review settings show one
+  **Quality** choice (Low, Medium, High, described by speed and depth only) in place of the model fields, and mark a
+  level without a model for the project's kind as "Not available" without saying why; their routes refuse a model
+  field with `MODEL_MANAGED_BY_INSTANCE`. A tier without a model for a kind fails the job
   with `managed_tier_unavailable`; it never moves to another tier. The workspace's token budget is cut to the context
   window of the tier's model when OpenRouter states one (the last window read when it cannot be asked, else 100,000
   tokens: it is never sent unclamped); a Diff model that OpenRouter does not list is refused too. The model ids are visible to you and the runner only: not to a
-  workspace, not in the admin portal (it shows whether a tier is configured), not in a result, a record or a log. Save
+  workspace, not in the admin portal (it shows whether a tier is configured), not in a result (`[model]` stands where a result
+  repeated one), a record or a log. Save
   the tiers before you set a workspace to `managed`, and roll the new App out completely first.
   The workspace's Settings, LLM access page shows a note instead of a key form.
 - **No usable operator key** (none saved, or one that cannot be decrypted, for example after a changed `APP_SECRET`):

@@ -53,8 +53,35 @@ the one that does, so the save does not check `maxTokens` against a model and `c
 cuts the budget to the window of the tier's model (`src/model-tiers/README.md`).
 
 `modelTier` is not sent to the runner: it is read by the claim of a job on the operator's key, which swaps the model
-for the operator's model of the tier. The settings form carries a stored tier through a save without a control for it
-(the control is #283), so saving the form never changes it.
+for the operator's model of the tier.
+
+## A workspace on the operator's key chooses a quality level, not a model (#283)
+
+For a workspace whose key mode is `managed` (`operatorsModels` of the service, read on every call) the models are the
+operator's and the workspace never sees them (`src/model-tiers/README.md`):
+
+- **The views carry no model.** `getGlobalSettings`, `getProjectSettings` and the answer of a save have no `model`, no
+  `fallbackModel` and no Dynamic model: not in `effective`, `overrides`, `builtIn`, `inherited`, `sources` or
+  `dynamic`. `cost` is `null` (the estimate would be for a model that is not used). They add
+  `modelManagedByInstance: true` and `tierAvailability`, whether each level has a model for each review kind (yes or
+  no, from the operator's configuration, never which model). Other workspaces get `modelManagedByInstance: false`,
+  `tierAvailability: null` and the views exactly as before.
+- **A write may not set a model.** A body with `model` or `fallbackModel` (and, for a project, `dynamicModel`, also
+  `null`) is refused `400 REVIEW_SETTINGS_INVALID` with an issue `{ field, code: "MODEL_MANAGED_BY_INSTANCE" }` for
+  every such field, judged on the names before any value, and nothing is stored. `modelTier` is accepted at the
+  workspace defaults and the project, with the usual layering.
+- **Stored models are kept.** The models a workspace saved on its own key stay stored: a save from a managed
+  workspace carries them through (the defaults replace their layer as a whole, so the service puts the stored
+  `model`/`fallbackModel` back; the Dynamic model is a project-only field that a save already keeps). The workspace
+  gets them back if it returns to its own key.
+- **The form** (`ui/quality-choice.tsx`, copy in `src/copy/model-quality.ts`) shows one **Quality** choice, Low, Medium
+  or High, each with a sentence about speed and depth and no model, vendor or cost, in place of the model, fallback
+  model, Dynamic model, model suggestions and cost estimate. The token budget stays. A level without a model for the
+  kind in force (the project's kind; every kind on the workspace defaults) is shown "Not available" without saying why
+  and cannot be chosen; the level in force stays selectable and a note says reviews would not start. The form reads
+  everything from the view (`managed`, `tierAvailability`), so a save that changes the key mode adapts the next answer.
+- **The instance admin is not special inside a workspace.** The operator reads and sets the models through the
+  operator API and the instance portal; a workspace's settings routes behave the same for every member.
 
 ## From settings to a runner job
 
@@ -144,13 +171,13 @@ Admin or an Owner (`manage_review_defaults`); the settings of a project are read
 a workspace that is not the person's) and by `withWorkspace(...)` (called first). A change must come from
 this site (`Sec-Fetch-Site`/`Origin`), be `application/json` and at most 64 KB.
 
-| Route                                                                  | Does                                                                                                            |
-| ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `GET /api/w/:workspace/review-settings`                                | the global defaults: `overrides`, `effective`, `sources`, `builtIn`, `cost`, `limits`, `updatedAt`, `updatedBy` |
-| `PUT /api/w/:workspace/review-settings`                                | body `{ "settings": { ... } }`, replaces the global defaults                                                    |
-| `GET /api/w/:workspace/repositories/:repositoryId/project/settings`    | the project's `overrides`, `effective`, `sources`, `inherited`, `cost`, `limits`                                |
-| `PUT /api/w/:workspace/repositories/:repositoryId/project/settings`    | body `{ "settings": { ... } }`, replaces the project's overrides                                                |
-| `DELETE /api/w/:workspace/repositories/:repositoryId/project/settings` | removes the project's overrides                                                                                 |
+| Route                                                                  | Does                                                                                                                                                          |
+| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/w/:workspace/review-settings`                                | the global defaults: `overrides`, `effective`, `sources`, `builtIn`, `cost`, `modelManagedByInstance`, `tierAvailability`, `limits`, `updatedAt`, `updatedBy` |
+| `PUT /api/w/:workspace/review-settings`                                | body `{ "settings": { ... } }`, replaces the global defaults                                                                                                  |
+| `GET /api/w/:workspace/repositories/:repositoryId/project/settings`    | the project's `overrides`, `effective`, `sources`, `inherited`, `cost`, `limits`                                                                              |
+| `PUT /api/w/:workspace/repositories/:repositoryId/project/settings`    | body `{ "settings": { ... } }`, replaces the project's overrides                                                                                              |
+| `DELETE /api/w/:workspace/repositories/:repositoryId/project/settings` | removes the project's overrides                                                                                                                               |
 
 A repository that was never activated can be read (the defaults, `projectId` null, `active` false) and
 saved: the first save creates its project with `active = 0`, so the settings are in place when it is
