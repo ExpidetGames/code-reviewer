@@ -57,7 +57,9 @@ claim --> reserved --complete with usage (failed or not), or a run that succeede
   were lost is not (a follow-up of #273).
 - **A job process the runner's loop ended.** The loop reports the process it had to end (hard timeout, killed by a
   signal, no result line, a result that disagrees with its exit code) with `errorReason` `no_result_from_process`,
-  and a failed result with a usage it could not read with `unreadable_usage`; the Diff watchdog uses the first. A
+  and a failed result with a usage it could not read with `unreadable_usage`; the Diff watchdog uses the first, and
+  so does a Diff command that fails with no usage while a model request it sent was in flight or came back
+  uncounted (PR-Agent counts only the calls that came back; #363). A
   failed result without a readable usage and with one of these reasons, or whose usage was sent and cannot be read,
   settles as `no_result` too. A runner of an earlier release never sends the reasons and an app of an earlier
   release ignores them: both stay void, as before.

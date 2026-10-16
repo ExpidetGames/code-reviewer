@@ -247,6 +247,27 @@ describe("how a completed job settles its usage record", () => {
     },
   );
 
+  // #363-T05: the Diff runner names the reason next to the code of the failure it classified, and sends no
+  // `usage` key at all.
+  it.each([
+    "timeout",
+    "llm_timeout",
+    "llm_unavailable",
+    "command_failed",
+    "unknown",
+  ])(
+    "settles a failed %s of a Diff run with the reason and no usage as a run with no result",
+    (errorCode) => {
+      expect(
+        settlementOfOutcome({
+          ok: false,
+          errorCode,
+          result: { ok: false, errorReason: "no_result_from_process" },
+        }),
+      ).toStrictEqual(NO_RESULT);
+    },
+  );
+
   // #273-T06
   it("voids a failed job without usage whose reason is any other", () => {
     for (const errorReason of [
