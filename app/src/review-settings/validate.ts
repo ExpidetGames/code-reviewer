@@ -48,6 +48,11 @@ export const REVIEW_SETTING_ISSUE_CODES = [
   "DYNAMIC_MODEL_TOOLS_UNSUPPORTED",
   /** The provider has no such model (#269). Never reported by the validation itself. */
   "DYNAMIC_MODEL_UNKNOWN",
+  /**
+   * The write sets a model field (`model`, `fallbackModel`, `dynamicModel`) for a workspace on the operator's key,
+   * whose models are the operator's (#283). Never reported by the validation itself.
+   */
+  "MODEL_MANAGED_BY_INSTANCE",
 ] as const;
 export type ReviewSettingIssueCode =
   (typeof REVIEW_SETTING_ISSUE_CODES)[number];

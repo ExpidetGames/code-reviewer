@@ -9,26 +9,34 @@ import type {
   GlobalSettingsView,
   ProjectDynamicView,
   ProjectSettingsView,
+  ReadableSources,
 } from "../service.ts";
 import type { ReviewCostGuard } from "../cost.ts";
-import type { SettingSource } from "../effective.ts";
+import type { TierAvailability } from "../../model-tiers/tiers.ts";
 import {
-  type ReviewSettingField,
-  type ReviewSettings,
+  type ReadableReviewSettings,
   type ReviewSettingsOverrides,
 } from "../settings.ts";
 
 export type SettingsFormModel = {
   mode: "global" | "project";
   /** What each field is while this layer does not set it. */
-  inherited: ReviewSettings;
+  inherited: ReadableReviewSettings;
   /** The fields this layer sets. */
   overrides: ReviewSettingsOverrides;
   /** What a review uses with the saved overrides. */
-  effective: ReviewSettings;
+  effective: ReadableReviewSettings;
   /** Where each field of `effective` comes from. */
-  sources: Record<ReviewSettingField, SettingSource>;
-  cost: ReviewCostGuard;
+  sources: ReadableSources;
+  /** The estimate of a review; null for a workspace on the operator's key, which has no model of its own (#283). */
+  cost: ReviewCostGuard | null;
+  /**
+   * The workspace reviews on the operator's key (#283): the form offers a quality level instead of the model, the
+   * fallback model and the Dynamic model, and shows no cost estimate. The settings it was built from hold no model.
+   */
+  managed: boolean;
+  /** For such a workspace, whether each level has a model for each kind of review; null otherwise. */
+  tierAvailability: TierAvailability | null;
   /** Who saved the global defaults last and when; null for a project or before the first save. */
   lastSaved: { at: string; by: string | null } | null;
   /**
@@ -50,6 +58,8 @@ export function modelFromGlobalView(
     effective: view.effective,
     sources: view.sources,
     cost: view.cost,
+    managed: view.modelManagedByInstance,
+    tierAvailability: view.tierAvailability,
     lastSaved:
       view.updatedAt === null
         ? null
@@ -67,6 +77,8 @@ export function modelFromProjectView(
     effective: view.effective,
     sources: view.sources,
     cost: view.cost,
+    managed: view.modelManagedByInstance,
+    tierAvailability: view.tierAvailability,
     lastSaved: null,
     dynamic: view.dynamic,
   };
@@ -85,14 +97,31 @@ export function modelFromAnswer(
   const view = answer as Record<string, unknown>;
   const has = (key: string) =>
     typeof view[key] === "object" && view[key] !== null;
-  if (!has("effective") || !has("overrides") || !has("sources") || !has("cost"))
+  // `cost` is null for a workspace on the operator's key.
+  if (
+    !has("effective") ||
+    !has("overrides") ||
+    !has("sources") ||
+    !Object.hasOwn(view, "cost")
+  )
     return null;
   if (mode === "global") {
     if (!has("builtIn")) return null;
-    return modelFromGlobalView(answer as GlobalSettingsView);
+    return modelFromGlobalView(withManagedFlag(answer as GlobalSettingsView));
   }
   if (!has("inherited")) return null;
-  return modelFromProjectView(answer as ProjectSettingsView);
+  return modelFromProjectView(withManagedFlag(answer as ProjectSettingsView));
+}
+
+/** An answer of a server that does not know the flag (the release before #283) is not managed. */
+function withManagedFlag<T extends GlobalSettingsView | ProjectSettingsView>(
+  view: T,
+): T {
+  return {
+    ...view,
+    modelManagedByInstance: view.modelManagedByInstance === true,
+    tierAvailability: view.tierAvailability ?? null,
+  };
 }
 
 /**

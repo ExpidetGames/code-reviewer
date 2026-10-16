@@ -32,13 +32,20 @@ import { ReviewSettingsError } from "./errors.ts";
 import type { ReviewSettingsHooks } from "./hooks.ts";
 import { noopReviewSettingsHooks } from "./hooks.ts";
 import {
+  configuredTiers,
+  type TierAvailability,
+} from "../model-tiers/tiers.ts";
+import {
   builtInProjectDynamicSettings,
+  MODEL_SETTING_FIELDS,
   PROJECT_DYNAMIC_LIMITS,
+  withoutModelFields,
   type ProjectDynamicOverrides,
   type ProjectDynamicPatch,
   type ProjectDynamicSettingField,
   type ProjectDynamicSettings,
   type ProjectReviewKind,
+  type ReadableReviewSettings,
   type ReviewSettingField,
   type ReviewSettings,
   type ReviewSettingsOverrides,
@@ -56,20 +63,45 @@ import {
 /** The key of the global defaults in `app_settings`. */
 export const REVIEW_DEFAULTS_KEY = "review_defaults";
 
+/** The sources of the settings; the model fields are absent for a workspace on the operator's key (#283). */
+export type ReadableSources = Omit<
+  Record<ReviewSettingField, SettingSource>,
+  (typeof MODEL_SETTING_FIELDS)[number]
+> &
+  Partial<
+    Pick<
+      Record<ReviewSettingField, SettingSource>,
+      (typeof MODEL_SETTING_FIELDS)[number]
+    >
+  >;
+
 type ViewBase = {
   /** The fields this layer sets; every other field is inherited. */
   overrides: ReviewSettingsOverrides;
-  /** The settings a review uses at this level. */
-  effective: ReviewSettings;
-  /** Where each field of `effective` comes from. */
-  sources: Record<ReviewSettingField, SettingSource>;
-  /** What a review is expected to cost with these settings, and whether that is above the limit. */
-  cost: ReviewCostGuard;
+  /** The settings a review uses at this level; without the model fields for a workspace on the operator's key. */
+  effective: ReadableReviewSettings;
+  /** Where each field of `effective` comes from; without the model fields for a workspace on the operator's key. */
+  sources: ReadableSources;
+  /**
+   * What a review is expected to cost with these settings, and whether that is above the limit. `null` for a workspace
+   * on the operator's key: the estimate is for a model that workspace does not know and that is not used (#283).
+   */
+  cost: ReviewCostGuard | null;
+  /**
+   * The models of this workspace's reviews are the operator's (its key mode is `managed`): the workspace chooses a
+   * quality level (`modelTier`) and the view carries no model field, no Dynamic model and no cost (#283).
+   */
+  modelManagedByInstance: boolean;
+  /**
+   * For such a workspace, whether each level has a model for each kind of review: yes or no, never which model.
+   * `null` for every other workspace.
+   */
+  tierAvailability: TierAvailability | null;
 };
 
 export type GlobalSettingsView = ViewBase & {
   /** The values nobody changed. */
-  builtIn: ReviewSettings;
+  builtIn: ReadableReviewSettings;
   /** ISO 8601 time of the last change, or null when the defaults were never saved. */
   updatedAt: string | null;
   /** The GitHub login of the person who saved them last, or null. */
@@ -83,7 +115,7 @@ export type ProjectSettingsView = ViewBase & {
   /** Whether reviews run for the project; false for a repository that was never activated. */
   active: boolean;
   /** What the project would use without its own overrides (the global level). */
-  inherited: ReviewSettings;
+  inherited: ReadableReviewSettings;
   /** The project-only review kind, Dynamic model and skill (#194). */
   dynamic: ProjectDynamicView;
 };
@@ -99,16 +131,22 @@ export type ProjectDynamicView = {
   /** The kind, Dynamic model and skill a review would use. */
   effective: {
     reviewKind: ProjectReviewKind;
-    dynamicModel: string;
+    /** Absent for a workspace on the operator's key (#283). */
+    dynamicModel?: string;
     /** The text a Dynamic review uses: the project's override, else the shipped default. */
     reviewSkill: string;
   };
   /** Where each effective value comes from (there is no global layer for these fields). */
-  sources: Record<ProjectDynamicSettingField, "built_in" | "project">;
+  sources: Partial<Record<"dynamicModel", "built_in" | "project">> &
+    Record<
+      Exclude<ProjectDynamicSettingField, "dynamicModel">,
+      "built_in" | "project"
+    >;
   /** What applies when the project sets nothing. */
   defaults: {
     reviewKind: ProjectReviewKind;
-    dynamicModel: string;
+    /** Absent for a workspace on the operator's key (#283). */
+    dynamicModel?: string;
     reviewSkill: string;
   };
   /** Whether the effective skill is the shipped default (the project sets no override). */
@@ -179,6 +217,36 @@ function notFound(): ReviewSettingsError {
     "REVIEW_SETTINGS_PROJECT_NOT_FOUND",
     "There is no such repository.",
   );
+}
+
+/** The model fields a layer holds, to carry through a save that cannot set them (#283). */
+function modelFieldsOf(
+  layer: ReviewSettingsOverrides,
+): ReviewSettingsOverrides {
+  const kept: ReviewSettingsOverrides = {};
+  if (layer.model !== undefined) kept.model = layer.model;
+  if (layer.fallbackModel !== undefined)
+    kept.fallbackModel = layer.fallbackModel;
+  return kept;
+}
+
+/**
+ * A write from a workspace on the operator's key may not set a model field: the models are the operator's (#283).
+ * Judged on the names the request carries, before any value is looked at, so a model that is also malformed is
+ * refused for the reason that matters. Every such field is named, not only the first.
+ */
+function refuseModelFields(input: unknown, fields: readonly string[]): void {
+  if (typeof input !== "object" || input === null || Array.isArray(input))
+    return;
+  const issues: ReviewSettingIssue[] = Object.keys(input)
+    .filter((name) => fields.includes(name))
+    .map((field) => ({ field, code: "MODEL_MANAGED_BY_INSTANCE" }));
+  if (issues.length > 0)
+    throw new ReviewSettingsError(
+      "REVIEW_SETTINGS_INVALID",
+      "Some settings are not valid.",
+      issues,
+    );
 }
 
 function checked(input: unknown): ReviewSettingsOverrides {
@@ -299,6 +367,11 @@ export function createReviewSettingsService(deps: {
    * never.
    */
   operatorsModels?: () => Promise<boolean>;
+  /**
+   * Whether each quality level has a model for each kind of review, for the quality choice of a workspace on the
+   * operator's key (#283). Only that: never which model. Default: nothing is configured.
+   */
+  tierAvailability?: () => Promise<TierAvailability>;
 }): ReviewSettingsService {
   const { appSettings, projects } = deps;
   const dynamicDefaults =
@@ -306,6 +379,8 @@ export function createReviewSettingsService(deps: {
   const defaultSkill = deps.defaultSkill ?? readDefaultReviewSkill;
   const hooks = deps.hooks ?? noopReviewSettingsHooks;
   const operatorsModels = deps.operatorsModels ?? (async () => false);
+  const tierAvailability =
+    deps.tierAvailability ?? (async () => configuredTiers({}));
 
   async function readGlobal() {
     const stored = await appSettings.get(REVIEW_DEFAULTS_KEY);
@@ -321,23 +396,36 @@ export function createReviewSettingsService(deps: {
     return parseStoredProjectDynamicOverrides(settings).reviewKind ?? "diff";
   }
 
-  function viewOf(
+  async function viewOf(
     effective: EffectiveReviewSettings,
     overrides: ReviewSettingsOverrides,
-    operators: boolean,
-  ): ViewBase {
-    const cost = estimateReviewCost(effective.settings);
+  ): Promise<ViewBase> {
+    // A workspace on the operator's key does not know the model, so none of the views carries one, and the estimate
+    // is for a model it does not use.
+    if (await operatorsModels())
+      return {
+        overrides: withoutModelFields(overrides),
+        effective: withoutModelFields(effective.settings),
+        sources: withoutModelFields(effective.sources),
+        cost: null,
+        modelManagedByInstance: true,
+        tierAvailability: await tierAvailability(),
+      };
     return {
       overrides,
       effective: effective.settings,
       sources: effective.sources,
-      // The stored model does not apply to a workspace on the operator's key, so it cannot be too small for the budget.
-      cost: operators ? { ...cost, exceedsContext: [] } : cost,
+      cost: estimateReviewCost(effective.settings),
+      modelManagedByInstance: false,
+      tierAvailability: null,
     };
   }
 
   /** The project-only settings of a project, with their sources, defaults and limits. */
-  function dynamicView(project: StoredProject | undefined): ProjectDynamicView {
+  function dynamicView(
+    project: StoredProject | undefined,
+    managed: boolean,
+  ): ProjectDynamicView {
     const defaults = dynamicDefaults();
     const shipped = defaultSkill();
     const overrides = parseStoredProjectDynamicOverrides(project?.settings);
@@ -346,7 +434,7 @@ export function createReviewSettingsService(deps: {
       project: overrides,
       defaultSkill: shipped.text,
     });
-    return {
+    const view: ProjectDynamicView = {
       overrides,
       effective: {
         reviewKind: effective.reviewKind,
@@ -369,6 +457,23 @@ export function createReviewSettingsService(deps: {
         reviewSkillMaxBytes: PROJECT_DYNAMIC_LIMITS.reviewSkillMaxBytes,
       },
     };
+    if (!managed) return view;
+    // The Dynamic model is the operator's as well (#283).
+    const storedOverrides = { ...view.overrides };
+    const shownEffective = { ...view.effective };
+    const shownDefaults = { ...view.defaults };
+    const shownSources = { ...view.sources };
+    delete storedOverrides.dynamicModel;
+    delete shownEffective.dynamicModel;
+    delete shownDefaults.dynamicModel;
+    delete shownSources.dynamicModel;
+    return {
+      ...view,
+      overrides: storedOverrides,
+      effective: shownEffective,
+      defaults: shownDefaults,
+      sources: shownSources,
+    };
   }
 
   async function globalView(): Promise<GlobalSettingsView> {
@@ -379,8 +484,10 @@ export function createReviewSettingsService(deps: {
       global: global.overrides,
     });
     return {
-      ...viewOf(effective, global.overrides, await operatorsModels()),
-      builtIn,
+      ...(await viewOf(effective, global.overrides)),
+      builtIn: (await operatorsModels())
+        ? withoutModelFields(builtIn)
+        : builtIn,
       updatedAt: global.updatedAt,
       updatedBy: global.updatedBy,
     };
@@ -398,13 +505,15 @@ export function createReviewSettingsService(deps: {
       global,
       project: overrides,
     });
+    const managed = await operatorsModels();
+    const inherited = resolveReviewSettings({ builtIn, global }).settings;
     return {
-      ...viewOf(effective, overrides, await operatorsModels()),
+      ...(await viewOf(effective, overrides)),
       repositoryId,
       projectId: project?.id ?? null,
       active: project?.active ?? false,
-      inherited: resolveReviewSettings({ builtIn, global }).settings,
-      dynamic: dynamicView(project),
+      inherited: managed ? withoutModelFields(inherited) : inherited,
+      dynamic: dynamicView(project, managed),
     };
   }
 
@@ -456,8 +565,15 @@ export function createReviewSettingsService(deps: {
     getGlobalSettings: globalView,
 
     async updateGlobalSettings(input, actor) {
-      const overrides = checked(input);
-      if (!(await operatorsModels()))
+      const managed = await operatorsModels();
+      if (managed) refuseModelFields(input, MODEL_SETTING_FIELDS);
+      const requested = checked(input);
+      // The models a workspace saved on its own key stay stored (it can go back to it); a save that cannot set them
+      // does not drop them.
+      const overrides = managed
+        ? { ...requested, ...modelFieldsOf((await readGlobal()).overrides) }
+        : requested;
+      if (!managed)
         refuseBudgetAboveContext(
           overrides,
           resolveReviewSettings({ builtIn: deps.builtIn(), global: overrides })
@@ -472,9 +588,12 @@ export function createReviewSettingsService(deps: {
     },
 
     async updateProjectSettings(repositoryId, input) {
+      const managed = await operatorsModels();
+      if (managed)
+        refuseModelFields(input, [...MODEL_SETTING_FIELDS, "dynamicModel"]);
       const patch = checkedProject(input);
       const warnings = await checkDynamicModel(patch.dynamic.dynamicModel);
-      if (!(await operatorsModels()))
+      if (!managed)
         refuseBudgetAboveContext(
           patch.review,
           resolveReviewSettings({
@@ -488,7 +607,11 @@ export function createReviewSettingsService(deps: {
       const project = await projects.updateSettingsWith(
         repositoryId,
         (current) => {
-          const next = mergeProjectSettings(current, patch);
+          const merged = mergeProjectSettings(current, patch);
+          // The models saved on the workspace's own key stay stored (see the global defaults).
+          const next = managed
+            ? { ...merged, ...modelFieldsOf(parseStoredOverrides(current)) }
+            : merged;
           previousKind = kindOf(current);
           kindChanged = previousKind !== kindOf(next);
           return next;

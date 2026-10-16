@@ -12,6 +12,7 @@ import {
 import type { ModelTier } from "../../model-tiers/tiers.ts";
 import {
   REVIEW_SETTING_FIELDS,
+  type ReadableReviewSettings,
   type ReviewSettingField,
   type ReviewSettings,
 } from "../settings.ts";
@@ -38,8 +39,8 @@ export type FormValues = {
   autoReviewOnPush: boolean;
   allowedCommands: ReviewCommand[];
   /**
-   * The tier of a workspace on the operator's key (#280). Carried so that a save sends back the tier that is stored;
-   * the form has no control for it yet (#283), so a save never changes it.
+   * The quality level of a workspace on the operator's key (#280, #283). Carried through a save of any workspace, so
+   * the level that is stored is never dropped; only the quality choice changes it.
    */
   modelTier: ModelTier;
 };
@@ -52,9 +53,10 @@ export type FormState = {
   dynamic?: DynamicFormValues;
 };
 
-function valuesOf(settings: ReviewSettings): FormValues {
+function valuesOf(settings: ReadableReviewSettings): FormValues {
   return {
-    model: settings.model,
+    // Absent for a workspace on the operator's key, whose form has no field for them (#283).
+    model: settings.model ?? "",
     fallbackModel: settings.fallbackModel ?? "",
     extraInstructions: settings.extraInstructions,
     maxFindings: String(settings.maxFindings),
@@ -98,6 +100,15 @@ export function setText(
     ...state,
     values: { ...state.values, [field]: value },
     overridden: { ...state.overridden, [field]: true },
+  };
+}
+
+/** The quality level a workspace on the operator's key chose (#283). */
+export function setModelTier(state: FormState, tier: ModelTier): FormState {
+  return {
+    ...state,
+    values: { ...state.values, modelTier: tier },
+    overridden: { ...state.overridden, modelTier: true },
   };
 }
 
@@ -214,9 +225,17 @@ export function previewSettings(
   model: SettingsFormModel,
   state: FormState,
 ): ReviewSettings | null {
+  // No estimate for a model the workspace does not know (#283).
+  if (model.managed) return null;
   const { raw, issues } = diffPatch(state);
   if (issues.length > 0) return null;
   const checked = validateReviewSettingsPatch(raw);
   if (!checked.ok) return null;
-  return { ...model.inherited, ...checked.value };
+  const merged = { ...model.inherited, ...checked.value };
+  if (merged.model === undefined) return null;
+  return {
+    ...merged,
+    model: merged.model,
+    fallbackModel: merged.fallbackModel ?? null,
+  };
 }

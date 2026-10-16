@@ -83,9 +83,9 @@ function projectOnlyChanges(
     body.reviewKind = values.reviewKind;
 
   // The built-in default typed again (or put back by "Reset to default") clears an override; any
-  // other value is the new override.
+  // other value is the new override. A workspace on the operator's key has no Dynamic model field (#283).
   const typedModel = values.dynamicModel.trim();
-  if (typedModel !== view.effective.dynamicModel) {
+  if (!model.managed && typedModel !== view.effective.dynamicModel) {
     const wanted =
       typedModel === view.defaults.dynamicModel ? null : typedModel;
     if (check({ dynamicModel: wanted })) body.dynamicModel = wanted;

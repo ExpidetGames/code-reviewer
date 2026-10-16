@@ -86,19 +86,6 @@ export function instanceAccessOf(
   }
 }
 
-/**
- * Whether the instance chooses the model of a workspace's reviews: it uses the operator's key (the key mode is
- * `managed`), working or not. The review settings of such a workspace stay stored and take no effect (#276).
- */
-export function instanceChoosesModel(
-  summary:
-    | { configured: true; source: LlmAccessSource }
-    | { configured: false; reason: LlmNotConfiguredReason },
-): boolean {
-  const access = instanceAccessOf(summary);
-  return access === "provided" || access === "key_unavailable";
-}
-
 export const createLlmAccess = createLlmConfig;
 
 /** Stable codes of `LlmAccessError`. */

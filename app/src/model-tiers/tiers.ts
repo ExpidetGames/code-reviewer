@@ -157,11 +157,17 @@ export function tiersView(tiers: ManagedModelTiers): ModelTiersView {
   return view;
 }
 
-/** Whether each tier has a model for each kind, and nothing else: all that the instance admin portal may show. */
-export function configuredTiers(
-  tiers: ManagedModelTiers,
-): Record<ModelTier, Record<ProjectReviewKind, boolean>> {
-  const view = {} as Record<ModelTier, Record<ProjectReviewKind, boolean>>;
+/**
+ * Whether each tier has a model for each kind, and nothing else: all that the instance admin portal and the quality
+ * choice of a workspace (#283) may know.
+ */
+export type TierAvailability = Record<
+  ModelTier,
+  Record<ProjectReviewKind, boolean>
+>;
+
+export function configuredTiers(tiers: ManagedModelTiers): TierAvailability {
+  const view = {} as TierAvailability;
   for (const tier of MODEL_TIERS)
     view[tier] = {
       diff: tiers[tier]?.diff !== undefined,
