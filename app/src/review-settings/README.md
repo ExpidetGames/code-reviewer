@@ -250,7 +250,8 @@ skill's identity and the size limit.
 The workspace settings are sub-pages with a sub-nav (#178). `/w/:workspace/settings` is **General** (the
 workspace name, the read-only instance, tenancy and member facts and the one "Needs attention" strip);
 `/w/:workspace/settings/review-defaults` holds the form for the global defaults;
-`/w/:workspace/settings/llm` holds the workspace key; `/w/:workspace/settings/advanced` holds the
+`/w/:workspace/settings/llm` holds the workspace key; `/w/:workspace/settings/plan` shows what the operator allows
+the workspace and what it has used (#282, listed only for a workspace with entitlements); `/w/:workspace/settings/advanced` holds the
 destructive actions (removing the key, resetting every default). A project has its own settings page
 (`/w/:workspace/projects/:repositoryId`) next to its "Review now" page (#174). The form
 (`ui/settings-form.tsx`) shows the value in force and where it comes from (built-in, global, this project);
