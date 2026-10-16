@@ -5,6 +5,17 @@
 // the cases the file can express, and the lists the app keeps in TypeScript (error codes, limits, key modes)
 // are the lists of the file. An external client is built against this file.
 import { describe, expect, it } from "vitest";
+import { createInstanceSettingsRepository } from "../../src/db/repositories/instance-settings-repository.ts";
+import {
+  checkPlanManagementUrl,
+  MAX_PLAN_MANAGEMENT_URL_LENGTH,
+  PLAN_MANAGEMENT_URL_ERROR_CODES,
+} from "../../src/plan-handoff/url.ts";
+import {
+  createHandoffToken,
+  hashHandoffToken,
+} from "../../src/plan-handoff/token.ts";
+import { signedInMember } from "../../src/test-support/session-lookup.ts";
 import {
   MAX_USAGE_CURSOR_LENGTH,
   TIER_NAME_PATTERN,
@@ -111,6 +122,10 @@ describe("the contract file", () => {
         "EntitlementsFields",
         "EntitlementsWrite",
         "ErrorResponse",
+        "HandoffRedeemRequest",
+        "HandoffRedeemResponse",
+        "PlanManagementResponse",
+        "PlanManagementWrite",
         "StoredEntitlements",
         "UsageItem",
         "UsagePage",
@@ -176,6 +191,53 @@ describe("the usage part of the contract file", () => {
         "workspaceId",
       ].sort(),
     );
+  });
+});
+
+describe("the plan handoff part of the contract file", () => {
+  // #284-T11
+  it("allows the addresses the app saves and the codes it refuses with", () => {
+    const defs = readContract(OPERATOR_CONTRACT_FILE).$defs as unknown as {
+      PlanManagementWrite: {
+        properties: { url: { maxLength: number; pattern: string } };
+      };
+      ApiErrorCode: { enum: string[] };
+    };
+
+    expect(defs.PlanManagementWrite.properties.url.maxLength).toBe(
+      MAX_PLAN_MANAGEMENT_URL_LENGTH,
+    );
+    expect(defs.PlanManagementWrite.properties.url.pattern).toBe("^https://");
+    expect(defs.ApiErrorCode.enum).toEqual(
+      expect.arrayContaining([
+        ...PLAN_MANAGEMENT_URL_ERROR_CODES,
+        "invalid_token",
+      ]),
+    );
+    // What the file allows for `url` is a superset of what the app saves: whatever the app stores is valid.
+    const stored = checkPlanManagementUrl("https://plans.example/a?b=c");
+    expect(stored.ok).toBe(true);
+    expectValid("PlanManagementResponse", {
+      version: 1,
+      planManagementUrl: stored.ok ? stored.url : null,
+    });
+  });
+
+  // #284-T03
+  it("promises exactly the fields the redemption answers, and no person data", () => {
+    const defs = readContract(OPERATOR_CONTRACT_FILE).$defs as unknown as {
+      HandoffRedeemResponse: {
+        properties: Record<string, { enum?: string[] }>;
+      };
+    };
+
+    expect(Object.keys(defs.HandoffRedeemResponse.properties).sort()).toEqual(
+      ["role", "userId", "version", "workspaceId", "workspaceSlug"].sort(),
+    );
+    expect(defs.HandoffRedeemResponse.properties.role?.enum).toEqual([
+      "owner",
+      "admin",
+    ]);
   });
 });
 
@@ -450,4 +512,65 @@ describe("what the app accepts", () => {
       expect(await accepted(body)).toBe(false);
     },
   );
+});
+
+describe("what the app answers for the plan handoff", () => {
+  // #284-T03
+  it("answers the setting and the redemption with documents valid against the file", async () => {
+    const h = await startOperatorApiHarness();
+    await signedInMember(h.db, {
+      id: "owner-1",
+      workspaceId: h.workspaceId,
+      role: "owner",
+    });
+    const token = createHandoffToken();
+    await h.handoffTokens(h.workspaceId).issue({
+      tokenHash: hashHandoffToken(token),
+      userId: "owner-1",
+      role: "owner",
+      ttlMs: 60_000,
+    });
+    await createInstanceSettingsRepository(h.db).remove("plan_management_url");
+
+    const expectBody = async (response: Response, definition: string) => {
+      const body: unknown = await response.json();
+      expectValid(definition, body);
+    };
+    await expectBody(
+      await h.call("GET", "/api/operator/v1/plan-management"),
+      "PlanManagementResponse",
+    );
+    await expectBody(
+      await h.call("PUT", "/api/operator/v1/plan-management", {
+        body: { url: "https://plans.example/manage" },
+      }),
+      "PlanManagementResponse",
+    );
+    await expectBody(
+      await h.call("DELETE", "/api/operator/v1/plan-management"),
+      "PlanManagementResponse",
+    );
+    // The request the app accepts is what the file describes, and so are both of its answers.
+    expectValid("PlanManagementWrite", { url: "https://plans.example/manage" });
+    expectValid("HandoffRedeemRequest", { token });
+    await expectBody(
+      await h.call("POST", "/api/operator/v1/handoff/redeem", {
+        body: { token },
+      }),
+      "HandoffRedeemResponse",
+    );
+    for (const response of [
+      await h.call("POST", "/api/operator/v1/handoff/redeem", {
+        body: { token },
+      }),
+      await h.call("PUT", "/api/operator/v1/plan-management", {
+        body: { url: "http://plans.example/" },
+      }),
+      await h.call("POST", "/api/operator/v1/handoff/redeem", {
+        rawBody: "[]",
+      }),
+      await h.call("GET", "/api/operator/v1/handoff/redeem"),
+    ])
+      await expectBody(response, "ErrorResponse");
+  });
 });
