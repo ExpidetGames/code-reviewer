@@ -74,6 +74,8 @@ async function setupOn(
     fetch: receiver.fetch,
     now: fixture.clock.now,
     timeoutMs: 40,
+    // The resends below are driven by the test (`sendDue`); the retries inside the request have their own test.
+    inlineRetryDelaysMs: [],
     log: {
       warn: (line) => logs.warn.push(line),
       error: (line) => logs.error.push(line),
@@ -636,10 +638,10 @@ describe.each(databases)("the dispatch webhook on %s", (name, open) => {
     });
 
     // #326-T09
-    it("sends a debounced job once it is due, and once only when a person pulls it forward", async () => {
+    it("sends a job that is not due yet once it is due, and once only when a person pulls it forward", async () => {
       const t = await setup();
       const runAfter = new Date(t.fixture.clock.now().getTime() + 90 * SECOND);
-      const debounced = await t.enqueue({ runAfter });
+      const notDue = await t.enqueue({ runAfter });
       const waiting = await t.enqueue({
         prNumber: 2,
         prUrl: "https://github.test/acme/widgets/pull/2",
@@ -649,7 +651,7 @@ describe.each(databases)("the dispatch webhook on %s", (name, open) => {
 
       // Not due yet: a row waits for its time, and nothing is sent.
       expect(t.receiver.received).toHaveLength(0);
-      expect(await t.dispatches.get(debounced.job.id)).toMatchObject({
+      expect(await t.dispatches.get(notDue.job.id)).toMatchObject({
         state: "pending",
         attempts: 0,
         nextDispatchAt: runAfter.toISOString(),
@@ -663,7 +665,7 @@ describe.each(databases)("the dispatch webhook on %s", (name, open) => {
         reason: "already_active",
       });
       expect(t.receiver.received.map((c) => c.body?.jobId)).toEqual([
-        debounced.job.id,
+        notDue.job.id,
       ]);
 
       // A second click does not send again.
@@ -675,7 +677,7 @@ describe.each(databases)("the dispatch webhook on %s", (name, open) => {
       t.fixture.clock.advance(90 * SECOND);
       expect(await t.service.sendDue()).toEqual({ sent: 1 });
       expect(t.receiver.received.map((c) => c.body?.jobId)).toEqual([
-        debounced.job.id,
+        notDue.job.id,
         waiting.job.id,
       ]);
     });

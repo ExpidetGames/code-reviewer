@@ -2,16 +2,21 @@
 
 // What goes wrong between the app and a Worker in the hosted deployment, and what the app does about it (#332-T03 to T06),
 // with the real app, the real Dispatcher and the real Worker, and time passing where the real waits are minutes long
-// (the journey moves the clock of one job in the database, e2e/helpers/hosted-db.ts, and calls the app's own cron sweep, which
-// is what the platform's cron does every minute):
+// (the journey moves the clock of one job in the database, e2e/helpers/hosted-db.ts, and calls the app's own cron sweep,
+// which the platform's cron runs every two hours and which is only the safety net: what happens in the normal flow
+// happens without it, #395):
 //
-//  - the Dispatcher is down when a job is queued, and comes back: the sweep sends the call again and the review runs once;
+//  - the Dispatcher is down for a moment when a job is queued: the app repeats the call inside the request and the review
+//    runs once, no sweep (#395-T06);
+//  - the Dispatcher is down for longer than the repeats: the sweep sends the call again when it is back and the review
+//    runs once;
 //  - the Dispatcher stays down past the give-up: the run fails with `dispatch_unavailable`, the page says what it means,
 //    and the pull request is free for the next push;
-//  - the platform refuses to create a sandbox: every refusal counts as a lost attempt, the job is announced again, and
-//    after three the run fails with `launch_failed` without any Worker having started;
+//  - the platform refuses to create a sandbox: every refusal counts as a lost attempt, the Dispatcher gives the job back
+//    and the app announces it again at once, and after three the run fails with `launch_failed` without any Worker having
+//    started;
 //  - a Worker dies in the middle of a review: the Dispatcher sees its container end with an error, gives the job back at
-//    once (no wait for the lease), the sweep announces it again and a second Worker finishes it (#332-T06, #375-T09);
+//    once (no wait for the lease), the app announces it again at once and a second Worker finishes it (#332-T06, #375-T09);
 //  - a Worker that took over and keeps ending with an error: every end gives the job back within seconds and costs an
 //    attempt, and after three the run fails with `worker_exited` (#375-T02);
 //  - a Worker dies and the Dispatcher cannot see its container end (`worker_wait_failed`): nothing is released, the lease
@@ -38,7 +43,6 @@ import {
   OWNER,
   runSweep,
   setUpReviewedRepositories,
-  sweepUntil,
 } from "../helpers/hosted-instance";
 import {
   headSha,
@@ -128,13 +132,46 @@ test.describe("what the hosted deployment does when the Dispatcher, the platform
     return { number, head };
   }
 
-  /** The app tried to send the call and could not: nobody listens. */
+  /**
+   * The app tried to send the call and could not: nobody listens. It tries once and repeats the call three times inside
+   * the same request (#395), so the failures are counted to four before it leaves the job to its back-off.
+   */
   async function waitForFailedSend(jobId: string): Promise<void> {
+    await eventually(
+      "the app's send and its repeats to fail",
+      async () => {
+        const dispatch = await dispatchOf(jobId);
+        return dispatch !== null && dispatch.consecutiveFailures >= 4;
+      },
+      60_000,
+    );
+  }
+
+  // #395-T06
+  test("the Dispatcher is down for a moment when a job is queued: the app repeats the call inside the request and the review runs once, without a sweep", async ({
+    page,
+    request,
+  }) => {
+    const { number } = await openPullRequest(page, request, 26, "a");
+    const job = await onlyJobOf(REPOSITORY.fullName, number);
     await eventually("the app's first send to fail", async () => {
-      const dispatch = await dispatchOf(jobId);
+      const dispatch = await dispatchOf(job.id);
       return dispatch !== null && dispatch.consecutiveFailures >= 1;
     });
-  }
+
+    // Back before the third repeat (one second, then three more, then eight).
+    await startDispatcher();
+
+    const run = runsOf(page, REPOSITORY.fullName, number);
+    await page.reload();
+    await expect(run.locator("[data-status]")).toContainText(
+      "Succeeded",
+      RUN_TIMEOUT,
+    );
+    expect(theDispatcher().workersOf(job.id)).toHaveLength(1);
+    expect(fakeLlm().requests()).toHaveLength(1);
+    expect(await dispatchOf(job.id)).toMatchObject({ state: "acked" });
+  });
 
   // #332-T03
   test("the Dispatcher is down when a job is queued: the sweep sends the call again when it is back and the review runs once", async ({
@@ -154,8 +191,8 @@ test.describe("what the hosted deployment does when the Dispatcher, the platform
     );
 
     await startDispatcher();
-    // The app waits 10 seconds after a first failure; the cron comes by once a minute.
-    await letTimePass(job.id, 15);
+    // After four failures the app waits five minutes; the cron comes by after that.
+    await letTimePass(job.id, 310);
     const swept = await runSweep(request);
 
     expect(swept.sent).toBe(1);
@@ -231,9 +268,8 @@ test.describe("what the hosted deployment does when the Dispatcher, the platform
       title: `Pull request ${String(number)}`,
       headSha: pushed,
     });
-    // A push is reviewed after the debounce, and the app sends such a job from the sweep when it is due.
-    await sweepUntil(
-      request,
+    // A push is reviewed at once: the app sends the call when it queues the job, no sweep.
+    await eventually(
       "the pushed commit to be reviewed",
       async () => {
         const comments = await getPullRequestComments(
@@ -264,23 +300,18 @@ test.describe("what the hosted deployment does when the Dispatcher, the platform
     const { number } = await openPullRequest(page, request, 22, "6");
     const job = await onlyJobOf(REPOSITORY.fullName, number);
 
-    // The first attempt came with the call the app sent when it queued the job.
-    await eventually("the first launch to fail", async () => {
-      const state = await onlyJobOf(REPOSITORY.fullName, number);
-      return state.attempts === 1 && state.status === "queued";
-    });
-    expect(theDispatcher().workersOf(job.id)).toHaveLength(0);
-
-    // The call was acknowledged (202) and the job is still queued: after the acknowledgement timeout the cron sends it again.
-    await letTimePass(job.id, 150);
-    await sweepUntil(request, "the second launch to fail", async () => {
-      const state = await onlyJobOf(REPOSITORY.fullName, number);
-      return state.attempts === 2 && state.status === "queued";
-    });
-    await letTimePass(job.id, 150);
-    await sweepUntil(request, "the third launch to fail", async () => {
-      return (await onlyJobOf(REPOSITORY.fullName, number)).status === "failed";
-    });
+    // The first attempt came with the call the app sent when it queued the job. The Dispatcher gives the job back after
+    // each refusal with a retry time of 30 seconds, and the app announces it again when that has passed (#395): no
+    // sweep and no clock moved, three attempts in about a minute.
+    await eventually(
+      "the third launch to fail",
+      async () => {
+        return (
+          (await onlyJobOf(REPOSITORY.fullName, number)).status === "failed"
+        );
+      },
+      150_000,
+    );
 
     expect(await onlyJobOf(REPOSITORY.fullName, number)).toMatchObject({
       status: "failed",
@@ -330,16 +361,17 @@ test.describe("what the hosted deployment does when the Dispatcher, the platform
     expect(Date.now() - startedAt).toBeLessThan(60_000);
     expect(theDispatcher().workersOf(job.id)).toHaveLength(1);
 
-    // The call was acknowledged (202) and the job is queued: after the acknowledgement timeout the cron sends it again.
-    await letTimePass(job.id, 150);
-    await sweepUntil(request, "the second Worker to end", async () => {
-      const state = await onlyJobOf(REPOSITORY.fullName, number);
-      return state.attempts === 2 && state.status === "queued";
-    });
-    await letTimePass(job.id, 150);
-    await sweepUntil(request, "the third Worker to end", async () => {
-      return (await onlyJobOf(REPOSITORY.fullName, number)).status === "failed";
-    });
+    // The job was given back with a retry time of 30 seconds and the app announces it again when that has passed (#395):
+    // the second and the third Worker follow, with no sweep and no clock moved.
+    await eventually(
+      "the third Worker to end",
+      async () => {
+        return (
+          (await onlyJobOf(REPOSITORY.fullName, number)).status === "failed"
+        );
+      },
+      150_000,
+    );
 
     expect(await onlyJobOf(REPOSITORY.fullName, number)).toMatchObject({
       status: "failed",
@@ -370,7 +402,7 @@ test.describe("what the hosted deployment does when the Dispatcher, the platform
 
   // #332-T06
   // #375-T09
-  test("a Worker dies in the middle of a review: the Dispatcher gives the job back at once, the sweep announces it again and a second Worker finishes it", async ({
+  test("a Worker dies in the middle of a review: the Dispatcher gives the job back at once, the app announces it again at once and a second Worker finishes it", async ({
     page,
     request,
   }) => {
@@ -397,12 +429,8 @@ test.describe("what the hosted deployment does when the Dispatcher, the platform
     });
     expect(theDispatcher().output()).toContain('"reason":"worker_exited"');
 
-    // The call was acknowledged and the job is queued: after the acknowledgement timeout the cron sends it again.
-    await letTimePass(job.id, 150);
-    const swept = await runSweep(request);
-    expect(swept.sent).toBe(1);
-    expect(swept.expired?.requeued ?? 0).toBe(0);
-
+    // The job was given back with a retry time of 30 seconds and the app announces it again when that has passed (#395),
+    // without a sweep.
     const run = runsOf(page, REPOSITORY.fullName, number);
     await page.reload();
     await expect(run.locator("[data-status]")).toContainText(

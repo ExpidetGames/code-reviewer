@@ -29,6 +29,20 @@ export type DispatchRow = {
   lastCode: DispatchResultCode | null;
 };
 
+/**
+ * The answers that mean "not now, ask again when something frees up" (#395): the Dispatcher said `not_claimable` (the
+ * pool cap, or the running job of the same pull request) or it was busy or unavailable. A row with one of these
+ * codes is sent again when a job ends, without waiting for its time.
+ */
+export const WAITING_DISPATCH_CODES = [
+  "ignored_not_claimable",
+  "rate_limited",
+  "unavailable",
+] as const;
+
+/** The pull request whose waiting job goes first when a slot frees (the one whose job just ended). */
+export type PullRequestRef = { repositoryId: string; prNumber: number };
+
 /** A queued job that is due and whose dispatch is missing or due: the work of one sweep. */
 export type DueDispatchJob = {
   jobId: string;
@@ -57,9 +71,32 @@ export type JobDispatchesRepository = {
   record(jobId: string, update: DispatchUpdate, at: Date): Promise<void>;
   /**
    * The queued jobs that are due now and have no dispatch row, or whose row is due and not stopped. The
-   * sweep (#328) sends these (`DispatchService.sendDue`). Oldest first.
+   * sweep (#328) sends these (`DispatchService.sendDue`). Oldest first. With `minAgeMs` (#395) a job that changed less
+   * than that long ago is left out: the hook of the request that queued it is still sending it.
    */
-  listDue(now: Date, limit: number): Promise<DueDispatchJob[]>;
+  listDue(
+    now: Date,
+    limit: number,
+    minAgeMs?: number,
+  ): Promise<DueDispatchJob[]>;
+  /**
+   * #395: the queued, due jobs whose last call was answered "not now" (`WAITING_DISPATCH_CODES`) and that were sent
+   * at least once, whatever time their row says: a slot freed, so they are asked again. The job of `first` (the pull
+   * request whose job just ended) comes first, then the oldest. Never a `stopped` row.
+   */
+  listWaiting(
+    now: Date,
+    limit: number,
+    first?: PullRequestRef,
+  ): Promise<DueDispatchJob[]>;
+  /** #395: the job as a dispatch sees it, or undefined unless it is `queued` and due at `now`. */
+  dueJob(jobId: string, now: Date): Promise<DueDispatchJob | undefined>;
+  /**
+   * #395: makes the dispatch of a queued job due at `at` again with the failures reset (the job was given back after a
+   * launch that failed: its earlier call is spent). Creates the row if there is none. Returns when the job may be
+   * claimed (its `run_after`), or undefined when the job is not queued.
+   */
+  resetForResend(jobId: string, at: Date): Promise<Date | undefined>;
   /**
    * #328: makes the `stopped` rows of jobs that are still queued and were stopped at or before `stoppedBefore`
    * pending again, due at `at`, with the failure count reset. A Dispatcher that could not run a review kind
@@ -201,7 +238,86 @@ export function createJobDispatchesRepository(
       return Number(result.numDeletedRows);
     },
 
-    async listDue(at, limit) {
+    async listWaiting(at, limit, first) {
+      const timestamp = formatTimestamp(at);
+      let query = db
+        .selectFrom("jobs")
+        .innerJoin("job_dispatches", "job_dispatches.job_id", "jobs.id")
+        .select([
+          "jobs.id as job_id",
+          "jobs.review_kind as review_kind",
+          "jobs.attempts as job_attempts",
+        ])
+        .where("jobs.status", "=", "queued")
+        .where("jobs.run_after", "<=", timestamp)
+        .where("job_dispatches.state", "=", "pending")
+        .where("job_dispatches.attempts", ">", 0)
+        .where("job_dispatches.last_code", "in", [...WAITING_DISPATCH_CODES]);
+      if (first !== undefined)
+        query = query.orderBy(
+          sql`case when jobs.repository_id = ${first.repositoryId} and jobs.pr_number = ${first.prNumber} then 0 else 1 end`,
+        );
+      const rows = await query
+        .orderBy("jobs.run_after")
+        .orderBy("jobs.id")
+        .limit(limit)
+        .execute();
+      return rows.map(toDueJob);
+    },
+
+    async dueJob(jobId, at) {
+      const row = await db
+        .selectFrom("jobs")
+        .select([
+          "jobs.id as job_id",
+          "jobs.review_kind as review_kind",
+          "jobs.attempts as job_attempts",
+        ])
+        .where("jobs.id", "=", jobId)
+        .where("jobs.status", "=", "queued")
+        .where("jobs.run_after", "<=", formatTimestamp(at))
+        .executeTakeFirst();
+      return row === undefined ? undefined : toDueJob(row);
+    },
+
+    async resetForResend(jobId, at) {
+      const queued = await db
+        .selectFrom("jobs")
+        .select("jobs.run_after")
+        .where("jobs.id", "=", jobId)
+        .where("jobs.status", "=", "queued")
+        .executeTakeFirst();
+      if (queued === undefined) return undefined;
+      const timestamp = formatTimestamp(at);
+      const stamped = formatTimestamp(now());
+      await db
+        .insertInto("job_dispatches")
+        .values({
+          job_id: jobId,
+          state: "pending",
+          attempts: 0,
+          consecutive_failures: 0,
+          next_dispatch_at: timestamp,
+          acked_at: null,
+          last_attempt_at: null,
+          last_status: null,
+          last_code: null,
+          created_at: stamped,
+          updated_at: stamped,
+        })
+        .onConflict((conflict) =>
+          conflict.column("job_id").doUpdateSet({
+            state: "pending",
+            consecutive_failures: 0,
+            next_dispatch_at: timestamp,
+            updated_at: stamped,
+          }),
+        )
+        .execute();
+      return new Date(queued.run_after);
+    },
+
+    async listDue(at, limit, minAgeMs = 0) {
       const timestamp = formatTimestamp(at);
       const rows = await db
         .selectFrom("jobs")
@@ -213,6 +329,11 @@ export function createJobDispatchesRepository(
         ])
         .where("jobs.status", "=", "queued")
         .where("jobs.run_after", "<=", timestamp)
+        .where(
+          "jobs.updated_at",
+          "<=",
+          formatTimestamp(new Date(at.getTime() - minAgeMs)),
+        )
         .where((eb) =>
           eb.or([
             eb("job_dispatches.job_id", "is", null),
@@ -226,11 +347,19 @@ export function createJobDispatchesRepository(
         .orderBy("jobs.id")
         .limit(limit)
         .execute();
-      return rows.map((row) => ({
-        jobId: row.job_id,
-        reviewKind: row.review_kind === "dynamic" ? "dynamic" : "diff",
-        jobAttempts: row.job_attempts,
-      }));
+      return rows.map(toDueJob);
     },
+  };
+}
+
+function toDueJob(row: {
+  job_id: string;
+  review_kind: string;
+  job_attempts: number;
+}): DueDispatchJob {
+  return {
+    jobId: row.job_id,
+    reviewKind: row.review_kind === "dynamic" ? "dynamic" : "diff",
+    jobAttempts: row.job_attempts,
   };
 }
