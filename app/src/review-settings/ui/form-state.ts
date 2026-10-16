@@ -9,6 +9,7 @@ import {
   REVIEW_COMMANDS,
   type ReviewCommand,
 } from "../../integrations/types.ts";
+import type { ModelTier } from "../../model-tiers/tiers.ts";
 import {
   REVIEW_SETTING_FIELDS,
   type ReviewSettingField,
@@ -36,6 +37,11 @@ export type FormValues = {
   autoReviewOnOpen: boolean;
   autoReviewOnPush: boolean;
   allowedCommands: ReviewCommand[];
+  /**
+   * The tier of a workspace on the operator's key (#280). Carried so that a save sends back the tier that is stored;
+   * the form has no control for it yet (#283), so a save never changes it.
+   */
+  modelTier: ModelTier;
 };
 
 export type FormState = {
@@ -58,6 +64,7 @@ function valuesOf(settings: ReviewSettings): FormValues {
     autoReviewOnOpen: settings.autoReviewOnOpen,
     autoReviewOnPush: settings.autoReviewOnPush,
     allowedCommands: [...settings.allowedCommands],
+    modelTier: settings.modelTier,
   };
 }
 

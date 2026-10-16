@@ -9,6 +9,8 @@ import { getDatabase } from "../db/startup.ts";
 import { createJobReviewSettingsHooks } from "../jobs/review-settings-hooks.ts";
 import { configuredLlmModel } from "../llm/config.ts";
 import { modelCapabilities } from "../llm/shared.ts";
+import { readEffectiveEntitlements } from "../workspaces/effective-entitlements.ts";
+import { keyModeForJob } from "../llm/resolve.ts";
 import {
   createReviewSettingsService,
   type ReviewSettingsService,
@@ -26,6 +28,11 @@ export function reviewSettingsServiceFor(
     // #195: a kind change cancels the project's waiting review jobs in this transaction.
     hooks: createJobReviewSettingsHooks(workspaceId),
     modelCapabilities,
+    // #280: on the operator's key the models are the operator's, and the workspace's budget is not checked against
+    // the stored one. Read on every call, so a change of the key mode takes effect at once.
+    operatorsModels: async () =>
+      keyModeForJob(await readEffectiveEntitlements(db, workspaceId)) ===
+      "managed",
     // Read on every call, so a changed LLM_MODEL reaches the next review.
     builtIn: () => builtInReviewSettings(configuredLlmModel(process.env)),
   });

@@ -65,6 +65,7 @@ const PUBLIC_ROUTES = [
   "/api/operator/v1/usage",
   "/api/operator/v1/entitlements/default",
   "/api/operator/v1/plan-management",
+  "/api/operator/v1/model-tiers",
   "/api/operator/v1/handoff/redeem",
   "/api/operator/v1/[...path]",
   // The platform's cron sends CRON_SECRET; the route is a 404 outside serverless mode (src/cron/, #319).

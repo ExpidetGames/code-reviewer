@@ -72,12 +72,17 @@ admin portal (**LLM key**, `/admin/llm`; `src/admin/ui/operator-llm-key-form.tsx
      per-job credential mints and reveals it (`buildJobInput`, after `checkJob` resolved the access again). A key
      that was removed or rotated between the claim and the fetch is the one the fetch uses; one that is gone ends the
      job with `llm_not_configured`.
-- **The model is the instance's.** While a job runs on the operator's key, the operator chooses the model, never the
-  tenant: the review settings' `model`, `maxTokens` and Dynamic model are **not used** (the instance's `LLM_MODEL` and
-  `LLM_MAX_TOKENS` are, for Diff and for Dynamic, in the job, in the Dynamic options and in the capabilities read),
-  on both delivery paths (`withInstanceModel` in `runner-api/claim.ts`). The settings stay stored and take effect
-  again if the workspace goes back to its own key. The settings pages replace the model fields with a note
-  (`instanceChoosesModel`). Managed tiers (#280, #283) will replace this.
+- **The model is the operator's, per tier.** While a job runs on the operator's key, the operator chooses the model,
+  never the tenant (#280, `src/model-tiers/README.md`): the workspace chooses a **tier** (the review setting
+  `modelTier`: `low`, `medium`, `high`; default `medium`) and the model of that tier for the job's review kind, which the
+  operator configured through the operator API, replaces `model` (Diff) or the Dynamic model, in the job, in the Dynamic
+  options and in the capabilities read (`withTierModel` in `runner-api/claim.ts`), on both delivery paths. The review
+  settings' `model`, fallback model and Dynamic model stay stored and take effect again if the workspace goes back to
+  its own key; the workspace's `maxTokens` is kept and cut to the context window of the tier's model when it is known.
+  A tier without a model fails the job with `managed_tier_unavailable`: no move to another tier and not to the
+  instance's `LLM_MODEL`, which a managed job no longer uses at all. The model of a tier never reaches a workspace
+  (not the settings, a page, a result, a record or a log). The settings pages replace the model fields with a note
+  (`instanceChoosesModel`); the tier control is #283.
 - **The Worker's fetch asks for the standing again.** A workspace suspended after the claim, or whose entitlements
   became unreadable, gets no key: the job ends with the code of the claim (`runner-api/README.md`). Quotas are not
   counted again.
@@ -198,9 +203,14 @@ states no window yields no descriptor. Nothing is invented. The claim of a Dynam
 
 The request goes to the provider's fixed address (`endpoint.ts`; the test stack points it at the fake LLM with
 the existing switch), sends no credential, follows no redirect, has a timeout and the size limit, and the fetch is
-a parameter. **Outbound call:** the app asks `openrouter.ai` (HTTPS 443, no key) on every save of a Dynamic model and on every claim of a Dynamic job whose model is not in the cache (#279); a host that cannot reach it waits at most 5 seconds and gets the `DYNAMIC_MODEL_UNVERIFIED` warning (`docs/deployment-coolify.md`). The log line holds the model id and the outcome class only (`MODEL_CAPABILITY_CHECK`).
+a parameter. **Outbound call:** the app asks `openrouter.ai` (HTTPS 443, no key) on every save of a Dynamic model and on every claim of a Dynamic job whose model is not in the cache (#279); a host that cannot reach it waits at most 5 seconds and gets the `DYNAMIC_MODEL_UNVERIFIED` warning (`docs/deployment-coolify.md`). The log line holds the model id and the outcome class only (`MODEL_CAPABILITY_CHECK`); the claim of a managed
+job (#280) passes `logAs` and the line names its tier (`model=tier=high`) instead of the id.
 `createModelCapabilityChecker` remembers a `supported` answer in memory for five minutes (at most 200 models), so
-saving the same model repeatedly asks once; no other outcome is remembered. The settings save is its first user
+saving the same model repeatedly asks once; for a settings save no other outcome is remembered. **The claim of a
+managed job asks with `forClaim`** (#280): it also remembers an answer that is not `supported` for 45 seconds, so a
+provider outage costs one wait of the 5 second timeout per model, not one per claim and Worker fetch, and the checker
+keeps the last context window it read for a model for a day (`lastKnownContextLength`), which the claim clamps the
+token budget to while the provider cannot be asked (`src/model-tiers/README.md`). The settings save is its first user
 (`src/review-settings/README.md`, "Saving a Dynamic model checks it"); the run-time enforcement is the runner
 proxy's (`dynamic_model_features_unsupported`).
 

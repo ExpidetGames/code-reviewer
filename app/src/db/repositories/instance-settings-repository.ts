@@ -29,6 +29,7 @@ import {
   validateEntitlements,
 } from "../../workspaces/entitlements-validation.ts";
 import type { StoredGithubApp } from "../../github-config/settings.ts";
+import type { ManagedModelTiers } from "../../model-tiers/tiers.ts";
 import type { ImportNotice } from "../../legacy-import/notice.ts";
 import type { SmtpSettings } from "../../mail/smtp-settings.ts";
 import type { Database } from "../schema.ts";
@@ -92,6 +93,13 @@ export type InstanceSettingValues = {
    * there is no such page, no button and no route, and no refusal notice links to the plan page.
    */
   plan_management_url: string;
+  /**
+   * #280: which model backs each managed tier, per kind of review (src/model-tiers/): `{ low?: { diff?, dynamic? }, ... }`
+   * with OpenRouter model ids. **Operator data**: written through the operator API only, read by the claim of a job of a
+   * managed workspace; the ids are never shown to a workspace and not to the admin portal (it shows whether a tier is
+   * configured). No row: no tier is configured, and a managed job fails closed (`managed_tier_unavailable`).
+   */
+  managed_model_tiers: ManagedModelTiers;
 };
 export type InstanceSettingKey = keyof InstanceSettingValues;
 /**

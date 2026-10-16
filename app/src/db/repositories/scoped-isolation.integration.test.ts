@@ -812,6 +812,11 @@ const CASES: Case[] = [
     expectAnswer: (answer) => expect(answer).toBeUndefined(),
   },
   {
+    name: "usage.setModelTier",
+    run: (a, b) => a.usage.setModelTier(b.job.id, "high"),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
     name: "usage.settle",
     run: (a, b) =>
       a.usage.settle(b.job.id, {
