@@ -244,7 +244,7 @@ without log access.
   records as before, and the read is a path of the operator API, which answers 404 until `OPERATOR_API_TOKEN` is set.
 - **No index yet.** The read filters the period on `reserved_at` across every workspace; no index leads with it, so it
   scans the records of the period's range as far as the planner can. Records are small and the call is a poll, not a
-  hot path; add a partial index on unknown-cost settled records if a deployment polls often over a very large table.
+  hot path; add a partial index on unknown-cost settled records if a deployment polls often over a very large table (hundreds of thousands of records, or a poll more than once a minute). Suggested shape: `(workspace_id, reserved_at) where state = 'settled' and cost_micro_usd is null`. The query must then write `state = 'settled'` as a literal (`sql.lit('settled')`, as `voidEndedJobs` does for its partial index): Kysely binds a plain value as a parameter, and the planner does not choose a partial index for a bound value.
 - **Mixed versions.** No schema change and no new setting. An instance of an earlier release has no such path (the
   operator API answers `404 not_found`); a reader that polls it during a rollout must treat that as "not yet", and
   read the summary of each workspace meanwhile. The log line is unchanged.

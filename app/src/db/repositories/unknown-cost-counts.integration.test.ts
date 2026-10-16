@@ -439,103 +439,125 @@ describe.each(databases)(
         ]);
       },
     );
+
+    /** The usage seeder, the feed and four workspaces in the order the database sorts their ids. */
+    async function setupWorkspaces() {
+      const { fixture, feed } = await start();
+      for (const slug of ["second", "third", "fourth"])
+        await addWorkspace(fixture.db, slug);
+      const workspaces = (
+        await fixture.db
+          .selectFrom("workspaces")
+          .select("id")
+          .orderBy("id")
+          .execute()
+      ).map((row) => row.id);
+      return {
+        fixture,
+        feed,
+        seeder: createUsageSeeder(fixture.db),
+        workspaces,
+      };
+    }
+
+    // #385-T03
+    run(
+      "pages whole workspaces by id, so a workspace is never split across two pages",
+      async () => {
+        const t = await setupWorkspaces();
+        for (const workspaceId of t.workspaces) {
+          await t.seeder.seed({ workspaceId, keyMode: "own" });
+          await t.seeder.seed({ workspaceId, keyMode: "managed" });
+        }
+        const [a, b, c, d] = t.workspaces;
+
+        const first = await t.feed.unknownCostCounts({ ...WHOLE, limit: 2 });
+        const second = await t.feed.unknownCostCounts({
+          ...WHOLE,
+          limit: 2,
+          after: first.nextAfter ?? "",
+        });
+
+        expect(
+          first.counts.map((count) => `${count.workspaceId}/${count.keyMode}`),
+        ).toEqual([`${a}/managed`, `${a}/own`, `${b}/managed`, `${b}/own`]);
+        expect(first.nextAfter).toBe(b);
+        expect(
+          second.counts.map((count) => `${count.workspaceId}/${count.keyMode}`),
+        ).toEqual([`${c}/managed`, `${c}/own`, `${d}/managed`, `${d}/own`]);
+        // A page that is not full is the last one.
+        expect(second.nextAfter).toBeNull();
+      },
+    );
+
+    // #385-T03
+    run(
+      "lists no workspace without an unknown cost, and answers an empty period with nothing",
+      async () => {
+        const t = await setupWorkspaces();
+        await t.seeder.seed({
+          workspaceId: t.workspaces[0] ?? "",
+          costMicroUsd: 5,
+        });
+        await t.seeder.seed({
+          workspaceId: t.workspaces[1] ?? "",
+          state: "reserved",
+        });
+        await t.seeder.seed({
+          workspaceId: t.workspaces[2] ?? "",
+          state: "void",
+        });
+
+        expect(await t.feed.unknownCostCounts({ ...WHOLE, limit: 10 })).toEqual(
+          {
+            counts: [],
+            nextAfter: null,
+          },
+        );
+      },
+    );
+
+    // #385-T03
+    run("gives a figure the summary of the workspace agrees with", async () => {
+      const t = await setupWorkspaces();
+      const workspaceId = t.workspaces[0] ?? "";
+      await t.seeder.seed({ workspaceId, reviewKind: "diff", keyMode: "own" });
+      await t.seeder.seed({
+        workspaceId,
+        reviewKind: "dynamic",
+        keyMode: "own",
+      });
+      await t.seeder.seed({
+        workspaceId,
+        reviewKind: "dynamic",
+        keyMode: "own",
+        costMicroUsd: 3,
+      });
+
+      const counts: UnknownCostCount[] = (
+        await t.feed.unknownCostCounts({ ...WHOLE, limit: 10 })
+      ).counts;
+      const summary = await createUsageRecordsRepository(
+        t.fixture.db,
+        workspaceId,
+      ).summarize(WHOLE);
+
+      // Per key mode, the unknown costs of both kinds add up to what the summary lists per kind and key mode.
+      expect(counts).toEqual([
+        { workspaceId, keyMode: "own", unknownCostCount: 2 },
+      ]);
+      expect(
+        summary.reduce((sum, group) => sum + group.unknownCostCount, 0),
+      ).toBe(2);
+    });
   },
 );
 
-describe("the read of the counts", () => {
-  async function setup() {
-    const fixture = await createJobQueueFixture();
-    const seeder = createUsageSeeder(fixture.db);
-    const workspaces = [fixture.workspaceId];
-    for (const slug of ["second", "third", "fourth"])
-      workspaces.push(await addWorkspace(fixture.db, slug));
-    return {
-      fixture,
-      seeder,
-      feed: createUsageFeedRepository(fixture.db),
-      workspaces: workspaces.sort(),
-    };
-  }
-
-  // #385-T03
-  it("pages whole workspaces by id, so a workspace is never split across two pages", async () => {
-    const t = await setup();
-    for (const workspaceId of t.workspaces) {
-      await t.seeder.seed({ workspaceId, keyMode: "own" });
-      await t.seeder.seed({ workspaceId, keyMode: "managed" });
-    }
-    const [a, b, c, d] = t.workspaces;
-
-    const first = await t.feed.unknownCostCounts({ ...WHOLE, limit: 2 });
-    const second = await t.feed.unknownCostCounts({
-      ...WHOLE,
-      limit: 2,
-      after: first.nextAfter ?? "",
-    });
-
-    expect(
-      first.counts.map((count) => `${count.workspaceId}/${count.keyMode}`),
-    ).toEqual([`${a}/managed`, `${a}/own`, `${b}/managed`, `${b}/own`]);
-    expect(first.nextAfter).toBe(b);
-    expect(
-      second.counts.map((count) => `${count.workspaceId}/${count.keyMode}`),
-    ).toEqual([`${c}/managed`, `${c}/own`, `${d}/managed`, `${d}/own`]);
-    // A page that is not full is the last one.
-    expect(second.nextAfter).toBeNull();
-  });
-
-  // #385-T03
-  it("lists no workspace without an unknown cost, and answers an empty period with nothing", async () => {
-    const t = await setup();
-    await t.seeder.seed({
-      workspaceId: t.workspaces[0] ?? "",
-      costMicroUsd: 5,
-    });
-    await t.seeder.seed({
-      workspaceId: t.workspaces[1] ?? "",
-      state: "reserved",
-    });
-    await t.seeder.seed({ workspaceId: t.workspaces[2] ?? "", state: "void" });
-
-    expect(await t.feed.unknownCostCounts({ ...WHOLE, limit: 10 })).toEqual({
-      counts: [],
-      nextAfter: null,
-    });
-  });
-
-  // #385-T03
-  it("gives a figure the summary of the workspace agrees with", async () => {
-    const t = await setup();
-    const workspaceId = t.workspaces[0] ?? "";
-    await t.seeder.seed({ workspaceId, reviewKind: "diff", keyMode: "own" });
-    await t.seeder.seed({ workspaceId, reviewKind: "dynamic", keyMode: "own" });
-    await t.seeder.seed({
-      workspaceId,
-      reviewKind: "dynamic",
-      keyMode: "own",
-      costMicroUsd: 3,
-    });
-
-    const counts: UnknownCostCount[] = (
-      await t.feed.unknownCostCounts({ ...WHOLE, limit: 10 })
-    ).counts;
-    const summary = await createUsageRecordsRepository(
-      t.fixture.db,
-      workspaceId,
-    ).summarize(WHOLE);
-
-    // Per key mode, the unknown costs of both kinds add up to what the summary lists per kind and key mode.
-    expect(counts).toEqual([
-      { workspaceId, keyMode: "own", unknownCostCount: 2 },
-    ]);
-    expect(
-      summary.reduce((sum, group) => sum + group.unknownCostCount, 0),
-    ).toBe(2);
-  });
-
+describe("the count on SQLite for an instance without entitlements", () => {
   // #385-T01
   it("writes nothing new for an instance without entitlements: a run that settles without a cost adds a row to nothing but the usage records", async () => {
-    const t = await setup();
+    const fixture = await createJobQueueFixture();
+    const t = { fixture, feed: createUsageFeedRepository(fixture.db) };
     const rowsPerTable = async () => {
       const tables = await sql<{ name: string }>`
         select name from sqlite_master where type = 'table' and name not like 'kysely_%' and name not like 'sqlite_%'`.execute(

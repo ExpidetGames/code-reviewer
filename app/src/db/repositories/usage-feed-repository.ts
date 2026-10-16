@@ -118,17 +118,19 @@ export function createUsageFeedRepository(
         .orderBy("workspace_id")
         .orderBy("key_mode")
         .execute();
+      // The rows come in the order of the database, so the extra workspace is told by position, never by comparing
+      // ids here (the collation of the database and JavaScript's order need not agree).
       const ids = [...new Set(rows.map((row) => row.workspace_id))];
-      const lastId = ids.length > limit ? ids[limit - 1] : undefined;
+      const extra = ids[limit];
       return {
         counts: rows
-          .filter((row) => lastId === undefined || row.workspace_id <= lastId)
+          .filter((row) => row.workspace_id !== extra)
           .map((row) => ({
             workspaceId: row.workspace_id,
             keyMode: row.key_mode as UsageKeyMode,
             unknownCostCount: Number(row.unknown),
           })),
-        nextAfter: lastId ?? null,
+        nextAfter: extra === undefined ? null : (ids[limit - 1] ?? null),
       };
     },
   };
