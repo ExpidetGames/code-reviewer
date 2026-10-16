@@ -428,3 +428,9 @@ Inside `dispatcher/`: `pnpm test`, `pnpm test:int`, `pnpm test:privileged` (a Do
 `src/contracts/` is generated from `contracts/` (`make generate-contracts`) and never edited by hand. The project
 imports nothing from `app/` or `runner/`; what is shared is the contracts and `fakes/` (`fakes/dispatcher-app` is the
 fake App every test here runs against). See `TESTING.md` for the test rules.
+
+The hosted end-to-end lane (#332, `TESTING.md`, "Hosted e2e lane") runs this project as a process: `src/test-support/hosted-e2e-main.ts` is the
+Node entry's composition with the Sandbox-Launcher and the capability probe over the local mode of the Sandbox double
+(`fakes/sandbox/local.ts`) and `fakes/sandbox/bin/docker-worker.sh`, which runs the real Worker as a local process in place of the
+container. It repeats the wiring of `sandboxFromEnvironment` with that one platform, so a change to the wiring is a change there too. It
+is test code: no entry of a deployment imports it.

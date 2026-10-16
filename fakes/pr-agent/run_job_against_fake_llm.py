@@ -12,7 +12,14 @@ OpenRouter's `provider.require_parameters` to the fake as it does to OpenRouter)
 and every other check of the job (the host of
 `prUrl` against `git.baseUrl`, the token, the model) stays untouched.
 
-    python run_job_against_fake_llm.py http://127.0.0.1:<port>/api/v1
+    python run_job_against_fake_llm.py http://127.0.0.1:<port>/api/v1 \
+        [<connect guard directory> <connection log>]
+
+With the two optional arguments the job process runs behind the runner's Python connect guard
+(`runner/tests/engine/connect_guard/`): it records every connection, datagram and name lookup it
+starts through Python's `socket` module in the log (one JSON line each) and refuses everything that
+is not loopback. The hosted lane (#332) uses it, so that a journey can show that the job never left
+the machine. Neither is a secret.
 
 The credentials stay on stdin: the address is the only argument and no secret. Test stacks only;
 never set `PR_AGENT_COMMAND` on a real runner. Run it with the Python of the runner's environment.
@@ -26,8 +33,11 @@ from typing import Any
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) != 2:
-        sys.stderr.write("usage: run_job_against_fake_llm.py <llm base url>\n")
+    if len(argv) not in (2, 4):
+        sys.stderr.write(
+            "usage: run_job_against_fake_llm.py <llm base url> "
+            "[<connect guard directory> <connection log>]\n"
+        )
         return 2
     raw = sys.stdin.read()
     try:
@@ -42,8 +52,15 @@ def main(argv: list[str]) -> int:
     # The job loop hands a Dynamic job one descriptor to ask whether the job is still its own
     # (#260); `subprocess` would close it, and the entry point then never allows the write.
     lease_check = os.environ.get("RUNNER_LEASE_CHECK_FD", "")
+    environment = dict(os.environ)
+    if len(argv) == 4:
+        environment["PYTHONPATH"] = os.pathsep.join(
+            [argv[2], *([environment["PYTHONPATH"]] if environment.get("PYTHONPATH") else [])]
+        )
+        environment["ENGINE_CONNECT_LOG"] = argv[3]
     done = subprocess.run(
         [sys.executable, "-m", "code_reviewer_runner.runner"],
+        env=environment,
         input=text,
         text=True,
         pass_fds=(int(lease_check),) if lease_check.isdecimal() else (),
