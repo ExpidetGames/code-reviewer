@@ -5,6 +5,9 @@
 // source of job options are used (see README.md for what replaces them when the projects land).
 import "server-only";
 import { createIntegrationsRepository } from "../db/repositories/integrations-repository.ts";
+import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
+import { createModelTiersService } from "../model-tiers/service.ts";
+import { allTierModels } from "../model-tiers/tiers.ts";
 import { createUsageRecordsRepository } from "../db/repositories/usage-records-repository.ts";
 import { createJobsRepository } from "../db/repositories/jobs-repository.ts";
 import { createRepositoriesRepository } from "../db/repositories/repositories-repository.ts";
@@ -51,6 +54,12 @@ function getClaimedKeys(): ClaimedKeys {
  */
 function sharedDeps(): WorkerApiDeps {
   const db = getDatabase();
+  // #280: which model backs a tier. Only the claim and the masking of a result read it; the checks of a save are the
+  // operator API's.
+  const modelTiers = createModelTiersService({
+    settings: createInstanceSettingsRepository(db),
+    modelCapabilities,
+  });
   const llm = getWorkspaceLlm();
   return {
     // Runners serve the whole instance: the queue is not scoped, and everything the claim looks up
@@ -95,7 +104,25 @@ function sharedDeps(): WorkerApiDeps {
         job.id,
         keyMode,
       ),
-    // #279: the metadata of a Dynamic job's model, read when its claim is built.
+    // #280: the managed tier of a job on the operator's key, in its usage record (the name, never the model).
+    recordModelTier: (job, tier) =>
+      createUsageRecordsRepository(db, job.workspaceId).setModelTier(
+        job.id,
+        tier,
+      ),
+    // #280: which model backs a tier for a kind of review. Only the claim reads it; the checks of a save are the
+    // operator API's, so the service here never writes.
+    modelTiers,
+    tierModels: async (job) => {
+      const record = await createUsageRecordsRepository(
+        db,
+        job.workspaceId,
+      ).get(job.id);
+      return record?.modelTier == null
+        ? { managed: false, models: [] }
+        : { managed: true, models: allTierModels(await modelTiers.read()) };
+    },
+    // #279: the metadata of a job's model (Dynamic, and a managed tier's), read when its claim is built.
     modelCapabilities,
     claimedKeys: getClaimedKeys(),
     now: () => new Date(),

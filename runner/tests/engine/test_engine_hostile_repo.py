@@ -99,6 +99,37 @@ def test_a_repository_file_cannot_move_a_request_a_credential_the_model_or_the_b
     assert all(connection["allowed"] for connection in outcome.connections)
 
 
+# #280: the model of a managed tier is operator data. PR-Agent can print the model into the
+# comment it publishes ("Agent run details", the `config` section of the relevant
+# configurations), so a repository file must not switch either on. Real PR-Agent, the file
+# delivered by the fake GitHub.
+def test_a_repository_file_cannot_put_the_model_into_the_published_review(
+    engine: Engine, github: FakeGithub, llm: FakeLlm
+) -> None:
+    github.put_file(
+        SETTINGS_PATH,
+        """
+[config]
+output_run_details = true
+output_relevant_configurations = true
+""",
+    )
+
+    outcome = engine.run("review")
+
+    assert outcome.result["ok"] is True
+    assert llm.requests != []
+    assert len(github.comments) == 1
+    body = github.comments[0].body
+    assert body.strip() != ""
+    # Neither the model nor the sections that would print it.
+    assert MODEL not in body
+    assert MODEL.split("/")[-1] not in body
+    assert "Agent run details" not in body
+    assert "model_weak" not in body
+    assert outcome.result["commentUrl"] is not None
+
+
 # CR-45
 def test_a_repository_file_cannot_make_pr_agent_evaluate_a_value(
     engine: Engine, github: FakeGithub, llm: FakeLlm

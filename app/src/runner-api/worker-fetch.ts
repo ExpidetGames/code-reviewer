@@ -114,6 +114,8 @@ export async function handleFetch(
     // Before the key leaves with the response: if it cannot be remembered, the job is given back (below)
     // and the Worker does not have the key.
     await deps.claimedKeys.remember(job.id, outcome.input.llm.apiKey);
+    if (outcome.tierModel !== null)
+      await deps.claimedKeys.rememberModel(job.id, outcome.tierModel);
     const current = await deps.queue.get(job.id);
     if (current?.leaseExpiresAt == null)
       throw new Error(`Job ${job.id} has no lease expiry at fetch.`);

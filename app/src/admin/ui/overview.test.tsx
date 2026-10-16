@@ -13,6 +13,12 @@ import { Overview } from "./overview.tsx";
 
 afterEach(cleanup);
 
+const NO_TIERS: AdminSettingsView["modelTiers"] = {
+  low: { diff: false, dynamic: false },
+  medium: { diff: false, dynamic: false },
+  high: { diff: false, dynamic: false },
+};
+
 function view(overrides: Partial<AdminSettingsView> = {}): AdminSettingsView {
   const never = { updatedBy: null, updatedAt: null };
   return {
@@ -28,6 +34,7 @@ function view(overrides: Partial<AdminSettingsView> = {}): AdminSettingsView {
     planManagementUrl: { value: null, ...never },
     smtp: { value: null, password: "none", ...never },
     operatorLlmKey: { state: "not_configured" },
+    modelTiers: NO_TIERS,
     workspaceCount: 1,
     githubConfigured: false,
     mailConfigured: false,
@@ -445,5 +452,43 @@ describe("the LLM key of the instance (#276)", () => {
     expect(
       screen.getByRole("link", { name: "LLM key" }).getAttribute("href"),
     ).toBe("/admin/llm");
+  });
+});
+
+describe("the model tiers (#280)", () => {
+  const tiers = (modelTiers: AdminSettingsView["modelTiers"]) =>
+    view({ modelTiers });
+
+  // #280-T01
+  it("shows a row that says which tiers are configured, without a form: the operator API sets them", () => {
+    render(
+      <Overview
+        settings={tiers({
+          low: { diff: true, dynamic: false },
+          medium: { diff: false, dynamic: false },
+          high: { diff: true, dynamic: true },
+        })}
+      />,
+    );
+
+    const text = row("Managed model tiers").textContent ?? "";
+    expect(text).toContain("Low: Diff only");
+    expect(text).toContain("Medium: not configured");
+    expect(text).toContain("High: Diff and Dynamic");
+    expect(text).toContain("operator API");
+    // Nothing to follow: there is no page that sets them.
+    expect(within(row("Managed model tiers")).queryByRole("link")).toBeNull();
+  });
+
+  // #280-T01
+  it("is optional: no tier is no warning and no attention notice", () => {
+    render(<Overview settings={view()} />);
+
+    expect(row("Managed model tiers").textContent).toContain(
+      "Low: not configured",
+    );
+    expect(
+      screen.queryByRole("region", { name: /needs attention/i }),
+    ).toBeNull();
   });
 });

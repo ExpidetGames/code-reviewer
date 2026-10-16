@@ -58,18 +58,19 @@ by Next.js.
 
 ## Endpoints
 
-| Call                                                   | Does                                                                                                                                                            |
-| ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /api/operator/v1/workspaces?after=<id>&limit=`    | A page (default 50, at most 200) of `{ id, slug, createdAt }` ordered by id, and `nextAfter`. No names of people, no emails, no repositories.                   |
-| `GET /api/operator/v1/workspaces/{id}/entitlements`    | The stored row (or `null`) and the effective entitlements; `effective.source` says whether they come from the workspace or from the default.                    |
-| `PUT /api/operator/v1/workspaces/{id}/entitlements`    | Replaces the row. Idempotent. Answers like `GET`.                                                                                                               |
-| `DELETE /api/operator/v1/workspaces/{id}/entitlements` | Removes the row, so the default applies. Harmless when there is none. Answers like `GET`.                                                                       |
-| `GET\|PUT /api/operator/v1/entitlements/default`       | The default for workspaces without a row. No `DELETE`.                                                                                                          |
-| `GET /api/operator/v1/usage?after=&limit=`             | A page (default 50, at most 200) of the **settled** usage records of every workspace, ordered by `(settledAt, id)`, and `nextCursor`.                           |
-| `GET /api/operator/v1/workspaces/{id}/usage`           | The same for one workspace, plus `from` (included) and `to` (excluded) on `settledAt`.                                                                          |
-| `GET\|PUT\|DELETE /api/operator/v1/plan-management`    | The address of the operator-configured page that "Manage plan" hands workspace Owners and Admins over to (#284): `{ "url": "https://…" }`; `DELETE` removes it. |
-| `POST /api/operator/v1/handoff/redeem`                 | `{ "token": "…" }`: who a handoff token was made for (workspace id and slug, role, opaque user id), once. One `422 invalid_token` for every other case.         |
-| `GET /api/operator/v1/workspaces/{id}/usage/summary`   | `from` and `to` are required: per review kind and key mode, what the workspace ran in the period.                                                               |
+| Call                                                   | Does                                                                                                                                                                           |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GET /api/operator/v1/workspaces?after=<id>&limit=`    | A page (default 50, at most 200) of `{ id, slug, createdAt }` ordered by id, and `nextAfter`. No names of people, no emails, no repositories.                                  |
+| `GET /api/operator/v1/workspaces/{id}/entitlements`    | The stored row (or `null`) and the effective entitlements; `effective.source` says whether they come from the workspace or from the default.                                   |
+| `PUT /api/operator/v1/workspaces/{id}/entitlements`    | Replaces the row. Idempotent. Answers like `GET`.                                                                                                                              |
+| `DELETE /api/operator/v1/workspaces/{id}/entitlements` | Removes the row, so the default applies. Harmless when there is none. Answers like `GET`.                                                                                      |
+| `GET\|PUT /api/operator/v1/entitlements/default`       | The default for workspaces without a row. No `DELETE`.                                                                                                                         |
+| `GET /api/operator/v1/usage?after=&limit=`             | A page (default 50, at most 200) of the **settled** usage records of every workspace, ordered by `(settledAt, id)`, and `nextCursor`.                                          |
+| `GET /api/operator/v1/workspaces/{id}/usage`           | The same for one workspace, plus `from` (included) and `to` (excluded) on `settledAt`.                                                                                         |
+| `GET\|PUT\|DELETE /api/operator/v1/plan-management`    | The address of the operator-configured page that "Manage plan" hands workspace Owners and Admins over to (#284): `{ "url": "https://…" }`; `DELETE` removes it.                |
+| `GET\|PUT /api/operator/v1/model-tiers`                | Which model backs each managed tier (`low`, `medium`, `high`), per review kind (#280): `{ "tiers": { "low": { "diff": "…", "dynamic": "…" }, … } }`. `PUT` replaces all of it. |
+| `POST /api/operator/v1/handoff/redeem`                 | `{ "token": "…" }`: who a handoff token was made for (workspace id and slug, role, opaque user id), once. One `422 invalid_token` for every other case.                        |
+| `GET /api/operator/v1/workspaces/{id}/usage/summary`   | `from` and `to` are required: per review kind and key mode, what the workspace ran in the period.                                                                              |
 
 A change takes effect on the next claim; a running job is not touched.
 
@@ -80,7 +81,26 @@ of the API holds or mentions it (`operator-api.integration.test.ts`).
 **Upgrade every app instance before setting any workspace to `managed`** (#276). An instance of the previous release
 ignores the key mode: it would run the workspace's jobs on the workspace's own key and model, outside the cost limit.
 
-### The PUT body
+### Model tiers (#280)
+
+`GET|PUT /model-tiers` is the only way to set or read which model backs a tier (`src/model-tiers/README.md`). The answer
+of both is `{ "version": 1, "tiers": { low|medium|high: { "diff": id|null, "dynamic": id|null } } }`, every tier and kind
+present, `null` where nothing is configured. A `PUT` body is `{ "tiers": { … } }` with any of the tiers and kinds (a tier
+or kind that is left out or `null` is not configured); it replaces the whole configuration, and unknown keys are refused
+(`400 request_invalid`, `field` names the place). A model id the review settings would refuse is `422 model_id_invalid`
+(`field` such as `high.diff`, never the value). A **Dynamic** model is checked against the provider's public metadata and
+refused with `422` `DYNAMIC_MODEL_TOOLS_UNSUPPORTED`, `DYNAMIC_MODEL_UNKNOWN` or `DYNAMIC_MODEL_UNVERIFIED` (unlike a
+user's choice in the review settings, a model that cannot be verified is refused here). A **Diff** model is refused
+`422 MODEL_UNKNOWN` when the provider does not list it, and accepted when it needs no tool support or the provider
+cannot be reached. The models of one `PUT` are read at the same time. Nothing is stored on a refusal. The
+log line is `[operator-api] put model-tiers tiers=<tiers with a model|-> result=<ok|code>`: never an id.
+
+**The ids are operator data**: they are served to the holder of this token and used for the job the runner gets; no
+workspace, page, answer of the admin portal (it says only whether a tier is configured), usage record or log of a
+workspace has them. A change takes effect at the next claim. An older app instance answers the path with its generic
+`404 not_found` and ignores the setting: **upgrade every app instance before saving tiers.**
+
+### The PUT body of the entitlements
 
 The whole entitlements (`planLabel`, `keyMode`, `limits` with every limit, `periodStart`, `suspended`,
 `suspensionCode`), validated by `validateEntitlements` of #271 (unknown keys are refused). A refusal is `422` with
@@ -221,6 +241,7 @@ for is a generic `500 internal_error`; the log gets the name of the error.
 | `token.ts`                 | The token rules, the constant-time comparison                                   |
 | `startup.ts`               | The one start line                                                              |
 | `contract.ts`              | Error codes, limits, routes and methods, the safety lag, the cursor size        |
+| `api.ts` (model tiers)     | `modelTiers`: the route over `src/model-tiers/service.ts`                       |
 | `usage.ts`                 | The three usage routes (query, safety lag, answer)                              |
 | `api.ts` (plan handoff)    | `redeemHandoff` and `planManagement` (`src/plan-handoff/` has the rest)         |
 | `usage-cursor.ts`          | The opaque cursor and the check of the safety lag                               |

@@ -51,6 +51,11 @@ function view(overrides: Partial<AdminSettingsView> = {}): AdminSettingsView {
     planManagementUrl: { value: null, ...never },
     smtp: { value: null, password: "none", ...never },
     operatorLlmKey: { state: "not_configured" },
+    modelTiers: {
+      low: { diff: false, dynamic: false },
+      medium: { diff: false, dynamic: false },
+      high: { diff: false, dynamic: false },
+    },
     workspaceCount: 1,
     githubConfigured: false,
     mailConfigured: false,

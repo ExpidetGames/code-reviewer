@@ -5,6 +5,7 @@
 // person reads is the UI's business, and a value is never echoed back.
 import { REVIEW_COMMANDS, type ReviewCommand } from "../integrations/types.ts";
 import { MODEL_NAME_PATTERN } from "../llm/config.ts";
+import { isModelTier, type ModelTier } from "../model-tiers/tiers.ts";
 import {
   PROJECT_DYNAMIC_LIMITS,
   PROJECT_DYNAMIC_SETTING_FIELDS,
@@ -146,6 +147,12 @@ function commands(value: unknown): FieldResult<ReviewCommand[]> {
   return ok(REVIEW_COMMANDS.filter((command) => seen.has(command)));
 }
 
+/** A tier name; anything else (a model id, a made-up level) is refused without being echoed. */
+function modelTier(value: unknown): FieldResult<ModelTier> {
+  if (typeof value !== "string") return fail("INVALID_TYPE");
+  return isModelTier(value) ? ok(value) : fail("INVALID_FORMAT");
+}
+
 const FIELD_CHECKS: {
   [K in ReviewSettingField]: (value: unknown) => FieldResult<ReviewSettings[K]>;
 } = {
@@ -165,6 +172,7 @@ const FIELD_CHECKS: {
   autoReviewOnOpen: bool,
   autoReviewOnPush: bool,
   allowedCommands: commands,
+  modelTier,
 };
 
 export type ValidationResult =

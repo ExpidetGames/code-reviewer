@@ -35,6 +35,7 @@ import {
   readImportNotice,
   type ImportNotice,
 } from "../legacy-import/notice.ts";
+import { configuredTiers, readStoredTiers } from "../model-tiers/tiers.ts";
 import { savePlanManagementUrl } from "../plan-handoff/settings.ts";
 import { checkPlanManagementUrl } from "../plan-handoff/url.ts";
 import { githubIdentityLinked } from "./github-identity.ts";
@@ -96,6 +97,11 @@ export type AdminSettingsView = {
    * four characters of a long key. Never the key.
    */
   operatorLlmKey: OperatorLlmKeyStatus;
+  /**
+   * #280: whether each managed model tier has a model, per kind of review, and nothing else. The ids are operator
+   * data that this portal never shows, and it has no way to change them (only the operator API writes them).
+   */
+  modelTiers: ReturnType<typeof configuredTiers>;
   workspaceCount: number;
   githubConfigured: boolean;
   mailConfigured: boolean;
@@ -316,6 +322,9 @@ export function createAdminService({
           password: mailServer.password,
         },
         operatorLlmKey: await operatorKey.status(),
+        modelTiers: configuredTiers(
+          readStoredTiers(await settings.get("managed_model_tiers")),
+        ),
         workspaceCount: Number(count.count),
         githubConfigured: github,
         mailConfigured: mail,

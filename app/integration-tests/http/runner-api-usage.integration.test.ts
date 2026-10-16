@@ -86,6 +86,8 @@ describe("the claim of a job", () => {
   // #272-T01
   it("records the operator's key as managed", async () => {
     const h = await startRunnerApiHarness({
+      // A job on the operator's key needs a model for its tier (#280); which one is not what this test is about.
+      modelTiers: { medium: { diff: "tier/medium-diff" } },
       loadLlm: async () => ({
         ok: true,
         source: "operator",

@@ -199,6 +199,56 @@ describe("changing a setting", () => {
     );
   });
 
+  // #280-T01
+  it("shows only whether each model tier is configured, never a model id, and has no way to change them", async () => {
+    const portal = await startPortal();
+    const read = async () =>
+      await (
+        await portal.visit("/api/admin/settings", {
+          cookies: portal.adminCookies,
+        })
+      ).text();
+    expect(JSON.parse(await read())).toMatchObject({
+      modelTiers: {
+        low: { diff: false, dynamic: false },
+        medium: { diff: false, dynamic: false },
+        high: { diff: false, dynamic: false },
+      },
+    });
+
+    await createInstanceSettingsRepository(portal.db).set(
+      "managed_model_tiers",
+      {
+        low: { diff: "hidden-vendor/portal-low" },
+        high: {
+          diff: "hidden-vendor/portal-high",
+          dynamic: "hidden-vendor/portal-dyn",
+        },
+      },
+      null,
+    );
+
+    const text = await read();
+    expect(JSON.parse(text)).toMatchObject({
+      modelTiers: {
+        low: { diff: true, dynamic: false },
+        medium: { diff: false, dynamic: false },
+        high: { diff: true, dynamic: true },
+      },
+    });
+    expect(text).not.toContain("hidden-vendor");
+    // The portal cannot write them: the operator API is the only way.
+    const refused = await put(portal, {
+      modelTiers: { low: { diff: "hidden-vendor/other" } },
+    });
+    expect(refused.status).toBe(422);
+    expect(
+      await createInstanceSettingsRepository(portal.db).get(
+        "managed_model_tiers",
+      ),
+    ).toMatchObject({ low: { diff: "hidden-vendor/portal-low" } });
+  });
+
   // #284-T11
   it("shows the plan management page as unset, saves a valid https address and shows who did it", async () => {
     const portal = await startPortal();
