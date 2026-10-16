@@ -10,11 +10,11 @@ code has no default for a tier: a tier without a model fails closed.
 
 ## The pieces
 
-| File                   | Role                                                                                                                                                                    |
-| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `tiers.ts`             | Pure: the tiers and the default, `checkManagedModelTiers` (a write), `readStoredTiers` (lenient read), `modelOfTier`, the operator and portal views, `clampMaxTokens`     |
-| `errors.ts`            | The codes of a refused configuration that the operator API adds (`model_id_invalid` and the three `DYNAMIC_MODEL_*`)                                                      |
-| `service.ts`           | `createModelTiersService`: `read`, `modelFor(tier, kind)`, `save` over the instance setting `managed_model_tiers`, with the check of Dynamic models                      |
+| File         | Role                                                                                                                                                                  |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tiers.ts`   | Pure: the tiers and the default, `checkManagedModelTiers` (a write), `readStoredTiers` (lenient read), `modelOfTier`, the operator and portal views, `clampMaxTokens` |
+| `errors.ts`  | The codes of a refused configuration that the operator API adds (`model_id_invalid` and the three `DYNAMIC_MODEL_*`)                                                  |
+| `service.ts` | `createModelTiersService`: `read`, `modelFor(tier, kind)`, `save` over the instance setting `managed_model_tiers`, with the check of Dynamic models                   |
 
 ## The configuration
 
