@@ -6,7 +6,9 @@
 // token the queue fences on, so another job's credential, an earlier claim's and a made-up one all
 // fail the same way. The job goes back through the queue's `release`: one attempt is counted (a failed
 // launch has no budget of its own), the job waits again from `retryAfterSeconds`, or fails with the
-// reason on the last allowed attempt.
+// reason on the last allowed attempt. The reasons are `launch_failed` (the Worker did not start) and
+// `worker_exited` (#375: it started and its container ended with an error before it reported a result); a job that
+// already has its result, or that another claim holds, is refused by the same fence and nothing changes.
 import "server-only";
 import type { RunnerQueue } from "../jobs/runner-queue.ts";
 import { workerLeaseToken } from "../jobs/worker-credential.ts";
@@ -27,6 +29,12 @@ export type ReleaseDeps = {
 
 /** The reason a job fails with when a Dispatcher gives it back; a reason the app does not know becomes this one. */
 export const LAUNCH_FAILED_CODE = "launch_failed";
+/** #375: the Worker's container ended with an error before it reported a result. */
+export const WORKER_EXITED_CODE = "worker_exited";
+const KNOWN_RELEASE_REASONS: readonly string[] = [
+  LAUNCH_FAILED_CODE,
+  WORKER_EXITED_CODE,
+];
 
 export async function handleRelease(
   deps: ReleaseDeps,
@@ -44,12 +52,15 @@ export async function handleRelease(
 
   const { credential, retryAfterSeconds } = parsed.value;
   const leaseToken = workerLeaseToken(credential);
-  // The error code is stored on a job that fails, and the UI has copy for the codes it knows: the one
-  // reason a Dispatcher has is a Worker that did not start.
+  // The error code is stored on a job that fails, and the UI has copy for the codes it knows: a reason of
+  // a Dispatcher that is not one of them (a newer one) is stored as the general `launch_failed`.
+  const code = KNOWN_RELEASE_REASONS.includes(parsed.value.reason)
+    ? parsed.value.reason
+    : LAUNCH_FAILED_CODE;
   const released = await deps.queue.release(
     jobId,
     leaseToken,
-    LAUNCH_FAILED_CODE,
+    code,
     retryAfterSeconds === undefined
       ? undefined
       : { retryAt: new Date(deps.now().getTime() + retryAfterSeconds * 1000) },

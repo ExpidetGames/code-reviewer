@@ -302,11 +302,15 @@ Worker. It cannot count what runs, so the app counts for it. Three additions, al
   dispatcher credential in `Authorization`, the job credential in the body. It is the queue's `release`, so an
   attempt is counted (a failed Worker launch is a failed attempt, no separate budget), the job waits again
   from `retryAfterSeconds` (default: at once) and fails on the last allowed attempt (three). The stored
-  error code is always `launch_failed`, whatever reason was sent (it is logged, the UI has copy for the
-  known code). Answers: `200` `{ job: { id, status: "queued" | "failed" } }`; `400` for a body that does not
+  error code is `launch_failed` or `worker_exited` (#375: the Worker started and its container ended with an
+  error before it reported a result), whatever else was sent becomes `launch_failed` (the reason is logged, the UI has
+  copy for both codes). A Dispatcher that does not know `worker_exited` is never needed: an App that does not know it
+  accepts any reason of the right form and stores `launch_failed`. Answers: `200` `{ job: { id, status: "queued" | "failed" } }`; `400` for a body that does not
   fit (a lease token is not a credential); `401 WORKER_CREDENTIAL_INVALID` for a credential that is not the
   running claim of that job (another job's, an earlier claim's, made up; nothing changes); `404` for an unknown
-  job; `409 RUNNER_JOB_ENDED` when the claim of that credential has ended. A repeated release of a job that
+  job; `409 RUNNER_JOB_ENDED` when the claim of that credential has ended (a job that already has its result is
+  this answer too, and its result stands: the release of a Worker that delivered its result and then exited with an
+  error is a no-op). A repeated release of a job that
   was queued again is `401` (the claim is gone). The credential is never logged or returned.
 - **Version.** `GET /api/runners/v1/version` answers `{ version: 1, appVersion, features }` with
   `features` from `APP_FEATURES` (`worker_api`, `claim_by_job_id`, `pool_cap`, `release`). It takes the

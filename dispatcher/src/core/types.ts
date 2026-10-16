@@ -37,6 +37,15 @@ export type LaunchSpec = {
   /** How long the Worker may live, from the start. */
   timeoutSeconds: number;
   config: LaunchConfig;
+  /**
+   * For a Launcher that supervises the Worker after the hand-over (#375): call it when the Worker's container has
+   * ended with a non-zero exit code and the end was seen (never when the wait itself failed, never for exit 0, and
+   * not for an exit before the hand-over, which `launch` rejects with). The core answers by giving the job back to
+   * the App, which counts a lost attempt and does nothing for a job the Worker has already finished. It holds the
+   * per-job credential in its closure, so the Launcher never needs it for this. Never rejects. A Launcher that does
+   * not supervise leaves it unused: the lease then ends the job.
+   */
+  onWorkerExit?: (exitCode: number) => Promise<void>;
 };
 
 /**

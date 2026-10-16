@@ -21,6 +21,10 @@
 #                             without root cannot, so a lane that is not privileged unsets it and serves Diff jobs. The
 #                             `probe` mode keeps it: its verdict is the answer of an environment that cannot do that.
 #   E2E_WORKER_GATE           optional path: the Worker is not started while a file exists there
+#   E2E_WORKER_EXIT_FILE      optional path: while a file exists there, a `worker-once` container does not run the Worker: it
+#                             lives for 3 seconds, which is past the hand-over of the journeys (1 second), and ends with
+#                             the exit code the file holds (#375): a Worker that took over and then died of a setup error
+#                             or a kill, without a result
 #   E2E_STDIN_COPY_DIR        optional: a copy of the start document of every `worker-once` (it holds the per-job
 #                             credential) goes to `run-<n>.stdin` there, so that a test can search every log for the value
 #                             that really was a secret. A directory no log is scanned in, never the records directory.
@@ -132,6 +136,11 @@ case "${1:-}" in
     # A container that is held (a test that wants a Worker that has not started yet, or one that is still there).
     # In short steps, so that a killed client leaves no long sleep behind.
     while [ -n "${E2E_WORKER_GATE:-}" ] && [ -e "$E2E_WORKER_GATE" ]; do sleep 0.1; done
+
+    if [ "$mode" = "worker-once" ] && [ -n "${E2E_WORKER_EXIT_FILE:-}" ] && [ -e "$E2E_WORKER_EXIT_FILE" ]; then
+      sleep 3
+      exit "$(cat "$E2E_WORKER_EXIT_FILE")"
+    fi
 
     if [ -n "${E2E_STDIN_COPY_DIR:-}" ] && [ "$mode" = "worker-once" ]; then
       document="$(cat)"

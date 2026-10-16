@@ -525,9 +525,9 @@
       }
     },
     "KnownReleaseReason": {
-      "description": "Why a Dispatcher gives a claimed job back. `launch_failed`: the Worker could not be started; the app counts it as a lost attempt (three attempts, then the job fails). A reader accepts any reason of the right form (ReleaseRequest) and treats an unknown one like launch_failed.",
+      "description": "Why a Dispatcher gives a claimed job back. `launch_failed`: the Worker could not be started. `worker_exited`: the Worker was started and its container ended with a non-zero exit code before it reported a result (#375); the call is a no-op (409 RUNNER_JOB_ENDED, or 401 for a claim that is gone) when the job already has its result or another claim holds it. Either way the app counts a lost attempt (three attempts, then the job fails, with the reason as its error code). A reader accepts any reason of the right form (ReleaseRequest) and treats an unknown one like launch_failed, so an app that does not know `worker_exited` still gives the job back.",
       "type": "string",
-      "enum": ["launch_failed"]
+      "enum": ["launch_failed", "worker_exited"]
     },
     "ReleaseRequest": {
       "description": "#318: POST /api/runners/v1/jobs/{id}/release, with the dispatcher credential (RUNNER_TOKEN) in Authorization and the job credential in the body. Gives the job back to the queue (or fails it on the last attempt).",

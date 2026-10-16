@@ -181,9 +181,9 @@ export type RunnerResult = {
   [k: string]: unknown;
 };
 /**
- * Why a Dispatcher gives a claimed job back. `launch_failed`: the Worker could not be started; the app counts it as a lost attempt (three attempts, then the job fails). A reader accepts any reason of the right form (ReleaseRequest) and treats an unknown one like launch_failed.
+ * Why a Dispatcher gives a claimed job back. `launch_failed`: the Worker could not be started. `worker_exited`: the Worker was started and its container ended with a non-zero exit code before it reported a result (#375); the call is a no-op (409 RUNNER_JOB_ENDED, or 401 for a claim that is gone) when the job already has its result or another claim holds it. Either way the app counts a lost attempt (three attempts, then the job fails, with the reason as its error code). A reader accepts any reason of the right form (ReleaseRequest) and treats an unknown one like launch_failed, so an app that does not know `worker_exited` still gives the job back.
  */
-export type KnownReleaseReason = "launch_failed";
+export type KnownReleaseReason = "launch_failed" | "worker_exited";
 /**
  * The features an app lists in VersionResponse.features. A reader ignores a name it does not know and refuses to run against an app that lacks one it needs. `worker_api`: /api/workers/v1 exists. `claim_by_job_id`: ClaimRequest.jobId is honoured. `pool_cap`: ClaimRequest.maxRunning is honoured. `release`: the release call exists.
  */
