@@ -534,6 +534,7 @@ class DynamicEngine:
         transport: Transport = _http_request,
         port_source: Callable[[], int] = lambda: _free_port(),
         popen: Callable[..., subprocess.Popen[bytes]] = subprocess.Popen,
+        superseded: Callable[[], bool] = lambda: False,
     ) -> None:
         if job.dynamic is None or job.base is None:
             raise EngineError(
@@ -558,6 +559,9 @@ class DynamicEngine:
         self._transport = transport
         self._port_source = port_source
         self._popen = popen
+        # True once the host told the process that a newer push replaced this run: the watch ends
+        # the turn at once instead of waiting for the proxy to see the next request.
+        self._superseded = superseded
         # Set by the supervisor: the engine then runs as the dedicated user with its own network
         # rules, and its home, temporary files and config live where `export_isolation` prepared
         # them (removed with the job's lifetime). Without it (the unprivileged engine suite and
@@ -866,6 +870,10 @@ class DynamicEngine:
         try:
             while not finished.wait(WATCH_INTERVAL_SECONDS):
                 self._raise_recorded_failure()
+                if self._superseded():
+                    raise EngineError(
+                        ErrorCode.SUPERSEDED, "the run was superseded by a newer push"
+                    )
                 self.ledger.check_deadline()
                 if not self._is_running():
                     raise EngineError(

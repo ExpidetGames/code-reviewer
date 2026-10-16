@@ -10,7 +10,7 @@ masker knows it from the first line), and the job process never sees it, only th
 
 | Exit | Meaning |
 |------|---------|
-| 0 | The job succeeded, or it was given back to the queue (a SIGTERM or SIGINT during the job). |
+| 0 | The job succeeded, it was given back (SIGTERM, SIGINT) or a newer push superseded it (#396). |
 | 1 | The job failed, the app did not hold it any more, or the result could not be delivered. |
 | 2 | The Worker could not start the job (`WorkerFailure`, see worker_errors.py). |
 
@@ -114,7 +114,7 @@ def parse_request(raw: str) -> WorkerRequest:
 
 
 def _exit_for(end: JobEnd) -> WorkerExit:
-    if end in (JobEnd.OK, JobEnd.GIVEN_BACK):
+    if end in (JobEnd.OK, JobEnd.GIVEN_BACK, JobEnd.SUPERSEDED):
         return WorkerExit.OK
     return WorkerExit.FAILED
 

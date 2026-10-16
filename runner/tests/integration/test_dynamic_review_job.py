@@ -13,7 +13,7 @@ import re
 import socket
 import sys
 import time
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -813,7 +813,10 @@ class RecordingPublisher:
         self.preparer = preparer
         self.fail = fail
 
-    def __call__(self, job: Any, found: DynamicFindings) -> Published:
+    def __call__(
+        self, job: Any, found: DynamicFindings, may_write: Callable[[], bool] | None = None
+    ) -> Published:
+        # `may_write` is the supersede check the entry point passes right before the write (#396).
         self.calls.append((job, found))
         if self.preparer is not None:
             self.preparer.events.append("published")

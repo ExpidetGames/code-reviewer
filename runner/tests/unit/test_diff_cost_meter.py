@@ -25,6 +25,7 @@ from code_reviewer_runner.diff_cost import (
     DiffCostMeter,
     install_cost_meter,
 )
+from code_reviewer_runner.supersede import SupersededError, SupersedeSignal
 
 Completion = Callable[..., Awaitable[Any]]
 
@@ -760,3 +761,59 @@ def test_a_stream_that_is_not_drained_may_have_used_the_model(installed: Install
     asyncio.run(run())
 
     assert meter.may_have_used_the_model is True
+
+
+class TestASupersededRun:
+    """#396: a request in flight finishes and is counted; a new one is refused and never counted."""
+
+    # #396-T06
+    def test_a_new_request_is_refused_before_it_is_sent_and_is_not_counted(self) -> None:
+        signal = SupersedeSignal()
+        sent: list[int] = []
+
+        async def completion(*args: Any, **kwargs: Any) -> Any:
+            sent.append(1)
+            return answer(0.002)
+
+        boundary = Boundary(completion)
+        meter, undo = install_cost_meter(boundary, signal)
+        try:
+            assert asyncio.run(call(boundary)) is not None
+            signal.set()
+            with pytest.raises(SupersededError):
+                asyncio.run(call(boundary))
+        finally:
+            undo()
+
+        assert sent == [1]
+        assert meter.cost_usd() == Decimal("0.002")
+        assert meter.answered_calls == 1
+
+    # #396-T06
+    def test_a_request_in_flight_when_the_run_is_superseded_is_priced(self) -> None:
+        signal = SupersedeSignal()
+        release = asyncio.Event()
+
+        async def completion(*args: Any, **kwargs: Any) -> Any:
+            await release.wait()
+            return answer(0.004)
+
+        async def scenario() -> tuple[Any, DiffCostMeter]:
+            boundary = Boundary(completion)
+            meter, undo = install_cost_meter(boundary, signal)
+            try:
+                inflight = asyncio.ensure_future(call(boundary))
+                await asyncio.sleep(0)
+                signal.set()
+                with pytest.raises(SupersededError):
+                    await call(boundary)
+                release.set()
+                return await inflight, meter
+            finally:
+                undo()
+
+        response, meter = asyncio.run(scenario())
+
+        assert response is not None
+        assert meter.cost_usd() == Decimal("0.004")
+        assert meter.may_have_used_the_model

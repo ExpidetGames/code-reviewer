@@ -67,6 +67,9 @@ class ErrorCode(StrEnum):
     # The job is not ours any more (its lease was lost, or it was cancelled), or that could not be
     # confirmed right before the summary would have been written (#260). Nothing was written.
     LEASE_LOST = "lease_lost"
+    # A newer push replaced this run while it was running (#396). It stopped sending model requests,
+    # published nothing and reports what it used. Not a failure of the job.
+    SUPERSEDED = "superseded"
     UNKNOWN = "unknown"
 
 

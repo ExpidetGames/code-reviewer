@@ -69,9 +69,10 @@ def test_a_claim_with_a_job_returns_the_lease_and_the_input_and_sends_token_and_
     assert headers["X-Runner-Id"] == "client-test"
     # #195 finding 9: the client really sends the engines it was configured with.
     # #279: the runner also says it reads the model capabilities of a Dynamic job.
+    # #396: and that it stops gracefully when its run is superseded.
     assert app.requests[0]["body"] == {
         "engines": ["pr-agent"],
-        "features": ["dynamic_capabilities"],
+        "features": ["dynamic_capabilities", "supersede"],
     }
     assert app.violations == []
 
@@ -92,7 +93,7 @@ def test_a_claim_advertises_the_configured_engines(app: FakeApp) -> None:
 
     assert app.requests[0]["body"] == {
         "engines": ["pr-agent", "opencode"],
-        "features": ["dynamic_capabilities"],
+        "features": ["dynamic_capabilities", "supersede"],
     }
     assert app.violations == []
 
@@ -293,3 +294,27 @@ def test_a_200_that_is_not_the_heartbeat_answer_of_the_job_is_unavailable(body: 
             asyncio.run(api.heartbeat(JOB_ID, "lease-1234567890"))
     finally:
         server.close()
+
+
+# #396-T01
+def test_a_heartbeat_answer_says_whether_the_run_was_superseded(app: FakeApp) -> None:
+    api = client(app)
+
+    assert asyncio.run(api.heartbeat(JOB_ID, "lease-1234567890")).superseded is False
+    app.superseded.add(JOB_ID)
+    assert asyncio.run(api.heartbeat(JOB_ID, "lease-1234567890")).superseded is True
+    assert app.violations == []
+
+
+# #396-T01
+@pytest.mark.parametrize("value", ["true", 1, None, "yes", [True]])
+def test_only_the_boolean_true_means_superseded(app: FakeApp, value: object) -> None:
+    import json as _json
+
+    from code_reviewer_runner.job_loop.api import parse_heartbeat
+    from code_reviewer_runner.job_loop.http import Reply
+
+    body = {"version": 1, "job": {"id": JOB_ID, "superseded": value}}
+    reply = Reply(200, {"content-type": "application/json"}, _json.dumps(body).encode())
+
+    assert parse_heartbeat(reply, JOB_ID).superseded is False

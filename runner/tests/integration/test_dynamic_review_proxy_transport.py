@@ -10,6 +10,7 @@ how much of an upstream answer is read. Both ends are loopback fakes; nothing le
 import json
 import socket
 import threading
+import time
 from collections.abc import Callable
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -164,6 +165,53 @@ def test_the_served_proxy_answers_only_the_holder_of_the_job_capability() -> Non
     forwarded = upstream.requests[0][1]
     assert forwarded["Authorization"] == f"Bearer {UPSTREAM_KEY}"
     assert capability not in json.dumps(forwarded)
+
+
+def slow_answer(seconds: float) -> Callable[[BaseHTTPRequestHandler], None]:
+    def respond(handler: BaseHTTPRequestHandler) -> None:
+        time.sleep(seconds)
+        answer_ok(handler)
+
+    return respond
+
+
+# #396-T08: a superseded run lets the request in flight finish, so that its cost is measured.
+def test_stopping_the_server_with_a_drain_waits_for_the_request_in_flight() -> None:
+    capability = new_proxy_capability()
+    ledger = BudgetLedger(DynamicLimits(), unit_costs=UNIT_COSTS)
+    with Listener(slow_answer(1.0)) as upstream:
+        server = started_proxy(upstream.url, capability, ledger)
+        answers: list[tuple[int, Any]] = []
+        caller = threading.Thread(target=lambda: answers.append(call(server.url, capability)))
+        caller.start()
+        while not upstream.requests:  # the request is on its way to the provider
+            time.sleep(0.02)
+
+        started = time.monotonic()
+        server.stop(drain_seconds=10.0)
+        waited = time.monotonic() - started
+        caller.join(timeout=5.0)
+
+    assert answers and answers[0][0] == 200
+    assert waited >= 0.5  # it waited for the answer
+    assert ledger.model_calls == 1  # and the call was counted with its measured cost
+
+
+# #396-T08: without a drain the server stops at once (every other end of a run).
+def test_stopping_the_server_without_a_drain_does_not_wait_for_a_request() -> None:
+    capability = new_proxy_capability()
+    with Listener(slow_answer(2.0)) as upstream:
+        server = started_proxy(upstream.url, capability)
+        caller = threading.Thread(target=lambda: call(server.url, capability), daemon=True)
+        caller.start()
+        while not upstream.requests:
+            time.sleep(0.02)
+
+        started = time.monotonic()
+        server.stop()
+        waited = time.monotonic() - started
+
+    assert waited < 1.5
 
 
 def redirect_to(target: str, status: int) -> Callable[[BaseHTTPRequestHandler], None]:

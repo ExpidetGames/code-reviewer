@@ -67,6 +67,8 @@ class FakeApp:
         self.heartbeats: list[str] = []
         self.claims = 0
         self.lost: set[str] = set()
+        # #396: the jobs a newer push replaced; their heartbeats answer `superseded: true`.
+        self.superseded: set[str] = set()
         self.complete_status = "succeeded"
         self._scripted: dict[str, list[Scripted]] = defaultdict(list)
         self._lock = threading.Lock()
@@ -167,6 +169,7 @@ class FakeApp:
                             "id": job_id,
                             "heartbeatAt": "2026-10-10T12:00:30.000Z",
                             "leaseExpiresAt": "2026-10-10T12:02:30.000Z",
+                            **({"superseded": True} if job_id in self.superseded else {}),
                         },
                     },
                 )

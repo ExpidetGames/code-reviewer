@@ -47,6 +47,9 @@ class ScaledClock:
     def monotonic(self) -> float:
         return time.monotonic() / self._factor
 
+    def wall(self) -> float:
+        return time.time()
+
     async def sleep(self, seconds: float) -> None:
         await asyncio.sleep(seconds * self._factor)
 
@@ -62,6 +65,9 @@ class RecordingClock:
 
     def monotonic(self) -> float:
         return self.now + time.monotonic()
+
+    def wall(self) -> float:
+        return time.time() + self.now
 
     async def sleep(self, seconds: float) -> None:
         self.pauses.append(seconds)
@@ -525,3 +531,47 @@ def test_the_credential_is_not_in_the_arguments_or_the_environment_of_the_runnin
     for place in (arguments, environment, stdout, stderr):
         assert b"example-git-token" not in place and b"example-llm-key" not in place
     assert "example-git-token" in seen["stdin"]  # it went to the job process, on stdin only
+
+
+# #396-T05: the whole Worker, against the fake App that supersedes the job.
+def test_a_worker_whose_job_was_superseded_delivers_the_result_exits_zero_and_calls_no_more(
+    app: FakeAppProcess, tmp_path: Path
+) -> None:
+    job = app.enqueue("diff")
+    credential = app.claim(job)
+    app.supersede(job)
+    settings = settings_for(tmp_path, "superseded", job_timeout=600.0)
+
+    code = worker_run(app, job, credential, settings, tmp_path, clock=ScaledClock(0.01))
+
+    assert code is WorkerExit.OK
+    (delivered,) = app.results(job)
+    assert delivered["errorCode"] == "superseded"
+    assert delivered["usage"]["costUsd"] == 0.0042
+    sequence = [route for route, _ in routes(app, job)]
+    # Nothing for the job after the result, and the result exactly once.
+    assert sequence[-1] == "result"
+    assert sequence.count("result") == 1
+    assert "heartbeat" in sequence
+
+
+# #396-T05: the same Worker when the process is deaf to the signal and the end: the lease the
+# answer named bounds the drain, the group is ended, and the cost is unknown.
+def test_a_worker_whose_process_does_not_drain_ends_it_and_reports_an_unknown_cost(
+    app: FakeAppProcess, tmp_path: Path
+) -> None:
+    job = app.enqueue("diff")
+    credential = app.claim(job)
+    app.supersede(job)
+    settings = settings_for(tmp_path, "deaf", job_timeout=600.0)
+
+    code = worker_run(app, job, credential, settings, tmp_path, clock=ScaledClock(0.01))
+
+    assert code is WorkerExit.OK
+    (delivered,) = app.results(job)
+    assert delivered["errorCode"] == "superseded"
+    assert delivered.get("errorReason") == "no_result_from_process"
+    assert delivered.get("usage") is None
+    (seen,) = reports(tmp_path)
+    helper = int((tmp_path / "helper.pid").read_text())
+    assert gone(seen["pid"]) and gone(helper)
