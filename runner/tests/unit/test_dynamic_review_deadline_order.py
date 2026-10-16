@@ -216,3 +216,23 @@ def test_an_engine_that_exits_during_the_message_follows_the_deadline_order(
         release.set()
 
     assert raised.value.code is code
+
+
+# #396-T10
+def test_a_run_superseded_during_the_message_call_ends_the_turn_at_once(tmp_path: Path) -> None:
+    # The watch reacts to the signal itself; it does not wait for the proxy to refuse the next
+    # request (an engine that is thinking, or retrying, makes none for a long time).
+    clock = Clock()
+    release = threading.Event()
+    engine, client = engine_with(tmp_path, clock, hung_message_call(release))
+    told = threading.Event()
+    engine._superseded = told.is_set  # pyright: ignore[reportPrivateUsage]
+    threading.Timer(0.2, told.set).start()
+
+    try:
+        with pytest.raises(EngineError) as raised:
+            engine._send(client, "session")  # pyright: ignore[reportPrivateUsage]
+    finally:
+        release.set()
+
+    assert raised.value.code is ErrorCode.SUPERSEDED

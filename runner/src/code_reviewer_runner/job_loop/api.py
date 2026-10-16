@@ -21,6 +21,7 @@ import re
 import urllib.request
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Protocol
 
 from code_reviewer_runner import __version__
@@ -56,13 +57,15 @@ __all__ = [
     "ApiUnavailable",
     "ClaimedJob",
     "CompleteReply",
+    "HeartbeatReply",
     "HttpRunnerApi",
     "LeaseLost",
     "RunnerApi",
 ]
 
 # What this runner understands beyond its engines (ClaimRequest.features in the contract).
-CLAIM_FEATURES: tuple[str, ...] = ("dynamic_capabilities",)
+# `supersede` (#396): it stops gracefully when a heartbeat answers `job.superseded`.
+CLAIM_FEATURES: tuple[str, ...] = ("dynamic_capabilities", "supersede")
 
 
 @dataclass(frozen=True)
@@ -80,10 +83,50 @@ class CompleteReply:
     already_completed: bool
 
 
+@dataclass(frozen=True)
+class HeartbeatReply:
+    """What the app said to a heartbeat that it accepted."""
+
+    # #396: a newer push replaced this run; it must stop gracefully. Absent in the answer means
+    # False.
+    superseded: bool = False
+    # When the lease ends, in seconds since the epoch, as the answer names it (None: absent or
+    # unreadable). A superseded run drains until shortly before it (`host.py`).
+    lease_expires_at: float | None = None
+
+
+def parse_heartbeat(reply: Reply, job_id: str) -> HeartbeatReply:
+    """The accepted heartbeat: a 200 is the app's "yes" only as the contract's answer for this very
+    job.
+
+    A gateway or a captive portal that answers 200 to everything is not the app (#260). `superseded`
+    counts only as the boolean `true`; anything else is "not superseded".
+    """
+    body = as_object(parse_json(reply))
+    job = as_object(body.get("job")) if body and body.get("version") == 1 else None
+    if job is None or job.get("id") != job_id:
+        raise ApiUnavailable("the heartbeat answer does not match the contract", 200)
+    return HeartbeatReply(
+        superseded=job.get("superseded") is True,
+        lease_expires_at=_epoch(job.get("leaseExpiresAt")),
+    )
+
+
+def _epoch(value: object) -> float | None:
+    """The time of a contract `Timestamp` as seconds since the epoch, or None for anything else."""
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return None if parsed.tzinfo is None else parsed.timestamp()
+
+
 class RunnerApi(Protocol):
     async def claim(self) -> ClaimedJob | None: ...
 
-    async def heartbeat(self, job_id: str, lease_token: str) -> None: ...
+    async def heartbeat(self, job_id: str, lease_token: str) -> HeartbeatReply: ...
 
     async def complete(
         self, job_id: str, lease_token: str, result: Mapping[str, Any]
@@ -129,18 +172,13 @@ class HttpRunnerApi:
             raise self._failure(reply)
         return self._parse_claim(reply)
 
-    async def heartbeat(self, job_id: str, lease_token: str) -> None:
+    async def heartbeat(self, job_id: str, lease_token: str) -> HeartbeatReply:
         reply = await asyncio.to_thread(
             self._send, f"/jobs/{self._safe_id(job_id)}/heartbeat", {"leaseToken": lease_token}
         )
         if reply.status != 200:
             raise self._failure(reply)
-        # #260: a 200 is the app's "yes" only as the contract's answer for this very job. A gateway
-        # or a captive portal that answers 200 to everything is not the app.
-        body = as_object(parse_json(reply))
-        job = as_object(body.get("job")) if body and body.get("version") == 1 else None
-        if job is None or job.get("id") != job_id:
-            raise ApiUnavailable("the heartbeat answer does not match the contract", 200)
+        return parse_heartbeat(reply, job_id)
 
     async def complete(
         self, job_id: str, lease_token: str, result: Mapping[str, Any]

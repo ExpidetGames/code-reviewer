@@ -699,6 +699,26 @@ the failure.
 **Not covered.** The process watchdog that ends a job whose runner did not stop in time writes no
 note: it cannot write safely while the job is being killed. That failure is in the Runs view.
 
+## A newer push replaces a running review (#396, #397)
+
+A push to a pull request whose automatic Dynamic Review is still running supersedes that run (the
+Runs view shows "Superseded"). The review of the new head starts at once; the old one stops
+without publishing:
+
+- The Worker learns of it at its next heartbeat (at most 60 s later), the job process is told,
+  and the model proxy refuses every further request with the code `superseded`. The engine's turn
+  ends at the signal. A model request that was already sent is waited for (at most 120 s, the
+  longest request), so its cost is measured and the run reports it.
+- Nothing is published after the signal: the summary, the reconciliation of findings and the note
+  of a failure each check right before the one write they make. A run that had already published
+  before it heard of it keeps its review (it ends as a success).
+- The run is not a quota run; its measured cost is usage with the reason `superseded` (the spend
+  limits still count it), and a cost that is not known is never billed.
+- The numbers and why they fit: [`runner/README.md`](../runner/README.md), "How long it takes";
+  they are stated in `contracts/runner-api.v1.json` (`SupersedeTiming`).
+- Only a Worker that names the feature `supersede` is told; an earlier Worker finishes and
+  publishes as before.
+
 ## Errors an operator sees
 
 | Code | Meaning | What to check |
@@ -873,7 +893,8 @@ by the defaults.
   write, the lease is lost, the completion report is lost): the comment says head A while the app has
   no succeeded review of A. The claim therefore carries `base.attemptedShas`: the heads of the
   pull request's earlier jobs of the same kind that *ran* and did not succeed (`failed`, or at least
-  one lost attempt; a job superseded or cancelled while still waiting never ran and is not counted),
+  one lost attempt; a job cancelled or superseded while still waiting never ran and is not counted, while a
+  superseded job that did run counts, #397),
   created after the last succeeded job and before the claimed one (newest first, at most 20, the key
   is left out when there are none). The publisher accepts such a head next to the job's own head and
   `previousReviewedSha`, reconciles from that state and edits the same comment; the next success

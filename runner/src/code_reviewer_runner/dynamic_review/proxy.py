@@ -413,6 +413,7 @@ class ModelProxy:
         capability: str,
         post: UpstreamPost = _http_post,
         require_parameters: bool = False,
+        superseded: Callable[[], bool] = lambda: False,
     ) -> None:
         if len(capability) < _MIN_CAPABILITY_CHARS:
             raise LimitError(
@@ -430,6 +431,14 @@ class ModelProxy:
         self._post = post
         # True when the destination is OpenRouter (the runner decides, never the engine).
         self._require_parameters = require_parameters
+        # #396: true once a newer push replaced the run. A request in flight finishes (and is
+        # counted); a new one is refused, with the stable code `superseded`, before anything is
+        # forwarded or reserved.
+        self._superseded = superseded
+        # Requests being answered right now. A superseded run lets them finish (their cost is
+        # measured) before the server goes away: `wait_idle`.
+        self._in_flight = 0
+        self._idle = threading.Condition()
         # The proxy starts only after the capability descriptor was proven: an unusable destination
         # is a failure before the first request, not a downgrade at the first call.
         self.capabilities.check_required()
@@ -450,6 +459,8 @@ class ModelProxy:
         """The whole decision for one request. Never raises; every failure is a stable code."""
         if not self.authorized(headers):
             return UNAUTHORIZED
+        with self._idle:
+            self._in_flight += 1
         try:
             return self._handle(method, path, body)
         except LimitError as error:
@@ -457,6 +468,15 @@ class ModelProxy:
             # 403, not 5xx: a deterministic refusal must not be retried (every retry is a call).
             self.ledger.record_failure(error)
             return ProxyResponse(status=403, body=error_body(error.code, error.detail))
+        finally:
+            with self._idle:
+                self._in_flight -= 1
+                self._idle.notify_all()
+
+    def wait_idle(self, timeout: float) -> bool:
+        """Wait until no request is being answered; False when `timeout` ran out first."""
+        with self._idle:
+            return self._idle.wait_for(lambda: self._in_flight == 0, timeout=timeout)
 
     def _handle(self, method: str, path: str, body: bytes) -> ProxyResponse:
         if path == f"{self.base_path}/models":
@@ -469,6 +489,8 @@ class ModelProxy:
             raise LimitError(
                 ErrorCode.DYNAMIC_POLICY_VIOLATION, "only the model protocol is allowed"
             )
+        if self._superseded():
+            raise LimitError(ErrorCode.SUPERSEDED, "the run was superseded by a newer push")
         self.ledger.check_request_bytes(len(body))
         request = self._decode(body)
         self._check_model(request)
@@ -803,6 +825,7 @@ class ProxyServer:
     """A running loopback proxy. `url` is what the engine's provider is pointed at."""
 
     def __init__(self, proxy: ModelProxy, host: str, port: int) -> None:
+        self._proxy = proxy
         self._server = ThreadingHTTPServer((host, port), _Handler)
         self._server.daemon_threads = True
         self._server.proxy = proxy  # type: ignore[attr-defined]
@@ -817,7 +840,12 @@ class ProxyServer:
         self._thread.start()
         return self
 
-    def stop(self) -> None:
+    def stop(self, drain_seconds: float = 0.0) -> None:
+        """Stop serving. With `drain_seconds` the requests already being answered finish first
+        (a superseded run: their cost is measured and must be in the result); new ones are
+        refused by the proxy's own supersede check meanwhile."""
+        if drain_seconds > 0:
+            self._proxy.wait_idle(drain_seconds)
         self._server.shutdown()
         self._server.server_close()
         self._thread.join(timeout=5.0)

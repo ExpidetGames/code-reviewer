@@ -19,6 +19,11 @@ argument list, the command line `ps` shows for it and the job from stdin.
     summary     ask the host over the lease channel (as a Dynamic job does right before it writes
                 its summary) and write `<directory>/summary` only if the answer is "held"; the
                 result line says which answer it got
+    superseded  wait for SIGUSR1 (the host unblocks it as the real process does once it has its
+                handler), then print the result of a superseded run (with the cost it measured)
+                and exit 1
+    deaf        never read SIGUSR1 (it stays blocked) and ignore SIGTERM, start a helper that also
+                waits; the pids of both are in the report: a process that does not drain
     kill        end by SIGKILL, with no result line and nothing cleaned up (an OOM kill)
 """
 
@@ -113,6 +118,41 @@ elif scenario == "summary":
     if answer == "held":
         (directory / "summary").write_text("the summary")
     print(result(ok=answer == "held", errorCode=None if answer == "held" else "lease_lost"))
+elif scenario == "superseded":
+    told: list[int] = []
+
+    def on_signal(signum: int, frame: object) -> None:
+        told.append(1)
+
+    signal.signal(signal.SIGUSR1, on_signal)
+    signal.pthread_sigmask(signal.SIG_UNBLOCK, [signal.SIGUSR1])
+    for _ in range(300):
+        if told:
+            break
+        time.sleep(0.1)
+    print(
+        result(
+            ok=False,
+            commentUrl=None,
+            errorCode="superseded",
+            logTail="superseded: a newer push replaced this run",
+            usage={
+                "model": "m",
+                "promptTokens": 600,
+                "completionTokens": 150,
+                "totalTokens": 750,
+                "aiCalls": 1,
+                "fallbackUsed": False,
+                "costUsd": 0.0042,
+            },
+        )
+    )
+    sys.exit(1)
+elif scenario == "deaf":
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    helper = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    (directory / "helper.pid").write_text(str(helper.pid))
+    time.sleep(60)
 elif scenario == "kill":
     os.kill(os.getpid(), signal.SIGKILL)
 else:

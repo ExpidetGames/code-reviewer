@@ -47,6 +47,7 @@ from importlib import import_module
 from typing import Any
 
 from code_reviewer_runner.dynamic_review.budget import exact_cost
+from code_reviewer_runner.supersede import PROCESS_SIGNAL, SupersededError, SupersedeSignal
 
 _HANDLER_MODULE = "pr_agent.algo.ai_handlers.litellm_ai_handler"
 _FUNCTION = "acompletion"
@@ -206,11 +207,16 @@ def _watched(meter: DiffCostMeter, stream: Any) -> AsyncIterator[Any]:
 
 def install_cost_meter(
     module: Any | None = None,
+    superseded: SupersedeSignal = PROCESS_SIGNAL,
 ) -> tuple[DiffCostMeter, Callable[[], None]]:
     """Wrap PR-Agent's `acompletion`. Returns the meter and a function that undoes the wrapping.
 
     Everything the wrapper relies on is checked first, and a failed check changes nothing.
     Installing twice does not wrap twice.
+
+    Once the run is superseded (#396) a new request is refused with `SupersededError` before
+    anything is sent
+    and before the meter hears of it; a request that is in flight finishes and is counted as always.
     """
     # PR-Agent ships no type information: the module is `Any` on purpose.
     target: Any = module if module is not None else import_module(_HANDLER_MODULE)
@@ -225,6 +231,8 @@ def install_cost_meter(
 
     @wraps(original)
     async def metered(*args: Any, **kwargs: Any) -> Any:
+        if superseded.is_set():
+            raise SupersededError("the run was superseded; no further model request is sent")
         meter.begin()
         if _carries_a_retry(kwargs):
             # Requests we cannot count one by one: the call is handed on unchanged and stays open.

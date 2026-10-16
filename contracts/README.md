@@ -72,6 +72,21 @@ The App, the Dispatcher (TypeScript) and the Worker (Python) agree on these file
   end-to-end journeys run against it. Its answers are checked against the schemas in
   `app/integration-tests/fakes/dispatcher-app.integration.test.ts`.
 
+### A superseded run (#396, #397)
+
+Additive, so a previous-release reader and writer keep working: the claim feature `supersede` (a runner or Worker
+that names it understands the heartbeat field below); the heartbeat answer's optional `job.superseded` (`true` when
+a newer push replaced the run; absent means not superseded, and `examples/HeartbeatResponse.json` shows the field
+as `false`; a runner that never named the feature never gets it); the result code `superseded`; the status
+`superseded` in the answer of a result and in the job state (`draining` there while the claim still holds); and
+`SupersedeTiming`, the numbers behind it, stated once for both sides (the heartbeat maximum, the longest model
+request, the drain, the margin before the lease, the claim and the report grace). It is not part of any request or
+answer: the app test and the runner test each hold their constants equal to it.
+
+A heartbeat that says `superseded` names the end of the claim in `job.leaseExpiresAt`: the app sets it once, at the
+push, to `claimSeconds` after it, and heartbeats do not extend it. The Worker ends its drain `killMarginSeconds`
+before it, so the result is reported while the claim holds.
+
 ### The probe contract (#331)
 
 `probe-verdict.v1.json` has no generated types: the reader, the Dispatcher, keeps the closed list of reasons in

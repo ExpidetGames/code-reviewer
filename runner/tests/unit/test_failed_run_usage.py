@@ -77,7 +77,7 @@ class FakeServer:
     def start(self) -> "FakeServer":
         return self
 
-    def stop(self) -> None:
+    def stop(self, drain_seconds: float = 0.0) -> None:
         pass
 
 
