@@ -248,6 +248,16 @@ const ENTRIES: Entry[] = [
     takesNoIds: true,
   },
   {
+    name: "POST plan-handoff",
+    route: "/api/w/[workspace]/plan-handoff",
+    method: "POST",
+    minRole: MINIMUM_ROLE.manage_plan,
+    path: () => "/plan-handoff",
+    params: () => ({}),
+    file: "plan-handoff/route.ts",
+    takesNoIds: true,
+  },
+  {
     name: "PATCH workspace",
     route: "/api/w/[workspace]",
     method: "PATCH",
@@ -470,6 +480,12 @@ async function start() {
     { kind: "everyone" },
     null,
   );
+  // The instance has a plan management page: without one, "Manage plan" is a missing path for everybody.
+  await createInstanceSettingsRepository(getDatabase()).set(
+    "plan_management_url",
+    "https://plans.example/manage",
+    null,
+  );
   // The registry reads the environment on first use, so the route files load after it was set.
   vi.resetModules();
   const alpha = await seedWorkspace("alpha", {
@@ -527,7 +543,8 @@ async function start() {
         | "repositories"
         | "jobs"
         | "invitations"
-        | "workspace_members",
+        | "workspace_members"
+        | "plan_handoff_tokens",
     ) =>
       db
         .selectFrom(table)
@@ -545,6 +562,7 @@ async function start() {
       jobs: await select("jobs"),
       invitations: await select("invitations"),
       members: await select("workspace_members"),
+      planHandoffTokens: await select("plan_handoff_tokens"),
       projects: await db
         .selectFrom("projects")
         .innerJoin("repositories", "repositories.id", "projects.repository_id")

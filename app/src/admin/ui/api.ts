@@ -39,6 +39,8 @@ export type SettingChange =
   | { limits: { maxWorkspacesPerUser: number } }
   /** The Dynamic Review rollout gate of the instance. */
   | { dynamicReview: { enabled: boolean } }
+  /** The page "Manage plan" hands people over to (#284); `null` removes it. */
+  | { planManagementUrl: string | null }
   /** `null` removes the mail server. */
   | { smtp: SmtpChange | null }
   /** The operator's own LLM key (write-only); `null` removes it. */

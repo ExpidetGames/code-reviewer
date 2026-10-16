@@ -61,6 +61,7 @@ export function InstanceForm({
   const tenancyHeadingId = `${ids}-tenancy-heading`;
   const limitsHeadingId = `${ids}-limits-heading`;
   const dynamicHeadingId = `${ids}-dynamic-heading`;
+  const planHeadingId = `${ids}-plan-heading`;
   const [tenancy, setTenancy] = useState<TenancyKind>(settings.tenancy.value);
   const [limitText, setLimitText] = useState(
     String(settings.maxWorkspacesPerUser.value),
@@ -68,20 +69,24 @@ export function InstanceForm({
   const [dynamicEnabled, setDynamicEnabled] = useState(
     settings.dynamicReview.value,
   );
+  const [planUrl, setPlanUrl] = useState(
+    settings.planManagementUrl.value ?? "",
+  );
   const [rolloutConfirmed, setRolloutConfirmed] = useState(false);
   const [dynamicRefusal, setDynamicRefusal] = useState(false);
   const [results, setResults] = useState<{
     tenancy: SaveStatus;
     limits: SaveStatus;
     dynamic: SaveStatus;
-  }>({ tenancy: null, limits: null, dynamic: null });
+    plan: SaveStatus;
+  }>({ tenancy: null, limits: null, dynamic: null, plan: null });
   const { pending, save } = useSave(api, settings.workspaceCount);
   const focusTargetRef = useFocusFirstError();
 
   async function submit(event: FormEvent) {
     event.preventDefault();
     // Only what changed is sent, so a save does not touch the other setting's "last changed".
-    const wanted: Array<"tenancy" | "limits" | "dynamic"> = [];
+    const wanted: Array<"tenancy" | "limits" | "dynamic" | "plan"> = [];
     const changes: SettingChange[] = [];
     if (tenancy !== settings.tenancy.value) {
       wanted.push("tenancy");
@@ -99,8 +104,20 @@ export function InstanceForm({
       wanted.push("dynamic");
       changes.push({ dynamicReview: { enabled: dynamicEnabled } });
     }
+    // An empty field removes the page: no button, no route.
+    if (planUrl.trim() !== (settings.planManagementUrl.value ?? "")) {
+      wanted.push("plan");
+      changes.push({
+        planManagementUrl: planUrl.trim() === "" ? null : planUrl.trim(),
+      });
+    }
     const outcomes = await save(...changes);
-    const next: typeof results = { tenancy: null, limits: null, dynamic: null };
+    const next: typeof results = {
+      tenancy: null,
+      limits: null,
+      dynamic: null,
+      plan: null,
+    };
     wanted.forEach((key, index) => {
       next[key] = outcomes[index] ?? null;
     });
@@ -116,7 +133,9 @@ export function InstanceForm({
           ? `${ids}-max`
           : wanted[failed] === "dynamic"
             ? `${ids}-dynamic`
-            : `${ids}-tenancy`;
+            : wanted[failed] === "plan"
+              ? `${ids}-plan`
+              : `${ids}-tenancy`;
     else if (blocked) focusTargetRef.current = `${ids}-rollout`;
   }
 
@@ -125,6 +144,11 @@ export function InstanceForm({
       ? results.limits.issues.find(
           (issue) => issue.field === "maxWorkspacesPerUser",
         )
+      : undefined;
+
+  const planIssue =
+    results.plan?.kind === "failed"
+      ? results.plan.issues.find((issue) => issue.field === "planManagementUrl")
       : undefined;
 
   return (
@@ -300,6 +324,50 @@ export function InstanceForm({
           ) : null}
           <LastChanged setting={settings.dynamicReview} />
           <SaveResult status={results.dynamic} />
+        </CardContent>
+      </Card>
+
+      <Card role="group" aria-labelledby={planHeadingId}>
+        <CardHeader>
+          <CardTitle>
+            <h2
+              id={planHeadingId}
+              className="text-lg font-semibold tracking-tight"
+            >
+              Plan management page
+            </h2>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <Field>
+            <FieldLabel htmlFor={`${ids}-plan`}>Address of the page</FieldLabel>
+            <Input
+              id={`${ids}-plan`}
+              type="url"
+              inputMode="url"
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="https://"
+              value={planUrl}
+              onChange={(event) => setPlanUrl(event.target.value)}
+              aria-invalid={planIssue !== undefined}
+              aria-describedby={`${ids}-plan-hint`}
+            />
+            <FieldDescription id={`${ids}-plan-hint`}>
+              An operator-configured page where the Owners and Admins of a
+              workspace manage its plan. While this is empty there is no
+              &quot;Manage plan&quot; button. It has to be an absolute https
+              address, without a user name, a password or a #fragment. The
+              person who clicks the button arrives there with a token that is
+              valid for five minutes and works once; the page redeems it through
+              the operator API. Upgrade every app instance before you set it.
+            </FieldDescription>
+            {planIssue ? (
+              <FieldError>{describeAdminIssue(planIssue)}</FieldError>
+            ) : null}
+          </Field>
+          <LastChanged setting={settings.planManagementUrl} />
+          <SaveResult status={results.plan} />
         </CardContent>
       </Card>
 

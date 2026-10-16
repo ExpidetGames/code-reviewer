@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/ExpidetGames/code-reviewer/contracts/operator-api.v1.json",
   "title": "Code Reviewer operator API, version 1",
-  "description": "The wire format of the operator API (#275, #278): a machine interface for an operator who sets the entitlements of workspaces and reads what they consumed, from outside the app. Every request carries 'Authorization: Bearer <OPERATOR_API_TOKEN>'; a request body is application/json up to 16384 bytes, and GET and DELETE carry none. Every answer is JSON with 'Cache-Control: no-store' and the version in its body; an error is {version, error, field?} with a stable code, never a message. Until OPERATOR_API_TOKEN is set the paths do not exist (the 404 of a missing path, not this format). The API identifies workspaces by id and slug only: no names of people, no emails, no repositories, no pull requests. A reader ignores fields it does not know. This file is the only source of the format; the app tests validate real answers and contracts/examples/operator-api holds one valid example per definition.",
+  "description": "The wire format of the operator API (#275, #278, #284): a machine interface for an operator who sets the entitlements of workspaces, reads what they consumed and redeems the handover of a workspace Owner or Admin, from outside the app. Every request carries 'Authorization: Bearer <OPERATOR_API_TOKEN>'; a request body is application/json up to 16384 bytes, and GET and DELETE carry none. Every answer is JSON with 'Cache-Control: no-store' and the version in its body; an error is {version, error, field?} with a stable code, never a message. Until OPERATOR_API_TOKEN is set the paths do not exist (the 404 of a missing path, not this format). The API identifies workspaces by id and slug only: no names of people, no emails, no repositories, no pull requests. A reader ignores fields it does not know. This file is the only source of the format; the app tests validate real answers and contracts/examples/operator-api holds one valid example per definition.",
   "version": 1,
   "$defs": {
     "Version": {
@@ -20,7 +20,7 @@
       "pattern": "^[A-Za-z0-9_-]{1,64}$"
     },
     "ApiErrorCode": {
-      "description": "Callers branch on the code. 401 unauthorized; 404 not_found (unknown path) or workspace_not_found; 405 method_not_allowed (with an Allow header); 400 body_not_allowed (a GET or DELETE with a body), request_invalid (not JSON, or a bad query such as a limit out of range), cursor_invalid (a usage cursor that is not one of the API's) or period_invalid (a usage 'from' or 'to' that is not a timestamp, a period that is empty, or a summary without both); 413 body_too_large; 415 unsupported_media_type; 409 period_start_backwards; 422 the other codes of a refused entitlement, among them cost_limit_requires_managed_key for a cost limit next to keyMode 'own' (the codes of the workspace entitlements validation, with 'field' naming the limit or key concerned); 500 internal_error.",
+      "description": "Callers branch on the code. 401 unauthorized; 404 not_found (unknown path) or workspace_not_found; 405 method_not_allowed (with an Allow header); 400 body_not_allowed (a GET or DELETE with a body), request_invalid (not JSON, or a bad query such as a limit out of range), cursor_invalid (a usage cursor that is not one of the API's) or period_invalid (a usage 'from' or 'to' that is not a timestamp, a period that is empty, or a summary without both); 413 body_too_large; 415 unsupported_media_type; 409 period_start_backwards; 422 the other codes of a refused entitlement, among them cost_limit_requires_managed_key for a cost limit next to keyMode 'own' (the codes of the workspace entitlements validation, with 'field' naming the limit or key concerned); 422 also invalid_token (a handoff token that is unknown, used, expired, revoked or whose person lost the role: one answer for all) and the codes of a refused plan management address (url_invalid, url_not_https, url_has_credentials, url_has_fragment, url_too_long); 500 internal_error.",
       "type": "string",
       "enum": [
         "unauthorized",
@@ -44,7 +44,13 @@
         "period_start_in_future",
         "period_start_backwards",
         "suspended_invalid",
-        "suspension_code_invalid"
+        "suspension_code_invalid",
+        "invalid_token",
+        "url_invalid",
+        "url_not_https",
+        "url_has_credentials",
+        "url_has_fragment",
+        "url_too_long"
       ]
     },
     "ErrorResponse": {
@@ -702,6 +708,97 @@
           "items": {
             "$ref": "#/$defs/UsageSummaryGroup"
           }
+        }
+      }
+    },
+    "PlanManagementWrite": {
+      "description": "The body of PUT /plan-management: the address of the page a workspace Owner or Admin is handed over to when they click 'Manage plan' in the app. It has to be an absolute https address without user name, password or fragment; it is stored in its normal form. Anything else is refused with 422 and one of the url_* codes. Unknown keys are refused (400 request_invalid).",
+      "type": "object",
+      "required": [
+        "url"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "url": {
+          "type": "string",
+          "minLength": 9,
+          "maxLength": 2048,
+          "pattern": "^https://"
+        }
+      }
+    },
+    "PlanManagementResponse": {
+      "description": "The answer of GET, PUT and DELETE /plan-management: the address in its stored form, or null while there is none. While there is none, the app shows no 'Manage plan' button and its route does not exist. The app appends the single query parameter 'handoff=<token>' to this address when it hands somebody over (any 'handoff' parameter in the stored address is replaced); the page that receives it redeems the token at once with POST /handoff/redeem and does not keep it in its address bar, its logs or its links.",
+      "type": "object",
+      "required": [
+        "version",
+        "planManagementUrl"
+      ],
+      "properties": {
+        "version": {
+          "$ref": "#/$defs/Version"
+        },
+        "planManagementUrl": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 2048,
+              "pattern": "^https://"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "HandoffRedeemRequest": {
+      "description": "The body of POST /handoff/redeem: the token from the 'handoff' query parameter. Exactly this key. A token of any other shape is not a request error: it gets the same invalid_token answer as an unknown one.",
+      "type": "object",
+      "required": [
+        "token"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "token": {
+          "type": "string",
+          "maxLength": 4096
+        }
+      }
+    },
+    "HandoffRedeemResponse": {
+      "description": "The answer of POST /handoff/redeem for a valid token: which workspace the person who clicked 'Manage plan' belongs to and with which role. A token is valid for five minutes after the click and works once; a newer click of the same person in the same workspace revokes it; the role is checked again at redemption (a person who is no longer a member with the role the token was made for gets invalid_token, and the token is used up). 'userId' is opaque: the same person always has the same id, and it is nothing an email, a name or a repository could be recovered from. Nothing else about the person is ever served. The service redeems the token before it shows anything, and sends the person back to /w/<workspaceSlug>/settings of the app (until the plan page of #282 exists; it will then be /w/<workspaceSlug>/settings/plan); that path is fixed on the app's side.",
+      "type": "object",
+      "required": [
+        "version",
+        "workspaceId",
+        "workspaceSlug",
+        "userId",
+        "role"
+      ],
+      "properties": {
+        "version": {
+          "$ref": "#/$defs/Version"
+        },
+        "workspaceId": {
+          "$ref": "#/$defs/WorkspaceId"
+        },
+        "workspaceSlug": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "userId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "owner",
+            "admin"
+          ]
         }
       }
     }

@@ -64,6 +64,8 @@ const PUBLIC_ROUTES = [
   "/api/operator/v1/workspaces/[id]/usage/summary",
   "/api/operator/v1/usage",
   "/api/operator/v1/entitlements/default",
+  "/api/operator/v1/plan-management",
+  "/api/operator/v1/handoff/redeem",
   "/api/operator/v1/[...path]",
   // The platform's cron sends CRON_SECRET; the route is a 404 outside serverless mode (src/cron/, #319).
   "/api/internal/repository-sync",
@@ -140,6 +142,7 @@ const PROTECTED_DATA_ROUTES = [
   "/api/w/[workspace]/invitations/[invitationId]/resend",
   "/api/w/[workspace]/llm-key",
   "/api/w/[workspace]/llm-key/test",
+  "/api/w/[workspace]/plan-handoff",
   "/api/w/[workspace]/members/[userId]",
   "/api/w/[workspace]/repositories/[repositoryId]/project",
   "/api/w/[workspace]/repositories/[repositoryId]/project/settings",

@@ -24,6 +24,7 @@ import { createJobsRepository } from "./jobs-repository.ts";
 import { createProjectsRepository } from "./projects-repository.ts";
 import { createRepositoriesRepository } from "./repositories-repository.ts";
 import { createRunsRepository } from "./runs-repository.ts";
+import { createPlanHandoffTokensRepository } from "./plan-handoff-tokens-repository.ts";
 import { createRefusalNoticesRepository } from "./refusal-notices-repository.ts";
 import { createUsageRecordsRepository } from "./usage-records-repository.ts";
 
@@ -45,6 +46,7 @@ function reposOf(db: Kysely<Database>, workspaceId: string) {
     entitlements: createWorkspaceEntitlementsRepository(db, workspaceId),
     usage: createUsageRecordsRepository(db, workspaceId),
     notices: createRefusalNoticesRepository(db, workspaceId),
+    planHandoff: createPlanHandoffTokensRepository(db, workspaceId),
   };
 }
 type Repos = ReturnType<typeof reposOf>;
@@ -222,6 +224,13 @@ async function seed(
     NOTICE_OPTIONS,
   );
   if (!taken.acquired) throw new Error("seeding failed");
+  // The handoff token of the Owner of the workspace (#284).
+  await repos.planHandoff.issue({
+    tokenHash: `handoff-${tag}`,
+    userId: `user-${tag}`,
+    role: "owner",
+    ttlMs: 5 * 60 * 1000,
+  });
   await repos.workspaceSecrets.put({
     name: "llm_api_key",
     binding: `binding-${tag}`,
@@ -295,6 +304,12 @@ async function rowsOf(db: Kysely<Database>, workspaceId: string) {
       .selectAll()
       .where("workspace_id", "=", workspaceId)
       .orderBy("id")
+      .execute(),
+    planHandoffTokens: await db
+      .selectFrom("plan_handoff_tokens")
+      .selectAll()
+      .where("workspace_id", "=", workspaceId)
+      .orderBy("token_hash")
       .execute(),
     entitlements: await db
       .selectFrom("workspace_entitlements")
@@ -874,6 +889,18 @@ const CASES: Case[] = [
     name: "notices.failed",
     run: (a, b) =>
       a.notices.failed(b.notice.id, new Date("2099-01-01T00:00:00.000Z")),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  // handoff tokens: making one under A for B's Owner revokes nothing of B's
+  {
+    name: "planHandoff.issue",
+    run: (a, b) =>
+      a.planHandoff.issue({
+        tokenHash: "handoff-from-a",
+        userId: b.userId,
+        role: "owner",
+        ttlMs: 5 * 60 * 1000,
+      }),
     expectAnswer: (answer) => expect(answer).toBeUndefined(),
   },
   // runs

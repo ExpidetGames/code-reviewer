@@ -24,6 +24,7 @@ import {
 } from "../signup/limits.ts";
 import { createTestDatabase } from "../test-support/test-database.ts";
 import { defaultWorkspaceId } from "../test-support/workspaces.ts";
+import { PLAN_HANDOFF_WINDOW_MS } from "../plan-handoff/limits.ts";
 import { WORKSPACE_WINDOWS_MS } from "../workspaces/rate-limits.ts";
 import {
   cleanUpExpiredRows,
@@ -128,6 +129,7 @@ describe("the cleanup of old rows", () => {
       VERIFICATION_MAIL_GLOBAL_WINDOW_MS,
       VERIFY_TOKEN_WINDOW_MS,
       ...WORKSPACE_WINDOWS_MS,
+      PLAN_HANDOFF_WINDOW_MS,
       PASSWORD_RESET_REQUEST_ADDRESS_WINDOW_MS,
       PASSWORD_RESET_MAIL_GLOBAL_WINDOW_MS,
     ])
@@ -368,6 +370,53 @@ describe("the cleanup of old rows", () => {
         (row) => row.id,
       ),
     ).toEqual(["valid"]);
+  });
+
+  // #284-T04
+  it("removes handoff tokens a day after they expired, and keeps the rest", async () => {
+    const { db, now } = await setup();
+    const workspaceId = await defaultWorkspaceId(db);
+    await db
+      .insertInto("users")
+      .values({
+        id: "u-handoff",
+        name: "u",
+        email: "u-handoff@example.test",
+        email_verified: 1,
+        created_at: iso(START - DAY),
+        updated_at: iso(START - DAY),
+      })
+      .execute();
+    const token = (hash: string, expiresAt: number) =>
+      db
+        .insertInto("plan_handoff_tokens")
+        .values({
+          token_hash: hash,
+          workspace_id: workspaceId,
+          user_id: "u-handoff",
+          role: "owner",
+          created_at: iso(expiresAt - 5 * 60 * 1000),
+          expires_at: iso(expiresAt),
+          used_at: null,
+          revoked_at: null,
+        })
+        .execute();
+    await token("long-gone", START - 2 * DAY);
+    await token("expired-today", START - 1000);
+    await token("valid", START + 1000);
+
+    await cleanUpExpiredRows(db, now);
+
+    expect(
+      (
+        await db
+          .selectFrom("plan_handoff_tokens")
+          .select("token_hash")
+          .execute()
+      )
+        .map((row) => row.token_hash)
+        .sort(),
+    ).toEqual(["expired-today", "valid"]);
   });
 
   it("does nothing on an empty database", async () => {

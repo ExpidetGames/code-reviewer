@@ -10,13 +10,14 @@
 //   3. method    one the route does not offer                                                   405
 //   4. body      GET and DELETE carry none                                                     400
 //   5. workspace the id in the path names a workspace                                          404 workspace_not_found
-//   6. work      PUT: application/json, up to 16 KiB, one JSON value (415 / 413 / 400), then
+//   6. work      PUT and POST: application/json, up to 16 KiB, one JSON value (415 / 413 / 400), then
 //                read, replace or remove; usage: the query (400 request_invalid / cursor_invalid / period_invalid)
 //                then the read (usage.ts)
 //
 // Nothing before step 1 reads the request body or touches the database. The API is separate from the browser
 // session of `/api/admin/*`: no cookie is looked at.
 import "server-only";
+import type { PlanHandoffRedeemRepository } from "../db/repositories/plan-handoff-redeem-repository.ts";
 import type { InstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
 import type {
   StoredEntitlements,
@@ -25,6 +26,14 @@ import type {
 import type { UsageFeedRepository } from "../db/repositories/usage-feed-repository.ts";
 import type { UsageRecordsRepository } from "../db/repositories/usage-records-repository.ts";
 import type { WorkspacesRepository } from "../db/repositories/workspaces-repository.ts";
+import {
+  readPlanManagementUrl,
+  savePlanManagementUrl,
+} from "../plan-handoff/settings.ts";
+import {
+  hashHandoffToken,
+  isWellFormedHandoffToken,
+} from "../plan-handoff/token.ts";
 import { describeError } from "../runner-api/logger.ts";
 import { bearerTokenOf } from "../runner-api/token-auth.ts";
 import { readLimitedBody } from "../webhooks/limited-body.ts";
@@ -70,6 +79,8 @@ export type OperatorApiDeps = {
   usageFeed: UsageFeedRepository;
   /** The usage records of one workspace (its page and its summary). */
   usageFor: (workspaceId: string) => UsageRecordsRepository;
+  /** The redemption of the handoff tokens of the "Manage plan" button (#284). */
+  handoffs: PlanHandoffRedeemRepository;
   /** How old a settlement must be before it is served; default `USAGE_SAFETY_LAG_MS`. Validated when the API is made. */
   usageSafetyLagMs?: number;
   now: () => Date;
@@ -275,11 +286,92 @@ export function createOperatorApi(deps: OperatorApiDeps): OperatorApi {
     return jsonResponse(200, { default: defaultView(stored) });
   }
 
+  function isObject(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+  }
+
+  /**
+   * `POST /handoff/redeem` `{ token }`: who a handoff token was made for, once. Every reason for not answering is the
+   * same `invalid_token`; the answer holds ids and a role only, and the log a workspace id and a result code.
+   */
+  async function redeemHandoff(request: Request): Promise<Response> {
+    const body = await readJson(request);
+    if (!body.ok) return body.response;
+    const value = body.value;
+    if (
+      !isObject(value) ||
+      Object.keys(value).length !== 1 ||
+      typeof value.token !== "string"
+    )
+      return errorResponse(400, "request_invalid");
+    const redeemed = isWellFormedHandoffToken(value.token)
+      ? await deps.handoffs.redeem(hashHandoffToken(value.token))
+      : undefined;
+    if (redeemed === undefined) {
+      deps.logger.info(
+        "[operator-api] handoff workspace=- result=invalid_token",
+      );
+      return errorResponse(422, "invalid_token");
+    }
+    deps.logger.info(
+      `[operator-api] handoff workspace=${redeemed.workspaceId} result=ok`,
+    );
+    return jsonResponse(200, {
+      workspaceId: redeemed.workspaceId,
+      workspaceSlug: redeemed.workspaceSlug,
+      userId: redeemed.userId,
+      role: redeemed.role,
+    });
+  }
+
+  async function planManagementAnswer(): Promise<Response> {
+    return jsonResponse(200, {
+      planManagementUrl: await readPlanManagementUrl(deps.settings),
+    });
+  }
+
+  /** `GET|PUT|DELETE /plan-management`: the page "Manage plan" hands people over to (#284). */
+  async function planManagement(request: Request): Promise<Response> {
+    if (request.method === "GET") return planManagementAnswer();
+    if (request.method === "DELETE") {
+      await savePlanManagementUrl(deps.settings, null, null);
+      deps.logger.info("[operator-api] delete plan-management result=ok");
+      return planManagementAnswer();
+    }
+    const body = await readJson(request);
+    if (!body.ok) return body.response;
+    const value = body.value;
+    if (
+      !isObject(value) ||
+      Object.keys(value).length !== 1 ||
+      !("url" in value)
+    )
+      return errorResponse(400, "request_invalid");
+    // `null` would remove the page: that is what DELETE is for, so here it is just not a valid address.
+    const saved = await savePlanManagementUrl(
+      deps.settings,
+      value.url === null ? "" : value.url,
+      null,
+    );
+    if (!saved.ok) {
+      deps.logger.info(
+        `[operator-api] put plan-management result=${saved.code}`,
+      );
+      return errorResponse(422, saved.code);
+    }
+    deps.logger.info("[operator-api] put plan-management result=ok");
+    return planManagementAnswer();
+  }
+
   async function work(
     request: Request,
     route: OperatorRoute,
   ): Promise<Response> {
     switch (route.kind) {
+      case "handoff-redeem":
+        return redeemHandoff(request);
+      case "plan-management":
+        return planManagement(request);
       case "workspaces":
         return listWorkspaces(request);
       case "default-entitlements":
@@ -320,7 +412,11 @@ export function createOperatorApi(deps: OperatorApiDeps): OperatorApi {
           return errorResponse(405, "method_not_allowed", {
             headers: { Allow: allowed.join(", ") },
           });
-        if (request.method !== "PUT" && carriesBody(request))
+        if (
+          request.method !== "PUT" &&
+          request.method !== "POST" &&
+          carriesBody(request)
+        )
           return errorResponse(400, "body_not_allowed");
         return await work(request, route);
       } catch (error) {

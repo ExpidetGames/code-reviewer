@@ -90,6 +90,16 @@ export function describeAdminIssue(issue: RequestIssue): string {
       return "Enter the API key. There is nothing to save.";
     case "api_key_invalid":
       return describeLlmKeyIssue(issue.code);
+    case "url_not_https":
+      return "The address must start with https://. Plain http is not accepted.";
+    case "url_has_credentials":
+      return "The address must not contain a user name or password.";
+    case "url_has_fragment":
+      return "The address must not contain a # fragment.";
+    case "url_too_long":
+      return "The address is too long (2048 characters at most).";
+    case "url_invalid":
+      return "This is not a valid address. Enter an absolute address that starts with https://, without spaces.";
     case "operator_llm_key_invalid":
       return GENERIC_FAILURE;
     case "sender_required":

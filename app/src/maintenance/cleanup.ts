@@ -19,11 +19,14 @@
 //   database for ever. (The row also goes with its job.)
 // - The row of the dispatch webhook of a job (`job_dispatches`, #326) is kept for a week after the job
 //   finished, for whoever asks why a review started late, and then removed. A queued or running job keeps its row.
+// - A handoff token of "Manage plan" (`plan_handoff_tokens`, #284) is valid for five minutes; its row is kept a day
+//   after it expired, then removed (not counted in the result, like a signed state).
 import type { Kysely } from "kysely";
 import { CREDENTIAL_PROVIDER_ID } from "../auth/session-user.ts";
 import { formatTimestamp } from "../db/codecs.ts";
 import { createJobClaimedKeysRepository } from "../db/repositories/job-claimed-keys-repository.ts";
 import { createJobDispatchesRepository } from "../db/repositories/job-dispatches-repository.ts";
+import { createPlanHandoffRedeemRepository } from "../db/repositories/plan-handoff-redeem-repository.ts";
 import { createRateLimitsRepository } from "../db/repositories/rate-limits-repository.ts";
 import type { Database } from "../db/schema.ts";
 
@@ -44,6 +47,9 @@ export const JOB_CLAIMED_KEY_KEEP_MS = 7 * 24 * 60 * 60 * 1000;
 
 /** How long the dispatch row of a finished job is kept: it only tells how the call to the Dispatcher went. */
 export const JOB_DISPATCH_KEEP_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** How long a handoff token is kept after it expired: nothing reads it by then, it only keeps the table small. */
+export const PLAN_HANDOFF_TOKEN_KEEP_MS = 24 * 60 * 60 * 1000;
 
 export type CleanupResult = {
   rateLimits: number;
@@ -186,6 +192,9 @@ export async function cleanUpExpiredRows(
     .deleteFrom("signed_states")
     .where("expires_at", "<=", formatTimestamp(now()))
     .execute();
+  await createPlanHandoffRedeemRepository(db, now).deleteExpiredBefore(
+    new Date(now().getTime() - PLAN_HANDOFF_TOKEN_KEEP_MS),
+  );
   const jobClaimedKeys = await createJobClaimedKeysRepository(
     db,
     now,

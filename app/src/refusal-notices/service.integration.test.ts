@@ -207,6 +207,20 @@ describe("the link", () => {
     expect(comments(h)[0]?.body).not.toMatch(/https?:\/\//);
   });
 
+  // #284-T01
+  it("posts the notice without a link when the link cannot be worked out", async () => {
+    const h = await start({
+      planPageUrl: () =>
+        Promise.reject(new Error("the settings could not be read")),
+    });
+    await limit(h, entitlements());
+
+    await refuse(h);
+
+    expect(comments(h)).toHaveLength(1);
+    expect(comments(h)[0]?.body).not.toMatch(/https?:\/\//);
+  });
+
   it("points to the plan page of the workspace when the instance has one", async () => {
     const h = await start({
       planPageUrl: (slug) => `https://app.example/w/${slug}/settings/plan`,

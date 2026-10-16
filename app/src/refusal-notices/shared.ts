@@ -5,10 +5,13 @@
 // (`after()` on a serverless platform, which keeps the function alive for it; src/dispatch/shared.ts), never in a
 // timer, and never delays or changes the claim.
 import "server-only";
+import { loadAuthConfig } from "../auth/config.ts";
+import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
 import { getDatabase } from "../db/startup.ts";
 import { runAfterResponse } from "../dispatch/shared.ts";
 import { integrationRegistry } from "../integrations/registry.ts";
 import { assembleRefusalNoticeService } from "./assemble.ts";
+import { createPlanPageUrlResolver } from "./plan-link.ts";
 import { createRefusalBatcher } from "./refusal-batch.ts";
 import type { NoticeRefusal, RefusalNoticeService } from "./service.ts";
 
@@ -16,11 +19,16 @@ let service: RefusalNoticeService | undefined;
 
 /** One service per process: its queue keeps a backlog of refusals from opening many requests at GitHub at once. */
 export function getRefusalNoticeService(): RefusalNoticeService {
-  service ??= assembleRefusalNoticeService({
-    db: getDatabase(),
+  if (service !== undefined) return service;
+  const db = getDatabase();
+  service = assembleRefusalNoticeService({
+    db,
     registry: integrationRegistry,
-    // No instance has configured a plan page yet (#284 owns the setting and the page it hands over to): no link.
-    planPageUrl: () => null,
+    // A link to the plan page exactly while the instance has a plan management page (#284).
+    planPageUrl: createPlanPageUrlResolver({
+      settings: createInstanceSettingsRepository(db),
+      baseUrl: () => loadAuthConfig(process.env).baseUrl,
+    }),
     log: console,
   });
   return service;

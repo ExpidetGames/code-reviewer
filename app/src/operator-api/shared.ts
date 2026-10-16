@@ -5,6 +5,7 @@
 // the caller gets the generic 500 of the API and the log gets the cause, never a token.
 import "server-only";
 import { notFound } from "next/navigation";
+import { createPlanHandoffRedeemRepository } from "../db/repositories/plan-handoff-redeem-repository.ts";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
 import { createUsageFeedRepository } from "../db/repositories/usage-feed-repository.ts";
 import { createUsageRecordsRepository } from "../db/repositories/usage-records-repository.ts";
@@ -27,6 +28,7 @@ export function getOperatorApi(): OperatorApi {
     settings: createInstanceSettingsRepository(db),
     usageFeed: createUsageFeedRepository(db),
     usageFor: (workspaceId) => createUsageRecordsRepository(db, workspaceId),
+    handoffs: createPlanHandoffRedeemRepository(db),
     now: () => new Date(),
     logger: consoleRunnerApiLogger,
     notFound,

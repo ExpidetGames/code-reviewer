@@ -86,6 +86,12 @@ export type InstanceSettingValues = {
    * `validateEntitlements` refuses and a `periodStart` earlier than the stored one.
    */
   default_entitlements: EntitlementsData;
+  /**
+   * #284: the operator-configured page an Owner or Admin is handed over to ("Manage plan"; src/plan-handoff/): an
+   * absolute `https:` address, checked by `checkPlanManagementUrl` when it is saved and again when it is read. No row:
+   * there is no such page, no button and no route, and no refusal notice links to the plan page.
+   */
+  plan_management_url: string;
 };
 export type InstanceSettingKey = keyof InstanceSettingValues;
 /**

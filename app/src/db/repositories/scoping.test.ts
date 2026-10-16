@@ -24,6 +24,7 @@ const SCOPED = [
   "integrations-repository.ts",
   "invitations-repository.ts",
   "jobs-repository.ts",
+  "plan-handoff-tokens-repository.ts",
   "projects-repository.ts",
   "refusal-notices-repository.ts",
   "repositories-repository.ts",
@@ -68,6 +69,11 @@ const SCOPED = [
  * - job-dispatches: where the signed wake-up call of a job stands (#326). The sender holds the job it just queued and
  *   the sweep works through the whole instance, like the lease side of the queue; the table has a job id and
  *   counters, no repository data, and is only written in webhook mode;
+ * - plan-handoff-redeem: the redemption of a handoff token by the external plan page (#284, operator API). The caller
+ *   holds only the token, so there is no workspace to scope to before the token is looked up by its hash; it never
+ *   lists, the answer names its own workspace, and the one statement that uses a token up and the check of the member's
+ *   role both run on the workspace the token was made for. Making a token goes through the scoped plan handoff tokens
+ *   repository; the clean-up deletes expired rows of every workspace and reads nothing;
  * - job-claimed-keys: the encrypted LLM key handed out with the claim of a job. It is keyed by the job and read
  *   only by the runner API when that job is completed (the job and its workspace are known there); it never
  *   lists, and a key is only ever looked up by the id of a job the caller holds.
@@ -84,6 +90,7 @@ const INSTANCE_LEVEL = [
   "job-dispatches-repository.ts",
   "jobs-claim.ts",
   "legacy-users-repository.ts",
+  "plan-handoff-redeem-repository.ts",
   "rate-limits-repository.ts",
   "refusal-notices-sweep.ts",
   "runner-jobs-repository.ts",

@@ -446,6 +446,27 @@ export interface RefusalNoticesTable {
   updated_at: string;
 }
 
+/**
+ * A single-use token that hands an Owner or Admin over to the operator-configured plan page (#284,
+ * src/plan-handoff/). Only the hash of the token is kept.
+ */
+export interface PlanHandoffTokensTable {
+  /** SHA-256 of the token, hex. */
+  token_hash: string;
+  workspace_id: string;
+  user_id: string;
+  /** The role the person had when the token was made: `owner` or `admin`. */
+  role: string;
+  /** ISO 8601 text in UTC. */
+  created_at: string;
+  /** ISO 8601 text in UTC. */
+  expires_at: string;
+  /** ISO 8601 text in UTC, or null while the token is unused. */
+  used_at: string | null;
+  /** ISO 8601 text in UTC, or null; set when a newer token of the same person in the same workspace replaced it. */
+  revoked_at: string | null;
+}
+
 /** A single-use link to set a new password; only the hash of the token is kept (src/auth/password-reset.ts). */
 export interface PasswordResetTokensTable {
   /** SHA-256 of the token, hex. */
@@ -603,6 +624,7 @@ export interface Database {
   job_claimed_keys: JobClaimedKeysTable;
   job_dispatches: JobDispatchesTable;
   refusal_notices: RefusalNoticesTable;
+  plan_handoff_tokens: PlanHandoffTokensTable;
   password_reset_tokens: PasswordResetTokensTable;
   email_verification_tokens: EmailVerificationTokensTable;
   signed_states: SignedStatesTable;
