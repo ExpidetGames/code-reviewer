@@ -41,6 +41,7 @@ from code_reviewer_runner.capabilities import (
     engines_from_environment,
 )
 from code_reviewer_runner.comment_recorder import CommentRecorder, install_comment_recorder
+from code_reviewer_runner.diff_cost import CostMeterError, install_cost_meter
 from code_reviewer_runner.dynamic_findings import (
     DROPPED_INVALID,
     DROPPED_OUTSIDE_EXPORT,
@@ -177,8 +178,19 @@ def run_job(
             if job.llm.require_parameters:
                 # Every OpenRouter request carries `provider.require_parameters` (#270).
                 patches.callback(apply_require_parameters_patch())
+            # The cost of the run is what the provider states for every answer (#274).
+            meter, undo_meter = install_cost_meter()
+            patches.callback(undo_meter)
         except IdentityPatchError as error:
             return _failure(error.code, error.detail, started, capture)
+        except CostMeterError as error:
+            # Fails closed: a run that cannot be measured is not started.
+            return _failure(
+                ErrorCode.RUNNER_ERROR,
+                f"cannot measure the model cost of PR-Agent: {error}",
+                started,
+                capture,
+            )
         except RequireParametersPatchError as error:
             # Fails closed: no request goes out without the field. The cause is named in the result.
             return _failure(
@@ -211,7 +223,9 @@ def run_job(
         # What PR-Agent measured is kept for a command that fails after its model call (#273).
         probe = UsageProbe()
         try:
-            handled, failed_flag, usage = asyncio.run(execute(job, guard, timeout_seconds, probe))
+            handled, failed_flag, usage = asyncio.run(
+                execute(job, guard, timeout_seconds, probe, meter)
+            )
         except JobTimeout:
             return _failure(
                 ErrorCode.TIMEOUT,
