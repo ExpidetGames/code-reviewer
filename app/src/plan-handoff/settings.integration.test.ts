@@ -20,9 +20,9 @@ describe("the plan management setting", () => {
 
   // #284-T11
   it.each([
-    ["http:", "http://billing.example/plans"],
-    ["credentials", "https://user:pw@billing.example/plans"],
-    ["a fragment", "https://billing.example/plans#x"],
+    ["http:", "http://plans.example/plans"],
+    ["credentials", "https://user:pw@plans.example/plans"],
+    ["a fragment", "https://plans.example/plans#x"],
   ])("refuses %s on save and stores nothing", async (_name, input) => {
     const { settings } = await start();
 
@@ -36,10 +36,10 @@ describe("the plan management setting", () => {
     const { settings } = await start();
 
     expect(
-      await savePlanManagementUrl(settings, "https://billing.example", null),
+      await savePlanManagementUrl(settings, "https://plans.example", null),
     ).toEqual({ ok: true });
     expect(await readPlanManagementUrl(settings)).toBe(
-      "https://billing.example/",
+      "https://plans.example/",
     );
     await savePlanManagementUrl(settings, "https://other.example/p", null);
     expect(await readPlanManagementUrl(settings)).toBe(
@@ -66,7 +66,7 @@ describe("the plan management setting", () => {
       })
       .execute();
 
-    await savePlanManagementUrl(settings, "https://billing.example/p", "admin");
+    await savePlanManagementUrl(settings, "https://plans.example/p", "admin");
 
     expect((await settings.getWithMeta("plan_management_url"))?.updatedBy).toBe(
       "admin",
@@ -77,7 +77,7 @@ describe("the plan management setting", () => {
   it("reads a stored value that is not a valid page as no page (fail closed)", async () => {
     const { settings } = await start();
     // Not through the save: a value put there by hand or damaged since.
-    await settings.set("plan_management_url", "http://billing.example/", null);
+    await settings.set("plan_management_url", "http://plans.example/", null);
     expect(await readPlanManagementUrl(settings)).toBeNull();
     await settings.set("plan_management_url", "not a url", null);
     expect(await readPlanManagementUrl(settings)).toBeNull();
