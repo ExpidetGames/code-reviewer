@@ -46,7 +46,7 @@ async function setup() {
     periodStart: PERIOD,
   };
   return {
-    ...fixture,
+    db: fixture.db,
     notices,
     key,
     advance: (ms: number) => {
