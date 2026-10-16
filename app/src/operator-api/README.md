@@ -104,6 +104,32 @@ the limit does not bound it. The usage summary lists such runs (`unknownCostCoun
 of them when it settles (job id and workspace id only), so they can be watched. An entry stored before the limit existed
 reads it as `null`.
 
+**Rollout of `ownKeyCostLimitMicroUsd`.** Because a write must state it, the first rollout is a cutover: a `PUT` without
+the key gets `422 limits_invalid` from an instance that knows it, and a `PUT` with it gets `422 limits_invalid` from one
+that does not (a write refuses an unknown limit, so a typo cannot pass). No single body works on both. So: **upgrade every
+app instance first** (an instance of the previous release reads the limit and ignores it), **then** switch the writer to
+send the key in every body, and treat a `422` during the window as retry-later, not as a refused plan. A body that
+carries the key:
+
+```http
+PUT /api/operator/v1/workspaces/{id}/entitlements
+Authorization: Bearer <OPERATOR_API_TOKEN>
+Content-Type: application/json
+
+{
+  "planLabel": "team",
+  "keyMode": "own",
+  "limits": {
+    "diffRunsPerPeriod": 100,
+    "dynamicRunsPerPeriod": null,
+    "managedCostLimitMicroUsd": null,
+    "ownKeyCostLimitMicroUsd": 2000000
+  },
+  "suspended": false,
+  "suspensionCode": null
+}
+```
+
 Limits are JSON numbers. A number above 2^53 − 1 loses precision when JSON is parsed, so it can never be stored
 as sent: it is refused as `limit_invalid`, not rounded.
 

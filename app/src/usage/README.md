@@ -122,10 +122,13 @@ entitlements still stop it, and its record is then voided.
 - **Which runs a cost limit watches (#361).** Each limit watches one key mode, **decided by the record, not by the
   entitlements now**: the sum of a key mode counts the settled records whose own `key_mode` is that mode, and the
   claim checks the limit of the key mode the job will run on. That key mode is known at claim time: the key mode of the
-  entitlements picks the key (#276, `keyModeForJob`), and the claim route resolves the same entitlements, so the claim
-  needs no second lookup and its one-transaction check and reservation stay as they are. The record is corrected
-  to the key the job really uses on both claim paths (`setKeyMode`), so a limit counts exactly the runs that spent
-  that key. A workspace switched between `own` and `managed` in the middle of a period keeps the records of each mode
+  entitlements picks the key (#276, `keyModeForJob`). The check uses the entitlements the claim itself read inside its
+  transaction, so its one-transaction check and reservation stay as they are. The claim route then resolves the access
+  with a read of its own and corrects the record to the key the job really uses on both claim paths (`setKeyMode`), so a
+  limit counts exactly the runs that spent that key. **Window:** if an operator switches the key mode between the two
+  reads, that one job is admitted against the limit of the other key; its record is still counted under the key it used,
+  so the sums stay right, and with a soft cap this is accepted.
+  A workspace switched between `own` and `managed` in the middle of a period keeps the records of each mode
   under the limit of that mode: the own-key records stay under `ownKeyCostLimitMicroUsd` while it is `managed`, and
   come back into play if it is switched back. A key mode `managed` whose operator key is missing is not a quota matter
   (#276) and keeps its own code (`llm_not_configured`).
@@ -140,7 +143,8 @@ entitlements still stop it, and its record is then voided.
   settlement is reported, once the transaction that made it committed, with one log line carrying the job id and the
   workspace id and nothing else (`unknownCostAlertLine`, `onUnknownCostSettled`; no figure, no model, no name): a run
   that settled with a usage whose cost is missing (`complete`), and a run that ended with no result (`no_result`: the
-  sweep returns what it settled). The operator API's summary lists the same runs (`unknownCostCount`) for a
+  sweep returns what it settled). A lost lease that is requeued settles nothing and raises nothing. A queue built on a database
+  that is already a transaction reports nothing, as it cannot see its caller's commit. The operator API's summary lists the same runs (`unknownCostCount`) for a
   reader that prefers to poll. Alerting on the line (or the count) is the operator's way of watching what the limit
   cannot bound.
 - **Locking.** The claim already runs under the instance gate lock of the queue (Postgres) or the write lock of the

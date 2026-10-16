@@ -288,7 +288,9 @@ export function createRunnerJobsRepository(
 
   /**
    * A transaction that collects the runs it settled without a known cost and reports them once it committed
-   * (#361): the alert never fires for a transaction that rolled back.
+   * (#361): the alert never fires for a transaction that rolled back. Only the repository that opens the transaction
+   * itself reports: one built on a database that is already a transaction (`db.isTransaction`) joins its caller's
+   * transaction, whose commit it cannot see, so it reports nothing rather than something that may be rolled back.
    */
   async function inAlertingTransaction<T>(
     run: (
@@ -298,6 +300,7 @@ export function createRunnerJobsRepository(
   ): Promise<T> {
     const unknownCost: UnknownCostSettlement[] = [];
     const result = await inTransaction((trx) => run(trx, unknownCost));
+    if (db.isTransaction) return result;
     for (const settlement of unknownCost)
       notify(() => options.onUnknownCostSettled?.(settlement));
     return result;

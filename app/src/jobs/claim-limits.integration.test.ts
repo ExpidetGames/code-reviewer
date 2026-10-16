@@ -1030,6 +1030,78 @@ describe.each(databases)("the limits at claim on %s", (name, open) => {
   );
 
   // #361-T10
+  run(
+    "raises no alert for a lost lease that is requeued, and exactly one on the final attempt",
+    async () => {
+      const fixture = await start();
+      const alerts: Array<{ workspaceId: string; jobId: string }> = [];
+      const queue = createRunnerQueue(fixture.db, {
+        now: fixture.clock.now,
+        onUnknownCostSettled: (event) => alerts.push(event),
+      });
+      const job = await enqueue(fixture);
+
+      // Two attempts are lost and the job waits again: its record stays reserved and nothing settled.
+      for (const attempt of [1, 2]) {
+        expect((await queue.claimNext("runner-a"))?.job.id).toBe(job.id);
+        fixture.clock.advance(3 * MINUTE);
+        await queue.expireStaleJobs();
+        expect((await queue.get(job.id))?.status).toBe("queued");
+        expect(await recordsOf(fixture).get(job.id)).toMatchObject({
+          state: "reserved",
+        });
+        expect(alerts, `after lost attempt ${String(attempt)}`).toEqual([]);
+      }
+
+      // The last attempt loses its lease too: the job ends without a result.
+      expect((await queue.claimNext("runner-a"))?.job.id).toBe(job.id);
+      fixture.clock.advance(3 * MINUTE);
+      await queue.expireStaleJobs();
+      // Expiring again settles nothing more.
+      await queue.expireStaleJobs();
+
+      expect((await queue.get(job.id))?.status).toBe("failed");
+      expect(alerts).toEqual([
+        { workspaceId: fixture.workspaceId, jobId: job.id },
+      ]);
+    },
+  );
+
+  // #361-T10
+  run(
+    "reports nothing from a queue built on a transaction, which cannot see its caller's commit or rollback",
+    async () => {
+      const fixture = await start();
+      const alerts: unknown[] = [];
+      const job = await enqueue(fixture);
+      const usage = {
+        ok: true as const,
+        result: {
+          ok: true,
+          usage: { promptTokens: 1, completionTokens: 1, costUsd: null },
+        },
+      };
+
+      // Rolled back: the settlement never happened, so no alert may have been raised for it.
+      await fixture.db
+        .transaction()
+        .execute(async (trx) => {
+          const queue = createRunnerQueue(trx, {
+            now: fixture.clock.now,
+            onUnknownCostSettled: (event) => alerts.push(event),
+          });
+          const claimed = await queue.claimNext("runner-a");
+          await queue.complete(job.id, claimed?.leaseToken ?? "", usage);
+          throw new Error("rollback");
+        })
+        .catch(() => undefined);
+
+      expect(alerts).toEqual([]);
+      expect(await recordsOf(fixture).get(job.id)).toBeUndefined();
+    },
+  );
+
+  // #361-T10
   run("never lets a throwing alert callback fail the completion", async () => {
     const fixture = await start();
     const errors: string[] = [];

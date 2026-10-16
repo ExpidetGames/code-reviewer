@@ -354,6 +354,12 @@ Vercel) reads `DISPATCHER_SHUTDOWN_GRACE_SECONDS` and `PORT`.
 - **Upgrade every App instance first.** An instance of a release before #276 does not know the key mode: it would run a
   managed workspace's jobs on the workspace's own key and model and outside the cost limit. Roll the new App out
   completely before the first workspace is set to `managed`.
+- **The cost limit of runs on a workspace's own key** (`ownKeyCostLimitMicroUsd`, #361) is part of the same body, and a
+  write must state it. That makes the rollout a cutover: a `PUT` without the key is refused (`422 limits_invalid`) by an
+  instance that knows it, and a `PUT` with it is refused by one that does not. **Upgrade every App instance first**
+  (an old instance reads the limit and ignores it), **then** switch the writer (your billing service) to send
+  `ownKeyCostLimitMicroUsd` in every body, `null` where there is no limit. A `422` during the rollout window means the
+  writer reached an instance of the other release: treat it as retry-later, not as a refused plan.
 - **The model is the instance's** while a job runs on the operator's key: `LLM_MODEL` and `LLM_MAX_TOKENS` apply and the
   workspace's `model`, `maxTokens` and Dynamic model review settings are not used (they take effect again if the
   workspace goes back to `own`). The workspace's Settings, LLM access page shows a note instead of a key form.
