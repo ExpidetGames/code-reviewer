@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// The "Manage plan" card of the General settings (#284): one plain form that posts to the handoff route of the
+// The "Manage plan" card of the General settings and of the plan page (#284, #282): one plain form that posts to the handoff route of the
 // workspace (src/plan-handoff/http.ts), whose answer is a redirect to the operator-configured page. It is rendered
 // only for an Owner or Admin while the instance has such a page (the page decides, from the role and the setting), so
 // there is nothing to hide here: no field, no address of the page and no token in the markup.

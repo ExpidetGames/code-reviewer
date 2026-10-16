@@ -46,6 +46,7 @@ export function GeneralSettingsPageContent({
   canManageLlmKey,
   canManagePlan = false,
   planError,
+  showPlan = false,
   audience = "member",
   tenancy,
   memberCount,
@@ -63,6 +64,8 @@ export function GeneralSettingsPageContent({
   canManagePlan?: boolean;
   /** Why the last click on "Manage plan" was refused, from the address of the page (`plan_error`). */
   planError?: PlanHandoffErrorCode;
+  /** The workspace has entitlements (#282): the settings navigation lists the Plan page. */
+  showPlan?: boolean;
   audience?: ConfigAudience;
   tenancy: "single" | "multi";
   memberCount: number;
@@ -81,7 +84,11 @@ export function GeneralSettingsPageContent({
     ...(llmNotice === null ? [] : [llmNotice]),
   ];
   return (
-    <SettingsScreen workspaceSlug={workspaceSlug} current="">
+    <SettingsScreen
+      workspaceSlug={workspaceSlug}
+      current=""
+      showPlan={showPlan}
+    >
       <LegacyLlmHashRedirect workspaceSlug={workspaceSlug} />
       <NeedsAttention notices={notices} />
       <div className="flex max-w-[64rem] flex-col gap-6">

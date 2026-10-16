@@ -37,7 +37,7 @@ describe("the link of the refusal notice", () => {
 
     const link = await resolve("acme");
 
-    expect(link).toBe("https://reviews.example.com/w/acme/settings");
+    expect(link).toBe("https://reviews.example.com/w/acme/settings/plan");
     expect(link).not.toContain("plans.example");
     expect(link).not.toContain("handoff");
   });
@@ -51,7 +51,7 @@ describe("the link of the refusal notice", () => {
     );
 
     expect(await resolve("a/../b")).toBe(
-      "https://reviews.example.com/w/a%2F..%2Fb/settings",
+      "https://reviews.example.com/w/a%2F..%2Fb/settings/plan",
     );
   });
 

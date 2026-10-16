@@ -57,6 +57,7 @@ import RunDetailPage from "../app/(app)/w/[workspace]/runs/[id]/page.tsx";
 import SettingsPage from "../app/(app)/w/[workspace]/settings/page.tsx";
 import MembersPage from "../app/(app)/w/[workspace]/members/page.tsx";
 import ProjectSettingsPage from "../app/(app)/w/[workspace]/projects/[repositoryId]/page.tsx";
+import PlanSettingsPage from "../app/(app)/w/[workspace]/settings/plan/page.tsx";
 import ProjectReviewPage from "../app/(app)/w/[workspace]/projects/[repositoryId]/review/page.tsx";
 import { noWorkspaceGates, openGates } from "../test-support/open-gates.ts";
 import type { AccessGates } from "../auth/access-gates.ts";
@@ -93,6 +94,13 @@ const APP_PAGES = [
         params: Promise.resolve(WORKSPACE),
         searchParams: Promise.resolve({}),
       } as Parameters<typeof SettingsPage>[0]),
+  },
+  {
+    path: "/w/acme/settings/plan",
+    render: () =>
+      PlanSettingsPage({ params: Promise.resolve(WORKSPACE) } as Parameters<
+        typeof PlanSettingsPage
+      >[0]),
   },
   {
     path: "/w/acme/members",
