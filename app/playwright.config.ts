@@ -79,6 +79,7 @@ export default defineConfig({
         /e2e\/reviews\//,
         /e2e\/jobs\//,
         /e2e\/dynamic\//,
+        /e2e\/hosted\//,
         /e2e\/setup\//,
         /e2e\/auth\/(sign-up|password-reset)\.e2e\.ts$/,
         /e2e\/admin\/mail\.e2e\.ts$/,

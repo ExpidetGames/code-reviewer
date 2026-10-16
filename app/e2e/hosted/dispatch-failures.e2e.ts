@@ -1,0 +1,355 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// What goes wrong between the app and a Worker in the hosted deployment, and what the app does about it (#332-T03 to T06),
+// with the real app, the real Dispatcher and the real Worker, and time passing where the real waits are minutes long
+// (the journey moves the clock of one job in the database, e2e/helpers/hosted-db.ts, and calls the app's own cron sweep, which
+// is what the platform's cron does every minute):
+//
+//  - the Dispatcher is down when a job is queued, and comes back: the sweep sends the call again and the review runs once;
+//  - the Dispatcher stays down past the give-up: the run fails with `dispatch_unavailable`, the page says what it means,
+//    and the pull request is free for the next push;
+//  - the platform refuses to create a sandbox: every refusal counts as a lost attempt, the job is announced again, and
+//    after three the run fails with `launch_failed` without any Worker having started;
+//  - a Worker dies in the middle of a review: its lease lapses, the sweep puts the job back and a second Worker finishes it.
+import { expect, test, type Page } from "@playwright/test";
+import { startLlmFake, type FakeLlm } from "../../../fakes/llm/server.ts";
+import { e2eEnv } from "../helpers/e2e-env";
+import {
+  addGithubPullRequest,
+  getPullRequestComments,
+} from "../helpers/github-fake";
+import {
+  dispatchOf,
+  jobsOf,
+  letTimePass,
+  onlyJobOf,
+} from "../helpers/hosted-db";
+import {
+  startHostedDispatcher,
+  type HostedDispatcher,
+} from "../helpers/hosted-dispatcher";
+import {
+  eventually,
+  OWNER,
+  runSweep,
+  setUpReviewedRepositories,
+  sweepUntil,
+} from "../helpers/hosted-instance";
+import {
+  headSha,
+  openRuns,
+  required,
+  REVIEW_MARKER,
+  RUN_TIMEOUT,
+  runsOf,
+} from "../helpers/hosted-journey";
+import { deliverPullRequestEvent } from "../helpers/webhooks";
+
+const INSTALLATION_ID = 9500302;
+const REPOSITORY = { id: 9700002, fullName: "hosted-failures/widgets" };
+const OWNER_OF_REPOSITORY = { login: "hosted-failures", id: OWNER.id };
+
+test.describe.configure({ mode: "serial" });
+
+test.describe("what the hosted deployment does when the Dispatcher, the platform or a Worker fails", () => {
+  let llm: FakeLlm | undefined;
+  let dispatcher: HostedDispatcher | undefined;
+
+  test.beforeAll(async ({ browser, baseURL }) => {
+    if (baseURL === undefined)
+      throw new Error("The journeys project has no baseURL.");
+    llm = await startLlmFake({ port: e2eEnv.modelLlmFakePort });
+    await setUpReviewedRepositories(browser, baseURL, {
+      installationId: INSTALLATION_ID,
+      repositories: [REPOSITORY],
+      active: [REPOSITORY.fullName],
+    });
+  });
+
+  test.beforeEach(() => {
+    fakeLlm().reset();
+  });
+
+  test.afterEach(async () => {
+    await stopDispatcher();
+  });
+
+  test.afterAll(async () => {
+    await stopDispatcher();
+    await llm?.close();
+  });
+
+  function fakeLlm(): FakeLlm {
+    if (llm === undefined) throw new Error("The fake LLM was not started.");
+    return llm;
+  }
+  function theDispatcher(): HostedDispatcher {
+    if (dispatcher === undefined)
+      throw new Error("The Dispatcher is not running.");
+    return dispatcher;
+  }
+  async function startDispatcher(): Promise<void> {
+    dispatcher = await startHostedDispatcher({ llmBaseUrl: fakeLlm().baseUrl });
+  }
+  async function stopDispatcher(): Promise<void> {
+    const running = dispatcher;
+    dispatcher = undefined;
+    await running?.stop();
+  }
+
+  /** A pull request of the repository and the signed webhook for it; returns the number. */
+  async function openPullRequest(
+    page: Page,
+    request: import("@playwright/test").APIRequestContext,
+    number: number,
+    variant: string,
+  ): Promise<{ number: number; head: string }> {
+    const head = headSha(variant, number);
+    await addGithubPullRequest(request, REPOSITORY.fullName, {
+      number,
+      title: `Pull request ${String(number)}`,
+      headSha: head,
+    });
+    await openRuns(page);
+    const answer = await deliverPullRequestEvent(request, {
+      action: "opened",
+      installationId: INSTALLATION_ID,
+      repository: { ...REPOSITORY, owner: OWNER_OF_REPOSITORY },
+      number,
+      title: `Pull request ${String(number)}`,
+      headSha: head,
+    });
+    expect(answer).toEqual({ status: "accepted", outcome: "trigger_enqueued" });
+    return { number, head };
+  }
+
+  /** The app tried to send the call and could not: nobody listens. */
+  async function waitForFailedSend(jobId: string): Promise<void> {
+    await eventually("the app's first send to fail", async () => {
+      const dispatch = await dispatchOf(jobId);
+      return dispatch !== null && dispatch.consecutiveFailures >= 1;
+    });
+  }
+
+  // #332-T03
+  test("the Dispatcher is down when a job is queued: the sweep sends the call again when it is back and the review runs once", async ({
+    page,
+    request,
+  }) => {
+    const { number } = await openPullRequest(page, request, 20, "3");
+    const job = await onlyJobOf(REPOSITORY.fullName, number);
+    await waitForFailedSend(job.id);
+    const run = runsOf(page, REPOSITORY.fullName, number);
+    expect(await dispatchOf(job.id)).toMatchObject({
+      state: "pending",
+      lastStatus: null,
+    });
+    expect((await onlyJobOf(REPOSITORY.fullName, number)).status).toBe(
+      "queued",
+    );
+
+    await startDispatcher();
+    // The app waits 10 seconds after a first failure; the cron comes by once a minute.
+    await letTimePass(job.id, 15);
+    const swept = await runSweep(request);
+
+    expect(swept.sent).toBe(1);
+    await page.reload();
+    await expect(run.locator("[data-status]")).toContainText(
+      "Succeeded",
+      RUN_TIMEOUT,
+    );
+    // The cron comes by again and the app sends nothing: the job is done, and one Worker ran, once.
+    expect((await runSweep(request)).sent).toBe(0);
+    expect(theDispatcher().workersOf(job.id)).toHaveLength(1);
+    expect(fakeLlm().requests()).toHaveLength(1);
+    expect(
+      await getPullRequestComments(request, REPOSITORY.fullName, number),
+    ).toHaveLength(1);
+    expect(await dispatchOf(job.id)).toMatchObject({
+      state: "acked",
+      lastStatus: 202,
+    });
+  });
+
+  // #332-T04
+  test("the Dispatcher stays down past the give-up: the run fails with dispatch_unavailable, the page says what that means, and the next push is reviewed", async ({
+    page,
+    request,
+  }) => {
+    const { number } = await openPullRequest(page, request, 21, "4");
+    const job = await onlyJobOf(REPOSITORY.fullName, number);
+    await waitForFailedSend(job.id);
+
+    // An hour without a claim (the app's give-up is 60 minutes in a deployment).
+    await letTimePass(job.id, 3700);
+    const swept = await runSweep(request);
+
+    expect(swept.givenUp).toBe(1);
+    expect(await onlyJobOf(REPOSITORY.fullName, number)).toMatchObject({
+      status: "failed",
+      errorCode: "dispatch_unavailable",
+      attempts: 0,
+    });
+    await page.reload();
+    const run = runsOf(page, REPOSITORY.fullName, number);
+    await expect(run.locator("[data-status]")).toContainText("Failed");
+    await run
+      .getByRole("link", {
+        name: `${REPOSITORY.fullName} #${String(number)}`,
+      })
+      .click();
+    const detail = page
+      .locator('[data-slot="run-detail"]')
+      .filter({ visible: true });
+    await expect(detail.getByText("dispatch_unavailable")).toBeVisible();
+    await expect(
+      detail.getByText(
+        "No worker picked up this run within the time limit, so it was stopped.",
+      ),
+    ).toBeVisible();
+    expect(fakeLlm().requests()).toHaveLength(0);
+
+    // The pull request is free: the Dispatcher is back, a push is reviewed.
+    await startDispatcher();
+    const pushed = headSha("5", number);
+    await addGithubPullRequest(request, REPOSITORY.fullName, {
+      number,
+      title: `Pull request ${String(number)}`,
+      headSha: pushed,
+    });
+    await deliverPullRequestEvent(request, {
+      action: "synchronize",
+      installationId: INSTALLATION_ID,
+      repository: { ...REPOSITORY, owner: OWNER_OF_REPOSITORY },
+      number,
+      title: `Pull request ${String(number)}`,
+      headSha: pushed,
+    });
+    // A push is reviewed after the debounce, and the app sends such a job from the sweep when it is due.
+    await sweepUntil(
+      request,
+      "the pushed commit to be reviewed",
+      async () => {
+        const comments = await getPullRequestComments(
+          request,
+          REPOSITORY.fullName,
+          number,
+        );
+        return comments.some((comment) => comment.body.includes(REVIEW_MARKER));
+      },
+      120_000,
+    );
+    await eventually("the review to be reported", async () => {
+      const states = await jobsOf(REPOSITORY.fullName, number);
+      return states.every((item) => item.status !== "running");
+    });
+    expect(
+      (await jobsOf(REPOSITORY.fullName, number)).map((item) => item.status),
+    ).toEqual(["failed", "succeeded"]);
+  });
+
+  // #332-T05
+  test("the platform refuses to create a sandbox: each refusal costs an attempt, the job is announced again, and after three the run fails with launch_failed without a Worker", async ({
+    page,
+    request,
+  }) => {
+    await startDispatcher();
+    theDispatcher().failNextCreations(3);
+    const { number } = await openPullRequest(page, request, 22, "6");
+    const job = await onlyJobOf(REPOSITORY.fullName, number);
+
+    // The first attempt came with the call the app sent when it queued the job.
+    await eventually("the first launch to fail", async () => {
+      const state = await onlyJobOf(REPOSITORY.fullName, number);
+      return state.attempts === 1 && state.status === "queued";
+    });
+    expect(theDispatcher().workersOf(job.id)).toHaveLength(0);
+
+    // The call was acknowledged (202) and the job is still queued: after the acknowledgement timeout the cron sends it again.
+    await letTimePass(job.id, 150);
+    await sweepUntil(request, "the second launch to fail", async () => {
+      const state = await onlyJobOf(REPOSITORY.fullName, number);
+      return state.attempts === 2 && state.status === "queued";
+    });
+    await letTimePass(job.id, 150);
+    await sweepUntil(request, "the third launch to fail", async () => {
+      return (await onlyJobOf(REPOSITORY.fullName, number)).status === "failed";
+    });
+
+    expect(await onlyJobOf(REPOSITORY.fullName, number)).toMatchObject({
+      status: "failed",
+      errorCode: "launch_failed",
+    });
+    expect(theDispatcher().workersOf(job.id)).toHaveLength(0);
+    expect(fakeLlm().requests()).toHaveLength(0);
+    await page.reload();
+    const run = runsOf(page, REPOSITORY.fullName, number);
+    await expect(run.locator("[data-status]")).toContainText("Failed");
+    await run
+      .getByRole("link", {
+        name: `${REPOSITORY.fullName} #${String(number)}`,
+      })
+      .click();
+    const detail = page
+      .locator('[data-slot="run-detail"]')
+      .filter({ visible: true });
+    await expect(detail.getByText("launch_failed")).toBeVisible();
+    await expect(
+      detail.getByText(
+        "The worker for this run could not be started, even after several tries.",
+      ),
+    ).toBeVisible();
+  });
+
+  // #332-T06
+  test("a Worker dies in the middle of a review: its lease lapses, the sweep puts the job back and a second Worker finishes it", async ({
+    page,
+    request,
+  }) => {
+    await startDispatcher();
+    // The model does not answer until told to: the first Worker is inside its review when it dies.
+    fakeLlm().hold(true);
+    const { number } = await openPullRequest(page, request, 23, "7");
+    const job = await onlyJobOf(REPOSITORY.fullName, number);
+    await eventually("the first Worker to ask the model", async () => {
+      return fakeLlm().requests().length === 1;
+    });
+    const first = required(
+      theDispatcher().workersOf(job.id)[0],
+      "The first Worker",
+    );
+
+    theDispatcher().killContainer(first);
+    fakeLlm().hold(false);
+
+    // Nothing tells the app the Worker is gone: the job is running until its lease runs out.
+    expect((await onlyJobOf(REPOSITORY.fullName, number)).status).toBe(
+      "running",
+    );
+    await letTimePass(job.id, 150);
+    const swept = await runSweep(request);
+    expect(swept.expired).toMatchObject({ requeued: 1 });
+
+    const run = runsOf(page, REPOSITORY.fullName, number);
+    await page.reload();
+    await expect(run.locator("[data-status]")).toContainText(
+      "Succeeded",
+      RUN_TIMEOUT,
+    );
+    expect(await onlyJobOf(REPOSITORY.fullName, number)).toMatchObject({
+      status: "succeeded",
+      attempts: 1,
+    });
+    expect(theDispatcher().workersOf(job.id)).toHaveLength(2);
+    // The first Worker never published anything; the second one did, once.
+    const comments = await getPullRequestComments(
+      request,
+      REPOSITORY.fullName,
+      number,
+    );
+    expect(comments).toHaveLength(1);
+    expect(comments[0]?.revision).toBe(1);
+    expect(fakeLlm().requests()).toHaveLength(2);
+  });
+});

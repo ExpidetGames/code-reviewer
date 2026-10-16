@@ -340,6 +340,93 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
 
+  # The hosted lane (#332): the whole hosted flow with the real code of the App (serverless mode, over the Postgres
+  # service container below), the Dispatcher (a process, started by the journeys) and the Worker (`worker-once` and
+  # `probe`, started by the Dispatcher's Sandbox-Launcher through the `docker` stand-in of fakes/sandbox/bin), over the
+  # loopback fakes: GitHub, the model and the Sandbox platform's local mode. No Docker daemon, no secret, no network
+  # beyond loopback (the tiktoken encoding of PR-Agent is the one download, as in the e2e job). The same journeys with
+  # the Dynamic Worker under the container's capabilities and read-only root are in the privileged lane (e2e-dynamic).
+  e2e-hosted:
+    name: "E2E: hosted deployment on fakes"
+    needs: changes
+    if: ${{ github.event_name == 'push' || github.base_ref == 'main' || needs.changes.outputs.app == 'true' || needs.changes.outputs.runner == 'true' || needs.changes.outputs.dispatcher == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    # The lane makes its own database on this server (E2E_DATABASE_URL). The credentials are throwaway: CI uses no
+    # repository secret.
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: app/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+      - name: Install the app's dependencies
+        working-directory: app
+        run: pnpm install --frozen-lockfile
+      # The Dispatcher is a project of its own: the journeys start its test host (dispatcher/src/test-support).
+      - name: Install the Dispatcher's dependencies
+        working-directory: dispatcher
+        run: pnpm install --frozen-lockfile
+      - name: Install the browser and its system libraries
+        working-directory: app
+        run: pnpm exec playwright install --with-deps chromium
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.13.0"
+          enable-cache: true
+          cache-dependency-glob: runner/uv.lock
+      - name: Install the runner
+        working-directory: runner
+        run: uv sync --locked
+      - name: Restore the tiktoken encoding
+        uses: actions/cache@v4
+        with:
+          path: /tmp/data-gym-cache
+          key: tiktoken-o200k_base-v1
+      - name: Prime the tiktoken cache
+        working-directory: runner
+        run: uv run python scripts/prime_tiktoken_cache.py
+      # Playwright builds the app and serves the production build itself (playwright.hosted.config.ts), after the
+      # migrations of `pnpm migrate`, like a deployment does. Every journey runs, on every pull request.
+      - name: Run the hosted journeys
+        working-directory: app
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+          E2E_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+        run: pnpm test:e2e:hosted
+      - name: Upload the Playwright report and the logs
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-hosted-report-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            app/playwright-report
+            app/test-results
+          retention-days: 14
+          if-no-files-found: ignore
+
   # The privileged Dynamic lane (#253, #201-T01): the journey of a pull request through the real app,
   # the real Dynamic runner (root, the capabilities of compose.dynamic.yml, its own startup self-check)
   # and the real pinned OpenCode as the engine user, against the loopback fakes only. It needs root, so
@@ -373,6 +460,10 @@ jobs:
           cache-dependency-path: app/pnpm-lock.yaml
       - name: Install dependencies
         working-directory: app
+        run: pnpm install --frozen-lockfile
+      # The hosted journey of the lane (#332) starts the Dispatcher's test host.
+      - name: Install the Dispatcher's dependencies
+        working-directory: dispatcher
         run: pnpm install --frozen-lockfile
       - name: Install the browser and its system libraries
         working-directory: app
@@ -652,7 +743,7 @@ jobs:
   # fails on any failed or cancelled job and accepts skipped jobs (path filter).
   ci-passed:
     name: All checks passed?
-    needs: [changes, app-fast, app-serverless, dispatcher-fast, runner-fast, engine, e2e, e2e-dynamic, licenses, image-app, image-runner, image-runner-dynamic, image-runner-sandbox, sandbox-local, compose, actionlint]
+    needs: [changes, app-fast, app-serverless, dispatcher-fast, runner-fast, engine, e2e, e2e-hosted, e2e-dynamic, licenses, image-app, image-runner, image-runner-dynamic, image-runner-sandbox, sandbox-local, compose, actionlint]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
