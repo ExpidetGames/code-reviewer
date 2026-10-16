@@ -457,7 +457,11 @@ export async function startDispatcherAppFake(
     )
       return errorReply(400);
     const stored = result as Record<string, unknown>;
-    if (job.status === "succeeded" || job.status === "failed") {
+    if (
+      job.status === "succeeded" ||
+      job.status === "failed" ||
+      (job.status === "superseded" && job.results.length > 0)
+    ) {
       const same = JSON.stringify(job.results[0]) === JSON.stringify(stored);
       return same
         ? {
@@ -481,8 +485,14 @@ export async function startDispatcherAppFake(
         },
       };
     }
+    // A run the App superseded (and whose holder was told) keeps its status: the report is taken once (#397).
+    const supersededRun = job.superseded && job.supersedeFeature;
     job.results.push(stored);
-    job.status = stored.ok === true ? "succeeded" : "failed";
+    job.status = supersededRun
+      ? "superseded"
+      : stored.ok === true
+        ? "succeeded"
+        : "failed";
     return {
       status: 200,
       body: {

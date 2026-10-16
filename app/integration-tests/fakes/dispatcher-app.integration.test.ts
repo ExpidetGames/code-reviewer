@@ -294,6 +294,32 @@ describe("the fake App", () => {
       Date.parse(named.job.leaseExpiresAt),
     );
     expect((await beat()).job.leaseExpiresAt).toBe(told.job.leaseExpiresAt);
+
+    // The report is taken once and the job stays superseded, like the App answers it (#397).
+    const report = {
+      result: { ...RESULT.result, ok: false, errorCode: "superseded" },
+    };
+    const send = async () => {
+      const response = await workerCall(
+        fake,
+        "POST",
+        `/api/workers/v1/jobs/${JOB}/result`,
+        credential,
+        report,
+      );
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      valid(worker, "WorkerResultResponse", body);
+      return body as { job: { status: string }; alreadyCompleted: boolean };
+    };
+    expect(await send()).toMatchObject({
+      job: { status: "superseded" },
+      alreadyCompleted: false,
+    });
+    expect(await send()).toMatchObject({
+      job: { status: "superseded" },
+      alreadyCompleted: true,
+    });
   });
 
   // #318-T08
