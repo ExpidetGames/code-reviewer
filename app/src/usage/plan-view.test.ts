@@ -9,8 +9,8 @@ import { buildPlanView, costPercentUsed, type PlanUsage } from "./plan-view.ts";
 
 const NO_USAGE: PlanUsage = {
   runs: { diff: 0, dynamic: 0 },
-  managedCostMicroUsd: 0,
-  managedUnknownCostCount: 0,
+  costMicroUsd: 0,
+  unknownCostCount: 0,
 };
 
 function limited(
@@ -25,12 +25,25 @@ function limited(
       diffRunsPerPeriod: null,
       dynamicRunsPerPeriod: null,
       managedCostLimitMicroUsd: null,
+      ownKeyCostLimitMicroUsd: null,
     },
     periodStart: "2026-10-01T00:00:00.000Z",
     suspended: false,
     suspensionCode: null,
     ...overrides,
   };
+}
+
+function ownKeyWithCostLimit(limit: number | null) {
+  return limited({
+    keyMode: "own",
+    limits: {
+      diffRunsPerPeriod: null,
+      dynamicRunsPerPeriod: null,
+      managedCostLimitMicroUsd: null,
+      ownKeyCostLimitMicroUsd: limit,
+    },
+  });
 }
 
 function managedWithCostLimit(limit: number | null) {
@@ -40,6 +53,7 @@ function managedWithCostLimit(limit: number | null) {
       diffRunsPerPeriod: null,
       dynamicRunsPerPeriod: null,
       managedCostLimitMicroUsd: limit,
+      ownKeyCostLimitMicroUsd: null,
     },
   });
 }
@@ -87,6 +101,7 @@ describe("the plan view", () => {
           diffRunsPerPeriod: 5,
           dynamicRunsPerPeriod: null,
           managedCostLimitMicroUsd: null,
+          ownKeyCostLimitMicroUsd: null,
         },
       }),
       { ...NO_USAGE, runs: { diff: 3, dynamic: 1 } },
@@ -133,8 +148,8 @@ describe("the plan view", () => {
   it("shows the cost limit as a percentage and the runs whose cost is unknown, never an amount", () => {
     const view = buildPlanView(managedWithCostLimit(5_000_000), {
       ...NO_USAGE,
-      managedCostMicroUsd: 3_100_000,
-      managedUnknownCostCount: 2,
+      costMicroUsd: 3_100_000,
+      unknownCostCount: 2,
     });
 
     expect(view).toMatchObject({
@@ -160,12 +175,81 @@ describe("the plan view", () => {
           diffRunsPerPeriod: null,
           dynamicRunsPerPeriod: null,
           managedCostLimitMicroUsd: 1_000_000,
+          ownKeyCostLimitMicroUsd: null,
         },
       }),
-      { ...NO_USAGE, managedCostMicroUsd: 900_000 },
+      { ...NO_USAGE, costMicroUsd: 900_000 },
     );
 
     expect(view).toMatchObject({ cost: null });
+  });
+
+  // #361 (plan page): the bar for the limit of the own key
+  it("shows the own-key cost limit as a percentage, with the runs whose cost is unknown apart, never an amount", () => {
+    const view = buildPlanView(ownKeyWithCostLimit(5_000_000), {
+      ...NO_USAGE,
+      costMicroUsd: 3_100_000,
+      unknownCostCount: 2,
+    });
+
+    expect(view).toMatchObject({
+      managed: false,
+      cost: { percentUsed: 62, unknownCostCount: 2 },
+    });
+    const text = JSON.stringify(view);
+    expect(text).not.toContain("3100000");
+    expect(text).not.toContain("5000000");
+    expect(text).not.toContain("MicroUsd");
+  });
+
+  it("rounds the own-key percentage down, caps it at 100 and reads a limit of 0 as 100", () => {
+    const at = (used: number, limit: number) =>
+      buildPlanView(ownKeyWithCostLimit(limit), {
+        ...NO_USAGE,
+        costMicroUsd: used,
+      });
+
+    expect(at(999_999, 1_000_000)).toMatchObject({ cost: { percentUsed: 99 } });
+    expect(at(1_000_000, 1_000_000)).toMatchObject({
+      cost: { percentUsed: 100 },
+    });
+    expect(at(7_000_000, 1_000_000)).toMatchObject({
+      cost: { percentUsed: 100 },
+    });
+    expect(at(0, 0)).toMatchObject({ cost: { percentUsed: 100 } });
+  });
+
+  it("has no cost for an own-key workspace without an own-key cost limit", () => {
+    expect(buildPlanView(ownKeyWithCostLimit(null), NO_USAGE)).toMatchObject({
+      cost: null,
+    });
+  });
+
+  it("shows only the limit of the key the workspace runs on", () => {
+    const both = {
+      diffRunsPerPeriod: null,
+      dynamicRunsPerPeriod: null,
+      managedCostLimitMicroUsd: 4_000_000,
+      ownKeyCostLimitMicroUsd: 8_000_000,
+    };
+    const usage = { ...NO_USAGE, costMicroUsd: 2_000_000 };
+
+    expect(
+      buildPlanView(limited({ keyMode: "managed", limits: both }), usage),
+    ).toMatchObject({ cost: { percentUsed: 50 } });
+    expect(
+      buildPlanView(limited({ keyMode: "own", limits: both }), usage),
+    ).toMatchObject({ cost: { percentUsed: 25 } });
+    // Only the other mode's limit is set: nothing applies to the key the workspace runs on.
+    expect(
+      buildPlanView(
+        limited({
+          keyMode: "managed",
+          limits: { ...both, managedCostLimitMicroUsd: null },
+        }),
+        usage,
+      ),
+    ).toMatchObject({ cost: null });
   });
 
   it("does not hand on where the entitlements came from", () => {

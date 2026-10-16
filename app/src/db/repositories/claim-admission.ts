@@ -87,7 +87,8 @@ export async function admitClaimedJob(
         own.reservedAt >= since;
       return ownCounts ? counted - 1 : counted;
     },
-    managedCostSince: (since) => records.sumSettledManagedCostMicroUsd(since),
+    costSince: (keyMode, since) =>
+      records.sumSettledCostMicroUsd(since, keyMode),
   };
   return {
     admission: await decideAdmission(entitlements, reviewKind, usage),

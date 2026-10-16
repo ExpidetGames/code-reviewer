@@ -46,6 +46,7 @@ describe("claiming the last unit of a limit from two processes", () => {
           diffRunsPerPeriod: 1,
           dynamicRunsPerPeriod: null,
           managedCostLimitMicroUsd: null,
+          ownKeyCostLimitMicroUsd: null,
         },
         periodStart: "2026-10-01T00:00:00.000Z",
         suspended: false,

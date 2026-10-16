@@ -43,6 +43,7 @@ function entitlements(
       diffRunsPerPeriod: null,
       dynamicRunsPerPeriod: null,
       managedCostLimitMicroUsd: null,
+      ownKeyCostLimitMicroUsd: null,
       ...limits,
     },
   };
@@ -202,6 +203,78 @@ describe("the plan view of a workspace", () => {
 
     expect(view).toMatchObject({ cost: { percentUsed: 62 } });
     expect(JSON.stringify(view)).not.toMatch(/6200000|10000000|9000000/);
+  });
+
+  // #361 (plan page)
+  it("reports the share of the own-key cost limit that the settled runs on the workspace's own key used", async () => {
+    const t = await setup();
+    await t.entitle(
+      entitlements({
+        keyMode: "own",
+        limits: { ownKeyCostLimitMicroUsd: 10_000_000 },
+      }),
+    );
+    await t.use({ state: "settled", keyMode: "own", costMicroUsd: 4_000_000 });
+    await t.use({ state: "settled", keyMode: "own", costMicroUsd: 2_200_000 });
+    // Not counted: the operator's key, an earlier period, a run that is still going, a run that never counted.
+    await t.use({
+      state: "settled",
+      keyMode: "managed",
+      costMicroUsd: 9_000_000,
+    });
+    await t.use({
+      state: "settled",
+      keyMode: "own",
+      costMicroUsd: 9_000_000,
+      reservedAt: BEFORE_PERIOD,
+    });
+    await t.use({ state: "reserved", keyMode: "own" });
+    await t.use({ state: "void", keyMode: "own" });
+
+    const view = await t.view();
+
+    expect(view).toMatchObject({ managed: false, cost: { percentUsed: 62 } });
+    expect(JSON.stringify(view)).not.toMatch(/6200000|10000000|9000000/);
+  });
+
+  // #361 (plan page)
+  it("lists own-key runs whose cost is unknown apart, counting those of the own key only", async () => {
+    const t = await setup();
+    await t.entitle(
+      entitlements({
+        keyMode: "own",
+        limits: { ownKeyCostLimitMicroUsd: 10_000_000 },
+      }),
+    );
+    await t.use({ state: "settled", keyMode: "own", costMicroUsd: 5_000_000 });
+    await t.use({ state: "settled", keyMode: "own", costMicroUsd: null });
+    await t.use({ state: "settled", keyMode: "managed", costMicroUsd: null });
+    await t.use({
+      state: "settled",
+      keyMode: "own",
+      costMicroUsd: null,
+      reservedAt: BEFORE_PERIOD,
+    });
+
+    expect(await t.view()).toMatchObject({
+      cost: { percentUsed: 50, unknownCostCount: 1 },
+    });
+  });
+
+  // #361 (plan page)
+  it("shows no cost for an own-key workspace whose only cost limit is the managed one, which nothing reads", async () => {
+    const t = await setup();
+    await t.entitle(
+      entitlements({
+        keyMode: "managed",
+        limits: { managedCostLimitMicroUsd: 10_000_000 },
+      }),
+    );
+    // The stored shape of before #277 can only be made by hand: switch the key mode under the limit.
+    await sql`update workspace_entitlements set key_mode = 'own'`.execute(t.db);
+    await t.use({ state: "settled", keyMode: "own", costMicroUsd: 9_000_000 });
+
+    expect(await t.view()).toMatchObject({ kind: "limited", cost: null });
   });
 
   it("lists a settled run whose cost is unknown apart and does not turn it into zero", async () => {

@@ -7,7 +7,8 @@
     "limits": {
       "diffRunsPerPeriod": 100,
       "dynamicRunsPerPeriod": null,
-      "managedCostLimitMicroUsd": 5000000
+      "managedCostLimitMicroUsd": 5000000,
+      "ownKeyCostLimitMicroUsd": null
     },
     "periodStart": "2026-10-01T00:00:00.000Z",
     "suspended": false,
@@ -22,7 +23,8 @@
     "limits": {
       "diffRunsPerPeriod": 100,
       "dynamicRunsPerPeriod": null,
-      "managedCostLimitMicroUsd": 5000000
+      "managedCostLimitMicroUsd": 5000000,
+      "ownKeyCostLimitMicroUsd": null
     },
     "periodStart": "2026-10-01T00:00:00.000Z",
     "suspended": false,

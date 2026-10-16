@@ -29,6 +29,7 @@ function entitlements(
       diffRunsPerPeriod: 0,
       dynamicRunsPerPeriod: null,
       managedCostLimitMicroUsd: null,
+      ownKeyCostLimitMicroUsd: null,
     },
     periodStart: PERIOD_1,
     suspended: false,
@@ -42,6 +43,7 @@ const SUSPENDED = entitlements({
     diffRunsPerPeriod: null,
     dynamicRunsPerPeriod: null,
     managedCostLimitMicroUsd: null,
+    ownKeyCostLimitMicroUsd: null,
   },
   suspended: true,
   suspensionCode: "overdue",
@@ -299,6 +301,7 @@ describe("what gets no notice", () => {
           diffRunsPerPeriod: 5,
           dynamicRunsPerPeriod: null,
           managedCostLimitMicroUsd: null,
+          ownKeyCostLimitMicroUsd: null,
         },
       }),
     );

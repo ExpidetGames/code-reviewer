@@ -344,7 +344,7 @@ export interface WorkspaceEntitlementsTable {
   plan_label: string;
   /** `own` or `managed` (KEY_MODES). */
   key_mode: string;
-  /** JSON text: `diffRunsPerPeriod`, `dynamicRunsPerPeriod`, `managedCostLimitMicroUsd`, each a count or null. */
+  /** JSON text: `diffRunsPerPeriod`, `dynamicRunsPerPeriod`, `managedCostLimitMicroUsd`, `ownKeyCostLimitMicroUsd` (#361; absent in an entry from before it), each a count or null. */
   limits: string;
   /** ISO 8601 text in UTC: usage counts from here. Never moves to an earlier time. */
   period_start: string;

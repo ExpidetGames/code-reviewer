@@ -39,6 +39,12 @@ export const NO_RESULT_JOB_ERROR_CODES = [
 /** Whose key a run was made with. The same two values as the key mode of the entitlements. */
 export type UsageKeyMode = KeyMode;
 
+/**
+ * A run that settled without a known cost (#361): the cost limits do not bound it, so it is reported (a log line, ids
+ * only) to be watched. Never carries a figure, a model or a name.
+ */
+export type UnknownCostSettlement = { workspaceId: string; jobId: string };
+
 /** Cost is stored as a whole number of millionths of a US dollar. */
 const MICRO_USD_PER_USD = 1_000_000;
 

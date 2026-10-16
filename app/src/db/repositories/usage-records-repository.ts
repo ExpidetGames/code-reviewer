@@ -101,8 +101,12 @@ export type UsageRecordsRepository = {
   get(jobId: string): Promise<UsageRecord | undefined>;
   /** Records that count (`reserved` and `settled`, never `void`) reserved at or after `since`, per review kind. */
   countByKind(since: string): Promise<Record<ProjectReviewKind, number>>;
-  /** The cost of the settled records of managed runs reserved at or after `since` (the period of the run, as in `countByKind`); an unknown cost adds nothing. */
-  sumSettledManagedCostMicroUsd(since: string): Promise<number>;
+  /**
+   * The cost of the settled records of the runs on `keyMode` reserved at or after `since` (the period of the run,
+   * as in `countByKind`); an unknown cost adds nothing. A record counts under the key mode it was settled with,
+   * whatever the entitlements say now (#361).
+   */
+  sumSettledCostMicroUsd(since: string, keyMode: UsageKeyMode): Promise<number>;
   /** Settled records after the cursor, ordered by `(settledAt, id)`; never a `reserved` or `void` record. */
   pageSettled(options: UsagePageOptions): Promise<UsageRecordsPage>;
   /**
@@ -275,13 +279,13 @@ export function createUsageRecordsRepository(
       return counts;
     },
 
-    async sumSettledManagedCostMicroUsd(since) {
+    async sumSettledCostMicroUsd(since, keyMode) {
       const row = await db
         .selectFrom("usage_records")
         .select((eb) => eb.fn.sum("cost_micro_usd").as("total"))
         .where("workspace_id", "=", workspaceId)
         .where("state", "=", "settled")
-        .where("key_mode", "=", "managed")
+        .where("key_mode", "=", keyMode)
         .where("reserved_at", ">=", since)
         .executeTakeFirst();
       return Number(row?.total ?? 0);

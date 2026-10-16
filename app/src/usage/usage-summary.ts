@@ -17,8 +17,8 @@ const END_OF_TIME = "9999-12-31T23:59:59.999Z";
 
 const NO_USAGE: PlanUsage = {
   runs: { diff: 0, dynamic: 0 },
-  managedCostMicroUsd: 0,
-  managedUnknownCostCount: 0,
+  costMicroUsd: 0,
+  unknownCostCount: 0,
 };
 
 /**
@@ -37,20 +37,24 @@ export async function readPlanView(
   const records = createUsageRecordsRepository(db, workspaceId, now);
   const since = entitlements.periodStart;
   const runs = await records.countByKind(since);
-  // The claim only watches the cost of runs on the operator's key, and only while a cost limit is set.
-  const watchesCost =
-    entitlements.keyMode === "managed" &&
-    entitlements.limits.managedCostLimitMicroUsd !== null;
-  if (!watchesCost) return buildPlanView(entitlements, { ...NO_USAGE, runs });
-  const [managedCostMicroUsd, groups] = await Promise.all([
-    records.sumSettledManagedCostMicroUsd(since),
+  // The claim watches the cost of the runs on the key the workspace runs on, and only while that key's cost limit
+  // is set (#361: the operator's key has its own limit, the workspace's key another).
+  const { keyMode, limits } = entitlements;
+  const costLimit =
+    keyMode === "managed"
+      ? limits.managedCostLimitMicroUsd
+      : limits.ownKeyCostLimitMicroUsd;
+  if (costLimit === null)
+    return buildPlanView(entitlements, { ...NO_USAGE, runs });
+  const [costMicroUsd, groups] = await Promise.all([
+    records.sumSettledCostMicroUsd(since, keyMode),
     records.summarize({ from: since, to: END_OF_TIME }),
   ]);
   return buildPlanView(entitlements, {
     runs,
-    managedCostMicroUsd,
-    managedUnknownCostCount: groups
-      .filter((group) => group.keyMode === "managed")
+    costMicroUsd,
+    unknownCostCount: groups
+      .filter((group) => group.keyMode === keyMode)
       .reduce((total, group) => total + group.unknownCostCount, 0),
   });
 }
