@@ -24,7 +24,7 @@ Anyone who can write it can send workspace Owners and Admins to that page: it is
 
 ## The button and the route
 
-An Owner or Admin sees **Manage plan** in the workspace settings (General, card "Plan") while a page is configured
+An Owner or Admin sees **Manage plan** in the workspace settings (General, card "Plan", and the same card on the Plan page) while a page is configured
 (`ui/manage-plan-card.tsx`; a Member does not see it). It is a plain `<form method="post">` to
 `POST /api/w/<slug>/plan-handoff` (`http.ts`, order of the checks):
 

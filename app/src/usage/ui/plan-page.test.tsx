@@ -399,4 +399,21 @@ describe("the plan page keeps up to date", () => {
       screen.getByRole("status", { name: "Updating the page" }).textContent,
     ).toContain("no longer updates");
   });
+
+  // #282-review: a person who loses their membership while the page is open gets the answer of a path that does
+  // not exist; asking again cannot fix that.
+  it("stops asking when the workspace is no longer the person's", async () => {
+    const poll = api([
+      { ok: false, status: 404, code: "not_found", issues: [] },
+    ]);
+    page(limited(), poll);
+
+    await advance(10_000);
+    await advance(120_000);
+
+    expect(poll.read).toHaveBeenCalledTimes(1);
+    const status = screen.getByRole("status", { name: "Updating the page" });
+    expect(status.textContent).toContain("That is not available to you.");
+    expect(status.textContent).toContain("no longer updates");
+  });
 });

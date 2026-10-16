@@ -41,6 +41,7 @@ import {
   planRunsText,
   planUnknownCostText,
 } from "../../copy/plan-usage.ts";
+import { NOT_AVAILABLE_TO_YOU } from "../../copy/messages.ts";
 import { KIND_NAMES } from "../../review-settings/kind-names.ts";
 import { formatUtc } from "../../ui/format-time.ts";
 import {
@@ -172,8 +173,10 @@ function PlanBody({ plan }: { plan: PlanView }) {
 function describeFailure(code: string | null, stopped: boolean): string {
   if (!stopped || code === null) return PLAN_POLL_FAILED;
   const sentence =
-    describeTransportFailure(code) ??
-    TRANSPORT_FAILURE_COPY.UNEXPECTED_RESPONSE;
+    code === "not_found"
+      ? NOT_AVAILABLE_TO_YOU
+      : (describeTransportFailure(code) ??
+        TRANSPORT_FAILURE_COPY.UNEXPECTED_RESPONSE);
   return `${sentence}${PLAN_POLL_STOPPED_SUFFIX}`;
 }
 
