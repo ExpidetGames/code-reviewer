@@ -252,3 +252,65 @@ def test_without_a_retry_a_timeout_stays_one_request_and_leaves_the_cost_unknown
 
     assert provider.seen == 1
     assert meter.cost_usd() is None
+
+
+# #363-T01, #363-T03: what the real LiteLLM does against a loopback provider decides whether the run
+# may have used the model: a refusal before generation did not, anything else may have.
+@pytest.mark.parametrize("status", [400, 401, 402, 403, 404, 422, 429])
+def test_a_refusal_before_any_generation_is_no_use_of_the_model(
+    provider: Provider, status: int
+) -> None:
+    meter = run_attempts(provider, [Step(status, error_body(status))])
+
+    assert meter.may_have_used_the_model is False
+
+
+@pytest.mark.parametrize("status", [500, 502, 503, 504, 524, 408, 418, 599])
+def test_a_server_error_may_have_used_the_model(provider: Provider, status: int) -> None:
+    meter = run_attempts(provider, [Step(status, error_body(status))])
+
+    assert meter.may_have_used_the_model is True
+
+
+# #363-T01: the request is still in flight when the client gives up.
+def test_a_request_that_is_not_answered_in_time_may_have_used_the_model(
+    provider: Provider,
+) -> None:
+    provider.steps = [Step(delay=1.5)]
+    boundary = Boundary()
+    meter, undo = install_cost_meter(boundary)
+
+    async def attempt() -> None:
+        with contextlib.suppress(Exception):
+            await ask(boundary, provider, timeout=0.3, num_retries=0, max_retries=0)
+
+    try:
+        asyncio.run(attempt())
+    finally:
+        undo()
+
+    assert provider.seen == 1
+    assert meter.may_have_used_the_model is True
+
+
+# #363-T01: cancelled by the soft timeout of the runner while the provider is still working.
+def test_a_request_cancelled_while_the_provider_works_may_have_used_the_model(
+    provider: Provider,
+) -> None:
+    provider.steps = [Step(delay=5)]
+    boundary = Boundary()
+    meter, undo = install_cost_meter(boundary)
+
+    async def attempt() -> None:
+        with contextlib.suppress(TimeoutError):
+            async with asyncio.timeout(0.3):
+                await ask(boundary, provider, num_retries=0, max_retries=0)
+
+    try:
+        asyncio.run(attempt())
+    finally:
+        undo()
+
+    assert provider.seen == 1
+    assert meter.may_have_used_the_model is True
+    assert meter.cost_usd() is None

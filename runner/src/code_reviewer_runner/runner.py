@@ -41,7 +41,7 @@ from code_reviewer_runner.capabilities import (
     engines_from_environment,
 )
 from code_reviewer_runner.comment_recorder import CommentRecorder, install_comment_recorder
-from code_reviewer_runner.diff_cost import CostMeterError, install_cost_meter
+from code_reviewer_runner.diff_cost import CostMeterError, DiffCostMeter, install_cost_meter
 from code_reviewer_runner.dynamic_findings import (
     DROPPED_INVALID,
     DROPPED_OUTSIDE_EXPORT,
@@ -162,6 +162,20 @@ def _failure(
     )
 
 
+def _unreported_use(usage: Usage | None, meter: DiffCostMeter) -> str | None:
+    """The reason of a failed Diff run whose model use PR-Agent did not measure (#363).
+
+    PR-Agent counts only the calls that came back. A run that ends while a request is in flight (or
+    after an answer it threw away) has no usage, but the model may have worked on it, so the result
+    says that and the app counts the run with an unknown cost instead of voiding it. A run that
+    reported usage needs no reason, and one that sent no request (or only requests the provider
+    refused) stays without one.
+    """
+    if usage is not None or not meter.may_have_used_the_model:
+        return None
+    return NO_RESULT_REASON
+
+
 def run_job(
     job: Job, capture: LogCapture, started: float, timeout_seconds: float | None = None
 ) -> JobResult:
@@ -227,12 +241,14 @@ def run_job(
             deadline = None if timeout_seconds is None else started + timeout_seconds
             handled, failed_flag, usage = asyncio.run(execute(job, guard, deadline, probe, meter))
         except JobTimeout:
+            usage = probe.usage()
             return _failure(
                 ErrorCode.TIMEOUT,
                 "the command did not finish in time",
                 started,
                 capture,
-                usage=probe.usage(),
+                usage=usage,
+                reason=_unreported_use(usage, meter),
             )
         except InvalidOption as error:
             # The key is an env name that parse_job validated; the value is never echoed.
@@ -247,12 +263,14 @@ def run_job(
         except BaseException as error:  # SystemExit and friends from a library included
             capture.add(_ERROR_LEVEL, "ERROR", "handle_request raised", error)
             code = classify_failure(capture.exceptions, capture.error_messages)
+            usage = probe.usage()
             return _failure(
                 code or ErrorCode.UNKNOWN,
                 "the command raised",
                 started,
                 capture,
-                usage=probe.usage(),
+                usage=usage,
+                reason=_unreported_use(usage, meter),
             )
     finally:
         patches.close()
@@ -278,6 +296,8 @@ def run_job(
             error_code = ErrorCode.COMMAND_FAILED
         error_code = error_code or ErrorCode.UNKNOWN
     log_tail, log_truncated = capture.snapshot()
+    # A failed command reports usage only when it reached the model.
+    reported = usage if ok else probe.usage()
     return JobResult(
         ok=ok,
         duration_ms=_elapsed_ms(started),
@@ -285,8 +305,8 @@ def run_job(
         error_code=error_code,
         log_tail=log_tail,
         log_truncated=log_truncated,
-        # A failed command reports usage only when it reached the model.
-        usage=usage if ok else probe.usage(),
+        usage=reported,
+        error_reason=None if ok else _unreported_use(reported, meter),
     )
 
 

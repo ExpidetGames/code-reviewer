@@ -677,6 +677,205 @@ def test_a_diff_run_that_succeeds_without_a_model_call_still_reports_its_usage_a
     assert result.usage.ai_calls == 0
 
 
+# #363-T01: PR-Agent counts only the calls that came back, so a command that raises while its first
+# request is still in flight has no usage; the run may have used the model, which the reason says.
+def test_a_diff_run_that_raises_while_its_first_request_is_in_flight_may_have_used_the_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ask = provider(monkeypatch, HANGS)
+
+    async def double() -> bool:
+        asking = asyncio.ensure_future(ask())
+        await asyncio.sleep(0)  # the request is sent
+        assert not asking.done()
+        raise RuntimeError("the command failed while the model was still working")
+
+    use_double(monkeypatch, double)
+
+    result, _ = run()
+
+    assert result.ok is False
+    assert result.usage is None
+    assert result.error_reason == "no_result_from_process"
+    assert result.to_json()["errorReason"] == "no_result_from_process"
+
+
+# #363-T02
+def test_a_diff_run_that_times_out_while_its_first_request_is_in_flight_may_have_used_the_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ask = provider(monkeypatch, HANGS)
+
+    async def double() -> bool:
+        await ask()
+        return True
+
+    use_double(monkeypatch, double)
+    capture = LogCapture(Redactor([TOKEN, API_KEY]))
+
+    result = runner.run_job(make_job(), capture, time.monotonic(), timeout_seconds=STARTS_WITHIN)
+
+    assert result.error_code is ErrorCode.TIMEOUT
+    assert result.usage is None
+    assert result.error_reason == "no_result_from_process"
+
+
+# #363-T01: a failure PR-Agent handles itself (a failure comment, the failed flag) is the same.
+def test_a_diff_run_that_reports_a_failure_while_its_request_is_in_flight_may_have_used_the_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ask = provider(monkeypatch, HANGS)
+
+    async def double() -> bool:
+        asking = asyncio.ensure_future(ask())
+        await asyncio.sleep(0)
+        assert not asking.done()
+        return False
+
+    use_double(monkeypatch, double)
+
+    result, _ = run()
+
+    assert result.ok is False
+    assert result.usage is None
+    assert result.error_reason == "no_result_from_process"
+
+
+# #363-T01: an answer that came back but that PR-Agent threw away (an empty reply is billed) is a
+# call of the model even though PR-Agent counted none.
+def test_a_diff_run_that_fails_after_an_answer_pr_agent_did_not_count_may_have_used_the_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider(monkeypatch, 0.0021)
+
+    async def double() -> bool:
+        module = import_module(HANDLER_MODULE)
+        await module.acompletion(model="openrouter/deepseek/deepseek-chat", messages=[])
+        raise RuntimeError("PR-Agent discarded the answer and gave up")
+
+    use_double(monkeypatch, double)
+
+    result, _ = run()
+
+    assert result.ok is False
+    assert result.usage is None
+    assert result.error_reason == "no_result_from_process"
+
+
+# #363-T03
+@pytest.mark.parametrize("fails", ["raises", "returns false", "times out"])
+def test_a_diff_run_that_fails_before_any_request_is_sent_has_no_usage_and_no_reason(
+    monkeypatch: pytest.MonkeyPatch, fails: str
+) -> None:
+    provider(monkeypatch)  # the model function is metered, and nobody calls it
+
+    async def double() -> bool:
+        if fails == "returns false":
+            return False
+        if fails == "times out":
+            await asyncio.sleep(30)
+        raise RuntimeError("failed before the model was asked")
+
+    calls = use_double(monkeypatch, double)
+    capture = LogCapture(Redactor([TOKEN, API_KEY]))
+
+    result = runner.run_job(make_job(), capture, time.monotonic(), timeout_seconds=STARTS_WITHIN)
+
+    assert len(calls) == 1
+    assert result.ok is False
+    assert result.usage is None
+    assert result.error_reason is None
+    assert "errorReason" not in result.to_json()
+
+
+# #363-T03: a request the provider refused before it generated anything (a bad key, a rate limit)
+# was not used, so a run that ends there is not counted as a run of the model.
+@pytest.mark.parametrize("status", [401, 429])
+def test_a_diff_run_whose_only_request_was_refused_before_generation_has_no_reason(
+    monkeypatch: pytest.MonkeyPatch, status: int
+) -> None:
+    refusal = (
+        AuthenticationError("bad key", "openrouter", "m")
+        if status == 401
+        else RateLimitError("slow down", "openrouter", "m")
+    )
+    ask = provider(monkeypatch, refusal)
+
+    async def double() -> bool:
+        await ask()
+        raise RuntimeError("the model refused the request")
+
+    use_double(monkeypatch, double)
+
+    result, _ = run()
+
+    assert result.ok is False
+    assert result.usage is None
+    assert result.error_reason is None
+
+
+# #363-T04: one call came back priced and a second request is in flight: the tokens are reported,
+# the cost is null (all or nothing), and no reason is needed because the usage settles the run.
+def test_a_diff_run_that_raises_with_one_priced_call_and_one_request_in_flight_reports_no_cost(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ask = provider(monkeypatch, 0.0021, HANGS)
+
+    async def double() -> bool:
+        asking = asyncio.ensure_future(ask())
+        await asyncio.sleep(0.05)  # the first answer is back, the second request is out
+        assert not asking.done()
+        raise RuntimeError("failed while the second request was in flight")
+
+    use_double(monkeypatch, double)
+
+    result, _ = run()
+
+    assert result.ok is False
+    assert result.usage is not None
+    assert result.usage.ai_calls == 1
+    assert result.usage.total_tokens == 750
+    assert result.usage.cost_usd is None
+    assert result.error_reason is None
+
+
+# #363-T06: a run that reported its usage carries no reason; a success is as before.
+def test_a_diff_run_that_fails_after_a_priced_call_carries_its_usage_and_no_reason(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ask = provider(monkeypatch, 0.0021)
+
+    async def double() -> bool:
+        await ask()
+        raise RuntimeError("failed")
+
+    use_double(monkeypatch, double)
+
+    result, _ = run()
+
+    assert result.usage is not None and result.usage.cost_usd == 0.0021
+    assert result.error_reason is None
+
+
+# #363-T06
+def test_a_successful_diff_run_never_carries_a_reason(monkeypatch: pytest.MonkeyPatch) -> None:
+    ask = provider(monkeypatch, 0.0021, 0.0021)
+
+    async def double() -> bool:
+        await ask()
+        provider_with_pull().publish_comment(f"## PR Reviewer Guide\n\n{REVIEW_MARKER}\n\nbody")
+        return True
+
+    use_double(monkeypatch, double)
+
+    result, _ = run()
+
+    assert result.ok is True
+    assert result.error_reason is None
+    assert result.usage is not None and result.usage.cost_usd == 0.0042
+    assert "errorReason" not in result.to_json()
+
+
 # CR-10-T07
 def test_a_secret_pr_agent_logs_never_reaches_the_result(monkeypatch: pytest.MonkeyPatch) -> None:
     async def double() -> bool:

@@ -4,12 +4,13 @@
 job entry point against the OpenRouter-shaped fake LLM. The cost is the sum of the `usage.cost` the
 provider states in its answers, all or nothing, and never a figure from a price table."""
 
+import json
 from decimal import Decimal
 from typing import Any
 
 from fake_github import FakeGithub
 from fake_llm import FakeLlm, Reply
-from harness import MODEL, Engine
+from harness import MODEL, Engine, Outcome
 
 FALLBACK = "test/fallback-model"
 # A model whose price LiteLLM's table knows: PR-Agent would have worked a cost out for it.
@@ -198,3 +199,80 @@ def test_a_run_whose_model_failed_with_a_server_error_reports_no_cost(
     assert result["ok"] is True
     assert result["usage"]["fallbackUsed"] is True
     assert result["usage"]["costUsd"] is None
+
+
+# #363-T01: PR-Agent counts only the calls that came back. The provider accepted the request and
+# failed it with a server error: the run has no usage, but the model may have worked on it, so the
+# result says so (and the app counts the run with an unknown cost instead of voiding it).
+def test_a_run_whose_only_request_failed_with_a_server_error_may_have_used_the_model(
+    engine: Engine, github: FakeGithub, llm: FakeLlm
+) -> None:
+    llm.override = Reply(status=500, message="upstream failed")
+
+    result = engine.run("review").result
+
+    assert result["ok"] is False
+    assert len(llm.requests) >= 1
+    assert result["usage"] is None
+    assert result["errorReason"] == "no_result_from_process"
+
+
+# #363-T02: the model never answers; the soft timeout ends the run with the request in flight.
+def test_a_run_that_times_out_while_its_request_is_in_flight_may_have_used_the_model(
+    engine: Engine, github: FakeGithub, llm: FakeLlm
+) -> None:
+    llm.override = Reply(hold=True)
+    # The timeout counts from the start of the process (#387): a start-up that outlasts it ends the
+    # job before the model is asked, which is not this case, so the job is run again with more time.
+    outcome: Outcome | None = None
+    for attempt in range(3):
+        process = engine.start(extra_env={"RUNNER_JOB_TIMEOUT_SECONDS": str(3 * 2**attempt)})
+        outcome = process.finish(json.dumps(engine.job("review")))
+        if llm.requests:
+            break
+    assert outcome is not None
+
+    result = outcome.result
+    assert llm.requests
+    assert result["ok"] is False
+    assert result["errorCode"] == "timeout"
+    assert result["usage"] is None
+    assert result["errorReason"] == "no_result_from_process"
+
+
+# #363-T03: a request the provider refused before it generated anything (a bad key) was not used.
+def test_a_run_whose_request_was_refused_before_any_generation_has_no_reason(
+    engine: Engine, github: FakeGithub, llm: FakeLlm
+) -> None:
+    llm.override = Reply(status=401, message="bad key")
+
+    result = engine.run("review").result
+
+    assert result["ok"] is False
+    assert len(llm.requests) >= 1
+    assert result["usage"] is None
+    assert "errorReason" not in result
+
+
+# #363-T03: no request was sent at all.
+def test_a_run_that_fails_before_it_asks_the_model_has_no_usage_and_no_reason(
+    engine: Engine, github: FakeGithub, llm: FakeLlm
+) -> None:
+    github.fail("GET", rf"/repos/octo/widgets/pulls/{github.number}", 404, "Not Found")
+
+    result = engine.run("review").result
+
+    assert result["ok"] is False
+    assert llm.requests == []
+    assert result["usage"] is None
+    assert "errorReason" not in result
+
+
+# #363-T06: a successful run is as before, with no reason.
+def test_a_successful_run_carries_no_reason(
+    engine: Engine, github: FakeGithub, llm: FakeLlm
+) -> None:
+    result = engine.run("review").result
+
+    assert result["ok"] is True
+    assert "errorReason" not in result

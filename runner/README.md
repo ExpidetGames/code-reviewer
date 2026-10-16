@@ -275,6 +275,9 @@ used; the app then counts the run with an unknown cost (`settled`, reason `no_re
 and never as void:
 - the Diff watchdog ends a command that blocks the event loop (`timeout`, `errorReason`
   `no_result_from_process`: PR-Agent's counters cannot be read from another thread);
+- a Diff command fails (it raises, times out, or reports a failure) with no usage although a request was sent
+  that the provider did not certainly refuse: one still in flight, cut off, or an answer PR-Agent did not count
+  (`errorReason` `no_result_from_process`, #363; see "Cost of a Diff run", below);
 - the loop ends a job process at its hard timeout (`timeout`, reason `no_result_from_process`), the process
   is killed by a signal, exits without a result line, or prints a result that disagrees with its exit code
   (`runner_error`, the same reason);
@@ -283,8 +286,9 @@ and never as void:
   job, or the runner is shut down on the last attempt (no `complete`, or `runner_shutdown`: the app decides).
 
 Not counted at all (void): a failure before the process started (the job could not be parsed or the process
-could not be launched) and a Dynamic run that failed before its first model call. A Diff command that fails while its first call is still in
-flight reports zero calls, because PR-Agent counts only calls that came back: it is void (a known gap, #363).
+could not be launched), a Dynamic run that failed before its first model call, and a Diff command that failed
+before it sent any request or whose only requests the provider refused before generating anything (a bad key,
+a rate limit).
 The exit code is 0 for `ok` and 1 otherwise. The environment variable `RUNNER_JOB_TIMEOUT_SECONDS`
 (read from the process environment, not handed to PR-Agent) makes the runner stop the command and
 report `timeout`: first by cancelling it, and if it does not react (a call that blocks the process)
@@ -790,8 +794,30 @@ settings file cannot switch it back on. The rules, pinned by `tests/unit/test_di
 | No answer at all | `null` (not zero) |
 
 A Diff run that fails reports the same cost rule after its calls (#273): a call still in flight when the run
-ends makes the cost `null`, which also closes the case of a partly priced sum reported as exact. A Diff run
-that fails while its first call is still in flight reports no usage at all (#363).
+ends makes the cost `null`, which also closes the case of a partly priced sum reported as exact.
+
+**A Diff run that fails while a request is in flight (#363).** PR-Agent counts only the calls that came back
+(`num_ai_calls`), so a command that raises, reports a failure or times out while its first request is still in
+flight, or whose request the provider accepted and then failed, has no usage. The model may still have worked on
+it. The meter already knows which requests are open, so the runner reads that instead of counting on its own
+(`DiffCostMeter.may_have_used_the_model`): true when a request is in flight, was cut off or cancelled, ended with
+anything but a refusal before generation, or came back (also an answer PR-Agent threw away). A failed Diff result
+that has no usage and for which the meter says so carries `errorReason` `no_result_from_process`, the reason the app
+already counts as `settled` / `no_result` with unknown cost and tokens (never `void`, never zero). The contract
+does not change: the signal is the existing optional `errorReason`.
+
+| Failed Diff run | Result |
+|---|---|
+| A request is in flight (the command raised, reported a failure or timed out), or an answer came back that PR-Agent did not count | no `usage`, `errorReason` `no_result_from_process` |
+| A call came back and another request is in flight | `usage` with the tokens PR-Agent counted and `costUsd` `null`; no reason (the usage settles the run) |
+| No request was sent, or the only requests were refused before generation (429, 401, 402, 403, 400, 404, 422) | no `usage`, no reason: the app voids the run |
+| Success | unchanged, never a reason |
+
+Tests: `tests/unit/test_runner.py`, `tests/unit/test_diff_cost_meter.py`,
+`tests/integration/test_diff_cost_litellm.py` (the real LiteLLM against a loopback provider) and
+`tests/engine/test_engine_cost.py`. Not covered: the watchdog of a command that blocks the event loop still
+reports the reason without looking at the meter (it never reads it), so such a run that never sent a request is
+counted as unknown too.
 
 ## Identity patch
 

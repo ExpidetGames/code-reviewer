@@ -322,6 +322,47 @@ describe("the completion of a job", () => {
     });
   });
 
+  // #363-T05: a Diff command failed while its model call was in flight. PR-Agent counted no call, so the
+  // runner sends no usage at all (the key is absent) and says that the model may have been used.
+  it("settles a failed Diff result with the reason and no usage as a run with an unknown cost", async () => {
+    const h = await startRunnerApiHarness();
+    const job = await claimedJob(h);
+
+    await h.complete(job.id, job.leaseToken, {
+      ok: false,
+      errorCode: "llm_timeout",
+      errorReason: "no_result_from_process",
+      errorMessage: "the model did not answer in time",
+      commentUrl: null,
+      usage: undefined, // left out of the JSON: the Diff runner sends no usage key
+    });
+
+    expect(await recordsOf(h).get(job.id)).toMatchObject({
+      state: "settled",
+      settledReason: "no_result",
+      costMicroUsd: null,
+      promptTokens: null,
+      completionTokens: null,
+      settledAt: h.clock.now().toISOString(),
+    });
+  });
+
+  // #363-T03: a Diff command that failed before it sent a request has neither usage nor reason: void.
+  it("still voids a failed Diff result without usage and without the reason", async () => {
+    const h = await startRunnerApiHarness();
+    const job = await claimedJob(h);
+
+    await h.complete(job.id, job.leaseToken, {
+      ok: false,
+      errorCode: "git_auth",
+      errorMessage: "the pull request could not be read",
+      commentUrl: null,
+      usage: undefined,
+    });
+
+    expect((await recordsOf(h).get(job.id))?.state).toBe("void");
+  });
+
   // #273-T08: a runner of an earlier release sends the same failure without the reason: as before.
   it("still voids a timeout without usage and without the reason", async () => {
     const h = await startRunnerApiHarness();
