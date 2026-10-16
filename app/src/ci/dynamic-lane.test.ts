@@ -289,12 +289,12 @@ describe("the Playwright configuration of the lane", () => {
   });
 
   // #253-N07
-  it("runs one worker, has the preflight as its global setup and starts the fake GitHub and one app", () => {
+  it("runs one worker, has the preflight as its global setup and starts the fake GitHub and two apps (the second is the hosted journey's, #332)", () => {
     expect(config).toContain("workers: 1");
     expect(config).toContain(
       'globalSetup: "./e2e/dynamic/preflight.global-setup.ts"',
     );
-    expect(config.match(/command:/g)).toHaveLength(2);
+    expect(config.match(/command:/g)).toHaveLength(3);
     expect(config).toContain("fakes/github/main.ts");
     expect(config).toContain("next start");
   });

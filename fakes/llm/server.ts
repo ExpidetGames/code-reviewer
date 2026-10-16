@@ -92,7 +92,13 @@ export type FakeLlm = {
   setModel(id: string, endpoints: FakeModelEndpoint[]): void;
   /** Every metadata request received (path and `Authorization` header, empty when none), in order. */
   modelRequests(): Array<{ path: string; authorization: string }>;
-  /** Normal replies, no error, no recorded requests. */
+  /**
+   * While on, a request to the chat completions route is recorded when it arrives and answered only when the hold is
+   * lifted (`hold(false)`, `reset()`); a client that hangs up meanwhile gets nothing. For a journey that needs a
+   * review that is in progress, so it can end the process that runs it.
+   */
+  hold(on: boolean): void;
+  /** Normal replies, no error, no recorded requests, no hold. */
   reset(): void;
   close(): Promise<void>;
 };
@@ -220,6 +226,13 @@ export async function startLlmFake(
   let agentRequests = 0;
   let models = new Map<string, FakeModelEndpoint[]>();
   let modelLog: Array<{ path: string; authorization: string }> = [];
+  let holding = false;
+  let held: Array<() => void> = [];
+  const release = () => {
+    const waiting = held;
+    held = [];
+    for (const answer of waiting) answer();
+  };
 
   const server: Server = createServer((request, response) => {
     const chunks: Buffer[] = [];
@@ -309,23 +322,34 @@ export async function startLlmFake(
         provider: providerOf((body as { provider?: unknown }).provider),
       });
 
-      if (error !== null) {
-        const message = quoteKey
-          ? `Incorrect API key provided: ${authorization.split(" ").at(-1) ?? ""}`
-          : error.message;
-        return send(error.status, { error: { message, code: error.status } });
-      }
-      if (agent !== null) {
-        if (toolNames((body as { tools?: unknown }).tools).length === 0)
-          return send(200, completion(model, "ok"));
-        const index = agentRequests;
-        agentRequests += 1;
-        const calls = agent.steps[index] ?? [
-          { name: "StructuredOutput", arguments: agent.final },
-        ];
-        return send(200, toolCompletion(model, `call_${String(index)}`, calls));
-      }
-      send(200, completion(model, replies[kind]));
+      const answer = () => {
+        // The client hung up while the request was held: nobody to answer.
+        if (response.destroyed) return;
+        if (error !== null) {
+          const message = quoteKey
+            ? `Incorrect API key provided: ${authorization.split(" ").at(-1) ?? ""}`
+            : error.message;
+          return send(error.status, {
+            error: { message, code: error.status },
+          });
+        }
+        if (agent !== null) {
+          if (toolNames((body as { tools?: unknown }).tools).length === 0)
+            return send(200, completion(model, "ok"));
+          const index = agentRequests;
+          agentRequests += 1;
+          const calls = agent.steps[index] ?? [
+            { name: "StructuredOutput", arguments: agent.final },
+          ];
+          return send(
+            200,
+            toolCompletion(model, `call_${String(index)}`, calls),
+          );
+        }
+        send(200, completion(model, replies[kind]));
+      };
+      if (holding) held.push(answer);
+      else answer();
     });
   });
 
@@ -359,7 +383,13 @@ export async function startLlmFake(
       agent = script;
       agentRequests = 0;
     },
+    hold(on) {
+      holding = on;
+      if (!on) release();
+    },
     reset() {
+      holding = false;
+      release();
       agent = null;
       agentRequests = 0;
       log = [];

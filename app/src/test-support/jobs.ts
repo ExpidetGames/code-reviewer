@@ -11,6 +11,7 @@ import { createRepositoriesRepository } from "../db/repositories/repositories-re
 import type { Database } from "../db/schema.ts";
 import { createJobQueue, type JobQueue } from "../jobs/job-queue.ts";
 import { createRunnerQueue, type RunnerQueue } from "../jobs/runner-queue.ts";
+import type { RunnerJobsRepositoryOptions } from "../db/repositories/runner-jobs-repository.ts";
 import {
   dynamicReviewEnabled as allowDynamicReview,
   type DynamicReviewGate,
@@ -68,6 +69,8 @@ export function createTestQueue(
     dynamicReviewEnabled?: DynamicReviewGate;
     /** #195: override the in-transaction kind resolver (tests). */
     reviewKind?: ReviewKindResolver;
+    /** #277: called for every job the claim refused, after the claim committed. */
+    onRefused?: RunnerJobsRepositoryOptions["onRefused"];
   } = {},
 ): TestQueue {
   return {
@@ -133,6 +136,8 @@ export async function createJobQueueFixture(
     database?: Kysely<Database>;
     /** #195: enable the Dynamic Review rollout gate for this fixture (default off). */
     dynamicReview?: boolean;
+    /** #277: called for every job the claim of the queue refused, after the claim committed. */
+    onRefused?: RunnerJobsRepositoryOptions["onRefused"];
   } = {},
 ): Promise<JobQueueFixture> {
   const created = options.database
@@ -185,6 +190,9 @@ export async function createJobQueueFixture(
   const queue = createTestQueue(db, workspaceId, {
     now: clock.now,
     limits: options.limits,
+    ...(options.onRefused === undefined
+      ? {}
+      : { onRefused: options.onRefused }),
     dynamicReviewEnabled:
       options.dynamicReview === true ? allowDynamicReview : undefined,
   });

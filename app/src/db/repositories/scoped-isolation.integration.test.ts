@@ -24,6 +24,7 @@ import { createJobsRepository } from "./jobs-repository.ts";
 import { createProjectsRepository } from "./projects-repository.ts";
 import { createRepositoriesRepository } from "./repositories-repository.ts";
 import { createRunsRepository } from "./runs-repository.ts";
+import { createRefusalNoticesRepository } from "./refusal-notices-repository.ts";
 import { createUsageRecordsRepository } from "./usage-records-repository.ts";
 
 const SHA = "b".repeat(40);
@@ -43,6 +44,7 @@ function reposOf(db: Kysely<Database>, workspaceId: string) {
     workspaceSecrets: createWorkspaceSecretsRepository(db, workspaceId),
     entitlements: createWorkspaceEntitlementsRepository(db, workspaceId),
     usage: createUsageRecordsRepository(db, workspaceId),
+    notices: createRefusalNoticesRepository(db, workspaceId),
   };
 }
 type Repos = ReturnType<typeof reposOf>;
@@ -62,6 +64,16 @@ function entitlementsOf(tag: string, overrides: { planLabel?: string } = {}) {
     suspensionCode: null,
   };
 }
+
+/** The pull request and period of the notice every seeded workspace has. */
+function noticeKeyOf(repositoryId: string) {
+  return {
+    repositoryId,
+    prNumber: 7,
+    periodStart: "2026-10-01T00:00:00.000Z",
+  };
+}
+const NOTICE_OPTIONS = { leaseMs: 60_000, maxAttempts: 3 };
 
 /** One workspace with an integration, a repository, a project, a job and a setting. */
 async function seed(
@@ -203,6 +215,13 @@ async function seed(
       completionTokens: 5,
     });
   }
+  // The notice of a refused review on the seeded pull request (#281).
+  const taken = await repos.notices.begin(
+    noticeKeyOf(repository.id),
+    "quota_exhausted",
+    NOTICE_OPTIONS,
+  );
+  if (!taken.acquired) throw new Error("seeding failed");
   await repos.workspaceSecrets.put({
     name: "llm_api_key",
     binding: `binding-${tag}`,
@@ -220,6 +239,7 @@ async function seed(
     integration,
     repository,
     job: enqueued.job,
+    notice: taken.notice,
     externalRepositoryId: `repo-${tag}`,
   };
 }
@@ -266,6 +286,12 @@ async function rowsOf(db: Kysely<Database>, workspaceId: string) {
       .execute(),
     usageRecords: await db
       .selectFrom("usage_records")
+      .selectAll()
+      .where("workspace_id", "=", workspaceId)
+      .orderBy("id")
+      .execute(),
+    refusalNotices: await db
+      .selectFrom("refusal_notices")
       .selectAll()
       .where("workspace_id", "=", workspaceId)
       .orderBy("id")
@@ -817,6 +843,38 @@ const CASES: Case[] = [
       expect(answer).toEqual([
         expect.objectContaining({ recordCount: 1, settledCount: 0 }),
       ]),
+  },
+  // refusal notices: B's pull request is not one of A's, so A neither sees, takes nor changes B's notice
+  {
+    name: "notices.find",
+    run: (a, b) => a.notices.find(noticeKeyOf(b.repository.id)),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
+    name: "notices.begin",
+    run: (a, b) =>
+      a.notices.begin(
+        { ...noticeKeyOf(b.repository.id), prNumber: 8 },
+        "quota_exhausted",
+        NOTICE_OPTIONS,
+      ),
+    expectAnswer: (answer) => expect(answer).toEqual({ acquired: false }),
+  },
+  {
+    name: "notices.markPosted",
+    run: (a, b) => a.notices.markPosted(b.notice.id),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
+    name: "notices.markDropped",
+    run: (a, b) => a.notices.markDropped(b.notice.id),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
+    name: "notices.failed",
+    run: (a, b) =>
+      a.notices.failed(b.notice.id, new Date("2099-01-01T00:00:00.000Z")),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
   },
   // runs
   {

@@ -9,7 +9,7 @@ DISPATCHER := pnpm --dir dispatcher
 RUNNER := uv --directory runner
 
 .PHONY: help install lint lint-app lint-dispatcher lint-runner typecheck typecheck-app typecheck-dispatcher typecheck-runner \
-	test-unit test-unit-app test-unit-dispatcher test-unit-runner test-integration check-licenses fix-spdx-headers generate-contracts check-contracts test-engine test-e2e test-e2e-dynamic test-sandbox-local test-images test-compose verify
+	test-unit test-unit-app test-unit-dispatcher test-unit-runner test-integration check-licenses fix-spdx-headers generate-contracts check-contracts test-engine test-e2e test-e2e-hosted test-e2e-dynamic test-sandbox-local test-images test-compose verify
 
 help:
 	@echo "make install           install app, dispatcher and runner dependencies from the lockfiles"
@@ -23,6 +23,7 @@ help:
 	@echo "make fix-spdx-headers  add the SPDX license header to every source file that lacks it (a unit test fails without it)"
 	@echo "make test-engine       the real PR-Agent and the pinned OpenCode against the fakes (about 5 minutes, not part of verify)"
 	@echo "make test-e2e          Playwright journeys against a production build (ARGS=... to filter)"
+	@echo "make test-e2e-hosted   the hosted deployment on fakes: app, Dispatcher and Worker over loopback (needs E2E_DATABASE_URL, a Postgres server; ARGS=... to filter)"
 	@echo "make test-e2e-dynamic   the privileged Dynamic Review journey with the real OpenCode (root and nft, CI-first, ARGS=... to filter)"
 	@echo "make test-sandbox-local  the Sandbox-Launcher's local mode with a real Docker daemon and the Worker image (needs Docker, not part of verify)"
 	@echo "make test-images       build the container images (the Dynamic runner and Sandbox targets too) and run their smoke tests (needs Docker)"
@@ -100,6 +101,14 @@ test-engine:
 #   make test-e2e PLAYWRIGHT_CHANNEL=chrome
 test-e2e:
 	PLAYWRIGHT_CHANNEL=$(PLAYWRIGHT_CHANNEL) $(APP) test:e2e $(ARGS)
+
+# The hosted lane (#332): the real app in its serverless mode, the real Dispatcher and the real Worker over the loopback
+# fakes. Needs a Postgres server it may create a database on (E2E_DATABASE_URL, for example
+# postgres://postgres:postgres@127.0.0.1:5432/postgres), the Dispatcher's and the runner's dependencies (`make install`)
+# and a browser (PLAYWRIGHT_CHANNEL=chrome for an installed Chrome). It fails, naming what is missing; it never skips.
+# CI runs it as the job `e2e-hosted`; the privileged half is `make test-e2e-dynamic`.
+test-e2e-hosted:
+	PLAYWRIGHT_CHANNEL=$(PLAYWRIGHT_CHANNEL) $(APP) test:e2e:hosted $(ARGS)
 
 # The privileged Dynamic Review lane (#253): needs sudo, nft and the internet once (the pinned OpenCode
 # and ripgrep). It fails, with the missing item named, where it cannot run; it never skips.

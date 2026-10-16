@@ -27,9 +27,18 @@ export const QUOTA_DETAILS = [
 ] as const;
 export type QuotaDetail = (typeof QUOTA_DETAILS)[number];
 
+/**
+ * `periodStart` is the start of the period the refusal was decided under (#281: the pull request notice is once
+ * per pull request and period). Unreadable entitlements have none: they have no period.
+ */
 export type Admission =
   | { allow: true }
-  | { allow: false; errorCode: EntitlementRefusalCode; detail?: QuotaDetail };
+  | {
+      allow: false;
+      errorCode: EntitlementRefusalCode;
+      detail?: QuotaDetail;
+      periodStart?: string;
+    };
 
 /** What the workspace used since the start of its period; each read is one indexed query in the database. */
 export type AdmissionUsage = {
@@ -99,8 +108,8 @@ export function standingRefusal(
   return null;
 }
 
-function exhausted(detail: QuotaDetail): Admission {
-  return { allow: false, errorCode: "quota_exhausted", detail };
+function exhausted(detail: QuotaDetail, periodStart: string): Admission {
+  return { allow: false, errorCode: "quota_exhausted", detail, periodStart };
 }
 
 /**
@@ -124,7 +133,11 @@ export async function decideAdmission(
   if (entitlements.kind === "invalid")
     return { allow: false, errorCode: entitlements.code };
   if (entitlements.suspended)
-    return { allow: false, errorCode: "workspace_suspended" };
+    return {
+      allow: false,
+      errorCode: "workspace_suspended",
+      periodStart: entitlements.periodStart,
+    };
 
   const { periodStart, limits } = entitlements;
   const runs = RUN_LIMIT_OF_KIND[reviewKind];
@@ -133,7 +146,7 @@ export async function decideAdmission(
     runLimit !== null &&
     (await usage.runsSince(reviewKind, periodStart)) >= runLimit
   )
-    return exhausted(runs.detail);
+    return exhausted(runs.detail, periodStart);
 
   const costLimit = limits.managedCostLimitMicroUsd;
   if (
@@ -141,7 +154,7 @@ export async function decideAdmission(
     entitlements.keyMode === "managed" &&
     (await usage.managedCostSince(periodStart)) >= costLimit
   )
-    return exhausted("managed_cost");
+    return exhausted("managed_cost", periodStart);
 
   return { allow: true };
 }

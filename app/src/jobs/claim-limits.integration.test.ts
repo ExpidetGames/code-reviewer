@@ -639,8 +639,14 @@ describe.each(databases)("the limits at claim on %s", (name, open) => {
         {
           jobId: job.id,
           workspaceId: fixture.workspaceId,
+          // #281: where the pull request notice goes, and whether somebody asked for the review.
+          repositoryId: job.repositoryId,
+          prNumber: job.prNumber,
+          triggerKind: job.triggerKind,
           errorCode: "quota_exhausted",
           detail: "diff_runs",
+          // #281: the period the refusal was decided under; the pull request notice is once per period.
+          periodStart: "2026-10-01T00:00:00.000Z",
         },
       ]);
     },
@@ -717,6 +723,48 @@ describe.each(databases)("the limits at claim on %s", (name, open) => {
         });
       expect(refusals.sort()).toEqual(backlog.map((job) => job.id).sort());
       expect(await allRecords(fixture)).toHaveLength(1);
+    },
+  );
+
+  // #281
+  run(
+    "tells where the pull request of every job of a suspended backlog is, with the period",
+    async () => {
+      const fixture = await start();
+      await setEntitlements(fixture, { suspended: true });
+      const first = await enqueue(fixture);
+      fixture.clock.advance(1000);
+      const second = await fixture.enqueueNew({
+        prNumber: 8,
+        headSha: "b".repeat(40),
+        triggerKind: "manual",
+      });
+      const refusals: unknown[] = [];
+      const queue = createRunnerQueue(fixture.db, {
+        now: fixture.clock.now,
+        onRefused: (refusal) => refusals.push(refusal),
+      });
+
+      expect(await queue.claimNext("runner-a", ENGINES)).toBeNull();
+
+      expect(refusals).toHaveLength(2);
+      expect(refusals).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            jobId: first.id,
+            repositoryId: first.repositoryId,
+            prNumber: first.prNumber,
+            triggerKind: first.triggerKind,
+            periodStart: PERIOD_START,
+          }),
+          expect.objectContaining({
+            jobId: second.id,
+            prNumber: 8,
+            triggerKind: "manual",
+            periodStart: PERIOD_START,
+          }),
+        ]),
+      );
     },
   );
 

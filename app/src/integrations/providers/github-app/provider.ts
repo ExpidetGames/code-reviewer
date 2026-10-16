@@ -23,6 +23,7 @@ import { GithubAppError } from "./errors.ts";
 import { parseGithubEvent } from "./events.ts";
 import {
   JOB_TOKEN_PERMISSIONS,
+  NOTICE_TOKEN_PERMISSIONS,
   jobTokenRepositoryIds,
   toJobAccessError,
   toReadError,
@@ -231,6 +232,48 @@ export function createGithubAppProvider(
         });
       } catch (error) {
         throw toJobAccessError(error);
+      }
+    },
+
+    async postPullRequestNotice(integration, repo, prNumber, notice) {
+      try {
+        const repositoryIds = jobTokenRepositoryIds(repo.externalId);
+        if (repo.integrationId !== integration.id || repositoryIds === null)
+          throw new IntegrationError(
+            "INTEGRATION_ACCESS_SCOPE_REFUSED",
+            "The repository does not belong to this integration or has no usable id.",
+          );
+        const scope = { repositoryIds, permissions: NOTICE_TOKEN_PERMISSIONS };
+        const client = await getClient();
+        if (notice.lookForEarlierSince !== undefined) {
+          const botLogin = `${(await getConfig()).slug}[bot]`;
+          const earlier = await client.listIssueComments(
+            integration.externalId,
+            scope,
+            repo.fullName,
+            prNumber,
+            { since: notice.lookForEarlierSince },
+          );
+          // Only the app's own comment counts: anybody can copy a marker into theirs.
+          if (
+            earlier.some(
+              (comment) =>
+                comment.authorLogin === botLogin &&
+                comment.body.includes(notice.marker),
+            )
+          )
+            return "already_there";
+        }
+        await client.createIssueComment(
+          integration.externalId,
+          scope,
+          repo.fullName,
+          prNumber,
+          notice.body,
+        );
+        return "posted";
+      } catch (error) {
+        throw toReadError(error);
       }
     },
 
