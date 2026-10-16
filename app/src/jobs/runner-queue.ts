@@ -87,6 +87,12 @@ export type RunnerQueue = {
     leaseToken: string,
     errorCode: JobErrorCode,
   ): Promise<CancelClaimedResult>;
+  /**
+   * #397: the holder of the running claim understands that its run can be superseded (the Worker's job details
+   * request named the feature `supersede`; a runner names it in its claim). False for any other token or a job that
+   * is not running.
+   */
+  noteSupersede(jobId: string, leaseToken: string): Promise<boolean>;
   /** A job by its id, whatever its workspace. */
   get(id: string): Promise<Job | undefined>;
   /** The expiry step of `claimNext` on its own. */
@@ -124,6 +130,7 @@ export function createRunnerQueue(
         );
       return jobs.release(jobId, leaseToken, reason, releaseOptions);
     },
+    noteSupersede: (jobId, leaseToken) => jobs.noteSupersede(jobId, leaseToken),
     get: (id) => jobs.get(id),
     expireStaleJobs: () => jobs.expireStaleJobs(),
     failUndispatched: (waitedMs) => jobs.failUndispatched(waitedMs),

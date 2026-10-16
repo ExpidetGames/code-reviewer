@@ -123,6 +123,8 @@ export const ERROR_COPY: Readonly<Record<string, string>> = {
     "The configured model does not support the features Dynamic Review requires. Choose another model.",
   lease_lost:
     "When the review was ready, the job was no longer held by its runner or this could not be confirmed, so nothing was written. The next push reviews again.",
+  superseded:
+    "A newer push replaced this run while it was running, so it was stopped and published nothing.",
   unknown: "The run failed for a reason this version does not know.",
 };
 

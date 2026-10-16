@@ -28,9 +28,10 @@ export type Engine = "pr-agent" | "opencode";
  */
 export type ReviewKind = "diff" | "dynamic";
 /**
- * The claim features this version of the contract defines (`features` in ClaimRequest). A reader ignores a feature name it does not know. `dynamic_capabilities` (#279): the runner reads `dynamic.capabilities`. `worker_credential` (#318): the caller is a Dispatcher and wants the split answer; the job input and its secrets reach only the Worker, with the per-job credential.
+ * The claim features this version of the contract defines (`features` in ClaimRequest). A reader ignores a feature name it does not know. `dynamic_capabilities` (#279): the runner reads `dynamic.capabilities`. `worker_credential` (#318): the caller is a Dispatcher and wants the split answer; the job input and its secrets reach only the Worker, with the per-job credential. `supersede` (#396): the runner understands `job.superseded` in a heartbeat answer and stops gracefully (it finishes the model requests in flight, sends no more, publishes nothing, reports its result and usage). The app supersedes a running job only when the claim named it. A Worker names it in the `features` of its details request.
  */
-export type KnownClaimFeature = "dynamic_capabilities" | "worker_credential";
+export type KnownClaimFeature =
+  "dynamic_capabilities" | "worker_credential" | "supersede";
 /**
  * #318: the per-job credential. 256 random bits, base64url without padding, behind the prefix `crj_`. The app mints it at claim; it is valid only for that job and only while the claim holds, and it is the one thing a Worker holds (Authorization: Bearer). Secret: never log it, never put it in an argument, an environment variable or a file; the Dispatcher passes it to the Worker on stdin.
  */
@@ -102,7 +103,8 @@ export type KnownRunnerErrorCode =
   | "dynamic_budget_exceeded"
   | "dynamic_accounting_failed"
   | "dynamic_model_features_unsupported"
-  | "lease_lost";
+  | "lease_lost"
+  | "superseded";
 /**
  * Exactly the job the runner reads on stdin (see runner/src/code_reviewer_runner/job.py). Closed: the runner refuses unknown fields. Contains secrets (git.token, llm.apiKey): only the claim response carries it.
  */
@@ -611,6 +613,18 @@ export interface HeartbeatRequest {
   leaseToken: LeaseToken;
   [k: string]: unknown;
 }
+/**
+ * #397, #396: the numbers behind the supersede of a running run, stated once for both sides; a test on each side compares its own constants with these. They are not part of any request or answer. The Worker learns of the push at its next heartbeat (at most 'maxHeartbeatIntervalSeconds'), tells its process at once, and lets the model requests in flight finish: each takes at most 'longestModelRequestSeconds', so the Worker drains for at most 'workerDrainSeconds' (the same number) and ends its process 'killMarginSeconds' before the lease named in the heartbeat answer, whichever comes first. The app keeps the claim for 'claimSeconds' from the push (heartbeats answer 'superseded', the report is taken), which is the heartbeat interval, the longest request and a margin of 60 seconds. It takes a report for 'reportGraceSeconds' more, the time before which it does not settle the usage record with an unknown cost. A report after that is refused with 409, like a heartbeat. A Worker takes the end of its drain from the 'leaseExpiresAt' of the heartbeat answer that said 'superseded': the app sets the lease of a superseded run once, at the push, to 'claimSeconds' after it, and heartbeats do not extend it.
+ */
+export interface SupersedeTiming {
+  maxHeartbeatIntervalSeconds?: 60;
+  longestModelRequestSeconds?: 120;
+  workerDrainSeconds?: 120;
+  killMarginSeconds?: 20;
+  claimSeconds?: 240;
+  reportGraceSeconds?: 60;
+  [k: string]: unknown;
+}
 /*
  */
 export interface HeartbeatResponse {
@@ -619,6 +633,10 @@ export interface HeartbeatResponse {
     id: JobId;
     heartbeatAt: Timestamp;
     leaseExpiresAt: Timestamp;
+    /**
+     * #396: true when a newer push replaced this run. Sent only to a claim that named the feature `supersede`; absent means not superseded. The runner finishes the model requests in flight, sends no more, publishes nothing, reports its result (errorCode `superseded`, with usage) and exits.
+     */
+    superseded?: boolean;
     [k: string]: unknown;
   };
   [k: string]: unknown;
@@ -658,9 +676,9 @@ export interface CompleteResponse {
   job: {
     id: JobId;
     /**
-     * succeeded or failed: the job is finished. queued: the runner reported runner_shutdown, the job was given back and waits for another runner (it fails instead if that was the last allowed attempt).
+     * succeeded or failed: the job is finished. queued: the runner reported runner_shutdown, the job was given back and waits for another runner (it fails instead if that was the last allowed attempt). superseded (#397): the run was replaced by a newer push; its report is stored once and the job stays superseded.
      */
-    status: "succeeded" | "failed" | "queued";
+    status: "succeeded" | "failed" | "queued" | "superseded";
     [k: string]: unknown;
   };
   alreadyCompleted: boolean;
@@ -722,6 +740,10 @@ export interface JobStateResponse {
       | "failed"
       | "superseded"
       | "cancelled";
+    /**
+     * #397: true for a superseded job whose claim is still valid: its Worker is finishing the model requests in flight and reporting what they cost. A Dispatcher keeps the VM of a draining job until the claim ends (the reaper). Absent means not draining; a reader that does not know the field sees a superseded job as ended.
+     */
+    draining?: boolean;
     [k: string]: unknown;
   };
   [k: string]: unknown;

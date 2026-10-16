@@ -32,6 +32,7 @@ by the code that enqueues (the trigger policy of the webhook handler, CR-31), no
 ```
 queued --claim--> running --complete--> succeeded | failed
 queued --newer automatic job--> superseded     running --lease lost or release--> queued (attempts + 1)
+running --newer automatic job, holder understands it--> superseded (drains, #397)
 queued --project off / PR closed--> cancelled  running --last attempt lost, or too long--> failed
 queued --review kind changed--> cancelled
 queued --claim refused by the workspace's entitlements--> failed (never runs, no attempt, no usage record; #277)
@@ -131,10 +132,28 @@ settings change (and the cancellation) back. The hook is `createJobReviewSetting
    future (a job given back with a retry time) it is made due now, because a person does not wait.
    Different arguments are different jobs (`/review` takes none; a historical person job
    with arguments is still its own job).
-4. **Supersession.** A new automatic job replaces the waiting _automatic_ jobs of the same pull request,
-   command and arguments (status `superseded`, `superseded_by` set). Waiting `comment` and `manual`
-   jobs are never replaced, and a running job is never touched: the new job waits behind it, because
-   only one job per pull request runs at a time.
+4. **Supersession.** A new automatic job replaces the _automatic_ jobs of the same pull request, review kind,
+   command and arguments that would review an older state (status `superseded`, `superseded_by` set, in the
+   transaction of the enqueue):
+   - a **waiting** one is dropped; it never ran;
+   - a **running** one (#397) is superseded **only if its holder understands it** (`accepts_supersede`, set by a
+     claim that names the feature `supersede`, or by the Worker's job details request; #396). Jobs of a runner or
+     Worker of an earlier release are left alone and the new job waits behind them as before. A running job a
+     person started (`comment`, `manual`) is never superseded, and a person's job never supersedes anything.
+
+   A superseded **running** job **drains**: it keeps `runner_id`, its lease token and its claim time; `finished_at` is
+   set; `lease_expires_at` is set to the claim window (`SUPERSEDED_DRAIN_MS` in `supersede-timing.ts`, 240 seconds: the Worker's next heartbeat, at most 60, its own drain, 120, the longest model request, and a margin) and is not extended
+   by heartbeats. The Worker's host reads the end of the window from `leaseExpiresAt` in the heartbeat answer and ends its
+   process `KILL_MARGIN_SECONDS` (20) before it, so the report arrives while the claim holds. Its heartbeats are answered `superseded` (`job.superseded: true`) while the window lasts, so
+   its Worker stops sending model requests, finishes the ones in flight and reports; its **report is accepted
+   once** and stored (the job stays `superseded`; it settles the usage record, below), also a little after the window
+   (a grace of 60 seconds, `SUPERSEDED_REPORT_GRACE_MS`). Only when window and grace are over without a report does the
+   next claim, sweep or request that expires leases settle the record with an unknown cost; a report after that is
+   refused (`409`).
+   The unique index that allows one running job per pull request (`jobs_one_running_per_pull_request_unique`) is on
+   `status = 'running'`, so the draining job does not hold the pull request: **the new job is claimable at
+   once** and both run for a short time. `attemptedShas` names the head of a superseded job that ran, like a failed
+   one, so the publisher recognises a comment it may have written just before it heard of it.
 
 `run_after` is `now` unless the caller passes a later time (only a job given back with a retry time waits; there is
 no debounce of `synchronize` since #395). A manual job is due at once. The start button

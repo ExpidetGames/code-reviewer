@@ -48,9 +48,9 @@ export const RUN_STATUS_PRESENTATION: Record<JobStatus, RunStatusPresentation> =
       settled: true,
     },
     superseded: {
-      label: "Replaced",
+      label: "Superseded",
       description:
-        "A newer commit made this run unnecessary, so a newer run took its place.",
+        "A newer push replaced this run, so it was stopped and a newer run took its place. A review it had not published is not on the pull request.",
       symbol: "↻",
       settled: true,
     },

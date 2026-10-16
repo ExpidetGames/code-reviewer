@@ -39,6 +39,8 @@ import { migration as addJobReviewKind } from "./20261013090000_add_job_review_k
 import { migration as fixDynamicDefaultModel } from "./20261014090000_fix_dynamic_default_model.ts";
 import { migration as createWorkspaceEntitlements } from "./20261014120000_create_workspace_entitlements.ts";
 import { migration as createUsageRecords } from "./20261014150000_create_usage_records.ts";
+import { migration as addJobAcceptsSupersede } from "./20261016140000_add_job_accepts_supersede.ts";
+import { migration as widenUsageRecordSettledReason } from "./20261016140100_widen_usage_record_settled_reason.ts";
 import { migration as addJobWorkerFetches } from "./20261015100000_add_job_worker_fetches.ts";
 import { migration as createSetupCodes } from "./20261015110000_create_setup_codes.ts";
 import { migration as createJobDispatches } from "./20261015120000_create_job_dispatches.ts";
@@ -90,6 +92,9 @@ const migrations: Record<string, Migration> = {
   "20261015200000_add_usage_record_settled_reason": addUsageRecordSettledReason,
   "20261016090000_create_refusal_notices": createRefusalNotices,
   "20261016120000_create_plan_handoff_tokens": createPlanHandoffTokens,
+  "20261016140000_add_job_accepts_supersede": addJobAcceptsSupersede,
+  "20261016140100_widen_usage_record_settled_reason":
+    widenUsageRecordSettledReason,
 };
 
 export const migrationProvider: MigrationProvider = {

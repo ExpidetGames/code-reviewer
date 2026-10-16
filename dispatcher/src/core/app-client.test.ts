@@ -81,6 +81,26 @@ describe("the job state call of the App client", () => {
     expect(await client.jobState(JOB)).toStrictEqual({ kind: "known", status });
   });
 
+  // #397-T12
+  it("reads the draining of a superseded job, and only the boolean true", async () => {
+    for (const [draining, expected] of [
+      [true, { kind: "known", status: "superseded", draining: true }],
+      [false, { kind: "known", status: "superseded" }],
+    ] as const) {
+      const { client } = stub(
+        json({ version: 1, job: { id: JOB, status: "superseded", draining } }),
+      );
+      expect(await client.jobState(JOB)).toStrictEqual(expected);
+    }
+    const { client } = stub(
+      json({
+        version: 1,
+        job: { id: JOB, status: "superseded", draining: "yes" },
+      }),
+    );
+    expect(await client.jobState(JOB)).toStrictEqual({ kind: "unreadable" });
+  });
+
   // #364-T22
   it("reads the answer of the fake App for every status it can be set to", async () => {
     const fake = await startApp();
