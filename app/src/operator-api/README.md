@@ -58,16 +58,18 @@ by Next.js.
 
 ## Endpoints
 
-| Call                                                   | Does                                                                                                                                          |
-| ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /api/operator/v1/workspaces?after=<id>&limit=`    | A page (default 50, at most 200) of `{ id, slug, createdAt }` ordered by id, and `nextAfter`. No names of people, no emails, no repositories. |
-| `GET /api/operator/v1/workspaces/{id}/entitlements`    | The stored row (or `null`) and the effective entitlements; `effective.source` says whether they come from the workspace or from the default.  |
-| `PUT /api/operator/v1/workspaces/{id}/entitlements`    | Replaces the row. Idempotent. Answers like `GET`.                                                                                             |
-| `DELETE /api/operator/v1/workspaces/{id}/entitlements` | Removes the row, so the default applies. Harmless when there is none. Answers like `GET`.                                                     |
-| `GET\|PUT /api/operator/v1/entitlements/default`       | The default for workspaces without a row. No `DELETE`.                                                                                        |
-| `GET /api/operator/v1/usage?after=&limit=`             | A page (default 50, at most 200) of the **settled** usage records of every workspace, ordered by `(settledAt, id)`, and `nextCursor`.         |
-| `GET /api/operator/v1/workspaces/{id}/usage`           | The same for one workspace, plus `from` (included) and `to` (excluded) on `settledAt`.                                                        |
-| `GET /api/operator/v1/workspaces/{id}/usage/summary`   | `from` and `to` are required: per review kind and key mode, what the workspace ran in the period.                                             |
+| Call                                                   | Does                                                                                                                                                            |
+| ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/operator/v1/workspaces?after=<id>&limit=`    | A page (default 50, at most 200) of `{ id, slug, createdAt }` ordered by id, and `nextAfter`. No names of people, no emails, no repositories.                   |
+| `GET /api/operator/v1/workspaces/{id}/entitlements`    | The stored row (or `null`) and the effective entitlements; `effective.source` says whether they come from the workspace or from the default.                    |
+| `PUT /api/operator/v1/workspaces/{id}/entitlements`    | Replaces the row. Idempotent. Answers like `GET`.                                                                                                               |
+| `DELETE /api/operator/v1/workspaces/{id}/entitlements` | Removes the row, so the default applies. Harmless when there is none. Answers like `GET`.                                                                       |
+| `GET\|PUT /api/operator/v1/entitlements/default`       | The default for workspaces without a row. No `DELETE`.                                                                                                          |
+| `GET /api/operator/v1/usage?after=&limit=`             | A page (default 50, at most 200) of the **settled** usage records of every workspace, ordered by `(settledAt, id)`, and `nextCursor`.                           |
+| `GET /api/operator/v1/workspaces/{id}/usage`           | The same for one workspace, plus `from` (included) and `to` (excluded) on `settledAt`.                                                                          |
+| `GET\|PUT\|DELETE /api/operator/v1/plan-management`    | The address of the operator-configured page that "Manage plan" hands workspace Owners and Admins over to (#284): `{ "url": "https://…" }`; `DELETE` removes it. |
+| `POST /api/operator/v1/handoff/redeem`                 | `{ "token": "…" }`: who a handoff token was made for (workspace id and slug, role, opaque user id), once. One `422 invalid_token` for every other case.         |
+| `GET /api/operator/v1/workspaces/{id}/usage/summary`   | `from` and `to` are required: per review kind and key mode, what the workspace ran in the period.                                                               |
 
 A change takes effect on the next claim; a running job is not touched.
 
@@ -146,6 +148,28 @@ no pull request, repository, branch, title or person, and no key. The view is bu
 - Reads log nothing. A mixed deployment is safe: no migration, only new routes and new definitions in the contract
   (readers ignore what they do not know), and an older app instance answers these paths with its generic `not_found`.
 
+## The plan handoff (#284)
+
+`src/plan-handoff/README.md` has the whole flow. Here is what the API does:
+
+- **`POST /handoff/redeem`** takes `{ "token" }` (exactly this key; a body that is not that is `400 request_invalid`) and
+  answers `200 { workspaceId, workspaceSlug, userId, role }` once. The token is 256 random bits kept as a hash, valid for
+  5 minutes, bound to the person and the role they had at the click, revoked by a newer click of the same person in the
+  same workspace, and **the role is checked again at redemption**. An unknown, used, expired or revoked token, one of
+  another shape, or one whose person lost the role gets the one answer `422 invalid_token` (the token is used up in the
+  last case). The answer holds no email, name or repository, and `userId` is opaque. No rate limit beyond the strength
+  of the token (like the rest of the API), none needed: a token cannot be guessed.
+- **`GET|PUT|DELETE /plan-management`** reads, sets and removes the address the button hands people over to. A `PUT`
+  body is exactly `{ "url": "https://…" }`; the address has to be absolute `https:` without credentials or a fragment,
+  else `422` with `url_invalid`, `url_not_https`, `url_has_credentials`, `url_has_fragment` or `url_too_long`. It is
+  stored in its normal form; `updated_by` is null (the API). The instance admin can set the same value in the portal.
+  **Whoever holds the operator token decides where Owners and Admins are sent**; the page only ever gets a one-shot
+  token for five minutes.
+- Logs: `[operator-api] handoff workspace=<id|-> result=<ok|invalid_token>` and
+  `[operator-api] <put|delete> plan-management result=<ok|code>`: ids and codes, never a token or an address.
+- Mixed deployments: an older app instance answers both paths with its generic `404 not_found`. **Upgrade every app
+  instance before setting the page.**
+
 ## Writes and logs
 
 A write records the operator API as the actor (`updated_by` is null) and logs one line:
@@ -161,6 +185,7 @@ for is a generic `500 internal_error`; the log gets the name of the error.
 | `startup.ts`               | The one start line                                                              |
 | `contract.ts`              | Error codes, limits, routes and methods, the safety lag, the cursor size        |
 | `usage.ts`                 | The three usage routes (query, safety lag, answer)                              |
+| `api.ts` (plan handoff)    | `redeemHandoff` and `planManagement` (`src/plan-handoff/` has the rest)         |
 | `usage-cursor.ts`          | The opaque cursor and the check of the safety lag                               |
 | `usage-views.ts`           | What a usage record and a summary look like to the outside                      |
 | `responses.ts`, `views.ts` | The answers: headers, errors, what an entitlement looks like to the outside     |

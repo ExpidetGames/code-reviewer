@@ -35,6 +35,8 @@ import {
   readImportNotice,
   type ImportNotice,
 } from "../legacy-import/notice.ts";
+import { savePlanManagementUrl } from "../plan-handoff/settings.ts";
+import { checkPlanManagementUrl } from "../plan-handoff/url.ts";
 import { githubIdentityLinked } from "./github-identity.ts";
 import {
   checkSignInMethods,
@@ -79,6 +81,11 @@ export type AdminSettingsView = {
    * it off cancels the waiting Dynamic jobs and leaves the running ones (contracts/README.md).
    */
   dynamicReview: SettingView<boolean>;
+  /**
+   * #284: the operator-configured page "Manage plan" hands an Owner or Admin over to (src/plan-handoff/); null while
+   * there is none, and then there is no button and no route. A saved value that is no longer valid reads as null.
+   */
+  planManagementUrl: SettingView<string | null>;
   /**
    * The mail server (null: none). The password is never part of it: `password` says whether one is set, and
    * whether it can still be read.
@@ -135,6 +142,14 @@ export type AdminService = {
    * instance settings repository, which takes the gate lock and cancels the waiting Dynamic jobs on off.
    */
   changeDynamicReview(actorId: string, change: unknown): Promise<ChangeResult>;
+  /**
+   * `value` is the request's `planManagementUrl` as received: an absolute `https:` address (no credentials, no
+   * fragment), or null to remove the page.
+   */
+  changePlanManagementUrl(
+    actorId: string,
+    value: unknown,
+  ): Promise<ChangeResult>;
   /** `smtp` is the request's `smtp` value as received: an object to save, or null to remove the mail server. */
   changeSmtp(actorId: string, smtp: unknown): Promise<ChangeResult>;
   /**
@@ -174,6 +189,13 @@ function canSend(view: {
   return view.settings.user === null || view.password === "configured";
 }
 
+/** The saved page, or null when none is saved or what is saved is not a valid page (the reader fails closed). */
+function checkedPlanManagementUrl(value: unknown): string | null {
+  if (value === undefined) return null;
+  const checked = checkPlanManagementUrl(value);
+  return checked.ok ? checked.url : null;
+}
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -210,6 +232,7 @@ export function createAdminService({
         "setup_completed_at",
         "import_notice",
         "dynamic_review",
+        "plan_management_url",
       ];
       const [
         tenancy,
@@ -219,6 +242,7 @@ export function createAdminService({
         completed,
         notice,
         dynamicReview,
+        planManagementUrl,
       ] = await Promise.all(keys.map((key) => settings.getWithMeta(key)));
       const importNotice = readImportNotice(notice?.value);
       const mailServer = await smtp.view();
@@ -228,6 +252,7 @@ export function createAdminService({
         methods?.updatedBy,
         maxWorkspaces?.updatedBy,
         dynamicReview?.updatedBy,
+        planManagementUrl?.updatedBy,
         mailServer.updatedBy,
       ].filter((id): id is string => typeof id === "string");
       const emails = await emailsOf([...new Set(ids)]);
@@ -273,6 +298,10 @@ export function createAdminService({
           dynamicReview,
           (dynamicReview?.value as { enabled: boolean } | undefined)
             ?.enabled === true,
+        ),
+        planManagementUrl: view(
+          planManagementUrl,
+          checkedPlanManagementUrl(planManagementUrl?.value),
         ),
         smtp: {
           ...view(
@@ -354,6 +383,16 @@ export function createAdminService({
         actorId,
       );
       return { ok: true };
+    },
+
+    async changePlanManagementUrl(actorId, value) {
+      const saved = await savePlanManagementUrl(settings, value, actorId);
+      if (saved.ok) return { ok: true };
+      return {
+        ok: false,
+        error: "invalid_input",
+        issues: [{ field: "planManagementUrl", code: saved.code }],
+      };
     },
 
     async changeSmtp(actorId, value) {

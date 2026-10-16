@@ -112,7 +112,9 @@ export async function startRunnerApiHarness(
     refusalNotices?: {
       deliver?: "claim" | "manual";
       /** The link to the plan page of a workspace; default none. */
-      planPageUrl?: (workspaceSlug: string) => string | null;
+      planPageUrl?: (
+        workspaceSlug: string,
+      ) => string | null | Promise<string | null>;
       /** How long a request to GitHub may take. */
       githubRequestTimeoutMs?: number;
     };

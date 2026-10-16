@@ -91,8 +91,10 @@ export type RefusalNoticeDeps = {
     options: { limit: number; maxAttempts: number },
   ) => Promise<StoredNotice[]>;
   registry: Pick<IntegrationRegistry, "resolve">;
-  /** The link to the plan page of a workspace, or null when the instance has none. */
-  planPageUrl: (workspaceSlug: string) => string | null;
+  /** The link to the plan page of a workspace, or null when the instance has none (plan-link.ts). */
+  planPageUrl: (
+    workspaceSlug: string,
+  ) => string | null | Promise<string | null>;
   now: () => Date;
   /** Receives lines of ids and stable codes only. */
   log: { info(line: string): void; error(line: string): void };
@@ -137,6 +139,15 @@ export function createRefusalNoticeService(
   /** When a notice whose attempt failed may be taken again: longer after every attempt. */
   const retryAt = (notice: StoredNotice) =>
     new Date(deps.now().getTime() + RETRY_WAIT_MS * notice.attempts);
+
+  /** The link, or none: a notice without one is still the notice, so a setting that cannot be read costs only the link. */
+  async function planPageLink(workspaceSlug: string): Promise<string | null> {
+    try {
+      return await deps.planPageUrl(workspaceSlug);
+    } catch {
+      return null;
+    }
+  }
 
   async function attempt(target: Target): Promise<void> {
     const { workspaceId, repositoryId, prNumber, periodStart, code } = target;
@@ -200,7 +211,7 @@ export function createRefusalNoticeService(
 
     const workspace = await deps.workspaces.get(workspaceId);
     const planPageUrl =
-      workspace === undefined ? null : deps.planPageUrl(workspace.slug);
+      workspace === undefined ? null : await planPageLink(workspace.slug);
     try {
       await provider.postPullRequestNotice(integration, repo, prNumber, {
         body: noticeBody(code, periodStart, planPageUrl),

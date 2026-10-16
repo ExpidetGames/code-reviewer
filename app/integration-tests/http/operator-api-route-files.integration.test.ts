@@ -49,6 +49,10 @@ async function loadRoutes() {
     (await import("../../src/app/api/operator/v1/workspaces/[id]/usage/route.ts")) as unknown as Route;
   const usageSummary =
     (await import("../../src/app/api/operator/v1/workspaces/[id]/usage/summary/route.ts")) as unknown as Route;
+  const planManagement =
+    (await import("../../src/app/api/operator/v1/plan-management/route.ts")) as unknown as Route;
+  const handoffRedeem =
+    (await import("../../src/app/api/operator/v1/handoff/redeem/route.ts")) as unknown as Route;
   return {
     list,
     entitlements,
@@ -57,6 +61,8 @@ async function loadRoutes() {
     usage,
     workspaceUsage,
     usageSummary,
+    planManagement,
+    handoffRedeem,
   };
 }
 
@@ -229,6 +235,40 @@ describe("the operator API route files while the API is on", () => {
     expect(mine.status).toBe(200);
     expect(await summary.json()).toMatchObject({ workspaceId, groups: [] });
     expect(wrong.status).toBe(401);
+  });
+
+  // #284-T09
+  it("serve the plan management setting and the redemption through the real wiring, and refuse a wrong token", async () => {
+    vi.stubEnv("OPERATOR_API_TOKEN", TOKEN);
+    await startDatabase();
+    const routes = await loadRoutes();
+    vi.spyOn(console, "info").mockImplementation(() => undefined);
+
+    const put = (await routes.planManagement.PUT(
+      request("PUT", TOKEN, { url: "https://plans.example/p" }) as never,
+    )) as Response;
+    const get = (await routes.planManagement.GET(
+      request("GET", TOKEN) as never,
+    )) as Response;
+    const redeem = (await routes.handoffRedeem.POST(
+      request("POST", TOKEN, { token: "a".repeat(43) }) as never,
+    )) as Response;
+    const wrong = (await routes.handoffRedeem.POST(
+      request("POST", "wrong", { token: "a".repeat(43) }) as never,
+    )) as Response;
+    const get405 = (await routes.handoffRedeem.GET(
+      request("GET", TOKEN) as never,
+    )) as Response;
+
+    expect(put.status).toBe(200);
+    expect(await get.json()).toEqual({
+      version: 1,
+      planManagementUrl: "https://plans.example/p",
+    });
+    expect(redeem.status).toBe(422);
+    expect(await redeem.json()).toEqual({ version: 1, error: "invalid_token" });
+    expect(wrong.status).toBe(401);
+    expect(get405.status).toBe(405);
   });
 
   // #275-T03

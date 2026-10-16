@@ -4,6 +4,8 @@
 // real repositories, a recording logger, and a `call` that builds requests like an operator's client does.
 // `notFound` throws a marker, because in the running server it is Next.js's `notFound()`.
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
+import { createPlanHandoffRedeemRepository } from "../db/repositories/plan-handoff-redeem-repository.ts";
+import { createPlanHandoffTokensRepository } from "../db/repositories/plan-handoff-tokens-repository.ts";
 import { createUsageFeedRepository } from "../db/repositories/usage-feed-repository.ts";
 import { createUsageRecordsRepository } from "../db/repositories/usage-records-repository.ts";
 import { createWorkspaceEntitlementsRepository } from "../db/repositories/workspace-entitlements-repository.ts";
@@ -66,6 +68,10 @@ export function routeOf(path: string): OperatorRoute {
     return { kind: "workspace-usage-summary", workspaceId: rest[1] };
   if (rest.length === 2 && rest[0] === "entitlements" && rest[1] === "default")
     return { kind: "default-entitlements" };
+  if (rest.length === 1 && rest[0] === "plan-management")
+    return { kind: "plan-management" };
+  if (rest.length === 2 && rest[0] === "handoff" && rest[1] === "redeem")
+    return { kind: "handoff-redeem" };
   return { kind: "unknown" };
 }
 
@@ -86,6 +92,7 @@ export async function startOperatorApiHarness(
     settings: createInstanceSettingsRepository(db, () => now),
     usageFeed: createUsageFeedRepository(db),
     usageFor: (id) => createUsageRecordsRepository(db, id, () => now),
+    handoffs: createPlanHandoffRedeemRepository(db, () => now),
     now: () => now,
     logger: {
       info: (line) => lines.push(line),
@@ -134,6 +141,9 @@ export async function startOperatorApiHarness(
     errors,
     api,
     usage: createUsageSeeder(db),
+    /** The handoff tokens of a workspace, made the way the route makes them. */
+    handoffTokens: (id: string) =>
+      createPlanHandoffTokensRepository(db, id, () => now),
     setNow: (next: Date) => {
       now = next;
     },
