@@ -12,13 +12,12 @@ import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
-  readdirSync,
-  readFileSync,
   appendFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
+import { readContainers, type Container } from "./hosted-containers";
 import { hostedEnv } from "./hosted-env";
 import {
   assertTiktokenCache,
@@ -60,23 +59,7 @@ function killTree(pid: number): void {
   }
 }
 
-/** One `docker run` the stand-in saw: a container that was started (or, for the probe, a canary). */
-export type Container = {
-  /** The order the containers were started in. */
-  index: number;
-  /** The entry mode: `worker-once` or `probe`. */
-  mode: string;
-  /** The container's name, `code-reviewer-worker-<job id>` for a job. */
-  name: string;
-  /** The rendered flags and the image and mode, one argument each. */
-  args: string[];
-  /** The environment the Worker had, `NAME=value` per line. */
-  environment: string;
-  /** The Worker's process id; its tree is everything the container runs. */
-  pid: number;
-  /** What the Worker wrote to stderr (and to stdout, except the probe's verdict). Read when asked. */
-  log(): string;
-};
+export type { Container };
 
 export type HostedDispatcher = {
   /** Everything the Dispatcher wrote to stdout and stderr so far. */
@@ -104,29 +87,6 @@ export type HostedDispatcher = {
   /** SIGTERM, then SIGKILL. Everything the process started is stopped with it. */
   stop(): Promise<void>;
 };
-
-function readContainers(): Container[] {
-  const directory = absolute(hostedEnv.dockerDirectory);
-  if (!existsSync(directory)) return [];
-  return readdirSync(directory)
-    .filter((file) => /^run-\d+\.args$/.test(file))
-    .sort()
-    .map((file, index) => {
-      const base = join(directory, file.slice(0, -".args".length));
-      const args = readFileSync(`${base}.args`, "utf8").split("\n");
-      args.pop();
-      return {
-        index,
-        mode: args.at(-1) ?? "",
-        name: readFileSync(`${base}.name`, "utf8"),
-        args,
-        environment: readFileSync(`${base}.env`, "utf8"),
-        pid: Number(readFileSync(`${base}.pid`, "utf8")),
-        log: () =>
-          existsSync(`${base}.log`) ? readFileSync(`${base}.log`, "utf8") : "",
-      };
-    });
-}
 
 export async function startHostedDispatcher(options: {
   /** The `llm.baseUrl` the jobs get, the address of the fake LLM (the app has no setting for it). */
@@ -289,9 +249,9 @@ export async function startHostedDispatcher(options: {
 
   return {
     output: () => output,
-    containers: readContainers,
+    containers: () => readContainers(absolute(hostedEnv.dockerDirectory)),
     workersOf: (jobId) =>
-      readContainers().filter(
+      readContainers(absolute(hostedEnv.dockerDirectory)).filter(
         (container) =>
           container.mode === "worker-once" &&
           container.name === `code-reviewer-worker-${jobId}`,

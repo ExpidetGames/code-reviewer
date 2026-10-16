@@ -35,7 +35,8 @@
 # secret of the Dispatcher's or the test's environment cannot. The start document comes on stdin as it does into the
 # container. `docker rm --force <name>` ends the Worker's whole tree, which is what the end of a container does.
 #
-# Records: run-<n>.args (one argument per line), run-<n>.env (the Worker's environment, names and values),
+# Records (`run-<n>.args` appears last, by a rename, so a container is listed only when its records are complete):
+# run-<n>.args (one argument per line), run-<n>.env (the Worker's environment, names and values),
 # run-<n>.pid (the Worker's process id) and run-<n>.log (what the Worker wrote to stderr, and to
 # stdout unless the mode is `probe`, whose stdout is the verdict) for each `docker run`; commands.log for every other
 # command. An argument this script does not know is refused with 125, like a daemon refuses one it does not know:
@@ -106,7 +107,9 @@ case "${1:-}" in
       exit 125
     fi
     n="$(date +%s%N)"
-    printf '%s\n' "${given[@]}" >"$dir/run-$n.args"
+    # The record of a container is complete when `run-<n>.args` exists (the harness lists containers by it, #380): it is
+    # written under a temporary name here and renamed after `.name`, `.pid` and `.env`, so a reader never sees a partial one.
+    printf '%s\n' "${given[@]}" >"$dir/run-$n.args.tmp"
     printf '%s' "$name" >"$dir/run-$n.name"
     printf '%s\n' "$$" >"$dir/run-$n.pid"
 
@@ -132,6 +135,7 @@ case "${1:-}" in
       environment=("${kept[@]}")
     fi
     printf '%s\n' "${environment[@]}" | sort >"$dir/run-$n.env"
+    mv "$dir/run-$n.args.tmp" "$dir/run-$n.args"
 
     # A container that is held (a test that wants a Worker that has not started yet, or one that is still there).
     # In short steps, so that a killed client leaves no long sleep behind.
