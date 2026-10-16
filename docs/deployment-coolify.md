@@ -5,6 +5,10 @@ repositories. Plan for about two hours, most of it waiting for DNS, the build an
 against Coolify's current documentation (links in each step); the first deployment with the customer is
 what verifies it on a real instance, see [What is verified](#what-is-verified).
 
+This guide is for a self-hosted installation, which keeps working unchanged. The hosted deployment on Vercel
+(a serverless App, a Dispatcher and a Worker per job in a Sandbox VM) has its own guide, [`deployment-vercel.md`](deployment-vercel.md);
+its section "Self-hosted and Coolify" says what does not change here.
+
 What you end up with: one Coolify application of type *Docker Compose*, built from this repository,
 with three containers: the **app** (web UI, API, webhook receiver, SQLite database, daily backups) behind
 Coolify's proxy under your domain with HTTPS, the **runner** (runs PR-Agent) that has no domain and
