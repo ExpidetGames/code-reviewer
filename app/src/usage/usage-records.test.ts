@@ -84,6 +84,20 @@ describe("how a completed job settles its usage record", () => {
     });
   });
 
+  // #274-T07: the exact cost of a Diff Review (the decimal sum of the charges its provider stated,
+  // printed as the shortest number) is stored as it is, in whole micro-USD, without a drift.
+  it("stores the exact cost of a Diff Review that the runner reports", () => {
+    const stored = (costUsd: number) =>
+      settlementOfOutcome({
+        ok: true,
+        result: { ok: true, usage: { ...USAGE, aiCalls: 3, costUsd } },
+      });
+
+    expect(stored(0.6)).toMatchObject({ costMicroUsd: 600_000 });
+    expect(stored(0.00037035)).toMatchObject({ costMicroUsd: 370 });
+    expect(stored(0)).toMatchObject({ costMicroUsd: 0 });
+  });
+
   it("settles a run that succeeded without a usage with everything unknown", () => {
     const results: JsonValue[] = [
       { ok: true, usage: null },

@@ -64,6 +64,7 @@ PROTECTED_SETTINGS = (
     "config.additional_reasoning_effort_models",
     "config.no_temperature_models",
     "config.retry_same_model_on_timeout",
+    "config.num_retries",
     "config.add_user_to_requests",
     "config.enable_claude_extended_thinking",
     "config.extended_thinking_budget_tokens",
