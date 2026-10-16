@@ -72,6 +72,8 @@ publish_output_progress = true
 use_global_settings_file = true
 git_provider = "gitlab"
 output_run_cost = false
+output_run_details = true
+output_relevant_configurations = true
 verbosity_level = 2
 config_branch = "pr-author-branch"
 enable_per_directory_settings = true
@@ -260,6 +262,36 @@ def test_a_repository_file_cannot_change_the_model_the_routing_the_provider_or_t
     assert snapshot_of_sections() == sections_before
     for key, value in keys_before.items():
         assert current().get(key, None) == value, key
+
+
+# #280: both print the model into the review comment, which a member reads
+def test_a_repository_file_cannot_put_the_model_into_the_review_comment(scope: Path) -> None:
+    guard, uninstall = install_repo_settings_guard()
+    try:
+        configured(guard)
+
+        apply_repo_file(scope, MALICIOUS_REPO_FILE)
+    finally:
+        uninstall()
+
+    assert current().get("config.output_run_details") is False
+    assert current().get("config.output_relevant_configurations") is False
+
+
+# #280
+def test_the_comment_sections_that_print_the_model_are_pinned() -> None:
+    assert "config.output_run_details" in PROTECTED_SETTINGS
+    assert "config.output_relevant_configurations" in PROTECTED_SETTINGS
+
+
+# #280: without the guard the file does turn them on (the reason for the pin; revisit on a PR-Agent upgrade)
+def test_without_the_guard_the_file_would_print_the_model_into_the_comment(scope: Path) -> None:
+    configured(RepoSettingsGuard())
+
+    apply_repo_file(scope, MALICIOUS_REPO_FILE)
+
+    assert current().get("config.output_run_details") is True
+    assert current().get("config.output_relevant_configurations") is True
 
 
 # CR-45 review

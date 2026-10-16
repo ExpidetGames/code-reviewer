@@ -118,6 +118,11 @@ def build_typed_settings(job: Job) -> dict[str, bool | int | str | list[str]]:
         # PR-Agent prices a call from a price table when the answer states no charge. The cost of
         # a run is measured from the provider's own `usage.cost` instead (`diff_cost.py`, #274).
         "config.output_run_cost": False,
+        # Neither section that prints the model into the published review comment ("Agent run details", the
+        # `config` section of the relevant configurations). The model of a managed tier is operator data (#280),
+        # and these are off by default in PR-Agent 0.47.0 but a repository file could turn them on.
+        "config.output_run_details": False,
+        "config.output_relevant_configurations": False,
         # LiteLLM and its client send a request again inside one call when this is set (or left to
         # their defaults): the meter would see only the last answer. Retries are PR-Agent's own
         # attempts, each of which passes the meter (#274).
