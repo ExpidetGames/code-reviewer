@@ -60,7 +60,10 @@
     },
     "ErrorResponse": {
       "type": "object",
-      "required": ["version", "error"],
+      "required": [
+        "version",
+        "error"
+      ],
       "properties": {
         "version": {
           "$ref": "#/$defs/Version"
@@ -87,25 +90,37 @@
       "properties": {
         "diffRunsPerPeriod": {
           "description": "A count (or micro-USD of measured model cost) per period, or null for unlimited.",
-          "type": ["integer", "null"],
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 0,
           "maximum": 9007199254740991
         },
         "dynamicRunsPerPeriod": {
           "description": "A count (or micro-USD of measured model cost) per period, or null for unlimited.",
-          "type": ["integer", "null"],
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 0,
           "maximum": 9007199254740991
         },
         "managedCostLimitMicroUsd": {
           "description": "Micro-USD of measured model cost per period for the runs on the operator's key, or null for unlimited. A soft cap. Refused next to keyMode 'own' (cost_limit_requires_managed_key).",
-          "type": ["integer", "null"],
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 0,
           "maximum": 9007199254740991
         },
         "ownKeyCostLimitMicroUsd": {
           "description": "Micro-USD of measured model cost per period for the runs on the workspace's own key (#361), or null for unlimited. A soft cap: a run that starts below it can end above it by what the runs in flight cost, and a run whose cost is unknown is not bounded by it. Entries stored before the limit existed read as null.",
-          "type": ["integer", "null"],
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 0,
           "maximum": 9007199254740991
         }
@@ -123,25 +138,37 @@
       "properties": {
         "diffRunsPerPeriod": {
           "description": "A count (or micro-USD of measured model cost) per period, or null for unlimited.",
-          "type": ["integer", "null"],
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 0,
           "maximum": 9007199254740991
         },
         "dynamicRunsPerPeriod": {
           "description": "A count (or micro-USD of measured model cost) per period, or null for unlimited.",
-          "type": ["integer", "null"],
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 0,
           "maximum": 9007199254740991
         },
         "managedCostLimitMicroUsd": {
           "description": "Micro-USD of measured model cost per period for the runs on the operator's key, or null for unlimited. A soft cap. Refused next to keyMode 'own' (cost_limit_requires_managed_key).",
-          "type": ["integer", "null"],
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 0,
           "maximum": 9007199254740991
         },
         "ownKeyCostLimitMicroUsd": {
           "description": "Micro-USD of measured model cost per period for the runs on the workspace's own key (#361), or null for unlimited. A soft cap: a run that starts below it can end above it by what the runs in flight cost, and a run whose cost is unknown is not bounded by it. Entries stored before the limit existed read as null.",
-          "type": ["integer", "null"],
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 0,
           "maximum": 9007199254740991
         }
@@ -169,7 +196,10 @@
         "keyMode": {
           "description": "Whose LLM key the workspace's reviews use. 'managed' is the operator's key.",
           "type": "string",
-          "enum": ["own", "managed"]
+          "enum": [
+            "own",
+            "managed"
+          ]
         },
         "limits": {
           "$ref": "#/$defs/EntitlementLimits"
@@ -182,7 +212,10 @@
         },
         "suspensionCode": {
           "description": "Why the workspace is suspended: lowercase letters, digits, '_' and '-', starting with a letter, at most 64 characters. null unless suspended.",
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "maxLength": 64,
           "pattern": "^[a-z][a-z0-9_-]*$"
         }
@@ -208,7 +241,10 @@
         "keyMode": {
           "description": "Whose LLM key the workspace's reviews use. 'managed' is the operator's key.",
           "type": "string",
-          "enum": ["own", "managed"]
+          "enum": [
+            "own",
+            "managed"
+          ]
         },
         "limits": {
           "$ref": "#/$defs/EntitlementLimitsWrite"
@@ -221,7 +257,10 @@
         },
         "suspensionCode": {
           "description": "Why the workspace is suspended: lowercase letters, digits, '_' and '-', starting with a letter, at most 64 characters. null unless suspended.",
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "maxLength": 64,
           "pattern": "^[a-z][a-z0-9_-]*$"
         }
@@ -229,7 +268,9 @@
       "allOf": [
         {
           "if": {
-            "required": ["keyMode"],
+            "required": [
+              "keyMode"
+            ],
             "properties": {
               "keyMode": {
                 "const": "own"
@@ -254,7 +295,9 @@
     "InvalidEntitlements": {
       "description": "A stored entry that cannot be read. It counts as 'invalid' for enforcement (fail closed); a valid PUT repairs it.",
       "type": "object",
-      "required": ["invalid"],
+      "required": [
+        "invalid"
+      ],
       "properties": {
         "invalid": {
           "const": true
@@ -271,7 +314,9 @@
             },
             {
               "type": "object",
-              "required": ["updatedAt"],
+              "required": [
+                "updatedAt"
+              ],
               "properties": {
                 "updatedAt": {
                   "$ref": "#/$defs/Timestamp"
@@ -287,7 +332,9 @@
             },
             {
               "type": "object",
-              "required": ["updatedAt"],
+              "required": [
+                "updatedAt"
+              ],
               "properties": {
                 "updatedAt": {
                   "$ref": "#/$defs/Timestamp"
@@ -303,7 +350,9 @@
       "oneOf": [
         {
           "type": "object",
-          "required": ["kind"],
+          "required": [
+            "kind"
+          ],
           "properties": {
             "kind": {
               "const": "unlimited"
@@ -317,7 +366,10 @@
             },
             {
               "type": "object",
-              "required": ["kind", "source"],
+              "required": [
+                "kind",
+                "source"
+              ],
               "properties": {
                 "kind": {
                   "const": "limited"
@@ -331,7 +383,11 @@
         },
         {
           "type": "object",
-          "required": ["kind", "code", "source"],
+          "required": [
+            "kind",
+            "code",
+            "source"
+          ],
           "properties": {
             "kind": {
               "const": "invalid"
@@ -349,11 +405,18 @@
     "EntitlementsSource": {
       "description": "'workspace': the workspace's own row. 'default': the instance default.",
       "type": "string",
-      "enum": ["workspace", "default"]
+      "enum": [
+        "workspace",
+        "default"
+      ]
     },
     "WorkspaceSummary": {
       "type": "object",
-      "required": ["id", "slug", "createdAt"],
+      "required": [
+        "id",
+        "slug",
+        "createdAt"
+      ],
       "properties": {
         "id": {
           "$ref": "#/$defs/WorkspaceId"
@@ -371,7 +434,11 @@
     "WorkspaceList": {
       "description": "GET /workspaces?after=<id>&limit=<1..200, default 50>: workspaces ordered by id after the cursor. 'nextAfter' is the id to pass as 'after' for the next page, null on the last page.",
       "type": "object",
-      "required": ["version", "workspaces", "nextAfter"],
+      "required": [
+        "version",
+        "workspaces",
+        "nextAfter"
+      ],
       "properties": {
         "version": {
           "$ref": "#/$defs/Version"
@@ -398,7 +465,12 @@
     "WorkspaceEntitlementsResponse": {
       "description": "The answer of GET, PUT and DELETE /workspaces/{id}/entitlements: the stored row (null when none, e.g. after DELETE) and the effective entitlements.",
       "type": "object",
-      "required": ["version", "workspaceId", "stored", "effective"],
+      "required": [
+        "version",
+        "workspaceId",
+        "stored",
+        "effective"
+      ],
       "properties": {
         "version": {
           "$ref": "#/$defs/Version"
@@ -424,7 +496,10 @@
     "DefaultEntitlementsResponse": {
       "description": "The answer of GET and PUT /entitlements/default: the default for workspaces without a row, an invalid marker for damaged data, or null when none was set. The default cannot be removed through the API.",
       "type": "object",
-      "required": ["version", "default"],
+      "required": [
+        "version",
+        "default"
+      ],
       "properties": {
         "version": {
           "$ref": "#/$defs/Version"
@@ -453,7 +528,10 @@
     },
     "UsageReason": {
       "description": "Why a record carries no measurement, as a short code (lowercase letters, digits and '_'), or null. A reader ignores a code it does not know. 'no_result': the job ended without any result from the runner that held it (it died, its lease ran out on the last attempt, it ran past the hard limit), so the model may have been used and the cost and the tokens are unknown. A run that reported its usage, failed or not, carries no reason; an unpriced run has a null cost and its tokens. 'superseded' (#397): a newer push replaced the run while it ran. It is not a run of the free quota, but what it measured is usage like any other: the cost and tokens are those it reported (or both unknown, when its Worker never reported) and are billed like the cost of any run, an unknown cost never.",
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "maxLength": 64,
       "pattern": "^[a-z][a-z0-9_]*$"
     },
@@ -494,31 +572,49 @@
         "reviewKind": {
           "description": "Which review the run was.",
           "type": "string",
-          "enum": ["diff", "dynamic"]
+          "enum": [
+            "diff",
+            "dynamic"
+          ]
         },
         "keyMode": {
           "description": "Whose LLM key the run used. 'managed' is the operator's key.",
           "type": "string",
-          "enum": ["own", "managed"]
+          "enum": [
+            "own",
+            "managed"
+          ]
         },
         "modelTier": {
           "description": "The quality tier of a managed run, or null. Only a tier name is ever shown (lowercase letters, digits, '_' and '-', starting with a letter, at most 32 characters); anything else is served as null.",
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "maxLength": 32,
           "pattern": "^[a-z][a-z0-9_-]{0,31}$"
         },
         "costMicroUsd": {
-          "type": ["integer", "null"],
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 0,
           "maximum": 2147483647
         },
         "promptTokens": {
-          "type": ["integer", "null"],
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 0,
           "maximum": 2147483647
         },
         "completionTokens": {
-          "type": ["integer", "null"],
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 0,
           "maximum": 2147483647
         },
@@ -533,7 +629,11 @@
     "UsagePage": {
       "description": "GET /usage?after=<cursor>&limit=<1..200, default 50> (every workspace) and GET /workspaces/{id}/usage?after=&limit=&from=&to= (one workspace; 'from' included and 'to' excluded, on 'settledAt'): a page of SETTLED records ordered by (settledAt, id) after the cursor. Records that are reserved or void are never served. A record is served only once its 'settledAt' is more than 60 seconds old (the safety lag), so a record that commits late cannot appear behind a position a reader already holds; a reader that polls therefore sees the newest minute of settlements a little later. 'nextCursor' is the position after the last item, or the cursor that was passed when the page is empty, or null when nothing has been served and none was passed: keep it and pass it as 'after' next time. Treat 'id' as the idempotency key: keep one item per id, however often a page is read.",
       "type": "object",
-      "required": ["version", "items", "nextCursor"],
+      "required": [
+        "version",
+        "items",
+        "nextCursor"
+      ],
       "properties": {
         "version": {
           "$ref": "#/$defs/Version"
@@ -572,11 +672,17 @@
       "properties": {
         "reviewKind": {
           "type": "string",
-          "enum": ["diff", "dynamic"]
+          "enum": [
+            "diff",
+            "dynamic"
+          ]
         },
         "keyMode": {
           "type": "string",
-          "enum": ["own", "managed"]
+          "enum": [
+            "own",
+            "managed"
+          ]
         },
         "recordCount": {
           "type": "integer",
@@ -608,7 +714,13 @@
     "UsageSummaryResponse": {
       "description": "GET /workspaces/{id}/usage/summary?from=&to=: both are required timestamps with 'from' before 'to'. A run belongs to the period it started in ('from' included, 'to' excluded), the same rule the limits count by, so this summary is what a limit sees; it is not a view of the feed (which is by time of settlement) and a run still in progress is counted in 'recordCount'. The groups are ordered by review kind then key mode; a combination without runs is not listed. The summary counts by the time a run started ('reserved_at'), so it does not reconcile with the feed, which is by time of settlement, at the edges of a period (a run that started on the 30th and settled on the 1st is in the earlier period's summary and the later period's feed). A closed period's counts can still change until its last run has ended: 'recordCount' minus 'settledCount' is the number still in progress. For accounts by time of settlement, use the feed.",
       "type": "object",
-      "required": ["version", "workspaceId", "from", "to", "groups"],
+      "required": [
+        "version",
+        "workspaceId",
+        "from",
+        "to",
+        "groups"
+      ],
       "properties": {
         "version": {
           "$ref": "#/$defs/Version"
@@ -699,14 +811,21 @@
     "UnknownCostCount": {
       "description": "How many runs of one workspace on one key mode settled without a known cost in the period: a plain integer, with no cost figure, model, key or name. A cost limit adds up known costs only, so these runs are not bounded by it. 'keyMode' says whose key they ran on ('managed' is the operator's key), which decides which cost limit they escape.",
       "type": "object",
-      "required": ["workspaceId", "keyMode", "unknownCostCount"],
+      "required": [
+        "workspaceId",
+        "keyMode",
+        "unknownCostCount"
+      ],
       "properties": {
         "workspaceId": {
           "$ref": "#/$defs/WorkspaceId"
         },
         "keyMode": {
           "type": "string",
-          "enum": ["own", "managed"]
+          "enum": [
+            "own",
+            "managed"
+          ]
         },
         "unknownCostCount": {
           "type": "integer",
@@ -718,7 +837,13 @@
     "UnknownCostCountsResponse": {
       "description": "GET /usage/unknown-cost?from=&to=&after=<workspace id>&limit=<1..200, default 50>: both 'from' and 'to' are required timestamps with 'from' before 'to', and the answer lists, per workspace and key mode, the settled runs of the period whose cost is not known. This includes a run that ended with no result from its runner (reason 'no_result' in the feed). A run belongs to the period it started in ('from' included, 'to' excluded), the same rule the limits and the summary count by, so a figure here equals 'unknownCostCount' in the summary of that workspace, added up over the review kinds of a key mode. It is a total, not a position in the feed: there is no safety lag, and a run that is still in progress is not counted until it settles, so the count of a period can still grow until its last run has ended; to alert on a rate, read the same period again and compare. Ordered by workspace id, then key mode. A workspace and key mode without such a run is not listed, so a workspace that is missing has a count of zero. A page holds the counts of up to 'limit' whole workspaces after 'after'; 'nextAfter' is the workspace id to pass as 'after' for the next page, null on the last page.",
       "type": "object",
-      "required": ["version", "from", "to", "counts", "nextAfter"],
+      "required": [
+        "version",
+        "from",
+        "to",
+        "counts",
+        "nextAfter"
+      ],
       "properties": {
         "version": {
           "$ref": "#/$defs/Version"
@@ -751,7 +876,9 @@
     "PlanManagementWrite": {
       "description": "The body of PUT /plan-management: the address of the page a workspace Owner or Admin is handed over to when they click 'Manage plan' in the app. It has to be an absolute https address without user name, password or fragment; it is stored in its normal form. Anything else is refused with 422 and one of the url_* codes. Unknown keys are refused (400 request_invalid).",
       "type": "object",
-      "required": ["url"],
+      "required": [
+        "url"
+      ],
       "additionalProperties": false,
       "properties": {
         "url": {
@@ -765,7 +892,10 @@
     "PlanManagementResponse": {
       "description": "The answer of GET, PUT and DELETE /plan-management: the address in its stored form, or null while there is none. While there is none, the app shows no 'Manage plan' button and its route does not exist. The app appends the single query parameter 'handoff=<token>' to this address when it hands somebody over (any 'handoff' parameter in the stored address is replaced); the page that receives it redeems the token at once with POST /handoff/redeem and does not keep it in its address bar, its logs or its links.",
       "type": "object",
-      "required": ["version", "planManagementUrl"],
+      "required": [
+        "version",
+        "planManagementUrl"
+      ],
       "properties": {
         "version": {
           "$ref": "#/$defs/Version"
@@ -787,7 +917,9 @@
     "HandoffRedeemRequest": {
       "description": "The body of POST /handoff/redeem: the token from the 'handoff' query parameter. Exactly this key. A token of any other shape is not a request error: it gets the same invalid_token answer as an unknown one.",
       "type": "object",
-      "required": ["token"],
+      "required": [
+        "token"
+      ],
       "additionalProperties": false,
       "properties": {
         "token": {
@@ -799,7 +931,13 @@
     "HandoffRedeemResponse": {
       "description": "The answer of POST /handoff/redeem for a valid token: which workspace the person who clicked 'Manage plan' belongs to and with which role. A token is valid for five minutes after the click and works once; a newer click of the same person in the same workspace revokes it; the role is checked again at redemption (a person who is no longer a member with the role the token was made for gets invalid_token, and the token is used up). 'userId' is opaque: the same person always has the same id, and it is nothing an email, a name or a repository could be recovered from. Nothing else about the person is ever served. The service redeems the token before it shows anything, and sends the person back to /w/<workspaceSlug>/settings/plan of the app (the plan and usage page of the workspace); that path is fixed on the app's side.",
       "type": "object",
-      "required": ["version", "workspaceId", "workspaceSlug", "userId", "role"],
+      "required": [
+        "version",
+        "workspaceId",
+        "workspaceSlug",
+        "userId",
+        "role"
+      ],
       "properties": {
         "version": {
           "$ref": "#/$defs/Version"
@@ -819,7 +957,10 @@
         },
         "role": {
           "type": "string",
-          "enum": ["owner", "admin"]
+          "enum": [
+            "owner",
+            "admin"
+          ]
         }
       }
     }

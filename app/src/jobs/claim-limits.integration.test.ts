@@ -1514,6 +1514,105 @@ describe.each(databases)("the limits at claim on %s", (name, open) => {
       expect(ignored).toEqual([fixture.workspaceId]);
     },
   );
+
+  describe("a run that a newer push superseded (#397)", () => {
+    const REPORT = {
+      ok: false,
+      errorCode: "superseded",
+      result: {
+        ok: false,
+        errorCode: "superseded",
+        usage: { promptTokens: 100, completionTokens: 10, costUsd: 1.2 },
+      },
+    } as const;
+
+    /** A running run whose holder understands the supersede, and the newer push that replaces it. */
+    async function supersededRun(fixture: JobQueueFixture) {
+      const old = await fixture.enqueueNew();
+      const claimed = await fixture.queue.claimNext("runner-a", ENGINES, {
+        acceptsSupersede: true,
+      });
+      expect(claimed?.job.id).toBe(old.id);
+      fixture.clock.advance(1);
+      await fixture.enqueue({ headSha: sha("b") });
+      expect((await fixture.queue.get(old.id))?.status).toBe("superseded");
+      return { old, claimed };
+    }
+
+    // #397-T08
+    run(
+      "is not a run of the free quota: the push that replaced it is still admitted at the limit",
+      async () => {
+        const fixture = await start();
+        await setEntitlements(fixture, { limits: { diffRunsPerPeriod: 1 } });
+        await supersededRun(fixture);
+
+        // The limit is one run: the superseded one does not use it up, the replacing one does.
+        const next = await fixture.queue.claimNext("runner-b", ENGINES);
+
+        expect(next?.job).toMatchObject({
+          headSha: sha("b"),
+          status: "running",
+        });
+        const other = await enqueue(fixture);
+        expect(await fixture.queue.claimNext("runner-c", ENGINES)).toBeNull();
+        expect(await fixture.queue.get(other.id)).toMatchObject({
+          status: "failed",
+          errorCode: "quota_exhausted",
+        });
+      },
+    );
+
+    // #397-T09
+    run(
+      "counts its measured cost against the cost limit, like any other usage",
+      async () => {
+        const fixture = await start();
+        await setEntitlements(fixture, {
+          limits: { ownKeyCostLimitMicroUsd: 1_000_000 },
+        });
+        const { old, claimed } = await supersededRun(fixture);
+        await fixture.queue.complete(old.id, claimed?.leaseToken ?? "", REPORT);
+        const waiting = await fixture.queue.get(
+          (
+            await fixture.db
+              .selectFrom("jobs")
+              .select("id")
+              .where("status", "=", "queued")
+              .executeTakeFirstOrThrow()
+          ).id,
+        );
+
+        // $1.20 was measured against a limit of $1.00: the next claim is refused for cost.
+        expect(await fixture.queue.claimNext("runner-b", ENGINES)).toBeNull();
+
+        expect(await fixture.queue.get(waiting?.id ?? "")).toMatchObject({
+          status: "failed",
+          errorCode: "quota_exhausted",
+        });
+      },
+    );
+
+    // #397-T09
+    run("adds nothing to the cost limit when its cost is unknown", async () => {
+      const fixture = await start();
+      await setEntitlements(fixture, {
+        limits: { ownKeyCostLimitMicroUsd: 1_000_000 },
+      });
+      const { old, claimed } = await supersededRun(fixture);
+      await fixture.queue.complete(old.id, claimed?.leaseToken ?? "", {
+        ...REPORT,
+        result: {
+          ...REPORT.result,
+          usage: { promptTokens: 100, completionTokens: 10, costUsd: null },
+        },
+      });
+
+      expect(
+        (await fixture.queue.claimNext("runner-b", ENGINES))?.job.headSha,
+      ).toBe(sha("b"));
+    });
+  });
 });
 
 /** Queues a job on a repository of its own in another workspace and returns its id. */

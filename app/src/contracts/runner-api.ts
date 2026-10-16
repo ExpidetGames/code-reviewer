@@ -28,9 +28,10 @@ export type Engine = "pr-agent" | "opencode";
  */
 export type ReviewKind = "diff" | "dynamic";
 /**
- * The claim features this version of the contract defines (`features` in ClaimRequest). A reader ignores a feature name it does not know. `dynamic_capabilities` (#279): the runner reads `dynamic.capabilities`. `worker_credential` (#318): the caller is a Dispatcher and wants the split answer; the job input and its secrets reach only the Worker, with the per-job credential.
+ * The claim features this version of the contract defines (`features` in ClaimRequest). A reader ignores a feature name it does not know. `dynamic_capabilities` (#279): the runner reads `dynamic.capabilities`. `worker_credential` (#318): the caller is a Dispatcher and wants the split answer; the job input and its secrets reach only the Worker, with the per-job credential. `supersede` (#396): the runner understands `job.superseded` in a heartbeat answer and stops gracefully (it finishes the model requests in flight, sends no more, publishes nothing, reports its result and usage). The app supersedes a running job only when the claim named it. A Worker names it in the `features` of its details request.
  */
-export type KnownClaimFeature = "dynamic_capabilities" | "worker_credential";
+export type KnownClaimFeature =
+  "dynamic_capabilities" | "worker_credential" | "supersede";
 /**
  * #318: the per-job credential. 256 random bits, base64url without padding, behind the prefix `crj_`. The app mints it at claim; it is valid only for that job and only while the claim holds, and it is the one thing a Worker holds (Authorization: Bearer). Secret: never log it, never put it in an argument, an environment variable or a file; the Dispatcher passes it to the Worker on stdin.
  */
@@ -102,7 +103,8 @@ export type KnownRunnerErrorCode =
   | "dynamic_budget_exceeded"
   | "dynamic_accounting_failed"
   | "dynamic_model_features_unsupported"
-  | "lease_lost";
+  | "lease_lost"
+  | "superseded";
 /**
  * Exactly the job the runner reads on stdin (see runner/src/code_reviewer_runner/job.py). Closed: the runner refuses unknown fields. Contains secrets (git.token, llm.apiKey): only the claim response carries it.
  */
@@ -619,6 +621,10 @@ export interface HeartbeatResponse {
     id: JobId;
     heartbeatAt: Timestamp;
     leaseExpiresAt: Timestamp;
+    /**
+     * #396: true when a newer push replaced this run. Sent only to a claim that named the feature `supersede`; absent means not superseded. The runner finishes the model requests in flight, sends no more, publishes nothing, reports its result (errorCode `superseded`, with usage) and exits.
+     */
+    superseded?: boolean;
     [k: string]: unknown;
   };
   [k: string]: unknown;

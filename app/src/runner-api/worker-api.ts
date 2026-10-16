@@ -28,7 +28,6 @@ import {
 } from "../jobs/worker-credential.ts";
 import { discardBody, readJsonBody } from "./body.ts";
 import type { ClaimDeps } from "./claim.ts";
-import { RUNNER_API_VERSION, type HeartbeatResponse } from "./contract.ts";
 import { describeError } from "./logger.ts";
 import {
   finishJob,

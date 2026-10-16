@@ -190,7 +190,13 @@ export function createReaper(options: ReaperOptions): Reaper {
           candidate.shape.kind === "job"
             ? states.get(candidate.shape.jobId)
             : undefined;
-        if (state?.kind === "known" && state.status !== "running")
+        // A superseded job that drains (#397) is not over: its Worker is finishing the requests in flight and
+        // reporting what they cost, so its VM stays until the claim ends.
+        if (
+          state?.kind === "known" &&
+          state.status !== "running" &&
+          state.draining !== true
+        )
           verdicts.set(candidate, "stop_job_ended");
         else {
           verdicts.set(candidate, "keep");

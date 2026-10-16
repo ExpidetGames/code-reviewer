@@ -32,8 +32,26 @@ and that amounts are not negative.
 claim --> reserved --complete with usage (failed or not), or a run that succeeded--> settled   (counts, with cost and tokens)
                    --job ended with no result from a runner that held it---------> settled   (counts, cost and tokens unknown, reason no_result)
                    --failed without usage, or ended before any runner began------> void      (does not count)
+                   --superseded while it ran (#397)-----------> still reserved, marked `superseded` (not a run of the quota)
+                        --the Worker reports-----------------> settled  (cost and tokens as reported, reason superseded)
+                        --the drain ends without a report-----> settled  (cost and tokens unknown, reason superseded)
 ```
 
+- **A superseded run (#397).** A newer push replaced a run that was running (`src/jobs/README.md`, "Supersession"). Its
+  record is marked at that moment (`settled_reason = 'superseded'` on the still `reserved` record) and from then on:
+  - it is **not a run of the free quota**: `countByKind` (the run limits at claim, the plan page) and the summary's
+    `recordCount`/`settledCount` leave it out, and `voidEndedJobs` and the sweep leave it alone while it drains
+    (the summary lists such runs in `supersededCount`);
+  - what it measured **is usage like any other**: the Worker's report settles it with the cost and tokens it reported
+    (an exact cost when every call was priced), billed like the cost of any run (`usage_records`, the feed, the
+    sums that the cost limits watch). An unknown cost stays unknown, adds nothing to a sum and is never billed
+    (it is raised as an unknown-cost settlement like any other, #361); a report that shows no model call
+    voids the record;
+  - if no report comes before the drain ends, the record settles with an unknown cost and unknown tokens (the request
+    in flight may have been charged and nobody can say).
+    The feed shows `reason: "superseded"` (`contracts/operator-api.v1.json`), so a billing reader can tell it from a normal
+    run. The cost limits still apply to it: its known cost counts towards `managedCostLimitMicroUsd` or
+    `ownKeyCostLimitMicroUsd` of the period it started in.
 - **Reserve.** `claimNext` inserts the record in the transaction of the claim, so a job a runner holds always has
   one. A job claimed again after a lost lease keeps its record (`job_id` is unique): it never counts twice.
   The claim does not know the key yet, so the record starts as `own`; the claim route corrects it with `setKeyMode`

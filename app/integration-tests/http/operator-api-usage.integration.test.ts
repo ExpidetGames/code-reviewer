@@ -379,6 +379,58 @@ describe("the usage of one workspace", () => {
 });
 
 describe("the summary of a period", () => {
+  // #397-T10
+  it("serves a superseded run with its reason and its cost, and lists such runs apart in the summary", async () => {
+    const h = await startOperatorApiHarness();
+    const base = {
+      workspaceId: h.workspaceId,
+      reservedAt: "2026-10-10T08:00:00.000Z",
+      keyMode: "managed" as const,
+    };
+    await h.usage.seed({ ...base, id: "run", costMicroUsd: 100 });
+    await h.usage.seed({
+      ...base,
+      id: "superseded-known",
+      settledAt: SETTLED_AT(2),
+      costMicroUsd: 40,
+      promptTokens: 600,
+      completionTokens: 150,
+      settledReason: "superseded",
+    });
+    await h.usage.seed({
+      ...base,
+      id: "superseded-unknown",
+      settledAt: SETTLED_AT(3),
+      costMicroUsd: null,
+      settledReason: "superseded",
+    });
+
+    const items = await itemsOf(await h.call("GET", FEED));
+    const summary = await json(
+      await h.call("GET", `${summaryOf(h.workspaceId)}?${OCTOBER}`),
+    );
+
+    expect(
+      items.map((item) => [item.id, item.reason, item.costMicroUsd]),
+    ).toEqual([
+      ["run", null, 100],
+      ["superseded-known", "superseded", 40],
+      ["superseded-unknown", "superseded", null],
+    ]);
+    // Two superseded runs are no runs of the quota; their known cost is in the sum, their unknown cost is counted.
+    expect(summary.groups).toEqual([
+      {
+        reviewKind: "diff",
+        keyMode: "managed",
+        recordCount: 1,
+        settledCount: 1,
+        supersededCount: 2,
+        knownCostMicroUsd: 140,
+        unknownCostCount: 1,
+      },
+    ]);
+  });
+
   // #278-T05
   it("counts per kind and key mode, sums the known cost, counts the unknown costs apart and leaves out void records", async () => {
     const h = await startOperatorApiHarness();
@@ -425,6 +477,7 @@ describe("the summary of a period", () => {
           keyMode: "managed",
           recordCount: 4,
           settledCount: 3,
+          supersededCount: 0,
           knownCostMicroUsd: 350,
           unknownCostCount: 1,
         },
@@ -433,6 +486,7 @@ describe("the summary of a period", () => {
           keyMode: "own",
           recordCount: 1,
           settledCount: 1,
+          supersededCount: 0,
           knownCostMicroUsd: 7,
           unknownCostCount: 0,
         },

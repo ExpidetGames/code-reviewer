@@ -828,6 +828,11 @@ const CASES: Case[] = [
     expectAnswer: (answer) => expect(answer).toBeUndefined(),
   },
   {
+    name: "usage.markSuperseded",
+    run: (a, b) => a.usage.markSuperseded([b.job.id]),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
     name: "usage.voidEndedJobs",
     run: (a) => a.usage.voidEndedJobs(),
     expectAnswer: (answer) => expect(answer).toBeUndefined(),

@@ -56,7 +56,11 @@
           "properties": {
             "id": { "$ref": "runner-api.v1.json#/$defs/JobId" },
             "heartbeatAt": { "$ref": "runner-api.v1.json#/$defs/Timestamp" },
-            "leaseExpiresAt": { "$ref": "runner-api.v1.json#/$defs/Timestamp" }
+            "leaseExpiresAt": { "$ref": "runner-api.v1.json#/$defs/Timestamp" },
+            "superseded": {
+              "description": "#396: true when a newer push replaced this run; see HeartbeatResponse in runner-api.v1.json. Sent only to a Worker that named the feature `supersede` in its details request.",
+              "type": "boolean"
+            }
           }
         }
       }
