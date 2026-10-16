@@ -77,7 +77,9 @@ def test_a_model_that_never_answers_ends_with_the_timeout_code_and_no_process_is
     engine: Engine, github: FakeGithub, llm: FakeLlm
 ) -> None:
     llm.override = Reply(hold=True)
-    job = engine.start(extra_env={"RUNNER_JOB_TIMEOUT_SECONDS": "3"})
+    # The timeout counts from the start of the process (#387), and the real PR-Agent takes seconds
+    # to start on a slow machine: it must be long enough for the model request to be sent first.
+    job = engine.start(extra_env={"RUNNER_JOB_TIMEOUT_SECONDS": "20"})
 
     outcome = job.finish(_stdin(engine))
 

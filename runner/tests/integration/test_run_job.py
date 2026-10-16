@@ -358,18 +358,20 @@ def test_the_options_of_the_job_win_over_the_repository_file_in_the_real_process
     assert seen["after_repo_file"]["num_max_findings"] == 3
 
 
-# The job timeout, soft (an await) and hard (a call that blocks everything).
+# The job timeout, soft (an await) and hard (a call that blocks everything). The timeout counts
+# from the start of the process (#387), so it is long enough for the command to start first.
 def test_a_command_that_awaits_too_long_is_stopped_with_the_timeout_code(tmp_path: Path) -> None:
-    process, _ = run_double(
-        "slow", tmp_path, extra_env={"RUNNER_JOB_TIMEOUT_SECONDS": "3"}, timeout=40
+    process, seen = run_double(
+        "slow", tmp_path, extra_env={"RUNNER_JOB_TIMEOUT_SECONDS": "8"}, timeout=40
     )
 
     result = result_of(process)
+    assert seen["calls"] == 1  # the command was running when the timeout cancelled it
     assert process.returncode == 1
     assert result["errorCode"] == "timeout"
     assert result["ok"] is False
     # CR-12-T05: the measured duration is the time until the stop, not zero and not the 120 s wait
-    assert result["durationMs"] >= 3000
+    assert result["durationMs"] >= 8000
 
 
 # #387-T06: the command runs (the start-up is over before the 6 s timeout) and blocks the loop, so
