@@ -94,6 +94,8 @@ describe("the migrations of both epics", () => {
       "20261015200000_add_usage_record_settled_reason",
       "20261016090000_create_refusal_notices",
       "20261016120000_create_plan_handoff_tokens",
+      "20261016140000_add_job_accepts_supersede",
+      "20261016140100_widen_usage_record_settled_reason",
     ]);
   });
 

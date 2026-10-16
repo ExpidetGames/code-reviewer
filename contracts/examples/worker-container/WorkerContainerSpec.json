@@ -1,9 +1,7 @@
 {
   "version": 1,
   "user": "0:0",
-  "capDrop": [
-    "ALL"
-  ],
+  "capDrop": ["ALL"],
   "capAdd": [
     {
       "name": "SETUID",
@@ -38,41 +36,24 @@
       "startupOnly": true
     }
   ],
-  "securityOpt": [
-    "no-new-privileges:true"
-  ],
+  "securityOpt": ["no-new-privileges:true"],
   "readOnly": true,
   "tmpfs": [
     {
       "path": "/tmp",
-      "options": [
-        "rw",
-        "noexec",
-        "nosuid",
-        "nodev"
-      ],
+      "options": ["rw", "noexec", "nosuid", "nodev"],
       "size": "512m",
       "mode": "1777"
     },
     {
       "path": "/run",
-      "options": [
-        "rw",
-        "noexec",
-        "nosuid",
-        "nodev"
-      ],
+      "options": ["rw", "noexec", "nosuid", "nodev"],
       "size": "1m",
       "mode": "0755"
     },
     {
       "path": "/home/runner",
-      "options": [
-        "rw",
-        "noexec",
-        "nosuid",
-        "nodev"
-      ],
+      "options": ["rw", "noexec", "nosuid", "nodev"],
       "size": "64m",
       "uid": 10001,
       "gid": 10001,
@@ -111,9 +92,5 @@
     "cgroupns",
     "dockerSocket"
   ],
-  "overridable": [
-    "memory.limit",
-    "memory.reservation",
-    "memory.swap"
-  ]
+  "overridable": ["memory.limit", "memory.reservation", "memory.swap"]
 }

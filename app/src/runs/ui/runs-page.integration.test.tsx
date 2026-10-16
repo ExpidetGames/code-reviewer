@@ -138,7 +138,7 @@ describe("the Runs page", () => {
       "Succeeded",
       "Failed",
       "Cancelled",
-      "Replaced",
+      "Superseded",
     ]);
     expect(
       screen.getByRole("link", { name: "Reset filter" }).getAttribute("href"),

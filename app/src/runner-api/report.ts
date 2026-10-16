@@ -91,6 +91,24 @@ function invalid(parsed: Extract<Parsed<unknown>, { ok: false }>): Response {
   });
 }
 
+/** The answer to an accepted heartbeat; `superseded` (#397) tells a run that a newer push replaced it. */
+export function heartbeatAnswer(
+  job: Job,
+  superseded: boolean,
+): HeartbeatResponse {
+  if (job.heartbeatAt === null || job.leaseExpiresAt === null)
+    throw new Error(`Heartbeat of job ${job.id} left no times.`);
+  return {
+    version: RUNNER_API_VERSION,
+    job: {
+      id: job.id,
+      heartbeatAt: job.heartbeatAt,
+      leaseExpiresAt: job.leaseExpiresAt,
+      ...(superseded ? { superseded: true } : {}),
+    },
+  };
+}
+
 export async function handleHeartbeat(
   deps: ReportDeps,
   jobId: string,
@@ -110,17 +128,10 @@ export async function handleHeartbeat(
     );
     return errorResponse(409, "RUNNER_LEASE_LOST");
   }
-  const { job } = result;
-  if (job.heartbeatAt === null || job.leaseExpiresAt === null)
-    throw new Error(`Heartbeat of job ${jobId} left no times.`);
-  return jsonResponse(200, {
-    version: RUNNER_API_VERSION,
-    job: {
-      id: job.id,
-      heartbeatAt: job.heartbeatAt,
-      leaseExpiresAt: job.leaseExpiresAt,
-    },
-  } satisfies HeartbeatResponse);
+  return jsonResponse(
+    200,
+    heartbeatAnswer(result.job, result.status === "superseded"),
+  );
 }
 
 export async function handleComplete(
@@ -242,7 +253,12 @@ export async function finishJob(
     case "completed":
     case "already_completed": {
       const status = result.job.status;
-      if (status !== "succeeded" && status !== "failed")
+      // `superseded` (#397): the report of a run a newer push replaced is stored and the job stays superseded.
+      if (
+        status !== "succeeded" &&
+        status !== "failed" &&
+        status !== "superseded"
+      )
         throw new Error(`Completed job ${jobId} has the status ${status}.`);
       deps.logger.info(
         `[runner-api] complete ${who} job=${jobId} status=${status}${result.status === "already_completed" ? " (repeated)" : ""}`,

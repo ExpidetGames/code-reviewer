@@ -9,7 +9,9 @@
  * - `running`     held by a runner under a lease
  * - `succeeded`   finished, the review was published
  * - `failed`      finished without a result; `error_code` says why
- * - `superseded`  replaced by a newer job for the same pull request while it was still waiting
+ * - `superseded`  replaced by a newer job for the same pull request: while it was waiting, or (#397) while it was
+ *                  running, when its holder understands the supersede (`accepts_supersede`): it then drains, finishes
+ *                  the model requests in flight and reports what it used, and its lease is kept for that
  * - `cancelled`   dropped while waiting (project deactivated, pull request closed)
  */
 export const JOB_STATUSES = [
@@ -25,8 +27,9 @@ export type JobStatus = (typeof JOB_STATUSES)[number];
 const TRANSITIONS: Record<JobStatus, readonly JobStatus[]> = {
   queued: ["running", "superseded", "cancelled"],
   // `queued` again only when the lease ran out or the runner gave the job back (`release`); both
-  // count a lost attempt, and the last allowed one fails the job instead.
-  running: ["succeeded", "failed", "queued"],
+  // count a lost attempt, and the last allowed one fails the job instead. `superseded` (#397) when a newer push
+  // replaced the run of a holder that understands it.
+  running: ["succeeded", "failed", "queued", "superseded"],
   succeeded: [],
   failed: [],
   superseded: [],

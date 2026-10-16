@@ -81,9 +81,9 @@
           "properties": {
             "id": { "$ref": "runner-api.v1.json#/$defs/JobId" },
             "status": {
-              "description": "succeeded or failed: the job is finished. queued: the job was given back (runner_shutdown, launch_failed) and waits for another claim; it fails instead if that was the last allowed attempt.",
+              "description": "succeeded or failed: the job is finished. queued: the job was given back (runner_shutdown, launch_failed) and waits for another claim; it fails instead if that was the last allowed attempt. superseded (#397): the run was replaced by a newer push; its result is stored once and the job stays superseded.",
               "type": "string",
-              "enum": ["succeeded", "failed", "queued"]
+              "enum": ["succeeded", "failed", "queued", "superseded"]
             }
           }
         },

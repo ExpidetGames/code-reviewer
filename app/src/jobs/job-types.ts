@@ -155,6 +155,12 @@ export type JobErrorCode = (typeof JOB_ERROR_CODES)[number];
 export type HeartbeatResult =
   | { status: "ok"; job: Job }
   /**
+   * #397: a newer push replaced this run. The claim is still valid for the drain window, so the holder can finish
+   * the model requests in flight and report what they cost; its lease is not extended. The holder must stop
+   * sending model requests and publish nothing.
+   */
+  | { status: "superseded"; job: Job }
+  /**
    * The caller does not hold the job: its lease token is not the current one (the lease was lost and
    * the job requeued or handed on, even to the same runner id), the job is finished, or it ran past
    * the hard limit (it is failed with `timeout` by this very call). The runner must stop.

@@ -107,12 +107,25 @@
       "description": "#279: what the app read from the provider's public metadata about the job's Dynamic model, so any tool-capable model runs without the operator describing it. Optional, and sent only to a runner that advertised the `dynamic_capabilities` feature in its claim. It comes from the app, never from the repository or the model. The runner can only narrow with it: it is intersected with the operator's RUNNER_DYNAMIC_CAPABILITIES (both booleans must hold, the smaller number wins for the limits, the higher unit price wins) and never widens what that allows. `maxOutputTokens` is the output allowance of one call, chosen by the app within the model's stated limit. The two unit prices come together or not at all; a model without them (outside the runner's built-in default) is refused by the runner with dynamic_config_invalid. A closed object.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["toolChoiceRequired", "structuredOutput", "maxOutputTokens", "contextWindowTokens"],
+      "required": [
+        "toolChoiceRequired",
+        "structuredOutput",
+        "maxOutputTokens",
+        "contextWindowTokens"
+      ],
       "properties": {
         "toolChoiceRequired": { "type": "boolean" },
         "structuredOutput": { "type": "boolean" },
-        "maxOutputTokens": { "type": "integer", "minimum": 1, "maximum": 10000000 },
-        "contextWindowTokens": { "type": "integer", "minimum": 1, "maximum": 100000000 },
+        "maxOutputTokens": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000000
+        },
+        "contextWindowTokens": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000000
+        },
         "inputUsdPerMtok": { "$ref": "#/$defs/UnitPrice" },
         "outputUsdPerMtok": { "$ref": "#/$defs/UnitPrice" }
       },
@@ -125,13 +138,22 @@
       "description": "#195: the checkout facts a Dynamic job carries, pinned when the job was queued or claimed and bounded. `headSha` is the exact queued head; `baseRef` is the branch the pull request merges into (the exact base SHA is resolved during checkout, #196). `previousReviewedSha` is the head of the last successful review of the same kind (#199), or null. `attemptedShas` (#255, optional: absent means none, and the app leaves it out when empty) are the heads of the earlier jobs of the pull request that ran and did not succeed, newest first; the publisher accepts such a head as the state of the summary comment, because a run may have written it and then ended without success. `attemptedShasTruncated` (#257, optional: absent means false, and the app leaves it out unless it is true) says that more heads qualified than the list holds; only then does the publisher rewrite a bot-owned summary whose state head it cannot account for, with a full review, instead of refusing it. `comparison` is the *declared* mode: a hint for preparation, never proof that the comparison is complete — the checkout verifies that before it trusts it.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["repository", "baseRef", "headSha", "previousReviewedSha", "comparison"],
+      "required": [
+        "repository",
+        "baseRef",
+        "headSha",
+        "previousReviewedSha",
+        "comparison"
+      ],
       "properties": {
         "repository": { "type": "string", "minLength": 1, "maxLength": 200 },
         "baseRef": { "type": "string", "minLength": 1, "maxLength": 255 },
         "headSha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
         "previousReviewedSha": {
-          "oneOf": [{ "type": "string", "pattern": "^[0-9a-f]{40}$" }, { "type": "null" }]
+          "oneOf": [
+            { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+            { "type": "null" }
+          ]
         },
         "attemptedShas": {
           "type": "array",
@@ -486,9 +508,9 @@
           "properties": {
             "id": { "$ref": "#/$defs/JobId" },
             "status": {
-              "description": "succeeded or failed: the job is finished. queued: the runner reported runner_shutdown, the job was given back and waits for another runner (it fails instead if that was the last allowed attempt).",
+              "description": "succeeded or failed: the job is finished. queued: the runner reported runner_shutdown, the job was given back and waits for another runner (it fails instead if that was the last allowed attempt). superseded (#397): the run was replaced by a newer push; its report is stored once and the job stays superseded.",
               "type": "string",
-              "enum": ["succeeded", "failed", "queued"]
+              "enum": ["succeeded", "failed", "queued", "superseded"]
             }
           }
         },
@@ -573,7 +595,18 @@
             "id": { "$ref": "#/$defs/JobId" },
             "status": {
               "type": "string",
-              "enum": ["queued", "running", "succeeded", "failed", "superseded", "cancelled"]
+              "enum": [
+                "queued",
+                "running",
+                "succeeded",
+                "failed",
+                "superseded",
+                "cancelled"
+              ]
+            },
+            "draining": {
+              "description": "#397: true for a superseded job whose claim is still valid: its Worker is finishing the model requests in flight and reporting what they cost. A Dispatcher keeps the VM of a draining job until the claim ends (the reaper). Absent means not draining; a reader that does not know the field sees a superseded job as ended.",
+              "type": "boolean"
             }
           }
         }

@@ -423,9 +423,9 @@ export interface WorkerResultResponse {
      */
     id: string;
     /**
-     * succeeded or failed: the job is finished. queued: the job was given back (runner_shutdown, launch_failed) and waits for another claim; it fails instead if that was the last allowed attempt.
+     * succeeded or failed: the job is finished. queued: the job was given back (runner_shutdown, launch_failed) and waits for another claim; it fails instead if that was the last allowed attempt. superseded (#397): the run was replaced by a newer push; its result is stored once and the job stays superseded.
      */
-    status: "succeeded" | "failed" | "queued";
+    status: "succeeded" | "failed" | "queued" | "superseded";
     [k: string]: unknown;
   };
   alreadyCompleted: boolean;

@@ -23,8 +23,12 @@ const ENDED_JOB_STATUSES = ["succeeded", "failed", "cancelled", "superseded"];
  * - A job a runner held that then ended with no result (its lease ran out on the last attempt, it ran past the hard
  *   limit, its runner was shut down on the last attempt) may have used the model: its record is `settled` with an
  *   unknown cost and unknown tokens, and the reason `no_result`. Counting it is the conservative reading (#273).
- * - Any other ended job (cancelled, replaced, refused at claim, given back before the runner began, never
- *   dispatched) made no model call anybody knows of: its record is void and does not count.
+ * - A run that was superseded while it ran (#397) has its record marked `superseded` and keeps it reserved while its
+ *   Worker drains. When the claim ran out without a report (the drain is over), the record is `settled` with an
+ *   unknown cost and unknown tokens: the model may have been in use for the request in flight, and nothing is
+ *   guessed. It does not count as a run of the quota (the reason), and an unknown cost is never billed.
+ * - Any other ended job (cancelled, replaced while it waited, refused at claim, given back before the runner began,
+ *   never dispatched) made no model call anybody knows of: its record is void and does not count.
  *
  * Two statements over the reserved records only (a partial index), each driven by those few records and probing
  * their job by primary key, so the work does not grow with the history of ended jobs.
@@ -57,10 +61,30 @@ export async function closeRecordsOfEndedJobs(
     )
     .returning(["workspace_id", "job_id"])
     .execute();
+  const drained = await executor
+    .updateTable("usage_records")
+    .set({ state: "settled", settled_at: settledAt })
+    .where("state", "=", sql.lit("reserved"))
+    .where("settled_reason", "=", "superseded")
+    .where((eb) =>
+      eb.exists(
+        eb
+          .selectFrom("jobs")
+          .select("jobs.id")
+          .whereRef("jobs.id", "=", "usage_records.job_id")
+          .where("jobs.status", "=", "superseded")
+          .where("jobs.claimed_at", "is not", null)
+          .where("jobs.lease_expires_at", "<=", settledAt),
+      ),
+    )
+    .returning(["workspace_id", "job_id"])
+    .execute();
   await executor
     .updateTable("usage_records")
     .set({ state: "void" })
     .where("state", "=", sql.lit("reserved"))
+    // A superseded run that is still draining keeps its record (#397).
+    .where("settled_reason", "is", null)
     .where((eb) =>
       eb.exists(
         eb
@@ -71,7 +95,7 @@ export async function closeRecordsOfEndedJobs(
       ),
     )
     .execute();
-  return settled.map((row) => ({
+  return [...settled, ...drained].map((row) => ({
     workspaceId: row.workspace_id,
     jobId: row.job_id,
   }));

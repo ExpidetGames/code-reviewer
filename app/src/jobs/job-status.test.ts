@@ -17,6 +17,8 @@ const ALLOWED: ReadonlyArray<readonly [JobStatus, JobStatus]> = [
   ["running", "succeeded"],
   ["running", "failed"],
   ["running", "queued"],
+  // #397: a newer push replaced a running job whose holder understands it.
+  ["running", "superseded"],
 ];
 
 describe("job status transitions", () => {
@@ -29,6 +31,16 @@ describe("job status transitions", () => {
         expect(canTransition(from, to), `${from} to ${to}`).toBe(
           allowed.has(`${from}>${to}`),
         );
+  });
+
+  // CR-27-T13
+  // #397-T01
+  it("lets a running job be superseded, and nothing leave the state of a superseded one", () => {
+    expect(canTransition("running", "superseded")).toBe(true);
+    for (const to of JOB_STATUSES)
+      expect(canTransition("superseded", to), `superseded to ${to}`).toBe(
+        false,
+      );
   });
 
   // CR-27-T13
@@ -54,6 +66,6 @@ describe("job status transitions", () => {
     expect(statusesThatCanBecome("failed")).toEqual(["running"]);
     expect(statusesThatCanBecome("queued")).toEqual(["running"]);
     expect(statusesThatCanBecome("cancelled")).toEqual(["queued"]);
-    expect(statusesThatCanBecome("superseded")).toEqual(["queued"]);
+    expect(statusesThatCanBecome("superseded")).toEqual(["queued", "running"]);
   });
 });

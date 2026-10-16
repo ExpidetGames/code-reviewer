@@ -590,7 +590,7 @@ describe("the detail page", () => {
       screen.getByRole("link", { name: "The newer run" }).getAttribute("href"),
     ).toBe("/w/acme/runs/newer-run");
     expect(screen.getByText("Lost attempts")).toBeTruthy();
-    expect(screen.getByText("Replaced")).toBeTruthy();
+    expect(screen.getByText("Superseded")).toBeTruthy();
   });
 });
 

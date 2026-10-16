@@ -9,6 +9,7 @@
       "keyMode": "managed",
       "recordCount": 42,
       "settledCount": 41,
+      "supersededCount": 5,
       "knownCostMicroUsd": 830114,
       "unknownCostCount": 2
     },
@@ -17,6 +18,7 @@
       "keyMode": "own",
       "recordCount": 3,
       "settledCount": 3,
+      "supersededCount": 0,
       "knownCostMicroUsd": 0,
       "unknownCostCount": 3
     }

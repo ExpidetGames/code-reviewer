@@ -99,7 +99,13 @@
               },
               "expected": {
                 "type": "string",
-                "enum": ["ok", "malformed", "expired", "unknown_key", "bad_signature"]
+                "enum": [
+                  "ok",
+                  "malformed",
+                  "expired",
+                  "unknown_key",
+                  "bad_signature"
+                ]
               }
             }
           }

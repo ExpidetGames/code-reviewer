@@ -63,9 +63,11 @@ export type UsagePageOptions = {
 export type UsageSummaryGroup = {
   reviewKind: ProjectReviewKind;
   keyMode: UsageKeyMode;
-  /** Runs that count (`reserved` and `settled`; never `void`). */
+  /** Runs that count (`reserved` and `settled`; never `void`, never a run that was superseded). */
   recordCount: number;
   settledCount: number;
+  /** Runs a newer push replaced (#397): not counted above, but their cost and unknown costs are in the sums below. */
+  supersededCount: number;
   /** Sum of the known cost of the settled runs, micro-USD. */
   knownCostMicroUsd: number;
   /** Settled runs whose cost is unknown. */
@@ -104,6 +106,12 @@ export type UsageRecordsRepository = {
    * transaction of every transition that ends a waiting job.
    */
   voidEndedJobs(): Promise<void>;
+  /**
+   * #397: marks the `reserved` records of these jobs of this workspace as superseded runs (reason `superseded`): the
+   * run was replaced by a newer push and is draining. It stays `reserved` until its Worker reports or the drain ends,
+   * but it no longer counts as a run of the quota, and `voidEndedJobs` leaves it alone.
+   */
+  markSuperseded(jobIds: readonly string[]): Promise<void>;
   get(jobId: string): Promise<UsageRecord | undefined>;
   /** Records that count (`reserved` and `settled`, never `void`) reserved at or after `since`, per review kind. */
   countByKind(since: string): Promise<Record<ProjectReviewKind, number>>;
@@ -249,11 +257,24 @@ export function createUsageRecordsRepository(
         .execute();
     },
 
+    async markSuperseded(jobIds) {
+      if (jobIds.length === 0) return;
+      await db
+        .updateTable("usage_records")
+        .set({ settled_reason: "superseded" })
+        .where("workspace_id", "=", workspaceId)
+        .where("job_id", "in", [...jobIds])
+        .where("state", "=", "reserved")
+        .execute();
+    },
+
     async voidEndedJobs() {
       await db
         .updateTable("usage_records")
         .set({ state: "void" })
         .where("workspace_id", "=", workspaceId)
+        // A run that was superseded while it ran keeps its record until it reports (#397).
+        .where("settled_reason", "is", null)
         // A literal, not a bound value, so the planner can use the partial index of the reserved records.
         .where("state", "=", sql.lit("reserved"))
         // Driven by the few reserved records, each probing its job by primary key.
@@ -286,6 +307,13 @@ export function createUsageRecordsRepository(
         .select(["review_kind", (eb) => eb.fn.countAll().as("runs")])
         .where("workspace_id", "=", workspaceId)
         .where("state", "in", ["reserved", "settled"])
+        // A run that a newer push replaced is not a run of the quota (#397); its cost still counts as usage.
+        .where((eb) =>
+          eb.or([
+            eb("settled_reason", "is", null),
+            eb("settled_reason", "<>", "superseded"),
+          ]),
+        )
         .where("reserved_at", ">=", since)
         .groupBy("review_kind")
         .execute();
@@ -340,8 +368,15 @@ export function createUsageRecordsRepository(
         .select([
           "review_kind",
           "key_mode",
-          (eb) => eb.fn.countAll().as("records"),
-          sql`sum(case when state = 'settled' then 1 else 0 end)`.as("settled"),
+          sql`sum(case when settled_reason is null or settled_reason <> 'superseded' then 1 else 0 end)`.as(
+            "records",
+          ),
+          sql`sum(case when state = 'settled' and (settled_reason is null or settled_reason <> 'superseded') then 1 else 0 end)`.as(
+            "settled",
+          ),
+          sql`sum(case when settled_reason = 'superseded' then 1 else 0 end)`.as(
+            "superseded",
+          ),
           (eb) => eb.fn.sum("cost_micro_usd").as("cost"),
           sql`sum(case when state = 'settled' and cost_micro_usd is null then 1 else 0 end)`.as(
             "unknown",
@@ -360,6 +395,7 @@ export function createUsageRecordsRepository(
         keyMode: row.key_mode as UsageKeyMode,
         recordCount: Number(row.records),
         settledCount: Number(row.settled),
+        supersededCount: Number(row.superseded),
         knownCostMicroUsd: Number(row.cost ?? 0),
         unknownCostCount: Number(row.unknown),
       }));
