@@ -78,6 +78,7 @@ function entitlements(keyMode: "own" | "managed"): EntitlementsData {
       diffRunsPerPeriod: null,
       dynamicRunsPerPeriod: null,
       managedCostLimitMicroUsd: null,
+      ownKeyCostLimitMicroUsd: null,
     },
     periodStart: "2026-10-01T00:00:00.000Z",
     suspended: false,
