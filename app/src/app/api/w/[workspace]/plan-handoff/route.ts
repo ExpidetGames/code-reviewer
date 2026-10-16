@@ -6,6 +6,7 @@
 // src/plan-handoff/http.ts.
 import { connection } from "next/server";
 import { getPlanHandoffRoute } from "@/plan-handoff/shared";
+import { withWorkspace } from "@/workspaces/access-runtime";
 
 export async function POST(
   request: Request,
@@ -14,5 +15,7 @@ export async function POST(
   // Needs the request and the database, so it never runs at build time.
   await connection();
   const { workspace } = await context.params;
-  return getPlanHandoffRoute().post(request, workspace);
+  return getPlanHandoffRoute().post(request, (handler) =>
+    withWorkspace(workspace, "manage_plan", handler),
+  );
 }

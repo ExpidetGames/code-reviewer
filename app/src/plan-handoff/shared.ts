@@ -8,7 +8,6 @@ import { createInstanceSettingsRepository } from "../db/repositories/instance-se
 import { createPlanHandoffTokensRepository } from "../db/repositories/plan-handoff-tokens-repository.ts";
 import { createRateLimitsRepository } from "../db/repositories/rate-limits-repository.ts";
 import { getDatabase } from "../db/startup.ts";
-import { withWorkspace } from "../workspaces/access-runtime.ts";
 import { createPlanHandoffRoute, type PlanHandoffRoute } from "./http.ts";
 import { createPlanHandoffLimits } from "./limits.ts";
 import { readPlanManagementUrl } from "./settings.ts";
@@ -29,7 +28,6 @@ export function getPlanHandoffRoute(): PlanHandoffRoute {
   return createPlanHandoffRoute({
     planManagementUrl: getPlanManagementUrl,
     notFound,
-    withAccess: (slug, handler) => withWorkspace(slug, "manage_plan", handler),
     async issue({ workspaceId, userId, role }) {
       const permission = await limits.hit({ workspaceId, userId });
       if (!permission.allowed)

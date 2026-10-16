@@ -30,11 +30,6 @@ export type PlanHandoffRouteDependencies = {
   planManagementUrl: () => Promise<string | null>;
   /** Next.js's own 404: the answer of a path that does not exist. Throws. */
   notFound: () => never;
-  /** Resolves the person and their role for `manage_plan`, then runs the handler (`withWorkspace`). */
-  withAccess: (
-    slug: string,
-    handler: (access: WorkspaceAccess) => Promise<Response>,
-  ) => Promise<Response>;
   /** Counts the click and, when it is allowed, makes the token for the person with the role they have now. */
   issue: (input: {
     workspaceId: string;
@@ -44,8 +39,17 @@ export type PlanHandoffRouteDependencies = {
   log: { info(line: string): void };
 };
 
+/**
+ * Resolves the person and their role for `manage_plan`, then runs the handler: the route file passes
+ * `(handler) => withWorkspace(workspace, "manage_plan", handler)`, so the guard stays where every other workspace
+ * route has it (and `src/workspaces/guard-rule.test.ts` can see it).
+ */
+export type WithAccess = (
+  handler: (access: WorkspaceAccess) => Promise<Response>,
+) => Promise<Response>;
+
 export type PlanHandoffRoute = {
-  post(request: Request, slug: string): Promise<Response>;
+  post(request: Request, withAccess: WithAccess): Promise<Response>;
 };
 
 function refusal(
@@ -70,16 +74,15 @@ function refusal(
 export function createPlanHandoffRoute({
   planManagementUrl,
   notFound,
-  withAccess,
   issue,
   log,
 }: PlanHandoffRouteDependencies): PlanHandoffRoute {
   return {
-    async post(request, slug) {
+    async post(request, withAccess) {
       const page = await planManagementUrl();
       if (page === null) return notFound();
       if (isCrossSite(request)) return refusal(403, "cross_site_request");
-      return withAccess(slug, async (access) => {
+      return withAccess(async (access) => {
         // The matrix lets an Admin and an Owner through; the token is bound to the role, which can only be one of them.
         const role = access.role;
         if (role !== "owner" && role !== "admin")
