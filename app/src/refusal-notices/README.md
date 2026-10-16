@@ -84,10 +84,13 @@ review ran for this change, that the workspace has used the reviews included for
 are paused for this workspace, with no reason), and to contact an Owner or Admin of the workspace (the limits and the suspension are set by the operator of the instance, so the text promises no action a workspace role can take). No amount, no
 count, no price, no model name, no reason for a suspension.
 
-**The link.** With a plan page configured the sentence links to `/w/<slug>/settings/plan` of the app
-(`plan-page.ts`); without one there is no link at all. The instance setting that turns it on is #284's (the
-operator-configured page the plan page hands over to); until it exists `getRefusalNoticeService` passes
-`planPageUrl: () => null` and no notice has a link. When #284 lands, wiring its setting there is the only change.
+**The link.** While the instance has an operator-configured plan management page (`plan_management_url`, #284) the
+sentence links to `/w/<slug>/settings/plan` of the app (`plan-page.ts`, the configured address of the app, never a request);
+without one there is no link at all. `getRefusalNoticeService` passes `createPlanPageUrlResolver` (`plan-link.ts`), which reads the setting every
+time a notice is made, so switching the page on or off takes effect at once. The link is never the operator's page and
+carries no token: an Owner or Admin who follows it finds "Manage plan" on the plan page (#282) and is handed over from
+there (`src/plan-handoff/README.md`). A setting that cannot be read costs the notice only its link. The plan page
+itself is #282's; until it exists, the path is a missing page.
 
 ## Not covered
 
@@ -105,6 +108,6 @@ instances of different versions never post two for one pull request and period: 
 
 `notice-text.test.ts` (text), `service.integration.test.ts` (end to end on the claim, with the fake GitHub: one
 comment, once per period, closed and draft pull requests, GitHub refusing, retries, two instances),
-`plan-page.test.ts`, `db/repositories/refusal-notices-repository*.test.ts` (the record, SQLite and Postgres),
+`plan-page.test.ts`, `plan-link.integration.test.ts` (the link follows the setting), `db/repositories/refusal-notices-repository*.test.ts` (the record, SQLite and Postgres),
 `scoped-isolation.integration.test.ts` (workspaces), `integrations/providers/github-app/` (client and provider),
 `dispatch/sweep.test.ts` (the sweep step).
