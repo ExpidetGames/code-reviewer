@@ -11,7 +11,7 @@ from typing import Any
 
 from support import API_KEY, TOKEN, make_job_dict
 
-from code_reviewer_runner.job_loop.api import ApiError, ClaimedJob, CompleteReply
+from code_reviewer_runner.job_loop.api import ApiError, ClaimedJob, CompleteReply, HeartbeatReply
 from code_reviewer_runner.job_loop.loop import RunnerLoop
 from code_reviewer_runner.job_loop.process import ProcessOutcome, ProcessSpec, RunningProcess
 from code_reviewer_runner.job_loop.settings import LoopSettings
@@ -116,6 +116,8 @@ class FakeProcess:
     def __init__(self, spec: ProcessSpec) -> None:
         self.spec = spec
         self.terminated = False
+        # #396: how many times the process was told that its run was superseded.
+        self.superseded_notices = 0
         self._done: asyncio.Future[ProcessOutcome] = asyncio.get_running_loop().create_future()
 
     def finish(self, result: ProcessOutcome | None = None) -> None:
@@ -124,6 +126,13 @@ class FakeProcess:
 
     async def wait(self) -> ProcessOutcome:
         return await asyncio.shield(self._done)
+
+    def notify_superseded(self) -> None:
+        self.superseded_notices += 1
+        if self.on_superseded is not None:
+            self.on_superseded(self)
+
+    on_superseded: Callable[["FakeProcess"], None] | None = None
 
     async def terminate(self) -> None:
         self.terminated = True
@@ -160,6 +169,8 @@ class FakeApi:
         self.claim_calls = 0
         self.heartbeats: list[tuple[str, str]] = []
         self.heartbeat_errors: list[ApiError] = []
+        # #396: the heartbeats answer `superseded` from this many heartbeats on (None: never).
+        self.superseded_from: int | None = None
         self.completions: list[tuple[str, str, Mapping[str, Any]]] = []
         self.complete_errors: list[ApiError] = []
         self.complete_reply = CompleteReply("succeeded", False)
@@ -177,10 +188,14 @@ class FakeApi:
             raise item
         return item
 
-    async def heartbeat(self, job_id: str, lease_token: str) -> None:
+    async def heartbeat(self, job_id: str, lease_token: str) -> HeartbeatReply:
         self.heartbeats.append((job_id, lease_token))
         if self.heartbeat_errors:
             raise self.heartbeat_errors.pop(0)
+        return HeartbeatReply(
+            superseded=self.superseded_from is not None
+            and len(self.heartbeats) >= self.superseded_from
+        )
 
     async def complete(
         self, job_id: str, lease_token: str, result: Mapping[str, Any]

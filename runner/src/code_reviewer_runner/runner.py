@@ -117,6 +117,13 @@ from code_reviewer_runner.review_state_watch import (
     WatchError,
     install_review_state_watch,
 )
+from code_reviewer_runner.supersede import (
+    PROCESS_SIGNAL,
+    SupersedeSignal,
+    WriteGuardError,
+    handling_the_signal,
+    install_write_guard,
+)
 from code_reviewer_runner.usage_probe import UsageProbe
 
 PROGRAM_NAME = "code-reviewer-run-job"
@@ -190,17 +197,60 @@ def _unreported_use(usage: Usage | None, meter: DiffCostMeter | None) -> str | N
     return NO_RESULT_REASON
 
 
+def as_superseded(result: JobResult, started: float, detail: str) -> JobResult:
+    """The result of a run that was told it was superseded (#396), whatever else it came to.
+
+    A run that published before it heard of it (`ok`) stays what it is: its review is on the pull
+    request. Any other end is `superseded`: nothing was published after the signal (the write guard,
+    and the Dynamic path checks first), and the usage the run measured stays, with the reason it
+    carries
+    (an unmeasured request in flight makes the cost unknown, as for any run).
+    """
+    if result.ok:
+        return result
+    header = f"{ErrorCode.SUPERSEDED.value}: {detail}"
+    tail = fit_to_bytes(f"{header}\n{result.log_tail}", MAX_TAIL_BYTES)
+    return replace(
+        result,
+        comment_url=None,
+        error_code=ErrorCode.SUPERSEDED,
+        log_tail=tail,
+        log_truncated=result.log_truncated or tail != f"{header}\n{result.log_tail}",
+    )
+
+
+SUPERSEDED_DETAIL = (
+    "a newer push replaced this run; no further model request was made and nothing was published"
+)
+
+
 def run_job(
     job: Job,
     capture: LogCapture,
     started: float,
     timeout_seconds: float | None = None,
     meter_slot: MeterSlot | None = None,
+    superseded: SupersedeSignal = PROCESS_SIGNAL,
 ) -> JobResult:
     """Run the job's command with PR-Agent. Never raises: every failure becomes a result.
 
     `meter_slot` is given the meter of the run as soon as it exists, so the watchdog can tell
-    whether a request was sent when it has to end a command that blocks the event loop (#363)."""
+    whether a request was sent when it has to end a command that blocks the event loop (#363).
+
+    A run that is superseded meanwhile (#396) finishes the model requests in flight, sends no more,
+    writes nothing to GitHub and ends `superseded` with the usage it measured."""
+    result = _run_diff_job(job, capture, started, timeout_seconds, meter_slot, superseded)
+    return as_superseded(result, started, SUPERSEDED_DETAIL) if superseded.is_set() else result
+
+
+def _run_diff_job(
+    job: Job,
+    capture: LogCapture,
+    started: float,
+    timeout_seconds: float | None,
+    meter_slot: MeterSlot | None,
+    superseded: SupersedeSignal,
+) -> JobResult:
     # Everything that is patched into PR-Agent is undone in the end, whichever install fails.
     patches = ExitStack()
     try:
@@ -214,7 +264,7 @@ def run_job(
                 # Every OpenRouter request carries `provider.require_parameters` (#270).
                 patches.callback(apply_require_parameters_patch())
             # The cost of the run is what the provider states for every answer (#274).
-            meter, undo_meter = install_cost_meter()
+            meter, undo_meter = install_cost_meter(superseded=superseded)
             patches.callback(undo_meter)
             if meter_slot is not None:
                 meter_slot.meter = meter
@@ -257,6 +307,18 @@ def run_job(
         patches.callback(undo_recorder)
         guard, undo_guard = install_repo_settings_guard()
         patches.callback(undo_guard)
+        try:
+            # Last, so it is the outermost: once the run is superseded nothing reaches GitHub
+            # (#396).
+            _writes, undo_writes = install_write_guard(superseded)
+        except WriteGuardError as error:
+            return _failure(
+                ErrorCode.RUNNER_ERROR,
+                f"cannot guard the writes of PR-Agent: {error}",
+                started,
+                capture,
+            )
+        patches.callback(undo_writes)
         # What PR-Agent measured is kept for a command that fails after its model call (#273).
         probe = UsageProbe()
         try:
@@ -390,6 +452,7 @@ def run_dynamic_job(
     lease_check: LeaseCheck | None = None,
     publish_failure: Callable[[Job, ErrorCode, str | None], Published | None] | None = None,
     usage_probe: UsageProbe | None = None,
+    superseded: SupersedeSignal = PROCESS_SIGNAL,
 ) -> JobResult:
     """Run a Dynamic job with the read-only stock engine (#197) and publish its summary (#201).
 
@@ -423,7 +486,13 @@ def run_dynamic_job(
         publish=publish,
         lease_check=lease_check,
         usage_probe=usage_probe or UsageProbe(),
+        superseded=superseded,
     )
+    # A run that was superseded (#396) ends `superseded` with its ledger's usage and writes nothing,
+    # not
+    # even the note of a failure: that code has no sentence.
+    if superseded.is_set():
+        result = as_superseded(result, started, SUPERSEDED_DETAIL)
     return add_failure_note(job, result, lease_check, publish_failure or publish_failure_note)
 
 
@@ -475,6 +544,7 @@ def _run_dynamic_job(
     publish: Callable[[Job, DynamicFindings], Published] | None = None,
     lease_check: LeaseCheck | None = None,
     usage_probe: UsageProbe,
+    superseded: SupersedeSignal = PROCESS_SIGNAL,
 ) -> JobResult:
     dynamic = job.dynamic
     base = job.base
@@ -550,6 +620,8 @@ def _run_dynamic_job(
             capabilities=capabilities,
             capability=capability,
             require_parameters=job.llm.require_parameters,
+            # Once superseded (#396) the proxy refuses every new request; one in flight finishes.
+            superseded=superseded.is_set,
         )
     except LimitError as error:
         # The destination cannot serve the run: fail before the engine starts, with no fallback.
@@ -621,7 +693,15 @@ def _run_dynamic_job(
     # findings passed every check above: any earlier failure leaves the previous comment untouched.
     # A run whose job is no longer ours (lease lost, cancelled) writes nothing (#260). Without a
     # check (a process the loop did not start) there is no lease to ask about.
+    if superseded.is_set():
+        return _failure(
+            ErrorCode.SUPERSEDED, SUPERSEDED_DETAIL, started, capture, usage=usage_probe.usage()
+        )
     if lease_check is not None and (state := lease_check()) is not LeaseState.HELD:
+        if state is LeaseState.SUPERSEDED:
+            return _failure(
+                ErrorCode.SUPERSEDED, SUPERSEDED_DETAIL, started, capture, usage=usage_probe.usage()
+            )
         detail = (
             "the lease could not be confirmed, so nothing was written"
             if state is LeaseState.UNCONFIRMED
@@ -864,7 +944,20 @@ def main(
     stdin: TextIO | None = None,
     stdout: TextIO | None = None,
 ) -> int:
-    """Entry point of the console script. Returns the process exit code."""
+    """Entry point of the console script. Returns the process exit code.
+
+    `SIGUSR1` means that the run was superseded (#396): the handler is in place for the whole
+    run."""
+    with handling_the_signal():
+        return _main(argv, stdin=stdin, stdout=stdout)
+
+
+def _main(
+    argv: Sequence[str] | None = None,
+    *,
+    stdin: TextIO | None = None,
+    stdout: TextIO | None = None,
+) -> int:
     started = time.monotonic()
     try:
         _build_parser().parse_args(argv)

@@ -55,6 +55,7 @@ class Recorder:
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
         self.extra_field = False
+        self.superseded = False
         details = example("WorkerJobDetailsResponse")
         self.job_id: str = details["job"]["id"]
         owner = self
@@ -79,6 +80,8 @@ class Recorder:
                     else "WorkerResultResponse"
                 )
                 answer = example(name)
+                if owner.superseded and name == "WorkerHeartbeatResponse":
+                    answer["job"]["superseded"] = True
                 if owner.extra_field:
                     answer["somethingNew"] = {"nested": True}
                     answer["job"]["alsoNew"] = 1
@@ -135,7 +138,7 @@ def test_the_client_speaks_the_worker_api_with_the_credential_in_the_authorizati
     # The credential is in no URL and in no body.
     assert CREDENTIAL not in json.dumps([[call["path"], call["body"]] for call in recorder.calls])
     # The details call names what this Worker reads, so the app sends optional fields to it.
-    assert "features=dynamic_capabilities" in recorder.calls[0]["path"]
+    assert "features=dynamic_capabilities,supersede" in recorder.calls[0]["path"]
     assert valid("WorkerHeartbeatRequest", recorder.calls[1]["body"])
     assert valid("WorkerResultRequest", recorder.calls[2]["body"])
     assert job.id == job_id and job.input == example("WorkerJobDetailsResponse")["job"]["input"]
@@ -170,3 +173,28 @@ def test_the_version_check_names_the_job_and_sends_the_credential_in_the_header_
     assert call["path"] == f"/api/runners/v1/version?jobId={recorder.job_id}"
     assert call["authorization"] == f"Bearer {CREDENTIAL}"
     assert CREDENTIAL not in call["path"]
+
+
+# #396-T01
+def test_a_superseded_heartbeat_answer_is_in_the_contract_and_is_understood(
+    recorder: Recorder,
+) -> None:
+    recorder.superseded = True
+    api = HttpWorkerApi(recorder.url, CREDENTIAL, request_timeout=5)
+
+    reply = asyncio.run(api.heartbeat(recorder.job_id, CREDENTIAL))
+
+    assert reply.superseded is True
+    answer = {**example("WorkerHeartbeatResponse")}
+    answer["job"] = {**answer["job"], "superseded": True}
+    assert valid("WorkerHeartbeatResponse", answer)
+    assert not valid(
+        "WorkerHeartbeatResponse", {**answer, "job": {**answer["job"], "superseded": "yes"}}
+    )
+
+
+# #396-T01
+def test_a_heartbeat_answer_without_the_field_is_not_superseded(recorder: Recorder) -> None:
+    api = HttpWorkerApi(recorder.url, CREDENTIAL, request_timeout=5)
+
+    assert asyncio.run(api.heartbeat(recorder.job_id, CREDENTIAL)).superseded is False

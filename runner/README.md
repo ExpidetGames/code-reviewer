@@ -602,8 +602,34 @@ and the enum agree. Callers branch on the code, never on the text.
 | `dynamic_accounting_failed` | The Dynamic Review's model usage could not be established or accounted for |
 | `dynamic_model_features_unsupported` | The configured model does not support the tool calling or structured output Dynamic Review requires, or OpenRouter found no provider that supports every parameter of a request (404, #270); there is no fallback model or provider |
 | `lease_lost` | A Dynamic job was no longer held by this runner (lease lost, job cancelled) or could not be confirmed as held right before it would have written its summary; nothing was written (#260) |
+| `superseded` | A newer push replaced this run while it was running (#396): it finished the model requests in flight, sent no more, published nothing and reports what it used. Not a failure of the job ("A superseded run", below) |
 | `timeout` | The command did not finish within `RUNNER_JOB_TIMEOUT_SECONDS` (also reported by the job loop for a process it had to end) |
 | `unknown` | Something failed that no rule recognises |
+
+## A superseded run (#396)
+
+When a new push arrives while an automatic review is running, the app supersedes the running one. A runner or
+Worker that names the claim feature `supersede` (`CLAIM_FEATURES`, `WORKER_FEATURES`) is told through its
+heartbeat: `job.superseded: true`. The job host then sends the job process `SIGUSR1`, once (never to the group, and
+not before the process is ten seconds old, so that its handler is in place), keeps beating, and waits for the process
+to end by itself. The process (`supersede.py`):
+
+- **lets every model request in flight finish**, so its cost is measured: the Diff meter (`diff_cost.py`) and the
+  Dynamic ledger count it as they always do;
+- **refuses every further model request**: the Diff meter raises `SupersededError` before anything is sent, and the
+  Dynamic model proxy answers `403` with the code `superseded` (the engine ends; there is no retry);
+- **publishes nothing**: every write of PR-Agent's GitHub provider is a no-op from then on (`install_write_guard`,
+  installed last so it is outermost: comments, edits, labels, reactions, check runs and the "Failed to ..." notices);
+  the Dynamic path checks before its summary, its finding reconciliation and the note of a failure, and the lease check
+  answers `superseded`;
+- **ends `superseded`** with the usage it measured (an exact cost when every call was priced, unknown otherwise). A
+  run that had published before it heard of it keeps its success.
+
+The host delivers that result (the same call as any result), ends `SUPERSEDED`, the Worker exits `0` and the Sandbox
+or container is torn down; the loop of a self-hosted runner goes on to its next job. A process that has not ended
+`SUPERSEDED_DRAIN_SECONDS` (120) after it was told is ended by the host, and its result is `superseded` with an
+unknown cost (`no_result_from_process`). A runner or Worker of an earlier release never names the feature, so the
+app never supersedes its jobs and nothing changes for it.
 
 ## The review comment size limit
 

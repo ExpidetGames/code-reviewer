@@ -413,6 +413,7 @@ class ModelProxy:
         capability: str,
         post: UpstreamPost = _http_post,
         require_parameters: bool = False,
+        superseded: Callable[[], bool] = lambda: False,
     ) -> None:
         if len(capability) < _MIN_CAPABILITY_CHARS:
             raise LimitError(
@@ -430,6 +431,11 @@ class ModelProxy:
         self._post = post
         # True when the destination is OpenRouter (the runner decides, never the engine).
         self._require_parameters = require_parameters
+        # #396: true once a newer push replaced the run. A request in flight finishes (and is
+        # counted); a new
+        # one is refused, with the stable code `superseded`, before anything is forwarded or
+        # reserved.
+        self._superseded = superseded
         # The proxy starts only after the capability descriptor was proven: an unusable destination
         # is a failure before the first request, not a downgrade at the first call.
         self.capabilities.check_required()
@@ -469,6 +475,8 @@ class ModelProxy:
             raise LimitError(
                 ErrorCode.DYNAMIC_POLICY_VIOLATION, "only the model protocol is allowed"
             )
+        if self._superseded():
+            raise LimitError(ErrorCode.SUPERSEDED, "the run was superseded by a newer push")
         self.ledger.check_request_bytes(len(body))
         request = self._decode(body)
         self._check_model(request)

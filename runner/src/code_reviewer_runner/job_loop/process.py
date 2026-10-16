@@ -34,6 +34,7 @@ from code_reviewer_runner.lease_check import (
     LeaseState,
 )
 from code_reviewer_runner.process_group import end_group, has_exited
+from code_reviewer_runner.supersede import SUPERSEDE_SIGNAL
 
 # The result line of a job is small (a log tail of 4 KB and a few numbers). Anything above this
 # is not a result.
@@ -99,6 +100,11 @@ class RunningProcess(Protocol):
 
     async def terminate(self) -> None:
         """End the process and everything it started: SIGTERM first, SIGKILL after the grace."""
+        ...
+
+    def notify_superseded(self) -> None:
+        """Tell the process that its run was superseded (#396): `SIGUSR1` to the leader only, never
+        the group."""
         ...
 
 
@@ -243,6 +249,16 @@ class _SubprocessJob:
 
     async def wait(self) -> ProcessOutcome:
         return await asyncio.shield(self._collected)
+
+    def notify_superseded(self) -> None:
+        # Under the lock that guards the end of the group, and only while the leader is unreaped: a
+        # reaped
+        # leader frees its pid (#233).
+        with self._group_lock:
+            if has_exited(self._process):
+                return
+            with contextlib.suppress(ProcessLookupError, PermissionError):
+                os.kill(self._process.pid, SUPERSEDE_SIGNAL)
 
     async def terminate(self) -> None:
         # SIGTERM first and SIGKILL after the grace; also after a clean exit of the leader, so a

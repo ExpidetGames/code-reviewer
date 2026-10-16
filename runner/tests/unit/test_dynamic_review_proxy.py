@@ -1632,3 +1632,55 @@ def test_reasoning_tokens_within_the_allowance_are_part_of_the_completion_and_ac
 
     assert post(subject, request_body()).status == 200
     assert subject.ledger.usage("m").completion_tokens == 4096
+
+
+# #396-T09
+def test_a_superseded_run_refuses_a_new_request_before_anything_is_forwarded_or_reserved() -> None:
+    upstream = Upstream()
+    superseded = {"now": False}
+    subject = proxy(upstream, superseded=lambda: superseded["now"])
+    assert post(subject, request_body()).status == 200
+
+    superseded["now"] = True
+    response = post(subject, request_body())
+
+    assert response.status == 403
+    assert error_code(response) == ErrorCode.SUPERSEDED.value
+    assert len(upstream.requests) == 1
+    # The ledger counts the one call that went out, and remembers why the next was refused.
+    usage = subject.ledger.usage("deepseek/deepseek-v4.1-flash")
+    assert usage.ai_calls == 1
+    failure = subject.ledger.failure
+    assert failure is not None and failure.code is ErrorCode.SUPERSEDED
+
+
+# #396-T09
+def test_a_request_in_flight_when_the_run_is_superseded_is_answered_and_counted() -> None:
+    superseded = {"now": False}
+
+    class Flip(Upstream):
+        def __call__(
+            self, url: str, body: bytes, headers: dict[str, str], limit: int
+        ) -> tuple[int, bytes]:
+            superseded["now"] = True  # the push arrives while the provider is working
+            return super().__call__(url, body, headers, limit)
+
+    upstream = Flip(body=answer_with_usage(cost=0.0007))
+    subject = proxy(upstream, superseded=lambda: superseded["now"])
+
+    response = post(subject, request_body())
+
+    assert response.status == 200
+    usage = subject.ledger.usage("deepseek/deepseek-v4.1-flash")
+    assert usage.ai_calls == 1
+    assert usage.cost_usd == pytest.approx(0.0007)
+    assert post(subject, request_body()).status == 403
+
+
+# #396-T09: the model list costs nothing and stays available.
+def test_the_model_list_is_still_served_after_the_run_was_superseded() -> None:
+    subject = proxy(Upstream(), superseded=lambda: True)
+
+    response = subject.handle("GET", "/v1/models", b"", bearer())
+
+    assert response.status == 200

@@ -21,6 +21,15 @@ Rules the code below follows (see the CR-29 decisions):
 - The secrets of a job (git token, LLM key, lease token) reach the process through its stdin only,
   and no log line or result the host produces contains them.
 - A lost lease (409 on a heartbeat) ends the process and sends nothing more for that job.
+- A heartbeat answer that says the run was superseded (#396) tells the job process once (`SIGUSR1`)
+  and the
+  host goes on: it keeps beating, waits for the process to end by itself (it finishes the model
+  requests in
+  flight, sends no more, publishes nothing), delivers its result (`superseded`, with the usage) and
+  ends
+  `SUPERSEDED`. A process that has not ended `SUPERSEDED_DRAIN_SECONDS` after it was told is ended
+  and its
+  usage is reported as unknown.
 - A hard stop (the end of the grace period, or a SIGTERM of a Worker) ends the process and reports
   `runner_shutdown`, which the app gives back to the queue (a repeated report may be answered with
   409, which is fine).
@@ -31,6 +40,7 @@ import json
 import logging
 import shlex
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Protocol
 
@@ -49,6 +59,7 @@ from code_reviewer_runner.job_loop.api import (
     ApiUnavailable,
     ClaimedJob,
     CompleteReply,
+    HeartbeatReply,
     LeaseLost,
 )
 from code_reviewer_runner.job_loop.clock import Clock, RealClock
@@ -91,6 +102,15 @@ DYNAMIC_PASSTHROUGH_VARIABLES = (
     "RUNNER_DYNAMIC_PROXY_PORT",
     "RUNNER_DYNAMIC_ENGINE_PORT",
 )
+# #396: a process that was told that its run was superseded finishes the model requests in flight
+# and ends by
+# itself. It is waited for this long (the time of a model request is bounded far below it), then it
+# is ended.
+SUPERSEDED_DRAIN_SECONDS = 120.0
+# The process installs its handler for the signal in the first lines of `main()`; a process younger
+# than this
+# is not signalled yet (the default action of `SIGUSR1` would end it without a result).
+SUPERSEDE_MIN_PROCESS_AGE_SECONDS = 10.0
 # A shutdown report is tried for this long; the process is going away either way.
 SHUTDOWN_REPORT_WINDOW_SECONDS = 10.0
 _FIRST_RETRY_SECONDS = 1.0
@@ -100,7 +120,7 @@ class JobApi(Protocol):
     """What the host needs of an API: the heartbeat and the delivery. The runner API (with the lease
     token) and the Worker API (with the job credential) both fit."""
 
-    async def heartbeat(self, job_id: str, lease_token: str) -> None: ...
+    async def heartbeat(self, job_id: str, lease_token: str) -> HeartbeatReply: ...
 
     async def complete(
         self, job_id: str, lease_token: str, result: Mapping[str, Any]
@@ -157,6 +177,9 @@ class JobEnd(StrEnum):
     LEASE_LOST = "lease_lost"
     # The result could not be delivered; the lease will run out and the job is tried again.
     NOT_DELIVERED = "not_delivered"
+    # A newer push replaced the run (#396): it stopped gracefully, its result and usage were
+    # delivered.
+    SUPERSEDED = "superseded"
 
 
 class Delivery(StrEnum):
@@ -166,13 +189,23 @@ class Delivery(StrEnum):
     FAILED = "failed"
 
 
-def _end_of(result: Result, delivery: Delivery) -> JobEnd:
+@dataclass
+class _RunState:
+    """What the host learned about one run while it supervised it."""
+
+    # The app said the run was superseded (a heartbeat answer, or the lease check before a write).
+    superseded: asyncio.Event = field(default_factory=asyncio.Event)
+
+
+def _end_of(result: Result, delivery: Delivery, superseded: bool = False) -> JobEnd:
     if delivery is Delivery.NOT_HELD:
         return JobEnd.LEASE_LOST
     if delivery is Delivery.FAILED:
         return JobEnd.NOT_DELIVERED
     if delivery is Delivery.GIVEN_BACK or result["errorCode"] == RUNNER_SHUTDOWN:
         return JobEnd.GIVEN_BACK
+    if superseded or result["errorCode"] == ErrorCode.SUPERSEDED.value:
+        return JobEnd.SUPERSEDED
     return JobEnd.OK if result["ok"] else JobEnd.FAILED
 
 
@@ -305,6 +338,7 @@ class JobHost:
             )
             return await self._refuse(claimed, result)
         self._log.info("job %s claimed: %s", claimed.id, job.command.value)
+        state = _RunState()
         try:
             # ASCII escapes: a lone surrogate in a text cannot break the encoding, and the job
             # process reads the same JSON.
@@ -320,7 +354,7 @@ class JobHost:
                 # #260: a Dynamic job writes its own comment, so it asks right before (a Diff job
                 # does not publish this way).
                 lease_check=(
-                    (lambda: self._confirm_lease(claimed))
+                    (lambda: self._confirm_lease(claimed, state))
                     if job.review_kind is ReviewKind.DYNAMIC
                     else None
                 ),
@@ -337,7 +371,7 @@ class JobHost:
             )
             return await self._refuse(claimed, result)
         try:
-            result = await self._supervise(claimed, process, redactor, started)
+            result = await self._supervise(claimed, process, redactor, started, state)
         finally:
             await self._after_process(job)
         if result is None:
@@ -351,7 +385,7 @@ class JobHost:
             ),
             shutdown=shutdown,
         )
-        return _end_of(result, delivery)
+        return _end_of(result, delivery, state.superseded.is_set())
 
     async def _refuse(self, claimed: ClaimedJob, result: Result) -> JobEnd:
         """Deliver the failure of a job that never started a process."""
@@ -406,19 +440,21 @@ class JobHost:
         process: RunningProcess,
         redactor: TextRedactor,
         started: float,
+        state: _RunState,
     ) -> Result | None:
         """Wait for the process, beat the heart, enforce the timeout. None: report nothing."""
         lost = asyncio.Event()
         finished = asyncio.ensure_future(process.wait())
         helpers: list[asyncio.Future[Any]] = [
-            asyncio.ensure_future(self._heartbeats(claimed, lost)),
+            asyncio.ensure_future(self._heartbeats(claimed, lost, state)),
             asyncio.ensure_future(lost.wait()),
             asyncio.ensure_future(
                 self._clock.sleep(self._settings.job_timeout + self._settings.kill_margin)
             ),
             asyncio.ensure_future(self._hard_stop.wait()),
+            asyncio.ensure_future(self._drain(claimed, process, state, started)),
         ]
-        _, lost_wait, timeout, shutdown = helpers
+        _, lost_wait, timeout, shutdown, drained = helpers
         try:
             await asyncio.wait([finished, *helpers[1:]], return_when=asyncio.FIRST_COMPLETED)
         except asyncio.CancelledError:
@@ -443,6 +479,21 @@ class JobHost:
             return failure_result(
                 ErrorCode.TIMEOUT.value,
                 "the job did not finish within the time limit and was ended",
+                duration_ms=self._ms_since(started),
+                log_tail=tail,
+                redactor=redactor,
+                reason=NO_RESULT_REASON,
+            )
+        if drained.done() and not drained.cancelled():
+            # The run was told that it was superseded and did not stop by itself: it is ended here,
+            # and what
+            # it used is unknown (a model request may have been in flight).
+            self._log.warning(
+                "job %s: the superseded run did not stop in time, the process was ended", claimed.id
+            )
+            return failure_result(
+                ErrorCode.SUPERSEDED.value,
+                "the superseded run did not stop in time and was ended",
                 duration_ms=self._ms_since(started),
                 log_tail=tail,
                 redactor=redactor,
@@ -474,11 +525,39 @@ class JobHost:
             self._log.error("the job process could not be ended cleanly (%s)", type(error).__name__)
             return None
 
-    async def _heartbeats(self, claimed: ClaimedJob, lost: asyncio.Event) -> None:
+    async def _drain(
+        self, claimed: ClaimedJob, process: RunningProcess, state: _RunState, started: float
+    ) -> None:
+        """Once the run is superseded (#396): tell the process, then give it
+        `SUPERSEDED_DRAIN_SECONDS`.
+
+        Returns when that time is over (the caller ends the process); never returns while the run is
+        not
+        superseded. The process is signalled once, and not before it is old enough to have its
+        handler.
+        """
+        await state.superseded.wait()
+        age = self._clock.monotonic() - started
+        if age < SUPERSEDE_MIN_PROCESS_AGE_SECONDS:
+            await self._clock.sleep(SUPERSEDE_MIN_PROCESS_AGE_SECONDS - age)
+        self._log.info("job %s: superseded by a newer push, the process is told", claimed.id)
+        try:
+            process.notify_superseded()
+        except Exception as error:
+            self._log.warning(
+                "job %s: the process could not be told (%s)", claimed.id, type(error).__name__
+            )
+        await self._clock.sleep(SUPERSEDED_DRAIN_SECONDS)
+
+    async def _heartbeats(
+        self, claimed: ClaimedJob, lost: asyncio.Event, state: _RunState | None = None
+    ) -> None:
         while True:
             await self._clock.sleep(claimed.heartbeat_interval)
             try:
-                await self._api.heartbeat(claimed.id, claimed.lease_token)
+                reply = await self._api.heartbeat(claimed.id, claimed.lease_token)
+                if reply.superseded and state is not None:
+                    state.superseded.set()
             except LeaseLost:
                 lost.set()
                 return
@@ -488,24 +567,26 @@ class JobHost:
                 detail = str(error) if isinstance(error, ApiError) else type(error).__name__
                 self._log.warning("job %s: heartbeat failed (%s)", claimed.id, detail)
 
-    async def _confirm_lease(self, claimed: ClaimedJob) -> LeaseState:
+    async def _confirm_lease(self, claimed: ClaimedJob, state: _RunState) -> LeaseState:
         """Beat the heart now. A lost lease and a cancelled job are both answered with 409.
 
         An answer that only says the app could not be reached (5xx, a reset, a timeout) is asked
         again after a short pause, so one hiccup does not cost a finished review. The whole question
         stays inside what the process waits for. 409 and 404 are final, and so is a refusal.
         """
+        if state.superseded.is_set():
+            return LeaseState.SUPERSEDED
         try:
             async with asyncio.timeout(LEASE_CHECK_BUDGET_SECONDS):
-                return await self._ask_app(claimed)
+                return await self._ask_app(claimed, state)
         except TimeoutError:
             self._log.warning("job %s: the lease check ran out of time", claimed.id)
             return LeaseState.UNCONFIRMED
 
-    async def _ask_app(self, claimed: ClaimedJob) -> LeaseState:
+    async def _ask_app(self, claimed: ClaimedJob, state: _RunState) -> LeaseState:
         for attempt in range(1, LEASE_CHECK_ATTEMPTS + 1):
             try:
-                await self._api.heartbeat(claimed.id, claimed.lease_token)
+                reply = await self._api.heartbeat(claimed.id, claimed.lease_token)
             except LeaseLost:
                 self._log.warning("job %s: the lease check before publishing: lost", claimed.id)
                 return LeaseState.LOST
@@ -518,6 +599,9 @@ class JobHost:
                     await self._clock.sleep(LEASE_CHECK_PAUSE_SECONDS * 2 ** (attempt - 1))
                     continue
                 return LeaseState.UNCONFIRMED
+            if reply.superseded:
+                state.superseded.set()
+                return LeaseState.SUPERSEDED
             return LeaseState.HELD
         return LeaseState.UNCONFIRMED  # pragma: no cover  (the last attempt returns above)
 

@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from code_reviewer_runner import __version__
-from code_reviewer_runner.job_loop.api import CompleteReply
+from code_reviewer_runner.job_loop.api import CompleteReply, HeartbeatReply, parse_heartbeat
 from code_reviewer_runner.job_loop.http import (
     ApiError,
     ApiRejected,
@@ -48,7 +48,7 @@ _JOB_ID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{
 MAX_HEARTBEAT_INTERVAL_SECONDS = 60
 # What this Worker understands beyond the plain job (`features` of the details request): an app
 # sends an optional job field only to a Worker that names it.
-WORKER_FEATURES: tuple[str, ...] = ("dynamic_capabilities",)
+WORKER_FEATURES: tuple[str, ...] = ("dynamic_capabilities", "supersede")
 # The feature of `GET /api/runners/v1/version` that says the Worker API exists.
 FEATURE_WORKER_API = "worker_api"
 
@@ -77,7 +77,7 @@ class WorkerApi(Protocol):
 
     async def fetch(self, job_id: str) -> WorkerJob: ...
 
-    async def heartbeat(self, job_id: str, lease_token: str) -> None: ...
+    async def heartbeat(self, job_id: str, lease_token: str) -> HeartbeatReply: ...
 
     async def complete(
         self, job_id: str, lease_token: str, result: Mapping[str, Any]
@@ -131,7 +131,7 @@ class HttpWorkerApi:
             raise self._failure(reply)
         return self._parse_job(reply, job_id)
 
-    async def heartbeat(self, job_id: str, lease_token: str) -> None:
+    async def heartbeat(self, job_id: str, lease_token: str) -> HeartbeatReply:
         # `lease_token` is the host's name for the proof of the claim; here it is the credential
         # this client already holds.
         reply = await asyncio.to_thread(
@@ -139,12 +139,7 @@ class HttpWorkerApi:
         )
         if reply.status != 200:
             raise self._failure(reply)
-        # A 200 is the app's "yes" only as the contract's answer for this very job. A gateway or a
-        # captive portal that answers 200 to everything is not the app.
-        body = as_object(parse_json(reply))
-        job = as_object(body.get("job")) if body and body.get("version") == 1 else None
-        if job is None or job.get("id") != job_id:
-            raise ApiUnavailable("the heartbeat answer does not match the contract", 200)
+        return parse_heartbeat(reply, job_id)
 
     async def complete(
         self, job_id: str, lease_token: str, result: Mapping[str, Any]

@@ -815,3 +815,21 @@ def test_the_claim_request_may_advertise_that_the_runner_reads_model_capabilitie
     assert not _accepts("ClaimRequest", {"features": [1]})
     assert not _accepts("ClaimRequest", {"features": ["Bad Name"]})
     assert "features" in _example("ClaimRequest")
+
+
+# #396-T14: the feature a runner names to be superseded gracefully, the field of the heartbeat
+# answer and the code.
+def test_the_contract_knows_the_supersede_feature_the_heartbeat_field_and_the_result_code() -> None:
+    assert _accepts("ClaimRequest", {"engines": ["pr-agent"], "features": ["supersede"]})
+    heartbeat = _example("HeartbeatResponse")
+    assert _accepts("HeartbeatResponse", heartbeat)
+    superseded = {**heartbeat, "job": {**heartbeat["job"], "superseded": True}}
+    assert _accepts("HeartbeatResponse", superseded)
+    assert not _accepts(
+        "HeartbeatResponse", {**heartbeat, "job": {**heartbeat["job"], "superseded": 1}}
+    )
+    result = {**_example("CompleteRequest")["result"], "ok": False, "errorCode": "superseded"}
+    assert _accepts("RunnerResult", result)
+    from code_reviewer_runner.result import ErrorCode
+
+    assert ErrorCode.SUPERSEDED.value == "superseded"

@@ -16,7 +16,7 @@ from loop_support import FakeLauncher, FakeProcess, outcome, result_line
 from support import API_KEY, TOKEN, make_job_dict
 
 from code_reviewer_runner import worker_cli
-from code_reviewer_runner.job_loop.api import CompleteReply
+from code_reviewer_runner.job_loop.api import CompleteReply, HeartbeatReply
 from code_reviewer_runner.job_loop.process import ProcessSpec, RunningProcess
 from code_reviewer_runner.job_loop.settings import (
     SettingsError,
@@ -60,8 +60,8 @@ class FakeWorkerApi:
         self.fetched += 1
         return WorkerJob(id=job_id, heartbeat_interval=30.0, input=self.input)
 
-    async def heartbeat(self, job_id: str, lease_token: str) -> None:
-        return None
+    async def heartbeat(self, job_id: str, lease_token: str) -> HeartbeatReply:
+        return HeartbeatReply()
 
     async def complete(
         self, job_id: str, lease_token: str, result: Mapping[str, Any]
@@ -285,3 +285,35 @@ def test_the_worker_reads_the_same_runtime_settings_as_the_runner_but_no_token_o
     assert worker.job_timeout == 90.0
     assert worker.job_command == ("fake-job", "--flag")
     assert not hasattr(worker, "token") and not hasattr(worker, "api_url")
+
+
+# #396-T05
+def test_a_worker_whose_run_was_superseded_delivers_its_result_and_exits_0() -> None:
+    from loop_support import outcome
+
+    line = (
+        json.dumps(
+            {
+                "ok": False,
+                "durationMs": 1,
+                "commentUrl": None,
+                "errorCode": "superseded",
+                "logTail": "superseded",
+                "logTruncated": False,
+                "usage": None,
+            }
+        )
+        + "\n"
+    ).encode()
+
+    class Superseding(FinishingLauncher):
+        async def start(self, spec: ProcessSpec) -> RunningProcess:
+            process = await FakeLauncher.start(self, spec)
+            assert isinstance(process, FakeProcess)
+            process.finish(outcome(exit_code=1, stdout=line))
+            return process
+
+    api = FakeWorkerApi()
+
+    assert run(api, Superseding()) is WorkerExit.OK
+    assert [item["errorCode"] for item in api.completions] == ["superseded"]
