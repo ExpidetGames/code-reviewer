@@ -20,6 +20,9 @@ const multiAppPort = Number(process.env.E2E_MULTI_PORT) || appPort + 4;
 // The app of the journey of the update from the previous release (e2e/upgrade/): the journey starts and restarts
 // it itself, on the port after the fifth app unless E2E_UPGRADE_PORT says otherwise.
 const upgradeAppPort = Number(process.env.E2E_UPGRADE_PORT) || appPort + 5;
+// The app of the journey of the operator limits (e2e/operator/, #285): multi-tenant, with the operator API on and a
+// real runner polling it. The port after the upgrade app unless E2E_OPERATOR_PORT says otherwise.
+const operatorAppPort = Number(process.env.E2E_OPERATOR_PORT) || appPort + 6;
 // The fake GitHub gets a random port in a high range, so two checkouts never collide however their
 // E2E_PORT values are chosen. The choice is stored in the environment: Playwright loads this file
 // again in every worker process, which inherits the main process's environment.
@@ -43,6 +46,13 @@ process.env.E2E_MODEL_LLM_PORT ||= String(
   65000 + Math.floor(Math.random() * 500),
 );
 const modelLlmFakePort = Number(process.env.E2E_MODEL_LLM_PORT);
+// The fake LLM of the operator limits journey (#285): it answers the reviews of the real runner and, at the same
+// port, the model metadata the operator app reads when it saves and claims with a managed tier. The app needs the
+// port when it starts. A range of its own, above the others: 65500-65534.
+process.env.E2E_OPERATOR_LLM_PORT ||= String(
+  65500 + Math.floor(Math.random() * 35),
+);
+const operatorLlmFakePort = Number(process.env.E2E_OPERATOR_LLM_PORT);
 
 export const e2eEnv = {
   appPort,
@@ -68,6 +78,13 @@ export const e2eEnv = {
   multiAppUrl: `http://127.0.0.1:${multiAppPort}`,
   upgradeAppPort,
   upgradeAppUrl: `http://127.0.0.1:${upgradeAppPort}`,
+  operatorAppPort,
+  /** The SQLite file of the operator app (#285), fresh for every run. */
+  operatorDatabasePath: "test-results/e2e-operator-data/app.db",
+  operatorAppUrl: `http://127.0.0.1:${operatorAppPort}`,
+  operatorLlmFakePort,
+  /** The fake LLM of the operator app: reviews and model metadata (`LLM_API_BASE_URL`). */
+  operatorLlmFakeApiUrl: `http://127.0.0.1:${operatorLlmFakePort}/api/v1`,
   /**
    * The fake SMTP server (fakes/smtp): the journey of the mail page configures the fourth app to send to it
    * (host, STARTTLS port, TLS port, a login), and every journey that reads a mail reads the "inbox" from its
@@ -93,6 +110,7 @@ export const e2eEnv = {
     setup: "test-results/e2e-setup.log",
     signup: "test-results/e2e-signup.log",
     multi: "test-results/e2e-multi.log",
+    operator: "test-results/e2e-operator.log",
   },
   /** The instance admin the journeys create when they set an app up. A dummy, as everything here. */
   adminEmail: "admin@e2e.test",
@@ -119,6 +137,8 @@ export const e2eEnv = {
   /** The login the app's comments are written as at the fake GitHub. */
   githubBotLogin: "code-reviewer-e2e[bot]",
   githubAppWebhookSecret: "e2e-webhook-secret-value",
+  /** The token of the operator API of the operator app (#285): a dummy, the script of the journey sends it. */
+  operatorApiToken: "e2e-operator-api-token-0123456789-0123456789-abcdef",
 };
 
 /**

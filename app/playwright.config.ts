@@ -87,6 +87,7 @@ export default defineConfig({
         /e2e\/workspaces\//,
         /e2e\/settings\/llm-key\.e2e\.ts$/,
         /e2e\/upgrade\//,
+        /e2e\/operator\//,
       ],
     },
     {
@@ -197,8 +198,32 @@ export default defineConfig({
       testMatch: /e2e\/jobs\/.*\.e2e\.ts$/,
       dependencies: ["prepare"],
     },
+    // The journeys of the operator limits (#285). The plain one runs on the pipeline app (an instance that never
+    // switched any of it on) after the journey of the real runner, which uses the same app: two runners must not poll
+    // one app. The limited one has an app of its own (the seventh: multi-tenant, with the operator API on) and
+    // connects GitHub installations to two workspaces, which sets the setup address of the one app registered at the
+    // fake GitHub, so it waits for the journey that does the same on the fifth app.
+    {
+      name: "operator-plain",
+      // No retry: the set-up of the group changes the app (a switch that would be clicked off again), so an attempt
+      // that fails is reported as it failed.
+      retries: 0,
+      use: { ...browser, baseURL: e2eEnv.pipelineAppUrl },
+      testMatch: /e2e\/operator\/plain-instance\.e2e\.ts$/,
+      dependencies: ["jobs"],
+    },
+    {
+      name: "operator",
+      // No retry: a second attempt would sign the same people up again and connect installations that are connected.
+      retries: 0,
+      use: { ...browser, baseURL: e2eEnv.operatorAppUrl },
+      testMatch: /e2e\/operator\/limited-workspace\.e2e\.ts$/,
+      dependencies: ["prepare", "connect"],
+    },
   ],
-  // Six servers. The fake GitHub stands in for github.com (sign in) and api.github.com; the app
+  // Six apps under test (the seventh port, `E2E_PORT` + 5, is the one the update journey starts itself) and the two
+  // fake servers they share, GitHub and SMTP; the journeys start their own fake LLMs. The apps take consecutive ports
+  // from `E2E_PORT` up to `E2E_PORT` + 6. The fake GitHub stands in for github.com (sign in) and api.github.com; the app
   // under test is pointed at it by environment variables. The journeys always run against a
   // production build, never the dev server, with a fresh SQLite file in the (git-ignored)
   // test-results folder; the app migrates it on start. All values are fixed dummies.
@@ -320,6 +345,29 @@ export default defineConfig({
         ALLOW_TEST_LLM_ENDPOINTS: "true",
       },
       url: e2eEnv.multiAppUrl,
+      reuseExistingServer: false,
+      timeout: 60_000,
+    },
+    {
+      command:
+        "rm -rf test-results/e2e-operator-data && mkdir -p test-results/e2e-operator-data && " +
+        `pnpm start --hostname 127.0.0.1 --port ${e2eEnv.operatorAppPort} > ${e2eEnv.logFiles.operator} 2>&1`,
+      env: {
+        ...appEnv,
+        DATABASE_PATH: e2eEnv.operatorDatabasePath,
+        BETTER_AUTH_URL: e2eEnv.operatorAppUrl,
+        // The operator API: the journey's script is the external service (e2e/operator/).
+        OPERATOR_API_TOKEN: e2eEnv.operatorApiToken,
+        // The model metadata a managed tier is saved and claimed with comes from the journey's fake LLM, which also
+        // answers the reviews of the real runner. The model and the context window are those of a workspace on its
+        // own key (a model PR-Agent does not know); a managed workspace gets the model of its tier.
+        LLM_API_BASE_URL: e2eEnv.operatorLlmFakeApiUrl,
+        ALLOW_TEST_LLM_ENDPOINTS: "true",
+        LLM_MODEL: llmEnv.model,
+        LLM_MAX_TOKENS: llmEnv.maxTokens,
+        REVIEW_DEBOUNCE_SECONDS: "1",
+      },
+      url: e2eEnv.operatorAppUrl,
       reuseExistingServer: false,
       timeout: 60_000,
     },
