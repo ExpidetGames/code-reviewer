@@ -18,14 +18,13 @@ import {
 import { projectServiceFor } from "../projects/shared.ts";
 import { reviewSettingsServiceFor } from "../review-settings/shared.ts";
 import { createAutomaticReviewSettingsSource } from "./automatic-review-settings.ts";
-import { configuredDebounceMs } from "./debounce-config.ts";
 import { consoleWebhookLogger } from "./logger.ts";
 import { createJobQueueReviewTriggerIntake } from "./job-queue-intake.ts";
 import type { ReviewTriggerIntake } from "./review-trigger-intake.ts";
 
 /**
  * Where review triggers of one workspace go: into its job queue, as a thin mapping. The trigger
- * policy (active project, drafts, settings, debounce) is applied by the handler before it calls the
+ * policy (active project, drafts, settings) is applied by the handler before it calls the
  * intake.
  */
 export function getJobQueueReviewTriggerIntake(
@@ -55,10 +54,7 @@ export function getGithubAppWebhookHandler(): WebhookHandler {
       }),
       intake: getJobQueueReviewTriggerIntake(workspaceId),
     }),
-    automatic: {
-      debounceMs: configuredDebounceMs(process.env),
-      now: () => new Date(),
-    },
+    automatic: {},
     logger: consoleWebhookLogger,
     // Nothing saved and no variable set is "not configured", the normal state, not an error to log.
     githubAppConfigured: async () =>

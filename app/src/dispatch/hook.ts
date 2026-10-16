@@ -15,6 +15,7 @@ import {
   type WebhookDispatchConfig,
 } from "./config.ts";
 import { createDispatchService, type DispatchService } from "./service.ts";
+import { testInlineRetryDelays } from "./test-timing.ts";
 
 type Env = Readonly<Record<string, string | undefined>>;
 
@@ -43,9 +44,14 @@ export function createDispatchHook(
   }
   if (config.mode === "poll") return undefined;
 
+  const delays = testInlineRetryDelays(options.env);
   const service =
     options.service?.(config) ??
-    createDispatchService({ db: options.db, config });
+    createDispatchService({
+      db: options.db,
+      config,
+      ...(delays === undefined ? {} : { inlineRetryDelaysMs: delays }),
+    });
   return (result) => {
     options.schedule(() => service.onEnqueued(result));
   };

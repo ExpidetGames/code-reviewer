@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// GET /api/internal/dispatch-sweep, called once a minute by the platform's cron (`vercel.json`) in serverless
+// GET /api/internal/dispatch-sweep, called every 2 hours by the platform's cron (`vercel.json`; a safety net, #395) in serverless
 // mode (#328): lapsed leases, resends, the give-up and the hourly cleanup of a deployment in which no process
 // lives long enough to do them (src/dispatch/sweep.ts). The route is a 404 anywhere else, and `CRON_SECRET` is
 // the whole credential (src/cron/auth.ts). Runs can overlap (the platform may retry, a run can outlast its
-// minute): a database try-lock lets one work and the others answer `skipped` at once. The answer carries counts
+// slot): a database try-lock lets one work and the others answer `skipped` at once. The answer carries counts
 // only.
 import "server-only";
 import type { Kysely } from "kysely";
@@ -31,11 +31,16 @@ export async function handleDispatchSweepCron(
   const headers = { "cache-control": "no-store" };
   try {
     const outcome = await tryWithLock(db(), SWEEP_LOCK, () => sweep().run());
-    if (!outcome.acquired)
+    if (!outcome.acquired) {
+      // The platform does not repeat a cron that runs every two hours: a run that did nothing has to be seen (#395).
+      console.warn(
+        "[sweep] DISPATCH_SWEEP_SKIPPED: another sweep was still running, so this run did nothing.",
+      );
       return Response.json(
         { status: "skipped", reason: "already_running" },
         { headers },
       );
+    }
     const { failedSteps, ...counts } = outcome.value;
     if (failedSteps.length > 0)
       // The steps that did work are in the log line of the run; the answer says which ones did not.

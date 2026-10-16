@@ -152,6 +152,20 @@ describe("the report of a superseded claim", () => {
   });
 
   // #397-T06
+  it("frees the slot like any other end: the app is told once that the job ended", async () => {
+    const ended: string[] = [];
+    const h = await startRunnerApiHarness({
+      hooks: { jobEnded: (event) => ended.push(event.jobId) },
+    });
+    const { old, worker } = await supersededWorker(h);
+
+    await h.worker.result(old.id, worker.credential, SUPERSEDED);
+    await h.worker.result(old.id, worker.credential, SUPERSEDED);
+
+    expect(ended).toEqual([old.id]);
+  });
+
+  // #397-T06
   it("is stored once through the runner API too", async () => {
     const h = await startRunnerApiHarness();
     const old = await h.enqueueNew({ prNumber: 7 });

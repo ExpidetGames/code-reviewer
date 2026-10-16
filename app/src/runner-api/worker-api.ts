@@ -148,6 +148,7 @@ export function createWorkerApi(deps: WorkerApiDeps): WorkerApi {
               ? errorResponse(409, "RUNNER_LEASE_LOST")
               : ended();
         }
+        deps.activity?.();
         return jsonResponse(
           200,
           heartbeatAnswer(result.job, result.status === "superseded"),

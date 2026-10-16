@@ -129,8 +129,8 @@ settings change (and the cancellation) back. The hook is `createJobReviewSetting
 3. **Jobs a person started** (`comment`, `manual`): exempt from the head commit rule, but there is never a
    duplicate of a waiting or running job for the same pull request, command and arguments
    (`already_active`): the existing job is returned, and if it is waiting behind a `run_after` in the
-   future (a debounced automatic job) it is made due now, because a person does not wait for a
-   debounce. Different arguments are different jobs (`/review` takes none; a historical person job
+   future (a job given back with a retry time) it is made due now, because a person does not wait.
+   Different arguments are different jobs (`/review` takes none; a historical person job
    with arguments is still its own job).
 4. **Supersession.** A new automatic job replaces the _automatic_ jobs of the same pull request, review kind,
    command and arguments that would review an older state (status `superseded`, `superseded_by` set, in the
@@ -152,8 +152,8 @@ settings change (and the cancellation) back. The hook is `createJobReviewSetting
    once** and both run for a short time. `attemptedShas` names the head of a superseded job that ran, like a failed
    one, so the publisher recognises a comment it may have written just before it heard of it.
 
-`run_after` is `now` unless the caller passes a later time (the debounce of `synchronize` is policy and
-is decided by the webhook handler's trigger policy, CR-31). A manual job is due at once. The start button
+`run_after` is `now` unless the caller passes a later time (only a job given back with a retry time waits; there is
+no debounce of `synchronize` since #395). A manual job is due at once. The start button
 (CR-33, `src/manual-reviews/README.md`) is the producer of `manual` jobs; it passes the head commit and the
 pull request address it got from the platform and the login of the signed in person.
 
@@ -244,9 +244,8 @@ checked in code review.
 - **CR-31 (triggers).** Done: the webhook handler applies the trigger policy before the intake
   (`src/webhooks/README.md`, "The trigger policy for automatic reviews"). It checks the active
   project, skips drafts and switched-off settings, compares a push with the pull request's current
-  head commit (`getPullRequest`) _before_ enqueueing, debounces `synchronize` through `runAfter`
-  (default 90 seconds, `REVIEW_DEBOUNCE_SECONDS`) and calls `discardWaitingForPr` when a pull request
-  closes.
+  head commit (`getPullRequest`) _before_ enqueueing and calls `discardWaitingForPr` when a pull request
+  closes. It debounced `synchronize` through `runAfter` until #395, which removed the wait: a push is due at once.
 - **CR-24 (projects).** Done (CR-46): `createJobProjectHooks` (`project-hooks.ts`) calls `cancelWaitingForRepository` in the transaction of the deactivation; `src/projects/shared.ts` plugs it in.
 - **CR-28/CR-29 (runner).** The runner API exists (`src/runner-api/README.md`); it uses `release` for
   "token creation failed". Its claim guard skips and cancels jobs of repositories

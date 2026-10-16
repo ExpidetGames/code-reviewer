@@ -17,7 +17,7 @@
 //                workspace: its projects, its settings, its job queue)
 //   7. translate `parseEvent`: a review trigger, an installation change or "ignored"
 //   8. act       trigger -> the repository must have an active project, then the trigger
-//                policy (automatic-review-policy.ts: drafts, settings, the debounce of a push;
+//                policy (automatic-review-policy.ts: drafts, settings;
 //                then the commit still being the head, checked against GitHub, failing open) or,
 //                for a comment command, the project's list of allowed commands; then
 //                `canTrigger`, then the intake;
@@ -86,13 +86,10 @@ const DELIVERY_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
  */
 export type ProjectGate = Pick<ProjectService, "hasActiveProject">;
 
-/** What the trigger policy needs besides the trigger: the wait, the head check and the clock. */
+/** What the trigger policy needs besides the trigger: the head check. */
 export type AutomaticReviewDeps = {
-  /** How long a push waits before its review may start. */
-  debounceMs: number;
   /** How long the check against GitHub's current head may take (default 5 seconds). */
   headCheckTimeoutMs?: number;
-  now(): Date;
 };
 
 /** The collaborators that act inside one workspace. */
@@ -396,7 +393,6 @@ export function createGithubAppWebhookHandler(
       return "project_not_active";
 
     const trigger = event.trigger;
-    let runAfter: Date | null = null;
 
     // The settings of the project decide for a command (which ones people may use) and for an
     // automatic trigger (the policy below).
@@ -404,7 +400,7 @@ export function createGithubAppWebhookHandler(
     if (settings === undefined) return "project_not_active";
 
     // A comment command is not subject to the policy for automatic reviews (drafts, the automatic
-    // switches, the debounce): a person asked for it. The project decides which commands people may
+    // switches): a person asked for it. The project decides which commands people may
     // use at all.
     if (trigger.kind === "command") {
       if (!isCommandAllowed(settings, trigger.command)) {
@@ -419,12 +415,9 @@ export function createGithubAppWebhookHandler(
       const decision = decideAutomaticTrigger({
         trigger,
         settings,
-        now: automatic.now(),
-        debounceMs: automatic.debounceMs,
       });
       if (decision.action === "skip")
         return skipped(deliveryId, trigger.prNumber, decision.reason);
-      runAfter = decision.runAfter;
 
       // Deliveries arrive late and out of order. Before the trigger takes the place of a waiting
       // job, ask GitHub whether its commit is still the head (one call), so a late delivery for an
@@ -451,12 +444,10 @@ export function createGithubAppWebhookHandler(
 
     if (!(await provider.canTrigger(integration, trigger)))
       return "trigger_not_allowed";
-    await intake.enqueueReviewTrigger(
-      trigger,
-      integration,
-      { deliveryId, event: eventName },
-      runAfter === null ? {} : { runAfter },
-    );
+    await intake.enqueueReviewTrigger(trigger, integration, {
+      deliveryId,
+      event: eventName,
+    });
     return "trigger_enqueued";
   }
 

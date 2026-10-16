@@ -186,28 +186,6 @@ export async function runSweep(
   return (await response.json()) as SweepAnswer;
 }
 
-/**
- * Runs the sweep until `done` holds, the way the cron does every minute, but looking every half second: for what
- * takes the app a moment to answer (a send is acknowledged a moment after it was claimed).
- */
-export async function sweepUntil(
-  request: APIRequestContext,
-  what: string,
-  done: () => Promise<boolean>,
-  timeoutMs = 30_000,
-): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    await runSweep(request);
-    if (await done()) return;
-    if (Date.now() > deadline)
-      throw new Error(
-        `Timed out after ${String(timeoutMs)} ms waiting for ${what}.`,
-      );
-    await new Promise((resolve) => setTimeout(resolve, 500));
-  }
-}
-
 /** Waits for an asynchronous condition. */
 export async function eventually(
   what: string,

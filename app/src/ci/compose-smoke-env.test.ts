@@ -89,7 +89,6 @@ describe("the compose smoke test environment", () => {
         "RUNNER_MEMORY_LIMIT",
         "LLM_MODEL",
         "LLM_MAX_TOKENS",
-        "REVIEW_DEBOUNCE_SECONDS",
       ]),
     );
   });

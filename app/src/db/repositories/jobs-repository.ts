@@ -429,7 +429,7 @@ export function createJobsRepository(
             .executeTakeFirst();
           if (active !== undefined) {
             await recordComment(active.id);
-            // A person does not wait for a debounce: a waiting job that was held back (an automatic
+            // A person does not wait: a waiting job that was held back (a job given back with a retry time
             // job after `synchronize`) is due now.
             const pulledForward =
               active.status === "queued" &&
