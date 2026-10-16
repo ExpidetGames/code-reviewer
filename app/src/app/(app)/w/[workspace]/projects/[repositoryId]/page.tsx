@@ -7,7 +7,6 @@ import { isDynamicReviewEnabled } from "@/jobs/dynamic-review-gate";
 import { getConfigStatusFor } from "@/config-status/shared";
 import { configAudienceOf } from "@/config-status/status";
 import { getWorkspaceLlm } from "@/llm/shared";
-import { instanceChoosesModel } from "@/llm/access";
 import { llmAccessAttention } from "@/llm/ui/llm-access-notice";
 import { projectServiceFor } from "@/projects/shared";
 import {
@@ -76,7 +75,6 @@ async function ProjectSettingsContent({
       workspaceSlug={workspaceSlug}
       audience={configAudienceOf(user)}
       llmNotice={llmNotice}
-      modelChosenByInstance={instanceChoosesModel(llmSummary)}
       data={data}
     />
   );

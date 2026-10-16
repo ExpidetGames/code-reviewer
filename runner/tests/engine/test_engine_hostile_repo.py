@@ -99,6 +99,24 @@ def test_a_repository_file_cannot_move_a_request_a_credential_the_model_or_the_b
     assert all(connection["allowed"] for connection in outcome.connections)
 
 
+# #283-T08: a Diff review of a workspace on the operator's key. Nothing in the job or the repository
+# asks for the model to be shown; the published comment must still not carry it (real PR-Agent, fake
+# GitHub and LLM).
+def test_the_published_diff_review_never_names_the_model_of_the_job(
+    engine: Engine, github: FakeGithub, llm: FakeLlm
+) -> None:
+    outcome = engine.run("review")
+
+    assert outcome.result["ok"] is True
+    assert {request.model for request in llm.requests} == {MODEL}
+    assert len(github.comments) == 1
+    body = github.comments[0].body
+    assert body.strip() != ""
+    assert MODEL not in body
+    assert MODEL.split("/")[-1] not in body
+    assert "Agent run details" not in body
+
+
 # #280: the model of a managed tier is operator data. PR-Agent can print the model into the
 # comment it publishes ("Agent run details", the `config` section of the relevant
 # configurations), so a repository file must not switch either on. Real PR-Agent, the file

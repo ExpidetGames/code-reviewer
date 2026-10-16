@@ -71,7 +71,10 @@ calls and the cost, which stays `null` ("Not available") when the runner could n
 Review reports the sum of the charges its provider reported for every call, or `null`; it never
 guesses a price. The detail shows the cost to four decimals, and a positive cost below $0.0001 reads
 "Less than $0.0001", never "$0.0000". The prompt/completion split and the fallback flag stay on the
-server; the list carries no usage. The log is cleaned (terminal escapes and control characters out)
+server; the list carries no usage. **A run on a managed quality level** (#283; its usage record names a tier) shows
+no model and no cost: `usage.costUsd` is `null` and `costHidden` is `true`, and the page has no Cost row, because the
+cost with the tokens would give the price per token and so the model; the tokens and the call count stay. The operator
+reads the cost through the operator API. The log is cleaned (terminal escapes and control characters out)
 and passed through the same redaction the runner API uses for results, with the secrets the app
 knows. Everything that came from outside (project name, login, a historical question of a removed `/ask` run, the log)
 is rendered as text. The links made from stored data are the comment link and the pull request link, and only when they are `https://github.com/` addresses

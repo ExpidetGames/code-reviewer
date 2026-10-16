@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 
 import { ReviewSettingsError } from "./errors.ts";
 import {
+  ALL_TIERS_CONFIGURED,
   setupReviewSettings,
   TEST_DEFAULT_SKILL,
   TEST_MODEL,
@@ -42,7 +43,7 @@ describe("the global defaults", () => {
     expect(Object.values(view.sources)).toEqual(
       Object.values(view.sources).map(() => "built_in"),
     );
-    expect(view.cost.warn).toBe(false);
+    expect(view.cost?.warn).toBe(false);
   });
 
   it("follow a changed model of the instance as long as nobody chose one", async () => {
@@ -196,8 +197,8 @@ describe("the global defaults", () => {
       "octocat",
     );
 
-    expect(view.cost.warn).toBe(true);
-    expect(view.cost.primary).toMatchObject({
+    expect(view.cost?.warn).toBe(true);
+    expect(view.cost?.primary).toMatchObject({
       status: "estimated",
       aboveLimit: true,
     });
@@ -229,7 +230,7 @@ describe("the token budget against the context window of the model", () => {
     );
 
     expect(view.effective.maxTokens).toBe(500_000);
-    expect(view.cost.exceedsContext).toEqual([]);
+    expect(view.cost?.exceedsContext).toEqual([]);
   });
 
   // #280-T09
@@ -245,13 +246,12 @@ describe("the token budget against the context window of the model", () => {
     );
     const project = await app.service.updateProjectSettings(app.first.id, {
       maxTokens: 1_200_000,
-      model: "deepseek/deepseek-v3.2",
     });
 
     expect(global.effective.maxTokens).toBe(1_000_000);
-    expect(global.cost.exceedsContext).toEqual([]);
+    expect(global.cost).toBeNull();
     expect(project.effective.maxTokens).toBe(1_200_000);
-    expect(project.cost.exceedsContext).toEqual([]);
+    expect(project.cost).toBeNull();
   });
 
   // #280-T09
@@ -297,7 +297,7 @@ describe("the token budget against the context window of the model", () => {
     );
 
     expect(view.effective.maxTokens).toBe(2_000_000);
-    expect(view.cost.warnings).toEqual([
+    expect(view.cost?.warnings).toEqual([
       { model: "primary", kind: "cost_unknown" },
     ]);
   });
@@ -325,7 +325,7 @@ describe("the token budget against the context window of the model", () => {
       })
       .catch((error: unknown) => error);
 
-    expect(view.cost.exceedsContext).toEqual(["primary"]);
+    expect(view.cost?.exceedsContext).toEqual(["primary"]);
     // A save that sets the budget again is asked to fix it.
     expect(saved).toBeInstanceOf(ReviewSettingsError);
   });
@@ -1006,6 +1006,278 @@ describe("a full reset and the settings-change hook", () => {
       model: "vendor/diff",
       reviewKind: "dynamic",
       dynamicModel: "vendor/model",
+    });
+  });
+});
+
+// #283: a workspace on the operator's key chooses a quality level; the models are not its business.
+describe("the settings of a workspace on the operator's key", () => {
+  const OWN_MODEL = "acme-own/model-9";
+  const OWN_FALLBACK = "acme-own/fallback-3";
+  const OWN_DYNAMIC = "acme-own/dynamic-5";
+
+  /** Every key name in a JSON value, at any depth. */
+  function keysOf(value: unknown): string[] {
+    if (Array.isArray(value)) return value.flatMap(keysOf);
+    if (typeof value !== "object" || value === null) return [];
+    return Object.entries(value).flatMap(([key, entry]) => [
+      key,
+      ...keysOf(entry),
+    ]);
+  }
+
+  async function managedWorkspace() {
+    const app = await setupReviewSettings(undefined, {
+      operatorsModels: true,
+      tierAvailability: ALL_TIERS_CONFIGURED,
+    });
+    await app.projects.activate(app.first.id);
+    return app;
+  }
+
+  // #283-T01
+  it("shows the quality level and no model, in the workspace defaults and in a project", async () => {
+    const app = await managedWorkspace();
+
+    const global = await app.service.getGlobalSettings();
+    const project = await app.service.getProjectSettings(app.first.id);
+
+    for (const view of [global, project]) {
+      expect(view.modelManagedByInstance).toBe(true);
+      expect(view.effective.modelTier).toBe("medium");
+      expect(view.effective).not.toHaveProperty("model");
+      expect(view.effective).not.toHaveProperty("fallbackModel");
+      expect(view.cost).toBeNull();
+      expect(view.tierAvailability).toEqual(ALL_TIERS_CONFIGURED);
+    }
+    expect(project.dynamic.effective).not.toHaveProperty("dynamicModel");
+    expect(project.dynamic.defaults).not.toHaveProperty("dynamicModel");
+    expect(global).not.toHaveProperty("builtIn.model");
+    expect(project.inherited).not.toHaveProperty("model");
+  });
+
+  // #283-T07
+  it("holds no model field and no model name anywhere in the answer", async () => {
+    const app = await managedWorkspace();
+    await app.service.updateGlobalSettings({ modelTier: "high" }, "octocat");
+    const global = await app.service.getGlobalSettings();
+    const project = await app.service.getProjectSettings(app.first.id);
+
+    for (const view of [global, project]) {
+      const text = JSON.stringify(view);
+      expect(keysOf(view)).not.toContain("model");
+      expect(keysOf(view)).not.toContain("fallbackModel");
+      expect(keysOf(view)).not.toContain("dynamicModel");
+      for (const name of [TEST_MODEL, DEFAULT_DYNAMIC_MODEL])
+        expect(text).not.toContain(name);
+    }
+  });
+
+  // #283-T01
+  it("saves the level at the workspace default and at the project, and the project's wins", async () => {
+    const app = await managedWorkspace();
+
+    const global = await app.service.updateGlobalSettings(
+      { modelTier: "low" },
+      "octocat",
+    );
+    const inherited = await app.service.getProjectSettings(app.first.id);
+    const project = await app.service.updateProjectSettings(app.first.id, {
+      modelTier: "high",
+    });
+
+    expect(global.overrides).toEqual({ modelTier: "low" });
+    expect(inherited.effective.modelTier).toBe("low");
+    expect(inherited.sources.modelTier).toBe("global");
+    expect(project.effective.modelTier).toBe("high");
+    expect(project.sources.modelTier).toBe("project");
+  });
+
+  // #283-T04
+  it.each([
+    ["model", { model: "acme-x/y-1" }],
+    ["fallbackModel", { fallbackModel: "acme-x/y-1" }],
+    ["fallbackModel", { fallbackModel: null }],
+  ])(
+    "refuses %s in a write to the workspace defaults with MODEL_MANAGED_BY_INSTANCE and stores nothing",
+    async (field, body) => {
+      const app = await managedWorkspace();
+
+      const error = await refusal(
+        app.service.updateGlobalSettings(
+          { ...body, modelTier: "high" },
+          "octocat",
+        ),
+      );
+
+      expect(error.code).toBe("REVIEW_SETTINGS_INVALID");
+      expect(error.issues).toEqual([
+        { field, code: "MODEL_MANAGED_BY_INSTANCE" },
+      ]);
+      expect(await app.appSettingRows()).toEqual([]);
+    },
+  );
+
+  // #283-T04
+  it.each([
+    ["model", { model: "acme-x/y-1" }],
+    ["fallbackModel", { fallbackModel: "acme-x/y-1" }],
+    ["dynamicModel", { dynamicModel: "acme-x/y-1" }],
+    ["dynamicModel", { dynamicModel: null }],
+  ])(
+    "refuses %s in a write to a project with MODEL_MANAGED_BY_INSTANCE and stores nothing",
+    async (field, body) => {
+      const app = await managedWorkspace();
+
+      const error = await refusal(
+        app.service.updateProjectSettings(app.first.id, {
+          ...body,
+          modelTier: "high",
+        }),
+      );
+
+      expect(error.issues).toEqual([
+        { field, code: "MODEL_MANAGED_BY_INSTANCE" },
+      ]);
+      expect((await app.projects.get(app.first.id))?.settings).toEqual({});
+    },
+  );
+
+  // #283-T04
+  it("names every model field of one write, not only the first", async () => {
+    const app = await managedWorkspace();
+
+    const error = await refusal(
+      app.service.updateProjectSettings(app.first.id, {
+        model: "acme-x/y-1",
+        dynamicModel: "acme-x/y-2",
+        maxFindings: 3,
+      }),
+    );
+
+    expect(error.issues).toEqual([
+      { field: "model", code: "MODEL_MANAGED_BY_INSTANCE" },
+      { field: "dynamicModel", code: "MODEL_MANAGED_BY_INSTANCE" },
+    ]);
+  });
+
+  // #283-T02
+  it("still takes a model from a workspace on its own key, and an unknown field stays unknown", async () => {
+    const app = await setupReviewSettings();
+    await app.projects.activate(app.first.id);
+
+    const view = await app.service.updateProjectSettings(app.first.id, {
+      model: "acme-x/y-1",
+      dynamicModel: "acme-x/y-2",
+    });
+
+    expect(view.modelManagedByInstance).toBe(false);
+    expect(view.effective.model).toBe("acme-x/y-1");
+    expect(view.dynamic.effective.dynamicModel).toBe("acme-x/y-2");
+    expect(view.cost).not.toBeNull();
+    expect(view.tierAvailability).toBeNull();
+  });
+
+  // #283-T01
+  it("keeps the models a workspace saved on its own key through a save of the level, and gives them back on its own key", async () => {
+    const app = await setupReviewSettings();
+    await app.projects.activate(app.first.id);
+    await app.service.updateGlobalSettings(
+      { model: OWN_MODEL, fallbackModel: OWN_FALLBACK, maxFindings: 4 },
+      "octocat",
+    );
+    await app.service.updateProjectSettings(app.first.id, {
+      model: OWN_MODEL,
+      dynamicModel: OWN_DYNAMIC,
+      maxFindings: 6,
+    });
+    app.setOperatorsModels(true);
+    app.setTierAvailability(ALL_TIERS_CONFIGURED);
+
+    const global = await app.service.updateGlobalSettings(
+      { maxFindings: 5, modelTier: "low" },
+      "octocat",
+    );
+    const project = await app.service.updateProjectSettings(app.first.id, {
+      maxFindings: 7,
+      modelTier: "high",
+    });
+
+    expect(JSON.stringify([global, project])).not.toContain(OWN_MODEL);
+    expect(JSON.stringify([global, project])).not.toContain(OWN_DYNAMIC);
+    app.setOperatorsModels(false);
+    const back = await app.service.getProjectSettings(app.first.id);
+    expect(back.overrides).toMatchObject({
+      model: OWN_MODEL,
+      maxFindings: 7,
+      modelTier: "high",
+    });
+    expect(back.dynamic.overrides.dynamicModel).toBe(OWN_DYNAMIC);
+    expect((await app.service.getGlobalSettings()).overrides).toMatchObject({
+      model: OWN_MODEL,
+      fallbackModel: OWN_FALLBACK,
+      maxFindings: 5,
+      modelTier: "low",
+    });
+  });
+
+  // #283-T01
+  it("keeps the models of its own key through a reset of the project, and drops the rest of the overrides", async () => {
+    const app = await setupReviewSettings();
+    await app.projects.activate(app.first.id);
+    await app.service.updateProjectSettings(app.first.id, {
+      model: OWN_MODEL,
+      fallbackModel: OWN_FALLBACK,
+      dynamicModel: OWN_DYNAMIC,
+      maxFindings: 9,
+      reviewKind: "dynamic",
+    });
+    app.setOperatorsModels(true);
+
+    const reset = await app.service.resetProjectSettings(app.first.id);
+
+    expect(JSON.stringify(reset)).not.toContain("acme-own");
+    expect(reset.overrides).not.toHaveProperty("maxFindings");
+    expect(reset.dynamic.effective.reviewKind).toBe("diff");
+    expect((await app.projects.get(app.first.id))?.settings).toEqual({
+      model: OWN_MODEL,
+      fallbackModel: OWN_FALLBACK,
+      dynamicModel: OWN_DYNAMIC,
+    });
+  });
+
+  // #283-T07
+  it("does not show a stored model of the workspace while the operator's key is used", async () => {
+    const app = await setupReviewSettings();
+    await app.projects.activate(app.first.id);
+    await app.service.updateProjectSettings(app.first.id, {
+      model: OWN_MODEL,
+      dynamicModel: OWN_DYNAMIC,
+    });
+    app.setOperatorsModels(true);
+
+    const project = await app.service.getProjectSettings(app.first.id);
+
+    expect(JSON.stringify(project)).not.toContain(OWN_MODEL);
+    expect(JSON.stringify(project)).not.toContain(OWN_DYNAMIC);
+    expect(project.overrides).not.toHaveProperty("model");
+  });
+
+  // #283-T01
+  it("reports which levels have a model for a kind, as yes or no, and nothing more", async () => {
+    const app = await managedWorkspace();
+    app.setTierAvailability({
+      low: { diff: true, dynamic: false },
+      medium: { diff: true, dynamic: true },
+      high: { diff: false, dynamic: false },
+    });
+
+    const view = await app.service.getProjectSettings(app.first.id);
+
+    expect(view.tierAvailability).toEqual({
+      low: { diff: true, dynamic: false },
+      medium: { diff: true, dynamic: true },
+      high: { diff: false, dynamic: false },
     });
   });
 });

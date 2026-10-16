@@ -91,15 +91,20 @@ function usageItems(run: RunDetailView) {
         term: "Usage",
         description: `${COUNT.format(usage.totalTokens)} tokens in ${COUNT.format(usage.aiCalls)} ${calls}`,
       },
-      {
-        term: "Cost",
-        description:
-          usage.costUsd === null ? (
-            <span className="text-muted-foreground">Not available</span>
-          ) : (
-            costText(usage.costUsd)
-          ),
-      },
+      // A run on a managed quality level shows no cost: with the tokens it would tell the model (#283).
+      ...(run.costHidden
+        ? []
+        : [
+            {
+              term: "Cost",
+              description:
+                usage.costUsd === null ? (
+                  <span className="text-muted-foreground">Not available</span>
+                ) : (
+                  costText(usage.costUsd)
+                ),
+            },
+          ]),
       ...(usage.stoppedEarly === null
         ? []
         : [

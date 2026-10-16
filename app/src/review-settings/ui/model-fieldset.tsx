@@ -5,6 +5,8 @@
 // budget, with the estimated cost of one review at the foot (the cost belongs next to the model it
 // depends on, not at the end of the form). Every field shows where its value comes from and can be
 // taken back to the layer below with "Reset to default".
+import type { ReactNode } from "react";
+import { QUALITY_HEADING } from "../../copy/model-quality.ts";
 import type { ReviewCostGuard } from "../cost.ts";
 import {
   SettingsCard,
@@ -29,10 +31,6 @@ export function tokenBudgetHint(): string {
   return `How much of a pull request the model can read in one go. A token is about three quarters of a word, so a bigger budget lets it see more of a large change, but costs more. Between ${min.toLocaleString("en-US")} and ${max.toLocaleString("en-US")}.`;
 }
 
-/** Shown instead of the model fields while the instance's own key is used: the operator chooses the model (#276). */
-export const MODEL_CHOSEN_BY_INSTANCE =
-  "The model is chosen by this instance, so there is nothing to set here. Reviews of this workspace use the instance's model, and a model you saved earlier is kept but not used.";
-
 export function ModelFieldset({
   model,
   state,
@@ -41,10 +39,13 @@ export function ModelFieldset({
   handlers,
   cost,
   datalistId,
-  chosenByInstance = false,
+  quality,
 }: SettingsFieldsetProps & {
-  /** The instance chooses the model (the workspace's key mode is managed): a note replaces the fields. */
-  chosenByInstance?: boolean;
+  /**
+   * The quality choice of a workspace on the operator's key (#283). It takes the place of the model, the fallback
+   * model and the cost estimate; the token budget stays.
+   */
+  quality?: ReactNode;
   cost: ReviewCostGuard | null;
   /** The id of the `<datalist>` of known model names, rendered by the container. */
   datalistId: string;
@@ -60,12 +61,23 @@ export function ModelFieldset({
       label,
       onReset: () => handlers.reset(name),
     });
-  if (chosenByInstance)
+  const budget = (
+    <SettingsTextField
+      name="maxTokens"
+      label="Token budget"
+      hint={tokenBudgetHint()}
+      error={errors.maxTokens}
+      origin={origin("maxTokens", "Token budget")}
+      value={state.values.maxTokens}
+      onChange={(value) => handlers.setText("maxTokens", value)}
+      inputMode="numeric"
+    />
+  );
+  if (quality !== undefined)
     return (
-      <SettingsCard title="Model" disabled={disabled}>
-        <p className="text-sm text-muted-foreground">
-          {MODEL_CHOSEN_BY_INSTANCE}
-        </p>
+      <SettingsCard title={QUALITY_HEADING} disabled={disabled}>
+        {quality}
+        {budget}
       </SettingsCard>
     );
   return (
@@ -91,16 +103,7 @@ export function ModelFieldset({
         list={datalistId}
         placeholder="None"
       />
-      <SettingsTextField
-        name="maxTokens"
-        label="Token budget"
-        hint={tokenBudgetHint()}
-        error={errors.maxTokens}
-        origin={origin("maxTokens", "Token budget")}
-        value={state.values.maxTokens}
-        onChange={(value) => handlers.setText("maxTokens", value)}
-        inputMode="numeric"
-      />
+      {budget}
       <CostSummary cost={cost} />
     </SettingsCard>
   );

@@ -45,9 +45,22 @@ Nothing else reads the setting except the claim of a job (below).
 
 The review setting `modelTier` (`low`, `medium`, `high`; `src/review-settings/README.md`) at the workspace default and at
 the project level, with the same layering as every other setting: the project's tier over the workspace default over
-`medium`. It is a setting like the others in the API and in the stored settings; the form for it is #283.
+`medium`. It is a setting like the others in the API and in the stored settings; the **Quality** choice that sets it is described below.
 **It only has an effect while the workspace's key mode is `managed`.** For a workspace on its own key (or without
 entitlements) `model` and the Dynamic model apply and the tier is ignored.
+
+### The Quality choice (#283)
+
+The settings forms of a managed workspace (the workspace defaults and every project) show one **Quality** choice, Low,
+Medium or High, instead of the model, the fallback model, the Dynamic model and the cost estimate
+(`src/review-settings/README.md`). Each level is described in a sentence by speed and depth only; the labels and the
+sentences are in `src/copy/model-quality.ts`, and a test scans them for a model name, a vendor, a price or a cost. The
+settings routes return `modelTier` and no model field for such a workspace and refuse a write that sets one with
+`MODEL_MANAGED_BY_INSTANCE`.
+
+A level that has no model for the kind of review in force is shown as **Not available**, and cannot be chosen, without
+saying why or which model would back it: the form gets a yes or no per level and kind (`tierAvailability`,
+`configuredTiers`), read from this configuration on every request, never an id.
 
 ## At claim
 
@@ -81,11 +94,14 @@ The id of a tier's model goes to the operator API and to the runner (it needs it
   name) and not in the plan or usage views.
 - **Not in the result of a run.** The runner reports the model it used (`usage.model`) and its log or error may repeat it.
   For a job that ran on a tier (its usage record names one) `usage.model` is **always** set to `null`, whatever the
-  runner calls the model, and the ids in any text become `[redacted]`: the model the job was handed (remembered with its
+  runner calls the model, and the ids in any text become `[model]` (the same place that masks credentials, `runner-api/report.ts`): the model the job was handed (remembered with its
   keys, encrypted, `runner-api/claimed-keys.ts`, `modelsOf`) **and every model the operator has configured now**, so the
   result is masked on any app instance, after any change of the tiers, and even if the remembered row cannot be read.
-  A run on the workspace's own key reports its model as before. Tokens, calls and cost stay, so the Runs
-  page and the limits are unaffected.
+  A run on the workspace's own key reports its model as before. Tokens and calls stay, and the limits are unaffected.
+  **The Runs view shows no cost for a run on a tier** (its usage record names one; `costHidden` in the run detail, #283):
+  with the tokens it would give a price per token, which tells the model and the operator's pricing. The operator reads
+  the cost through the operator API. The link to the comment is not masked: the app builds it from GitHub data, and a
+  short id that also occurs in a repository name would break it.
 - **Not in a published pull request comment.** The model is the runner's business, and PR-Agent can print it into the
   review comment. The runner sets `config.output_run_details` and `config.output_relevant_configurations` to `false`
   for every job and pins them against a repository's `.pr_agent.toml` (`runner/README.md`). The Dynamic summary and the
@@ -95,7 +111,8 @@ The id of a tier's model goes to the operator API and to the runner (it needs it
   the id, the operator API names the tiers that have a model and the result code. The operator's own `PUT` of a model is
   read from the provider and logged by the checker with the id (server log, the operator's).
 - Not in error copy: `managed_tier_unavailable` says that the chosen level is not available and that a workspace Owner or
-  Admin should contact whoever runs the instance (until #283 there is no control to point at), not which model it would be.
+  Admin can choose another quality level in the review settings of the project (and to contact whoever runs the
+  instance if none is available), not which model it would be.
 
 `integration-tests/http/model-tiers-privacy.integration.test.ts` configures tiers with ids no other test uses, runs
 managed Diff and Dynamic jobs, and searches every answer a member can read for any of them.
@@ -109,6 +126,12 @@ managed Diff and Dynamic jobs, and searches every answer a member can read for a
   would run on the instance default model it was pinned to (#276) or on the workspace's own settings, and does not know
   the tier. It also drops `modelTier` from the settings it saves from a form that does not carry it.
 - A runner or Worker of the previous release gets the same job input; only the value of `llm.model` differs.
+- **The Quality choice (#283) is additive too**: no migration and no change of a runner-facing API. The settings answers
+  gain `modelManagedByInstance` and `tierAvailability` and drop the model fields **for a managed workspace only**; a form
+  that does not know the flag (an older cached page) reads the answer as not managed. An app instance of the previous
+  release still shows the model fields of a managed workspace; the stored models, the key mode and the level are the
+  same data, so the two releases can serve the same database during a rolling deploy. The only visible difference is the
+  placeholder in a stored result (`[model]` instead of `[redacted]`).
 
 ## Testing
 
@@ -116,6 +139,9 @@ managed Diff and Dynamic jobs, and searches every answer a member can read for a
 refusals, nothing stored on a refusal), `integration-tests/http/operator-api-model-tiers.integration.test.ts` (the route),
 `integration-tests/http/runner-api-model-tiers.integration.test.ts` (the claim on both paths: the model per tier and
 kind, the default, the layering, the closed failure, the workspace on its own key, the clamp, the masking),
-`integration-tests/http/model-tiers-privacy.integration.test.ts`, the contract in
+`integration-tests/http/model-tiers-privacy.integration.test.ts` (also the settings answers of a managed workspace),
+`src/review-settings/*.integration.test.ts` and `ui/*.test.tsx` (the Quality choice, the refusal of a model write, the
+views without a model), `src/copy/model-quality.test.ts` (the copy scan), the published Dynamic and Diff comment in
+`runner/tests/integration/test_dynamic_review_job.py` and `runner/tests/engine/test_engine_hostile_repo.py`, the contract in
 `integration-tests/compatibility/operator-api-contract.integration.test.ts` and the portal row in
 `src/admin/http.integration.test.ts` and `src/admin/ui/overview.test.tsx`.

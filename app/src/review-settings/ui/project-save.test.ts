@@ -83,6 +83,8 @@ function model(
       ]),
     ) as SettingsFormModel["sources"],
     cost: estimateReviewCost(effective),
+    managed: false,
+    tierAvailability: null,
     lastSaved: null,
     dynamic,
   };
