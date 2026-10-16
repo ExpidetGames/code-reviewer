@@ -191,7 +191,8 @@ Deleting workspaces, transferring data, SSO and teams below the workspace are ou
 is bound to a workspace by an Owner or Admin (`manage_connections`) through "Connect GitHub" on the Connections page; the
 rules are in `src/installation-binding/README.md`, and the synchronization of a workspace reads its own connections only
 (`POST /api/w/:workspace/integrations/sync`; the whole instance's stays the instance admin's). The workspace LLM key is
-in place (`src/llm/`, `manage_llm_key`: an Admin or an Owner sets it, every member sees whether there is one). The workspace
+in place (`src/llm/`, `manage_llm_key`: an Admin or an Owner sets it, every member sees whether there is one). "Manage plan"
+(`manage_plan`, an Admin or an Owner) hands the person over to the operator-configured plan page (`src/plan-handoff/`). The workspace
 pages tell a member only that GitHub is not set up and to ask the instance admin; the names of the variables are the
 instance admin's to read (`src/config-status/`). Whether reviews have an LLM key is the workspace's own matter: the hint
 "LLM not configured" tells a Member to ask an Admin or an Owner of the workspace (`src/llm/ui/`).

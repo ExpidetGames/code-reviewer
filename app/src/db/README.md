@@ -343,6 +343,20 @@ so an app of the previous release on the same database is unaffected (it never r
   start is the dedupe, a partial index serves the cron sweep's read of the due ones (`refusal-notices-sweep.ts`,
   instance level). See `src/refusal-notices/README.md`.
 
+### Plan handoff tokens
+
+Migration `20261016120000_create_plan_handoff_tokens` (#284; epic #268). It adds an empty table and touches no existing
+row, so an app of the previous release on the same database is unaffected (it never reads the table):
+
+- `plan_handoff_tokens` (`token_hash` primary key: the SHA-256 of a token of 256 random bits, never the token;
+  `workspace_id` and `user_id` foreign keys, `user_id` `on delete cascade`; `role` `owner`/`admin`, the role at the click;
+  `created_at`, `expires_at` five minutes later, `used_at`, `revoked_at`): the single-use hand-over of an Owner or Admin
+  to the operator-configured plan page. Making one is scoped (`plan-handoff-tokens-repository.ts`: it revokes the same
+  person's unused tokens of the workspace and inserts, in one transaction); redeeming one is by the hash alone and
+  instance level (`plan-handoff-redeem-repository.ts`: one guarded `update … returning`, then the role is read again).
+  Rows are removed a day after they expired (`src/maintenance/cleanup.ts`); the table is listed in the user merge
+  (`github-signin/merge.ts`, ends with the retired user). See `src/plan-handoff/README.md`.
+
 ## Workspace scoping
 
 Every repository that reads or writes customer data is created for one workspace:
@@ -368,6 +382,7 @@ Not scoped, each for a reason (the list is in `scoping.test.ts`):
 | `usage-feed-repository.ts`                                           | The settled usage records of every workspace in one ordered feed, for the operator API (#278): the operator serves many workspaces from one token. It only reads (never a `reserved` or `void` record), and every record carries `workspaceId`; the reads of one workspace go through the scoped usage records repository                                                                      |
 | `runner-jobs-repository.ts`                                          | The lease side of the job queue (claim, heartbeat, complete, release, expiry). Runners serve the whole instance with one token, so a claim hands out the oldest due job of any workspace; every change is fenced by the lease token, and the job it returns carries `workspaceId`                                                                                                              |
 | `claim-admission.ts`                                                 | The check of the entitlements of a job the claim just took (#277), inside the claim transaction of the lease side of the queue, for whichever workspace the job is in. It reads, through repositories created for that job's workspace (the instance default and the workspace row it locks are not customer data), and decides; the ending of a refused job is the lease side's own statement |
+| `plan-handoff-redeem-repository.ts`                                  | The redemption of a handoff token by the external plan page through the operator API (#284). The caller holds only the token, so there is no workspace to scope to before it is looked up by its hash; it never lists, and the answer names the workspace the token was made for. Making a token is the scoped plan handoff tokens repository; the clean-up only deletes expired rows          |
 | `refusal-notices-sweep.ts`                                           | The notices of refused reviews that are due to be posted again (#281), for the cron sweep that serves the whole instance. It only reads the `pending` rows whose wait is over, and every answer carries `workspaceId`; the record itself goes through the scoped refusal notices repository                                                                                                    |
 
 A signed-in user works in the workspace named by the address (`/w/<slug>`) and only in one they are a member

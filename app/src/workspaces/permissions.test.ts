@@ -26,6 +26,8 @@ const MATRIX: Record<WorkspaceAction, [boolean, boolean, boolean]> = {
   manage_review_defaults: [false, true, true],
   manage_connections: [false, true, true],
   manage_llm_key: [false, true, true],
+  // #284-T06: Manage plan is for the people who can act on a refusal notice, not for a Member.
+  manage_plan: [false, true, true],
   view_members: [true, true, true],
   view_invitations: [false, true, true],
   manage_invitations: [false, true, true],
