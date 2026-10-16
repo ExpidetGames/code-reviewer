@@ -618,7 +618,8 @@ A run's error code is shown on the Runs pages with a fixed sentence. Four belong
 Others you will meet: `no_capable_runner` (a Dynamic job nobody could run for 30 minutes: the probe says no, or
 `DISPATCHER_ENGINES` has no `opencode`), `dynamic_review_disabled` (the gate is off), `lease_expired` (the Worker
 stopped reporting), `quota_exhausted`, `workspace_suspended` and `entitlements_invalid` (the workspace's limits, set
-through the operator API), `llm_not_configured` (the workspace has no LLM key, or it is `managed` and the operator has no usable key: section 3.5). The wake-up call's answers (`202`,
+through the operator API), `managed_tier_unavailable` (the workspace is `managed` and its tier has no model for the kind
+of review: save one with `PUT /api/operator/v1/model-tiers`), `llm_not_configured` (the workspace has no LLM key, or it is `managed` and the operator has no usable key: section 3.5). The wake-up call's answers (`202`,
 `200 ignored` with `not_claimable` or `not_capable`, `429`, `503`) and the App's back-off are in
 `app/src/dispatch/README.md`, "What an answer means".
 
@@ -786,8 +787,11 @@ A self-hosted installation and a hosted one never share a database or a GitHub A
   A limit for runs on a workspace's own key is #361. Limits and the key mode are set through the operator API; the
   operator's own key (section 3.5) is saved by the instance admin only, and a workspace set to `managed` before every App
   instance runs the release that knows the key mode is served by the wrong key and outside the limit.
-- **A managed workspace has no model of its own**: the instance's `LLM_MODEL` and `LLM_MAX_TOKENS` apply to all of them
-  until managed quality tiers exist (#280, #283).
+- **A managed workspace has no model of its own**: it chooses a tier (`low`, `medium`, `high`) and the models behind the
+  tiers are yours, set through the operator API (`PUT /api/operator/v1/model-tiers`, one model per tier and review kind;
+  `app/src/model-tiers/README.md`). A tier without a model for a kind fails the job with `managed_tier_unavailable`, it
+  does not move to another tier or to `LLM_MODEL`. The models never reach a workspace; a Dynamic model has to support tool
+  calls (checked when you save it). Save the tiers before you set a workspace to `managed`.
 - **A Worker whose end the Dispatcher does not see still holds its slot until its lease lapses** (two minutes after its
   last heartbeat); only the next sweep then puts the job back, and the pull request shows "Running" meanwhile. A Worker
   that exits non-zero before it has reported a result is released at once when the Dispatcher sees the container end
