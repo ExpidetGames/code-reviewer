@@ -5,6 +5,7 @@
 // record, and the model of a managed tier is only ever its tier name. The shapes are the definitions `UsageItem`
 // and `UsageSummaryResponse` of the contract.
 import { TIER_NAME_PATTERN } from "./contract.ts";
+import type { UnknownCostCount } from "../db/repositories/usage-feed-repository.ts";
 import type {
   UsageRecord,
   UsageSummaryGroup,
@@ -41,5 +42,14 @@ export function usageSummaryGroupView(group: UsageSummaryGroup) {
     settledCount: group.settledCount,
     knownCostMicroUsd: group.knownCostMicroUsd,
     unknownCostCount: group.unknownCostCount,
+  };
+}
+
+/** A plain integer for a workspace and a key mode: no cost, model, key or name (#385). Shape: `UnknownCostCount`. */
+export function unknownCostCountView(count: UnknownCostCount) {
+  return {
+    workspaceId: count.workspaceId,
+    keyMode: count.keyMode,
+    unknownCostCount: count.unknownCostCount,
   };
 }
