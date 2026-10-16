@@ -358,28 +358,47 @@ def test_the_options_of_the_job_win_over_the_repository_file_in_the_real_process
     assert seen["after_repo_file"]["num_max_findings"] == 3
 
 
-# The job timeout, soft (an await) and hard (a call that blocks everything). The timeout counts
-# from the start of the process (#387), so it is long enough for the command to start first.
+def run_until_the_command_starts(
+    scenario: str, tmp_path: Path, timeout_seconds: int
+) -> tuple[subprocess.CompletedProcess[str], dict[str, Any], int]:
+    """Run the double with a timeout the command starts within; returns the timeout it took.
+
+    The soft timeout counts from the start of the process (#387), so a start-up (the imports) that
+    takes longer than the timeout ends the job before the command starts: the clean result the
+    product promises, but not what the caller wants to look at. The double reports when the
+    command started (`seen`); if it did not, the run is repeated with twice the time (at most
+    three runs), so the tests do not bet on how long the imports of this machine take.
+    """
+    for attempt in range(3):
+        timeout = timeout_seconds * 2**attempt
+        directory = tmp_path / f"attempt-{attempt}"
+        directory.mkdir()
+        process, seen = run_double(
+            scenario, directory, extra_env={"RUNNER_JOB_TIMEOUT_SECONDS": str(timeout)}, timeout=90
+        )
+        if seen.get("calls") == 1 or attempt == 2:
+            return process, seen, timeout
+    raise AssertionError("unreachable")
+
+
+# The job timeout, soft (an await) and hard (a call that blocks everything).
 def test_a_command_that_awaits_too_long_is_stopped_with_the_timeout_code(tmp_path: Path) -> None:
-    process, seen = run_double(
-        "slow", tmp_path, extra_env={"RUNNER_JOB_TIMEOUT_SECONDS": "8"}, timeout=40
-    )
+    process, seen, timeout = run_until_the_command_starts("slow", tmp_path, 4)
 
     result = result_of(process)
     assert seen["calls"] == 1  # the command was running when the timeout cancelled it
     assert process.returncode == 1
     assert result["errorCode"] == "timeout"
     assert result["ok"] is False
+    assert result["logTail"].startswith("timeout: the command did not finish in time")
     # CR-12-T05: the measured duration is the time until the stop, not zero and not the 120 s wait
-    assert result["durationMs"] >= 8000
+    assert result["durationMs"] >= timeout * 1000
 
 
-# #387-T06: the command runs (the start-up is over before the 6 s timeout) and blocks the loop, so
-# only the watchdog can end it, after the timeout and the grace, with its own text and reason.
+# #387-T06: the command runs and blocks the loop, so only the watchdog can end it, after the
+# timeout and the grace, with its own text and reason.
 def test_a_command_that_blocks_the_whole_process_is_ended_by_the_watchdog(tmp_path: Path) -> None:
-    process, seen = run_double(
-        "hang", tmp_path, extra_env={"RUNNER_JOB_TIMEOUT_SECONDS": "6"}, timeout=60
-    )
+    process, seen, timeout = run_until_the_command_starts("hang", tmp_path, 4)
 
     result = result_of(process)
     assert seen["calls"] == 1  # the command was started and is what blocked
@@ -389,14 +408,15 @@ def test_a_command_that_blocks_the_whole_process_is_ended_by_the_watchdog(tmp_pa
     assert result["logTail"].startswith(
         "timeout [no_result_from_process]: the command did not stop"
     )
-    assert 9000 <= result["durationMs"] < 20_000  # the 6 s timeout and the 3 s grace
+    assert (timeout + 3) * 1000 <= result["durationMs"] < 40_000  # the timeout and the grace
 
 
-# #387-T01: the soft timeout counts from the start of the process. The start-up (4.5 s) is longer
-# than the 3 s the watchdog allows after the 4 s timeout, but ends before the watchdog (7 s): the
-# deadline has passed by then, so the job ends with the clean soft result and the command never
-# starts. Counted from the start of the command, the soft timeout would land at 8.5 s, after the
-# watchdog. The margin to the watchdog is 2.5 s of import time on top of the 4.5 s.
+# #387-T01: the soft timeout counts from the start of the job (the first line of `main()`). The
+# start-up (4.5 s) is longer than the 3 s the watchdog allows after the 4 s timeout, but ends before
+# the watchdog (7 s): the deadline has passed by then, so the job ends with the clean soft result
+# and the command never starts. Counted from the start of the command, the soft timeout would land
+# at 8.5 s, after the watchdog. The margin to the watchdog is 2.5 s of import time on top of the
+# 4.5 s.
 def test_a_slow_start_does_not_let_the_watchdog_overtake_the_soft_timeout(tmp_path: Path) -> None:
     process, seen = run_double(
         "slow_start", tmp_path, extra_env={"RUNNER_JOB_TIMEOUT_SECONDS": "4"}, timeout=40
@@ -409,7 +429,8 @@ def test_a_slow_start_does_not_let_the_watchdog_overtake_the_soft_timeout(tmp_pa
     assert result["logTail"].startswith("timeout: the command did not finish in time")
     assert "errorReason" not in result  # the watchdog's result names "no_result_from_process"
     assert seen == {}  # the command never started
-    assert 4500 <= result["durationMs"] < 7000  # ended by the soft timeout, before the watchdog
+    # Ended by the soft timeout (4 s, not the start-up), before the watchdog (7 s).
+    assert 4000 <= result["durationMs"] < 7000
 
 
 # #387-T05

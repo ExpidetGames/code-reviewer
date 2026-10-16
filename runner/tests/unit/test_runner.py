@@ -650,11 +650,12 @@ def test_a_diff_run_that_fails_before_its_first_model_call_reports_no_usage(
             await asyncio.sleep(30)
         raise RuntimeError("failed before the model was asked")
 
-    use_double(monkeypatch, double)
+    calls = use_double(monkeypatch, double)
     capture = LogCapture(Redactor([TOKEN, API_KEY]))
 
-    result = runner.run_job(make_job(), capture, time.monotonic(), timeout_seconds=0.2)
+    result = runner.run_job(make_job(), capture, time.monotonic(), timeout_seconds=STARTS_WITHIN)
 
+    assert len(calls) == 1  # the command ran: this is not the clean timeout before its start
     assert result.ok is False
     assert result.usage is None
 
@@ -990,11 +991,12 @@ def test_a_command_that_awaits_past_the_timeout_is_stopped_with_the_timeout_code
         await asyncio.sleep(30)
         return True
 
-    use_double(monkeypatch, double)
+    calls = use_double(monkeypatch, double)
     capture = LogCapture(Redactor([TOKEN, API_KEY]))
 
-    result = runner.run_job(make_job(), capture, time.monotonic(), timeout_seconds=0.2)
+    result = runner.run_job(make_job(), capture, time.monotonic(), timeout_seconds=STARTS_WITHIN)
 
+    assert len(calls) == 1  # the command ran and was cancelled, not stopped before its start
     assert result.ok is False
     assert result.error_code is ErrorCode.TIMEOUT
     assert result.exit_code == 1

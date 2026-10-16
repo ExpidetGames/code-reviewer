@@ -94,11 +94,11 @@ async def execute(
     """Run the command inside a request scope; returns (handled, command_failed, usage).
 
     `deadline` is the moment (on `time.monotonic()`) the soft timeout ends the command, counted from
-    the start of the process and not from here: the imports and the settings copy below can take
-    seconds on a cold start, and the hard timeout of the entry point is counted from the process
-    start too, so a deadline counted from here could land after it (#387). A deadline that has
-    passed by the time the command would start ends the run with `JobTimeout`, and the command is
-    never started.
+    the start of the job (the first line of `main()`) and not from here: the imports and the
+    settings copy below can take seconds on a cold start, and the hard timeout of the entry point is
+    counted from there too, so a deadline counted from here could land after it (#387). A deadline
+    that has passed by the time the command would start ends the run with `JobTimeout`, and the
+    command is never started.
 
     `probe` is given what PR-Agent measured however the command ends, also when it raises or runs
     out of time, so a run that fails after its model call can still report what it used (#273).

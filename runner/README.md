@@ -288,8 +288,8 @@ flight reports zero calls, because PR-Agent counts only calls that came back: it
 The exit code is 0 for `ok` and 1 otherwise. The environment variable `RUNNER_JOB_TIMEOUT_SECONDS`
 (read from the process environment, not handed to PR-Agent) makes the runner stop the command and
 report `timeout`: first by cancelling it, and if it does not react (a call that blocks the process)
-three seconds later by printing the result and ending the process. Both are counted from the start of
-the process, not from the start of the command (#387): the imports and the settings copy of a cold
+three seconds later by printing the result and ending the process. Both are counted from the first line of
+`main()` of the job process, not from the start of the command (#387): the imports and the settings copy of a cold
 start take seconds, and a limit counted after them could land behind the three seconds of the
 process end. A start-up that used up the whole timeout ends with the clean `timeout` result and the
 command is never started; a Dynamic run gets the part of the timeout that is left as its deadline.
