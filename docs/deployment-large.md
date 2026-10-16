@@ -4,7 +4,8 @@ The small topology (`compose.yml`) runs the app and the runner on one machine wi
 is for the large one: an **external Postgres**, **several app instances** and **several runners**,
 behind a reverse proxy. The product is identical; only the topology and the database differ
 (`docs/decisions/0001-editions-setup-and-accounts.md`, section 2.1). `compose.large.yml` is the
-example to start from — read it next to this guide.
+example to start from — read it next to this guide. The hosted deployment on Vercel, which also uses an
+external Postgres but runs the App as functions, is described in [`deployment-vercel.md`](deployment-vercel.md).
 
 `DATABASE_URL` selects the database:
 
