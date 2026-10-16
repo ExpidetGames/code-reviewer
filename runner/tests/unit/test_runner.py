@@ -24,6 +24,7 @@ from pr_agent.git_providers.github_provider import GithubProvider
 from support import pr_agent_module
 
 from code_reviewer_runner import runner
+from code_reviewer_runner.diff_cost import DiffCostMeter
 from code_reviewer_runner.identity_patch import PATCHED_FOR_VERSION
 from code_reviewer_runner.job import Job, JobError, parse_job
 from code_reviewer_runner.log_capture import LogCapture
@@ -1347,10 +1348,9 @@ def test_the_watchdog_still_prints_a_timeout_result_when_the_log_tail_cannot_be_
     assert json.loads(out.getvalue())["errorCode"] == "timeout"
 
 
-# #273-T06: a Diff command that blocks the event loop is ended by the watchdog; PR-Agent's counters
-# live in the blocked loop and cannot be read, so the result says it is a run that may have used
-# the model, not a run that did not.
-def test_the_watchdog_of_a_diff_run_says_it_left_no_result(
+# #273-T06: a watchdog with no meter to read (nothing was handed over) cannot tell, so the result
+# says it is a run that may have used the model, not a run that did not.
+def test_the_watchdog_of_a_diff_run_without_a_meter_says_it_left_no_result(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     exits: list[int] = []
@@ -1368,6 +1368,131 @@ def test_the_watchdog_of_a_diff_run_says_it_left_no_result(
     assert result["errorCode"] == "timeout"
     assert result["errorReason"] == "no_result_from_process"
     assert result["usage"] is None
+
+
+def fire_the_watchdog(
+    monkeypatch: pytest.MonkeyPatch, meter_slot: Any = None
+) -> dict[str, Any]:  # Any: the slot is the runner's private class
+    """The Diff watchdog fires now (its loop is blocked) and the result line it prints."""
+    exits: list[int] = []
+    monkeypatch.setattr(runner.os, "_exit", exits.append)
+    out = io.StringIO()
+    channel = runner._ResultChannel(out)  # pyright: ignore[reportPrivateUsage]
+
+    timer = runner._start_watchdog(  # pyright: ignore[reportPrivateUsage]
+        60.0, channel, time.monotonic(), LogCapture(Redactor([])), [], None, meter_slot
+    )
+    timer.cancel()
+    timer.function()
+    assert exits == [1]
+    return json.loads(out.getvalue())
+
+
+def slot_with(meter: DiffCostMeter | None) -> Any:
+    slot = runner.MeterSlot()
+    slot.meter = meter
+    return slot
+
+
+# #363-T03: the event loop blocked before the first request was sent (a hung call to GitHub): the
+# meter is readable from the timer thread and says nothing was sent, so the run is void.
+def test_the_watchdog_of_a_diff_run_that_sent_no_request_leaves_the_run_void(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = fire_the_watchdog(monkeypatch, slot_with(DiffCostMeter()))
+
+    assert result["errorCode"] == "timeout"
+    assert result["usage"] is None
+    assert "errorReason" not in result
+
+
+# #363-T03: the watchdog fired before the runner had installed the meter: nothing was sent.
+def test_the_watchdog_of_a_diff_run_before_the_meter_exists_leaves_the_run_void(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = fire_the_watchdog(monkeypatch, slot_with(None))
+
+    assert result["usage"] is None
+    assert "errorReason" not in result
+
+
+# #363-T01, #363-T02: the loop blocked with a request open: the model may have been used.
+def test_the_watchdog_of_a_diff_run_with_a_request_open_says_the_model_may_have_been_used(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    meter = DiffCostMeter()
+    meter.begin()
+
+    result = fire_the_watchdog(monkeypatch, slot_with(meter))
+
+    assert result["errorCode"] == "timeout"
+    assert result["usage"] is None
+    assert result["errorReason"] == "no_result_from_process"
+
+
+# #363-T01: a request the provider refused is not a use of the model, also when the loop blocks.
+def test_the_watchdog_of_a_diff_run_whose_only_request_was_refused_leaves_the_run_void(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    meter = DiffCostMeter()
+    meter.begin()
+    meter.refused()
+
+    result = fire_the_watchdog(monkeypatch, slot_with(meter))
+
+    assert "errorReason" not in result
+
+
+# #363-T01: `run_job` puts the meter of the run where the watchdog reads it, as soon as it exists.
+def test_run_job_hands_the_meter_of_the_run_to_the_slot_of_the_watchdog(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ask = provider(monkeypatch, HANGS)
+    slot = runner.MeterSlot()
+    seen: list[bool | None] = []
+
+    async def double() -> bool:
+        asking = asyncio.ensure_future(ask())
+        await asyncio.sleep(0)
+        assert not asking.done()
+        assert slot.meter is not None
+        seen.append(slot.meter.may_have_used_the_model)
+        return False
+
+    use_double(monkeypatch, double)
+
+    runner.run_job(
+        make_job(), LogCapture(Redactor([TOKEN, API_KEY])), time.monotonic(), meter_slot=slot
+    )
+
+    assert seen == [True]
+
+
+# #363-T01: `main` gives the watchdog and `run_job` the same slot.
+def test_main_gives_the_watchdog_and_the_run_the_same_meter_slot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    slots: dict[str, Any] = {}
+    real_start = runner._start_watchdog  # pyright: ignore[reportPrivateUsage]
+
+    def spy_start(*args: Any, **kwargs: Any) -> Any:
+        slots["watchdog"] = args[6] if len(args) > 6 else kwargs.get("meter_slot")
+        return real_start(*args, **kwargs)
+
+    def fake_run_job(*args: Any, **kwargs: Any) -> JobResult:
+        slots["run"] = kwargs.get("meter_slot")
+        return JobResult(
+            ok=False, duration_ms=1, comment_url=None, error_code=ErrorCode.UNKNOWN, log_tail=""
+        )
+
+    monkeypatch.setattr(runner, "_start_watchdog", spy_start)
+    monkeypatch.setattr(runner, "run_job", fake_run_job)
+    monkeypatch.setenv(runner.TIMEOUT_VARIABLE, "60")
+
+    runner.main([], stdin=io.StringIO(json.dumps(job_json())), stdout=io.StringIO())
+
+    assert isinstance(slots["run"], runner.MeterSlot)
+    assert slots["watchdog"] is slots["run"]
 
 
 # #387-T02: the soft deadline is counted from the start of the process, so the start-up (import,

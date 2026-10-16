@@ -162,7 +162,21 @@ def _failure(
     )
 
 
-def _unreported_use(usage: Usage | None, meter: DiffCostMeter) -> str | None:
+class MeterSlot:
+    """Where the meter of the Diff run in progress is found by the watchdog thread (#363).
+
+    `main` creates it before it starts the watchdog and hands it to `run_job`, which fills it as
+    soon as the meter is installed: the way a Dynamic run hands its `UsageProbe` over. The meter is
+    guarded by a lock and its counters are read without any await or I/O, so the watchdog can read
+    it from its own thread while the event loop is blocked. Empty means no request can have been
+    sent.
+    """
+
+    def __init__(self) -> None:
+        self.meter: DiffCostMeter | None = None
+
+
+def _unreported_use(usage: Usage | None, meter: DiffCostMeter | None) -> str | None:
     """The reason of a failed Diff run whose model use PR-Agent did not measure (#363).
 
     PR-Agent counts only the calls that came back. A run that ends while a request is in flight (or
@@ -171,15 +185,22 @@ def _unreported_use(usage: Usage | None, meter: DiffCostMeter) -> str | None:
     reported usage needs no reason, and one that sent no request (or only requests the provider
     refused) stays without one.
     """
-    if usage is not None or not meter.may_have_used_the_model:
+    if usage is not None or meter is None or not meter.may_have_used_the_model:
         return None
     return NO_RESULT_REASON
 
 
 def run_job(
-    job: Job, capture: LogCapture, started: float, timeout_seconds: float | None = None
+    job: Job,
+    capture: LogCapture,
+    started: float,
+    timeout_seconds: float | None = None,
+    meter_slot: MeterSlot | None = None,
 ) -> JobResult:
-    """Run the job's command with PR-Agent. Never raises: every failure becomes a result."""
+    """Run the job's command with PR-Agent. Never raises: every failure becomes a result.
+
+    `meter_slot` is given the meter of the run as soon as it exists, so the watchdog can tell
+    whether a request was sent when it has to end a command that blocks the event loop (#363)."""
     # Everything that is patched into PR-Agent is undone in the end, whichever install fails.
     patches = ExitStack()
     try:
@@ -195,6 +216,8 @@ def run_job(
             # The cost of the run is what the provider states for every answer (#274).
             meter, undo_meter = install_cost_meter()
             patches.callback(undo_meter)
+            if meter_slot is not None:
+                meter_slot.meter = meter
         except IdentityPatchError as error:
             return _failure(error.code, error.detail, started, capture)
         except CostMeterError as error:
@@ -762,6 +785,19 @@ def _probe_usage(probe: UsageProbe | None) -> Usage | None:
         return None
 
 
+def _watchdog_reason(probe: UsageProbe | None, meter_slot: MeterSlot | None) -> str | None:
+    """The `errorReason` of a run the watchdog ends. A Dynamic run (a probe) reads its ledger."""
+    if probe is not None:
+        return None
+    if meter_slot is None:
+        return NO_RESULT_REASON
+    try:
+        return _unreported_use(None, meter_slot.meter)
+    except Exception:
+        # Reading must never stop the failure from being reported; unreadable means unknown.
+        return NO_RESULT_REASON
+
+
 def _start_watchdog(
     seconds: float,
     channel: _ResultChannel,
@@ -769,12 +805,16 @@ def _start_watchdog(
     capture: LogCapture | None,
     secrets: Sequence[str],
     probe: UsageProbe | None = None,
+    meter_slot: MeterSlot | None = None,
 ) -> threading.Timer:
     """Last resort for a command that blocks the event loop and so ignores the soft timeout.
 
     A Dynamic run hands over its `probe`: the ledger can be read from this thread, so the result
     still says what the run used (#273). A Diff command keeps its measurements in the context of
-    the blocked event loop, which this thread cannot read; its timeout result carries none.
+    the blocked event loop, which this thread cannot read; its timeout result carries none, but the
+    meter of its model function is lock guarded and safe to read from here: a run that sent no
+    request stays void, and one with a request open (or answered but uncounted) is reported as
+    possibly used (#363). A watchdog without a meter slot cannot tell and reports the reason.
     """
 
     def fire() -> None:
@@ -782,9 +822,9 @@ def _start_watchdog(
         # before this process ends, so no engine or helper survives the timeout (#197-T07).
         shutdown_engines()
         usage = _probe_usage(probe)
-        # Without a probe (a Diff command) the counters cannot be read from here: the run may have
-        # used the model, which the reason says (#273).
-        reason = NO_RESULT_REASON if probe is None else None
+        # A Diff command's usage lives in the blocked event loop and cannot be read from here, but
+        # its meter can: the reason says that the model may have been used (#273, #363).
+        reason = _watchdog_reason(probe, meter_slot)
         try:
             result = _failure(
                 ErrorCode.TIMEOUT,
@@ -892,8 +932,10 @@ def main(
     capture = LogCapture(redactor)
     saved_streams: tuple[Any, Any] = (sys.stdout, sys.stderr)
     timeout_seconds = _timeout_from(saved_env)
+    # Where the watchdog finds the meter of the run, once `run_job` has installed it (#363).
+    meter_slot = MeterSlot()
     watchdog = (
-        _start_watchdog(timeout_seconds, channel, started, capture, job.secrets)
+        _start_watchdog(timeout_seconds, channel, started, capture, job.secrets, None, meter_slot)
         if timeout_seconds
         else None
     )
@@ -909,7 +951,7 @@ def main(
         os.environ.clear()
         os.environ.update(build_environment(job, saved_env))
         try:
-            result = run_job(job, capture, started, timeout_seconds)
+            result = run_job(job, capture, started, timeout_seconds, meter_slot=meter_slot)
         except KeyboardInterrupt:
             raise
         except BaseException as error:

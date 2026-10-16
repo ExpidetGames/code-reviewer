@@ -702,3 +702,61 @@ def test_a_call_that_carries_a_retry_count_may_have_used_the_model(installed: In
     asyncio.run(run())
 
     assert meter.may_have_used_the_model is True
+
+
+# #363-T01: one request refused before generation and a second one still in flight.
+def test_a_refused_request_and_a_request_in_flight_may_have_used_the_model(
+    installed: Install,
+) -> None:
+    release = asyncio.Event()
+    replies: list[Any] = [status_error(429)]
+
+    async def completion(*args: Any, **kwargs: Any) -> Any:
+        if replies:
+            raise replies.pop(0)
+        await release.wait()
+        return answer(0.01)
+
+    boundary, meter = installed(completion)
+
+    async def run() -> bool:
+        with pytest.raises(Exception):  # noqa: B017 # the refusal is the error under test
+            await call(boundary)
+        assert meter.may_have_used_the_model is False  # only the refusal so far
+        asking = asyncio.ensure_future(call(boundary))
+        await asyncio.sleep(0.01)
+        in_flight = meter.may_have_used_the_model
+        release.set()
+        await asking
+        return in_flight
+
+    assert asyncio.run(run()) is True
+
+
+# #363-T01: a stream cut half way is a request that may have been billed.
+def test_a_stream_cut_half_way_may_have_used_the_model(installed: Install) -> None:
+    boundary, meter = installed(stream_of(text_chunk(), then=RuntimeError("cut off")))
+
+    async def run() -> None:
+        with pytest.raises(RuntimeError):
+            await drain(await call(boundary))
+
+    asyncio.run(run())
+
+    assert meter.may_have_used_the_model is True
+
+
+# #363-T01: a stream nobody read to its end is a request that may have been billed.
+def test_a_stream_that_is_not_drained_may_have_used_the_model(installed: Install) -> None:
+    boundary, meter = installed(
+        stream_of(text_chunk(), SimpleNamespace(choices=[], usage=answer(0.03).usage))
+    )
+
+    async def run() -> None:
+        stream = await call(boundary)
+        async for _ in stream:
+            break  # the consumer stops early and leaves the stream suspended
+
+    asyncio.run(run())
+
+    assert meter.may_have_used_the_model is True

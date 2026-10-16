@@ -274,7 +274,9 @@ below). Some ends report no usage although the model may have been
 used; the app then counts the run with an unknown cost (`settled`, reason `no_result`, `src/usage/README.md`)
 and never as void:
 - the Diff watchdog ends a command that blocks the event loop (`timeout`, `errorReason`
-  `no_result_from_process`: PR-Agent's counters cannot be read from another thread);
+  `no_result_from_process`) while the meter says a request was sent that the provider did not certainly
+  refuse (PR-Agent's own counters live in the blocked loop; the meter is lock guarded and safe to read from the
+  watchdog's thread, #363);
 - a Diff command fails (it raises, times out, or reports a failure) with no usage although a request was sent
   that the provider did not certainly refuse: one still in flight, cut off, or an answer PR-Agent did not count
   (`errorReason` `no_result_from_process`, #363; see "Cost of a Diff run", below);
@@ -813,11 +815,14 @@ does not change: the signal is the existing optional `errorReason`.
 | No request was sent, or the only requests were refused before generation (429, 401, 402, 403, 400, 404, 422) | no `usage`, no reason: the app voids the run |
 | Success | unchanged, never a reason |
 
+The watchdog that ends a command blocking the event loop reads the same meter (`main` creates a `MeterSlot` before
+it starts the watchdog and hands it to `run_job`, which fills it when the meter is installed; the counters are
+read under the meter's lock, with no await or I/O). A loop that blocked before its first request, or before the
+meter existed, stays void; one that blocked with a request open reports the reason.
+
 Tests: `tests/unit/test_runner.py`, `tests/unit/test_diff_cost_meter.py`,
 `tests/integration/test_diff_cost_litellm.py` (the real LiteLLM against a loopback provider) and
-`tests/engine/test_engine_cost.py`. Not covered: the watchdog of a command that blocks the event loop still
-reports the reason without looking at the meter (it never reads it), so such a run that never sent a request is
-counted as unknown too.
+`tests/engine/test_engine_cost.py`.
 
 ## Identity patch
 

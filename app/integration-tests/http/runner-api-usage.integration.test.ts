@@ -347,6 +347,30 @@ describe("the completion of a job", () => {
     });
   });
 
+  // #363-T05: the runner's own result line always carries the key, as `"usage": null`.
+  it("settles a failed Diff result with the reason and an explicit null usage as a run with an unknown cost", async () => {
+    const h = await startRunnerApiHarness();
+    const job = await claimedJob(h);
+
+    await h.complete(job.id, job.leaseToken, {
+      ok: false,
+      errorCode: "llm_timeout",
+      errorReason: "no_result_from_process",
+      errorMessage: "the model did not answer in time",
+      commentUrl: null,
+      usage: null,
+    });
+
+    expect(await recordsOf(h).get(job.id)).toMatchObject({
+      state: "settled",
+      settledReason: "no_result",
+      costMicroUsd: null,
+      promptTokens: null,
+      completionTokens: null,
+      settledAt: h.clock.now().toISOString(),
+    });
+  });
+
   // #363-T03: a Diff command that failed before it sent a request has neither usage nor reason: void.
   it("still voids a failed Diff result without usage and without the reason", async () => {
     const h = await startRunnerApiHarness();
