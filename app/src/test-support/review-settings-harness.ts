@@ -53,6 +53,8 @@ export async function setupReviewSettings(
   options: {
     hooks?: ReviewSettingsHooks;
     modelCapabilities?: ModelCapabilityChecker;
+    /** #280: whether the workspace's models are the operator's (its key mode is `managed`); default false. */
+    operatorsModels?: boolean;
   } = {},
 ) {
   const database = db ?? (await createTestDatabase()).db;
@@ -66,6 +68,9 @@ export async function setupReviewSettings(
     projects,
     builtIn: () => builtInReviewSettings(model),
     defaultSkill: () => TEST_DEFAULT_SKILL,
+    ...(options.operatorsModels === true
+      ? { operatorsModels: async () => true }
+      : {}),
     ...(options.hooks === undefined ? {} : { hooks: options.hooks }),
     ...(options.modelCapabilities === undefined
       ? {}

@@ -19,6 +19,7 @@ import {
 } from "../../components/ui/card.tsx";
 import type { GithubConfigView } from "../../github-config/service.ts";
 import { GITHUB_SIGN_IN_NOT_ENABLED } from "../../github-config/ui/messages.ts";
+import { MODEL_TIERS } from "../../model-tiers/tiers.ts";
 import { UNREADABLE_SECRET_CAUSE } from "../../secrets/messages.ts";
 import type { AdminSettingsView } from "../service.ts";
 import { ImportNotice } from "./import-notice.tsx";
@@ -38,7 +39,8 @@ function SetupRow({
   status: RowStatus;
   summary: string;
   hint?: string;
-  href: string;
+  /** Left out for a setting that has no page of its own (the model tiers: the operator API sets them). */
+  href?: string;
 }) {
   const Icon = status === "ok" ? CheckCircle2 : TriangleAlert;
   return (
@@ -58,13 +60,15 @@ function SetupRow({
           <p className="text-sm text-muted-foreground">{hint}</p>
         )}
       </div>
-      <Link
-        href={href}
-        aria-label={`Configure ${title}`}
-        className="shrink-0 rounded-sm text-sm font-medium text-primary underline-offset-4 hover:underline no-underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-      >
-        Configure
-      </Link>
+      {href === undefined ? null : (
+        <Link
+          href={href}
+          aria-label={`Configure ${title}`}
+          className="shrink-0 rounded-sm text-sm font-medium text-primary underline-offset-4 hover:underline no-underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+        >
+          Configure
+        </Link>
+      )}
     </li>
   );
 }
@@ -116,6 +120,24 @@ function operatorKeyRow(settings: AdminSettingsView): {
     summary: "Not configured",
     hint: "Optional. Only workspaces that use the key of the instance need it.",
   };
+}
+
+const TIER_LABELS = { low: "Low", medium: "Medium", high: "High" } as const;
+
+/** "Low: Diff only, Medium: not configured, High: Diff and Dynamic": whether, never which model (#280). */
+function modelTiersSummary(tiers: AdminSettingsView["modelTiers"]): string {
+  return MODEL_TIERS.map((tier) => {
+    const { diff, dynamic } = tiers[tier];
+    const state =
+      diff && dynamic
+        ? "Diff and Dynamic"
+        : diff
+          ? "Diff only"
+          : dynamic
+            ? "Dynamic only"
+            : "not configured";
+    return `${TIER_LABELS[tier]}: ${state}`;
+  }).join(", ");
 }
 
 function githubRow(
@@ -267,6 +289,12 @@ export function Overview({
                 ? {}
                 : { hint: operatorKey.hint })}
               href="/admin/llm"
+            />
+            <SetupRow
+              title="Managed model tiers"
+              status="ok"
+              summary={modelTiersSummary(settings.modelTiers)}
+              hint="Optional. Which model backs each tier is set through the operator API and is not shown here. A workspace on the key of the instance cannot run a review of a kind its tier has no model for."
             />
             <SetupRow
               title="Tenancy"
