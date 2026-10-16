@@ -6,14 +6,29 @@
 // every item names its own. It only reads, never a `reserved` or `void` record, and nothing it returns is written
 // back. The reads of ONE workspace (its page, its summary) are those of the scoped usage-records-repository.ts.
 import "server-only";
-import type { Kysely } from "kysely";
+import type { ExpressionBuilder, Kysely } from "kysely";
 import type { Database } from "../schema.ts";
+import type { UsageKeyMode } from "../../usage/usage-records.ts";
 import {
   afterUsageCursor,
   toUsageRecord,
   type UsageCursor,
   type UsageRecordsPage,
 } from "./usage-records-repository.ts";
+
+/** How many settled runs of a workspace on one key mode ended without a known cost (#385). Nothing else is in it. */
+export type UnknownCostCount = {
+  workspaceId: string;
+  keyMode: UsageKeyMode;
+  unknownCostCount: number;
+};
+
+export type UnknownCostCountsPage = {
+  /** Ordered by workspace id, then key mode; a combination without an unknown cost is not listed. */
+  counts: UnknownCostCount[];
+  /** The last workspace of this page when there are more, else null. */
+  nextAfter: string | null;
+};
 
 export type UsageFeedRepository = {
   /**
@@ -26,6 +41,20 @@ export type UsageFeedRepository = {
     limit: number;
     settledBefore?: string | undefined;
   }): Promise<UsageRecordsPage>;
+
+  /**
+   * The settled runs without a known cost (#385) that started in `[from, to)`, per workspace and key mode: the rule
+   * of the period of the summary and of the limits (`reserved_at`), so it agrees with both. A run that ended with
+   * no result counts (its cost is unknown); a running or void record never does. The count is read from the records,
+   * which the settlement writes in its own transaction, so it cannot drift from them. Pages hold whole workspaces
+   * (`limit` of them), after the workspace id `after`.
+   */
+  unknownCostCounts(options: {
+    from: string;
+    to: string;
+    after?: string | undefined;
+    limit: number;
+  }): Promise<UnknownCostCountsPage>;
 };
 
 export function createUsageFeedRepository(
@@ -53,6 +82,53 @@ export function createUsageFeedRepository(
           last?.settledAt == null
             ? after
             : { settledAt: last.settledAt, id: last.id },
+      };
+    },
+
+    async unknownCostCounts({ from, to, after, limit }) {
+      const unknownCost = (eb: ExpressionBuilder<Database, "usage_records">) =>
+        eb.and([
+          eb("state", "=", "settled"),
+          eb("cost_micro_usd", "is", null),
+          eb("reserved_at", ">=", from),
+          eb("reserved_at", "<", to),
+        ]);
+      // One more workspace than the page holds tells whether there is another page.
+      let workspaces = db
+        .selectFrom("usage_records")
+        .select("workspace_id")
+        .distinct()
+        .where(unknownCost);
+      if (after !== undefined)
+        workspaces = workspaces.where("workspace_id", ">", after);
+      const rows = await db
+        .selectFrom("usage_records")
+        .select([
+          "workspace_id",
+          "key_mode",
+          (eb) => eb.fn.countAll().as("unknown"),
+        ])
+        .where(unknownCost)
+        .where(
+          "workspace_id",
+          "in",
+          workspaces.orderBy("workspace_id").limit(limit + 1),
+        )
+        .groupBy(["workspace_id", "key_mode"])
+        .orderBy("workspace_id")
+        .orderBy("key_mode")
+        .execute();
+      const ids = [...new Set(rows.map((row) => row.workspace_id))];
+      const lastId = ids.length > limit ? ids[limit - 1] : undefined;
+      return {
+        counts: rows
+          .filter((row) => lastId === undefined || row.workspace_id <= lastId)
+          .map((row) => ({
+            workspaceId: row.workspace_id,
+            keyMode: row.key_mode as UsageKeyMode,
+            unknownCostCount: Number(row.unknown),
+          })),
+        nextAfter: lastId ?? null,
       };
     },
   };

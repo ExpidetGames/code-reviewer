@@ -378,6 +378,8 @@ export function createOperatorApi(deps: OperatorApiDeps): OperatorApi {
         return defaultEntitlements(request);
       case "usage":
         return usage.feed(request);
+      case "usage-unknown-cost":
+        return usage.unknownCost(request);
       case "workspace-entitlements":
       case "workspace-usage":
       case "workspace-usage-summary": {

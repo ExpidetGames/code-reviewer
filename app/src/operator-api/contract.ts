@@ -77,6 +77,7 @@ export type OperatorRoute =
   | { kind: "workspace-entitlements"; workspaceId: string }
   | { kind: "default-entitlements" }
   | { kind: "usage" }
+  | { kind: "usage-unknown-cost" }
   | { kind: "workspace-usage"; workspaceId: string }
   | { kind: "workspace-usage-summary"; workspaceId: string }
   | { kind: "plan-management" }
@@ -89,6 +90,7 @@ export const ROUTE_METHODS: Record<OperatorRoute["kind"], readonly string[]> = {
   "workspace-entitlements": ["GET", "PUT", "DELETE"],
   "default-entitlements": ["GET", "PUT"],
   usage: ["GET"],
+  "usage-unknown-cost": ["GET"],
   "workspace-usage": ["GET"],
   "workspace-usage-summary": ["GET"],
   "plan-management": ["GET", "PUT", "DELETE"],

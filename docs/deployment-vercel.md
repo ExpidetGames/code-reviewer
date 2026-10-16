@@ -791,7 +791,9 @@ A self-hosted installation and a hosted one never share a database or a GitHub A
   limits are exact. A run with an unknown cost counts for nothing (`unknownCostCount` in the operator API's summary).
   The runs on a workspace's own key have a limit of their own
   (`ownKeyCostLimitMicroUsd`, same rules); an unknown cost is not bounded by either, and the app logs one line for each
-  run that settles without a cost (job and workspace id only) so they can be watched. Limits and the key mode are set through the operator API; the
+  run that settles without a cost (job and workspace id only) so they can be watched. The operator API counts them per
+  workspace and key mode for a period (`GET /usage/unknown-cost`), so an external service can alert on a rate without
+  reading logs. Limits and the key mode are set through the operator API; the
   operator's own key (section 3.5) is saved by the instance admin only, and a workspace set to `managed` before every App
   instance runs the release that knows the key mode is served by the wrong key and outside the limit.
 - **A managed workspace has no model of its own**: the instance's `LLM_MODEL` and `LLM_MAX_TOKENS` apply to all of them

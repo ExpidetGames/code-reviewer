@@ -51,6 +51,8 @@ export function routeOf(path: string): OperatorRoute {
   )
     return { kind: "workspace-entitlements", workspaceId: rest[1] };
   if (rest.length === 1 && rest[0] === "usage") return { kind: "usage" };
+  if (rest.length === 2 && rest[0] === "usage" && rest[1] === "unknown-cost")
+    return { kind: "usage-unknown-cost" };
   if (
     rest.length === 3 &&
     rest[0] === "workspaces" &&

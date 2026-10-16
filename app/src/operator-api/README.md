@@ -70,6 +70,7 @@ by Next.js.
 | `GET\|PUT\|DELETE /api/operator/v1/plan-management`    | The address of the operator-configured page that "Manage plan" hands workspace Owners and Admins over to (#284): `{ "url": "https://…" }`; `DELETE` removes it. |
 | `POST /api/operator/v1/handoff/redeem`                 | `{ "token": "…" }`: who a handoff token was made for (workspace id and slug, role, opaque user id), once. One `422 invalid_token` for every other case.         |
 | `GET /api/operator/v1/workspaces/{id}/usage/summary`   | `from` and `to` are required: per review kind and key mode, what the workspace ran in the period.                                                               |
+| `GET /api/operator/v1/usage/unknown-cost`              | `from` and `to` are required: per workspace and key mode, how many runs of the period settled without a known cost (#385). A page of whole workspaces by id.    |
 
 A change takes effect on the next claim; a running job is not touched.
 
@@ -101,7 +102,8 @@ used that key, so a switch in the middle of a period keeps each key's runs under
 `quota_exhausted` like any other limit. Both cost limits are **soft caps**: a run that starts below the limit can end
 above it by what the runs in flight at that moment cost, and a run whose cost is unknown adds nothing to the sum, so
 the limit does not bound it. The usage summary lists such runs (`unknownCostCount`) and the app logs one line for each
-of them when it settles (job id and workspace id only), so they can be watched. An entry stored before the limit existed
+of them when it settles (job id and workspace id only), so they can be watched; `GET /usage/unknown-cost` counts them per
+workspace and key mode (below), so a cost limit that leaks can be told apart and alerted on without the logs. An entry stored before the limit existed
 reads it as `null`.
 
 **Rollout of `ownKeyCostLimitMicroUsd`.** Because a write must state it, the first rollout is a cutover: a `PUT` without
@@ -180,6 +182,21 @@ no pull request, repository, branch, title or person, and no key. The view is bu
   a limit sees. It is not a view of the feed (which is by time of settlement), and it counts a run that is still in
   progress in `recordCount`. A combination without runs is not listed. It has no safety lag: it is a total, not a
   position to continue from.
+- **The count of unknown costs** (`GET /usage/unknown-cost?from=&to=&after=&limit=`, #385) answers, for every workspace at
+  once, `{ version, from, to, counts, nextAfter }` where each count is `{ workspaceId, keyMode, unknownCostCount }`:
+  a plain integer and nothing else (no cost figure, model, key, name or job). It counts the settled runs whose cost is
+  not known (a run that reported no cost, one that succeeded without usage, and one that ended with no result), by the
+  period rule of the summary, so it equals that workspace's `unknownCostCount` added up over the review kinds of a key
+  mode. `from` and `to` are required (`400 period_invalid`); `limit` is 1 to 200 workspaces (default 50) and `after` a
+  workspace id (`400 request_invalid`), the paging of `GET /workspaces`: `nextAfter` is the last workspace of a full
+  page, `null` on the last. A page lists a workspace's key modes together, ordered by workspace id then key mode, and a
+  workspace and key mode without an unknown cost is not listed (a missing one is zero). It is a total, not a feed
+  position: no safety lag, and a run is counted once it settled, so the count of a period can grow until its last run
+  has ended. **To alert on a rate, read the same period again later and compare**; the key mode says which limit
+  leaks (`managed` is the operator's key, whose limit is `managedCostLimitMicroUsd`). The numbers come from the
+  usage records themselves (`src/usage/README.md`, "Counting unknown costs"). Mixed deployments: an older app
+  instance answers this path with its generic `404 not_found`, so a reader treats a `404` during a rollout as "not
+  yet".
 - **Workspace scoping.** The feed of every workspace reads through the instance level `usage-feed-repository.ts`; one
   workspace's page and summary through the scoped usage records repository, which can only see its own rows.
 - Reads log nothing. A mixed deployment is safe: no migration, only new routes and new definitions in the contract
@@ -221,7 +238,7 @@ for is a generic `500 internal_error`; the log gets the name of the error.
 | `token.ts`                 | The token rules, the constant-time comparison                                   |
 | `startup.ts`               | The one start line                                                              |
 | `contract.ts`              | Error codes, limits, routes and methods, the safety lag, the cursor size        |
-| `usage.ts`                 | The three usage routes (query, safety lag, answer)                              |
+| `usage.ts`                 | The four usage routes (query, safety lag, answer)                               |
 | `api.ts` (plan handoff)    | `redeemHandoff` and `planManagement` (`src/plan-handoff/` has the rest)         |
 | `usage-cursor.ts`          | The opaque cursor and the check of the safety lag                               |
 | `usage-views.ts`           | What a usage record and a summary look like to the outside                      |

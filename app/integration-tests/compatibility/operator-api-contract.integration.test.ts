@@ -129,6 +129,7 @@ describe("the contract file", () => {
         "PlanManagementResponse",
         "PlanManagementWrite",
         "StoredEntitlements",
+        "UnknownCostCountsResponse",
         "UsageItem",
         "UsagePage",
         "UsageSummaryResponse",
@@ -193,6 +194,64 @@ describe("the usage part of the contract file", () => {
         "workspaceId",
       ].sort(),
     );
+  });
+});
+
+describe("the unknown cost part of the contract file", () => {
+  // #385-T09
+  it("promises a plain integer per workspace and key mode, and no figure, model, key or name", () => {
+    const defs = readContract(OPERATOR_CONTRACT_FILE).$defs as unknown as {
+      UnknownCostCount: {
+        required: string[];
+        properties: Record<string, { enum?: string[]; type?: string }>;
+      };
+      UnknownCostCountsResponse: { required: string[] };
+    };
+
+    expect(Object.keys(defs.UnknownCostCount.properties).sort()).toEqual([
+      "keyMode",
+      "unknownCostCount",
+      "workspaceId",
+    ]);
+    expect([...defs.UnknownCostCount.required].sort()).toEqual([
+      "keyMode",
+      "unknownCostCount",
+      "workspaceId",
+    ]);
+    expect(defs.UnknownCostCount.properties.keyMode?.enum).toEqual([
+      ...KEY_MODES,
+    ]);
+    expect(defs.UnknownCostCount.properties.unknownCostCount?.type).toBe(
+      "integer",
+    );
+    expect([...defs.UnknownCostCountsResponse.required].sort()).toEqual([
+      "counts",
+      "from",
+      "nextAfter",
+      "to",
+      "version",
+    ]);
+  });
+
+  // #385-T09
+  it("only grows: every definition of the version before the count is still there", () => {
+    const names = Object.keys(
+      readContract(OPERATOR_CONTRACT_FILE).$defs as object,
+    );
+
+    for (const before of [
+      "ErrorResponse",
+      "WorkspaceList",
+      "WorkspaceEntitlementsResponse",
+      "UsageCursor",
+      "UsageItem",
+      "UsagePage",
+      "UsageSummaryGroup",
+      "UsageSummaryResponse",
+      "PlanManagementWrite",
+      "HandoffRedeemResponse",
+    ])
+      expect(names).toContain(before);
   });
 });
 
@@ -376,6 +435,27 @@ describe("what the app answers", () => {
       ),
       "UsageSummaryResponse",
     );
+    // #385: the count of unknown costs, with a page, with the last page and with nothing to count.
+    const period = "from=2026-10-01T00:00:00.000Z&to=2026-11-01T00:00:00.000Z";
+    const counted = (await answer(
+      await h.call(
+        "GET",
+        `/api/operator/v1/usage/unknown-cost?${period}&limit=1`,
+      ),
+      "UnknownCostCountsResponse",
+    )) as { counts: unknown[]; nextAfter: string | null };
+    expect(counted.counts).not.toHaveLength(0);
+    await answer(
+      await h.call("GET", `/api/operator/v1/usage/unknown-cost?${period}`),
+      "UnknownCostCountsResponse",
+    );
+    await answer(
+      await h.call(
+        "GET",
+        "/api/operator/v1/usage/unknown-cost?from=2020-10-01T00:00:00.000Z&to=2020-11-01T00:00:00.000Z",
+      ),
+      "UnknownCostCountsResponse",
+    );
     // An empty feed has no position yet.
     const empty = await startOperatorApiHarness();
     await answer(
@@ -393,6 +473,9 @@ describe("what the app answers", () => {
       ["GET", "/api/operator/v1/usage?limit=0", {}],
       ["GET", `/api/operator/v1/workspaces/${id}/usage?from=x`, {}],
       ["GET", `/api/operator/v1/workspaces/${id}/usage/summary`, {}],
+      ["GET", "/api/operator/v1/usage/unknown-cost", {}],
+      ["GET", "/api/operator/v1/usage/unknown-cost?limit=0&from=a", {}],
+      ["POST", "/api/operator/v1/usage/unknown-cost", {}],
       ["GET", "/api/operator/v1/workspaces/nope/usage", {}],
       ["GET", "/api/operator/v1/usage", { token: null }],
       ["POST", "/api/operator/v1/usage", {}],

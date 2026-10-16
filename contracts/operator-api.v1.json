@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/ExpidetGames/code-reviewer/contracts/operator-api.v1.json",
   "title": "Code Reviewer operator API, version 1",
-  "description": "The wire format of the operator API (#275, #278, #284): a machine interface for an operator who sets the entitlements of workspaces, reads what they consumed and redeems the handover of a workspace Owner or Admin, from outside the app. Every request carries 'Authorization: Bearer <OPERATOR_API_TOKEN>'; a request body is application/json up to 16384 bytes, and GET and DELETE carry none. Every answer is JSON with 'Cache-Control: no-store' and the version in its body; an error is {version, error, field?} with a stable code, never a message. Until OPERATOR_API_TOKEN is set the paths do not exist (the 404 of a missing path, not this format). The API identifies workspaces by id and slug only: no names of people, no emails, no repositories, no pull requests. A reader ignores fields it does not know. This file is the only source of the format; the app tests validate real answers and contracts/examples/operator-api holds one valid example per definition.",
+  "description": "The wire format of the operator API (#275, #278, #284, #385): a machine interface for an operator who sets the entitlements of workspaces, reads what they consumed and redeems the handover of a workspace Owner or Admin, from outside the app. Every request carries 'Authorization: Bearer <OPERATOR_API_TOKEN>'; a request body is application/json up to 16384 bytes, and GET and DELETE carry none. Every answer is JSON with 'Cache-Control: no-store' and the version in its body; an error is {version, error, field?} with a stable code, never a message. Until OPERATOR_API_TOKEN is set the paths do not exist (the 404 of a missing path, not this format). The API identifies workspaces by id and slug only: no names of people, no emails, no repositories, no pull requests. A reader ignores fields it does not know. This file is the only source of the format; the app tests validate real answers and contracts/examples/operator-api holds one valid example per definition.",
   "version": 1,
   "$defs": {
     "Version": {
@@ -20,7 +20,7 @@
       "pattern": "^[A-Za-z0-9_-]{1,64}$"
     },
     "ApiErrorCode": {
-      "description": "Callers branch on the code. 401 unauthorized; 404 not_found (unknown path) or workspace_not_found; 405 method_not_allowed (with an Allow header); 400 body_not_allowed (a GET or DELETE with a body), request_invalid (not JSON, or a bad query such as a limit out of range), cursor_invalid (a usage cursor that is not one of the API's) or period_invalid (a usage 'from' or 'to' that is not a timestamp, a period that is empty, or a summary without both); 413 body_too_large; 415 unsupported_media_type; 409 period_start_backwards; 422 the other codes of a refused entitlement, among them cost_limit_requires_managed_key for a managed cost limit next to keyMode 'own' (the codes of the workspace entitlements validation, with 'field' naming the limit or key concerned); 422 also invalid_token (a handoff token that is unknown, used, expired, revoked or whose person lost the role: one answer for all) and the codes of a refused plan management address (url_invalid, url_not_https, url_has_credentials, url_has_fragment, url_too_long); 500 internal_error.",
+      "description": "Callers branch on the code. 401 unauthorized; 404 not_found (unknown path) or workspace_not_found; 405 method_not_allowed (with an Allow header); 400 body_not_allowed (a GET or DELETE with a body), request_invalid (not JSON, or a bad query such as a limit out of range), cursor_invalid (a usage cursor that is not one of the API's) or period_invalid (a usage 'from' or 'to' that is not a timestamp, a period that is empty, or a summary or a count of unknown costs without both); 413 body_too_large; 415 unsupported_media_type; 409 period_start_backwards; 422 the other codes of a refused entitlement, among them cost_limit_requires_managed_key for a managed cost limit next to keyMode 'own' (the codes of the workspace entitlements validation, with 'field' naming the limit or key concerned); 422 also invalid_token (a handoff token that is unknown, used, expired, revoked or whose person lost the role: one answer for all) and the codes of a refused plan management address (url_invalid, url_not_https, url_has_credentials, url_has_fragment, url_too_long); 500 internal_error.",
       "type": "string",
       "enum": [
         "unauthorized",
@@ -728,6 +728,71 @@
           "items": {
             "$ref": "#/$defs/UsageSummaryGroup"
           }
+        }
+      }
+    },
+    "UnknownCostCount": {
+      "description": "How many runs of one workspace on one key mode settled without a known cost in the period: a plain integer, with no cost figure, model, key or name. A cost limit adds up known costs only, so these runs are not bounded by it. 'keyMode' says whose key they ran on ('managed' is the operator's key), which decides which cost limit they escape.",
+      "type": "object",
+      "required": [
+        "workspaceId",
+        "keyMode",
+        "unknownCostCount"
+      ],
+      "properties": {
+        "workspaceId": {
+          "$ref": "#/$defs/WorkspaceId"
+        },
+        "keyMode": {
+          "type": "string",
+          "enum": [
+            "own",
+            "managed"
+          ]
+        },
+        "unknownCostCount": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      }
+    },
+    "UnknownCostCountsResponse": {
+      "description": "GET /usage/unknown-cost?from=&to=&after=<workspace id>&limit=<1..200, default 50>: both 'from' and 'to' are required timestamps with 'from' before 'to', and the answer lists, per workspace and key mode, the settled runs of the period whose cost is not known. This includes a run that ended with no result from its runner (reason 'no_result' in the feed). A run belongs to the period it started in ('from' included, 'to' excluded), the same rule the limits and the summary count by, so a figure here equals 'unknownCostCount' in the summary of that workspace, added up over the review kinds of a key mode. It is a total, not a position in the feed: there is no safety lag, and a run that is still in progress is not counted until it settles, so the count of a period can still grow until its last run has ended; to alert on a rate, read the same period again and compare. Ordered by workspace id, then key mode. A workspace and key mode without such a run is not listed, so a workspace that is missing has a count of zero. A page holds the counts of up to 'limit' whole workspaces after 'after'; 'nextAfter' is the workspace id to pass as 'after' for the next page, null on the last page.",
+      "type": "object",
+      "required": [
+        "version",
+        "from",
+        "to",
+        "counts",
+        "nextAfter"
+      ],
+      "properties": {
+        "version": {
+          "$ref": "#/$defs/Version"
+        },
+        "from": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "to": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "counts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UnknownCostCount"
+          },
+          "maxItems": 400
+        },
+        "nextAfter": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/WorkspaceId"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },

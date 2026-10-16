@@ -15,6 +15,8 @@ const FEED = "/api/operator/v1/usage";
 const workspaceFeed = (id: string) => `/api/operator/v1/workspaces/${id}/usage`;
 const summaryOf = (id: string) =>
   `/api/operator/v1/workspaces/${id}/usage/summary`;
+const UNKNOWN_COST = "/api/operator/v1/usage/unknown-cost";
+const OCTOBER = "from=2026-10-01T00:00:00.000Z&to=2026-11-01T00:00:00.000Z";
 
 // The harness clock is 2026-10-14T12:00:00.000Z; everything below is well past the safety lag of 60 seconds.
 const SETTLED_AT = (second: number) =>
@@ -453,6 +455,192 @@ describe("the summary of a period", () => {
   });
 });
 
+describe("the count of runs that settled without a known cost", () => {
+  // #385-T03
+  it("lists one plain integer per workspace and key mode for the period, and nothing else", async () => {
+    const h = await startOperatorApiHarness();
+    const other = await h.addWorkspace("second");
+    const at = "2026-10-05T10:00:00.000Z";
+    const base = { reservedAt: at, settledAt: at };
+    await h.usage.seed({ ...base, workspaceId: h.workspaceId, keyMode: "own" });
+    await h.usage.seed({
+      ...base,
+      workspaceId: h.workspaceId,
+      keyMode: "own",
+      reviewKind: "dynamic",
+      settledReason: "no_result",
+    });
+    await h.usage.seed({
+      ...base,
+      workspaceId: h.workspaceId,
+      keyMode: "managed",
+      modelTier: "standard",
+      promptTokens: 10,
+    });
+    await h.usage.seed({
+      ...base,
+      workspaceId: h.workspaceId,
+      keyMode: "managed",
+      costMicroUsd: 400,
+    });
+    await h.usage.seed({ ...base, workspaceId: other, keyMode: "managed" });
+
+    const response = await h.call("GET", `${UNKNOWN_COST}?${OCTOBER}`);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await json(response)).toEqual({
+      version: 1,
+      from: "2026-10-01T00:00:00.000Z",
+      to: "2026-11-01T00:00:00.000Z",
+      counts: [
+        { workspaceId: h.workspaceId, keyMode: "managed", unknownCostCount: 1 },
+        { workspaceId: h.workspaceId, keyMode: "own", unknownCostCount: 2 },
+        { workspaceId: other, keyMode: "managed", unknownCostCount: 1 },
+      ].sort((a, b) =>
+        a.workspaceId === b.workspaceId
+          ? a.keyMode.localeCompare(b.keyMode)
+          : a.workspaceId.localeCompare(b.workspaceId),
+      ),
+      nextAfter: null,
+    });
+  });
+
+  // #385-T07
+  it("counts by the time the run started, the period rule of the summary, with no safety lag", async () => {
+    const h = await startOperatorApiHarness();
+    // A run that settled a second ago is counted: this is a total, not a position to continue from.
+    await h.usage.seed({
+      workspaceId: h.workspaceId,
+      reservedAt: "2026-10-14T11:59:58.000Z",
+      settledAt: "2026-10-14T11:59:59.000Z",
+    });
+    await h.usage.seed({
+      workspaceId: h.workspaceId,
+      reservedAt: "2026-09-30T23:59:59.999Z",
+      settledAt: "2026-10-14T11:00:00.000Z",
+    });
+
+    const body = await json(await h.call("GET", `${UNKNOWN_COST}?${OCTOBER}`));
+    const summary = await json(
+      await h.call("GET", `${summaryOf(h.workspaceId)}?${OCTOBER}`),
+    );
+
+    expect(body.counts).toEqual([
+      { workspaceId: h.workspaceId, keyMode: "own", unknownCostCount: 1 },
+    ]);
+    expect(summary.groups).toMatchObject([{ unknownCostCount: 1 }]);
+  });
+
+  // #385-T08
+  it("does not change the answer for workspace B when workspace A settles runs without a cost", async () => {
+    const h = await startOperatorApiHarness();
+    const other = await h.addWorkspace("second");
+    await h.usage.seed({ workspaceId: other, keyMode: "managed" });
+    const read = async () =>
+      (
+        (await json(await h.call("GET", `${UNKNOWN_COST}?${OCTOBER}`)))
+          .counts as Array<{ workspaceId: string }>
+      ).filter((count) => count.workspaceId === other);
+    const summaryBefore = await (
+      await h.call("GET", `${summaryOf(other)}?${OCTOBER}`)
+    ).text();
+    const before = await read();
+
+    await h.usage.seed({ workspaceId: h.workspaceId, keyMode: "managed" });
+    await h.usage.seed({ workspaceId: h.workspaceId, keyMode: "own" });
+
+    expect(await read()).toEqual(before);
+    expect(
+      await (await h.call("GET", `${summaryOf(other)}?${OCTOBER}`)).text(),
+    ).toBe(summaryBefore);
+  });
+
+  // #385-T03
+  it("pages whole workspaces by id with nextAfter, null on the last page", async () => {
+    const h = await startOperatorApiHarness();
+    const ids = [
+      h.workspaceId,
+      await h.addWorkspace("second"),
+      await h.addWorkspace("third"),
+    ].sort();
+    for (const workspaceId of ids) {
+      await h.usage.seed({ workspaceId, keyMode: "own" });
+      await h.usage.seed({ workspaceId, keyMode: "managed" });
+    }
+
+    const first = await json(
+      await h.call("GET", `${UNKNOWN_COST}?${OCTOBER}&limit=2`),
+    );
+    const second = await json(
+      await h.call(
+        "GET",
+        `${UNKNOWN_COST}?${OCTOBER}&limit=2&after=${String(first.nextAfter)}`,
+      ),
+    );
+
+    expect((first.counts as Item[]).map((count) => count.workspaceId)).toEqual([
+      ids[0],
+      ids[0],
+      ids[1],
+      ids[1],
+    ]);
+    expect(first.nextAfter).toBe(ids[1]);
+    expect((second.counts as Item[]).map((count) => count.workspaceId)).toEqual(
+      [ids[2], ids[2]],
+    );
+    expect(second.nextAfter).toBeNull();
+  });
+
+  // #385-T03
+  it("answers a period without unknown costs with no counts", async () => {
+    const h = await startOperatorApiHarness();
+    await h.usage.seed({ workspaceId: h.workspaceId, costMicroUsd: 1 });
+
+    expect(
+      await json(await h.call("GET", `${UNKNOWN_COST}?${OCTOBER}`)),
+    ).toMatchObject({ counts: [], nextAfter: null });
+  });
+
+  // #385-T09
+  it.each([
+    "",
+    "from=2026-10-01T00:00:00.000Z",
+    "to=2026-11-01T00:00:00.000Z",
+    "from=2026-10-01&to=2026-11-01",
+    "from=2026-11-01T00:00:00.000Z&to=2026-10-01T00:00:00.000Z",
+  ])("refuses the period %j with period_invalid", async (query) => {
+    const h = await startOperatorApiHarness();
+
+    const response = await h.call("GET", `${UNKNOWN_COST}?${query}`);
+
+    expect(response.status).toBe(400);
+    expect(await json(response)).toEqual({
+      version: 1,
+      error: "period_invalid",
+    });
+  });
+
+  // #385-T09
+  it.each([
+    "limit=0",
+    "limit=201",
+    "limit=abc",
+    "after=",
+    "after=not%20an%20id",
+  ])("refuses %s with request_invalid", async (query) => {
+    const h = await startOperatorApiHarness();
+
+    const response = await h.call("GET", `${UNKNOWN_COST}?${OCTOBER}&${query}`);
+
+    expect(response.status).toBe(400);
+    expect(await json(response)).toEqual({
+      version: 1,
+      error: "request_invalid",
+    });
+  });
+});
+
 describe("what a caller may not do", () => {
   // #278-T06
   it.each([
@@ -553,6 +741,7 @@ describe("what a caller may not do", () => {
 
     for (const path of [
       FEED,
+      UNKNOWN_COST,
       workspaceFeed(h.workspaceId),
       summaryOf(h.workspaceId),
     ]) {
@@ -573,6 +762,7 @@ describe("what a caller may not do", () => {
 
     for (const path of [
       FEED,
+      UNKNOWN_COST,
       workspaceFeed(h.workspaceId),
       summaryOf(h.workspaceId),
     ])
@@ -586,6 +776,8 @@ describe("what a caller may not do", () => {
 
     for (const path of [
       FEED,
+      UNKNOWN_COST,
+      `${UNKNOWN_COST}?limit=0`,
       workspaceFeed(h.workspaceId),
       summaryOf(h.workspaceId),
       workspaceFeed("nope"),
@@ -608,7 +800,7 @@ describe("what a caller may not do", () => {
 
 describe("what the answers and logs leave out", () => {
   // #278-T04
-  it("contains no model name, repository, pull request, user or key, in the items, the summary or the logs", async () => {
+  it("contains no model name, repository, pull request, user or key, in the items, the summary, the count of unknown costs or the logs", async () => {
     const h = await startOperatorApiHarness();
     await h.usage.seed({
       workspaceId: h.workspaceId,
@@ -622,6 +814,15 @@ describe("what the answers and logs leave out", () => {
         usage: { promptTokens: 1, completionTokens: 1, costUsd: 0.000005 },
         summary: "api key sk-or-v1-0123456789abcdef and mail dev@example.test",
       },
+    });
+    // A run without a cost, which the count of unknown costs lists.
+    await h.usage.seed({
+      workspaceId: h.workspaceId,
+      keyMode: "managed",
+      modelTier: "standard",
+      settledAt: SETTLED_AT(2),
+      reservedAt: SETTLED_AT(0),
+      jobResult: { model: "vendor/secret-model-7b" },
     });
     await h.db
       .insertInto("users")
@@ -650,6 +851,7 @@ describe("what the answers and logs leave out", () => {
           `${summaryOf(h.workspaceId)}?from=2026-10-01T00:00:00.000Z&to=2026-11-01T00:00:00.000Z`,
         )
       ).text(),
+      await (await h.call("GET", `${UNKNOWN_COST}?${OCTOBER}`)).text(),
       ...h.lines,
       ...h.errors,
     ].join("\n");
