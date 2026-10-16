@@ -657,6 +657,24 @@ describe("the model of a tier stays on the server", () => {
     });
   });
 
+  // #280-T08
+  it("is masked in the text of a result even when the id is too short for the generic secret rule", async () => {
+    const h = await start({
+      keyMode: "managed",
+      tiers: { medium: { diff: "ab/c" } },
+    });
+    const { job } = await h.claimed();
+
+    await h.complete(job.id, job.leaseToken, {
+      logTail: "model ab/c answered",
+      errorMessage: "ab/c is busy",
+    });
+
+    const stored = JSON.stringify((await h.queue.get(job.id))?.result);
+    expect(stored).not.toContain("ab/c");
+    expect(stored).toContain("[redacted] answered");
+  });
+
   it("is kept encrypted for the masking, and a run on the workspace's own key reports its model as before", async () => {
     const h = await start({
       keyMode: "managed",

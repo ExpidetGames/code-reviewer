@@ -17,6 +17,7 @@ import {
   type RunnerResult,
 } from "./contract.ts";
 import type { ClaimedKeys } from "./claimed-keys.ts";
+import { maskSecretInText } from "../llm/access.ts";
 import { redactResult } from "./redact.ts";
 import type { RunnerApiLogger } from "./logger.ts";
 import {
@@ -53,19 +54,31 @@ export function mapRunnerErrorCode(code: string): string {
   return RUNNER_ERROR_CODES.some((known) => known === code) ? code : "unknown";
 }
 
-/** The result without the model a managed tier gave the job: `usage.model` is not reported (null) when it names one. */
+/**
+ * The result without the model a managed tier gave the job (#280): `usage.model` is not reported (null) when it names
+ * one, and the id is masked in the text fields at any length (the generic rule that follows ignores secrets shorter
+ * than a credential could be).
+ */
 function withoutTierModel(
   result: RunnerResult,
   models: readonly string[],
 ): RunnerResult {
+  if (models.length === 0) return result;
+  const mask = (text: string) => maskSecretInText(text, ...models);
   const reported = result.usage?.model ?? null;
-  if (
-    result.usage === null ||
-    reported === null ||
-    !models.some((model) => reported.includes(model))
-  )
-    return result;
-  return { ...result, usage: { ...result.usage, model: null } };
+  return {
+    ...result,
+    logTail: mask(result.logTail),
+    errorMessage:
+      result.errorMessage === null ? null : mask(result.errorMessage),
+    commentUrl: result.commentUrl === null ? null : mask(result.commentUrl),
+    usage:
+      result.usage === null
+        ? null
+        : reported !== null && models.some((model) => reported.includes(model))
+          ? { ...result.usage, model: null }
+          : result.usage,
+  };
 }
 
 function invalid(parsed: Extract<Parsed<unknown>, { ok: false }>): Response {
