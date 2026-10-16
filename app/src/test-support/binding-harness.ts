@@ -292,7 +292,7 @@ export async function createBindingHarness(
       deliveries: createWebhookDeliveriesRepository(db),
       sync,
       workspace,
-      automatic: { debounceMs: 0, now },
+      automatic: {},
       logger: { info: () => undefined, error: () => undefined },
     });
     return {

@@ -16,7 +16,6 @@ import { createWebhookDeliveriesRepository } from "../db/repositories/webhook-de
 import type { IntegrationProvider } from "../integrations/provider.ts";
 import { createIntegrationRegistry } from "../integrations/registry.ts";
 import { createProjectService } from "../projects/service.ts";
-import { AUTOMATIC_REVIEW_DEBOUNCE_MS } from "../webhooks/automatic-review-policy.ts";
 import {
   createGithubAppWebhookHandler,
   type AutomaticReviewDeps,
@@ -62,10 +61,6 @@ export async function startWebhookHarness(
     wrapProvider?: (provider: IntegrationProvider) => IntegrationProvider;
     /** The review settings every project uses; default: the built-in values (everything on). */
     reviewSettings?: Partial<ReviewSettings>;
-    /** How long a push waits (default: the policy's 90 seconds). */
-    debounceMs?: number;
-    /** The clock of the trigger policy (default: the real one). */
-    now?: () => Date;
   } = {},
 ) {
   const base = await startSyncHarness({
@@ -101,10 +96,7 @@ export async function startWebhookHarness(
   };
   const settingsFor: WorkspaceCollaborators["settingsFor"] = async () =>
     settings;
-  const automatic: AutomaticReviewDeps = {
-    debounceMs: options.debounceMs ?? AUTOMATIC_REVIEW_DEBOUNCE_MS,
-    now: options.now ?? (() => new Date()),
-  };
+  const automatic: AutomaticReviewDeps = {};
   const handler = createGithubAppWebhookHandler({
     registry,
     integrations: base.directory,

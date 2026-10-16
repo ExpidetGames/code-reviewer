@@ -44,7 +44,13 @@ describe("the dispatch hook", () => {
       db,
       schedule: (work) => scheduled.push(work),
       service: () =>
-        ({ onEnqueued, sendDue: vi.fn(), sendJob: vi.fn() }) as DispatchService,
+        ({
+          onEnqueued,
+          sendDue: vi.fn(),
+          sendJob: vi.fn(),
+          sendWaiting: vi.fn(),
+          redispatch: vi.fn(),
+        }) as DispatchService,
     });
 
     hook?.(result);

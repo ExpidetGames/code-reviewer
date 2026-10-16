@@ -144,6 +144,7 @@ export function createWorkerApi(deps: WorkerApiDeps): WorkerApi {
         const { job } = result;
         if (job.heartbeatAt === null || job.leaseExpiresAt === null)
           throw new Error(`Heartbeat of job ${jobId} left no times.`);
+        deps.activity?.();
         return jsonResponse(200, {
           version: RUNNER_API_VERSION,
           job: {

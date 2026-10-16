@@ -12,7 +12,7 @@ import {
 } from "../test-support/postgres-test-database.ts";
 import { createTestDatabase } from "../test-support/test-database.ts";
 import type { Database } from "./schema.ts";
-import { tryWithLock } from "./try-lock.ts";
+import { OPPORTUNISTIC_LOCK, SWEEP_LOCK, tryWithLock } from "./try-lock.ts";
 
 const KEY = { namespace: 328, id: 1 } as const;
 
@@ -61,6 +61,27 @@ describe.each(databases)("the try-lock on %s", (name, open) => {
 
     expect(second).toEqual({ acquired: false });
     expect(await first).toEqual({ acquired: true, value: "first" });
+  });
+
+  // #395-T11
+  it("keeps the lock of the sweep and the lock of the repair work of other requests apart, so neither can make the other a no-op", async () => {
+    const db = await database();
+    const held = gate();
+    const started = gate();
+
+    const repair = tryWithLock(db, OPPORTUNISTIC_LOCK, async () => {
+      started.open();
+      await held.opened;
+      return "repair";
+    });
+    await started.opened;
+    // The cron fires while the repair work is sending: it gets its lock and does its work.
+    const sweep = await tryWithLock(db, SWEEP_LOCK, async () => "sweep");
+    held.open();
+
+    expect(sweep).toEqual({ acquired: true, value: "sweep" });
+    expect(await repair).toEqual({ acquired: true, value: "repair" });
+    expect(SWEEP_LOCK).not.toEqual(OPPORTUNISTIC_LOCK);
   });
 
   // #328-T06

@@ -27,7 +27,7 @@ of a repository is one lookup per repository on the index `jobs_repository_recen
 
 | Status       | Label     | Meaning                                                                                                |
 | ------------ | --------- | ------------------------------------------------------------------------------------------------------ |
-| `queued`     | Waiting   | Waiting for a runner (or for its debounce)                                                             |
+| `queued`     | Waiting   | Waiting for a runner (or for its retry time)                                                           |
 | `running`    | Running   | A runner holds it                                                                                      |
 | `succeeded`  | Succeeded | The review was published                                                                               |
 | `failed`     | Failed    | Ended without a review; the error code is translated                                                   |

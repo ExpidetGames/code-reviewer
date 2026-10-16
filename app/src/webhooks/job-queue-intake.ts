@@ -2,7 +2,7 @@
 
 // The review trigger intake of the running app: it turns a trigger into a job in the queue. This is
 // a thin mapping and nothing else. Deciding whether a trigger deserves a job (the repository has an
-// active project, drafts wait, `synchronize` is debounced) is trigger policy, which the webhook
+// active project, drafts wait) is trigger policy, which the webhook
 // handler applies before it calls the intake (automatic-review-policy.ts), not inside the queue.
 import type { RepositoriesRepository } from "../db/repositories/repositories-repository.ts";
 import type {
@@ -15,7 +15,6 @@ import type { JobQueue } from "../jobs/job-queue.ts";
 import type { EnqueueJobInput } from "../jobs/job-types.ts";
 import type { WebhookLogger } from "./logger.ts";
 import type {
-  EnqueueOptions,
   ReviewTriggerIntake,
   ReviewTriggerSource,
 } from "./review-trigger-intake.ts";
@@ -38,7 +37,6 @@ export function jobInputForTrigger(
   trigger: ReviewTrigger,
   repositoryId: string,
   source: ReviewTriggerSource,
-  options: EnqueueOptions = {},
 ): EnqueueJobInput {
   const common = {
     repositoryId,
@@ -47,7 +45,6 @@ export function jobInputForTrigger(
     headSha: trigger.headSha,
     actorLogin: trigger.actor.login,
     deliveryId: source.deliveryId,
-    ...(options.runAfter === undefined ? {} : { runAfter: options.runAfter }),
   };
   if (trigger.kind === "command")
     return {
@@ -90,12 +87,7 @@ export function createJobQueueReviewTriggerIntake(
   }
 
   return {
-    async enqueueReviewTrigger(
-      trigger,
-      integration: Integration,
-      source,
-      options,
-    ) {
+    async enqueueReviewTrigger(trigger, integration: Integration, source) {
       const repository = await deps.repositories.findByExternalId(
         integration.id,
         trigger.repo.externalId,
@@ -111,7 +103,7 @@ export function createJobQueueReviewTriggerIntake(
       let result;
       try {
         result = await deps.queue.enqueue(
-          jobInputForTrigger(trigger, repository.id, source, options),
+          jobInputForTrigger(trigger, repository.id, source),
         );
       } catch (error) {
         // Input the queue refuses will be refused every time: rejecting would make the route answer

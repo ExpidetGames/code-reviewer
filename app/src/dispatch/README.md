@@ -35,15 +35,16 @@ The Dispatcher's own names for the same key are `DISPATCHER_SIGNING_KEY_ID` and 
 
 ## How a job is announced
 
-| File                                           | Role                                                                                                                                                                                                                                    |
-| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `config.ts`                                    | `loadDispatchConfig`, `dispatchConfigProblems`                                                                                                                                                                                          |
-| `request.ts`                                   | `buildDispatchRequest`: the closed body (`{version, type:"job.ready", jobId, reviewKind, attempt, dispatchId, sentAt}`, no secret, no repository data) and the headers; `signDispatch`                                                  |
-| `send.ts`                                      | `sendDispatch`: one `POST`, 8 seconds for everything, no redirect followed; the answer becomes a `SendResult`                                                                                                                           |
-| `outcome.ts`                                   | `decideOutcome`: what an answer means (state, next time, alert); the back-off schedule                                                                                                                                                  |
-| `service.ts`                                   | `createDispatchService`: `onEnqueued` (the queue hook) and `sendDue` (the hook for the sweep) and `sendJob` (one job of its listing; it sends only a row that is due now, so a listing older than another sender's claim sends nothing) |
-| `hook.ts`, `shared.ts`                         | The hook for `createJobQueue` (none in poll mode), run through Next's `after()`; `getDispatchService()` for the sweep                                                                                                                   |
-| `db/repositories/job-dispatches-repository.ts` | The rows of `job_dispatches`                                                                                                                                                                                                            |
+| File                                                        | Role                                                                                                                                                                                                                                                                                                                         |
+| ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `config.ts`                                                 | `loadDispatchConfig`, `dispatchConfigProblems`                                                                                                                                                                                                                                                                               |
+| `request.ts`                                                | `buildDispatchRequest`: the closed body (`{version, type:"job.ready", jobId, reviewKind, attempt, dispatchId, sentAt}`, no secret, no repository data) and the headers; `signDispatch`                                                                                                                                       |
+| `send.ts`                                                   | `sendDispatch`: one `POST`, 8 seconds for everything, no redirect followed; the answer becomes a `SendResult`                                                                                                                                                                                                                |
+| `outcome.ts`                                                | `decideOutcome`: what an answer means (state, next time, alert); the back-off schedule                                                                                                                                                                                                                                       |
+| `service.ts`                                                | `createDispatchService`: `onEnqueued` (the queue hook, with the bounded inline retries, #395), `sendDue` (the hook for the sweep), `sendJob` (one job of its listing; it sends only a row that is due now, so a listing older than another sender's claim sends nothing), `sendWaiting` and `redispatch` (a job ended, #395) |
+| `job-ended.ts`, `opportunistic.ts`, `maintenance-shared.ts` | What happens between two sweeps (#395): the reaction to a job that ended, and the repair work of the requests that touch the database                                                                                                                                                                                        |
+| `hook.ts`, `shared.ts`                                      | The hook for `createJobQueue` (none in poll mode), run through Next's `after()`; `getDispatchService()` for the sweep                                                                                                                                                                                                        |
+| `db/repositories/job-dispatches-repository.ts`              | The rows of `job_dispatches`                                                                                                                                                                                                                                                                                                 |
 
 1. A producer (the GitHub webhook, a comment, the start button) enqueues through `jobQueueFor`
    (`src/jobs/shared.ts`), which passes `onEnqueued` to `createJobQueue`. The queue calls it **after the enqueue
@@ -52,14 +53,20 @@ The Dispatcher's own names for the same key are `DISPATCHER_SIGNING_KEY_ID` and 
 2. The hook hands the work to `after()` (Next keeps a serverless function alive for it, `waitUntil` on the
    platform). The GitHub response, the comment handling and the start button never wait for it and never fail
    because of it. There is no timer and no loop in the app for this.
-3. `onEnqueued` acts for a **new** job and for an `already_active` one (a person's click that pulled a job waiting
-   behind the debounce forward); a job returned as `same_delivery`, `same_comment` or `same_head` gets nothing, and
-   neither does a job that was created already failed (Dynamic Review off). It makes the `job_dispatches` row and,
-   if the job is due, sends. A job that is not due yet (the 90 second debounce of an automatic review) only gets
-   its row with `next_dispatch_at = run_after`; the sweep sends it when it is due.
+3. `onEnqueued` acts for a **new** job and for an `already_active` one; a job returned as `same_delivery`,
+   `same_comment` or `same_head` gets nothing, and neither does a job that was created already failed (Dynamic Review
+   off). It makes the `job_dispatches` row and, if the job is due, sends: every job is due at once, a push included
+   (there is no debounce since #395). A job that is not due yet (a job given back with a retry time) only gets its row
+   with `next_dispatch_at = run_after`.
 4. The send is **claimed in the row first** (`claimSend`: a compare and set on `next_dispatch_at`, which also counts
    the attempt), so the request that queued the job, the sweep and another instance never send one call twice. If
    the sender dies, the claim runs out after 30 seconds and the job is due again.
+
+5. A call that failed with a transient answer (a 5xx, a timeout, no connection, `429`/`503`) is made again **inside the
+   same request** (#395), at most three more times, after 1, 3 and 8 seconds (`INLINE_RETRY_DELAYS_MS`), a `Retry-After`
+   of up to 10 seconds honoured, and never longer than 35 seconds in all (`INLINE_RETRY_BUDGET_MS`, the function lives 60).
+   A refusal (`rejected`) is never repeated inline. A job that was taken meanwhile (it is no longer `queued`) is not
+   sent again. What is still unsent after that is left to the row's back-off, to "Between two sweeps" and to the sweep.
 
 The job is durable before any of this: nothing here can lose it or undo the enqueue. If even the row cannot be
 written, the job is still queued, and `sendDue` finds queued, due jobs **without** a row as well.
@@ -70,7 +77,7 @@ written, the job is still queued, and `sendDue` finds queued, due jobs **without
 | ------------------------------------------------------------------------------ | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `202`                                                                          | `acked`, `acked_at`     | Looked at again after the **acknowledgement timeout** (2 minutes); sent again only if the job is still queued then (the claim failed, or the Worker launch was given back) |
 | `200 ignored`, `not_claimable` (or any other reason of the right form)         | `pending`               | Again after the acknowledgement timeout (not due, running, pool cap reached, ...)                                                                                          |
-| `200 ignored`, `not_capable`                                                   | `stopped`               | Not by the send itself: the Dispatcher cannot run that review kind. The sweep asks again after 10 minutes ("The cron sweep", step 3)                                       |
+| `200 ignored`, `not_capable`                                                   | `stopped`               | Not by the send itself: the Dispatcher cannot run that review kind. The sweep asks again, at its next run ("The cron sweep", step 3)                                       |
 | `429`, `503`                                                                   | `pending`, failures + 1 | The longer of the schedule and `Retry-After` (seconds or HTTP date, at most 1 hour). Only the status and `Retry-After` are read; the body is dropped                       |
 | other `5xx`, timeout, no connection                                            | `pending`, failures + 1 | 10 s, 30 s, 2 min, 5 min, then 15 min                                                                                                                                      |
 | any other status (`4xx`, a redirect, an unexpected `2xx`, an unreadable `200`) | `pending`, failures + 1 | **30 minutes**, and an error log line `DISPATCH_REJECTED` (a wrong URL or a wrong secret looks like this)                                                                  |
@@ -78,10 +85,38 @@ written, the job is still queued, and `sendDue` finds queued, due jobs **without
 `last_status` and `last_code` (`DISPATCH_RESULT_CODES`) keep the last answer for support. The failures count resets
 on any answer that is not a failure.
 
+## Between two sweeps (#395)
+
+The sweep runs **every 2 hours**, a safety net (next section). Everything the normal flow needs happens in the request that
+causes it, after the response (`after()`), with no timer and no queue, and only while `RUNNER_DISPATCH=webhook`:
+
+- **A job ended or was given back** (`job-ended.ts`; the Worker's result, the runner API's `complete`, a Dispatcher's
+  `release`): the **freed slot first**. `sendWaiting` asks the queued jobs that were answered `not_claimable` (the pool
+  cap, the running job of their pull request), whatever time their row says, the job of the same pull request first,
+  then the oldest, **until as many wake-ups were accepted as there are free slots** below
+  `RUNNER_DISPATCH_MAX_RUNNING` (one when the cap is not set), at most 20 candidates: a job that is refused again does
+  not use the slot. Left out: a job whose own pull request has a running job (it would be refused again), a job whose
+  last call is younger than 9 seconds (`WAITING_MIN_GAP_MS`: a call in flight holds the row, and two events must not
+  send one job twice) and a job the Dispatcher answered `429`/`503` (its `Retry-After` is its time; it is sent when due).
+  **Then** a job that was **given back** (queued again) is sent again by `redispatch`: its retry time is waited for
+  inside the request when it fits (the Dispatcher gives a job back with 30 seconds; a little slack is added because a
+  timer can fire early), else the next sender sends it. One deadline of 45 seconds from the start of the reaction
+  (`JOB_ENDED_BUDGET_MS`) covers both, so that the request, whose function lives 60 seconds, is not cut in the middle
+  of a send. An acknowledged job (`202`) is not "waiting": its own look comes after the acknowledgement timeout.
+- **A request touched the database** (`opportunistic.ts`; a GitHub delivery that queued a job, dropped waiting ones or
+  changed an installation, and not an unused event, a duplicate or an ignored one: `webhooks/touch-policy.ts`; a Worker's or
+  runner's heartbeat and result): the leases that ran out are released (`expireStaleJobs`) and `sendDue` sends what is
+  due. At most once per 30 seconds per function instance, under a lock **of its own** (`OPPORTUNISTIC_LOCK`), not the
+  sweep's: the two may overlap, so a run of this work can never make the cron a no-op. Both are also done by the sweep;
+  every send is fenced by the compare and set on the row, so overlapping senders send a call once. A sweep that
+  finds the sweep's lock held is logged (`DISPATCH_SWEEP_SKIPPED`).
+
 ## The cron sweep (#328)
 
-A serverless deployment has no process that polls and none that lives long enough to hold a timer, so **the clock
-is the platform's cron**: `GET /api/internal/dispatch-sweep`, once a minute (`app/vercel.json`), with
+A serverless deployment has no process that polls and none that lives long enough to hold a timer. The platform's cron
+is the safety net for what the requests above did not repair: `GET /api/internal/dispatch-sweep`, **every 2 hours**
+(`0 */2 * * *`, `app/vercel.json`; sparse on purpose, so that a database that scales to zero can sleep between
+webhooks), with
 `Authorization: Bearer <CRON_SECRET>` like the daily repository sync. The route exists only in serverless mode
 (`APP_RUNTIME=serverless`, a `404` anywhere else, so a Coolify installation is untouched), a missing or wrong
 secret is `401` with no side effect, and nothing below `/api/internal` is open except the two exact paths of the
@@ -96,7 +131,7 @@ two crons (`src/auth/access.ts`).
 | `sweep-shared.ts`                | The wiring of the running server                                                                                                                                   |
 
 **Overlapping runs.** A run that starts while another one is still working (the platform retries, or a run
-outlasts its minute) does not queue behind it: it answers `{"status":"skipped","reason":"already_running"}` and
+outlasts its slot) does not queue behind it: it answers `{"status":"skipped","reason":"already_running"}` and
 does nothing. The lock lives and dies with one transaction on a connection of its own (not the pool, whose connections the steps
 need: a pool of one still works), so a crashed instance can never leave it locked. Every step is also safe on its own, so a second instance that got in anyway (for example the job
 creation hook running at the same moment) only ever sees compare-and-set statements.
@@ -112,7 +147,7 @@ cause) and does not stop the others; the answer is then `500` with `failedSteps`
 2. **`give_up`**: a job that has been **queued for the give-up time without a claim** fails with the stable code
    `dispatch_unavailable` (copy on the Runs pages, `runs/error-copy.ts`) and no attempt is counted, so the pull
    request is free for the next push or review request. "Queued" is counted from the later of the time the job
-   became due (`run_after`, so a debounce does not eat the budget) and the time it was last queued (a job given back
+   became due (`run_after`, so a retry time does not eat the budget) and the time it was last queued (a job given back
    after a lost lease waits again from then, never from its first due time). A job whose dispatch a Dispatcher
    **acknowledged** (`202`) within the last acknowledgement timeout is spared: that Dispatcher is working on it.
    A job that is running is never touched by this step. The time is `RUNNER_DISPATCH_GIVE_UP_SECONDS`: **3600 (60
@@ -120,16 +155,17 @@ cause) and does not stop the others; the answer is then `500` with `failedSteps`
    value outside 60 to 604800 or one that is not a whole number keeps the default of the mode. It is also the longest a
    job may wait when the pool is full, so set it above the longest queue you accept.
 3. **`revive`** (webhook mode): a dispatch **stopped** with `not_capable` (the Dispatcher cannot run that review
-   kind) is made pending again `STOPPED_REVIVE_MS` (10 minutes) after it stopped, if its job is still queued, so a
-   Dispatcher that was updated or got its engine back is asked again, at a slow pace and never in a hot loop. A
-   Dynamic job that nobody can ever run still ends as `no_capable_runner` after 30 minutes (step 1).
+   kind) is made pending again at the first sweep that finds it stopped for `STOPPED_REVIVE_MS` (10 minutes) or longer, if its job is still queued, so a
+   Dispatcher that was updated or got its engine back is asked again, at a slow pace and never in a hot loop (every
+   2 hours, since the sweep runs that often). A Dynamic job that nobody can ever run still ends as `no_capable_runner`
+   after 30 minutes, when a claim or the sweep looks at it (step 1).
 4. **`send`** (webhook mode, `getDispatchService()?.sendDue(limit)`): every queued job that is due and has no row, or
    whose row is due and not stopped, is sent: jobs queued by an instance that had no hook, a row that could not be
-   written, a debounced job that became due, a call that was never acknowledged, an acknowledged job that is still
+   written, a job given back with a retry time that has passed, a call that was never acknowledged, an acknowledged job that is still
    queued after the acknowledgement timeout (the claim failed, or the Worker launch was given back). **The pool cap:**
    with `RUNNER_DISPATCH_MAX_RUNNING` (1 to 1000, normally the Dispatcher's `DISPATCHER_MAX_RUNNING`) the run sends
    at most as many calls as there are free slots (the cap minus the jobs running now, never more than 20 a run), and
-   none at the cap, so a long queue does not wake the Dispatcher for nothing every two minutes; the job is sent in the
+   none at the cap, so a long queue does not wake the Dispatcher for nothing; the job is sent when a slot frees ("Between two sweeps"), or in the
    first run after a slot frees. Unset, the sweep does not limit itself and the Dispatcher's own cap (enforced by the
    app at the claim, `maxRunning`) is the only limit. The first call right after a job is queued (the hook of
    `jobQueueFor`) is not held back by the cap: the claim is.
@@ -140,7 +176,7 @@ cause) and does not stop the others; the answer is then `500` with `failedSteps`
    unverified accounts, verification and reset links, signed states, remembered job keys, **and the `job_dispatches`
    rows of jobs that finished a week ago**) runs **once when the hour has changed**. The hour of the last
    successful run is kept in `app_meta` (`maintenance.sweep_cleanup_hour`), so every instance sees the same one; a run
-   that failed is tried again by the next minute's run. On a server (Docker, Coolify) the timer stays as it was.
+   that failed is tried again by the next run. On a server (Docker, Coolify) the timer stays as it was.
 
 The answer is `{"status":"ok","expired":{...},"givenUp":n,"revived":n,"sent":n,"noticesTried":n,"cleanedUp":bool}`; a line
 `[sweep] requeued=.. lease_expired=.. timed_out=.. given_up=.. revived=.. sent=..` is logged for a run that did

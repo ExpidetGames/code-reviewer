@@ -38,7 +38,7 @@ import { operatorTokenProblem } from "../operator-api/token.ts";
 import { ERROR_COPY } from "../runs/error-copy.ts";
 import { resolveRuntimeMode } from "../runtime/mode.ts";
 import { SETUP_CODE_TTL_MS } from "../setup/code-store.ts";
-import { configuredDebounceMs } from "../webhooks/debounce-config.ts";
+import { DEBOUNCE_VARIABLE } from "../webhooks/debounce-config.ts";
 
 const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
 
@@ -146,7 +146,6 @@ describe("the App section of the guide against the code", () => {
       "app/src/llm/config.ts",
       "app/src/operator-api/token.ts",
       "app/src/runner-api/token-auth.ts",
-      "app/src/webhooks/debounce-config.ts",
       "app/src/auth/config.ts",
       "app/src/crypto/app-secret.ts",
       "app/src/deploy/startup.ts",
@@ -287,7 +286,6 @@ describe("the App section of the guide against the code", () => {
       "DATABASE_POOL_MAX",
       "RUNNER_DISPATCH_GIVE_UP_SECONDS",
       "OPERATOR_API_TOKEN",
-      "REVIEW_DEBOUNCE_SECONDS",
     ])
       expect(row(name).required, name).toBe("optional");
     expect(row("RUNNER_DISPATCH_MAX_RUNNING").required).toBe("**set it**");
@@ -365,17 +363,6 @@ describe("the App section of the guide against the code", () => {
         RUNNER_DISPATCH_MAX_RUNNING: String(MAX_RUNNING_RANGE.max + 1),
       }).maxRunning,
     ).toBeNull();
-
-    expect(row("REVIEW_DEBOUNCE_SECONDS").text).toContain(
-      "0 to 600, default 90",
-    );
-    expect(configuredDebounceMs({})).toBe(90_000);
-    expect(configuredDebounceMs({ REVIEW_DEBOUNCE_SECONDS: "600" })).toBe(
-      600_000,
-    );
-    expect(configuredDebounceMs({ REVIEW_DEBOUNCE_SECONDS: "601" })).toBe(
-      90_000,
-    );
 
     for (const name of [
       "APP_SECRET",
@@ -471,8 +458,8 @@ describe("the hosted deployment guide and vercel.json", () => {
     const sweep = appConfig.crons.find(({ path }) =>
       path.endsWith("dispatch-sweep"),
     );
-    expect(sweep?.schedule).toBe("* * * * *");
-    expect(guide).toMatch(/every\s+minute/);
+    expect(sweep?.schedule).toBe("0 */2 * * *");
+    expect(guide).toMatch(/every\s+2\s+hours/);
     expect(guide).toContain(
       `\`maxDuration\` of **${String(dispatcherConfig.functions["src/index.ts"]?.maxDuration)} seconds**`,
     );
@@ -632,63 +619,58 @@ describe("the hosted deployment guide as a procedure", () => {
     );
   });
 
-  // #333-cron
-  it("says that the per-minute cron is required, what is lost without it and how late a debounced review starts", () => {
+  // #395-T02
+  it("says that the cron is a sparse safety net, why it is sparse, what the normal flow does without it and how late each abnormal case can be", () => {
     const needs = flat(section("## 2. What you need first"));
-    const sweep = flat(section("### 5.7 What depends on the per-minute sweep"));
+    const sweep = flat(section("### 5.7 What depends on the 2 hour sweep"));
+    const overview = flat(section("## 1. What you are deploying"));
     const appReadme = flat(read("app/src/dispatch/README.md"));
 
-    expect(needs).toContain("The per-minute cron is a hard requirement.");
-    expect(needs).toContain("without it push-triggered reviews never start");
-    expect(needs).toContain("up to about 60 seconds later");
-    // Leases do not stop expiring without the cron: every claim expires the lapsed ones, so it is late, not never.
     expect(needs).toContain(
-      "the lease of a Worker that stopped reporting expires only late, when another job happens to be claimed",
+      "The 2 hour cron is a safety net, and it is required.",
     );
-    expect(needs).toContain("need the cron only if that first send fails");
-    expect(guide).not.toContain("leases never expire");
-    expect(guide).not.toContain("nothing else ends it");
-    expect(read("app/src/db/repositories/runner-jobs-repository.ts")).toMatch(
-      /async claimNext[\s\S]{0,400}await expire\(trx, current(, \w+)?\)/,
-    );
+    expect(needs).toContain("The normal path does not depend on it");
+    expect(overview).toContain("scales to zero");
+    expect(overview).toContain("**The normal flow never waits for it**");
     expect(needs).toContain(
       "A plan that allows only daily crons cannot run this deployment",
     );
-    expect(flat(section("## 1. What you are deploying"))).toContain(
-      "is also the only thing that sends the wake-up for a job that is not due yet",
-    );
-    expect(flat(section("### 3.1 The App project"))).toContain(
-      "**push-triggered reviews never start** (section 5.7)",
-    );
-    expect(sweep).toContain("**Not due yet** when queued");
-    expect(sweep).toContain("**Never starts**");
+    // The per-duty timing: what is done at once, and what can be up to two hours late.
     expect(sweep).toContain(
-      "a send that fails is retried only by the sweep** | Works if the first send succeeds; a failed send is never retried",
+      "**The normal flow, without the sweep (webhook mode):**",
     );
+    expect(sweep).toContain("There is no debounce.");
+    expect(sweep).toContain("repeats it up to three more times");
+    expect(sweep).toContain("When a job ends");
     expect(sweep).toContain(
-      "Expires late: every claim also expires lapsed leases (`claimNext`)",
+      "**Only the sweep (and so up to about 2 hours late)",
     );
-    expect(sweep).toContain("the debounce plus up to about 60 seconds");
-    expect(sweep).toContain("`REVIEW_DEBOUNCE_SECONDS=0`");
+    for (const abnormal of [
+      "`dispatch_unavailable`",
+      "`not_capable`",
+      "A refusal notice whose post failed",
+      "up to 2 hours",
+    ])
+      expect(sweep, abnormal).toContain(abnormal);
+    expect(guide).not.toMatch(/per-minute/);
+    expect(guide).not.toMatch(/once a minute/);
+    expect(guide).not.toContain("push-triggered reviews never start");
+    expect(guide).not.toContain(DEBOUNCE_VARIABLE);
+    // Leases do not stop expiring without the cron: every claim expires the lapsed ones, so it is late, not never.
+    expect(read("app/src/db/repositories/runner-jobs-repository.ts")).toMatch(
+      /async claimNext[\s\S]{0,400}await expire\(trx, current(, \w+)?\)/,
+    );
     expect(
       flat(
         section("### Step 8. Smoke test: a Diff review, then a Dynamic review"),
       ),
     ).toContain("**Push to the open pull request**");
-    expect(
-      flat(section("## 9. Known limits and what is not verified")),
-    ).toContain(
-      "A debounced review starts up to about 60 seconds later than self-hosted",
-    );
-    // What the guide says is what the App's own documentation says about the sweep and the debounce.
+    // What the guide says is what the App's own documentation says about the sweep and the normal flow.
     expect(appReadme).toContain(
-      "A job that is not due yet (the 90 second debounce of an automatic review) only gets its row with `next_dispatch_at = run_after`; the sweep sends it when it is due.",
+      "`GET /api/internal/dispatch-sweep`, **every 2 hours**",
     );
-    expect(appReadme).toContain("a debounced job that became due");
-    expect(appReadme).toContain(
-      "`GET /api/internal/dispatch-sweep`, once a minute",
-    );
-    expect(configuredDebounceMs({})).toBe(90_000);
+    expect(appReadme).toContain("Between two sweeps");
+    expect(appReadme).not.toContain("the 90 second debounce");
   });
 
   // #333-e2e
