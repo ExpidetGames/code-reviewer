@@ -475,8 +475,9 @@ for the reviews. No new product code, no new fake: the fake LLM already offers t
 - **The script** sets the default entitlements and the row of B, the tiers (six made-up model ids), the plan management page and
   the period, suspends and unsuspends, reads the usage feed, the summary and the count of unknown costs, and redeems the handoff
   token. The operator's LLM key is saved by the instance admin in the admin portal (`changeAdminSetting`), as the API has no call for
-  it. The operator's page (`https://plans.example.test/manage`) is answered by the journey (a route of the page), so the browser asks
-  nothing of the network.
+  it. The operator's page (`https://plans.example.test/manage`) is never asked for: the journey takes the answer of the hand-over
+  route (a `303` to that address) before the browser sees it (a route of the page, `route.fetch` without redirects), reads where it leads
+  and gives the browser a page of the app, so the browser asks nothing of the network.
 - **The usage feed has a safety lag of 60 seconds** (`USAGE_SAFETY_LAG_MS`, not configurable): the script polls for the records like
   a reader that is caught up, with the condition as the wait (`pollUsage`); the summary has no lag and is used where the journey does not
   need the feed itself. Two reads of the feed cost about 50 s of waiting in the journey; nothing is sped up by writing rows.

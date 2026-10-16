@@ -687,20 +687,29 @@ test.describe("a limited workspace on an instance with the operator API on", () 
   // #285-T08
   test("an Owner clicks Manage plan and the script redeems the token: the identity is returned once and the second redeem is refused", async () => {
     const page = ownerPage();
-    // The operator's page is not reachable from the test: the browser is answered by the journey.
-    await page.route("https://plans.example.test/**", (route) =>
-      route.fulfill({
+    // The operator's page is not reachable from the test, and the browser must never ask for it: the journey takes
+    // the answer of the hand-over route (a 303 to the operator's page) before the browser sees it, reads where it
+    // leads and gives the browser a page of the app instead.
+    let location = "";
+    const handoffRoute = `**/api/w/${slugA}/plan-handoff`;
+    await page.route(handoffRoute, async (route) => {
+      const answer = await route.fetch({ maxRedirects: 0 });
+      expect(answer.status()).toBe(303);
+      location = answer.headers()["location"] ?? "";
+      await route.fulfill({
         status: 200,
         contentType: "text/html",
-        body: "<!doctype html><title>Operator page</title><p>Operator page</p>",
-      }),
-    );
+        body: "<!doctype html><title>Handed over</title><p>Handed over</p>",
+      });
+    });
     await page.goto(`/w/${slugA}/settings/plan`);
     await page.getByRole("button", { name: "Manage plan" }).click();
-    await page.waitForURL(/^https:\/\/plans\.example\.test\/manage\?handoff=/);
-    const token = new URL(page.url()).searchParams.get("handoff") ?? "";
+    await expect.poll(() => location).not.toBe("");
+    await page.unroute(handoffRoute);
+    const target = new URL(location);
+    expect(`${target.origin}${target.pathname}`).toBe(PLAN_PAGE);
+    const token = target.searchParams.get("handoff") ?? "";
     expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/);
-    await page.unroute("https://plans.example.test/**");
 
     const first = await script().redeemHandoff(token);
     expect(first.status).toBe(200);
