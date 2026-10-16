@@ -5,7 +5,7 @@
 // Review, and, while Dynamic Review is chosen, its model and review skill. The card never implies that
 // Dynamic Review works while the instance has not enabled it (#195 gate): the option says so and
 // choosing it shows what happens to the runs. Switching is confirmed by the form when it is saved.
-import { useId } from "react";
+import { useId, type ReactNode } from "react";
 import { Alert, alertVariants } from "../../components/ui/alert.tsx";
 import { Badge } from "../../components/ui/badge.tsx";
 import { FieldDescription, FieldLabel } from "../../components/ui/field.tsx";
@@ -24,7 +24,6 @@ import {
   SettingsTextField,
   type SettingsOrigin,
 } from "./settings-fields.tsx";
-import { MODEL_CHOSEN_BY_INSTANCE } from "./model-fieldset.tsx";
 import { SkillEditor } from "./skill-editor.tsx";
 
 const KIND_HINTS: Record<ProjectReviewKind, string> = {
@@ -62,10 +61,12 @@ export function ReviewKindFieldset({
   hiddenProblem,
   kindError,
   handlers,
-  modelChosenByInstance = false,
+  quality,
 }: {
-  /** The instance chooses the model (the workspace's key mode is managed): a note replaces the model field (#276). */
-  modelChosenByInstance?: boolean;
+  /**
+   * The quality choice of a workspace on the operator's key (#283): it takes the place of the Dynamic model field.
+   */
+  quality?: ReactNode;
   view: ProjectDynamicView;
   values: DynamicFormValues;
   errors: Partial<Record<string, string>>;
@@ -181,15 +182,13 @@ export function ReviewKindFieldset({
 
       {dynamic ? (
         <>
-          {modelChosenByInstance ? (
-            <p className="text-sm text-muted-foreground">
-              {MODEL_CHOSEN_BY_INSTANCE}
-            </p>
+          {quality !== undefined ? (
+            quality
           ) : (
             <SettingsTextField
               name="dynamicModel"
               label="Dynamic Review model"
-              hint={`The model the agent uses. Type the name of any model your provider serves; the default is ${view.defaults.dynamicModel}.`}
+              hint={`The model the agent uses. Type the name of any model your provider serves; the default is ${view.defaults.dynamicModel ?? ""}.`}
               error={errors.dynamicModel}
               origin={modelOrigin}
               value={values.dynamicModel}

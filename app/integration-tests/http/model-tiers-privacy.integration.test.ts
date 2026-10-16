@@ -6,9 +6,16 @@
 // everything a workspace member can read - settings, the Runs list and detail, the plan page, the usage
 // records, the comments the app wrote on the pull request - and searches all of it for any model id of any tier.
 import { describe, expect, it } from "vitest";
+import type { SessionUser } from "../../src/auth/access-policy.ts";
+import { createAppSettingsRepository } from "../../src/db/repositories/app-settings-repository.ts";
+import { createProjectsRepository } from "../../src/db/repositories/projects-repository.ts";
 import { createRunsRepository } from "../../src/db/repositories/runs-repository.ts";
 import { createUsageRecordsRepository } from "../../src/db/repositories/usage-records-repository.ts";
 import { createWorkspaceEntitlementsRepository } from "../../src/db/repositories/workspace-entitlements-repository.ts";
+import { configuredTiers } from "../../src/model-tiers/tiers.ts";
+import { createReviewSettingsRouteHandlers } from "../../src/review-settings/http.ts";
+import { createReviewSettingsService } from "../../src/review-settings/service.ts";
+import { builtInReviewSettings } from "../../src/review-settings/settings.ts";
 import { createRunsService } from "../../src/runs/runs-service.ts";
 import { sha } from "../../src/test-support/jobs.ts";
 import {
@@ -135,7 +142,65 @@ async function whatAMemberCanRead(h: RunnerApiHarness): Promise<string> {
   });
 }
 
+/**
+ * The review settings of the workspace as its routes answer them while its key mode is `managed` (the harness's own
+ * service is the one the claim uses and does not know the key mode).
+ */
+async function settingsAnswers(h: RunnerApiHarness): Promise<string> {
+  const service = createReviewSettingsService({
+    appSettings: createAppSettingsRepository(h.db, h.workspaceId),
+    projects: createProjectsRepository(h.db, h.workspaceId),
+    builtIn: () => builtInReviewSettings("vendor/instance-model"),
+    operatorsModels: async () => true,
+    tierAvailability: async () => configuredTiers(TIERS),
+  });
+  const handlers = createReviewSettingsRouteHandlers({
+    requireUser: async () => ({ id: "u1" }) as SessionUser,
+    service,
+  });
+  const answers = [
+    await handlers.getGlobal(
+      new Request("https://app.test/api/review-settings"),
+    ),
+    await handlers.getProject(
+      new Request("https://app.test/api/project"),
+      h.repositoryId,
+    ),
+  ];
+  return (await Promise.all(answers.map((answer) => answer.text()))).join("\n");
+}
+
 describe("what a workspace member can read after managed runs", () => {
+  // #283-T07
+  it("shows the tokens of a managed run in the Runs view, and neither its model nor its cost", async () => {
+    const h = await start();
+    const job = await run(h, "diff");
+    const runs = createRunsService({
+      runs: createRunsRepository(h.db, h.workspaceId),
+      now: h.clock.now,
+    });
+
+    const detail = JSON.stringify(await runs.get(job.id));
+
+    expect(detail).toContain('"totalTokens":1280');
+    expect(detail).not.toContain("0.02");
+    expect(detail).toContain('"costHidden":true');
+  });
+
+  // #283-T07
+  it("holds no model id of any tier, and no model field, in the settings of the workspace and of the project", async () => {
+    const h = await start();
+    await run(h, "diff");
+    await run(h, "dynamic");
+
+    const text = await settingsAnswers(h);
+
+    for (const needle of NEEDLES) expect(text).not.toContain(needle);
+    expect(text).not.toMatch(/"(model|fallbackModel|dynamicModel)"/);
+    expect(text).not.toContain("vendor/instance-model");
+    expect(text).toContain('"modelTier":"high"');
+  });
+
   // #280-T08
   it("holds no model id of any tier: settings, Runs, plan and usage, for a Diff and a Dynamic run", async () => {
     const h = await start();

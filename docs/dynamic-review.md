@@ -297,7 +297,8 @@ chooses a quality tier (`low`, `medium`, `high`) and never sees a model. The ope
 tier for Dynamic Review through the operator API; a Dynamic model has to support tool calls, which is checked when the
 operator saves it (an unverifiable model is refused too). At claim the tier's Dynamic model replaces the project's, the
 capabilities below are read for it, and a tier without a Dynamic model ends the job with `managed_tier_unavailable`
-instead of moving to another tier. The model reaches the runner and nothing a workspace can read. A workspace on its own
+instead of moving to another tier. The model reaches the runner and nothing a workspace can read; the project's settings show a Quality choice instead of
+the Dynamic model field (#283). A workspace on its own
 key keeps the model it chose. See `app/src/model-tiers/README.md`.
 
 **The app describes the model for every job (#279).** When a Dynamic job is claimed, the app reads

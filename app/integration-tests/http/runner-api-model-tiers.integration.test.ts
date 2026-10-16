@@ -674,7 +674,7 @@ describe("the model of a tier stays on the server", () => {
 
     const stored = JSON.stringify((await h.queue.get(job.id))?.result);
     expect(stored).not.toContain(SECRET_HINT);
-    expect(stored).toContain("[redacted]");
+    expect(stored).toContain("[model]");
     // The cost and the tokens of the run are still there.
     expect(JSON.parse(stored).usage).toMatchObject({
       model: null,
@@ -755,6 +755,135 @@ describe("the model of a tier stays on the server", () => {
     expect(stored).not.toContain("tier/");
   });
 
+  // #283-T05
+  it("replaces every tier model id with [model] in the log tail, the used one and the others alike", async () => {
+    const h = await start({
+      keyMode: "managed",
+      project: { modelTier: "high" },
+    });
+    const { job } = await h.claimed();
+
+    await h.complete(job.id, job.leaseToken, {
+      logTail: ALL_TIER_MODELS.map((model) => `tried ${model} first`).join(
+        "\n",
+      ),
+      usage: usageOf("openrouter/tier/high-diff"),
+    });
+
+    const result = (await h.queue.get(job.id))?.result as {
+      logTail: string;
+      usage: { model: string | null; costUsd: number };
+    };
+    for (const model of ALL_TIER_MODELS)
+      expect(result.logTail).not.toContain(model);
+    expect(result.logTail.split("\n")).toEqual(
+      ALL_TIER_MODELS.map(() => "tried [model] first"),
+    );
+    expect(result.usage).toMatchObject({ model: null, costUsd: 0.01 });
+  });
+
+  // #283-T05
+  it("does the same for a Dynamic job", async () => {
+    const h = await start({
+      keyMode: "managed",
+      dynamic: true,
+      project: { modelTier: "low" },
+    });
+    const { job } = await h.claimed(DYNAMIC_CLAIM);
+
+    await h.complete(job.id, job.leaseToken, {
+      logTail: "agent on tier/low-dyn, planner on tier/high-dyn",
+    });
+
+    const result = (await h.queue.get(job.id))?.result as { logTail: string };
+    expect(result.logTail).toBe("agent on [model], planner on [model]");
+  });
+
+  // #283-T06
+  it("replaces a model id in the error message of a failed run before it is stored", async () => {
+    const h = await start({
+      keyMode: "managed",
+      project: { modelTier: "medium" },
+    });
+    const { job } = await h.claimed();
+
+    await h.complete(job.id, job.leaseToken, {
+      ok: false,
+      errorCode: "llm_rate_limit",
+      errorMessage:
+        "429: tier/medium-diff is rate limited, try tier/high-diff instead",
+    });
+
+    const stored = (await h.queue.get(job.id))?.result as {
+      errorMessage: string;
+    };
+    expect(stored.errorMessage).toBe(
+      "429: [model] is rate limited, try [model] instead",
+    );
+  });
+
+  // #283-T05
+  it.each([
+    ["ab/c", "https://github.com/ab/cats/pull/1#issuecomment-1"],
+    [
+      "acme/widget-reviews",
+      "https://github.com/acme/widget-reviews/pull/1#issuecomment-1",
+    ],
+  ])(
+    "leaves the link to the comment alone when the tier id %s also occurs in a repository name",
+    async (tierModel, link) => {
+      const h = await start({
+        keyMode: "managed",
+        tiers: { medium: { diff: tierModel } },
+      });
+      const { job } = await h.claimed();
+
+      await h.complete(job.id, job.leaseToken, {
+        commentUrl: link,
+        logTail: `model ${tierModel} answered`,
+      });
+
+      const result = (await h.queue.get(job.id))?.result as {
+        commentUrl: string;
+        logTail: string;
+      };
+      expect(result.commentUrl).toBe(link);
+      expect(result.logTail).toBe("model [model] answered");
+    },
+  );
+
+  // #283-T05
+  it("masks the id inside a provider-prefixed spelling and leaves only the prefix", async () => {
+    const h = await start({
+      keyMode: "managed",
+      project: { modelTier: "high" },
+    });
+    const { job } = await h.claimed();
+
+    await h.complete(job.id, job.leaseToken, {
+      logTail: "calling openrouter/tier/high-diff now",
+    });
+
+    const result = (await h.queue.get(job.id))?.result as { logTail: string };
+    expect(result.logTail).toBe("calling openrouter/[model] now");
+  });
+
+  // #283-T05
+  it("leaves the text of a run on the workspace's own key alone", async () => {
+    const h = await start({
+      keyMode: "own",
+      project: { model: "tier/high-diff" },
+    });
+    const { job } = await h.claimed();
+
+    await h.complete(job.id, job.leaseToken, {
+      logTail: "model tier/high-diff answered",
+    });
+
+    const result = (await h.queue.get(job.id))?.result as { logTail: string };
+    expect(result.logTail).toBe("model tier/high-diff answered");
+  });
+
   // #280-T08
   it("still hides the model when the sealed row of the job cannot be read", async () => {
     const h = await start({
@@ -773,7 +902,7 @@ describe("the model of a tier stays on the server", () => {
     const stored = JSON.stringify((await h.queue.get(job.id))?.result);
     expect(stored).not.toContain("tier/");
     expect(JSON.parse(stored).usage.model).toBeNull();
-    expect(stored).toContain("[redacted] answered");
+    expect(stored).toContain("[model] answered");
   });
 
   // #280-T08
@@ -839,7 +968,7 @@ describe("the model of a tier stays on the server", () => {
 
     const stored = JSON.stringify((await h.queue.get(job.id))?.result);
     expect(stored).not.toContain("ab/c");
-    expect(stored).toContain("[redacted] answered");
+    expect(stored).toContain("[model] answered");
   });
 
   it("is kept encrypted for the masking, and a run on the workspace's own key reports its model as before", async () => {
