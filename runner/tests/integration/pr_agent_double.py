@@ -131,7 +131,8 @@ def install_double() -> None:
             await asyncio.sleep(120)
 
         # The runner meters whatever function is there when it starts the run (after this).
-        import_module("pr_agent.algo.ai_handlers.litellm_ai_handler").acompletion = never_answers
+        handler_module: Any = import_module("pr_agent.algo.ai_handlers.litellm_ai_handler")
+        handler_module.acompletion = never_answers
 
     async def handle_request(
         self: Any, pr_url: str, request: Any, notify: Any = None, propagate_tool_errors: Any = None
