@@ -100,8 +100,10 @@ that workspace in one statement (and void the records of those that lost a lease
 workspace. A refusal for a limit is decided per job (the count changes with every claim) and is bounded: at most 25
 per call, then the call answers "nothing" and the runner asks again. The detail is only logged (`onRefused`, `[queue] job=... refused at
 claim: quota_exhausted (diff_runs)`; a callback that throws is logged as `claim_refusal_log_failed` and ignored, so a
-claimed job is never orphaned); the stored code is all the Runs pages and the later pull request notice (#281)
-get. A job claimed again after a lost lease keeps the one record it has and is **not counted against itself**
+claimed job is never orphaned); the stored code is all the Runs pages get. The pull request notice (#281, `src/refusal-notices/README.md`) is posted
+for `quota_exhausted` and `workspace_suspended` after the claim committed, once per pull request and period: the
+refusal carries the `periodStart` it was decided under for that (`ClaimRefusal.periodStart`), and the notice does
+not tell the three limits apart, so no detail is stored. A job claimed again after a lost lease keeps the one record it has and is **not counted against itself**
 (it is left out of its own count), so it runs at a limit that its first claim used up; suspension and unreadable
 entitlements still stop it, and its record is then voided.
 

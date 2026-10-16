@@ -133,13 +133,16 @@ cause) and does not stop the others; the answer is then `500` with `failedSteps`
    first run after a slot frees. Unset, the sweep does not limit itself and the Dispatcher's own cap (enforced by the
    app at the claim, `maxRunning`) is the only limit. The first call right after a job is queued (the hook of
    `jobQueueFor`) is not held back by the cap: the claim is.
-5. **`cleanup`**: the cleanup a server runs on a timer (`maintenance/cleanup.ts`: old rate limit counters,
+5. **`notices`** (#281): the notices of refused reviews whose post failed (`refusal_notices` rows that are `pending`, past
+   their wait and under 3 attempts) are tried again, at most 20 a run (`src/refusal-notices/README.md`). Without this
+   step a failed notice is only retried when the next push on the pull request is refused.
+6. **`cleanup`**: the cleanup a server runs on a timer (`maintenance/cleanup.ts`: old rate limit counters,
    unverified accounts, verification and reset links, signed states, remembered job keys, **and the `job_dispatches`
    rows of jobs that finished a week ago**) runs **once when the hour has changed**. The hour of the last
    successful run is kept in `app_meta` (`maintenance.sweep_cleanup_hour`), so every instance sees the same one; a run
    that failed is tried again by the next minute's run. On a server (Docker, Coolify) the timer stays as it was.
 
-The answer is `{"status":"ok","expired":{...},"givenUp":n,"revived":n,"sent":n,"cleanedUp":bool}`; a line
+The answer is `{"status":"ok","expired":{...},"givenUp":n,"revived":n,"sent":n,"noticesTried":n,"cleanedUp":bool}`; a line
 `[sweep] requeued=.. lease_expired=.. timed_out=.. given_up=.. revived=.. sent=..` is logged for a run that did
 something. Nothing a database or a Dispatcher said reaches a log or an answer.
 

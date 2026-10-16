@@ -92,6 +92,21 @@ export interface IntegrationProvider {
     trigger: ReviewTrigger,
   ): Promise<boolean>;
 
+  /**
+   * Only where the app can write a comment below a pull request (#281): posts `body` as the app, with a token
+   * of its own limited to this repository and to the comment permission (never the credentials of a job). When
+   * `lookForEarlierSince` is given, first looks for a comment of the app itself, changed since then, that holds
+   * `marker`, and posts nothing if there is one ("already_there"): the way an app instance that is unsure
+   * whether another one posted does not post twice. Rejects with an `IntegrationError` with a stable code; the
+   * message never holds a token or the body.
+   */
+  postPullRequestNotice?(
+    integration: Integration,
+    repo: RepoRef,
+    prNumber: number,
+    notice: { body: string; marker: string; lookForEarlierSince?: string },
+  ): Promise<"posted" | "already_there">;
+
   /** Credentials for one job on one repository; short-lived where the platform allows it. */
   jobAccess(integration: Integration, repo: RepoRef): Promise<GitAccess>;
 

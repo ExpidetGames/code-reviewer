@@ -5,6 +5,7 @@
 import type {
   CollaboratorPermission,
   GithubAppClient,
+  IssueComment,
   RemoteInstallation,
   RemoteRepository,
 } from "./client.ts";
@@ -23,6 +24,12 @@ export type FakeGithubAppClientData = {
   mintFailure?: Error;
   /** Makes `listOpenPullRequests` reject with this error. */
   listPullRequestsFailure?: Error;
+  /** Makes `createIssueComment` reject with this error. */
+  commentFailure?: Error;
+  /** Makes `listIssueComments` reject with this error. */
+  listCommentsFailure?: Error;
+  /** What `listIssueComments` answers, by "owner/name#number". */
+  comments?: Record<string, IssueComment[]>;
   /** Makes `getPullRequest` reject with this error (an unknown pull request is rejected anyway). */
   getPullRequestFailure?: Error;
 };
@@ -131,6 +138,35 @@ export function fakeGithubAppClient(
     async getCollaboratorPermission(installationId, repoFullName, login) {
       record("getCollaboratorPermission", installationId, repoFullName, login);
       return data.permissions?.[`${repoFullName}#${login}`] ?? "none";
+    },
+    async listIssueComments(installationId, scope, repoFullName, prNumber) {
+      record(
+        "listIssueComments",
+        installationId,
+        scope,
+        repoFullName,
+        prNumber,
+      );
+      if (data.listCommentsFailure) throw data.listCommentsFailure;
+      return data.comments?.[`${repoFullName}#${prNumber}`] ?? [];
+    },
+    async createIssueComment(
+      installationId,
+      scope,
+      repoFullName,
+      prNumber,
+      body,
+    ) {
+      record(
+        "createIssueComment",
+        installationId,
+        scope,
+        repoFullName,
+        prNumber,
+        body,
+      );
+      if (data.commentFailure) throw data.commentFailure;
+      return { id: "5001" };
     },
     async mintInstallationToken(installationId, scope) {
       record("mintInstallationToken", installationId, scope);

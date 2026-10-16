@@ -421,6 +421,31 @@ export interface JobDispatchesTable {
   updated_at: string;
 }
 
+/**
+ * The notice of a refused review that one pull request got in one period (#281). Unique by workspace, repository,
+ * pull request and period start: that is what keeps a second push from posting again.
+ */
+export interface RefusalNoticesTable {
+  id: string;
+  workspace_id: string;
+  repository_id: string;
+  pr_number: number;
+  /** The `period_start` of the entitlements the refusal was decided under (ISO 8601 text in UTC). */
+  period_start: string;
+  /** A NoticeCode: the refusal the notice is about (`quota_exhausted` or `workspace_suspended`). */
+  code: string;
+  /** `pending`, `posted` or `dropped` (`NOTICE_STATES`). */
+  state: string;
+  /** How many times a post was started; bounded by the code. */
+  attempts: number;
+  /** ISO 8601 text in UTC: when a post may be started again. While one is in flight: when its claim ends. */
+  next_attempt_at: string;
+  /** ISO 8601 text in UTC; only a posted notice has it. */
+  posted_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 /** A single-use link to set a new password; only the hash of the token is kept (src/auth/password-reset.ts). */
 export interface PasswordResetTokensTable {
   /** SHA-256 of the token, hex. */
@@ -577,6 +602,7 @@ export interface Database {
   usage_records: UsageRecordsTable;
   job_claimed_keys: JobClaimedKeysTable;
   job_dispatches: JobDispatchesTable;
+  refusal_notices: RefusalNoticesTable;
   password_reset_tokens: PasswordResetTokensTable;
   email_verification_tokens: EmailVerificationTokensTable;
   signed_states: SignedStatesTable;

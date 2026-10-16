@@ -18,6 +18,15 @@ export const JOB_TOKEN_PERMISSIONS: InstallationPermissions = {
   metadata: "read",
 };
 
+/**
+ * What the token of a notice (#281) may do: write a comment below a pull request (GitHub files the comments of a
+ * pull request under issues) and the metadata every token gets anyway. No code, no pull request settings.
+ */
+export const NOTICE_TOKEN_PERMISSIONS: InstallationPermissions = {
+  issues: "write",
+  metadata: "read",
+};
+
 /** The repository ids a job token is limited to: exactly one, and a real GitHub id. */
 export function jobTokenRepositoryIds(repoExternalId: string): number[] | null {
   if (!/^[1-9]\d*$/.test(repoExternalId)) return null;

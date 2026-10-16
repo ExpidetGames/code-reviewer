@@ -29,8 +29,18 @@ import { readEffectiveEntitlements } from "../../workspaces/effective-entitlemen
 export type ClaimRefusal = {
   jobId: string;
   workspaceId: string;
+  /** The pull request of the job, for the notice on it (#281). */
+  repositoryId: string;
+  prNumber: number;
+  /** What started the job (`webhook` is an automatic review), for the notice on a draft (#281). */
+  triggerKind: string;
   errorCode: string;
   detail?: string;
+  /**
+   * The start of the period the refusal was decided under (#281, the pull request notice). Absent for entitlements
+   * that cannot be read: they have no period, and no notice.
+   */
+  periodStart?: string;
 };
 
 /** The decision and whether the job already had a usage record (a job claimed again after a lost lease). */
