@@ -142,8 +142,9 @@ settings change (and the cancellation) back. The hook is `createJobReviewSetting
      person started (`comment`, `manual`) is never superseded, and a person's job never supersedes anything.
 
    A superseded **running** job **drains**: it keeps `runner_id`, its lease token and its claim time; `finished_at` is
-   set; `lease_expires_at` is set to the claim window (`SUPERSEDED_DRAIN_MS` in `supersede-timing.ts`, 240 seconds: the Worker's next heartbeat, at most 60, its own drain, 120, and a margin) and is not extended
-   by heartbeats. Its heartbeats are answered `superseded` (`job.superseded: true`) while the window lasts, so
+   set; `lease_expires_at` is set to the claim window (`SUPERSEDED_DRAIN_MS` in `supersede-timing.ts`, 240 seconds: the Worker's next heartbeat, at most 60, its own drain, 120, the longest model request, and a margin) and is not extended
+   by heartbeats. The Worker's host reads the end of the window from `leaseExpiresAt` in the heartbeat answer and ends its
+   process `KILL_MARGIN_SECONDS` (20) before it, so the report arrives while the claim holds. Its heartbeats are answered `superseded` (`job.superseded: true`) while the window lasts, so
    its Worker stops sending model requests, finishes the ones in flight and reports; its **report is accepted
    once** and stored (the job stays `superseded`; it settles the usage record, below), also a little after the window
    (a grace of 60 seconds, `SUPERSEDED_REPORT_GRACE_MS`). Only when window and grace are over without a report does the

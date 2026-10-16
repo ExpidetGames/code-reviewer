@@ -8,6 +8,8 @@ import { readFileSync } from "node:fs";
 import type { Kysely } from "kysely";
 import { describe, expect, it } from "vitest";
 import {
+  KILL_MARGIN_SECONDS,
+  LONGEST_MODEL_REQUEST_SECONDS,
   MAX_WORKER_HEARTBEAT_INTERVAL_SECONDS,
   SUPERSEDED_DRAIN_MS,
   SUPERSEDED_REPORT_GRACE_MS,
@@ -384,9 +386,14 @@ describe.each(databases)("superseding a running review on %s", (name, open) => {
     async () => {
       // The heartbeat of a Worker is 30 seconds and at most 60, then it drains for 120 (#399).
       expect(MAX_WORKER_HEARTBEAT_INTERVAL_SECONDS).toBe(60);
-      expect(WORKER_DRAIN_SECONDS).toBe(120);
+      expect(LONGEST_MODEL_REQUEST_SECONDS).toBe(120);
+      expect(WORKER_DRAIN_SECONDS).toBe(LONGEST_MODEL_REQUEST_SECONDS);
+      // The report has to arrive inside the claim even when the Worker uses its whole drain: it ends its process
+      // KILL_MARGIN_SECONDS before the claim runs out.
       expect(SUPERSEDED_DRAIN_MS).toBeGreaterThanOrEqual(
-        (MAX_WORKER_HEARTBEAT_INTERVAL_SECONDS + WORKER_DRAIN_SECONDS + 30) *
+        (MAX_WORKER_HEARTBEAT_INTERVAL_SECONDS +
+          WORKER_DRAIN_SECONDS +
+          KILL_MARGIN_SECONDS) *
           1000,
       );
       // One definition for both projects: the contract file states the same numbers.
@@ -399,7 +406,11 @@ describe.each(databases)("superseding a running review on %s", (name, open) => {
       expect(timing.maxHeartbeatIntervalSeconds.const).toBe(
         MAX_WORKER_HEARTBEAT_INTERVAL_SECONDS,
       );
+      expect(timing.longestModelRequestSeconds.const).toBe(
+        LONGEST_MODEL_REQUEST_SECONDS,
+      );
       expect(timing.workerDrainSeconds.const).toBe(WORKER_DRAIN_SECONDS);
+      expect(timing.killMarginSeconds.const).toBe(KILL_MARGIN_SECONDS);
       expect(timing.claimSeconds.const * 1000).toBe(SUPERSEDED_DRAIN_MS);
       expect(timing.reportGraceSeconds.const * 1000).toBe(
         SUPERSEDED_REPORT_GRACE_MS,
