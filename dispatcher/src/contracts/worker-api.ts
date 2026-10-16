@@ -403,7 +403,7 @@ export interface RunnerUsage {
   aiCalls: number;
   fallbackUsed: boolean;
   /**
-   * The cost in US dollars, or null when it is not known. A Dynamic Review reports the exact sum of the charges its model provider reported for every call, and null when any call has no reported charge; it never estimates one.
+   * The cost in US dollars, or null when it is not known. A Dynamic Review and a Diff Review report the exact sum of the charges their model provider stated for every call, and null when any call has no stated charge or ended without an answer that could have been billed; neither estimates one from tokens or a price table.
    */
   costUsd: number | null;
   /**

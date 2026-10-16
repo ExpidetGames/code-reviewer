@@ -88,6 +88,7 @@ reasoning_effort = "max"
 additional_reasoning_effort_models = ["evil"]
 no_temperature_models = ["evil"]
 retry_same_model_on_timeout = false
+num_retries = 5
 add_user_to_requests = true
 enable_claude_extended_thinking = true
 extended_thinking_budget_tokens = 999999

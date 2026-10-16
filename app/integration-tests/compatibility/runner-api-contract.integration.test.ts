@@ -461,6 +461,40 @@ describe("what the app accepts from a runner", () => {
     ).toEqual(new Set([true, false]));
   });
 
+  // #274-T07: the result of a Diff Review with its exact cost is valid in the schema and in the app,
+  // and the app reads the cost as the runner printed it.
+  it("accepts the exact cost of a Diff Review unchanged", () => {
+    for (const costUsd of [0.6, 0.00037035, 0, null]) {
+      const result = {
+        ok: true,
+        durationMs: 41200,
+        commentUrl: "https://github.com/octo/repo/pull/7#issuecomment-1",
+        errorCode: null,
+        logTail: "",
+        logTruncated: false,
+        usage: {
+          model: "openrouter/vendor/model-name",
+          promptTokens: 3000,
+          completionTokens: 450,
+          totalTokens: 3450,
+          aiCalls: 3,
+          fallbackUsed: false,
+          costUsd,
+        },
+      };
+      const body = {
+        leaseToken: "6f1d2c9a-5b3e-4a77-9c0d-8e2f1a4b7c33",
+        result,
+      };
+
+      expect(contract.check("RunnerResult", result).valid).toBe(true);
+      expect(contract.check("CompleteRequest", body).valid).toBe(true);
+      const parsed = parseCompleteRequest(body);
+      expect(parsed.ok).toBe(true);
+      if (parsed.ok) expect(parsed.value.result.usage?.costUsd).toBe(costUsd);
+    }
+  });
+
   // #195-T06: the claim request is judged exactly like the contract. An absent body is the
   // previous-release caller and means pr-agent only; an empty or unknown or duplicated engine list is
   // refused before any job is claimed.

@@ -3,7 +3,7 @@
 One row per job in `usage_records` (migration `20261014150000_create_usage_records`; epic #268, issue #272): what the
 run consumed, in a form that can be counted atomically with the decision to start a run and read incrementally by
 an outside service. The job's own `result` still holds the full usage for showing one run; this table is for
-counting. It measures nothing itself: it stores the `usage.costUsd` that the runner reports (#267).
+counting. It measures nothing itself: it stores the `usage.costUsd` that the runner reports, which is exact for both review kinds: the sum of the charges the model provider stated for every call, `null` when any is missing (#267 for Dynamic, #274 for Diff; `runner/README.md`).
 
 | File                                             | Role                                                                                  |
 | ------------------------------------------------ | ------------------------------------------------------------------------------------- |
