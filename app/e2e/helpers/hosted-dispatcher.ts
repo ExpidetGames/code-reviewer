@@ -133,6 +133,12 @@ export async function startHostedDispatcher(options: {
    * Worker starts the way the container's does.
    */
   unsetForWorkerOnce?: string[];
+  /**
+   * Whether the Worker host and the job process run behind the runner's Python connect guard, which records every
+   * connection in `hostedEnv.connectionLog` and refuses anything that is not loopback. Default true; the privileged lane
+   * has the operating system's guard over everything instead.
+   */
+  connectGuard?: boolean;
   /** Whether the Worker needs the tiktoken encoding of PR-Agent (every lane that runs a Diff job). Default true. */
   tiktoken?: boolean;
   /** More variables for the process, for a lane that needs them (the privileged lane's wrapper). */
@@ -145,6 +151,12 @@ export async function startHostedDispatcher(options: {
       `The Worker is not installed (${program} is missing): run "make install" or "uv sync --locked" in runner/.`,
     );
   const tiktoken = options.tiktoken ?? true;
+  const connectGuard = options.connectGuard ?? true;
+  const guardDirectory = resolve(
+    process.cwd(),
+    "../runner/tests/engine/connect_guard",
+  );
+  const connectionLog = absolute(hostedEnv.connectionLog);
   if (tiktoken) assertTiktokenCache();
   mkdirSync(absolute(hostedEnv.dockerDirectory), { recursive: true });
   mkdirSync(absolute(hostedEnv.controlDirectory), { recursive: true });
@@ -183,9 +195,23 @@ export async function startHostedDispatcher(options: {
     ).join(" "),
     // What the image carries itself and the container is not given: the job command that adds the address of the fake
     // LLM to the job, and the tiktoken encoding PR-Agent counts tokens with.
-    E2E_WORKER_PASS_PR_AGENT_COMMAND: [python, WRAPPER, options.llmBaseUrl]
+    // The copy of every start document: what the logs are searched for (the per-job credential is in it).
+    E2E_STDIN_COPY_DIR: absolute(hostedEnv.secretsDirectory),
+    E2E_WORKER_PASS_PR_AGENT_COMMAND: [
+      python,
+      WRAPPER,
+      options.llmBaseUrl,
+      ...(connectGuard ? [guardDirectory, connectionLog] : []),
+    ]
       .map(quoted)
       .join(" "),
+    ...(connectGuard
+      ? {
+          // The Worker host: its connections to the app. The job process gets the guard from the job command.
+          E2E_WORKER_PASS_PYTHONPATH: guardDirectory,
+          E2E_WORKER_PASS_ENGINE_CONNECT_LOG: connectionLog,
+        }
+      : {}),
     ...(tiktoken
       ? { E2E_WORKER_PASS_TIKTOKEN_CACHE_DIR: tiktokenCacheDirectory() }
       : {}),

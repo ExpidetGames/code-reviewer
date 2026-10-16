@@ -17,6 +17,7 @@ import { syncFromGithubAsAdmin } from "./admin-api";
 import { e2eEnv, llmEnv } from "./e2e-env";
 import { addGithubInstallation, GITHUB_APP_OWNER_ACCOUNT } from "./github-fake";
 import { hostedEnv } from "./hosted-env";
+import { rememberSecret } from "./hosted-secrets";
 
 /** The owner of the repositories the journeys review: the account the fake reports as the owner of the App. */
 export const OWNER = {
@@ -30,6 +31,10 @@ export async function signInAsAdmin(page: Page): Promise<void> {
     data: { email: e2eEnv.adminEmail, password: e2eEnv.adminPassword },
   });
   expect(signedIn.status(), await signedIn.text()).toBe(200);
+  // The session cookie must be nowhere but the browser: the scans of the lane search for it.
+  for (const cookie of await page.context().cookies())
+    if (/session/i.test(cookie.name))
+      rememberSecret("session-cookie", cookie.value);
   await page.goto("/");
   await expect(page).toHaveURL(/\/w\/[a-z0-9-]+\/projects$/);
 }

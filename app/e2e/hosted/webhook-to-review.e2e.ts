@@ -26,6 +26,7 @@ import {
 } from "../helpers/hosted-instance";
 import {
   expectNoCredentials,
+  goldenDockerRun,
   headSha,
   openRuns,
   required,
@@ -33,6 +34,7 @@ import {
   RUN_TIMEOUT,
   runsOf,
 } from "../helpers/hosted-journey";
+import { perJobCredentials } from "../helpers/hosted-secrets";
 import { deliverPullRequestEvent } from "../helpers/webhooks";
 
 const INSTALLATION_ID = 9500301;
@@ -143,36 +145,21 @@ test.describe("a pull request on its way to a review through the hosted deployme
     const workers = theDispatcher().workersOf(job.id);
     expect(workers).toHaveLength(1);
 
-    // The container was started with the flags of the hardened spec, and nothing of the Dispatcher's or the App's
-    // secrets was given to it: the credential of the job came on stdin, which no record of the stand-in holds.
-    const flags = workers[0]?.args.join(" ") ?? "";
-    for (const flag of [
-      "--cap-drop ALL",
-      "--security-opt no-new-privileges:true",
-      "--read-only",
-      "--pids-limit 512",
-      "--sysctl net.ipv6.conf.all.disable_ipv6=1",
-    ])
-      expect(flags).toContain(flag);
+    // The container was started with exactly the flags the renderer makes from the hardened spec (the golden file of its
+    // own test, with this job's name, image and timeout put in): a flag that is dropped, weakened or added turns this
+    // red. Nothing of the Dispatcher's or the App's secrets was given to it; the credential of the job came on stdin.
     const worker = required(workers[0], "The Worker");
-    for (const forbidden of [
-      "--privileged",
-      "--volume",
-      "-v",
-      "--mount",
-      "--device",
-      "--pid",
-      "--ipc",
-      "--uts",
-      "--userns",
-      "--cgroupns",
-    ])
-      expect(worker.args).not.toContain(forbidden);
-    expect(flags).toContain("--network bridge");
+    expect(worker.args).toEqual(goldenDockerRun(job.id, 180));
     expect(worker.environment).not.toMatch(
       /RUNNER_TOKEN|DISPATCHER_|CRON_SECRET|APP_SECRET/,
     );
 
+    // The credential is a real one (the stand-in kept a copy of the start document), and it is in none of this.
+    const credentials = perJobCredentials();
+    expect(credentials.length).toBeGreaterThan(0);
+    expect(
+      credentials.every((value) => /^crj_[A-Za-z0-9_-]{20,}$/.test(value)),
+    ).toBe(true);
     await expectNoCredentials(page, request, {
       "the Dispatcher's output": theDispatcher().output(),
       "the Worker's log": worker.log(),

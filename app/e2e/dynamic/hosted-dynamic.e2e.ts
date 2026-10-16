@@ -10,7 +10,7 @@
 // per-job credential and runs the REAL OpenCode as the engine user behind its model proxy; one summary comment lands on
 // the fake pull request. Nothing is replaced but the container itself and the platform behind it; the network guard of
 // the lane counts every attempt to leave loopback, of the Dispatcher, the Worker and the engine alike.
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { expect, test } from "@playwright/test";
@@ -52,6 +52,11 @@ import {
   switchProjectOn,
 } from "../helpers/hosted-instance";
 import { openRuns, required, runsOf } from "../helpers/hosted-journey";
+import {
+  allSecrets,
+  containsSecret,
+  perJobCredentials,
+} from "../helpers/hosted-secrets";
 import { deliverPullRequestEvent } from "../helpers/webhooks";
 
 const WRAPPER = resolve(
@@ -102,6 +107,8 @@ test.describe("a pull request on its way to a Dynamic Review summary through the
       llmBaseUrl: llm.baseUrl,
       engines: "pr-agent,opencode",
       tiktoken: false,
+      // The lane's own guard is the operating system's, over every process (assertNoExternalAttempts below).
+      connectGuard: false,
       unsetForWorkerOnce: [],
       dynamic: {
         capabilities: JSON.stringify({
@@ -301,6 +308,13 @@ test.describe("a pull request on its way to a Dynamic Review summary through the
       "the Dispatcher's output": log,
       "the Worker's log": worker.log(),
       "the Worker's environment": worker.environment,
+      "the Worker's flags": worker.args.join("\n"),
+      // The app of this lane is a server: its log is a file, and holds what a server logs (the credential of a claim
+      // is never in it).
+      "the app's log": readFileSync(
+        resolve(process.cwd(), hostedEnv.logFiles.app),
+        "utf8",
+      ),
       "what the model was shown": asked.map((item) => item.prompt).join("\n"),
     };
     for (const [name, text] of Object.entries(texts))
@@ -309,9 +323,15 @@ test.describe("a pull request on its way to a Dynamic Review summary through the
         llmEnv.apiKey,
         hostedEnv.dispatcherToken,
         hostedEnv.webhookSecret,
+        hostedEnv.cronSecret,
         ...tokens,
+        // The credential this Worker was really given (a copy of its start document), and the admin's session cookies.
+        ...allSecrets(),
       ])
-        expect(text, `a credential is in ${name}`).not.toContain(secret);
+        expect(containsSecret(text, secret), `a credential is in ${name}`).toBe(
+          false,
+        );
+    expect(perJobCredentials()).toHaveLength(1);
     expect(`${log}${worker.log()}`).not.toMatch(/crj_[A-Za-z0-9_-]{8,}/);
     await eventually(
       "the engine's processes to be gone",

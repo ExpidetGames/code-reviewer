@@ -63,6 +63,13 @@ export const hostedEnv = {
     app: `${directory}/app.log`,
     dispatcher: `${directory}/dispatcher.log`,
   },
+  /** One JSON line per connection of the Worker host and the job process (the runner's connect guard); loopback only. */
+  connectionLog: `${directory}/connections.jsonl`,
+  /**
+   * What the lane knows that no log may hold: the start documents the Worker was given (with the per-job credential),
+   * the session cookies and the setup code. Never scanned itself; every log is scanned for what is in it.
+   */
+  secretsDirectory: `${directory}/secrets`,
   /** The records of the `docker` stand-in (`fakes/sandbox/bin/docker-worker.sh`): one set of files per container. */
   dockerDirectory: `${directory}/docker`,
   /** What a journey writes to steer the Dispatcher process (`dispatcher/src/test-support/hosted-e2e-main.ts`). */

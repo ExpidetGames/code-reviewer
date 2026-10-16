@@ -200,6 +200,38 @@ describe("the docker stand-in of the hosted lane", () => {
     expect(recorded(".args")).toEqual([]);
   });
 
+  // #332-T10
+  it("copies the start document of a worker-once to the directory it is given, and still hands it to the Worker", async () => {
+    await program(`cat >"${directory}/stdin"`);
+    const copies = join(directory, "copies");
+    const vm = await vmWith({ E2E_STDIN_COPY_DIR: copies });
+    const started = await vm.start({
+      label: "worker",
+      cmd: "docker",
+      args: flags("worker-once"),
+    });
+
+    await started.writeStdin(START_DOCUMENT);
+    await started.closeStdin();
+    await started.wait();
+
+    expect(await readFile(join(directory, "stdin"), "utf8")).toBe(
+      START_DOCUMENT,
+    );
+    const [copy] = readdirSync(copies);
+    expect(await readFile(join(copies, copy ?? ""), "utf8")).toBe(
+      START_DOCUMENT,
+    );
+    // Never in the records of the stand-in, which every log scan reads.
+    expect(
+      recorded(".args").concat(recorded(".env"), recorded(".log")),
+    ).not.toContain(copy);
+    const [environment] = recorded(".env");
+    expect(
+      await readFile(join(records, environment ?? ""), "utf8"),
+    ).not.toContain("crj_dummy");
+  });
+
   // #332-T08
   it("keeps the Worker from starting while the gate file exists and starts it when it is gone", async () => {
     await program(`touch "${directory}/started"`);

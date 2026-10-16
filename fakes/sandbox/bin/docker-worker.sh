@@ -21,6 +21,9 @@
 #                             without root cannot, so a lane that is not privileged unsets it and serves Diff jobs. The
 #                             `probe` mode keeps it: its verdict is the answer of an environment that cannot do that.
 #   E2E_WORKER_GATE           optional path: the Worker is not started while a file exists there
+#   E2E_STDIN_COPY_DIR        optional: a copy of the start document of every `worker-once` (it holds the per-job
+#                             credential) goes to `run-<n>.stdin` there, so that a test can search every log for the value
+#                             that really was a secret. A directory no log is scanned in, never the records directory.
 #   E2E_WORKER_PATH           the PATH of the Worker (default: the PATH of this process)
 #
 # The Worker's environment is closed, like a container's: the `--env` flags of the rendered command, the
@@ -129,6 +132,13 @@ case "${1:-}" in
     # A container that is held (a test that wants a Worker that has not started yet, or one that is still there).
     # In short steps, so that a killed client leaves no long sleep behind.
     while [ -n "${E2E_WORKER_GATE:-}" ] && [ -e "$E2E_WORKER_GATE" ]; do sleep 0.1; done
+
+    if [ -n "${E2E_STDIN_COPY_DIR:-}" ] && [ "$mode" = "worker-once" ]; then
+      document="$(cat)"
+      mkdir -p "$E2E_STDIN_COPY_DIR"
+      (umask 077 && printf '%s\n' "$document" >"$E2E_STDIN_COPY_DIR/run-$n.stdin")
+      exec <<<"$document"
+    fi
 
     exec 2>>"$dir/run-$n.log"
     [ "$mode" = "probe" ] || exec 1>>"$dir/run-$n.log"

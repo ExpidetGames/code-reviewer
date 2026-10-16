@@ -131,55 +131,34 @@ const DISPATCH_TIMES = [
   "updated_at",
 ] as const;
 
-function earlier(value: string | null, seconds: number): string | null {
-  if (value === null) return null;
-  return new Date(Date.parse(value) - seconds * 1000).toISOString();
+/** The text of a stored time moved back by `$2` seconds, in the form the app stores (ISO 8601, milliseconds, `Z`). */
+function earlier(column: string): string {
+  return `to_char((${column}::timestamptz - make_interval(secs => $2)) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`;
 }
 
 /**
  * Lets `seconds` pass for one job: every time stored for it and for its dispatch moves back by that much. A lease
  * that had two minutes to run is then over, a job queued a minute ago has been queued an hour, and a call that was
- * to be sent again in two minutes is due.
+ * to be sent again in two minutes is due. One statement, with the arithmetic in the database: the app's own writes
+ * (a heartbeat, an acknowledgement) cannot fall between a read and a write of the journey, and a null stays null.
  */
 export async function letTimePass(
   jobId: string,
   seconds: number,
 ): Promise<void> {
-  await withDatabase(async (client) => {
-    await client.query("BEGIN");
-    try {
-      const job = await client.query<Record<string, string | null>>(
-        `SELECT ${JOB_TIMES.join(", ")} FROM jobs WHERE id = $1`,
-        [jobId],
-      );
-      const jobRow = job.rows[0];
-      if (jobRow === undefined) throw new Error(`There is no job ${jobId}.`);
-      await client.query(
-        `UPDATE jobs SET ${JOB_TIMES.map((name, index) => `${name} = $${String(index + 2)}`).join(", ")} WHERE id = $1`,
-        [
-          jobId,
-          ...JOB_TIMES.map((name) => earlier(jobRow[name] ?? null, seconds)),
-        ],
-      );
-      const dispatch = await client.query<Record<string, string | null>>(
-        `SELECT ${DISPATCH_TIMES.join(", ")} FROM job_dispatches WHERE job_id = $1`,
-        [jobId],
-      );
-      const dispatchRow = dispatch.rows[0];
-      if (dispatchRow !== undefined)
-        await client.query(
-          `UPDATE job_dispatches SET ${DISPATCH_TIMES.map((name, index) => `${name} = $${String(index + 2)}`).join(", ")} WHERE job_id = $1`,
-          [
-            jobId,
-            ...DISPATCH_TIMES.map((name) =>
-              earlier(dispatchRow[name] ?? null, seconds),
-            ),
-          ],
-        );
-      await client.query("COMMIT");
-    } catch (error) {
-      await client.query("ROLLBACK");
-      throw error;
-    }
-  });
+  const moved = await withDatabase((client) =>
+    client.query<{ jobs: string }>(
+      `WITH moved_job AS (
+         UPDATE jobs SET ${JOB_TIMES.map((name) => `${name} = ${earlier(name)}`).join(", ")}
+          WHERE id = $1 RETURNING id
+       ), moved_dispatch AS (
+         UPDATE job_dispatches SET ${DISPATCH_TIMES.map((name) => `${name} = ${earlier(name)}`).join(", ")}
+          WHERE job_id = $1 RETURNING job_id
+       )
+       SELECT (SELECT count(*) FROM moved_job) AS jobs, (SELECT count(*) FROM moved_dispatch) AS dispatches`,
+      [jobId, seconds],
+    ),
+  );
+  if (Number(moved.rows[0]?.jobs ?? 0) !== 1)
+    throw new Error(`There is no job ${jobId}.`);
 }

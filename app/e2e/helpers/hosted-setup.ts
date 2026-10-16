@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 import { expect, request } from "@playwright/test";
 import { e2eEnv } from "./e2e-env";
 import { hostedDatabaseUrls, hostedEnv } from "./hosted-env";
+import { rememberSecret } from "./hosted-secrets";
 
 const run = promisify(execFile);
 
@@ -34,6 +35,7 @@ export async function makeSetupCode(): Promise<string> {
   );
   const code = /Setup code: (\d{6})\b/.exec(stdout)?.[1];
   if (code === undefined) throw new Error("setup-code printed no code.");
+  rememberSecret("setup-code", code);
   return code;
 }
 
