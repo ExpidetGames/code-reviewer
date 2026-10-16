@@ -9,6 +9,7 @@ import { getDatabase } from "../db/startup.ts";
 import { runAfterResponse } from "../dispatch/shared.ts";
 import { integrationRegistry } from "../integrations/registry.ts";
 import { assembleRefusalNoticeService } from "./assemble.ts";
+import { createRefusalBatcher } from "./refusal-batch.ts";
 import type { NoticeRefusal, RefusalNoticeService } from "./service.ts";
 
 let service: RefusalNoticeService | undefined;
@@ -25,7 +26,14 @@ export function getRefusalNoticeService(): RefusalNoticeService {
   return service;
 }
 
+// The refusals of a claim are gathered and deduplicated per pull request and period before one callback is
+// scheduled for them all (refusal-batch.ts).
+const batcher = createRefusalBatcher({
+  schedule: runAfterResponse,
+  handle: (refusal) => getRefusalNoticeService().onRefused(refusal),
+});
+
 /** What the runner queue calls for a refused job. Never throws. */
 export function noticeOfRefusal(refusal: NoticeRefusal): void {
-  runAfterResponse(() => getRefusalNoticeService().onRefused(refusal));
+  batcher.add(refusal);
 }

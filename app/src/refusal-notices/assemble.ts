@@ -5,7 +5,6 @@
 // The running server (shared.ts) and the tests make it the same way.
 import type { Kysely } from "kysely";
 import { createIntegrationsRepository } from "../db/repositories/integrations-repository.ts";
-import { createJobsRepository } from "../db/repositories/jobs-repository.ts";
 import { createRefusalNoticesRepository } from "../db/repositories/refusal-notices-repository.ts";
 import { listDueRefusalNotices } from "../db/repositories/refusal-notices-sweep.ts";
 import { createRepositoriesRepository } from "../db/repositories/repositories-repository.ts";
@@ -32,7 +31,6 @@ export function assembleRefusalNoticeService(
   const { db } = assembly;
   const now = assembly.now ?? (() => new Date());
   return createRefusalNoticeService({
-    jobs: (workspaceId) => createJobsRepository(db, workspaceId),
     repositories: (workspaceId) =>
       createRepositoriesRepository(db, workspaceId, now),
     integrations: (workspaceId) =>

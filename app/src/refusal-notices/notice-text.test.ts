@@ -28,6 +28,24 @@ describe("the text of the notice", () => {
     expect(text).toContain(NOTICE_WHO_CAN_ACT);
   });
 
+  // #281-P3
+  it("tells people to contact an Owner or Admin, and does not promise an action only the operator can take", () => {
+    for (const code of ["quota_exhausted", "workspace_suspended"] as const) {
+      const text = visible(noticeBody(code, PERIOD, null));
+      expect(text).toContain("contact an Owner or Admin of this workspace");
+      expect(text).not.toMatch(/can act/i);
+    }
+    const linked = visible(
+      noticeBody(
+        "quota_exhausted",
+        PERIOD,
+        "https://app.example/w/acme/settings/plan",
+      ),
+    );
+    expect(linked).toContain("contact an Owner or Admin of this workspace");
+    expect(linked).not.toMatch(/can act/i);
+  });
+
   // #281-T04
   it("says that reviews are paused, with no reason, for a suspension", () => {
     const text = visible(noticeBody("workspace_suspended", PERIOD, null));

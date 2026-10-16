@@ -446,6 +446,107 @@ describe("when GitHub refuses the comment", () => {
   });
 });
 
+describe("a notice that cannot be attempted when it is due again", () => {
+  /** Rows that wait for another attempt, made the way a failed first attempt leaves them. */
+  async function dueRows(h: RunnerApiHarness, prNumbers: number[]) {
+    const notices = createRefusalNoticesRepository(
+      h.db,
+      h.workspaceId,
+      h.clock.now,
+    );
+    for (const prNumber of prNumbers) {
+      await notices.begin(
+        { repositoryId: h.repositoryId, prNumber, periodStart: PERIOD_1 },
+        "quota_exhausted",
+        { leaseMs: MINUTE, maxAttempts: MAX_ATTEMPTS },
+      );
+      h.clock.advance(1000);
+    }
+    h.clock.advance(5 * MINUTE);
+    return notices;
+  }
+  const keyOf = (h: RunnerApiHarness, prNumber: number) => ({
+    repositoryId: h.repositoryId,
+    prNumber,
+    periodStart: PERIOD_1,
+  });
+  const UNREADABLE = Array.from({ length: 22 }, (_, index) => 101 + index);
+
+  // #281-P2
+  it("drops the ones whose pull request is gone, so a newer one is still posted", async () => {
+    const h = await start();
+    // 22 pull requests the fake does not know (404), then one that is there and newer.
+    const notices = await dueRows(h, [...UNREADABLE, 7]);
+
+    await h.notices.service().retryDue();
+    await h.notices.service().retryDue();
+
+    expect(comments(h, 7)).toHaveLength(1);
+    expect(await notices.find(keyOf(h, 101))).toMatchObject({
+      state: "dropped",
+    });
+    expect(await notices.find(keyOf(h, 7))).toMatchObject({ state: "posted" });
+  });
+
+  // #281-P2
+  it("counts an attempt for the ones GitHub cannot answer for now, so a newer one is still posted and none is read for ever", async () => {
+    const h = await start();
+    for (const prNumber of UNREADABLE)
+      h.fake.addPullRequest(h.repository.fullName, {
+        number: prNumber,
+        title: "Change",
+        state: "open",
+        headSha: sha("a"),
+        headRef: `feature/${prNumber}`,
+        baseRef: "main",
+        author: { login: "alice", id: 1001 },
+      });
+    // `/pulls/10x`, `/pulls/11x`, `/pulls/12x` fail; `/pulls/7` does not.
+    h.fake.fail({ pathIncludes: "/pulls/1", status: 500 });
+    const notices = await dueRows(h, [...UNREADABLE, 7]);
+    const reads = () =>
+      h.fake.requests().filter((r) => /\/pulls\/1\d\d$/.test(r.path)).length;
+
+    await h.notices.service().retryDue();
+    await h.notices.service().retryDue();
+
+    expect(comments(h, 7)).toHaveLength(1);
+    // They wait now (not due, not dropped) and were counted.
+    expect(await notices.find(keyOf(h, 101))).toMatchObject({
+      state: "pending",
+      attempts: 2,
+    });
+
+    // However many runs follow, no row is read more than the attempts allow.
+    for (let run = 0; run < 6; run += 1) {
+      h.clock.advance(60 * MINUTE);
+      await h.notices.service().retryDue();
+      await h.notices.service().retryDue();
+    }
+    expect(reads()).toBeLessThanOrEqual(UNREADABLE.length * MAX_ATTEMPTS);
+    expect(await notices.find(keyOf(h, 101))).toMatchObject({
+      state: "pending",
+      attempts: MAX_ATTEMPTS,
+    });
+  });
+
+  // #281-P2
+  it("drops a notice whose connection is no longer active", async () => {
+    const h = await start();
+    const notices = await dueRows(h, [7]);
+    await h.db
+      .updateTable("integrations")
+      .set({ status: "disabled" })
+      .execute();
+
+    expect(await h.notices.service().retryDue()).toEqual({ tried: 1 });
+
+    expect(await notices.find(keyOf(h, 7))).toMatchObject({ state: "dropped" });
+    expect(comments(h, 7)).toEqual([]);
+    expect(await h.notices.service().retryDue()).toEqual({ tried: 0 });
+  });
+});
+
 describe("two app instances", () => {
   // #281-T08
   it("post one comment when they refuse jobs of the same pull request at the same time", async () => {

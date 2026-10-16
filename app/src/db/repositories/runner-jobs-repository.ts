@@ -581,7 +581,14 @@ export function createRunnerJobsRepository(
     claimedJobId: string,
     errorCode: string,
     current: Date,
-  ): Promise<string[]> {
+  ): Promise<
+    Array<{
+      id: string;
+      repository_id: string;
+      pr_number: number;
+      trigger_kind: string;
+    }>
+  > {
     const rows = await executor
       .updateTable("jobs")
       .set(refusedJob(errorCode, current))
@@ -596,9 +603,9 @@ export function createRunnerJobsRepository(
           ]),
         ]),
       )
-      .returning("id")
+      .returning(["id", "repository_id", "pr_number", "trigger_kind"])
       .execute();
-    return rows.map((row) => row.id);
+    return rows;
   }
 
   return {
@@ -661,10 +668,13 @@ export function createRunnerJobsRepository(
               );
               // Any of them may have had a record that counted (claimed before, lost its lease).
               await closeRecordsOfEndedJobs(trx, formatTimestamp(current));
-              for (const jobId of ended)
+              for (const job of ended)
                 refusals.push({
-                  jobId,
+                  jobId: job.id,
                   workspaceId: row.workspace_id,
+                  repositoryId: job.repository_id,
+                  prNumber: job.pr_number,
+                  triggerKind: job.trigger_kind,
                   errorCode: admission.errorCode,
                   ...detail,
                 });
@@ -677,6 +687,9 @@ export function createRunnerJobsRepository(
             refusals.push({
               jobId: row.id,
               workspaceId: row.workspace_id,
+              repositoryId: row.repository_id,
+              prNumber: row.pr_number,
+              triggerKind: row.trigger_kind,
               errorCode: admission.errorCode,
               ...detail,
             });

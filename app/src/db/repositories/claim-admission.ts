@@ -29,6 +29,11 @@ import { readEffectiveEntitlements } from "../../workspaces/effective-entitlemen
 export type ClaimRefusal = {
   jobId: string;
   workspaceId: string;
+  /** The pull request of the job, for the notice on it (#281). */
+  repositoryId: string;
+  prNumber: number;
+  /** What started the job (`webhook` is an automatic review), for the notice on a draft (#281). */
+  triggerKind: string;
   errorCode: string;
   detail?: string;
   /**

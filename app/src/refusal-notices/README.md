@@ -12,7 +12,11 @@ app, so the bot is not silent. Part of #268.
    the claim resolved anyway). `jobs/shared.ts` hands it to `noticeOfRefusal` (`shared.ts`), which runs the service
    with `runAfterResponse` (Next's `after()`, so a serverless platform keeps the function alive for it; never a timer).
    `entitlements_invalid` has no period and no notice.
-2. `service.ts` (`onRefused`) loads the job, then:
+   The refusal carries the repository, the pull request number and the trigger of the job, so no job is read again; and
+   `refusal-batch.ts` gathers the refusals of one claim and keeps **one per workspace, repository, pull request and
+   period** (a review somebody asked for wins over an automatic one) before it schedules **one** `after()` callback for
+   the lot, however large the backlog a suspension just failed.
+2. `service.ts` (`onRefused`), for each of them:
    - **stops at once** if the pull request already has a notice for the period (`posted`, `dropped`, or an attempt that
      is still running): no call to GitHub;
    - reads the pull request through the provider (`getPullRequest`): a **closed** one gets no notice (and a pending
@@ -38,7 +42,7 @@ exactly one gets the notice to post:
 | --------- | ------------------------------------------- | --------------------------------------------------------- |
 | `pending` | to be posted; `attempts`, `next_attempt_at` | only when `next_attempt_at` has passed and `attempts < 3` |
 | `posted`  | the comment is on the pull request          | never                                                     |
-| `dropped` | the pull request was closed                 | never                                                     |
+| `dropped` | nothing will be posted (closed, gone)       | never                                                     |
 
 A second push or a manual review in the same period finds the row and posts nothing; a later `period_start` is a new
 row and may post again. The comment carries a hidden marker (`<!-- code-reviewer:refusal-notice period=<start> -->`):
@@ -48,7 +52,17 @@ nothing if there is one.
 
 ## Failure is quiet and bounded
 
-A notice is best effort. A failure never changes the job (it is `failed` with its code already), never throws into
+A notice is best effort. A callback that is cut off part-way (a serverless function can be) leaves the pull requests it
+did not reach without a row, and no sweep knows of them; the next refusal on those pull requests tries again, which is
+acceptable for a best-effort notice.
+
+**A notice that is due again always moves on**, so the sweep cannot be stuck on rows it cannot work: one whose
+repository or connection is gone or no longer active, or whose pull request is gone (404) or closed, is `dropped`; one
+whose pull request cannot be read for now is counted as an attempt (`begin`) and waits like a failed post, so after 3
+attempts it is no longer listed. Only a notice that was never taken has no row to move on, and it is retried by the
+next refusal only.
+
+A failure never changes the job (it is `failed` with its code already), never throws into
 the claim, and is **one log line with a stable code and ids only** (`[notices] REFUSAL_NOTICE_FAILED workspace=..
 repository=.. pr=.. code=INTEGRATION_ACCESS_... attempt=n`; never a name, a title, a token or the text). The record
 stays `pending` with `next_attempt_at` = now + 5 minutes × the attempts made; at most **3 attempts** are made. Retries
@@ -67,7 +81,7 @@ GitHub at once.
 English, fixed sentences in `src/copy/refusal-notice.ts`, put together by `notice-text.ts` from **the code, the period
 and the link, and nothing else**: no pull request text (title, branch, description) can reach it. It says that no
 review ran for this change, that the workspace has used the reviews included for the current period (or that reviews
-are paused for this workspace, with no reason), and that the Owners and Admins of the workspace can act. No amount, no
+are paused for this workspace, with no reason), and to contact an Owner or Admin of the workspace (the limits and the suspension are set by the operator of the instance, so the text promises no action a workspace role can take). No amount, no
 count, no price, no model name, no reason for a suspension.
 
 **The link.** With a plan page configured the sentence links to `/w/<slug>/settings/plan` of the app

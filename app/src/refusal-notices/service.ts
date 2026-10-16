@@ -16,7 +16,6 @@ import type {
 } from "../db/repositories/refusal-notices-repository.ts";
 import type { ClaimRefusal } from "../db/repositories/claim-admission.ts";
 import type { IntegrationsRepository } from "../db/repositories/integrations-repository.ts";
-import type { JobsRepository } from "../db/repositories/jobs-repository.ts";
 import type {
   RepositoriesRepository,
   StoredRepository,
@@ -53,10 +52,23 @@ export const NOTICE_LOG_CODES = [
   "REFUSAL_NOTICE_ERROR",
 ] as const;
 
+/** Failures of reading the pull request that no later attempt will cure: it, or the installation, is gone. */
+const PERMANENT_READ_FAILURES: readonly string[] = [
+  "INTEGRATION_PULL_REQUEST_NOT_FOUND",
+  "INTEGRATION_ACCESS_CONNECTION_GONE",
+];
+
+const BEGIN = { leaseMs: ATTEMPT_LEASE_MS, maxAttempts: MAX_ATTEMPTS };
+
 /** What the claim tells about a refused job (the fields the notice needs). */
 export type NoticeRefusal = Pick<
   ClaimRefusal,
-  "jobId" | "workspaceId" | "errorCode" | "periodStart"
+  | "workspaceId"
+  | "repositoryId"
+  | "prNumber"
+  | "triggerKind"
+  | "errorCode"
+  | "periodStart"
 >;
 
 export type RetryReport = { tried: number };
@@ -69,7 +81,6 @@ export type RefusalNoticeService = {
 };
 
 export type RefusalNoticeDeps = {
-  jobs: (workspaceId: string) => Pick<JobsRepository, "get">;
   repositories: (workspaceId: string) => Pick<RepositoriesRepository, "get">;
   integrations: (workspaceId: string) => Pick<IntegrationsRepository, "get">;
   workspaces: Pick<WorkspacesRepository, "get">;
@@ -123,6 +134,10 @@ export function createRefusalNoticeService(
     return result;
   }
 
+  /** When a notice whose attempt failed may be taken again: longer after every attempt. */
+  const retryAt = (notice: StoredNotice) =>
+    new Date(deps.now().getTime() + RETRY_WAIT_MS * notice.attempts);
+
   async function attempt(target: Target): Promise<void> {
     const { workspaceId, repositoryId, prNumber, periodStart, code } = target;
     const where = `workspace=${workspaceId} repository=${repositoryId} pr=${prNumber}`;
@@ -137,16 +152,22 @@ export function createRefusalNoticeService(
       if (existing.nextAttemptAt > deps.now().toISOString()) return;
     }
 
+    // A notice that is due again must always move on (be posted, be counted as an attempt, or be dropped): a row
+    // that is skipped without a change would be listed by the sweep on every run, and could starve newer ones.
+    const drop = async () => {
+      if (existing !== undefined) await notices.markDropped(existing.id);
+    };
     const repository = await deps.repositories(workspaceId).get(repositoryId);
-    if (repository === undefined) return;
+    if (repository === undefined) return drop();
     const integration = await deps
       .integrations(workspaceId)
       .get(repository.integrationId);
-    if (integration === undefined || integration.status !== "active") return;
+    if (integration === undefined || integration.status !== "active")
+      return drop();
     const provider = deps.registry.resolve(integration.type);
     if (provider.postPullRequestNotice === undefined) {
       deps.log.error(`[notices] REFUSAL_NOTICE_UNSUPPORTED ${where}`);
-      return;
+      return drop();
     }
     const repo = repoRefOf(repository);
 
@@ -154,22 +175,26 @@ export function createRefusalNoticeService(
     try {
       pullRequest = await provider.getPullRequest(integration, repo, prNumber);
     } catch (error) {
+      const failure = errorCodeOf(error);
       deps.log.error(
-        `[notices] REFUSAL_NOTICE_PULL_REQUEST_UNREADABLE ${where} code=${errorCodeOf(error)}`,
+        `[notices] REFUSAL_NOTICE_PULL_REQUEST_UNREADABLE ${where} code=${failure}`,
       );
+      if (existing === undefined) return;
+      // The pull request or the installation is gone for good: nothing will ever be posted.
+      if (PERMANENT_READ_FAILURES.includes(failure)) return drop();
+      // Maybe a moment: count it as an attempt and wait, so it is not read on every run of the sweep.
+      const counted = await notices.begin(key, code, BEGIN);
+      if (counted.acquired)
+        await notices.failed(counted.notice.id, retryAt(counted.notice));
       return;
     }
     if (pullRequest.state !== "open") {
       // Nobody reads a notice on a closed pull request, and the same refusal would not post one later either.
-      if (existing !== undefined) await notices.markDropped(existing.id);
-      return;
+      return drop();
     }
     if (pullRequest.draft && target.skipDraft) return;
 
-    const taken = await notices.begin(key, code, {
-      leaseMs: ATTEMPT_LEASE_MS,
-      maxAttempts: MAX_ATTEMPTS,
-    });
+    const taken = await notices.begin(key, code, BEGIN);
     if (!taken.acquired) return;
     const { notice } = taken;
 
@@ -194,10 +219,7 @@ export function createRefusalNoticeService(
       deps.log.error(
         `[notices] REFUSAL_NOTICE_FAILED ${where} code=${errorCodeOf(error)} attempt=${notice.attempts}`,
       );
-      await notices.failed(
-        notice.id,
-        new Date(deps.now().getTime() + RETRY_WAIT_MS * notice.attempts),
-      );
+      await notices.failed(notice.id, retryAt(notice));
     }
   }
 
@@ -215,24 +237,16 @@ export function createRefusalNoticeService(
   return {
     onRefused(refusal) {
       return inOrder(async () => {
-        const { workspaceId, jobId, errorCode, periodStart } = refusal;
+        const { workspaceId, errorCode, periodStart } = refusal;
         if (!isNoticeCode(errorCode) || periodStart === undefined) return;
-        try {
-          const job = await deps.jobs(workspaceId).get(jobId);
-          if (job === undefined) return;
-          await safely({
-            workspaceId,
-            repositoryId: job.repositoryId,
-            prNumber: job.prNumber,
-            periodStart,
-            code: errorCode,
-            skipDraft: job.triggerKind === "webhook",
-          });
-        } catch (error) {
-          deps.log.error(
-            `[notices] REFUSAL_NOTICE_ERROR workspace=${workspaceId} code=${errorCodeOf(error)}`,
-          );
-        }
+        await safely({
+          workspaceId,
+          repositoryId: refusal.repositoryId,
+          prNumber: refusal.prNumber,
+          periodStart,
+          code: errorCode,
+          skipDraft: refusal.triggerKind === "webhook",
+        });
       });
     },
 

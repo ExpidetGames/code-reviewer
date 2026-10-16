@@ -15,13 +15,16 @@ export const NOTICE_QUOTA_EXHAUSTED =
 export const NOTICE_WORKSPACE_SUSPENDED =
   "Reviews are paused for this workspace.";
 
-/** Who can act, when the instance has no page to point to. */
+/**
+ * Who to turn to, when the instance has no page to point to. Nothing a workspace role can change is promised: the
+ * limits and the suspension are set by the operator of the instance.
+ */
 export const NOTICE_WHO_CAN_ACT =
-  "The Owners and Admins of this workspace can act on this.";
+  "Please contact an Owner or Admin of this workspace.";
 
-/** Who can act and where, when the instance has a plan page (the link text is the page's name). */
+/** Who to turn to and where to read more, when the instance has a plan page (the link text is the page's name). */
 export function noticeWhoCanActAt(linkText: string, url: string): string {
-  return `The Owners and Admins of this workspace can act on this on [${linkText}](${url}).`;
+  return `Please contact an Owner or Admin of this workspace, who can find out more on [${linkText}](${url}).`;
 }
 
 /** The name of the plan page in the link. */
