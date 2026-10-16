@@ -7,6 +7,8 @@
 //   handle(hint) -> capability check -> capacity -> App version -> claim -> { started, background }
 //   background:  launch(spec) while heartbeating with the job credential
 //                deadline, lost lease or abort -> stop the launch; launch failed -> release(launch_failed)
+//   after that:  a Launcher that supervises the Worker calls `spec.onWorkerExit(code)` when the container ends with
+//                an error; the core then releases the job with `worker_exited` instead of waiting for the lease (#375)
 //
 // It never sees the job input, the git token or the model key: the App hands those to the Worker.
 import {
@@ -14,6 +16,7 @@ import {
   type AppClient,
   type AppFailure,
   type ClaimedJob,
+  type ReleaseReason,
 } from "./app-client.ts";
 import { systemClock } from "./clock.ts";
 import {
@@ -256,7 +259,7 @@ export function createDispatcherCore(deps: CoreDependencies): DispatcherCore {
         stopped: reason,
       });
       // A lost lease means the App already gave the job away: there is nothing of ours to release.
-      if (reason !== "lease_lost") await release(job);
+      if (reason !== "lease_lost") await release(job, "launch_failed");
     } finally {
       phaseDone.abort();
       shutdown.signal.removeEventListener("abort", onShutdown);
@@ -279,6 +282,7 @@ export function createDispatcherCore(deps: CoreDependencies): DispatcherCore {
         kind: job.reviewKind,
         timeoutSeconds: settings.jobTimeoutSeconds,
         config: settings.workerConfig[job.reviewKind],
+        onWorkerExit: (exitCode) => workerExited(job, exitCode),
       },
       guard.signal,
     );
@@ -286,25 +290,44 @@ export function createDispatcherCore(deps: CoreDependencies): DispatcherCore {
     await Promise.race([launched, aborted]);
   }
 
-  async function release(job: ClaimedJob): Promise<void> {
+  /**
+   * The Worker's container ended after the hand-over (#375). Exit 0 is a Worker that is done (or that gave the job
+   * back itself): nothing to release. Any other code is a Worker that may have died before it delivered a result,
+   * and the App decides: it gives the job back when this claim still holds it and does nothing for a job that has a
+   * result or another claim (the credential fences it, `release_not_holder` below). Never rejects.
+   */
+  async function workerExited(
+    job: ClaimedJob,
+    exitCode: number,
+  ): Promise<void> {
+    if (exitCode === 0) return;
+    await release(job, "worker_exited", { exitCode });
+  }
+
+  async function release(
+    job: ClaimedJob,
+    reason: ReleaseReason,
+    extra: Record<string, unknown> = {},
+  ): Promise<void> {
     for (let attempt = 1; attempt <= RELEASE_ATTEMPTS; attempt += 1) {
       const result = await app.release(
         job.id,
         job.credential,
+        reason,
         RELEASE_RETRY_AFTER_SECONDS,
       );
       if (result === "released") {
-        logger.info("released", { jobId: job.id, reason: "launch_failed" });
+        logger.info("released", { jobId: job.id, reason, ...extra });
         return;
       }
       if (result === "not_holder") {
-        logger.warn("release_not_holder", { jobId: job.id });
+        logger.warn("release_not_holder", { jobId: job.id, reason, ...extra });
         return;
       }
       if (attempt < RELEASE_ATTEMPTS) await clock.sleep(attempt * 1000);
     }
     // The lease runs out and the App gives the job back by itself; the cost is the wait.
-    logger.error("release_failed", { jobId: job.id });
+    logger.error("release_failed", { jobId: job.id, reason, ...extra });
   }
 
   return {

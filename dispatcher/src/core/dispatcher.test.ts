@@ -13,6 +13,7 @@ import {
   waitFor,
 } from "../test-support/harness.ts";
 import { createDispatcherCore } from "./dispatcher.ts";
+import { createLogger } from "./logger.ts";
 import { LaunchError, type HandleResult } from "./types.ts";
 
 let app: DispatcherAppFake;
@@ -570,5 +571,201 @@ describe("the Dispatcher core", () => {
 
     expect(launcher.signals[0]?.aborted).toBe(true);
     expect(app.requests().filter((r) => r.route === "release")).toHaveLength(1);
+  });
+});
+
+/**
+ * The Worker's container ended with an error after the hand-over (#375): the Launcher calls `onWorkerExit` of the spec
+ * it was given, and the core gives the job back at once instead of leaving it to the lease.
+ */
+describe("the Dispatcher core after the hand-over", () => {
+  /** A claimed and handed-over job: the spec the Launcher got, and what the core's background work resolved to. */
+  async function handedOver() {
+    const jobId = app.enqueue();
+    const built = build();
+    const result = await handled(
+      built.core.handle({ jobId, reviewKind: "diff" }),
+    );
+    expect(result.outcome).toBe("started");
+    const spec = built.launcher.launches[0];
+    if (spec?.onWorkerExit === undefined)
+      throw new Error("the core gave the Launcher no onWorkerExit");
+    return { jobId, spec, onWorkerExit: spec.onWorkerExit, ...built };
+  }
+
+  /** What the Worker does with its credential: deliver its result. */
+  async function deliverResult(jobId: string, credential: string) {
+    const response = await fetch(
+      `${app.url}/api/workers/v1/jobs/${jobId}/result`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${credential}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ result: { ok: true } }),
+      },
+    );
+    expect(response.status).toBe(200);
+  }
+
+  /** `onWorkerExit` resolves once the core has finished, which takes the clock when a release is retried. */
+  async function exit(
+    onWorkerExit: (exitCode: number) => Promise<void>,
+    exitCode: number,
+  ): Promise<void> {
+    await drive(onWorkerExit(exitCode));
+  }
+
+  // #375-T01
+  it("releases the job with worker_exited when the container ends with 2 before any result, and the credential is in no log", async () => {
+    const { jobId, spec, onWorkerExit, core, logger, recorded } =
+      await handedOver();
+
+    await exit(onWorkerExit, 2);
+
+    const release = recorded.calls.find((call) =>
+      call.url.endsWith("/release"),
+    );
+    expect(release?.url).toBe(
+      `${app.url}/api/runners/v1/jobs/${jobId}/release`,
+    );
+    expect(release?.headers.get("authorization")).toBe(
+      `Bearer ${DISPATCHER_TOKEN}`,
+    );
+    expect(release?.body).toStrictEqual({
+      credential: spec.credential,
+      reason: "worker_exited",
+      retryAfterSeconds: 30,
+    });
+    expect(releases()).toStrictEqual([
+      { method: "POST", route: "release", jobId, status: 200 },
+    ]);
+    expect(logger.text()).toContain('"reason":"worker_exited"');
+    expect(logger.text()).toContain('"exitCode":2');
+    expect(logger.text()).not.toContain(spec.credential);
+    expect(logger.text()).not.toContain(DISPATCHER_TOKEN);
+    // The App has the job queued again: the next wake-up call claims it.
+    expect(
+      (await handled(core.handle({ jobId, reviewKind: "diff" }))).outcome,
+    ).toBe("started");
+  });
+
+  // #375-T03
+  it("treats the release of a job that already delivered its result as a no-op: one call, no retry, the result stands", async () => {
+    const { jobId, spec, onWorkerExit, core, logger } = await handedOver();
+    await deliverResult(jobId, spec.credential);
+
+    await exit(onWorkerExit, 1);
+
+    expect(releases()).toStrictEqual([
+      { method: "POST", route: "release", jobId, status: 409 },
+    ]);
+    expect(logger.text()).toContain("release_not_holder");
+    expect(logger.text()).not.toContain('"released"');
+    expect(app.results(jobId)).toHaveLength(1);
+    // The job is finished, not queued: nothing is claimed for it.
+    expect((await core.handle({ jobId, reviewKind: "diff" })).outcome).toBe(
+      "ignored",
+    );
+  });
+
+  // #375-T04
+  it("releases nothing when the container ends with 0", async () => {
+    const { onWorkerExit, logger } = await handedOver();
+
+    await exit(onWorkerExit, 0);
+
+    expect(releases()).toStrictEqual([]);
+    expect(logger.text()).not.toContain("release");
+  });
+
+  // #375-T06 (the Dispatcher's side: a stale credential after a requeue and a new claim)
+  it("does not take the job from a newer claim when its own credential is stale", async () => {
+    const { jobId, spec, onWorkerExit, core, launcher, logger } =
+      await handedOver();
+    // The first claim ends (its Worker gave the job back), a second one starts.
+    await exit(onWorkerExit, 2);
+    const again = await handled(core.handle({ jobId, reviewKind: "diff" }));
+    expect(again.outcome).toBe("started");
+    const second = launcher.launches[1];
+    expect(second?.credential).not.toBe(spec.credential);
+    const before = releases().length;
+
+    // The old Worker's exit arrives late: the old credential is not the claim's.
+    await exit(onWorkerExit, 2);
+
+    expect(releases().slice(before)).toStrictEqual([
+      { method: "POST", route: "release", jobId, status: 401 },
+    ]);
+    expect(logger.text()).toContain("release_not_holder");
+    // The new claim is untouched: the job is still running for it, and nothing is claimed twice.
+    expect((await core.handle({ jobId, reviewKind: "diff" })).outcome).toBe(
+      "ignored",
+    );
+  });
+
+  // #375-T07
+  it("tries the release a bounded number of times, logs release_failed with its reason, and leaves the job to its lease", async () => {
+    const { onWorkerExit, logger } = await handedOver();
+    app.script("release", [
+      { status: 503 },
+      { status: 503 },
+      { status: 503 },
+      { status: 503 },
+    ]);
+
+    await expect(exit(onWorkerExit, 137)).resolves.toBeUndefined();
+    await clock.advance(10 * 60 * 1000);
+    await settle();
+
+    expect(releases().map((request) => request.status)).toStrictEqual([
+      503, 503, 503,
+    ]);
+    expect(logger.text()).toContain("release_failed");
+    expect(logger.text()).toContain('"reason":"worker_exited"');
+    expect(logger.text()).toContain('"exitCode":137');
+  });
+
+  // #375-T07
+  it("does not reject when the App cannot be reached", async () => {
+    const { onWorkerExit, logger } = await handedOver();
+    await app.close();
+
+    await expect(exit(onWorkerExit, 2)).resolves.toBeUndefined();
+
+    expect(logger.text()).toContain("release_failed");
+    // Start the next test's app again: afterEach closes it, and a closed server is closed once.
+    app = await startApp();
+  });
+
+  // #375-T08
+  it("never writes the credential or the dispatcher token on any path of the exit, through the real masker", async () => {
+    const jobId = app.enqueue();
+    const lines: string[] = [];
+    const logger = createLogger((line) => lines.push(line), [DISPATCHER_TOKEN]);
+    const launcher = createFakeLauncher();
+    const core = createDispatcherCore({
+      settings: settingsFor(app.url),
+      launcher,
+      clock,
+      logger,
+    });
+    const started = await handled(core.handle({ jobId, reviewKind: "diff" }));
+    expect(started.outcome).toBe("started");
+    const spec = launcher.launches[0];
+    if (spec?.onWorkerExit === undefined) throw new Error("no onWorkerExit");
+
+    // Released, then refused (the claim is gone), then a failing App: every outcome of the exit.
+    await exit(spec.onWorkerExit, 2);
+    await exit(spec.onWorkerExit, 2);
+    app.script("release", [{ status: 503 }, { status: 503 }, { status: 503 }]);
+    await exit(spec.onWorkerExit, 2);
+
+    const everything = lines.join("\n");
+    expect(everything).toContain("worker_exited");
+    expect(everything).not.toContain(spec.credential);
+    expect(everything).not.toContain(DISPATCHER_TOKEN);
+    expect(everything).not.toMatch(/crj_[A-Za-z0-9_-]{10,}/);
   });
 });

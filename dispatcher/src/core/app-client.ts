@@ -5,6 +5,7 @@
 // Every answer is read against the shapes of contracts/runner-api.v1.json; an answer of another shape,
 // such as a previous release's legacy claim with a job input and a git token, is refused unread.
 import { z } from "zod";
+import type { KnownReleaseReason } from "../contracts/runner-api.ts";
 import type { ReviewKind } from "./types.ts";
 
 /** The features of the App the split needs (`VersionResponse.features`). */
@@ -55,6 +56,8 @@ export type JobStateResult =
 
 export type HeartbeatResult = "ok" | "lease_lost" | "failed";
 export type ReleaseResult = "released" | "not_holder" | "failed";
+/** Why the core gives a job back: the Worker did not start (`launch_failed`), or it ended with an error after it did. */
+export type ReleaseReason = KnownReleaseReason;
 
 const splitClaim = z.object({
   version: z.literal(1),
@@ -245,6 +248,7 @@ export function createAppClient(options: AppClientOptions) {
     async release(
       jobId: string,
       credential: string,
+      reason: ReleaseReason,
       retryAfterSeconds: number,
     ): Promise<ReleaseResult> {
       const response = await send(
@@ -252,7 +256,7 @@ export function createAppClient(options: AppClientOptions) {
         {
           method: "POST",
           bearer: options.token,
-          body: { credential, reason: "launch_failed", retryAfterSeconds },
+          body: { credential, reason, retryAfterSeconds },
         },
       );
       if (response === null) return "failed";
