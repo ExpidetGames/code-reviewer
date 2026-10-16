@@ -16,6 +16,9 @@
 #   - The capabilities of the container: root, with exactly the eight of the spec (`--cap-drop ALL`, then `--cap-add` of
 #     them) in the bounding set, no inheritable ones and no-new-privileges. The Worker's startup installs the engine
 #     user's network rules and drops NET_ADMIN and SETPCAP itself.
+#   - A /tmp that is the container's: the Worker's temporary directories are made there, where the engine user can enter
+#     them (the self-check runs `opencode --version` as that user from one). The stand-in points TMPDIR at the Worker's
+#     home, a directory only root can enter, which is right for a host process and wrong for a container.
 #
 # The same arrangement as `probe_as_container` of dynamic_e2e_namespace.sh, which proves the `probe` mode on the lane's
 # layout before any journey runs. The list of capabilities is the one of compose.dynamic.yml, kept equal by
@@ -39,7 +42,7 @@ export -f make_root_read_only
 
 exec unshare --mount -- bash -c '
   make_root_read_only || { echo "the container'"'"'s read-only root could not be made" >&2; exit 125; }
-  exec setpriv \
+  exec env TMPDIR=/tmp setpriv \
     --bounding-set=-all,+chown,+dac_override,+fowner,+kill,+setgid,+setuid,+setpcap,+net_admin \
     --inh-caps=-all --no-new-privs "$0" "$1"
 ' "$program" "$mode"

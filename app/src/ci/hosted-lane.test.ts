@@ -207,6 +207,8 @@ describe("the Worker's container in the privileged lane", () => {
     expect(capabilities).toEqual([...PRODUCTION_CAPABILITIES].sort());
     expect(container).toContain("--inh-caps=-all");
     expect(container).toContain("--no-new-privs");
+    // The container's /tmp is where the Worker makes its temporary directories, which the engine user must be able to enter.
+    expect(container).toContain("env TMPDIR=/tmp setpriv");
     expect(container).toContain("mount -o remount,bind,ro");
     expect(container).toContain("unshare --mount");
     expect(container).toMatch(/^exec unshare/m);
