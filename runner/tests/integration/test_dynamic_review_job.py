@@ -994,7 +994,7 @@ def test_the_published_summary_never_names_the_model_of_the_job(tmp_path: Path) 
             )
 
         assert result.ok, result.log_tail
-        # The model did the work (it is the model of the requests) and is nowhere in what was published.
+        # The model did the work (it is the model of the requests) and is nowhere in the comment.
         assert {body["model"] for _, body in upstream.requests} == {model}
         assert len(github.comments) == 1
         published = json.dumps(github.comments)

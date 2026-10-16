@@ -99,8 +99,9 @@ def test_a_repository_file_cannot_move_a_request_a_credential_the_model_or_the_b
     assert all(connection["allowed"] for connection in outcome.connections)
 
 
-# #283-T08: a Diff review of a workspace on the operator's key. Nothing in the job or the repository asks for
-# the model to be shown; the published comment must still not carry it (real PR-Agent, fake GitHub and LLM).
+# #283-T08: a Diff review of a workspace on the operator's key. Nothing in the job or the repository
+# asks for the model to be shown; the published comment must still not carry it (real PR-Agent, fake
+# GitHub and LLM).
 def test_the_published_diff_review_never_names_the_model_of_the_job(
     engine: Engine, github: FakeGithub, llm: FakeLlm
 ) -> None:
