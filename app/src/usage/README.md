@@ -10,6 +10,8 @@ counting. It measures nothing itself: it stores the `usage.costUsd` that the run
 | `usage-records.ts`                               | Pure: the states, `costUsdToMicroUsd`, `settlementOfOutcome`, `keyModeOfAccessSource` |
 | `../db/repositories/usage-records-repository.ts` | Scoped to one workspace: `reserve`, `setKeyMode`, `settle`, `get` and the three reads |
 | `enforce-entitlements.ts`                        | Pure: `decideAdmission`, the order of the checks of a claim (below)                   |
+| `plan-view.ts`, `usage-summary.ts`               | The plan page's view of a workspace and the read that builds it (#282, below)         |
+| `http.ts`, `shared.ts`, `ui/`                    | The polling answer of the plan page, its wiring and the page (#282, below)            |
 | `../db/repositories/claim-admission.ts`          | Instance level: resolves the entitlements inside the claim transaction and decides    |
 
 ## Columns
@@ -141,8 +143,8 @@ entitlements still stop it, and its record is then voided.
 
 ## Reads
 
-Repository functions, and the operator API that serves them (#278, `src/operator-api/README.md`); there is no page
-yet (#282).
+Repository functions, the operator API that serves them (#278, `src/operator-api/README.md`) and the plan page of a
+workspace (#282, below).
 
 - `countByKind(since)`: records that count (`reserved`, `settled`) reserved at or after `since`, per review kind.
 - `sumSettledManagedCostMicroUsd(since)`: the cost of settled records of managed runs reserved at or after `since` (a run belongs to the period it started in, for the count and for the cost alike);
@@ -173,9 +175,57 @@ the guarantee.
 
 Records are small and kept; there is no retention job.
 
+## The plan page (#282)
+
+`/w/<slug>/settings/plan` ("Plan and usage", a sub-page of the workspace settings) says what the workspace may use, what
+it has used in the current period and whether reviews are paused, **read-only for every member** (`view`). Its data
+route is `GET /api/w/<slug>/plan`, which the page polls (the Runs pages' mechanism, `useLiveSnapshot`: every 10
+seconds while the workspace has limits, every 30 while none apply, a failed update keeps the last data and says so, a
+lost session stops it). The answer is `Cache-Control: no-store`; a workspace the person does not belong to is the answer
+of a path that does not exist (page and route), like every workspace address.
+
+`readPlanView` (`usage-summary.ts`) reads the effective entitlements (`readEffectiveEntitlements`, the claim's own
+read) and, only for a workspace that has them, the usage since `period_start` through the repository of #272: the same
+count (`countByKind`: `reserved` and `settled`, never `void`) and the same period rule (`reserved_at`) as the claim,
+so the page and a refusal always agree. `buildPlanView` (`plan-view.ts`) is the boundary to the browser; it copies
+named fields only:
+
+| State        | When                                             | What the page says                                                                                                                                                                                                       |
+| ------------ | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `unlimited`  | no entitlements (no row, no instance default)    | "No limits apply to this workspace." No navigation entry (the page is still there by address).                                                                                                                           |
+| `unreadable` | entitlements exist but fail the checks of a read | That the limits cannot be read and reviews are not started. Nothing else (the claim refuses with `entitlements_invalid`).                                                                                                |
+| `limited`    | the rest                                         | The plan label (operator text, shown as text), the start of the period (never an end: the app does not know it), "3 of 5" and "1 of 2" per kind or "no limit", a notice when reviews are paused, and the cost bar below. |
+
+- **Counts.** "N of limit" or "N used, no limit"; "limit reached" is said in words when `used >= limit`.
+- **The cost limit is shown as a percentage, never as an amount.** A bar (`role="progressbar"`, whose name and
+  `aria-valuetext` are the visible sentence "62 % of the usage limit used") appears only for a workspace on the
+  operator's key (`managed`) that has a `managedCostLimitMicroUsd`: the claim watches nothing else, and a limit next
+  to the key mode `own` is read by nothing (above), so it is not shown. The percentage is the settled managed cost
+  in the period divided by the limit, **rounded down** (100 means the limit is reached, as the claim refuses at
+  `used >= limit`) and **at most 100**: a run that was in flight when the limit was reached may take the total past it,
+  and the page does not claim to know by how much. The page says that it is not exact (soft cap). A limit of 0 reads 100. Settled runs whose cost is unknown are counted apart ("2 finished reviews could not be measured and are not in
+  this percentage"), never as zero. Neither the API nor the DOM holds an amount, a currency or the measured cost, in
+  any unit; the measured sum does not leave `buildPlanView`.
+- **A managed workspace** is told that the instance provides the models. The page never shows a model, a tier, a key or
+  anything of a job, the reason of a suspension, or whether the entitlements are the workspace's own or the instance
+  default; a test looks for each in the answer and in the markup.
+- **Navigation.** The settings sub-nav lists "Plan" (before "Advanced") only while the workspace has entitlements
+  (`planPageAvailable`: its own row or the instance default, readable or not). Every settings page asks once per request.
+  The address is the one the refusal notice and the operator's page lead to (`planReturnPath`, `src/plan-handoff/`).
+- **"Manage plan"** (#284) is on this page too, for an Owner or Admin while the instance has a plan management page.
+- **Mixed versions.** No schema change, no new setting. An app of the previous release has no plan page and no route
+  (both answer as a path that does not exist), and its General settings keep working; the plan address the notice and
+  the operator's page use is only set once a plan management page is (`src/plan-handoff/README.md`: upgrade every
+  instance first).
+
 ## Tests
 
 `usage-records.test.ts` (rounding and settlement rules), `usage-records-repository.integration.test.ts` and the
 Postgres twin, `integration-tests/http/runner-api-usage.integration.test.ts` (claim, completion, lease loss),
 the rows of `scoped-isolation.integration.test.ts`, and the operator API's usage endpoints
-(`usage-feed-repository.integration.test.ts`, `integration-tests/http/operator-api-usage.integration.test.ts`).
+(`usage-feed-repository.integration.test.ts`, `integration-tests/http/operator-api-usage.integration.test.ts`). The plan
+page: `plan-view.test.ts` (the percentage and what the view leaves out), `usage-summary.integration.test.ts` (real
+records: period, `reserved` and `void`, kinds, key modes, unknown cost), `ui/plan-page.test.tsx` (the page, the bar's
+text, no colour-only state, the polling), `ui/plan-page.integration.test.tsx` (the page file with the real wiring),
+`integration-tests/http/plan-route-file.integration.test.ts` and the "GET plan" row of
+`workspace-isolation.integration.test.ts` (the route).

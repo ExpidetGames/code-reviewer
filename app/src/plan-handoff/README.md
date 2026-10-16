@@ -24,7 +24,7 @@ Anyone who can write it can send workspace Owners and Admins to that page: it is
 
 ## The button and the route
 
-An Owner or Admin sees **Manage plan** in the workspace settings (General, card "Plan") while a page is configured
+An Owner or Admin sees **Manage plan** in the workspace settings (General, card "Plan", and the same card on the Plan page) while a page is configured
 (`ui/manage-plan-card.tsx`; a Member does not see it). It is a plain `<form method="post">` to
 `POST /api/w/<slug>/plan-handoff` (`http.ts`, order of the checks):
 
@@ -70,12 +70,17 @@ side.
 
 ## Coming back
 
-The service sends people back to the path of `planReturnPath` (`return-path.ts`): **`/w/<slug>/settings`** of this app, the
-General settings page, which has the "Manage plan" card. The path is fixed here and nothing in a request chooses it, so
-the app has no return redirect to abuse. The one constant `PLAN_RETURN_PATH_SECTION` decides it: **when the plan page of
-#282 lands it becomes `/plan`** (`/w/<slug>/settings/plan`), for the refusal notice link and, with the description in the
-contract, for the operator's page, in one change. #282 has to be on `development` before the next `development` to
-`main` pull request.
+The service sends people back to the path of `planReturnPath` (`return-path.ts`): **`/w/<slug>/settings/plan`** of this
+app, the plan and usage page of the workspace (#282, `src/usage/README.md`, "The plan page"), which every member can open.
+The path is fixed here and nothing in a request chooses it, so the app has no return redirect to abuse. The one constant
+`PLAN_RETURN_PATH_SECTION` (`/plan`) decides it, for the refusal notice link and, with the description in the contract,
+for the operator's page; tests keep the constant, the settings navigation's address and the contract in agreement.
+
+"Manage plan" is on **both** the General settings page and the plan page, for an Owner or Admin while a page is
+configured. General keeps it because a workspace without entitlements has no plan page link in the navigation (it has
+nothing to show) and is still where an operator may want to send an owner to start a plan; the plan page has it
+because that is where people arrive from a refusal notice and from the operator's page. A refused click from either
+page comes back to General (below).
 
 ## A refused click
 

@@ -11,6 +11,7 @@ import {
   type PlanHandoffErrorCode,
 } from "@/plan-handoff/errors";
 import { getPlanManagementUrl } from "@/plan-handoff/shared";
+import { planPageLinkedFor } from "@/usage/shared";
 import { requireWorkspace } from "@/workspaces/access-runtime";
 import { can } from "@/workspaces/permissions";
 import { getMembersService } from "@/workspaces/shared";
@@ -64,7 +65,7 @@ async function GeneralSettingsContent({
   planError: PlanHandoffErrorCode | null;
   user: { isInstanceAdmin: boolean };
 }) {
-  const [config, llmSummary, tenancy, members, planManagementUrl] =
+  const [config, llmSummary, tenancy, members, planManagementUrl, showPlan] =
     await Promise.all([
       // Only the instance admin gets the names of the variables that are wrong.
       getConfigStatusFor(user),
@@ -73,6 +74,7 @@ async function GeneralSettingsContent({
       getMembersService().list(workspaceId),
       // Only asked for somebody the role lets through: a Member's page never reads the setting.
       canManagePlan ? getPlanManagementUrl() : Promise.resolve(null),
+      planPageLinkedFor(workspaceId),
     ]);
   return (
     <GeneralSettingsPageContent
@@ -82,6 +84,7 @@ async function GeneralSettingsContent({
       canManageLlmKey={canManageLlmKey}
       canManagePlan={canManagePlan && planManagementUrl !== null}
       {...(planError === null ? {} : { planError })}
+      showPlan={showPlan}
       audience={configAudienceOf(user)}
       tenancy={tenancy === "multi" ? "multi" : "single"}
       memberCount={members.length}

@@ -34,6 +34,8 @@ export const PERMANENT_FAILURE_CODES = [
   "UNAUTHENTICATED",
   "ACCESS_DENIED",
   "RUN_NOT_FOUND",
+  /** The answer of a workspace route for a person who is not (or no longer) a member (src/workspaces/access-response.ts). */
+  "not_found",
 ] as const;
 
 /** The longest wait after repeated failures. */

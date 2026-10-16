@@ -106,6 +106,17 @@ const ENTRIES: Entry[] = [
     takesNoIds: true,
   },
   {
+    // #282-T07: the plan and usage view of the workspace in the address, for every member.
+    name: "GET plan",
+    route: "/api/w/[workspace]/plan",
+    method: "GET",
+    minRole: MINIMUM_ROLE.view,
+    path: () => "/plan",
+    params: () => ({}),
+    file: "plan/route.ts",
+    takesNoIds: true,
+  },
+  {
     name: "GET runs/[id]",
     route: "/api/w/[workspace]/runs/[id]",
     method: "GET",

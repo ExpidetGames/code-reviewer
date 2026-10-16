@@ -8,6 +8,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { Breadcrumbs } from "../../components/breadcrumbs.tsx";
+import { PLAN_NAV_LABEL, PLAN_PAGE_TITLE } from "../../copy/plan-usage.ts";
 import { PageHeader } from "../../components/page-header.tsx";
 import { cn } from "../../lib/utils.ts";
 import { workspacePath } from "../paths.ts";
@@ -20,6 +21,8 @@ export const SETTINGS_SECTIONS = [
     title: "Review defaults",
   },
   { segment: "llm", label: "LLM access", title: "LLM access" },
+  // Only listed while the workspace has entitlements (`showPlan`); the page itself exists for everybody.
+  { segment: "plan", label: PLAN_NAV_LABEL, title: PLAN_PAGE_TITLE },
   { segment: "advanced", label: "Advanced", title: "Advanced" },
 ] as const;
 
@@ -39,14 +42,19 @@ export function settingsSectionHref(
 export function SettingsNav({
   workspaceSlug,
   current,
+  showPlan = false,
 }: {
   workspaceSlug: string;
   current: SettingsSection;
+  /** The workspace has entitlements (#282): the Plan page is listed. An unlimited workspace has no entry. */
+  showPlan?: boolean;
 }) {
   return (
     <nav aria-label="Settings sections" className="border-b border-border">
       <ul className="flex flex-wrap items-center gap-1">
-        {SETTINGS_SECTIONS.map((section) => {
+        {SETTINGS_SECTIONS.filter(
+          (section) => showPlan || section.segment !== "plan",
+        ).map((section) => {
           const active = section.segment === current;
           return (
             <li key={section.segment || "general"}>
@@ -78,10 +86,13 @@ export function SettingsNav({
 export function SettingsScreen({
   workspaceSlug,
   current,
+  showPlan = false,
   children,
 }: {
   workspaceSlug: string;
   current: SettingsSection;
+  /** The workspace has entitlements (#282), so the sub-nav lists the Plan page. */
+  showPlan?: boolean;
   children: ReactNode;
 }) {
   const section = SETTINGS_SECTIONS.find((item) => item.segment === current);
@@ -105,7 +116,11 @@ export function SettingsScreen({
         }
       />
       <div className="flex flex-col gap-6 pt-6">
-        <SettingsNav workspaceSlug={workspaceSlug} current={current} />
+        <SettingsNav
+          workspaceSlug={workspaceSlug}
+          current={current}
+          showPlan={showPlan}
+        />
         {children}
       </div>
     </>
