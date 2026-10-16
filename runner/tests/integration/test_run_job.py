@@ -396,7 +396,7 @@ def test_a_command_that_awaits_too_long_is_stopped_with_the_timeout_code(tmp_pat
 
 
 # #387-T06, #363-T03: the command runs and blocks the loop, so only the watchdog can end it, after
-# the timeout and the grace, with its own text. It sent no model request: the run is void, no reason.
+# the timeout and the grace, with its own text. It sent no model request: void, so no reason.
 def test_a_command_that_blocks_the_whole_process_is_ended_by_the_watchdog(tmp_path: Path) -> None:
     process, seen, timeout = run_until_the_command_starts("hang", tmp_path, 4)
 
