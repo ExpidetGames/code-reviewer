@@ -44,6 +44,7 @@ function detail(overrides: Partial<RunDetailView> = {}): RunDetailView {
     finishedAt: "2026-10-10T12:03:15.000Z",
     durationMs: 185_000,
     problem: null,
+    costHidden: false,
     headSha: "0123456789abcdef0123456789abcdef01234567",
     args: "",
     attempts: 0,
@@ -184,19 +185,25 @@ describe("the usage of a run", () => {
   });
 
   // #283-T07
-  it("shows no model for a run on a managed tier, whose usage carries none, and keeps the tokens and cost", () => {
+  it("shows no model and no cost for a run on a managed tier, and keeps the tokens and calls", () => {
     const { container } = render(
       <RunDetail
         workspaceSlug="acme"
-        initial={snap(detail({ usage: { ...usage, model: null } }))}
+        initial={snap(
+          detail({
+            usage: { ...usage, model: null, costUsd: null },
+            costHidden: true,
+          }),
+        )}
         api={apiAnswering([])}
       />,
     );
 
     expect(screen.queryByText("Model")).toBeNull();
+    expect(screen.queryByText("Cost")).toBeNull();
     expect(container.querySelector('[data-slot="run-model"]')).toBeNull();
+    expect(text(container)).not.toContain("Not available");
     expect(text(container)).toContain("12,900 tokens in 7 model calls");
-    expect(text(container)).toContain("$0.04");
   });
 
   // #201-T29

@@ -97,8 +97,11 @@ The id of a tier's model goes to the operator API and to the runner (it needs it
   runner calls the model, and the ids in any text become `[model]` (the same place that masks credentials, `runner-api/report.ts`): the model the job was handed (remembered with its
   keys, encrypted, `runner-api/claimed-keys.ts`, `modelsOf`) **and every model the operator has configured now**, so the
   result is masked on any app instance, after any change of the tiers, and even if the remembered row cannot be read.
-  A run on the workspace's own key reports its model as before. Tokens, calls and cost stay, so the Runs
-  page and the limits are unaffected.
+  A run on the workspace's own key reports its model as before. Tokens and calls stay, and the limits are unaffected.
+  **The Runs view shows no cost for a run on a tier** (its usage record names one; `costHidden` in the run detail, #283):
+  with the tokens it would give a price per token, which tells the model and the operator's pricing. The operator reads
+  the cost through the operator API. The link to the comment is not masked: the app builds it from GitHub data, and a
+  short id that also occurs in a repository name would break it.
 - **Not in a published pull request comment.** The model is the runner's business, and PR-Agent can print it into the
   review comment. The runner sets `config.output_run_details` and `config.output_relevant_configurations` to `false`
   for every job and pins them against a repository's `.pr_agent.toml` (`runner/README.md`). The Dynamic summary and the

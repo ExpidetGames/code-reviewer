@@ -80,8 +80,16 @@ operator's and the workspace never sees them (`src/model-tiers/README.md`):
   kind in force (the project's kind; every kind on the workspace defaults) is shown "Not available" without saying why
   and cannot be chosen; the level in force stays selectable and a note says reviews would not start. The form reads
   everything from the view (`managed`, `tierAvailability`), so a save that changes the key mode adapts the next answer.
-- **The instance admin is not special inside a workspace.** The operator reads and sets the models through the
-  operator API and the instance portal; a workspace's settings routes behave the same for every member.
+- **The instance admin is not special inside a workspace (decision).** An instance admin who is a member of a managed
+  workspace gets the same stripped view and the same refusal as its other members: the view depends on the workspace's
+  key mode, never on the user. The operator sees and sets which model backs each level through the operator API
+  (`GET|PUT /api/operator/v1/model-tiers`) and sees whether each level is configured in the instance portal, not inside a
+  customer workspace. The admin's view of a workspace on its own key (the admin's usual one) is unchanged.
+- **Fail closed for display.** The models are hidden whenever the key mode is anything but `own`, so a workspace whose
+  entitlements cannot be read (`unreadable`) also shows no model field and no estimate, and refuses a model write; its
+  jobs fail closed in that state too.
+- **A reset keeps the stored models.** `DELETE` on a project removes every override but the models saved on the
+  workspace's own key (`model`, `fallbackModel`, Dynamic model), like a save does.
 
 ## From settings to a runner job
 

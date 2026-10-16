@@ -823,6 +823,52 @@ describe("the model of a tier stays on the server", () => {
   });
 
   // #283-T05
+  it.each([
+    ["ab/c", "https://github.com/ab/cats/pull/1#issuecomment-1"],
+    [
+      "acme/widget-reviews",
+      "https://github.com/acme/widget-reviews/pull/1#issuecomment-1",
+    ],
+  ])(
+    "leaves the link to the comment alone when the tier id %s also occurs in a repository name",
+    async (tierModel, link) => {
+      const h = await start({
+        keyMode: "managed",
+        tiers: { medium: { diff: tierModel } },
+      });
+      const { job } = await h.claimed();
+
+      await h.complete(job.id, job.leaseToken, {
+        commentUrl: link,
+        logTail: `model ${tierModel} answered`,
+      });
+
+      const result = (await h.queue.get(job.id))?.result as {
+        commentUrl: string;
+        logTail: string;
+      };
+      expect(result.commentUrl).toBe(link);
+      expect(result.logTail).toBe("model [model] answered");
+    },
+  );
+
+  // #283-T05
+  it("masks the id inside a provider-prefixed spelling and leaves only the prefix", async () => {
+    const h = await start({
+      keyMode: "managed",
+      project: { modelTier: "high" },
+    });
+    const { job } = await h.claimed();
+
+    await h.complete(job.id, job.leaseToken, {
+      logTail: "calling openrouter/tier/high-diff now",
+    });
+
+    const result = (await h.queue.get(job.id))?.result as { logTail: string };
+    expect(result.logTail).toBe("calling openrouter/[model] now");
+  });
+
+  // #283-T05
   it("leaves the text of a run on the workspace's own key alone", async () => {
     const h = await start({
       keyMode: "own",

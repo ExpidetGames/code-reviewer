@@ -640,12 +640,21 @@ export function createReviewSettingsService(deps: {
       // A full reset clears every override (Diff and project-only) and notifies the same hook as a
       // save, so a kind change back to Diff cancels waiting reviews and a rejecting hook rolls the
       // reset back.
+      const managed = await operatorsModels();
       let previousKind: ProjectReviewKind = "diff";
       const project = await projects.updateSettingsWith(
         repositoryId,
         (current) => {
           previousKind = kindOf(current);
-          return {};
+          // The models saved on the workspace's own key stay stored, as they do through a save (#283).
+          if (!managed) return {};
+          const kept: ProjectSettings = modelFieldsOf(
+            parseStoredOverrides(current),
+          );
+          const storedModel =
+            parseStoredProjectDynamicOverrides(current).dynamicModel;
+          if (storedModel !== undefined) kept.dynamicModel = storedModel;
+          return kept;
         },
         async (updated, executor) => {
           const nextKind = kindOf(updated.settings);

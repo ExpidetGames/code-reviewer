@@ -1221,6 +1221,31 @@ describe("the settings of a workspace on the operator's key", () => {
     });
   });
 
+  // #283-T01
+  it("keeps the models of its own key through a reset of the project, and drops the rest of the overrides", async () => {
+    const app = await setupReviewSettings();
+    await app.projects.activate(app.first.id);
+    await app.service.updateProjectSettings(app.first.id, {
+      model: OWN_MODEL,
+      fallbackModel: OWN_FALLBACK,
+      dynamicModel: OWN_DYNAMIC,
+      maxFindings: 9,
+      reviewKind: "dynamic",
+    });
+    app.setOperatorsModels(true);
+
+    const reset = await app.service.resetProjectSettings(app.first.id);
+
+    expect(JSON.stringify(reset)).not.toContain("acme-own");
+    expect(reset.overrides).not.toHaveProperty("maxFindings");
+    expect(reset.dynamic.effective.reviewKind).toBe("diff");
+    expect((await app.projects.get(app.first.id))?.settings).toEqual({
+      model: OWN_MODEL,
+      fallbackModel: OWN_FALLBACK,
+      dynamicModel: OWN_DYNAMIC,
+    });
+  });
+
   // #283-T07
   it("does not show a stored model of the workspace while the operator's key is used", async () => {
     const app = await setupReviewSettings();

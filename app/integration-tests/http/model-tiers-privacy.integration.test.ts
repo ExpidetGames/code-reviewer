@@ -172,6 +172,22 @@ async function settingsAnswers(h: RunnerApiHarness): Promise<string> {
 
 describe("what a workspace member can read after managed runs", () => {
   // #283-T07
+  it("shows the tokens of a managed run in the Runs view, and neither its model nor its cost", async () => {
+    const h = await start();
+    const job = await run(h, "diff");
+    const runs = createRunsService({
+      runs: createRunsRepository(h.db, h.workspaceId),
+      now: h.clock.now,
+    });
+
+    const detail = JSON.stringify(await runs.get(job.id));
+
+    expect(detail).toContain('"totalTokens":1280');
+    expect(detail).not.toContain("0.02");
+    expect(detail).toContain('"costHidden":true');
+  });
+
+  // #283-T07
   it("holds no model id of any tier, and no model field, in the settings of the workspace and of the project", async () => {
     const h = await start();
     await run(h, "diff");

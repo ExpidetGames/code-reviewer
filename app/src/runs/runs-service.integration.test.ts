@@ -8,6 +8,7 @@ import { sha } from "../test-support/jobs.ts";
 import { createRunsFixture } from "../test-support/runs.ts";
 import { addWorkspace } from "../test-support/workspaces.ts";
 import { createRunsRepository } from "../db/repositories/runs-repository.ts";
+import { createUsageRecordsRepository } from "../db/repositories/usage-records-repository.ts";
 import {
   createLastRunSource,
   createRunsService,
@@ -317,6 +318,71 @@ describe("the usage of a run", () => {
     const detail = await f.runs.get(finished.id);
 
     expect(detail?.run.usage?.costUsd).toBe(5.79e-5);
+  });
+});
+
+describe("the usage of a run on a managed quality level (#283)", () => {
+  const usage = {
+    model: "vendor/tier-model",
+    promptTokens: 100,
+    completionTokens: 20,
+    totalTokens: 120,
+    aiCalls: 2,
+    fallbackUsed: false,
+    costUsd: 0.0123,
+  };
+
+  async function finishedRun(tier: "high" | null) {
+    const f = await createRunsFixture();
+    const finished = await f.finished({
+      ok: true,
+      result: {
+        ok: true,
+        commentUrl: "https://github.com/acme/widgets/pull/1#c",
+        logTail: "ok",
+        usage,
+      },
+    });
+    if (tier !== null) {
+      const records = createUsageRecordsRepository(
+        f.db,
+        f.workspaceId,
+        f.clock.now,
+      );
+      await records.reserve(finished.id, "managed");
+      // The record may be settled already (setModelTier only changes a reserved one): write the column.
+      await f.db
+        .updateTable("usage_records")
+        .set({ model_tier: tier })
+        .where("job_id", "=", finished.id)
+        .execute();
+    }
+    return { f, finished };
+  }
+
+  // #283-T07
+  it("shows the tokens and calls and no cost, in the data as well as on the page", async () => {
+    const { f, finished } = await finishedRun("high");
+
+    const detail = await f.runs.get(finished.id);
+
+    expect(detail?.run).toMatchObject({
+      costHidden: true,
+      usage: { totalTokens: 120, aiCalls: 2, costUsd: null },
+    });
+    expect(JSON.stringify(detail)).not.toContain("0.0123");
+  });
+
+  // #283-T07
+  it("keeps the cost of a run on the workspace's own key", async () => {
+    const { f, finished } = await finishedRun(null);
+
+    const detail = await f.runs.get(finished.id);
+
+    expect(detail?.run).toMatchObject({
+      costHidden: false,
+      usage: { costUsd: 0.0123 },
+    });
   });
 });
 

@@ -65,7 +65,9 @@ export function mapRunnerErrorCode(code: string): string {
 /**
  * The result without the model of a managed tier (#280): `usage.model` is not reported (null) whatever the runner calls
  * the model, and the ids become `[model]` in the text fields at any length (the generic rule that follows ignores
- * secrets shorter than a credential could be). `hide` is whether the job ran on a tier.
+ * secrets shorter than a credential could be). The link to the comment is left alone: the app builds it from GitHub
+ * data, it never carries a model, and a short id that also occurs in a repository name would break the link. `hide`
+ * is whether the job ran on a tier.
  */
 function withoutTierModel(
   result: RunnerResult,
@@ -79,7 +81,6 @@ function withoutTierModel(
     logTail: mask(result.logTail),
     errorMessage:
       result.errorMessage === null ? null : mask(result.errorMessage),
-    commentUrl: result.commentUrl === null ? null : mask(result.commentUrl),
     usage: result.usage === null ? null : { ...result.usage, model: null },
   };
 }
@@ -187,7 +188,6 @@ export async function finishJob(
     [
       ...(await deps.knownSecrets(job.workspaceId)),
       ...(await deps.claimedKeys.keysOf(jobId)),
-      ...models,
       ...extraSecrets,
     ],
   );
