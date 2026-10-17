@@ -82,6 +82,8 @@ export type RequestOptions = {
   engines?: string[];
   /** #279: the features sent in the claim body next to the engines (`dynamic_capabilities`). */
   features?: string[];
+  /** #424: the LLM providers a runner advertises in the claim body. Any value, so a test can send an invalid one. */
+  llmProviders?: unknown;
   /** #322: the job a Dispatcher claims. Sent in the claim body; the engines then default to `pr-agent`. */
   jobId?: string;
   /** #322: the pool cap. Sent in the claim body. Any value, so a test can send an invalid one. */
@@ -413,6 +415,7 @@ export async function startRunnerApiHarness(
   function claimRequest(request: RequestOptions): Request {
     if (
       request.engines === undefined &&
+      request.llmProviders === undefined &&
       request.jobId === undefined &&
       request.maxRunning === undefined
     )
@@ -428,6 +431,9 @@ export async function startRunnerApiHarness(
         ...(request.features === undefined
           ? {}
           : { features: request.features }),
+        ...(request.llmProviders === undefined
+          ? {}
+          : { llmProviders: request.llmProviders }),
         ...(request.jobId === undefined ? {} : { jobId: request.jobId }),
         ...(request.maxRunning === undefined
           ? {}
@@ -600,10 +606,11 @@ export async function startRunnerApiHarness(
       credential: string | null,
       features?: string,
       target: typeof workerApi = workerApi,
+      llmProviders?: string,
     ) =>
       target.details(
         new Request(
-          `${workerUrl}/jobs/${jobId}${features === undefined ? "" : `?features=${features}`}`,
+          `${workerUrl}/jobs/${jobId}${detailsQuery(features, llmProviders)}`,
           { method: "GET", headers: workerHeaders(credential) },
         ),
         jobId,
@@ -743,6 +750,14 @@ export type RunnerApiHarness = Awaited<
 >;
 
 /** A valid, successful result; any field can be replaced. */
+function detailsQuery(features?: string, llmProviders?: string): string {
+  const parts = [
+    ...(features === undefined ? [] : [`features=${features}`]),
+    ...(llmProviders === undefined ? [] : [`llmProviders=${llmProviders}`]),
+  ];
+  return parts.length === 0 ? "" : `?${parts.join("&")}`;
+}
+
 export function goodResult(
   overrides: Partial<RunnerResult> = {},
 ): RunnerResult {

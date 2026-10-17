@@ -35,6 +35,7 @@ from code_reviewer_runner.dynamic_review.prompts import compose_system_prompt
 from code_reviewer_runner.dynamic_review.proxy import ModelProxy, capabilities_from_config
 from code_reviewer_runner.job import Job, parse_job
 from code_reviewer_runner.job_loop.jsonvalues import as_object
+from code_reviewer_runner.llm_providers import OPENROUTER
 
 RUNNER = Path(__file__).resolve().parents[2]
 API_KEY = "dummy-openrouter-key-0123456789"
@@ -340,6 +341,7 @@ def run_engine(
         upstream_model="deepseek/deepseek-v4.1-flash",
         capabilities=capabilities_from_config(CAPABILITIES),
         capability=capability,
+        provider=OPENROUTER,
     )
     audit = RecordingAudit(ledger)
     proxy.audit = audit
