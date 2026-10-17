@@ -6,7 +6,8 @@
 // tier, per kind of review (Diff and Dynamic): that is **operator data**. Nothing in this repository names a model
 // for a tier, and the ids never leave the server (the operator API and the runner's job are the two exceptions).
 import { MAX_FIELD_LENGTH } from "../operator-api/contract.ts";
-import { MODEL_NAME_PATTERN } from "../llm/config.ts";
+import { isModelId as hasModelIdShape } from "../llm/config.ts";
+import { DEFAULT_LLM_PROVIDER } from "../llm/providers/index.ts";
 import type { ProjectReviewKind } from "../review-settings/settings.ts";
 
 /** The levels a workspace chooses from. Lower case names: the usage record carries one as `model_tier`. */
@@ -41,7 +42,7 @@ export type ModelTiersView = Record<
   Record<ProjectReviewKind, string | null>
 >;
 
-/** The most the rule for a model id allows (`MODEL_NAME_PATTERN` states the same bound). */
+/** The most the rule for a model id allows (the provider's model-id rule states the same bound). */
 const MAX_MODEL_ID_CHARS = 200;
 
 /**
@@ -73,7 +74,10 @@ function refused(code: ModelTierCheckCode, field?: string): CheckTiersResult {
 }
 
 function isModelId(text: string): boolean {
-  return text.length <= MAX_MODEL_ID_CHARS && MODEL_NAME_PATTERN.test(text);
+  return (
+    text.length <= MAX_MODEL_ID_CHARS &&
+    hasModelIdShape(text, DEFAULT_LLM_PROVIDER)
+  );
 }
 
 /**

@@ -5,9 +5,10 @@
 // of the instance that the workspaces whose key mode is `managed` review with. Write-only like every credential of
 // the portal: the page says whether a key is saved, cannot be read or is missing, and the last four characters of a
 // long key; the field is emptied after a save and the saved value never reaches this page. The server judges the
-// key (src/llm/operator-key.ts); the form shows the reason it gets back. The provider is OpenRouter.
+// key (src/llm/operator-key.ts); the form shows the reason it gets back. The provider is the default one.
 import { useEffect, useId, useState, type FormEvent } from "react";
 import { Button } from "../../components/button.tsx";
+import { DEFAULT_LLM_PROVIDER_LABEL } from "../../llm/providers/index.ts";
 import { DangerZone } from "../../components/danger-zone.tsx";
 import { HelpDisclosure } from "../../components/help-disclosure.tsx";
 import { InfoHint } from "../../components/info-hint.tsx";
@@ -102,11 +103,11 @@ export function OperatorLlmKeyForm({
         <HelpDisclosure label="How this works">
           A workspace whose key mode is managed reviews with this key instead of
           a key of its own; its own key stays stored and is not used. Any other
-          workspace never uses it. The provider is OpenRouter and bills the
-          account the key belongs to. The key is stored encrypted on this server
-          with the key of this instance (APP_SECRET), so anyone who holds both
-          can decrypt it. Only an instance admin can save or remove it, here;
-          the operator API cannot read or change it.
+          workspace never uses it. The provider is {DEFAULT_LLM_PROVIDER_LABEL}{" "}
+          and bills the account the key belongs to. The key is stored encrypted
+          on this server with the key of this instance (APP_SECRET), so anyone
+          who holds both can decrypt it. Only an instance admin can save or
+          remove it, here; the operator API cannot read or change it.
         </HelpDisclosure>
 
         <Card role="region" aria-labelledby={`${ids}-key`}>

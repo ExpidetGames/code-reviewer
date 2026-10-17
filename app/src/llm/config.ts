@@ -15,14 +15,22 @@
 // The limits below are the ones the runner enforces on a job (runner/README.md, "llm"); a value the
 // runner would refuse is refused here, so it shows up in the UI instead of as a failed job.
 
-export const LLM_PROVIDERS = ["openrouter"] as const;
-export type LlmProvider = (typeof LLM_PROVIDERS)[number];
+import {
+  DEFAULT_LLM_PROVIDER,
+  llmProviderDescriptors,
+  type LlmProviderId,
+} from "./providers/index.ts";
+
+/** The supported providers, from the registry (src/llm/providers/): adding a provider adds it here. */
+export const LLM_PROVIDERS = llmProviderDescriptors.ids;
+export type LlmProvider = LlmProviderId;
 
 /**
- * The model used when `LLM_MODEL` is not set: the recommendation of the model comparison (measured
- * 0.0027 USD per review on average against the customer's limit of 0.10 USD).
+ * The model used when `LLM_MODEL` is not set: the default Diff model of the default provider (for the
+ * built-in one the recommendation of the model comparison).
  */
-export const DEFAULT_LLM_MODEL = "anthropic/claude-haiku-5.5";
+export const DEFAULT_LLM_MODEL =
+  llmProviderDescriptors.defaultProvider.defaultModels.diff;
 
 /** The variables that configure the instance's LLM defaults (the import reads the legacy ones once). */
 export const LLM_DEFAULT_VARIABLES = ["LLM_MODEL", "LLM_MAX_TOKENS"] as const;
@@ -41,9 +49,18 @@ export type LlmConfigIssue = {
 
 /** What the runner accepts for `llm.apiKey`, `llm.model` and `llm.maxTokens`. */
 export const MAX_LLM_KEY_CHARS = 4096;
-export const MODEL_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/+-]{0,199}$/;
 export const MIN_LLM_CONTEXT_TOKENS = 1000;
 export const MAX_LLM_CONTEXT_TOKENS = 10_000_000;
+
+/**
+ * Whether `model` has the shape of a model id of the provider: the rule of the provider's adapter, which is
+ * what its runner accepts for `llm.model`. A model id that fails it is never sent anywhere. The provider is
+ * a required argument: a caller that has none yet passes `DEFAULT_LLM_PROVIDER`, so the day a project can choose it
+ * is a place to change, not a silent default.
+ */
+export function isModelId(model: string, provider: LlmProvider): boolean {
+  return llmProviderDescriptors.get(provider).checkModelId(model);
+}
 
 export type LlmConfig = {
   provider: LlmProvider;
@@ -126,7 +143,7 @@ function readModel(
 ): string {
   const value = raw?.trim();
   if (!value) return DEFAULT_LLM_MODEL;
-  if (!MODEL_NAME_PATTERN.test(value)) {
+  if (!isModelId(value, DEFAULT_LLM_PROVIDER)) {
     warnings.push({ code: "LLM_MODEL_INVALID", variable: "LLM_MODEL" });
     return DEFAULT_LLM_MODEL;
   }

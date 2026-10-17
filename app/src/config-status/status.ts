@@ -7,6 +7,7 @@
 import type { GithubSnapshot } from "../github-config/credentials.ts";
 import { githubAppInstallUrlFor } from "../integrations/registry.ts";
 import { readLlmDefaults } from "../llm/config.ts";
+import { DEFAULT_LLM_PROVIDER } from "../llm/providers/index.ts";
 import type { LlmStatus } from "../llm/status.ts";
 
 type Env = Readonly<Record<string, string | undefined>>;
@@ -55,7 +56,7 @@ function llmStatusOf(env: Env): LlmStatus {
   const defaults = readLlmDefaults(env);
   return {
     configured: true,
-    provider: "openrouter",
+    provider: DEFAULT_LLM_PROVIDER,
     model: defaults.model,
     warnings: defaults.warnings,
   };
@@ -102,7 +103,7 @@ export function statusForMembers(status: ConfigStatus): ConfigStatus {
       : { configured: false, kind: "missing", variables: [], slug: null },
     llm: {
       configured: true,
-      provider: "openrouter",
+      provider: DEFAULT_LLM_PROVIDER,
       model: "",
       warnings: [],
     },

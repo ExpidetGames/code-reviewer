@@ -96,7 +96,7 @@ export type InstanceSettingValues = {
   plan_management_url: string;
   /**
    * #280: which model backs each managed tier, per kind of review (src/model-tiers/): `{ low?: { diff?, dynamic? }, ... }`
-   * with OpenRouter model ids. **Operator data**: written through the operator API only, read by the claim of a job of a
+   * with the provider's model ids. **Operator data**: written through the operator API only, read by the claim of a job of a
    * managed workspace; the ids are never shown to a workspace and not to the admin portal (it shows whether a tier is
    * configured). No row: no tier is configured, and a managed job fails closed (`managed_tier_unavailable`).
    */

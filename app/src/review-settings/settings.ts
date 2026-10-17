@@ -12,6 +12,7 @@
 // that are left out (empty project rules, switches that are off, everything else PR-Agent has).
 import { REVIEW_COMMANDS, type ReviewCommand } from "../integrations/types.ts";
 import { DEFAULT_LLM_MODEL } from "../llm/config.ts";
+import { llmProviderDescriptors } from "../llm/providers/index.ts";
 import { DEFAULT_MODEL_TIER, type ModelTier } from "../model-tiers/tiers.ts";
 
 export type ReviewSettings = {
@@ -92,7 +93,8 @@ export const DEFAULT_REVIEW_VERDICT_MODE: ReviewVerdictMode = "blocking";
  * model the configured provider serves (#194-T08), and the operator's model/provider resolution is
  * #197's business, not a project setting. No hosting-provider or routing field exists.
  */
-export const DEFAULT_DYNAMIC_MODEL = "deepseek/deepseek-v4.1-flash";
+export const DEFAULT_DYNAMIC_MODEL =
+  llmProviderDescriptors.defaultProvider.defaultModels.dynamic;
 
 /**
  * The settings that only a project has (#194): one review kind, the Dynamic model and an optional

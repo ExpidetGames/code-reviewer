@@ -9,7 +9,7 @@ import {
   resolveProjectDynamicSettings,
   resolveReviewSettings,
 } from "./effective.ts";
-import { MODEL_PRICES } from "./model-pricing.ts";
+import { MODEL_PRICES } from "../llm/providers/openrouter/model-pricing.ts";
 import {
   DEFAULT_DYNAMIC_MODEL,
   DEFAULT_MAX_TOKENS,

@@ -27,6 +27,7 @@ import {
 } from "../../components/ui/select.tsx";
 import { UNREADABLE_SECRET_CAUSE } from "../../secrets/messages.ts";
 import { LLM_PROVIDERS } from "../config.ts";
+import { llmProviderDescriptors } from "../providers/index.ts";
 import type { WorkspaceLlmKeyStatus } from "../workspace-key.ts";
 import { browserLlmKeyApi, type LlmKeyApi } from "./api.ts";
 import {
@@ -34,8 +35,6 @@ import {
   describeLlmKeyFailure,
   describeLlmKeyIssue,
 } from "./messages.ts";
-
-const PROVIDER_LABEL: Record<string, string> = { openrouter: "OpenRouter" };
 
 type Outcome =
   | { kind: "saved"; changed: boolean }
@@ -172,7 +171,7 @@ export function LlmAccessForm({
           <SelectContent>
             {LLM_PROVIDERS.map((known) => (
               <SelectItem key={known} value={known}>
-                {PROVIDER_LABEL[known] ?? known}
+                {llmProviderDescriptors.labelOf(known)}
               </SelectItem>
             ))}
           </SelectContent>
