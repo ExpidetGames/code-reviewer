@@ -1498,6 +1498,8 @@ describe("an earlier request for changes when the new review submits nothing (re
     expect(t.fake.pullRequestReviewDecisions(t.repo, 7)).toEqual({
       [BOT]: "CHANGES_REQUESTED",
     });
+    // The jobs that follow come later: events of one pull request are ordered by the time they were recorded.
+    t.fixture.clock.advance(1000);
   }
 
   // #405-T22
@@ -1623,6 +1625,7 @@ describe("an earlier request for changes when the new review submits nothing (re
     expect(
       t.reviews().filter((review) => review.state === "DISMISSED"),
     ).toHaveLength(1);
+    t.fixture.clock.advance(1000);
     t.fake.updatePullRequest(t.repo, 7, { headSha: sha("d") });
     const next = await t.fixture.enqueueNew({ headSha: sha("d") });
     const again = await t.claim();

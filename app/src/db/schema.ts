@@ -462,6 +462,8 @@ export interface JobCheckRunsTable {
   review_id: string | null;
   /** `approve`, `request_changes` or `withdrawn`: what the app did to the pull request with the verdict; null if nothing. */
   review_event: string | null;
+  /** When `review_event` was recorded (ISO 8601 UTC); null with it. Orders the events of one pull request. */
+  review_event_at: string | null;
   /** A JobStatus: the status of the job the check run shows now; null before the first sync. */
   synced_status: string | null;
   /** How many times the creation of the check run was started (counted before the call). */

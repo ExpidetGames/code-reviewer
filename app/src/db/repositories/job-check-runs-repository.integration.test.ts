@@ -382,6 +382,22 @@ describe("what the app asked of a pull request (review round 2)", () => {
   });
 
   // #405-T22
+  it("keeps the order of the events when an older row is touched again", async () => {
+    const t = await setup();
+    await submit(t, t.job.id, "request_changes");
+    const second = await t.enqueueNew({ headSha: sha("b") });
+    await submit(t, second.id, "withdrawn");
+
+    // The sync of the first job goes over its row again (a retry, a finish): that is not a new event.
+    await t.checks.take(t.job.id, LEASE);
+    await t.checks.finish(t.job.id, { settled: false });
+
+    expect(await t.checks.lastReviewEventOfPullRequest(second.id)).toBe(
+      "withdrawn",
+    );
+  });
+
+  // #405-T22
   it("does not mix up two pull requests", async () => {
     const t = await setup();
     await submit(t, t.job.id, "request_changes");

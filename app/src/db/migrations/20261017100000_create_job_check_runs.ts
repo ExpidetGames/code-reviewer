@@ -32,6 +32,7 @@ export const migration: Migration = {
       .addColumn("check_run_id", "text")
       .addColumn("review_id", "text")
       .addColumn("review_event", "text")
+      .addColumn("review_event_at", "text")
       .addColumn("synced_status", "text")
       .addColumn("check_create_attempts", "integer", (column) =>
         column.notNull().defaultTo(0),

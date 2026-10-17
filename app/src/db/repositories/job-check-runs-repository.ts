@@ -186,6 +186,7 @@ export function createJobCheckRunsRepository(
         check_run_id: null,
         review_id: null,
         review_event: null,
+        review_event_at: null,
         synced_status: null,
         check_create_attempts: 0,
         review_submit_attempts: 0,
@@ -276,7 +277,10 @@ export function createJobCheckRunsRepository(
           review_state: review.reviewState,
           ...(review.reviewEvent === undefined
             ? {}
-            : { review_event: review.reviewEvent }),
+            : {
+                review_event: review.reviewEvent,
+                review_event_at: formatTimestamp(now()),
+              }),
           updated_at: formatTimestamp(now()),
         })
         .execute();
@@ -298,7 +302,7 @@ export function createJobCheckRunsRepository(
         .where("jobs.repository_id", "=", job.repository_id)
         .where("jobs.pr_number", "=", job.pr_number)
         .where("job_check_runs.review_event", "is not", null)
-        .orderBy("job_check_runs.updated_at", "desc")
+        .orderBy("job_check_runs.review_event_at", "desc")
         .orderBy("job_check_runs.job_id", "desc")
         .executeTakeFirst();
       return (latest?.review_event as ReviewEvent | null | undefined) ?? null;
