@@ -186,7 +186,8 @@ Network guard (exists, applies to every automated test):
 Dispatcher (`dispatcher/`, Node version from `.nvmrc`, pnpm): the same Vitest layout as the app (projects `unit` and
 `integration`, node environment, the network guard, at most 4 workers), ESLint (the core may import no Node module and no
 platform SDK) and Prettier. `make lint`, `make typecheck`, `make test-unit`, `make test-integration` and `make verify`
-include it; CI runs the job "Dispatcher: static & tests".
+include it; CI runs the job "Dispatcher: static & tests", which also builds the Dispatcher with the pinned Vercel CLI offline
+(`vercel build --prod` with a stub project file and no token: the deployment's type check differs from `tsc`, #412).
 
 App (`app/`, Node version from `.nvmrc`, pnpm):
 
