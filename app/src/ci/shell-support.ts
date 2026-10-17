@@ -107,7 +107,7 @@ export function runStep(
         CALLS_FILE: callsFile,
         STUB_DIR: bin,
         ...options.env,
-      } as NodeJS.ProcessEnv,
+      } as unknown as NodeJS.ProcessEnv,
     });
     return {
       status: result.status ?? -1,
