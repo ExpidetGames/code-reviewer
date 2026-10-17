@@ -209,7 +209,7 @@ The change is additive in both directions, so there is no deploy order to keep:
 | previous | previous | unchanged |
 | previous | new | the new runner sends `llmProviders` (claim) and `llmProviders=` (details); the old app ignores them and sends `openrouter`, which the new runner's registry holds |
 | new | previous | no list is sent, so the app reads `["openrouter"]`; it sends `openrouter`, which the old runner reads (`"provider": "openrouter"` is valid under both the enum and the pattern) |
-| new | new | the list is parsed and kept; the job is the same |
+| new | new | the claim list is parsed and validated, the details list is ignored for now; neither is used yet, so the job is the same |
 
 The first app change that sends another provider (the claim issue of epic #420) must deploy only after
 every runner it serves advertises that provider: it sends a provider only to a caller that listed it

@@ -805,6 +805,13 @@ provider. An entry holds:
   app of the previous release ignores both; an app that gets neither reads it as `["openrouter"]`,
   which is what a runner of the previous release can run. A new app therefore never hands an old
   runner a job it cannot read. The app still only sends `openrouter`.
+  The app only parses and validates the list today; it does not use it before the claim issue of
+  epic #420 (#432).
+- **Checks of an entry.** The `require_parameters` field must not be one the Dynamic proxy forwards
+  from the engine (`PROXY_FORWARDED_FIELDS`): the proxy sets it after the copy and would overwrite what
+  the engine sent, so such an entry cannot be built. The key and the base setting share one section.
+  `ModelProxy` and `apply_require_parameters_patch` take the provider as a required argument, with no
+  default.
 - **Tests.** A second, fake provider (`tests/unit/support.py`, `fake_provider`) is registered for the
   duration of a test to prove that the job parser, the PR-Agent configuration, the patch, the proxy
   and the guard follow the entry. There is no second real provider and no cost policy for one yet.

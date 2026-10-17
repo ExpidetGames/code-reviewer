@@ -293,7 +293,10 @@ describe("the claim with the feature worker_credential", () => {
 });
 
 describe("the details of a job", () => {
-  // #424-T08
+  // #424-T08: the route does not use the list yet (it is #432's claim and fetch resolver), so this pins
+  // only what must hold for every shape of it: the call is not refused and the job is unchanged. That a
+  // newer Worker's list is read is asserted by `parseWorkerLlmProviders` (requests.test.ts) and by the
+  // runner sending it (test_runner_api_client.py); #432 adds the assertion on the route.
   it.each([
     ["without the providers", undefined],
     ["with the provider of a previous-release Worker", "openrouter"],
