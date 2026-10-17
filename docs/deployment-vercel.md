@@ -249,6 +249,13 @@ yours.
   | `INFISICAL_DOMAIN` | The address of your Infisical instance (`https://<infisical host>`) |
   | `INFISICAL_PROJECT_SLUG` | The slug of the Infisical project below |
 
+  A called workflow does not see the environment's secrets on its own: the caller must pass them, or the secret is an
+  empty string without any error (GitHub, "Reuse workflows", environment secrets). `deploy-production.yml` therefore
+  passes exactly these four by name in the `secrets:` of every job that calls `vercel-stage.yml`, `golden-snapshot.yml`
+  or `dispatcher-canary.yml` (never `secrets: inherit`, so nothing else crosses over), and each of those declares them
+  as required `workflow_call` secrets. The called job still selects the environment with `environment: production`; a
+  job that calls a workflow cannot take an environment itself. The first deployment failed on this (#408).
+
   Set them without typing a value into a command line, for example
   `read -rs -p 'value: ' V; printf '%s' "$V" | gh secret set INFISICAL_CLIENT_SECRET --env production; unset V`.
 - No repository variable is needed.
@@ -1053,7 +1060,8 @@ A self-hosted installation and a hosted one never share a database or a GitHub A
 - **The deployment pipeline** (#403) has never run on GitHub, Vercel or Infisical. Unit tests prove the logic against
   stand-ins and the shell of the steps against stub programs; the platform behavior below is only as good as the
   documentation and the CLI's source, which is why the pipeline fails closed on each point. The first real run is the test:
-  - That the workflows are accepted and that the environment `production` hands its secrets to the called workflows.
+  - That the workflows are accepted and that the called workflows get the four Infisical secrets the callers pass by name
+    (#408; the first run, which passed none, showed that they are empty otherwise).
   - That `vercel build` run from the repository root honors the project's Root Directory, and that it needs no token:
     the CLI's source and a run without a token against a pulled project directory say so (the build step runs with the
     token blanked), but nothing was run against a real project.
