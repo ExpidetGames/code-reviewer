@@ -146,6 +146,11 @@
         },
         "checkedAt": {
           "$ref": "runner-api.v1.json#/$defs/Timestamp"
+        },
+        "imageDigest": {
+          "description": "The id of the Worker image this deployment is configured with (`SANDBOX_IMAGE_DIGEST`), present when one is configured. A deploy step compares it with the image its pipeline built, so that a canary that passed is known to have proven that image (#403).",
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
         }
       }
     }

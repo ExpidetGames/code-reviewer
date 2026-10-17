@@ -5,7 +5,12 @@ import type { Clock } from "../core/types.ts";
 import { DISPATCHER_TOKEN } from "../test-support/harness.ts";
 import { parseCanaryArguments, runCanary } from "./canary.ts";
 
-type Seen = { url: string; method: string; headers: Headers };
+type Seen = {
+  url: string;
+  method: string;
+  headers: Headers;
+  redirect: Request["redirect"];
+};
 
 function script(handler: (request: Seen) => Response | Promise<Response>): {
   fetch: typeof fetch;
@@ -20,6 +25,7 @@ function script(handler: (request: Seen) => Response | Promise<Response>): {
         url: request.url,
         method: request.method,
         headers: request.headers,
+        redirect: request.redirect,
       };
       seen.push(entry);
       return handler(entry);
@@ -398,6 +404,8 @@ const TEAM = "team_exampleTeam0001";
 const PROJECT = "prj_exampleDispatcher0001";
 const STAGED_HOST = "dispatcher-abc123-example-team.vercel.app";
 const VERIFY = { token: VERCEL_TOKEN, teamId: TEAM, projectId: PROJECT };
+const COMMIT = "0123456789abcdef0123456789abcdef01234567";
+const DIGEST = `sha256:${"b".repeat(64)}`;
 
 /** What the platform answers for a deployment of the Dispatcher project: the fields the check reads. */
 function deploymentRecord(overrides: Record<string, unknown> = {}) {
@@ -407,6 +415,8 @@ function deploymentRecord(overrides: Record<string, unknown> = {}) {
     projectId: PROJECT,
     ownerId: TEAM,
     readyState: "READY",
+    target: "production",
+    meta: { githubCommitSha: COMMIT },
     ...overrides,
   };
 }
@@ -461,6 +471,11 @@ describe("the deployment check of the deploy canary", () => {
     expect(probe?.headers.get("authorization")).toBe(
       `Bearer ${DISPATCHER_TOKEN}`,
     );
+    // No redirect is followed, whoever answers: a redirect would carry the bypass header to another origin.
+    expect(seen.map((request) => request.redirect)).toEqual(
+      seen.map(() => "manual"),
+    );
+    expect(seen.length).toBeGreaterThanOrEqual(3);
     // Each credential goes to its own host only.
     for (const request of seen) {
       const toPlatform = new URL(request.url).hostname === "api.vercel.com";
@@ -495,6 +510,10 @@ describe("the deployment check of the deploy canary", () => {
       { url: "other-abc.vercel.app" },
     ],
     ["a record without a host", { url: undefined }],
+    ["a preview deployment", { target: null }],
+    ["a staged deployment of no target", { target: undefined }],
+    ["a deployment that is still building", { readyState: "BUILDING" }],
+    ["a deployment that failed", { readyState: "ERROR" }],
   ])(
     "refuses a deployment of %s and sends nothing to it",
     async (_name, overrides) => {
@@ -521,7 +540,6 @@ describe("the deployment check of the deploy canary", () => {
   it.each([
     ["not found", () => respond({ error: { code: "not_found" } }, 404)],
     ["forbidden", () => respond({ error: { code: "forbidden" } }, 403)],
-    ["a server error", () => respond({}, 500)],
     [
       "a redirect",
       () =>
@@ -634,6 +652,158 @@ describe("the deployment check of the deploy canary", () => {
   });
 });
 
+describe("the commit and the retries of the deployment check", () => {
+  // #403-T01
+  it("accepts a deployment built from the commit this run expects", async () => {
+    const { fetch } = platformAndDeployment(() => respond(deploymentRecord()));
+    const { run } = stagedOptions(fetch, {
+      verifyDeployment: { ...VERIFY, expectedCommit: COMMIT },
+    });
+
+    expect(await run()).toBe(0);
+  });
+
+  // #403-T02
+  it.each([
+    ["another commit", { meta: { githubCommitSha: "f".repeat(40) } }],
+    ["no commit", { meta: {} }],
+    ["no meta", { meta: undefined }],
+  ])(
+    "refuses a deployment with %s when a commit is expected, and sends nothing to it",
+    async (_name, overrides) => {
+      const { fetch, seen } = platformAndDeployment(() =>
+        respond(deploymentRecord(overrides)),
+      );
+      const { run, lines } = stagedOptions(fetch, {
+        verifyDeployment: { ...VERIFY, expectedCommit: COMMIT },
+      });
+
+      expect(await run()).toBe(2);
+
+      expect(lines.join("\n")).toContain("canary_deployment_not_verified");
+      expect(lines.join("\n")).not.toContain(COMMIT);
+      expect(
+        seen.filter(
+          (request) => new URL(request.url).hostname !== "api.vercel.com",
+        ),
+      ).toEqual([]);
+    },
+  );
+
+  // #403-T02
+  it("asks again after a 429 or a 5xx of the platform, and goes on when it answers", async () => {
+    const answers = [
+      () => respond({}, 429),
+      () => respond({}, 503),
+      () => respond(deploymentRecord()),
+    ];
+    let call = 0;
+    const { fetch, seen } = platformAndDeployment(() =>
+      (answers[call++] ?? answers[2])!(),
+    );
+    const { run } = stagedOptions(fetch);
+
+    expect(await run()).toBe(0);
+
+    expect(
+      seen.filter(
+        (request) => new URL(request.url).hostname === "api.vercel.com",
+      ),
+    ).toHaveLength(3);
+  });
+
+  // #403-T02
+  it.each([429, 500, 502, 503])(
+    "reports a platform that keeps answering %s as unavailable (exit 1), not as a wrong deployment",
+    async (status) => {
+      const { fetch, seen } = platformAndDeployment(() => respond({}, status));
+      const { run, lines } = stagedOptions(fetch);
+
+      expect(await run()).toBe(1);
+
+      expect(lines.join("\n")).toContain("canary_verification_unavailable");
+      expect(lines.join("\n")).not.toContain("not_verified");
+      expect(
+        seen.filter(
+          (request) => new URL(request.url).hostname !== "api.vercel.com",
+        ),
+      ).toEqual([]);
+    },
+  );
+
+  // #403-T02
+  it.each([401, 403, 404])(
+    "does not ask again after a %s: that is an answer",
+    async (status) => {
+      const { fetch, seen } = platformAndDeployment(() => respond({}, status));
+      const { run } = stagedOptions(fetch);
+
+      expect(await run()).toBe(2);
+
+      expect(
+        seen.filter(
+          (request) => new URL(request.url).hostname === "api.vercel.com",
+        ),
+      ).toHaveLength(1);
+    },
+  );
+});
+
+describe("the image id the canary proves", () => {
+  function reporting(report: unknown) {
+    return script((request) =>
+      request.url.endsWith("/health")
+        ? respond({ status: "ok" })
+        : respond(report),
+    );
+  }
+
+  // #403-T12
+  it("passes when the deployment's report names the image the run built", async () => {
+    const { fetch } = reporting({ ...REPORT, imageDigest: DIGEST });
+    const { run, lines } = options(fetch, { expectedImageDigest: DIGEST });
+
+    expect(await run()).toBe(0);
+
+    expect(lines.join("\n")).not.toContain(DIGEST);
+  });
+
+  // #403-T12
+  it.each([
+    ["another image", { ...REPORT, imageDigest: `sha256:${"c".repeat(64)}` }],
+    ["no image", REPORT],
+  ])(
+    "blocks the release when the report names %s, without printing either id",
+    async (_name, report) => {
+      const { fetch } = reporting(report);
+      const { run, lines } = options(fetch, { expectedImageDigest: DIGEST });
+
+      expect(await run()).toBe(1);
+
+      const text = lines.join("\n");
+      expect(text).toContain("canary_image_mismatch");
+      expect(text).not.toContain(DIGEST);
+      expect(text).not.toContain("c".repeat(64));
+    },
+  );
+
+  // #403-T12
+  it("does not look at the image when none is expected", async () => {
+    const { fetch } = reporting({ ...REPORT, imageDigest: DIGEST });
+    const { run } = options(fetch);
+
+    expect(await run()).toBe(0);
+  });
+
+  // #403-T12
+  it("blocks on a mismatch even when the probe itself passed", async () => {
+    const { fetch } = reporting({ ...REPORT, imageDigest: "sha256:zz" });
+    const { run } = options(fetch, { expectedImageDigest: DIGEST });
+
+    expect(await run()).toBe(1);
+  });
+});
+
 describe("the arguments of the deployment check", () => {
   const env = {
     RUNNER_TOKEN: "dummy-token-1234567890",
@@ -668,6 +838,55 @@ describe("the arguments of the deployment check", () => {
       ).toThrow(new RegExp(name));
     },
   );
+
+  // #403-T01
+  it("takes the commit to expect from --expect-commit, and the image id from the environment", () => {
+    const parsed = parseCanaryArguments(
+      [
+        "--url",
+        `https://${STAGED_HOST}`,
+        "--verify-vercel",
+        "--expect-commit",
+        COMMIT,
+      ],
+      { ...env, CANARY_EXPECT_IMAGE_DIGEST: DIGEST },
+    );
+
+    expect(parsed.verifyDeployment).toStrictEqual({
+      ...VERIFY,
+      expectedCommit: COMMIT,
+    });
+    expect(parsed.expectedImageDigest).toBe(DIGEST);
+  });
+
+  // #403-T01
+  it.each(["not-a-sha", "ABCDEF", "g".repeat(40), ""])(
+    "refuses %j as the commit to expect, without echoing it",
+    (value) => {
+      expect(() =>
+        parseCanaryArguments(
+          [
+            "--url",
+            `https://${STAGED_HOST}`,
+            "--verify-vercel",
+            "--expect-commit",
+            value,
+          ],
+          env,
+        ),
+      ).toThrow(/expect-commit/);
+    },
+  );
+
+  // #403-T12
+  it("refuses an image id that is not one", () => {
+    expect(() =>
+      parseCanaryArguments(["--url", `https://${STAGED_HOST}`], {
+        ...env,
+        CANARY_EXPECT_IMAGE_DIGEST: "latest",
+      }),
+    ).toThrow(/CANARY_EXPECT_IMAGE_DIGEST/);
+  });
 
   // #403-T03
   it("takes no argument for the three values: they would show up in process lists and logs", () => {

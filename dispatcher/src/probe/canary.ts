@@ -33,6 +33,11 @@ export type DeploymentCheck = {
   token: string;
   teamId: string;
   projectId: string;
+  /**
+   * The commit the deployment must have been built from (`meta.githubCommitSha`, which the deploy step sets). Without
+   * it any production deployment of the project and team qualifies.
+   */
+  expectedCommit?: string;
 };
 
 export type CanaryOptions = {
@@ -59,6 +64,11 @@ export type CanaryOptions = {
   /** How long to wait for the deployment to answer `GET /health` before the credential is sent. 0: one try. */
   healthWaitSeconds?: number;
   probeTimeoutSeconds?: number;
+  /**
+   * The Worker image id the deployment must report (`imageDigest` of the probe report), so that the canary proves the
+   * image the pipeline built and not whichever one the project variables happen to name. Never printed.
+   */
+  expectedImageDigest?: string;
   /** Platform deployment protection: sent as `x-vercel-protection-bypass`. A secret. */
   bypassSecret?: string;
   fetch?: typeof fetch;
@@ -70,7 +80,14 @@ const DeploymentRecordSchema = z.object({
   url: z.string(),
   projectId: z.string(),
   ownerId: z.string(),
+  target: z.string().nullish(),
+  readyState: z.string().optional(),
+  meta: z.record(z.string(), z.unknown()).nullish(),
 });
+const COMMIT = /^[0-9a-f]{40}$/;
+const IMAGE_ID = /^sha256:[0-9a-f]{64}$/;
+const PLATFORM_ATTEMPTS = 3;
+const PLATFORM_RETRY_MILLISECONDS = 2000;
 
 const ReportSchema = z.object({
   version: z.literal(1),
@@ -79,6 +96,7 @@ const ReportSchema = z.object({
   engines: z.array(z.string()).max(16),
   reasons: z.array(z.string()).max(64),
   failure: z.string().max(100).optional(),
+  imageDigest: z.string().max(100).optional(),
 });
 
 export class CanaryUsageError extends Error {
@@ -89,7 +107,7 @@ export class CanaryUsageError extends Error {
 }
 
 const USAGE =
-  "usage: probe:canary --url <https://dispatcher> [--allowed-hosts <host,host>] [--verify-vercel] [--check-only] [--engines pr-agent,opencode] [--wait-seconds <n>] [--timeout-seconds <n>]; the credential is RUNNER_TOKEN in the environment, the allowed hosts may also be CANARY_ALLOWED_HOSTS; --verify-vercel reads VERCEL_TOKEN, VERCEL_TEAM_ID and VERCEL_PROJECT_ID (the Dispatcher project) from the environment";
+  "usage: probe:canary --url <https://dispatcher> [--allowed-hosts <host,host>] [--verify-vercel [--expect-commit <sha>]] [--check-only] [--engines pr-agent,opencode] [--wait-seconds <n>] [--timeout-seconds <n>]; the credential is RUNNER_TOKEN in the environment, the allowed hosts may also be CANARY_ALLOWED_HOSTS; CANARY_EXPECT_IMAGE_DIGEST is the image id the deployment must report; --verify-vercel reads VERCEL_TOKEN, VERCEL_TEAM_ID and VERCEL_PROJECT_ID (the Dispatcher project) from the environment";
 
 function seconds(value: string | undefined, name: string, max: number): number {
   const number = Number(value);
@@ -134,6 +152,7 @@ export function parseCanaryArguments(
         "--wait-seconds",
         "--timeout-seconds",
         "--allowed-hosts",
+        "--expect-commit",
       ].includes(name)
     )
       throw new CanaryUsageError(USAGE);
@@ -170,12 +189,34 @@ export function parseCanaryArguments(
     return known;
   });
   const bypass = env.VERCEL_AUTOMATION_BYPASS_SECRET;
-  const verifyDeployment = verify ? deploymentCheckFrom(env) : undefined;
+  const expectedCommit = values.get("--expect-commit");
+  if (expectedCommit !== undefined && !verify)
+    throw new CanaryUsageError("--expect-commit needs --verify-vercel");
+  if (expectedCommit !== undefined && !COMMIT.test(expectedCommit))
+    throw new CanaryUsageError("--expect-commit takes a full commit sha");
+  const verifyDeployment = verify
+    ? {
+        ...deploymentCheckFrom(env),
+        ...(expectedCommit === undefined ? {} : { expectedCommit }),
+      }
+    : undefined;
+  const expectedImageDigest = env.CANARY_EXPECT_IMAGE_DIGEST;
+  if (
+    expectedImageDigest !== undefined &&
+    expectedImageDigest !== "" &&
+    !IMAGE_ID.test(expectedImageDigest)
+  )
+    throw new CanaryUsageError(
+      "CANARY_EXPECT_IMAGE_DIGEST must be an image id (sha256:...)",
+    );
   return {
     url,
     token,
     ...(allowedHosts === undefined ? {} : { allowedHosts }),
     ...(verifyDeployment === undefined ? {} : { verifyDeployment }),
+    ...(expectedImageDigest === undefined || expectedImageDigest === ""
+      ? {}
+      : { expectedImageDigest }),
     ...(checkOnly ? { checkOnly } : {}),
     requiredEngines,
     healthWaitSeconds: values.has("--wait-seconds")
@@ -232,30 +273,42 @@ function baseOf(input: string, strict: boolean): URL | undefined {
 }
 
 /**
- * Whether the platform says that the deployment this host names belongs to the project and the team. The host is the
- * deployment's own: an alias or a domain answers with another `url`, and is refused. Only the platform's address
- * ever sees the token; what it answers is never printed.
+ * Whether the platform says that the deployment this host names is a ready production deployment of the project and
+ * the team (and of the expected commit, when one is given). The host is the deployment's own: an alias or a domain
+ * answers with another `url`, and is refused. A 429 or a 5xx is not an answer about the deployment: it is asked again
+ * a few times and then reported as unavailable. Only the platform's address ever sees the token; what it answers is
+ * never printed.
  */
 async function verifiedByPlatform(
   host: string,
   check: DeploymentCheck,
   request: typeof fetch,
+  clock: Clock,
 ): Promise<"verified" | "not_verified" | "unavailable"> {
   const address = new URL(
     `/v13/deployments/${encodeURIComponent(host)}`,
     PLATFORM_API,
   );
   address.searchParams.set("teamId", check.teamId);
-  let answer: Response;
-  try {
-    answer = await request(address, {
-      headers: { authorization: `Bearer ${check.token}` },
-      redirect: "manual",
-      signal: AbortSignal.timeout(15_000),
-    });
-  } catch {
-    return "unavailable";
+  let answer: Response | undefined;
+  for (let attempt = 1; attempt <= PLATFORM_ATTEMPTS; attempt += 1) {
+    try {
+      answer = await request(address, {
+        headers: { authorization: `Bearer ${check.token}` },
+        redirect: "manual",
+        signal: AbortSignal.timeout(15_000),
+      });
+    } catch {
+      answer = undefined;
+    }
+    const retry =
+      answer === undefined || answer.status === 429 || answer.status >= 500;
+    if (!retry) break;
+    if (attempt < PLATFORM_ATTEMPTS)
+      await clock.sleep(PLATFORM_RETRY_MILLISECONDS);
   }
+  if (answer === undefined || answer.status === 429 || answer.status >= 500)
+    return "unavailable";
   if (answer.status !== 200) return "not_verified";
   let record: z.infer<typeof DeploymentRecordSchema>;
   try {
@@ -263,10 +316,14 @@ async function verifiedByPlatform(
   } catch {
     return "not_verified";
   }
+  const commit = record.meta?.githubCommitSha;
   const matches =
     record.url.toLowerCase() === host &&
     record.projectId === check.projectId &&
-    record.ownerId === check.teamId;
+    record.ownerId === check.teamId &&
+    record.target === "production" &&
+    record.readyState === "READY" &&
+    (check.expectedCommit === undefined || commit === check.expectedCommit);
   return matches ? "verified" : "not_verified";
 }
 
@@ -295,6 +352,7 @@ export async function runCanary(options: CanaryOptions): Promise<0 | 1 | 2> {
       base.hostname.toLowerCase(),
       options.verifyDeployment,
       request,
+      options.clock,
     );
     if (verdict === "unavailable") {
       write(
@@ -388,6 +446,16 @@ export async function runCanary(options: CanaryOptions): Promise<0 | 1 | 2> {
   ].join(" ");
   const missing = required.filter((engine) => !engines.includes(engine));
   if (answer.status === 200 && report.ok && missing.length === 0) {
+    // The probe passed; was it the image the pipeline built? Neither id is printed.
+    if (
+      options.expectedImageDigest !== undefined &&
+      report.imageDigest !== options.expectedImageDigest
+    ) {
+      write(
+        `canary: canary_image_mismatch (the deployment does not report the image this run built), the release is blocked`,
+      );
+      return 1;
+    }
     write(`canary: ${report.status} ${details}`);
     return 0;
   }

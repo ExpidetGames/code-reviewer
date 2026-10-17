@@ -42,6 +42,7 @@ const DENIED: ProbeResult = {
 function build(
   probe?: () => Promise<ProbeResult>,
   engines: ("pr-agent" | "opencode")[] = ["pr-agent", "opencode"],
+  imageDigest?: string,
 ) {
   const launcher = createFakeLauncher(probe === undefined ? {} : { probe });
   const logger = recordingLogger();
@@ -53,6 +54,7 @@ function build(
     trigger: webhookTrigger({
       keys: [{ kid: KEY_ID, secret: SIGNING_SECRET }],
     }),
+    ...(imageDigest === undefined ? {} : { imageDigest }),
   });
   return { app, launcher, logger };
 }
@@ -233,5 +235,57 @@ describe("POST /probe", () => {
       failure: "probe_not_supported",
       ok: true,
     });
+  });
+});
+
+describe("the image id in the probe report", () => {
+  const DIGEST = `sha256:${"a".repeat(64)}`;
+
+  // #403-T12
+  it("names the Worker image id this deployment is configured with, so that a deploy step can tell which image it proved", async () => {
+    const { app } = build(() => Promise.resolve(PASSED), undefined, DIGEST);
+
+    const response = await post(app, authorized);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ imageDigest: DIGEST });
+  });
+
+  // #403-T12
+  it("leaves it out when no image is configured, and never takes it from anything but the configuration", async () => {
+    const { app } = build(() => Promise.resolve(PASSED));
+
+    const body = (await (await post(app, authorized)).json()) as Record<
+      string,
+      unknown
+    >;
+
+    expect(body).not.toHaveProperty("imageDigest");
+  });
+
+  // #403-T12
+  it("drops a value that is not an image id", async () => {
+    const { app } = build(
+      () => Promise.resolve(PASSED),
+      undefined,
+      "sha256:not-a-digest",
+    );
+
+    const body = (await (await post(app, authorized)).json()) as Record<
+      string,
+      unknown
+    >;
+
+    expect(body).not.toHaveProperty("imageDigest");
+  });
+
+  // #403-T12
+  it("is not shown to a caller without the credential", async () => {
+    const { app } = build(() => Promise.resolve(PASSED), undefined, DIGEST);
+
+    const response = await post(app);
+
+    expect(response.status).toBe(401);
+    expect(JSON.stringify(await response.json())).not.toContain(DIGEST);
   });
 });
