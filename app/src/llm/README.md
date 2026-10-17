@@ -2,7 +2,7 @@
 
 A workspace brings its own LLM key (bring your own key, BYOK; `docs/decisions/0001-editions-setup-and-accounts.md`,
 sections 2.7 and 2.8), or, where an operator has set its key mode to `managed`, uses the operator's own key (below). An Admin or an Owner enters it under **Settings → LLM access** of the workspace
-(`/w/:workspace/settings/llm`); removing the key is a danger zone under **Settings → Advanced**. The app
+(`/w/:workspace/settings/llm`), one card and one key for **each registered provider** (#426); removing a key is a danger zone under **Settings → Advanced**, one button for each provider that has a key. The app
 hands the key of the job's own workspace to the runner with every job. The legacy `LLM_PROVIDER` and `LLM_API_KEY`
 were imported once into the default workspace by the update of an existing installation (`src/legacy-import/`) and
 are not read any more; `LLM_MODEL` and `LLM_MAX_TOKENS` are instance settings.
@@ -47,7 +47,8 @@ What moved behind the adapter, with the module that stays and does the part that
 `none`. Nothing reads `none` yet; the policy for such a provider comes with the first one (ADR 0005, 2.4).
 
 Not part of the seam yet (the next issues): the runner side (`llm.provider` is still the enum of one value in the
-contracts), more than one key slot per workspace and the model catalog.
+contracts), the choice of the provider per project and the model catalog. A workspace has **one key per provider**
+since #426 (below, "The keys of a workspace").
 
 ## Which key a job gets
 
@@ -55,7 +56,8 @@ contracts), more than one key slot per workspace and the model catalog.
 (`src/workspaces/README.md`, "Entitlements"; `keyModeForJob`), and by nothing else:
 
 1. **`own`, or no entitlements at all** (an instance that never configured any, which is every self-hoster): the
-   workspace's own key, stored encrypted (below), bound to the provider it was entered for. **The operator's key is
+   workspace's own key **of the provider the job is for** (the default provider until a project can choose, #426),
+   stored encrypted (below), bound to that provider. A key of another provider is never taken. **The operator's key is
    never read** for such a workspace, not even when it has no key of its own: the job then fails with `no_key`.
 2. **`managed`**: the operator's own key (#276, below), source `operator`. The workspace's own stored key is ignored
    (it stays stored, not deleted) and is **never a fallback**: the entitlement says which key is used. Without a
@@ -69,8 +71,8 @@ The reasons of `llm_not_configured` (`LLM_NOT_CONFIGURED_REASONS`): `no_key`, `k
 `key_binding_mismatch`, `operator_key_missing`, `operator_key_unreadable`, `entitlements_invalid`. They are logged
 with the job and drive the copy of the pages; they never hold a value.
 
-The input of the resolver is a union on purpose (`keyMode: "own"` carries the workspace's key, `"managed"` carries the
-operator's, `"unreadable"` carries neither), so a job of a workspace that is not managed has no place to put the
+The input of the resolver is a union on purpose (`keyMode: "own"` carries the key of the workspace for the job's
+`provider`, `"managed"` carries the operator's, `"unreadable"` carries neither), so a job of a workspace that is not managed has no place to put the
 operator's key and a managed one has none for the workspace's. `assemble.ts` reads only what the mode names.
 
 There is no step for a key in the environment: a key in `LLM_API_KEY` would be spent by every workspace that has not
@@ -145,35 +147,44 @@ admin portal (**LLM key**, `/admin/llm`; `src/admin/ui/operator-llm-key-form.tsx
   instance. The "LLM not configured" hint of the other pages becomes "LLM access is not available" without a link to a
   form. The routes that save, test and remove a workspace key keep working: the key is only not used while managed.
 
-## The key of a workspace
+## The keys of a workspace
 
-| File               | Role                                                                                                                                                                                                                                                                |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `workspace-key.ts` | `createWorkspaceLlmKeyService`: `status`, `save`, `remove`, `reveal`, `forJob`, on the encrypted store of the workspace (`src/secrets/workspace-store.ts`)                                                                                                          |
-| `http.ts`          | The handlers of `GET\|PUT\|DELETE /api/w/:workspace/llm-key` and `POST /api/w/:workspace/llm-key/test` (the route files are below `src/app/api/w/[workspace]/llm-key/`)                                                                                             |
-| `key-test.ts`      | The "Test key" button: the limits per workspace and for the instance around the adapter's `testKey` (one call to the provider; `GET /key` of OpenRouter, which costs nothing), the failure classes                                                                  |
-| `endpoint.ts`      | The provider's API address. Not configurable by a person; the test stack points it at the fake LLM with `LLM_API_BASE_URL` together with `ALLOW_TEST_LLM_ENDPOINTS=true`, which anything else ignores                                                               |
-| `ui/`              | The settings section (`LlmAccessSection`, form), the hint "LLM not configured": `llmAccessAttention` builds it as an `AttentionNotice` so a page can merge it into its one "Needs attention" strip, `LlmAccessNotice` renders it on its own; the copy for the codes |
+A workspace has **one key for each registered provider** (#426, ADR 0005, section 2.5). Each is a row of
+`workspace_secrets` under the name the provider's adapter gives it (`secretNames.workspace`): **`llm_api_key`** for
+OpenRouter, the name it has always had, so a key stored before there were several providers _is_ OpenRouter's key,
+unchanged (a SQL migration cannot re-encrypt without `APP_SECRET`: no schema change, no data migration), and
+`llm_api_key.<provider>` for every later provider. `WORKSPACE_SECRET_NAMES` is derived from the registry. The binding of
+a row must equal the provider of its slot (`key_binding_mismatch` otherwise), and because the name is part of the
+additional authenticated data, a ciphertext moved to another provider's name, or to another workspace, does not decrypt.
+
+| File               | Role                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `workspace-key.ts` | `createWorkspaceLlmKeyService`: `status(provider)`, `statusAll()`, `save({provider, apiKey})`, `remove(provider)`, `reveal(provider)`, `keyFor(provider)`, on the encrypted store of the workspace (`src/secrets/workspace-store.ts`)                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `http.ts`          | The handlers of `GET\|PUT\|DELETE /api/w/:workspace/llm-keys/:provider` and `POST /api/w/:workspace/llm-keys/:provider/test` (route files below `src/app/api/w/[workspace]/llm-keys/[provider]/`). The old `/llm-key` and `/llm-key/test` are an **alias for the default provider** with the same handlers (their body may still name `provider`, which must then be the default one). A body that names another provider than the address is `provider_invalid`; a provider in the address that is not registered is 404 `provider_not_found`, after the workspace and the role were settled (a foreign workspace gets the missing-workspace answer first) |
+| `key-test.ts`      | The "Test key" button: the limits per workspace and for the instance around the adapter's `testKey` (one call to the provider; `GET /key` of OpenRouter, which costs nothing), the failure classes                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `endpoint.ts`      | The provider's API address. Not configurable by a person; the test stack points it at the fake LLM with `LLM_API_BASE_URL` together with `ALLOW_TEST_LLM_ENDPOINTS=true`, which anything else ignores                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `ui/`              | The settings section (`LlmAccessSection`, form), the hint "LLM not configured": `llmAccessAttention` builds it as an `AttentionNotice` so a page can merge it into its one "Needs attention" strip, `LlmAccessNotice` renders it on its own; the copy for the codes                                                                                                                                                                                                                                                                                                                                                                                         |
 
 - **Storage.** Table `workspace_secrets`, AES-256-GCM with a key derived from `APP_SECRET`; the additional
-  authenticated data is the table, the **workspace id** and the name `llm_api_key`, so a row copied to another
-  workspace does not decrypt. **The operator can decrypt it by design** (the operator holds the database and
+  authenticated data is the table, the **workspace id** and the name of the provider's slot (above), so a row copied
+  to another workspace, or to another provider's name, does not decrypt. **The operator can decrypt it by design** (the operator holds the database and
   `APP_SECRET`); the settings page says so, and the hosted terms must. This reverses the old guarantee that the
   key is "never stored": a workspace key is persisted, encrypted.
 - **Write-only.** No answer holds the key. An Admin or an Owner sees whether it is configured, cannot be read, or
-  is missing, and the last four characters of a long key; a **Member sees only whether one exists**. An empty field
-  keeps the stored key.
-- **Not carried to another provider.** The key is bound to its provider (`binding`). Changing the provider with an
-  empty field is refused (`api_key_required_for_new_provider`): a stored key is never sent to a provider or an
-  endpoint other than the one it was entered for (the lesson of the SMTP password of #100). The bound provider is
-  checked again when the key is used.
+  is missing, and the last four characters of a long key, for each provider; a **Member sees only whether one exists**.
+  An empty field keeps the stored key of that provider (`api_key_required` when it has none).
+- **Never used for another provider.** The key is bound to its provider (`binding`), and every provider has a slot of
+  its own, so saving, replacing or removing one provider's key never touches another's, and an empty field keeps only
+  the key of that provider. A stored key is never sent to a provider or an endpoint other than the one it was entered
+  for (the lesson of the SMTP password of #100): the binding is compared with the provider again when the key is
+  revealed for the test button and when a job takes it (`key_binding_mismatch`).
 - **Who.** `manage_llm_key` (Admin and Owner) sets, tests and removes it; every member reads the state.
 - **The rules for a key** are the legacy variable's (`checkLlmApiKey`): surrounding whitespace is ignored,
   whitespace or control characters inside and more than 4096 characters are refused (`api_key_invalid`).
 - **Test key.** A key typed into the field is checked as it is and forgotten; with an empty field the stored one is
   checked. The address is the provider's own, redirects are not followed, the time is limited, and the provider's
   words only appear as a cleaned first line (the key removed in every spelling, long opaque tokens blanked). Limited
-  per workspace (5 per 10 minutes) and for the instance (60), in `rate_limits`; counters that cannot be read refuse
+  per workspace, **across providers**: one count for all of its keys (5 per 10 minutes), and for the instance (60), in `rate_limits`; counters that cannot be read refuse
   the click. **The instance budget is shared**: the workspaces of one person (a multi-tenant instance lets anybody
   create several, 10 by default) can use it up, and the button is then refused for everybody for a while. Nothing
   else is affected. The server also logs `LLM_TEST_ENDPOINTS_ENABLED` at start when the test stack's address switch is
@@ -283,15 +294,15 @@ claimed-keys.ts`: one row per job, the sealed text is the list of the keys hande
 `providers/structure.test.ts` (the provider is named only in its adapter), `providers/openrouter/adapter.test.ts` and
 `providers/openrouter/adapter.integration.test.ts` (the adapter against the fake LLM);
 `resolve.test.ts`, `config.test.ts`, `access.test.ts`, `startup.test.ts`, `endpoint.test.ts`, `model-capabilities.test.ts`, `dynamic-capabilities.test.ts` and
-`../instrumentation.test.ts` (unit, no database); `workspace-key.integration.test.ts`, `operator-key.integration.test.ts`,
+`../instrumentation.test.ts` (unit, no database); `workspace-key.integration.test.ts`, `workspace-keys.integration.test.ts` (one key per provider, with a test-only second provider: the keys apart, the name bound into the ciphertext, an old row), `workspace-keys-access.integration.test.ts` (which provider's key a job takes, the keys to mask), `operator-key.integration.test.ts`,
 `operator-access.integration.test.ts` (whose key a workspace gets, over a real database),
 `key-test.integration.test.ts` (real SQLite, the fake LLM over real HTTP); `ui/*.test.tsx`;
-`integration-tests/http/llm-key-route.integration.test.ts` (the real route files: roles, isolation, the request,
+`integration-tests/http/llm-keys-route.integration.test.ts` (the per-provider routes and the alias beside them, the shared limit of the test button, no key in any answer, log or page), `integration-tests/http/llm-key-route.integration.test.ts` (the alias routes, the real route files: roles, isolation, the request,
 the test button, no key in any answer or log; and a managed workspace's settings: no form, the same note for every
 role, the routes still working), `integration-tests/http/runner-api-llm-key.integration.test.ts` (the claim: each
 workspace's own key, no borrowing, no key from the environment, removal, masking across instances),
 `integration-tests/http/runner-api-operator-key.integration.test.ts` (the operator's key on the legacy claim and the
 Worker API: delivered, remembered, masked, never to a Dispatcher, the usage record's key mode),
 `src/admin/operator-llm-key.integration.test.ts` (the portal's save, status and refusals; who may not) and the rows for
-the routes in `workspace-isolation.integration.test.ts`. Journey: `e2e/settings/llm-key.e2e.ts`, and the
+the routes in `workspace-isolation.integration.test.ts` (and for the provider-qualified secret name in `src/db/repositories/scoped-isolation.integration.test.ts`). Journey: `e2e/settings/llm-key.e2e.ts`, and the
 review with the workspace key in `e2e/jobs/pull-request-to-review.e2e.ts`.
