@@ -10,6 +10,7 @@ code rules of a result, tolerance for fields it does not know) hold.
 
 import copy
 import json
+import re
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
@@ -18,6 +19,7 @@ import pytest
 from jsonschema import Draft202012Validator
 
 from code_reviewer_runner import job as runner_job
+from code_reviewer_runner.llm_providers import PROVIDER_ID_PATTERN, registered_provider_ids
 
 CONTRACTS = Path(__file__).resolve().parents[3] / "contracts"
 SCHEMA_PATH = CONTRACTS / "runner-api.v1.json"
@@ -912,3 +914,93 @@ def test_the_supersede_timing_constants_equal_the_contract() -> None:
     assert CLAIM_SECONDS >= (
         MAX_HEARTBEAT_INTERVAL_SECONDS + LONGEST_MODEL_REQUEST_SECONDS + KILL_MARGIN_SECONDS
     )
+
+
+def _job_with_provider(provider: object) -> Document:
+    claim = _example("ClaimResponse")
+    claim["job"]["input"]["llm"]["provider"] = provider
+    return claim
+
+
+# #424-T01: `llm.provider` is a slug in the contract; the registry decides which slugs run.
+@pytest.mark.parametrize(
+    ("provider", "accepted"),
+    [
+        ("openrouter", True),
+        ("fakeai", True),
+        ("a1", True),
+        ("a" + "b" * 31, True),
+        ("a" + "b" * 32, False),
+        ("a", False),
+        ("OpenRouter", False),
+        ("1abc", False),
+        ("open-router", False),
+        ("open router", False),
+        ("", False),
+        (None, False),
+        (7, False),
+    ],
+)
+def test_the_contract_accepts_a_provider_slug_and_refuses_an_uppercase_or_too_long_one(
+    provider: object, accepted: bool
+) -> None:
+    assert _accepts("ClaimResponse", _job_with_provider(provider)) is accepted
+
+
+# #424-T01, #424-T03: the contract takes the slug, the runner refuses one it has no entry for with
+# the existing invalid-job error. The two verdicts on the form always agree for a registered slug.
+def test_a_slug_the_contract_accepts_is_still_refused_by_the_runner_without_an_entry() -> None:
+    claim = _job_with_provider("fakeai")
+
+    assert _accepts("ClaimResponse", claim)
+    with pytest.raises(runner_job.JobError) as refused:
+        runner_job.parse_job(json.dumps(claim["job"]["input"]))
+    assert refused.value.code.value == "invalid_job"
+
+
+# #424-T02: a claim without the advertisement is valid and means OpenRouter; the example names it.
+def test_the_claim_request_may_leave_the_provider_advertisement_out() -> None:
+    assert _accepts("ClaimRequest", {})
+    assert _accepts("ClaimRequest", {"engines": ["pr-agent"], "features": ["supersede"]})
+    assert _accepts("ClaimRequest", {"llmProviders": ["openrouter"]})
+    assert _accepts("ClaimRequest", {"llmProviders": ["openrouter", "fakeai"]})
+    assert _example("ClaimRequest")["llmProviders"] == ["openrouter"]
+    description = _load(SCHEMA_PATH)["$defs"]["ClaimRequest"]["description"]
+    assert "llmProviders" in description and "openrouter" in description
+
+
+# #424-T01
+@pytest.mark.parametrize(
+    "advertised",
+    [
+        [],
+        "openrouter",
+        ["OpenRouter"],
+        ["a" * 33],
+        [1],
+        ["openrouter", "openrouter"],
+        [f"p{index:02d}" for index in range(17)],
+    ],
+)
+def test_the_claim_request_refuses_a_bad_provider_advertisement(advertised: object) -> None:
+    assert not _accepts("ClaimRequest", {"llmProviders": advertised})
+
+
+# #424-T07: the providers the contract knows are the registry of the runner, in the form of the id.
+def test_the_providers_of_the_contract_are_the_providers_of_the_runner_registry() -> None:
+    schema = _load(SCHEMA_PATH)
+    known: list[str] = schema["$defs"]["KnownLlmProvider"]["enum"]
+    pattern: str = schema["$defs"]["LlmProviderId"]["pattern"]
+
+    assert sorted(known) == sorted(registered_provider_ids())
+    assert pattern == PROVIDER_ID_PATTERN.pattern
+    assert all(re.fullmatch(pattern, name) for name in known)
+    assert _example("ClaimRequest")["llmProviders"] == list(registered_provider_ids())
+
+
+# #424-T04: the job of the previous release still validates and still parses.
+def test_the_previous_release_job_is_valid_and_parses_with_the_openrouter_entry() -> None:
+    claim = _previous_release_review_claim()
+
+    assert _accepts("ClaimResponse", claim)
+    assert runner_job.parse_job(json.dumps(claim["job"]["input"])).llm.provider == "openrouter"

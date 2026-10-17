@@ -4,12 +4,14 @@
 // bodies of heartbeat and complete. A refusal names fields and reasons, never the values.
 import { describe, expect, it } from "vitest";
 import {
+  callerLlmProviders,
   parseClaimRequest,
   parseCompleteRequest,
   parseHeartbeatRequest,
   parseJobId,
   parseReleaseRequest,
   parseRunnerId,
+  parseWorkerLlmProviders,
 } from "./requests.ts";
 
 const TOKEN = "6f1d2c9a-5b3e-4a77-9c0d-8e2f1a4b7c33";
@@ -591,4 +593,68 @@ describe("the release body (#322)", () => {
       });
     },
   );
+});
+
+describe("the LLM providers a caller advertises (#424)", () => {
+  // #424-T02
+  it("reads a claim without the list exactly as before, and the absent list means OpenRouter", () => {
+    expect(parseClaimRequest({ engines: ["pr-agent"] })).toEqual({
+      ok: true,
+      value: { engines: ["pr-agent"] },
+    });
+    expect(callerLlmProviders(undefined)).toEqual(["openrouter"]);
+  });
+
+  // #424-T02
+  it("keeps the list a runner advertises, also a provider this app has no adapter for", () => {
+    expect(
+      parseClaimRequest({ llmProviders: ["openrouter", "a_future_provider"] }),
+    ).toEqual({
+      ok: true,
+      value: { llmProviders: ["openrouter", "a_future_provider"] },
+    });
+    expect(callerLlmProviders(["a_future_provider"])).toEqual([
+      "a_future_provider",
+    ]);
+  });
+
+  // #424-T01
+  it("refuses a list that is not a list of provider slugs, a duplicate, an empty or a long list", () => {
+    for (const llmProviders of [
+      "openrouter",
+      [],
+      [1],
+      ["OpenRouter"],
+      ["a"],
+      ["a".repeat(33)],
+      ["openrouter", "openrouter"],
+      Array.from({ length: 17 }, (_, index) => `provider_${index}`),
+      {},
+      null,
+    ]) {
+      expect(parseClaimRequest({ llmProviders })).toEqual({
+        ok: false,
+        fields: [{ field: "llmProviders", code: "invalid" }],
+      });
+    }
+  });
+
+  // #424-T08
+  it("reads the providers of the Worker's details call like the features: a comma separated list", () => {
+    expect(parseWorkerLlmProviders(null)).toBeUndefined();
+    expect(parseWorkerLlmProviders("openrouter")).toEqual(["openrouter"]);
+    expect(parseWorkerLlmProviders("openrouter, a_future_provider ")).toEqual([
+      "openrouter",
+      "a_future_provider",
+    ]);
+  });
+
+  // #424-T08: a malformed parameter is ignored like an unknown feature, it never fails the call.
+  it("ignores names of the details call that are no slugs, and a list with none left is absent", () => {
+    expect(parseWorkerLlmProviders("OpenRouter,openrouter,openrouter")).toEqual(
+      ["openrouter"],
+    );
+    expect(parseWorkerLlmProviders("")).toBeUndefined();
+    expect(parseWorkerLlmProviders("Bad Name,,a")).toBeUndefined();
+  });
 });

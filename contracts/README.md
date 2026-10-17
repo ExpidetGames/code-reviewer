@@ -192,6 +192,29 @@ echoed) and `POST /probe`'s answers are checked against `ProbeReport` in `dispat
   does not know), unlike unknown engines. `golden` fixtures: `fakes/fixtures/dynamic-review-job.json`
   (without) and `dynamic-review-job-capabilities.json` (with the field), validated by both suites.
 
+- #424 grows v1 without breaking a reader: `RunnerJobInput.llm.provider` changes from the enum
+  `["openrouter"]` to a slug (`LlmProviderId`, `^[a-z][a-z0-9_]{1,31}$`), and `ClaimRequest` and the
+  Worker API's details request (`WorkerJobDetailsRequest`, the query `?llmProviders=a,b`) get an
+  optional list of the providers the caller can run. The list means "send me jobs for these", absent
+  means `["openrouter"]`. `KnownLlmProvider` lists the slugs this release knows; the runner's
+  registry, the app's registry and that list are compared by tests. The app only parses the list; it
+  still sends `openrouter` only.
+
+### Rolling out providers (#424)
+
+The change is additive in both directions, so there is no deploy order to keep:
+
+| App | Runner / Worker | What happens |
+|---|---|---|
+| previous | previous | unchanged |
+| previous | new | the new runner sends `llmProviders` (claim) and `llmProviders=` (details); the old app ignores them and sends `openrouter`, which the new runner's registry holds |
+| new | previous | no list is sent, so the app reads `["openrouter"]`; it sends `openrouter`, which the old runner reads (`"provider": "openrouter"` is valid under both the enum and the pattern) |
+| new | new | the claim list is parsed and validated, the details list is ignored for now; neither is used yet, so the job is the same |
+
+The first app change that sends another provider (the claim issue of epic #420) must deploy only after
+every runner it serves advertises that provider: it sends a provider only to a caller that listed it
+and ends the job with `llm_provider_unsupported` otherwise. Until then the contract is as above.
+
 ### Rolling out Dynamic Review (#195, finding 4)
 
 A previous-release **app** ignores `review_kind` in its claim SQL: on a shared, migrated database it

@@ -7,10 +7,13 @@ neither the environment of the parent process nor a secret of the job reaches `o
 
 import json
 from collections.abc import Callable, Mapping
+from pathlib import Path
 from typing import Any
 
 import pytest
+from support import fake_provider
 
+from code_reviewer_runner import llm_providers
 from code_reviewer_runner.job import RESERVED_OPTIONS, Job, parse_job
 from code_reviewer_runner.pr_agent_config import (
     InvalidOption,
@@ -388,3 +391,49 @@ def test_a_review_option_maps_to_its_settings_section() -> None:
 # CR-10-T01, #203
 def test_review_becomes_a_single_word_request() -> None:
     assert build_request(make_job("review")) == ["review"]
+
+
+# #424-T04: the previous release's job is configured exactly as before the registry existed.
+def test_the_previous_release_job_gets_the_openrouter_configuration_it_always_got() -> None:
+    fixture = Path(__file__).resolve().parents[3] / "fakes" / "fixtures"
+    job = parse_job((fixture / "previous-release-review-job.json").read_text(encoding="utf-8"))
+
+    env = environment(job)
+    typed = build_typed_settings(job)
+
+    pinned = f"openrouter/{job.llm.model}"
+    assert env["CONFIG__MODEL"] == pinned
+    assert env["CONFIG__MODEL_WEAK"] == pinned
+    assert env["CONFIG__MODEL_REASONING"] == pinned
+    assert env["OPENROUTER__API_BASE"] == "https://openrouter.ai/api/v1"
+    assert build_secret_settings(job)["openrouter.key"] == job.llm.api_key
+    assert typed["config.fallback_models"] == []
+
+
+# #424-T04: a local fake address replaces the provider's own base, as before.
+def test_a_loopback_base_url_replaces_the_default_api_base_of_the_provider() -> None:
+    llm = {**make_job_dict()["llm"], "baseUrl": "http://127.0.0.1:9/api/v1"}
+    job = make_job(llm=llm)
+
+    assert environment(job)["OPENROUTER__API_BASE"] == "http://127.0.0.1:9/api/v1"
+
+
+# #424-T03: every provider-specific name comes from the entry of the job's provider.
+def test_the_names_of_the_configuration_come_from_the_registry_entry_of_the_job(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = fake_provider()
+    monkeypatch.setitem(llm_providers.PROVIDERS, fake.id, fake)
+    llm = {**make_job_dict()["llm"], "provider": "fakeai", "model": "vendor/model-1"}
+    job = make_job(llm=llm)
+
+    env = environment(job)
+    secrets = build_secret_settings(job)
+    typed = build_typed_settings(make_job(llm={**llm, "fallbackModels": ["vendor/model-2"]}))
+
+    assert env["CONFIG__MODEL"] == "fakeai/vendor/model-1"
+    assert env["FAKEAI__API_BASE"] == "https://fakeai.invalid/v1"
+    assert "OPENROUTER__API_BASE" not in env
+    assert secrets["fakeai.key"] == API_KEY
+    assert "openrouter.key" not in secrets
+    assert typed["config.fallback_models"] == ["fakeai/vendor/model-2"]
