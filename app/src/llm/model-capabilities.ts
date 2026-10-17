@@ -26,6 +26,7 @@ import {
   MODEL_METADATA_MAX_BYTES,
   MODEL_METADATA_TIMEOUT_MS,
   type FetchLike,
+  type LlmProviderAdapter,
   type ModelCapabilities,
   type ModelCapabilityOutcome,
   type ModelCapabilityResult,
@@ -52,21 +53,24 @@ export const MODEL_CAPABILITY_FAILURE_CACHE_MS = 45 * 1000;
 export const MODEL_CONTEXT_WINDOW_KEEP_MS = 24 * 60 * 60 * 1000;
 const MAX_CACHED_MODELS = 200;
 
+/**
+ * Where the checker finds the adapter of a provider: the registry of the app, or one a test builds with a second
+ * provider. `get` throws for an id it does not know. `P` is the type of a provider id.
+ */
+export type AdapterLookup<P extends string = LlmProvider> = {
+  get(id: P): LlmProviderAdapter;
+};
+
 /** The memory is per provider and model; a provider id has no NUL, so the two parts cannot run together. */
-const cacheKey = (provider: LlmProvider, modelId: string) =>
+const cacheKey = (provider: string, modelId: string) =>
   `${provider}\0${modelId}`;
 
 /**
  * Asks the provider's metadata whether `modelId` supports tool calling. Never throws.
  */
-export async function checkModelCapabilities({
-  baseUrl,
-  modelId,
+export function checkModelCapabilities({
   provider = DEFAULT_LLM_PROVIDER,
-  fetchImpl,
-  timeoutMs,
-  log = console.error,
-  logAs,
+  ...input
 }: {
   /** The provider's API address (src/llm/endpoint.ts), never a value from a request. */
   baseUrl: string;
@@ -79,7 +83,27 @@ export async function checkModelCapabilities({
   /** What the log line names instead of the model id (the claim of a managed job names its tier, #280). */
   logAs?: string;
 }): Promise<ModelCapabilityResult> {
-  const adapter = llmProviderAdapters.get(provider);
+  return askAdapter(llmProviderAdapters.get(provider), input);
+}
+
+async function askAdapter(
+  adapter: LlmProviderAdapter,
+  {
+    baseUrl,
+    modelId,
+    fetchImpl,
+    timeoutMs,
+    log = console.error,
+    logAs,
+  }: {
+    baseUrl: string;
+    modelId: string;
+    fetchImpl?: FetchLike;
+    timeoutMs?: number;
+    log?: (line: string) => void;
+    logAs?: string;
+  },
+): Promise<ModelCapabilityResult> {
   const result = await adapter.checkModelCapabilities({
     baseUrl,
     modelId,
@@ -95,7 +119,7 @@ export async function checkModelCapabilities({
 }
 
 /** How a caller asks the checker. */
-export type ModelCapabilityCheckOptions = {
+export type ModelCapabilityCheckOptions<P extends string = LlmProvider> = {
   /**
    * The claim path (#280): an answer that is not `supported` is remembered for a short time, so a provider outage
    * does not stall every claim. A settings save leaves it out and always sees the provider as it is now.
@@ -104,26 +128,24 @@ export type ModelCapabilityCheckOptions = {
   /** What the log line names instead of the model id; a managed claim names its tier, which a member may know. */
   logAs?: string;
   /** The provider the model belongs to; the default provider when left out. */
-  provider?: LlmProvider;
+  provider?: P;
 };
 
-export type ModelCapabilityChecker = {
+export type ModelCapabilityChecker<P extends string = LlmProvider> = {
   check(
     modelId: string,
-    options?: ModelCapabilityCheckOptions,
+    options?: ModelCapabilityCheckOptions<P>,
   ): Promise<ModelCapabilityResult>;
   /**
    * The context window the last successful read of this model stated, kept for a day (null: never read or stated
    * none). The claim clamps the token budget of a managed job to it when a fresh read fails.
    */
-  lastKnownContextLength?(
-    modelId: string,
-    provider?: LlmProvider,
-  ): number | null;
+  lastKnownContextLength?(modelId: string, provider?: P): number | null;
 };
 
 /** `checkModelCapabilities` that remembers `supported` answers in memory for `ttlMs`. */
-export function createModelCapabilityChecker({
+export function createModelCapabilityChecker<P extends string = LlmProvider>({
+  adapters = llmProviderAdapters as unknown as AdapterLookup<P>, // `P` is `LlmProvider` when no lookup is given
   baseUrl,
   fetchImpl,
   timeoutMs,
@@ -133,8 +155,10 @@ export function createModelCapabilityChecker({
   windowKeepMs = MODEL_CONTEXT_WINDOW_KEEP_MS,
   now = Date.now,
 }: {
+  /** The adapters to ask; the app's registry unless a test brings its own. */
+  adapters?: AdapterLookup<P>;
   /** Read on every ask, so a changed address (the test stack's switch) is followed. */
-  baseUrl: (provider: LlmProvider) => string;
+  baseUrl: (provider: P) => string;
   fetchImpl?: FetchLike;
   timeoutMs?: number;
   log?: (line: string) => void;
@@ -142,7 +166,7 @@ export function createModelCapabilityChecker({
   failureTtlMs?: number;
   windowKeepMs?: number;
   now?: () => number;
-}): ModelCapabilityChecker {
+}): ModelCapabilityChecker<P> {
   type Entry = { until: number; result: ModelCapabilityResult };
   const remembered = new Map<string, Entry>();
   const failures = new Map<string, Entry>();
@@ -161,7 +185,7 @@ export function createModelCapabilityChecker({
 
   return {
     async check(modelId, options = {}) {
-      const provider = options.provider ?? DEFAULT_LLM_PROVIDER;
+      const provider = options.provider ?? (DEFAULT_LLM_PROVIDER as P);
       const key = cacheKey(provider, modelId);
       const hit = remembered.get(key);
       if (hit !== undefined && hit.until > now()) return hit.result;
@@ -172,10 +196,9 @@ export function createModelCapabilityChecker({
         failures.delete(key);
       }
 
-      const result = await checkModelCapabilities({
+      const result = await askAdapter(adapters.get(provider), {
         baseUrl: baseUrl(provider),
         modelId,
-        provider,
         ...(fetchImpl === undefined ? {} : { fetchImpl }),
         ...(timeoutMs === undefined ? {} : { timeoutMs }),
         ...(log === undefined ? {} : { log }),
@@ -196,7 +219,7 @@ export function createModelCapabilityChecker({
       return result;
     },
 
-    lastKnownContextLength(modelId, provider = DEFAULT_LLM_PROVIDER) {
+    lastKnownContextLength(modelId, provider = DEFAULT_LLM_PROVIDER as P) {
       const key = cacheKey(provider, modelId);
       const kept = windows.get(key);
       if (kept === undefined) return null;

@@ -34,6 +34,9 @@ describe("the OpenRouter adapter", () => {
       `a${"b".repeat(199)}`,
     ])
       expect(adapter.checkModelId(id), id).toBe(true);
+    // Upper case is valid in the first character and in the rest of the id.
+    for (const id of ["Qwen/Qwen3-32B", "Vendor/Model-A", "Model", "a/B"])
+      expect(adapter.checkModelId(id), id).toBe(true);
     for (const id of [
       "",
       " vendor/model",

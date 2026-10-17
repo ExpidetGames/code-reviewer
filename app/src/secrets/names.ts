@@ -6,12 +6,13 @@
 // new credential adds its name here. (Secrets of a workspace, such as its LLM key, are not here:
 // they belong to a workspace and are stored with it, see WORKSPACE_SECRET_NAMES below.)
 import { llmProviderDescriptors } from "../llm/providers/index.ts";
+import { ProviderRegistryError } from "../llm/providers/registry.ts";
 
 /** The operator's LLM key of each provider, from the registry (src/llm/providers/). */
 type OperatorLlmKeyName =
   (typeof llmProviderDescriptors.operatorSecretNames)[number];
 
-const FIXED_SECRET_NAMES = [
+export const FIXED_SECRET_NAMES = [
   "github_app_client_secret",
   "github_app_private_key",
   "github_app_webhook_secret",
@@ -19,13 +20,29 @@ const FIXED_SECRET_NAMES = [
 ] as const;
 
 /**
- * Every secret of the instance, in alphabetical order. The LLM keys of the operator (used by the workspaces whose
- * key mode is `managed`, #276) are one per provider, named by the provider's adapter.
+ * Every secret of the instance, in alphabetical order: the fixed names and the operator's LLM key of each provider
+ * (used by the workspaces whose key mode is `managed`, #276), named by the provider's adapter. A provider name that
+ * is a fixed name, or that another provider already uses, would put two secrets under one row id: that stops the app at
+ * start (`ProviderRegistryError`), like any other invalid adapter.
  */
-export const SECRET_NAMES: readonly SecretName[] = [
-  ...FIXED_SECRET_NAMES,
-  ...llmProviderDescriptors.operatorSecretNames,
-].sort();
+export function secretNamesOf(
+  operatorLlmKeyNames: readonly string[],
+): readonly SecretName[] {
+  const taken = new Set<string>(FIXED_SECRET_NAMES);
+  for (const name of operatorLlmKeyNames) {
+    if (taken.has(name))
+      throw new ProviderRegistryError(
+        "provider_secret_name_taken",
+        `operator key name "${name}" is already a secret name of the instance`,
+      );
+    taken.add(name);
+  }
+  return [...taken].sort() as SecretName[];
+}
+
+export const SECRET_NAMES: readonly SecretName[] = secretNamesOf(
+  llmProviderDescriptors.operatorSecretNames,
+);
 export type SecretName =
   (typeof FIXED_SECRET_NAMES)[number] | OperatorLlmKeyName;
 

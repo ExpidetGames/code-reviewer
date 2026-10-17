@@ -175,7 +175,7 @@ function readLlm(env: Env): LegacyLlm {
     provider,
     apiKey: key.key,
     model:
-      model !== "" && model !== DEFAULT_LLM_MODEL && isModelId(model)
+      model !== "" && model !== DEFAULT_LLM_MODEL && isModelId(model, provider)
         ? model
         : null,
   };

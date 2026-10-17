@@ -131,6 +131,39 @@ describe("the provider registry", () => {
   });
 
   // #423-T03
+  it("refuses two adapters sharing an operator secret name, although their workspace names differ", () => {
+    expect(
+      codeOf(() =>
+        createAdapterRegistry([
+          createFakeAdapter(),
+          createFakeAdapter({
+            id: "otherai",
+            secretNames: {
+              workspace: "llm_api_key.otherai",
+              operator: `operator_llm_key.${FAKE_PROVIDER_ID}`,
+            },
+          }),
+        ]),
+      ),
+    ).toBe("provider_secret_name_taken");
+  });
+
+  // #423-T03
+  it("throws for the id of a provider that is not in the registry instead of serving another one", () => {
+    const registry = createAdapterRegistry([
+      ...llmProviderAdapters.providers,
+      createFakeAdapter(),
+    ]);
+
+    expect(() => (registry.get as (id: string) => unknown)("nope")).toThrow(
+      ProviderRegistryError,
+    );
+    expect(() => llmProviderDescriptors.get("nope" as never)).toThrow(
+      ProviderRegistryError,
+    );
+  });
+
+  // #423-T03
   it("has a stable list of error codes", () => {
     expect([...PROVIDER_REGISTRY_ERROR_CODES]).toEqual([
       "registry_empty",

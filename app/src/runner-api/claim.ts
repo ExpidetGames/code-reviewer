@@ -41,6 +41,7 @@ import type {
 import type { RunnerQueue } from "../jobs/runner-queue.ts";
 import type { ClaimResult, Job, JobErrorCode } from "../jobs/job-types.ts";
 import type { ResolvedEntitlements } from "../workspaces/entitlements.ts";
+import { DEFAULT_LLM_PROVIDER } from "../llm/providers/index.ts";
 import { revealLlmAccess, type LlmAccessResult } from "../llm/access.ts";
 import {
   MAX_LLM_CONTEXT_TOKENS,
@@ -281,7 +282,7 @@ function llmOptionsOf(
   const { model, maxTokens } = options.llm ?? {};
   const chosen: { model?: string; maxTokens?: number } = {};
   if (model !== undefined && model !== null) {
-    if (!isModelId(model)) return null;
+    if (!isModelId(model, DEFAULT_LLM_PROVIDER)) return null;
     chosen.model = model;
   }
   if (maxTokens !== undefined && maxTokens !== null) {
@@ -335,7 +336,7 @@ function dynamicOptionsOf(options: JobOptions): DynamicReviewOptions | null {
   const dynamic = options.dynamic;
   if (dynamic === undefined) return null;
   if (
-    !isModelId(dynamic.model) ||
+    !isModelId(dynamic.model, DEFAULT_LLM_PROVIDER) ||
     dynamic.model.length > MAX_DYNAMIC_MODEL_CHARS
   )
     return null;

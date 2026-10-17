@@ -53,6 +53,14 @@ type Candidate = Record<string, unknown>;
 
 const isText = (value: unknown): value is string =>
   typeof value === "string" && value.trim() !== "";
+const isHttpUrl = (value: string): boolean => {
+  // `URL.canParse` is not in every browser this module reaches (it is imported by client components).
+  try {
+    return /^https?:$/.test(new URL(value).protocol);
+  } catch {
+    return false;
+  }
+};
 const isRecord = (value: unknown): value is Candidate =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
@@ -88,11 +96,7 @@ function checkDescriptor(candidate: Candidate): void {
   )
     invalid(id, "id");
   if (!isText(candidate.label)) invalid(id, "label");
-  if (
-    !isText(candidate.apiBaseUrl) ||
-    !URL.canParse(candidate.apiBaseUrl) ||
-    !/^https?:$/.test(new URL(candidate.apiBaseUrl).protocol)
-  )
+  if (!isText(candidate.apiBaseUrl) || !isHttpUrl(candidate.apiBaseUrl))
     invalid(id, "apiBaseUrl");
   const secrets = candidate.secretNames;
   if (

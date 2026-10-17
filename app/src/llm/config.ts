@@ -55,12 +55,10 @@ export const MAX_LLM_CONTEXT_TOKENS = 10_000_000;
 /**
  * Whether `model` has the shape of a model id of the provider: the rule of the provider's adapter, which is
  * what its runner accepts for `llm.model`. A model id that fails it is never sent anywhere. The provider is
- * the default one until a project can choose.
+ * a required argument: a caller that has none yet passes `DEFAULT_LLM_PROVIDER`, so the day a project can choose it
+ * is a place to change, not a silent default.
  */
-export function isModelId(
-  model: string,
-  provider: LlmProvider = DEFAULT_LLM_PROVIDER,
-): boolean {
+export function isModelId(model: string, provider: LlmProvider): boolean {
   return llmProviderDescriptors.get(provider).checkModelId(model);
 }
 
@@ -145,7 +143,7 @@ function readModel(
 ): string {
   const value = raw?.trim();
   if (!value) return DEFAULT_LLM_MODEL;
-  if (!isModelId(value)) {
+  if (!isModelId(value, DEFAULT_LLM_PROVIDER)) {
     warnings.push({ code: "LLM_MODEL_INVALID", variable: "LLM_MODEL" });
     return DEFAULT_LLM_MODEL;
   }

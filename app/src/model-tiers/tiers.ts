@@ -7,6 +7,7 @@
 // for a tier, and the ids never leave the server (the operator API and the runner's job are the two exceptions).
 import { MAX_FIELD_LENGTH } from "../operator-api/contract.ts";
 import { isModelId as hasModelIdShape } from "../llm/config.ts";
+import { DEFAULT_LLM_PROVIDER } from "../llm/providers/index.ts";
 import type { ProjectReviewKind } from "../review-settings/settings.ts";
 
 /** The levels a workspace chooses from. Lower case names: the usage record carries one as `model_tier`. */
@@ -73,7 +74,10 @@ function refused(code: ModelTierCheckCode, field?: string): CheckTiersResult {
 }
 
 function isModelId(text: string): boolean {
-  return text.length <= MAX_MODEL_ID_CHARS && hasModelIdShape(text);
+  return (
+    text.length <= MAX_MODEL_ID_CHARS &&
+    hasModelIdShape(text, DEFAULT_LLM_PROVIDER)
+  );
 }
 
 /**

@@ -32,16 +32,16 @@ are derived from it.
 
 What moved behind the adapter, with the module that stays and does the part that is the same for every provider:
 
-| Was                                          | Now                                                                                                                              |
-| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| API address in `endpoint.ts`                 | `apiBaseUrl`; `endpoint.ts` keeps the test-stack override (`ALLOW_TEST_LLM_ENDPOINTS`)                                           |
-| The key test in `key-test.ts`                | `testKey`; `key-test.ts` keeps the limits per workspace and for the instance                                                     |
-| The metadata read in `model-capabilities.ts` | `checkModelCapabilities`; `model-capabilities.ts` keeps logging and the short memory, **keyed by provider and model**            |
-| `MODEL_NAME_PATTERN`                         | `checkModelId`, used through `isModelId` (`config.ts`)                                                                           |
-| `review-settings/model-pricing.ts`           | `priceOf` and `suggestedModels`                                                                                                  |
-| `DEFAULT_LLM_MODEL`, `DEFAULT_DYNAMIC_MODEL` | `defaultModels.diff`, `defaultModels.dynamic` (the exports stay)                                                                 |
-| `llm_api_key`, `operator_llm_key`            | `secretNames`. **They never change**: the ciphertext is bound to the name, so a stored key would stop decrypting (ADR 0005, 2.5) |
-| `OPERATOR_KEY_PROVIDER`, `?? "openrouter"`   | `DEFAULT_LLM_PROVIDER`                                                                                                           |
+| Was                                          | Now                                                                                                                                                                                                                                  |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| API address in `endpoint.ts`                 | `apiBaseUrl`; `endpoint.ts` keeps the test-stack override (`ALLOW_TEST_LLM_ENDPOINTS`)                                                                                                                                               |
+| The key test in `key-test.ts`                | `testKey`; `key-test.ts` keeps the limits per workspace and for the instance                                                                                                                                                         |
+| The metadata read in `model-capabilities.ts` | `checkModelCapabilities`; `model-capabilities.ts` keeps logging and the short memory, **keyed by provider and model**                                                                                                                |
+| `MODEL_NAME_PATTERN`                         | `checkModelId`, used through `isModelId` (`config.ts`)                                                                                                                                                                               |
+| `review-settings/model-pricing.ts`           | `priceOf` and `suggestedModels`                                                                                                                                                                                                      |
+| `DEFAULT_LLM_MODEL`, `DEFAULT_DYNAMIC_MODEL` | `defaultModels.diff`, `defaultModels.dynamic` (the exports stay)                                                                                                                                                                     |
+| `llm_api_key`, `operator_llm_key`            | `secretNames`. **They never change**: the ciphertext is bound to the name, so a stored key would stop decrypting (ADR 0005, 2.5). An operator name must differ from the fixed secret names (`secretNamesOf`, `src/secrets/names.ts`) |
+| `OPERATOR_KEY_PROVIDER`, `?? "openrouter"`   | `DEFAULT_LLM_PROVIDER`                                                                                                                                                                                                               |
 
 `costReporting` is `provider_reported` when the provider says what a call cost (every cost limit relies on that) or
 `none`. Nothing reads `none` yet; the policy for such a provider comes with the first one (ADR 0005, 2.4).

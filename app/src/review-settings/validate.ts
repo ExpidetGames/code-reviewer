@@ -5,6 +5,7 @@
 // person reads is the UI's business, and a value is never echoed back.
 import { REVIEW_COMMANDS, type ReviewCommand } from "../integrations/types.ts";
 import { isModelId } from "../llm/config.ts";
+import { DEFAULT_LLM_PROVIDER } from "../llm/providers/index.ts";
 import { isModelTier, type ModelTier } from "../model-tiers/tiers.ts";
 import {
   PROJECT_DYNAMIC_LIMITS,
@@ -98,7 +99,7 @@ function modelName(value: unknown): FieldResult<string> {
   if (typeof value !== "string") return fail("INVALID_TYPE");
   const name = value.trim();
   if (name === "") return fail("EMPTY");
-  if (!isModelId(name)) return fail("INVALID_FORMAT");
+  if (!isModelId(name, DEFAULT_LLM_PROVIDER)) return fail("INVALID_FORMAT");
   return ok(name);
 }
 
