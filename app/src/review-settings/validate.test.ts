@@ -503,6 +503,28 @@ describe("validating the project-only settings", () => {
     ]);
   });
 
+  // #405-T28
+  it("accept each verdict mode, and null as the reset to the default", () => {
+    for (const reviewVerdict of ["off", "blocking", "any", null])
+      expect(validateProjectSettingsPatch({ reviewVerdict })).toEqual({
+        ok: true,
+        value: { review: {}, dynamic: { reviewVerdict } },
+      });
+  });
+
+  // #405-T28
+  it("refuse an unknown verdict mode with a stable code and never echo it", () => {
+    expect(projectIssuesOf({ reviewVerdict: "always" })).toEqual([
+      { field: "reviewVerdict", code: "INVALID_FORMAT" },
+    ]);
+    expect(projectIssuesOf({ reviewVerdict: true })).toEqual([
+      { field: "reviewVerdict", code: "INVALID_TYPE" },
+    ]);
+    expect(
+      JSON.stringify(projectIssuesOf({ reviewVerdict: "sk-dummy-secret" })),
+    ).not.toContain("sk-dummy-secret");
+  });
+
   // #200 review: the model, like the skill, has an explicit `null` reset to the built-in default.
   it("accept a null Dynamic model as the reset to the built-in default", () => {
     expect(validateProjectSettingsPatch({ dynamicModel: null })).toEqual({
@@ -535,6 +557,9 @@ describe("validating the project-only settings", () => {
     expect(issuesOf({ reviewSkill: "text" })).toEqual([
       { field: "reviewSkill", code: "UNKNOWN_FIELD" },
     ]);
+    expect(issuesOf({ reviewVerdict: "any" })).toEqual([
+      { field: "reviewVerdict", code: "UNKNOWN_FIELD" },
+    ]);
   });
 
   it("reads stored project-only fields and drops the ones this version would not accept", () => {
@@ -558,6 +583,16 @@ describe("validating the project-only settings", () => {
       }),
     ).toEqual({});
     expect(parseStoredProjectDynamicOverrides({ reviewSkill: null })).toEqual(
+      {},
+    );
+    // #405-T28: a stored verdict mode is read, one this version does not know is dropped (the default applies).
+    expect(
+      parseStoredProjectDynamicOverrides({ reviewVerdict: "any" }),
+    ).toEqual({ reviewVerdict: "any" });
+    expect(
+      parseStoredProjectDynamicOverrides({ reviewVerdict: "sometimes" }),
+    ).toEqual({});
+    expect(parseStoredProjectDynamicOverrides({ reviewVerdict: null })).toEqual(
       {},
     );
     // #200 review: a stored null model is "no override" too, not a stored value.

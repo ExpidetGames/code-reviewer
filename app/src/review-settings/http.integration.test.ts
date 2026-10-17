@@ -372,6 +372,52 @@ describe("the project-only settings over HTTP", () => {
     });
   });
 
+  // #405-T28
+  it("saves the verdict mode and reads it back, and refuses an unknown one with a stable code", async () => {
+    const app = await setup();
+
+    const saved = await app.putProject({ settings: { reviewVerdict: "off" } });
+    const refused = await app.putProject({
+      settings: { reviewVerdict: "always" },
+    });
+
+    expect(saved.status).toBe(200);
+    expect(await saved.json()).toMatchObject({
+      dynamic: {
+        effective: { reviewVerdict: "off" },
+        defaults: { reviewVerdict: "blocking" },
+        sources: { reviewVerdict: "project" },
+      },
+    });
+    expect(refused.status).toBe(400);
+    expect(await refused.json()).toEqual({
+      error: "REVIEW_SETTINGS_INVALID",
+      issues: [{ field: "reviewVerdict", code: "INVALID_FORMAT" }],
+    });
+    const read = await app.handlers.getProject(
+      new Request(`${URL_BASE}${app.projectPath}`),
+      app.first.id,
+    );
+    expect(await read.json()).toMatchObject({
+      dynamic: { effective: { reviewVerdict: "off" } },
+    });
+  });
+
+  // #405-T28
+  it("cannot become a workspace default: the global route refuses the verdict mode", async () => {
+    const app = await setup();
+
+    const response = await app.putGlobal({
+      settings: { reviewVerdict: "any" },
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: "REVIEW_SETTINGS_INVALID",
+      issues: [{ field: "reviewVerdict", code: "UNKNOWN_FIELD" }],
+    });
+  });
+
   // #194-T05
   it("refuses an oversize skill with a stable code and never echoes the value", async () => {
     const app = await setup();

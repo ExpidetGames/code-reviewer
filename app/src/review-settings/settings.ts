@@ -104,6 +104,8 @@ export type ProjectDynamicSettings = {
   dynamicModel: string;
   /** The project's skill override, or `null` for the shipped default skill. */
   reviewSkill: string | null;
+  /** What a finished review does on its pull request besides the check run (#405): applies to both kinds. */
+  reviewVerdict: ReviewVerdictMode;
 };
 
 /** A project layer: only the fields somebody set. */
@@ -118,6 +120,8 @@ export type ProjectDynamicPatch = {
   reviewKind?: ProjectReviewKind;
   dynamicModel?: string | null;
   reviewSkill?: string | null;
+  /** `null` clears the override, so the default (`blocking`) applies again (#405). */
+  reviewVerdict?: ReviewVerdictMode | null;
 };
 
 export type ProjectDynamicSettingField = keyof ProjectDynamicSettings;
@@ -126,6 +130,7 @@ export const PROJECT_DYNAMIC_SETTING_FIELDS = [
   "reviewKind",
   "dynamicModel",
   "reviewSkill",
+  "reviewVerdict",
 ] as const satisfies readonly ProjectDynamicSettingField[];
 
 export const REVIEW_SETTING_FIELDS = [
@@ -174,6 +179,7 @@ export function builtInProjectDynamicSettings(
     reviewKind: "diff",
     dynamicModel,
     reviewSkill: null,
+    reviewVerdict: DEFAULT_REVIEW_VERDICT_MODE,
   };
 }
 

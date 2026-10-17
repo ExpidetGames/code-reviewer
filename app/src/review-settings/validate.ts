@@ -9,6 +9,8 @@ import { isModelTier, type ModelTier } from "../model-tiers/tiers.ts";
 import {
   PROJECT_DYNAMIC_LIMITS,
   PROJECT_DYNAMIC_SETTING_FIELDS,
+  REVIEW_VERDICT_MODES,
+  type ReviewVerdictMode,
   PROJECT_REVIEW_KINDS,
   REVIEW_SETTING_FIELDS,
   REVIEW_SETTING_LIMITS,
@@ -192,6 +194,14 @@ function reviewKind(value: unknown): FieldResult<ProjectReviewKind> {
   return known === undefined ? fail("INVALID_FORMAT") : ok(known);
 }
 
+/** The verdict mode of a project (#405): one of the known modes, or `null` to clear the override. */
+function reviewVerdict(value: unknown): FieldResult<ReviewVerdictMode | null> {
+  if (value === null) return ok(null);
+  if (typeof value !== "string") return fail("INVALID_TYPE");
+  const known = REVIEW_VERDICT_MODES.find((mode) => mode === value);
+  return known === undefined ? fail("INVALID_FORMAT") : ok(known);
+}
+
 // The skill is untrusted text: a size bound in UTF-8 bytes (multibyte characters count as their
 // bytes), no forbidden control characters, no unpaired surrogate. Those are checked on the raw text
 // before an empty (or blank) value is read as an explicit reset to the shipped default, so forbidden
@@ -224,6 +234,7 @@ const DYNAMIC_FIELD_CHECKS: {
   // The same rule as the Diff model: the identifier is kept literally, no provider rewrite (#194-T08).
   dynamicModel: dynamicModelValue,
   reviewSkill,
+  reviewVerdict,
 };
 
 export type ProjectSettingsPatch = {
@@ -307,6 +318,8 @@ export function parseStoredProjectDynamicOverrides(
     overrides.dynamicModel = value.dynamicModel;
   if (typeof value.reviewSkill === "string")
     overrides.reviewSkill = value.reviewSkill;
+  if (typeof value.reviewVerdict === "string")
+    overrides.reviewVerdict = value.reviewVerdict;
   return overrides;
 }
 
