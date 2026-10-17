@@ -10,5 +10,8 @@
   "periodStart": "2026-10-01T00:00:00.000Z",
   "suspended": false,
   "suspensionCode": null,
+  "modelAccess": {
+    "catalogEntries": null
+  },
   "updatedAt": "2026-10-14T12:00:00.000Z"
 }
