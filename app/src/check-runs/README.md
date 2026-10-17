@@ -14,12 +14,12 @@ off). Worker tokens do not get `checks: write`.
 throws, never changes the job, and is safe to repeat; the row `job_check_runs` (one per job, `src/db/repositories/
 job-check-runs-repository.ts`, scoped by workspace) keeps what was synced, so a repeat with nothing new makes no call.
 
-| Caller | When | File |
-|---|---|---|
-| Queues, after the response (`after()`) | enqueue (and the jobs it superseded), claim, result, release, cancel, a heartbeat that learns of a supersede or a hard timeout | `notifying-queues.ts`, attached in `src/jobs/shared.ts` |
-| `reconcileDue()` from the sweep | serverless (Vercel): the step `checks` repairs what the requests did not (lease expiry, give-up, timeout) | `src/dispatch/sweep.ts` |
-| `reconcileDue()` from the opportunistic maintenance | webhook mode of a hosted deployment, no timer | `src/dispatch/opportunistic.ts` |
-| `reconcileDue()` from a timer every minute | a long-lived server (Compose, Coolify), production only | `startup.ts`, `src/instrumentation.ts` |
+| Caller                                              | When                                                                                                                           | File                                                    |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------- |
+| Queues, after the response (`after()`)              | enqueue (and the jobs it superseded), claim, result, release, cancel, a heartbeat that learns of a supersede or a hard timeout | `notifying-queues.ts`, attached in `src/jobs/shared.ts` |
+| `reconcileDue()` from the sweep                     | serverless (Vercel): the step `checks` repairs what the requests did not (lease expiry, give-up, timeout)                      | `src/dispatch/sweep.ts`                                 |
+| `reconcileDue()` from the opportunistic maintenance | webhook mode of a hosted deployment, no timer                                                                                  | `src/dispatch/opportunistic.ts`                         |
+| `reconcileDue()` from a timer every minute          | a long-lived server (Compose, Coolify), production only                                                                        | `startup.ts`, `src/instrumentation.ts`                  |
 
 So no check stays `in_progress`: a job that ends without a request of its own is found by the next reconcile.
 
