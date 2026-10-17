@@ -1,97 +1,144 @@
 name: Golden snapshot
 
-# Builds the golden snapshot of the hosted deployment (#316, #330): a builder VM on Vercel Sandbox installs a
+# Builds the golden snapshot of the hosted deployment (#316, #330, #403): a builder VM on Vercel Sandbox installs a
 # pinned Docker, builds the Worker image from this commit, stops the daemon cleanly and snapshots; a second VM
 # created from that snapshot then scans it for secrets and job data, checks the image id and runs the image's own
-# self-check. Only a snapshot that passed all of it gets a record (the artifact `golden-snapshot-record`). The
-# Dispatcher is configured with that record by hand (docs/golden-snapshot.md); nothing here changes a deployment.
+# self-check. Only a snapshot that passed all of it gets a record (the artifact `golden-snapshot-record`) and the
+# outputs below.
+#
+# deploy-production.yml calls it when the Worker image inputs changed since the commit of the snapshot in use (or
+# there is none): the new snapshot is then proven by the canary on the staged Dispatcher and made current only after
+# the promotion. This workflow never wires a snapshot into a deployment, never writes to Infisical and never removes
+# a snapshot of an earlier run (`--skip-retention`): the deployment does all of that, in that order, so that the
+# snapshot production runs is never at risk. Started by hand it is a rehearsal: it builds and checks a snapshot and
+# leaves it; the next deployment that cleans up removes it. To roll a new snapshot out without a change of the
+# image inputs (the platform's base image changed, say) run Deploy production with `rebuild_snapshot`.
 #
 # It never runs for a pull request or a fork, and it never runs job code: the builder VM runs our own build and the
-# Worker image's `probe` mode, nothing from a pull request. The Vercel token is read by the build step only, from the
-# environment `hosted-snapshot`, and is never in a command line or a log. A push to main runs it only when the
-# repository variable GOLDEN_SNAPSHOT_ENABLED is "true" (set it once the secrets exist); a manual run needs no variable.
+# Worker image's `probe` mode, nothing from a pull request. The Vercel token, the team and the Dispatcher's project
+# id are loaded from Infisical /ci just before the build step, after the dependencies were installed, with the
+# sign-in secrets of the environment `production` (restricted to main), and are never in a command line or a log.
 on:
   workflow_dispatch:
     inputs:
       target:
-        description: "Build target of runner/Dockerfile"
-        default: sandbox
+        description: "Build target of runner/Dockerfile; empty is the default of dispatcher/src/snapshot/config.ts (sandbox)"
+        default: ""
         required: false
-      pinned_snapshot:
-        description: "Snapshot id the Dispatcher is configured with now (retention never deletes it)"
+  workflow_call:
+    inputs:
+      target:
+        description: "Build target of runner/Dockerfile; empty is the default of dispatcher/src/snapshot/config.ts (sandbox)"
+        default: ""
         required: false
-  push:
-    branches: [main]
+        type: string
+    outputs:
+      snapshot-id:
+        description: The snapshot the Sandbox-Launcher creates job VMs from
+        value: ${{ jobs.build.outputs.snapshot-id }}
+      image-digest:
+        description: The id of the Worker image inside it
+        value: ${{ jobs.build.outputs.image-digest }}
+      commit:
+        description: The commit it was built from
+        value: ${{ jobs.build.outputs.commit }}
 
 permissions:
   contents: read
 
 # Runs queue one behind the other: cancelling a run could leave a builder VM and a half made snapshot behind.
+# A rehearsal by hand and the build a deployment calls have groups of their own: a pending rehearsal must not replace
+# the pending build of a deployment (GitHub keeps one pending run per group). `github.workflow` is the name of the
+# top-level workflow, so inside a call it is the caller's.
 concurrency:
-  group: golden-snapshot
+  group: ${{ github.workflow == 'Golden snapshot' && 'golden-snapshot-rehearsal' || 'golden-snapshot-deploy' }}
   cancel-in-progress: false
 
 jobs:
   build:
     name: Build, check and record the golden snapshot
-    # The job's own condition (a manual run executes the code of the branch it is started on, with the environment's
-    # secrets): only main and development, as the canary. The environment's own branch rule is the second layer.
-    if: ${{ github.repository == 'ExpidetGames/code-reviewer' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/development') && (github.event_name == 'workflow_dispatch' || vars.GOLDEN_SNAPSHOT_ENABLED == 'true') }}
+    # The job's own condition guards against an accident; the boundary is the environment `production`, whose
+    # deployment branches are restricted to main (docs/deployment-vercel.md, section 2.1).
+    if: ${{ github.repository == 'ExpidetGames/code-reviewer' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
-    # Holds VERCEL_TOKEN, VERCEL_TEAM_ID and VERCEL_PROJECT_ID; protect it with a required reviewer if wanted.
-    environment: hosted-snapshot
+    environment: production
     permissions:
       contents: read
+    outputs:
+      snapshot-id: ${{ steps.record.outputs.snapshot-id }}
+      image-digest: ${{ steps.record.outputs.image-digest }}
+      commit: ${{ steps.record.outputs.commit }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
           package_json_file: dispatcher/package.json
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version-file: .nvmrc
-          cache: pnpm
-          cache-dependency-path: dispatcher/pnpm-lock.yaml
       - name: Install dependencies
         working-directory: dispatcher
         run: pnpm install --frozen-lockfile
       # Tracked files of this commit only: the build context cannot hold an untracked file or a credential.
       - name: Archive the commit
         run: git archive --format=tar.gz --output "$RUNNER_TEMP/context.tgz" HEAD
+      # The snapshot has to be in the Dispatcher's project, because the Launcher creates job VMs in the project it
+      # runs in. VERCEL_TOKEN and VERCEL_TEAM_ID are exported under the names the build reads.
+      - name: Load the Vercel credentials from Infisical
+        uses: ./.github/actions/infisical-ci-secrets
+        with:
+          secret-names: VERCEL_TOKEN VERCEL_TEAM_ID VERCEL_DISPATCHER_PROJECT_ID
+          client-id: ${{ secrets.INFISICAL_CLIENT_ID }}
+          client-secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+          domain: ${{ secrets.INFISICAL_DOMAIN }}
+          project-slug: ${{ secrets.INFISICAL_PROJECT_SLUG }}
+          consequence: No snapshot was built.
       - name: Build, check and record the snapshot
         working-directory: dispatcher
         env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          VERCEL_TEAM_ID: ${{ secrets.VERCEL_TEAM_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-          TARGET: ${{ inputs.target || 'sandbox' }}
-          PINNED: ${{ inputs.pinned_snapshot }}
+          VERCEL_PROJECT_ID: ${{ env.VERCEL_DISPATCHER_PROJECT_ID }}
+          TARGET: ${{ inputs.target }}
         run: |
+          set -euo pipefail
           args=(
             --context "$RUNNER_TEMP/context.tgz"
             --vm-prepare ../docker/sandbox/vm-prepare.sh
             --out "$RUNNER_TEMP/golden-snapshot.json"
             --commit "$GITHUB_SHA"
-            --target "$TARGET"
+            --skip-retention
           )
-          if [ -n "$PINNED" ]; then args+=(--pin-snapshot "$PINNED"); fi
+          # The default target is the one in dispatcher/src/snapshot/config.ts, an input of the snapshot: it is not
+          # repeated here, where a change would go unseen.
+          if [ -n "$TARGET" ]; then
+            args+=(--target "$TARGET")
+          fi
           pnpm snapshot:build "${args[@]}"
+      - name: Read the record
+        id: record
+        run: |
+          set -euo pipefail
+          {
+            echo "snapshot-id=$(jq -r .snapshotId "$RUNNER_TEMP/golden-snapshot.json")"
+            echo "image-digest=$(jq -r .imageDigest "$RUNNER_TEMP/golden-snapshot.json")"
+            echo "commit=$(jq -r .commit "$RUNNER_TEMP/golden-snapshot.json")"
+          } >> "$GITHUB_OUTPUT"
       - name: Show the record
         run: |
           {
             echo "### Golden snapshot"
             echo
-            echo "Set these in the Dispatcher project (docs/golden-snapshot.md), after the canary passed on the new snapshot:"
+            echo "Not wired into anything yet. A deployment makes it current after its canary passed and the promotion went through (docs/deployment-vercel.md, section 5.1)."
             echo
             echo '```json'
             cat "$RUNNER_TEMP/golden-snapshot.json"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Keep the record
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: golden-snapshot-record
           path: ${{ runner.temp }}/golden-snapshot.json

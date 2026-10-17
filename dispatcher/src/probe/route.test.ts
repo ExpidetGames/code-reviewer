@@ -42,6 +42,8 @@ const DENIED: ProbeResult = {
 function build(
   probe?: () => Promise<ProbeResult>,
   engines: ("pr-agent" | "opencode")[] = ["pr-agent", "opencode"],
+  imageDigest?: string,
+  snapshotId?: string,
 ) {
   const launcher = createFakeLauncher(probe === undefined ? {} : { probe });
   const logger = recordingLogger();
@@ -53,6 +55,8 @@ function build(
     trigger: webhookTrigger({
       keys: [{ kid: KEY_ID, secret: SIGNING_SECRET }],
     }),
+    ...(imageDigest === undefined ? {} : { imageDigest }),
+    ...(snapshotId === undefined ? {} : { snapshotId }),
   });
   return { app, launcher, logger };
 }
@@ -233,5 +237,113 @@ describe("POST /probe", () => {
       failure: "probe_not_supported",
       ok: true,
     });
+  });
+});
+
+describe("the image id in the probe report", () => {
+  const DIGEST = `sha256:${"a".repeat(64)}`;
+
+  // #403-T12
+  it("names the Worker image id this deployment is configured with, so that a deploy step can tell which image it proved", async () => {
+    const { app } = build(() => Promise.resolve(PASSED), undefined, DIGEST);
+
+    const response = await post(app, authorized);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ imageDigest: DIGEST });
+  });
+
+  // #403-T12
+  it("leaves it out when no image is configured, and never takes it from anything but the configuration", async () => {
+    const { app } = build(() => Promise.resolve(PASSED));
+
+    const body = (await (await post(app, authorized)).json()) as Record<
+      string,
+      unknown
+    >;
+
+    expect(body).not.toHaveProperty("imageDigest");
+  });
+
+  // #403-T12
+  it("drops a value that is not an image id", async () => {
+    const { app } = build(
+      () => Promise.resolve(PASSED),
+      undefined,
+      "sha256:not-a-digest",
+    );
+
+    const body = (await (await post(app, authorized)).json()) as Record<
+      string,
+      unknown
+    >;
+
+    expect(body).not.toHaveProperty("imageDigest");
+  });
+
+  // #403-T12
+  it("is not shown to a caller without the credential", async () => {
+    const { app } = build(() => Promise.resolve(PASSED), undefined, DIGEST);
+
+    const response = await post(app);
+
+    expect(response.status).toBe(401);
+    expect(JSON.stringify(await response.json())).not.toContain(DIGEST);
+  });
+});
+
+describe("the snapshot id in the probe report", () => {
+  // #403-T12
+  it("names the snapshot this deployment creates job VMs from, so that a pair that did not reach it is seen", async () => {
+    const { app } = build(
+      () => Promise.resolve(PASSED),
+      undefined,
+      undefined,
+      "snap_example01",
+    );
+
+    const response = await post(app, authorized);
+
+    expect(await response.json()).toMatchObject({
+      snapshotId: "snap_example01",
+    });
+  });
+
+  // #403-T12
+  it.each(["", "snap x", "snap_\nid", "a".repeat(200)])(
+    "drops %j: it is not a snapshot id",
+    async (value) => {
+      const { app } = build(
+        () => Promise.resolve(PASSED),
+        undefined,
+        undefined,
+        value,
+      );
+
+      const body = (await (await post(app, authorized)).json()) as Record<
+        string,
+        unknown
+      >;
+
+      expect(body).not.toHaveProperty("snapshotId");
+    },
+  );
+
+  // #403-T12
+  it("leaves it out when none is configured and from a refused call", async () => {
+    const none = build(() => Promise.resolve(PASSED));
+    expect(await (await post(none.app, authorized)).json()).not.toHaveProperty(
+      "snapshotId",
+    );
+
+    const refused = build(
+      () => Promise.resolve(PASSED),
+      undefined,
+      undefined,
+      "snap_example01",
+    );
+    expect(
+      JSON.stringify(await (await post(refused.app)).json()),
+    ).not.toContain("snap_example01");
   });
 });

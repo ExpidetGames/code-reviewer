@@ -26,6 +26,11 @@ export type PipelineConfig = {
   requiredEngines: readonly string[];
   /** The memory limit of the probe container (the spike used 1.5 GB). */
   probeMemory: string;
+  /**
+   * Whether the run removes older builders and their snapshots when it is done. The deployment pipeline (#403) turns
+   * it off: it removes them itself, after the promotion, so that the snapshot production runs is never at risk.
+   */
+  retention: boolean;
   /** How many snapshots retention keeps (the current and the previous ones). */
   keep: number;
   /** Snapshot ids retention never removes: the one the Dispatcher is configured with. */
@@ -48,6 +53,7 @@ export const DEFAULT_CONFIG: PipelineConfig = {
   imageTag: "code-reviewer-worker:golden",
   requiredEngines: ["pr-agent", "opencode"],
   probeMemory: "1536m",
+  retention: true,
   keep: 2,
   pinnedSnapshotIds: [],
 };
@@ -129,6 +135,7 @@ export function resolveConfig(
       4,
     ),
     probeMemory: text("probeMemory", merged.probeMemory, MEMORY),
+    retention: merged.retention === false ? false : true,
     keep: integer("keep", merged.keep, 1, 10),
     pinnedSnapshotIds: list(
       "pinnedSnapshotIds",

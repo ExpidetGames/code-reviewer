@@ -14,6 +14,7 @@ const config = JSON.parse(readFileSync(join(ROOT, "vercel.json"), "utf8")) as {
   regions?: string[];
   functions?: Record<string, { maxDuration?: number }>;
   crons?: Array<{ path: string; schedule: string }>;
+  git?: { deploymentEnabled?: boolean };
 };
 
 // 800 s is generally available on Pro; up to 1800 s (30 minutes) is an extended maximum in beta for Pro and
@@ -21,6 +22,11 @@ const config = JSON.parse(readFileSync(join(ROOT, "vercel.json"), "utf8")) as {
 const PRO_EXTENDED_MAXIMUM_SECONDS = 1800;
 
 describe("vercel.json of the Dispatcher", () => {
+  // #403-T10
+  it("switches Git auto-deploy off: the project is deployed by the production workflow and by nothing else", () => {
+    expect(config.git).toStrictEqual({ deploymentEnabled: false });
+  });
+
   // #329-R08
   it("runs the function in fra1, the region of the Sandbox VMs and snapshots", () => {
     expect(config.regions).toStrictEqual(["fra1"]);

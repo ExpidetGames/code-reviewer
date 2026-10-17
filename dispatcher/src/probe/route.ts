@@ -17,9 +17,19 @@ export type ProbeRouteOptions = {
   engines: readonly Engine[];
   launcher: Launcher;
   logger: Logger;
+  /**
+   * The Worker image id this deployment is configured with (`SANDBOX_IMAGE_DIGEST`): named in the report so that a
+   * deploy step can tell which image its canary proved. Dropped unless it has the shape of an image id.
+   */
+  imageDigest?: string;
+  /** The golden snapshot this deployment creates job VMs from (`SANDBOX_SNAPSHOT_ID`): named for the same reason. */
+  snapshotId?: string;
   /** ISO time for a report the route makes itself. */
   now?: () => Date;
 };
+
+const IMAGE_ID = /^sha256:[0-9a-f]{64}$/;
+const SNAPSHOT_ID = /^[A-Za-z0-9][A-Za-z0-9_.-]{2,127}$/;
 
 function digest(value: string): Buffer {
   return createHash("sha256").update(value, "utf8").digest();
@@ -92,6 +102,15 @@ export function mountProbeRoute(app: Hono, options: ProbeRouteOptions): void {
     );
     logger.info("probe_requested", { status: result.status, ok });
     c.header("cache-control", "no-store");
-    return c.json({ version: 1, ok, ...result }, ok ? 200 : 503);
+    const imageDigest = IMAGE_ID.test(options.imageDigest ?? "")
+      ? { imageDigest: options.imageDigest }
+      : {};
+    const snapshotId = SNAPSHOT_ID.test(options.snapshotId ?? "")
+      ? { snapshotId: options.snapshotId }
+      : {};
+    return c.json(
+      { version: 1, ok, ...result, ...imageDigest, ...snapshotId },
+      ok ? 200 : 503,
+    );
   });
 }

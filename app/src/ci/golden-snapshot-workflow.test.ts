@@ -29,6 +29,7 @@ type Job = {
   environment?: string;
   permissions?: Record<string, string>;
   steps: Step[];
+  outputs?: Record<string, string>;
   "runs-on"?: string;
 };
 type Workflow = {
@@ -52,44 +53,81 @@ function stepNamed(name: string): Step {
 }
 
 describe("golden snapshot workflow", () => {
-  // #330-extra-workflow
-  it("runs on demand and on a push to main, and never for a pull request", () => {
+  // #403-T13
+  it("runs on demand and when the deployment workflow calls it, never for a pull request, and no longer for a push", () => {
     expect(Object.keys(workflow.on).sort()).toEqual([
-      "push",
+      "workflow_call",
       "workflow_dispatch",
     ]);
-    expect(workflow.on.push?.branches).toEqual(["main"]);
-    expect(source).not.toMatch(/pull_request/);
+    expect(source).not.toMatch(/pull_request|^\s+push:/m);
+    // The variable that switched the automatic build on is retired: the deployment builds when it has to.
+    expect(source).not.toContain("GOLDEN_SNAPSHOT_ENABLED");
+    expect(source).not.toContain("pinned_snapshot");
   });
 
-  // #330-extra-workflow
-  it("is opt-in on a push (a repository variable) and only for this repository", () => {
-    const condition = String(job.if);
-    expect(condition).toContain(
-      "github.repository == 'ExpidetGames/code-reviewer'",
+  // #403-T13
+  it("gives the deployment the snapshot, the image id and the commit as outputs", () => {
+    const outputs =
+      (
+        workflow.on.workflow_call as {
+          outputs?: Record<string, { value: string }>;
+        }
+      ).outputs ?? {};
+    expect(Object.keys(outputs).sort()).toEqual([
+      "commit",
+      "image-digest",
+      "snapshot-id",
+    ]);
+    for (const output of Object.values(outputs))
+      expect(output.value).toMatch(/^\$\{\{ jobs\.build\.outputs\./);
+    const read = stepNamed("Read the record");
+    expect(read.id).toBe("record");
+    expect(read.run).toContain("jq -r .snapshotId");
+    expect(read.run).toContain("jq -r .imageDigest");
+    expect(job.outputs?.["snapshot-id"]).toBe(
+      "${{ steps.record.outputs.snapshot-id }}",
     );
-    expect(condition).toContain("vars.GOLDEN_SNAPSHOT_ENABLED == 'true'");
-    expect(condition).toContain("github.event_name == 'workflow_dispatch'");
   });
 
-  // #333-ref-guard
-  it("runs only from main and development, like the canary, so a manual run on another branch cannot use the environment's secrets", () => {
+  // #403-T22
+  it("queues a rehearsal by hand apart from the build a deployment calls, so that neither replaces the other's pending run", () => {
+    const group = String(workflow.concurrency?.group);
+    expect(group).toContain("github.workflow == 'Golden snapshot'");
+    expect(group).toContain("golden-snapshot-rehearsal");
+    expect(group).toContain("golden-snapshot-deploy");
+    // Neither is the group of the deployment, which would hold the called build behind its own caller.
+    expect(group).not.toContain("deploy-production");
+    expect(workflow.concurrency?.["cancel-in-progress"]).toBe(false);
+  });
+
+  // #403-T22
+  it("passes the target only when one was given: the default lives in config.ts, which is an input of the snapshot", () => {
+    const build = stepNamed("Build, check and record the snapshot");
+    expect(build.run).toContain('if [ -n "$TARGET" ]; then');
+    expect(build.run).toContain('args+=(--target "$TARGET")');
+    expect(build.env?.TARGET).toBe("${{ inputs.target }}");
+  });
+
+  // #403-T17
+  it("removes nothing of earlier runs and writes nothing to Infisical: the deployment does that after the promotion", () => {
+    const build = stepNamed("Build, check and record the snapshot");
+    expect(build.run).toContain("--skip-retention");
+    expect(source).not.toMatch(
+      /snapshot:ops|infisical-write-snapshot-pair|--pin-snapshot/,
+    );
+  });
+
+  // #403-T05
+  it("runs only from main, so a manual run on another branch cannot use the Infisical sign-in of the environment production", () => {
     const condition = String(job.if);
 
     expect(condition).toContain("github.ref == 'refs/heads/main'");
-    expect(condition).toContain("github.ref == 'refs/heads/development'");
+    expect(condition).not.toContain("development");
     // The ref condition is ANDed with the others, not an alternative to them.
     expect(condition).toMatch(
-      /repository == '[^']+' && \(github\.ref == 'refs\/heads\/main' \|\| github\.ref == 'refs\/heads\/development'\) && \(/,
+      /repository == '[^']+' && github\.ref == 'refs\/heads\/main'( \}\})?$/,
     );
-    expect(condition.match(/github\.ref ==/g)).toHaveLength(2);
-    // The same two branches as the canary workflow.
-    const canary = readFileSync(
-      `${repoRoot}.github/workflows/dispatcher-canary.yml`,
-      "utf8",
-    );
-    expect(canary).toContain("github.ref == 'refs/heads/main'");
-    expect(canary).toContain("github.ref == 'refs/heads/development'");
+    expect(condition.match(/github\.ref ==/g)).toHaveLength(1);
   });
 
   // #330-extra-workflow
@@ -97,7 +135,7 @@ describe("golden snapshot workflow", () => {
     expect(jobs).toHaveLength(1);
     expect(workflow.permissions).toEqual({ contents: "read" });
     expect(job.permissions).toEqual({ contents: "read" });
-    expect(job.environment).toBe("hosted-snapshot");
+    expect(job.environment).toBe("production");
     expect(source).not.toMatch(/id-token|packages:\s*write|contents:\s*write/);
   });
 
@@ -107,23 +145,37 @@ describe("golden snapshot workflow", () => {
     expect(workflow.concurrency?.group).toBeTruthy();
   });
 
-  // #330-T02
-  it("reads the platform secrets in the build step only, as environment, never in a command line", () => {
+  // #403-T06
+  it("loads the platform credentials from Infisical after the install and just before the build step, which alone uses them", () => {
+    const names = job.steps.map((step) => step.name);
+    const load = job.steps.find(
+      (step) => step.uses === "./.github/actions/infisical-ci-secrets",
+    );
+    expect(load?.with?.["secret-names"]).toBe(
+      "VERCEL_TOKEN VERCEL_TEAM_ID VERCEL_DISPATCHER_PROJECT_ID",
+    );
+    const at = job.steps.findIndex((step) => step === load);
+    expect(at).toBeGreaterThan(names.indexOf("Install dependencies"));
+    expect(at).toBeLessThan(
+      names.indexOf("Build, check and record the snapshot"),
+    );
+    expect(job.steps[0]?.uses).toMatch(/^actions\/checkout@/);
+    // Only the Infisical sign-in reads a secret of GitHub.
     const withSecrets = job.steps.filter((step) =>
       JSON.stringify(step).includes("secrets."),
     );
-    expect(withSecrets.map((step) => step.name)).toEqual([
-      "Build, check and record the snapshot",
+    expect(withSecrets).toEqual([load]);
+  });
+
+  // #403-T06
+  it("hands the build step the project id under the name the client reads, and no credential in a command line", () => {
+    const build = stepNamed("Build, check and record the snapshot");
+    expect(Object.keys(build.env ?? {}).sort()).toEqual([
+      "TARGET",
+      "VERCEL_PROJECT_ID",
     ]);
-    const build = withSecrets[0] as Step;
-    expect(Object.keys(build.env ?? {}).sort()).toEqual(
-      [
-        "PINNED",
-        "TARGET",
-        "VERCEL_PROJECT_ID",
-        "VERCEL_TEAM_ID",
-        "VERCEL_TOKEN",
-      ].sort(),
+    expect(build.env?.VERCEL_PROJECT_ID).toBe(
+      "${{ env.VERCEL_DISPATCHER_PROJECT_ID }}",
     );
     expect(build.run).not.toContain("secrets.");
     expect(build.run).not.toMatch(/echo[^\n]*VERCEL_/);
@@ -131,10 +183,9 @@ describe("golden snapshot workflow", () => {
   });
 
   // #330-T02
-  it("passes the dispatch inputs through environment variables, not into the shell text", () => {
+  it("passes the dispatch input through an environment variable, not into the shell text", () => {
     const build = stepNamed("Build, check and record the snapshot");
     expect(build.env?.TARGET).toContain("inputs.target");
-    expect(build.env?.PINNED).toContain("inputs.pinned_snapshot");
     for (const step of job.steps)
       expect(step.run ?? "", step.name).not.toMatch(/\$\{\{\s*inputs\./);
   });

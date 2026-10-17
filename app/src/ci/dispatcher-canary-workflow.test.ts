@@ -70,79 +70,111 @@ describe("dispatcher canary workflow", () => {
     );
     expect(workflow.permissions).toEqual({ contents: "read" });
     expect(job.permissions).toEqual({ contents: "read" });
-    expect(job.environment).toBe("hosted-canary");
+    expect(job.environment).toBe("production");
     expect(source).not.toMatch(/id-token|packages:\s*write|contents:\s*write/);
     expect(job["timeout-minutes"]).toBeLessThanOrEqual(20);
   });
 
-  // #331-R01
-  it("runs only from main and development, enforced in the job and not by a branch filter that a manual run ignores", () => {
+  // #403-T05
+  it("runs only from main, enforced in the job and not by a branch filter that a manual run ignores", () => {
     const condition = String(job.if);
 
     expect(condition).toContain("github.ref == 'refs/heads/main'");
-    expect(condition).toContain("github.ref == 'refs/heads/development'");
-    // Nothing else: no tag, no pull request ref, no wildcard.
-    expect(condition.match(/github\.ref\b/g)).toHaveLength(2);
-    expect(condition).not.toMatch(/startsWith|contains\(github\.ref/);
-    // The two refs are alternatives of one condition that is also bound to the repository.
-    expect(condition).toMatch(/&&\s*\([^)]*\|\|[^)]*\)/);
-  });
-
-  // #331-R01
-  it("checks the URL against the allow-list in a step that holds no secret, before the step that does", () => {
-    const names = job.steps.map((step) => step.name);
-    const check = stepNamed("Check the URL against the allowed hosts");
-
-    expect(
-      names.indexOf("Check the URL against the allowed hosts"),
-    ).toBeLessThan(names.indexOf("Run the canary"));
-    expect(JSON.stringify(check)).not.toContain("secrets.");
-    expect(Object.keys(check.env ?? {}).sort()).toEqual([
-      "CANARY_ALLOWED_HOSTS",
-      "CANARY_URL",
-    ]);
-    expect(check.env?.CANARY_ALLOWED_HOSTS).toContain(
-      "vars.DISPATCHER_CANARY_HOSTS",
+    // Nothing else: no development, no tag, no pull request ref, no wildcard.
+    expect(condition.match(/github\.ref\b/g)).toHaveLength(1);
+    expect(condition).not.toMatch(
+      /startsWith|contains\(github\.ref|development/,
     );
-    expect(check.run).toContain('--url "$CANARY_URL"');
-    expect(check.run).toContain("--check-only");
-    expect(check["working-directory"]).toBe("dispatcher");
+    // The ref is ANDed with the repository.
+    expect(condition).toMatch(
+      /repository == '[^']+' && github\.ref == 'refs\/heads\/main'( \}\})?$/,
+    );
   });
 
-  // #331-R01
-  it("hands the allow-list to the step that sends the credential too, so that it refuses on its own", () => {
+  // #403-T03
+  it("has no list of hosts any more: the platform decides which deployment may get the credential", () => {
+    expect(source).not.toMatch(
+      /DISPATCHER_CANARY_HOSTS|CANARY_ALLOWED_HOSTS|--check-only|vars\./,
+    );
+    expect(source).not.toContain("hosted-canary");
     const canary = stepNamed("Run the canary");
-
-    expect(canary.env?.CANARY_ALLOWED_HOSTS).toContain(
-      "vars.DISPATCHER_CANARY_HOSTS",
-    );
+    expect(canary.run).toContain("--verify-vercel");
+    expect(canary.run).toContain('--url "$CANARY_URL"');
   });
 
-  // #331-extra-workflow
+  // #403-T08
   it("lets two runs queue instead of cancelling one that is waiting for a canary VM", () => {
     expect(workflow.concurrency?.["cancel-in-progress"]).toBe(false);
     expect(workflow.concurrency?.group).toBeTruthy();
   });
 
-  // #331-T05
-  it("reads the dispatcher credential in the canary step only, as environment, never in a command line", () => {
+  // #403-T06
+  it("loads the credentials from Infisical just before the canary step, after the dependencies were installed", () => {
+    const names = job.steps.map((step) => step.name);
+    const load = job.steps.find(
+      (step) => step.uses === "./.github/actions/infisical-ci-secrets",
+    );
+    expect(load).toBeDefined();
+    expect(load?.with?.["secret-names"]).toBe(
+      "RUNNER_TOKEN VERCEL_TOKEN VERCEL_TEAM_ID VERCEL_DISPATCHER_PROJECT_ID VERCEL_DISPATCHER_AUTOMATION_BYPASS_SECRET",
+    );
+    const at = job.steps.findIndex((step) => step === load);
+    expect(at).toBeGreaterThan(names.indexOf("Install dependencies"));
+    expect(at).toBeLessThan(names.indexOf("Run the canary"));
+    // The checkout comes first: the action is a local one.
+    expect(job.steps[0]?.uses).toMatch(/^actions\/checkout@/);
+  });
+
+  // #403-T06
+  it("hands the canary step what it renames and reads the credentials from the environment, never in a command line", () => {
+    const canary = stepNamed("Run the canary");
+    expect(Object.keys(canary.env ?? {}).sort()).toEqual(
+      [
+        "CANARY_ENGINES",
+        "CANARY_EXPECT_IMAGE_DIGEST",
+        "CANARY_EXPECT_SNAPSHOT_ID",
+        "CANARY_URL",
+        "VERCEL_AUTOMATION_BYPASS_SECRET",
+        "VERCEL_PROJECT_ID",
+      ].sort(),
+    );
+    expect(canary.env?.VERCEL_PROJECT_ID).toBe(
+      "${{ env.VERCEL_DISPATCHER_PROJECT_ID }}",
+    );
+    expect(canary.env?.VERCEL_AUTOMATION_BYPASS_SECRET).toBe(
+      "${{ env.VERCEL_DISPATCHER_AUTOMATION_BYPASS_SECRET }}",
+    );
+    expect(canary.env?.CANARY_EXPECT_IMAGE_DIGEST).toBe(
+      "${{ inputs.image_digest }}",
+    );
+    // No step but the Infisical sign-in reads a secret.
     const withSecrets = job.steps.filter((step) =>
       JSON.stringify(step).includes("secrets."),
     );
-    expect(withSecrets.map((step) => step.name)).toEqual(["Run the canary"]);
-    const canary = withSecrets[0] as Step;
-    expect(Object.keys(canary.env ?? {}).sort()).toEqual(
-      [
-        "CANARY_ALLOWED_HOSTS",
-        "CANARY_ENGINES",
-        "CANARY_URL",
-        "RUNNER_TOKEN",
-        "VERCEL_AUTOMATION_BYPASS_SECRET",
-      ].sort(),
-    );
+    expect(withSecrets.map((step) => step.uses)).toEqual([
+      "./.github/actions/infisical-ci-secrets",
+    ]);
     expect(canary.run).not.toContain("secrets.");
-    expect(canary.run).not.toMatch(/echo[^\n]*(RUNNER_TOKEN|BYPASS)/);
+    expect(canary.run).not.toMatch(
+      /echo[^\n]*(RUNNER_TOKEN|BYPASS|VERCEL_TOKEN)/,
+    );
     expect(canary.run).not.toMatch(/set -x|--debug|xtrace|--token/);
+  });
+
+  // #403-T01
+  it("asks for a production deployment of the commit of this run and for the image the pipeline built", () => {
+    const canary = stepNamed("Run the canary");
+    expect(canary.run).toContain("--verify-vercel");
+    expect(canary.run).toContain('--expect-commit "$GITHUB_SHA"');
+    expect(workflow.on.workflow_call?.inputs).toHaveProperty("image_digest");
+    expect(workflow.on.workflow_dispatch?.inputs).toHaveProperty(
+      "image_digest",
+    );
+    // The commit is the one that was checked out, not a ref that can move.
+    const checkout = job.steps.find((step) =>
+      step.uses?.startsWith("actions/checkout@"),
+    );
+    expect(checkout?.with?.ref).toBe("${{ github.sha }}");
   });
 
   // #331-extra-workflow

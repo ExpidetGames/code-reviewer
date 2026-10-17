@@ -327,36 +327,69 @@ proves nothing and advertises what it advertises.
 
 ### The deploy canary
 
-`pnpm probe:canary --url https://<dispatcher> [--allowed-hosts host,host] [--check-only] [--engines pr-agent,opencode] [--wait-seconds 120] [--timeout-seconds 300]`
+`pnpm probe:canary --url https://<dispatcher> [--verify-vercel [--expect-commit <sha>]] [--allowed-hosts host,host] [--check-only] [--engines pr-agent,opencode] [--wait-seconds 120] [--timeout-seconds 300]`
 (`src/probe/canary.ts`) is the step of a release pipeline that calls `POST /probe` and fails the release when the Dynamic
 canary fails. The credential is `RUNNER_TOKEN` in the environment (never an argument); `VERCEL_AUTOMATION_BYPASS_SECRET`, when set,
 is sent as `x-vercel-protection-bypass` for a deployment behind deployment protection. It waits for the deployment to answer
 `GET /health` first (never sending the credential there), sends the credential to that one URL (https, or http to this machine;
 no redirect is followed) and prints stable codes and the contract's reasons only. With `--allowed-hosts` (or
 `CANARY_ALLOWED_HOSTS`) a URL whose host is not on the list is refused with exit 2 **before any request**, this machine included;
-an empty list refuses every URL. `--check-only` does only that check, without a credential.
+an empty list refuses every URL (for a person at a terminal). With **`--verify-vercel`** (what the release pipeline uses) the
+command first asks the Vercel API, with `VERCEL_TOKEN`, `VERCEL_TEAM_ID` and `VERCEL_PROJECT_ID` (the Dispatcher's project) from
+the environment, whether the deployment behind the URL's host is a **ready production deployment** of that project and that team (and,
+with `--expect-commit <sha>`, built from that commit: `meta.githubCommitSha`, which the deploy step sets), and sends
+nothing to the host otherwise. A 429, a 5xx or no answer from the platform is asked again twice and then reported as
+unavailable, not as a wrong deployment. The URL must then be https on the default port with no path, and the host must be the deployment's own
+address (the API answers with it as `url`): an alias or a domain is refused. The token goes to `api.vercel.com` only, the
+dispatcher credential to the verified host only, and the API's answer is never printed. A staged production deployment gets
+a new host with every deployment, which is why a list of hosts cannot work in a pipeline. `--check-only` does only these
+checks, without a credential and without a probe.
 
-| Exit | Meaning                                                                                                                           |
-| ---- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `0`  | the deployment advertises every required engine (both by default) from a probe that ran just now                                  |
-| `1`  | it does not, it could not be reached or refused the credential, or answered something that is not a report: **block the release** |
-| `2`  | wrong use (a bad URL or option); nothing was sent                                                                                 |
+`CANARY_EXPECT_IMAGE_DIGEST` (an image id `sha256:...`) and `CANARY_EXPECT_SNAPSHOT_ID` (a snapshot id) are the pair the
+deployment must report: `POST /probe` names the image and the golden snapshot the deployment is configured with
+(`SANDBOX_IMAGE_DIGEST` and `SANDBOX_SNAPSHOT_ID`; `imageDigest` and `snapshotId` in `contracts/probe-verdict.v1.json`), the
+Launcher proves in the canary VM that the snapshot holds exactly that image, and the canary fails with
+`canary_image_mismatch` (exit 1, no id printed) when the answer names another image or snapshot or none. The pipeline
+passes the pair of the snapshot it built, so a pair that did not reach the staged deployment cannot pass on the old
+one, and a rebuild that left the image id unchanged is told apart by its snapshot id.
 
-`.github/workflows/dispatcher-canary.yml` runs it (`workflow_dispatch`, or `workflow_call` from a release workflow) in the
-environment `hosted-canary`, which holds the secrets `RUNNER_TOKEN` and, when needed, `VERCEL_AUTOMATION_BYPASS_SECRET`; inputs
-are `url` and `engines` (`pr-agent` for a Diff-only deployment). The credential is sent to one host only: a step without any
-secret first checks the `url` against the repository variable **`DISPATCHER_CANARY_HOSTS`** (exact host names, comma separated;
-unset or empty refuses every URL), and the step with the secrets checks it again. The job runs only from `main` and
-`development` (its own condition, because a manual run executes the code of the branch it is started on).
+| Exit | Meaning                                                                                                                                                                                                     |
+| ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `0`  | the deployment advertises every required engine (both by default) from a probe that ran just now                                                                                                            |
+| `1`  | it does not, it could not be reached or refused the credential, or answered something that is not a report, or the Vercel API could not be asked (`canary_verification_unavailable`): **block the release** |
+| `2`  | wrong use (a bad URL or option), or a deployment that is not the Dispatcher project's (`canary_deployment_not_verified`); nothing was sent                                                                  |
 
-**What the maintainer sets on the environment `hosted-canary`** (repository settings, Environments), because a workflow cannot
-protect itself: _Deployment branches and tags_: **selected branches**, `main` and `development` only (without it any branch could
-run its own copy of the canary code with the environment's secrets); _Required reviewers_: at least one person other than whoever
-starts the run; no secret of any other purpose in it. `RUNNER_TOKEN` there is the Dispatcher project's dispatcher credential;
-rotate it with the Dispatcher project's. The sequence of a release: deploy the Dispatcher to a URL
-that carries the candidate `SANDBOX_SNAPSHOT_ID` and `SANDBOX_IMAGE_DIGEST` (a staged production deployment, `vercel deploy --prod --skip-domain`: a preview deployment does not have the
-production variables; see `docs/deployment-vercel.md`, section 5.1), run the canary against it, promote only on exit 0. After a golden snapshot rebuild
-(`docs/golden-snapshot.md`) the same step proves the new snapshot before the Dispatcher project is switched to it.
+`.github/workflows/dispatcher-canary.yml` runs it (`workflow_dispatch`, or `workflow_call` from `deploy-production.yml`, which
+calls it between "stage the Dispatcher" and "promote") with `--verify-vercel`, in the GitHub environment `production`. Its
+inputs are `url` (the staged deployment's own address) and `engines` (`pr-agent` for a Diff-only deployment). The job loads
+`RUNNER_TOKEN`, `VERCEL_TOKEN`, `VERCEL_TEAM_ID`, `VERCEL_DISPATCHER_PROJECT_ID` and
+`VERCEL_DISPATCHER_AUTOMATION_BYPASS_SECRET` from Infisical `prod` `/ci` with the shared action
+`.github/actions/infisical-ci-secrets`, after the dependencies were installed and just before the canary step, and it runs
+only from `main` (its own condition, because a manual run executes the code of the branch it is started on). The
+Infisical sign-in is four **secrets** of the environment `production` (`docs/deployment-vercel.md`, section 2.1); the
+environment's deployment branches are restricted to `main` as the second layer. **Retired:** the environment
+`hosted-canary` and the repository variable `DISPATCHER_CANARY_HOSTS`: the canary keeps no list of hosts any more.
+
+The sequence of a release is the workflow `deploy-production.yml` (`docs/deployment-vercel.md`, section 5.6): the
+Dispatcher is deployed as a staged production deployment (`vercel deploy --prebuilt --prod --skip-domain`; a preview
+deployment does not have the production variables) that carries the golden snapshot pair of the run as its own run-time
+variables, the canary runs against it with the commit of the run and the image id the run built, and only on exit 0 and a
+healthy App is anything promoted. `rollback-production.yml` puts a previous deployment back by hand.
+
+### The snapshot steps of the pipeline (`pnpm snapshot:ops`)
+
+`pnpm snapshot:ops <decide|persist|exists|verify|cleanup>` (`src/snapshot/ops-cli.ts`) holds the steps of the deployment that
+look after the golden snapshot, so that their logic is tested apart from the workflow. Ids, tokens and the Infisical
+client secret come from the environment, never from arguments; every line printed is a stable code; the exit status is
+0 done, 1 failed, 2 wrong use.
+
+| Command                                                                    | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `decide --sha <commit> --env-file <file> --github-output <file> [--force]` | Does the Worker image need a new snapshot? Compares the commit of the pair in use (the live deployment's meta, else the project's pulled variables) with the commit given, on the paths of `IMAGE_INPUT_PATHS` (`src/snapshot/pair.ts`: exactly what the build consumes). Rebuild if they differ, if the commit or the pair is missing, if the snapshot of the pair no longer exists, or with `--force`. Stops (exit 1) when the live deployment or the list of snapshots cannot be read. Writes `rebuild`, `reason`, `repair`, the pair and `previous-snapshot-id` as step outputs. |
+| `persist [--from-deployment <id or address>]`                              | Writes the pair (`PAIR_SNAPSHOT_ID`, `PAIR_IMAGE_DIGEST`, `PAIR_COMMIT`, or the pair in the meta of the deployment) to Infisical `prod` `/dispatcher`: signs in with `INFISICAL_CLIENT_ID` and `INFISICAL_CLIENT_SECRET`, finds the project by `INFISICAL_PROJECT_SLUG` on `INFISICAL_DOMAIN` (https only), updates the three keys one after the other and creates one that does not exist. Nothing else is written. Imports nothing but our own modules and Node built-ins (a test holds it).                                                                                       |
+| `exists`                                                                   | Is the golden snapshot `PAIR_SNAPSHOT_ID` still there? `snapshot_missing` or `snapshot_lookup_failed` otherwise. Run before a deployment uses a pair.                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `verify --deployment <id or address> [--check-snapshot]`                   | Is the deployment a ready production deployment of the project and team (`VERCEL_PROJECT_ID`)? With `--check-snapshot`, is the snapshot of its pair still there (`rollback_snapshot_missing`)? Used before a rollback.                                                                                                                                                                                                                                                                                                                                                               |
+| `cleanup`                                                                  | Removes the golden snapshots except `KEEP_SNAPSHOT_IDS` and the one the live deployment runs; with `DISCARD_SNAPSHOT_ID` removes just that one. Leaves a young snapshot (three hours) that is not kept alone, and removes a builder with no snapshot older than that. Removes nothing when the live deployment cannot be read or when no kept snapshot is among the builders.                                                                                                                                                                                                        |
 
 **The engine uid and the VM's agent channel (#317).** The spike found that no process in the VM can open an `AF_VSOCK` socket
 (a platform filter) and that the container's root can reach the VM's agent on the Docker bridge gateway while the engine
