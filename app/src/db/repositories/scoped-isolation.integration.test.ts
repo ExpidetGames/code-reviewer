@@ -952,6 +952,11 @@ const CASES: Case[] = [
     expectAnswer: (answer) => expect(answer).toBeUndefined(),
   },
   {
+    name: "jobChecks.lastReviewEventOfPullRequest",
+    run: (a, b) => a.jobChecks.lastReviewEventOfPullRequest(b.job.id),
+    expectAnswer: (answer) => expect(answer).toBeNull(),
+  },
+  {
     name: "jobChecks.forgetCheckAttempts",
     run: (a, b) => a.jobChecks.forgetCheckAttempts(b.job.id),
     expectAnswer: (answer) => expect(answer).toBeUndefined(),

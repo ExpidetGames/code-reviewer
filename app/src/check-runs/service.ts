@@ -244,6 +244,8 @@ export function createCheckRunService(
   let waiting: Promise<ReconcileReport> | null = null;
   // The installations that were found to lack the Checks permission, and until when that is believed.
   const permissionMissingUntil = new Map<string, number>();
+  // The same for the permission to review pull requests.
+  const reviewPermissionMissingUntil = new Map<string, number>();
 
   const where = (job: Job) =>
     `job=${job.id} workspace=${job.workspaceId} repository=${job.repositoryId}`;
@@ -253,6 +255,12 @@ export function createCheckRunService(
     permissionMissingUntil.set(
       integration.id,
       deps.now().getTime() + PERMISSION_MEMORY_MS,
+    );
+  }
+  function verdictPermissionKnownMissing(integration: Integration): boolean {
+    return (
+      (reviewPermissionMissingUntil.get(integration.id) ?? 0) >
+      deps.now().getTime()
     );
   }
   function permissionKnownMissing(integration: Integration): boolean {
@@ -514,6 +522,11 @@ export function createCheckRunService(
         error.code !== "INTEGRATION_REPOSITORY_NOT_ACCESSIBLE")
     )
       throw error;
+    if (error.code === "INTEGRATION_ACCESS_SCOPE_REFUSED")
+      reviewPermissionMissingUntil.set(
+        target.integration.id,
+        deps.now().getTime() + PERMISSION_MEMORY_MS,
+      );
     deps.log.error(
       `[check-runs] REVIEW_VERDICT_REFUSED ${where(target.job)} code=${error.code}`,
     );
@@ -532,6 +545,13 @@ export function createCheckRunService(
     const { job, integration, provider, repo } = target;
     if (provider.withdrawReviewVerdict === undefined)
       return skipVerdict(job, checks, "off");
+    // Only where the app asked for changes and has not taken it back since: nothing is asked of GitHub otherwise.
+    if (
+      (await checks.lastReviewEventOfPullRequest(job.id)) !== "request_changes"
+    )
+      return skipVerdict(job, checks, "off");
+    if (verdictPermissionKnownMissing(integration))
+      return skipVerdict(job, checks, "permission_missing");
     const pullRequest = await pullRequestFor(target, budget);
     if (!pullRequest.open) return skipVerdict(job, checks, pullRequest.reason);
     try {
@@ -547,6 +567,7 @@ export function createCheckRunService(
       await checks.recordReview(job.id, {
         reviewId: withdrawn.reviewId,
         reviewState: "done",
+        reviewEvent: "withdrawn",
       });
       deps.log.info(
         `[check-runs] REVIEW_VERDICT_WITHDRAWN ${where(job)} outcome=${withdrawn.outcome}`,
@@ -574,6 +595,15 @@ export function createCheckRunService(
     if (provider.submitReviewVerdict === undefined)
       return skipVerdict(job, checks, "unsupported");
 
+    if (verdictPermissionKnownMissing(integration)) {
+      deps.log.info(
+        `[check-runs] REVIEW_VERDICT_REFUSED ${where(job)} code=INTEGRATION_ACCESS_SCOPE_REFUSED known`,
+      );
+      return checks.recordReview(job.id, {
+        reviewId: null,
+        reviewState: "dropped",
+      });
+    }
     // Only a pull request that is open and still at the head that was reviewed gets a verdict: the review of a
     // newer head decides for itself, and a verdict on an old head would be read as one on the new.
     const pullRequest = await pullRequestFor(target, budget);
@@ -613,6 +643,8 @@ export function createCheckRunService(
       await checks.recordReview(job.id, {
         reviewId: submitted.reviewId,
         reviewState: "done",
+        reviewEvent:
+          decision.event === "approve" ? "approve" : "request_changes",
       });
       deps.log.info(
         `[check-runs] REVIEW_VERDICT_SUBMITTED ${where(job)} event=${decision.event} outcome=${submitted.outcome}`,

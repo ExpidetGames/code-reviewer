@@ -28,6 +28,7 @@ const REFUSED_UPDATES = [
   ["a negative failure count", "attempts = -1"],
   ["a negative creation count", "check_create_attempts = -1"],
   ["a negative submission count", "review_submit_attempts = -1"],
+  ["a review event the code does not know", "review_event = 'maybe'"],
 ] as const;
 
 async function setup() {

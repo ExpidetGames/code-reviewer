@@ -24,12 +24,21 @@ export type CheckRunState = (typeof CHECK_RUN_STATES)[number];
 export const REVIEW_VERDICT_STATES = ["pending", "done", "dropped"] as const;
 export type ReviewVerdictState = (typeof REVIEW_VERDICT_STATES)[number];
 
+/** What the app did to a pull request with its verdict; `withdrawn`: its own request for changes was taken back. */
+export const REVIEW_EVENTS = [
+  "approve",
+  "request_changes",
+  "withdrawn",
+] as const;
+export type ReviewEvent = (typeof REVIEW_EVENTS)[number];
+
 /** A row as the rest of the app sees it. Timestamps are ISO 8601 text in UTC. */
 export type StoredJobCheck = {
   jobId: string;
   workspaceId: string;
   checkRunId: string | null;
   reviewId: string | null;
+  reviewEvent: ReviewEvent | null;
   /** The job status the check run shows now (a `JobStatus`); null before the first sync. */
   syncedStatus: string | null;
   checkCreateAttempts: number;
@@ -78,8 +87,19 @@ export type JobCheckRunsRepository = {
   /** The verdict is submitted (`reviewId`) or decided not to be (null), or the platform refused it (`dropped`). */
   recordReview(
     jobId: string,
-    review: { reviewId: string | null; reviewState: "done" | "dropped" },
+    review: {
+      reviewId: string | null;
+      reviewState: "done" | "dropped";
+      /** What was done to the pull request, when something was. */
+      reviewEvent?: ReviewEvent;
+    },
   ): Promise<void>;
+  /**
+   * What the app last did to the pull request of the job with its verdict, over the jobs of the workspace: the event
+   * of the latest row that recorded one, or null if none did. A verdict that was skipped records none, so a request
+   * for changes made earlier stands.
+   */
+  lastReviewEventOfPullRequest(jobId: string): Promise<ReviewEvent | null>;
   /** Ends the sync: the lease is over and the failures are forgotten. `settled`: the job ended and all is done. */
   finish(jobId: string, outcome: { settled: boolean }): Promise<void>;
   /**
@@ -107,6 +127,7 @@ export function toStoredJobCheck(
     workspaceId: row.workspace_id,
     checkRunId: row.check_run_id,
     reviewId: row.review_id,
+    reviewEvent: row.review_event as ReviewEvent | null,
     syncedStatus: row.synced_status,
     checkCreateAttempts: row.check_create_attempts,
     reviewSubmitAttempts: row.review_submit_attempts,
@@ -164,6 +185,7 @@ export function createJobCheckRunsRepository(
         workspace_id: workspaceId,
         check_run_id: null,
         review_id: null,
+        review_event: null,
         synced_status: null,
         check_create_attempts: 0,
         review_submit_attempts: 0,
@@ -252,9 +274,34 @@ export function createJobCheckRunsRepository(
         .set({
           review_id: review.reviewId,
           review_state: review.reviewState,
+          ...(review.reviewEvent === undefined
+            ? {}
+            : { review_event: review.reviewEvent }),
           updated_at: formatTimestamp(now()),
         })
         .execute();
+    },
+
+    async lastReviewEventOfPullRequest(jobId) {
+      const job = await db
+        .selectFrom("jobs")
+        .select(["repository_id", "pr_number"])
+        .where("workspace_id", "=", workspaceId)
+        .where("id", "=", jobId)
+        .executeTakeFirst();
+      if (job === undefined) return null;
+      const latest = await db
+        .selectFrom("job_check_runs")
+        .innerJoin("jobs", "jobs.id", "job_check_runs.job_id")
+        .select("job_check_runs.review_event")
+        .where("job_check_runs.workspace_id", "=", workspaceId)
+        .where("jobs.repository_id", "=", job.repository_id)
+        .where("jobs.pr_number", "=", job.pr_number)
+        .where("job_check_runs.review_event", "is not", null)
+        .orderBy("job_check_runs.updated_at", "desc")
+        .orderBy("job_check_runs.job_id", "desc")
+        .executeTakeFirst();
+      return (latest?.review_event as ReviewEvent | null | undefined) ?? null;
     },
 
     async finish(jobId, outcome) {

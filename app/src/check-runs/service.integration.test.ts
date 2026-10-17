@@ -830,7 +830,7 @@ describe("the verdict setting", () => {
     expect(t.reviews()).toEqual([]);
     expect(t.checkRuns()[0]).toMatchObject({ conclusion: "success" });
     expect(t.checkRuns()[0]?.output?.summary).toContain("switched off");
-    expect(t.lines.info.join("\n")).toContain("outcome=nothing_to_dismiss");
+    expect(t.lines.info.join("\n")).toContain("reason=off");
   });
 
   // #405-T18
@@ -1344,6 +1344,44 @@ describe("an App without the permission, asked again and again (review P3-3)", (
   });
 });
 
+describe("an App that may not review, asked again and again (review round 2)", () => {
+  // #405-T26
+  it("asks GitHub for a token for the verdict once for the jobs that follow, until the memory of it is over", async () => {
+    const t = await createCheckRunsHarness({
+      permissions: {
+        metadata: "read",
+        contents: "read",
+        issues: "write",
+        checks: "write",
+        pull_requests: "read",
+      },
+    });
+    const first = await t.fixture.enqueueNew();
+    const one = await t.claim();
+    await t.succeed(one.job, one.token, { findings: CLEAN });
+    await t.service.syncJob(first.id);
+    expect(await t.rowOf(first.id)).toMatchObject({ reviewState: "dropped" });
+    const asked = t.fake.tokenRequests().length;
+
+    const second = await t.fixture.enqueueNew({ headSha: sha("b") });
+    const two = await t.claim();
+    await t.succeed(two.job, two.token, { findings: CLEAN });
+    await t.service.syncJob(second.id);
+
+    // Only the check run asked for a token this time: the verdict was not tried.
+    expect(
+      t.fake
+        .tokenRequests()
+        .slice(asked)
+        .filter((request) => "pull_requests" in (request.permissions ?? {})),
+    ).toEqual([]);
+    expect(await t.rowOf(second.id)).toMatchObject({ reviewState: "dropped" });
+    expect(
+      t.lines.error.filter((line) => line.includes("REVIEW_VERDICT_REFUSED")),
+    ).toHaveLength(1);
+  });
+});
+
 describe("a refusal that is not a missing permission (review P2-7)", () => {
   // #405-T12
   it("drops an archived repository with its own code and does not call it a permission", async () => {
@@ -1515,6 +1553,90 @@ describe("an earlier request for changes when the new review submits nothing (re
       reviewState: "done",
       state: "settled",
     });
+  });
+
+  // #405-T22 (review round 2): `off` costs nothing where the app never asked for changes.
+  it("makes no call to GitHub about the verdict when the setting is off and the app asked for nothing", async () => {
+    const t = await createCheckRunsHarness();
+    t.setVerdictMode("off");
+    const job = await t.fixture.enqueueNew();
+    const claimed = await t.claim();
+    await t.succeed(claimed.job, claimed.token, { findings: CLEAN });
+
+    await t.service.syncJob(job.id);
+
+    const aboutThePullRequest = t.fake
+      .requests()
+      .filter((request) => request.path.includes("/pulls/"));
+    expect(aboutThePullRequest).toEqual([]);
+    expect(
+      t.fake.tokenRequests().map((r) => Object.keys(r.permissions ?? {})),
+    ).not.toContainEqual(["metadata", "pull_requests"]);
+    expect(await t.rowOf(job.id)).toMatchObject({
+      reviewState: "done",
+      state: "settled",
+    });
+  });
+
+  // #405-T22 (review round 2)
+  it("makes no call either when the latest thing the app did was to approve or to take its request back", async () => {
+    const t = await createCheckRunsHarness();
+    await askedForChanges(t);
+    t.fixture.clock.advance(MINUTE);
+    t.fake.updatePullRequest(t.repo, 7, { headSha: sha("c") });
+    const approved = await t.fixture.enqueueNew({ headSha: sha("c") });
+    const second = await t.claim();
+    await t.succeed(second.job, second.token, { findings: CLEAN });
+    await t.service.syncJob(approved.id);
+    expect(t.fake.pullRequestReviewDecisions(t.repo, 7)).toEqual({
+      [BOT]: "APPROVED",
+    });
+    t.setVerdictMode("off");
+    t.fixture.clock.advance(MINUTE);
+    t.fake.updatePullRequest(t.repo, 7, { headSha: sha("d") });
+    const off = await t.fixture.enqueueNew({ headSha: sha("d") });
+    const third = await t.claim();
+    await t.succeed(third.job, third.token, { findings: CLEAN });
+    const before = t.fake.requests().length;
+
+    await t.service.syncJob(off.id);
+
+    const after = t.fake.requests().slice(before);
+    expect(after.filter((request) => request.path.includes("/pulls/"))).toEqual(
+      [],
+    );
+    expect(
+      t.reviews().filter((review) => review.state === "DISMISSED"),
+    ).toEqual([]);
+  });
+
+  // #405-T22 (review round 2)
+  it("takes the request back once, and asks nothing about it on the jobs that follow", async () => {
+    const t = await createCheckRunsHarness();
+    await askedForChanges(t);
+    t.setVerdictMode("off");
+    t.fake.updatePullRequest(t.repo, 7, { headSha: sha("c") });
+    const first = await t.fixture.enqueueNew({ headSha: sha("c") });
+    const claimed = await t.claim();
+    await t.succeed(claimed.job, claimed.token, { findings: CLEAN });
+    await t.service.syncJob(first.id);
+    expect(
+      t.reviews().filter((review) => review.state === "DISMISSED"),
+    ).toHaveLength(1);
+    t.fake.updatePullRequest(t.repo, 7, { headSha: sha("d") });
+    const next = await t.fixture.enqueueNew({ headSha: sha("d") });
+    const again = await t.claim();
+    await t.succeed(again.job, again.token, { findings: CLEAN });
+    const before = t.fake.requests().length;
+
+    await t.service.syncJob(next.id);
+
+    expect(
+      t.fake
+        .requests()
+        .slice(before)
+        .filter((request) => request.path.includes("/pulls/")),
+    ).toEqual([]);
   });
 
   // #405-T22 (review round 2)

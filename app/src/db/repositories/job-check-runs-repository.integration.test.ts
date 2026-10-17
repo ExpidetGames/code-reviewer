@@ -5,7 +5,7 @@
 // settled or dropped. Isolation between workspaces is in scoped-isolation.integration.test.ts; what the service does
 // with the row is in src/check-runs/service.integration.test.ts.
 import { describe, expect, it } from "vitest";
-import { createJobQueueFixture } from "../../test-support/jobs.ts";
+import { createJobQueueFixture, sha } from "../../test-support/jobs.ts";
 import { createJobCheckRunsRepository } from "./job-check-runs-repository.ts";
 import { listJobsWithCheckWork } from "./job-check-runs-sweep.ts";
 
@@ -310,6 +310,88 @@ describe("a failed sync", () => {
       state: "active",
       attempts: 0,
     });
+  });
+});
+
+describe("what the app asked of a pull request (review round 2)", () => {
+  async function submit(
+    t: Awaited<ReturnType<typeof setup>>,
+    jobId: string,
+    event: "approve" | "request_changes" | "withdrawn",
+  ) {
+    await t.checks.take(jobId, LEASE);
+    await t.checks.recordReview(jobId, {
+      reviewId: "5001",
+      reviewState: "done",
+      reviewEvent: event,
+    });
+    t.advance(SECOND);
+  }
+
+  // #405-T22
+  it("keeps the event of a review next to its id", async () => {
+    const t = await setup();
+
+    await submit(t, t.job.id, "request_changes");
+
+    expect(await t.checks.find(t.job.id)).toMatchObject({
+      reviewId: "5001",
+      reviewEvent: "request_changes",
+    });
+  });
+
+  // #405-T22
+  it("says nothing was asked when no review of the pull request recorded an event", async () => {
+    const t = await setup();
+    await t.checks.take(t.job.id, LEASE);
+    // A skipped verdict records a state and no event.
+    await t.checks.recordReview(t.job.id, {
+      reviewId: null,
+      reviewState: "done",
+    });
+
+    expect(await t.checks.lastReviewEventOfPullRequest(t.job.id)).toBeNull();
+  });
+
+  // #405-T22
+  it("answers with the latest event of the pull request, whatever job it was recorded for", async () => {
+    const t = await setup();
+    await submit(t, t.job.id, "request_changes");
+    const second = await t.enqueueNew({ headSha: sha("b") });
+    await t.checks.take(second.id, LEASE);
+    // The second job skipped its verdict: the request of the first still stands.
+    await t.checks.recordReview(second.id, {
+      reviewId: null,
+      reviewState: "done",
+    });
+
+    expect(await t.checks.lastReviewEventOfPullRequest(second.id)).toBe(
+      "request_changes",
+    );
+
+    const third = await t.enqueueNew({ headSha: sha("c") });
+    await submit(t, third.id, "withdrawn");
+    expect(await t.checks.lastReviewEventOfPullRequest(third.id)).toBe(
+      "withdrawn",
+    );
+    const fourth = await t.enqueueNew({ headSha: sha("d") });
+    await submit(t, fourth.id, "approve");
+    expect(await t.checks.lastReviewEventOfPullRequest(fourth.id)).toBe(
+      "approve",
+    );
+  });
+
+  // #405-T22
+  it("does not mix up two pull requests", async () => {
+    const t = await setup();
+    await submit(t, t.job.id, "request_changes");
+    const other = await t.enqueueNew({
+      prNumber: 8,
+      prUrl: "https://github.test/acme/widgets/pull/8",
+    });
+    await t.checks.take(other.id, LEASE);
+
+    expect(await t.checks.lastReviewEventOfPullRequest(other.id)).toBeNull();
   });
 });
 

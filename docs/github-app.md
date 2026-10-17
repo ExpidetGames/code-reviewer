@@ -164,7 +164,9 @@ at its cost or time limit, dropped a finding its validation refused, left files 
 made no model call or did not report its findings submits **no** review, and the check run says so and why. Such a
 run does not dismiss an earlier `REQUEST_CHANGES` of the App (it fails closed): a complete review on a later push
 replaces it. Only the setting `off` dismisses it, with a message, and only the App's own latest request, found by the
-author and the marker in its body; a review of a person is never dismissed, whatever its text says. A Diff project
+author and the marker in its body, and every such request that stands (not only the latest); a review of a person is
+never dismissed, whatever its text says. The App asks GitHub about this only for a pull request on which its own record
+shows a request for changes, so `off` costs nothing elsewhere; a request the record does not know of is dismissed by hand. A Diff project
 under `blocking` never gets a verdict, so no later review replaces such a request (for example after a project
 changed from Dynamic to Diff Review): choose `any` for it, or `off` to have it dismissed, or dismiss it by hand. The
 check run says this.

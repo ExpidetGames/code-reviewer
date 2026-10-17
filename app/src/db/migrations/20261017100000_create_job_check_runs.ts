@@ -31,6 +31,7 @@ export const migration: Migration = {
       )
       .addColumn("check_run_id", "text")
       .addColumn("review_id", "text")
+      .addColumn("review_event", "text")
       .addColumn("synced_status", "text")
       .addColumn("check_create_attempts", "integer", (column) =>
         column.notNull().defaultTo(0),
@@ -65,6 +66,10 @@ export const migration: Migration = {
       .addCheckConstraint(
         "job_check_runs_review_state_check",
         sql`review_state in ('pending', 'done', 'dropped')`,
+      )
+      .addCheckConstraint(
+        "job_check_runs_review_event_check",
+        sql`review_event is null or review_event in ('approve', 'request_changes', 'withdrawn')`,
       )
       .addCheckConstraint(
         "job_check_runs_counts_check",

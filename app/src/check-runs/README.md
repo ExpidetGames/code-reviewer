@@ -51,7 +51,12 @@ lives with the review kind, `src/review-settings/`) and `findings` of the runner
 - **A skipped verdict leaves an earlier one in place** (fail closed) and the check run says why no verdict was
   submitted. Only `off` takes the App's own latest `REQUEST_CHANGES` back, by dismissing it with a message
   (`provider.withdrawReviewVerdict`: the review of the App's login that carries `VERDICT_MARKER_PREFIX` and still
-  asks for changes; any other review is never touched).
+  asks for changes; any other review is never touched). Every such request of the App that stands is dismissed, not
+  only the latest, because GitHub may count an earlier one of the same reviewer once the latest is gone. `off` costs
+  GitHub calls only where the App asked for changes: the table remembers what the App did to a pull request
+  (`job_check_runs.review_event`: `approve`, `request_changes`, `withdrawn`), and a skipped verdict records none, so
+  the request stays on record. A request that this database does not know of (made before the feature, or by an
+  instance with another database) is not looked for; dismiss it by hand.
 
 Only a pull request that is open and still at the reviewed head gets the review (a stale head or a closed pull
 request is a logged skip). The check of the head and the submit are two calls: a push in between puts the review on
@@ -88,7 +93,8 @@ body). The work is bounded in time and in tries:
   (`PERMISSION_MEMORY_MS`), so the jobs that follow ask GitHub for no token. Only GitHub's own "Resource not
   accessible by integration" counts as a missing permission; an archived repository and one outside the installation
   have their own codes, and a 403 for another reason is retried like any failure.
-- A refused review (own pull request, 403, 422) is `REVIEW_VERDICT_REFUSED` and dropped.
+- A refused review (own pull request, 403, 422) is `REVIEW_VERDICT_REFUSED` and dropped. An App that may not review is
+  believed so for ten minutes too: the jobs that follow ask GitHub for nothing and log it once.
 - A check run that was made and whose id was not kept (the response was lost) is found again by its `external_id`
   (the job id) on the commit; this is also done for a job that was cancelled or replaced meanwhile, so that run is
   completed `neutral` and none is made.
