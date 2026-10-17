@@ -8,6 +8,7 @@ import {
   canTransition,
   checkDescription,
   checkEntryName,
+  descriptionRevealsModel,
   nameKeyOf,
   nameRevealsModel,
   type CatalogEntry,
@@ -15,6 +16,11 @@ import {
 import { toMemberEntry, type MemberCatalogEntry } from "./member.ts";
 
 const BEHIND = { provider: "openrouter", modelId: "acme-labs/deep-thinker-4" };
+const SONNET = {
+  provider: "openrouter",
+  modelId: "anthropic/claude-sonnet-5-5",
+};
+const GROK = { provider: "openrouter", modelId: "x-ai/grok-4-fast:free" };
 
 describe("the name of a catalog entry", () => {
   it("accepts 1 to 40 printable characters, trimmed, and keys it case-insensitively", () => {
@@ -54,6 +60,108 @@ describe("the name of a catalog entry", () => {
   it("is not refused for a name that shares nothing with the model", () => {
     expect(nameRevealsModel("Deep", BEHIND)).toBe(false);
     expect(nameRevealsModel("Thorough", BEHIND)).toBe(false);
+    expect(nameRevealsModel("Medium", SONNET)).toBe(false);
+    expect(nameRevealsModel("Medium", GROK)).toBe(false);
+  });
+
+  // #425-T05
+  it.each([
+    ["spaces for dashes", "Claude Sonnet 5 5"],
+    ["a dot for the last dash", "Claude Sonnet 5.5"],
+    ["underscores", "claude_sonnet_5_5"],
+    ["fullwidth letters", "ｃｌａｕｄｅ-ｓｏｎｎｅｔ-５-５"],
+    ["the vendor and the model id", "anthropic/claude-sonnet-5-5"],
+    ["extra words around it", "The Claude-Sonnet 5.5 option"],
+  ])("is refused for a model id written with %s", (_label, name) => {
+    expect(nameRevealsModel(name, SONNET)).toBe(true);
+  });
+
+  // #425-T05
+  it.each([
+    ["the slug without its variant", "grok-4-fast"],
+    ["the slug without its variant, spelled with spaces", "Grok 4 Fast"],
+    ["the slug with its variant", "grok-4-fast:free"],
+    ["the id without its variant", "x-ai/grok-4-fast"],
+  ])("is refused for %s of an id with a :variant", (_label, name) => {
+    expect(nameRevealsModel(name, GROK)).toBe(true);
+  });
+
+  // #425-T05
+  it("does not let a very short model id block names (below four letters and digits nothing is compared)", () => {
+    const short = { provider: "openrouter", modelId: "vendor/o1" };
+    expect(nameRevealsModel("Solo one", short)).toBe(false);
+  });
+});
+
+describe("the description of a catalog entry against its own model", () => {
+  // #425-T06
+  it.each([
+    ["the slug", "Runs grok-4-fast for quick feedback", GROK],
+    [
+      "a name that is the slug in other letters",
+      "Grok 4 Fast, always on",
+      GROK,
+    ],
+    ["the family name alone", "Powered by Grok 4", GROK],
+    ["the vendor", "From xAI", GROK],
+    ["the vendor spelled with a dash", "Built by x-ai", GROK],
+    ["the vendor spelled apart", "Made by X AI", GROK],
+    [
+      "a token of the slug",
+      "qwen3 coder",
+      {
+        provider: "openrouter",
+        modelId: "qwen/qwen3-coder",
+      },
+    ],
+    [
+      "the vendor of a model with a dash",
+      "Llama based",
+      {
+        provider: "openrouter",
+        modelId: "meta-llama/llama-4-maverick",
+      },
+    ],
+    ["the brand in the slug", "A Sonnet for your code", SONNET],
+    ["the vendor", "Anthropic's pick", SONNET],
+    ["fullwidth letters", "ｇｒｏｋ", GROK],
+  ])("is refused when it names %s", (_label, text, behind) => {
+    expect(descriptionRevealsModel(text, behind)).toBe(true);
+  });
+
+  // #425-T06
+  it("compares the slug as a whole as well, for a slug whose single words are too short to be compared", () => {
+    const short = { provider: "openrouter", modelId: "vendor/abc-12" };
+    expect(descriptionRevealsModel("Our abc 12 option", short)).toBe(true);
+    expect(descriptionRevealsModel("Our abc option", short)).toBe(false);
+  });
+
+  // #425-T06
+  it.each([
+    ["Medium reviews with a good balance", SONNET],
+    ["Fast and thorough", GROK],
+    [
+      "Quick reviews that point out the obvious problems.",
+      {
+        provider: "openrouter",
+        modelId: "acme/quick-1",
+      },
+    ],
+    ["Deep analysis of larger changes", BEHIND],
+  ])("is not refused for a plain sentence: %s", (text, behind) => {
+    expect(descriptionRevealsModel(text, behind)).toBe(false);
+  });
+
+  // #425-T06
+  it("does not cover a brand that the model id does not contain", () => {
+    // Documented limit: only what is derivable from the id (provider, vendor, slug) is compared. The generic scan
+    // of the copy (copy/member-copy-scan.ts) knows the common brand names, nothing knows all of them.
+    expect(
+      descriptionRevealsModel("Made by Moonshot", {
+        provider: "openrouter",
+        modelId: "acme/rocket-1",
+      }),
+    ).toBe(false);
   });
 });
 

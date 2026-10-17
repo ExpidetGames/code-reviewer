@@ -75,10 +75,12 @@ describe.each(ENGINES)("the model catalog service on $name", (engine) => {
     const catalog = createCatalogRepository(db);
     const settings = createInstanceSettingsRepository(db);
     const asked: string[] = [];
+    const askedProviders: Array<string | undefined> = [];
     const lines: string[] = [];
     const modelCapabilities: ModelCapabilityChecker = {
-      check: async (modelId) => {
+      check: async (modelId, options) => {
         asked.push(modelId);
+        askedProviders.push(options?.provider);
         return answer(modelId);
       },
     };
@@ -88,7 +90,7 @@ describe.each(ENGINES)("the model catalog service on $name", (engine) => {
       modelCapabilities,
       logger: { info: (line) => lines.push(line) },
     });
-    return { db, catalog, settings, service, asked, lines };
+    return { db, catalog, settings, service, asked, askedProviders, lines };
   }
 
   async function created(
@@ -237,11 +239,52 @@ describe.each(ENGINES)("the model catalog service on $name", (engine) => {
     },
   );
 
+  // #425-T06
+  it_(
+    "refuses a description that names the entry's own model or vendor, on create and on every change that could",
+    async () => {
+      const { service } = await start();
+
+      expect(
+        await service.create(
+          { ...FAST, description: "Runs acme-labs for quick feedback" },
+          null,
+        ),
+      ).toMatchObject({
+        ok: false,
+        code: "description_invalid",
+        field: "description",
+      });
+      expect(
+        await service.create(
+          {
+            ...FAST,
+            modelId: "x-ai/grok-4-fast:free",
+            description: "Powered by Grok 4",
+          },
+          null,
+        ),
+      ).toMatchObject({ ok: false, code: "description_invalid" });
+      const entry = await created(service, {
+        ...FAST,
+        description: "Obvious problems, found fast.",
+      });
+      // The description stays as it is; the model it is checked against changes.
+      expect(
+        await service.update(entry.id, { modelId: "acme/obvious-1" }, null),
+      ).toMatchObject({ ok: false, code: "description_invalid" });
+      expect(
+        await service.update(entry.id, { description: "Acme says so" }, null),
+      ).toMatchObject({ ok: false, code: "description_invalid" });
+      expect((await service.get(entry.id))?.modelId).toBe("acme/quick-1");
+    },
+  );
+
   // #425-T03
   it_(
     "moves from draft to released to retired and to released again, and releases only what it checked",
     async () => {
-      const { service, asked } = await start();
+      const { service, asked, askedProviders } = await start();
       const entry = await created(service);
 
       const released = await service.release(entry.id, null);
@@ -259,6 +302,8 @@ describe.each(ENGINES)("the model catalog service on $name", (engine) => {
         entry: { status: "released" },
       });
       expect(asked).toEqual(["acme/quick-1", "acme/quick-1"]);
+      // The check is asked about the provider of the entry (#423), not the default one.
+      expect(askedProviders).toEqual(["openrouter", "openrouter"]);
     },
   );
 

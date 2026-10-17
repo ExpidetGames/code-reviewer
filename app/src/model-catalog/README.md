@@ -28,10 +28,17 @@ table), `status`, `sortOrder`, who changed it last and when.
 - **Name:** 1 to 40 printable characters, no space at either end, **unique whatever the case** (decision C3; refused
   `catalog_name_taken`). The uniqueness is a unique index on the stored `name_key` (the name folded to lower case), so it
   is the same on SQLite and Postgres. The name is shown to members by design, so it is refused when it contains the
-  entry's model id, the part of it after the last `/` or the provider (`name_reveals_model`, in any case; checked again
-  when the model changes). A name like "Opus" that hints at a vendor family is the operator's choice.
-- **Description:** optional, one line of at most 160 characters, scanned for model, vendor, price and cost words
-  (`description_invalid`).
+  entry's model id, its slug (the part after the last `/`, with or without a `:variant` such as `:free`) or the provider.
+  The comparison folds the text first (compatibility forms, lower case, letters and digits only), so "Claude Sonnet 5.5",
+  "claude_sonnet_5_5" and a fullwidth spelling are caught like the id itself; a piece shorter than four letters and
+  digits is not compared (`name_reveals_model`; checked again when the model changes). A name like "Opus" that hints at a
+  vendor family is the operator's choice.
+- **Description:** optional, one line of at most 160 characters, scanned for model, vendor, price and cost words, and
+  held to the entry's own model: the same comparison as the name, plus the vendor prefix of the id ("xAI", "x-ai", "X AI")
+  and the words of the slug that name a family or version ("Grok", "qwen3"), as whole words
+  (`descriptionRevealsModel`; `description_invalid`, checked again when the model changes). **Not covered:** a brand that
+  the id does not contain, and the descriptive words of a slug ("fast", "coder", `DESCRIPTIVE_WORDS`), which an operator
+  may use. The scan of the copy knows the common brand names; nothing can know all of them.
 - **Provider:** one of `LLM_PROVIDERS` (`PROVIDER_UNKNOWN` otherwise). **Model id:** the rule of the review settings
   (`model_id_invalid`).
 

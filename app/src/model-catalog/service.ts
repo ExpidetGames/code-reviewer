@@ -10,7 +10,7 @@
 import type { CatalogRepository } from "../db/repositories/catalog-repository.ts";
 import { CatalogNameTakenError } from "../db/repositories/catalog-repository.ts";
 import type { InstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
-import { LLM_PROVIDERS, MODEL_NAME_PATTERN } from "../llm/config.ts";
+import { isModelId, LLM_PROVIDERS, type LlmProvider } from "../llm/config.ts";
 import type { ModelCapabilityChecker } from "../llm/model-capabilities.ts";
 import type { ProjectReviewKind } from "../review-settings/settings.ts";
 import {
@@ -18,6 +18,7 @@ import {
   canTransition,
   checkDescription,
   checkEntryName,
+  descriptionRevealsModel,
   nameRevealsModel,
   type CatalogDefaults,
   type CatalogEntry,
@@ -99,7 +100,7 @@ function checkKinds(value: unknown): ProjectReviewKind[] | undefined {
   return CATALOG_KINDS.filter((kind) => value.includes(kind));
 }
 
-function isProvider(value: unknown): value is string {
+function isProvider(value: unknown): value is LlmProvider {
   return LLM_PROVIDERS.some((provider) => provider === value);
 }
 
@@ -135,10 +136,11 @@ export function createCatalogService(deps: {
    * is a typo that would fail every job. An entry that serves both is held to the stricter rule.
    */
   async function refuseUnsuitableModel(
+    provider: LlmProvider,
     modelId: string,
     kinds: readonly ProjectReviewKind[],
   ): Promise<Refused | undefined> {
-    const result = await modelCapabilities.check(modelId);
+    const result = await modelCapabilities.check(modelId, { provider });
     const dynamic = kinds.includes("dynamic");
     if (result.outcome === "unknown_model")
       return refused(dynamic ? "DYNAMIC_MODEL_UNKNOWN" : "MODEL_UNKNOWN");
@@ -172,12 +174,17 @@ export function createCatalogService(deps: {
     if (!canTransition(entry.status, to))
       return refused("catalog_transition_invalid");
     if (to === "released") {
+      if (!isProvider(entry.provider))
+        return refused("PROVIDER_UNKNOWN", "provider");
       const unsuitable = await refuseUnsuitableModel(
+        entry.provider,
         entry.modelId,
         entry.kinds,
       );
       if (unsuitable !== undefined) return unsuitable;
     } else {
+      // Check then act, harmless: see `setDefaults`. A default set between this read and the write below is read as
+      // none by `defaults()`, because the entry is retired by then.
       const defaults = await storedDefaults();
       if (defaults.diff === id || defaults.dynamic === id)
         return refused("catalog_entry_is_default");
@@ -198,25 +205,33 @@ export function createCatalogService(deps: {
       if (!name.ok) return refused(name.code, "name");
       const description = checkDescription(input.description);
       if (!description.ok) return refused(description.code, "description");
-      if (!isProvider(input.provider))
-        return refused("PROVIDER_UNKNOWN", "provider");
+      const provider = input.provider;
+      if (!isProvider(provider)) return refused("PROVIDER_UNKNOWN", "provider");
       const modelId = input.modelId;
-      if (typeof modelId !== "string" || !MODEL_NAME_PATTERN.test(modelId))
+      if (typeof modelId !== "string" || !isModelId(modelId, provider))
         return refused("model_id_invalid", "modelId");
       const kinds = checkKinds(input.kinds);
       if (kinds === undefined) return refused("kinds_invalid", "kinds");
       const sortOrder = input.sortOrder ?? 0;
       if (!Number.isSafeInteger(sortOrder) || typeof sortOrder !== "number")
         return refused("request_invalid", "sortOrder");
-      if (nameRevealsModel(name.name, { provider: input.provider, modelId }))
+      if (nameRevealsModel(name.name, { provider, modelId }))
         return refused("name_reveals_model", "name");
+      if (
+        description.description !== null &&
+        descriptionRevealsModel(description.description, {
+          provider,
+          modelId,
+        })
+      )
+        return refused("description_invalid", "description");
       const created = await writeOrRefuse(() =>
         catalog.insert(
           {
             name: name.name,
             nameKey: name.key,
             description: description.description,
-            provider: input.provider as string,
+            provider,
             modelId,
             kinds,
             sortOrder,
@@ -252,11 +267,13 @@ export function createCatalogService(deps: {
           return refused("PROVIDER_UNKNOWN", "provider");
         provider = input.provider;
       }
+      // A stored provider that the registry no longer lists (an adapter was removed) cannot be edited until it is changed.
+      if (!isProvider(provider)) return refused("PROVIDER_UNKNOWN", "provider");
       let modelId = entry.modelId;
       if (input.modelId !== undefined) {
         if (
           typeof input.modelId !== "string" ||
-          !MODEL_NAME_PATTERN.test(input.modelId)
+          !isModelId(input.modelId, provider)
         )
           return refused("model_id_invalid", "modelId");
         modelId = input.modelId;
@@ -278,6 +295,11 @@ export function createCatalogService(deps: {
       }
       if (nameRevealsModel(name, { provider, modelId }))
         return refused("name_reveals_model", "name");
+      if (
+        description !== null &&
+        descriptionRevealsModel(description, { provider, modelId })
+      )
+        return refused("description_invalid", "description");
 
       const modelChanged =
         provider !== entry.provider || modelId !== entry.modelId;
@@ -287,7 +309,11 @@ export function createCatalogService(deps: {
         for (const kind of CATALOG_KINDS)
           if (defaults[kind] === id && !kinds.includes(kind))
             return refused("catalog_entry_is_default", kind);
-        const unsuitable = await refuseUnsuitableModel(modelId, kinds);
+        const unsuitable = await refuseUnsuitableModel(
+          provider,
+          modelId,
+          kinds,
+        );
         if (unsuitable !== undefined) return unsuitable;
       }
 
@@ -347,6 +373,9 @@ export function createCatalogService(deps: {
       return { diff: fit("diff"), dynamic: fit("dynamic") };
     },
 
+    // Check then act, and harmless: `retire`, `update` (a narrowed kind) and this method can interleave, so a default
+    // may be stored for an entry that was retired a moment ago. Nothing reads the stored value directly: `defaults()`
+    // checks it again against the entry's current status and kinds and reads a stale one as none (README, "Defaults").
     async setDefaults(input, updatedBy) {
       if (!isPlainObject(input)) return refused("request_invalid");
       const chosen: CatalogDefaults = { diff: null, dynamic: null };
