@@ -3,7 +3,7 @@
 // Pins down the structure of the CI workflow (.github/workflows/ci.yml) so that a refactor cannot
 // quietly drop a check, swallow a failure, widen permissions or unpin an action. It reads the
 // file as YAML; how GitHub actually runs it is verified by the CI runs themselves.
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
@@ -67,9 +67,21 @@ function allRunCommands(): string[] {
   return jobs.flatMap(([, job]) => runCommands(job));
 }
 
+// Every `uses:` of a step: the actions of other repositories. A local action (`./.github/actions/<name>`, a
+// composite action of this repository) is part of the commit under test and cannot be pinned.
 function allUses(): string[] {
   return jobs.flatMap(([, job]) =>
-    steps(job).flatMap((step) => (step.uses ? [step.uses] : [])),
+    steps(job).flatMap((step) =>
+      step.uses && !step.uses.startsWith("./") ? [step.uses] : [],
+    ),
+  );
+}
+
+function localUses(): string[] {
+  return jobs.flatMap(([, job]) =>
+    steps(job).flatMap((step) =>
+      step.uses?.startsWith("./") ? [step.uses] : [],
+    ),
   );
 }
 
@@ -683,6 +695,15 @@ describe("CI workflow security", () => {
     for (const action of thirdParty) {
       expect(action, action).toMatch(/@[0-9a-f]{40}$/);
     }
+  });
+
+  // #412-T02
+  it("calls only local actions that are in the repository", () => {
+    for (const action of localUses())
+      expect(
+        existsSync(`${repoRoot}${action.slice(2)}/action.yml`),
+        action,
+      ).toBe(true);
   });
 
   // CR-16-T06
