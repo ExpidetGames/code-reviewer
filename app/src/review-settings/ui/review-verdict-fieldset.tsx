@@ -40,7 +40,7 @@ export const VERDICT_KIND_NOTES: Record<ProjectReviewKind, string> = {
 };
 
 export const VERDICT_COMMON_NOTE =
-  "After a successful review Code Reviewer submits the review as itself on the commit that was reviewed, with a link to the review comment. A failed, cancelled or replaced run submits none, and a new push replaces the earlier verdict. An approval counts like any other approval for branch protection.";
+  "After a successful review Code Reviewer submits the review as itself on the commit that was reviewed, with a link to the review comment. A failed, cancelled or replaced run submits none, and a new push replaces the earlier verdict. Do not rely on this approval for branch protection: GitHub does not document that the approval of an App counts towards required approvals.";
 
 function isMode(value: string): value is ReviewVerdictMode {
   return REVIEW_VERDICT_MODES.some((mode) => mode === value);

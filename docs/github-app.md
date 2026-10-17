@@ -159,9 +159,13 @@ submits nothing. Which findings block is a project setting, **Review verdict**, 
 | `blocking` (default) | `REQUEST_CHANGES` while a P0 finding is open, otherwise `APPROVE` | no review is submitted: a review without severities cannot tell a blocker from a nit |
 | `any` | `REQUEST_CHANGES` while any finding is open, otherwise `APPROVE` | `REQUEST_CHANGES` while a finding is active, otherwise `APPROVE` |
 
-A Dynamic review that stopped early (cost or time limit) never approves. **Branch protection:** an `APPROVE` of the
-App counts like any other approval, so a rule that requires approving reviews can be satisfied by it; set the
-project to `off` where that is not wanted.
+A Dynamic review that stopped early (cost or time limit) never approves.
+
+**Branch protection.** GitHub documents "Require approvals" as approvals from people with write permission, and does
+not say whether the approval of a GitHub App counts (it does not for the Actions bot; reports on a dedicated App
+disagree). Do not rely on the `APPROVE` of Code Reviewer in either direction. To require a human approval anyway,
+turn on **Require review from Code Owners** with a `CODEOWNERS` file that names people or teams: the App cannot be a
+code owner, so only a human approval satisfies that rule (or set the project's Review verdict to `off`).
 
 ## Events
 

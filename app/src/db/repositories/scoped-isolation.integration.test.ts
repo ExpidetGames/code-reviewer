@@ -921,6 +921,7 @@ const CASES: Case[] = [
     expectAnswer: (answer) => expect(answer).toBeUndefined(),
   },
   // job check runs (#405): B's job is not one of A's, so A neither sees, takes nor changes B's check run record
+  // (#405-T35, for every method of the repository below)
   {
     name: "jobChecks.find",
     run: (a, b) => a.jobChecks.find(b.job.id),
