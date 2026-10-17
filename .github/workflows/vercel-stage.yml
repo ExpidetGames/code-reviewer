@@ -55,6 +55,19 @@ on:
         required: false
         default: ""
         type: string
+    secrets:
+      INFISICAL_CLIENT_ID:
+        description: Client id of the Infisical machine identity (a secret of the environment production, passed by the caller)
+        required: true
+      INFISICAL_CLIENT_SECRET:
+        description: Client secret of the Infisical machine identity (a secret of the environment production, passed by the caller)
+        required: true
+      INFISICAL_DOMAIN:
+        description: Address of the Infisical instance (a secret of the environment production, passed by the caller)
+        required: true
+      INFISICAL_PROJECT_SLUG:
+        description: Slug of the Infisical project (a secret of the environment production, passed by the caller)
+        required: true
     outputs:
       url:
         description: Address of the staged deployment (https, a Vercel deployment host)
