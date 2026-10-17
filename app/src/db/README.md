@@ -357,6 +357,19 @@ row, so an app of the previous release on the same database is unaffected (it ne
   Rows are removed a day after they expired (`src/maintenance/cleanup.ts`); the table is listed in the user merge
   (`github-signin/merge.ts`, ends with the retired user). See `src/plan-handoff/README.md`.
 
+### Model catalog entries
+
+Migration `20261017140000_create_model_catalog_entries` (#425; epic #420). It adds an empty table and touches no existing
+row, so an app of the previous release on the same database is unaffected (it never reads the table):
+
+- `model_catalog_entries` (`id` primary key, opaque `mce_…`; `name` and `name_key`, the name folded to lower case with a
+  unique index, so two names never differ only in case and no expression index is needed; `description`; `provider` and
+  `model_id`, operator only; `serves_diff` and `serves_dynamic`, 0 or 1 with a check that at least one is 1; `status`
+  `draft`/`released`/`retired` (a check); `sort_order`; `created_at`, `updated_at`; `updated_by` → `users.id` `on delete
+set null`): the operator's list of the models that workspaces on the operator's key may use. Instance level
+  (`catalog-repository.ts`): no workspace owns an entry. A released entry is never hard-deleted. See
+  `src/model-catalog/README.md`. The user merge moves `updated_by` (`github-signin/merge.ts`).
+
 ## Workspace scoping
 
 Every repository that reads or writes customer data is created for one workspace:
@@ -384,6 +397,7 @@ Not scoped, each for a reason (the list is in `scoping.test.ts`):
 | `claim-admission.ts`                                                 | The check of the entitlements of a job the claim just took (#277), inside the claim transaction of the lease side of the queue, for whichever workspace the job is in. It reads, through repositories created for that job's workspace (the instance default and the workspace row it locks are not customer data), and decides; the ending of a refused job is the lease side's own statement                                   |
 | `plan-handoff-redeem-repository.ts`                                  | The redemption of a handoff token by the external plan page through the operator API (#284). The caller holds only the token, so there is no workspace to scope to before it is looked up by its hash; it never lists, and the answer names the workspace the token was made for. Making a token is the scoped plan handoff tokens repository; the clean-up only deletes expired rows                                            |
 | `refusal-notices-sweep.ts`                                           | The notices of refused reviews that are due to be posted again (#281), for the cron sweep that serves the whole instance. It only reads the `pending` rows whose wait is over, and every answer carries `workspaceId`; the record itself goes through the scoped refusal notices repository                                                                                                                                      |
+| `catalog-repository.ts`                                              | The operator's model catalog (#425): instance configuration, not customer data; no workspace owns an entry. Its one read across workspaces is `countProjectsSelecting`, a number of how many projects select an entry (for the operator's confirmation when the model behind it changes); it returns no row, project or workspace. The member view selects only the columns a member may see                                     |
 
 A signed-in user works in the workspace named by the address (`/w/<slug>`) and only in one they are a member
 of (`src/workspaces/README.md`); the repositories of members and invitations below follow the same rule,

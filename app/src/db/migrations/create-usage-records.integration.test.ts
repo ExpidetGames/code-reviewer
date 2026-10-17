@@ -38,7 +38,8 @@ async function snapshot(
       table.name === "job_dispatches" ||
       table.name === "refusal_notices" ||
       table.name === "plan_handoff_tokens" ||
-      table.name === "job_check_runs"
+      table.name === "job_check_runs" ||
+      table.name === "model_catalog_entries"
     )
       continue;
     const { rows } =
