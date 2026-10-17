@@ -72,6 +72,15 @@ The App, the Dispatcher (TypeScript) and the Worker (Python) agree on these file
   end-to-end journeys run against it. Its answers are checked against the schemas in
   `app/integration-tests/fakes/dispatcher-app.integration.test.ts`.
 
+### The findings a review left open (#405)
+
+Additive, so a previous-release reader and writer keep working: `RunnerResult.findings`, an optional `ReviewFindings`
+(`open`, and `bySeverity` with `P0` to `P3`, or `null` for a Diff Review whose findings have no severity). It is the
+count of the findings open **after** a successful run (a Dynamic Review carries the findings of earlier runs over, PR-Agent
+keeps a record of the active ones), and the app decides the review verdict it submits from it
+(`app/src/check-runs/README.md`). A runner that does not send it, a failed result, or a count that cannot be known
+means no verdict. The app stores it with the result and ignores it when it is absent.
+
 ### A superseded run (#396, #397)
 
 Additive, so a previous-release reader and writer keep working: the claim feature `supersede` (a runner or Worker

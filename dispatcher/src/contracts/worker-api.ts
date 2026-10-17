@@ -81,6 +81,10 @@ export type RunnerResult = {
   logTail: string;
   logTruncated?: boolean;
   /**
+   * #405: the findings left open on the pull request by a successful review, which the app turns into the review verdict it submits. Absent (or null) where the runner cannot say, and on every failure: the app then submits no verdict. Additive: a runner that does not send it, or an app that does not read it, keeps working.
+   */
+  findings?: ReviewFindings | null;
+  /**
    * What the run used. A failed result carries it too, whenever the run made at least one model call before it failed (a timeout at the end, an answer the validator refuses, a publish error): the app counts such a run exactly like a successful one. A run that failed before its first model call reports null. The cost follows the same rule as for a successful run: exact, or null when any call is unpriced; the token counters are reported either way.
    */
   usage?: RunnerUsage | null;
@@ -398,6 +402,18 @@ export interface WorkerHeartbeatResponse {
 export interface WorkerResultRequest {
   result: RunnerResult;
   [k: string]: unknown;
+}
+/**
+ * #405: what a successful review left open on the pull request. `open` counts the findings that are open AFTER the run (a Dynamic Review carries the findings of earlier runs over, PR-Agent keeps a record of active ones), not the ones the run found. `bySeverity` is the count per priority of a Dynamic Review, of the findings its summary lists (so `open` may exceed the sum when lower priority findings did not fit); null for a Diff Review, whose findings have no severity.
+ */
+export interface ReviewFindings {
+  open: number;
+  bySeverity: {
+    P0: number;
+    P1: number;
+    P2: number;
+    P3: number;
+  } | null;
 }
 export interface RunnerUsage {
   model: string | null;

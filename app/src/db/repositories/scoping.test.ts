@@ -23,6 +23,7 @@ const SCOPED = [
   "installation-link-requests-repository.ts",
   "integrations-repository.ts",
   "invitations-repository.ts",
+  "job-check-runs-repository.ts",
   "jobs-repository.ts",
   "plan-handoff-tokens-repository.ts",
   "projects-repository.ts",
@@ -66,6 +67,10 @@ const SCOPED = [
  * - refusal-notices-sweep: the notices of refused reviews that are due to be posted again (#281), for the cron sweep that
  *   serves the whole instance; it only reads the rows that wait for a retry, and every answer names its workspace. The
  *   record itself goes through the scoped refusal notices repository;
+ * - job-check-runs-sweep: the jobs whose check run on GitHub is behind (#405), for the reconciler that serves the whole
+ *   instance (the sweep, the timer and the requests that touch the database); it only reads the rows that are due and
+ *   the waiting or running jobs without one, and every answer names its workspace. The record itself goes through
+ *   the scoped job check runs repository;
  * - job-dispatches: where the signed wake-up call of a job stands (#326). The sender holds the job it just queued and
  *   the sweep works through the whole instance, like the lease side of the queue; the table has a job id and
  *   counters, no repository data, and is only written in webhook mode;
@@ -86,6 +91,7 @@ const INSTANCE_LEVEL = [
   "instance-settings-repository.ts",
   "integration-directory-repository.ts",
   "invitation-directory-repository.ts",
+  "job-check-runs-sweep.ts",
   "job-claimed-keys-repository.ts",
   "job-dispatches-repository.ts",
   "jobs-claim.ts",

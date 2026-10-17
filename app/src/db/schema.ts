@@ -449,6 +449,38 @@ export interface RefusalNoticesTable {
 }
 
 /**
+ * Where the check run and the review verdict of one review job stand on GitHub (#405, src/check-runs/README.md): one
+ * row per job. The ids make the work idempotent; `synced_status` is the job status the check run shows now.
+ */
+export interface JobCheckRunsTable {
+  job_id: string;
+  /** The workspace of the job, repeated here so queries need no join to scope. */
+  workspace_id: string;
+  /** The id of the check run on the platform, as text; null until it is made. */
+  check_run_id: string | null;
+  /** The id of the review the app submitted, as text; null until then (or when none is submitted). */
+  review_id: string | null;
+  /** A JobStatus: the status of the job the check run shows now; null before the first sync. */
+  synced_status: string | null;
+  /** How many times the creation of the check run was started (counted before the call). */
+  check_create_attempts: ColumnType<number, number | undefined, number>;
+  /** How many times the submission of the review was started (counted before the call). */
+  review_submit_attempts: ColumnType<number, number | undefined, number>;
+  /** `pending`, `done` or `dropped` (`REVIEW_VERDICT_STATES`). */
+  review_state: ColumnType<string, string | undefined, string>;
+  /** `active`, `settled` or `dropped` (`JOB_CHECK_STATES`). */
+  state: ColumnType<string, string | undefined, string>;
+  /** Failed syncs in a row; bounded by the code. */
+  attempts: ColumnType<number, number | undefined, number>;
+  /** ISO 8601 text in UTC: when a sync may start again. While one runs: when its claim ends. */
+  next_attempt_at: string;
+  /** The stable code of the last failure or of the reason the row was dropped. */
+  last_code: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
  * A single-use token that hands an Owner or Admin over to the operator-configured plan page (#284,
  * src/plan-handoff/). Only the hash of the token is kept.
  */
@@ -626,6 +658,7 @@ export interface Database {
   job_claimed_keys: JobClaimedKeysTable;
   job_dispatches: JobDispatchesTable;
   refusal_notices: RefusalNoticesTable;
+  job_check_runs: JobCheckRunsTable;
   plan_handoff_tokens: PlanHandoffTokensTable;
   password_reset_tokens: PasswordResetTokensTable;
   email_verification_tokens: EmailVerificationTokensTable;

@@ -385,6 +385,32 @@ describe("what the app accepts from a runner", () => {
         result: { ...result, usage: { ...result.usage, stoppedEarly } },
       },
     ]),
+    // #405-T30: the findings a successful review left open, in the schema and in the parser.
+    ...[
+      { open: 3, bySeverity: { P0: 1, P1: 0, P2: 2, P3: 0 } },
+      { open: 2, bySeverity: null },
+      { open: 0, bySeverity: { P0: 0, P1: 0, P2: 0, P3: 0 } },
+      null,
+    ].map((findings): [string, unknown] => [
+      `findings ${JSON.stringify(findings)}`,
+      { leaseToken: TOKEN, result: { ...result, findings } },
+    ]),
+    ...[
+      { open: -1, bySeverity: null },
+      { open: 1.5, bySeverity: null },
+      { open: 1 },
+      { bySeverity: null },
+      { open: 1, bySeverity: { P0: 1, P1: 0, P2: 0 } },
+      { open: 1, bySeverity: { P0: 1, P1: 0, P2: 0, P3: 0, P4: 0 } },
+      { open: 1, bySeverity: { P0: -1, P1: 0, P2: 0, P3: 0 } },
+      { open: 1, bySeverity: null, extra: true },
+      { open: 1000001, bySeverity: null },
+      "none",
+      [],
+    ].map((findings): [string, unknown] => [
+      `findings that are not valid: ${JSON.stringify(findings)}`,
+      { leaseToken: TOKEN, result: { ...result, findings } },
+    ]),
     [
       "usage with a negative token count",
       {

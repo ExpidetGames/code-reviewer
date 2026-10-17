@@ -384,6 +384,23 @@ export type RunnerUsage = {
 export const STOPPED_EARLY_REASONS = ["cost_limit", "time_limit"] as const;
 export type StoppedEarly = (typeof STOPPED_EARLY_REASONS)[number];
 
+/** The priorities of a Dynamic Review's findings, highest first (#195); `P0` is the one that blocks (#405). */
+export const FINDING_PRIORITIES = ["P0", "P1", "P2", "P3"] as const;
+export type FindingPriority = (typeof FINDING_PRIORITIES)[number];
+
+/**
+ * #405: what a successful review left open on the pull request. `open` counts the findings open AFTER the run;
+ * `bySeverity` is the count per priority of the findings a Dynamic summary lists (so it may add up to less than
+ * `open`), and null for a Diff Review, whose findings have no severity.
+ */
+export type ReviewFindings = {
+  open: number;
+  bySeverity: Record<FindingPriority, number> | null;
+};
+
+/** The largest count a runner may report; the same bound as the schema. */
+export const MAX_FINDING_COUNT = 100_000;
+
 /** The result of a job as the runner reports it, after the checks and with every field filled. */
 export type RunnerResult = {
   ok: boolean;
@@ -400,6 +417,8 @@ export type RunnerResult = {
   logTail: string;
   logTruncated: boolean;
   usage: RunnerUsage | null;
+  /** #405: the findings left open by a successful review; absent where the runner could not say. */
+  findings?: ReviewFindings;
 };
 
 export type CompleteRequest = { leaseToken: string; result: RunnerResult };

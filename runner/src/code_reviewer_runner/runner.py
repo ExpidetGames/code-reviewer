@@ -111,7 +111,13 @@ from code_reviewer_runner.require_parameters_patch import (
     RequireParametersPatchError,
     apply_require_parameters_patch,
 )
-from code_reviewer_runner.result import NO_RESULT_REASON, ErrorCode, JobResult, Usage
+from code_reviewer_runner.result import (
+    NO_RESULT_REASON,
+    ErrorCode,
+    JobResult,
+    ReviewFindings,
+    Usage,
+)
 from code_reviewer_runner.review_state_watch import (
     ReviewStateWatch,
     WatchError,
@@ -405,6 +411,7 @@ def _run_diff_job(
         log_truncated=log_truncated,
         usage=reported,
         error_reason=None if ok else _unreported_use(reported, meter),
+        findings=_diff_findings(ok, job.command, watch),
     )
 
 
@@ -785,7 +792,19 @@ def _run_dynamic_job(
         error_code=None,
         log_tail=summary,
         usage=ledger.usage(job.llm.model),
+        findings=published.findings,
     )
+
+
+def _diff_findings(ok: bool, command: Command, watch: ReviewStateWatch) -> ReviewFindings | None:
+    """The findings PR-Agent holds as active after a successful review, for the verdict (#405).
+
+    PR-Agent gives its findings no severity, so there is a count and no breakdown. None when the run
+    failed or the review tool wrote no record: the app then submits no verdict.
+    """
+    if not ok or command is not Command.REVIEW or watch.active_findings is None:
+        return None
+    return ReviewFindings(open=watch.active_findings, by_severity=None)
 
 
 def _truncation(
