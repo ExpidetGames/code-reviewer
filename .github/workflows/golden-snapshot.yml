@@ -7,8 +7,9 @@ name: Golden snapshot
 # Dispatcher is configured with that record by hand (docs/golden-snapshot.md); nothing here changes a deployment.
 #
 # It never runs for a pull request or a fork, and it never runs job code: the builder VM runs our own build and the
-# Worker image's `probe` mode, nothing from a pull request. The Vercel token is read by the build step only, from the
-# environment `hosted-snapshot`, and is never in a command line or a log. A push to main runs it only when the
+# Worker image's `probe` mode, nothing from a pull request. The Vercel token, the team and the Dispatcher's project id
+# are loaded from Infisical /ci (#403) just before the build step, with the sign-in secrets of the environment
+# `production`, and are never in a command line or a log. A push to main runs it only when the
 # repository variable GOLDEN_SNAPSHOT_ENABLED is "true" (set it once the secrets exist); a manual run needs no variable.
 on:
   workflow_dispatch:
@@ -35,12 +36,12 @@ jobs:
   build:
     name: Build, check and record the golden snapshot
     # The job's own condition (a manual run executes the code of the branch it is started on, with the environment's
-    # secrets): only main and development, as the canary. The environment's own branch rule is the second layer.
-    if: ${{ github.repository == 'ExpidetGames/code-reviewer' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/development') && (github.event_name == 'workflow_dispatch' || vars.GOLDEN_SNAPSHOT_ENABLED == 'true') }}
+    # secrets): only main, as the canary and the deployment. The environment's own branch rule is the second layer.
+    if: ${{ github.repository == 'ExpidetGames/code-reviewer' && github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || vars.GOLDEN_SNAPSHOT_ENABLED == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
-    # Holds VERCEL_TOKEN, VERCEL_TEAM_ID and VERCEL_PROJECT_ID; protect it with a required reviewer if wanted.
-    environment: hosted-snapshot
+    # Holds the Infisical sign-in as secrets; its deployment branches are restricted to main.
+    environment: production
     permissions:
       contents: read
     steps:
@@ -61,12 +62,21 @@ jobs:
       # Tracked files of this commit only: the build context cannot hold an untracked file or a credential.
       - name: Archive the commit
         run: git archive --format=tar.gz --output "$RUNNER_TEMP/context.tgz" HEAD
+      # The snapshot has to be in the Dispatcher's project, because the Launcher creates job VMs in the project it
+      # runs in. VERCEL_TOKEN and VERCEL_TEAM_ID are exported under the names the build reads.
+      - name: Load the Vercel credentials from Infisical
+        uses: ./.github/actions/infisical-ci-secrets
+        with:
+          secret-names: VERCEL_TOKEN VERCEL_TEAM_ID VERCEL_DISPATCHER_PROJECT_ID
+          client-id: ${{ secrets.INFISICAL_CLIENT_ID }}
+          client-secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+          domain: ${{ secrets.INFISICAL_DOMAIN }}
+          project-slug: ${{ secrets.INFISICAL_PROJECT_SLUG }}
+          consequence: No snapshot was built.
       - name: Build, check and record the snapshot
         working-directory: dispatcher
         env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          VERCEL_TEAM_ID: ${{ secrets.VERCEL_TEAM_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_PROJECT_ID: ${{ env.VERCEL_DISPATCHER_PROJECT_ID }}
           TARGET: ${{ inputs.target || 'sandbox' }}
           PINNED: ${{ inputs.pinned_snapshot }}
         run: |

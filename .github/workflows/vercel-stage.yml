@@ -1,0 +1,189 @@
+name: Vercel stage
+
+# Reusable (#403): stages one project of the hosted deployment on Vercel production with the Vercel CLI, for
+# deploy-production.yml. It builds the commit here (`vercel pull`, `vercel build --prod`) and uploads the result
+# (`vercel deploy --prebuilt --prod --skip-domain`): a staged production deployment, which uses the production
+# variables and is not assigned the production domains. Nothing goes live here; promoting is the last job of
+# deploy-production.yml, after the canary. The project's Git integration is switched off (vercel.json), so the CLI
+# is the only way a deployment is made.
+#
+# The runtime variables of the project come from Vercel (`vercel pull`; Infisical's Secret Sync keeps them there,
+# docs/deployment-vercel.md, section 3). The credentials the CLI needs - the token, the team id and the project id
+# of this project - come from Infisical /ci, loaded by .github/actions/infisical-ci-secrets with the sign-in secrets
+# of the environment `production`. They are loaded just before the first CLI step, so the dependencies' install
+# scripts never see the token, and the CLI reads them from the environment: the token is never on a command line.
+# The job runs only for this repository on main, whoever calls it.
+on:
+  workflow_call:
+    inputs:
+      project:
+        description: Short name of the Vercel project, used in the job name and the GitHub deployment (app, dispatcher)
+        required: true
+        type: string
+      directory:
+        description: Root directory of the project in the repository (app, dispatcher)
+        required: true
+        type: string
+      project-id-secret:
+        description: Name of the secret at Infisical /ci that holds the project's id
+        required: true
+        type: string
+      ref:
+        description: Commit SHA to check out and build
+        required: true
+        type: string
+    outputs:
+      url:
+        description: Address of the staged deployment (https, a Vercel deployment host)
+        value: ${{ jobs.stage.outputs.url }}
+      deployment-id:
+        description: Id of the GitHub deployment record of this stage
+        value: ${{ jobs.stage.outputs.deployment-id }}
+
+permissions:
+  contents: read
+
+env:
+  # An exact version, never `latest`: a deployment must not change because the CLI did. Raise it deliberately.
+  VERCEL_CLI_VERSION: 64.5.0
+  VERCEL_TELEMETRY_DISABLED: "1"
+
+jobs:
+  stage:
+    name: Stage ${{ inputs.project }} on Vercel
+    if: ${{ github.repository == 'ExpidetGames/code-reviewer' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    # Holds the Infisical sign-in; its deployment branches are restricted to main.
+    environment: production
+    permissions:
+      contents: read
+      deployments: write
+    outputs:
+      url: ${{ steps.deploy.outputs.url }}
+      deployment-id: ${{ steps.record.outputs.deployment-id }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - name: Record the deployment on GitHub
+        id: record
+        uses: actions/github-script@v9
+        env:
+          PROJECT: ${{ inputs.project }}
+          COMMIT_SHA: ${{ inputs.ref }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        with:
+          script: |
+            const environment = `${process.env.PROJECT}-production`;
+            const deployment = await github.rest.repos.createDeployment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: process.env.COMMIT_SHA,
+              environment,
+              description: `Vercel production deployment of ${process.env.PROJECT}`,
+              auto_merge: false,
+              required_contexts: [],
+              transient_environment: false,
+              production_environment: true,
+            });
+            await github.rest.repos.createDeploymentStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              deployment_id: deployment.data.id,
+              state: 'in_progress',
+              environment,
+              log_url: process.env.RUN_URL,
+              description: 'Staged on Vercel, not promoted yet.',
+              auto_inactive: false,
+            });
+            core.setOutput('deployment-id', String(deployment.data.id));
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: ${{ inputs.directory }}/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+          cache-dependency-path: ${{ inputs.directory }}/pnpm-lock.yaml
+      - name: Install the Vercel CLI
+        run: npm install --global "vercel@${VERCEL_CLI_VERSION}"
+      # Just before the first CLI step. Exports the values, masked, for every later step.
+      - name: Load the Vercel credentials from Infisical
+        uses: ./.github/actions/infisical-ci-secrets
+        with:
+          secret-names: VERCEL_TOKEN VERCEL_TEAM_ID ${{ inputs.project-id-secret }}
+          client-id: ${{ secrets.INFISICAL_CLIENT_ID }}
+          client-secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+          domain: ${{ secrets.INFISICAL_DOMAIN }}
+          project-slug: ${{ secrets.INFISICAL_PROJECT_SLUG }}
+          consequence: Nothing is deployed.
+      # The CLI reads the team and the project from VERCEL_ORG_ID and VERCEL_PROJECT_ID. The loaded values are
+      # already masked; they are neither echoed nor passed on a command line.
+      - name: Export the team and project ids under the names the CLI reads
+        env:
+          PROJECT_ID_SECRET: ${{ inputs.project-id-secret }}
+        run: |
+          set -euo pipefail
+          echo "VERCEL_ORG_ID=${VERCEL_TEAM_ID}" >> "$GITHUB_ENV"
+          echo "VERCEL_PROJECT_ID=${!PROJECT_ID_SECRET}" >> "$GITHUB_ENV"
+      - name: Pull the production settings and variables
+        run: vercel pull --yes --environment=production
+      - name: Build
+        run: vercel build --prod
+      # `--skip-domain`: the staged deployment of docs/deployment-vercel.md, section 5.1. Its address is the only
+      # thing the CLI prints on stdout.
+      - name: Deploy the build, staged
+        id: deploy
+        env:
+          COMMIT_SHA: ${{ inputs.ref }}
+          REPOSITORY: ${{ github.repository }}
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          url="$(
+            vercel deploy --prebuilt --prod --skip-domain --archive=tgz \
+              --meta githubDeployment=1 \
+              --meta githubCommitRef=main \
+              --meta githubCommitSha="${COMMIT_SHA}" \
+              --meta githubCommitOrg="${REPOSITORY_OWNER}" \
+              --meta githubCommitRepo="${REPOSITORY#*/}" \
+              --meta githubOrg="${REPOSITORY_OWNER}" \
+              --meta githubRepo="${REPOSITORY#*/}"
+          )"
+          if ! [[ "${url}" =~ ^https://[a-z0-9-]+\.vercel\.app$ ]]; then
+            echo "::error::The CLI did not print a deployment address."
+            exit 1
+          fi
+          echo "url=${url}" >> "$GITHUB_OUTPUT"
+      - name: Summarize
+        env:
+          PROJECT: ${{ inputs.project }}
+          DEPLOYMENT_URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          {
+            echo "### Staged ${PROJECT}"
+            echo
+            echo "- url: ${DEPLOYMENT_URL}"
+            echo "- not promoted yet: the production domains still point at the previous deployment"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Mark the GitHub deployment failed
+        if: ${{ failure() && steps.record.outputs.deployment-id != '' }}
+        uses: actions/github-script@v9
+        env:
+          DEPLOYMENT_ID: ${{ steps.record.outputs.deployment-id }}
+          PROJECT: ${{ inputs.project }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        with:
+          script: |
+            await github.rest.repos.createDeploymentStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              deployment_id: Number(process.env.DEPLOYMENT_ID),
+              state: 'failure',
+              environment: `${process.env.PROJECT}-production`,
+              log_url: process.env.RUN_URL,
+              description: 'The deployment could not be staged.',
+              auto_inactive: false,
+            });

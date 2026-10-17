@@ -72,24 +72,17 @@ describe("golden snapshot workflow", () => {
     expect(condition).toContain("github.event_name == 'workflow_dispatch'");
   });
 
-  // #333-ref-guard
-  it("runs only from main and development, like the canary, so a manual run on another branch cannot use the environment's secrets", () => {
+  // #403-T05
+  it("runs only from main, so a manual run on another branch cannot use the Infisical sign-in of the environment production", () => {
     const condition = String(job.if);
 
     expect(condition).toContain("github.ref == 'refs/heads/main'");
-    expect(condition).toContain("github.ref == 'refs/heads/development'");
+    expect(condition).not.toContain("development");
     // The ref condition is ANDed with the others, not an alternative to them.
     expect(condition).toMatch(
-      /repository == '[^']+' && \(github\.ref == 'refs\/heads\/main' \|\| github\.ref == 'refs\/heads\/development'\) && \(/,
+      /repository == '[^']+' && github\.ref == 'refs\/heads\/main' && \(/,
     );
-    expect(condition.match(/github\.ref ==/g)).toHaveLength(2);
-    // The same two branches as the canary workflow.
-    const canary = readFileSync(
-      `${repoRoot}.github/workflows/dispatcher-canary.yml`,
-      "utf8",
-    );
-    expect(canary).toContain("github.ref == 'refs/heads/main'");
-    expect(canary).toContain("github.ref == 'refs/heads/development'");
+    expect(condition.match(/github\.ref ==/g)).toHaveLength(1);
   });
 
   // #330-extra-workflow
@@ -97,7 +90,7 @@ describe("golden snapshot workflow", () => {
     expect(jobs).toHaveLength(1);
     expect(workflow.permissions).toEqual({ contents: "read" });
     expect(job.permissions).toEqual({ contents: "read" });
-    expect(job.environment).toBe("hosted-snapshot");
+    expect(job.environment).toBe("production");
     expect(source).not.toMatch(/id-token|packages:\s*write|contents:\s*write/);
   });
 
@@ -107,23 +100,38 @@ describe("golden snapshot workflow", () => {
     expect(workflow.concurrency?.group).toBeTruthy();
   });
 
-  // #330-T02
-  it("reads the platform secrets in the build step only, as environment, never in a command line", () => {
+  // #403-T06
+  it("loads the platform credentials from Infisical after the install and just before the build step, which alone uses them", () => {
+    const names = job.steps.map((step) => step.name);
+    const load = job.steps.find(
+      (step) => step.uses === "./.github/actions/infisical-ci-secrets",
+    );
+    expect(load?.with?.["secret-names"]).toBe(
+      "VERCEL_TOKEN VERCEL_TEAM_ID VERCEL_DISPATCHER_PROJECT_ID",
+    );
+    const at = job.steps.findIndex((step) => step === load);
+    expect(at).toBeGreaterThan(names.indexOf("Install dependencies"));
+    expect(at).toBeLessThan(
+      names.indexOf("Build, check and record the snapshot"),
+    );
+    expect(job.steps[0]?.uses).toMatch(/^actions\/checkout@/);
+    // Only the Infisical sign-in reads a secret of GitHub.
     const withSecrets = job.steps.filter((step) =>
       JSON.stringify(step).includes("secrets."),
     );
-    expect(withSecrets.map((step) => step.name)).toEqual([
-      "Build, check and record the snapshot",
+    expect(withSecrets).toEqual([load]);
+  });
+
+  // #403-T06
+  it("hands the build step the project id under the name the client reads, and no credential in a command line", () => {
+    const build = stepNamed("Build, check and record the snapshot");
+    expect(Object.keys(build.env ?? {}).sort()).toEqual([
+      "PINNED",
+      "TARGET",
+      "VERCEL_PROJECT_ID",
     ]);
-    const build = withSecrets[0] as Step;
-    expect(Object.keys(build.env ?? {}).sort()).toEqual(
-      [
-        "PINNED",
-        "TARGET",
-        "VERCEL_PROJECT_ID",
-        "VERCEL_TEAM_ID",
-        "VERCEL_TOKEN",
-      ].sort(),
+    expect(build.env?.VERCEL_PROJECT_ID).toBe(
+      "${{ env.VERCEL_DISPATCHER_PROJECT_ID }}",
     );
     expect(build.run).not.toContain("secrets.");
     expect(build.run).not.toMatch(/echo[^\n]*VERCEL_/);

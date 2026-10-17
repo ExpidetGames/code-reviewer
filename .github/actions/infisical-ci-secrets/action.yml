@@ -1,0 +1,181 @@
+name: Load CI secrets from Infisical
+description: >-
+  Signs in to Infisical with the repository's machine identity (Universal Auth) and exports the named secrets at
+  /ci of the Infisical environment prod into the job's environment, each one masked. Production only: the
+  environment and the path are not inputs. Where each value lives: docs/deployment-vercel.md, section 3.
+
+# A composite action cannot read the `secrets` context, so the caller passes the four Infisical settings in. They
+# are not `required` here: when one is missing, the first step names it, instead of the run failing without a word
+# on why. The repository must be checked out before this action runs, because it is a local action. The settings
+# are secrets of the GitHub environment `production` (this repository is public: a variable is world-readable), so
+# every job that calls this action runs in that environment.
+
+inputs:
+  secret-names:
+    description: Space-separated names of the secrets to load from /ci, at most six
+    required: true
+  client-id:
+    description: The secret INFISICAL_CLIENT_ID of the environment production
+    required: false
+  client-secret:
+    description: The secret INFISICAL_CLIENT_SECRET of the environment production
+    required: false
+  domain:
+    description: The secret INFISICAL_DOMAIN of the environment production
+    required: false
+  project-slug:
+    description: The secret INFISICAL_PROJECT_SLUG of the environment production
+    required: false
+  consequence:
+    description: What a failure here means for the caller, appended to every error
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Check the Infisical configuration
+      id: config
+      shell: bash
+      env:
+        SECRET_NAMES: ${{ inputs.secret-names }}
+        INFISICAL_CLIENT_ID: ${{ inputs.client-id }}
+        INFISICAL_CLIENT_SECRET: ${{ inputs.client-secret }}
+        INFISICAL_DOMAIN: ${{ inputs.domain }}
+        INFISICAL_PROJECT_SLUG: ${{ inputs.project-slug }}
+        CONSEQUENCE: ${{ inputs.consequence }}
+      run: |
+        set -euo pipefail
+
+        missing=()
+        [ -n "${INFISICAL_CLIENT_ID}" ] || missing+=("INFISICAL_CLIENT_ID")
+        [ -n "${INFISICAL_CLIENT_SECRET}" ] || missing+=("INFISICAL_CLIENT_SECRET")
+        [ -n "${INFISICAL_DOMAIN}" ] || missing+=("INFISICAL_DOMAIN")
+        [ -n "${INFISICAL_PROJECT_SLUG}" ] || missing+=("INFISICAL_PROJECT_SLUG")
+        if [ "${#missing[@]}" -gt 0 ]; then
+          echo "::error::Infisical is not configured - missing secret ${missing[*]} of the GitHub environment production (Settings, Environments). ${CONSEQUENCE}"
+          exit 1
+        fi
+
+        read -r -a names <<< "${SECRET_NAMES}"
+        if [ "${#names[@]}" -eq 0 ] || [ "${#names[@]}" -gt 6 ]; then
+          echo "::error::secret-names must name one to six secrets, got ${#names[@]}."
+          exit 1
+        fi
+        for name in "${names[@]}"; do
+          if ! [[ "${name}" =~ ^[A-Z][A-Z0-9_]*$ ]]; then
+            echo "::error::'${name}' is not a secret name (capital letters, digits and underscores)."
+            exit 1
+          fi
+        done
+        if [ "$(printf '%s\n' "${names[@]}" | sort -u | wc -l)" -ne "${#names[@]}" ]; then
+          echo "::error::secret-names names a secret twice."
+          exit 1
+        fi
+        for index in 0 1 2 3 4 5; do
+          echo "name_$((index + 1))=${names[index]:-}" >> "$GITHUB_OUTPUT"
+        done
+
+    # Each call reads exactly one secret, so a job never receives more of /ci than it names. The action masks
+    # every value it exports (core.setSecret before exportVariable) and fails, naming path and environment,
+    # when the secret does not exist.
+    - name: Load ${{ steps.config.outputs.name_1 }}
+      uses: Infisical/secrets-action@d2e351f16c6ca20d17c85e6c992e04bdeb64e87d # v1.0.18
+      with:
+        method: universal
+        client-id: ${{ inputs.client-id }}
+        client-secret: ${{ inputs.client-secret }}
+        domain: ${{ inputs.domain }}
+        project-slug: ${{ inputs.project-slug }}
+        env-slug: prod
+        secret-path: /ci
+        secret-name: ${{ steps.config.outputs.name_1 }}
+        export-type: env
+
+    - name: Load ${{ steps.config.outputs.name_2 }}
+      if: steps.config.outputs.name_2 != ''
+      uses: Infisical/secrets-action@d2e351f16c6ca20d17c85e6c992e04bdeb64e87d # v1.0.18
+      with:
+        method: universal
+        client-id: ${{ inputs.client-id }}
+        client-secret: ${{ inputs.client-secret }}
+        domain: ${{ inputs.domain }}
+        project-slug: ${{ inputs.project-slug }}
+        env-slug: prod
+        secret-path: /ci
+        secret-name: ${{ steps.config.outputs.name_2 }}
+        export-type: env
+
+    - name: Load ${{ steps.config.outputs.name_3 }}
+      if: steps.config.outputs.name_3 != ''
+      uses: Infisical/secrets-action@d2e351f16c6ca20d17c85e6c992e04bdeb64e87d # v1.0.18
+      with:
+        method: universal
+        client-id: ${{ inputs.client-id }}
+        client-secret: ${{ inputs.client-secret }}
+        domain: ${{ inputs.domain }}
+        project-slug: ${{ inputs.project-slug }}
+        env-slug: prod
+        secret-path: /ci
+        secret-name: ${{ steps.config.outputs.name_3 }}
+        export-type: env
+
+    - name: Load ${{ steps.config.outputs.name_4 }}
+      if: steps.config.outputs.name_4 != ''
+      uses: Infisical/secrets-action@d2e351f16c6ca20d17c85e6c992e04bdeb64e87d # v1.0.18
+      with:
+        method: universal
+        client-id: ${{ inputs.client-id }}
+        client-secret: ${{ inputs.client-secret }}
+        domain: ${{ inputs.domain }}
+        project-slug: ${{ inputs.project-slug }}
+        env-slug: prod
+        secret-path: /ci
+        secret-name: ${{ steps.config.outputs.name_4 }}
+        export-type: env
+
+    - name: Load ${{ steps.config.outputs.name_5 }}
+      if: steps.config.outputs.name_5 != ''
+      uses: Infisical/secrets-action@d2e351f16c6ca20d17c85e6c992e04bdeb64e87d # v1.0.18
+      with:
+        method: universal
+        client-id: ${{ inputs.client-id }}
+        client-secret: ${{ inputs.client-secret }}
+        domain: ${{ inputs.domain }}
+        project-slug: ${{ inputs.project-slug }}
+        env-slug: prod
+        secret-path: /ci
+        secret-name: ${{ steps.config.outputs.name_5 }}
+        export-type: env
+
+    - name: Load ${{ steps.config.outputs.name_6 }}
+      if: steps.config.outputs.name_6 != ''
+      uses: Infisical/secrets-action@d2e351f16c6ca20d17c85e6c992e04bdeb64e87d # v1.0.18
+      with:
+        method: universal
+        client-id: ${{ inputs.client-id }}
+        client-secret: ${{ inputs.client-secret }}
+        domain: ${{ inputs.domain }}
+        project-slug: ${{ inputs.project-slug }}
+        env-slug: prod
+        secret-path: /ci
+        secret-name: ${{ steps.config.outputs.name_6 }}
+        export-type: env
+
+    - name: Check the loaded values
+      shell: bash
+      env:
+        SECRET_NAMES: ${{ inputs.secret-names }}
+        CONSEQUENCE: ${{ inputs.consequence }}
+      run: |
+        set -euo pipefail
+
+        read -r -a names <<< "${SECRET_NAMES}"
+        empty=()
+        for name in "${names[@]}"; do
+          # Indirect expansion reads the exported value without printing it.
+          [ -n "${!name:-}" ] || empty+=("${name}")
+        done
+        if [ "${#empty[@]}" -gt 0 ]; then
+          echo "::error::Infisical returned no value for ${empty[*]} at /ci in the environment prod. ${CONSEQUENCE}"
+          exit 1
+        fi

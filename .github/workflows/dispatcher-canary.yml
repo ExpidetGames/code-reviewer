@@ -1,24 +1,24 @@
 name: Dispatcher canary
 
-# The deploy canary of the hosted deployment (#316, #331): calls `POST /probe` of a deployed Dispatcher, which runs
+# The deploy canary of the hosted deployment (#316, #331, #403): calls `POST /probe` of a deployed Dispatcher, which runs
 # the Worker image's `probe` mode in a canary VM cloned from the golden snapshot with the real container flags, and
 # fails when the Dynamic-Worker's canary does not pass (the hardening, the egress mode, IPv6 off where it is required,
-# the self-check). A release pipeline puts this step between "deploy to a URL" and "promote": a failing canary blocks
-# the release. Run it on a preview deployment that carries the new snapshot (docs/golden-snapshot.md, "Rebuild") before
-# the Dispatcher project is switched to it.
+# the self-check). deploy-production.yml calls it between "stage the Dispatcher" and "promote": a failing canary
+# blocks the release. It can also be started by hand on a staged production deployment (docs/golden-snapshot.md,
+# "Rebuild").
 #
-# It never runs for a pull request, and only from main or development (the job's condition: a manual run would
-# otherwise run the code of any branch with the environment's secrets). It sends the dispatcher credential to the one
-# URL it is given (https, no redirect followed) and only if the host is on the maintainers' list (the repository variable
-# DISPATCHER_CANARY_HOSTS), and it prints only stable codes. The environment `hosted-canary` must also be protected
-# (dispatcher/README.md, "The deploy canary": deployment branches main and development only, required reviewers). The
-# credential comes from that environment and is read by one step, as an environment variable, never in a command line
-# or a log.
+# It never runs for a pull request, and only from main (the job's condition: a manual run would otherwise run the
+# code of any branch with the Infisical sign-in of the environment `production`, which is restricted to main as
+# well). It sends the dispatcher credential to the one URL it is given, and only after the Vercel API, asked with
+# the access token from Infisical, has confirmed that the deployment behind the host belongs to the Dispatcher
+# project and the team (https, no redirect followed, the deployment's own address and not an alias): every staged
+# deployment has a host of its own, so there is no list of hosts to keep. It prints only stable codes. The
+# credentials are loaded from Infisical /ci by one step, as environment variables, never in a command line or a log.
 on:
   workflow_dispatch:
     inputs:
       url:
-        description: "Base URL of the deployed Dispatcher (https), for example the preview deployment"
+        description: "Base URL of the staged Dispatcher deployment (https://....vercel.app)"
         required: true
       engines:
         description: "Engines the release needs: pr-agent,opencode, or pr-agent for a Diff-only deployment"
@@ -47,12 +47,11 @@ concurrency:
 jobs:
   canary:
     name: Prove the Dynamic-Worker canary of a deployment
-    if: ${{ github.repository == 'ExpidetGames/code-reviewer' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/development') }}
+    if: ${{ github.repository == 'ExpidetGames/code-reviewer' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    # Holds RUNNER_TOKEN (the Dispatcher project's dispatcher credential) and, when the deployment is behind
-    # deployment protection, VERCEL_AUTOMATION_BYPASS_SECRET.
-    environment: hosted-canary
+    # Holds the Infisical sign-in as secrets; its deployment branches are restricted to main.
+    environment: production
     permissions:
       contents: read
     steps:
@@ -70,20 +69,25 @@ jobs:
       - name: Install dependencies
         working-directory: dispatcher
         run: pnpm install --frozen-lockfile
-      # No secret in this step. The credential goes to the one host name the maintainers listed in the repository
-      # variable DISPATCHER_CANARY_HOSTS (comma separated, exact names); an unset or empty variable refuses every URL.
-      - name: Check the URL against the allowed hosts
-        working-directory: dispatcher
-        env:
-          CANARY_URL: ${{ inputs.url }}
-          CANARY_ALLOWED_HOSTS: ${{ vars.DISPATCHER_CANARY_HOSTS }}
-        run: pnpm probe:canary --url "$CANARY_URL" --check-only
+      # After the install and just before the step that uses them. RUNNER_TOKEN is the Dispatcher project's dispatcher
+      # credential, the bypass secret is the Dispatcher project's Protection Bypass for Automation secret, and the
+      # token, the team and the project id let the canary ask the platform whom the staged host belongs to.
+      - name: Load the credentials from Infisical
+        uses: ./.github/actions/infisical-ci-secrets
+        with:
+          secret-names: RUNNER_TOKEN VERCEL_TOKEN VERCEL_TEAM_ID VERCEL_DISPATCHER_PROJECT_ID VERCEL_DISPATCHER_AUTOMATION_BYPASS_SECRET
+          client-id: ${{ secrets.INFISICAL_CLIENT_ID }}
+          client-secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+          domain: ${{ secrets.INFISICAL_DOMAIN }}
+          project-slug: ${{ secrets.INFISICAL_PROJECT_SLUG }}
+          consequence: The canary did not run, so nothing is promoted.
+      # `--verify-vercel` reads VERCEL_TOKEN, VERCEL_TEAM_ID and VERCEL_PROJECT_ID (the Dispatcher project) from the
+      # environment; the canary command reads RUNNER_TOKEN and the bypass secret from it too.
       - name: Run the canary
         working-directory: dispatcher
         env:
-          CANARY_ALLOWED_HOSTS: ${{ vars.DISPATCHER_CANARY_HOSTS }}
-          RUNNER_TOKEN: ${{ secrets.RUNNER_TOKEN }}
-          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+          VERCEL_PROJECT_ID: ${{ env.VERCEL_DISPATCHER_PROJECT_ID }}
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ env.VERCEL_DISPATCHER_AUTOMATION_BYPASS_SECRET }}
           CANARY_URL: ${{ inputs.url }}
           CANARY_ENGINES: ${{ inputs.engines || 'pr-agent,opencode' }}
-        run: pnpm probe:canary --url "$CANARY_URL" --engines "$CANARY_ENGINES"
+        run: pnpm probe:canary --url "$CANARY_URL" --verify-vercel --engines "$CANARY_ENGINES"

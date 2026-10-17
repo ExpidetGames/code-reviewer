@@ -1,0 +1,95 @@
+name: Rollback production
+
+# Puts a previous deployment of the hosted version back into production (#403): the App, the Dispatcher or both, each
+# with the deployment id (dpl_...) or the deployment address (https://....vercel.app) to restore, from the Vercel
+# dashboard or from the summary of an earlier run of deploy-production. It runs `vercel rollback` with the pinned CLI.
+# A rollback does not undo a migration (docs/deployment-vercel.md, section 7): it is safe while the migrations since
+# were additive. After a rollback Vercel stops assigning the production domains to new deployments of that project;
+# the `vercel promote` of the next deploy-production run assigns them again.
+#
+# Manual only, and only for this repository on main (the job's own condition: a manual run executes the workflow of
+# the branch it is started on, with the Infisical sign-in of the environment `production`). It shares the
+# deployment's queue, so it never runs in the middle of a migration or a promotion.
+on:
+  workflow_dispatch:
+    inputs:
+      app_deployment:
+        description: "App: deployment id (dpl_...) or address (https://....vercel.app) to restore; empty leaves the App alone"
+        required: false
+        default: ""
+      dispatcher_deployment:
+        description: "Dispatcher: deployment id (dpl_...) or address (https://....vercel.app) to restore; empty leaves the Dispatcher alone"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  # An exact version, never `latest` (the same in vercel-stage.yml and deploy-production.yml).
+  VERCEL_CLI_VERSION: 64.5.0
+  VERCEL_TELEMETRY_DISABLED: "1"
+
+jobs:
+  rollback:
+    name: Roll production back
+    if: ${{ github.repository == 'ExpidetGames/code-reviewer' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: production
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Check the inputs
+        env:
+          APP_DEPLOYMENT: ${{ inputs.app_deployment }}
+          DISPATCHER_DEPLOYMENT: ${{ inputs.dispatcher_deployment }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${APP_DEPLOYMENT}" ] && [ -z "${DISPATCHER_DEPLOYMENT}" ]; then
+            echo "::error::Give at least one deployment to restore."
+            exit 1
+          fi
+          for value in "${APP_DEPLOYMENT}" "${DISPATCHER_DEPLOYMENT}"; do
+            [ -z "${value}" ] && continue
+            if ! [[ "${value}" =~ ^dpl_[A-Za-z0-9]{8,64}$ ]] && ! [[ "${value}" =~ ^https://[a-z0-9-]+\.vercel\.app$ ]]; then
+              echo "::error::A deployment is a Vercel deployment id (dpl_...) or a deployment address (https://....vercel.app)."
+              exit 1
+            fi
+          done
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+      - name: Install the Vercel CLI
+        run: npm install --global "vercel@${VERCEL_CLI_VERSION}"
+      - name: Load the Vercel credentials from Infisical
+        uses: ./.github/actions/infisical-ci-secrets
+        with:
+          secret-names: VERCEL_TOKEN VERCEL_TEAM_ID VERCEL_APP_PROJECT_ID VERCEL_DISPATCHER_PROJECT_ID
+          client-id: ${{ secrets.INFISICAL_CLIENT_ID }}
+          client-secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+          domain: ${{ secrets.INFISICAL_DOMAIN }}
+          project-slug: ${{ secrets.INFISICAL_PROJECT_SLUG }}
+          consequence: Nothing was rolled back.
+      - name: Roll the App back
+        if: ${{ inputs.app_deployment != '' }}
+        env:
+          DEPLOYMENT: ${{ inputs.app_deployment }}
+          VERCEL_ORG_ID: ${{ env.VERCEL_TEAM_ID }}
+          VERCEL_PROJECT_ID: ${{ env.VERCEL_APP_PROJECT_ID }}
+        run: vercel rollback "$DEPLOYMENT" --yes --timeout 5m
+      - name: Roll the Dispatcher back
+        if: ${{ inputs.dispatcher_deployment != '' }}
+        env:
+          DEPLOYMENT: ${{ inputs.dispatcher_deployment }}
+          VERCEL_ORG_ID: ${{ env.VERCEL_TEAM_ID }}
+          VERCEL_PROJECT_ID: ${{ env.VERCEL_DISPATCHER_PROJECT_ID }}
+        run: vercel rollback "$DEPLOYMENT" --yes --timeout 5m
