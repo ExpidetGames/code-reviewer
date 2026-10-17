@@ -119,9 +119,20 @@ export function parseSettingsInput(
   // Empty is allowed: the page can be saved before the token is at hand; enabling asks for it.
   if (
     clientToken === null ||
-    (clientToken !== "" && !isToken(clientToken, CLIENT_TOKEN_MAX_LENGTH))
+    (clientToken !== "" &&
+      (!isToken(clientToken, CLIENT_TOKEN_MAX_LENGTH) ||
+        clientTokenEnvironmentOf(clientToken) === null))
   )
     issues.push({ field: "clientToken", code: "client_token_invalid" });
+  else if (
+    clientToken !== "" &&
+    isEnvironment(input.environment) &&
+    clientTokenEnvironmentOf(clientToken) !== input.environment
+  )
+    issues.push({
+      field: "clientToken",
+      code: "client_token_environment_mismatch",
+    });
   if (!isGraceDays(input.graceDays))
     issues.push({ field: "graceDays", code: "grace_days_invalid" });
   const apiKey = secretField(input.apiKey, "apiKey", "api_key_invalid", issues);
@@ -151,11 +162,21 @@ export function parseSettingsInput(
 }
 
 /**
- * Which Paddle environment an API key belongs to, from the key alone: a key with `_sdbx` in it is a sandbox key
- * (`pdl_sdbx_...`), `pdl_live_...` is a live key, anything else is no Paddle key (null).
+ * Which Paddle environment an API key belongs to, from the key alone: `pdl_sdbx_...` is a sandbox key,
+ * `pdl_live_...` is a live key, anything else is no Paddle key (null). The same rule as the client's
+ * `paddleKeyEnvironment`.
  */
 export function keyEnvironmentOf(apiKey: string): BillingEnvironment | null {
-  if (apiKey.includes("_sdbx")) return "sandbox";
+  if (apiKey.startsWith("pdl_sdbx_")) return "sandbox";
   if (apiKey.startsWith("pdl_live_")) return "live";
+  return null;
+}
+
+/** Which Paddle environment a client-side token belongs to: `test_...` is sandbox, `live_...` is live, anything else null. */
+export function clientTokenEnvironmentOf(
+  token: string,
+): BillingEnvironment | null {
+  if (token.startsWith("test_")) return "sandbox";
+  if (token.startsWith("live_")) return "live";
   return null;
 }
