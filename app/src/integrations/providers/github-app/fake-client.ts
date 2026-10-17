@@ -238,6 +238,25 @@ export function fakeGithubAppClient(
       if (data.reviewFailure) throw data.reviewFailure;
       return data.reviews?.[`${repoFullName}#${prNumber}`] ?? [];
     },
+    async dismissPullRequestReview(
+      installationId,
+      scope,
+      repoFullName,
+      prNumber,
+      reviewId,
+      message,
+    ) {
+      record(
+        "dismissPullRequestReview",
+        installationId,
+        scope,
+        repoFullName,
+        prNumber,
+        reviewId,
+        message,
+      );
+      if (data.reviewFailure) throw data.reviewFailure;
+    },
     async mintInstallationToken(installationId, scope) {
       record("mintInstallationToken", installationId, scope);
       if (data.mintFailure) throw data.mintFailure;

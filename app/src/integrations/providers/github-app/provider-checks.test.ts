@@ -171,6 +171,39 @@ describe("publishing the check run of a review", () => {
     ]);
   });
 
+  // #405-T11 (review P1-2)
+  it("only looks for a check run that may have been made, and makes none when the job ended before it was shown", async () => {
+    const { client, provider } = setup();
+
+    const published = await provider.publishReviewCheck?.(
+      integration,
+      widgets,
+      { ...CHECK, status: "completed", conclusion: "neutral" },
+      { checkRunId: null, mayExist: true, createIfMissing: false },
+    );
+
+    expect(published).toEqual({ checkRunId: null });
+    expect(client.calls.map((call) => call.method)).toEqual(["findCheckRun"]);
+  });
+
+  // #405-T11 (review P1-2)
+  it("completes the check run it finds when the job ended before the id was kept", async () => {
+    const { client, provider } = setup({ foundCheckRun: { id: "8123" } });
+
+    const published = await provider.publishReviewCheck?.(
+      integration,
+      widgets,
+      { ...CHECK, status: "completed", conclusion: "neutral" },
+      { checkRunId: null, mayExist: true, createIfMissing: false },
+    );
+
+    expect(published).toEqual({ checkRunId: "8123" });
+    expect(client.calls.map((call) => call.method)).toEqual([
+      "findCheckRun",
+      "updateCheckRun",
+    ]);
+  });
+
   // #405-T12
   it("reports a permission the App does not hold as a refused scope, from the token request or from the call", async () => {
     const duringToken = new GithubAppError(
@@ -388,5 +421,109 @@ describe("submitting the verdict of a review", () => {
         ),
       ).toMatchObject({ code });
     }
+  });
+});
+
+const BOT = "code-reviewer-test[bot]";
+const MARKER = "<!-- code-reviewer:verdict job=job-0 -->";
+const review = (
+  id: string,
+  authorLogin: string,
+  state: string,
+  body = `x ${MARKER}`,
+) => ({ id, authorLogin, state, body });
+
+describe("withdrawing the earlier request for changes of the App", () => {
+  const options = {
+    message: "Switched off.",
+    markerPrefix: "<!-- code-reviewer:verdict",
+  };
+
+  // #405-T22 (review P2-1)
+  it("dismisses its own latest request for changes with the message, and nothing else", async () => {
+    const { client, provider } = setup({
+      reviews: {
+        "acme/widgets#7": [
+          review("1", BOT, "APPROVED"),
+          review("2", "a-human", "CHANGES_REQUESTED", "please fix"),
+          review("3", BOT, "CHANGES_REQUESTED"),
+        ],
+      },
+    });
+
+    const outcome = await provider.withdrawReviewVerdict?.(
+      integration,
+      widgets,
+      7,
+      options,
+    );
+
+    expect(outcome).toEqual({ outcome: "dismissed", reviewId: "3" });
+    expect(
+      client.calls
+        .filter((call) => call.method === "dismissPullRequestReview")
+        .map((call) => call.args.slice(2)),
+    ).toEqual([["acme/widgets", 7, "3", "Switched off."]]);
+    expect(
+      client.calls.find((call) => call.method === "listPullRequestReviews")
+        ?.args[1],
+    ).toEqual({
+      repositoryIds: [7001],
+      permissions: { pull_requests: "write", metadata: "read" },
+    });
+  });
+
+  // #405-T22 (review P2-1)
+  it.each([
+    [
+      "its latest review is an approval",
+      [review("1", BOT, "CHANGES_REQUESTED"), review("2", BOT, "APPROVED")],
+    ],
+    ["its review was dismissed already", [review("1", BOT, "DISMISSED")]],
+    [
+      "only a human asked for changes",
+      [review("1", "a-human", "CHANGES_REQUESTED", "no")],
+    ],
+    [
+      "a human copied its marker into a review of their own",
+      [review("1", "a-human", "CHANGES_REQUESTED", `no ${MARKER}`)],
+    ],
+    [
+      "its review has no marker of the app",
+      [review("1", BOT, "CHANGES_REQUESTED", "typed by hand")],
+    ],
+    ["there is no review", []],
+  ])("dismisses nothing when %s", async (_name, reviews) => {
+    const { client, provider } = setup({
+      reviews: { "acme/widgets#7": reviews },
+    });
+
+    const outcome = await provider.withdrawReviewVerdict?.(
+      integration,
+      widgets,
+      7,
+      options,
+    );
+
+    expect(outcome).toEqual({ outcome: "nothing_to_dismiss", reviewId: null });
+    expect(client.calls.map((call) => call.method)).not.toContain(
+      "dismissPullRequestReview",
+    );
+  });
+
+  // #405-T26
+  it("reports a refusal like a refused review", async () => {
+    const { provider } = setup({
+      reviews: { "acme/widgets#7": [review("1", BOT, "CHANGES_REQUESTED")] },
+      reviewFailure: new GithubAppError("GITHUB_APP_REQUEST_FAILED", "422", {
+        status: 422,
+      }),
+    });
+
+    expect(
+      await failureOf(
+        provider.withdrawReviewVerdict?.(integration, widgets, 7, options),
+      ),
+    ).toMatchObject({ code: "INTEGRATION_REQUEST_REFUSED" });
   });
 });

@@ -48,7 +48,9 @@ function setup(options: { settings?: SweepSettings; poll?: boolean } = {}) {
     retryDue: vi.fn<() => Promise<{ tried: number }>>(async () => ({
       tried: 0,
     })),
-    reconcileDue: vi.fn<() => Promise<{ synced: number }>>(async () => ({
+    reconcileDue: vi.fn<
+      (options?: { budgetMs?: number }) => Promise<{ synced: number }>
+    >(async () => ({
       synced: 0,
     })),
     info: vi.fn<(line: string) => void>(),
@@ -134,6 +136,15 @@ describe("the check runs in a run of the sweep (#405)", () => {
     await t.sweep.run();
 
     expect(t.reconcileDue).toHaveBeenCalledOnce();
+  });
+
+  // #405-T32 (review P2-4)
+  it("gives the reconcile the time of an internal route, which lives longer than a request", async () => {
+    const t = setup();
+
+    await t.sweep.run();
+
+    expect(t.reconcileDue).toHaveBeenCalledWith({ budgetMs: 40_000 });
   });
 
   // #405-T32

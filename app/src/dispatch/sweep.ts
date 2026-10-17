@@ -35,6 +35,8 @@ export const STOPPED_REVIVE_MS = 10 * 60 * 1000;
 /** Where the hour of the last cleanup is kept, so that every instance sees the same one. */
 export const CLEANUP_HOUR_KEY = "maintenance.sweep_cleanup_hour";
 const HOUR_MS = 60 * 60 * 1000;
+/** The sweep runs in an internal route (five minutes), so the check runs may have most of a minute (#405). */
+const CHECKS_BUDGET_MS = 40_000;
 
 export const SWEEP_STEPS = [
   "expire",
@@ -84,7 +86,9 @@ export type SweepDependencies = {
   /** #281: tries the notices of refused reviews that are due again. Left out, none is tried. */
   notices?: { retryDue(): Promise<{ tried: number }> };
   /** #405: brings the check runs and verdicts of jobs in line with GitHub. Left out, none is touched. */
-  checks?: { reconcileDue(): Promise<{ synced: number }> };
+  checks?: {
+    reconcileDue(options?: { budgetMs?: number }): Promise<{ synced: number }>;
+  };
   settings: SweepSettings;
   log?: SweepLog;
 };
@@ -151,7 +155,9 @@ export function createDispatchSweep(deps: SweepDependencies): DispatchSweep {
     const checks = deps.checks;
     if (checks !== undefined)
       await step("checks", async () => {
-        report.checksSynced = (await checks.reconcileDue()).synced;
+        report.checksSynced = (
+          await checks.reconcileDue({ budgetMs: CHECKS_BUDGET_MS })
+        ).synced;
       });
     await step("cleanup", async () => {
       const hour = Math.floor(now().getTime() / HOUR_MS);

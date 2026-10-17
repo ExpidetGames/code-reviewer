@@ -472,7 +472,7 @@ export interface JobCheckRunsTable {
   review_state: ColumnType<string, string | undefined, string>;
   /** `active`, `settled` or `dropped` (`JOB_CHECK_STATES`). */
   state: ColumnType<string, string | undefined, string>;
-  /** Failed syncs in a row; bounded by the code. */
+  /** Syncs started since the last one that finished, counted when they start (so a sync cut off counts); bounded by the code. */
   attempts: ColumnType<number, number | undefined, number>;
   /** ISO 8601 text in UTC: when a sync may start again. While one runs: when its claim ends. */
   next_attempt_at: string;

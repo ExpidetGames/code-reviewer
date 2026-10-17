@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 import { JOB_STATUSES } from "../jobs/job-status.ts";
 import { describeCheck, type CheckSubject } from "./check-text.ts";
+import type { VerdictSkipReason } from "./verdict.ts";
 
 const COMMENT = "https://github.test/acme/widgets/pull/7#issuecomment-1001";
 
@@ -44,6 +45,61 @@ describe("the check run of a job that waits or runs", () => {
     expect(describeCheck(subject({ status: "running" }))).not.toHaveProperty(
       "conclusion",
     );
+  });
+});
+
+describe("what the check run says about the verdict", () => {
+  const skipped = (reason: VerdictSkipReason) =>
+    describeCheck(
+      subject({
+        status: "succeeded",
+        verdict: { kind: "skip", reason },
+      }),
+    ).summary;
+
+  // #405-T19 (review P2-1)
+  it.each([
+    ["review_incomplete", "did not cover everything"],
+    ["no_severity", "no severities"],
+    ["findings_unknown", "did not report"],
+    ["no_model_work", "no model call"],
+  ] as const)(
+    "says that no verdict was submitted because of %s, and that an earlier request for changes stays",
+    (reason, because) => {
+      const summary = skipped(reason);
+
+      expect(summary).toContain("No review verdict was submitted");
+      expect(summary).toContain(because);
+      expect(summary).toContain("earlier request for changes");
+    },
+  );
+
+  // #405-T18
+  it("says the verdict is switched off, without the warning about an earlier request", () => {
+    const summary = skipped("off");
+
+    expect(summary).toContain("switched off");
+    expect(summary).not.toContain("earlier request for changes");
+  });
+
+  // #405-T20
+  it("says nothing extra when a verdict is submitted, and nothing before the review is done", () => {
+    expect(
+      describeCheck(
+        subject({
+          status: "succeeded",
+          verdict: { kind: "submit", event: "approve", blocking: 0 },
+        }),
+      ).summary,
+    ).not.toContain("verdict");
+    expect(
+      describeCheck(
+        subject({
+          status: "running",
+          verdict: { kind: "skip", reason: "off" },
+        }),
+      ).summary,
+    ).not.toContain("verdict");
   });
 });
 

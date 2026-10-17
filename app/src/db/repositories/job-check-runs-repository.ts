@@ -58,9 +58,14 @@ export type JobCheckRunsRepository = {
   /**
    * Takes the job for one sync: makes its row, or takes an `active` one whose lease or back-off is over. For
    * `leaseMs` nobody else takes it. Every other case (settled, dropped, held, a job of another workspace) is
-   * `acquired: false`. One statement.
+   * `acquired: false`. The start counts as an attempt at once (`attempts`, until `finish`), so a sync that is killed
+   * halfway (a function that ran out of time) is not forgotten; a row that has started `maxAttempts` syncs without
+   * finishing one is dropped instead of taken.
    */
-  take(jobId: string, options: { leaseMs: number }): Promise<TakeResult>;
+  take(
+    jobId: string,
+    options: { leaseMs: number; maxAttempts: number },
+  ): Promise<TakeResult>;
   /** Counts the start of a call that makes something on the platform, BEFORE the call. */
   noteStarted(jobId: string, what: "check" | "review"): Promise<void>;
   /** The check run exists and shows this status of the job. */
@@ -77,7 +82,15 @@ export type JobCheckRunsRepository = {
   ): Promise<void>;
   /** Ends the sync: the lease is over and the failures are forgotten. `settled`: the job ended and all is done. */
   finish(jobId: string, outcome: { settled: boolean }): Promise<void>;
-  /** The sync failed: it waits until `retryAt`, and is dropped when `maxAttempts` failures are reached. */
+  /**
+   * The check run was looked for by the job and there is none (the earlier attempt to make it did not work): the
+   * attempts to make it are forgotten, so a job that ended meanwhile needs none.
+   */
+  forgetCheckAttempts(jobId: string): Promise<void>;
+  /**
+   * The sync failed: it waits until `retryAt`, and is dropped when the attempts it counted (`take`) have reached
+   * `maxAttempts`.
+   */
   failed(
     jobId: string,
     failure: { code: string; retryAt: Date; maxAttempts: number },
@@ -157,7 +170,7 @@ export function createJobCheckRunsRepository(
         check_state: "active",
         review_state: "pending",
         state: "active",
-        attempts: 0,
+        attempts: 1,
         next_attempt_at: leaseEnds,
         last_code: null,
         created_at: timestamp,
@@ -173,18 +186,34 @@ export function createJobCheckRunsRepository(
         .executeTakeFirst();
       if (made !== undefined)
         return { acquired: true, created: true, check: toStoredJobCheck(made) };
-      const taken = await db
-        .updateTable("job_check_runs")
-        .set({ next_attempt_at: leaseEnds, updated_at: timestamp })
-        .where("workspace_id", "=", workspaceId)
-        .where("job_id", "=", jobId)
-        .where("state", "=", "active")
-        .where("next_attempt_at", "<=", timestamp)
+      const due = () =>
+        db
+          .updateTable("job_check_runs")
+          .where("workspace_id", "=", workspaceId)
+          .where("job_id", "=", jobId)
+          .where("state", "=", "active")
+          .where("next_attempt_at", "<=", timestamp);
+      const taken = await due()
+        .set((eb) => ({
+          next_attempt_at: leaseEnds,
+          attempts: eb("attempts", "+", 1),
+          updated_at: timestamp,
+        }))
+        .where("attempts", "<", options.maxAttempts)
         .returningAll()
         .executeTakeFirst();
-      return taken === undefined
-        ? { acquired: false }
-        : { acquired: true, created: false, check: toStoredJobCheck(taken) };
+      if (taken !== undefined)
+        return {
+          acquired: true,
+          created: false,
+          check: toStoredJobCheck(taken),
+        };
+      // Due but out of attempts: the syncs that started did not finish (nor fail), so the row ends here.
+      await due()
+        .set({ state: "dropped", updated_at: timestamp })
+        .where("attempts", ">=", options.maxAttempts)
+        .execute();
+      return { acquired: false };
     },
 
     async noteStarted(jobId, what) {
@@ -240,14 +269,22 @@ export function createJobCheckRunsRepository(
         .execute();
     },
 
+    async forgetCheckAttempts(jobId) {
+      await active(jobId)
+        .set({
+          check_create_attempts: 0,
+          updated_at: formatTimestamp(now()),
+        })
+        .execute();
+    },
+
     async failed(jobId, failure) {
       const timestamp = formatTimestamp(now());
       await active(jobId)
         .set((eb) => ({
-          attempts: eb("attempts", "+", 1),
           state: eb
             .case()
-            .when(eb("attempts", "+", 1), ">=", failure.maxAttempts)
+            .when("attempts", ">=", failure.maxAttempts)
             .then("dropped")
             .else("active")
             .end(),

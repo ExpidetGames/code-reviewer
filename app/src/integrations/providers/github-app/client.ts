@@ -173,6 +173,7 @@ export type GithubAppClient = {
     scope: JobTokenScope,
     repoFullName: string,
     input: NewCheckRun,
+    signal?: AbortSignal,
   ): Promise<{ id: string }>;
   /** Changes a check run that `createCheckRun` made. Same token rules and failures. */
   updateCheckRun(
@@ -181,6 +182,7 @@ export type GithubAppClient = {
     repoFullName: string,
     checkRunId: string,
     input: Partial<CheckRunFields>,
+    signal?: AbortSignal,
   ): Promise<void>;
   /**
    * The check run of the app with this name and external id on the commit, or null: how a check run is found
@@ -191,6 +193,7 @@ export type GithubAppClient = {
     scope: JobTokenScope,
     repoFullName: string,
     lookup: { headSha: string; name: string; externalId: string },
+    signal?: AbortSignal,
   ): Promise<{ id: string } | null>;
   /**
    * Submits a review of a pull request as the app (#405), with a token limited to `scope`. The body is the
@@ -202,6 +205,7 @@ export type GithubAppClient = {
     repoFullName: string,
     prNumber: number,
     input: NewPullRequestReview,
+    signal?: AbortSignal,
   ): Promise<{ id: string }>;
   /** The reviews of a pull request, all pages. Only the author, the state and the body are read. */
   listPullRequestReviews(
@@ -209,7 +213,21 @@ export type GithubAppClient = {
     scope: JobTokenScope,
     repoFullName: string,
     prNumber: number,
+    signal?: AbortSignal,
   ): Promise<PullRequestReview[]>;
+  /**
+   * Dismisses a review of a pull request with a message (#405; `PUT .../reviews/{id}/dismissals`), with a token
+   * limited to `scope`. The caller makes sure the review is the app's own.
+   */
+  dismissPullRequestReview(
+    installationId: string,
+    scope: JobTokenScope,
+    repoFullName: string,
+    prNumber: number,
+    reviewId: string,
+    message: string,
+    signal?: AbortSignal,
+  ): Promise<void>;
   /**
    * Mints a fresh installation access token, never from the cache, limited to the given repositories
    * and permissions. The one place a token for a job is created. Refuses (without a request) a scope
@@ -531,7 +549,7 @@ export function createGithubAppClient(
 
   async function request(
     credential: string,
-    method: "GET" | "POST" | "PATCH",
+    method: "GET" | "POST" | "PATCH" | "PUT",
     path: string,
     body?: unknown,
     signal?: AbortSignal,
@@ -746,8 +764,9 @@ export function createGithubAppClient(
     installationId: string,
     scope: JobTokenScope,
     run: (token: string) => Promise<T>,
+    signal?: AbortSignal,
   ): Promise<T> {
-    const minted = await mint(installationId, scope);
+    const minted = await mint(installationId, scope, signal);
     try {
       return await run(minted.token);
     } finally {
@@ -983,16 +1002,27 @@ export function createGithubAppClient(
       });
     },
 
-    async createCheckRun(installationId, scope, repoFullName, input) {
+    async createCheckRun(installationId, scope, repoFullName, input, signal) {
       checkInstallationId(installationId);
       checkCommitSha(input.headSha);
       const path = `${repoPath(repoFullName)}/check-runs`;
-      return withScopedToken(installationId, scope, async (token) => {
-        const json = await request(token, "POST", path, checkRunBody(input));
-        if (!isRecord(json) || typeof json.id !== "number")
-          throw shapeError("POST /repos/{owner}/{repo}/check-runs");
-        return { id: String(json.id) };
-      });
+      return withScopedToken(
+        installationId,
+        scope,
+        async (token) => {
+          const json = await request(
+            token,
+            "POST",
+            path,
+            checkRunBody(input),
+            signal,
+          );
+          if (!isRecord(json) || typeof json.id !== "number")
+            throw shapeError("POST /repos/{owner}/{repo}/check-runs");
+          return { id: String(json.id) };
+        },
+        signal,
+      );
     },
 
     async updateCheckRun(
@@ -1001,41 +1031,54 @@ export function createGithubAppClient(
       repoFullName,
       checkRunId,
       input,
+      signal,
     ) {
       checkInstallationId(installationId);
       checkCheckRunId(checkRunId);
       const path = `${repoPath(repoFullName)}/check-runs/${checkRunId}`;
-      await withScopedToken(installationId, scope, async (token) => {
-        await request(token, "PATCH", path, checkRunBody(input));
-      });
+      await withScopedToken(
+        installationId,
+        scope,
+        async (token) => {
+          await request(token, "PATCH", path, checkRunBody(input), signal);
+        },
+        signal,
+      );
     },
 
-    async findCheckRun(installationId, scope, repoFullName, lookup) {
+    async findCheckRun(installationId, scope, repoFullName, lookup, signal) {
       checkInstallationId(installationId);
       checkCommitSha(lookup.headSha);
       const path = `${repoPath(repoFullName)}/commits/${lookup.headSha}/check-runs?check_name=${encodeURIComponent(lookup.name)}`;
-      return withScopedToken(installationId, scope, async (token) => {
-        const runs = await allPages(
-          async () => token,
-          path,
-          (json) => {
-            if (!isRecord(json) || !Array.isArray(json.check_runs))
-              throw shapeError(
-                "GET /repos/{owner}/{repo}/commits/{ref}/check-runs",
-              );
-            return json.check_runs;
-          },
-          (item) => ({
-            id: isRecord(item) ? item.id : undefined,
-            externalId: isRecord(item) ? item.external_id : undefined,
-          }),
-        );
-        const found = runs.find(
-          (run) =>
-            typeof run.id === "number" && run.externalId === lookup.externalId,
-        );
-        return found === undefined ? null : { id: String(found.id) };
-      });
+      return withScopedToken(
+        installationId,
+        scope,
+        async (token) => {
+          const runs = await allPages(
+            async () => token,
+            path,
+            (json) => {
+              if (!isRecord(json) || !Array.isArray(json.check_runs))
+                throw shapeError(
+                  "GET /repos/{owner}/{repo}/commits/{ref}/check-runs",
+                );
+              return json.check_runs;
+            },
+            (item) => ({
+              id: isRecord(item) ? item.id : undefined,
+              externalId: isRecord(item) ? item.external_id : undefined,
+            }),
+            signal,
+          );
+          const found = runs.find(
+            (run) =>
+              typeof run.id === "number" &&
+              run.externalId === lookup.externalId,
+          );
+          return found === undefined ? null : { id: String(found.id) };
+        },
+        signal,
+      );
     },
 
     async createPullRequestReview(
@@ -1044,21 +1087,33 @@ export function createGithubAppClient(
       repoFullName,
       prNumber,
       input,
+      signal,
     ) {
       checkInstallationId(installationId);
       checkPullRequestNumber(prNumber);
       checkCommitSha(input.commitId);
       const path = `${repoPath(repoFullName)}/pulls/${prNumber}/reviews`;
-      return withScopedToken(installationId, scope, async (token) => {
-        const json = await request(token, "POST", path, {
-          commit_id: input.commitId,
-          body: input.body,
-          event: input.event,
-        });
-        if (!isRecord(json) || typeof json.id !== "number")
-          throw shapeError("POST /repos/{owner}/{repo}/pulls/{n}/reviews");
-        return { id: String(json.id) };
-      });
+      return withScopedToken(
+        installationId,
+        scope,
+        async (token) => {
+          const json = await request(
+            token,
+            "POST",
+            path,
+            {
+              commit_id: input.commitId,
+              body: input.body,
+              event: input.event,
+            },
+            signal,
+          );
+          if (!isRecord(json) || typeof json.id !== "number")
+            throw shapeError("POST /repos/{owner}/{repo}/pulls/{n}/reviews");
+          return { id: String(json.id) };
+        },
+        signal,
+      );
     },
 
     async listPullRequestReviews(
@@ -1066,21 +1121,56 @@ export function createGithubAppClient(
       scope,
       repoFullName,
       prNumber,
+      signal,
     ) {
       checkInstallationId(installationId);
       checkPullRequestNumber(prNumber);
       const path = `${repoPath(repoFullName)}/pulls/${prNumber}/reviews`;
-      return withScopedToken(installationId, scope, (token) =>
-        allPages(
-          async () => token,
-          path,
-          (json) => {
-            if (!Array.isArray(json))
-              throw shapeError("GET /repos/{owner}/{repo}/pulls/{n}/reviews");
-            return json;
-          },
-          (item) => toPullRequestReview(item),
-        ),
+      return withScopedToken(
+        installationId,
+        scope,
+        (token) =>
+          allPages(
+            async () => token,
+            path,
+            (json) => {
+              if (!Array.isArray(json))
+                throw shapeError("GET /repos/{owner}/{repo}/pulls/{n}/reviews");
+              return json;
+            },
+            (item) => toPullRequestReview(item),
+            signal,
+          ),
+        signal,
+      );
+    },
+
+    async dismissPullRequestReview(
+      installationId,
+      scope,
+      repoFullName,
+      prNumber,
+      reviewId,
+      message,
+      signal,
+    ) {
+      checkInstallationId(installationId);
+      checkPullRequestNumber(prNumber);
+      checkCheckRunId(reviewId);
+      const path = `${repoPath(repoFullName)}/pulls/${prNumber}/reviews/${reviewId}/dismissals`;
+      await withScopedToken(
+        installationId,
+        scope,
+        async (token) => {
+          await request(
+            token,
+            "PUT",
+            path,
+            { message, event: "DISMISS" },
+            signal,
+          );
+        },
+        signal,
       );
     },
 

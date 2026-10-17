@@ -28,7 +28,7 @@ import { createJobQueueFixture, sha, type JobQueueFixture } from "./jobs.ts";
 
 export const HEAD = sha("a");
 export const COMMENT_URL =
-  "https://github.test/acme/widgets/pull/7#issuecomment-1001";
+  "https://github.test/acme/gadgets/pull/7#issuecomment-1001";
 
 export type CheckRunsHarness = {
   fixture: JobQueueFixture;
@@ -38,6 +38,14 @@ export type CheckRunsHarness = {
   fake: Awaited<ReturnType<typeof startGithubAppHarness>>["fake"];
   service: CheckRunService;
   lines: { info: string[]; error: string[] };
+  /** The waits of the service between two tries of one call, in milliseconds; each moves the clock by that much. */
+  sleeps: number[];
+  /** How often the reconciler asked for the jobs that are due. */
+  dueCalls: { count: number };
+  /** Sets the status of the integration of the fixture (`disabled`: suspended on the platform). */
+  setIntegrationStatus(
+    status: "active" | "disabled" | "disconnected",
+  ): Promise<void>;
   /** The verdict mode the project has; the test changes it like a settings save would. */
   setVerdictMode(mode: ReviewVerdictMode): void;
   /** The state of the job's row, as stored. */
@@ -105,11 +113,14 @@ export async function createCheckRunsHarness(
 
   const registry = createDefaultIntegrationRegistry({
     loadConfig: () => loadGithubAppConfig(github.env),
-    githubClient: { now: github.clock.now },
+    // A short timeout, so an answer that never comes is a failure within the test.
+    githubClient: { now: github.clock.now, requestTimeoutMs: 300 },
   });
   const provider = registry.resolve("github_app");
   let verdictMode: ReviewVerdictMode = DEFAULT_REVIEW_VERDICT_MODE;
   const lines = { info: [] as string[], error: [] as string[] };
+  const sleeps: number[] = [];
+  const dueCalls = { count: 0 };
   const { db, workspaceId } = fixture;
   const checks = createJobCheckRunsRepository(
     db,
@@ -123,10 +134,18 @@ export async function createCheckRunsHarness(
     integrations: (id) =>
       createIntegrationsRepository(db, id, fixture.clock.now),
     checks: (id) => createJobCheckRunsRepository(db, id, fixture.clock.now),
-    dueJobs: (at, limits) => listJobsWithCheckWork(db, at, limits),
+    dueJobs: (at, limits) => {
+      dueCalls.count += 1;
+      return listJobsWithCheckWork(db, at, limits);
+    },
     verdictMode: async () => verdictMode,
     registry,
     now: fixture.clock.now,
+    // A wait is simulated: it is noted and the clock moves, so the budget and the back-off see it pass.
+    sleep: async (ms) => {
+      sleeps.push(ms);
+      fixture.clock.advance(ms);
+    },
     log: {
       info: (line) => lines.info.push(line),
       error: (line) => lines.error.push(line),
@@ -140,6 +159,15 @@ export async function createCheckRunsHarness(
     fake,
     service,
     lines,
+    sleeps,
+    dueCalls,
+    async setIntegrationStatus(status) {
+      await db
+        .updateTable("integrations")
+        .set({ status })
+        .where("workspace_id", "=", workspaceId)
+        .execute();
+    },
     setVerdictMode(mode) {
       verdictMode = mode;
     },

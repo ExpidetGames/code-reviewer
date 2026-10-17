@@ -9,7 +9,7 @@ import type { ReviewCheck } from "../integrations/types.ts";
 import type { JobStatus } from "../jobs/job-status.ts";
 import { describeErrorCode } from "../runs/error-copy.ts";
 import type { ReviewFindings } from "../runner-api/contract.ts";
-import { safeLink } from "./verdict.ts";
+import { safeLink, type VerdictDecision } from "./verdict.ts";
 
 /** The facts of a job the check run is made from. */
 export type CheckSubject = {
@@ -22,6 +22,8 @@ export type CheckSubject = {
   findings: ReviewFindings | null;
   /** Why a Dynamic review was wrapped up early (`cost_limit`, `time_limit`), or null. */
   stoppedEarly: string | null;
+  /** What the app decided about the review verdict of a successful review; absent where it is not decided. */
+  verdict?: VerdictDecision;
 };
 
 export type CheckText = Pick<
@@ -44,6 +46,24 @@ function findingsLine(findings: ReviewFindings | null): string | null {
   const { bySeverity } = findings;
   if (bySeverity === null) return `${plural(findings.open, "open finding")}.`;
   return `${plural(findings.open, "open finding")}: P0 ${String(bySeverity.P0)} · P1 ${String(bySeverity.P1)} · P2 ${String(bySeverity.P2)} · P3 ${String(bySeverity.P3)}`;
+}
+
+const VERDICT_SKIP_TEXT: Readonly<Record<string, string>> = {
+  review_incomplete:
+    "the review did not cover everything (a finding was dropped, files were left out, or it stopped at a limit)",
+  no_severity:
+    "a Diff Review has no severities, so the setting for blocking findings cannot judge it",
+  findings_unknown: "the runner did not report which findings are open",
+  no_model_work: "the review made no model call",
+};
+
+/** What a successful review says about its verdict when it submitted none; empty when it submitted one. */
+function verdictLine(verdict: VerdictDecision | undefined): string | null {
+  if (verdict === undefined || verdict.kind === "submit") return null;
+  if (verdict.reason === "off")
+    return "The review verdict is switched off for this project.";
+  const because = VERDICT_SKIP_TEXT[verdict.reason] ?? "of an unknown reason";
+  return `No review verdict was submitted: ${because}. An earlier request for changes by Code Reviewer on this pull request stays until a complete review replaces it.`;
 }
 
 function linkLine(commentUrl: string | null): string | null {
@@ -91,6 +111,7 @@ export function describeCheck(subject: CheckSubject): CheckText {
           subject.stoppedEarly === null
             ? null
             : (STOPPED_EARLY_TEXT[subject.stoppedEarly] ?? null),
+          verdictLine(subject.verdict),
           linkLine(subject.commentUrl),
         ),
         ...details,

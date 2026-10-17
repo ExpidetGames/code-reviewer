@@ -11,6 +11,8 @@ import type { CheckRunService } from "./service.ts";
 import { getCheckRunService } from "./shared.ts";
 
 export const CHECK_RECONCILE_INTERVAL_MS = 60 * 1000;
+/** A long-lived process has no limit of a function; one run may take most of the minute until the next tick. */
+const RECONCILE_BUDGET_MS = 40 * 1000;
 
 export type CheckReconcilerTimer = { stop: () => void };
 
@@ -39,7 +41,9 @@ export function startCheckReconciler({
     if (running) return;
     running = true;
     try {
-      const { synced } = await (service ?? getCheckRunService()).reconcileDue();
+      const { synced } = await (service ?? getCheckRunService()).reconcileDue({
+        budgetMs: RECONCILE_BUDGET_MS,
+      });
       if (synced > 0)
         log.info(
           `[check-runs] synced the check runs of ${String(synced)} jobs.`,

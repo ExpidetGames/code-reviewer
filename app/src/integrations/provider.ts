@@ -121,8 +121,17 @@ export interface IntegrationProvider {
     integration: Integration,
     repo: RepoRef,
     check: ReviewCheck,
-    known: { checkRunId: string | null; mayExist: boolean },
-  ): Promise<{ checkRunId: string }>;
+    known: {
+      checkRunId: string | null;
+      mayExist: boolean;
+      /**
+       * False for a job that ended before its check was ever shown: the check is looked for (an earlier attempt may
+       * have made it) and completed if it is there, but none is made. Default true.
+       */
+      createIfMissing?: boolean;
+    },
+    signal?: AbortSignal,
+  ): Promise<{ checkRunId: string | null }>;
 
   /**
    * Only where the app can review a pull request (#405): submits the verdict as the app, with a token limited to
@@ -137,7 +146,25 @@ export interface IntegrationProvider {
     prNumber: number,
     verdict: ReviewVerdict,
     options: { lookForEarlier: boolean },
+    signal?: AbortSignal,
   ): Promise<{ outcome: "submitted" | "already_there"; reviewId: string }>;
+
+  /**
+   * Only where the app can review a pull request (#405): takes back the app's own latest request for changes (the
+   * latest review of the app that holds `markerPrefix` and still asks for changes) by dismissing it with `message`.
+   * Nothing else is touched: a review of anybody else is never dismissed, whatever its text says. Rejects like
+   * `submitReviewVerdict`.
+   */
+  withdrawReviewVerdict?(
+    integration: Integration,
+    repo: RepoRef,
+    prNumber: number,
+    options: { message: string; markerPrefix: string },
+    signal?: AbortSignal,
+  ): Promise<{
+    outcome: "dismissed" | "nothing_to_dismiss";
+    reviewId: string | null;
+  }>;
 
   /** Credentials for one job on one repository; short-lived where the platform allows it. */
   jobAccess(integration: Integration, repo: RepoRef): Promise<GitAccess>;

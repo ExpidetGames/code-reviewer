@@ -280,7 +280,7 @@ export function createGithubAppProvider(
       }
     },
 
-    async publishReviewCheck(integration, repo, check, known) {
+    async publishReviewCheck(integration, repo, check, known, signal) {
       try {
         const repositoryIds = jobTokenRepositoryIds(repo.externalId);
         if (repo.integrationId !== integration.id || repositoryIds === null)
@@ -314,6 +314,7 @@ export function createGithubAppProvider(
                   name: check.name,
                   externalId: check.jobId,
                 },
+                signal,
               )
             )?.id ?? null;
         if (checkRunId !== null) {
@@ -323,14 +324,17 @@ export function createGithubAppProvider(
             repo.fullName,
             checkRunId,
             fields,
+            signal,
           );
           return { checkRunId };
         }
+        if (known.createIfMissing === false) return { checkRunId: null };
         const created = await client.createCheckRun(
           integration.externalId,
           scope,
           repo.fullName,
           { name: check.name, headSha: check.headSha, ...fields },
+          signal,
         );
         return { checkRunId: created.id };
       } catch (error) {
@@ -338,7 +342,14 @@ export function createGithubAppProvider(
       }
     },
 
-    async submitReviewVerdict(integration, repo, prNumber, verdict, options) {
+    async submitReviewVerdict(
+      integration,
+      repo,
+      prNumber,
+      verdict,
+      options,
+      signal,
+    ) {
       try {
         const repositoryIds = jobTokenRepositoryIds(repo.externalId);
         if (repo.integrationId !== integration.id || repositoryIds === null)
@@ -356,6 +367,7 @@ export function createGithubAppProvider(
               scope,
               repo.fullName,
               prNumber,
+              signal,
             )
           ).find(
             // Only the app's own review counts: anybody can copy a marker into theirs.
@@ -376,8 +388,56 @@ export function createGithubAppProvider(
             body: verdict.body,
             event: verdict.event === "approve" ? "APPROVE" : "REQUEST_CHANGES",
           },
+          signal,
         );
         return { outcome: "submitted" as const, reviewId: created.id };
+      } catch (error) {
+        throw toWriteError(error);
+      }
+    },
+
+    async withdrawReviewVerdict(integration, repo, prNumber, options, signal) {
+      try {
+        const repositoryIds = jobTokenRepositoryIds(repo.externalId);
+        if (repo.integrationId !== integration.id || repositoryIds === null)
+          throw new IntegrationError(
+            "INTEGRATION_ACCESS_SCOPE_REFUSED",
+            "The repository does not belong to this integration or has no usable id.",
+          );
+        const scope = { repositoryIds, permissions: VERDICT_TOKEN_PERMISSIONS };
+        const client = await getClient();
+        const botLogin = `${(await getConfig()).slug}[bot]`;
+        // Only the app's own reviews that carry its marker, and of those the latest that still counts (an approval
+        // or a request for changes): a review of anybody else is never touched, whatever its text says.
+        const latest = (
+          await client.listPullRequestReviews(
+            integration.externalId,
+            scope,
+            repo.fullName,
+            prNumber,
+            signal,
+          )
+        )
+          .filter(
+            (review) =>
+              review.authorLogin === botLogin &&
+              review.body.includes(options.markerPrefix) &&
+              (review.state === "APPROVED" ||
+                review.state === "CHANGES_REQUESTED"),
+          )
+          .at(-1);
+        if (latest === undefined || latest.state !== "CHANGES_REQUESTED")
+          return { outcome: "nothing_to_dismiss" as const, reviewId: null };
+        await client.dismissPullRequestReview(
+          integration.externalId,
+          scope,
+          repo.fullName,
+          prNumber,
+          latest.id,
+          options.message,
+          signal,
+        );
+        return { outcome: "dismissed" as const, reviewId: latest.id };
       } catch (error) {
         throw toWriteError(error);
       }

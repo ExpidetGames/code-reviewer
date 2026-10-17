@@ -61,9 +61,12 @@ export function decideVerdict(input: {
   return { kind: "submit", event: "approve", blocking: 0 };
 }
 
+/** What every marker of a verdict starts with: by it the app's own reviews are told from those of other people. */
+export const VERDICT_MARKER_PREFIX = "<!-- code-reviewer:verdict";
+
 /** The hidden text by which the app's own review for a job is recognised if it has to look for it. */
 export function verdictMarker(jobId: string): string {
-  return `<!-- code-reviewer:verdict job=${jobId} -->`;
+  return `${VERDICT_MARKER_PREFIX} job=${jobId} -->`;
 }
 
 function plural(count: number, noun: string): string {

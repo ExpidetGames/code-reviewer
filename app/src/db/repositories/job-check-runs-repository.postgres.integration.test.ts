@@ -18,7 +18,7 @@ import { listJobsWithCheckWork } from "./job-check-runs-sweep.ts";
 const describePostgres = hasPostgres() ? describe : describe.skip;
 
 const MINUTE = 60 * 1000;
-const LEASE = { leaseMs: MINUTE };
+const LEASE = { leaseMs: MINUTE, maxAttempts: 5 };
 
 /** Direct writes that the checks of the table must refuse, whatever the engine. */
 const REFUSED_UPDATES = [
@@ -80,7 +80,7 @@ describePostgres("the job check runs on Postgres", () => {
     expect(await t.checks.take(t.job.id, LEASE)).toMatchObject({
       acquired: true,
       created: false,
-      check: { attempts: 1 },
+      check: { attempts: 2 },
     });
     await t.checks.failed(t.job.id, {
       code: "INTEGRATION_ACCESS_UNAVAILABLE",

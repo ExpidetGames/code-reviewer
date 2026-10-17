@@ -11,7 +11,7 @@ import { listJobsWithCheckWork } from "./job-check-runs-sweep.ts";
 
 const SECOND = 1000;
 const MINUTE = 60 * SECOND;
-const LEASE = { leaseMs: MINUTE };
+const LEASE = { leaseMs: MINUTE, maxAttempts: 5 };
 
 async function setup() {
   const fixture = await createJobQueueFixture();
@@ -55,7 +55,8 @@ describe("taking the check of a job", () => {
         checkState: "active",
         reviewState: "pending",
         state: "active",
-        attempts: 0,
+        // A sync that is started counts at once, so one that is killed halfway is not forgotten.
+        attempts: 1,
         lastCode: null,
       },
     });
@@ -181,21 +182,21 @@ describe("a failed sync", () => {
     t.advance(5 * MINUTE);
     expect(await t.checks.take(t.job.id, LEASE)).toMatchObject({
       acquired: true,
-      check: { attempts: 1, lastCode: "INTEGRATION_ACCESS_UNAVAILABLE" },
+      check: { attempts: 2, lastCode: "INTEGRATION_ACCESS_UNAVAILABLE" },
     });
   });
 
   // #405-T15
   it("is dropped when its attempts are used up, and never taken again", async () => {
     const t = await setup();
-    await t.checks.take(t.job.id, LEASE);
-
-    for (let attempt = 0; attempt < 3; attempt += 1)
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await t.checks.take(t.job.id, { ...LEASE, maxAttempts: 3 });
       await t.checks.failed(t.job.id, {
         code: "INTEGRATION_ACCESS_UNAVAILABLE",
         retryAt: t.now(),
         maxAttempts: 3,
       });
+    }
 
     expect(await t.checks.find(t.job.id)).toMatchObject({
       state: "dropped",
@@ -204,6 +205,61 @@ describe("a failed sync", () => {
     });
     t.advance(60 * MINUTE);
     expect(await t.checks.take(t.job.id, LEASE)).toEqual({ acquired: false });
+  });
+
+  // #405-T15 (review P2-4)
+  it("counts a sync that was killed halfway, and drops the row when the syncs started pile up", async () => {
+    const t = await setup();
+    const options = { leaseMs: MINUTE, maxAttempts: 3 };
+
+    // Three syncs start and never finish: no finish, no failure is ever written.
+    for (let start = 0; start < 3; start += 1) {
+      expect(await t.checks.take(t.job.id, options)).toMatchObject({
+        acquired: true,
+      });
+      t.advance(MINUTE + SECOND);
+    }
+    const fourth = await t.checks.take(t.job.id, options);
+
+    expect(fourth).toEqual({ acquired: false });
+    expect(await t.checks.find(t.job.id)).toMatchObject({
+      state: "dropped",
+      attempts: 3,
+    });
+  });
+
+  // #405-T15 (review P1-1)
+  it("is given more attempts to close a check run that is still open, and the limit it is given is the caller's", async () => {
+    const t = await setup();
+    const options = { leaseMs: MINUTE, maxAttempts: 30 };
+
+    for (let start = 0; start < 7; start += 1) {
+      await t.checks.take(t.job.id, options);
+      await t.checks.failed(t.job.id, {
+        code: "INTEGRATION_ACCESS_UNAVAILABLE",
+        retryAt: t.now(),
+        maxAttempts: 30,
+      });
+    }
+
+    expect(await t.checks.find(t.job.id)).toMatchObject({
+      state: "active",
+      attempts: 7,
+    });
+  });
+
+  // #405-T16 (review P1-2)
+  it("forgets the attempts to make a check run once it is known that none exists", async () => {
+    const t = await setup();
+    await t.checks.take(t.job.id, LEASE);
+    await t.checks.noteStarted(t.job.id, "check");
+
+    await t.checks.forgetCheckAttempts(t.job.id);
+
+    expect(await t.checks.find(t.job.id)).toMatchObject({
+      checkCreateAttempts: 0,
+      checkRunId: null,
+    });
   });
 
   // #405-T12
@@ -258,6 +314,35 @@ describe("a failed sync", () => {
 });
 
 describe("finding the jobs whose check run is behind", () => {
+  // #405-T32 (review P1-1, P3-1)
+  it("reaches a retry that is due even when many newer jobs without a row are waiting", async () => {
+    const t = await setup();
+    await t.queue.claimNext("runner-1");
+    await t.checks.take(t.job.id, LEASE);
+    await t.checks.recordCheck(t.job.id, {
+      checkRunId: "9001",
+      syncedStatus: "queued",
+    });
+    await t.checks.failed(t.job.id, {
+      code: "INTEGRATION_ACCESS_UNAVAILABLE",
+      retryAt: new Date(t.now().getTime() + 5 * MINUTE),
+      maxAttempts: 30,
+    });
+    for (let n = 0; n < 25; n += 1) {
+      t.advance(SECOND);
+      await t.enqueueNew({
+        prNumber: 100 + n,
+        prUrl: `https://github.test/acme/widgets/pull/${String(100 + n)}`,
+      });
+    }
+    t.advance(2 * 60 * MINUTE);
+
+    const listed = await listJobsWithCheckWork(t.db, t.now(), { limit: 20 });
+
+    expect(listed).toHaveLength(20);
+    expect(listed[0]?.jobId).toBe(t.job.id);
+  });
+
   // #405-T06
   it("lists a running job without a row, and a job whose check run shows an older status", async () => {
     const t = await setup();

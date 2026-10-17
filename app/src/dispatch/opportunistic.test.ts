@@ -25,7 +25,9 @@ function setup(
   const dispatch = { sendDue: vi.fn(() => Promise.resolve({ sent: 1 })) };
   const log = { error: vi.fn() };
   const checks = {
-    reconcileDue: vi.fn(() => Promise.resolve({ synced: 0 })),
+    reconcileDue: vi.fn((_options?: { budgetMs?: number }) =>
+      Promise.resolve({ synced: 0 }),
+    ),
   };
   const maintenance = createOpportunisticMaintenance({
     withLock: async (work) =>
@@ -68,6 +70,8 @@ describe("the repair work of the requests that touch the database", () => {
     await t.maintenance.run();
 
     expect(t.checks.reconcileDue).toHaveBeenCalledOnce();
+    // A request has a minute in all, and its response and the repair work before this took part of it (review P2-4).
+    expect(t.checks.reconcileDue).toHaveBeenCalledWith({ budgetMs: 15_000 });
     expect(t.queue.expireStaleJobs.mock.invocationCallOrder[0]).toBeLessThan(
       t.checks.reconcileDue.mock.invocationCallOrder[0] ?? 0,
     );

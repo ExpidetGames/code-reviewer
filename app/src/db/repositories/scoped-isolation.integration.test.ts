@@ -79,7 +79,7 @@ function noticeKeyOf(repositoryId: string) {
   };
 }
 const NOTICE_OPTIONS = { leaseMs: 60_000, maxAttempts: 3 };
-const CHECK_LEASE = { leaseMs: 60_000 };
+const CHECK_LEASE = { leaseMs: 60_000, maxAttempts: 5 };
 
 /** One workspace with an integration, a repository, a project, a job and a setting. */
 async function seed(

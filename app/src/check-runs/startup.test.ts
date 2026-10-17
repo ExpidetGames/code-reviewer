@@ -41,6 +41,8 @@ describe("the check run reconciler of a long-lived server", () => {
       expect(f.service.reconcileDue).toHaveBeenCalledTimes(2),
     );
 
+    // A long-lived process has no limit of a function, so it may spend most of the minute.
+    expect(f.service.reconcileDue).toHaveBeenCalledWith({ budgetMs: 40_000 });
     expect(f.setTimer).toHaveBeenCalledWith(
       expect.any(Function),
       CHECK_RECONCILE_INTERVAL_MS,

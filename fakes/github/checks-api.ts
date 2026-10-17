@@ -72,6 +72,8 @@ export type FakePullRequestReview = {
   login: string;
   commitId: string | null;
   submittedAt: string;
+  /** The message it was dismissed with; null while it stands. */
+  dismissalMessage: string | null;
 };
 
 export type ChecksApiAnswer = { status: number; body: unknown } | undefined;
@@ -314,6 +316,28 @@ export function createChecksApi(options: ChecksApiOptions): ChecksApi {
       };
     }
 
+    // Dismissing a review needs the pull request permission; only a review that counts (an approval or a request for
+    // changes that stands) can be dismissed, and a message is required, as on GitHub.
+    const dismissMatch = /^\/pulls\/(\d+)\/reviews\/(\d+)\/dismissals$/.exec(
+      rest,
+    );
+    if (dismissMatch && method === "PUT") {
+      if (!request.mayDo(["pull_requests"], "write")) return FORBIDDEN;
+      const key = `${fullName}#${Number(dismissMatch[1])}`;
+      const review = (reviews.get(key) ?? []).find(
+        (item) => item.id === Number(dismissMatch[2]),
+      );
+      if (review === undefined) return NOT_FOUND;
+      const fields = parseObject(await request.body());
+      if (fields === null || typeof fields.message !== "string")
+        return invalid("message is required");
+      if (review.state !== "APPROVED" && review.state !== "CHANGES_REQUESTED")
+        return invalid("Can not dismiss a review that does not stand");
+      review.state = "DISMISSED";
+      review.dismissalMessage = fields.message;
+      return { status: 200, body: reviewJson(review) };
+    }
+
     const reviewsMatch = /^\/pulls\/(\d+)\/reviews$/.exec(rest);
     if (reviewsMatch) {
       const number = Number(reviewsMatch[1]);
@@ -380,6 +404,7 @@ export function createChecksApi(options: ChecksApiOptions): ChecksApi {
       login: review.login,
       commitId: review.commitId ?? null,
       submittedAt: isoSeconds(options.now()),
+      dismissalMessage: null,
     };
     const key = `${repository}#${number}`;
     reviews.set(key, [...(reviews.get(key) ?? []), stored]);

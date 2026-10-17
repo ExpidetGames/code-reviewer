@@ -493,6 +493,8 @@ describe("an App that may not write check runs", () => {
     await t.service.syncJob(first.id);
     t.fake.setAppPermissions({ ...WITHOUT_CHECKS, checks: "write" });
 
+    // The App is believed to lack the permission for a while (review P3-3); after that it is asked again.
+    t.fixture.clock.advance(11 * MINUTE);
     const second = await t.fixture.enqueueNew({
       prNumber: 8,
       prUrl: "https://github.test/acme/widgets/pull/8",
@@ -535,19 +537,19 @@ describe("GitHub failing", () => {
   });
 
   // #405-T15
-  it("gives a job up after its attempts are used up", async () => {
+  it("gives a job up after its attempts are used up, even one with a check run that may exist", async () => {
     const t = await createCheckRunsHarness();
     const job = await t.fixture.enqueueNew();
     t.fake.fail({ pathIncludes: "/check-runs", status: 502 });
 
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-      t.fixture.clock.advance(20 * MINUTE);
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      t.fixture.clock.advance(61 * MINUTE);
       await t.service.syncJob(job.id);
     }
 
     expect(await t.rowOf(job.id)).toMatchObject({
       state: "dropped",
-      attempts: 5,
+      attempts: 30,
     });
     t.fake.clearFailures();
     t.fixture.clock.advance(60 * MINUTE);
@@ -798,7 +800,7 @@ describe("the verdict of a successful review", () => {
     const job = await t.fixture.enqueueNew();
     const claimed = await t.claim();
     await t.succeed(claimed.job, claimed.token, { findings: CLEAN });
-    t.fake.fail({ pathIncludes: "/pulls/7/reviews", status: 502, times: 1 });
+    t.fake.fail({ pathIncludes: "/pulls/7/reviews", status: 502 });
 
     await t.service.syncJob(job.id);
 
@@ -807,6 +809,7 @@ describe("the verdict of a successful review", () => {
       reviewState: "pending",
       attempts: 1,
     });
+    t.fake.clearFailures();
     t.fixture.clock.advance(3 * MINUTE);
     await t.service.reconcileDue();
     expect(t.reviews()).toMatchObject([{ state: "APPROVED" }]);
@@ -826,7 +829,8 @@ describe("the verdict setting", () => {
 
     expect(t.reviews()).toEqual([]);
     expect(t.checkRuns()[0]).toMatchObject({ conclusion: "success" });
-    expect(t.lines.info.join("\n")).toContain("reason=off");
+    expect(t.checkRuns()[0]?.output?.summary).toContain("switched off");
+    expect(t.lines.info.join("\n")).toContain("outcome=nothing_to_dismiss");
   });
 
   // #405-T18
@@ -983,6 +987,542 @@ describe("a verdict from a review that proves nothing", () => {
 
     expect(t.reviews()).toEqual([]);
     expect(t.lines.info.join("\n")).toContain("reason=no_model_work");
+  });
+});
+
+const WITHOUT_CHECKS_PERMISSION = {
+  metadata: "read",
+  contents: "read",
+  pull_requests: "write",
+  issues: "write",
+} as const;
+const HOUR = 60 * MINUTE;
+
+describe("no check run stays open (review P1-1)", () => {
+  // #405-T15
+  it("keeps trying to close a check run past the usual number of attempts, and completes it once GitHub is back", async () => {
+    const t = await createCheckRunsHarness();
+    const job = await t.fixture.enqueueNew();
+    await t.service.syncJob(job.id);
+    const claimed = await t.claim();
+    await t.succeed(claimed.job, claimed.token, { findings: CLEAN });
+    t.fake.fail({ pathIncludes: "/check-runs", status: 502 });
+
+    // A GitHub incident of many hours: far more failed syncs than the five that end a sync with nothing to close.
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      t.fixture.clock.advance(HOUR);
+      await t.service.reconcileDue();
+    }
+
+    expect(await t.rowOf(job.id)).toMatchObject({ state: "active" });
+    expect(t.checkRuns()[0]).toMatchObject({ status: "queued" });
+    t.fake.clearFailures();
+    t.fixture.clock.advance(HOUR);
+    await t.service.reconcileDue();
+
+    expect(t.checkRuns()[0]).toMatchObject({
+      status: "completed",
+      conclusion: "success",
+    });
+    expect(await t.rowOf(job.id)).toMatchObject({ state: "settled" });
+  });
+
+  // #405-T15
+  it("tries the call again within the same request before it waits, once after one second and once after three", async () => {
+    const t = await createCheckRunsHarness();
+    const job = await t.fixture.enqueueNew();
+    t.fake.fail({ pathIncludes: "/check-runs", status: 502, times: 2 });
+
+    await t.service.syncJob(job.id);
+
+    expect(t.sleeps).toEqual([1000, 3000]);
+    expect(t.checkRuns()).toHaveLength(1);
+    expect(await t.rowOf(job.id)).toMatchObject({ attempts: 0 });
+  });
+
+  // #405-T16
+  it("does not make a second check run when the call it repeats had worked and its answer was lost", async () => {
+    const t = await createCheckRunsHarness();
+    const job = await t.fixture.enqueueNew();
+    // GitHub makes the check run and answers too late for the client, which gives up waiting.
+    t.fake.fail({
+      pathIncludes: "/check-runs",
+      responseDelayMs: 1500,
+      times: 1,
+    });
+
+    await t.service.syncJob(job.id);
+
+    expect(t.checkRuns()).toHaveLength(1);
+    expect(await t.rowOf(job.id)).toMatchObject({
+      checkRunId: String(t.checkRuns()[0]?.id),
+    });
+  });
+
+  // #405-T12
+  it("keeps the check run open for another try when the permission to write it was taken away, and closes it when it is back", async () => {
+    const t = await createCheckRunsHarness();
+    const job = await t.fixture.enqueueNew();
+    await t.service.syncJob(job.id);
+    t.fake.setAppPermissions(WITHOUT_CHECKS_PERMISSION);
+    const claimed = await t.claim();
+
+    await t.service.syncJob(job.id);
+
+    expect(t.checkRuns()[0]).toMatchObject({ status: "queued" });
+    expect(await t.rowOf(job.id)).toMatchObject({
+      state: "active",
+      checkState: "active",
+      lastCode: "INTEGRATION_ACCESS_SCOPE_REFUSED",
+    });
+    expect(
+      t.lines.error.filter((line) =>
+        line.includes("CHECK_RUN_PERMISSION_MISSING"),
+      ),
+    ).toHaveLength(1);
+
+    t.fake.setAppPermissions({ ...WITHOUT_CHECKS_PERMISSION, checks: "write" });
+    await t.succeed(claimed.job, claimed.token, { findings: CLEAN });
+    t.fixture.clock.advance(HOUR);
+    await t.service.reconcileDue();
+
+    expect(t.checkRuns()[0]).toMatchObject({
+      status: "completed",
+      conclusion: "success",
+    });
+  });
+
+  // #405-T10
+  it("waits for a connection that is switched off while a check run is open, and closes the check run when it is back", async () => {
+    const t = await createCheckRunsHarness();
+    const job = await t.fixture.enqueueNew();
+    await t.service.syncJob(job.id);
+    await t.setIntegrationStatus("disabled");
+    const claimed = await t.claim();
+    await t.succeed(claimed.job, claimed.token, { findings: CLEAN });
+    const before = t.fake.requests().length;
+
+    await t.service.syncJob(job.id);
+
+    expect(t.fake.requests()).toHaveLength(before);
+    expect(await t.rowOf(job.id)).toMatchObject({ state: "active" });
+    await t.setIntegrationStatus("active");
+    t.fixture.clock.advance(HOUR);
+    await t.service.reconcileDue();
+    expect(t.checkRuns()[0]).toMatchObject({ conclusion: "success" });
+  });
+
+  // #405-T10
+  it("drops a job whose connection is switched off before any check run was made", async () => {
+    const t = await createCheckRunsHarness();
+    const job = await t.fixture.enqueueNew();
+    await t.setIntegrationStatus("disabled");
+
+    await t.service.syncJob(job.id);
+
+    expect(await t.rowOf(job.id)).toMatchObject({
+      state: "dropped",
+      lastCode: "CHECK_RUN_CONNECTION_UNAVAILABLE",
+    });
+  });
+
+  // #405-T15
+  it("still gives a sync up after five failures when no check run is open", async () => {
+    const t = await createCheckRunsHarness();
+    const job = await t.fixture.enqueueNew();
+    const claimed = await t.claim();
+    await t.succeed(claimed.job, claimed.token, { findings: CLEAN });
+    // The check run is made and completed; only the verdict keeps failing.
+    t.fake.fail({ pathIncludes: "/pulls/7", status: 502 });
+
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      t.fixture.clock.advance(HOUR);
+      await t.service.syncJob(job.id);
+    }
+
+    expect(t.checkRuns()[0]).toMatchObject({ status: "completed" });
+    expect(await t.rowOf(job.id)).toMatchObject({ state: "dropped" });
+  });
+});
+
+describe("a check run whose creation may have worked (review P1-2)", () => {
+  async function orphan(
+    t: Awaited<ReturnType<typeof createCheckRunsHarness>>,
+    jobId: string,
+  ) {
+    const { integration, repo } = await t.target();
+    // The earlier attempt: the check run exists on GitHub, and the app only knows it started to make one.
+    await t.provider.publishReviewCheck?.(
+      integration,
+      repo,
+      {
+        jobId,
+        headSha: HEAD,
+        name: "Code Reviewer",
+        status: "queued",
+        title: "Waiting",
+        summary: "x",
+      },
+      { checkRunId: null, mayExist: false },
+    );
+    const now = t.fixture.clock.now().toISOString();
+    await t.fixture.db
+      .insertInto("job_check_runs")
+      .values({
+        job_id: jobId,
+        workspace_id: t.fixture.workspaceId,
+        check_create_attempts: 1,
+        next_attempt_at: now,
+        created_at: now,
+        updated_at: now,
+      })
+      .execute();
+  }
+
+  // #405-T16
+  it("is completed as superseded when the job was replaced before its id was kept", async () => {
+    const t = await createCheckRunsHarness();
+    const job = await t.fixture.enqueueNew();
+    await orphan(t, job.id);
+    await t.fixture.enqueueNew({ headSha: sha("b") });
+
+    await t.service.syncJob(job.id);
+
+    expect(
+      t.checkRuns().filter((run) => run.externalId === job.id),
+    ).toMatchObject([
+      {
+        status: "completed",
+        conclusion: "neutral",
+        output: { title: "Superseded by a newer commit" },
+      },
+    ]);
+    expect(await t.rowOf(job.id)).toMatchObject({ state: "settled" });
+  });
+
+  // #405-T16
+  it("is completed as cancelled when the job was cancelled before its id was kept", async () => {
+    const t = await createCheckRunsHarness();
+    const job = await t.fixture.enqueueNew();
+    await orphan(t, job.id);
+    await t.fixture.queue.discardWaitingForPr(t.fixture.repositoryId, 7);
+
+    await t.service.syncJob(job.id);
+
+    expect(t.checkRuns()).toMatchObject([
+      { status: "completed", conclusion: "neutral" },
+    ]);
+  });
+
+  // #405-T11
+  it("makes none when the look finds none and the job ended, and forgets that it tried", async () => {
+    const t = await createCheckRunsHarness();
+    const job = await t.fixture.enqueueNew();
+    const now = t.fixture.clock.now().toISOString();
+    await t.fixture.db
+      .insertInto("job_check_runs")
+      .values({
+        job_id: job.id,
+        workspace_id: t.fixture.workspaceId,
+        check_create_attempts: 1,
+        next_attempt_at: now,
+        created_at: now,
+        updated_at: now,
+      })
+      .execute();
+    await t.fixture.enqueueNew({ headSha: sha("b") });
+
+    await t.service.syncJob(job.id);
+
+    expect(t.checkRuns().filter((run) => run.externalId === job.id)).toEqual(
+      [],
+    );
+    expect(await t.rowOf(job.id)).toMatchObject({
+      state: "settled",
+      checkCreateAttempts: 0,
+    });
+  });
+});
+
+describe("the reconcile within the time of a function (review P2-4)", () => {
+  // #405-T32
+  it("stops starting jobs when its budget is used up, and the rest waits for the next run", async () => {
+    const t = await createCheckRunsHarness();
+    for (let n = 0; n < 5; n += 1)
+      await t.fixture.enqueueNew({
+        prNumber: 20 + n,
+        prUrl: `https://github.test/acme/widgets/pull/${String(20 + n)}`,
+      });
+    // Every call fails, so each job spends four simulated seconds on its waits between tries.
+    t.fake.fail({ pathIncludes: "/check-runs", status: 502 });
+
+    const report = await t.service.reconcileDue({ budgetMs: 9000 });
+
+    expect(report.synced).toBe(2);
+  });
+
+  // #405-T32
+  it("does not run a call for a sync whose own time is over", async () => {
+    const t = await createCheckRunsHarness();
+    const job = await t.fixture.enqueueNew();
+    t.fake.fail({ pathIncludes: "/check-runs", status: 502 });
+
+    await t.service.syncJob(job.id, { budgetMs: 500 });
+
+    // No second try was started: a wait of a second would not fit.
+    expect(t.sleeps).toEqual([]);
+  });
+
+  // #405-T32 (review P3-2)
+  it("asks for the due jobs once for reconciles that are asked for at the same time", async () => {
+    const t = await createCheckRunsHarness();
+    await t.fixture.enqueueNew();
+
+    await Promise.all([
+      t.service.reconcileDue(),
+      t.service.reconcileDue(),
+      t.service.reconcileDue(),
+    ]);
+
+    expect(t.dueCalls.count).toBeLessThanOrEqual(2);
+    expect(t.checkRuns()).toHaveLength(1);
+  });
+});
+
+describe("an App without the permission, asked again and again (review P3-3)", () => {
+  // #405-T12
+  it("asks GitHub for a token once for the jobs that follow, until the memory of it is over", async () => {
+    const t = await createCheckRunsHarness({
+      permissions: WITHOUT_CHECKS_PERMISSION,
+    });
+    const first = await t.fixture.enqueueNew();
+    await t.service.syncJob(first.id);
+    const asked = t.fake.tokenRequests().length;
+
+    const second = await t.fixture.enqueueNew({
+      prNumber: 8,
+      prUrl: "https://github.test/acme/widgets/pull/8",
+    });
+    await t.service.syncJob(second.id);
+
+    expect(t.fake.tokenRequests()).toHaveLength(asked);
+    expect(await t.rowOf(second.id)).toMatchObject({
+      checkState: "dropped",
+      lastCode: "CHECK_RUN_PERMISSION_MISSING",
+    });
+    t.fixture.clock.advance(11 * MINUTE);
+    t.fake.setAppPermissions({ ...WITHOUT_CHECKS_PERMISSION, checks: "write" });
+    const third = await t.fixture.enqueueNew({
+      prNumber: 9,
+      prUrl: "https://github.test/acme/widgets/pull/9",
+    });
+    await t.service.syncJob(third.id);
+    expect(t.checkRuns()).toHaveLength(1);
+  });
+});
+
+describe("a refusal that is not a missing permission (review P2-7)", () => {
+  // #405-T12
+  it("drops an archived repository with its own code and does not call it a permission", async () => {
+    const t = await createCheckRunsHarness();
+    const job = await t.fixture.enqueueNew();
+    t.fake.fail({
+      pathIncludes: "/check-runs",
+      status: 403,
+      message: "Repository was archived so is read-only.",
+    });
+
+    await t.service.syncJob(job.id);
+
+    expect(await t.rowOf(job.id)).toMatchObject({
+      state: "dropped",
+      lastCode: "CHECK_RUN_REPOSITORY_ARCHIVED",
+    });
+    const errors = t.lines.error.join("\n");
+    expect(errors).toContain("CHECK_RUN_REPOSITORY_ARCHIVED");
+    expect(errors).not.toContain("CHECK_RUN_PERMISSION_MISSING");
+  });
+
+  // #405-T12
+  it("retries a 403 that GitHub gives for another reason, as any failure", async () => {
+    const t = await createCheckRunsHarness();
+    const job = await t.fixture.enqueueNew();
+    t.fake.fail({
+      pathIncludes: "/check-runs",
+      status: 403,
+      message: "Something temporary",
+      times: 1,
+    });
+
+    await t.service.syncJob(job.id);
+
+    expect(await t.rowOf(job.id)).toMatchObject({
+      state: "active",
+      attempts: 1,
+    });
+    expect(t.lines.error.join("\n")).not.toContain("PERMISSION_MISSING");
+    t.fixture.clock.advance(3 * MINUTE);
+    await t.service.reconcileDue();
+    expect(t.checkRuns()).toHaveLength(1);
+  });
+
+  // #405-T26
+  it("drops the verdict for an archived repository without a retry", async () => {
+    const t = await createCheckRunsHarness();
+    const job = await t.fixture.enqueueNew();
+    const claimed = await t.claim();
+    await t.succeed(claimed.job, claimed.token, { findings: CLEAN });
+    t.fake.fail({
+      pathIncludes: "/pulls/7/reviews",
+      status: 403,
+      message: "Repository was archived so is read-only.",
+    });
+
+    await t.service.syncJob(job.id);
+
+    expect(await t.rowOf(job.id)).toMatchObject({ reviewState: "dropped" });
+  });
+});
+
+describe("a link that is not to the review comment (review P3-4)", () => {
+  // #405-T03
+  it("is left out of the check run and of the review when it is not a comment of this pull request", async () => {
+    const t = await createCheckRunsHarness();
+    for (const [index, link] of [
+      "https://evil.example/acme/gadgets/pull/7#issuecomment-1",
+      "https://github.test/acme/widgets/pull/7#issuecomment-1",
+      "https://github.test/acme/gadgets/pull/8#issuecomment-1",
+      "https://github.test/acme/gadgets/pull/7",
+      "javascript:alert(1)",
+    ].entries()) {
+      const job = await t.fixture.enqueueNew({
+        headSha: sha("abcde"[index] ?? "f"),
+      });
+      const claimed = await t.claim();
+      await t.succeed(claimed.job, claimed.token, {
+        findings: CLEAN,
+        commentUrl: link,
+      });
+      await t.service.syncJob(job.id);
+
+      const run = t.checkRuns().find((item) => item.externalId === job.id);
+      expect(run?.detailsUrl).toBeNull();
+      expect(run?.output?.summary).not.toContain(link);
+    }
+    for (const review of t.reviews()) expect(review.body).not.toContain("](");
+  });
+
+  // #405-T03
+  it("is kept when it is a comment of this pull request", async () => {
+    const t = await createCheckRunsHarness();
+    const job = await t.fixture.enqueueNew();
+    const claimed = await t.claim();
+    await t.succeed(claimed.job, claimed.token, { findings: CLEAN });
+
+    await t.service.syncJob(job.id);
+
+    expect(t.checkRuns()[0]?.detailsUrl).toBe(COMMENT_URL);
+    expect(t.reviews()[0]?.body).toContain(`](${COMMENT_URL})`);
+  });
+});
+
+describe("an earlier request for changes when the new review submits nothing (review P2-1)", () => {
+  async function askedForChanges(
+    t: Awaited<ReturnType<typeof createCheckRunsHarness>>,
+  ) {
+    const first = await t.fixture.enqueueNew();
+    const claimed = await t.claim();
+    await t.succeed(claimed.job, claimed.token, { findings: BLOCKER });
+    await t.service.syncJob(first.id);
+    expect(t.fake.pullRequestReviewDecisions(t.repo, 7)).toEqual({
+      [BOT]: "CHANGES_REQUESTED",
+    });
+  }
+
+  // #405-T22
+  it("stays when the review that follows is incomplete, and the check run says why no verdict was submitted", async () => {
+    const t = await createCheckRunsHarness();
+    await askedForChanges(t);
+    t.fake.updatePullRequest(t.repo, 7, { headSha: sha("c") });
+    const second = await t.fixture.enqueueNew({ headSha: sha("c") });
+    const claimed = await t.claim();
+    await t.succeed(claimed.job, claimed.token, {
+      findings: { ...CLEAN, incomplete: true },
+    });
+
+    await t.service.syncJob(second.id);
+
+    expect(t.fake.pullRequestReviewDecisions(t.repo, 7)).toEqual({
+      [BOT]: "CHANGES_REQUESTED",
+    });
+    const summary = t.checkRuns().find((run) => run.externalId === second.id)
+      ?.output?.summary;
+    expect(summary).toContain("No review verdict was submitted");
+    expect(summary).toContain("did not cover everything");
+    expect(summary).toContain("earlier request for changes");
+  });
+
+  // #405-T22
+  it("is dismissed with a message when the project switched the verdict off, and nothing of a human is touched", async () => {
+    const t = await createCheckRunsHarness();
+    await askedForChanges(t);
+    t.fake.addPullRequestReview(t.repo, 7, {
+      login: "a-human",
+      event: "REQUEST_CHANGES",
+      body: "my own opinion",
+    });
+    t.setVerdictMode("off");
+    t.fake.updatePullRequest(t.repo, 7, { headSha: sha("c") });
+    const second = await t.fixture.enqueueNew({ headSha: sha("c") });
+    const claimed = await t.claim();
+    await t.succeed(claimed.job, claimed.token, { findings: CLEAN });
+
+    await t.service.syncJob(second.id);
+
+    expect(t.fake.pullRequestReviewDecisions(t.repo, 7)).toEqual({
+      "a-human": "CHANGES_REQUESTED",
+    });
+    const dismissed = t
+      .reviews()
+      .filter((review) => review.state === "DISMISSED");
+    expect(dismissed).toHaveLength(1);
+    expect(dismissed[0]?.login).toBe(BOT);
+    expect(dismissed[0]?.dismissalMessage).toMatch(/switched off/i);
+    expect(await t.rowOf(second.id)).toMatchObject({
+      reviewState: "done",
+      state: "settled",
+    });
+  });
+
+  // #405-T22
+  it("is not dismissed when the setting is off and the app asked for nothing", async () => {
+    const t = await createCheckRunsHarness();
+    t.setVerdictMode("off");
+    const job = await t.fixture.enqueueNew();
+    const claimed = await t.claim();
+    await t.succeed(claimed.job, claimed.token, { findings: CLEAN });
+
+    await t.service.syncJob(job.id);
+
+    expect(t.reviews()).toEqual([]);
+  });
+
+  // #405-T24
+  it("is not dismissed on a pull request that is closed", async () => {
+    const t = await createCheckRunsHarness();
+    await askedForChanges(t);
+    t.setVerdictMode("off");
+    t.fake.updatePullRequest(t.repo, 7, { headSha: sha("c") });
+    const second = await t.fixture.enqueueNew({ headSha: sha("c") });
+    const claimed = await t.claim();
+    await t.succeed(claimed.job, claimed.token, { findings: CLEAN });
+    t.fake.updatePullRequest(t.repo, 7, { state: "closed" });
+
+    await t.service.syncJob(second.id);
+
+    expect(t.fake.pullRequestReviewDecisions(t.repo, 7)).toEqual({
+      [BOT]: "CHANGES_REQUESTED",
+    });
   });
 });
 

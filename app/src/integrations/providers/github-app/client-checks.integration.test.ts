@@ -287,6 +287,57 @@ describe("check runs, written with a narrow token", () => {
     expect(error).toMatchObject({ status: 422 });
   });
 
+  // #405-T22 (review P2-1)
+  it("dismisses a review with a message, with a token for the pull request permission alone", async () => {
+    const { fake, client } = await setup();
+    const asked = await client.createPullRequestReview(
+      "4242",
+      REVIEW_SCOPE,
+      "acme/widgets",
+      7,
+      { commitId: HEAD, body: "changes", event: "REQUEST_CHANGES" },
+    );
+
+    await client.dismissPullRequestReview(
+      "4242",
+      REVIEW_SCOPE,
+      "acme/widgets",
+      7,
+      asked.id,
+      "Switched off.",
+    );
+
+    expect(fake.pullRequestReviews("acme/widgets", 7)).toMatchObject([
+      { state: "DISMISSED", dismissalMessage: "Switched off." },
+    ]);
+    expect(fake.pullRequestReviewDecisions("acme/widgets", 7)).toEqual({});
+  });
+
+  // #405-T22 (review P2-1)
+  it("cannot dismiss a review twice or one that is not there", async () => {
+    const { client } = await setup();
+    const asked = await client.createPullRequestReview(
+      "4242",
+      REVIEW_SCOPE,
+      "acme/widgets",
+      7,
+      { commitId: HEAD, body: "changes", event: "REQUEST_CHANGES" },
+    );
+    const dismiss = (id: string) =>
+      client.dismissPullRequestReview(
+        "4242",
+        REVIEW_SCOPE,
+        "acme/widgets",
+        7,
+        id,
+        "Switched off.",
+      );
+    await dismiss(asked.id);
+
+    expect(await failureOf(dismiss(asked.id))).toMatchObject({ status: 422 });
+    expect(await failureOf(dismiss("1"))).toMatchObject({ status: 404 });
+  });
+
   // #405-T15
   it.each([
     [403, "GITHUB_APP_FORBIDDEN"],
