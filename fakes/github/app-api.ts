@@ -342,6 +342,12 @@ export function createAppPart(
   const installations = new Map<number, FakeInstallation>();
   const repositories = new Map<number, FakeRepository[]>();
   const pullRequests = new Map<string, FakePullRequest[]>();
+  // Every head a pull request has had ("owner/name#7"): a review may name any of its commits (#405).
+  const commits = new Map<string, Set<string>>();
+  const noteCommit = (repoFullName: string, number: number, sha: string) => {
+    const key = `${repoFullName}#${number}`;
+    commits.set(key, new Set([...(commits.get(key) ?? []), sha]));
+  };
   const gitRepositories = new Map<string, string>();
   const permissions = new Map<string, FakeCollaboratorPermission>();
   const tokens = new Map<string, IssuedToken>();
@@ -780,6 +786,8 @@ export function createAppPart(
         query: url.searchParams,
         repository,
         pullRequests: prs,
+        commitsOf: (number) =>
+          commits.get(`${fullName}#${number}`) ?? new Set(),
         body: () => readBody(request),
         mayDo: (names, level) =>
           names.some((name) => mayDo(issued, name, level)),
@@ -883,6 +891,7 @@ export function createAppPart(
       );
     },
     addPullRequest(repoFullName, pullRequest) {
+      noteCommit(repoFullName, pullRequest.number, pullRequest.headSha);
       pullRequests.set(repoFullName, [
         ...(pullRequests.get(repoFullName) ?? []).filter(
           (existing) => existing.number !== pullRequest.number,
@@ -897,6 +906,8 @@ export function createAppPart(
       const existing = pullRequests.get(repoFullName) ?? [];
       if (!existing.some((pr) => pr.number === number))
         throw new Error(`no pull request ${number} in ${repoFullName}`);
+      if (changes.headSha !== undefined)
+        noteCommit(repoFullName, number, changes.headSha);
       pullRequests.set(
         repoFullName,
         existing.map((pr) =>
@@ -943,6 +954,7 @@ export function createAppPart(
       installations.clear();
       repositories.clear();
       pullRequests.clear();
+      commits.clear();
       gitRepositories.clear();
       permissions.clear();
       review.reset();

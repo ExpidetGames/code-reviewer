@@ -202,8 +202,89 @@ describe("check runs, written with a narrow token", () => {
       code: "GITHUB_APP_REQUEST_FAILED",
       status: 422,
       duringTokenRequest: true,
+      refusal: "permission_missing",
     });
     expect(fake.checkRuns("acme/widgets")).toEqual([]);
+  });
+
+  // #405-T12 (review P2-7): a 403 does not always mean a missing permission.
+  it.each([
+    ["Resource not accessible by integration", "permission_missing"],
+    ["Repository was archived so is read-only.", "repository_archived"],
+    ["Something else GitHub says", "other"],
+  ] as const)(
+    "reads why GitHub refused a check run with 403 (%s)",
+    async (message, refusal) => {
+      const { fake, client } = await setup();
+      fake.fail({ pathIncludes: "/check-runs", status: 403, message });
+
+      const error = await failureOf(
+        client.createCheckRun("4242", CHECKS_SCOPE, "acme/widgets", {
+          name: "Code Reviewer",
+          headSha: HEAD,
+          status: "queued",
+        }),
+      );
+
+      expect(error).toMatchObject({ code: "GITHUB_APP_FORBIDDEN", refusal });
+      // What GitHub said is never part of the error.
+      expect(String((error as Error).message)).not.toContain(message);
+    },
+  );
+
+  // #405-T12 (review P2-7)
+  it("reads that a repository is not in the installation when the token is requested", async () => {
+    const { client } = await setup();
+
+    const error = await failureOf(
+      client.createCheckRun(
+        "4242",
+        { repositoryIds: [999999], permissions: CHECKS_SCOPE.permissions },
+        "acme/widgets",
+        { name: "Code Reviewer", headSha: HEAD, status: "queued" },
+      ),
+    );
+
+    expect(error).toMatchObject({
+      duringTokenRequest: true,
+      refusal: "repository_not_accessible",
+    });
+  });
+
+  // #405-T16 (review P3-7)
+  it("finds a check run that is not on the first page of the commit's check runs", async () => {
+    const { fake, client } = await setup();
+    for (let n = 0; n < 130; n += 1)
+      await client.createCheckRun("4242", CHECKS_SCOPE, "acme/widgets", {
+        name: "Code Reviewer",
+        headSha: HEAD,
+        status: "queued",
+        externalId: `job-${String(n)}`,
+      });
+
+    const found = await client.findCheckRun(
+      "4242",
+      CHECKS_SCOPE,
+      "acme/widgets",
+      { headSha: HEAD, name: "Code Reviewer", externalId: "job-129" },
+    );
+
+    expect(found?.id).toBe(String(fake.checkRuns("acme/widgets")[129]?.id));
+  });
+
+  // #405-T24 (review P3-7)
+  it("is refused a review on a commit the pull request never had", async () => {
+    const { client } = await setup();
+
+    const error = await failureOf(
+      client.createPullRequestReview("4242", REVIEW_SCOPE, "acme/widgets", 7, {
+        commitId: "9".repeat(40),
+        body: "x",
+        event: "APPROVE",
+      }),
+    );
+
+    expect(error).toMatchObject({ status: 422 });
   });
 
   // #405-T15

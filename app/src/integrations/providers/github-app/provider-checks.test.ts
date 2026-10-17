@@ -353,9 +353,31 @@ describe("submitting the verdict of a review", () => {
       { status: 403 },
     );
 
+    const forbiddenFor = (
+      refusal: "permission_missing" | "repository_archived" | "other",
+    ) =>
+      new GithubAppError("GITHUB_APP_FORBIDDEN", "GitHub answered 403.", {
+        status: 403,
+        refusal,
+      });
+    const outside = new GithubAppError(
+      "GITHUB_APP_REQUEST_FAILED",
+      "GitHub answered 422.",
+      {
+        status: 422,
+        duringTokenRequest: true,
+        refusal: "repository_not_accessible",
+      },
+    );
+
+    // #405-T12 (review P2-7): only a missing permission is a missing permission.
     for (const [failure, code] of [
       [refused, "INTEGRATION_REQUEST_REFUSED"],
       [forbidden, "INTEGRATION_ACCESS_SCOPE_REFUSED"],
+      [forbiddenFor("permission_missing"), "INTEGRATION_ACCESS_SCOPE_REFUSED"],
+      [forbiddenFor("repository_archived"), "INTEGRATION_REPOSITORY_ARCHIVED"],
+      [forbiddenFor("other"), "INTEGRATION_ACCESS_CONNECTION_SUSPENDED"],
+      [outside, "INTEGRATION_REPOSITORY_NOT_ACCESSIBLE"],
     ] as const) {
       const { provider } = setup({ reviewFailure: failure });
       expect(

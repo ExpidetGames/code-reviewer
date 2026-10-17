@@ -9,8 +9,8 @@
 // What it checks, like GitHub: a check run needs `checks: write` (403 `Resource not accessible by integration`
 // otherwise), a name and a 40 character head sha; `status` is one of `queued`, `in_progress`, `completed`, a
 // completed check run has a `conclusion` from GitHub's list (and a conclusion alone completes it, 422 for an unknown
-// one). A review needs `pull_requests: write`, an event of `APPROVE`, `REQUEST_CHANGES` or `COMMENT`, and an App
-// cannot approve or request changes on a pull request it wrote itself (422). Every state change of a check run is
+// one); the list of a commit's check runs is paged. A review needs `pull_requests: write`, an event of `APPROVE`, `REQUEST_CHANGES` or `COMMENT`, and an App
+// cannot approve or request changes on a pull request it wrote itself (422), and its `commit_id` must be a commit the pull request has had (422). Every state change of a check run is
 // kept in its `history`, so a test can assert the transitions and not only the last state. Dummy data only.
 
 export const CHECK_RUN_STATUSES = [
@@ -86,6 +86,8 @@ export type ChecksApiRequest = {
     state: string;
     author: { login: string };
   }>;
+  /** Every commit the pull request has had as its head: a review may name any of them. */
+  commitsOf: (number: number) => ReadonlySet<string>;
   body: () => Promise<string>;
   mayDo: (names: string[], level: "read" | "write") => boolean;
 };
@@ -296,11 +298,18 @@ export function createChecksApi(options: ChecksApiOptions): ChecksApi {
           run.headSha === commitMatch[1] &&
           (name === null || run.name === name),
       );
+      const perPage = Math.min(
+        Math.max(Number(request.query.get("per_page")) || 30, 1),
+        100,
+      );
+      const page = Math.max(Number(request.query.get("page")) || 1, 1);
       return {
         status: 200,
         body: {
           total_count: matching.length,
-          check_runs: matching.map(runJson),
+          check_runs: matching
+            .slice((page - 1) * perPage, page * perPage)
+            .map(runJson),
         },
       };
     }
@@ -336,6 +345,11 @@ export function createChecksApi(options: ChecksApiOptions): ChecksApi {
           return invalid("Unprocessable request: event is not valid");
         if (event !== "COMMENT" && pull.author.login === options.botLogin)
           return invalid("Can not approve your own pull request");
+        if (
+          typeof fields.commit_id === "string" &&
+          !request.commitsOf(number).has(fields.commit_id)
+        )
+          return invalid("commit_id is not part of the pull request");
         if (event !== "APPROVE" && typeof fields.body !== "string")
           return invalid("Body is required for this event");
         const review = addReview(fullName, number, {

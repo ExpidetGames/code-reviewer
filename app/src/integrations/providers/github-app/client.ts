@@ -7,7 +7,7 @@
 // Errors are `GithubAppError`s with a stable code (see errors.ts). A message names the call and the
 // status only: never the JWT, a token, a key or a response body.
 import type { GithubAppConfig } from "./config.ts";
-import { GithubAppError } from "./errors.ts";
+import { GithubAppError, type GithubRefusalReason } from "./errors.ts";
 import { isRecord } from "./guards.ts";
 import { createAppJwt } from "./jwt.ts";
 import { toPullRequestRef } from "./mappers.ts";
@@ -467,10 +467,36 @@ export function createGithubAppClient(
     return null;
   }
 
+  /**
+   * Why GitHub refused, from the `message` of its answer (read at most a few kilobytes, never kept): the closed
+   * set of `GithubRefusalReason`. Only for the answers where the reason decides what the caller does.
+   */
+  async function refusalOf(response: Response): Promise<GithubRefusalReason> {
+    let message = "";
+    try {
+      const json: unknown = JSON.parse((await response.text()).slice(0, 4000));
+      if (isRecord(json) && typeof json.message === "string")
+        message = json.message;
+    } catch {
+      // An answer that is not JSON says nothing.
+    }
+    if (/archived/i.test(message)) return "repository_archived";
+    if (
+      /resource not accessible by integration|permissions? .*not granted/i.test(
+        message,
+      )
+    )
+      return "permission_missing";
+    if (/repositor(y|ies).*(not exist|not accessible|not found)/i.test(message))
+      return "repository_not_accessible";
+    return "other";
+  }
+
   function errorForStatus(
     method: string,
     path: string,
     response: Response,
+    refusal?: GithubRefusalReason,
   ): GithubAppError {
     const status = response.status;
     const call = `${method} ${path}`;
@@ -497,6 +523,7 @@ export function createGithubAppClient(
               : "GITHUB_APP_REQUEST_FAILED";
     return new GithubAppError(code, `GitHub answered ${status} for ${call}.`, {
       status,
+      ...(refusal === undefined ? {} : { refusal }),
       // A 5xx may say when to come back (Retry-After); everything else has nothing to wait for.
       retryAfterSeconds: status >= 500 ? retryAfter(response.headers) : null,
     });
@@ -536,9 +563,24 @@ export function createGithubAppClient(
       );
     }
     if (!response.ok) {
-      // The body is not read (it is never needed and must not end up in a message); free the socket.
-      await response.body?.cancel().catch(() => undefined);
-      throw errorForStatus(method, path.split("?")[0] as string, response);
+      const rateLimited =
+        response.status === 429 ||
+        response.headers.get("retry-after") !== null ||
+        response.headers.get("x-ratelimit-remaining") === "0";
+      // The body is read only to tell why a 403 or a 422 was refused (#405) and never ends up in a message;
+      // otherwise it is not needed: free the socket.
+      const refusal =
+        (response.status === 403 || response.status === 422) && !rateLimited
+          ? await refusalOf(response)
+          : undefined;
+      if (refusal === undefined)
+        await response.body?.cancel().catch(() => undefined);
+      throw errorForStatus(
+        method,
+        path.split("?")[0] as string,
+        response,
+        refusal,
+      );
     }
     try {
       return await response.json();
@@ -635,6 +677,7 @@ export function createGithubAppClient(
           status: error.status,
           retryAfterSeconds: error.retryAfterSeconds,
           duringTokenRequest: true,
+          ...(error.refusal === undefined ? {} : { refusal: error.refusal }),
         });
       throw error;
     }
