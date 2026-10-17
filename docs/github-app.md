@@ -150,22 +150,52 @@ then nothing breaks: reviews run and are published as before, no check run appea
 After a successful review the App also submits a pull request review as itself: `REQUEST_CHANGES` when the review
 found blocking findings, otherwise `APPROVE`, with a one line body and a link to the review comment. A later run on a
 new push submits a new review, which replaces the earlier verdict of the App on GitHub (a reviewer's latest review
-counts, so no dismissal is needed). Human reviews are never touched, and a failed, cancelled or superseded run
-submits nothing. Which findings block is a project setting, **Review verdict**, next to the review kind:
+counts). Human reviews are never touched, and a failed, cancelled or superseded run submits nothing. Which findings
+block is a project setting, **Review verdict**, next to the review kind:
 
 | Value | Dynamic Review | Diff Review (PR-Agent has no severities) |
 |---|---|---|
-| `off` | no review is submitted | no review is submitted |
+| `off` | no review is submitted; the App's own earlier request for changes is dismissed on the next run | the same |
 | `blocking` (default) | `REQUEST_CHANGES` while a P0 finding is open, otherwise `APPROVE` | no review is submitted: a review without severities cannot tell a blocker from a nit |
 | `any` | `REQUEST_CHANGES` while any finding is open, otherwise `APPROVE` | `REQUEST_CHANGES` while a finding is active, otherwise `APPROVE` |
 
-A Dynamic review that stopped early (cost or time limit) never approves.
+**When no verdict is submitted, an earlier one stays.** The App approves only a review that is whole: one that stopped
+at its cost or time limit, dropped a finding its validation refused, left files out of the diff or failed a chunk,
+made no model call or did not report its findings submits **no** review, and the check run says so and why. Such a
+run does not dismiss an earlier `REQUEST_CHANGES` of the App (it fails closed): a complete review on a later push
+replaces it. Only the setting `off` dismisses it, with a message, and only the App's own latest request, found by the
+author and the marker in its body; a review of a person is never dismissed, whatever its text says. The same holds
+when a project changes from Dynamic to Diff Review under `blocking`.
+
+**The verdict comes from the model and can be wrong or manipulated.** Text in the diff, the pull request or the
+repository can try to talk a model into reporting no finding, and a review that fails in a way the runner does not
+see can look clean. The App guards what it can (no approval without a model call, without a complete review or with
+findings it dropped), but it is no gate. Treat the `APPROVE` as advice.
 
 **Branch protection.** GitHub documents "Require approvals" as approvals from people with write permission, and does
 not say whether the approval of a GitHub App counts (it does not for the Actions bot; reports on a dedicated App
 disagree). Do not rely on the `APPROVE` of Code Reviewer in either direction. To require a human approval anyway,
 turn on **Require review from Code Owners** with a `CODEOWNERS` file that names people or teams: the App cannot be a
-code owner, so only a human approval satisfies that rule (or set the project's Review verdict to `off`).
+code owner, so only a human approval satisfies that rule (or set the project's Review verdict to `off`). Because the
+verdict can be manipulated (above), a human code owner is also the answer to a pull request that tries to approve
+itself.
+
+**Updating an existing installation.** Every project that exists now starts to submit verdicts with the first review
+after the update (the default is `blocking`): a Dynamic project approves or requests changes, a Diff project does
+not (it has no severities). To keep a project as it was, set its **Review verdict** to `off` under the project's
+settings, before or after the update. The check run needs the Checks permission (above) and appears for new jobs only.
+
+**When GitHub cannot be reached or refuses.** The App never fails a job over a check run or a review. A call that
+cannot reach GitHub is repeated twice at once (after one and after three seconds), then the job is retried by the
+sweep, the timer or the next request: at most five times, but about fifteen hours (the waits grow to an hour) while a
+check run is open on GitHub, so an outage does not leave "Reviewing" on a pull request that ended long ago. A
+hosted deployment retries from the sweep every two hours and from the requests that touch the database. What stays as
+it is on GitHub, because it cannot be written any more, is logged by a stable code (ids only): a repository that was
+archived (`CHECK_RUN_REPOSITORY_ARCHIVED`) or that left the installation (`CHECK_RUN_REPOSITORY_NOT_ACCESSIBLE`), an
+installation that is gone, and a connection a person disconnected; a check run that was open then stays open until it
+is removed on GitHub. A missing permission is told from these by what GitHub answers (`CHECK_RUN_PERMISSION_MISSING`
+only for "Resource not accessible by integration"). The **Re-run** button of a check run does nothing: the App does
+not subscribe to `check_run` events; a new push, or `/review`, runs the review again.
 
 ## Events
 

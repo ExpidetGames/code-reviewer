@@ -128,6 +128,23 @@ environment variable is needed, and a replaced webhook secret counts from the ne
 instance. Without an App GitHub is "not configured" and no review can run. An installation from before
 accounts that still has `GITHUB_APP_*` variables has them imported once by the update.
 
+## Updating to the release with check runs and review verdicts
+
+The release that adds the check run "Code Reviewer" and the review verdict (#405) changes what a pull request shows,
+and an operator has two things to do:
+
+1. **Self-hosted: accept the new permission.** Add *Checks: Read and write* to the GitHub App (the App's settings,
+   *Repository permissions*) and accept the changed permissions on each installation. Until then reviews run as
+   before and no check run appears; **Check the permissions** on the Integrations page names *Checks* as missing
+   ([docs/github-app.md](docs/github-app.md)). Apps made by the one click flow from now on ask for it.
+2. **Every project starts to submit a verdict.** The default of the project setting *Review verdict* is `blocking`
+   for new **and existing** projects: after the update a Dynamic project's reviews are followed by an `APPROVE` or a
+   `REQUEST_CHANGES` of the App (Diff projects submit none). To keep a project as it was, set *Review verdict* to `off`
+   in its settings. The verdict comes from the model: if a branch rule must have a human approval, require a code
+   owner review ([docs/github-app.md](docs/github-app.md), "Branch protection").
+
+The migration only adds a table; an app of the previous release keeps working on the same database.
+
 ## Updating from a version before accounts
 
 An installation that ran the release before accounts (the GitHub OAuth app and the allow list, `GITHUB_APP_*` and

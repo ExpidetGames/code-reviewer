@@ -906,6 +906,8 @@ minutes. The reaper checks every VM itself, so it does not depend on the platfor
 
 ### 5.6 Updating the App or the Dispatcher
 
+> **Release with check runs and review verdicts (#405).** The App needs the *Checks* permission accepted on each installation, and every existing project starts to submit a review verdict after the update (`Review verdict` `off` keeps a project as it was): [Updating to the release with check runs and review verdicts](../README.md#updating-to-the-release-with-check-runs-and-review-verdicts). The check runs of a hosted deployment are repaired by the sweep every two hours and by the requests that touch the database; no timer runs.
+
 A release is a pull request from `development` into `main`. **Merging it is the whole release**: it starts *Deploy
 production* (`.github/workflows/deploy-production.yml`; you can also start it by hand on `main`), and nothing else is
 done by hand, a change of the Worker image included (section 5.1). The jobs, in the order of their dependencies:
