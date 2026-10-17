@@ -122,7 +122,7 @@ GitHub ──webhook──▶ App ──queues the job, then signed POST /dispat
   | Project | Root directory | Framework | Config |
   |---|---|---|---|
   | App | `app/` | Next.js | `app/vercel.json`: region `fra1`, `pnpm install --frozen-lockfile`, function durations, the two crons |
-  | Dispatcher | `dispatcher/` | Hono (detected from the default export of `src/index.ts`) | `dispatcher/vercel.json`: region `fra1`, `maxDuration` 1800 for `src/index.ts`, one cron (the reaper, every 5 minutes) |
+  | Dispatcher | `dispatcher/` | Hono (the entry is `src/index.ts`, the only file named `app`, `index` or `server` that imports `hono`) | `dispatcher/vercel.json`: region `fra1`, `maxDuration` 1800 for `src/index.ts`, one cron (the reaper, every 5 minutes) |
 
   Both need Node.js 24 (`engines` in both `package.json` files, `.nvmrc`). Set the Node.js version of each project to
   24.x if the project's default differs.
@@ -248,6 +248,13 @@ yours.
   | `INFISICAL_CLIENT_SECRET` | Its Client Secret |
   | `INFISICAL_DOMAIN` | The address of your Infisical instance (`https://<infisical host>`) |
   | `INFISICAL_PROJECT_SLUG` | The slug of the Infisical project below |
+
+  A called workflow does not see the environment's secrets on its own: the caller must pass them, or the secret is an
+  empty string without any error (GitHub, "Reuse workflows", environment secrets). `deploy-production.yml` therefore
+  passes exactly these four by name in the `secrets:` of every job that calls `vercel-stage.yml`, `golden-snapshot.yml`
+  or `dispatcher-canary.yml` (never `secrets: inherit`, so nothing else crosses over), and each of those declares them
+  as required `workflow_call` secrets. The called job still selects the environment with `environment: production`; a
+  job that calls a workflow cannot take an environment itself. The first deployment failed on this (#408).
 
   Set them without typing a value into a command line, for example
   `read -rs -p 'value: ' V; printf '%s' "$V" | gh secret set INFISICAL_CLIENT_SECRET --env production; unset V`.
@@ -500,6 +507,24 @@ It does see the **production runtime variables**: `vercel pull` writes them to `
 build loads them (the App's `DATABASE_URL` and `APP_SECRET`, the Dispatcher's `RUNNER_TOKEN` and signing secret, every
 non-Sensitive variable the pull returns). Treat the build code of both projects, and every dependency in their
 lockfiles, as trusted with those values; the lockfiles and the reviews of changes to them are what protects them.
+
+**The Dispatcher is type-checked by the builder, not by `tsc`.** The Hono builder of the CLI checks the types through its
+own language service, which finds packages the way `node` does and does not follow pnpm's symlinks the way `tsc` does.
+`undici-types` (imported by `@types/node` for the global `Response`) is therefore a direct devDependency of the
+Dispatcher, at the version `@types/node` uses; without it `vercel build` fails on every use of `Response` while
+`make typecheck` is green (#412). The CI job "Dispatcher: static & tests" runs the same `vercel build` offline with a stub
+project file, so such a difference fails in a pull request and not in a release.
+
+**The Dispatcher's function is emitted file by file, and `vercel build` succeeding does not mean it starts.** The Hono
+builder takes as the entry the first of `app`, `index` and `server` (project root, then `src/`) whose text imports
+`hono`, and transpiles the files it reaches one by one, without bundling or rewriting imports. Two things followed
+(#416): `src/app.ts` imported Hono and exported no app, so it was taken as the entry (renamed `src/dispatcher-app.ts`;
+`src/index.ts` imports the `Hono` type, which is what makes it qualify), and the sources import each other as `./x.ts`,
+which the emit kept while only `x.js` was in the function (`rewriteRelativeImportExtensions` in `tsconfig.json` makes the
+emit write `.js`). The first request of the deployment failed with `ERR_MODULE_NOT_FOUND` and the canary reported
+`deployment_not_ready`. The CI job "Dispatcher: static & tests" therefore also runs `dispatcher/scripts/check-built-function.mjs`
+after the build: every relative import of the emitted files must name a file in the function, and the handler of
+`.vc-config.json` must load, with placeholder settings and no network, and answer `GET /health` with 200.
 
 **A Vercel access token acts for its owner in the whole team (or account) it is created for, not for one project**, whatever
 the project ids in `/ci` say: create it from a dedicated account that has the lowest team role that can deploy, promote
@@ -1055,7 +1080,8 @@ A self-hosted installation and a hosted one never share a database or a GitHub A
 - **The deployment pipeline** (#403) has never run on GitHub, Vercel or Infisical. Unit tests prove the logic against
   stand-ins and the shell of the steps against stub programs; the platform behavior below is only as good as the
   documentation and the CLI's source, which is why the pipeline fails closed on each point. The first real run is the test:
-  - That the workflows are accepted and that the environment `production` hands its secrets to the called workflows.
+  - That the workflows are accepted and that the called workflows get the four Infisical secrets the callers pass by name
+    (#408; the first run, which passed none, showed that they are empty otherwise).
   - That `vercel build` run from the repository root honors the project's Root Directory, and that it needs no token:
     the CLI's source and a run without a token against a pulled project directory say so (the build step runs with the
     token blanked), but nothing was run against a real project.
