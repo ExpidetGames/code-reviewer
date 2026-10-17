@@ -21,6 +21,7 @@ import {
   INVALID_ENTITLEMENTS,
   type EntitlementsData,
   type EntitlementsEntry,
+  type ModelAccess,
 } from "../../workspaces/entitlements.ts";
 import {
   EntitlementsError,
@@ -198,12 +199,21 @@ export function createInstanceSettingsRepository(
   function readStoredDefault(text: string): {
     entry: EntitlementsEntry;
     periodStart: string | undefined;
+    modelAccess: ModelAccess | undefined;
   } {
     const decoded = tryDecodeJson(text);
     const data = decoded.ok ? readEntitlements(decoded.value) : undefined;
     return data === undefined
-      ? { entry: INVALID_ENTITLEMENTS, periodStart: undefined }
-      : { entry: data, periodStart: data.periodStart };
+      ? {
+          entry: INVALID_ENTITLEMENTS,
+          periodStart: undefined,
+          modelAccess: undefined,
+        }
+      : {
+          entry: data,
+          periodStart: data.periodStart,
+          modelAccess: data.modelAccess,
+        };
   }
 
   /**
@@ -218,29 +228,33 @@ export function createInstanceSettingsRepository(
     const moment = now();
     const checked = validateEntitlements(value, moment);
     if (!checked.ok) throw new EntitlementsError(checked.code, checked.field);
-    const row = {
-      key: "default_entitlements",
-      value: encodeJson(checked.value),
-      updated_by: updatedBy,
-      updated_at: formatTimestamp(moment),
-    };
+    const key = "default_entitlements";
     const write = async (trx: Kysely<Database>) => {
       await lockDefaultEntitlements(trx);
       const stored = await trx
         .selectFrom("instance_settings")
         .select("value")
-        .where("key", "=", row.key)
+        .where("key", "=", key)
         .executeTakeFirst();
       // An unreadable stored default has no period start to protect: a valid write repairs it.
-      const storedStart =
-        stored === undefined
-          ? undefined
-          : readStoredDefault(stored.value).periodStart;
+      const storedDefault =
+        stored === undefined ? undefined : readStoredDefault(stored.value);
       const refused = checkPeriodStartNotBackwards(
         checked.value.periodStart,
-        storedStart,
+        storedDefault?.periodStart,
       );
       if (refused !== undefined) throw new EntitlementsError(refused);
+      // #428: a model access that the write leaves out keeps the stored one (the lock above makes it atomic).
+      const modelAccess =
+        value.modelAccess === undefined
+          ? (storedDefault?.modelAccess ?? checked.value.modelAccess)
+          : checked.value.modelAccess;
+      const row = {
+        key,
+        value: encodeJson({ ...checked.value, modelAccess }),
+        updated_by: updatedBy,
+        updated_at: formatTimestamp(moment),
+      };
       await trx
         .insertInto("instance_settings")
         .values(row)

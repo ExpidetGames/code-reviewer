@@ -47,6 +47,10 @@ export type WorkspaceEntitlementsRepository = {
    * Inserts the row or replaces it, recording who and when. Refuses (with an `EntitlementsError`) what
    * `validateEntitlements` refuses, and a `periodStart` earlier than the stored one
    * (`period_start_backwards`); the same value again is accepted. Answers with the stored row.
+   *
+   * A `modelAccess` that is left out keeps the stored one (#428): the statement does not touch the column, so a writer
+   * that does not know the field never clears what an operator granted, and two writers cannot race on it. To clear it,
+   * state `{ catalogEntries: null }`. A row that is inserted by such a write starts with every released entry.
    */
   put(
     entitlements: EntitlementsData,
@@ -61,6 +65,25 @@ export type WorkspaceEntitlementsRepository = {
   remove(): Promise<boolean>;
 };
 
+/**
+ * The column of the model access: NULL for "every released entry" (also what a row of before #428 has), otherwise JSON
+ * text `{"catalogEntries":[...]}`. Text that is damaged reads as a value the validation refuses, so the row is
+ * unreadable and grants no model.
+ */
+function decodeModelAccess(text: string | null): unknown {
+  if (text === null) return undefined;
+  const decoded = tryDecodeJson(text);
+  return decoded.ok ? decoded.value : "damaged";
+}
+
+function encodeModelAccess(
+  modelAccess: EntitlementsData["modelAccess"],
+): string | null {
+  if (modelAccess === undefined || modelAccess.catalogEntries === null)
+    return null;
+  return encodeJson({ catalogEntries: modelAccess.catalogEntries });
+}
+
 function toStored(row: WorkspaceEntitlementsTable): StoredEntitlements {
   const meta = { updatedBy: row.updated_by, updatedAt: row.updated_at };
   const limits = tryDecodeJson(row.limits);
@@ -71,6 +94,7 @@ function toStored(row: WorkspaceEntitlementsTable): StoredEntitlements {
     periodStart: row.period_start,
     suspended: row.suspended === 1,
     suspensionCode: row.suspension_code,
+    modelAccess: decodeModelAccess(row.model_access),
   });
   return data === undefined
     ? { ...INVALID_ENTITLEMENTS, ...meta }
@@ -105,9 +129,11 @@ export function createWorkspaceEntitlementsRepository(
         period_start: value.periodStart,
         suspended: encodeBoolean(value.suspended),
         suspension_code: value.suspensionCode,
+        model_access: encodeModelAccess(value.modelAccess),
         updated_at: formatTimestamp(moment),
         updated_by: updatedBy,
       };
+      const keepModelAccess = entitlements.modelAccess === undefined;
       // One statement decides: an existing row is replaced only when the new period start is not earlier
       // than the stored one (canonical text of fixed width compares as time), so two writers cannot
       // race a start backwards. No row back means the guard refused it. `returning` answers with the row
@@ -125,6 +151,7 @@ export function createWorkspaceEntitlementsRepository(
               period_start: row.period_start,
               suspended: row.suspended,
               suspension_code: row.suspension_code,
+              ...(keepModelAccess ? {} : { model_access: row.model_access }),
               updated_at: row.updated_at,
               updated_by: row.updated_by,
             })

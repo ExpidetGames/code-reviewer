@@ -51,7 +51,10 @@ describe("the model catalog migration", () => {
   it("sorts after every migration that was merged before it", async () => {
     const names = Object.keys(await migrationProvider.getMigrations());
 
-    expect(names.at(-1)).toBe(SPLIT);
+    // Later migrations sort after it; the one before it is the newest of the previous release.
+    expect(names.at(names.indexOf(SPLIT) - 1)).toBe(
+      "20261017100000_create_job_check_runs",
+    );
   });
 
   // #425-T10
