@@ -7,7 +7,7 @@
 // Errors are `GithubAppError`s with a stable code (see errors.ts). A message names the call and the
 // status only: never the JWT, a token, a key or a response body.
 import type { GithubAppConfig } from "./config.ts";
-import { GithubAppError } from "./errors.ts";
+import { GithubAppError, type GithubRefusalReason } from "./errors.ts";
 import { isRecord } from "./guards.ts";
 import { createAppJwt } from "./jwt.ts";
 import { toPullRequestRef } from "./mappers.ts";
@@ -67,6 +67,38 @@ export type IssueComment = {
   body: string;
   /** The login of the author (`<slug>[bot]` for the app's own comments). */
   authorLogin: string;
+};
+
+/** The fields of a check run (#405) that the app writes: the name and commit only when it is created. */
+export type CheckRunFields = {
+  status: "queued" | "in_progress" | "completed";
+  /** Required with `completed`. The app only ever uses `success` and `neutral`: a check run is never red. */
+  conclusion?: "success" | "neutral";
+  /** The id of the job, so a check run that was created but whose id was not kept can be found again. */
+  externalId?: string;
+  detailsUrl?: string;
+  /** ISO 8601 text in UTC. */
+  startedAt?: string;
+  completedAt?: string;
+  output?: { title: string; summary: string };
+};
+
+export type NewCheckRun = CheckRunFields & { name: string; headSha: string };
+
+/** A review of a pull request (#405), as far as the app needs it. */
+export type PullRequestReview = {
+  id: string;
+  body: string;
+  /** The login of the author (`<slug>[bot]` for the app's own reviews). */
+  authorLogin: string;
+  /** `APPROVED`, `CHANGES_REQUESTED`, `COMMENTED`, `DISMISSED` or `PENDING`. */
+  state: string;
+};
+
+export type NewPullRequestReview = {
+  commitId: string;
+  body: string;
+  event: "APPROVE" | "REQUEST_CHANGES";
 };
 
 export type GithubAppClient = {
@@ -131,6 +163,72 @@ export type GithubAppClient = {
     body: string,
   ): Promise<{ id: string }>;
   /**
+   * Creates the check run of a review on a commit (#405), as the app, with a token of its own limited to `scope`
+   * (minted for this call and switched off after it, also when the call fails). Rejects with the stable code of
+   * the answer; an App that was not granted the Checks permission fails while the token is requested (422, see
+   * `duringTokenRequest`) or with 403.
+   */
+  createCheckRun(
+    installationId: string,
+    scope: JobTokenScope,
+    repoFullName: string,
+    input: NewCheckRun,
+    signal?: AbortSignal,
+  ): Promise<{ id: string }>;
+  /** Changes a check run that `createCheckRun` made. Same token rules and failures. */
+  updateCheckRun(
+    installationId: string,
+    scope: JobTokenScope,
+    repoFullName: string,
+    checkRunId: string,
+    input: Partial<CheckRunFields>,
+    signal?: AbortSignal,
+  ): Promise<void>;
+  /**
+   * The check run of the app with this name and external id on the commit, or null: how a check run is found
+   * again when it was created and its id was not kept (the process died between the two).
+   */
+  findCheckRun(
+    installationId: string,
+    scope: JobTokenScope,
+    repoFullName: string,
+    lookup: { headSha: string; name: string; externalId: string },
+    signal?: AbortSignal,
+  ): Promise<{ id: string } | null>;
+  /**
+   * Submits a review of a pull request as the app (#405), with a token limited to `scope`. The body is the
+   * caller's: it must not carry anything of the pull request.
+   */
+  createPullRequestReview(
+    installationId: string,
+    scope: JobTokenScope,
+    repoFullName: string,
+    prNumber: number,
+    input: NewPullRequestReview,
+    signal?: AbortSignal,
+  ): Promise<{ id: string }>;
+  /** The reviews of a pull request, all pages. Only the author, the state and the body are read. */
+  listPullRequestReviews(
+    installationId: string,
+    scope: JobTokenScope,
+    repoFullName: string,
+    prNumber: number,
+    signal?: AbortSignal,
+  ): Promise<PullRequestReview[]>;
+  /**
+   * Dismisses a review of a pull request with a message (#405; `PUT .../reviews/{id}/dismissals`), with a token
+   * limited to `scope`. The caller makes sure the review is the app's own.
+   */
+  dismissPullRequestReview(
+    installationId: string,
+    scope: JobTokenScope,
+    repoFullName: string,
+    prNumber: number,
+    reviewId: string,
+    message: string,
+    signal?: AbortSignal,
+  ): Promise<void>;
+  /**
    * Mints a fresh installation access token, never from the cache, limited to the given repositories
    * and permissions. The one place a token for a job is created. Refuses (without a request) a scope
    * with no repository or no permission, and a token GitHub reports as broader than asked for.
@@ -149,6 +247,11 @@ export type GithubAppClientOptions = {
   now?: () => number;
   /** How long one request may take before it counts as unavailable. Default 15 seconds. */
   requestTimeoutMs?: number;
+  /**
+   * How long switching a token off may take. Default 3 seconds: it is a courtesy of a few bytes, and must not make
+   * a call outlast the time its caller has (#405).
+   */
+  revokeTimeoutMs?: number;
   /** Receives a warning about a record that is skipped. Default: console.warn. */
   warn?: (line: string) => void;
 };
@@ -160,6 +263,7 @@ const TOKEN_EXPIRY_BUFFER_MS = 60_000;
 /** A JWT lives about 9 minutes (see jwt.ts); reuse it for 5 so it never expires mid-call. */
 const JWT_REUSE_MS = 5 * 60_000;
 const DEFAULT_TIMEOUT_MS = 15_000;
+const DEFAULT_REVOKE_TIMEOUT_MS = 3_000;
 const GITHUB_API_VERSION = "2022-11-28";
 
 function shapeError(call: string): GithubAppError {
@@ -222,6 +326,61 @@ function toIssueComment(value: unknown): IssueComment {
   )
     throw shapeError("GET /repos/{owner}/{repo}/issues/{n}/comments");
   return { id: String(value.id), body: value.body, authorLogin: user.login };
+}
+
+function toPullRequestReview(value: unknown): PullRequestReview {
+  const user = isRecord(value) ? value.user : undefined;
+  if (
+    !isRecord(value) ||
+    typeof value.id !== "number" ||
+    typeof value.state !== "string" ||
+    !isRecord(user) ||
+    typeof user.login !== "string"
+  )
+    throw shapeError("GET /repos/{owner}/{repo}/pulls/{n}/reviews");
+  return {
+    id: String(value.id),
+    body: typeof value.body === "string" ? value.body : "",
+    authorLogin: user.login,
+    state: value.state,
+  };
+}
+
+/** The body of a create or update of a check run, in GitHub's field names. */
+function checkRunBody(input: Partial<NewCheckRun>): Record<string, unknown> {
+  return {
+    ...(input.name === undefined ? {} : { name: input.name }),
+    ...(input.headSha === undefined ? {} : { head_sha: input.headSha }),
+    ...(input.status === undefined ? {} : { status: input.status }),
+    ...(input.conclusion === undefined ? {} : { conclusion: input.conclusion }),
+    ...(input.externalId === undefined
+      ? {}
+      : { external_id: input.externalId }),
+    ...(input.detailsUrl === undefined
+      ? {}
+      : { details_url: input.detailsUrl }),
+    ...(input.startedAt === undefined ? {} : { started_at: input.startedAt }),
+    ...(input.completedAt === undefined
+      ? {}
+      : { completed_at: input.completedAt }),
+    ...(input.output === undefined ? {} : { output: input.output }),
+  };
+}
+
+function checkCommitSha(sha: string): void {
+  if (!/^[0-9a-f]{40}$/.test(sha))
+    throw new GithubAppError(
+      "GITHUB_APP_REQUEST_FAILED",
+      "The commit is not a full lower case sha.",
+    );
+}
+
+function checkCheckRunId(id: string): void {
+  if (!/^[1-9]\d{0,15}$/.test(id))
+    throw new GithubAppError(
+      "GITHUB_APP_REQUEST_FAILED",
+      "The check run id is not a number.",
+    );
 }
 
 function checkInstallationId(installationId: string): void {
@@ -298,6 +457,7 @@ export function createGithubAppClient(
   const { config } = options;
   const now = options.now ?? Date.now;
   const timeoutMs = options.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const revokeTimeoutMs = options.revokeTimeoutMs ?? DEFAULT_REVOKE_TIMEOUT_MS;
   const warn = options.warn ?? ((line: string) => console.warn(line));
   const doFetch: typeof fetch = (input, init) =>
     (options.fetch ?? globalThis.fetch)(input, init);
@@ -332,10 +492,36 @@ export function createGithubAppClient(
     return null;
   }
 
+  /**
+   * Why GitHub refused, from the `message` of its answer (read at most a few kilobytes, never kept): the closed
+   * set of `GithubRefusalReason`. Only for the answers where the reason decides what the caller does.
+   */
+  async function refusalOf(response: Response): Promise<GithubRefusalReason> {
+    let message = "";
+    try {
+      const json: unknown = JSON.parse((await response.text()).slice(0, 4000));
+      if (isRecord(json) && typeof json.message === "string")
+        message = json.message;
+    } catch {
+      // An answer that is not JSON says nothing.
+    }
+    if (/archived/i.test(message)) return "repository_archived";
+    if (
+      /resource not accessible by integration|permissions? .*not granted/i.test(
+        message,
+      )
+    )
+      return "permission_missing";
+    if (/repositor(y|ies).*(not exist|not accessible|not found)/i.test(message))
+      return "repository_not_accessible";
+    return "other";
+  }
+
   function errorForStatus(
     method: string,
     path: string,
     response: Response,
+    refusal?: GithubRefusalReason,
   ): GithubAppError {
     const status = response.status;
     const call = `${method} ${path}`;
@@ -362,6 +548,7 @@ export function createGithubAppClient(
               : "GITHUB_APP_REQUEST_FAILED";
     return new GithubAppError(code, `GitHub answered ${status} for ${call}.`, {
       status,
+      ...(refusal === undefined ? {} : { refusal }),
       // A 5xx may say when to come back (Retry-After); everything else has nothing to wait for.
       retryAfterSeconds: status >= 500 ? retryAfter(response.headers) : null,
     });
@@ -369,7 +556,7 @@ export function createGithubAppClient(
 
   async function request(
     credential: string,
-    method: "GET" | "POST",
+    method: "GET" | "POST" | "PATCH" | "PUT",
     path: string,
     body?: unknown,
     signal?: AbortSignal,
@@ -401,9 +588,24 @@ export function createGithubAppClient(
       );
     }
     if (!response.ok) {
-      // The body is not read (it is never needed and must not end up in a message); free the socket.
-      await response.body?.cancel().catch(() => undefined);
-      throw errorForStatus(method, path.split("?")[0] as string, response);
+      const rateLimited =
+        response.status === 429 ||
+        response.headers.get("retry-after") !== null ||
+        response.headers.get("x-ratelimit-remaining") === "0";
+      // The body is read only to tell why a 403 or a 422 was refused (#405) and never ends up in a message;
+      // otherwise it is not needed: free the socket.
+      const refusal =
+        (response.status === 403 || response.status === 422) && !rateLimited
+          ? await refusalOf(response)
+          : undefined;
+      if (refusal === undefined)
+        await response.body?.cancel().catch(() => undefined);
+      throw errorForStatus(
+        method,
+        path.split("?")[0] as string,
+        response,
+        refusal,
+      );
     }
     try {
       return await response.json();
@@ -463,7 +665,7 @@ export function createGithubAppClient(
             "x-github-api-version": GITHUB_API_VERSION,
             "user-agent": `code-reviewer-${config.slug}`,
           },
-          signal: AbortSignal.timeout(timeoutMs),
+          signal: AbortSignal.timeout(revokeTimeoutMs),
         },
       );
       await response.body?.cancel().catch(() => undefined);
@@ -500,6 +702,7 @@ export function createGithubAppClient(
           status: error.status,
           retryAfterSeconds: error.retryAfterSeconds,
           duringTokenRequest: true,
+          ...(error.refusal === undefined ? {} : { refusal: error.refusal }),
         });
       throw error;
     }
@@ -568,12 +771,15 @@ export function createGithubAppClient(
     installationId: string,
     scope: JobTokenScope,
     run: (token: string) => Promise<T>,
+    signal?: AbortSignal,
   ): Promise<T> {
-    const minted = await mint(installationId, scope);
+    const minted = await mint(installationId, scope, signal);
     try {
       return await run(minted.token);
     } finally {
-      await revokeInstallationToken(minted.token);
+      // The token is always switched off, but once the time of the caller is over nobody waits for the answer.
+      if (signal?.aborted === true) void revokeInstallationToken(minted.token);
+      else await revokeInstallationToken(minted.token);
     }
   }
 
@@ -803,6 +1009,178 @@ export function createGithubAppClient(
           throw shapeError("POST /repos/{owner}/{repo}/issues/{n}/comments");
         return { id: String(json.id) };
       });
+    },
+
+    async createCheckRun(installationId, scope, repoFullName, input, signal) {
+      checkInstallationId(installationId);
+      checkCommitSha(input.headSha);
+      const path = `${repoPath(repoFullName)}/check-runs`;
+      return withScopedToken(
+        installationId,
+        scope,
+        async (token) => {
+          const json = await request(
+            token,
+            "POST",
+            path,
+            checkRunBody(input),
+            signal,
+          );
+          if (!isRecord(json) || typeof json.id !== "number")
+            throw shapeError("POST /repos/{owner}/{repo}/check-runs");
+          return { id: String(json.id) };
+        },
+        signal,
+      );
+    },
+
+    async updateCheckRun(
+      installationId,
+      scope,
+      repoFullName,
+      checkRunId,
+      input,
+      signal,
+    ) {
+      checkInstallationId(installationId);
+      checkCheckRunId(checkRunId);
+      const path = `${repoPath(repoFullName)}/check-runs/${checkRunId}`;
+      await withScopedToken(
+        installationId,
+        scope,
+        async (token) => {
+          await request(token, "PATCH", path, checkRunBody(input), signal);
+        },
+        signal,
+      );
+    },
+
+    async findCheckRun(installationId, scope, repoFullName, lookup, signal) {
+      checkInstallationId(installationId);
+      checkCommitSha(lookup.headSha);
+      const path = `${repoPath(repoFullName)}/commits/${lookup.headSha}/check-runs?check_name=${encodeURIComponent(lookup.name)}&filter=all`;
+      return withScopedToken(
+        installationId,
+        scope,
+        async (token) => {
+          const runs = await allPages(
+            async () => token,
+            path,
+            (json) => {
+              if (!isRecord(json) || !Array.isArray(json.check_runs))
+                throw shapeError(
+                  "GET /repos/{owner}/{repo}/commits/{ref}/check-runs",
+                );
+              return json.check_runs;
+            },
+            (item) => ({
+              id: isRecord(item) ? item.id : undefined,
+              externalId: isRecord(item) ? item.external_id : undefined,
+            }),
+            signal,
+          );
+          const found = runs.find(
+            (run) =>
+              typeof run.id === "number" &&
+              run.externalId === lookup.externalId,
+          );
+          return found === undefined ? null : { id: String(found.id) };
+        },
+        signal,
+      );
+    },
+
+    async createPullRequestReview(
+      installationId,
+      scope,
+      repoFullName,
+      prNumber,
+      input,
+      signal,
+    ) {
+      checkInstallationId(installationId);
+      checkPullRequestNumber(prNumber);
+      checkCommitSha(input.commitId);
+      const path = `${repoPath(repoFullName)}/pulls/${prNumber}/reviews`;
+      return withScopedToken(
+        installationId,
+        scope,
+        async (token) => {
+          const json = await request(
+            token,
+            "POST",
+            path,
+            {
+              commit_id: input.commitId,
+              body: input.body,
+              event: input.event,
+            },
+            signal,
+          );
+          if (!isRecord(json) || typeof json.id !== "number")
+            throw shapeError("POST /repos/{owner}/{repo}/pulls/{n}/reviews");
+          return { id: String(json.id) };
+        },
+        signal,
+      );
+    },
+
+    async listPullRequestReviews(
+      installationId,
+      scope,
+      repoFullName,
+      prNumber,
+      signal,
+    ) {
+      checkInstallationId(installationId);
+      checkPullRequestNumber(prNumber);
+      const path = `${repoPath(repoFullName)}/pulls/${prNumber}/reviews`;
+      return withScopedToken(
+        installationId,
+        scope,
+        (token) =>
+          allPages(
+            async () => token,
+            path,
+            (json) => {
+              if (!Array.isArray(json))
+                throw shapeError("GET /repos/{owner}/{repo}/pulls/{n}/reviews");
+              return json;
+            },
+            (item) => toPullRequestReview(item),
+            signal,
+          ),
+        signal,
+      );
+    },
+
+    async dismissPullRequestReview(
+      installationId,
+      scope,
+      repoFullName,
+      prNumber,
+      reviewId,
+      message,
+      signal,
+    ) {
+      checkInstallationId(installationId);
+      checkPullRequestNumber(prNumber);
+      checkCheckRunId(reviewId);
+      const path = `${repoPath(repoFullName)}/pulls/${prNumber}/reviews/${reviewId}/dismissals`;
+      await withScopedToken(
+        installationId,
+        scope,
+        async (token) => {
+          await request(
+            token,
+            "PUT",
+            path,
+            { message, event: "DISMISS" },
+            signal,
+          );
+        },
+        signal,
+      );
     },
 
     async mintInstallationToken(installationId, scope) {

@@ -345,6 +345,13 @@ describe("the check of the permissions through the route", () => {
     const { portal } = await start();
     const fake = await portal.fakeGithub();
     fake.setAppAccountPermissions({});
+    // An App made before the check run: the four permissions of a job and nothing else.
+    fake.setAppPermissions({
+      metadata: "read",
+      contents: "read",
+      pull_requests: "write",
+      issues: "write",
+    });
     await portal.visit("/api/admin/github", {
       method: "PUT",
       cookies: portal.adminCookies,
@@ -369,7 +376,7 @@ describe("the check of the permissions through the route", () => {
 
     expect(await response.json()).toEqual({
       ok: true,
-      missing: ["emails", "members"],
+      missing: ["checks", "emails", "members"],
     });
   });
 

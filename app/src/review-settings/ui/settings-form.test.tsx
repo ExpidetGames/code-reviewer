@@ -39,16 +39,19 @@ const DYNAMIC_VIEW: ProjectDynamicView = {
     reviewKind: "diff",
     dynamicModel: DEFAULT_DYNAMIC_MODEL,
     reviewSkill: DEFAULT_REVIEW_SKILL.text,
+    reviewVerdict: "blocking",
   },
   sources: {
     reviewKind: "built_in",
     dynamicModel: "built_in",
     reviewSkill: "built_in",
+    reviewVerdict: "built_in",
   },
   defaults: {
     reviewKind: "diff",
     dynamicModel: DEFAULT_DYNAMIC_MODEL,
     reviewSkill: DEFAULT_REVIEW_SKILL.text,
+    reviewVerdict: "blocking",
   },
   reviewSkillIsDefault: true,
   defaultSkill: {

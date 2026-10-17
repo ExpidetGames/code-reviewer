@@ -10,6 +10,7 @@ import {
   type ReviewSettingField,
   type ReviewSettings,
   type ReviewSettingsOverrides,
+  type ReviewVerdictMode,
 } from "./settings.ts";
 
 /** Where the value of a field comes from. */
@@ -69,6 +70,8 @@ export type EffectiveProjectDynamic = {
   reviewSkill: string;
   /** Whether `reviewSkill` is the shipped default (the project sets no override). */
   reviewSkillIsDefault: boolean;
+  /** What a finished review does on its pull request besides the check run (#405). */
+  reviewVerdict: ReviewVerdictMode;
   sources: Record<ProjectDynamicSettingField, ProjectDynamicSource>;
 };
 
@@ -83,6 +86,7 @@ export function resolveProjectDynamicSettings(layers: {
     reviewKind: ProjectReviewKind;
     dynamicModel: string;
     reviewSkill: string | null;
+    reviewVerdict: ReviewVerdictMode;
   };
   project?: ProjectDynamicOverrides;
   defaultSkill: string;
@@ -98,7 +102,7 @@ export function resolveProjectDynamicSettings(layers: {
     ProjectDynamicSettingField,
     ProjectDynamicSource
   >;
-  for (const field of ["reviewKind", "dynamicModel"] as const)
+  for (const field of ["reviewKind", "dynamicModel", "reviewVerdict"] as const)
     sources[field] = has(field) ? "project" : "built_in";
   // A null (or empty, already normalized to null) override means "no override" and resolves to the
   // shipped default, never to another project's skill.
@@ -109,6 +113,7 @@ export function resolveProjectDynamicSettings(layers: {
     dynamicModel: project?.dynamicModel ?? builtIn.dynamicModel,
     reviewSkill: reviewSkillOverride ?? layers.defaultSkill,
     reviewSkillIsDefault,
+    reviewVerdict: project?.reviewVerdict ?? builtIn.reviewVerdict,
     sources,
   };
 }

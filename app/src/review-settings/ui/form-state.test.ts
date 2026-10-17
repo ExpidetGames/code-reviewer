@@ -260,16 +260,19 @@ describe("the project-only settings in the form serialization", () => {
       reviewKind: "dynamic" as const,
       dynamicModel: "vendor/dynamic-model",
       reviewSkill: "review for the Dynamic kind",
+      reviewVerdict: "blocking" as const,
     },
     sources: {
       reviewKind: "project" as const,
       dynamicModel: "project" as const,
       reviewSkill: "project" as const,
+      reviewVerdict: "built_in" as const,
     },
     defaults: {
       reviewKind: "diff" as const,
       dynamicModel: "deepseek/deepseek-v4.1-flash",
       reviewSkill: "shipped skill",
+      reviewVerdict: "blocking" as const,
     },
     reviewSkillIsDefault: false,
     defaultSkill: {

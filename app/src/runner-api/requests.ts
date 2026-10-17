@@ -14,6 +14,8 @@ import type {
   FieldErrorCode,
   HeartbeatRequest,
   ReleaseRequest,
+  FindingPriority,
+  ReviewFindings,
   RunnerResult,
   RunnerUsage,
   WorkerResultRequest,
@@ -21,6 +23,8 @@ import type {
 import {
   CLAIM_ENGINES,
   CLAIM_FEATURES,
+  FINDING_PRIORITIES,
+  MAX_FINDING_COUNT,
   MAX_RUNNING_RANGE,
   RELEASE_RETRY_AFTER_RANGE,
   STOPPED_EARLY_REASONS,
@@ -348,6 +352,53 @@ function parseUsage(
   };
 }
 
+/** The findings of a successful review (#405): null or absent is "not said", the same as for a runner that never sent it. */
+function parseFindings(
+  check: Checker,
+  value: unknown,
+): ReviewFindings | null | undefined {
+  if (value === undefined || value === null) return null;
+  if (!isRecord(value)) return check.fail("result.findings", "invalid");
+  const before = check.fields.length;
+  const prefix = "result.findings.";
+  for (const key of Object.keys(value))
+    if (key !== "open" && key !== "bySeverity" && key !== "incomplete")
+      check.fail(`${prefix}${key}`, "invalid");
+  const open = check.integer(value, "open", `${prefix}open`, MAX_FINDING_COUNT);
+  const counts = value.bySeverity;
+  let bySeverity: ReviewFindings["bySeverity"] | undefined;
+  if (counts === undefined) check.fail(`${prefix}bySeverity`, "required");
+  else if (counts === null) bySeverity = null;
+  else if (!isRecord(counts)) check.fail(`${prefix}bySeverity`, "invalid");
+  else {
+    const read: Partial<Record<FindingPriority, number>> = {};
+    for (const key of Object.keys(counts))
+      if (!(FINDING_PRIORITIES as readonly string[]).includes(key))
+        check.fail(`${prefix}bySeverity.${key}`, "invalid");
+    for (const priority of FINDING_PRIORITIES) {
+      const count = check.integer(
+        counts,
+        priority,
+        `${prefix}bySeverity.${priority}`,
+        MAX_FINDING_COUNT,
+      );
+      if (count !== undefined) read[priority] = count;
+    }
+    if (FINDING_PRIORITIES.every((priority) => read[priority] !== undefined))
+      bySeverity = read as Record<FindingPriority, number>;
+  }
+  const incomplete = value.incomplete;
+  if (incomplete !== undefined && typeof incomplete !== "boolean")
+    check.fail(`${prefix}incomplete`, "invalid");
+  if (
+    check.fields.length > before ||
+    open === undefined ||
+    bySeverity === undefined
+  )
+    return undefined;
+  return { open, bySeverity, ...(incomplete === true ? { incomplete } : {}) };
+}
+
 function parseResult(check: Checker, value: unknown): RunnerResult | undefined {
   if (!isRecord(value)) return check.fail("result", "invalid");
   const before = check.fields.length;
@@ -405,6 +456,7 @@ function parseResult(check: Checker, value: unknown): RunnerResult | undefined {
   if (logTruncated !== undefined && typeof logTruncated !== "boolean")
     check.fail("result.logTruncated", "invalid");
   const usage = parseUsage(check, value.usage);
+  const findings = parseFindings(check, value.findings);
 
   if (
     check.fields.length > before ||
@@ -414,6 +466,7 @@ function parseResult(check: Checker, value: unknown): RunnerResult | undefined {
     errorMessage === undefined ||
     commentUrl === undefined ||
     usage === undefined ||
+    findings === undefined ||
     (errorCode !== null && typeof errorCode !== "string")
   )
     return undefined;
@@ -427,6 +480,7 @@ function parseResult(check: Checker, value: unknown): RunnerResult | undefined {
     logTail,
     logTruncated: logTruncated === true,
     usage,
+    ...(findings === null ? {} : { findings }),
   };
 }
 

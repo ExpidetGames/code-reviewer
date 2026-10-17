@@ -108,6 +108,30 @@ class Usage:
 
 
 @dataclass(frozen=True)
+class ReviewFindings:
+    """The findings left open on the pull request after a successful review (#405).
+
+    The app decides the review verdict from this, so it counts what is *open*, not what the run
+    found: a Dynamic run carries earlier findings over. `by_severity` is the count per priority
+    (`P0` to `P3`) of a Dynamic review and None for a review that has no severities (Diff);
+    `open` may be larger than their sum when the summary left lower priority findings out.
+    """
+
+    open: int
+    by_severity: dict[str, int] | None
+    # The review did not cover everything it was asked to (a finding the validation dropped, a chunk
+    # that failed, files left out for the token budget): `open` may miss a blocker, so the app never
+    # approves on it. Left out of the JSON when False.
+    incomplete: bool = False
+
+    def to_json(self) -> dict[str, Any]:
+        document: dict[str, Any] = {"open": self.open, "bySeverity": self.by_severity}
+        if self.incomplete:
+            document["incomplete"] = True
+        return document
+
+
+@dataclass(frozen=True)
 class JobResult:
     ok: bool
     duration_ms: int
@@ -120,6 +144,9 @@ class JobResult:
     # A finer, stable name for the failure next to `error_code` (for a Dynamic checkout failure
     # the `CheckoutReason`). Never free text; None where a failure has no finer name.
     error_reason: str | None = None
+    # The findings left open by a successful review, for the verdict the app submits (#405). None
+    # where the runner cannot say (and on every failure): the app then submits no verdict.
+    findings: ReviewFindings | None = None
 
     def to_json(self) -> dict[str, Any]:
         document: dict[str, Any] = {
@@ -133,6 +160,8 @@ class JobResult:
         }
         if self.error_reason is not None:
             document["errorReason"] = self.error_reason
+        if self.findings is not None:
+            document["findings"] = self.findings.to_json()
         return document
 
     def to_line(self) -> str:

@@ -8,6 +8,7 @@ import { JOB_TOKEN_PERMISSIONS } from "./job-access.ts";
 import {
   APP_NAME_MAX_LENGTH,
   buildAppManifest,
+  CHECK_RUN_PERMISSIONS,
   missingPermissions,
   suggestedAppName,
 } from "./manifest.ts";
@@ -50,7 +51,8 @@ describe("the GitHub App manifest", () => {
   });
 
   // #102-GH-01
-  it("asks for the repository permissions of a review job plus Email addresses and Members, read-only", () => {
+  // #405-T13
+  it("asks for the repository permissions of a review job plus Checks, Email addresses and Members", () => {
     const manifest = buildAppManifest({
       publicUrl: PUBLIC_URL,
       tenancy: "single",
@@ -59,10 +61,17 @@ describe("the GitHub App manifest", () => {
 
     expect(manifest.default_permissions).toEqual({
       ...JOB_TOKEN_PERMISSIONS,
+      checks: "write",
       emails: "read",
       members: "read",
     });
     expect(manifest.default_events).toEqual(["pull_request", "issue_comment"]);
+  });
+
+  // #405-T13
+  it("asks for the Checks permission on top of a job token's, which a Worker never holds", () => {
+    expect(CHECK_RUN_PERMISSIONS).toEqual({ checks: "write" });
+    expect(JOB_TOKEN_PERMISSIONS).not.toHaveProperty("checks");
   });
 
   it("does not ask GitHub to authorize a person during the installation", () => {
@@ -102,7 +111,8 @@ describe("the suggested App name", () => {
 });
 
 describe("the permissions an App lacks", () => {
-  it("lists the account and organization permissions of an App that was made by hand without them", () => {
+  // #405-T13
+  it("lists the Checks, account and organization permissions of an App that was made by hand without them", () => {
     expect(
       missingPermissions({
         pull_requests: "write",
@@ -110,7 +120,7 @@ describe("the permissions an App lacks", () => {
         contents: "read",
         metadata: "read",
       }),
-    ).toEqual(["emails", "members"]);
+    ).toEqual(["checks", "emails", "members"]);
   });
 
   it("lists a permission whose level is too low and nothing for a complete App", () => {
@@ -120,6 +130,7 @@ describe("the permissions an App lacks", () => {
         issues: "write",
         contents: "read",
         metadata: "read",
+        checks: "write",
         emails: "read",
         members: "read",
       }),
@@ -130,6 +141,7 @@ describe("the permissions an App lacks", () => {
         issues: "write",
         contents: "write",
         metadata: "read",
+        checks: "write",
         emails: "read",
         members: "write",
       }),

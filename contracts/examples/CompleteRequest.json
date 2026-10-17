@@ -7,6 +7,7 @@
     "errorCode": null,
     "logTail": "review published",
     "logTruncated": false,
+    "findings": { "open": 3, "bySeverity": { "P0": 1, "P1": 0, "P2": 2, "P3": 0 } },
     "usage": {
       "model": "vendor/model-name",
       "promptTokens": 12000,

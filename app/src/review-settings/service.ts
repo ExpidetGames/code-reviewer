@@ -44,6 +44,7 @@ import {
   type ProjectDynamicPatch,
   type ProjectDynamicSettingField,
   type ProjectDynamicSettings,
+  type ReviewVerdictMode,
   type ProjectReviewKind,
   type ReadableReviewSettings,
   type ReviewSettingField,
@@ -135,6 +136,8 @@ export type ProjectDynamicView = {
     dynamicModel?: string;
     /** The text a Dynamic review uses: the project's override, else the shipped default. */
     reviewSkill: string;
+    /** What a finished review does on its pull request besides the check run (#405). */
+    reviewVerdict: ReviewVerdictMode;
   };
   /** Where each effective value comes from (there is no global layer for these fields). */
   sources: Partial<Record<"dynamicModel", "built_in" | "project">> &
@@ -148,6 +151,7 @@ export type ProjectDynamicView = {
     /** Absent for a workspace on the operator's key (#283). */
     dynamicModel?: string;
     reviewSkill: string;
+    reviewVerdict: ReviewVerdictMode;
   };
   /** Whether the effective skill is the shipped default (the project sets no override). */
   reviewSkillIsDefault: boolean;
@@ -312,6 +316,9 @@ function mergeProjectSettings(
   }
   if (dynamic.reviewSkill !== undefined && dynamic.reviewSkill !== null)
     next.reviewSkill = dynamic.reviewSkill;
+  // A `null` verdict mode is an explicit "follow the default again" (#405).
+  if (dynamic.reviewVerdict !== undefined && dynamic.reviewVerdict !== null)
+    next.reviewVerdict = dynamic.reviewVerdict;
   return next;
 }
 
@@ -440,12 +447,14 @@ export function createReviewSettingsService(deps: {
         reviewKind: effective.reviewKind,
         dynamicModel: effective.dynamicModel,
         reviewSkill: effective.reviewSkill,
+        reviewVerdict: effective.reviewVerdict,
       },
       sources: effective.sources,
       defaults: {
         reviewKind: defaults.reviewKind,
         dynamicModel: defaults.dynamicModel,
         reviewSkill: shipped.text,
+        reviewVerdict: defaults.reviewVerdict,
       },
       reviewSkillIsDefault: effective.reviewSkillIsDefault,
       defaultSkill: {

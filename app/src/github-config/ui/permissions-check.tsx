@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 "use client";
-// What an App that was imported or made by hand may lack: the account permission "Email addresses" (the
-// verified primary email of a GitHub sign in) and the organization permission "Members" (a person's role
-// when an installation is bound to a workspace). The list is always shown; the button asks GitHub which of
+// What an App that was imported or made by hand may lack: the repository permission "Checks" (the check run of
+// a review, #405), the account permission "Email addresses" (the verified primary email of a GitHub sign in) and
+// the organization permission "Members" (a person's role when an installation is bound to a workspace). The list is always shown; the button asks GitHub which of
 // them this App really lacks. It sits behind the "Permissions GitHub granted" disclosure of the page.
 import { useState } from "react";
 import { Button } from "../../components/button.tsx";
@@ -40,12 +40,14 @@ export function PermissionsCheck({
   return (
     <div className="flex flex-col gap-3 pt-2">
       <p className="text-sm text-muted-foreground">
-        An App that was imported or made by hand may lack two permissions that
-        the one-click flow asks for. Add them in the App&apos;s settings on
+        An App that was imported or made by hand may lack permissions that the
+        one-click flow asks for. Without Checks, reviews run as before but the
+        pull request shows no check run. Add them in the App&apos;s settings on
         GitHub (Permissions &amp; events), then accept the changed permissions
         on each installation when GitHub asks:
       </p>
       <ul className="list-disc pl-5 text-sm text-muted-foreground">
+        <li>{PERMISSION_LABELS.checks}</li>
         <li>{PERMISSION_LABELS.emails}</li>
         <li>{PERMISSION_LABELS.members}</li>
       </ul>

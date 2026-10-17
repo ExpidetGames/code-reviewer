@@ -92,3 +92,67 @@ export function toReadError(error: unknown): IntegrationError {
     { cause: error, retryAfterSeconds: error.retryAfterSeconds },
   );
 }
+
+/**
+ * What the token of a check run (#405) may do: write check runs of one repository and the metadata every token gets
+ * anyway. No code, no comments, no reviews: the review verdict has a token of its own.
+ */
+export const CHECK_TOKEN_PERMISSIONS: InstallationPermissions = {
+  checks: "write",
+  metadata: "read",
+};
+
+/** What the token of a review verdict (#405) may do: reviews of pull requests and the metadata. */
+export const VERDICT_TOKEN_PERMISSIONS: InstallationPermissions = {
+  pull_requests: "write",
+  metadata: "read",
+};
+
+/**
+ * The same for a write the app makes itself (a check run, a review). On top of `toReadError`:
+ * - 422 on the token request, or 403 on the call: the app is not granted the permission (or the installation has
+ *   not accepted it yet): `INTEGRATION_ACCESS_SCOPE_REFUSED`, the code by which the caller knows a permission is
+ *   missing. GitHub's reason (`GithubAppError.refusal`) tells it from a read-only (archived) repository
+ *   (`INTEGRATION_REPOSITORY_ARCHIVED`), a repository outside the installation
+ *   (`INTEGRATION_REPOSITORY_NOT_ACCESSIBLE`) and a refusal for another reason (the normal retry path);
+ * - 422 on the call itself: the platform refuses what was sent (a review of the app's own pull request):
+ *   `INTEGRATION_REQUEST_REFUSED`.
+ */
+export function toWriteError(error: unknown): IntegrationError {
+  if (!(error instanceof GithubAppError)) return toReadError(error);
+  const refusedScope =
+    (error.code === "GITHUB_APP_REQUEST_FAILED" &&
+      error.status === 422 &&
+      error.duringTokenRequest) ||
+    (error.code === "GITHUB_APP_FORBIDDEN" && !error.duringTokenRequest);
+  // What GitHub said about a refusal decides what it means: a read-only repository and one outside the installation
+  // are not a missing permission, and a 403 for another reason is retried like any failure.
+  if (refusedScope && error.refusal === "repository_archived")
+    return new IntegrationError(
+      "INTEGRATION_REPOSITORY_ARCHIVED",
+      error.message,
+      {
+        cause: error,
+      },
+    );
+  if (refusedScope && error.refusal === "repository_not_accessible")
+    return new IntegrationError(
+      "INTEGRATION_REPOSITORY_NOT_ACCESSIBLE",
+      error.message,
+      { cause: error },
+    );
+  if (refusedScope && error.refusal === "other") return toReadError(error);
+  if (refusedScope)
+    return new IntegrationError(
+      "INTEGRATION_ACCESS_SCOPE_REFUSED",
+      error.message,
+      {
+        cause: error,
+      },
+    );
+  if (error.code === "GITHUB_APP_REQUEST_FAILED" && error.status === 422)
+    return new IntegrationError("INTEGRATION_REQUEST_REFUSED", error.message, {
+      cause: error,
+    });
+  return toReadError(error);
+}

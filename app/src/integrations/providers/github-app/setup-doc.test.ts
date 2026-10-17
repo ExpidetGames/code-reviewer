@@ -11,6 +11,7 @@ import { JOB_TOKEN_PERMISSIONS } from "./job-access.ts";
 import {
   ACCOUNT_PERMISSIONS,
   buildAppManifest,
+  CHECK_RUN_PERMISSIONS,
   GITHUB_APP_PATHS,
   ORGANIZATION_PERMISSIONS,
   REPOSITORY_PERMISSIONS,
@@ -64,13 +65,19 @@ const expectedRows = (
 
 describe("the GitHub App setup guide", () => {
   // #102-GH-18
+  // #405-T13
   it("lists exactly the repository permissions the code works with, at the same access level", () => {
     const listed = permissionRows(
       subsection(section("Permissions"), "Repository permissions"),
     );
 
-    expect(listed).toEqual(expectedRows(JOB_TOKEN_PERMISSIONS));
-    expect(REPOSITORY_PERMISSIONS).toEqual(JOB_TOKEN_PERMISSIONS);
+    expect(listed).toEqual(
+      expectedRows({ ...JOB_TOKEN_PERMISSIONS, ...CHECK_RUN_PERMISSIONS }),
+    );
+    expect(REPOSITORY_PERMISSIONS).toEqual({
+      ...JOB_TOKEN_PERMISSIONS,
+      ...CHECK_RUN_PERMISSIONS,
+    });
   });
 
   // #102-GH-18
@@ -147,7 +154,7 @@ describe("the GitHub App setup guide", () => {
   });
 
   // CR-38-T01
-  it("names every environment variable the loader still reads for an installation that was not imported, and no write permission beyond the list", () => {
+  it("names every environment variable the loader still reads for an installation that was not imported", () => {
     for (const name of [
       "GITHUB_APP_ID",
       "GITHUB_APP_SLUG",
@@ -156,8 +163,6 @@ describe("the GitHub App setup guide", () => {
       "GITHUB_APP_PRIVATE_KEY_PATH",
     ])
       expect(guide, name).toContain(name);
-    // The MVP asks for no Checks permission (decision of the project lead).
-    expect(section("Permissions")).not.toMatch(/\(`checks`\)/);
     // The variables of the separate OAuth app are documented as no longer used.
     expect(guide).toMatch(/GITHUB_OAUTH_CLIENT_ID[\s\S]*?not used any more/);
   });
