@@ -6,7 +6,14 @@
 // engine, so every wake-up call is ignored. The Sandbox SDK is loaded on the first job, not at start. This file
 // and what it imports must never reach `node:child_process` (the Node entry, node.ts, is a separate file for
 // that reason; see src/bundle/serverless-bundle.test.ts). With a snapshot the reaper's cron route (#364) is mounted too.
+//
+// Why this file imports Hono, and why no other file named app, index or server does (#416): the Hono builder of the
+// Vercel CLI takes as the function's entry the first of app, index and server (in the project root, then in src/) whose
+// text imports "hono". The type import below is what makes this file qualify; a file such as the former src/app.ts,
+// which imports Hono and default-exports no app, would be taken instead and the function would die on its first request.
+// src/vercel-config.test.ts holds the rule, and CI starts the built function (scripts/check-built-function.mjs).
 import { waitUntil } from "@vercel/functions";
+import type { Hono } from "hono";
 import { composeDispatcher } from "./compose.ts";
 import { sandboxFromEnvironment } from "./launchers/sandbox-env.ts";
 
@@ -23,4 +30,4 @@ const { app } = composeDispatcher({
   background: (work) => waitUntil(work),
 });
 
-export default app;
+export default app satisfies Hono;

@@ -210,6 +210,12 @@ jobs:
           mkdir -p .vercel
           echo '{"projectId":"prj_ci","orgId":"team_ci","settings":{"framework":"hono","nodeVersion":"24.x"}}' > .vercel/project.json
           vercel build --prod --yes
+      # `vercel build` succeeding does not mean the function starts (#416): the Hono builder emits the sources file by
+      # file, and an import it leaves pointing at a file that is not in the function fails when Node loads it, on the
+      # first request of the deployment. This starts the built function the way the platform's launcher does, with
+      # placeholder settings, and asks it for GET /health. Offline, no token, no secret.
+      - name: Start the built function and ask it for GET /health
+        run: node scripts/check-built-function.mjs
 
   # The privileged lane of the Sandbox-Launcher (#329-T09, T10): `make test-sandbox-local` builds the `sandbox`
   # target on the runner's Docker daemon and runs the Launcher's local mode against it and the fake App, so
