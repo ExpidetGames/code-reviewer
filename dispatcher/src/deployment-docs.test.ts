@@ -438,9 +438,8 @@ describe("the Dispatcher section of the guide", () => {
     expect(row("SANDBOX_SNAPSHOT_ID").text).toMatch(
       /Unset, the Dispatcher has no Launcher and claims nothing/,
     );
-    expect(row("SANDBOX_IMAGE_DIGEST").text).toMatch(
-      /change the two together/i,
-    );
+    // The pipeline sets the two together; nobody changes one without the other.
+    expect(row("SANDBOX_IMAGE_DIGEST").text).toMatch(/sets the two together/i);
     expect(
       sandboxFromEnvironment(VALID, NO_SDK).launcher({
         settings: loadSettings(VALID),
@@ -513,9 +512,15 @@ describe("the commands and names the guide gives", () => {
     // The list of hosts is retired.
     expect(canaryWorkflow).not.toContain("DISPATCHER_CANARY_HOSTS");
     expect(canaryWorkflow).toContain("--verify-vercel");
-    expect(snapshotWorkflow).toContain("vars.GOLDEN_SNAPSHOT_ENABLED");
-    for (const input of ["pinned_snapshot", "target"]) {
-      expect(snapshotWorkflow).toContain(`${input}:`);
+    // The variable that switched the automatic build on is retired.
+    expect(snapshotWorkflow).not.toContain("GOLDEN_SNAPSHOT_ENABLED");
+    // The inputs: `target` of the snapshot workflow (in its own runbook), `rebuild_snapshot` and `canary_engines` of the
+    // deployment, and the ones of the canary workflow.
+    expect(snapshotWorkflow).toContain("target:");
+    expect(read("docs/golden-snapshot.md")).toContain("`target`");
+    const deployWorkflow = read(".github/workflows/deploy-production.yml");
+    for (const input of ["rebuild_snapshot", "canary_engines", "allow_stale"]) {
+      expect(deployWorkflow).toContain(`${input}:`);
       expect(guide).toContain(`\`${input}\``);
     }
     for (const input of ["url", "engines"]) {
@@ -524,7 +529,7 @@ describe("the commands and names the guide gives", () => {
     }
     expect(guide).toContain("DISPATCHER_CANARY_HOSTS");
     expect(guide).toContain("GOLDEN_SNAPSHOT_ENABLED");
-    expect(guide).toContain("golden-snapshot-record");
+    expect(read("docs/golden-snapshot.md")).toContain("golden-snapshot-record");
   });
 
   // #333-T04
