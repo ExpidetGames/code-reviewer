@@ -97,6 +97,7 @@ from code_reviewer_runner.lease_check import (
     LeaseState,
     lease_check_from_environment,
 )
+from code_reviewer_runner.llm_providers import require_provider
 from code_reviewer_runner.log_capture import (
     MAX_TAIL_BYTES,
     LogCapture,
@@ -280,8 +281,10 @@ def _run_diff_job(
             litellm.suppress_debug_info = True
             patches.callback(apply_identity_patch(job.git.bot_login))
             if job.llm.require_parameters:
-                # Every OpenRouter request carries `provider.require_parameters` (#270).
-                patches.callback(apply_require_parameters_patch())
+                # Every request carries the provider's require-parameters field (#270).
+                patches.callback(
+                    apply_require_parameters_patch(provider=require_provider(job.llm.provider))
+                )
             # The cost of the run is what the provider states for every answer (#274).
             meter, undo_meter = install_cost_meter(superseded=superseded)
             patches.callback(undo_meter)
@@ -645,7 +648,8 @@ def _run_dynamic_job(
         return _failure(error.code, error.detail, started, capture)
     # From here on every failure says what the model calls so far cost (nothing before the first).
     usage_probe.watch(lambda: ledger.usage(job.llm.model))
-    upstream = job.llm.base_url or "https://openrouter.ai/api/v1"
+    provider = require_provider(job.llm.provider)
+    upstream = job.llm.base_url or provider.default_api_base
     # One unguessable capability per job: the proxy demands it, the engine config carries it.
     capability = new_proxy_capability()
     try:
@@ -659,6 +663,7 @@ def _run_dynamic_job(
             capabilities=capabilities,
             capability=capability,
             require_parameters=job.llm.require_parameters,
+            provider=provider,
             # Once superseded (#396) the proxy refuses every new request; one in flight finishes.
             superseded=superseded.is_set,
         )

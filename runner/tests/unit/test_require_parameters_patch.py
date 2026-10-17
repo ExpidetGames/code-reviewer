@@ -9,10 +9,12 @@ written for, like the identity patch."""
 
 import inspect
 from collections.abc import Iterator
+from dataclasses import replace
 from importlib import import_module
 from typing import Any
 
 import pytest
+from support import fake_provider
 
 from code_reviewer_runner.error_mapping import classify_failure
 from code_reviewer_runner.require_parameters_patch import (
@@ -61,7 +63,7 @@ def controls(handler: Any, kwargs: dict[str, Any] | None = None) -> dict[str, An
     return result
 
 
-# #270-T03
+# #270-T03, #424-T05
 @pytest.mark.usefixtures("patched")
 def test_the_request_controls_of_a_diff_job_carry_required_parameters(handler: Any) -> None:
     assert controls(handler)["extra_body"] == {"provider": {"require_parameters": True}}
@@ -137,3 +139,36 @@ def test_openrouter_finding_no_provider_for_the_parameters_is_the_existing_provi
     error.status_code = 404  # type: ignore[attr-defined]
 
     assert classify_failure([error], []) is ErrorCode.MODEL_UNKNOWN
+
+
+class FakeHandler:
+    """A handler of a provider with its own request controls method and body field."""
+
+    def apply_fakeai_request_controls(
+        self, model: str, kwargs: dict[str, Any], inherited_reasoning_effort: Any
+    ) -> dict[str, Any]:
+        return {**kwargs, "extra_body": {"routing": {"order": ["a"]}}}
+
+
+# #424-T05
+def test_the_patch_follows_the_mechanism_of_the_provider_it_is_given() -> None:
+    handler = object.__new__(FakeHandler)
+    undo = apply_require_parameters_patch(FakeHandler, provider=fake_provider())
+    try:
+        body = handler.apply_fakeai_request_controls("fakeai/m", {"model": "m"}, None)["extra_body"]
+    finally:
+        undo()
+
+    assert body == {"routing": {"order": ["a"], "strict": True}}
+    assert (
+        "strict"
+        not in handler.apply_fakeai_request_controls("fakeai/m", {}, None)["extra_body"]["routing"]
+    )
+
+
+# #424-T05
+def test_a_provider_without_the_mechanism_cannot_be_patched() -> None:
+    without = replace(fake_provider(), require_parameters=None)
+
+    with pytest.raises(RequireParametersPatchError):
+        apply_require_parameters_patch(FakeHandler, provider=without)

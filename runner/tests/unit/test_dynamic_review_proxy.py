@@ -15,6 +15,7 @@ from typing import Any
 from urllib.error import URLError
 
 import pytest
+from support import fake_provider
 
 from code_reviewer_runner.dynamic_review.budget import (
     DEFAULT_WINDOW_TOKENS,
@@ -1195,7 +1196,7 @@ NO_PROVIDER_ANSWER = {
 }
 
 
-# #270-T01
+# #270-T01, #424-T05
 def test_a_call_to_openrouter_is_forwarded_with_required_parameters_and_allowed_fields() -> None:
     upstream = Upstream()
     subject = proxy(upstream, require_parameters=True)
@@ -1250,7 +1251,7 @@ def test_a_destination_that_is_not_openrouter_gets_the_request_unchanged() -> No
     assert "provider" not in json.loads(upstream.requests[0][1])
 
 
-# #270-T05
+# #270-T05, #424-T05
 def test_openrouter_finding_no_provider_for_the_parameters_ends_the_run_without_a_fallback() -> (
     None
 ):
@@ -1280,6 +1281,40 @@ def test_another_not_found_answer_keeps_the_unknown_model_code() -> None:
     response = post(subject, request_body())
 
     assert error_code(response) == ErrorCode.MODEL_UNKNOWN.value
+
+
+# #424-T05: the field, the matcher and the cost are those of the entry the proxy is given.
+def test_the_proxy_follows_the_registry_entry_of_its_provider() -> None:
+    fake = fake_provider()
+    upstream = Upstream(body={**answer_with_usage(cost=None)})
+    upstream.body["usage"]["price"] = 0.002
+    subject = proxy(upstream, require_parameters=True, provider=fake)
+
+    response = post(subject, request_body())
+
+    forwarded = json.loads(upstream.requests[0][1])
+    assert response.status == 200
+    assert forwarded["routing"] == {"strict": True}
+    assert "provider" not in forwarded
+    assert subject.ledger.usage("deepseek/deepseek-v4.1-flash").cost_usd == 0.002
+
+
+# #424-T05
+def test_the_no_endpoint_matcher_of_the_given_provider_decides_the_stable_code() -> None:
+    fake = fake_provider()
+    refused = proxy(
+        Upstream(status=404, body={"error": {"message": "nothing can serve this"}}),
+        require_parameters=True,
+        provider=fake,
+    )
+    other = proxy(
+        Upstream(status=404, body=NO_PROVIDER_ANSWER), require_parameters=True, provider=fake
+    )
+
+    assert error_code(post(refused, request_body())) == (
+        ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED.value
+    )
+    assert error_code(post(other, request_body())) == ErrorCode.MODEL_UNKNOWN.value
 
 
 def answer_with_cost(cost: Any, prompt: int = 10, completion: int = 5) -> dict[str, Any]:
