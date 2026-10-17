@@ -1049,7 +1049,7 @@ export function createGithubAppClient(
     async findCheckRun(installationId, scope, repoFullName, lookup, signal) {
       checkInstallationId(installationId);
       checkCommitSha(lookup.headSha);
-      const path = `${repoPath(repoFullName)}/commits/${lookup.headSha}/check-runs?check_name=${encodeURIComponent(lookup.name)}`;
+      const path = `${repoPath(repoFullName)}/commits/${lookup.headSha}/check-runs?check_name=${encodeURIComponent(lookup.name)}&filter=all`;
       return withScopedToken(
         installationId,
         scope,

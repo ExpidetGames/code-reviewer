@@ -9,7 +9,7 @@
 // What it checks, like GitHub: a check run needs `checks: write` (403 `Resource not accessible by integration`
 // otherwise), a name and a 40 character head sha; `status` is one of `queued`, `in_progress`, `completed`, a
 // completed check run has a `conclusion` from GitHub's list (and a conclusion alone completes it, 422 for an unknown
-// one); the list of a commit's check runs is paged. A review needs `pull_requests: write`, an event of `APPROVE`, `REQUEST_CHANGES` or `COMMENT`, and an App
+// one); the list of a commit's check runs is paged and, as on GitHub, shows only the latest run of a name unless `filter=all`. A review needs `pull_requests: write`, an event of `APPROVE`, `REQUEST_CHANGES` or `COMMENT`, and an App
 // cannot approve or request changes on a pull request it wrote itself (422), and its `commit_id` must be a commit the pull request has had (422). Every state change of a check run is
 // kept in its `history`, so a test can assert the transitions and not only the last state. Dummy data only.
 
@@ -295,11 +295,17 @@ export function createChecksApi(options: ChecksApiOptions): ChecksApi {
     if (commitMatch && method === "GET") {
       if (!request.mayDo(["checks"], "read")) return FORBIDDEN;
       const name = request.query.get("check_name");
-      const matching = list.filter(
+      let matching = list.filter(
         (run) =>
           run.headSha === commitMatch[1] &&
           (name === null || run.name === name),
       );
+      // Like GitHub, `filter=latest` is the default: of the runs with one name by one app only the latest is listed.
+      if ((request.query.get("filter") ?? "latest") === "latest") {
+        const latest = new Map<string, FakeCheckRun>();
+        for (const run of matching) latest.set(`${run.login}/${run.name}`, run);
+        matching = [...latest.values()];
+      }
       const perPage = Math.min(
         Math.max(Number(request.query.get("per_page")) || 30, 1),
         100,

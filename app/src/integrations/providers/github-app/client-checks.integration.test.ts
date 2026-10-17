@@ -272,6 +272,27 @@ describe("check runs, written with a narrow token", () => {
     expect(found?.id).toBe(String(fake.checkRuns("acme/widgets")[129]?.id));
   });
 
+  // #405-T16 (review round 2)
+  it("finds the check run of a job even when a later job has one of the same name on the same commit", async () => {
+    const { fake, client } = await setup();
+    for (const job of ["job-1", "job-2"])
+      await client.createCheckRun("4242", CHECKS_SCOPE, "acme/widgets", {
+        name: "Code Reviewer",
+        headSha: HEAD,
+        status: "queued",
+        externalId: job,
+      });
+
+    const found = await client.findCheckRun(
+      "4242",
+      CHECKS_SCOPE,
+      "acme/widgets",
+      { headSha: HEAD, name: "Code Reviewer", externalId: "job-1" },
+    );
+
+    expect(found?.id).toBe(String(fake.checkRuns("acme/widgets")[0]?.id));
+  });
+
   // #405-T24 (review P3-7)
   it("is refused a review on a commit the pull request never had", async () => {
     const { client } = await setup();
