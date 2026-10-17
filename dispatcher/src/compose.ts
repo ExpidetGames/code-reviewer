@@ -2,7 +2,7 @@
 
 // What both entry points share: the settings from the environment, the Webhook-Trigger over the
 // configured keys and a logger that masks every secret of this deployment.
-import { createDispatcher, type Dispatcher } from "./app.ts";
+import { createDispatcher, type Dispatcher } from "./dispatcher-app.ts";
 import { loadSettings, type Settings } from "./config.ts";
 import { createLogger } from "./core/logger.ts";
 import type { Launcher, Logger } from "./core/types.ts";

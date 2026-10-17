@@ -14,18 +14,18 @@ App ──signed POST /dispatch──▶ Trigger ──▶ core ──claim─�
                                             └──▶ Launcher.launch(...)   (heartbeats with the credential meanwhile)
 ```
 
-| Part                                                                              | Where                                            | Status                                                                                   |
-| --------------------------------------------------------------------------------- | ------------------------------------------------ | ---------------------------------------------------------------------------------------- |
-| Dispatcher core: claim, capacity, heartbeat during the launch, release on failure | `src/core/`                                      | here; platform-free (no `node:*`, no platform SDK: ESLint and a test check it)           |
-| Webhook-Trigger: `POST /dispatch`, `GET /health`                                  | `src/triggers/webhook.ts`, `src/app.ts`          | here                                                                                     |
-| Fake Launcher (tests)                                                             | `src/launchers/fake.ts`                          | here                                                                                     |
-| Hardened container spec renderer and `ContainerLauncher` (#325)                   | `src/launchers/container*.ts`                    | here, used by the Sandbox-Launcher (#329) and the Docker-Launcher (#334)                 |
-| Sandbox-Launcher over the Vercel Sandbox SDK (#329)                               | `src/launchers/sandbox*.ts`, `vercel-sandbox.ts` | here, wired into the Vercel entry when `SANDBOX_SNAPSHOT_ID` is set                      |
-| Capability probe, `POST /probe`, canary VM, deploy canary command (#331)          | `src/probe/`, `src/launchers/sandbox-canary.ts`  | here, in front of the Sandbox-Launcher: `opencode` is advertised from a fresh probe only |
-| Vercel entry, a default export                                                    | `src/index.ts`                                   | here: the Sandbox-Launcher when a golden snapshot is configured, else `noLauncher`       |
-| Node entry, `@hono/node-server` and a graceful shutdown                           | `src/node.ts` (`pnpm start`)                     | here, with no engine until the Docker-Launcher (#334) is wired in                        |
-| Poll-Trigger, Docker-Launcher                                                     | `src/triggers/poll.ts`, `src/launchers/`         | #334                                                                                     |
-| Golden snapshot pipeline (a command, not a runtime part)                          | `src/snapshot/`, `pnpm snapshot:build`           | here (#330), `docs/golden-snapshot.md`                                                   |
+| Part                                                                              | Where                                              | Status                                                                                   |
+| --------------------------------------------------------------------------------- | -------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| Dispatcher core: claim, capacity, heartbeat during the launch, release on failure | `src/core/`                                        | here; platform-free (no `node:*`, no platform SDK: ESLint and a test check it)           |
+| Webhook-Trigger: `POST /dispatch`, `GET /health`                                  | `src/triggers/webhook.ts`, `src/dispatcher-app.ts` | here                                                                                     |
+| Fake Launcher (tests)                                                             | `src/launchers/fake.ts`                            | here                                                                                     |
+| Hardened container spec renderer and `ContainerLauncher` (#325)                   | `src/launchers/container*.ts`                      | here, used by the Sandbox-Launcher (#329) and the Docker-Launcher (#334)                 |
+| Sandbox-Launcher over the Vercel Sandbox SDK (#329)                               | `src/launchers/sandbox*.ts`, `vercel-sandbox.ts`   | here, wired into the Vercel entry when `SANDBOX_SNAPSHOT_ID` is set                      |
+| Capability probe, `POST /probe`, canary VM, deploy canary command (#331)          | `src/probe/`, `src/launchers/sandbox-canary.ts`    | here, in front of the Sandbox-Launcher: `opencode` is advertised from a fresh probe only |
+| Vercel entry, a default export                                                    | `src/index.ts`                                     | here: the Sandbox-Launcher when a golden snapshot is configured, else `noLauncher`       |
+| Node entry, `@hono/node-server` and a graceful shutdown                           | `src/node.ts` (`pnpm start`)                       | here, with no engine until the Docker-Launcher (#334) is wired in                        |
+| Poll-Trigger, Docker-Launcher                                                     | `src/triggers/poll.ts`, `src/launchers/`           | #334                                                                                     |
+| Golden snapshot pipeline (a command, not a runtime part)                          | `src/snapshot/`, `pnpm snapshot:build`             | here (#330), `docs/golden-snapshot.md`                                                   |
 
 Two entry files keep `node:child_process` (the Docker-Launcher's way of starting a process) out of the serverless
 bundle (none of ours: the Sandbox SDK's dependency tree holds `execa` for a local-development token fetch and `undici`; the
