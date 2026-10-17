@@ -95,7 +95,9 @@ const renders = [
       <LlmSettingsPageContent
         workspaceSlug="acme"
         canManage
-        keyStatus={{ state: "not_configured" }}
+        keyStatuses={[
+          { provider: "openrouter", status: { state: "not_configured" } },
+        ]}
         summary={{ configured: false, reason: "no_key" }}
       />
     ),
@@ -108,7 +110,7 @@ const renders = [
       <AdvancedSettingsPageContent
         workspaceSlug="acme"
         canManageKey
-        keyConfigured
+        keys={[{ provider: "openrouter", configured: true }]}
         canResetDefaults
       />
     ),

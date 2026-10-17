@@ -16,6 +16,7 @@ import { secondsLeft } from "../auth/sign-in-limit.ts";
 import type { LlmProvider } from "./config.ts";
 import { DEFAULT_LLM_PROVIDER } from "./providers/index.ts";
 import { llmProviderAdapters } from "./providers/server.ts";
+import type { LlmProviderAdapter } from "./providers/types.ts";
 import {
   KEY_TEST_TIMEOUT_MS,
   LLM_KEY_TEST_FAILURE_CODES,
@@ -23,6 +24,9 @@ import {
   type LlmKeyCheck,
   type LlmKeyTestFailureCode,
 } from "./providers/types.ts";
+
+/** The adapters the key test reads: the server's registry, or a test's own. */
+type Adapters = { get(id: LlmProvider): Pick<LlmProviderAdapter, "testKey"> };
 
 export { KEY_TEST_TIMEOUT_MS, LLM_KEY_TEST_FAILURE_CODES };
 export type { LlmKeyCheck, LlmKeyTestFailureCode };
@@ -37,6 +41,7 @@ export function checkLlmKey({
   provider = DEFAULT_LLM_PROVIDER,
   fetchImpl,
   timeoutMs,
+  adapters = llmProviderAdapters,
 }: {
   /** The provider's API address (src/llm/endpoint.ts), never a value from a request. */
   baseUrl: string;
@@ -44,8 +49,10 @@ export function checkLlmKey({
   provider?: LlmProvider;
   fetchImpl?: FetchLike;
   timeoutMs?: number;
+  /** The providers the app supports; a test passes its own. */
+  adapters?: Adapters;
 }): Promise<LlmKeyCheck> {
-  return llmProviderAdapters.get(provider).testKey({
+  return adapters.get(provider).testKey({
     baseUrl,
     apiKey,
     ...(fetchImpl === undefined ? {} : { fetchImpl }),
@@ -79,6 +86,7 @@ export function createLlmKeyTestService({
   baseUrlOf,
   fetchImpl,
   timeoutMs,
+  adapters,
   now = () => new Date(),
   log = console.error,
 }: {
@@ -87,6 +95,8 @@ export function createLlmKeyTestService({
   baseUrlOf: (provider: LlmProvider) => string;
   fetchImpl?: FetchLike;
   timeoutMs?: number;
+  /** The providers the app supports; a test passes its own. */
+  adapters?: Adapters;
   now?: () => Date;
   log?: (line: string) => void;
 }): LlmKeyTestService {
@@ -124,6 +134,7 @@ export function createLlmKeyTestService({
         provider,
         ...(fetchImpl === undefined ? {} : { fetchImpl }),
         ...(timeoutMs === undefined ? {} : { timeoutMs }),
+        ...(adapters === undefined ? {} : { adapters }),
       });
       if (!result.ok) log(`[llm] KEY_TEST_FAILED: ${result.error}`);
       return result;

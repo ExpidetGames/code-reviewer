@@ -373,7 +373,7 @@ export async function startRunnerApiHarness(
   async function setLlmKey(key: string | null): Promise<void> {
     const keys = llm.keyServiceFor(fixture.workspaceId);
     if (key === null) {
-      await keys.remove();
+      await keys.remove("openrouter");
       return;
     }
     const saved = await keys.save(

@@ -271,7 +271,9 @@ describe("removing or replacing the key of a workspace", () => {
     await saveKey(h, first.workspaceId, KEY_A);
     const running = await h.claimed();
 
-    expect(await h.llm.keyServiceFor(first.workspaceId).remove()).toBe(true);
+    expect(
+      await h.llm.keyServiceFor(first.workspaceId).remove("openrouter"),
+    ).toBe(true);
     const next = await h.claim();
     const heartbeat = await h.heartbeat(running.job.id, running.job.leaseToken);
     const complete = await h.complete(running.job.id, running.job.leaseToken);
@@ -348,7 +350,7 @@ describe("removing or replacing the key of a workspace", () => {
     const job = await h.enqueueNew();
     await saveKey(h, job.workspaceId, PLAIN_KEY_A);
     const claimed = await h.claimed();
-    await h.llm.keyServiceFor(job.workspaceId).remove();
+    await h.llm.keyServiceFor(job.workspaceId).remove("openrouter");
 
     await h.anotherInstance().complete(job.id, claimed.job.leaseToken, {
       logTail: `the provider refused ${PLAIN_KEY_A}`,

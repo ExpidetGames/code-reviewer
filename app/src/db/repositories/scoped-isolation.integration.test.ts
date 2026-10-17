@@ -252,6 +252,16 @@ async function seed(
     lastFour: null,
     updatedBy: `user-${tag}`,
   });
+  // #426-T10: the key of a second provider has a name of its own in the same workspace.
+  await repos.workspaceSecrets.put({
+    name: "llm_api_key.fakeai",
+    binding: `fakeai-${tag}`,
+    ciphertext: `ciphertext-fakeai-${tag}`,
+    nonce: `nonce-fakeai-${tag}`,
+    keyVersion: 1,
+    lastFour: null,
+    updatedBy: `user-${tag}`,
+  });
   return {
     workspaceId,
     userId: `user-${tag}`,
@@ -795,6 +805,32 @@ const CASES: Case[] = [
   {
     name: "workspaceSecrets.remove",
     run: (a) => a.workspaceSecrets.remove("llm_api_key"),
+    expectAnswer: (answer) => expect(answer).toBe(true),
+  },
+  // #426-T10: the same, for the name of a second provider's key
+  {
+    name: "workspaceSecrets.get (provider-qualified name)",
+    run: (a) => a.workspaceSecrets.get("llm_api_key.fakeai"),
+    expectAnswer: (answer) =>
+      expect(answer).toMatchObject({ binding: "fakeai-a" }),
+  },
+  {
+    name: "workspaceSecrets.put (provider-qualified name)",
+    run: (a) =>
+      a.workspaceSecrets.put({
+        name: "llm_api_key.fakeai",
+        binding: "fakeai-a-changed",
+        ciphertext: "ciphertext-fakeai-a-changed",
+        nonce: "nonce-fakeai-a-changed",
+        keyVersion: 1,
+        lastFour: null,
+        updatedBy: null,
+      }),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
+    name: "workspaceSecrets.remove (provider-qualified name)",
+    run: (a) => a.workspaceSecrets.remove("llm_api_key.fakeai"),
     expectAnswer: (answer) => expect(answer).toBe(true),
   },
   // entitlements: one row per workspace, so the scope alone decides whose row it is
