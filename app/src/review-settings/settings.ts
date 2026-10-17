@@ -78,6 +78,16 @@ export const PROJECT_REVIEW_KINDS = ["diff", "dynamic"] as const;
 export type ProjectReviewKind = (typeof PROJECT_REVIEW_KINDS)[number];
 
 /**
+ * What a finished review does on its pull request besides the check run (#405): `off` submits no review, `blocking`
+ * submits `REQUEST_CHANGES` while a blocking finding is open and `APPROVE` otherwise, `any` treats every open
+ * finding as blocking. A Dynamic finding blocks at the highest priority (`P0`); a Diff finding has no severity, so
+ * `blocking` submits nothing for a Diff review (src/check-runs/README.md). A project setting, like the review kind.
+ */
+export const REVIEW_VERDICT_MODES = ["off", "blocking", "any"] as const;
+export type ReviewVerdictMode = (typeof REVIEW_VERDICT_MODES)[number];
+export const DEFAULT_REVIEW_VERDICT_MODE: ReviewVerdictMode = "blocking";
+
+/**
  * The default model of Dynamic Review. It is a **default, not an allow-list**: a project may name any
  * model the configured provider serves (#194-T08), and the operator's model/provider resolution is
  * #197's business, not a project setting. No hosting-provider or routing field exists.
