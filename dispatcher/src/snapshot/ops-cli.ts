@@ -147,6 +147,9 @@ async function runDecide(
           `image-digest=${decision.pair.imageDigest}`,
           `commit=${decision.pair.commit}`,
         ]),
+    ...(decision.previous === undefined
+      ? []
+      : [`previous-snapshot-id=${decision.previous.snapshotId}`]),
   ];
   deps.appendText(output, `${lines.join("\n")}\n`);
   deps.stderr(

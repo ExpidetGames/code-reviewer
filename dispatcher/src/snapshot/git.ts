@@ -31,7 +31,7 @@ export async function commitKnown(
   return (await git(directory, ["cat-file", "-e", `${commit}^{commit}`])) === 0;
 }
 
-/** Whether any of the paths differs between the two commits. Throws when it cannot tell (a missing commit, no git). */
+/** Whether any of the paths (from the top of the repository, wherever the command runs) differs between the two commits. Throws when it cannot tell (a missing commit, no git). */
 export async function pathsChanged(
   directory: string,
   from: string,
@@ -46,7 +46,7 @@ export async function pathsChanged(
     from,
     to,
     "--",
-    ...paths,
+    ...paths.map((path) => `:(top)${path}`),
   ]);
   if (status === 0) return false;
   if (status === 1) return true;

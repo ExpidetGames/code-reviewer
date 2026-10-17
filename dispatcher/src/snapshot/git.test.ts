@@ -83,6 +83,17 @@ describe("the git questions of the snapshot decision", () => {
   });
 
   // #403-T13
+  it("reads the paths from the top of the repository, whichever folder the command runs in", async () => {
+    const inner = join(dir, "dispatcher");
+    mkdirSync(inner, { recursive: true });
+    expect(await pathsChanged(inner, docsOnly, runnerChanged, ["runner"])).toBe(
+      true,
+    );
+    expect(await pathsChanged(inner, first, docsOnly, ["runner"])).toBe(false);
+    expect(await commitKnown(inner, first)).toBe(true);
+  });
+
+  // #403-T13
   it("takes a commit as a commit, never as an option", async () => {
     expect(await commitKnown(dir, "--output=/tmp/x")).toBe(false);
     await expect(

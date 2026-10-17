@@ -56,6 +56,8 @@ describe("whether the snapshot has to be rebuilt", () => {
 
     expect(decision).toMatchObject({ rebuild: true, reason: "inputs_changed" });
     expect(decision.pair).toBeUndefined();
+    // The pair that production runs now is the one to keep next to the new one.
+    expect(decision.previous).toEqual(PAIR);
   });
 
   // #403-T13
@@ -77,6 +79,7 @@ describe("whether the snapshot has to be rebuilt", () => {
     });
 
     expect(decision).toMatchObject({ rebuild: true, reason: "pair_missing" });
+    expect(decision.previous).toBeUndefined();
   });
 
   // #403-T13
@@ -86,6 +89,7 @@ describe("whether the snapshot has to be rebuilt", () => {
     const decision = await decide({ sha: NEW, force: true, deps: d });
 
     expect(decision).toMatchObject({ rebuild: true, reason: "forced" });
+    expect(decision.previous).toEqual(PAIR);
     expect(d.asked).toEqual([]);
   });
 

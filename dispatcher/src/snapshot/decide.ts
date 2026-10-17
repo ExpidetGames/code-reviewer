@@ -23,6 +23,8 @@ export type Decision = {
   reason: DecideReason;
   /** The pair this deployment uses; only when nothing is rebuilt. */
   pair?: SnapshotPair;
+  /** The pair production runs now, when there is one: the snapshot to keep next to a new one. */
+  previous?: SnapshotPair;
   /** The variables of the project differ from the live pair: write the pair to them again after the promotion. */
   repair: boolean;
 };
