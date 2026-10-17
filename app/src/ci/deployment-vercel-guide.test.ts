@@ -248,9 +248,9 @@ describe("the App section of the guide against the code", () => {
     // APP_RUNTIME is selected by the platform's own marker, so the code does not demand it: the guide says "set it".
     expect(resolveRuntimeMode({ VERCEL: "1" })).toBe("serverless");
     expect(row("APP_RUNTIME").required).toBe("yes, set it");
-    // RUNNER_DISPATCH is `poll` without it: the guide asks for it in step 7 only.
+    // RUNNER_DISPATCH is `poll` without it: the guide asks for it in step 5 only.
     expect(dispatchConfigProblems({})).toEqual([]);
-    expect(row("RUNNER_DISPATCH").required).toContain("in step 7");
+    expect(row("RUNNER_DISPATCH").required).toContain("in step 5");
   });
 
   // #333-T04
@@ -414,7 +414,7 @@ describe("the App section of the guide against the code", () => {
   it("states the setup code's lifetime", () => {
     expect(
       section(
-        "### Step 3. The setup code, then the first-run setup in the browser",
+        "### Step 4. The setup code, then the first-run setup in the browser",
       ),
     ).toMatch(
       new RegExp(`valid for ${String(SETUP_CODE_TTL_MS / 60_000)}\\s+minutes`),
@@ -475,11 +475,9 @@ describe("the hosted deployment guide and vercel.json", () => {
 describe("the hosted deployment guide as a procedure", () => {
   const TITLES = [
     "Migrate the database",
-    "Deploy the App (still in poll mode)",
+    "Put the variables into Infisical (still in poll mode)",
+    "First deployment",
     "The setup code, then the first-run setup in the browser",
-    "Build the golden snapshot",
-    "Deploy the Dispatcher",
-    "Run the canary",
     "Switch the App to webhook mode",
     "Smoke test: a Diff review, then a Dynamic review",
   ];
@@ -498,12 +496,13 @@ describe("the hosted deployment guide as a procedure", () => {
   });
 
   // #333-T01
-  it("puts into each step what belongs to it, and the webhook only into step 7", () => {
+  // #403-T11
+  it("puts into each step what belongs to it, and the webhook only into step 5", () => {
     expect(step(1)).toContain("pnpm --dir app migrate");
     expect(step(1)).toContain("read -rs");
     expect(step(1)).not.toContain("setup-code");
 
-    // Poll mode first: the App is deployed with its cron secret and its address, without any webhook variable.
+    // Poll mode first: the App is configured with its cron secret and its address, without any webhook variable.
     expect(step(2)).toContain("`BETTER_AUTH_URL`");
     expect(step(2)).toContain("`CRON_SECRET`");
     expect(step(2)).toContain("production domain");
@@ -512,28 +511,28 @@ describe("the hosted deployment guide as a procedure", () => {
     );
     expect(step(2)).not.toContain("RUNNER_DISPATCH=webhook");
     expect(step(2)).not.toContain("RUNNER_WEBHOOK_URL=");
-
-    expect(step(3)).toContain("pnpm --dir app setup-code");
-    expect(step(3)).toContain("/api/webhooks/github-app");
-    expect(step(3)).toContain("`/admin/llm`");
-
-    // The snapshot comes before the Dispatcher, and the Dispatcher takes its values from the record.
-    expect(step(4)).toContain("golden-snapshot.yml");
-    expect(flat(step(4))).toContain(
-      "`pinned_snapshot` stays empty on the first run",
+    // The Dispatcher's variables go in too, and the snapshot keys are left to the pipeline.
+    expect(step(2)).toContain("`RUNNER_API_URL`");
+    expect(step(2)).toContain("`DISPATCHER_MAX_RUNNING`");
+    expect(flat(step(2))).toContain(
+      "**Leave the three `SANDBOX_SNAPSHOT_*` keys unset**",
     );
-    expect(step(4)).toContain("golden-snapshot-record");
-    expect(step(4)).not.toContain("SANDBOX_SNAPSHOT_ID");
-    expect(flat(step(5))).toContain(
-      "`SANDBOX_SNAPSHOT_ID` and `SANDBOX_IMAGE_DIGEST` from the record",
-    );
-    expect(step(5)).toContain("`CRON_SECRET`");
-    expect(step(5)).toContain("`DISPATCHER_CANARY_HOSTS`");
-    expect(step(5)).toContain("`RUNNER_API_URL`");
 
-    expect(flat(step(6))).toContain("*Dispatcher canary*");
-    expect(step(6)).toContain("POST /probe");
-    expect(step(6)).toContain("section 5.1");
+    // The first deployment is the workflow: snapshot, canary and promotion included, nothing by hand.
+    expect(step(3)).toContain("*Deploy production*");
+    expect(step(3)).toContain("`persist`");
+    expect(step(3)).toContain("`cleanup`");
+    expect(flat(step(3))).toContain("*Dispatcher canary*");
+    expect(flat(step(3))).toContain("asks the Vercel API");
+    expect(flat(step(3))).toContain("`canary_image_mismatch`");
+    expect(step(3)).toContain("POST /probe");
+    expect(step(3)).toContain("`SCHEMA_BEHIND`");
+    expect(step(3)).toContain("`CRON_SECRET`");
+    expect(step(3)).not.toContain("vercel deploy --prebuilt --prod\n");
+
+    expect(step(4)).toContain("pnpm --dir app setup-code");
+    expect(step(4)).toContain("/api/webhooks/github-app");
+    expect(step(4)).toContain("`/admin/llm`");
 
     for (const name of [
       "RUNNER_DISPATCH=webhook",
@@ -542,16 +541,18 @@ describe("the hosted deployment guide as a procedure", () => {
       "RUNNER_WEBHOOK_KEY_ID",
       "RUNNER_DISPATCH_MAX_RUNNING",
     ])
-      expect(step(7), name).toContain(name);
-    expect(step(7)).toContain("`dispatch_unavailable`");
-    expect(step(7)).toContain("Switch soon after step 3");
-    expect(step(7)).toContain("RUNNER_DISPATCH_GIVE_UP_SECONDS");
+      expect(step(5), name).toContain(name);
+    expect(step(5)).toContain("`dispatch_unavailable`");
+    expect(step(5)).toContain("Switch soon after step 4");
+    expect(step(5)).toContain("RUNNER_DISPATCH_GIVE_UP_SECONDS");
+    for (const earlier of [1, 2, 3, 4])
+      expect(step(earlier)).not.toContain("RUNNER_DISPATCH=webhook");
 
-    expect(step(8).indexOf("**Diff.**")).toBeGreaterThanOrEqual(0);
-    expect(step(8).indexOf("**Diff.**")).toBeLessThan(
-      step(8).indexOf("**Dynamic.**"),
+    expect(step(6).indexOf("**Diff.**")).toBeGreaterThanOrEqual(0);
+    expect(step(6).indexOf("**Diff.**")).toBeLessThan(
+      step(6).indexOf("**Dynamic.**"),
     );
-    expect(step(8)).toContain("**Done when:**");
+    expect(step(6)).toContain("**Done when:**");
   });
 
   // #333-T01
@@ -577,18 +578,19 @@ describe("the hosted deployment guide as a procedure", () => {
       /(?:APP_SECRET|RUNNER_TOKEN|PASSWORD|_PW|SECRET)=['"][^$<'"\s]/,
     );
     expect(guide).not.toMatch(/echo [^\n|]*\| *(?:vercel|gh) /);
-    expect(guide).toContain("Prevent self-review");
   });
 
   // #333-T04
   it("describes the release path with a staged production deployment, not a preview", () => {
-    const rebuild = section("### 5.1 Rebuild the snapshot (with a pin)");
+    const rebuild = section(
+      "### 5.1 The golden snapshot: built, wired in and cleaned up by the pipeline",
+    );
 
-    expect(rebuild).toContain("vercel deploy --prod --skip-domain");
-    expect(rebuild).toContain("vercel promote");
-    expect(rebuild).toContain("`DISPATCHER_CANARY_HOSTS`");
-    expect(rebuild).toContain("`VERCEL_AUTOMATION_BYPASS_SECRET`");
-    expect(rebuild).toContain("Why not a preview deployment");
+    expect(flat(rebuild)).toContain(
+      "`vercel deploy --env SANDBOX_SNAPSHOT_ID=...",
+    );
+    expect(rebuild).toContain("**Promote**");
+    expect(rebuild).toContain("`--skip-retention`");
     expect(rebuild).not.toMatch(/Deploy the Dispatcher to a preview/);
   });
 
@@ -662,7 +664,7 @@ describe("the hosted deployment guide as a procedure", () => {
     );
     expect(
       flat(
-        section("### Step 8. Smoke test: a Diff review, then a Dynamic review"),
+        section("### Step 6. Smoke test: a Diff review, then a Dynamic review"),
       ),
     ).toContain("**Push to the open pull request**");
     // What the guide says is what the App's own documentation says about the sweep and the normal flow.
@@ -715,7 +717,7 @@ describe("the hosted deployment guide as a procedure", () => {
   it("covers the operations: pin, rotation, the three codes and rollback", () => {
     const operations = section("## 5. Operations");
 
-    expect(operations).toContain("`pinned_snapshot`");
+    expect(operations).toContain("`snapshot-decide`");
     expect(operations).toContain("### 5.2 Rotating secrets");
     for (const code of [
       "dispatch_unavailable",
@@ -761,9 +763,15 @@ describe("the hosted deployment guide as a procedure", () => {
     expect(needs).toContain("**A GitHub App for the hosted instance.**");
     expect(needs).toContain("`app/`");
     expect(needs).toContain("`dispatcher/`");
-    expect(needs).toContain("`hosted-snapshot`");
-    expect(needs).toContain("`hosted-canary`");
-    expect(needs).toContain("`DISPATCHER_CANARY_HOSTS`");
+    // The former environments and the list of hosts are retired, and the guide says so.
+    for (const name of [
+      "`hosted-snapshot`",
+      "`hosted-canary`",
+      "`DISPATCHER_CANARY_HOSTS`",
+    ])
+      expect(flat(needs), name).toMatch(
+        new RegExp(`${name}[^.]*\\*\\*retired\\*\\*|[Rr]etired:[^\\n]*${name}`),
+      );
   });
 });
 
@@ -897,5 +905,285 @@ describe("the hosted deployment guide as a document", () => {
           `${file}: ${host}`,
         ).toBe(true);
     }
+  });
+});
+
+describe("the deployment pipeline in the guide", () => {
+  const setup = section("### 2.1 Setup of the deployment pipeline (once)");
+  const workflowFiles = [
+    ".github/workflows/deploy-production.yml",
+    ".github/workflows/vercel-stage.yml",
+    ".github/workflows/dispatcher-canary.yml",
+    ".github/workflows/golden-snapshot.yml",
+    ".github/workflows/rollback-production.yml",
+  ].map((path) => read(path));
+  const everything = [
+    ...workflowFiles,
+    read(".github/actions/infisical-ci-secrets/action.yml"),
+  ].join("\n");
+
+  // #403-T11
+  it("lists the GitHub side: the environment production, its branch rule and its four secrets, as secrets", () => {
+    expect(setup).toContain("**`production`**");
+    expect(flat(setup)).toContain("only the branch `main`");
+    for (const name of [
+      "INFISICAL_CLIENT_ID",
+      "INFISICAL_CLIENT_SECRET",
+      "INFISICAL_DOMAIN",
+      "INFISICAL_PROJECT_SLUG",
+    ]) {
+      expect(setup, name).toContain(`| \`${name}\``);
+      expect(everything, name).toContain(`secrets.${name}`);
+      expect(everything, name).not.toContain(`vars.${name}`);
+    }
+    expect(flat(setup)).toContain("**not** variables");
+  });
+
+  // #403-T11
+  it("lists every key of /ci that a workflow loads, and no other", () => {
+    const loaded = new Set<string>();
+    for (const text of workflowFiles)
+      for (const match of text.matchAll(/secret-names: (.+)/g))
+        for (const name of (match[1] as string).split(" "))
+          if (/^[A-Z][A-Z0-9_]+$/.test(name)) loaded.add(name);
+    loaded.delete("VERCEL_ORG_ID");
+    const ci = (setup.split("The keys of **`/ci`**")[1] ?? "").split(
+      "**Infisical Secret Sync**",
+    )[0] as string;
+    const documented = [...ci.matchAll(/^\s*\| `([A-Z][A-Z0-9_]+)` \|/gm)].map(
+      (match) => match[1] as string,
+    );
+    // The project id of the stage job is a parameter of the caller.
+    for (const name of [
+      "VERCEL_APP_PROJECT_ID",
+      "VERCEL_DISPATCHER_PROJECT_ID",
+    ])
+      loaded.add(name);
+    expect(documented.sort()).toEqual([...loaded].sort());
+    expect(documented).toHaveLength(8);
+  });
+
+  // #403-T11
+  it("lists the three Infisical folders, the two Secret Syncs, the shared values and the read-only machine identity", () => {
+    expect(setup).toContain("`/ci`");
+    expect(setup).toContain("`/app`");
+    expect(setup).toContain("`/dispatcher`");
+    expect(setup).toContain("`prod`");
+    expect(flat(setup)).toContain(
+      "source `prod` `/app` to the **App** project, environment **Production**",
+    );
+    expect(flat(setup)).toContain(
+      "source `prod` `/dispatcher` to the **Dispatcher** project, environment **Production**",
+    );
+    expect(setup).toContain("Infisical secret references");
+    for (const name of [
+      "RUNNER_TOKEN",
+      "RUNNER_WEBHOOK_SECRET",
+      "DISPATCHER_SIGNING_SECRET",
+      "RUNNER_DISPATCH_MAX_RUNNING",
+      "DISPATCHER_MAX_RUNNING",
+      "BETTER_AUTH_URL",
+      "RUNNER_API_URL",
+    ])
+      expect(setup, name).toContain(`\`${name}\``);
+    expect(setup).toContain("**Universal Auth**");
+  });
+
+  // #403-T19
+  it("describes the one identity's role exactly: read /ci, create and edit three keys of /dispatcher, nothing else", () => {
+    const text = flat(setup);
+    expect(text).toContain("**one** identity");
+    expect(setup).toContain(
+      "| Secrets: describe and read value | `prod` | `/ci` | any |",
+    );
+    expect(setup).toContain(
+      "| Secrets: describe, create and edit | `prod` | `/dispatcher` | `SANDBOX_SNAPSHOT_ID`, `SANDBOX_IMAGE_DIGEST`, `SANDBOX_SNAPSHOT_COMMIT` |",
+    );
+    expect(text).toContain("**No** read of `/app` or `/dispatcher`");
+    expect(text).toContain("recommended hardening");
+    expect(text).toContain("The pipeline does not depend on it");
+    expect(guide).not.toMatch(
+      /INFISICAL_\w*SNAPSHOT\w*|second (machine )?identity/,
+    );
+    expect(text).toContain(
+      "`persist` job of `deploy-production.yml` and the `rollback` job of `rollback-production.yml`",
+    );
+  });
+
+  // #403-T19
+  it("explains the failure behaviour: before the promotion nothing changes, after a failed persist the next run repairs", () => {
+    const snapshot = flat(
+      section(
+        "### 5.1 The golden snapshot: built, wired in and cleaned up by the pipeline",
+      ),
+    );
+    expect(snapshot).toContain("**If the run fails before the promotion**");
+    expect(snapshot).toContain("`discard` job removes");
+    // The outcome of a promotion that failed or timed out is unknown, and the snapshot is left alone.
+    expect(snapshot).toContain("the outcome is unknown");
+    expect(snapshot).toContain(
+      "`discard` runs only when the promotion never started",
+    );
+    expect(snapshot).toContain(
+      "**If the promotion succeeded and `persist` failed:**",
+    );
+    expect(snapshot).toContain("**prefers it over the variables**");
+    expect(snapshot).toContain("**only after the Dispatcher is live**");
+    expect(snapshot).toContain("**after every promotion of the Dispatcher**");
+    expect(snapshot).toContain("the previous one");
+    expect(snapshot).toContain("`IMAGE_INPUT_PATHS`");
+    expect(snapshot).toContain(
+      "A release that changes the Worker image needs nothing from you",
+    );
+  });
+
+  // #403-T11
+  it("writes every Infisical reference as ${<env>.<folder>.<KEY>} with the environment slug first", () => {
+    const references = [
+      ...guide.matchAll(/\$\{([A-Za-z0-9_]+\.[A-Za-z0-9_.]+)\}/g),
+    ].map((match) => match[1] as string);
+    expect(references.length).toBeGreaterThanOrEqual(6);
+    for (const reference of references)
+      expect(reference, reference).toMatch(
+        /^prod\.(ci|app|dispatcher)\.[A-Z][A-Z0-9_]+$/,
+      );
+    expect(guide).not.toMatch(/\$\{(ci|app|dispatcher)\./);
+    expect(flat(setup)).toContain("environment slug first");
+  });
+
+  // #403-T11
+  it("says where the GitHub App credentials and the model keys come from, since no folder holds them", () => {
+    const text = flat(setup);
+    expect(text).toContain("no GitHub App credential and no model API key");
+    expect(text).toContain("encrypted with `APP_SECRET`");
+    expect(text).toContain("/admin/llm");
+  });
+
+  // #403-T11
+  it("lists the Vercel dashboard steps: the root directories, Git auto-deploy off and the bypass", () => {
+    expect(setup).toContain("**Root Directory**");
+    expect(setup).toContain("`app`");
+    expect(setup).toContain("`dispatcher`");
+    expect(setup).toContain("**Git auto-deploy off.**");
+    expect(setup).toContain('"git": { "deploymentEnabled": false }');
+    expect(setup).toContain("**Protection Bypass for Automation**");
+  });
+
+  // #403-T11
+  it("marks the retired environments and the list of hosts as retired, and no workflow uses them", () => {
+    for (const name of [
+      "hosted-snapshot",
+      "hosted-canary",
+      "DISPATCHER_CANARY_HOSTS",
+    ]) {
+      expect(setup, name).toContain(name);
+      expect(everything, name).not.toContain(name);
+    }
+    expect(setup).toMatch(/Retired: the environments/);
+  });
+
+  // #403-T11
+  it("names the pipeline's jobs in their order and the rollback workflow", () => {
+    const update = section("### 5.6 Updating the App or the Dispatcher");
+    const order = [
+      "fresh",
+      "migrate",
+      "snapshot-decide",
+      "snapshot-build",
+      "stage-app",
+      "stage-dispatcher",
+      "health-app",
+      "canary",
+      "promote-app",
+      "persist",
+      "cleanup",
+      "discard",
+      "record",
+    ].map((job) => update.indexOf(`| \`${job}\``));
+    expect(order.every((index) => index >= 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    expect(update).toContain("`promote-app`, `promote-dispatcher`");
+    expect(update).toContain("SCHEMA_BEHIND");
+    expect(update).toContain("deploy-production");
+    expect(flat(update)).toContain("Merging it is the whole release");
+    expect(section("## 7. Rolling back")).toContain("*Rollback production*");
+  });
+});
+
+describe("the snapshot keys, the rollback and the build in the guide", () => {
+  const setup = flat(
+    section("### 2.1 Setup of the deployment pipeline (once)"),
+  );
+  const snapshot = flat(
+    section(
+      "### 5.1 The golden snapshot: built, wired in and cleaned up by the pipeline",
+    ),
+  );
+
+  // #403-T25
+  it("tells the operator not to create the three snapshot keys and not to give them a placeholder, and says why", () => {
+    expect(setup).toContain(
+      "**Do not create them, and do not give them a placeholder.**",
+    );
+    expect(setup).toContain("Absent is the supported state");
+    expect(setup).toContain("`ConfigError`");
+    // Nothing in the guide suggests a placeholder value, and the first step leaves the keys out.
+    expect(guide).not.toMatch(/with the value `unset`|value `unset`/);
+    expect(guide).not.toMatch(/Create them once/);
+    expect(
+      flat(
+        section(
+          "### Step 2. Put the variables into Infisical (still in poll mode)",
+        ),
+      ),
+    ).toContain("**Leave the three `SANDBOX_SNAPSHOT_*` keys unset**");
+    expect(setup).toContain(
+      "a 403 on that first write means the role lacks it",
+    );
+  });
+
+  // #403-T21
+  it("says that a pair whose snapshot is gone is rebuilt, and that a rollback to a deployment whose snapshot is gone is refused", () => {
+    expect(snapshot).toContain("`snapshot_missing`");
+    expect(snapshot).toContain("`snapshot_lookup_failed`");
+    expect(snapshot).toContain("`live_pair_unavailable`");
+    const rollback = flat(section("## 7. Rolling back"));
+    expect(rollback).toContain("**refuses with `rollback_snapshot_missing`**");
+    expect(rollback).toContain("before it touches either project");
+  });
+
+  // #403-T14
+  it("describes the image inputs as exactly what the build consumes, and what is not an input", () => {
+    expect(snapshot).toContain("`IMAGE_INPUT_PATHS`");
+    expect(snapshot).toContain("`scripts.ts`");
+    expect(snapshot).toContain(
+      "The tests of `runner/`, its README and the logic of the deployment steps are not inputs",
+    );
+  });
+
+  // #403-T26
+  it("states what the build sees: the production runtime variables, not the token", () => {
+    const text = flat(section("### 3.4 The GitHub side"));
+    expect(text).toContain("**What the build sees.**");
+    expect(text).toContain("`.vercel/.env.production.local`");
+    expect(text).toContain("without the Vercel token");
+  });
+
+  // #403-T26
+  it("lists what is accepted or not verified: the deployment records, the mixed trio, targets.production after a rollback", () => {
+    const followUps = flat(section("## 10. Follow-ups"));
+    expect(followUps).toContain(
+      "**Accepted:** every job that runs in the environment `production`",
+    );
+    expect(followUps).toContain("written one after the other");
+    expect(guide).toContain(
+      "`targets.production` of the project follows a `vercel rollback`",
+    );
+  });
+
+  // #403-T21
+  it("says that this guide is for a new installation and what a hand-made pair does", () => {
+    expect(flat(guide)).toContain("This guide is for a **new installation**");
+    expect(flat(guide)).toContain("keeps the old one as the previous snapshot");
   });
 });

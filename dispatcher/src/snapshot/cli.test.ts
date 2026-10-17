@@ -235,6 +235,44 @@ describe("the snapshot command", () => {
     expect(h.fake.vms.size).toBe(0);
   });
 
+  // #403-T17
+  it("leaves the builders of earlier runs alone with --skip-retention: the deployment pipeline cleans up after it is live", async () => {
+    const fake = happyFake();
+    const old = fake.seedBuilder(
+      "code-reviewer-golden-builder-20260101T000000Z",
+      1,
+    );
+    const older = fake.seedBuilder(
+      "code-reviewer-golden-builder-20260201T000000Z",
+      2,
+    );
+    const h = harness({ fake });
+
+    expect(await runCli([...ARGS, "--skip-retention"], h.deps)).toBe(0);
+
+    const live = fake.liveSnapshotIds();
+    expect(live).toContain(old);
+    expect(live).toContain(older);
+    expect(live).toHaveLength(3);
+    expect(h.stderr.join("\n")).not.toContain("retention_removed");
+  });
+
+  // #403-T17
+  it("still removes the check VM with --skip-retention", async () => {
+    const fake = happyFake();
+    const h = harness({ fake });
+
+    await runCli([...ARGS, "--skip-retention"], h.deps);
+
+    expect(
+      [...fake.vms.values()].filter(
+        (vm) =>
+          vm.name.startsWith("code-reviewer-golden-check-") &&
+          vm.state !== "deleted",
+      ),
+    ).toEqual([]);
+  });
+
   it("prints retention warnings as log lines and still succeeds", async () => {
     const fake = happyFake();
     fake.seedBuilder("code-reviewer-golden-builder-20260101T000000Z", 1, false);
