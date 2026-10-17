@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// `pnpm snapshot:ops <decide|persist|cleanup>` (#403): the steps of the deployment pipeline that look after the
+// `pnpm snapshot:ops <decide|persist|exists|verify|cleanup>` (#403): the steps of the deployment pipeline that look after the
 // golden snapshot around a deployment, in one command so that the logic is testable apart from the workflow.
 //
 //   decide    does the Worker image need a new snapshot? Writes the answer and the pair to use as step outputs.
 //   persist   writes a pair to Infisical `prod` `/dispatcher` (after the promotion, or for a rollback).
+//   exists    is the golden snapshot (PAIR_SNAPSHOT_ID) still there? (before a deployment uses it)
 //   verify    is a deployment a ready production deployment of the project? (before a rollback)
 //   cleanup   removes the snapshots that are neither the current one, the previous one nor the live one; or
 //             discards the snapshot of a run that did not reach production.
@@ -22,11 +23,12 @@ import {
   isCommit,
   isSnapshotId,
   pairFrom,
+  PAIR_VARIABLES,
   pairFromValues,
   parseDotenv,
   type SnapshotPair,
 } from "./pair.ts";
-import { BUILDER_PREFIX } from "./pipeline.ts";
+import { BUILDER_PREFIX } from "./names.ts";
 import {
   livePair,
   pairOfDeployment,
@@ -52,7 +54,12 @@ export type OpsDeps = {
     credentials: VercelCredentials,
   ): SnapshotService | Promise<SnapshotService>;
   fetch: typeof fetch;
+  /** Milliseconds since the epoch. */
+  now(): number;
 };
+
+/** A builder that has lived this long without a snapshot is the leftover of a build that was killed (builds time out). */
+const BUILD_MAX_AGE_MS = 3 * 3_600_000;
 
 class Usage extends Error {}
 
@@ -88,6 +95,27 @@ function required(env: OpsDeps["env"], names: readonly string[]): void {
   for (const name of names) if (!env[name]) throw new Usage(name);
 }
 
+/** Whether a golden snapshot is still there. "unavailable" is not "no". */
+async function snapshotExists(
+  deps: OpsDeps,
+  auth: VercelAuth,
+  snapshotId: string,
+): Promise<"yes" | "no" | "unavailable"> {
+  try {
+    const service = await deps.createService({
+      token: auth.token,
+      teamId: auth.teamId,
+      projectId: auth.projectId,
+    });
+    const builders = await service.listBuilders(BUILDER_PREFIX);
+    return builders.some((builder) => builder.snapshotId === snapshotId)
+      ? "yes"
+      : "no";
+  } catch {
+    return "unavailable";
+  }
+}
+
 function vercelAuth(env: OpsDeps["env"]): VercelAuth {
   required(env, ["VERCEL_TOKEN", "VERCEL_TEAM_ID", "VERCEL_PROJECT_ID"]);
   return {
@@ -118,27 +146,48 @@ async function runDecide(
   const auth = vercelAuth(deps.env);
 
   let configured: SnapshotPair | undefined;
+  let projectSnapshotId: string | undefined;
   try {
-    configured = pairFrom(parseDotenv(deps.readText(envFile)));
+    const variables = parseDotenv(deps.readText(envFile));
+    configured = pairFrom(variables);
+    const id = variables[PAIR_VARIABLES.snapshotId];
+    projectSnapshotId = isSnapshotId(id) ? id : undefined;
   } catch {
     deps.stderr("ops: env_file_unreadable");
     return 1;
   }
-  const decision = await decide({
-    sha,
-    force: flags.has("--force"),
-    deps: {
-      live: async () => {
-        const lookup = await livePair(auth, deps.fetch);
-        if (lookup.status === "unavailable")
-          deps.stderr("ops: live_pair_unavailable");
-        return lookup.status === "pair" ? lookup.pair : undefined;
+  let decision;
+  try {
+    decision = await decide({
+      sha,
+      force: flags.has("--force"),
+      deps: {
+        live: async () => {
+          const lookup = await livePair(auth, deps.fetch);
+          if (lookup.status === "unavailable")
+            throw new Error("live_pair_unavailable");
+          return lookup.status === "pair" ? lookup.pair : undefined;
+        },
+        projectPair: () => configured,
+        projectSnapshotId: () => projectSnapshotId,
+        snapshotExists: (id) => snapshotExists(deps, auth, id),
+        commitKnown: deps.commitKnown,
+        changed: deps.pathsChanged,
       },
-      projectPair: () => configured,
-      commitKnown: deps.commitKnown,
-      changed: deps.pathsChanged,
-    },
-  });
+    });
+  } catch (error) {
+    // Only the codes decide itself raises are named; anything else is an unexpected error without its text.
+    if (
+      error instanceof Error &&
+      ["live_pair_unavailable", "snapshot_lookup_failed"].includes(
+        error.message,
+      )
+    ) {
+      deps.stderr(`ops: ${error.message}`);
+      return 1;
+    }
+    throw error;
+  }
   const lines = [
     `rebuild=${String(decision.rebuild)}`,
     `reason=${decision.reason}`,
@@ -150,9 +199,9 @@ async function runDecide(
           `image-digest=${decision.pair.imageDigest}`,
           `commit=${decision.pair.commit}`,
         ]),
-    ...(decision.previous === undefined
+    ...(decision.previousSnapshotId === undefined
       ? []
-      : [`previous-snapshot-id=${decision.previous.snapshotId}`]),
+      : [`previous-snapshot-id=${decision.previousSnapshotId}`]),
   ];
   deps.appendText(output, `${lines.join("\n")}\n`);
   deps.stderr(
@@ -222,21 +271,64 @@ async function runVerify(
   argv: readonly string[],
   deps: OpsDeps,
 ): Promise<number> {
-  const { values } = parseOptions(argv, ["--deployment"], []);
+  const { values, flags } = parseOptions(
+    argv,
+    ["--deployment"],
+    ["--check-snapshot"],
+  );
   const deployment = values.get("--deployment");
   if (deployment === undefined || !DEPLOYMENT.test(deployment))
     throw new Usage("--deployment");
-  const answer = await productionDeployment(
-    vercelAuth(deps.env),
-    deployment.replace(/^https:\/\//, ""),
-    deps.fetch,
-  );
+  const auth = vercelAuth(deps.env);
+  const host = deployment.replace(/^https:\/\//, "");
+  const answer = await productionDeployment(auth, host, deps.fetch);
   if (answer === "unavailable") {
     deps.stderr("ops: deployment_lookup_failed");
     return 1;
   }
   if (answer === "no") {
     deps.stderr("ops: deployment_not_production");
+    return 1;
+  }
+  if (!flags.has("--check-snapshot")) return 0;
+
+  // A rollback puts the deployment back, and with it the snapshot it runs. If that snapshot is gone (the cleanup keeps
+  // the new and the previous one only) the Dispatcher fails every job: refuse, and leave production as it is.
+  const lookup = await pairOfDeployment(auth, host, deps.fetch);
+  if (lookup.status === "unavailable") {
+    deps.stderr("ops: deployment_lookup_failed");
+    return 1;
+  }
+  if (lookup.status === "none") {
+    deps.stderr("ops: deployment_without_pair, no snapshot to check");
+    return 0;
+  }
+  const exists = await snapshotExists(deps, auth, lookup.pair.snapshotId);
+  if (exists === "unavailable") {
+    deps.stderr("ops: snapshot_lookup_failed");
+    return 1;
+  }
+  if (exists === "no") {
+    deps.stderr("ops: rollback_snapshot_missing");
+    return 1;
+  }
+  return 0;
+}
+
+async function runExists(
+  argv: readonly string[],
+  deps: OpsDeps,
+): Promise<number> {
+  parseOptions(argv, [], []);
+  const id = deps.env.PAIR_SNAPSHOT_ID;
+  if (!isSnapshotId(id)) throw new Usage("PAIR_SNAPSHOT_ID");
+  const exists = await snapshotExists(deps, vercelAuth(deps.env), id);
+  if (exists === "unavailable") {
+    deps.stderr("ops: snapshot_lookup_failed");
+    return 1;
+  }
+  if (exists === "no") {
+    deps.stderr("ops: snapshot_missing");
     return 1;
   }
   return 0;
@@ -275,12 +367,22 @@ async function runCleanup(
   const plan = planCleanup(await service.listBuilders(BUILDER_PREFIX), {
     keep,
     ...(discard === undefined ? {} : { discard }),
+    now: deps.now(),
+    minAgeMs: BUILD_MAX_AGE_MS,
+    unmanagedMaxAgeMs: BUILD_MAX_AGE_MS,
   });
   if (plan.refused !== undefined) {
     deps.stderr(`ops: cleanup_refused, ${plan.refused}`);
     return 1;
   }
-  if (plan.unmanaged.length > 0) deps.stderr("ops: builder_without_snapshot");
+  if (plan.unmanaged.length > 0)
+    deps.stdout(
+      `::warning::ops: ${String(plan.unmanaged.length)} builder(s) without a snapshot are younger than a build can last and were left alone\n`,
+    );
+  if (plan.recent.length > 0)
+    deps.stdout(
+      `::warning::ops: ${String(plan.recent.length)} young snapshot(s) that are not kept were left alone (a rehearsal may be using them)\n`,
+    );
   let failed = 0;
   for (const builder of plan.remove) {
     try {
@@ -308,6 +410,7 @@ export async function runOps(
     if (command === "decide") return await runDecide(rest, deps);
     if (command === "persist") return await runPersist(rest, deps);
     if (command === "verify") return await runVerify(rest, deps);
+    if (command === "exists") return await runExists(rest, deps);
     if (command === "cleanup") return await runCleanup(rest, deps);
     throw new Usage("command");
   } catch (error) {

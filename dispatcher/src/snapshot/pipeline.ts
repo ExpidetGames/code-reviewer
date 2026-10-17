@@ -16,6 +16,7 @@ import { SnapshotPipelineError } from "./errors.ts";
 import type { SnapshotErrorCode } from "./errors.ts";
 import { GoldenRecordSchema } from "./record.ts";
 import type { GoldenRecord } from "./record.ts";
+import { BUILDER_PREFIX } from "./names.ts";
 import { planRetention } from "./retention.ts";
 import { PATHS, SCAN_DONE, STEPS, EXIT_VERSION_MISMATCH } from "./scripts.ts";
 import {
@@ -58,7 +59,7 @@ export type PipelineResult = {
   warnings: string[];
 };
 
-export const BUILDER_PREFIX = "code-reviewer-golden-builder-";
+export { BUILDER_PREFIX };
 const CHECK_PREFIX = "code-reviewer-golden-check-";
 const TAG_APP = "code-reviewer";
 const MANIFEST_HASH_LINE = /^MANIFEST_SHA256 ([0-9a-f]{64})$/m;

@@ -24,6 +24,7 @@ const code = await runOps(process.argv.slice(2), {
     return createVercelService({ Sandbox } satisfies SandboxSdk, credentials);
   },
   fetch,
+  now: () => Date.now(),
 });
 process.exitCode = code;
 setTimeout(() => process.exit(code), 10_000).unref();

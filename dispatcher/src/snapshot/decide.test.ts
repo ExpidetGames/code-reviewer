@@ -21,6 +21,8 @@ function deps(overrides: Partial<DecideDeps> = {}): DecideDeps & {
     asked,
     live: () => Promise.resolve(undefined),
     projectPair: () => PAIR,
+    projectSnapshotId: () => PAIR.snapshotId,
+    snapshotExists: () => Promise.resolve("yes"),
     commitKnown: () => Promise.resolve(true),
     changed: (from, to, paths) => {
       asked.push({ from, to, paths });
@@ -29,6 +31,105 @@ function deps(overrides: Partial<DecideDeps> = {}): DecideDeps & {
     ...overrides,
   };
 }
+
+describe("whether the snapshot of the pair still exists", () => {
+  // #403-T21
+  it("rebuilds when the snapshot of a pair that would be reused is gone (a rollback past the previous one, a snapshot deleted by hand)", async () => {
+    const decision = await decide({
+      sha: NEW,
+      force: false,
+      deps: deps({ snapshotExists: () => Promise.resolve("no") }),
+    });
+
+    expect(decision).toMatchObject({
+      rebuild: true,
+      reason: "snapshot_missing",
+    });
+    expect(decision.pair).toBeUndefined();
+    expect(decision.repair).toBe(false);
+  });
+
+  // #403-T21
+  it("stops the run, and does not guess, when the platform cannot say whether the snapshot exists", async () => {
+    await expect(
+      decide({
+        sha: NEW,
+        force: false,
+        deps: deps({ snapshotExists: () => Promise.resolve("unavailable") }),
+      }),
+    ).rejects.toThrow(/snapshot_lookup_failed/);
+  });
+
+  // #403-T21
+  it("asks only about a pair it is about to reuse: a rebuild needs no answer", async () => {
+    let asked = 0;
+    const count = () => {
+      asked += 1;
+      return Promise.resolve("yes" as const);
+    };
+    await decide({
+      sha: NEW,
+      force: true,
+      deps: deps({ snapshotExists: count }),
+    });
+    await decide({
+      sha: NEW,
+      force: false,
+      deps: deps({
+        changed: () => Promise.resolve(true),
+        snapshotExists: count,
+      }),
+    });
+    expect(asked).toBe(0);
+  });
+
+  // #403-T21
+  it("stops the run when the live deployment cannot be read, rather than decide from stale variables", async () => {
+    await expect(
+      decide({
+        sha: NEW,
+        force: false,
+        deps: deps({
+          live: () => Promise.reject(new Error("live_pair_unavailable")),
+        }),
+      }),
+    ).rejects.toThrow(/live_pair_unavailable/);
+  });
+});
+
+describe("a pair set up by hand, before the pipeline", () => {
+  // #403-T21
+  it("keeps the snapshot of an incomplete pair as the one to keep, so that the first cleanup does not delete what the previous deployment runs", async () => {
+    const decision = await decide({
+      sha: NEW,
+      force: false,
+      deps: deps({
+        projectPair: () => undefined,
+        projectSnapshotId: () => "snap_by_hand01",
+      }),
+    });
+
+    expect(decision).toMatchObject({
+      rebuild: true,
+      reason: "pair_missing",
+      previousSnapshotId: "snap_by_hand01",
+    });
+  });
+
+  // #403-T21
+  it("has nothing to keep on a first deployment", async () => {
+    const decision = await decide({
+      sha: NEW,
+      force: false,
+      deps: deps({
+        projectPair: () => undefined,
+        projectSnapshotId: () => undefined,
+      }),
+    });
+
+    expect(decision.previousSnapshotId).toBeUndefined();
+  });
+});
 
 describe("whether the snapshot has to be rebuilt", () => {
   // #403-T13
@@ -41,6 +142,7 @@ describe("whether the snapshot has to be rebuilt", () => {
       rebuild: false,
       reason: "inputs_unchanged",
       pair: PAIR,
+      previousSnapshotId: PAIR.snapshotId,
       repair: false,
     });
     expect(d.asked).toEqual([{ from: OLD, to: NEW, paths: IMAGE_INPUT_PATHS }]);
@@ -57,7 +159,7 @@ describe("whether the snapshot has to be rebuilt", () => {
     expect(decision).toMatchObject({ rebuild: true, reason: "inputs_changed" });
     expect(decision.pair).toBeUndefined();
     // The pair that production runs now is the one to keep next to the new one.
-    expect(decision.previous).toEqual(PAIR);
+    expect(decision.previousSnapshotId).toBe(PAIR.snapshotId);
   });
 
   // #403-T13
@@ -75,11 +177,14 @@ describe("whether the snapshot has to be rebuilt", () => {
     const decision = await decide({
       sha: NEW,
       force: false,
-      deps: deps({ projectPair: () => undefined }),
+      deps: deps({
+        projectPair: () => undefined,
+        projectSnapshotId: () => undefined,
+      }),
     });
 
     expect(decision).toMatchObject({ rebuild: true, reason: "pair_missing" });
-    expect(decision.previous).toBeUndefined();
+    expect(decision.previousSnapshotId).toBeUndefined();
   });
 
   // #403-T13
@@ -89,7 +194,7 @@ describe("whether the snapshot has to be rebuilt", () => {
     const decision = await decide({ sha: NEW, force: true, deps: d });
 
     expect(decision).toMatchObject({ rebuild: true, reason: "forced" });
-    expect(decision.previous).toEqual(PAIR);
+    expect(decision.previousSnapshotId).toBe(PAIR.snapshotId);
     expect(d.asked).toEqual([]);
   });
 
@@ -120,6 +225,7 @@ describe("whether the snapshot has to be rebuilt", () => {
       rebuild: false,
       reason: "inputs_unchanged",
       pair: livePair,
+      previousSnapshotId: livePair.snapshotId,
       repair: true,
     });
     expect(d.asked[0]).toMatchObject({ from: NEW, to: NEW });
@@ -147,6 +253,7 @@ describe("whether the snapshot has to be rebuilt", () => {
     expect(decision).toMatchObject({
       rebuild: false,
       pair: PAIR,
+      previousSnapshotId: PAIR.snapshotId,
       repair: false,
     });
   });

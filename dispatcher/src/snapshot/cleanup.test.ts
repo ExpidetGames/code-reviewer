@@ -112,3 +112,82 @@ describe("which golden snapshots are removed after a deployment", () => {
     expect(plan.remove).toEqual([]);
   });
 });
+
+describe("what a cleanup leaves for a run that may be in progress, and what it clears that nothing owns", () => {
+  const HOUR = 3_600_000;
+  const NOW = 100 * HOUR;
+  const aged = (
+    hoursOld: number,
+    snapshotId: string | undefined,
+    n: number,
+  ): BuilderInfo => ({
+    name: `code-reviewer-golden-builder-${String(n).padStart(2, "0")}`,
+    createdAt: NOW - hoursOld * HOUR,
+    ...(snapshotId === undefined ? {} : { snapshotId }),
+  });
+  const rules = { now: NOW, minAgeMs: 3 * HOUR, unmanagedMaxAgeMs: 3 * HOUR };
+
+  // #403-T22
+  it("leaves a snapshot that is not kept but is young alone: a rehearsal by hand may be using it right now", () => {
+    const builders = [
+      aged(1, "snap_rehearsal", 1),
+      aged(50, "snap_old", 2),
+      aged(10, "snap_keep", 3),
+    ];
+
+    const plan = planCleanup(builders, { keep: ["snap_keep"], ...rules });
+
+    expect(plan.remove.map((b) => b.snapshotId)).toEqual(["snap_old"]);
+    expect(plan.recent.map((b) => b.snapshotId)).toEqual(["snap_rehearsal"]);
+  });
+
+  // #403-T22
+  it("removes a builder with no snapshot once it is older than any build can last, and not before", () => {
+    const builders = [
+      aged(10, undefined, 1),
+      aged(1, undefined, 2),
+      aged(10, "snap_keep", 3),
+    ];
+
+    const plan = planCleanup(builders, { keep: ["snap_keep"], ...rules });
+
+    expect(plan.remove.map((b) => b.name)).toEqual([builders[0]?.name]);
+    expect(plan.unmanaged.map((b) => b.name)).toEqual([builders[1]?.name]);
+  });
+
+  // #403-T22
+  it("does not apply the ages to a discard, which names its snapshot", () => {
+    const builders = [aged(0.1, "snap_new", 1), aged(10, "snap_keep", 2)];
+
+    const plan = planCleanup(builders, {
+      keep: ["snap_keep"],
+      discard: "snap_new",
+      ...rules,
+    });
+
+    expect(plan.remove.map((b) => b.snapshotId)).toEqual(["snap_new"]);
+  });
+
+  // #403-T22
+  it("does not clear builders with no snapshot when the list is refused", () => {
+    const plan = planCleanup([aged(10, undefined, 1)], {
+      keep: ["snap_unknown"],
+      ...rules,
+    });
+
+    expect(plan.refused).toBe("keep_not_found");
+    expect(plan.remove).toEqual([]);
+  });
+
+  // #403-T22
+  it("keeps its earlier behavior when no clock is given", () => {
+    const plan = planCleanup(B, { keep: ["snap_d"] });
+
+    expect(plan.remove.map((b) => b.snapshotId)).toEqual([
+      "snap_a",
+      "snap_b",
+      "snap_c",
+    ]);
+    expect(plan.recent).toEqual([]);
+  });
+});

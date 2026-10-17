@@ -45,6 +45,7 @@ function harness(
     changed?: boolean;
     known?: boolean;
     builders?: BuilderInfo[];
+    listFails?: boolean;
     deleteFails?: string;
     persistStatus?: number;
   } = {},
@@ -54,10 +55,19 @@ function harness(
   const files = new Map<string, string>();
   const requests: Array<{ method: string; url: URL; body?: unknown }> = [];
   const deleted: string[] = [];
-  const builders = options.builders ?? [];
+  const builders = options.builders ?? [
+    {
+      name: "code-reviewer-golden-builder-0",
+      createdAt: 0,
+      snapshotId: PAIR.snapshotId,
+    },
+  ];
   const service: SnapshotService = {
     createVm: () => Promise.reject(new Error("not used")),
-    listBuilders: () => Promise.resolve(builders),
+    listBuilders: () =>
+      options.listFails
+        ? Promise.reject(new Error("offline"))
+        : Promise.resolve(builders),
     deleteBuilder: (name) => {
       if (name === options.deleteFails) return Promise.reject(new Error("x"));
       deleted.push(name);
@@ -78,6 +88,7 @@ function harness(
     commitKnown: () => Promise.resolve(options.known ?? true),
     pathsChanged: () => Promise.resolve(options.changed ?? false),
     createService: () => service,
+    now: () => 1_000_000_000,
     fetch: async (input, init) => {
       const request = new Request(input, init);
       const url = new URL(request.url);
@@ -174,7 +185,11 @@ describe("snapshot:ops decide", () => {
     await runOps(args(["--force"]), forced.deps);
     expect(forced.files.get("OUT")).toContain("reason=forced\n");
 
-    const repaired = harness({ live: NEW, file: envFile(PAIR) });
+    const repaired = harness({
+      live: NEW,
+      file: envFile(PAIR),
+      builders: [builder(1, NEW.snapshotId)],
+    });
     await runOps(args(), repaired.deps);
     const output = repaired.files.get("OUT") ?? "";
     expect(output).toContain(`snapshot-id=${NEW.snapshotId}\n`);
@@ -182,13 +197,47 @@ describe("snapshot:ops decide", () => {
   });
 
   // #403-T13
-  it("falls back to the variables when the live deployment cannot be read, and says so", async () => {
+  it("stops, and writes nothing, when the live deployment cannot be read: stale variables must not decide", async () => {
     const h = harness({ live: "unavailable" });
+
+    expect(await runOps(args(), h.deps)).toBe(1);
+
+    expect(h.files.size).toBe(0);
+    expect(text(h)).toContain("live_pair_unavailable");
+  });
+
+  // #403-T21
+  it("rebuilds when the snapshot of the pair is gone, and says why", async () => {
+    const h = harness({ builders: [builder(1, "snap_other99")] });
 
     expect(await runOps(args(), h.deps)).toBe(0);
 
-    expect(h.files.get("OUT")).toContain("repair=false\n");
-    expect(text(h)).toContain("live_pair_unavailable");
+    expect(h.files.get("OUT")).toContain("rebuild=true\n");
+    expect(h.files.get("OUT")).toContain("reason=snapshot_missing\n");
+  });
+
+  // #403-T21
+  it("stops the run when the snapshots cannot be listed", async () => {
+    const h = harness({ listFails: true });
+
+    expect(await runOps(args(), h.deps)).toBe(1);
+
+    expect(text(h)).toContain("snapshot_lookup_failed");
+    expect(h.files.size).toBe(0);
+  });
+
+  // #403-T21
+  it("keeps the snapshot of a pair set up by hand, with no commit, as the previous one", async () => {
+    const h = harness({
+      file: 'SANDBOX_SNAPSHOT_ID="snap_by_hand01"\nSANDBOX_IMAGE_DIGEST="sha256:abc"\n',
+    });
+
+    expect(await runOps(args(), h.deps)).toBe(0);
+
+    expect(h.files.get("OUT")).toContain("reason=pair_missing\n");
+    expect(h.files.get("OUT")).toContain(
+      "previous-snapshot-id=snap_by_hand01\n",
+    );
   });
 
   // #403-T13
@@ -560,5 +609,134 @@ describe("snapshot:ops verify", () => {
         h.deps,
       ),
     ).toBe(0);
+  });
+});
+
+describe("snapshot:ops exists", () => {
+  // #403-T21
+  it("passes for a snapshot that is there", async () => {
+    const h = harness({ env: { PAIR_SNAPSHOT_ID: PAIR.snapshotId } });
+
+    expect(await runOps(["exists"], h.deps)).toBe(0);
+  });
+
+  // #403-T21
+  it("fails with a stable code for a snapshot that is gone, and another when the platform cannot say", async () => {
+    const gone = harness({ env: { PAIR_SNAPSHOT_ID: "snap_gone99" } });
+    expect(await runOps(["exists"], gone.deps)).toBe(1);
+    expect(text(gone)).toContain("snapshot_missing");
+
+    const offline = harness({
+      env: { PAIR_SNAPSHOT_ID: PAIR.snapshotId },
+      listFails: true,
+    });
+    expect(await runOps(["exists"], offline.deps)).toBe(1);
+    expect(text(offline)).toContain("snapshot_lookup_failed");
+  });
+
+  // #403-T21
+  it("refuses a value that is not a snapshot id, with exit 2 and no request", async () => {
+    const h = harness({ env: { PAIR_SNAPSHOT_ID: "snap x" } });
+
+    expect(await runOps(["exists"], h.deps)).toBe(2);
+    expect(h.requests).toEqual([]);
+  });
+});
+
+describe("snapshot:ops verify --check-snapshot", () => {
+  const dpl = "dpl_oldexample01";
+  function rolling(snapshotId: string | undefined, builders: BuilderInfo[]) {
+    const h = harness({ builders });
+    const inner = h.deps.fetch;
+    h.deps.fetch = (input, init) => {
+      const url = new URL(new Request(input, init).url);
+      if (url.pathname === `/v13/deployments/${dpl}`)
+        return Promise.resolve(
+          Response.json({
+            id: dpl,
+            projectId: VERCEL.VERCEL_PROJECT_ID,
+            ownerId: VERCEL.VERCEL_TEAM_ID,
+            target: "production",
+            readyState: "READY",
+            meta:
+              snapshotId === undefined
+                ? {}
+                : pairToMeta({ ...PAIR, snapshotId }),
+          }),
+        );
+      return inner(input, init);
+    };
+    return h;
+  }
+  const argv = ["verify", "--deployment", dpl, "--check-snapshot"];
+
+  // #403-T21
+  it("passes when the snapshot of the deployment's pair is still there", async () => {
+    expect(
+      await runOps(
+        argv,
+        rolling(PAIR.snapshotId, [builder(1, PAIR.snapshotId)]).deps,
+      ),
+    ).toBe(0);
+  });
+
+  // #403-T21
+  it("refuses the rollback with a stable code when that snapshot is gone: it would put production on a Dispatcher that cannot start a job", async () => {
+    const h = rolling(PAIR.snapshotId, [builder(1, "snap_other99")]);
+
+    expect(await runOps(argv, h.deps)).toBe(1);
+
+    expect(text(h)).toContain("rollback_snapshot_missing");
+  });
+
+  // #403-T21
+  it("lets a deployment without a pair through (made by hand: nothing to check), and stops when the platform cannot say", async () => {
+    expect(await runOps(argv, rolling(undefined, []).deps)).toBe(0);
+
+    const offline = rolling(PAIR.snapshotId, []);
+    offline.deps.createService = () => ({
+      createVm: () => Promise.reject(new Error("x")),
+      listBuilders: () => Promise.reject(new Error("offline")),
+      deleteBuilder: () => Promise.resolve(),
+    });
+    expect(await runOps(argv, offline.deps)).toBe(1);
+    expect(text(offline)).toContain("snapshot_lookup_failed");
+  });
+
+  // #403-T21
+  it("does not look at snapshots without the flag (the App has none)", async () => {
+    const h = rolling(PAIR.snapshotId, [builder(1, "snap_other99")]);
+
+    expect(await runOps(["verify", "--deployment", dpl], h.deps)).toBe(0);
+  });
+});
+
+describe("snapshot:ops cleanup, leftovers", () => {
+  // #403-T22
+  it("leaves a young snapshot that is not kept alone, and clears a builder that never got a snapshot", async () => {
+    const h = harness({
+      env: { KEEP_SNAPSHOT_IDS: NEW.snapshotId },
+      live: NEW,
+      builders: [
+        builder(1, "snap_old"),
+        {
+          name: "code-reviewer-golden-builder-young",
+          createdAt: 1_000_000_000 - 60_000,
+          snapshotId: "snap_young",
+        },
+        {
+          name: "code-reviewer-golden-builder-killed",
+          createdAt: 1_000_000_000 - 4 * 3_600_000,
+        },
+        builder(4, NEW.snapshotId),
+      ],
+    });
+
+    expect(await runOps(["cleanup"], h.deps)).toBe(0);
+
+    expect(h.deleted.sort()).toEqual([
+      "code-reviewer-golden-builder-1",
+      "code-reviewer-golden-builder-killed",
+    ]);
   });
 });

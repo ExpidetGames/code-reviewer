@@ -15,6 +15,7 @@ export type DecideReason =
   | "forced"
   | "pair_missing"
   | "commit_unknown"
+  | "snapshot_missing"
   | "inputs_changed"
   | "inputs_unchanged";
 
@@ -23,17 +24,28 @@ export type Decision = {
   reason: DecideReason;
   /** The pair this deployment uses; only when nothing is rebuilt. */
   pair?: SnapshotPair;
-  /** The pair production runs now, when there is one: the snapshot to keep next to a new one. */
-  previous?: SnapshotPair;
+  /**
+   * The snapshot production runs now, when there is one: the one to keep next to a new one. Also known for a pair
+   * that was set up by hand and has no commit, so that the first cleanup does not delete what the previous
+   * deployment (the rollback target) still runs.
+   */
+  previousSnapshotId?: string;
   /** The variables of the project differ from the live pair: write the pair to them again after the promotion. */
   repair: boolean;
 };
 
 export type DecideDeps = {
-  /** The pair the live production Dispatcher deployment carries in its meta, if it carries one. */
+  /**
+   * The pair the live production Dispatcher deployment carries in its meta, if it carries one. Rejects when the
+   * platform cannot say: the stale variables must not decide in its place.
+   */
   live(): Promise<SnapshotPair | undefined>;
   /** The pair in the variables of the project (`vercel pull`), if complete and of the right shape. */
   projectPair(): SnapshotPair | undefined;
+  /** The snapshot id in the variables of the project when it has the shape of one, even if the pair is incomplete. */
+  projectSnapshotId(): string | undefined;
+  /** Whether the snapshot is still there. "unavailable" is not "no". */
+  snapshotExists(snapshotId: string): Promise<"yes" | "no" | "unavailable">;
   /** Whether the commit is in this clone. */
   commitKnown(commit: string): Promise<boolean>;
   /** Whether any of the paths differs between the two commits. Throws when it cannot tell. */
@@ -49,11 +61,18 @@ export async function decide(options: {
   const live = await deps.live();
   const configured = deps.projectPair();
   const pair = live ?? configured;
-  const previous = pair === undefined ? {} : { previous: pair };
+  const previousSnapshotId = pair?.snapshotId ?? deps.projectSnapshotId();
+  const previous =
+    previousSnapshotId === undefined ? {} : { previousSnapshotId };
   if (options.force)
     return { rebuild: true, reason: "forced", repair: false, ...previous };
   if (pair === undefined)
-    return { rebuild: true, reason: "pair_missing", repair: false };
+    return {
+      rebuild: true,
+      reason: "pair_missing",
+      repair: false,
+      ...previous,
+    };
   if (!(await deps.commitKnown(pair.commit)))
     return {
       rebuild: true,
@@ -68,10 +87,22 @@ export async function decide(options: {
       repair: false,
       ...previous,
     };
+  // About to reuse it: is there still a snapshot behind the pair? A rollback past the previous snapshot, or a
+  // deletion by hand, leaves a pair that looks fine and cannot start a job.
+  const exists = await deps.snapshotExists(pair.snapshotId);
+  if (exists === "unavailable") throw new Error("snapshot_lookup_failed");
+  if (exists === "no")
+    return {
+      rebuild: true,
+      reason: "snapshot_missing",
+      repair: false,
+      ...previous,
+    };
   return {
     rebuild: false,
     reason: "inputs_unchanged",
     pair,
+    ...previous,
     repair: live !== undefined && !pairsEqual(live, configured),
   };
 }
