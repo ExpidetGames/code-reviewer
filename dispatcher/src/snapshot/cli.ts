@@ -77,8 +77,14 @@ type Parsed = {
 
 function parse(argv: readonly string[]): Parsed {
   const values = new Map<string, string[]>();
+  let skipRetention = false;
   for (let index = 0; index < argv.length; index += 2) {
     const name = argv[index] ?? "";
+    if (name === "--skip-retention") {
+      skipRetention = true;
+      index -= 1;
+      continue;
+    }
     if (!(VALUE_OPTIONS as readonly string[]).includes(name))
       throw new UsageError(OPTION_NAME.test(name) ? name : "unknown option");
     const value = argv[index + 1];
@@ -110,6 +116,7 @@ function parse(argv: readonly string[]): Parsed {
     ...(one("--buildx-version") === undefined
       ? {}
       : { buildxVersion: one("--buildx-version") }),
+    ...(skipRetention ? { retention: false } : {}),
     ...(keep === undefined ? {} : { keep: Number(keep) }),
     ...(values.has("--pin-snapshot")
       ? { pinnedSnapshotIds: values.get("--pin-snapshot") }
