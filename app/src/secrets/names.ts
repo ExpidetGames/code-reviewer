@@ -11,6 +11,10 @@ export const SECRET_NAMES = [
   "github_app_webhook_secret",
   /** The LLM key of the instance's operator, used by the workspaces whose key mode is `managed` (#276). */
   "operator_llm_key",
+  /** The Paddle API key of the billing module (ADR 0005, M11; #437). */
+  "paddle_api_key",
+  /** The signing secret of the Paddle notification destination (ADR 0005, M11; #437). */
+  "paddle_webhook_secret",
   "smtp_password",
 ] as const;
 export type SecretName = (typeof SECRET_NAMES)[number];

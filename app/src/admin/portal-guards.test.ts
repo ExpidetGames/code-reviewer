@@ -66,6 +66,34 @@ describe("the guards of the admin portal", () => {
     expect(readFileSync(page!.file, "utf8")).toMatch(/\brequireAdmin\(\)/);
   });
 
+  // #437-T07
+  it("guard the billing page and its data routes like every other part of the portal", () => {
+    const billing = discoverRoutes().filter(
+      ({ route }) =>
+        concretePath(route).startsWith("/instance-portal/billing") ||
+        concretePath(route).startsWith("/api/instance-portal/billing"),
+    );
+    const files = billing.map(({ file }) => file);
+
+    expect(billing.map(({ route }) => concretePath(route)).sort()).toEqual([
+      "/api/instance-portal/billing",
+      "/api/instance-portal/billing/check",
+      "/api/instance-portal/billing/notification-destination",
+      "/instance-portal/billing",
+    ]);
+    for (const { route, file } of billing) {
+      expect(isInternalPortalPath(concretePath(route))).toBe(true);
+      const source = readFileSync(file, "utf8");
+      if (/page\.tsx?$/.test(file))
+        expect(source).toMatch(/\brequireAdmin\(\)/);
+      else {
+        expect(source).toMatch(/\bcreateBillingRouteHandlers\(/);
+        expect(source).toMatch(/\baccess:\s*lookupAdmin\b/);
+      }
+    }
+    expect(files.length).toBe(4);
+  });
+
   it("are handed to the handlers by every data route", () => {
     const handlers = routes.filter(({ file }) => /route\.tsx?$/.test(file));
     expect(handlers.length).toBeGreaterThan(0);
@@ -74,8 +102,9 @@ describe("the guards of the admin portal", () => {
       .filter(({ file }) => {
         const source = readFileSync(file, "utf8");
         return !(
-          /\bcreate(Admin|Github|Approval)RouteHandlers\(/.test(source) &&
-          /\baccess:\s*lookupAdmin\b/.test(source)
+          /\bcreate(Admin|Github|Approval|Billing)RouteHandlers\(/.test(
+            source,
+          ) && /\baccess:\s*lookupAdmin\b/.test(source)
         );
       })
       .map(({ route }) => route);

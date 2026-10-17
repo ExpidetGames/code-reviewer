@@ -28,6 +28,7 @@ import {
   readEntitlements,
   validateEntitlements,
 } from "../../workspaces/entitlements-validation.ts";
+import type { BillingSettings } from "../../billing/settings.ts";
 import type { StoredGithubApp } from "../../github-config/settings.ts";
 import type { ManagedModelTiers } from "../../model-tiers/tiers.ts";
 import type { ImportNotice } from "../../legacy-import/notice.ts";
@@ -100,6 +101,12 @@ export type InstanceSettingValues = {
    * configured). No row: no tier is configured, and a managed job fails closed (`managed_tier_unavailable`).
    */
   managed_model_tiers: ManagedModelTiers;
+  /**
+   * #437 (epic #421): the billing module's settings (src/billing/): the Paddle environment, the client-side token (public by
+   * design), the grace days and the `enabled` switch. The API key and the webhook secret are in the secret store
+   * (`paddle_api_key`, `paddle_webhook_secret`). No row: billing was never configured, which is off and inert (`isBillingOn`).
+   */
+  billing_settings: BillingSettings;
 };
 export type InstanceSettingKey = keyof InstanceSettingValues;
 /**
