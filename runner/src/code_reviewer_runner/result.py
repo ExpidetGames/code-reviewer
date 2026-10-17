@@ -119,9 +119,16 @@ class ReviewFindings:
 
     open: int
     by_severity: dict[str, int] | None
+    # The review did not cover everything it was asked to (a finding the validation dropped, a chunk
+    # that failed, files left out for the token budget): `open` may miss a blocker, so the app never
+    # approves on it. Left out of the JSON when False.
+    incomplete: bool = False
 
     def to_json(self) -> dict[str, Any]:
-        return {"open": self.open, "bySeverity": self.by_severity}
+        document: dict[str, Any] = {"open": self.open, "bySeverity": self.by_severity}
+        if self.incomplete:
+            document["incomplete"] = True
+        return document
 
 
 @dataclass(frozen=True)

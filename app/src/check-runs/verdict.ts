@@ -20,6 +20,7 @@ export const VERDICT_SKIP_REASONS = [
   "no_severity",
   "findings_unknown",
   "review_incomplete",
+  "no_model_work",
 ] as const;
 export type VerdictSkipReason = (typeof VERDICT_SKIP_REASONS)[number];
 
@@ -37,8 +38,10 @@ export function decideVerdict(input: {
   findings: FindingCounts | null;
   /** Why the review was wrapped up before it was done (`cost_limit`, `time_limit`), or null. */
   stoppedEarly: string | null;
+  /** How many model calls the run made (`usage.aiCalls`); null when it did not say. */
+  modelCalls: number | null;
 }): VerdictDecision {
-  const { mode, findings, stoppedEarly } = input;
+  const { mode, findings, stoppedEarly, modelCalls } = input;
   if (mode === "off") return { kind: "skip", reason: "off" };
   if (findings === null) return { kind: "skip", reason: "findings_unknown" };
   if (findings.bySeverity === null && mode === "blocking")
@@ -49,8 +52,12 @@ export function decideVerdict(input: {
       : findings.bySeverity.P0;
   if (blocking > 0)
     return { kind: "submit", event: "request_changes", blocking };
-  if (stoppedEarly !== null)
+  // Only a review that did its work, covered everything and found nothing approves: the verdict comes from the
+  // model's own count, and a count with no work behind it (or one that lost findings) proves nothing.
+  if (stoppedEarly !== null || findings.incomplete === true)
     return { kind: "skip", reason: "review_incomplete" };
+  if (modelCalls === null || modelCalls === 0)
+    return { kind: "skip", reason: "no_model_work" };
   return { kind: "submit", event: "approve", blocking: 0 };
 }
 

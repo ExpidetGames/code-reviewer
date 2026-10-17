@@ -390,6 +390,8 @@ describe("what the app accepts from a runner", () => {
       { open: 3, bySeverity: { P0: 1, P1: 0, P2: 2, P3: 0 } },
       { open: 2, bySeverity: null },
       { open: 0, bySeverity: { P0: 0, P1: 0, P2: 0, P3: 0 } },
+      { open: 0, bySeverity: null, incomplete: true },
+      { open: 1, bySeverity: null, incomplete: false },
       null,
     ].map((findings): [string, unknown] => [
       `findings ${JSON.stringify(findings)}`,
@@ -404,6 +406,7 @@ describe("what the app accepts from a runner", () => {
       { open: 1, bySeverity: { P0: 1, P1: 0, P2: 0, P3: 0, P4: 0 } },
       { open: 1, bySeverity: { P0: -1, P1: 0, P2: 0, P3: 0 } },
       { open: 1, bySeverity: null, extra: true },
+      { open: 1, bySeverity: null, incomplete: "yes" },
       { open: 1000001, bySeverity: null },
       "none",
       [],

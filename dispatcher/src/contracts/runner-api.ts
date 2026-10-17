@@ -669,6 +669,10 @@ export interface RunnerUsage {
  */
 export interface ReviewFindings {
   open: number;
+  /**
+   * True when the review did not cover everything it was asked to: a finding its validation dropped, a chunk that failed, files left out for the token budget. `open` may then miss a blocker, so the app never approves on it. Absent means complete.
+   */
+  incomplete?: boolean;
   bySeverity: {
     P0: number;
     P1: number;

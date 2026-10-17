@@ -176,7 +176,12 @@ export async function createCheckRunsHarness(
     async succeed(job, token, result = {}) {
       await fixture.queue.complete(job.id, token, {
         ok: true,
-        result: { ok: true, commentUrl: COMMENT_URL, ...result } as never,
+        result: {
+          ok: true,
+          commentUrl: COMMENT_URL,
+          usage: { aiCalls: 3 },
+          ...result,
+        } as never,
       });
     },
     async fail(job, token, errorCode) {

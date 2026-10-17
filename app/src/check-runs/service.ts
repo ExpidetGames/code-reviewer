@@ -261,6 +261,7 @@ export function createCheckRunService(
       mode,
       findings: facts.findings,
       stoppedEarly: facts.stoppedEarly,
+      modelCalls: facts.modelCalls,
     });
     if (decision.kind === "skip")
       return skipVerdict(job, checks, decision.reason);

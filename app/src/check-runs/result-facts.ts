@@ -16,6 +16,8 @@ export type ResultFacts = {
   commentUrl: string | null;
   findings: ReviewFindings | null;
   stoppedEarly: string | null;
+  /** How many model calls the run made; null when the usage is missing. A review without any did no work. */
+  modelCalls: number | null;
 };
 
 type Record_ = Record<string, JsonValue>;
@@ -35,22 +37,35 @@ function isCount(value: JsonValue | undefined): value is number {
 
 function readFindings(value: JsonValue | undefined): ReviewFindings | null {
   if (!isRecord(value) || !isCount(value.open)) return null;
+  const incomplete = value.incomplete;
+  if (incomplete !== undefined && typeof incomplete !== "boolean") return null;
+  const flag = incomplete === true ? { incomplete } : {};
   const counts = value.bySeverity;
-  if (counts === null) return { open: value.open, bySeverity: null };
+  if (counts === null) return { open: value.open, bySeverity: null, ...flag };
   if (!isRecord(counts)) return null;
   const [p0, p1, p2, p3] = FINDING_PRIORITIES.map(
     (priority) => counts[priority],
   );
   if (!isCount(p0) || !isCount(p1) || !isCount(p2) || !isCount(p3)) return null;
-  return { open: value.open, bySeverity: { P0: p0, P1: p1, P2: p2, P3: p3 } };
+  return {
+    open: value.open,
+    bySeverity: { P0: p0, P1: p1, P2: p2, P3: p3 },
+    ...flag,
+  };
 }
 
 export function readResultFacts(result: JsonValue | null): ResultFacts {
   if (!isRecord(result ?? undefined))
-    return { commentUrl: null, findings: null, stoppedEarly: null };
+    return {
+      commentUrl: null,
+      findings: null,
+      stoppedEarly: null,
+      modelCalls: null,
+    };
   const record = result as Record_;
   const usage = record.usage;
   const stoppedEarly = isRecord(usage) ? usage.stoppedEarly : undefined;
+  const aiCalls = isRecord(usage) ? usage.aiCalls : undefined;
   return {
     commentUrl:
       typeof record.commentUrl === "string" ? record.commentUrl : null,
@@ -60,5 +75,6 @@ export function readResultFacts(result: JsonValue | null): ResultFacts {
       (STOPPED_EARLY_REASONS as readonly string[]).includes(stoppedEarly)
         ? stoppedEarly
         : null,
+    modelCalls: isCount(aiCalls) ? aiCalls : null,
   };
 }

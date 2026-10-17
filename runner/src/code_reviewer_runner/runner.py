@@ -804,7 +804,12 @@ def _diff_findings(ok: bool, command: Command, watch: ReviewStateWatch) -> Revie
     """
     if not ok or command is not Command.REVIEW or watch.active_findings is None:
         return None
-    return ReviewFindings(open=watch.active_findings, by_severity=None)
+    return ReviewFindings(
+        open=watch.active_findings,
+        by_severity=None,
+        # A failed chunk or a file left out may hide a finding: zero active is then not "none".
+        incomplete=watch.coverage_complete is not True,
+    )
 
 
 def _truncation(

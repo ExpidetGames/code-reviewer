@@ -137,7 +137,7 @@ class Publisher:
         state = reconcile(previous, redacted)
         body = self._render(state, reset=reset, stopped_early=run.stopped_early)
         published = self._write(existing, body, head_sha)
-        return replace(published, reset=reset, findings=_open_findings(state))
+        return replace(published, reset=reset, findings=_open_findings(state, run))
 
     def publish_failure(
         self,
@@ -347,15 +347,17 @@ class Publisher:
         return None
 
 
-def _open_findings(state: ReviewState) -> ReviewFindings:
+def _open_findings(state: ReviewState, run: DynamicFindings) -> ReviewFindings:
     """The findings still active in the reconciled state, as the result reports them (#405).
 
-    The state before the comment is fitted, so a finding the summary has to leave out for space
-    still counts as open (`omitted_findings`), and the priorities are those of the findings kept.
+    The priorities are those of the findings the state holds. A finding the validation dropped
+    (invalid, or on a file the engine could not read) may have been a blocker, so the review is
+    reported as incomplete and the app does not approve on it.
     """
     return ReviewFindings(
-        open=len(state.findings) + state.omitted_findings,
+        open=len(state.findings),
         by_severity=summary_counts(state.findings),
+        incomplete=run.dropped_invalid > 0 or run.dropped_outside_export > 0,
     )
 
 

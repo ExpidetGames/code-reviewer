@@ -405,6 +405,10 @@
       "required": ["open", "bySeverity"],
       "properties": {
         "open": { "type": "integer", "minimum": 0, "maximum": 100000 },
+        "incomplete": {
+          "description": "True when the review did not cover everything it was asked to: a finding its validation dropped, a chunk that failed, files left out for the token budget. `open` may then miss a blocker, so the app never approves on it. Absent means complete.",
+          "type": "boolean"
+        },
         "bySeverity": {
           "oneOf": [
             {

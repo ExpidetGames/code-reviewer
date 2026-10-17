@@ -396,6 +396,8 @@ export type FindingPriority = (typeof FINDING_PRIORITIES)[number];
 export type ReviewFindings = {
   open: number;
   bySeverity: Record<FindingPriority, number> | null;
+  /** True when the review did not cover everything (a dropped finding, a failed chunk): `open` may miss a blocker. */
+  incomplete?: true;
 };
 
 /** The largest count a runner may report; the same bound as the schema. */

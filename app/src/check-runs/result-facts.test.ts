@@ -10,7 +10,7 @@ const GOOD = {
   ok: true,
   commentUrl: "https://github.test/acme/widgets/pull/7#issuecomment-1",
   findings: { open: 3, bySeverity: { P0: 1, P1: 0, P2: 2, P3: 0 } },
-  usage: { stoppedEarly: "cost_limit" },
+  usage: { stoppedEarly: "cost_limit", aiCalls: 4 },
 };
 
 describe("the facts of a stored result", () => {
@@ -19,7 +19,33 @@ describe("the facts of a stored result", () => {
       commentUrl: "https://github.test/acme/widgets/pull/7#issuecomment-1",
       findings: { open: 3, bySeverity: { P0: 1, P1: 0, P2: 2, P3: 0 } },
       stoppedEarly: "cost_limit",
+      modelCalls: 4,
     });
+  });
+
+  // #405-T30 (review P1-3)
+  it("reads that the review did not cover everything", () => {
+    expect(
+      readResultFacts({
+        findings: { open: 0, bySeverity: null, incomplete: true },
+      }).findings,
+    ).toEqual({ open: 0, bySeverity: null, incomplete: true });
+    expect(
+      readResultFacts({
+        findings: { open: 0, bySeverity: null, incomplete: false },
+      }).findings,
+    ).toEqual({ open: 0, bySeverity: null });
+    expect(
+      readResultFacts({
+        findings: { open: 0, bySeverity: null, incomplete: "yes" },
+      }).findings,
+    ).toBeNull();
+  });
+
+  it("reads no model calls when the usage is missing or not a count", () => {
+    expect(readResultFacts({ usage: null }).modelCalls).toBeNull();
+    expect(readResultFacts({ usage: { aiCalls: -1 } }).modelCalls).toBeNull();
+    expect(readResultFacts({ usage: { aiCalls: 0 } }).modelCalls).toBe(0);
   });
 
   it("reads the findings of a Diff review, which have no breakdown", () => {
@@ -34,6 +60,7 @@ describe("the facts of a stored result", () => {
       commentUrl: null,
       findings: null,
       stoppedEarly: null,
+      modelCalls: null,
     });
   });
 
@@ -47,6 +74,7 @@ describe("the facts of a stored result", () => {
       commentUrl: null,
       findings: null,
       stoppedEarly: null,
+      modelCalls: null,
     });
   });
 
@@ -69,6 +97,11 @@ describe("the facts of a stored result", () => {
   it("ignores a link that is not text and a reason it does not know", () => {
     expect(
       readResultFacts({ commentUrl: 5, usage: { stoppedEarly: "boredom" } }),
-    ).toEqual({ commentUrl: null, findings: null, stoppedEarly: null });
+    ).toEqual({
+      commentUrl: null,
+      findings: null,
+      stoppedEarly: null,
+      modelCalls: null,
+    });
   });
 });

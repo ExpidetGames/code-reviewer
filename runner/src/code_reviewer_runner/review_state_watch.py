@@ -43,6 +43,10 @@ class ReviewStateWatch:
     # How many findings the last record PR-Agent built holds as active (#405): what is open on the
     # pull request after this review. None until the review tool wrote a record.
     active_findings: int | None = None
+    # Whether that review covered the whole diff (#405): PR-Agent records `last_run.complete` (no
+    # failed chunk, nothing dropped, not incremental) and the files it left out. None until a record
+    # was written; a record without the coverage counts as not complete.
+    coverage_complete: bool | None = None
 
 
 def install_review_state_watch(
@@ -66,6 +70,7 @@ def install_review_state_watch(
 
     def append_review_state(review_body: str, state: Any, max_chars: int | None = None) -> str:
         watch.active_findings = _active_findings(state)
+        watch.coverage_complete = _coverage_complete(state)
         try:
             result = str(original(review_body, state, max_chars))
         except ValueError:
@@ -95,6 +100,15 @@ def _active_findings(state: Any) -> int | None:
         return sum(1 for entry in findings if entry["state"] == "ACTIVE")
     except (KeyError, TypeError):
         return None
+
+
+def _coverage_complete(state: Any) -> bool:
+    """True only when the record says the run covered everything and left no file out."""
+    try:
+        last_run = state["last_run"]
+        return last_run["complete"] is True and not last_run["excluded_files"]
+    except (KeyError, TypeError):
+        return False
 
 
 def _without_limit(original: Callable[..., Any], review_body: str, state: Any) -> str | None:

@@ -63,7 +63,7 @@ def test_the_result_of_a_review_is_otherwise_unchanged(
         "logTruncated",
         "usage",
     }
-    assert result["findings"]["bySeverity"] is None
+    assert result["findings"] == {"open": 1, "bySeverity": None}
     assert set(result["usage"]) == {
         "model",
         "promptTokens",

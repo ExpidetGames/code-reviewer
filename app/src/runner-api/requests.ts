@@ -362,7 +362,7 @@ function parseFindings(
   const before = check.fields.length;
   const prefix = "result.findings.";
   for (const key of Object.keys(value))
-    if (key !== "open" && key !== "bySeverity")
+    if (key !== "open" && key !== "bySeverity" && key !== "incomplete")
       check.fail(`${prefix}${key}`, "invalid");
   const open = check.integer(value, "open", `${prefix}open`, MAX_FINDING_COUNT);
   const counts = value.bySeverity;
@@ -387,13 +387,16 @@ function parseFindings(
     if (FINDING_PRIORITIES.every((priority) => read[priority] !== undefined))
       bySeverity = read as Record<FindingPriority, number>;
   }
+  const incomplete = value.incomplete;
+  if (incomplete !== undefined && typeof incomplete !== "boolean")
+    check.fail(`${prefix}incomplete`, "invalid");
   if (
     check.fields.length > before ||
     open === undefined ||
     bySeverity === undefined
   )
     return undefined;
-  return { open, bySeverity };
+  return { open, bySeverity, ...(incomplete === true ? { incomplete } : {}) };
 }
 
 function parseResult(check: Checker, value: unknown): RunnerResult | undefined {

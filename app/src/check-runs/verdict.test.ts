@@ -27,8 +27,9 @@ function decide(
   mode: ReviewVerdictMode,
   findings: FindingCounts | null,
   stoppedEarly: string | null = null,
+  modelCalls: number | null = 3,
 ) {
-  return decideVerdict({ mode, findings, stoppedEarly });
+  return decideVerdict({ mode, findings, stoppedEarly, modelCalls });
 }
 
 describe("the verdict setting off", () => {
@@ -148,6 +149,74 @@ describe("what is not known or not complete", () => {
       kind: "submit",
       event: "request_changes",
       blocking: 1,
+    });
+  });
+});
+
+describe("a review that did not cover everything", () => {
+  const incomplete = (counts: FindingCounts): FindingCounts => ({
+    ...counts,
+    incomplete: true,
+  });
+
+  // #405-T19 (review P1-3)
+  it("never approves, because a finding it dropped may have been the blocker", () => {
+    expect(decide("blocking", incomplete(dynamic({})))).toEqual({
+      kind: "skip",
+      reason: "review_incomplete",
+    });
+    expect(decide("any", incomplete(dynamic({ P3: 0 })))).toEqual({
+      kind: "skip",
+      reason: "review_incomplete",
+    });
+    expect(decide("any", incomplete(diff(0)))).toEqual({
+      kind: "skip",
+      reason: "review_incomplete",
+    });
+  });
+
+  // #405-T19 (review P1-3)
+  it("still requests changes for a blocker it did find", () => {
+    expect(decide("blocking", incomplete(dynamic({ P0: 1 })))).toEqual({
+      kind: "submit",
+      event: "request_changes",
+      blocking: 1,
+    });
+    expect(decide("any", incomplete(diff(2)))).toEqual({
+      kind: "submit",
+      event: "request_changes",
+      blocking: 2,
+    });
+  });
+
+  // #405-T19 (review P1-3)
+  it("submits nothing under blocking for a Diff review, as before", () => {
+    expect(decide("blocking", incomplete(diff(0)))).toEqual({
+      kind: "skip",
+      reason: "no_severity",
+    });
+  });
+});
+
+describe("a review that shows no sign of work", () => {
+  // #405-T19 (review P2-3)
+  it("never approves a result that made no model call or did not report its usage", () => {
+    for (const calls of [0, null])
+      expect(decide("blocking", dynamic({}), null, calls)).toEqual({
+        kind: "skip",
+        reason: "no_model_work",
+      });
+    expect(decide("any", diff(0), null, 0)).toEqual({
+      kind: "skip",
+      reason: "no_model_work",
+    });
+  });
+
+  // #405-T19 (review P2-3)
+  it("still requests changes: failing closed costs a look, not a merge", () => {
+    expect(decide("blocking", dynamic({ P0: 1 }), null, 0)).toMatchObject({
+      kind: "submit",
+      event: "request_changes",
     });
   });
 });

@@ -939,6 +939,53 @@ describe("the verdict setting", () => {
   });
 });
 
+describe("a verdict from a review that proves nothing", () => {
+  // #405-T19 (review P1-3)
+  it("does not approve a review that dropped findings or left files out, and says so in the check", async () => {
+    const t = await createCheckRunsHarness();
+    const job = await t.fixture.enqueueNew();
+    const claimed = await t.claim();
+    await t.succeed(claimed.job, claimed.token, {
+      findings: { ...CLEAN, incomplete: true },
+    });
+
+    await t.service.syncJob(job.id);
+
+    expect(t.reviews()).toEqual([]);
+    expect(t.lines.info.join("\n")).toContain("reason=review_incomplete");
+  });
+
+  // #405-T19 (review P1-3)
+  it("still requests changes for a blocker of a review that is incomplete", async () => {
+    const t = await createCheckRunsHarness();
+    const job = await t.fixture.enqueueNew();
+    const claimed = await t.claim();
+    await t.succeed(claimed.job, claimed.token, {
+      findings: { ...BLOCKER, incomplete: true },
+    });
+
+    await t.service.syncJob(job.id);
+
+    expect(t.reviews()).toMatchObject([{ state: "CHANGES_REQUESTED" }]);
+  });
+
+  // #405-T19 (review P2-3)
+  it("does not approve a result that made no model call", async () => {
+    const t = await createCheckRunsHarness();
+    const job = await t.fixture.enqueueNew();
+    const claimed = await t.claim();
+    await t.succeed(claimed.job, claimed.token, {
+      findings: CLEAN,
+      usage: { aiCalls: 0 },
+    });
+
+    await t.service.syncJob(job.id);
+
+    expect(t.reviews()).toEqual([]);
+    expect(t.lines.info.join("\n")).toContain("reason=no_model_work");
+  });
+});
+
 describe("what the tokens and the logs hold", () => {
   // #405-T34
   it("asks for a token limited to one repository and the least permissions for each call, and logs no token", async () => {
