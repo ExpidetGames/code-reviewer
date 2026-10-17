@@ -205,6 +205,7 @@ describe("the Review verdict card", () => {
     const user = userEvent.setup();
     const { api } = fakeApi({
       ok: false,
+      status: 400,
       code: "REVIEW_SETTINGS_INVALID",
       issues: [{ field: "reviewVerdict", code: "INVALID_FORMAT" }],
     });
