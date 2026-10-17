@@ -84,7 +84,7 @@ list in a comment.
 
 | # | Default | Used by |
 |---|---|---|
-| C1 | **Tiers are migrated to catalog entries and removed in the same series.** There is no separate "retire" release. The operator route `/api/operator/v1/model-tiers` is removed (a documented breaking change of the operator API). The migration issue starts with a read-only check of the real production counts. | migration issue |
+| C1 | **Tiers are migrated to catalog entries and removed in the same series.** There is no separate "retire" release. The operator route `/api/operator/v1/model-tiers` is removed (a documented breaking change of the operator API). The migration issue starts with a read-only check of the real production counts. All code that reads tiers goes in this series; the physical deletion of the old data (the `managed_model_tiers` setting and the `modelTier` members of the settings JSON) is a separate forward-only migration shipped one release later, because a migration only adds and a removal waits one release (`docs/deployment-vercel.md`, 5.6). Until then nothing reads that data. | migration issue |
 | C2 | **No second provider now.** Only the adapter seam. The second provider, and the policy for providers that do not report cost, are a follow-up. | adapter issues |
 | C3 | **Catalog entry names are unique** (case-insensitive). One entry may serve Diff, Dynamic or both. There is **one instance default entry per kind**, set by the operator. There is **no workspace-level default**. | catalog, settings |
 | C4 | Entries that are not in the workspace's plan are **shown locked**, with a link to Manage plan. | settings UI |
