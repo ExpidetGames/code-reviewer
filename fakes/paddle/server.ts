@@ -123,6 +123,12 @@ export async function startPaddleFake(
     headers: Record<string, string> = {},
   ): void {
     if (res.destroyed || res.writableEnded) return;
+    // Paddle answers a DELETE with 204 and no body.
+    if (status === 204) {
+      res.writeHead(204, headers);
+      res.end();
+      return;
+    }
     const text = JSON.stringify(body);
     res.writeHead(status, {
       "content-type": "application/json",

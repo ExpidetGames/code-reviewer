@@ -616,6 +616,22 @@ export function createRoutes(store: Store, now: () => number): Route[] {
     },
     {
       method: "GET",
+      pattern: /^\/notification-settings$/,
+      handler: ({ query }) => {
+        checkQuery(query, ["active", "traffic_source"]);
+        return { status: 200, data: [...store.notificationSettings.values()] };
+      },
+    },
+    {
+      method: "DELETE",
+      pattern: /^\/notification-settings\/([^/]+)$/,
+      handler: ({ params }) => {
+        store.removeNotificationSetting(params[0] ?? "");
+        return { status: 204, data: null };
+      },
+    },
+    {
+      method: "GET",
       pattern: /^\/notification-settings\/([^/]+)$/,
       handler: ({ params }) => ({
         status: 200,

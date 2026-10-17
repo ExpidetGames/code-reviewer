@@ -300,6 +300,44 @@ describe("Paddle errors", () => {
   });
 });
 
+describe("notification settings", () => {
+  const destination = "https://app.example.test/api/billing/webhook";
+  const input = (url: string) => ({
+    description: "Code Reviewer",
+    destination: url,
+    subscribed_events: ["subscription.updated"],
+  });
+
+  // #437-T05
+  it("lists the destinations with their secret and deletes one by id", async () => {
+    const fake = await startTestPaddle();
+    const client = clientFor(fake);
+    const first = await client.createNotificationSetting(input(destination));
+    const second = await client.createNotificationSetting(
+      input("https://other.example.test/hook"),
+    );
+
+    const listed = await client.listNotificationSettings();
+
+    expect(listed.map(({ id }) => id).sort()).toEqual(
+      [first.id, second.id].sort(),
+    );
+    expect(listed.find(({ id }) => id === first.id)).toMatchObject({
+      destination,
+      endpoint_secret_key: first.endpoint_secret_key,
+    });
+
+    await client.deleteNotificationSetting(first.id);
+
+    expect((await client.listNotificationSettings()).map(({ id }) => id)).toEqual(
+      [second.id],
+    );
+    expect(
+      (await failureOf(client.deleteNotificationSetting(first.id))).code,
+    ).toBe("not_found");
+  });
+});
+
 describe("no real network", () => {
   // #436-T11
   it("cannot reach the real Paddle from a test: the network guard blocks it", async () => {

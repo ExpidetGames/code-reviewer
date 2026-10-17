@@ -351,6 +351,11 @@ export function createStore(options: StoreOptions) {
       return setting;
     },
 
+    removeNotificationSetting(settingId: string): void {
+      get(notificationSettings, settingId);
+      notificationSettings.delete(settingId);
+    },
+
     addPortalSession(
       customerId: string,
       subscriptionIds: string[],
