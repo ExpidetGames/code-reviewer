@@ -30,7 +30,11 @@ import {
   type LlmAccessResult,
   type LlmNotConfiguredReason,
 } from "./access.ts";
-import { LLM_PROVIDERS, type LlmDefaults, type LlmProvider } from "./config.ts";
+import type { LlmDefaults, LlmProvider } from "./config.ts";
+import {
+  DEFAULT_LLM_PROVIDER,
+  llmProviderDescriptors,
+} from "./providers/index.ts";
 import {
   ENTITLEMENTS_INVALID_CODE,
   type KeyMode,
@@ -54,9 +58,6 @@ export type OperatorKeyForJob =
   | { state: "unreadable" }
   | { state: "key"; apiKey: string };
 
-/** The provider of the operator's key. OpenRouter is the only provider for now; the key is not bound to one. */
-export const OPERATOR_KEY_PROVIDER: LlmProvider = "openrouter";
-
 type Defaults = Pick<LlmDefaults, "model" | "contextWindowTokens">;
 
 export type ResolveLlmInput =
@@ -77,7 +78,7 @@ export function keyModeForJob(
 }
 
 function knownProvider(binding: string): LlmProvider | undefined {
-  return LLM_PROVIDERS.find((provider) => provider === binding);
+  return llmProviderDescriptors.ids.find((provider) => provider === binding);
 }
 
 const failure = (reason: LlmNotConfiguredReason) =>
@@ -104,7 +105,8 @@ export function resolveWorkspaceLlmAccess(
       ok: true,
       source: "operator",
       access: createLlmAccess({
-        provider: OPERATOR_KEY_PROVIDER,
+        // The operator's key is not bound to a provider: it is the default provider's.
+        provider: DEFAULT_LLM_PROVIDER,
         model: defaults.model,
         apiKey: operatorKey.apiKey,
         contextWindowTokens: defaults.contextWindowTokens,

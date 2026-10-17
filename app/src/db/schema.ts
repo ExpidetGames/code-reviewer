@@ -638,6 +638,34 @@ export interface UnclaimedInstallationsTable {
   source: string;
 }
 
+/**
+ * One entry of the operator's model catalog (#425, src/model-catalog/). Instance level: no workspace owns it. `name` is
+ * shown to members, `provider` and `model_id` are operator only.
+ */
+export interface ModelCatalogEntriesTable {
+  /** Opaque: `mce_` and 32 random hex digits. */
+  id: string;
+  /** 1 to 40 printable characters; shown to members. */
+  name: string;
+  /** The name folded to lower case (`nameKeyOf`); unique, so two names never differ only in case. */
+  name_key: string;
+  description: string | null;
+  /** A provider of the registry; checked in code, not by the database. */
+  provider: string;
+  model_id: string;
+  /** 0 or 1; at least one of the two kinds is 1 (a check). */
+  serves_diff: number;
+  serves_dynamic: number;
+  /** `draft`, `released` or `retired` (`CATALOG_STATUSES`). */
+  status: string;
+  sort_order: number;
+  /** ISO 8601 text in UTC. */
+  created_at: string;
+  updated_at: string;
+  /** The user who changed it last, or null (the system, or a user who was deleted since). */
+  updated_by: string | null;
+}
+
 export interface Database {
   app_meta: AppMetaTable;
   users: UsersTable;
@@ -666,6 +694,7 @@ export interface Database {
   refusal_notices: RefusalNoticesTable;
   job_check_runs: JobCheckRunsTable;
   plan_handoff_tokens: PlanHandoffTokensTable;
+  model_catalog_entries: ModelCatalogEntriesTable;
   password_reset_tokens: PasswordResetTokensTable;
   email_verification_tokens: EmailVerificationTokensTable;
   signed_states: SignedStatesTable;

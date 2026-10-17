@@ -97,6 +97,7 @@ describe("the migrations of both epics", () => {
       "20261016140000_add_job_accepts_supersede",
       "20261016140100_widen_usage_record_settled_reason",
       "20261017100000_create_job_check_runs",
+      "20261017140000_create_model_catalog_entries",
     ]);
   });
 
@@ -151,6 +152,7 @@ describe("starting the database", () => {
       "jobs",
       "kysely_migration",
       "kysely_migration_lock",
+      "model_catalog_entries",
       "password_reset_tokens",
       "plan_handoff_tokens",
       "projects",

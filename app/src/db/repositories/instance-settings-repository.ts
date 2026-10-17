@@ -30,6 +30,7 @@ import {
 } from "../../workspaces/entitlements-validation.ts";
 import type { BillingSettings } from "../../billing/settings.ts";
 import type { StoredGithubApp } from "../../github-config/settings.ts";
+import type { CatalogDefaults } from "../../model-catalog/entries.ts";
 import type { ManagedModelTiers } from "../../model-tiers/tiers.ts";
 import type { ImportNotice } from "../../legacy-import/notice.ts";
 import type { SmtpSettings } from "../../mail/smtp-settings.ts";
@@ -96,11 +97,17 @@ export type InstanceSettingValues = {
   plan_management_url: string;
   /**
    * #280: which model backs each managed tier, per kind of review (src/model-tiers/): `{ low?: { diff?, dynamic? }, ... }`
-   * with OpenRouter model ids. **Operator data**: written through the operator API only, read by the claim of a job of a
+   * with the provider's model ids. **Operator data**: written through the operator API only, read by the claim of a job of a
    * managed workspace; the ids are never shown to a workspace and not to the admin portal (it shows whether a tier is
    * configured). No row: no tier is configured, and a managed job fails closed (`managed_tier_unavailable`).
    */
   managed_model_tiers: ManagedModelTiers;
+  /**
+   * #425: the instance default entry of the model catalog per kind of review (src/model-catalog/): `{ diff, dynamic }`,
+   * each the id of a released entry that serves the kind, or null. Written by the catalog service only, which reads it
+   * again against the entries (a default that is no longer fit reads as none). No row: no default.
+   */
+  catalog_defaults: CatalogDefaults;
   /**
    * #437 (epic #421): the billing module's settings (src/billing/): the Paddle environment, the client-side token (public by
    * design), the grace days and the `enabled` switch. The API key and the webhook secret are in the secret store

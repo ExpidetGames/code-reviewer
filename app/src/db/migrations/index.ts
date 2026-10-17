@@ -48,6 +48,7 @@ import { migration as createJobDispatches } from "./20261015120000_create_job_di
 import { migration as addUsageRecordSettledReason } from "./20261015200000_add_usage_record_settled_reason.ts";
 import { migration as createRefusalNotices } from "./20261016090000_create_refusal_notices.ts";
 import { migration as createPlanHandoffTokens } from "./20261016120000_create_plan_handoff_tokens.ts";
+import { migration as createModelCatalogEntries } from "./20261017140000_create_model_catalog_entries.ts";
 
 const migrations: Record<string, Migration> = {
   "0001_create_app_meta": createAppMeta,
@@ -97,6 +98,7 @@ const migrations: Record<string, Migration> = {
   "20261016140100_widen_usage_record_settled_reason":
     widenUsageRecordSettledReason,
   "20261017100000_create_job_check_runs": createJobCheckRuns,
+  "20261017140000_create_model_catalog_entries": createModelCatalogEntries,
 };
 
 export const migrationProvider: MigrationProvider = {

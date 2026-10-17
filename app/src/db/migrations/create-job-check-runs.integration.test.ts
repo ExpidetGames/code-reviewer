@@ -31,7 +31,11 @@ async function rowsOfEveryTable(
 ): Promise<Record<string, unknown[]>> {
   const result: Record<string, unknown[]> = {};
   for (const table of await db.introspection.getTables()) {
-    if (table.name === "job_check_runs") continue;
+    if (
+      table.name === "job_check_runs" ||
+      table.name === "model_catalog_entries"
+    )
+      continue;
     const { rows } =
       await sql<unknown>`select * from ${sql.table(table.name)}`.execute(db);
     result[table.name] = rows;

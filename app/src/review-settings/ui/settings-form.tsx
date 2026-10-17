@@ -39,7 +39,7 @@ import {
 } from "../settings.ts";
 import type { ReviewCostGuard } from "../cost.ts";
 import { estimateReviewCost } from "../cost.ts";
-import { MODEL_PRICES } from "../model-pricing.ts";
+import { llmProviderDescriptors } from "../../llm/providers/index.ts";
 import {
   browserGlobalSettingsApi,
   browserProjectSettingsApi,
@@ -472,9 +472,11 @@ export function SettingsForm({
       >
         {model.managed ? null : (
           <datalist id={datalistId}>
-            {Object.keys(MODEL_PRICES).map((name) => (
-              <option key={name} value={name} />
-            ))}
+            {llmProviderDescriptors.defaultProvider.suggestedModels.map(
+              (name) => (
+                <option key={name} value={name} />
+              ),
+            )}
           </datalist>
         )}
 

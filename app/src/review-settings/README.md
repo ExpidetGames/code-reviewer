@@ -157,7 +157,7 @@ model (and the fallback model) and lists the warnings: `above_limit` when the es
 the customer's limit (exactly 0.10 does not warn), and `cost_unknown` for a model the price table does
 not know. `warn` is true when there is any. It never blocks a setting; the UI shows the warnings.
 
-The price per model is a small static table (`model-pricing.ts`, USD per million tokens from OpenRouter's
+The price per model is a small static table (`src/llm/providers/openrouter/model-pricing.ts`, behind the provider's adapter, USD per million tokens from OpenRouter's
 model list, with the day it was read, the same prices the model comparison used); the model comparison
 ticket keeps it up to date. A review is assumed to send 30000 tokens (the size of a large pull request, never
 more than the budget) and get 3000 back, in one call. The prompt is multiplied by the model's
