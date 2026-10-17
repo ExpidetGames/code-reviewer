@@ -25,9 +25,9 @@ function setup(
   const dispatch = { sendDue: vi.fn(() => Promise.resolve({ sent: 1 })) };
   const log = { error: vi.fn() };
   const checks = {
-    reconcileDue: vi.fn((_options?: { budgetMs?: number }) =>
-      Promise.resolve({ synced: 0 }),
-    ),
+    reconcileDue: vi.fn<
+      (options?: { budgetMs?: number }) => Promise<{ synced: number }>
+    >(() => Promise.resolve({ synced: 0 })),
   };
   const maintenance = createOpportunisticMaintenance({
     withLock: async (work) =>
