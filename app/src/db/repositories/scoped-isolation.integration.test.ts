@@ -1239,6 +1239,28 @@ describe("two workspaces", () => {
   });
 
   // #271-T06
+  // #426-T10: both workspaces hold the same names, so a read that lost its workspace filter would still find a row;
+  // only a name that B alone holds shows it.
+  it("keep the key of a provider apart on a read: A does not see the provider-qualified secret only B has", async () => {
+    const { reposA, reposB } = await twoWorkspaces();
+    await reposB.workspaceSecrets.put({
+      name: "llm_api_key.onlyb",
+      binding: "onlyb-b",
+      ciphertext: "ciphertext-onlyb-b",
+      nonce: "nonce-onlyb-b",
+      keyVersion: 1,
+      lastFour: null,
+      updatedBy: "user-b",
+    });
+
+    expect(await reposA.workspaceSecrets.get("llm_api_key.onlyb")).toBe(
+      undefined,
+    );
+    expect(await reposB.workspaceSecrets.get("llm_api_key.onlyb")).toMatchObject(
+      { binding: "onlyb-b" },
+    );
+  });
+
   it("keep the entitlements apart: changing A's leaves B with its own", async () => {
     const { reposA, reposB } = await twoWorkspaces();
 
