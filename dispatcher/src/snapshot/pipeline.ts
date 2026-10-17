@@ -443,6 +443,10 @@ class Run {
   /** After the new snapshot passed: remove the builders (with their snapshots) beyond the current and previous ones. */
   private async retire(): Promise<void> {
     const { service, logger } = this.deps;
+    if (!this.config.retention) {
+      await this.deleteCheck();
+      return;
+    }
     try {
       const plan = planRetention(await service.listBuilders(BUILDER_PREFIX), {
         keep: this.config.keep,

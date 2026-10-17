@@ -1,0 +1,431 @@
+// SPDX-License-Identifier: Apache-2.0
+
+import { describe, expect, it } from "vitest";
+import { runOps, type OpsDeps } from "./ops-cli.ts";
+import { pairToMeta, type SnapshotPair } from "./pair.ts";
+import type { BuilderInfo, SnapshotService } from "./service.ts";
+
+const OLD_COMMIT = "1".repeat(40);
+const SHA = "2".repeat(40);
+const PAIR: SnapshotPair = {
+  snapshotId: "snap_old01",
+  imageDigest: `sha256:${"a".repeat(64)}`,
+  commit: OLD_COMMIT,
+};
+const NEW: SnapshotPair = {
+  snapshotId: "snap_new01",
+  imageDigest: `sha256:${"b".repeat(64)}`,
+  commit: SHA,
+};
+const VERCEL = {
+  VERCEL_TOKEN: "vercel-token-not-a-real-one-0123456789",
+  VERCEL_TEAM_ID: "team_example01",
+  VERCEL_PROJECT_ID: "prj_example01",
+};
+const INFISICAL = {
+  INFISICAL_DOMAIN: "https://infisical.example.com",
+  INFISICAL_CLIENT_ID: "client-id-not-real",
+  INFISICAL_CLIENT_SECRET: "client-secret-not-a-real-one-0123456789",
+  INFISICAL_PROJECT_SLUG: "example-project",
+};
+
+function envFile(pair: SnapshotPair | undefined): string {
+  return pair === undefined
+    ? 'OTHER="x"\n'
+    : `SANDBOX_SNAPSHOT_ID="${pair.snapshotId}"\nSANDBOX_IMAGE_DIGEST="${pair.imageDigest}"\nSANDBOX_SNAPSHOT_COMMIT="${pair.commit}"\n`;
+}
+
+type Harness = ReturnType<typeof harness>;
+
+function harness(
+  options: {
+    env?: Record<string, string>;
+    file?: string;
+    live?: SnapshotPair | "none" | "unavailable";
+    changed?: boolean;
+    known?: boolean;
+    builders?: BuilderInfo[];
+    deleteFails?: string;
+    persistStatus?: number;
+  } = {},
+) {
+  const out: string[] = [];
+  const err: string[] = [];
+  const files = new Map<string, string>();
+  const requests: Array<{ method: string; url: URL; body?: unknown }> = [];
+  const deleted: string[] = [];
+  const builders = options.builders ?? [];
+  const service: SnapshotService = {
+    createVm: () => Promise.reject(new Error("not used")),
+    listBuilders: () => Promise.resolve(builders),
+    deleteBuilder: (name) => {
+      if (name === options.deleteFails) return Promise.reject(new Error("x"));
+      deleted.push(name);
+      return Promise.resolve();
+    },
+  };
+  const live = options.live ?? "none";
+  const deps: OpsDeps = {
+    env: { ...VERCEL, ...INFISICAL, ...options.env },
+    stdout: (text) => out.push(text),
+    stderr: (line) => err.push(line),
+    readText: (path) => {
+      if (path === ".vercel/.env.production.local")
+        return options.file ?? envFile(PAIR);
+      throw new Error("missing");
+    },
+    appendText: (path, text) => files.set(path, (files.get(path) ?? "") + text),
+    commitKnown: () => Promise.resolve(options.known ?? true),
+    pathsChanged: () => Promise.resolve(options.changed ?? false),
+    createService: () => service,
+    fetch: async (input, init) => {
+      const request = new Request(input, init);
+      const url = new URL(request.url);
+      const text = await request.text();
+      requests.push({
+        method: request.method,
+        url,
+        ...(text === "" ? {} : { body: JSON.parse(text) as unknown }),
+      });
+      if (url.hostname === "api.vercel.com") {
+        if (live === "unavailable") return new Response("{}", { status: 500 });
+        if (url.pathname.startsWith("/v9/projects/"))
+          return Response.json({ targets: { production: { id: "dpl_live" } } });
+        return Response.json({
+          projectId: VERCEL.VERCEL_PROJECT_ID,
+          ownerId: VERCEL.VERCEL_TEAM_ID,
+          meta: live === "none" ? {} : pairToMeta(live),
+        });
+      }
+      if (url.pathname.includes("login"))
+        return Response.json({ accessToken: "t" });
+      if (url.pathname.includes("/projects/slug/"))
+        return Response.json({ id: "pid" });
+      return Response.json({}, { status: options.persistStatus ?? 200 });
+    },
+  };
+  return { deps, out, err, files, requests, deleted };
+}
+
+const builder = (n: number, snapshotId: string): BuilderInfo => ({
+  name: `code-reviewer-golden-builder-${String(n)}`,
+  createdAt: n,
+  snapshotId,
+});
+
+const text = (h: Harness): string => [...h.out, ...h.err].join("\n");
+
+describe("snapshot:ops decide", () => {
+  const args = (extra: string[] = []) => [
+    "decide",
+    "--sha",
+    SHA,
+    "--env-file",
+    ".vercel/.env.production.local",
+    "--github-output",
+    "OUT",
+    ...extra,
+  ];
+
+  // #403-T13
+  it("writes a reuse decision with the pair as step outputs and masks the ids", async () => {
+    const h = harness();
+
+    expect(await runOps(args(), h.deps)).toBe(0);
+
+    const output = h.files.get("OUT") ?? "";
+    expect(output).toContain("rebuild=false\n");
+    expect(output).toContain("reason=inputs_unchanged\n");
+    expect(output).toContain(`snapshot-id=${PAIR.snapshotId}\n`);
+    expect(output).toContain(`image-digest=${PAIR.imageDigest}\n`);
+    expect(output).toContain(`commit=${PAIR.commit}\n`);
+    expect(output).toContain("repair=false\n");
+    // The ids reach the log only as masks.
+    expect(h.out.join("")).toContain(`::add-mask::${PAIR.snapshotId}`);
+    expect(h.out.join("")).toContain(`::add-mask::${PAIR.imageDigest}`);
+    expect(h.err.join("\n")).not.toContain(PAIR.snapshotId);
+  });
+
+  // #403-T13
+  it("writes a rebuild decision without a pair when the inputs changed", async () => {
+    const h = harness({ changed: true });
+
+    expect(await runOps(args(), h.deps)).toBe(0);
+
+    const output = h.files.get("OUT") ?? "";
+    expect(output).toContain("rebuild=true\n");
+    expect(output).toContain("reason=inputs_changed\n");
+    expect(output).not.toContain("snapshot-id=");
+  });
+
+  // #403-T13
+  it("rebuilds on the first deployment, when the pulled file holds no pair", async () => {
+    const h = harness({ file: envFile(undefined) });
+
+    await runOps(args(), h.deps);
+
+    expect(h.files.get("OUT")).toContain("reason=pair_missing\n");
+  });
+
+  // #403-T13
+  it("rebuilds when told to, and takes the live pair over a stale variable", async () => {
+    const forced = harness();
+    await runOps(args(["--force"]), forced.deps);
+    expect(forced.files.get("OUT")).toContain("reason=forced\n");
+
+    const repaired = harness({ live: NEW, file: envFile(PAIR) });
+    await runOps(args(), repaired.deps);
+    const output = repaired.files.get("OUT") ?? "";
+    expect(output).toContain(`snapshot-id=${NEW.snapshotId}\n`);
+    expect(output).toContain("repair=true\n");
+  });
+
+  // #403-T13
+  it("falls back to the variables when the live deployment cannot be read, and says so", async () => {
+    const h = harness({ live: "unavailable" });
+
+    expect(await runOps(args(), h.deps)).toBe(0);
+
+    expect(h.files.get("OUT")).toContain("repair=false\n");
+    expect(text(h)).toContain("live_pair_unavailable");
+  });
+
+  // #403-T13
+  it.each([
+    ["no sha", ["decide", "--env-file", "x", "--github-output", "OUT"]],
+    [
+      "a sha that is not one",
+      ["decide", "--sha", "main", "--env-file", "x", "--github-output", "OUT"],
+    ],
+    [
+      "an unknown option",
+      [
+        "decide",
+        "--sha",
+        SHA,
+        "--env-file",
+        "x",
+        "--github-output",
+        "OUT",
+        "--nope",
+      ],
+    ],
+    ["no command", []],
+    ["an unknown command", ["frobnicate"]],
+  ])("refuses %s with exit 2 and nothing written", async (_name, argv) => {
+    const h = harness();
+
+    expect(await runOps(argv, h.deps)).toBe(2);
+
+    expect(h.files.size).toBe(0);
+  });
+});
+
+describe("snapshot:ops persist", () => {
+  const PAIR_ENV = {
+    PAIR_SNAPSHOT_ID: NEW.snapshotId,
+    PAIR_IMAGE_DIGEST: NEW.imageDigest,
+    PAIR_COMMIT: NEW.commit,
+  };
+
+  // #403-T15
+  it("writes the pair of the environment to Infisical and prints nothing of it", async () => {
+    const h = harness({ env: PAIR_ENV });
+
+    expect(await runOps(["persist"], h.deps)).toBe(0);
+
+    const writes = h.requests.filter((r) =>
+      r.url.pathname.startsWith("/api/v4/secrets/"),
+    );
+    expect(
+      writes.map((r) => (r.body as { secretValue: string }).secretValue),
+    ).toEqual([NEW.snapshotId, NEW.imageDigest, NEW.commit]);
+    // The ids appear in the log only as masks; every other line is a code.
+    expect(h.err.join("\n")).not.toContain(NEW.snapshotId);
+    expect(h.out.join("")).toContain(`::add-mask::${NEW.snapshotId}`);
+    expect(text(h)).not.toContain(INFISICAL.INFISICAL_CLIENT_SECRET);
+  });
+
+  // #403-T15
+  it("restores the pair of an earlier deployment for a rollback, read from that deployment's meta", async () => {
+    const h = harness({ live: PAIR });
+
+    expect(
+      await runOps(["persist", "--from-deployment", "dpl_old01"], h.deps),
+    ).toBe(0);
+
+    const lookup = h.requests.find(
+      (r) => r.url.pathname === "/v13/deployments/dpl_old01",
+    );
+    expect(lookup).toBeDefined();
+    const writes = h.requests.filter((r) =>
+      r.url.pathname.startsWith("/api/v4/secrets/"),
+    );
+    expect(
+      writes.map((r) => (r.body as { secretValue: string }).secretValue),
+    ).toEqual([PAIR.snapshotId, PAIR.imageDigest, PAIR.commit]);
+  });
+
+  // #403-T15
+  it("does nothing, and says so, for a deployment that carries no pair", async () => {
+    const h = harness({ live: "none" });
+
+    expect(
+      await runOps(["persist", "--from-deployment", "dpl_old01"], h.deps),
+    ).toBe(0);
+
+    expect(
+      h.requests.some((r) => r.url.pathname.startsWith("/api/v4/secrets/")),
+    ).toBe(false);
+    expect(text(h)).toContain("deployment_without_pair");
+  });
+
+  // #403-T15
+  it("fails loudly with the code when a write is refused", async () => {
+    const h = harness({ env: PAIR_ENV, persistStatus: 403 });
+
+    expect(await runOps(["persist"], h.deps)).toBe(1);
+
+    expect(text(h)).toContain("infisical_write_failed");
+  });
+
+  // #403-T15
+  it.each([
+    ["no pair in the environment", {}],
+    [
+      "a pair of the wrong shape",
+      {
+        PAIR_SNAPSHOT_ID: "x y",
+        PAIR_IMAGE_DIGEST: "latest",
+        PAIR_COMMIT: "abc",
+      },
+    ],
+  ])("refuses %s with exit 2", async (_name, env) => {
+    const h = harness({ env });
+
+    expect(await runOps(["persist"], h.deps)).toBe(2);
+
+    expect(h.requests).toEqual([]);
+  });
+
+  // #403-T15
+  it.each([
+    "INFISICAL_DOMAIN",
+    "INFISICAL_CLIENT_ID",
+    "INFISICAL_CLIENT_SECRET",
+    "INFISICAL_PROJECT_SLUG",
+  ])("refuses to start without %s, naming it", async (name) => {
+    const h = harness({ env: { ...PAIR_ENV, [name]: "" } });
+
+    expect(await runOps(["persist"], h.deps)).toBe(2);
+
+    expect(text(h)).toContain(name);
+    expect(h.requests).toEqual([]);
+  });
+});
+
+describe("snapshot:ops cleanup", () => {
+  const four = [
+    builder(1, "snap_a"),
+    builder(2, "snap_b"),
+    builder(3, PAIR.snapshotId),
+    builder(4, NEW.snapshotId),
+  ];
+  const KEEP = { KEEP_SNAPSHOT_IDS: `${NEW.snapshotId} ${PAIR.snapshotId}` };
+
+  // #403-T16
+  it("removes the older builders, keeps the new and the previous snapshot, and protects the live one too", async () => {
+    const h = harness({ builders: four, env: KEEP, live: NEW });
+
+    expect(await runOps(["cleanup"], h.deps)).toBe(0);
+
+    expect(h.deleted).toEqual([builder(1, "").name, builder(2, "").name]);
+  });
+
+  // #403-T16
+  it("also keeps what the live deployment uses when the caller did not name it", async () => {
+    const h = harness({
+      builders: four,
+      env: { KEEP_SNAPSHOT_IDS: NEW.snapshotId },
+      live: PAIR,
+    });
+
+    await runOps(["cleanup"], h.deps);
+
+    expect(h.deleted).not.toContain(builder(3, "").name);
+    expect(h.deleted).not.toContain(builder(4, "").name);
+  });
+
+  // #403-T16
+  it("removes nothing, and fails, when the live deployment cannot be read: it could be the one to delete", async () => {
+    const h = harness({ builders: four, env: KEEP, live: "unavailable" });
+
+    expect(await runOps(["cleanup"], h.deps)).toBe(1);
+
+    expect(h.deleted).toEqual([]);
+    expect(text(h)).toContain("cleanup_refused");
+  });
+
+  // #403-T16
+  it("removes nothing when the kept snapshots are not among the builders", async () => {
+    const h = harness({
+      builders: four,
+      env: { KEEP_SNAPSHOT_IDS: "snap_unknown" },
+    });
+
+    expect(await runOps(["cleanup"], h.deps)).toBe(1);
+
+    expect(h.deleted).toEqual([]);
+  });
+
+  // #403-T16
+  it("goes on after a builder that cannot be deleted, reports it, and fails at the end", async () => {
+    const h = harness({
+      builders: four,
+      env: KEEP,
+      live: NEW,
+      deleteFails: builder(1, "").name,
+    });
+
+    expect(await runOps(["cleanup"], h.deps)).toBe(1);
+
+    expect(h.deleted).toEqual([builder(2, "").name]);
+    expect(text(h)).toContain("cleanup_incomplete");
+  });
+
+  // #403-T16
+  it("discards the snapshot of a run that did not reach production, unless the live deployment uses it", async () => {
+    const discard = harness({
+      builders: four,
+      env: {
+        KEEP_SNAPSHOT_IDS: PAIR.snapshotId,
+        DISCARD_SNAPSHOT_ID: NEW.snapshotId,
+      },
+      live: PAIR,
+    });
+    expect(await runOps(["cleanup"], discard.deps)).toBe(0);
+    expect(discard.deleted).toEqual([builder(4, "").name]);
+
+    // A promotion that timed out but went through: the live deployment already uses it.
+    const live = harness({
+      builders: four,
+      env: {
+        KEEP_SNAPSHOT_IDS: PAIR.snapshotId,
+        DISCARD_SNAPSHOT_ID: NEW.snapshotId,
+      },
+      live: NEW,
+    });
+    expect(await runOps(["cleanup"], live.deps)).toBe(0);
+    expect(live.deleted).toEqual([]);
+  });
+
+  // #403-T16
+  it("prints the names of no snapshot", async () => {
+    const h = harness({ builders: four, env: KEEP, live: NEW });
+
+    await runOps(["cleanup"], h.deps);
+
+    for (const id of ["snap_a", PAIR.snapshotId, NEW.snapshotId])
+      expect(text(h)).not.toContain(id);
+  });
+});
