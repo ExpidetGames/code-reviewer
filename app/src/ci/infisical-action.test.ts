@@ -107,3 +107,51 @@ describe("the Infisical secrets action", () => {
       expect(step["continue-on-error"], step.name).toBeUndefined();
   });
 });
+
+describe("the Infisical write action", () => {
+  const write = parse(
+    readText(".github/actions/infisical-write-snapshot-pair/action.yml"),
+  ) as CompositeAction;
+  const step = write.runs.steps[0];
+
+  // #403-T19
+  it("is a composite action with one step that runs the persist command, with every value from an input", () => {
+    expect(write.runs.using).toBe("composite");
+    expect(write.runs.steps).toHaveLength(1);
+    expect(step?.run).toContain(
+      'pnpm --dir dispatcher snapshot:ops "${args[@]}"',
+    );
+    expect(step?.run).toContain("persist");
+    expect(step?.run).not.toContain("${{");
+    for (const [name, input] of [
+      ["INFISICAL_CLIENT_ID", "client-id"],
+      ["INFISICAL_CLIENT_SECRET", "client-secret"],
+      ["INFISICAL_DOMAIN", "domain"],
+      ["INFISICAL_PROJECT_SLUG", "project-slug"],
+      ["PAIR_SNAPSHOT_ID", "snapshot-id"],
+      ["PAIR_IMAGE_DIGEST", "image-digest"],
+      ["PAIR_COMMIT", "commit"],
+      ["FROM_DEPLOYMENT", "from-deployment"],
+      ["VERCEL_PROJECT_ID", "vercel-project-id"],
+    ])
+      expect(step?.env?.[name]).toBe(`\${{ inputs.${input} }}`);
+    expect(
+      readText(".github/actions/infisical-write-snapshot-pair/action.yml"),
+    ).not.toMatch(/secrets\.|vars\./);
+  });
+
+  // #403-T19
+  it("takes the four sign-in values as required inputs, and is not the read action: it lists no secret to load", () => {
+    for (const name of ["client-id", "client-secret", "domain", "project-slug"])
+      expect(write.inputs?.[name]?.required).toBe(true);
+    expect(JSON.stringify(write.runs.steps)).not.toContain(
+      "Infisical/secrets-action",
+    );
+    expect(write.inputs).not.toHaveProperty("secret-names");
+  });
+
+  // #403-T19
+  it("does not exist in the read action: the one that every job uses cannot write", () => {
+    expect(source).not.toMatch(/persist|snapshot:ops|api\/v4\/secrets/);
+  });
+});

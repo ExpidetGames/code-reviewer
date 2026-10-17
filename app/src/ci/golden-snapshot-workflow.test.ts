@@ -29,6 +29,7 @@ type Job = {
   environment?: string;
   permissions?: Record<string, string>;
   steps: Step[];
+  outputs?: Record<string, string>;
   "runs-on"?: string;
 };
 type Workflow = {
@@ -52,24 +53,49 @@ function stepNamed(name: string): Step {
 }
 
 describe("golden snapshot workflow", () => {
-  // #330-extra-workflow
-  it("runs on demand and on a push to main, and never for a pull request", () => {
+  // #403-T13
+  it("runs on demand and when the deployment workflow calls it, never for a pull request, and no longer for a push", () => {
     expect(Object.keys(workflow.on).sort()).toEqual([
-      "push",
+      "workflow_call",
       "workflow_dispatch",
     ]);
-    expect(workflow.on.push?.branches).toEqual(["main"]);
-    expect(source).not.toMatch(/pull_request/);
+    expect(source).not.toMatch(/pull_request|^\s+push:/m);
+    // The variable that switched the automatic build on is retired: the deployment builds when it has to.
+    expect(source).not.toContain("GOLDEN_SNAPSHOT_ENABLED");
+    expect(source).not.toContain("pinned_snapshot");
   });
 
-  // #330-extra-workflow
-  it("is opt-in on a push (a repository variable) and only for this repository", () => {
-    const condition = String(job.if);
-    expect(condition).toContain(
-      "github.repository == 'ExpidetGames/code-reviewer'",
+  // #403-T13
+  it("gives the deployment the snapshot, the image id and the commit as outputs", () => {
+    const outputs =
+      (
+        workflow.on.workflow_call as {
+          outputs?: Record<string, { value: string }>;
+        }
+      ).outputs ?? {};
+    expect(Object.keys(outputs).sort()).toEqual([
+      "commit",
+      "image-digest",
+      "snapshot-id",
+    ]);
+    for (const output of Object.values(outputs))
+      expect(output.value).toMatch(/^\$\{\{ jobs\.build\.outputs\./);
+    const read = stepNamed("Read the record");
+    expect(read.id).toBe("record");
+    expect(read.run).toContain("jq -r .snapshotId");
+    expect(read.run).toContain("jq -r .imageDigest");
+    expect(job.outputs?.["snapshot-id"]).toBe(
+      "${{ steps.record.outputs.snapshot-id }}",
     );
-    expect(condition).toContain("vars.GOLDEN_SNAPSHOT_ENABLED == 'true'");
-    expect(condition).toContain("github.event_name == 'workflow_dispatch'");
+  });
+
+  // #403-T17
+  it("removes nothing of earlier runs and writes nothing to Infisical: the deployment does that after the promotion", () => {
+    const build = stepNamed("Build, check and record the snapshot");
+    expect(build.run).toContain("--skip-retention");
+    expect(source).not.toMatch(
+      /snapshot:ops|infisical-write-snapshot-pair|--pin-snapshot/,
+    );
   });
 
   // #403-T05
@@ -80,7 +106,7 @@ describe("golden snapshot workflow", () => {
     expect(condition).not.toContain("development");
     // The ref condition is ANDed with the others, not an alternative to them.
     expect(condition).toMatch(
-      /repository == '[^']+' && github\.ref == 'refs\/heads\/main' && \(/,
+      /repository == '[^']+' && github\.ref == 'refs\/heads\/main'( \}\})?$/,
     );
     expect(condition.match(/github\.ref ==/g)).toHaveLength(1);
   });
@@ -126,7 +152,6 @@ describe("golden snapshot workflow", () => {
   it("hands the build step the project id under the name the client reads, and no credential in a command line", () => {
     const build = stepNamed("Build, check and record the snapshot");
     expect(Object.keys(build.env ?? {}).sort()).toEqual([
-      "PINNED",
       "TARGET",
       "VERCEL_PROJECT_ID",
     ]);
@@ -139,10 +164,9 @@ describe("golden snapshot workflow", () => {
   });
 
   // #330-T02
-  it("passes the dispatch inputs through environment variables, not into the shell text", () => {
+  it("passes the dispatch input through an environment variable, not into the shell text", () => {
     const build = stepNamed("Build, check and record the snapshot");
     expect(build.env?.TARGET).toContain("inputs.target");
-    expect(build.env?.PINNED).toContain("inputs.pinned_snapshot");
     for (const step of job.steps)
       expect(step.run ?? "", step.name).not.toMatch(/\$\{\{\s*inputs\./);
   });

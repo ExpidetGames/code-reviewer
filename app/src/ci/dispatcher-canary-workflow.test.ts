@@ -126,11 +126,12 @@ describe("dispatcher canary workflow", () => {
   });
 
   // #403-T06
-  it("hands the canary step the three values it renames and reads the credentials from the environment, never in a command line", () => {
+  it("hands the canary step what it renames and reads the credentials from the environment, never in a command line", () => {
     const canary = stepNamed("Run the canary");
     expect(Object.keys(canary.env ?? {}).sort()).toEqual(
       [
         "CANARY_ENGINES",
+        "CANARY_EXPECT_IMAGE_DIGEST",
         "CANARY_URL",
         "VERCEL_AUTOMATION_BYPASS_SECRET",
         "VERCEL_PROJECT_ID",
@@ -141,6 +142,9 @@ describe("dispatcher canary workflow", () => {
     );
     expect(canary.env?.VERCEL_AUTOMATION_BYPASS_SECRET).toBe(
       "${{ env.VERCEL_DISPATCHER_AUTOMATION_BYPASS_SECRET }}",
+    );
+    expect(canary.env?.CANARY_EXPECT_IMAGE_DIGEST).toBe(
+      "${{ inputs.image_digest }}",
     );
     // No step but the Infisical sign-in reads a secret.
     const withSecrets = job.steps.filter((step) =>
@@ -154,6 +158,22 @@ describe("dispatcher canary workflow", () => {
       /echo[^\n]*(RUNNER_TOKEN|BYPASS|VERCEL_TOKEN)/,
     );
     expect(canary.run).not.toMatch(/set -x|--debug|xtrace|--token/);
+  });
+
+  // #403-T01
+  it("asks for a production deployment of the commit of this run and for the image the pipeline built", () => {
+    const canary = stepNamed("Run the canary");
+    expect(canary.run).toContain("--verify-vercel");
+    expect(canary.run).toContain('--expect-commit "$GITHUB_SHA"');
+    expect(workflow.on.workflow_call?.inputs).toHaveProperty("image_digest");
+    expect(workflow.on.workflow_dispatch?.inputs).toHaveProperty(
+      "image_digest",
+    );
+    // The commit is the one that was checked out, not a ref that can move.
+    const checkout = job.steps.find((step) =>
+      step.uses?.startsWith("actions/checkout@"),
+    );
+    expect(checkout?.with?.ref).toBe("${{ github.sha }}");
   });
 
   // #331-extra-workflow

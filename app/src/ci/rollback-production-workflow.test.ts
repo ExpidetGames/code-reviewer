@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Pins down the manual rollback of the hosted deployment (.github/workflows/rollback-production.yml, #403): it
-// runs on demand from main only, takes the deployment to restore per project and puts exactly that deployment back
-// into production with the pinned Vercel CLI.
+// Pins down the manual rollback of the hosted deployment (.github/workflows/rollback-production.yml, #403): it runs
+// on demand from main only, in a queue of its own, takes the deployment to restore per project, checks with the
+// Vercel API that it is a ready production deployment of that project, puts exactly that deployment back into
+// production with the pinned Vercel CLI, and writes the restored Dispatcher's snapshot pair back to Infisical.
 import { describe, expect, it } from "vitest";
+import { runStep } from "./shell-support.ts";
 import {
   isInfisicalLoad,
   readText,
@@ -16,6 +18,12 @@ import {
 const source = readText(".github/workflows/rollback-production.yml");
 const workflow = readWorkflow("rollback-production.yml");
 const job = Object.values(workflow.jobs)[0] as Job;
+const steps = stepsOf(job);
+const named = (name: string) => {
+  const step = steps.find((s) => s.name === name);
+  if (!step) throw new Error(`no step "${name}"`);
+  return step;
+};
 
 describe("the production rollback workflow", () => {
   // #403-T09
@@ -47,36 +55,61 @@ describe("the production rollback workflow", () => {
     );
   });
 
-  // #403-T08
-  it("queues behind a running deployment instead of racing it", () => {
+  // #403-T20
+  it("has a queue of its own: an emergency rollback does not wait behind a deployment, and neither drops the other", () => {
     expect(workflow.concurrency).toEqual({
-      group: "deploy-production",
+      group: "rollback-production",
       "cancel-in-progress": false,
     });
+    expect(readWorkflow("deploy-production.yml").concurrency?.group).not.toBe(
+      workflow.concurrency?.group,
+    );
   });
 
   // #403-T09
-  it("checks both inputs for the shape of a deployment id or address before it signs in, and passes them as environment variables", () => {
-    const steps = stepsOf(job);
-    const check = steps.findIndex((step) => (step.run ?? "").includes("dpl_"));
-    expect(check).toBeGreaterThanOrEqual(0);
-    expect(check).toBeLessThan(stepIndex(job, isInfisicalLoad));
-    expect(steps[check]?.env?.APP_DEPLOYMENT).toBe(
-      "${{ inputs.app_deployment }}",
+  it("installs the dependencies before the token is loaded, and the CLI from the lockfile", () => {
+    const install = steps.findIndex((s) =>
+      /pnpm --dir dispatcher install --frozen-lockfile/.test(s.run ?? ""),
     );
-    expect(steps[check]?.env?.DISPATCHER_DEPLOYMENT).toBe(
-      "${{ inputs.dispatcher_deployment }}",
+    const load = stepIndex(job, isInfisicalLoad);
+    const cli = steps.findIndex(
+      (s) => s.uses === "./.github/actions/vercel-cli",
     );
-    expect(steps[check]?.run).toContain("https://[a-z0-9-]+\\.vercel\\.app");
-    // Nothing to do is a mistake, not a success.
-    expect(steps[check]?.run).toMatch(/at least one/);
-    for (const step of steps)
-      expect(step.run ?? "", step.name).not.toContain("${{");
+    expect(install).toBeGreaterThanOrEqual(0);
+    expect(cli).toBeGreaterThanOrEqual(0);
+    expect(load).toBeGreaterThan(install);
+    expect(load).toBeGreaterThan(cli);
+    expect(source).not.toMatch(/npm install|VERCEL_CLI_VERSION/);
+  });
+
+  // #403-T09
+  it("verifies both deployments against the Vercel API before it rolls either back", () => {
+    const apps = named(
+      "Check that the App deployment is a production deployment of the App",
+    );
+    const dispatchers = named(
+      "Check that the Dispatcher deployment is a production deployment of the Dispatcher",
+    );
+    expect(apps.run).toBe(
+      'pnpm --dir dispatcher snapshot:ops verify --deployment "$DEPLOYMENT"',
+    );
+    expect(apps.env?.VERCEL_PROJECT_ID).toBe(
+      "${{ env.VERCEL_APP_PROJECT_ID }}",
+    );
+    expect(dispatchers.env?.VERCEL_PROJECT_ID).toBe(
+      "${{ env.VERCEL_DISPATCHER_PROJECT_ID }}",
+    );
+    const firstRollback = steps.findIndex((s) =>
+      /vercel rollback/.test(s.run ?? ""),
+    );
+    expect(steps.indexOf(apps)).toBeLessThan(firstRollback);
+    expect(steps.indexOf(dispatchers)).toBeLessThan(firstRollback);
+    expect(apps.if).toContain("inputs.app_deployment != ''");
+    expect(dispatchers.if).toContain("inputs.dispatcher_deployment != ''");
   });
 
   // #403-T09
   it("restores each given deployment with the pinned CLI in its own project, and only that", () => {
-    const steps = stepsOf(job);
     const rollbacks = steps.filter((step) =>
       /vercel rollback/.test(step.run ?? ""),
     );
@@ -92,15 +125,96 @@ describe("the production rollback workflow", () => {
       expect(step.if).toBeTruthy();
       expect(step.env?.VERCEL_ORG_ID).toBe("${{ env.VERCEL_TEAM_ID }}");
     }
-    expect(workflow.env?.VERCEL_CLI_VERSION).toMatch(/^\d+\.\d+\.\d+$/);
-    expect(source).toContain(
-      'npm install --global "vercel@${VERCEL_CLI_VERSION}"',
-    );
-    const load = stepIndex(job, isInfisicalLoad);
-    expect(
-      steps.findIndex((step) => /vercel rollback/.test(step.run ?? "")),
-    ).toBeGreaterThan(load);
     for (const step of steps)
       expect(step["continue-on-error"], step.name).toBeUndefined();
+  });
+
+  // #403-T19
+  it("writes the restored Dispatcher's snapshot pair back to Infisical, from that deployment's meta, after the rollback", () => {
+    const write = named(
+      "Write the restored Dispatcher's golden snapshot pair back to Infisical",
+    );
+    expect(write.uses).toBe("./.github/actions/infisical-write-snapshot-pair");
+    expect(write.if).toContain("inputs.dispatcher_deployment != ''");
+    expect(write.with?.["from-deployment"]).toBe(
+      "${{ inputs.dispatcher_deployment }}",
+    );
+    expect(write.with?.["vercel-project-id"]).toBe(
+      "${{ env.VERCEL_DISPATCHER_PROJECT_ID }}",
+    );
+    expect(steps.indexOf(write)).toBeGreaterThan(
+      steps.findIndex(
+        (s) =>
+          /vercel rollback/.test(s.run ?? "") && s.name?.includes("Dispatcher"),
+      ),
+    );
+  });
+
+  // #403-T09
+  it("passes the inputs to the shell as environment variables only", () => {
+    for (const step of steps)
+      expect(step.run ?? "", step.name).not.toContain("${{");
+    expect(named("Check the inputs").env?.APP_DEPLOYMENT).toBe(
+      "${{ inputs.app_deployment }}",
+    );
+    expect(named("Check the inputs").env?.DISPATCHER_DEPLOYMENT).toBe(
+      "${{ inputs.dispatcher_deployment }}",
+    );
+  });
+});
+
+describe("the input check of the rollback", () => {
+  const selector = {
+    workflow: "rollback-production.yml",
+    job: "rollback",
+    step: "Check the inputs",
+  } as const;
+
+  // #403-T09
+  it.each([
+    ["an id", { APP_DEPLOYMENT: "dpl_example0001", DISPATCHER_DEPLOYMENT: "" }],
+    [
+      "an address",
+      {
+        APP_DEPLOYMENT: "",
+        DISPATCHER_DEPLOYMENT: "https://example-abc.vercel.app",
+      },
+    ],
+    [
+      "both",
+      {
+        APP_DEPLOYMENT: "dpl_example0001",
+        DISPATCHER_DEPLOYMENT: "https://example-abc.vercel.app",
+      },
+    ],
+  ])("accepts %s", (_name, env) => {
+    expect(runStep(selector, { env }).status).toBe(0);
+  });
+
+  // #403-T09
+  it.each([
+    ["nothing", { APP_DEPLOYMENT: "", DISPATCHER_DEPLOYMENT: "" }],
+    [
+      "an address on another host",
+      { APP_DEPLOYMENT: "https://example.com", DISPATCHER_DEPLOYMENT: "" },
+    ],
+    [
+      "a path",
+      {
+        APP_DEPLOYMENT: "https://example-abc.vercel.app/x",
+        DISPATCHER_DEPLOYMENT: "",
+      },
+    ],
+    ["a flag", { APP_DEPLOYMENT: "--yes", DISPATCHER_DEPLOYMENT: "" }],
+    ["a short id", { APP_DEPLOYMENT: "dpl_x", DISPATCHER_DEPLOYMENT: "" }],
+    [
+      "a second value that is wrong",
+      { APP_DEPLOYMENT: "dpl_example0001", DISPATCHER_DEPLOYMENT: "latest" },
+    ],
+  ])("refuses %s", (_name, env) => {
+    const run = runStep(selector, { env });
+
+    expect(run.status).toBe(1);
+    expect(run.stdout).toContain("::error::");
   });
 });
