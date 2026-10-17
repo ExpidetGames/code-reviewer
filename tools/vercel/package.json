@@ -1,0 +1,10 @@
+{
+  "name": "code-reviewer-vercel-cli",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The Vercel CLI the deployment workflows use, pinned with its whole dependency tree (#403). Install with `npm ci --ignore-scripts`; nothing is built from this directory.",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "vercel": "64.5.0"
+  }
+}

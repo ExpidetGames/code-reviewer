@@ -14,6 +14,7 @@ const appRoot = fileURLToPath(new URL("../../", import.meta.url));
 type VercelConfig = {
   regions?: string[];
   crons?: Array<{ path: string; schedule: string }>;
+  git?: { deploymentEnabled?: boolean };
   functions?: Record<string, { maxDuration?: number }>;
 } & Record<string, unknown>;
 
@@ -37,6 +38,19 @@ describe("app/vercel.json", () => {
   // #319-T08
   it("runs in the one region the golden snapshots and the database live in", () => {
     expect(config.regions).toEqual(["fra1"]);
+  });
+
+  // #403-T10
+  it("switches Git auto-deploy off: the project is deployed by the production workflow and by nothing else", () => {
+    expect(config.git).toEqual({ deploymentEnabled: false });
+  });
+
+  // #403-T10
+  it("keeps its two crons", () => {
+    expect((config.crons ?? []).map(({ path }) => path).sort()).toEqual([
+      "/api/internal/dispatch-sweep",
+      "/api/internal/repository-sync",
+    ]);
   });
 
   // #319-T08

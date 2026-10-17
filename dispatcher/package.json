@@ -7,6 +7,7 @@
   "scripts": {
     "start": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON src/node.ts",
     "snapshot:build": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON src/snapshot/main.ts",
+    "snapshot:ops": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON src/snapshot/ops-main.ts",
     "probe:canary": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON src/probe/canary-main.ts",
     "lint": "eslint .",
     "format": "prettier --write .",
