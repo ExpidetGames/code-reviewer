@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { MODEL_TIERS } from "../model-tiers/tiers.ts";
 import { describeErrorCode } from "../runs/error-copy.ts";
 import { describeIssue } from "../review-settings/ui/messages.ts";
+import { MEMBER_COPY_FORBIDDEN } from "./member-copy-scan.ts";
 import * as quality from "./model-quality.ts";
 
 /** Every string the module exports, including the ones inside the levels. */
@@ -37,19 +38,11 @@ describe("the copy of the quality levels", () => {
 
   // #283-T03
   it("describes the levels by speed and depth only: no model, vendor, price or cost", () => {
-    const forbidden = [
-      /\bmodels?\b/i,
-      /\bopenrouter\b|\bopenai\b|\banthropic\b|\bgoogle\b|\bgemini\b|\bclaude\b|\bgpt\b/i,
-      /\bdeepseek\b|\bmeta\b|\bllama\b|\bmistral\b|\bqwen\b|\bhaiku\b|\bsonnet\b|\bopus\b/i,
-      /[$€£]|\busd\b|\beur\b/i,
-      /\bpric|\bcost|\bcheap|\bexpensive|\bfree\b|\bcredit|\btoken|\bbill|\bplan\b/i,
-      // The shape of a provider's model id.
-      /[a-z0-9-]+\/[a-z0-9][a-z0-9._:-]*/i,
-    ];
     const strings = allStrings();
     expect(strings.length).toBeGreaterThan(6);
     for (const text of strings)
-      for (const pattern of forbidden) expect(text).not.toMatch(pattern);
+      for (const pattern of MEMBER_COPY_FORBIDDEN)
+        expect(text).not.toMatch(pattern);
   });
 
   // #283-T03

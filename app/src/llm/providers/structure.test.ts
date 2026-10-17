@@ -30,6 +30,8 @@ const ALLOWED: Readonly<Record<string, string>> = {
     "generated from the Worker API contract, same enum",
   "app/src/runner-api/contract.ts":
     "the runner API contract's `llm.provider` literal (the runner seam is the next issue)",
+  "app/src/copy/member-copy-scan.ts":
+    "the list of vendor words that copy for a member must never say, the provider's name among them",
   "app/src/review-settings/runner-settings.ts":
     "a comment that names PR-Agent's own key variable (the runner side of the provider, the next issue)",
 };
