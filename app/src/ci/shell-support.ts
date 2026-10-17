@@ -9,6 +9,7 @@ import { spawnSync } from "node:child_process";
 import {
   chmodSync,
   mkdirSync,
+  readdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -109,13 +110,28 @@ export function runStep(
         ...options.env,
       } as unknown as NodeJS.ProcessEnv,
     });
+    // What the step and the stand-ins left in the run's directory, read before it is removed.
+    const left = new Map<string, string>();
+    for (const folder of ["", "bin"])
+      for (const entry of readdirSync(join(dir, folder), {
+        withFileTypes: true,
+      }))
+        if (entry.isFile())
+          left.set(
+            join(folder, entry.name),
+            readFileSync(join(dir, folder, entry.name), "utf8"),
+          );
     return {
       status: result.status ?? -1,
       stdout: result.stdout,
       stderr: result.stderr,
       output: readFileSync(outputFile, "utf8"),
       calls: readFileSync(callsFile, "utf8").split("\n").filter(Boolean),
-      read: (path) => readFileSync(join(dir, path), "utf8"),
+      read: (path) => {
+        const content = left.get(path);
+        if (content === undefined) throw new Error(`no file ${path}`);
+        return content;
+      },
     };
   } finally {
     rmSync(dir, { recursive: true, force: true });

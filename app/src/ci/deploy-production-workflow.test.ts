@@ -177,12 +177,18 @@ describe("the production deployment workflow", () => {
       "needs.snapshot-decide.outputs.repair == 'true'",
     );
 
+    // The cleanup follows every promotion of the Dispatcher, after persist when persist had something to do. The
+    // keep list makes it safe to repeat, and it clears what an earlier run could not.
     const cleanup = job("cleanup");
     expect(needsOf(cleanup)).toContain("persist");
-    expect(String(cleanup.if)).toContain("needs.persist.result == 'success'");
-    expect(String(cleanup.if)).toContain(
-      "needs.snapshot-decide.outputs.rebuild == 'true'",
+    expect(needsOf(cleanup)).toContain("promote-dispatcher");
+    const condition = String(cleanup.if);
+    expect(condition).toContain("needs.promote-dispatcher.result == 'success'");
+    expect(condition).toContain(
+      "needs.persist.result == 'success' || needs.persist.result == 'skipped'",
     );
+    // A persist that failed holds the cleanup back.
+    expect(condition).not.toMatch(/persist\.result != /);
   });
 
   // #403-T19
@@ -190,8 +196,9 @@ describe("the production deployment workflow", () => {
     const step = stepsOf(job("cleanup")).find((s) =>
       (s.run ?? "").includes("snapshot:ops cleanup"),
     );
+    // The snapshot the run built, or, when nothing was rebuilt, the one it reuses.
     expect(step?.env?.NEW_SNAPSHOT_ID).toBe(
-      "${{ needs.snapshot-build.outputs.snapshot-id }}",
+      "${{ needs.snapshot-build.outputs.snapshot-id || needs.snapshot-decide.outputs.snapshot-id }}",
     );
     expect(step?.env?.PREVIOUS_SNAPSHOT_ID).toBe(
       "${{ needs.snapshot-decide.outputs.previous-snapshot-id }}",
@@ -208,7 +215,11 @@ describe("the production deployment workflow", () => {
     const condition = String(discard.if);
     expect(condition).toContain("always()");
     expect(condition).toContain("needs.snapshot-build.result == 'success'");
-    expect(condition).toContain("needs.promote-dispatcher.result != 'success'");
+    // Only when the promotion never started. After a failure or a cancel the outcome is unknown (a promotion that
+    // timed out can still land), and the snapshot is left to the next cleanup, which keeps the live one.
+    expect(condition).toContain("needs.promote-dispatcher.result == 'skipped'");
+    expect(condition).not.toContain("promote-dispatcher.result != ");
+    expect(condition).not.toContain("'failure'");
     const step = stepsOf(discard).find((s) =>
       (s.run ?? "").includes("snapshot:ops cleanup"),
     );
@@ -367,7 +378,10 @@ describe("the production deployment workflow", () => {
     );
     expect(steps[at("build")]?.run).toContain("vercel build --prod");
     // The build runs the project's code (next build, bundlers, plugins): it must not see the token.
-    expect(steps[at("build")]?.env?.VERCEL_TOKEN).toBe("");
+    expect(steps[at("build")]?.run).toBe(
+      "env -u VERCEL_TOKEN vercel build --prod",
+    );
+    expect(steps[at("build")]?.env?.VERCEL_TOKEN).toBeUndefined();
     expect(steps[at("pull")]?.env?.VERCEL_TOKEN).toBeUndefined();
     expect(steps[at("deploy")]?.env?.VERCEL_TOKEN).toBeUndefined();
     const deploy = steps[at("deploy")]?.run ?? "";
@@ -476,8 +490,7 @@ describe("the shell of the pipeline", () => {
 
   describe("the check that the run is current", () => {
     const selector = {
-      workflow: "deploy-production.yml",
-      job: "fresh",
+      action: "check-current-commit",
       step: "Compare with the head of main",
     } as const;
     const gh = (head: string) => ({ gh: `echo '${head}'` });
@@ -854,5 +867,235 @@ describe("the shell of the pipeline", () => {
         runStep(check, { env: { ...env, VERCEL_TEAM_ID: "team" } }).status,
       ).toBe(0);
     });
+  });
+});
+
+describe("the freshness check, where a partial re-run cannot skip it", () => {
+  const CHECK = "./.github/actions/check-current-commit";
+
+  // #403-T23
+  it("is a step of the first job and of every job that promotes or writes the pair, before the step that acts", () => {
+    expect(stepsOf(job("fresh")).some((step) => step.uses === CHECK)).toBe(
+      true,
+    );
+    for (const [name, acts] of [
+      [
+        "promote-app",
+        (s: { run?: string }) => (s.run ?? "").includes("vercel promote"),
+      ],
+      [
+        "promote-dispatcher",
+        (s: { run?: string }) => (s.run ?? "").includes("vercel promote"),
+      ],
+    ] as const) {
+      const steps = stepsOf(job(name));
+      const check = steps.findIndex((step) => step.uses === CHECK);
+      expect(check, name).toBeGreaterThanOrEqual(0);
+      expect(check, name).toBeLessThan(steps.findIndex(acts));
+      expect(steps[check]?.with?.["allow-stale"], name).toBe(
+        "${{ inputs.allow_stale }}",
+      );
+    }
+    const persist = stepsOf(job("persist"));
+    expect(
+      persist.findIndex((step) => step.uses === CHECK),
+    ).toBeGreaterThanOrEqual(0);
+    expect(persist.findIndex((step) => step.uses === CHECK)).toBeLessThan(
+      persist.findIndex(
+        (step) =>
+          step.uses === "./.github/actions/infisical-write-snapshot-pair",
+      ),
+    );
+  });
+
+  // #403-T23
+  it("is a composite action that reads the head of main with the job's own token and takes the override as an input only", () => {
+    const text = readText(".github/actions/check-current-commit/action.yml");
+    expect(text).toContain("github-token");
+    expect(text).toContain("allow-stale");
+    expect(text).not.toMatch(/secrets\./);
+    expect(text).not.toContain("${{ inputs.allow-stale }}\n        run");
+  });
+
+  // #403-T23
+  it("lets only a manual run override it: the input does not exist for a push", () => {
+    const inputs = (
+      workflow.on.workflow_dispatch as { inputs: Record<string, unknown> }
+    ).inputs;
+    expect(Object.keys(inputs)).toContain("allow_stale");
+    expect(Object.keys(workflow.on.push as object)).toEqual(["branches"]);
+  });
+});
+
+describe("the shell of the stage that carries a pair", () => {
+  const COMMIT = "2".repeat(40);
+  const DIGEST = `sha256:${"a".repeat(64)}`;
+
+  describe("the build", () => {
+    const selector = {
+      workflow: "vercel-stage.yml",
+      job: "stage",
+      step: "Build",
+    } as const;
+
+    // #403-T24
+    it("runs with no Vercel token in its environment, whatever the job's environment holds", () => {
+      const run = runStep(selector, {
+        env: {
+          VERCEL_TOKEN: "token-not-real-0123456789",
+          VERCEL_TEAM_ID: "team_example",
+        },
+        stubs: {
+          vercel:
+            'if [ -n "${VERCEL_TOKEN+x}" ]; then echo token-present > "$STUB_DIR/seen"; else echo token-absent > "$STUB_DIR/seen"; fi',
+        },
+      });
+
+      expect(run.status).toBe(0);
+      expect(run.read("bin/seen").trim()).toBe("token-absent");
+      // The rest of the environment is still there: the team and project ids are not secrets.
+      expect(run.calls[0]).toBe("vercel build --prod");
+    });
+  });
+
+  describe("the check that the snapshot exists", () => {
+    const stage = stepsOf(stageJob);
+    const exists = stage.find((step) =>
+      (step.run ?? "").includes("snapshot:ops exists"),
+    );
+
+    // #403-T21
+    it("runs for a deployment that carries a pair, after the credentials are loaded and before anything is pulled or built", () => {
+      expect(exists).toBeDefined();
+      expect(exists?.if).toContain("inputs.snapshot-id != ''");
+      expect(exists?.env?.PAIR_SNAPSHOT_ID).toBe("${{ inputs.snapshot-id }}");
+      const at = stage.indexOf(exists as (typeof stage)[number]);
+      expect(at).toBeGreaterThan(stepIndex(stageJob, isInfisicalLoad));
+      expect(at).toBeLessThan(
+        stage.findIndex((step) => runsVercel(step, "pull")),
+      );
+      expect(exists?.run).toBe("pnpm --dir dispatcher snapshot:ops exists");
+    });
+  });
+
+  describe("the deployment document of the CLI", () => {
+    const selector = {
+      workflow: "vercel-stage.yml",
+      job: "stage",
+      step: "Deploy the build, staged",
+    } as const;
+    const env = {
+      COMMIT_SHA: COMMIT,
+      REPOSITORY: "example/repository",
+      REPOSITORY_OWNER: "example",
+      SNAPSHOT_ID: "",
+      IMAGE_DIGEST: "",
+      SNAPSHOT_COMMIT: "",
+    };
+    const vercel = (document: string, status = 0) => ({
+      vercel: `printf '%s\\n' '${document}'\nexit ${String(status)}`,
+    });
+    const doc = (overrides: Record<string, unknown> = {}) =>
+      JSON.stringify({
+        id: "dpl_example0001",
+        url: "https://example-abc.vercel.app",
+        target: "production",
+        readyState: "READY",
+        ...overrides,
+      });
+
+    // #403-T24
+    it.each([
+      ["a preview", { target: null }],
+      ["a deployment that is not ready", { readyState: "ERROR" }],
+      ["a deployment of another target", { target: "staging" }],
+    ])("fails on %s before the canary has to", (_name, overrides) => {
+      const run = runStep(selector, { env, stubs: vercel(doc(overrides)) });
+
+      expect(run.status).not.toBe(0);
+      expect(run.output).toBe("");
+    });
+
+    // #403-T24
+    it("names the CLI's error in the log, a stable code only, when the deployment failed", () => {
+      const error = JSON.stringify({
+        status: "error",
+        reason: "deploy_failed",
+        message: "Something with a secret-looking-value-0123456789 inside",
+      });
+      const run = runStep(selector, { env, stubs: vercel(error, 1) });
+
+      expect(run.status).not.toBe(0);
+      expect(run.stdout + run.stderr).toContain("deploy_failed");
+      expect(run.stdout + run.stderr).not.toContain("secret-looking-value");
+    });
+
+    // #403-T24
+    it("says it could not read the document when there is none, without a code it made up", () => {
+      const run = runStep(selector, { env, stubs: vercel("deployed!", 1) });
+
+      expect(run.status).not.toBe(0);
+      expect(run.stdout).toContain("::error::");
+      expect(run.stdout + run.stderr).not.toContain("deployed!");
+    });
+
+    // #403-T08
+    it("still reports a ready production deployment", () => {
+      const run = runStep(selector, {
+        env: {
+          ...env,
+          SNAPSHOT_ID: "snap_example01",
+          IMAGE_DIGEST: DIGEST,
+          SNAPSHOT_COMMIT: COMMIT,
+        },
+        stubs: vercel(doc()),
+      });
+
+      expect(run.status).toBe(0);
+      expect(run.output).toContain("url=https://example-abc.vercel.app\n");
+    });
+  });
+});
+
+describe("the canary and the rollback, the other places a snapshot has to exist", () => {
+  // #403-T21
+  it("checks that the snapshot exists before the canary runs, so that a re-run of failed jobs after a discard says what is wrong", () => {
+    const canaryWorkflow = readWorkflow("dispatcher-canary.yml");
+    const steps = stepsOf(canaryWorkflow.jobs.canary as Job);
+    const check = steps.find((step) =>
+      (step.run ?? "").includes("snapshot:ops exists"),
+    );
+    expect(check?.if).toContain("inputs.snapshot_id != ''");
+    expect(check?.env?.PAIR_SNAPSHOT_ID).toBe("${{ inputs.snapshot_id }}");
+    expect(steps.indexOf(check as (typeof steps)[number])).toBeLessThan(
+      steps.findIndex((step) => step.name === "Run the canary"),
+    );
+    expect(steps.findIndex((step) => isInfisicalLoad(step))).toBeLessThan(
+      steps.indexOf(check as (typeof steps)[number]),
+    );
+    expect(job("canary").with?.snapshot_id).toBe(
+      "${{ needs.snapshot-build.outputs.snapshot-id || needs.snapshot-decide.outputs.snapshot-id }}",
+    );
+    const canary = steps.find((step) => step.name === "Run the canary");
+    expect(canary?.env?.CANARY_EXPECT_SNAPSHOT_ID).toBe(
+      "${{ inputs.snapshot_id }}",
+    );
+  });
+
+  // #403-T21
+  it("refuses a rollback of the Dispatcher whose snapshot is gone, before anything is rolled back", () => {
+    const steps = stepsOf(
+      Object.values(readWorkflow("rollback-production.yml").jobs)[0] as Job,
+    );
+    const dispatcher = steps.find((step) =>
+      step.name?.startsWith("Check that the Dispatcher deployment"),
+    );
+    expect(dispatcher?.run).toBe(
+      'pnpm --dir dispatcher snapshot:ops verify --deployment "$DEPLOYMENT" --check-snapshot',
+    );
+    const app = steps.find((step) =>
+      step.name?.startsWith("Check that the App deployment"),
+    );
+    expect(app?.run).not.toContain("--check-snapshot");
   });
 });

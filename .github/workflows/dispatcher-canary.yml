@@ -13,8 +13,9 @@ name: Dispatcher canary
 # the access token from Infisical, has confirmed that the deployment behind the host belongs to the Dispatcher
 # project and the team, as a ready production deployment built from the commit of this run (https, no redirect
 # followed, the deployment's own address and not an alias): every staged deployment has a host of its own, so there is
-# no list of hosts to keep. When `image_digest` is given, the canary must also find that Worker image id in the
-# Dispatcher's own report, which proves the image the pipeline built and not whichever one the variables name. It prints only stable codes. The
+# no list of hosts to keep. When `image_digest` and `snapshot_id` are given, the canary must also find that Worker image id
+# and that snapshot id in the Dispatcher's own report, which proves the pair the pipeline built and not whichever one the
+# variables name (a rebuild of the same layers keeps the image id and changes the snapshot). It prints only stable codes. The
 # credentials are loaded from Infisical /ci by one step, as environment variables, never in a command line or a log.
 on:
   workflow_dispatch:
@@ -30,6 +31,10 @@ on:
         description: "Worker image id the deployment must report (sha256:...); empty does not check the image"
         default: ""
         required: false
+      snapshot_id:
+        description: "Golden snapshot id the deployment must report; empty does not check the snapshot"
+        default: ""
+        required: false
   workflow_call:
     inputs:
       url:
@@ -43,6 +48,11 @@ on:
         type: string
       image_digest:
         description: "Worker image id the deployment must report (sha256:...); empty does not check the image"
+        default: ""
+        required: false
+        type: string
+      snapshot_id:
+        description: "Golden snapshot id the deployment must report; empty does not check the snapshot"
         default: ""
         required: false
         type: string
@@ -91,6 +101,14 @@ jobs:
           domain: ${{ secrets.INFISICAL_DOMAIN }}
           project-slug: ${{ secrets.INFISICAL_PROJECT_SLUG }}
           consequence: The canary did not run, so nothing is promoted.
+      # A snapshot that was removed since (a re-run of failed jobs after the run's snapshot was discarded) is said so
+      # here, in a code, and not as a canary VM that cannot start.
+      - name: Check that the golden snapshot still exists
+        if: ${{ inputs.snapshot_id != '' }}
+        env:
+          VERCEL_PROJECT_ID: ${{ env.VERCEL_DISPATCHER_PROJECT_ID }}
+          PAIR_SNAPSHOT_ID: ${{ inputs.snapshot_id }}
+        run: pnpm --dir dispatcher snapshot:ops exists
       # `--verify-vercel` reads VERCEL_TOKEN, VERCEL_TEAM_ID and VERCEL_PROJECT_ID (the Dispatcher project) from the
       # environment; the canary command reads RUNNER_TOKEN and the bypass secret from it too.
       - name: Run the canary
@@ -101,4 +119,5 @@ jobs:
           CANARY_URL: ${{ inputs.url }}
           CANARY_ENGINES: ${{ inputs.engines || 'pr-agent,opencode' }}
           CANARY_EXPECT_IMAGE_DIGEST: ${{ inputs.image_digest }}
+          CANARY_EXPECT_SNAPSHOT_ID: ${{ inputs.snapshot_id }}
         run: pnpm probe:canary --url "$CANARY_URL" --verify-vercel --expect-commit "$GITHUB_SHA" --engines "$CANARY_ENGINES"

@@ -19,17 +19,20 @@ name: Deploy production
 #     (docs/deployment-vercel.md, section 5.6). The Dispatcher's carries the pair of this run as its own run-time
 #     variables and meta. The project's variables, Infisical and the live deployment are not touched.
 #  6. health-app: the staged App answers `/api/health` with 200 and `{"status":"ok"}`.
-#  7. canary: dispatcher-canary.yml on the staged Dispatcher, which must report the image id of the pair of this run:
-#     the new snapshot is proven by the deployment that will use it.
+#  7. canary: dispatcher-canary.yml on the staged Dispatcher, which must report the snapshot id and the image id of
+#     the pair of this run: the new snapshot is proven by the deployment that will use it.
 #  8. promote-app, promote-dispatcher: `vercel promote`, one job per project, so that a partial promotion is recorded
-#     as it is.
+#     as it is. Each checks again, right before it acts, that the commit is still the head of main (a re-run of the
+#     failed jobs of an old run skips `fresh`).
 #  9. persist: only after the Dispatcher is live, the pair is written to Infisical /dispatcher (the one write path of
 #     the repository, its own composite action), and Secret Sync carries it to the project's variables for later
 #     deployments. A failure here fails the run: production runs the new pair but the variables are behind. The next
 #     run reads the live deployment's meta, finds the live pair, and writes it again (docs, section 5.1).
-# 10. cleanup: only after persist, every golden snapshot but the new one and the one before it (the rollback target)
-#     is removed, and never the one the live deployment runs. `discard` removes the snapshot of a run that built one
-#     and did not get live.
+# 10. cleanup: after every promotion of the Dispatcher (and after persist, when persist had something to do), every
+#     golden snapshot but the new one and the one before it (the rollback target) is removed, and never the one the
+#     live deployment runs. A keep list is safe to repeat, so it also clears what an earlier run could not. `discard`
+#     removes the snapshot of a run that built one and whose Dispatcher promotion never started; after a failed or
+#     cancelled promotion the outcome is unknown (it can still land) and the snapshot is left to the next cleanup.
 #
 # Production only: no staging, no preview. It never runs for a pull request and never on `pull_request_target`. Every
 # job runs only for this repository on main (the job's own condition guards against accidents; the boundary is the
@@ -67,7 +70,8 @@ env:
 
 jobs:
   # A re-run of an old run rebuilds that run's commit. Without this it would be staged and promoted over a newer
-  # production. Needs no secret.
+  # production. Needs no secret. "Re-run failed jobs" skips a job that succeeded, so the jobs that promote or write
+  # run the same check themselves, right before they act.
   fresh:
     name: Check that the commit is the head of main
     if: ${{ github.repository == 'ExpidetGames/code-reviewer' && github.ref == 'refs/heads/main' }}
@@ -76,22 +80,14 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Compare with the head of main
-        env:
-          GH_TOKEN: ${{ github.token }}
-          ALLOW_STALE: ${{ inputs.allow_stale }}
-        run: |
-          set -euo pipefail
-          head="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq .object.sha)"
-          if [ "${head}" = "${GITHUB_SHA}" ]; then
-            exit 0
-          fi
-          if [ "${ALLOW_STALE}" = "true" ]; then
-            echo "::warning::A newer commit is on main; this run deploys an older one because it was told to."
-            exit 0
-          fi
-          echo "::error::A newer commit is on main. This run would put an older version over it. Nothing is deployed; the newer commit has its own run."
-          exit 1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/check-current-commit
+        with:
+          github-token: ${{ github.token }}
+          allow-stale: ${{ inputs.allow_stale }}
 
   migrate:
     name: Migrate the database
@@ -310,6 +306,7 @@ jobs:
       url: ${{ needs.stage-dispatcher.outputs.url }}
       engines: ${{ inputs.canary_engines || 'pr-agent,opencode' }}
       image_digest: ${{ needs.snapshot-build.outputs.image-digest || needs.snapshot-decide.outputs.image-digest }}
+      snapshot_id: ${{ needs.snapshot-build.outputs.snapshot-id || needs.snapshot-decide.outputs.snapshot-id }}
 
   promote-app:
     name: Promote the App
@@ -339,6 +336,11 @@ jobs:
           domain: ${{ secrets.INFISICAL_DOMAIN }}
           project-slug: ${{ secrets.INFISICAL_PROJECT_SLUG }}
           consequence: Nothing is promoted; production stays on its previous deployments.
+      # Right before the promotion, so that a re-run of failed jobs of an old run cannot skip it.
+      - uses: ./.github/actions/check-current-commit
+        with:
+          github-token: ${{ github.token }}
+          allow-stale: ${{ inputs.allow_stale }}
       # The App first. The CLI reads the token from VERCEL_TOKEN, the team and the project from the environment.
       - name: Promote the App
         env:
@@ -375,6 +377,10 @@ jobs:
           domain: ${{ secrets.INFISICAL_DOMAIN }}
           project-slug: ${{ secrets.INFISICAL_PROJECT_SLUG }}
           consequence: The Dispatcher is not promoted; production stays on its previous Dispatcher.
+      - uses: ./.github/actions/check-current-commit
+        with:
+          github-token: ${{ github.token }}
+          allow-stale: ${{ inputs.allow_stale }}
       - name: Promote the Dispatcher
         env:
           DEPLOYMENT_URL: ${{ needs.stage-dispatcher.outputs.url }}
@@ -407,6 +413,12 @@ jobs:
           node-version-file: .nvmrc
       - name: Install dependencies
         run: pnpm --dir dispatcher install --frozen-lockfile
+      # A pair of an older run must not overwrite a newer one: if main moved on, the next run finds the live pair and
+      # writes it itself (the repair).
+      - uses: ./.github/actions/check-current-commit
+        with:
+          github-token: ${{ github.token }}
+          allow-stale: ${{ inputs.allow_stale }}
       - name: Write the pair
         uses: ./.github/actions/infisical-write-snapshot-pair
         with:
@@ -418,12 +430,13 @@ jobs:
           image-digest: ${{ needs.snapshot-build.outputs.image-digest || needs.snapshot-decide.outputs.image-digest }}
           commit: ${{ needs.snapshot-build.outputs.commit || needs.snapshot-decide.outputs.commit }}
 
-  # Only after persist: the new and the previous snapshot stay (the previous deployment, the rollback target, still
-  # references it), the live one is never removed, everything else the pipeline built goes.
+  # After the promotion, and after persist when it ran: the new and the previous snapshot stay (the previous
+  # deployment, the rollback target, still references it), the live one is never removed, everything else the pipeline
+  # built goes (young builders and unmanaged ones excepted, see ops-cli.ts).
   cleanup:
     name: Remove the golden snapshots nobody needs
-    needs: [snapshot-decide, snapshot-build, persist]
-    if: ${{ !cancelled() && github.repository == 'ExpidetGames/code-reviewer' && github.ref == 'refs/heads/main' && needs.persist.result == 'success' && needs.snapshot-decide.outputs.rebuild == 'true' }}
+    needs: [snapshot-decide, snapshot-build, promote-dispatcher, persist]
+    if: ${{ !cancelled() && github.repository == 'ExpidetGames/code-reviewer' && github.ref == 'refs/heads/main' && needs.promote-dispatcher.result == 'success' && (needs.persist.result == 'success' || needs.persist.result == 'skipped') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment: production
@@ -454,19 +467,21 @@ jobs:
       - name: Remove the old snapshots
         env:
           VERCEL_PROJECT_ID: ${{ env.VERCEL_DISPATCHER_PROJECT_ID }}
-          NEW_SNAPSHOT_ID: ${{ needs.snapshot-build.outputs.snapshot-id }}
+          NEW_SNAPSHOT_ID: ${{ needs.snapshot-build.outputs.snapshot-id || needs.snapshot-decide.outputs.snapshot-id }}
           PREVIOUS_SNAPSHOT_ID: ${{ needs.snapshot-decide.outputs.previous-snapshot-id }}
         run: |
           set -euo pipefail
           export KEEP_SNAPSHOT_IDS="${NEW_SNAPSHOT_ID} ${PREVIOUS_SNAPSHOT_ID}"
           pnpm --dir dispatcher snapshot:ops cleanup
 
-  # A run that built a snapshot and did not get live: the snapshot is removed, unless the live deployment turns out to
-  # use it (a promotion that timed out and went through). The next cleanup removes it too if this one cannot.
+  # A run that built a snapshot and whose Dispatcher promotion never started: the snapshot is removed (still not if the
+  # live deployment uses it). After a promotion that failed, timed out or was cancelled the outcome is unknown, since a
+  # promotion that was requested can still land, so nothing is removed: the next cleanup keeps the live one and removes
+  # the rest.
   discard:
     name: Discard the snapshot of a run that did not get live
     needs: [snapshot-decide, snapshot-build, promote-dispatcher]
-    if: ${{ always() && github.repository == 'ExpidetGames/code-reviewer' && github.ref == 'refs/heads/main' && needs.snapshot-build.result == 'success' && needs.promote-dispatcher.result != 'success' }}
+    if: ${{ always() && github.repository == 'ExpidetGames/code-reviewer' && github.ref == 'refs/heads/main' && needs.snapshot-build.result == 'success' && needs.promote-dispatcher.result == 'skipped' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment: production

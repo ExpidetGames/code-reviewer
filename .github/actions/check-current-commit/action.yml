@@ -1,0 +1,36 @@
+name: Check that the commit is the head of main
+description: >-
+  Fails unless the commit of this run is still the head of main. A re-run of an old run, or of its failed jobs only,
+  rebuilds or promotes that run's commit; without this check it could put an older version over a newer production. A
+  manual run may be told to deploy an older commit on purpose (allow-stale). Needs the `gh` CLI, which GitHub's runners
+  have, and a token that can read the repository; reads nothing else and writes nothing.
+
+inputs:
+  github-token:
+    description: "The job's GITHUB_TOKEN (contents: read is enough)"
+    required: true
+  allow-stale:
+    description: "true to let the run go on although a newer commit is on main (a manual run's deliberate choice)"
+    required: false
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - name: Compare with the head of main
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        ALLOW_STALE: ${{ inputs.allow-stale }}
+      run: |
+        set -euo pipefail
+        head="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq .object.sha)"
+        if [ "${head}" = "${GITHUB_SHA}" ]; then
+          exit 0
+        fi
+        if [ "${ALLOW_STALE}" = "true" ]; then
+          echo "::warning::A newer commit is on main; this run goes on with an older one because it was told to."
+          exit 0
+        fi
+        echo "::error::A newer commit is on main. This run would put an older version over it. Nothing is changed; the newer commit has its own run."
+        exit 1

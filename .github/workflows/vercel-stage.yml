@@ -12,7 +12,7 @@ name: Vercel stage
 # of this project - come from Infisical /ci, loaded by .github/actions/infisical-ci-secrets with the sign-in secrets
 # of the environment `production`. The order matters: the dependencies are installed FIRST, so that their install
 # scripts never see the token; the token is loaded then, for `vercel pull` and `vercel deploy`; and `vercel build`,
-# which runs the project's code (`next build`, bundlers, plugins), runs with the token blanked, because it works from
+# which runs the project's code (`next build`, bundlers, plugins), runs without the token (`env -u`), because it works from
 # the files `vercel pull` wrote and needs no platform call (checked against the CLI's source and a run without a
 # token). The CLI reads the credentials from the environment: the token is never on a command line.
 #
@@ -153,13 +153,19 @@ jobs:
           set -euo pipefail
           echo "VERCEL_ORG_ID=${VERCEL_TEAM_ID}" >> "$GITHUB_ENV"
           echo "VERCEL_PROJECT_ID=${!PROJECT_ID_SECRET}" >> "$GITHUB_ENV"
+      # The pair of this run must be there to be used: a re-run of failed jobs of a run whose snapshot was removed
+      # stops here with a code that says so.
+      - name: Check that the golden snapshot still exists
+        if: ${{ inputs.snapshot-id != '' }}
+        env:
+          PAIR_SNAPSHOT_ID: ${{ inputs.snapshot-id }}
+        run: pnpm --dir dispatcher snapshot:ops exists
       - name: Pull the production settings and variables
         run: vercel pull --yes --environment=production
-      # The code of the project runs here. The token is blanked for it.
+      # The code of the project runs here (next build, bundlers, plugins). The token is removed from its environment
+      # by `env -u`, which does not depend on which of a step's and the job's variables wins.
       - name: Build
-        env:
-          VERCEL_TOKEN: ""
-        run: vercel build --prod
+        run: env -u VERCEL_TOKEN vercel build --prod
       # `--skip-domain`: the staged deployment of docs/deployment-vercel.md, section 5.1. `--json` prints the
       # deployment as one JSON document on stdout (the CLI's other output goes to stderr).
       - name: Deploy the build, staged
@@ -192,6 +198,7 @@ jobs:
             )
           fi
 
+          status=0
           document="$(
             vercel deploy --prebuilt --prod --skip-domain --archive=tgz --json \
               --meta githubDeployment=1 \
@@ -202,11 +209,24 @@ jobs:
               --meta githubOrg="${REPOSITORY_OWNER}" \
               --meta githubRepo="${REPOSITORY#*/}" \
               ${pair[@]+"${pair[@]}"}
-          )"
+          )" || status=$?
+          # On a failure the CLI prints a document with a stable reason on stdout; the rest of its output is on stderr.
+          if [ "${status}" -ne 0 ]; then
+            reason="$(jq -r '.reason // empty | select(test("^[a-z_]{1,40}$"))' <<< "${document}" 2> /dev/null || true)"
+            echo "::error::The deployment failed${reason:+ (${reason})}."
+            exit 1
+          fi
           url="$(jq -r '.url // empty' <<< "${document}")"
           id="$(jq -r '.id // empty' <<< "${document}")"
+          target="$(jq -r '.target // empty' <<< "${document}")"
+          state="$(jq -r '.readyState // empty' <<< "${document}")"
           if ! [[ "${url}" =~ ^https://[a-z0-9-]+\.vercel\.app$ ]] || ! [[ "${id}" =~ ^dpl_[A-Za-z0-9]+$ ]]; then
             echo "::error::The CLI did not report a deployment."
+            exit 1
+          fi
+          # A preview, or a deployment that is not ready, is no staged production deployment.
+          if [ "${target}" != "production" ] || [ "${state}" != "READY" ]; then
+            echo "::error::The CLI did not report a ready production deployment."
             exit 1
           fi
           {

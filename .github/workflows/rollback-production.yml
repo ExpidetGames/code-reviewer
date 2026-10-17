@@ -97,12 +97,15 @@ jobs:
           DEPLOYMENT: ${{ inputs.app_deployment }}
           VERCEL_PROJECT_ID: ${{ env.VERCEL_APP_PROJECT_ID }}
         run: pnpm --dir dispatcher snapshot:ops verify --deployment "$DEPLOYMENT"
+      # The Dispatcher's snapshot has to exist too: the cleanup keeps the new and the previous one only, and a Dispatcher
+      # put back onto a snapshot that is gone fails every job. Refused with `rollback_snapshot_missing`, before either
+      # project is touched; production stays as it is.
       - name: Check that the Dispatcher deployment is a production deployment of the Dispatcher
         if: ${{ inputs.dispatcher_deployment != '' }}
         env:
           DEPLOYMENT: ${{ inputs.dispatcher_deployment }}
           VERCEL_PROJECT_ID: ${{ env.VERCEL_DISPATCHER_PROJECT_ID }}
-        run: pnpm --dir dispatcher snapshot:ops verify --deployment "$DEPLOYMENT"
+        run: pnpm --dir dispatcher snapshot:ops verify --deployment "$DEPLOYMENT" --check-snapshot
       - name: Roll the App back
         if: ${{ inputs.app_deployment != '' }}
         env:

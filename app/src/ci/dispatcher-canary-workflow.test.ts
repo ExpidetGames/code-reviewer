@@ -132,6 +132,7 @@ describe("dispatcher canary workflow", () => {
       [
         "CANARY_ENGINES",
         "CANARY_EXPECT_IMAGE_DIGEST",
+        "CANARY_EXPECT_SNAPSHOT_ID",
         "CANARY_URL",
         "VERCEL_AUTOMATION_BYPASS_SECRET",
         "VERCEL_PROJECT_ID",
