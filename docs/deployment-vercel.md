@@ -508,6 +508,13 @@ build loads them (the App's `DATABASE_URL` and `APP_SECRET`, the Dispatcher's `R
 non-Sensitive variable the pull returns). Treat the build code of both projects, and every dependency in their
 lockfiles, as trusted with those values; the lockfiles and the reviews of changes to them are what protects them.
 
+**The Dispatcher is type-checked by the builder, not by `tsc`.** The Hono builder of the CLI checks the types through its
+own language service, which finds packages the way `node` does and does not follow pnpm's symlinks the way `tsc` does.
+`undici-types` (imported by `@types/node` for the global `Response`) is therefore a direct devDependency of the
+Dispatcher, at the version `@types/node` uses; without it `vercel build` fails on every use of `Response` while
+`make typecheck` is green (#412). The CI job "Dispatcher: static & tests" runs the same `vercel build` offline with a stub
+project file, so such a difference fails in a pull request and not in a release.
+
 **A Vercel access token acts for its owner in the whole team (or account) it is created for, not for one project**, whatever
 the project ids in `/ci` say: create it from a dedicated account that has the lowest team role that can deploy, promote
 and create Sandboxes and snapshots, give it an expiry if the dashboard offers one (and a calendar reminder to rotate it
