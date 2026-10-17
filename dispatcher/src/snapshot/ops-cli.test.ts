@@ -154,7 +154,7 @@ describe("snapshot:ops decide", () => {
     const output = h.files.get("OUT") ?? "";
     expect(output).toContain("rebuild=true\n");
     expect(output).toContain("reason=inputs_changed\n");
-    expect(output).not.toContain("snapshot-id=");
+    expect(output).not.toMatch(/^snapshot-id=/m);
     // What production runs now, to be kept next to the new snapshot.
     expect(output).toContain(`previous-snapshot-id=${PAIR.snapshotId}\n`);
   });
