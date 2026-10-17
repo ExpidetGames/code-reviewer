@@ -66,4 +66,42 @@ describe("vercel.json of the Dispatcher", () => {
     expect(Number(every?.[1])).toBeGreaterThanOrEqual(1);
     expect(Number(every?.[1])).toBeLessThanOrEqual(5);
   });
+
+  // #416-T04
+  it("gives the Hono builder exactly one entry, and it is src/index.ts", () => {
+    // The wrapper builder of the Vercel CLI (@vercel/hono) takes the entry from the files app, index and server in the
+    // project root and in src/ (any JS or TS extension): the first one whose text imports "hono", in that order. A file
+    // that imports Hono but default-exports no app (src/app.ts did) wins over the real entry and the function dies on
+    // its first request. The rule is repeated here so that this fails without the CLI.
+    const names = [
+      "app",
+      "index",
+      "server",
+      "src/app",
+      "src/index",
+      "src/server",
+    ];
+    const extensions = ["js", "cjs", "mjs", "ts", "cts", "mts"];
+    const importsHono =
+      /(?:from|require|import)\s*(?:\(\s*)?["']hono["']\s*(?:\))?/;
+    const entries = names
+      .flatMap((name) => extensions.map((extension) => `${name}.${extension}`))
+      .filter((file) => existsSync(join(ROOT, file)))
+      .filter((file) =>
+        importsHono.test(readFileSync(join(ROOT, file), "utf8")),
+      );
+
+    expect(entries).toStrictEqual(["src/index.ts"]);
+  });
+
+  // #416-T05
+  it("emits the relative imports of the sources as .js, as the file-by-file build of the platform needs", () => {
+    const tsconfig = JSON.parse(
+      readFileSync(join(ROOT, "tsconfig.json"), "utf8"),
+    ) as {
+      compilerOptions: Record<string, unknown>;
+    };
+
+    expect(tsconfig.compilerOptions.rewriteRelativeImportExtensions).toBe(true);
+  });
 });

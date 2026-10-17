@@ -51,4 +51,26 @@ describe("the Dispatcher build with the Vercel CLI", () => {
     );
     expect(steps[build]?.["continue-on-error"]).toBeUndefined();
   });
+
+  // #416-T02
+  it("then starts the built function and asks it for /health, offline and without a secret", () => {
+    const job = readWorkflow("ci.yml").jobs["dispatcher-fast"];
+    if (!job) throw new Error("no job dispatcher-fast");
+    const steps = stepsOf(job);
+    const build = steps.findIndex((step) => step.run?.includes("vercel build"));
+    const start = steps.findIndex((step) =>
+      step.run?.includes("scripts/check-built-function.mjs"),
+    );
+    expect(start).toBeGreaterThan(build);
+    expect(steps[start]?.run?.trim()).toBe(
+      "node scripts/check-built-function.mjs",
+    );
+    expect(JSON.stringify(steps[start])).not.toMatch(
+      /--token|VERCEL_TOKEN|secrets\./,
+    );
+    expect(steps[start]?.["continue-on-error"]).toBeUndefined();
+    expect(readText("dispatcher/scripts/check-built-function.mjs")).toContain(
+      "/health",
+    );
+  });
 });
