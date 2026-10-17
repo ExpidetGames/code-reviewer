@@ -327,7 +327,7 @@ proves nothing and advertises what it advertises.
 
 ### The deploy canary
 
-`pnpm probe:canary --url https://<dispatcher> [--verify-vercel] [--allowed-hosts host,host] [--check-only] [--engines pr-agent,opencode] [--wait-seconds 120] [--timeout-seconds 300]`
+`pnpm probe:canary --url https://<dispatcher> [--verify-vercel [--expect-commit <sha>]] [--allowed-hosts host,host] [--check-only] [--engines pr-agent,opencode] [--wait-seconds 120] [--timeout-seconds 300]`
 (`src/probe/canary.ts`) is the step of a release pipeline that calls `POST /probe` and fails the release when the Dynamic
 canary fails. The credential is `RUNNER_TOKEN` in the environment (never an argument); `VERCEL_AUTOMATION_BYPASS_SECRET`, when set,
 is sent as `x-vercel-protection-bypass` for a deployment behind deployment protection. It waits for the deployment to answer
@@ -336,12 +336,21 @@ no redirect is followed) and prints stable codes and the contract's reasons only
 `CANARY_ALLOWED_HOSTS`) a URL whose host is not on the list is refused with exit 2 **before any request**, this machine included;
 an empty list refuses every URL (for a person at a terminal). With **`--verify-vercel`** (what the release pipeline uses) the
 command first asks the Vercel API, with `VERCEL_TOKEN`, `VERCEL_TEAM_ID` and `VERCEL_PROJECT_ID` (the Dispatcher's project) from
-the environment, whether the deployment behind the URL's host belongs to that project and that team, and sends nothing to the
-host otherwise. The URL must then be https on the default port with no path, and the host must be the deployment's own
+the environment, whether the deployment behind the URL's host is a **ready production deployment** of that project and that team (and,
+with `--expect-commit <sha>`, built from that commit: `meta.githubCommitSha`, which the deploy step sets), and sends
+nothing to the host otherwise. A 429, a 5xx or no answer from the platform is asked again twice and then reported as
+unavailable, not as a wrong deployment. The URL must then be https on the default port with no path, and the host must be the deployment's own
 address (the API answers with it as `url`): an alias or a domain is refused. The token goes to `api.vercel.com` only, the
 dispatcher credential to the verified host only, and the API's answer is never printed. A staged production deployment gets
 a new host with every deployment, which is why a list of hosts cannot work in a pipeline. `--check-only` does only these
 checks, without a credential and without a probe.
+
+`CANARY_EXPECT_IMAGE_DIGEST` (an environment variable, an image id `sha256:...`) is the Worker image id the deployment
+must report: `POST /probe` names the image the deployment is configured with (`SANDBOX_IMAGE_DIGEST`, `imageDigest` in
+`contracts/probe-verdict.v1.json`), the Launcher proves in the canary VM that the snapshot holds exactly that image, and the
+canary fails with `canary_image_mismatch` (exit 1, neither id printed) when the answer names another image or none. The
+pipeline passes the id of the snapshot it built, so a pair that did not reach the staged deployment cannot pass on the
+old image.
 
 | Exit | Meaning                                                                                                                                                                                                     |
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -362,10 +371,23 @@ environment's deployment branches are restricted to `main` as the second layer. 
 
 The sequence of a release is the workflow `deploy-production.yml` (`docs/deployment-vercel.md`, section 5.6): the
 Dispatcher is deployed as a staged production deployment (`vercel deploy --prebuilt --prod --skip-domain`; a preview
-deployment does not have the production variables) that carries the candidate `SANDBOX_SNAPSHOT_ID` and
-`SANDBOX_IMAGE_DIGEST`, the canary runs against it, and only on exit 0 and a healthy App is anything promoted. After a golden
-snapshot rebuild (`docs/golden-snapshot.md`) the same step proves the new snapshot before the Dispatcher project is switched
-to it. `rollback-production.yml` puts a previous deployment back by hand.
+deployment does not have the production variables) that carries the golden snapshot pair of the run as its own run-time
+variables, the canary runs against it with the commit of the run and the image id the run built, and only on exit 0 and a
+healthy App is anything promoted. `rollback-production.yml` puts a previous deployment back by hand.
+
+### The snapshot steps of the pipeline (`pnpm snapshot:ops`)
+
+`pnpm snapshot:ops <decide|persist|verify|cleanup>` (`src/snapshot/ops-cli.ts`) holds the steps of the deployment that
+look after the golden snapshot, so that their logic is tested apart from the workflow. Ids, tokens and the Infisical
+client secret come from the environment, never from arguments; every line printed is a stable code; the exit status is
+0 done, 1 failed, 2 wrong use.
+
+| Command                                                                    | What it does                                                                                                                                                                                                                                                                                                                                                                                     |
+| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `decide --sha <commit> --env-file <file> --github-output <file> [--force]` | Does the Worker image need a new snapshot? Compares the commit of the pair in use (the live deployment's meta, else the project's pulled variables) with the commit given, on the paths of `IMAGE_INPUT_PATHS` (`src/snapshot/pair.ts`). Rebuild if they differ, if the commit or the pair is missing, or with `--force`. Writes `rebuild`, `reason`, `repair` and the pair as step outputs.     |
+| `persist [--from-deployment <id or address>]`                              | Writes the pair (`PAIR_SNAPSHOT_ID`, `PAIR_IMAGE_DIGEST`, `PAIR_COMMIT`, or the pair in the meta of the deployment) to Infisical `prod` `/dispatcher`: signs in with `INFISICAL_CLIENT_ID` and `INFISICAL_CLIENT_SECRET`, finds the project by `INFISICAL_PROJECT_SLUG` on `INFISICAL_DOMAIN` (https only), updates the three keys and creates one that does not exist. Nothing else is written. |
+| `verify --deployment <id or address>`                                      | Is the deployment a ready production deployment of the project and team (`VERCEL_PROJECT_ID`)? Used before a rollback.                                                                                                                                                                                                                                                                           |
+| `cleanup`                                                                  | Removes the golden snapshots except `KEEP_SNAPSHOT_IDS` and the one the live deployment runs; with `DISCARD_SNAPSHOT_ID` removes just that one. Removes nothing when the live deployment cannot be read or when no kept snapshot is among the builders.                                                                                                                                          |
 
 **The engine uid and the VM's agent channel (#317).** The spike found that no process in the VM can open an `AF_VSOCK` socket
 (a platform filter) and that the container's root can reach the VM's agent on the Docker bridge gateway while the engine
