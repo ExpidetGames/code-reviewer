@@ -393,6 +393,293 @@ describe("the host allow-list of the deploy canary", () => {
   });
 });
 
+const VERCEL_TOKEN = "vercel-token-not-a-real-one-0123456789";
+const TEAM = "team_exampleTeam0001";
+const PROJECT = "prj_exampleDispatcher0001";
+const STAGED_HOST = "dispatcher-abc123-example-team.vercel.app";
+const VERIFY = { token: VERCEL_TOKEN, teamId: TEAM, projectId: PROJECT };
+
+/** What the platform answers for a deployment of the Dispatcher project: the fields the check reads. */
+function deploymentRecord(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "dpl_example0001",
+    url: STAGED_HOST,
+    projectId: PROJECT,
+    ownerId: TEAM,
+    readyState: "READY",
+    ...overrides,
+  };
+}
+
+/** The platform answers `api`; the staged deployment answers like a healthy Dispatcher. */
+function platformAndDeployment(api: () => Response | Promise<Response>) {
+  return script((request) => {
+    if (new URL(request.url).hostname === "api.vercel.com") return api();
+    return request.url.endsWith("/health")
+      ? respond({ status: "ok" })
+      : respond(REPORT);
+  });
+}
+
+function stagedOptions(
+  fetchImplementation: typeof fetch,
+  extra: Partial<Parameters<typeof runCanary>[0]> = {},
+) {
+  return options(fetchImplementation, {
+    url: `https://${STAGED_HOST}`,
+    verifyDeployment: VERIFY,
+    ...extra,
+  });
+}
+
+describe("the deployment check of the deploy canary", () => {
+  // #403-T01
+  it("sends the credential to a staged deployment the platform says belongs to the Dispatcher project and team", async () => {
+    const { fetch, seen } = platformAndDeployment(() =>
+      respond(deploymentRecord()),
+    );
+    const { run, lines } = stagedOptions(fetch);
+
+    expect(await run()).toBe(0);
+
+    // The platform is asked first, and before any request reaches the deployment.
+    expect(new URL(seen[0]?.url ?? "").hostname).toBe("api.vercel.com");
+    expect(new URL(seen[0]?.url ?? "").pathname).toBe(
+      `/v13/deployments/${STAGED_HOST}`,
+    );
+    expect(new URL(seen[0]?.url ?? "").searchParams.get("teamId")).toBe(TEAM);
+    expect(seen[0]?.method).toBe("GET");
+    expect(seen[0]?.headers.get("authorization")).toBe(
+      `Bearer ${VERCEL_TOKEN}`,
+    );
+    expect(
+      seen.filter(
+        (request) => new URL(request.url).hostname === "api.vercel.com",
+      ),
+    ).toHaveLength(1);
+    const probe = seen.find((request) => request.url.endsWith("/probe"));
+    expect(probe?.headers.get("authorization")).toBe(
+      `Bearer ${DISPATCHER_TOKEN}`,
+    );
+    // Each credential goes to its own host only.
+    for (const request of seen) {
+      const toPlatform = new URL(request.url).hostname === "api.vercel.com";
+      const sent = [...request.headers.values()].join(" ");
+      expect(sent.includes(VERCEL_TOKEN), request.url).toBe(toPlatform);
+      expect(sent.includes(DISPATCHER_TOKEN), request.url).toBe(
+        request.url.endsWith("/probe"),
+      );
+    }
+    expect(lines.join("\n")).not.toContain(VERCEL_TOKEN);
+    expect(lines.join("\n")).not.toContain(DISPATCHER_TOKEN);
+  });
+
+  // #403-T01
+  it("compares the host case-insensitively", async () => {
+    const { fetch } = platformAndDeployment(() =>
+      respond(deploymentRecord({ url: STAGED_HOST.toUpperCase() })),
+    );
+    const { run } = stagedOptions(fetch);
+
+    expect(await run()).toBe(0);
+  });
+
+  // #403-T02
+  it.each([
+    ["another project", { projectId: "prj_someoneElse" }],
+    ["another team", { ownerId: "team_someoneElse" }],
+    ["a record without a project", { projectId: undefined }],
+    ["a record without an owner", { ownerId: undefined }],
+    [
+      "an alias, whose deployment has another host",
+      { url: "other-abc.vercel.app" },
+    ],
+    ["a record without a host", { url: undefined }],
+  ])(
+    "refuses a deployment of %s and sends nothing to it",
+    async (_name, overrides) => {
+      const { fetch, seen } = platformAndDeployment(() =>
+        respond(deploymentRecord(overrides)),
+      );
+      const { run, lines } = stagedOptions(fetch);
+
+      expect(await run()).toBe(2);
+
+      expect(lines.join("\n")).toContain("canary_deployment_not_verified");
+      expect(
+        seen.filter(
+          (request) => new URL(request.url).hostname !== "api.vercel.com",
+        ),
+      ).toEqual([]);
+      expect(lines.join("\n")).not.toContain(VERCEL_TOKEN);
+      expect(lines.join("\n")).not.toContain(PROJECT);
+      expect(lines.join("\n")).not.toContain(TEAM);
+    },
+  );
+
+  // #403-T02
+  it.each([
+    ["not found", () => respond({ error: { code: "not_found" } }, 404)],
+    ["forbidden", () => respond({ error: { code: "forbidden" } }, 403)],
+    ["a server error", () => respond({}, 500)],
+    [
+      "a redirect",
+      () =>
+        new Response(null, {
+          status: 302,
+          headers: { location: "https://elsewhere.example/" },
+        }),
+    ],
+    ["not JSON", () => new Response("<html>", { status: 200 })],
+    ["an array", () => respond([deploymentRecord()])],
+  ])(
+    "does not accept the host when the platform answers %s, and sends nothing to it",
+    async (_name, answer) => {
+      const { fetch, seen } = platformAndDeployment(answer);
+      const { run, lines } = stagedOptions(fetch);
+
+      expect(await run()).toBe(2);
+
+      expect(lines.join("\n")).toContain("canary_deployment_not_verified");
+      expect(
+        seen.filter(
+          (request) => new URL(request.url).hostname !== "api.vercel.com",
+        ),
+      ).toEqual([]);
+    },
+  );
+
+  // #403-T02
+  it("blocks, without a word of the error, when the platform cannot be reached, and sends nothing to the deployment", async () => {
+    const { fetch, seen } = platformAndDeployment(() => {
+      throw new Error(`connect ECONNREFUSED ${VERCEL_TOKEN}`);
+    });
+    const { run, lines } = stagedOptions(fetch);
+
+    expect(await run()).toBe(1);
+
+    expect(lines.join("\n")).toContain("canary_verification_unavailable");
+    expect(lines.join("\n")).not.toContain("ECONNREFUSED");
+    expect(lines.join("\n")).not.toContain(VERCEL_TOKEN);
+    expect(
+      seen.filter(
+        (request) => new URL(request.url).hostname !== "api.vercel.com",
+      ),
+    ).toEqual([]);
+  });
+
+  // #403-T02
+  it.each([
+    ["http", `http://${STAGED_HOST}`],
+    ["this machine", "http://localhost:3000"],
+    ["a port", `https://${STAGED_HOST}:8443`],
+    ["a path", `https://${STAGED_HOST}/probe`],
+    ["credentials in the URL", `https://user:pw@${STAGED_HOST}`],
+    ["not a URL", "dispatcher"],
+  ])(
+    "refuses a URL with %s before it asks the platform or sends anything",
+    async (_name, url) => {
+      const { fetch, seen } = platformAndDeployment(() =>
+        respond(deploymentRecord()),
+      );
+      const { run } = stagedOptions(fetch, { url });
+
+      expect(await run()).toBe(2);
+
+      expect(seen).toEqual([]);
+    },
+  );
+
+  // #403-T03
+  it("holds a URL to the list of hosts and to the platform's answer when both are given", async () => {
+    const { fetch, seen } = platformAndDeployment(() =>
+      respond(deploymentRecord()),
+    );
+    const { run, lines } = stagedOptions(fetch, {
+      allowedHosts: ["another.example"],
+    });
+
+    expect(await run()).toBe(2);
+
+    expect(lines.join("\n")).toContain("canary_host_not_allowed");
+    expect(seen).toEqual([]);
+  });
+
+  // #403-T03
+  it("checks only: asks the platform, sends no credential to the deployment and needs no probe", async () => {
+    const { fetch, seen } = platformAndDeployment(() =>
+      respond(deploymentRecord()),
+    );
+    const { run, lines } = stagedOptions(fetch, { checkOnly: true, token: "" });
+
+    expect(await run()).toBe(0);
+
+    expect(lines.join("\n")).toContain("the URL is allowed");
+    expect(seen).toHaveLength(1);
+    expect(new URL(seen[0]?.url ?? "").hostname).toBe("api.vercel.com");
+  });
+
+  // #403-T03
+  it("without the check keeps working as before for a person at a terminal", async () => {
+    const { fetch, seen } = deployment(() => respond(REPORT));
+    const { run } = options(fetch);
+
+    expect(await run()).toBe(0);
+
+    expect(
+      seen.some(
+        (request) => new URL(request.url).hostname === "api.vercel.com",
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("the arguments of the deployment check", () => {
+  const env = {
+    RUNNER_TOKEN: "dummy-token-1234567890",
+    VERCEL_TOKEN,
+    VERCEL_TEAM_ID: TEAM,
+    VERCEL_PROJECT_ID: PROJECT,
+  };
+
+  // #403-T03
+  it("turns the check on with --verify-vercel and reads the three values from the environment", () => {
+    expect(
+      parseCanaryArguments(
+        ["--url", `https://${STAGED_HOST}`, "--verify-vercel"],
+        env,
+      ).verifyDeployment,
+    ).toStrictEqual(VERIFY);
+    expect(
+      parseCanaryArguments(["--url", `https://${STAGED_HOST}`], env)
+        .verifyDeployment,
+    ).toBeUndefined();
+  });
+
+  // #403-T03
+  it.each(["VERCEL_TOKEN", "VERCEL_TEAM_ID", "VERCEL_PROJECT_ID"])(
+    "refuses --verify-vercel without %s, naming it",
+    (name) => {
+      expect(() =>
+        parseCanaryArguments(
+          ["--url", `https://${STAGED_HOST}`, "--verify-vercel"],
+          { ...env, [name]: "" },
+        ),
+      ).toThrow(new RegExp(name));
+    },
+  );
+
+  // #403-T03
+  it("takes no argument for the three values: they would show up in process lists and logs", () => {
+    expect(() =>
+      parseCanaryArguments(
+        ["--url", `https://${STAGED_HOST}`, "--vercel-token", "x"],
+        env,
+      ),
+    ).toThrow();
+  });
+});
+
 describe("the arguments of the deploy canary", () => {
   it("takes the URL and reads the credential from the environment, never from an argument", () => {
     expect(
