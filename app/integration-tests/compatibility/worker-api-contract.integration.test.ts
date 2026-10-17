@@ -211,4 +211,25 @@ describe("what the app accepts from a Worker", () => {
       ),
     ).toStrictEqual(["dynamic_capabilities", "worker_credential"]);
   });
+
+  // #424-T08: the details request is judged by the contract with or without the providers.
+  it.each([
+    ["nothing", {}, true],
+    ["only the features", { features: "dynamic_capabilities,supersede" }, true],
+    ["only the providers", { llmProviders: "openrouter" }, true],
+    [
+      "both",
+      { features: "supersede", llmProviders: "openrouter,fakeai" },
+      true,
+    ],
+    ["an uppercase provider", { llmProviders: "OpenRouter" }, false],
+    [
+      "a list with an empty name",
+      { llmProviders: "openrouter,,fakeai" },
+      false,
+    ],
+    ["a too short provider", { llmProviders: "a" }, false],
+  ])("describes the details request with %s", (_name, query, valid) => {
+    expect(worker.check("WorkerJobDetailsRequest", query).valid).toBe(valid);
+  });
 });

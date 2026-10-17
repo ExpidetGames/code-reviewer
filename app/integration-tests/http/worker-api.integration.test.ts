@@ -293,6 +293,36 @@ describe("the claim with the feature worker_credential", () => {
 });
 
 describe("the details of a job", () => {
+  // #424-T08
+  it.each([
+    ["without the providers", undefined],
+    ["with the provider of a previous-release Worker", "openrouter"],
+    [
+      "with a provider this app has no adapter for",
+      "openrouter,a_future_provider",
+    ],
+    ["with a malformed list", "OpenRouter,,x"],
+  ])(
+    "answers the details request %s with the same job: OpenRouter",
+    async (_name, providers) => {
+      const h = await startRunnerApiHarness();
+      const job = await h.enqueueNew();
+      const claim = await h.claimedSplit();
+
+      const response = await h.worker.details(
+        job.id,
+        claim.job.credential,
+        "dynamic_capabilities",
+        undefined,
+        providers,
+      );
+
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body.job.input.llm.provider).toBe("openrouter");
+    },
+  );
+
   // #320-T17
   it("mints the git token and reveals the model key at fetch, and remembers the key then", async () => {
     const h = await startRunnerApiHarness();
