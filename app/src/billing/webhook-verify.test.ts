@@ -10,8 +10,7 @@ import {
 } from "./webhook-verify.ts";
 
 const SECRET = "pdl_ntfset_test_secret_value";
-const BODY =
-  '{"event_id":"evt_01test","event_type":"subscription.updated"}';
+const BODY = '{"event_id":"evt_01test","event_type":"subscription.updated"}';
 const TS = 1_700_000_000;
 // The HMAC-SHA256 of `${TS}:${BODY}` made with `openssl dgst -sha256 -hmac`, independent of this code.
 const KNOWN_H1 =
@@ -125,9 +124,10 @@ describe("verifyPaddleSignature", () => {
   it("uses a tolerance of five minutes by default and honours a configured one", () => {
     expect(PADDLE_SIGNATURE_TOLERANCE_SECONDS).toBe(300);
     const header = `ts=${TS};h1=${KNOWN_H1}`;
-    expect(
-      verify(header, { now: at(TS + 10), toleranceSeconds: 5 }),
-    ).toEqual({ ok: false, code: "timestamp_out_of_tolerance" });
+    expect(verify(header, { now: at(TS + 10), toleranceSeconds: 5 })).toEqual({
+      ok: false,
+      code: "timestamp_out_of_tolerance",
+    });
     expect(verify(header, { now: at(TS + 10), toleranceSeconds: 10 }).ok).toBe(
       true,
     );
