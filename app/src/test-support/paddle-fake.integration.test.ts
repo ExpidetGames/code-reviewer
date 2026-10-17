@@ -1,12 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Pins down the fake Paddle (fakes/paddle) over real HTTP the way the client of the app speaks to it: the
-// documented request shapes are enforced, errors are Paddle shaped, the immutability rule of the app holds on
-// the fake too, and the lifecycle calls behave like Paddle where the research says how Paddle behaves
-// (fakes/README.md). A wrong fake fails here before it misleads a route test.
+// documented request shapes are enforced, errors are Paddle shaped (their codes are classified as documented
+// or unverified), the app's own price rule is the client's and not the fake's, and the lifecycle calls behave
+// like Paddle where the research says how Paddle behaves (fakes/README.md). A wrong fake fails here before it misleads a route test.
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import {
+  DOCUMENTED_ERROR_CODES,
+  UNVERIFIED_ERROR_CODES,
+} from "../../../fakes/paddle/errors.ts";
 import { loadPaddleFixture } from "../../../fakes/paddle/fixtures.ts";
-import { startTestPaddle } from "./paddle-fake.ts";
+import { clientFor, startTestPaddle } from "./paddle-fake.ts";
+
+const FAKE_DIR = join(import.meta.dirname, "../../../fakes/paddle");
 
 type Answer = { status: number; json: any; headers: Headers }; // eslint-disable-line @typescript-eslint/no-explicit-any -- a test reads whatever shape the fake answered
 
@@ -48,7 +56,10 @@ async function seedPrice(fake: Awaited<ReturnType<typeof startTestPaddle>>) {
   return { product: product.json.data, price: price.json.data };
 }
 
-describe("the immutability rule", () => {
+describe("a price PATCH of a money field", () => {
+  // The research (§1) documents these fields as accepted by `PATCH /prices/{id}`; that Paddle locks them once a
+  // price is in use is undocumented (S1). Refusing them is the app's own policy and lives in the client
+  // (`updatePrice`, `price_field_immutable`), in front of the fake. The fake does not enforce it.
   // #436-T07
   it.each([
     ["unit_price", { amount: "1", currency_code: "USD" }],
@@ -56,33 +67,39 @@ describe("the immutability rule", () => {
     ["billing_cycle", { interval: "year", frequency: 1 }],
     ["trial_period", { interval: "day", frequency: 7 }],
     ["tax_mode", "external"],
-  ])(
-    "refuses a PATCH naming %s and leaves the price as it was",
-    async (field, value) => {
-      const fake = await startTestPaddle();
-      const { price } = await seedPrice(fake);
-      const answer = await call(fake, "PATCH", `/prices/${price.id}`, {
-        [field]: value,
-      });
-      expect(answer.status).toBe(400);
-      expect(answer.json.error).toMatchObject({
-        type: "request_error",
-        code: "price_field_immutable",
-      });
-      expect(fake.prices()).toEqual([price]);
-    },
-  );
-
-  // #436-T07
-  it("refuses it also next to an allowed field, and changes nothing", async () => {
+  ])("is accepted by the fake when it names %s", async (field, value) => {
     const fake = await startTestPaddle();
     const { price } = await seedPrice(fake);
     const answer = await call(fake, "PATCH", `/prices/${price.id}`, {
-      name: "Renamed",
-      unit_price: { amount: "1", currency_code: "USD" },
+      [field]: value,
+    });
+    expect(answer.status).toBe(200);
+    expect(answer.json.data[field]).toEqual(value);
+  });
+
+  // #436-T07
+  it("is still checked against the documented shape", async () => {
+    const fake = await startTestPaddle();
+    const { price } = await seedPrice(fake);
+    const answer = await call(fake, "PATCH", `/prices/${price.id}`, {
+      unit_price: { amount: 1500 },
     });
     expect(answer.status).toBe(400);
-    expect(fake.prices()[0]?.name).toBe(price.name);
+    expect(answer.json.error.code).toBe("invalid_field");
+    expect(fake.prices()).toEqual([price]);
+  });
+
+  // #436-T07
+  it("never reaches the fake through the client: the app's guard refuses first", async () => {
+    const fake = await startTestPaddle();
+    const { price } = await seedPrice(fake);
+    const before = fake.requests().length;
+    const failure = await clientFor(fake)
+      .updatePrice(price.id, { unit_price: { amount: "1" } } as never)
+      .catch((error: unknown) => error);
+    expect(failure).toMatchObject({ code: "price_field_immutable" });
+    expect(fake.requests()).toHaveLength(before);
+    expect(fake.prices()).toEqual([price]);
   });
 
   // #436-T07
@@ -101,6 +118,54 @@ describe("the immutability rule", () => {
       status: "archived",
       custom_data: { a: 1 },
     });
+  });
+});
+
+describe("error codes of the fake", () => {
+  // The research documents the shape of an error and a few codes; the names below were invented for the fake.
+  // Callers must branch on the HTTP status and the documented constraint, not on these strings, until the
+  // contract run against the sandbox (#448). A new code must be classified here.
+  // #436-T07
+  it("classifies every code it can answer as documented or unverified", () => {
+    const source = readdirSync(FAKE_DIR)
+      .filter((file) => file.endsWith(".ts"))
+      .map((file) => readFileSync(join(FAKE_DIR, file), "utf8"))
+      .join("\n");
+    const used = new Set<string>();
+    for (const match of source.matchAll(
+      /(?:conflict|fail|PaddleHttpError|errorBody)\(\s*(?:\d+,\s*)?"([a-z_]+)"/g,
+    ))
+      if (match[1] !== undefined) used.add(match[1]);
+    for (const code of ["internal_error", "injected_fault"]) used.add(code);
+    expect(used.size).toBeGreaterThan(8);
+    const known = new Set<string>([
+      ...DOCUMENTED_ERROR_CODES,
+      ...UNVERIFIED_ERROR_CODES,
+    ]);
+    expect([...used].filter((code) => !known.has(code))).toEqual([]);
+    expect(
+      DOCUMENTED_ERROR_CODES.filter((code) =>
+        (UNVERIFIED_ERROR_CODES as readonly string[]).includes(code),
+      ),
+    ).toEqual([]);
+  });
+
+  // #436-T07
+  it("names the invented codes the review found, and none of the documented ones", () => {
+    expect([...UNVERIFIED_ERROR_CODES]).toEqual(
+      expect.arrayContaining([
+        "price_field_immutable",
+        "entity_archived",
+        "invalid_request",
+        "request_too_large",
+        "authentication_missing",
+        "internal_error",
+        "injected_fault",
+        "subscription_update_when_past_due",
+        "subscription_locked_pending_changes",
+        "subscription_locked_renewal",
+      ]),
+    );
   });
 });
 

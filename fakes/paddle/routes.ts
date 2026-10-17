@@ -3,7 +3,7 @@
 // The endpoints of the fake Paddle: the ones the billing module uses (issue #436), with the request shapes of
 // Paddle's documentation and the behavior the research of epic #421 records. A handler gets the parsed request
 // and returns a status and a body, or throws a `PaddleHttpError`.
-import { PaddleHttpError, conflict, invalidFields } from "./errors.ts";
+import { conflict, invalidFields } from "./errors.ts";
 import {
   addCycle,
   stamp,
@@ -43,15 +43,6 @@ export type RouteReply = {
 };
 type Handler = (request: RouteRequest) => RouteReply;
 type Route = { method: string; pattern: RegExp; handler: Handler };
-
-/** The price fields that decide what is charged. The app never PATCHes them, and neither does the fake accept it. */
-const IMMUTABLE_PRICE_FIELDS = [
-  "unit_price",
-  "unit_price_overrides",
-  "billing_cycle",
-  "trial_period",
-  "tax_mode",
-];
 
 const TAX_CATEGORIES = [
   "digital-goods",
@@ -101,6 +92,12 @@ const PRODUCT_PATCH: Shape = {
   custom_data: optional(nullable(record)),
   status: optional(string({ oneOf: STATUSES })),
 };
+const UNIT_PRICE_OVERRIDES = array(
+  object({
+    country_codes: required(array(string({ pattern: /^[A-Z]{2}$/ }))),
+    unit_price: required(object(MONEY)),
+  }),
+);
 const PRICE_CREATE: Shape = {
   product_id: required(string({ pattern: /^pro_[a-z0-9]+$/ })),
   description: required(string({ min: 1, max: 500 })),
@@ -110,14 +107,7 @@ const PRICE_CREATE: Shape = {
   billing_cycle: optional(nullable(object(CYCLE))),
   trial_period: optional(nullable(object(CYCLE))),
   tax_mode: optional(string({ oneOf: TAX_MODES })),
-  unit_price_overrides: optional(
-    array(
-      object({
-        country_codes: required(array(string({ pattern: /^[A-Z]{2}$/ }))),
-        unit_price: required(object(MONEY)),
-      }),
-    ),
-  ),
+  unit_price_overrides: optional(UNIT_PRICE_OVERRIDES),
   quantity: optional(
     object({
       minimum: required(integer({ min: 1 })),
@@ -126,8 +116,15 @@ const PRICE_CREATE: Shape = {
   ),
   custom_data: optional(nullable(record)),
 };
-// The fields Paddle's PATCH accepts besides the five the app never changes.
+// The fields Paddle's PATCH accepts (research §1, verified), including the money fields. That Paddle locks them
+// once a price is in use is undocumented (S1), so the fake accepts them. Refusing a PATCH of them is the app's own
+// policy (`updatePrice` in app/src/billing, `price_field_immutable`) and lives in the client, in front of the fake.
 const PRICE_PATCH: Shape = {
+  unit_price: optional(object(MONEY)),
+  unit_price_overrides: optional(UNIT_PRICE_OVERRIDES),
+  billing_cycle: optional(nullable(object(CYCLE))),
+  trial_period: optional(nullable(object(CYCLE))),
+  tax_mode: optional(string({ oneOf: TAX_MODES })),
   name: optional(nullable(string({ max: 200 }))),
   description: optional(string({ min: 1, max: 500 })),
   type: optional(string({ oneOf: ["standard", "custom"] })),
@@ -274,6 +271,9 @@ export function createRoutes(store: Store, now: () => number): Route[] {
     body: Record<string, unknown>,
   ): FakeSubscription {
     const changesItems = body.items !== undefined;
+    // The three `subscription_*` locks below are documented constraints (not within 30 minutes of renewal, not
+    // past due, not with a pending change) under UNVERIFIED code names (errors.ts): branch on the 409 and the
+    // constraint, not on the strings, until the sandbox contract run (#448).
     if (subscription.status === "canceled")
       throw conflict(
         "subscription_update_when_canceled",
@@ -397,17 +397,6 @@ export function createRoutes(store: Store, now: () => number): Route[] {
       pattern: /^\/prices\/([^/]+)$/,
       handler: ({ params, body }) => {
         const price = store.get(store.prices, params[0] ?? "");
-        // Before anything else: the same rule as the client's, so a bug in the app cannot slip past the fake.
-        if (typeof body === "object" && body !== null) {
-          const named = IMMUTABLE_PRICE_FIELDS.filter((field) => field in body);
-          if (named.length > 0)
-            throw new PaddleHttpError(
-              400,
-              "price_field_immutable",
-              `The app never changes ${named.join(", ")} of a price: create a new price instead`,
-              named.map((field) => ({ field, message: "Must not be changed" })),
-            );
-        }
         patchEntity(price, parseBody(body, PRICE_PATCH));
         return { status: 200, data: price };
       },

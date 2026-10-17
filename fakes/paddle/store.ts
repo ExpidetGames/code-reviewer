@@ -100,6 +100,7 @@ export function createStore(options: StoreOptions) {
   function activePrice(id: string): FakePrice {
     const price = get(prices, id);
     if (price.status === "archived")
+      // Unverified code name (errors.ts); the 409 and the constraint (an archived entity is not used) are the contract.
       throw conflict("entity_archived", `Price ${id} is archived`);
     return price;
   }

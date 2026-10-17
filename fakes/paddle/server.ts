@@ -168,6 +168,7 @@ export async function startPaddleFake(
       headers: Record<string, string> = {},
     ) => send(res, status, errorBody(status, code, detail, requestId), headers);
 
+    // UNVERIFIED against the sandbox (errors.ts): the codes below, the `type` values and the 403 for a missing key.
     if (text === undefined)
       return fail(413, "request_too_large", "The body is too large");
     if (!authenticated) {
@@ -195,6 +196,7 @@ export async function startPaddleFake(
             requestId,
           ),
       );
+    // `too_many_requests` is an unverified name (errors.ts); the 429 and `Retry-After` are what a caller relies on.
     if (fault?.kind === "rate_limit")
       return fail(429, "too_many_requests", "Too many requests", {
         "retry-after": String(fault.retryAfterSeconds),
