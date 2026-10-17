@@ -29,6 +29,7 @@ import {
   validateEntitlements,
 } from "../../workspaces/entitlements-validation.ts";
 import type { StoredGithubApp } from "../../github-config/settings.ts";
+import type { CatalogDefaults } from "../../model-catalog/entries.ts";
 import type { ManagedModelTiers } from "../../model-tiers/tiers.ts";
 import type { ImportNotice } from "../../legacy-import/notice.ts";
 import type { SmtpSettings } from "../../mail/smtp-settings.ts";
@@ -100,6 +101,12 @@ export type InstanceSettingValues = {
    * configured). No row: no tier is configured, and a managed job fails closed (`managed_tier_unavailable`).
    */
   managed_model_tiers: ManagedModelTiers;
+  /**
+   * #425: the instance default entry of the model catalog per kind of review (src/model-catalog/): `{ diff, dynamic }`,
+   * each the id of a released entry that serves the kind, or null. Written by the catalog service only, which reads it
+   * again against the entries (a default that is no longer fit reads as none). No row: no default.
+   */
+  catalog_defaults: CatalogDefaults;
 };
 export type InstanceSettingKey = keyof InstanceSettingValues;
 /**

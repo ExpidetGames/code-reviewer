@@ -81,11 +81,16 @@ const SCOPED = [
  *   repository; the clean-up deletes expired rows of every workspace and reads nothing;
  * - job-claimed-keys: the encrypted LLM key handed out with the claim of a job. It is keyed by the job and read
  *   only by the runner API when that job is completed (the job and its workspace are known there); it never
- *   lists, and a key is only ever looked up by the id of a job the caller holds.
+ *   lists, and a key is only ever looked up by the id of a job the caller holds;
+ * - catalog: the operator's list of the models managed workspaces may use (#425, ADR 0005, 2.6). It is instance
+ *   configuration, not customer data, and no workspace owns an entry. Its one read across workspaces is a count of
+ *   how many projects select an entry (for the operator's confirmation when the model behind it changes); it
+ *   returns a number, never a row, a project or a workspace.
  */
 const INSTANCE_LEVEL = [
   "allowed-login-pins-repository.ts",
   "app-meta-repository.ts",
+  "catalog-repository.ts",
   "claim-admission.ts",
   "installation-link-request-directory-repository.ts",
   "instance-settings-repository.ts",
@@ -211,6 +216,16 @@ describe("the repositories and workspace scoping", () => {
     expect(
       withoutWorkspace.parameters.some((p) => p.name === "workspaceId"),
     ).toBe(false);
+  });
+
+  // #425-T11
+  it("classifies the model catalog repository as instance level, with an exported factory that takes no workspace", () => {
+    expect(INSTANCE_LEVEL).toContain("catalog-repository.ts");
+    expect(SCOPED).not.toContain("catalog-repository.ts");
+    const factories = exportedFunctions("catalog-repository.ts").filter(
+      touchesTheDatabase,
+    );
+    expect(factories.map((fn) => fn.name)).toEqual(["createCatalogRepository"]);
   });
 
   it("keeps the instance level modules from taking a workspace, so the two groups stay apart", () => {
