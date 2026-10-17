@@ -314,13 +314,18 @@ yours.
   variables are for an update of an old self-hosted installation and a hosted instance never sets them (section 3.1).
 
 **The golden snapshot keys.** Three keys of `/dispatcher` belong to the pipeline: `SANDBOX_SNAPSHOT_ID`,
-`SANDBOX_IMAGE_DIGEST` and `SANDBOX_SNAPSHOT_COMMIT` (the commit the snapshot was built from). Create them once, with
-the value `unset`, so that the first run has something to update (it creates them if they are missing, when the
-identity may); after that **do not edit them by hand**: the deployment writes them, and only after a promotion. They are
-not secrets, and they must reach Vercel as ordinary variables, **not as Sensitive ones**: `vercel pull` does not return a
-Sensitive variable, and a blank pair makes every deployment rebuild the snapshot (safe, but slow and wasteful). The
-pipeline works from the pair its live Dispatcher deployment carries (section 5.1); the keys are what Secret Sync and a
-deployment made by hand see.
+`SANDBOX_IMAGE_DIGEST` and `SANDBOX_SNAPSHOT_COMMIT` (the commit the snapshot was built from). **Do not create them,
+and do not give them a placeholder.** Absent is the supported state ("no launcher, nothing is claimed"); a placeholder
+that is not an id makes the Dispatcher refuse to start (`SANDBOX_SNAPSHOT_ID` set without a valid
+`SANDBOX_IMAGE_DIGEST`, or the other way round, is a `ConfigError` when the function initialises), in every deployment
+that does not get the pipeline's own values. The first deployment writes the keys (the write creates what is missing, so
+the identity needs *create* as well as *edit* on exactly these three names: a 403 on that first write means the role
+lacks it), and from then on **do not edit them by hand**: the pipeline writes them, and only after a promotion. They
+are not secrets, and they must reach Vercel as ordinary variables, **not as Sensitive ones**: `vercel pull` does not
+return a Sensitive variable, and a blank pair makes every deployment rebuild the snapshot (safe, but slow and wasteful).
+After the first run, check once that the three keys exist in Infisical and in the Vercel project, and that Vercel does
+not show them as Sensitive. The pipeline works from the pair its live Dispatcher deployment carries (section 5.1); the
+keys are what Secret Sync and a deployment made by hand see.
 
 **Machine identity** (Infisical, Access Control): **one** identity, **Universal Auth**, used by every job of the pipeline.
 Its role is exactly this, and nothing more (create a custom role and add the identity to the project with it):
@@ -489,6 +494,13 @@ Vercel) reads `DISPATCHER_SHUTDOWN_GRACE_SECONDS` and `PORT`.
 | Infisical `prod` `/dispatcher` | `SANDBOX_SNAPSHOT_ID`, `SANDBOX_IMAGE_DIGEST`, `SANDBOX_SNAPSHOT_COMMIT` | Written by the pipeline after a promotion, with the same machine identity (section 2.1 has its role). Not secrets |
 | retired | the environments `hosted-snapshot` and `hosted-canary`, the variables `DISPATCHER_CANARY_HOSTS` and `GOLDEN_SNAPSHOT_ENABLED` | Replaced by the above. The canary no longer keeps a list of hosts: the Vercel API says whether a staged host is the Dispatcher project's |
 
+**What the build sees.** `vercel build` (which runs `next build`, the bundler and every plugin of the two projects) runs
+without the Vercel token and after the dependencies were installed, so neither the token nor the install scripts meet.
+It does see the **production runtime variables**: `vercel pull` writes them to `.vercel/.env.production.local`, and the
+build loads them (the App's `DATABASE_URL` and `APP_SECRET`, the Dispatcher's `RUNNER_TOKEN` and signing secret, every
+non-Sensitive variable the pull returns). Treat the build code of both projects, and every dependency in their
+lockfiles, as trusted with those values; the lockfiles and the reviews of changes to them are what protects them.
+
 **A Vercel access token acts for its owner in the whole team (or account) it is created for, not for one project**, whatever
 the project ids in `/ci` say: create it from a dedicated account that has the lowest team role that can deploy, promote
 and create Sandboxes and snapshots, give it an expiry if the dashboard offers one (and a calendar reminder to rotate it
@@ -591,6 +603,11 @@ migrates by itself. This manual run is for the first time, and for the check of 
    to use the project's OIDC token. **Leave the three `SANDBOX_SNAPSHOT_*` keys unset**: the first deployment builds the
    snapshot and writes them (a Dispatcher without a snapshot claims nothing, which is what you want until then).
 4. Check that `/ci` holds the eight keys of section 2.1 and that both Secret Syncs show *synced*.
+
+This guide is for a **new installation**. An installation that already has `SANDBOX_SNAPSHOT_ID` and
+`SANDBOX_IMAGE_DIGEST` set by hand (the flow before the pipeline) and no `SANDBOX_SNAPSHOT_COMMIT` also works: the first
+run sees an incomplete pair, builds a snapshot, and keeps the old one as the previous snapshot, which the live
+Dispatcher deployment still runs, until the next run that rebuilds.
 
 ### Step 3. First deployment
 
@@ -723,59 +740,90 @@ snapshot it has:
 1. **Decide** (`snapshot-decide`). The pair production runs is read from the **live production deployment of the
    Dispatcher** (its meta carries `sandboxSnapshotId`, `sandboxImageDigest` and `sandboxSnapshotCommit`, put there by the
    deploy step), and, for a deployment made by hand, from the project's variables (`vercel pull`; Infisical `/dispatcher`
-   by Secret Sync). The snapshot is **rebuilt** when: the commit of the pair is missing or not in the clone, the pair is
-   missing or incomplete (the first deployment), an input of the Worker image changed between that commit and this run's
-   commit (`runner/`, the license files, `.dockerignore`, `docker/sandbox/` and `dispatcher/src/snapshot/`: the list is
-   `IMAGE_INPUT_PATHS` in `dispatcher/src/snapshot/pair.ts`, and a test holds that every file the Dockerfile copies is in
-   it), or the run was started with `rebuild_snapshot` (the platform's base image changed, say). Otherwise the pair is
-   reused. A pair that cannot be trusted is never reused: when in doubt it rebuilds.
+   by Secret Sync). If the live deployment cannot be read the run **stops** (`live_pair_unavailable`): stale variables
+   must not decide in its place. The snapshot is **rebuilt** when: the commit of the pair is missing or not in the
+   clone, the pair is missing or incomplete (the first deployment), an input of the Worker image changed between that
+   commit and this run's commit, the **snapshot of the pair no longer exists** (`snapshot_missing`: a rollback went past
+   the previous one, someone deleted it), or the run was started with `rebuild_snapshot` (the platform's base image
+   changed, say). If the platform cannot say whether the snapshot exists the run stops (`snapshot_lookup_failed`).
+   Otherwise the pair is reused. A pair that cannot be trusted is never reused: when in doubt it rebuilds.
+   *The inputs* are exactly what the image build consumes (`IMAGE_INPUT_PATHS` in `dispatcher/src/snapshot/pair.ts`): the
+   files `runner/Dockerfile` copies out of the build context (`runner/src`, `pyproject.toml`, `uv.lock`,
+   `.python-version`, the two fetch scripts and the two pin files), the Dockerfile and the two ignore files, the license
+   files, `docker/sandbox/vm-prepare.sh`, and the four files of the build tool that decide what is installed and checked
+   in the snapshot (`config.ts` with the pinned Docker versions and the default build target, `pipeline.ts`,
+   `scripts.ts`, `probe-flags.ts`). A test parses the Dockerfile's `COPY` lines and fails when one is missing from the
+   list and when the list names something the build does not copy; another follows the imports of `pipeline.ts`. The
+   tests of `runner/`, its README and the logic of the deployment steps are not inputs: editing them rebuilds nothing.
+   A pair set up by hand before the pipeline existed (a snapshot and an image id, no commit) is not reusable, but its
+   snapshot is kept as the previous one, so the first cleanup does not delete what the previous deployment still runs.
 2. **Build** (`snapshot-build`, only if needed). The workflow `golden-snapshot.yml`, called by the run:
    a builder VM on Vercel Sandbox installs a pinned Docker, builds the Worker image from this commit, snapshots with no
    expiry, and a second VM from that snapshot scans it for secrets and job data, checks the image id and runs the
    image's own self-check ([`golden-snapshot.md`](golden-snapshot.md) has every step and failure code). It removes
    nothing of earlier runs (`--skip-retention`) and writes nothing to Infisical.
-3. **Stage** (`stage-dispatcher`). The staged Dispatcher deployment gets the pair of this run as its **own run-time
-   variables** (`vercel deploy --env SANDBOX_SNAPSHOT_ID=... --env SANDBOX_IMAGE_DIGEST=...`) and as meta. The project's
-   variables, Infisical and the live deployment are not touched, so production keeps using the old pair until the
-   promotion. This is the one mechanism of the pipeline that depends on how the platform treats `--env` next to the
-   project's own variables (section 9); the canary does not trust it, it checks.
-4. **Prove** (`canary`). The canary calls `POST /probe` of the staged Dispatcher, whose answer names the Worker image id
-   the deployment is configured with, and fails unless it is the one this run built (`canary_image_mismatch`). The probe
-   creates its canary VM from the snapshot the deployment uses. So the new snapshot is proven by the deployment that
-   will run it, before anything is promoted.
-5. **Promote**, App first, then Dispatcher (`promote-app`, `promote-dispatcher`).
+3. **Stage** (`stage-dispatcher`). First `snapshot:ops exists` checks that the snapshot is there (a re-run of failed jobs
+   after the snapshot was removed stops here with `snapshot_missing`, not in a canary VM that cannot start). The staged
+   Dispatcher deployment then gets the pair of this run as its **own run-time variables** (`vercel deploy --env
+   SANDBOX_SNAPSHOT_ID=... --env SANDBOX_IMAGE_DIGEST=...`) and as meta. The project's variables, Infisical and the live
+   deployment are not touched, so production keeps using the old pair until the promotion. This is the one mechanism of
+   the pipeline that depends on how the platform treats `--env` next to the project's own variables (section 9); the
+   canary does not trust it, it checks.
+4. **Prove** (`canary`). The canary calls `POST /probe` of the staged Dispatcher, whose answer names the **snapshot id and
+   the Worker image id** the deployment is configured with, and fails unless both are the ones this run built
+   (`canary_image_mismatch`, no id printed). Both, because a rebuild of the same layers keeps the image id and changes
+   the snapshot. The probe creates its canary VM from the snapshot the deployment uses. So the new snapshot is proven by
+   the deployment that will run it, before anything is promoted.
+5. **Promote**, App first, then Dispatcher (`promote-app`, `promote-dispatcher`). Each job checks again, right before it
+   promotes, that its commit is still the head of `main`: *Re-run failed jobs* of an old run skips the first job's check,
+   so the check is part of the jobs that act.
 6. **Persist** (`persist`), **only after the Dispatcher is live**. The pair is written to Infisical `prod` `/dispatcher`
-   with the machine identity's write path (section 2.1); Secret Sync then carries it to the project's variables for
-   deployments made by hand and for the next `vercel pull`. Written also when nothing was rebuilt but the variables are
-   behind the live pair (a repair, below).
-7. **Clean up** (`cleanup`), **only after persist**. Every golden snapshot is removed except: the new one, the previous
-   one (the one production ran before this run: the rollback target, the previous Dispatcher deployment, still
+   with the machine identity's write path (section 2.1), after the same freshness check (a pair of an older run must not
+   overwrite a newer one; if `main` moved on, the next run finds the live pair and writes it). Secret Sync then carries it
+   to the project's variables for deployments made by hand and for the next `vercel pull`. Written also when nothing was
+   rebuilt but the variables are behind the live pair (a repair, below). The three keys are written one after the other:
+   a failure after the first leaves a mixed trio (a new id with an old image id, say), which a deployment made by hand
+   would refuse to start with and which the next run repairs.
+7. **Clean up** (`cleanup`), **after every promotion of the Dispatcher** (and after persist, when persist had something
+   to do). Every golden snapshot is removed except: the new one (or the one in use, when nothing was rebuilt), the
+   previous one (the one production ran before this run: the rollback target, the previous Dispatcher deployment, still
    references it), and the one the live deployment runs (read from the platform again, and if it cannot be read nothing
-   is removed). A builder whose snapshot the platform did not report is never touched. The rule is a list of what to
-   keep, built from the current state, so it is safe to repeat after a failure halfway: what is gone is not planned
-   again, and a list that does not contain a kept snapshot removes nothing.
+   is removed). Left alone besides: a snapshot younger than three hours that is not kept (a rehearsal by hand may be
+   using it), and a builder with no snapshot younger than three hours; a builder with no snapshot **older** than three
+   hours is the leftover of a build that was killed (builds are serialised and time out) and is removed. The rule is a
+   list of what to keep, built from the current state, so it is safe to repeat after a failure halfway and it clears
+   what an earlier run could not: what is gone is not planned again, and a list that does not contain a kept snapshot
+   removes nothing.
 
-**If the run fails before the promotion** (the build, the staging, the health check, the canary, a promotion that
-fails): production keeps the old deployments and the old pair, Infisical was not written, and the `discard` job removes
-the snapshot this run built (unless the live deployment turns out to use it, as when a promotion timed out and went
-through). If `discard` cannot run, the next run's cleanup removes it.
+**If the run fails before the promotion** (the build, the staging, the health check, the canary): production keeps the
+old deployments and the old pair, Infisical was not written, and the `discard` job removes the snapshot this run built.
+*Re-run failed jobs* after that is safe: the stage and the canary check that the snapshot exists and stop with
+`snapshot_missing` if it does not, and *Re-run all jobs* builds a new one.
+
+**If the Dispatcher's promotion failed, timed out or was cancelled:** the outcome is unknown. `vercel promote` requests
+the promotion first and only then waits, so a timeout stops the waiting, not the promotion, and it can still land. Nothing
+is discarded then (`discard` runs only when the promotion never started): the snapshot stays, and the next run's cleanup
+keeps whichever one is live and removes the rest. Check the Dispatcher project's production deployment; if it is the new
+one, the next run repairs the variables (below), and if it is not, the next cleanup removes the unused snapshot.
 
 **If the promotion succeeded and `persist` failed:** the run fails loudly (red), production runs the new pair and
 Infisical still holds the old one. Nothing breaks: the live Dispatcher deployment carries its pair as its own variables.
 The next run reads the live deployment's pair, **prefers it over the variables**, finds that they differ and writes the
 live pair (a repair), so the state heals itself on the next deployment; meanwhile a deployment made by hand from the
 stale variables would use the old pair, whose snapshot the cleanup has not removed because `cleanup` runs after
-`persist` only. To heal it sooner, *Re-run failed jobs* of the run does exactly the persist step with the same pair.
+`persist`. To heal it sooner, *Re-run failed jobs* of the run does exactly the persist step with the same pair.
 
 **If `cleanup` fails or the run is cancelled after the promotion:** the pair is already written; the snapshots that
-should have gone stay until the next run that rebuilds, whose cleanup removes everything not in its keep list.
+should have gone stay until the next run, whose cleanup removes everything not in its keep list.
 
 **A release that changes the Worker image needs nothing from you:** merge to `main`; the run notices the changed
 inputs, builds, proves the new snapshot on the staged Dispatcher and promotes. Only if the platform's base image or an
 account-level setting changes without a change to the repository, run *Deploy production* with `rebuild_snapshot`.
 The workflow *Golden snapshot*, started by hand, is a **rehearsal**: it builds and checks a snapshot and leaves it, wires
 nothing in and persists nothing (a manual build that wrote the pair would let the pair drift away from what production
-runs, and break the retention rule above). The next run that cleans up removes it.
+runs, and break the retention rule above). It has a queue of its own, apart from the build a deployment calls, and a
+deployment's cleanup leaves a snapshot younger than three hours alone; an older rehearsal is removed by the next
+cleanup.
 
 ### 5.2 Rotating secrets
 
@@ -820,7 +868,8 @@ URL.
 - **Dynamic off, instantly:** Admin, Setup, Instance, Dynamic Review, untick. Waiting Dynamic jobs are cancelled
   `dynamic_review_disabled`; running ones finish.
 - **Diff only:** set `DISPATCHER_ENGINES=pr-agent` and redeploy: no probe, no canary VM.
-- **No Launcher:** unset `SANDBOX_SNAPSHOT_ID` and `SANDBOX_IMAGE_DIGEST` and redeploy: the Dispatcher claims nothing.
+- **No Launcher:** unset `SANDBOX_SNAPSHOT_ID` and `SANDBOX_IMAGE_DIGEST` and redeploy: the Dispatcher claims nothing. (A
+  deployment of the pipeline carries its own pair and builds one when none is configured, so this is for a hand deployment.)
   Waiting jobs are not lost: Diff jobs fail with `dispatch_unavailable` after the give-up time, Dynamic ones with
   `no_capable_runner` after 30 minutes.
 - **No more wake-ups:** `RUNNER_DISPATCH=poll` in the App. Jobs stay queued; nobody claims them.
@@ -863,9 +912,9 @@ done by hand, a change of the Worker image included (section 5.1). The jobs, in 
 
 | Job | What it does | If it fails |
 |---|---|---|
-| `fresh` | The commit of the run is still the head of `main`. An older run (a re-run of an old run) is refused, unless a manual run was started with `allow_stale` | Nothing is deployed |
+| `fresh` | The commit of the run is still the head of `main`. An older run (a re-run of an old run) is refused, unless a manual run was started with `allow_stale`. The promotion jobs and `persist` check it again right before they act, so a re-run of the failed jobs cannot skip it | Nothing is deployed |
 | `migrate` | `pnpm --dir app migrate` against `DATABASE_URL_MIGRATE` from `/ci` | Nothing is deployed |
-| `snapshot-decide` | Does the Worker image need a new golden snapshot? (section 5.1) | Nothing is deployed |
+| `snapshot-decide` | Does the Worker image need a new golden snapshot? Is the one in use still there? (section 5.1) | Nothing is deployed |
 | `snapshot-build` | Only if needed: builds and checks the snapshot | Nothing is promoted; the snapshot is discarded |
 | `stage-app` | `vercel pull`, `vercel build --prod` (without the Vercel token), `vercel deploy --prebuilt --prod --skip-domain` for the App: a staged production deployment, no domain | Nothing is promoted |
 | `stage-dispatcher` | The same for the Dispatcher, after the App and the snapshot, with the pair of the run as its own variables and meta | Nothing is promoted; the snapshot is discarded |
@@ -873,8 +922,8 @@ done by hand, a change of the Worker image included (section 5.1). The jobs, in 
 | `canary` | The Dispatcher canary on the staged Dispatcher, which must report the image id of the run (step 3 of section 4) | Nothing is promoted; the snapshot is discarded |
 | `promote-app`, `promote-dispatcher` | `vercel promote` of the App, then of the Dispatcher, one job each | A project that did not promote keeps its old deployment: section 7 |
 | `persist` | Writes the pair to Infisical, only after the Dispatcher is live (section 5.1) | The run fails loudly; the next run repairs it |
-| `cleanup` | Removes the snapshots nobody needs, only after `persist` | The next run that rebuilds removes them |
-| `discard` | Removes the snapshot of a run that built one and did not get live | The next cleanup removes it |
+| `cleanup` | Removes the snapshots nobody needs, after every promotion of the Dispatcher and after `persist` when it ran | The next run removes them |
+| `discard` | Removes the snapshot of a run that built one and whose Dispatcher promotion never started | The next cleanup removes it |
 | `record` | Closes the GitHub deployment records (`app-production`, `dispatcher-production`), each with what happened to its own project | |
 
 Production stays on its previous deployments until `promote-app`. Do not rely on the platform to hold traffic back from a
@@ -966,7 +1015,7 @@ the canary uses the Dynamic size, so run it after changing it.
 | What | How |
 |---|---|
 | **The App** | Actions, *Rollback production*, *Run workflow* on `main`, with `app_deployment` set to the deployment to restore (its id `dpl_...` or its address, from the Vercel dashboard or from the summary of an earlier run). The workflow first asks the Vercel API that it is a ready **production** deployment of the **App** project and team, then runs `vercel rollback` with the pinned CLI. Safe as long as the migrations since were additive (the previous version runs on a database that is ahead of it). A migration that has run is never undone. |
-| **The Dispatcher** | The same workflow with `dispatcher_deployment`. It also writes the restored deployment's golden snapshot pair (read from its meta) back to Infisical `/dispatcher`, so that the next deployment decides from what production runs again. Restore the **previous** Dispatcher deployment: its snapshot is kept by the cleanup (the new one and the previous one stay). An older deployment's snapshot may be gone, and the Dispatcher then fails every job with `sandbox_snapshot_missing`. |
+| **The Dispatcher** | The same workflow with `dispatcher_deployment`. It also writes the restored deployment's golden snapshot pair (read from its meta) back to Infisical `/dispatcher`, so that the next deployment decides from what production runs again. Restore the **previous** Dispatcher deployment: its snapshot is kept by the cleanup (the new one and the previous one stay). The workflow checks that the snapshot of the target deployment still exists, and **refuses with `rollback_snapshot_missing`** when it is gone, before it touches either project: restoring the deployment would put production on a Dispatcher that fails every job, and writing its dead pair to Infisical would send the next deployment after it. To go further back, deploy the old commit as a new run instead (a manual run with `allow_stale`), which builds a snapshot for it. A deployment made by hand, which carries no pair, is let through. |
 | **A pipeline that stopped between the two promotions** | The App was promoted and the Dispatcher was not (or the other way round): the GitHub deployment records say which (`app-production`, `dispatcher-production`). Run *Rollback production* for the one that moved, or fix the cause and run *Deploy production* again. A later deployment's `vercel promote` also ends a rollback's pause on the automatic assignment of the production domains. |
 | **The snapshot** | Roll the Dispatcher back (row above): it restores the pair with the deployment. There is no separate action on the snapshot; the cleanup keeps the current and the previous one for exactly this. |
 | **Webhook mode** | `RUNNER_DISPATCH=poll` stops the wake-ups. It is not a way back to the self-hosted runner: the hosted App has no runner that polls (section 8). |
@@ -1015,7 +1064,10 @@ A self-hosted installation and a hosted one never share a database or a GitHub A
     that happens on the first run, the pipeline is safe but cannot deploy a new snapshot until the mechanism is
     replaced (writing the pair to the project's variables through the API before staging is the alternative; it
     touches the project before the canary, which this design avoids).
-  - That the project reports its production deployment as `targets.production` and a deployment's `meta`, `target`,
+  - That `targets.production` of the project follows a `vercel rollback` (the pipeline's idea of the "live" deployment
+    is that field; if a rollback leaves it on the deployment rolled back from, the decision and the cleanup read the
+    wrong pair until the next promotion), and that the project reports its production deployment as that field and a
+    deployment's `meta`, `target`,
     `readyState`, `projectId` and `ownerId` as the API reference says (the snapshot decision, the canary's check and
     the rollback's check read them), and that a staged production deployment has the target `production`.
   - That a staged address is under Deployment Protection and the bypass header opens it, and that `vercel promote` and
@@ -1098,3 +1150,9 @@ A self-hosted installation and a hosted one never share a database or a GitHub A
 - A second GitHub environment `production-rollback` with required reviewers, so that a rollback needs an approval
   without gating every deployment job.
 - A tool that checks a new migration for removals (section 5.6).
+- **Accepted:** every job that runs in the environment `production` also gets a GitHub deployment record (about a
+  dozen per release run), some of which stay without a final status when a run ends early (section 5.6). Only the jobs
+  that read or write secrets run there, and those need the environment; the two records the pipeline writes itself
+  (`app-production`, `dispatcher-production`) are the ones that say what reached production.
+- **Accepted:** the three snapshot keys are written one after the other, not in one call (section 5.1); a mixed trio
+  is repaired by the next run.

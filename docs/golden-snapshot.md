@@ -93,9 +93,12 @@ code and, for a failed command, its exit status and the last lines of its error 
 ## When it is rebuilt
 
 The deployment rebuilds the snapshot when something that goes into the Worker image changed since the commit the
-snapshot in use was built from (`runner/`, the license files, `.dockerignore`, `docker/sandbox/` and
-`dispatcher/src/snapshot/`, where the pinned Docker and buildx versions live), when that commit or the pair is missing
-(the first deployment), or when *Deploy production* is started with `rebuild_snapshot`. That last one is for what the
+snapshot in use was built from (exactly the files the image build consumes: what `runner/Dockerfile` copies, its ignore
+files, the license files, `docker/sandbox/vm-prepare.sh` and the four files of the build tool that decide what is
+installed in the snapshot, `config.ts` with the pinned Docker and buildx versions and the default target among them: see
+`IMAGE_INPUT_PATHS` in `dispatcher/src/snapshot/pair.ts`), when that commit or the pair is missing (the first
+deployment), when the snapshot of the pair no longer exists, or when *Deploy production* is started with
+`rebuild_snapshot`. That last one is for what the
 repository cannot show: the platform's base image changed (the install step then fails with `docker_version_mismatch`
 instead of snapshotting something nobody tested: update the pin in `dispatcher/src/snapshot/config.ts`, re-run the
 checks of spike #317 on the new base). The decision, the proof by the canary, the promotion, the write to Infisical and

@@ -586,7 +586,9 @@ describe("the hosted deployment guide as a procedure", () => {
       "### 5.1 The golden snapshot: built, wired in and cleaned up by the pipeline",
     );
 
-    expect(rebuild).toContain("`vercel deploy --env SANDBOX_SNAPSHOT_ID=...");
+    expect(flat(rebuild)).toContain(
+      "`vercel deploy --env SANDBOX_SNAPSHOT_ID=...",
+    );
     expect(rebuild).toContain("**Promote**");
     expect(rebuild).toContain("`--skip-retention`");
     expect(rebuild).not.toMatch(/Deploy the Dispatcher to a preview/);
@@ -1017,12 +1019,17 @@ describe("the deployment pipeline in the guide", () => {
     );
     expect(snapshot).toContain("**If the run fails before the promotion**");
     expect(snapshot).toContain("`discard` job removes");
+    // The outcome of a promotion that failed or timed out is unknown, and the snapshot is left alone.
+    expect(snapshot).toContain("the outcome is unknown");
+    expect(snapshot).toContain(
+      "`discard` runs only when the promotion never started",
+    );
     expect(snapshot).toContain(
       "**If the promotion succeeded and `persist` failed:**",
     );
     expect(snapshot).toContain("**prefers it over the variables**");
     expect(snapshot).toContain("**only after the Dispatcher is live**");
-    expect(snapshot).toContain("**only after persist**");
+    expect(snapshot).toContain("**after every promotion of the Dispatcher**");
     expect(snapshot).toContain("the previous one");
     expect(snapshot).toContain("`IMAGE_INPUT_PATHS`");
     expect(snapshot).toContain(
@@ -1100,5 +1107,83 @@ describe("the deployment pipeline in the guide", () => {
     expect(update).toContain("deploy-production");
     expect(flat(update)).toContain("Merging it is the whole release");
     expect(section("## 7. Rolling back")).toContain("*Rollback production*");
+  });
+});
+
+describe("the snapshot keys, the rollback and the build in the guide", () => {
+  const setup = flat(
+    section("### 2.1 Setup of the deployment pipeline (once)"),
+  );
+  const snapshot = flat(
+    section(
+      "### 5.1 The golden snapshot: built, wired in and cleaned up by the pipeline",
+    ),
+  );
+
+  // #403-T25
+  it("tells the operator not to create the three snapshot keys and not to give them a placeholder, and says why", () => {
+    expect(setup).toContain(
+      "**Do not create them, and do not give them a placeholder.**",
+    );
+    expect(setup).toContain("Absent is the supported state");
+    expect(setup).toContain("`ConfigError`");
+    // Nothing in the guide suggests a placeholder value, and the first step leaves the keys out.
+    expect(guide).not.toMatch(/with the value `unset`|value `unset`/);
+    expect(guide).not.toMatch(/Create them once/);
+    expect(
+      flat(
+        section(
+          "### Step 2. Put the variables into Infisical (still in poll mode)",
+        ),
+      ),
+    ).toContain("**Leave the three `SANDBOX_SNAPSHOT_*` keys unset**");
+    expect(setup).toContain(
+      "a 403 on that first write means the role lacks it",
+    );
+  });
+
+  // #403-T21
+  it("says that a pair whose snapshot is gone is rebuilt, and that a rollback to a deployment whose snapshot is gone is refused", () => {
+    expect(snapshot).toContain("`snapshot_missing`");
+    expect(snapshot).toContain("`snapshot_lookup_failed`");
+    expect(snapshot).toContain("`live_pair_unavailable`");
+    const rollback = flat(section("## 7. Rolling back"));
+    expect(rollback).toContain("**refuses with `rollback_snapshot_missing`**");
+    expect(rollback).toContain("before it touches either project");
+  });
+
+  // #403-T14
+  it("describes the image inputs as exactly what the build consumes, and what is not an input", () => {
+    expect(snapshot).toContain("`IMAGE_INPUT_PATHS`");
+    expect(snapshot).toContain("`scripts.ts`");
+    expect(snapshot).toContain(
+      "The tests of `runner/`, its README and the logic of the deployment steps are not inputs",
+    );
+  });
+
+  // #403-T26
+  it("states what the build sees: the production runtime variables, not the token", () => {
+    const text = flat(section("### 3.4 The GitHub side"));
+    expect(text).toContain("**What the build sees.**");
+    expect(text).toContain("`.vercel/.env.production.local`");
+    expect(text).toContain("without the Vercel token");
+  });
+
+  // #403-T26
+  it("lists what is accepted or not verified: the deployment records, the mixed trio, targets.production after a rollback", () => {
+    const followUps = flat(section("## 10. Follow-ups"));
+    expect(followUps).toContain(
+      "**Accepted:** every job that runs in the environment `production`",
+    );
+    expect(followUps).toContain("written one after the other");
+    expect(guide).toContain(
+      "`targets.production` of the project follows a `vercel rollback`",
+    );
+  });
+
+  // #403-T21
+  it("says that this guide is for a new installation and what a hand-made pair does", () => {
+    expect(flat(guide)).toContain("This guide is for a **new installation**");
+    expect(flat(guide)).toContain("keeps the old one as the previous snapshot");
   });
 });
