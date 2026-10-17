@@ -473,6 +473,33 @@ describe("withdrawing the earlier request for changes of the App", () => {
     });
   });
 
+  // #405-T22 (review round 2): two pushes, two requests; GitHub may count either, so none is left standing.
+  it("dismisses every request for changes of its own that still stands, not only the latest", async () => {
+    const { client, provider } = setup({
+      reviews: {
+        "acme/widgets#7": [
+          review("1", BOT, "CHANGES_REQUESTED"),
+          review("2", "a-human", "CHANGES_REQUESTED", `copied ${MARKER}`),
+          review("3", BOT, "CHANGES_REQUESTED"),
+        ],
+      },
+    });
+
+    const outcome = await provider.withdrawReviewVerdict?.(
+      integration,
+      widgets,
+      7,
+      options,
+    );
+
+    expect(outcome).toEqual({ outcome: "dismissed", reviewId: "3" });
+    expect(
+      client.calls
+        .filter((call) => call.method === "dismissPullRequestReview")
+        .map((call) => call.args[4]),
+    ).toEqual(["1", "3"]);
+  });
+
   // #405-T22 (review P2-1)
   it.each([
     [

@@ -315,8 +315,11 @@ export function createCheckRunService(
       return { kind: "gone" };
     }
     if (integration.status !== "active") {
-      // A connection that is switched off may come back; a check run that is open waits for it.
-      if (checkIsOpen(held)) {
+      // A connection that is switched off may come back; a check run that is open, or a verdict that is due, waits.
+      if (
+        checkIsOpen(held) ||
+        (job.status === "succeeded" && held.reviewState === "pending")
+      ) {
         if (held.attempts <= 1)
           deps.log.error(
             `[check-runs] CHECK_RUN_CONNECTION_UNAVAILABLE ${where(job)} waiting`,

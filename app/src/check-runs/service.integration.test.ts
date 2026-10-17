@@ -1112,6 +1112,29 @@ describe("no check run stays open (review P1-1)", () => {
     expect(t.checkRuns()[0]).toMatchObject({ conclusion: "success" });
   });
 
+  // #405-T10 (review round 2)
+  it("waits for a connection that is switched off while only the verdict is still due, and submits it when it is back", async () => {
+    const t = await createCheckRunsHarness();
+    const job = await t.fixture.enqueueNew();
+    const claimed = await t.claim();
+    await t.succeed(claimed.job, claimed.token, { findings: CLEAN });
+    // The check run is completed; only the verdict cannot be sent yet.
+    t.fake.fail({ pathIncludes: "/pulls/7", status: 502, times: 3 });
+    await t.service.syncJob(job.id);
+    expect(t.checkRuns()[0]).toMatchObject({ status: "completed" });
+    expect(await t.rowOf(job.id)).toMatchObject({ reviewState: "pending" });
+
+    await t.setIntegrationStatus("disabled");
+    t.fixture.clock.advance(HOUR);
+    await t.service.syncJob(job.id);
+    expect(await t.rowOf(job.id)).toMatchObject({ state: "active" });
+
+    await t.setIntegrationStatus("active");
+    t.fixture.clock.advance(HOUR);
+    await t.service.reconcileDue();
+    expect(t.reviews()).toMatchObject([{ state: "APPROVED" }]);
+  });
+
   // #405-T10
   it("drops a job whose connection is switched off before any check run was made", async () => {
     const t = await createCheckRunsHarness();
@@ -1492,6 +1515,29 @@ describe("an earlier request for changes when the new review submits nothing (re
       reviewState: "done",
       state: "settled",
     });
+  });
+
+  // #405-T22 (review round 2)
+  it("is not reached by a person who copied the marker of the app into their own review", async () => {
+    const t = await createCheckRunsHarness();
+    t.fake.addPullRequestReview(t.repo, 7, {
+      login: "a-human",
+      event: "REQUEST_CHANGES",
+      body: `my own opinion ${verdictMarker("job-0")}`,
+    });
+    t.setVerdictMode("off");
+    const job = await t.fixture.enqueueNew();
+    const claimed = await t.claim();
+    await t.succeed(claimed.job, claimed.token, { findings: CLEAN });
+
+    await t.service.syncJob(job.id);
+
+    expect(t.fake.pullRequestReviewDecisions(t.repo, 7)).toEqual({
+      "a-human": "CHANGES_REQUESTED",
+    });
+    expect(
+      t.reviews().filter((review) => review.state === "DISMISSED"),
+    ).toEqual([]);
   });
 
   // #405-T22

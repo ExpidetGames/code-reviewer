@@ -407,9 +407,11 @@ export function createGithubAppProvider(
         const scope = { repositoryIds, permissions: VERDICT_TOKEN_PERMISSIONS };
         const client = await getClient();
         const botLogin = `${(await getConfig()).slug}[bot]`;
-        // Only the app's own reviews that carry its marker, and of those the latest that still counts (an approval
-        // or a request for changes): a review of anybody else is never touched, whatever its text says.
-        const latest = (
+        // Only the app's own reviews that carry its marker count: a review of anybody else is never touched, whatever
+        // its text says. The latest of them that still counts (an approval or a request for changes) decides whether
+        // there is anything to take back; then every request of the app that stands is dismissed, not only the latest,
+        // because GitHub may count an earlier one of the same reviewer again once the latest is gone.
+        const own = (
           await client.listPullRequestReviews(
             integration.externalId,
             scope,
@@ -417,26 +419,28 @@ export function createGithubAppProvider(
             prNumber,
             signal,
           )
-        )
-          .filter(
-            (review) =>
-              review.authorLogin === botLogin &&
-              review.body.includes(options.markerPrefix) &&
-              (review.state === "APPROVED" ||
-                review.state === "CHANGES_REQUESTED"),
-          )
-          .at(-1);
+        ).filter(
+          (review) =>
+            review.authorLogin === botLogin &&
+            review.body.includes(options.markerPrefix) &&
+            (review.state === "APPROVED" ||
+              review.state === "CHANGES_REQUESTED"),
+        );
+        const latest = own.at(-1);
         if (latest === undefined || latest.state !== "CHANGES_REQUESTED")
           return { outcome: "nothing_to_dismiss" as const, reviewId: null };
-        await client.dismissPullRequestReview(
-          integration.externalId,
-          scope,
-          repo.fullName,
-          prNumber,
-          latest.id,
-          options.message,
-          signal,
-        );
+        for (const standing of own.filter(
+          (review) => review.state === "CHANGES_REQUESTED",
+        ))
+          await client.dismissPullRequestReview(
+            integration.externalId,
+            scope,
+            repo.fullName,
+            prNumber,
+            standing.id,
+            options.message,
+            signal,
+          );
         return { outcome: "dismissed" as const, reviewId: latest.id };
       } catch (error) {
         throw toWriteError(error);
