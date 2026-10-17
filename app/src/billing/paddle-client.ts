@@ -411,7 +411,10 @@ export function createPaddleClient(options: PaddleClientOptions) {
     schema: S,
     input: { query?: Query; body?: unknown } = {},
   ): Promise<z.infer<S>> {
-    return (await request(method, path, envelope(schema), input)).data;
+    const answer = (await request(method, path, envelope(schema), input)) as {
+      data: z.infer<S>;
+    };
+    return answer.data;
   }
 
   async function page<S extends z.ZodType>(

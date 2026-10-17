@@ -92,14 +92,16 @@ describe("the money guardrail", () => {
   // #436-T06
   it("refuses a field it does not know and any status but archived", async () => {
     const { client, calls } = stubbed(() => json({ data: {} }));
-    expect(await codeOf(client.updatePrice(PRICE_ID, { quantity: 5 }))).toBe(
-      "price_field_immutable",
-    );
     expect(
-      await codeOf(client.updatePrice(PRICE_ID, { status: "active" })),
+      await codeOf(client.updatePrice(PRICE_ID, { quantity: 5 } as never)),
     ).toBe("price_field_immutable");
     expect(
-      await codeOf(client.updatePrice(PRICE_ID, { unit_price: undefined })),
+      await codeOf(client.updatePrice(PRICE_ID, { status: "active" } as never)),
+    ).toBe("price_field_immutable");
+    expect(
+      await codeOf(
+        client.updatePrice(PRICE_ID, { unit_price: undefined } as never),
+      ),
     ).toBe("price_field_immutable");
     expect(calls).toHaveLength(0);
   });
