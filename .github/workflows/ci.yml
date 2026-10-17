@@ -196,6 +196,20 @@ jobs:
         run: pnpm test
       - name: Integration tests on the host
         run: pnpm test:int
+      # The production deployment builds the Dispatcher with the Vercel CLI, whose Hono builder type-checks through
+      # its own language service: it finds packages the way `node` does, not the way `tsc` follows pnpm's symlinks
+      # (#412). The same pinned CLI builds it here with a stub project file (the settings of the Vercel project: the
+      # Hono preset, Node.js 24) and no token, so a type that only the builder cannot resolve fails before a release.
+      # Nothing is deployed or pulled, and nothing is read from the network or from a secret.
+      - name: Install the Vercel CLI
+        uses: ./.github/actions/vercel-cli
+      - name: Build the Dispatcher with the Vercel CLI, as the deployment does
+        env:
+          VERCEL_TELEMETRY_DISABLED: "1"
+        run: |
+          mkdir -p .vercel
+          echo '{"projectId":"prj_ci","orgId":"team_ci","settings":{"framework":"hono","nodeVersion":"24.x"}}' > .vercel/project.json
+          vercel build --prod --yes
 
   # The privileged lane of the Sandbox-Launcher (#329-T09, T10): `make test-sandbox-local` builds the `sandbox`
   # target on the runner's Docker daemon and runs the Launcher's local mode against it and the fake App, so
