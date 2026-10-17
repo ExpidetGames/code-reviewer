@@ -3,7 +3,7 @@
 // The cost guard: what a review is expected to cost with a model, and whether that is above the
 // limit the customer set. It only advises (the UI shows a warning); it never blocks a setting.
 //
-// The estimate is deliberately simple: the price of the model (`model-pricing.ts`) times a typical
+// The estimate is deliberately simple: the price of the model (the provider's adapter, src/llm/providers/) times a typical
 // review. A typical review sends `TYPICAL_PROMPT_TOKENS` to the model and gets
 // `TYPICAL_COMPLETION_TOKENS` back, in one call. That is the size of a large pull request: the model
 // comparison (three sample pull requests, prompts of 3k, 8k to 12k and 31k to 45k tokens, replies of
@@ -16,7 +16,8 @@
 //
 // `upperUsd` is what the review can cost at most with the model: the whole budget as the prompt, and
 // as many calls as the chunking of large pull requests allows. It is shown, never used to warn.
-import { MODEL_PRICES, type ModelPrice } from "./model-pricing.ts";
+import { llmProviderDescriptors } from "../llm/providers/index.ts";
+import type { ModelPrice } from "../llm/providers/types.ts";
 import type { ReviewSettings } from "./settings.ts";
 
 /** The customer's limit: at most this many USD per review on average. Above it the UI warns. */
@@ -74,17 +75,20 @@ function roundUsd(value: number): number {
   return Math.round(value * 1_000_000) / 1_000_000;
 }
 
+/** The price from `prices` when a table is given (tests), otherwise from the default provider's adapter. */
 function priceOf(
   model: string,
-  prices: Readonly<Record<string, ModelPrice>>,
+  prices: Readonly<Record<string, ModelPrice>> | undefined,
 ): ModelPrice | undefined {
+  if (prices === undefined)
+    return llmProviderDescriptors.defaultProvider.priceOf(model) ?? undefined;
   return Object.hasOwn(prices, model) ? prices[model] : undefined;
 }
 
 function estimate(
   model: string,
   settings: CostSettings,
-  prices: Readonly<Record<string, ModelPrice>>,
+  prices: Readonly<Record<string, ModelPrice>> | undefined,
 ): ModelCostEstimate {
   const price = priceOf(model, prices);
   if (price === undefined) return { status: "unknown_model", model };
@@ -120,7 +124,7 @@ function estimate(
  */
 export function modelsExceedingContext(
   settings: Pick<ReviewSettings, "model" | "fallbackModel" | "maxTokens">,
-  prices: Readonly<Record<string, ModelPrice>> = MODEL_PRICES,
+  prices?: Readonly<Record<string, ModelPrice>>,
 ): Array<"model" | "fallbackModel"> {
   const exceeds = (model: string | null): boolean => {
     if (model === null) return false;
@@ -138,7 +142,7 @@ export function modelsExceedingContext(
 
 export function estimateReviewCost(
   settings: CostSettings,
-  prices: Readonly<Record<string, ModelPrice>> = MODEL_PRICES,
+  prices?: Readonly<Record<string, ModelPrice>>,
 ): ReviewCostGuard {
   const primary = estimate(settings.model, settings, prices);
   const fallback =

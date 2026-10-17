@@ -17,17 +17,10 @@
 //
 // To update: read the list, copy `prompt` and `completion` times 1,000,000 and `context_length` for
 // the models worth choosing, change `PRICING_AS_OF`, and run the tests.
-
-export type ModelPrice = {
-  /** USD per million input (prompt) tokens. */
-  inputPerMillion: number;
-  /** USD per million output (completion) tokens. */
-  outputPerMillion: number;
-  /** The context window of the model, in tokens. */
-  contextTokens: number;
-  /** The model's tokens per token PR-Agent counts in the prompt. 1 unless measured otherwise. */
-  inputTokenFactor: number;
-};
+//
+// Part of the OpenRouter adapter (src/llm/providers/): the adapter offers the keys as its suggested models and
+// answers `priceOf` from this table; nothing else reads it.
+import type { ModelPrice } from "../types.ts";
 
 export const PRICING_AS_OF = "2026-10-10";
 

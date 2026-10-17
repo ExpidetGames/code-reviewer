@@ -2,7 +2,8 @@
 
 // The operator's own LLM key (docs/decisions/0001-editions-setup-and-accounts.md, section 2.8, addendum): the one
 // key an instance admin stores for the workspaces whose key mode is `managed` (src/workspaces/entitlements.ts).
-// It lives in the encrypted secret store of the instance (src/secrets/), under the name `operator_llm_key`.
+// It lives in the encrypted secret store of the instance (src/secrets/), under the name the default provider's
+// adapter gives it (src/llm/providers/; `operator_llm_key` for the built-in provider).
 //
 // - **Write-only**, like every credential of the portal. The service answers whether a key is configured, cannot
 //   be read, or is missing, and the last four characters of a long key. Nothing returns the key except `forJob`,
@@ -10,11 +11,15 @@
 // - **Only the instance admin writes it**, in the admin portal. It is not a setting of the operator API: whoever
 //   holds that token must not hold the key. This service is wired to the portal's service and to the resolver and
 //   to nothing else.
-// - **The provider is OpenRouter**, the only provider for now, so the key is not bound to one.
+// - **The provider is the default provider**, the only one for now, so the key is not bound to one.
 // - The rules for a key are those of the workspace's key (`checkLlmApiKey`): surrounding whitespace is ignored,
 //   whitespace or control characters inside and more than 4096 characters are refused.
 import type { SecretStore } from "../secrets/store.ts";
 import { checkLlmApiKey } from "./config.ts";
+import {
+  DEFAULT_LLM_PROVIDER,
+  llmProviderDescriptors,
+} from "./providers/index.ts";
 import type { OperatorKeyForJob } from "./resolve.ts";
 
 export const OPERATOR_KEY_ISSUE_CODES = [
@@ -55,7 +60,8 @@ export type OperatorLlmKeyService = {
   forJob(): Promise<OperatorKeyForJob>;
 };
 
-const NAME = "operator_llm_key" as const;
+const NAME =
+  llmProviderDescriptors.get(DEFAULT_LLM_PROVIDER).secretNames.operator;
 
 export function createOperatorLlmKeyService({
   store,
