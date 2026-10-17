@@ -15,8 +15,17 @@ from typing import Any
 
 import pytest
 from pr_agent.git_providers import utils as untyped_provider_utils
-from support import API_KEY, TOKEN, current, make_job, pr_agent_module, request_scope
+from support import (
+    API_KEY,
+    TOKEN,
+    current,
+    fake_provider,
+    make_job,
+    pr_agent_module,
+    request_scope,
+)
 
+from code_reviewer_runner import llm_providers
 from code_reviewer_runner.job import Job
 from code_reviewer_runner.pr_agent_config import AUTO_CAST_SETTING, build_typed_settings
 from code_reviewer_runner.pr_agent_runtime import configure_settings
@@ -27,6 +36,8 @@ from code_reviewer_runner.repo_settings_guard import (
     _waits_for_evaluation,  # pyright: ignore[reportPrivateUsage]
     install_repo_settings_guard,
     neutralize_unevaluated_values,
+    protected_sections,
+    protected_settings,
 )
 
 provider_utils: Any = untyped_provider_utils  # Any: PR-Agent ships no type information
@@ -497,3 +508,52 @@ def test_a_settings_section_with_a_marker_named_key_is_not_a_value_waiting_for_e
     assert section._meta_value is True  # the trap: any attribute name answers with the key
     assert _waits_for_evaluation(section) is False
     assert _waits_for_evaluation(lazy) is True
+
+
+# #424-T06
+def test_the_protected_sections_and_settings_are_the_registry_derived_lists() -> None:
+    providers = list(llm_providers.PROVIDERS.values())
+
+    assert protected_sections(providers) == PROTECTED_SECTIONS
+    assert protected_settings(providers) == PROTECTED_SETTINGS
+    assert "openrouter" in PROTECTED_SECTIONS
+    assert {"openrouter.key", "openrouter.api_base"} <= set(PROTECTED_SETTINGS)
+    # The sections of PR-Agent's own providers are pinned whatever the registry holds.
+    assert {"openai", "anthropic", "litellm", "model_routing"} <= set(protected_sections([]))
+    assert "openrouter" not in protected_sections([])
+    assert len(PROTECTED_SECTIONS) == len(set(PROTECTED_SECTIONS))
+    assert len(PROTECTED_SETTINGS) == len(set(PROTECTED_SETTINGS))
+
+
+# #424-T06
+def test_a_provider_added_to_the_registry_is_pinned_without_touching_the_guard() -> None:
+    fake = fake_provider()
+
+    assert "fakeai" not in PROTECTED_SECTIONS
+    assert "fakeai" in protected_sections([fake])
+    assert {"fakeai.key", "fakeai.api_base"} <= set(protected_settings([fake]))
+
+
+# #424-T06: a repository file cannot redirect the key or the endpoint of a provider of the registry.
+def test_a_repository_file_cannot_change_the_key_or_the_endpoint_of_a_registered_provider(
+    scope: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = fake_provider()
+    monkeypatch.setitem(llm_providers.PROVIDERS, fake.id, fake)
+    job = make_job(llm={"provider": "fakeai", "model": "vendor/model", "apiKey": API_KEY})
+    current().set("fakeai.api_base", fake.default_api_base)
+    guard, uninstall = install_repo_settings_guard()
+    try:
+        configured(guard, job)
+
+        apply_repo_file(
+            scope,
+            '[fakeai]\nkey = "evil-key"\napi_base = "https://evil.example.com/v1"\n'
+            'surprise = "x"\n',
+        )
+    finally:
+        uninstall()
+
+    assert current().get("fakeai.key") == API_KEY
+    assert current().get("fakeai.api_base") == fake.default_api_base
+    assert current().get("fakeai.surprise") is None
