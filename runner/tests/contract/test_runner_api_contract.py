@@ -354,10 +354,12 @@ def test_the_result_of_a_diff_run_with_its_exact_cost_is_valid(cost: float | Non
         (3, {"P0": 1, "P1": 0, "P2": 2, "P3": 0}),
         (2, None),
         (0, {"P0": 0, "P1": 0, "P2": 0, "P3": 0}),
+        (0, None, True),
+        (1, {"P0": 0, "P1": 1, "P2": 0, "P3": 0}, True),
     ],
 )
 def test_the_findings_a_review_left_open_are_valid_or_absent(
-    findings: tuple[int, dict[str, int] | None] | None,
+    findings: tuple[int, dict[str, int] | None] | tuple[int, dict[str, int] | None, bool] | None,
 ) -> None:
     from code_reviewer_runner.result import JobResult, ReviewFindings
 
@@ -369,11 +371,18 @@ def test_the_findings_a_review_left_open_are_valid_or_absent(
         log_tail="",
         findings=None
         if findings is None
-        else ReviewFindings(open=findings[0], by_severity=findings[1]),
+        else ReviewFindings(
+            open=findings[0],
+            by_severity=findings[1],
+            incomplete=len(findings) == 3 and findings[2] is True,
+        ),
     )
 
     assert _accepts("RunnerResult", result.to_json())
     assert ("findings" in result.to_json()) is (findings is not None)
+    # #405 (review round 2): the field for a review that did not cover everything is in the schema.
+    if findings is not None and len(findings) == 3:
+        assert result.to_json()["findings"]["incomplete"] is True
 
 
 # #405-T30
