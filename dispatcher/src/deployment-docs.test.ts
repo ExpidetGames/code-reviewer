@@ -209,6 +209,7 @@ describe("the Dispatcher section of the guide", () => {
         ![
           "CANARY_ALLOWED_HOSTS",
           "CANARY_EXPECT_IMAGE_DIGEST",
+          "CANARY_EXPECT_SNAPSHOT_ID",
           "PAIR_SNAPSHOT_ID",
           "PAIR_IMAGE_DIGEST",
           "PAIR_COMMIT",

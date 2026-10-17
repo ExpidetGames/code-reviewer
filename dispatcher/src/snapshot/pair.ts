@@ -26,18 +26,36 @@ export const PAIR_META = {
 } as const;
 
 /**
- * What goes into the Worker image or into the way it is built and checked. A change in any of them since the
- * snapshot's commit means the snapshot is stale. `app/src/ci` holds a test that every file the Dockerfile copies is
- * covered.
+ * Exactly what the Worker image build consumes, and nothing it does not (#403): a change in any of them since the
+ * snapshot's commit means the snapshot is stale; a change anywhere else (the tests of `runner/`, its README, the
+ * logic of the deployment steps) does not rebuild anything. Three groups:
+ *  - the files `runner/Dockerfile` copies out of the build context (a test parses its `COPY` lines and fails when one is
+ *    missing here, and when this list names something the build does not copy), and the files that decide what the
+ *    build context holds (`.dockerignore`, `runner/Dockerfile.dockerignore`, the Dockerfile itself);
+ *  - the script the snapshot's VM runs on every start (`docker/sandbox/vm-prepare.sh`);
+ *  - the files of the build tool that decide what is installed and checked in the snapshot (the pinned Docker
+ *    versions and the default build target live in `config.ts`; a test follows the imports of `pipeline.ts`).
  */
 export const IMAGE_INPUT_PATHS = [
-  "runner",
   "LICENSE",
   "NOTICE",
   "THIRD_PARTY_LICENSES.md",
   ".dockerignore",
-  "docker/sandbox",
-  "dispatcher/src/snapshot",
+  "runner/Dockerfile",
+  "runner/Dockerfile.dockerignore",
+  "runner/pyproject.toml",
+  "runner/uv.lock",
+  "runner/.python-version",
+  "runner/src",
+  "runner/scripts/fetch_opencode.py",
+  "runner/scripts/fetch_ripgrep.py",
+  "runner/opencode-pin.json",
+  "runner/ripgrep-pin.json",
+  "docker/sandbox/vm-prepare.sh",
+  "dispatcher/src/snapshot/config.ts",
+  "dispatcher/src/snapshot/pipeline.ts",
+  "dispatcher/src/snapshot/probe-flags.ts",
+  "dispatcher/src/snapshot/scripts.ts",
 ] as const;
 
 const SNAPSHOT_ID = /^[A-Za-z0-9][A-Za-z0-9_.-]{2,127}$/;

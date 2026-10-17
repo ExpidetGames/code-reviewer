@@ -9,7 +9,7 @@ import {
   pairToMeta,
   pairsEqual,
 } from "./pair.ts";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
@@ -139,34 +139,112 @@ describe("the inputs of the Worker image", () => {
   const root = join(import.meta.dirname, "..", "..", "..");
   const dockerfile = readFileSync(join(root, "runner/Dockerfile"), "utf8");
 
+  /** The files and folders the Dockerfile copies out of the build context (not from another stage). */
+  const copied = dockerfile
+    .split("\n")
+    .filter((line) => /^COPY\s/.test(line) && !line.includes("--from="))
+    .flatMap((line) =>
+      line
+        .replace(/^COPY\s+/, "")
+        .split(/\s+/)
+        .filter((word) => !word.startsWith("--"))
+        .slice(0, -1),
+    );
+  const inList = (path: string): boolean =>
+    IMAGE_INPUT_PATHS.some(
+      (input) => path === input || path.startsWith(`${input}/`),
+    );
+
   // #403-T14
   it("cover every file the Dockerfile copies from the build context", () => {
-    const sources = dockerfile
-      .split("\n")
-      .filter((line) => /^COPY\s/.test(line) && !line.includes("--from="))
-      .flatMap((line) =>
-        line
-          .replace(/^COPY\s+/, "")
-          .split(/\s+/)
-          .filter((word) => !word.startsWith("--"))
-          .slice(0, -1),
-      );
-    expect(sources.length).toBeGreaterThan(5);
-    for (const source of sources)
-      expect(
-        IMAGE_INPUT_PATHS.some(
-          (path) => source === path || source.startsWith(`${path}/`),
-        ),
-        source,
-      ).toBe(true);
+    expect(copied.length).toBeGreaterThan(8);
+    for (const source of copied) expect(inList(source), source).toBe(true);
   });
 
   // #403-T14
-  it("name the build tooling of the snapshot and its VM script, and only paths that exist", async () => {
-    const { existsSync } = await import("node:fs");
-    expect(IMAGE_INPUT_PATHS).toContain("docker/sandbox");
-    expect(IMAGE_INPUT_PATHS).toContain("dispatcher/src/snapshot");
+  it("take nothing else of the image's folders: no tests, no README, nothing the build does not copy", () => {
+    // The context files that decide what the build sees, the VM script, and the build tool's own files.
+    const EXTRA = new Set([
+      ".dockerignore",
+      "runner/Dockerfile",
+      "runner/Dockerfile.dockerignore",
+      "docker/sandbox/vm-prepare.sh",
+      "dispatcher/src/snapshot/config.ts",
+      "dispatcher/src/snapshot/pipeline.ts",
+      "dispatcher/src/snapshot/probe-flags.ts",
+      "dispatcher/src/snapshot/scripts.ts",
+    ]);
+    for (const path of IMAGE_INPUT_PATHS)
+      expect(
+        copied.includes(path) || EXTRA.has(path),
+        `${path} is neither copied by the Dockerfile nor a context or tool file`,
+      ).toBe(true);
+    for (const wide of [
+      "runner",
+      "runner/tests",
+      "runner/README.md",
+      "dispatcher/src/snapshot",
+      "docker/sandbox",
+    ])
+      expect(IMAGE_INPUT_PATHS as readonly string[], wide).not.toContain(wide);
+  });
+
+  // #403-T14
+  it("name only paths that exist", () => {
     for (const path of IMAGE_INPUT_PATHS)
       expect(existsSync(join(root, path)), path).toBe(true);
+  });
+
+  // #403-T14
+  it("have no way into the image the test above cannot see: no ADD, no bind mount, no copy from the context by URL", () => {
+    expect(dockerfile).not.toMatch(/^\s*ADD\s/m);
+    expect(dockerfile).not.toMatch(/--mount=[^\n]*type=bind/);
+    expect(dockerfile).not.toMatch(/^COPY\s[^\n]*https?:/m);
+  });
+
+  // #403-T14
+  it("cover every file of the build tool that decides what is in the snapshot: what the pipeline imports, apart from files that only carry codes and types", () => {
+    const IGNORED = new Set([
+      "errors.ts",
+      "record.ts",
+      "retention.ts",
+      "service.ts",
+      "names.ts",
+    ]);
+    const seen = new Set<string>();
+    const walk = (file: string): void => {
+      if (seen.has(file)) return;
+      seen.add(file);
+      const text = readFileSync(join(import.meta.dirname, file), "utf8");
+      for (const match of text.matchAll(
+        /^import [^;]*? from "\.\/([\w-]+\.ts)";/gm,
+      ))
+        walk(match[1] as string);
+    };
+    walk("pipeline.ts");
+    const tooling = [...seen].filter((file) => !IGNORED.has(file));
+    expect(tooling.sort()).toEqual([
+      "config.ts",
+      "pipeline.ts",
+      "probe-flags.ts",
+      "scripts.ts",
+    ]);
+    for (const file of tooling)
+      expect(IMAGE_INPUT_PATHS as readonly string[]).toContain(
+        `dispatcher/src/snapshot/${file}`,
+      );
+  });
+
+  // #403-T14
+  it("track the build target default: it lives in config.ts, which is an input, and the workflow does not repeat it", () => {
+    const workflow = readFileSync(
+      join(root, ".github/workflows/golden-snapshot.yml"),
+      "utf8",
+    );
+    expect(
+      readFileSync(join(import.meta.dirname, "config.ts"), "utf8"),
+    ).toContain('target: "sandbox"');
+    expect(workflow).not.toMatch(/inputs\.target \|\| /);
+    expect(workflow).not.toMatch(/default: sandbox/);
   });
 });

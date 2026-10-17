@@ -22,14 +22,14 @@ on:
   workflow_dispatch:
     inputs:
       target:
-        description: "Build target of runner/Dockerfile"
-        default: sandbox
+        description: "Build target of runner/Dockerfile; empty is the default of dispatcher/src/snapshot/config.ts (sandbox)"
+        default: ""
         required: false
   workflow_call:
     inputs:
       target:
-        description: "Build target of runner/Dockerfile"
-        default: sandbox
+        description: "Build target of runner/Dockerfile; empty is the default of dispatcher/src/snapshot/config.ts (sandbox)"
+        default: ""
         required: false
         type: string
     outputs:
@@ -47,8 +47,11 @@ permissions:
   contents: read
 
 # Runs queue one behind the other: cancelling a run could leave a builder VM and a half made snapshot behind.
+# A rehearsal by hand and the build a deployment calls have groups of their own: a pending rehearsal must not replace
+# the pending build of a deployment (GitHub keeps one pending run per group). `github.workflow` is the name of the
+# top-level workflow, so inside a call it is the caller's.
 concurrency:
-  group: golden-snapshot
+  group: ${{ github.workflow == 'Golden snapshot' && 'golden-snapshot-rehearsal' || 'golden-snapshot-deploy' }}
   cancel-in-progress: false
 
 jobs:
@@ -98,15 +101,22 @@ jobs:
         working-directory: dispatcher
         env:
           VERCEL_PROJECT_ID: ${{ env.VERCEL_DISPATCHER_PROJECT_ID }}
-          TARGET: ${{ inputs.target || 'sandbox' }}
+          TARGET: ${{ inputs.target }}
         run: |
-          pnpm snapshot:build \
-            --context "$RUNNER_TEMP/context.tgz" \
-            --vm-prepare ../docker/sandbox/vm-prepare.sh \
-            --out "$RUNNER_TEMP/golden-snapshot.json" \
-            --commit "$GITHUB_SHA" \
-            --target "$TARGET" \
+          set -euo pipefail
+          args=(
+            --context "$RUNNER_TEMP/context.tgz"
+            --vm-prepare ../docker/sandbox/vm-prepare.sh
+            --out "$RUNNER_TEMP/golden-snapshot.json"
+            --commit "$GITHUB_SHA"
             --skip-retention
+          )
+          # The default target is the one in dispatcher/src/snapshot/config.ts, an input of the snapshot: it is not
+          # repeated here, where a change would go unseen.
+          if [ -n "$TARGET" ]; then
+            args+=(--target "$TARGET")
+          fi
+          pnpm snapshot:build "${args[@]}"
       - name: Read the record
         id: record
         run: |

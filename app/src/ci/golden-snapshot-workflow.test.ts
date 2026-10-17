@@ -89,6 +89,25 @@ describe("golden snapshot workflow", () => {
     );
   });
 
+  // #403-T22
+  it("queues a rehearsal by hand apart from the build a deployment calls, so that neither replaces the other's pending run", () => {
+    const group = String(workflow.concurrency?.group);
+    expect(group).toContain("github.workflow == 'Golden snapshot'");
+    expect(group).toContain("golden-snapshot-rehearsal");
+    expect(group).toContain("golden-snapshot-deploy");
+    // Neither is the group of the deployment, which would hold the called build behind its own caller.
+    expect(group).not.toContain("deploy-production");
+    expect(workflow.concurrency?.["cancel-in-progress"]).toBe(false);
+  });
+
+  // #403-T22
+  it("passes the target only when one was given: the default lives in config.ts, which is an input of the snapshot", () => {
+    const build = stepNamed("Build, check and record the snapshot");
+    expect(build.run).toContain('if [ -n "$TARGET" ]; then');
+    expect(build.run).toContain('args+=(--target "$TARGET")');
+    expect(build.env?.TARGET).toBe("${{ inputs.target }}");
+  });
+
   // #403-T17
   it("removes nothing of earlier runs and writes nothing to Infisical: the deployment does that after the promotion", () => {
     const build = stepNamed("Build, check and record the snapshot");
