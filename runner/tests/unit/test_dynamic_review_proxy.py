@@ -34,6 +34,7 @@ from code_reviewer_runner.dynamic_review.proxy import (
 )
 from code_reviewer_runner.dynamic_review.wrap_up import WRAP_UP_INSTRUCTION
 from code_reviewer_runner.error_mapping import _LLM_STATUS, classify_failure  # pyright: ignore[reportPrivateUsage]
+from code_reviewer_runner.llm_providers import OPENROUTER
 from code_reviewer_runner.result import ErrorCode
 
 UPSTREAM_KEY = "sk-or-v1-workspace-key-0123456789"
@@ -127,6 +128,7 @@ def proxy(upstream: UpstreamPost, **overrides: Any) -> ModelProxy:
         "capabilities": capabilities_from_config(CAPABILITIES),
         "capability": CAPABILITY,
         "post": upstream,
+        "provider": OPENROUTER,
     }
     configured.update(overrides)
     return ModelProxy(**configured)

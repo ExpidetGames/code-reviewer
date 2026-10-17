@@ -17,6 +17,7 @@ import pytest
 from support import fake_provider
 
 from code_reviewer_runner.error_mapping import classify_failure
+from code_reviewer_runner.llm_providers import OPENROUTER
 from code_reviewer_runner.require_parameters_patch import (
     RequireParametersPatchError,
     apply_require_parameters_patch,
@@ -49,7 +50,7 @@ def handler() -> Any:  # Any: PR-Agent's handler is untyped
 
 @pytest.fixture
 def patched() -> Iterator[None]:
-    undo = apply_require_parameters_patch()
+    undo = apply_require_parameters_patch(provider=OPENROUTER)
     try:
         yield
     finally:
@@ -90,7 +91,7 @@ def test_without_the_patch_the_request_controls_stay_as_pr_agent_builds_them(
 
 # #270-T03
 def test_undoing_the_patch_restores_the_original_method(handler: Any) -> None:
-    undo = apply_require_parameters_patch()
+    undo = apply_require_parameters_patch(provider=OPENROUTER)
     undo()
 
     assert "extra_body" not in controls(handler)
@@ -98,8 +99,8 @@ def test_undoing_the_patch_restores_the_original_method(handler: Any) -> None:
 
 # #270-T03
 def test_applying_the_patch_twice_does_not_wrap_it_twice(handler: Any) -> None:
-    first = apply_require_parameters_patch()
-    second = apply_require_parameters_patch()
+    first = apply_require_parameters_patch(provider=OPENROUTER)
+    second = apply_require_parameters_patch(provider=OPENROUTER)
     try:
         assert controls(handler)["extra_body"] == {"provider": {"require_parameters": True}}
     finally:
@@ -113,7 +114,7 @@ def test_a_pr_agent_that_does_not_fit_the_patch_is_refused_and_nothing_is_change
     for handler_class in (NoControls, WrongSignature):
         before = dict(vars(handler_class))
         with pytest.raises(RequireParametersPatchError):
-            apply_require_parameters_patch(handler_class)
+            apply_require_parameters_patch(handler_class, provider=OPENROUTER)
         assert dict(vars(handler_class)) == before
 
 

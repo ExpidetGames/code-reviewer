@@ -26,6 +26,26 @@ from code_reviewer_runner.dynamic_review.budget import exact_cost
 
 PROVIDER_ID_PATTERN: Final = re.compile(r"^[a-z][a-z0-9_]{1,31}$")
 
+# The only request fields the Dynamic proxy copies from the engine's request to the provider (the
+# rest is dropped; `stream` and `stream_options` are absent on purpose). It lives here because a
+# provider's `body_field` must not be one of them: the proxy sets that field after the copy and
+# would overwrite what the engine sent.
+PROXY_FORWARDED_FIELDS: Final = frozenset(
+    {
+        "messages",
+        "tools",
+        "tool_choice",
+        "parallel_tool_calls",
+        "temperature",
+        "top_p",
+        "frequency_penalty",
+        "presence_penalty",
+        "seed",
+        "stop",
+        "response_format",
+    }
+)
+
 
 @dataclass(frozen=True)
 class RequireParameters:
@@ -40,6 +60,12 @@ class RequireParameters:
     request_controls_method: str
     body_field: str
     body_value: Mapping[str, object]
+
+    def __post_init__(self) -> None:
+        if self.body_field in PROXY_FORWARDED_FIELDS:
+            raise ValueError(
+                f"require-parameters field {self.body_field!r} is a field the proxy forwarded"
+            )
 
 
 @dataclass(frozen=True)

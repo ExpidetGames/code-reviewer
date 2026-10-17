@@ -24,7 +24,7 @@ from collections.abc import Callable
 from importlib import import_module
 from typing import Any
 
-from code_reviewer_runner.llm_providers import OPENROUTER, LlmProviderSpec
+from code_reviewer_runner.llm_providers import LlmProviderSpec
 
 _HANDLER_MODULE = "pr_agent.algo.ai_handlers.litellm_ai_handler"
 _EXPECTED_SIGNATURE = ["self", "model", "kwargs", "inherited_reasoning_effort"]
@@ -37,7 +37,7 @@ class RequireParametersPatchError(Exception):
 
 
 def apply_require_parameters_patch(
-    handler_class: type[Any] | None = None, *, provider: LlmProviderSpec = OPENROUTER
+    handler_class: type[Any] | None = None, *, provider: LlmProviderSpec
 ) -> Callable[[], None]:
     """Wrap the request controls of the provider. Returns a function that undoes the patch.
 

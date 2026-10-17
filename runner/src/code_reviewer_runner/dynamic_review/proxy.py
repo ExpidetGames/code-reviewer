@@ -80,7 +80,7 @@ from code_reviewer_runner.dynamic_review.wrap_up import (
 from code_reviewer_runner.error_mapping import is_context_length_exceeded, llm_status_code
 from code_reviewer_runner.job import JobCapabilities
 from code_reviewer_runner.job_loop.jsonvalues import as_object
-from code_reviewer_runner.llm_providers import OPENROUTER, LlmProviderSpec
+from code_reviewer_runner.llm_providers import PROXY_FORWARDED_FIELDS, LlmProviderSpec
 from code_reviewer_runner.result import ErrorCode
 
 # The protocol the run requires (`wrap_up.py` names the tool and the choice). The pinned OpenCode
@@ -88,25 +88,10 @@ from code_reviewer_runner.result import ErrorCode
 # choice is not usable.
 
 _REQUEST_TIMEOUT_SECONDS = 120.0
-# The only request fields that reach the provider. Everything else the engine sends is dropped, and
-# the destination, the model and the output bound come from trusted configuration, never from here.
-# `stream` and `stream_options` are absent on purpose: the provider is always asked for the whole
-# answer (see `completion_stream.py`), whatever the engine asked for.
-_FORWARDED_FIELDS = frozenset(
-    {
-        "messages",
-        "tools",
-        "tool_choice",
-        "parallel_tool_calls",
-        "temperature",
-        "top_p",
-        "frequency_penalty",
-        "presence_penalty",
-        "seed",
-        "stop",
-        "response_format",
-    }
-)
+# `PROXY_FORWARDED_FIELDS` are the only request fields that reach the provider. Everything else the
+# engine sends is dropped, and the destination, the model and the output bound come from trusted
+# configuration, never from here. `stream` and `stream_options` are absent on purpose: the provider
+# is always asked for the whole answer (see `completion_stream.py`), whatever the engine asked for.
 # Fields that would steer a request to another route or destination. They are not merely dropped:
 # an engine that sends one is misbehaving and the run stops.
 _ROUTING_FIELDS = frozenset(
@@ -409,8 +394,8 @@ class ModelProxy:
         capabilities: DynamicCapabilities,
         capability: str,
         post: UpstreamPost = _http_post,
+        provider: LlmProviderSpec,
         require_parameters: bool = False,
-        provider: LlmProviderSpec = OPENROUTER,
         superseded: Callable[[], bool] = lambda: False,
     ) -> None:
         if len(capability) < _MIN_CAPABILITY_CHARS:
@@ -670,7 +655,7 @@ class ModelProxy:
                 ErrorCode.DYNAMIC_POLICY_VIOLATION, "the request tries to choose a route"
             )
         forwarded: dict[str, Any] = {
-            field: value for field, value in request.items() if field in _FORWARDED_FIELDS
+            field: value for field, value in request.items() if field in PROXY_FORWARDED_FIELDS
         }
         forwarded["model"] = self.upstream_model
         forwarded["max_tokens"] = self._output_allowance(request)
