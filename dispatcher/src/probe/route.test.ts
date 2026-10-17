@@ -3,7 +3,7 @@
 import { Ajv2020 } from "ajv/dist/2020.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { DispatcherAppFake } from "../../../fakes/dispatcher-app/server.ts";
-import { createApp } from "../app.ts";
+import { createApp } from "../dispatcher-app.ts";
 import { createBackgroundTracker } from "../background.ts";
 import type { ProbeResult } from "../core/types.ts";
 import { createFakeLauncher } from "../launchers/fake.ts";

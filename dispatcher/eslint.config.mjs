@@ -36,5 +36,17 @@ export default defineConfig([
       ],
     },
   },
-  globalIgnores(["dist/**", "coverage/**", "node_modules/**"]),
+  {
+    // Plain Node scripts run by CI, not part of the TypeScript sources (#416).
+    files: ["scripts/**/*.mjs"],
+    languageOptions: {
+      globals: {
+        console: "readonly",
+        process: "readonly",
+        Request: "readonly",
+      },
+    },
+  },
+  // `.vercel/` is what `vercel build` writes (the emitted function, generated code).
+  globalIgnores(["dist/**", "coverage/**", "node_modules/**", ".vercel/**"]),
 ]);

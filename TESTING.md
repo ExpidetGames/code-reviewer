@@ -187,7 +187,10 @@ Dispatcher (`dispatcher/`, Node version from `.nvmrc`, pnpm): the same Vitest la
 `integration`, node environment, the network guard, at most 4 workers), ESLint (the core may import no Node module and no
 platform SDK) and Prettier. `make lint`, `make typecheck`, `make test-unit`, `make test-integration` and `make verify`
 include it; CI runs the job "Dispatcher: static & tests", which also builds the Dispatcher with the pinned Vercel CLI offline
-(`vercel build --prod` with a stub project file and no token: the deployment's type check differs from `tsc`, #412).
+(`vercel build --prod` with a stub project file and no token: the deployment's type check differs from `tsc`, #412) and then
+starts the built function the way the platform's launcher does and asks it for `GET /health`
+(`dispatcher/scripts/check-built-function.mjs`: the emit is file by file, so an import left pointing at a file that is not in
+the function only fails when Node loads it, #416).
 
 App (`app/`, Node version from `.nvmrc`, pnpm):
 
