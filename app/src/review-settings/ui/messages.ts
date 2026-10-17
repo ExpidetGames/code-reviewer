@@ -83,6 +83,8 @@ const ISSUE_COPY: Record<ReviewSettingIssueCode, (field: string) => string> = {
   INVALID_FORMAT: (field) => {
     if (field === "allowedCommands") return "Only the command review exists.";
     if (field === "reviewKind") return "Choose Diff Review or Dynamic Review.";
+    if (field === "reviewVerdict")
+      return "Choose Off, Blocking findings only or Any finding.";
     if (field === "dynamicModel")
       return `Use a model name as your provider spells it, for example ${DEFAULT_DYNAMIC_MODEL} (letters, digits and . _ : / + -, no spaces).`;
     if (MODEL_FIELDS.includes(field))

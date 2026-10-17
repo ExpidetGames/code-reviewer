@@ -5,7 +5,7 @@
 // read-only, nothing stored) or a custom text the person edits; resetting it only changes the form until
 // the save, and the form keeps the typed values of the kind that is not selected, so toggling the kind
 // loses nothing.
-import type { ProjectReviewKind } from "../settings.ts";
+import type { ProjectReviewKind, ReviewVerdictMode } from "../settings.ts";
 import type { ProjectDynamicView } from "../service.ts";
 import type { FormState } from "./form-state.ts";
 
@@ -21,6 +21,8 @@ export type DynamicFormValues = {
    * the save. Null when there is none.
    */
   draft: string | null;
+  /** What a finished review does on its pull request besides the check run (#405). */
+  reviewVerdict: ReviewVerdictMode;
 };
 
 export function initialDynamicValues(
@@ -33,6 +35,7 @@ export function initialDynamicValues(
     skillMode: view.reviewSkillIsDefault ? "default" : "custom",
     skillText: view.effective.reviewSkill,
     draft: null,
+    reviewVerdict: view.effective.reviewVerdict,
   };
 }
 
@@ -56,6 +59,13 @@ export function setReviewKind(
   reviewKind: ProjectReviewKind,
 ): FormState {
   return withDynamic(state, { reviewKind });
+}
+
+export function setReviewVerdict(
+  state: FormState,
+  reviewVerdict: ReviewVerdictMode,
+): FormState {
+  return withDynamic(state, { reviewVerdict });
 }
 
 export function setDynamicModel(

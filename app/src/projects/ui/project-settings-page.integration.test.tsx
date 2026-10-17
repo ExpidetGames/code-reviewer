@@ -451,6 +451,7 @@ describe("the Review kind card of the settings page of a project", () => {
       reviewKind: "dynamic",
       dynamicModel: "vendor/agent-1",
       reviewSkill: "Look for security problems only.",
+      reviewVerdict: "blocking",
     });
 
     // Resetting the skill is staged, and stored only by the save; it removes only the skill override.
@@ -477,6 +478,58 @@ describe("the Review kind card of the settings page of a project", () => {
       TEST_DEFAULT_SKILL.text,
     );
     view.unmount();
+  });
+
+  // #405-T28
+  it("stores the review verdict of a project, shows it after a reload, and takes it back to the default", async () => {
+    const user = userEvent.setup();
+    const { app } = await readyPage();
+    expect(
+      screen
+        .getByRole("radio", { name: "Blocking findings only (default)" })
+        .getAttribute("aria-checked"),
+    ).toBe("true");
+
+    await user.click(screen.getByRole("radio", { name: "Any finding" }));
+    await user.click(screen.getByRole("button", SAVE));
+    expect((await screen.findByRole("status")).textContent).toMatch(/Saved\./);
+
+    expect(JSON.parse((await app.projectRows())[0]?.settings ?? "{}")).toEqual({
+      reviewVerdict: "any",
+    });
+    const reloaded = await app.load();
+    if (reloaded.kind !== "ready") throw new Error("expected a project");
+    expect(reloaded.model.dynamic?.effective.reviewVerdict).toBe("any");
+    expect(reloaded.model.dynamic?.sources.reviewVerdict).toBe("project");
+
+    // Choosing the default again removes the override instead of storing it.
+    await user.click(
+      screen.getByRole("radio", { name: "Blocking findings only (default)" }),
+    );
+    await user.click(screen.getByRole("button", SAVE));
+    await screen.findByText(/Saved\./);
+    expect(JSON.parse((await app.projectRows())[0]?.settings ?? "{}")).toEqual(
+      {},
+    );
+  });
+
+  // #405-T28
+  it("keeps the Diff overrides when only the review verdict is saved", async () => {
+    const user = userEvent.setup();
+    const app = await openProject();
+    await app.service.updateProjectSettings(app.first.id, { maxFindings: 9 });
+    const data = await app.load();
+    if (data.kind !== "ready") throw new Error("expected a project");
+    renderReady(app, data);
+
+    await user.click(screen.getByRole("radio", { name: "Off" }));
+    await user.click(screen.getByRole("button", SAVE));
+    await screen.findByText(/Saved\./);
+
+    expect(JSON.parse((await app.projectRows())[0]?.settings ?? "{}")).toEqual({
+      maxFindings: 9,
+      reviewVerdict: "off",
+    });
   });
 
   // Lead note (1): an untouched form must never clear the Diff overrides.

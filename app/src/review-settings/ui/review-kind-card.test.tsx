@@ -41,17 +41,21 @@ function dynamicView(
       reviewKind: overrides.reviewKind ?? "diff",
       dynamicModel: overrides.dynamicModel ?? DEFAULT_DYNAMIC_MODEL,
       reviewSkill: overrides.reviewSkill ?? SHIPPED,
+      reviewVerdict: overrides.reviewVerdict ?? "blocking",
     },
     sources: {
       reviewKind: overrides.reviewKind === undefined ? "built_in" : "project",
       dynamicModel:
         overrides.dynamicModel === undefined ? "built_in" : "project",
       reviewSkill: overrides.reviewSkill === undefined ? "built_in" : "project",
+      reviewVerdict:
+        overrides.reviewVerdict === undefined ? "built_in" : "project",
     },
     defaults: {
       reviewKind: "diff",
       dynamicModel: DEFAULT_DYNAMIC_MODEL,
       reviewSkill: SHIPPED,
+      reviewVerdict: "blocking",
     },
     reviewSkillIsDefault: overrides.reviewSkill === undefined,
     defaultSkill: {
