@@ -260,7 +260,7 @@ function parseLlmProviders(check: Checker, raw: unknown): string[] | undefined {
 }
 
 /**
- * #424: the providers a caller can run: what it advertised, or OpenRouter, which is all a
+ * #424: the providers a caller can run: what it advertised, or `DEFAULT_LLM_PROVIDERS`, which is all a
  * previous-release caller can run.
  */
 export function callerLlmProviders(
@@ -272,7 +272,7 @@ export function callerLlmProviders(
 /**
  * #424: the providers named in the `llmProviders` query parameter of the Worker's details call, a comma
  * separated list. Names that are no slugs are ignored (like unknown features), so a malformed value
- * never fails the call; `undefined` means the Worker named none, which `callerLlmProviders` reads as OpenRouter.
+ * never fails the call; `undefined` means the Worker named none, which `callerLlmProviders` reads as the default of an unlisted caller.
  */
 export function parseWorkerLlmProviders(
   raw: string | null,
