@@ -130,6 +130,12 @@ function providerOf(raw: unknown): LlmProvider | undefined {
   return llmProviderDescriptors.find(raw)?.id;
 }
 
+/** The provider of the address: the registry's id exactly, with no trimming and no case folding (as `slotOf` does). */
+function providerOfPath(raw: string): LlmProvider | undefined {
+  const found = providerOf(raw);
+  return found === raw ? found : undefined;
+}
+
 /** A body that names a provider must name the one of the address. */
 function bodyNamesAnotherProvider(
   body: Record<string, unknown>,
@@ -148,7 +154,7 @@ export function createLlmKeyRouteHandlers({
 
   return {
     async get(_request, access, raw) {
-      const provider = providerOf(raw);
+      const provider = providerOfPath(raw);
       if (provider === undefined) return refusal("provider_not_found");
       const canManage = mayManage(access);
       return done({
@@ -159,7 +165,7 @@ export function createLlmKeyRouteHandlers({
 
     async put(request, access, raw) {
       if (!mayManage(access)) return refusal("forbidden");
-      const provider = providerOf(raw);
+      const provider = providerOfPath(raw);
       if (provider === undefined) return refusal("provider_not_found");
       const body = await readJsonObject(request, LLM_KEY_REQUEST_MAX_BYTES);
       if (!body.ok) return refusal(body.error);
@@ -179,7 +185,7 @@ export function createLlmKeyRouteHandlers({
 
     async remove(request, access, raw) {
       if (!mayManage(access)) return refusal("forbidden");
-      const provider = providerOf(raw);
+      const provider = providerOfPath(raw);
       if (provider === undefined) return refusal("provider_not_found");
       if (isCrossSite(request)) return refusal("cross_site_request");
       return done({ ok: true, removed: await keys.remove(provider) });
@@ -187,7 +193,7 @@ export function createLlmKeyRouteHandlers({
 
     async test(request, access, raw) {
       if (!mayManage(access)) return refusal("forbidden");
-      const provider = providerOf(raw);
+      const provider = providerOfPath(raw);
       if (provider === undefined) return refusal("provider_not_found");
       const body = await readJsonObject(request, LLM_KEY_REQUEST_MAX_BYTES);
       if (!body.ok) return refusal(body.error);

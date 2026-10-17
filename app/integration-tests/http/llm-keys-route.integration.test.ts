@@ -270,6 +270,34 @@ describe("the key of one provider as an Admin or an Owner", () => {
   });
 });
 
+describe("the provider in the address", () => {
+  // #426-T04
+  it("is matched exactly against the registry: no trimming and no case folding", async () => {
+    const t = await start();
+    t.as("admin");
+
+    for (const spelled of [
+      "OpenRouter",
+      "OPENROUTER",
+      " openrouter",
+      "openrouter ",
+    ]) {
+      const answers = [
+        await t.handle.get(spelled),
+        await t.handle.put({ apiKey: KEY }, spelled),
+        await t.handle.delete(spelled),
+        await t.handle.test({}, spelled),
+      ];
+      for (const answer of answers) {
+        expect(answer.status).toBe(404);
+        expect(await answer.json()).toEqual({ error: "provider_not_found" });
+      }
+    }
+    expect(await t.secrets(t.alpha.id)).toEqual([]);
+    expect(t.fake.keyChecks()).toEqual([]);
+  });
+});
+
 describe("a Member", () => {
   // #426-T04
   it("sees only whether a key exists, and is refused everything else", async () => {
