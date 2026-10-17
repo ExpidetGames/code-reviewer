@@ -25,11 +25,11 @@ const ALLOWED: Readonly<Record<string, string>> = {
   "app/src/llm/providers/server.ts":
     "the registry lists its adapters (with their network calls, server only)",
   "app/src/contracts/runner-api.ts":
-    "generated from the runner API contract, whose `llm.provider` is still the enum of one value (the runner seam is the next issue)",
+    "generated from the runner API contract, whose `KnownLlmProvider` lists the slugs of this release and whose text says what an absent `llmProviders` means (#424)",
   "app/src/contracts/worker-api.ts":
-    "generated from the Worker API contract, same enum",
+    "generated from the Worker API contract, whose text says what an absent `llmProviders` means (#424)",
   "app/src/runner-api/contract.ts":
-    "the runner API contract's `llm.provider` literal (the runner seam is the next issue)",
+    "the wire default of a caller that advertised no providers: what a previous-release runner can run (`DEFAULT_LLM_PROVIDERS`, #424)",
   "app/src/copy/member-copy-scan.ts":
     "the list of vendor words that copy for a member must never say, the provider's name among them",
   "app/src/review-settings/runner-settings.ts":

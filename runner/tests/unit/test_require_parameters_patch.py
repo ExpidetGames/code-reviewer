@@ -9,12 +9,15 @@ written for, like the identity patch."""
 
 import inspect
 from collections.abc import Iterator
+from dataclasses import replace
 from importlib import import_module
 from typing import Any
 
 import pytest
+from support import fake_provider
 
 from code_reviewer_runner.error_mapping import classify_failure
+from code_reviewer_runner.llm_providers import OPENROUTER
 from code_reviewer_runner.require_parameters_patch import (
     RequireParametersPatchError,
     apply_require_parameters_patch,
@@ -47,7 +50,7 @@ def handler() -> Any:  # Any: PR-Agent's handler is untyped
 
 @pytest.fixture
 def patched() -> Iterator[None]:
-    undo = apply_require_parameters_patch()
+    undo = apply_require_parameters_patch(provider=OPENROUTER)
     try:
         yield
     finally:
@@ -61,7 +64,7 @@ def controls(handler: Any, kwargs: dict[str, Any] | None = None) -> dict[str, An
     return result
 
 
-# #270-T03
+# #270-T03, #424-T05
 @pytest.mark.usefixtures("patched")
 def test_the_request_controls_of_a_diff_job_carry_required_parameters(handler: Any) -> None:
     assert controls(handler)["extra_body"] == {"provider": {"require_parameters": True}}
@@ -88,7 +91,7 @@ def test_without_the_patch_the_request_controls_stay_as_pr_agent_builds_them(
 
 # #270-T03
 def test_undoing_the_patch_restores_the_original_method(handler: Any) -> None:
-    undo = apply_require_parameters_patch()
+    undo = apply_require_parameters_patch(provider=OPENROUTER)
     undo()
 
     assert "extra_body" not in controls(handler)
@@ -96,8 +99,8 @@ def test_undoing_the_patch_restores_the_original_method(handler: Any) -> None:
 
 # #270-T03
 def test_applying_the_patch_twice_does_not_wrap_it_twice(handler: Any) -> None:
-    first = apply_require_parameters_patch()
-    second = apply_require_parameters_patch()
+    first = apply_require_parameters_patch(provider=OPENROUTER)
+    second = apply_require_parameters_patch(provider=OPENROUTER)
     try:
         assert controls(handler)["extra_body"] == {"provider": {"require_parameters": True}}
     finally:
@@ -111,7 +114,7 @@ def test_a_pr_agent_that_does_not_fit_the_patch_is_refused_and_nothing_is_change
     for handler_class in (NoControls, WrongSignature):
         before = dict(vars(handler_class))
         with pytest.raises(RequireParametersPatchError):
-            apply_require_parameters_patch(handler_class)
+            apply_require_parameters_patch(handler_class, provider=OPENROUTER)
         assert dict(vars(handler_class)) == before
 
 
@@ -137,3 +140,36 @@ def test_openrouter_finding_no_provider_for_the_parameters_is_the_existing_provi
     error.status_code = 404  # type: ignore[attr-defined]
 
     assert classify_failure([error], []) is ErrorCode.MODEL_UNKNOWN
+
+
+class FakeHandler:
+    """A handler of a provider with its own request controls method and body field."""
+
+    def apply_fakeai_request_controls(
+        self, model: str, kwargs: dict[str, Any], inherited_reasoning_effort: Any
+    ) -> dict[str, Any]:
+        return {**kwargs, "extra_body": {"routing": {"order": ["a"]}}}
+
+
+# #424-T05
+def test_the_patch_follows_the_mechanism_of_the_provider_it_is_given() -> None:
+    handler = object.__new__(FakeHandler)
+    undo = apply_require_parameters_patch(FakeHandler, provider=fake_provider())
+    try:
+        body = handler.apply_fakeai_request_controls("fakeai/m", {"model": "m"}, None)["extra_body"]
+    finally:
+        undo()
+
+    assert body == {"routing": {"order": ["a"], "strict": True}}
+    assert (
+        "strict"
+        not in handler.apply_fakeai_request_controls("fakeai/m", {}, None)["extra_body"]["routing"]
+    )
+
+
+# #424-T05
+def test_a_provider_without_the_mechanism_cannot_be_patched() -> None:
+    without = replace(fake_provider(), require_parameters=None)
+
+    with pytest.raises(RequireParametersPatchError):
+        apply_require_parameters_patch(FakeHandler, provider=without)

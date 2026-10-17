@@ -1,0 +1,4 @@
+{
+  "features": "dynamic_capabilities,supersede",
+  "llmProviders": "openrouter"
+}

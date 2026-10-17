@@ -41,11 +41,28 @@ export type ClaimFeature = (typeof CLAIM_FEATURES)[number];
 export type ClaimRequest = {
   engines?: ClaimEngine[];
   features?: ClaimFeature[];
+  /**
+   * #424: the LLM providers the runner can run (slugs of its registry). Absent means
+   * `DEFAULT_LLM_PROVIDERS`, which is all a previous-release runner can run. Slugs this app has no
+   * adapter for are kept: a newer runner may know more than this app.
+   */
+  llmProviders?: string[];
   /** #322: claim exactly this job (a Dispatcher woken by the dispatch webhook). */
   jobId?: string;
   /** #322: the pool cap: 204 while this many jobs of the caller's `X-Runner-Id` are running. */
   maxRunning?: number;
 };
+
+/**
+ * #424: the form of an LLM provider slug (`LlmProviderId` in the contract): `llm.provider` of a job
+ * and the items of `llmProviders`. Whether a slug is usable is the registry's decision
+ * (`src/llm/providers`), not the contract's.
+ */
+export const LLM_PROVIDER_ID_PATTERN = /^[a-z][a-z0-9_]{1,31}$/;
+/** #424: what a caller that advertised no providers can run: the only provider before the registry. */
+export const DEFAULT_LLM_PROVIDERS = ["openrouter"] as const;
+/** #424: the bound of `llmProviders` (and of the Worker's list). */
+export const MAX_LLM_PROVIDERS = 16;
 
 /** #322: the range of `ClaimRequest.maxRunning`. */
 export const MAX_RUNNING_RANGE = { min: 1, max: 1000 } as const;
@@ -301,7 +318,8 @@ export type RunnerJobInput = {
     botLogin: string;
   };
   llm: {
-    provider: "openrouter";
+    /** A slug of the registry (`LlmProviderId`); the claim sends `openrouter` for now. */
+    provider: string;
     model: string;
     apiKey: string;
     /** The token budget of the review; left out when neither the settings nor the instance set one. */
