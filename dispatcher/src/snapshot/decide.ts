@@ -46,16 +46,28 @@ export async function decide(options: {
   deps: DecideDeps;
 }): Promise<Decision> {
   const { deps } = options;
-  if (options.force) return { rebuild: true, reason: "forced", repair: false };
   const live = await deps.live();
   const configured = deps.projectPair();
   const pair = live ?? configured;
+  const previous = pair === undefined ? {} : { previous: pair };
+  if (options.force)
+    return { rebuild: true, reason: "forced", repair: false, ...previous };
   if (pair === undefined)
     return { rebuild: true, reason: "pair_missing", repair: false };
   if (!(await deps.commitKnown(pair.commit)))
-    return { rebuild: true, reason: "commit_unknown", repair: false };
+    return {
+      rebuild: true,
+      reason: "commit_unknown",
+      repair: false,
+      ...previous,
+    };
   if (await deps.changed(pair.commit, options.sha, IMAGE_INPUT_PATHS))
-    return { rebuild: true, reason: "inputs_changed", repair: false };
+    return {
+      rebuild: true,
+      reason: "inputs_changed",
+      repair: false,
+      ...previous,
+    };
   return {
     rebuild: false,
     reason: "inputs_unchanged",
