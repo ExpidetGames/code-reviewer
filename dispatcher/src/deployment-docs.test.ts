@@ -208,6 +208,16 @@ describe("the Dispatcher section of the guide", () => {
       (name) =>
         ![
           "CANARY_ALLOWED_HOSTS",
+          "CANARY_EXPECT_IMAGE_DIGEST",
+          "PAIR_SNAPSHOT_ID",
+          "PAIR_IMAGE_DIGEST",
+          "PAIR_COMMIT",
+          "KEEP_SNAPSHOT_IDS",
+          "DISCARD_SNAPSHOT_ID",
+          "INFISICAL_DOMAIN",
+          "INFISICAL_CLIENT_ID",
+          "INFISICAL_CLIENT_SECRET",
+          "INFISICAL_PROJECT_SLUG",
           "VERCEL_AUTOMATION_BYPASS_SECRET",
           "PORT",
           "DISPATCHER_SHUTDOWN_GRACE_SECONDS",
