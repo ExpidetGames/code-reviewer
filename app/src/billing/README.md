@@ -23,12 +23,16 @@ const client = createPaddleClient({
 ```
 
 - **Base URL** is injected: `paddleBaseUrl("sandbox" | "live")`, or the address of the fake (`fakes/paddle`) in a
-  test. `paddleKeyEnvironment(apiKey)` reads the environment from the key prefix (`_sdbx` is sandbox,
-  `pdl_live_` is live) and from nothing else of the key.
+  test. `paddleKeyEnvironment(apiKey)` reads the environment from the key prefix (`pdl_sdbx_` is sandbox,
+  `pdl_live_` is live) and from nothing else of the key. When the base URL is Paddle's own, the key must belong to
+  that environment: `createPaddleClient` throws `environment_mismatch` otherwise (a sandbox key against the live
+  address, the reverse, or a key of unknown prefix). Any other address (the fake) takes any key.
 - **Endpoints:** products and prices (create, get, list, patch), transactions (create), subscriptions (get, list,
   patch, preview, cancel), customer portal sessions (create), notification settings (create, get). Wire names
   are Paddle's (`snake_case`), so a request body is what the Paddle docs show.
-- **Time limit:** 10 seconds for one request, all of it (`timeoutMs`). No redirect is followed.
+- **Time limit:** 10 seconds for one request, all of it (`timeoutMs`). No redirect is followed. **Size limit:** a
+  body is read in chunks and dropped once it passes 2,000,000 bytes (a larger `content-length` is refused without
+  reading); the call fails with `invalid_response` (for an error status, with its status code and no `paddleCode`).
 - **429:** retried after `Retry-After`, at most `maxRateLimitRetries` times (default 2) and only when the wait is
   at most `maxRetryAfterSeconds` (default 30); otherwise `rate_limited` with `retryAfterSeconds`. **Nothing else is
   retried.** Paddle has no idempotency keys: after `timeout`, `network_error` or `server_error` on a create, list
@@ -39,8 +43,11 @@ const client = createPaddleClient({
   They never hold a response body, a header or the API key; the UI translates the code to copy.
 - **Money guardrail (ADR 0005, 2.11):** `updatePrice` refuses, before anything is sent, a PATCH of `unit_price`,
   `unit_price_overrides`, `billing_cycle`, `trial_period` or `tax_mode` (`price_field_immutable`). Allowed:
-  `name`, `description`, `custom_data` and `status: "archived"`. Any other field or status is refused too. The
-  caller still has to check that no live subscription uses a price before it archives it.
+  `name`, `description`, `custom_data` and `status: "archived"`. Any other field or status is refused too. The wire
+  body is a fresh object with only these keys, each read once, so what is checked is what is sent. This is **the
+  app's policy, not a Paddle behaviour**: Paddle documents the PATCH of those fields as accepted (research S1 leaves
+  open whether it locks them for a price in use), and the fake accepts them too. The caller still has to check that
+  no live subscription uses a price before it archives it.
 - **Untrusted input:** every response is parsed with our schema (`paddle-schemas.ts`); a field we do not list is
   never passed on.
 - **The API key** is sent as the bearer token and used for nothing else. It is never logged and never in an error.
@@ -49,7 +56,7 @@ const client = createPaddleClient({
 
 `verifyPaddleSignature({ header, rawBody, secret, now, toleranceSeconds? })` returns `{ ok: true, timestamp }` or
 `{ ok: false, code }` with one of `secret_missing`, `signature_missing`, `signature_malformed`,
-`signature_mismatch`, `timestamp_out_of_tolerance`.
+`signature_mismatch`, `timestamp_out_of_tolerance`, `tolerance_invalid`.
 
 - The header is `ts=<unix seconds>;h1=<hex>`; `h1` may appear more than once (Paddle sends two while a secret is
   rotated) and one valid value is enough. Unknown keys are ignored.
@@ -57,8 +64,17 @@ const client = createPaddleClient({
   exactly as it arrived (`await request.text()`), before any JSON parse.
 - Every candidate is compared with `timingSafeEqual`, none is skipped after a match.
 - The signature is checked **before** the age, so a header made without the secret learns nothing about the
-  clock. The tolerance is 5 minutes either way (`PADDLE_SIGNATURE_TOLERANCE_SECONDS`): replay is stopped by the
-  dedupe on `event_id`, not by the clock, and Paddle's retries may carry the `ts` of the first try.
+  clock.
+- **Tolerance.** The default is 5 minutes either way (`PADDLE_SIGNATURE_TOLERANCE_SECONDS`) and is an explicit
+  parameter (`toleranceSeconds`): the caller (#441) can change it without touching the verifier. A non-finite or
+  negative value is refused (`tolerance_invalid`) rather than accepting every age. The default is right only if Paddle
+  signs each retry with a fresh `ts`. **That is unverified (research S3)** and must be checked in the sandbox before
+  go-live (#441, #448): make the endpoint answer 500 once and compare the `ts` of the two tries.
+  - Replay of a processed event is not stopped by the clock but by the dedupe on `event_id` (#441).
+  - If the retries keep the `ts` of the first try, the fallback is to pass a wider `toleranceSeconds` that covers
+    Paddle's retry window. The signature still binds the body and the secret, and the `event_id` dedupe stops a
+    replay, so a wide window costs no safety. Until then a retry after more than 5 minutes would be refused with
+    `timestamp_out_of_tolerance`, exactly the outage case retries exist for.
 - An empty secret is refused (`secret_missing`): a signature made with an empty key is no signature.
 
 ## Testing

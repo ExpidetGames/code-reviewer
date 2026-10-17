@@ -107,6 +107,41 @@ describe("the money guardrail", () => {
   });
 
   // #436-T06
+  it("sends only the allowed keys it checked, not what an inherited toJSON would turn the object into", async () => {
+    const { client, calls } = stubbed(() =>
+      json({ data: loadPaddleFixture("price") }),
+    );
+    const inherited = {
+      toJSON: () => ({ unit_price: { amount: "1", currency_code: "USD" } }),
+    };
+    const patch = Object.assign(Object.create(inherited) as object, {
+      name: "Renamed",
+    });
+    await client.updatePrice(PRICE_ID, patch as never);
+    expect(calls).toHaveLength(1);
+    expect(JSON.parse(String(calls[0]?.init.body))).toEqual({
+      name: "Renamed",
+    });
+  });
+
+  // #436-T06
+  it("reads each field once: a getter that answers differently the second time cannot change the wire body", async () => {
+    const { client, calls } = stubbed(() =>
+      json({ data: loadPaddleFixture("price") }),
+    );
+    let reads = 0;
+    const patch = {
+      get status() {
+        return reads++ === 0 ? "archived" : "active";
+      },
+    };
+    await client.updatePrice(PRICE_ID, patch as never);
+    expect(JSON.parse(String(calls[0]?.init.body))).toEqual({
+      status: "archived",
+    });
+  });
+
+  // #436-T06
   it("sends a PATCH of name, description, custom_data and archived", async () => {
     const { client, calls } = stubbed(() =>
       json({ data: loadPaddleFixture("price") }),
@@ -183,6 +218,42 @@ describe("requests", () => {
     expect(paddleKeyEnvironment("")).toBeNull();
   });
 
+  it("does not take a marker in the middle of a key for its environment", () => {
+    expect(paddleKeyEnvironment("pdl_live_apikey_sdbx_abc")).toBe("live");
+    expect(paddleKeyEnvironment("other_pdl_sdbx_apikey_abc")).toBeNull();
+    expect(paddleKeyEnvironment("pdl_xsdbx_apikey_abc")).toBeNull();
+  });
+
+  it.each([
+    ["sandbox key against the live address", "pdl_sdbx_apikey_abc", "live"],
+    ["live key against the sandbox address", "pdl_live_apikey_abc", "sandbox"],
+    ["unknown key against the live address", "something-else", "live"],
+    ["unknown key against the sandbox address", "something-else", "sandbox"],
+  ] as const)(
+    "refuses a %s at construction with environment_mismatch",
+    (_label, apiKey, environment) => {
+      let failure: unknown;
+      try {
+        createPaddleClient({ apiKey, baseUrl: paddleBaseUrl(environment) });
+      } catch (error) {
+        failure = error;
+      }
+      expect(failure).toBeInstanceOf(PaddleClientError);
+      expect((failure as PaddleClientError).code).toBe("environment_mismatch");
+      expect((failure as PaddleClientError).message).not.toContain(apiKey);
+    },
+  );
+
+  it("accepts a key that matches the address, and any key for an address that is not Paddle's (the fake)", () => {
+    for (const options of [
+      { apiKey: "pdl_sdbx_apikey_abc", baseUrl: paddleBaseUrl("sandbox") },
+      { apiKey: "pdl_live_apikey_abc", baseUrl: paddleBaseUrl("live") },
+      { apiKey: "pdl_live_apikey_abc", baseUrl: "http://127.0.0.1:9" },
+      { apiKey: "something-else", baseUrl: "http://paddle.invalid" },
+    ])
+      expect(() => createPaddleClient(options)).not.toThrow();
+  });
+
   it("refuses a missing key or an address that is not http(s) at construction", () => {
     const base = { apiKey: API_KEY, baseUrl: "http://paddle.invalid" };
     for (const bad of [
@@ -195,6 +266,54 @@ describe("requests", () => {
 });
 
 describe("responses", () => {
+  // The body is read in chunks and dropped once it passes the limit, so memory is bounded, not only parsing.
+  function chunked(chunks: number, chunkBytes: number) {
+    const state = { pulls: 0, cancelled: false };
+    const chunk = new Uint8Array(chunkBytes).fill(32);
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (state.pulls >= chunks) return controller.close();
+        state.pulls += 1;
+        controller.enqueue(chunk);
+      },
+      cancel() {
+        state.cancelled = true;
+      },
+    });
+    return { state, body };
+  }
+
+  // #436-T05
+  it("stops reading a 2xx body that passes the size limit and reports invalid_response", async () => {
+    const { state, body } = chunked(40, 1_000_000);
+    const { client } = stubbed(() => new Response(body, { status: 200 }));
+    expect(await codeOf(client.getPrice(PRICE_ID))).toBe("invalid_response");
+    expect(state.pulls).toBeLessThan(10);
+    expect(state.cancelled).toBe(true);
+  });
+
+  // #436-T05
+  it("also stops reading an oversized error body, and still reports the status", async () => {
+    const { state, body } = chunked(40, 1_000_000);
+    const { client } = stubbed(() => new Response(body, { status: 500 }));
+    expect(await codeOf(client.getPrice(PRICE_ID))).toBe("server_error");
+    expect(state.pulls).toBeLessThan(10);
+  });
+
+  // #436-T05
+  it("refuses at once a body whose declared length passes the limit", async () => {
+    const { state, body } = chunked(40, 1_000_000);
+    const { client } = stubbed(
+      () =>
+        new Response(body, {
+          status: 200,
+          headers: { "content-length": "40000000" },
+        }),
+    );
+    expect(await codeOf(client.getPrice(PRICE_ID))).toBe("invalid_response");
+    expect(state.pulls).toBeLessThan(3);
+  });
+
   // #436-T05
   it("parses the sample entities and ignores the fields it does not use", async () => {
     const price = loadPaddleFixture("price");
@@ -331,6 +450,7 @@ describe("responses", () => {
     expect([...PADDLE_CLIENT_ERROR_CODES].sort()).toEqual([
       "bad_request",
       "conflict",
+      "environment_mismatch",
       "forbidden",
       "invalid_argument",
       "invalid_configuration",
@@ -372,7 +492,14 @@ describe("rate limits", () => {
 
   // #436-T09
   it("gives up with rate_limited after the last try and says how long Paddle asked to wait", async () => {
-    const { client, calls } = stubbed(limited("3"), { maxRateLimitRetries: 2 });
+    // A client without a retry bound would loop for ever; this stub breaks the loop with a different code.
+    const { client, calls } = stubbed(
+      () => {
+        if (calls.length > 5) throw new Error("more tries than the bound");
+        return limited("3")();
+      },
+      { maxRateLimitRetries: 2 },
+    );
     const error = (await client
       .getPrice(PRICE_ID)
       .catch((e: unknown) => e)) as PaddleClientError;

@@ -10,6 +10,8 @@
 //   creates again (ADR 0005, 2.11).
 // - Errors carry a stable code (`PADDLE_CLIENT_ERROR_CODES`), the HTTP status and Paddle's own error code. They
 //   never carry a response body, a header or the API key; the caller's UI translates the code to copy.
+// - The key's environment (sandbox or live) must fit the Paddle address; the check is made when the client is made.
+// - A response body is read in chunks and dropped once it passes `MAX_RESPONSE_BYTES`, so the limit bounds memory.
 // - Money guardrail (2.11): a price is never edited in a field that sets what is charged. `updatePrice` refuses
 //   such a PATCH before it is sent.
 import "server-only";
@@ -47,6 +49,7 @@ export type {
 
 export const PADDLE_CLIENT_ERROR_CODES = [
   "invalid_configuration",
+  "environment_mismatch",
   "invalid_argument",
   "price_field_immutable",
   "timeout",
@@ -65,6 +68,8 @@ export type PaddleClientErrorCode = (typeof PADDLE_CLIENT_ERROR_CODES)[number];
 
 const MESSAGES: Record<PaddleClientErrorCode, string> = {
   invalid_configuration: "The Paddle client is not configured correctly",
+  environment_mismatch:
+    "The Paddle API key belongs to another environment than the address",
   invalid_argument: "A Paddle request argument is not valid",
   price_field_immutable: "This Paddle price field is never changed by the app",
   timeout: "Paddle did not answer in time",
@@ -122,9 +127,16 @@ export function paddleBaseUrl(environment: PaddleEnvironment): string {
   return BASE_URLS[environment];
 }
 
+/** The environment of a Paddle address; null for any other address (the fake, a test stub). */
+function addressEnvironment(origin: string): PaddleEnvironment | null {
+  for (const environment of ["sandbox", "live"] as const)
+    if (origin === BASE_URLS[environment]) return environment;
+  return null;
+}
+
 /** Which Paddle environment a key belongs to, from its prefix alone; null for anything else. */
 export function paddleKeyEnvironment(apiKey: string): PaddleEnvironment | null {
-  if (apiKey.includes("_sdbx")) return "sandbox";
+  if (apiKey.startsWith("pdl_sdbx_")) return "sandbox";
   if (apiKey.startsWith("pdl_live_")) return "live";
   return null;
 }
@@ -249,7 +261,7 @@ const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_RATE_LIMIT_RETRIES = 2;
 const DEFAULT_MAX_RETRY_AFTER_SECONDS = 30;
 const DEFAULT_RETRY_AFTER_SECONDS = 1;
-const MAX_RESPONSE_CHARS = 2_000_000;
+const MAX_RESPONSE_BYTES = 2_000_000;
 const ID = /^[A-Za-z0-9_]{1,64}$/;
 const PLAIN_CODE = /^[a-z][a-z0-9_]{0,63}$/;
 
@@ -276,15 +288,48 @@ function ids(values: string[] | undefined): string | undefined {
   return values === undefined ? undefined : values.map(id).join(",");
 }
 
-function assertPricePatchAllowed(patch: object): void {
-  const keys = Reflect.ownKeys(patch);
-  for (const key of keys) {
+/**
+ * The wire body of a price PATCH: a fresh object holding only the allowed keys, each read once from the argument.
+ * What is checked is what is sent, so an inherited `toJSON` or a getter that answers differently the second time
+ * cannot change the body after the check.
+ */
+function pricePatchBody(patch: object): Record<string, unknown> {
+  for (const key of Reflect.ownKeys(patch)) {
     if (typeof key !== "string" || !ALLOWED_PRICE_PATCH_FIELDS.has(key))
       throw new PaddleClientError("price_field_immutable");
   }
-  const { status } = patch as { status?: unknown };
-  if ("status" in patch && status !== "archived")
+  const body: Record<string, unknown> = {};
+  for (const key of ALLOWED_PRICE_PATCH_FIELDS)
+    if (Object.hasOwn(patch, key))
+      body[key] = (patch as Record<string, unknown>)[key];
+  if ("status" in body && body.status !== "archived")
     throw new PaddleClientError("price_field_immutable");
+  return body;
+}
+
+/**
+ * The body as text, or null when it passes `MAX_RESPONSE_BYTES`. Stops reading at the limit and cancels the
+ * stream; a declared `content-length` above the limit is refused without reading.
+ */
+async function readBody(response: Response): Promise<string | null> {
+  const declared = Number(response.headers.get("content-length"));
+  const reader = response.body?.getReader();
+  if (reader === undefined) return "";
+  const giveUp = async () => {
+    await reader.cancel().catch(() => undefined);
+    return null;
+  };
+  if (Number.isFinite(declared) && declared > MAX_RESPONSE_BYTES)
+    return giveUp();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) return Buffer.concat(chunks).toString("utf8");
+    total += value.byteLength;
+    if (total > MAX_RESPONSE_BYTES) return giveUp();
+    chunks.push(value);
+  }
 }
 
 export function createPaddleClient(options: PaddleClientOptions) {
@@ -299,6 +344,11 @@ export function createPaddleClient(options: PaddleClientOptions) {
     throw new PaddleClientError("invalid_configuration");
   }
   if (apiKey === "") throw new PaddleClientError("invalid_configuration");
+  // A sandbox key against the live address (or the reverse) is a mistake of the caller; Paddle would only say
+  // `forbidden`. An address that is not Paddle's (the fake) takes any key.
+  const addressIs = addressEnvironment(origin);
+  if (addressIs !== null && paddleKeyEnvironment(apiKey) !== addressIs)
+    throw new PaddleClientError("environment_mismatch");
 
   const doFetch: DispatchFetch =
     options.fetch ?? ((url, init) => fetch(url, init));
@@ -333,7 +383,7 @@ export function createPaddleClient(options: PaddleClientOptions) {
     const context = `${method} ${path}`;
     const signal = AbortSignal.timeout(timeoutMs);
     let status: number;
-    let text: string;
+    let text: string | null;
     let retryAfterHeader: string | null;
     try {
       const response = await doFetch(urlFor(path, query), {
@@ -350,7 +400,7 @@ export function createPaddleClient(options: PaddleClientOptions) {
       });
       status = response.status;
       retryAfterHeader = response.headers.get("retry-after");
-      text = await response.text();
+      text = await readBody(response);
     } catch {
       // The reason is dropped: a connection error may quote the address or a header.
       throw new PaddleClientError(
@@ -367,10 +417,10 @@ export function createPaddleClient(options: PaddleClientOptions) {
     if (status < 200 || status >= 300)
       throw new PaddleClientError(statusCode(status), {
         status,
-        paddleCode: paddleCodeOf(text),
+        paddleCode: text === null ? null : paddleCodeOf(text),
         context,
       });
-    if (text.length > MAX_RESPONSE_CHARS)
+    if (text === null)
       throw new PaddleClientError("invalid_response", { status, context });
     try {
       return { json: JSON.parse(text) as unknown };
@@ -461,9 +511,9 @@ export function createPaddleClient(options: PaddleClientOptions) {
     /** Refuses, before anything is sent, a PATCH of a field that sets what is charged (`price_field_immutable`). */
     updatePrice(priceId: string, patch: PricePatch): Promise<PaddlePrice> {
       return Promise.resolve().then(() => {
-        assertPricePatchAllowed(patch);
+        const body = pricePatchBody(patch);
         return one("PATCH", `/prices/${id(priceId)}`, paddlePriceSchema, {
-          body: patch,
+          body,
         });
       });
     },
