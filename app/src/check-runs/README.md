@@ -67,11 +67,13 @@ reviewer, and human reviews are never touched.
 A GitHub failure is one log line with a stable code (`CHECK_RUN_LOG_CODES` in `service.ts`; ids only, never a token or a
 body). The work is bounded in time and in tries:
 
-- A sync has a time budget (`budgetMs`: 20 s after a response, 15 s in the opportunistic maintenance, 40 s in the sweep
-  and the timer) and every call is cut off at its end; a call that could not reach GitHub is repeated twice in the same
-  request (after 1 s and 3 s, as a repeat that may find what the first one made). The start of a sync counts as an
-  attempt (`attempts` in `job_check_runs`, reset when a sync finishes), so a sync that is killed halfway is not
-  forgotten, and the row is dropped once it has started `MAX_ATTEMPTS` (5) without finishing.
+- A sync has a time budget (`budgetMs`: 15 s after a response, 15 s in the opportunistic maintenance, 40 s in the sweep
+  and the timer) and a call in flight is cut off when it is over. Switching a token off after a call has a timeout of
+  its own (3 s) and is not waited for once the time of the sync is over, so a sync overruns its budget by 3 s at most
+  (a slow GitHub, a token to switch off), never by a whole request timeout. A call that could not reach GitHub is
+  repeated twice in the same request (after 1 s and 3 s, as a repeat that may find what the first one made). The
+  start of a sync counts as an attempt (`attempts` in `job_check_runs`, reset when a sync finishes), so a sync that is
+  killed halfway is not forgotten, and the row is dropped once it has started `MAX_ATTEMPTS` (5) without finishing.
 - A failed sync waits `2 min x attempts` (at most an hour; a rate limit as long as GitHub says) and is taken again by
   the sweep, the timer or the opportunistic maintenance.
 - **While a check run is open on GitHub** (made, not completed) the row gets `MAX_OPEN_ATTEMPTS` (30, about fifteen

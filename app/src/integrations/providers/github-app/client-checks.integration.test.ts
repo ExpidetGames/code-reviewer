@@ -19,7 +19,7 @@ const REVIEW_SCOPE = {
   permissions: { pull_requests: "write", metadata: "read" },
 } as const;
 
-async function setup() {
+async function setup(options: { revokeTimeoutMs?: number } = {}) {
   const harness = await startGithubAppHarness();
   const { fake, clock, env } = harness;
   fake.addInstallation({
@@ -39,6 +39,7 @@ async function setup() {
   const client = createGithubAppClient({
     config: loadGithubAppConfig(env),
     now: clock.now,
+    ...options,
   });
   return { fake, client };
 }
@@ -270,6 +271,56 @@ describe("check runs, written with a narrow token", () => {
     );
 
     expect(found?.id).toBe(String(fake.checkRuns("acme/widgets")[129]?.id));
+  });
+
+  // #405-T32 (review round 2): the token is switched off after the call, and that does not outlast the time of the sync.
+  it("does not wait for a slow switch-off of the token longer than its own short timeout", async () => {
+    const { fake, client } = await setup({ revokeTimeoutMs: 300 });
+    fake.fail({ pathIncludes: "/installation/token", hang: true });
+
+    const started = Date.now();
+    await client.createCheckRun("4242", CHECKS_SCOPE, "acme/widgets", {
+      name: "Code Reviewer",
+      headSha: HEAD,
+      status: "queued",
+    });
+
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(fake.checkRuns("acme/widgets")).toHaveLength(1);
+  });
+
+  // #405-T32 (review round 2)
+  it("does not wait for the switch-off at all once the time of the sync is over, but still asks for it", async () => {
+    const { fake, client } = await setup({ revokeTimeoutMs: 5000 });
+    // The call itself hangs until the time of the sync is over; the switch-off hangs too.
+    fake.fail({ pathIncludes: "/check-runs", hang: true });
+    fake.fail({ pathIncludes: "/installation/token", hang: true });
+    const signal = AbortSignal.timeout(300);
+
+    const started = Date.now();
+    const error = await failureOf(
+      client.createCheckRun(
+        "4242",
+        CHECKS_SCOPE,
+        "acme/widgets",
+        { name: "Code Reviewer", headSha: HEAD, status: "queued" },
+        signal,
+      ),
+    );
+
+    expect(error).toMatchObject({ code: "GITHUB_APP_UNAVAILABLE" });
+    expect(Date.now() - started).toBeLessThan(2000);
+    // The token was still switched off (the request was made, the answer is not waited for).
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(
+      fake
+        .requests()
+        .some(
+          (item) =>
+            item.method === "DELETE" &&
+            item.path.includes("/installation/token"),
+        ),
+    ).toBe(true);
   });
 
   // #405-T16 (review round 2)

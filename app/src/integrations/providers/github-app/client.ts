@@ -247,6 +247,11 @@ export type GithubAppClientOptions = {
   now?: () => number;
   /** How long one request may take before it counts as unavailable. Default 15 seconds. */
   requestTimeoutMs?: number;
+  /**
+   * How long switching a token off may take. Default 3 seconds: it is a courtesy of a few bytes, and must not make
+   * a call outlast the time its caller has (#405).
+   */
+  revokeTimeoutMs?: number;
   /** Receives a warning about a record that is skipped. Default: console.warn. */
   warn?: (line: string) => void;
 };
@@ -258,6 +263,7 @@ const TOKEN_EXPIRY_BUFFER_MS = 60_000;
 /** A JWT lives about 9 minutes (see jwt.ts); reuse it for 5 so it never expires mid-call. */
 const JWT_REUSE_MS = 5 * 60_000;
 const DEFAULT_TIMEOUT_MS = 15_000;
+const DEFAULT_REVOKE_TIMEOUT_MS = 3_000;
 const GITHUB_API_VERSION = "2022-11-28";
 
 function shapeError(call: string): GithubAppError {
@@ -451,6 +457,7 @@ export function createGithubAppClient(
   const { config } = options;
   const now = options.now ?? Date.now;
   const timeoutMs = options.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const revokeTimeoutMs = options.revokeTimeoutMs ?? DEFAULT_REVOKE_TIMEOUT_MS;
   const warn = options.warn ?? ((line: string) => console.warn(line));
   const doFetch: typeof fetch = (input, init) =>
     (options.fetch ?? globalThis.fetch)(input, init);
@@ -658,7 +665,7 @@ export function createGithubAppClient(
             "x-github-api-version": GITHUB_API_VERSION,
             "user-agent": `code-reviewer-${config.slug}`,
           },
-          signal: AbortSignal.timeout(timeoutMs),
+          signal: AbortSignal.timeout(revokeTimeoutMs),
         },
       );
       await response.body?.cancel().catch(() => undefined);
@@ -770,7 +777,9 @@ export function createGithubAppClient(
     try {
       return await run(minted.token);
     } finally {
-      await revokeInstallationToken(minted.token);
+      // The token is always switched off, but once the time of the caller is over nobody waits for the answer.
+      if (signal?.aborted === true) void revokeInstallationToken(minted.token);
+      else await revokeInstallationToken(minted.token);
     }
   }
 

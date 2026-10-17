@@ -47,14 +47,32 @@ export function getCheckRunService(): CheckRunService {
   return service;
 }
 
+/**
+ * The time the work of a queue call is given. It runs in the `after()` of a request that has 60 seconds in all (a
+ * webhook may have spent half a minute of it on its inline dispatch), and the opportunistic maintenance may follow.
+ */
+const AFTER_RESPONSE_BUDGET_MS = 15_000;
+
 /** What the queues call: the work runs after the response and never rejects. */
-export const checkNotifier: CheckNotifier = {
-  job(jobId) {
-    runAfterResponse(() => getCheckRunService().syncJob(jobId));
-  },
-  change() {
-    runAfterResponse(
-      async () => void (await getCheckRunService().reconcileDue()),
-    );
-  },
-};
+export function createCheckNotifier(
+  service: () => Pick<CheckRunService, "syncJob" | "reconcileDue">,
+  after: (work: () => Promise<void>) => void,
+): CheckNotifier {
+  return {
+    job(jobId) {
+      after(() =>
+        service().syncJob(jobId, { budgetMs: AFTER_RESPONSE_BUDGET_MS }),
+      );
+    },
+    change() {
+      after(async () => {
+        await service().reconcileDue({ budgetMs: AFTER_RESPONSE_BUDGET_MS });
+      });
+    },
+  };
+}
+
+export const checkNotifier: CheckNotifier = createCheckNotifier(
+  getCheckRunService,
+  runAfterResponse,
+);
