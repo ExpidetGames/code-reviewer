@@ -7,6 +7,48 @@ hands the key of the job's own workspace to the runner with every job. The legac
 were imported once into the default workspace by the update of an existing installation (`src/legacy-import/`) and
 are not read any more; `LLM_MODEL` and `LLM_MAX_TOKENS` are instance settings.
 
+## Providers
+
+The providers the app supports are a closed list in code, `src/llm/providers/` (ADR 0005, section 2.4; epic #420).
+**Adding a provider means adding an adapter** in a folder next to `openrouter/` and listing it in `index.ts` and
+`server.ts`; no other file names a provider (the structure test `providers/structure.test.ts` fails on a new mention,
+with a short allow-list for the runner contract, which is the next issue).
+
+An adapter (`providers/types.ts`) has two parts, because client components import the first and must not reach the
+network:
+
+| Part                                | Members                                                                                                                                                                                             | Listed in   |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| **Descriptor** (data, pure rules)   | `id` (`^[a-z][a-z0-9_]{1,31}$`), `label`, `apiBaseUrl`, `secretNames` (`workspace`, `operator`), `checkModelId`, `suggestedModels`, `priceOf`, `defaultModels` (`diff`, `dynamic`), `costReporting` | `index.ts`  |
+| **Operations** (the server's calls) | `testKey` (the "Test key" button), `checkModelCapabilities` (the model metadata)                                                                                                                    | `server.ts` |
+
+`registry.ts` validates a list when the module loads (`ProviderRegistryError`, stable codes `registry_empty`,
+`provider_member_missing`, `provider_member_invalid`, `provider_id_duplicate`, `provider_secret_name_taken`) and gives
+the lookups: `get`, `find` (a request's or a stored binding's text, trimmed and case-insensitive), `labelOf`, `ids`.
+The **first adapter is the default provider** (`DEFAULT_LLM_PROVIDER`): the one a request that names none, the
+operator's key and the cost estimate use, until a project can choose (the next issues of the epic).
+`LLM_PROVIDERS` and `LlmProvider` (`config.ts`), `SECRET_NAMES` and `WORKSPACE_SECRET_NAMES` (`src/secrets/names.ts`)
+are derived from it.
+
+What moved behind the adapter, with the module that stays and does the part that is the same for every provider:
+
+| Was                                          | Now                                                                                                                              |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| API address in `endpoint.ts`                 | `apiBaseUrl`; `endpoint.ts` keeps the test-stack override (`ALLOW_TEST_LLM_ENDPOINTS`)                                           |
+| The key test in `key-test.ts`                | `testKey`; `key-test.ts` keeps the limits per workspace and for the instance                                                     |
+| The metadata read in `model-capabilities.ts` | `checkModelCapabilities`; `model-capabilities.ts` keeps logging and the short memory, **keyed by provider and model**            |
+| `MODEL_NAME_PATTERN`                         | `checkModelId`, used through `isModelId` (`config.ts`)                                                                           |
+| `review-settings/model-pricing.ts`           | `priceOf` and `suggestedModels`                                                                                                  |
+| `DEFAULT_LLM_MODEL`, `DEFAULT_DYNAMIC_MODEL` | `defaultModels.diff`, `defaultModels.dynamic` (the exports stay)                                                                 |
+| `llm_api_key`, `operator_llm_key`            | `secretNames`. **They never change**: the ciphertext is bound to the name, so a stored key would stop decrypting (ADR 0005, 2.5) |
+| `OPERATOR_KEY_PROVIDER`, `?? "openrouter"`   | `DEFAULT_LLM_PROVIDER`                                                                                                           |
+
+`costReporting` is `provider_reported` when the provider says what a call cost (every cost limit relies on that) or
+`none`. Nothing reads `none` yet; the policy for such a provider comes with the first one (ADR 0005, 2.4).
+
+Not part of the seam yet (the next issues): the runner side (`llm.provider` is still the enum of one value in the
+contracts), more than one key slot per workspace and the model catalog.
+
 ## Which key a job gets
 
 `resolve.ts` (`resolveWorkspaceLlmAccess`, pure) decides by **the key mode of the workspace's effective entitlements**
@@ -48,7 +90,7 @@ job never sees another workspace's key (`integration-tests/http/runner-api-llm-k
 ## The operator's own key (#276)
 
 The instance admin stores **one key of the operator's own** for the workspaces whose key mode is `managed`, in the
-admin portal (**LLM key**, `/admin/llm`; `src/admin/ui/operator-llm-key-form.tsx`). The provider is OpenRouter.
+admin portal (**LLM key**, `/admin/llm`; `src/admin/ui/operator-llm-key-form.tsx`). The provider is the default one (`src/llm/providers/`).
 
 | File              | Role                                                                                                                                                  |
 | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -109,7 +151,7 @@ admin portal (**LLM key**, `/admin/llm`; `src/admin/ui/operator-llm-key-form.tsx
 | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `workspace-key.ts` | `createWorkspaceLlmKeyService`: `status`, `save`, `remove`, `reveal`, `forJob`, on the encrypted store of the workspace (`src/secrets/workspace-store.ts`)                                                                                                          |
 | `http.ts`          | The handlers of `GET\|PUT\|DELETE /api/w/:workspace/llm-key` and `POST /api/w/:workspace/llm-key/test` (the route files are below `src/app/api/w/[workspace]/llm-key/`)                                                                                             |
-| `key-test.ts`      | The "Test key" button: one call to the provider (`GET /key` of OpenRouter, which costs nothing), the failure classes, the limits                                                                                                                                    |
+| `key-test.ts`      | The "Test key" button: the limits per workspace and for the instance around the adapter's `testKey` (one call to the provider; `GET /key` of OpenRouter, which costs nothing), the failure classes                                                                  |
 | `endpoint.ts`      | The provider's API address. Not configurable by a person; the test stack points it at the fake LLM with `LLM_API_BASE_URL` together with `ALLOW_TEST_LLM_ENDPOINTS=true`, which anything else ignores                                                               |
 | `ui/`              | The settings section (`LlmAccessSection`, form), the hint "LLM not configured": `llmAccessAttention` builds it as an `AttentionNotice` so a page can merge it into its one "Needs attention" strip, `LlmAccessNotice` renders it on its own; the copy for the codes |
 
@@ -237,6 +279,9 @@ claimed-keys.ts`: one row per job, the sealed text is the list of the keys hande
 
 ## Testing
 
+`providers/registry.test.ts` (validation, with a fake second adapter that exists only in tests: `providers/fake-adapter.ts`),
+`providers/structure.test.ts` (the provider is named only in its adapter), `providers/openrouter/adapter.test.ts` and
+`providers/openrouter/adapter.integration.test.ts` (the adapter against the fake LLM);
 `resolve.test.ts`, `config.test.ts`, `access.test.ts`, `startup.test.ts`, `endpoint.test.ts`, `model-capabilities.test.ts`, `dynamic-capabilities.test.ts` and
 `../instrumentation.test.ts` (unit, no database); `workspace-key.integration.test.ts`, `operator-key.integration.test.ts`,
 `operator-access.integration.test.ts` (whose key a workspace gets, over a real database),
