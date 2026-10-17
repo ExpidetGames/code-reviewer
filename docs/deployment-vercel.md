@@ -6,6 +6,13 @@ Sandbox VM. Follow it top to bottom for a first deployment. Every variable, comm
 against the code on `development`; section 9 says what no test has proven yet, and that is a lot: **nobody has
 run the whole path on Vercel yet** (the first real deployment is the one this guide is written for).
 
+**Deployments are made by GitHub Actions, with Infisical as the secret manager** (#403). A push to `main` runs
+`.github/workflows/deploy-production.yml`: it migrates the database, stages the App and then the Dispatcher on Vercel
+production (a staged deployment takes no domain), checks the staged App's health, runs the Dispatcher canary on the
+staged Dispatcher and only then promotes both. A failure at any step leaves production on the deployments it has.
+There is no staging environment and there are no preview deployments, and the projects' Git integration is switched off.
+Section 2.1 lists everything to create once (GitHub, Infisical, Vercel); section 5.6 describes a release.
+
 A self-hosted installation (Docker Compose, Coolify) is not affected by anything here and keeps working
 unchanged: see section 8 and [`deployment-coolify.md`](deployment-coolify.md).
 
@@ -201,27 +208,123 @@ URL and one callback URL, so the hosted instance needs its own. It is created fr
 (admin portal, Integrations) in step 3, [`github-app.md`](github-app.md) has the details. Nothing about it is an
 environment variable.
 
-**GitHub environments** in the repository settings (a workflow cannot protect itself, so you set these):
+**GitHub, Infisical and Vercel, set up for the pipeline.** The workflows sign in to Infisical with one machine identity
+whose sign-in values are four secrets of the GitHub environment `production`, and read everything else they need from
+Infisical. Section 2.1 lists exactly what to create, and where. The former environments `hosted-snapshot` and
+`hosted-canary` and the repository variable `DISPATCHER_CANARY_HOSTS` are **retired**: delete them once the
+secrets they held are in Infisical `/ci`. Leave `GOLDEN_SNAPSHOT_ENABLED` unset for now (section 5.1).
 
-| Environment | Holds | Protection to set |
-|---|---|---|
-| `hosted-snapshot` | secrets `VERCEL_TOKEN`, `VERCEL_TEAM_ID`, `VERCEL_PROJECT_ID` (of the **Dispatcher's** Vercel project) | Deployment branches: selected branches `main` and `development` only. Required reviewers, with **Prevent self-review** switched on (otherwise whoever starts the run can approve it). The workflow's job runs only from `main` and `development` by its own condition (like the canary's); the branch rule of the environment is the second layer, because a workflow cannot protect itself. |
-| `hosted-canary` | secret `RUNNER_TOKEN` (the same value as the Dispatcher project's), and `VERCEL_AUTOMATION_BYPASS_SECRET` only if the Dispatcher is behind Deployment Protection | Deployment branches: selected branches `main` and `development` only. Required reviewers with **Prevent self-review**, as above. Nothing of any other purpose in it. |
-
-Plus one repository variable, `DISPATCHER_CANARY_HOSTS`: the exact host name(s) of the Dispatcher, comma separated
-(no scheme, no path). Unset or empty, the canary refuses every URL. Leave `GOLDEN_SNAPSHOT_ENABLED` unset for now
-(section 5.1).
-
-**On your machine**, a checkout of `development` (or the release tag), Node.js 24, pnpm 10 and `openssl`:
+**On your machine**, a checkout of `main` (or the release tag), Node.js 24, pnpm 10 and `openssl`:
 `pnpm --dir app install --frozen-lockfile` and `pnpm --dir dispatcher install --frozen-lockfile`. The commands in
-step 1 to 3 run from there.
+step 1 to 3 run from there; the Vercel CLI of step 2 is the pinned version of the workflows
+(`VERCEL_CLI_VERSION` in `.github/workflows/deploy-production.yml`).
+
+### 2.1 Setup of the deployment pipeline (once)
+
+This repository is public: nothing below is written into it, no value, no id, no address. Names between `<` and `>` are
+yours.
+
+**GitHub** (repository settings, Environments):
+
+- One environment, **`production`**. Deployment branches and tags: *Selected branches and tags*, only the branch
+  `main`. Every job that signs in to Infisical runs in this environment, so a run on any other branch is refused before
+  it can read a secret; each job also checks the repository and the branch itself (the second layer). Required
+  reviewers are optional: every job of the pipeline would wait for the approval.
+- Its four **secrets** (environment secrets, **not** variables: variables of a public repository are world-readable):
+
+  | Secret | Meaning |
+  |---|---|
+  | `INFISICAL_CLIENT_ID` | The Client ID of the machine identity below |
+  | `INFISICAL_CLIENT_SECRET` | Its Client Secret |
+  | `INFISICAL_DOMAIN` | The address of your Infisical instance (`https://<infisical host>`) |
+  | `INFISICAL_PROJECT_SLUG` | The slug of the Infisical project below |
+
+  Set them without typing a value into a command line, for example
+  `read -rs -p 'value: ' V; printf '%s' "$V" | gh secret set INFISICAL_CLIENT_SECRET --env production; unset V`.
+- Optional, a repository **variable** (it holds no secret): `GOLDEN_SNAPSHOT_ENABLED=true` makes a push to `main`
+  build a golden snapshot (section 5.1).
+- Retired: the environments `hosted-snapshot` and `hosted-canary`, the repository variable `DISPATCHER_CANARY_HOSTS`.
+
+**Infisical** (one project; the workflows use the environment slug **`prod`** and nothing else):
+
+- Three folders in `prod`:
+
+  | Folder | Holds | Who reads it |
+  |---|---|---|
+  | `/ci` | Only what the workflows need, listed below | GitHub Actions, through the machine identity. **Never synced to Vercel** |
+  | `/app` | The runtime variables of the App project: the table of section 3.1 | Vercel, by Secret Sync |
+  | `/dispatcher` | The runtime variables of the Dispatcher project: the table of section 3.2 | Vercel, by Secret Sync |
+
+- The keys of **`/ci`** (all required: a workflow that names a key that is missing or empty stops with its name):
+
+  | Key | What it is | Read by |
+  |---|---|---|
+  | `VERCEL_TOKEN` | A Vercel access token for the team (section 3.4 says how to limit it) | the deployment, the rollback, the canary's check of the staged host, the snapshot build |
+  | `VERCEL_TEAM_ID` | The id of the Vercel team (`team_...`). The workflows export it as `VERCEL_ORG_ID` for the CLI | all of them |
+  | `VERCEL_APP_PROJECT_ID` | The id of the App's Vercel project (`prj_...`) | the deployment, the rollback |
+  | `VERCEL_DISPATCHER_PROJECT_ID` | The id of the Dispatcher's Vercel project | the deployment, the rollback, the canary, the snapshot build |
+  | `VERCEL_APP_AUTOMATION_BYPASS_SECRET` | The App project's *Protection Bypass for Automation* secret: opens the staged App's address for the health check | the health check |
+  | `VERCEL_DISPATCHER_AUTOMATION_BYPASS_SECRET` | The same for the Dispatcher project: opens the staged Dispatcher's address for the canary | the canary |
+  | `DATABASE_URL_MIGRATE` | The direct URL of the migrate role (section 2) | the migration |
+  | `RUNNER_TOKEN` | The dispatcher credential, the canary's. **The value of the App's and the Dispatcher's `RUNNER_TOKEN`** | the canary |
+
+**Infisical Secret Sync** (the App's and the Dispatcher's variables reach Vercel from Infisical, never from a workflow):
+
+- Two syncs, destination *Vercel*: source `prod` `/app` to the **App** project, environment **Production**; source `prod`
+  `/dispatcher` to the **Dispatcher** project, environment **Production**. Switch auto-sync on. The deployment job then
+  reads the result with `vercel pull`. Do not set a variable of these projects by hand in Vercel: the next sync would
+  overwrite it. A change in Infisical takes effect with the **next deployment**, so wait until the sync shows
+  *synced* and then run the *Deploy production* workflow.
+- **Shared values.** Some values must be identical in both projects (section 3.3): `RUNNER_TOKEN`, the signing secret
+  (`RUNNER_WEBHOOK_SECRET` and `DISPATCHER_SIGNING_SECRET`), the key id, the pool cap, the App's address
+  (`BETTER_AUTH_URL` and `RUNNER_API_URL`) and, only if the Dispatcher's production domain is protected, the bypass secret
+  (`RUNNER_WEBHOOK_BYPASS_TOKEN`). Keep each of them **once**, with Infisical secret references, so that they cannot
+  drift apart: the value lives in one place, the other key holds a reference to it.
+
+  | Value | Stored in | The other key is a reference |
+  |---|---|---|
+  | `RUNNER_TOKEN` | `/ci` `RUNNER_TOKEN` | `/app` `RUNNER_TOKEN` = `${ci.RUNNER_TOKEN}`, `/dispatcher` `RUNNER_TOKEN` = `${ci.RUNNER_TOKEN}` |
+  | Signing secret | `/app` `RUNNER_WEBHOOK_SECRET` | `/dispatcher` `DISPATCHER_SIGNING_SECRET` = `${app.RUNNER_WEBHOOK_SECRET}` |
+  | Signing key id | `/app` `RUNNER_WEBHOOK_KEY_ID` | `/dispatcher` `DISPATCHER_SIGNING_KEY_ID` = `${app.RUNNER_WEBHOOK_KEY_ID}` |
+  | Pool cap | `/app` `RUNNER_DISPATCH_MAX_RUNNING` | `/dispatcher` `DISPATCHER_MAX_RUNNING` = `${app.RUNNER_DISPATCH_MAX_RUNNING}` |
+  | The App's address | `/app` `BETTER_AUTH_URL` | `/dispatcher` `RUNNER_API_URL` = `${app.BETTER_AUTH_URL}` |
+  | The Dispatcher's bypass secret (only if protected) | `/ci` `VERCEL_DISPATCHER_AUTOMATION_BYPASS_SECRET` | `/app` `RUNNER_WEBHOOK_BYPASS_TOKEN` = `${ci.VERCEL_DISPATCHER_AUTOMATION_BYPASS_SECRET}` |
+
+  The notation `${<folder>.<KEY>}` is Infisical's reference to a key of another folder of the same environment; check it
+  against your Infisical version before you rely on it. Everything else is **not** shared: in particular the two
+  `CRON_SECRET`s are two values (section 3.3).
+
+**Machine identity** (Infisical, Access Control): one identity with **Universal Auth**, **read-only** access to the
+secrets of the environment **`prod`** at the path **`/ci` only**: no `/app`, no `/dispatcher`, no other environment, no
+write, no folder or project administration. Create a Client Secret for it, put the Client ID and the Client Secret in
+the two GitHub secrets above, and rotate the Client Secret on a schedule (section 5.2). The Secret Syncs use
+Infisical's own connection to Vercel, not this identity.
+
+**Vercel dashboard**, for each of the two projects:
+
+1. Settings, Build and Deployment, **Root Directory**: `app` for the App project, `dispatcher` for the Dispatcher
+   project. Node.js Version 24.x.
+2. **Git auto-deploy off.** `app/vercel.json` and `dispatcher/vercel.json` carry `"git": { "deploymentEnabled": false }`,
+   which stops Vercel from building a push by itself. Also check Settings, Git: either disconnect the repository, or
+   leave it connected for the display of the commit and keep that setting. A deployment is made by the workflow only.
+3. Settings, Deployment Protection: leave *Standard Protection* on (it protects every address except the production
+   domains) and switch on **Protection Bypass for Automation**. Copy that project's secret into the matching key of `/ci`
+   (`VERCEL_APP_AUTOMATION_BYPASS_SECRET`, `VERCEL_DISPATCHER_AUTOMATION_BYPASS_SECRET`). The App's production domain
+   must stay reachable without a login (section 2).
+4. Settings, General: copy the **Project ID** into `/ci` (`VERCEL_APP_PROJECT_ID`, `VERCEL_DISPATCHER_PROJECT_ID`); the
+   team's id is in the team's Settings (`VERCEL_TEAM_ID`).
+5. Account settings, Tokens: create the access token for `/ci` `VERCEL_TOKEN` (section 3.4).
+6. Settings, Environment Variables: leave them to the Secret Sync.
+
 
 ## 3. Environment variables
 
-Set them in each Vercel project (Settings, Environment Variables) for the **Production** environment. A change
-applies only to deployments made after it: redeploy after every change. "Secret" means: mark it *Sensitive* in
-Vercel and never write it in a file, a log or an issue. Placeholders for every variable are in `.env.example`
-(App) and `dispatcher/.env.example` (Dispatcher).
+Set them in Infisical, environment `prod`: the App's in the folder `/app`, the Dispatcher's in `/dispatcher`
+(section 2.1); the Secret Syncs write them to the **Production** environment of the two Vercel projects. A change
+applies only to deployments made after it: run the *Deploy production* workflow after every change. "Secret" means:
+keep it in Infisical only (Vercel stores a synced secret as *Sensitive*, if the sync is set up so) and never write it in
+a file, a log or an issue. Placeholders for every variable are in `.env.example` (App) and `dispatcher/.env.example`
+(Dispatcher).
 
 ### Generating the secrets
 
@@ -233,19 +336,17 @@ and never in the shell history:
 ```sh
 # a 64 character secret: RUNNER_TOKEN, CRON_SECRET (one per project), RUNNER_WEBHOOK_SECRET, OPERATOR_API_TOKEN
 SECRET=$(openssl rand -hex 32)
-printf '%s' "$SECRET" | vercel env add RUNNER_TOKEN production --sensitive     # in the linked project's directory
-# the same value into the second place that needs it, then forget it:
-printf '%s' "$SECRET" | gh secret set RUNNER_TOKEN --env hosted-canary
+printf '%s\n' "$SECRET"       # shown once, on the terminal only: paste it into the value field of Infisical
 unset SECRET
 # APP_SECRET, a different call:
-SECRET=$(openssl rand -base64 32); printf '%s' "$SECRET" | vercel env add APP_SECRET production --sensitive; unset SECRET
+SECRET=$(openssl rand -base64 32); printf '%s\n' "$SECRET"; unset SECRET
 ```
 
-`vercel env add NAME production` reads the value from standard input when it is piped (`vercel link` the project's
-directory first, `app/` or `dispatcher/`). `printf` is a shell built-in with the value in a variable, so the value is not in the
-history or the process list; `echo "<value>" | ...`, which the CLI's own examples show, would put it in the history. The
-dashboard (Settings, Environment Variables) works too, with *Sensitive* on. Keep a copy of `APP_SECRET`, and only that
-one, in your password manager: it is the one value that cannot be rotated (section 5.2). Rules the code enforces for
+The value goes into the Infisical dashboard (the key in `/app`, `/dispatcher` or `/ci`, environment `prod`) and nowhere
+else. `printf` is a shell built-in with the value in a variable, so the value is not in the history or the process list;
+`echo "<value>" | ...` would put it in the history. Keep a copy of `APP_SECRET`, and only that one, in your password
+manager: it is the one value that cannot be rotated (section 5.2). A value shared by both projects is generated once
+and referenced (section 2.1). Rules the code enforces for
 every secret: at least 32 characters, no white space or control characters.
 
 ### 3.1 The App project
@@ -272,8 +373,9 @@ every secret: at least 32 characters, no white space or control characters.
 
 Not set in the project, on purpose:
 
-- `DATABASE_URL_MIGRATE`: the direct URL of the **migrate role**. Only `pnpm migrate` and `pnpm setup-code` read it,
-  from the shell you run them in. The App never reads it; do not give it to a function.
+- `DATABASE_URL_MIGRATE`: the direct URL of the **migrate role**. Only `pnpm migrate` and `pnpm setup-code` read it:
+  the deployment workflow (from Infisical `/ci`) and you, from the shell you run them in. The App never reads it; it
+  is not in `/app` and not in a function.
 - `VERCEL`: set by the platform.
 - `NODE_ENV`, `NEXT_RUNTIME`: set by Next.js.
 - `DATABASE_PATH`: the file of the SQLite image, unused with Postgres.
@@ -290,7 +392,7 @@ A refusal at start names the variable, never its value (`ConfigError`: `required
 | Variable | Required | Secret | Meaning |
 |---|---|---|---|
 | `RUNNER_API_URL` | yes | no | The App's public URL, `https://<app production domain>` (no path, query or credentials). Also the address the **Worker** inside the VM calls, so it must be reachable from the internet. |
-| `RUNNER_TOKEN` | yes | **yes** | The dispatcher credential. **Same value as the App's `RUNNER_TOKEN`** and as the `hosted-canary` secret. |
+| `RUNNER_TOKEN` | yes | **yes** | The dispatcher credential. **Same value as the App's `RUNNER_TOKEN`** and as `/ci` `RUNNER_TOKEN` (the canary's). |
 | `DISPATCHER_MAX_RUNNING` | yes | no | The pool cap, 1 to 1000: how many launches may be in progress, and the cap the App enforces atomically at the claim. **Must equal the App's `RUNNER_DISPATCH_MAX_RUNNING`.** Each running job is one VM. |
 | `DISPATCHER_SIGNING_KEY_ID` | yes | no | The key id the App signs with. **Same as the App's `RUNNER_WEBHOOK_KEY_ID`** (`k1` if that is unset). |
 | `DISPATCHER_SIGNING_SECRET` | yes | **yes** | **Same value as the App's `RUNNER_WEBHOOK_SECRET`.** At least 32 characters, different from `RUNNER_TOKEN`. |
@@ -318,7 +420,7 @@ Vercel) reads `DISPATCHER_SHUTDOWN_GRACE_SECONDS` and `PORT`.
 
 | App | Dispatcher | Notes |
 |---|---|---|
-| `RUNNER_TOKEN` | `RUNNER_TOKEN` (and the `hosted-canary` secret) | One credential, three places |
+| `RUNNER_TOKEN` | `RUNNER_TOKEN` (and `RUNNER_TOKEN` in `/ci`) | One credential, three keys, one stored value (section 2.1) |
 | `RUNNER_WEBHOOK_SECRET` | `DISPATCHER_SIGNING_SECRET` | The signing key |
 | `RUNNER_WEBHOOK_KEY_ID` (default `k1`) | `DISPATCHER_SIGNING_KEY_ID` | Its name |
 | `RUNNER_DISPATCH_MAX_RUNNING` | `DISPATCHER_MAX_RUNNING` | The pool cap, both must be set |
@@ -331,10 +433,16 @@ Vercel) reads `DISPATCHER_SHUTDOWN_GRACE_SECONDS` and `PORT`.
 
 | Where | Name | Meaning |
 |---|---|---|
-| environment `hosted-snapshot` | `VERCEL_TOKEN`, `VERCEL_TEAM_ID`, `VERCEL_PROJECT_ID` | Platform access for the snapshot build; `VERCEL_PROJECT_ID` is the **Dispatcher's** project. The pipeline hands the token to the platform client and to nothing else. **A Vercel access token acts for its owner in the whole team (or account) it is created for, not for one project**, whatever `VERCEL_PROJECT_ID` says: create it from a dedicated account that has the lowest team role that can create Sandboxes and snapshots, give it an expiry if the dashboard offers one (and a calendar reminder to rotate it before that day), and if the dashboard offers a token limited to the one project, use that. |
-| environment `hosted-canary` | `RUNNER_TOKEN`, `VERCEL_AUTOMATION_BYPASS_SECRET` (optional) | The canary's credential and the bypass |
-| repository variable | `DISPATCHER_CANARY_HOSTS` | The only host(s) the canary may send the credential to |
+| environment `production` (secrets) | `INFISICAL_CLIENT_ID`, `INFISICAL_CLIENT_SECRET`, `INFISICAL_DOMAIN`, `INFISICAL_PROJECT_SLUG` | The sign-in to Infisical (section 2.1). Secrets, not variables |
+| Infisical `prod` `/ci` | `VERCEL_TOKEN`, `VERCEL_TEAM_ID`, `VERCEL_APP_PROJECT_ID`, `VERCEL_DISPATCHER_PROJECT_ID`, the two bypass secrets, `DATABASE_URL_MIGRATE`, `RUNNER_TOKEN` | What the workflows need (section 2.1). The golden snapshot build reads `VERCEL_TOKEN`, `VERCEL_TEAM_ID` and `VERCEL_DISPATCHER_PROJECT_ID`; the Dispatcher's project is the one the snapshot has to be in |
 | repository variable | `GOLDEN_SNAPSHOT_ENABLED` | `true` makes a push to `main` build a snapshot. Unset: only manual runs |
+| retired | the environments `hosted-snapshot` and `hosted-canary`, the variable `DISPATCHER_CANARY_HOSTS` | Replaced by the above. The canary no longer keeps a list of hosts: the Vercel API says whether a staged host is the Dispatcher project's |
+
+**A Vercel access token acts for its owner in the whole team (or account) it is created for, not for one project**, whatever
+the project ids in `/ci` say: create it from a dedicated account that has the lowest team role that can deploy, promote
+and create Sandboxes and snapshots, give it an expiry if the dashboard offers one (and a calendar reminder to rotate it
+before that day), and if the dashboard offers a token limited to the one project, use that. The token is the most
+valuable key in `/ci`: it can deploy to production, which is why the environment `production` is restricted to `main`.
 
 ### 3.5 LLM keys: a workspace's own, or the operator's
 
@@ -383,6 +491,11 @@ Vercel) reads `DISPATCHER_SHUTDOWN_GRACE_SECONDS` and `PORT`.
 
 Do the steps in this order (migrate, App, setup code, snapshot, Dispatcher, canary, webhook, smoke test); each one has a check. Nothing is lost if you stop between steps.
 
+Do section 2.1 first: the GitHub environment `production`, Infisical with its three folders and the two Secret Syncs,
+the machine identity and the two Vercel projects. Steps 1 to 4 prepare the pipeline's first run: **the App is deployed by
+hand once (step 2)** because the pipeline stages the Dispatcher too, and its canary cannot pass before the golden
+snapshot exists (step 4). From step 5 on every deployment is the *Deploy production* workflow.
+
 ### Step 1. Migrate the database
 
 ```sh
@@ -400,23 +513,28 @@ and exits 0 (`[migrate] applied N migration(s): ...` or `[migrate] the schema is
 exits 1 with one line and a code (a failed batch is rolled back). Two runs take turns. The URL is not printed.
 **Check:** run it again; it must say that nothing is left to apply.
 
-Run it again before **every** later deployment, before the new version takes traffic. The App never migrates by
-itself.
+Every later deployment migrates first: the *Deploy production* workflow runs `pnpm --dir app migrate` before it stages
+anything, with `DATABASE_URL_MIGRATE` from Infisical `/ci`, and a failed migration means no deployment. The App never
+migrates by itself. This manual run is for the first time, and for the check of the roles above.
 
 ### Step 2. Deploy the App (still in poll mode)
 
-1. Create the App project (root directory `app/`) and add its **production domain** first: `BETTER_AUTH_URL` must be
-   that address, and the App refuses to start without it.
-2. Set the variables of section 3.1 **except** the `RUNNER_DISPATCH` and `RUNNER_WEBHOOK_*` ones (poll mode is the
-   default; webhook mode is step 7), including `BETTER_AUTH_URL` and `CRON_SECRET`, with the commands of "Generating the
-   secrets". The database URL of the app role, read from a prompt and piped, never printed:
+1. Create the App project (root directory `app/`, section 2.1) and add its **production domain** first: `BETTER_AUTH_URL`
+   must be that address, and the App refuses to start without it.
+2. Put the variables of section 3.1 **except** the `RUNNER_DISPATCH` and `RUNNER_WEBHOOK_*` ones (poll mode is the
+   default; webhook mode is step 7) into Infisical `prod` `/app`, including `BETTER_AUTH_URL` and `CRON_SECRET`, with the
+   commands of "Generating the secrets", and wait until the Secret Sync to the App project shows *synced*. The
+   database URL of the app role is built from a prompt and shown once on the terminal, to be pasted into
+   `DATABASE_URL`; the migrate role's URL of step 1 goes into `/ci` as `DATABASE_URL_MIGRATE`:
 
    ```sh
    read -rs -p 'cr_app password: ' APP_PW; echo
-   printf '%s' "postgres://cr_app:${APP_PW}@<host>:5432/code_reviewer?sslmode=require" | vercel env add DATABASE_URL production --sensitive
+   printf '%s\n' "postgres://cr_app:${APP_PW}@<host>:5432/code_reviewer?sslmode=require"
    unset APP_PW
    ```
-3. Deploy the production branch.
+3. Deploy once from your machine, with the pinned Vercel CLI and your own login (not the CI token): in the repository
+   root `vercel link` the App project, then `vercel pull --yes --environment=production`, `vercel build --prod` and
+   `vercel deploy --prebuilt --prod`. This is the only manual deployment: from step 5 on the workflow does it.
 
 **Check:** `https://<app>/api/health` answers `200 {"status":"ok"}`. `503` with `SCHEMA_BEHIND` means step 1 was
 not run against this database, `503` without a code means the database is not reachable with `DATABASE_URL`. In the
@@ -462,11 +580,12 @@ is built from the commit **inside that VM**, with no registry and no registry cr
 ([`golden-snapshot.md`](golden-snapshot.md) has every step and failure code).
 
 1. Create the **Dispatcher project** now (root directory `dispatcher/`, no variables yet, no deployment needed): the
-   token and project id of the `hosted-snapshot` environment point at it, because the Launcher creates job VMs in the
-   project it runs in and the snapshot has to be in that project.
-2. Set the three secrets of `hosted-snapshot` (section 3.4), for example `printf '%s' "$TOKEN" | gh secret set VERCEL_TOKEN --env hosted-snapshot` with the token read into `TOKEN` by `read -rs`.
-3. Actions, *Golden snapshot*, *Run workflow* on `development` (or the release tag's branch): `target` stays
-   `sandbox`; `pinned_snapshot` stays empty on the first run. A reviewer approves the environment.
+   token, team id and project id in `/ci` point at it, because the Launcher creates job VMs in the project it runs in
+   and the snapshot has to be in that project.
+2. Check that `/ci` holds `VERCEL_TOKEN`, `VERCEL_TEAM_ID` and `VERCEL_DISPATCHER_PROJECT_ID` (section 2.1); the build
+   reads exactly these three, through the machine identity.
+3. Actions, *Golden snapshot*, *Run workflow* on `main` (the job refuses every other branch, and so does the
+   environment `production`): `target` stays `sandbox`; `pinned_snapshot` stays empty on the first run.
 4. About two minutes later the run summary shows the **record**:
 
    ```json
@@ -484,17 +603,24 @@ anything that is not an apt, Docker or build artifact).
 
 ### Step 5. Deploy the Dispatcher
 
-Set the variables of section 3.2 in the Dispatcher project: `RUNNER_API_URL`, `RUNNER_TOKEN`,
-`DISPATCHER_MAX_RUNNING` (start small, for example `2`), `DISPATCHER_SIGNING_KEY_ID` (`k1`),
-`DISPATCHER_SIGNING_SECRET`, `SANDBOX_SNAPSHOT_ID` and `SANDBOX_IMAGE_DIGEST` from the record, `CRON_SECRET` (the reaper's, section 5.5), and optionally
-`DISPATCHER_ENGINES`, `DISPATCHER_WORKER_CONFIG` (section 6). Leave `VERCEL_TOKEN` and its siblings unset to use the
-project's OIDC token. Deploy.
+Put the variables of section 3.2 into Infisical `prod` `/dispatcher`: `RUNNER_API_URL` (a reference to the App's
+`BETTER_AUTH_URL`, section 2.1), `RUNNER_TOKEN` (a reference to the one in `/ci`), `DISPATCHER_MAX_RUNNING` (start small, for example `2`),
+`DISPATCHER_SIGNING_KEY_ID` and `DISPATCHER_SIGNING_SECRET` (references to the App's `RUNNER_WEBHOOK_KEY_ID`, `k1`, and
+`RUNNER_WEBHOOK_SECRET`, which you create in `/app` now with the secret from "Generating the secrets"; the App ignores
+them until step 7, because `RUNNER_DISPATCH` is unset), `SANDBOX_SNAPSHOT_ID` and `SANDBOX_IMAGE_DIGEST` from the record,
+`CRON_SECRET` (the reaper's, section 5.5), and optionally `DISPATCHER_ENGINES`, `DISPATCHER_WORKER_CONFIG` (section 6).
+Leave `VERCEL_TOKEN` and its siblings unset to use the project's OIDC token. Check that `/ci` holds `RUNNER_TOKEN`,
+`VERCEL_DISPATCHER_AUTOMATION_BYPASS_SECRET` and the other keys of section 2.1. Wait until both Secret Syncs show
+*synced*, then run the workflow: Actions, *Deploy production*, *Run workflow* on `main`. It migrates, stages the App and
+the Dispatcher, checks the staged App, runs the canary on the staged Dispatcher (step 6) and, if everything passed,
+promotes both.
 
-**Check:** `https://<dispatcher>/health` answers `200 {"status":"ok"}`. The settings are read when the function
-initialises, so a bad value shows as failing requests and a log line that names the variable
-(`SANDBOX_SNAPSHOT_ID is required`, `DISPATCHER_WORKER_CONFIG is invalid`, ...), not as a failed build. If you
-protect the project with Deployment Protection, every path answers the platform's login page until the bypass header
-is sent: confirm `curl -s -o /dev/null -w '%{http_code}' -H 'x-vercel-protection-bypass: <secret>' https://<dispatcher>/health`
+**Check:** `https://<dispatcher>/health` answers `200 {"status":"ok"}` once the workflow has promoted. The settings are
+read when the function initialises, so a bad value shows as failing requests and a log line that names the variable
+(`SANDBOX_SNAPSHOT_ID is required`, `DISPATCHER_WORKER_CONFIG is invalid`, ...), not as a failed build; in the workflow
+that is a failed canary and nothing is promoted. If you protect the production domain with Deployment Protection, every
+path answers the platform's login page until the bypass header is sent: confirm
+`curl -s -o /dev/null -w '%{http_code}' -H 'x-vercel-protection-bypass: <secret>' https://<dispatcher>/health`
 prints `200` before step 7, or every wake-up waits half an hour (section 5.3).
 
 Check the reaper too: the Dispatcher's Cron Jobs settings list it, and its first runs answer `200` (`401` means
@@ -503,32 +629,34 @@ platform's cron gets past it is not verified** (I could not confirm it from the 
 first run, and if it is refused, either switch protection off for the production domain (the Dispatcher checks a
 signature or a credential on every route that does anything) or reap by hand (section 5.5).
 
-Then add the Dispatcher's production host (exact, no scheme or path) to the repository variable
-`DISPATCHER_CANARY_HOSTS` and the Dispatcher's `RUNNER_TOKEN` to the `hosted-canary` environment (and the bypass secret,
-if it is protected).
-
 ### Step 6. Run the canary
 
-Actions, *Dispatcher canary*, *Run workflow* on `main` or `development` (the job refuses other branches): `url` is
-`https://<dispatcher>`, `engines` is `pr-agent,opencode` (or `pr-agent` for a Diff-only deployment). A reviewer
-approves the `hosted-canary` environment. The step first checks the URL against `DISPATCHER_CANARY_HOSTS` without any
-secret, waits for `GET /health`, then calls `POST /probe`, which creates a canary VM from the snapshot, runs the
-image's `probe` mode with the real container flags and reports.
+The workflow of step 5 runs the canary for you: the *Dispatcher canary* workflow (`dispatcher-canary.yml`), called with
+the staged Dispatcher's address and `engines` of `pr-agent,opencode` (the `canary_engines` input of *Deploy production*;
+`pr-agent` for a Diff-only deployment). It signs in to Infisical, loads `RUNNER_TOKEN`, the bypass secret and the token,
+team and project id, and **asks the Vercel API whether the deployment behind the host belongs to the Dispatcher
+project and the team, before any request goes to it** (https, no port, no path, the deployment's own address and not an alias; a
+wrong project or team, an alias, a redirect or an API failure stops the run with exit 2 or 1 and nothing is sent). Then
+it waits for `GET /health` and calls `POST /probe`, which creates a canary VM from the snapshot, runs the image's `probe`
+mode with the real container flags and reports.
 
 **Pass:** exit 0, the deployment advertises every required engine from a probe that ran just now. **Fail** (exit 1):
 read the stable reasons in the output (`dispatcher/README.md`, "The capability probe"; for a platform error the code is
 one of the closed `ProbeFailure` list, for a `denied` verdict the reasons of the startup self-check in
-[`dynamic-review.md`](dynamic-review.md)) and do not go on. Exit 2 means a wrong URL or option and nothing was sent.
+[`dynamic-review.md`](dynamic-review.md)) and do not go on; nothing was promoted. Exit 2 means a wrong URL, a deployment
+that is not the Dispatcher's or a wrong option, and nothing was sent.
 
-For the very first deployment the production deployment is the candidate, as above. **For every later release the
-candidate is a staged production deployment** (section 5.1): that is the only place where the new snapshot can be proven
-before production uses it.
+To run the canary alone on a staged deployment, Actions, *Dispatcher canary*, *Run workflow* on `main`, with `url` set to
+the staged deployment's address (it must be that deployment's own address, such as the one a run of *Deploy production*
+prints in its summary). **For every release the candidate is a staged production deployment** (section 5.1): that is
+the only place where the new snapshot can be proven before production uses it.
 
 ### Step 7. Switch the App to webhook mode
 
-In the App project add `RUNNER_DISPATCH=webhook`, `RUNNER_WEBHOOK_URL=https://<dispatcher>/dispatch`,
-`RUNNER_WEBHOOK_SECRET` and `RUNNER_WEBHOOK_KEY_ID` (the Dispatcher's two signing values), `RUNNER_DISPATCH_MAX_RUNNING`
-(= `DISPATCHER_MAX_RUNNING`) and, if needed, `RUNNER_WEBHOOK_BYPASS_TOKEN`. Redeploy.
+In Infisical `/app` add `RUNNER_DISPATCH=webhook`, `RUNNER_WEBHOOK_URL=https://<dispatcher>/dispatch`,
+`RUNNER_DISPATCH_MAX_RUNNING` (the stored value `DISPATCHER_MAX_RUNNING` references: set it now to the cap you put in
+step 5, and make `DISPATCHER_MAX_RUNNING` the reference) and, if needed, `RUNNER_WEBHOOK_BYPASS_TOKEN`. The signing
+secret and key id (`RUNNER_WEBHOOK_SECRET`, `RUNNER_WEBHOOK_KEY_ID`) are in `/app` since step 5. Wait for the Secret Sync and run *Deploy production* again.
 
 **Check:** the deployment starts. A webhook mode with a missing URL, a short or reused signing secret stops the start
 with `DEPLOY_CONFIG_INVALID` naming the variables (never the values).
@@ -577,47 +705,52 @@ Rebuild on every image release (a stale snapshot is a stale Worker image: the La
 when the pinned Docker version or `docker/sandbox/vm-prepare.sh` changes, or when the platform's base image changes.
 The full procedure is in [`golden-snapshot.md`](golden-snapshot.md), "Rebuild"; the short form:
 
-1. Run the workflow with **`pinned_snapshot` set to the `snapshotId` the Dispatcher uses now**. Retention really
-   deletes old builders and their snapshots after a successful run (it keeps the newest two and every pin): a snapshot
-   in use that is neither is **deleted**, and the Dispatcher then fails every job with `sandbox_snapshot_missing`.
+1. Run the workflow (Actions, *Golden snapshot*, on `main`) with **`pinned_snapshot` set to the `snapshotId` the
+   Dispatcher uses now**. Retention really deletes old builders and their snapshots after a successful run (it keeps the
+   newest two and every pin): a snapshot in use that is neither is **deleted**, and the Dispatcher then fails every job
+   with `sandbox_snapshot_missing`. The snapshot is built from `main` only: it needs the Infisical sign-in of the
+   environment `production`, which no other branch can use. A release that changes the Worker image is therefore
+   merged first, and the Dispatcher deployment that goes out with the merge still carries the previous pair until
+   step 3 is done.
 2. Take the new record from the summary.
-3. Put the new `SANDBOX_SNAPSHOT_ID` and `SANDBOX_IMAGE_DIGEST` into the Dispatcher project's **production**
-   variables **without promoting anything**: a variable change affects only deployments made afterwards, so the live
-   deployment keeps the old pair. Then make a **staged production deployment**, which uses the production variables
-   but is not assigned the production domains:
+3. Put the new `SANDBOX_SNAPSHOT_ID` and `SANDBOX_IMAGE_DIGEST` into Infisical `prod` `/dispatcher`, and wait until the
+   Secret Sync shows *synced*. A variable change affects only deployments made afterwards, so the live deployment keeps
+   the old pair.
+4. Run *Deploy production* (Actions, on `main`). Its Dispatcher job makes a **staged production deployment**, which uses
+   the production variables but is not assigned the production domains:
 
    ```sh
-   cd dispatcher && vercel deploy --prod --skip-domain      # prints the deployment URL
+   vercel deploy --prebuilt --prod --skip-domain      # what the workflow runs; prints the deployment address
    ```
 
    Why not a preview deployment: a preview gets the project's *Preview* variables, which the guide does not set (it would
    fail at start for want of `RUNNER_TOKEN` and the snapshot pair), its host changes with every deployment, and neither
    the reaper nor any cron runs there.
-4. Prove it. The canary refuses a host that is not in the repository variable `DISPATCHER_CANARY_HOSTS` (exact host
-   names, comma separated), and the staged deployment has a host of its own: add it to the variable first. If the project's
-   Deployment Protection covers generated deployment URLs, the canary needs the project's bypass secret as
-   `VERCEL_AUTOMATION_BYPASS_SECRET` in `hosted-canary`; with protection off it needs nothing more. Run the *Dispatcher
-   canary* workflow with `url` = the staged deployment (step 6). The probe creates its canary VM from the **new** snapshot, because
-   that deployment carries the new pair.
-5. Only on exit 0 promote: `vercel promote <deployment-url>`. On a failure, do not promote; put the old pair back into the
-   variables (a later deployment must not pick the new pair up by accident) and delete the staged deployment.
-6. Remove the staged deployment's host from `DISPATCHER_CANARY_HOSTS` (the credential must go only to hosts you mean
-   it for), and on the next snapshot run pass the **new** snapshot id as the pin.
+5. The workflow proves it: the *Dispatcher canary* runs on the staged deployment (step 6 of section 4), and its probe
+   creates its canary VM from the **new** snapshot, because that deployment carries the new pair. The staged
+   host is new every time; the canary accepts it because the Vercel API says it belongs to the Dispatcher project and
+   the team, so there is no list to edit. The project's Deployment Protection covers generated deployment URLs, which is
+   why the canary and the App's health check send the projects' bypass secrets from `/ci`.
+6. Only if the canary and the health check passed does the workflow promote (`vercel promote`, the App first). On a
+   failure nothing is promoted: put the old pair back into `/dispatcher` (a later deployment must not pick the new pair up
+   by accident), wait for the sync, and delete the staged deployment in the Vercel dashboard. On the next snapshot run
+   pass the **new** snapshot id as the pin.
 
 `GOLDEN_SNAPSHOT_ENABLED=true` makes every push to `main` build a snapshot, but nothing changes a deployment by
-itself: marking a snapshot current is always this manual step, and a rebuilt image whose digest differs from the
-configured one is refused by the Launcher until you do it.
+itself: marking a snapshot current is always this manual step (the pair in `/dispatcher`), and a rebuilt image whose
+digest differs from the configured one is refused by the Launcher until you do it. A push to `main` runs the snapshot
+workflow and the deployment at the same time; the deployment carries the pair that was in `/dispatcher` when it started.
 
 ### 5.2 Rotating secrets
 
 | Secret | How |
 |---|---|
-| **Webhook signing key** (`RUNNER_WEBHOOK_SECRET`, `DISPATCHER_SIGNING_SECRET`) | No gap, in this order: (1) in the Dispatcher project set the new key as current (`DISPATCHER_SIGNING_KEY_ID`, `DISPATCHER_SIGNING_SECRET`) and the old one as `..._PREVIOUS`, redeploy; (2) in the App project set the new key (`RUNNER_WEBHOOK_KEY_ID`, `RUNNER_WEBHOOK_SECRET`), redeploy; (3) after at least 5 minutes (the receiver's clock tolerance) remove the previous key from the Dispatcher and redeploy. Use a **new key id** each time. |
-| **`RUNNER_TOKEN`** (the dispatcher credential) | The App accepts exactly one, so there is a short gap: set the new value in the App and the Dispatcher projects and in the `hosted-canary` environment, redeploy **both**. Claims that arrive between the two deployments fail and the job stays queued, to be resent when the next job ends, by the next request that touches the database or by the sweep; running Workers are not affected (they use their per-job credential, not this token). Do it when the queue is quiet. |
-| **Vercel access** | With OIDC (no `VERCEL_TOKEN` in the Dispatcher project) there is nothing to rotate for the Launcher. For the snapshot pipeline: create a new access token (a dedicated one, with an expiry if the dashboard offers it: section 3.4), update `VERCEL_TOKEN` in `hosted-snapshot` (and in the Dispatcher project if you chose token auth there, then redeploy), run a harmless check (a snapshot run, or the canary), then revoke the old token. |
-| **Bypass secret** | Regenerate it in the Dispatcher project's Deployment Protection settings, then update `RUNNER_WEBHOOK_BYPASS_TOKEN` (App, redeploy) and `VERCEL_AUTOMATION_BYPASS_SECRET` (`hosted-canary`). Wake-ups fail with `DISPATCH_REJECTED` in between. |
-| **`CRON_SECRET`** (App and Dispatcher, two separate values) | Change it in the project, redeploy. Vercel sends the new value to the next cron call; until the deployment is live the calls are refused (`401`) and one run of the sweep is lost (the next one, two hours later, covers it). |
-| **`OPERATOR_API_TOKEN`** | Change it, redeploy, give the operator's client the new one. |
+| **Webhook signing key** (`RUNNER_WEBHOOK_SECRET`, `DISPATCHER_SIGNING_SECRET`) | No gap, in this order, each "deploy" being a run of *Deploy production* after the sync: (1) in `/dispatcher` write the new key as plain values into `DISPATCHER_SIGNING_KEY_ID` and `DISPATCHER_SIGNING_SECRET` (replacing the references) and the old one into `..._PREVIOUS`, deploy; (2) in `/app` set the new key (`RUNNER_WEBHOOK_KEY_ID`, `RUNNER_WEBHOOK_SECRET`), deploy; (3) after at least 5 minutes (the receiver's clock tolerance) remove the previous key from `/dispatcher`, put the references back, deploy. Use a **new key id** each time. |
+| **`RUNNER_TOKEN`** (the dispatcher credential) | The App accepts exactly one, so there is a short gap: change the one stored value in Infisical `/ci` (the keys of `/app` and `/dispatcher` are references to it), wait for both syncs and run *Deploy production*, which redeploys **both**; the canary of that run already uses the new value. Claims that arrive between the two deployments fail and the job stays queued, to be resent when the next job ends, by the next request that touches the database or by the sweep; running Workers are not affected (they use their per-job credential, not this token). Do it when the queue is quiet. |
+| **Vercel access** | With OIDC (no `VERCEL_TOKEN` in the Dispatcher project) there is nothing to rotate for the Launcher. For the pipeline: create a new access token (a dedicated one, with an expiry if the dashboard offers it: section 3.4), update `VERCEL_TOKEN` in `/ci` (and in `/dispatcher` if you chose token auth there, then redeploy), run a harmless check (a snapshot run, or *Deploy production*), then revoke the old token. The same holds for the Infisical Client Secret: create a new one, update the GitHub secret `INFISICAL_CLIENT_SECRET`, run a check, revoke the old one. |
+| **Bypass secret** | Regenerate it in the Dispatcher project's Deployment Protection settings, then update `/ci` `VERCEL_DISPATCHER_AUTOMATION_BYPASS_SECRET` (`/app` `RUNNER_WEBHOOK_BYPASS_TOKEN` references it, if you use it) and run *Deploy production*. Wake-ups fail with `DISPATCH_REJECTED` in between. The App project's bypass secret (`/ci` `VERCEL_APP_AUTOMATION_BYPASS_SECRET`) is used by the health check only. |
+| **`CRON_SECRET`** (App and Dispatcher, two separate values) | Change it in `/app` or `/dispatcher`, wait for the sync, run *Deploy production*. Vercel sends the new value to the next cron call; until the deployment is live the calls are refused (`401`) and one run of the sweep is lost (the next one, two hours later, covers it). |
+| **`OPERATOR_API_TOKEN`** | Change it in `/app`, run *Deploy production*, give the operator's client the new one. |
 | **`APP_SECRET`** | Not rotatable: changing it signs everybody out and makes every stored credential (GitHub App key, mail password, workspace LLM keys) unreadable. |
 
 Any secret that was ever in a log, a chat or an issue is rotated the same way.
@@ -688,13 +821,31 @@ minutes. The reaper checks every VM itself, so it does not depend on the platfor
 
 ### 5.6 Updating the App or the Dispatcher
 
-Order: **migrate, then deploy**. `pnpm --dir app migrate`, then deploy the App. Do not rely on the platform to hold
-traffic back from a deployment that is ahead of the database: it answers `/api/health` with `SCHEMA_BEHIND`, but
-nothing stops it from being promoted. A migration always works for the version that is still running (additions
+A release is a pull request from `development` into `main`. Merging it starts *Deploy production*
+(`.github/workflows/deploy-production.yml`; you can also start it by hand on `main`). Its order is fixed:
+
+| Job | What it does | If it fails |
+|---|---|---|
+| `migrate` | `pnpm --dir app migrate` against `DATABASE_URL_MIGRATE` from `/ci` | Nothing is deployed |
+| `stage-app` | `vercel pull`, `vercel build --prod`, `vercel deploy --prebuilt --prod --skip-domain` for the App: a staged production deployment, no domain | Nothing is promoted |
+| `stage-dispatcher` | The same for the Dispatcher, after the App | Nothing is promoted |
+| `health-app` | `GET /api/health` of the staged App must answer `200` with `{"status":"ok"}`: `SCHEMA_BEHIND` and every other answer block (retried for about four minutes, then fail) | Nothing is promoted |
+| `canary` | The Dispatcher canary on the staged Dispatcher (section 4, step 6) | Nothing is promoted |
+| `promote` | `vercel promote` of the App and then of the Dispatcher | The App may be live and the Dispatcher not: section 7 |
+| `record` | Closes the GitHub deployment records (`app-production`, `dispatcher-production`) | |
+
+Production stays on its previous deployments until `promote`. Do not rely on the platform to hold traffic back from a
+deployment that is ahead of the database: it answers `/api/health` with `SCHEMA_BEHIND`, but nothing stops it from being
+promoted by hand. The pipeline stops it. A migration always works for the version that is still running (additions
 first, removals one release later), so an App instance **behind** the database is healthy and an instance **ahead**
-of it reports `SCHEMA_BEHIND`. Update the Dispatcher after the App when a release changes the runner API
-(`GET /api/runners/v1/version` lists the App's features; a Dispatcher that finds one missing answers `503` and claims
-nothing).
+of it reports `SCHEMA_BEHIND`. The App is staged before the Dispatcher because a release that changes the runner API
+needs the App first (`GET /api/runners/v1/version` lists the App's features; a Dispatcher that finds one missing answers
+`503` and claims nothing). Runs queue one behind the other (one group, `deploy-production`) and are never cancelled: a
+migration or a promotion in progress runs to its end. GitHub keeps only the newest waiting run: a run that is waiting
+when a newer push arrives is cancelled, and the newer run deploys the newer commit.
+
+The Vercel CLI is pinned to an exact version (`VERCEL_CLI_VERSION` in the three workflows that install it); raise it
+deliberately, in one pull request, in all of them.
 
 ### 5.7 What depends on the 2 hour sweep
 
@@ -758,9 +909,10 @@ the canary uses the Dynamic size, so run it after changing it.
 
 | What | How |
 |---|---|
-| **The App** | Vercel's instant rollback to the previous production deployment. Safe as long as the migrations since were additive (the previous version runs on a database that is ahead of it). A migration that has run is never undone. |
-| **The Dispatcher** | Roll back the deployment, or set the previous `SANDBOX_SNAPSHOT_ID` **together with** its `SANDBOX_IMAGE_DIGEST` and redeploy. |
-| **The snapshot** | Take the previous record (artifact of that run, or the builder `code-reviewer-golden-builder-<time>` whose `currentSnapshotId` you want) and put both values back. Then pin the snapshot in use in the next build so retention does not delete it ([`golden-snapshot.md`](golden-snapshot.md), "Roll back"). The previous snapshot exists only while retention has not removed it. |
+| **The App** | Actions, *Rollback production*, *Run workflow* on `main`, with `app_deployment` set to the deployment to restore (its id `dpl_...` or its address, from the Vercel dashboard or from an earlier run's summary). It runs `vercel rollback` with the pinned CLI. Safe as long as the migrations since were additive (the previous version runs on a database that is ahead of it). A migration that has run is never undone. |
+| **The Dispatcher** | The same workflow with `dispatcher_deployment`, or set the previous `SANDBOX_SNAPSHOT_ID` **together with** its `SANDBOX_IMAGE_DIGEST` in `/dispatcher` and run *Deploy production*. |
+| **A pipeline that stopped between the two promotions** | The App was promoted and the Dispatcher was not (or the other way round): run *Rollback production* for the one that moved, or fix the cause and run *Deploy production* again. A later deployment's `vercel promote` also ends a rollback's pause on the automatic assignment of the production domains. |
+| **The snapshot** | Take the previous record (artifact of that run, or the builder `code-reviewer-golden-builder-<time>` whose `currentSnapshotId` you want) and put both values back into `/dispatcher`. Then pin the snapshot in use in the next build so retention does not delete it ([`golden-snapshot.md`](golden-snapshot.md), "Roll back"). The previous snapshot exists only while retention has not removed it. |
 | **Webhook mode** | `RUNNER_DISPATCH=poll` stops the wake-ups. It is not a way back to the self-hosted runner: the hosted App has no runner that polls (section 8). |
 | **Dynamic Review** | The gate (section 5.4). |
 | **A secret** | Section 5.2. |
@@ -786,6 +938,15 @@ A self-hosted installation and a hosted one never share a database or a GitHub A
 
 **Not verified on the real platform (the first deployment is the test):**
 
+- **The deployment pipeline** (#403) has never run on GitHub or Vercel: that the workflows are accepted and the
+  environment `production` hands its secrets to the called workflows; that `vercel build` honors the Root Directory
+  from the repository root and that `vercel deploy --prebuilt` gives the functions the production variables of the
+  project; that a staged deployment's host is the `url` of the Vercel API's answer (the canary compares them, and an
+  `ownerId` equal to the team id) and that the staged addresses are under Deployment Protection with the bypass header
+  opening them; that Infisical's Secret Sync writes the variables as the platform expects (including Sensitive ones,
+  which `vercel pull` does not return, so nothing may depend on them at build time) and that the reference notation of
+  section 2.1 resolves across folders; that `vercel promote` and `vercel rollback` accept a deployment address in a
+  non-interactive run. The first real run is the test.
 - The **Dispatcher on Vercel**: deploying `dispatcher/`, `waitUntil` supervision for a job's whole life, the 1800 s
   function limit (a beta limit), the cold-start and the probe behavior, and the OIDC authentication of the Sandbox
   SDK from a function. The spike did not deploy a function (its probe T14 was not run). The unit and integration
@@ -853,5 +1014,9 @@ A self-hosted installation and a hosted one never share a database or a GitHub A
 ## 10. Follow-ups
 
 - #334 and #335 the self-hosted split and flipping its default: then section 8 gets its step table.
-- A deploy workflow that runs `pnpm migrate` and the canary in order is not part of the repository; today steps 1, 2,
-  5 and 6 are manual.
+- The first App deployment (step 2) is manual because the pipeline's canary cannot pass before the snapshot exists. A
+  workflow input that skips the Dispatcher for that one run would remove the manual step.
+- The golden snapshot is built from `main` only (the environment `production` is restricted to it), so a release that
+  changes the Worker image is deployed once with the previous snapshot pair, and a second time after the new pair is in
+  `/dispatcher` (section 5.1). A snapshot built before the merge would need a second environment.
+- Infisical OIDC for the repository's workflows instead of a long-lived Universal Auth client secret.

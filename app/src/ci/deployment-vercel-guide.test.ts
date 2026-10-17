@@ -528,10 +528,12 @@ describe("the hosted deployment guide as a procedure", () => {
       "`SANDBOX_SNAPSHOT_ID` and `SANDBOX_IMAGE_DIGEST` from the record",
     );
     expect(step(5)).toContain("`CRON_SECRET`");
-    expect(step(5)).toContain("`DISPATCHER_CANARY_HOSTS`");
+    expect(step(5)).toContain("`VERCEL_DISPATCHER_AUTOMATION_BYPASS_SECRET`");
+    expect(step(5)).toContain("*Deploy production*");
     expect(step(5)).toContain("`RUNNER_API_URL`");
 
     expect(flat(step(6))).toContain("*Dispatcher canary*");
+    expect(flat(step(6))).toContain("asks the Vercel API");
     expect(step(6)).toContain("POST /probe");
     expect(step(6)).toContain("section 5.1");
 
@@ -577,17 +579,16 @@ describe("the hosted deployment guide as a procedure", () => {
       /(?:APP_SECRET|RUNNER_TOKEN|PASSWORD|_PW|SECRET)=['"][^$<'"\s]/,
     );
     expect(guide).not.toMatch(/echo [^\n|]*\| *(?:vercel|gh) /);
-    expect(guide).toContain("Prevent self-review");
   });
 
   // #333-T04
   it("describes the release path with a staged production deployment, not a preview", () => {
     const rebuild = section("### 5.1 Rebuild the snapshot (with a pin)");
 
-    expect(rebuild).toContain("vercel deploy --prod --skip-domain");
-    expect(rebuild).toContain("vercel promote");
-    expect(rebuild).toContain("`DISPATCHER_CANARY_HOSTS`");
-    expect(rebuild).toContain("`VERCEL_AUTOMATION_BYPASS_SECRET`");
+    expect(rebuild).toContain("vercel deploy --prebuilt --prod --skip-domain");
+    expect(rebuild).toContain("`vercel promote`");
+    expect(rebuild).toContain("there is no list to edit");
+    expect(rebuild).toContain("bypass secrets from `/ci`");
     expect(rebuild).toContain("Why not a preview deployment");
     expect(rebuild).not.toMatch(/Deploy the Dispatcher to a preview/);
   });
@@ -761,9 +762,15 @@ describe("the hosted deployment guide as a procedure", () => {
     expect(needs).toContain("**A GitHub App for the hosted instance.**");
     expect(needs).toContain("`app/`");
     expect(needs).toContain("`dispatcher/`");
-    expect(needs).toContain("`hosted-snapshot`");
-    expect(needs).toContain("`hosted-canary`");
-    expect(needs).toContain("`DISPATCHER_CANARY_HOSTS`");
+    // The former environments and the list of hosts are retired, and the guide says so.
+    for (const name of [
+      "`hosted-snapshot`",
+      "`hosted-canary`",
+      "`DISPATCHER_CANARY_HOSTS`",
+    ])
+      expect(flat(needs), name).toMatch(
+        new RegExp(`${name}[^.]*\\*\\*retired\\*\\*|[Rr]etired:[^\\n]*${name}`),
+      );
   });
 });
 
@@ -897,5 +904,131 @@ describe("the hosted deployment guide as a document", () => {
           `${file}: ${host}`,
         ).toBe(true);
     }
+  });
+});
+
+describe("the deployment pipeline in the guide", () => {
+  const setup = section("### 2.1 Setup of the deployment pipeline (once)");
+  const workflowFiles = [
+    ".github/workflows/deploy-production.yml",
+    ".github/workflows/vercel-stage.yml",
+    ".github/workflows/dispatcher-canary.yml",
+    ".github/workflows/golden-snapshot.yml",
+    ".github/workflows/rollback-production.yml",
+  ].map((path) => read(path));
+  const everything = [
+    ...workflowFiles,
+    read(".github/actions/infisical-ci-secrets/action.yml"),
+  ].join("\n");
+
+  // #403-T11
+  it("lists the GitHub side: the environment production, its branch rule and its four secrets, as secrets", () => {
+    expect(setup).toContain("**`production`**");
+    expect(flat(setup)).toContain("only the branch `main`");
+    for (const name of [
+      "INFISICAL_CLIENT_ID",
+      "INFISICAL_CLIENT_SECRET",
+      "INFISICAL_DOMAIN",
+      "INFISICAL_PROJECT_SLUG",
+    ]) {
+      expect(setup, name).toContain(`| \`${name}\``);
+      expect(everything, name).toContain(`secrets.${name}`);
+      expect(everything, name).not.toContain(`vars.${name}`);
+    }
+    expect(flat(setup)).toContain("**not** variables");
+  });
+
+  // #403-T11
+  it("lists every key of /ci that a workflow loads, and no other", () => {
+    const loaded = new Set<string>();
+    for (const text of workflowFiles)
+      for (const match of text.matchAll(/secret-names: (.+)/g))
+        for (const name of (match[1] as string).split(" "))
+          if (/^[A-Z][A-Z0-9_]+$/.test(name)) loaded.add(name);
+    loaded.delete("VERCEL_ORG_ID");
+    const ci = (setup.split("The keys of **`/ci`**")[1] ?? "").split(
+      "**Infisical Secret Sync**",
+    )[0] as string;
+    const documented = [...ci.matchAll(/^\s*\| `([A-Z][A-Z0-9_]+)` \|/gm)].map(
+      (match) => match[1] as string,
+    );
+    // The project id of the stage job is a parameter of the caller.
+    for (const name of [
+      "VERCEL_APP_PROJECT_ID",
+      "VERCEL_DISPATCHER_PROJECT_ID",
+    ])
+      loaded.add(name);
+    expect(documented.sort()).toEqual([...loaded].sort());
+    expect(documented).toHaveLength(8);
+  });
+
+  // #403-T11
+  it("lists the three Infisical folders, the two Secret Syncs, the shared values and the read-only machine identity", () => {
+    expect(setup).toContain("`/ci`");
+    expect(setup).toContain("`/app`");
+    expect(setup).toContain("`/dispatcher`");
+    expect(setup).toContain("`prod`");
+    expect(flat(setup)).toContain(
+      "source `prod` `/app` to the **App** project, environment **Production**",
+    );
+    expect(flat(setup)).toContain(
+      "source `prod` `/dispatcher` to the **Dispatcher** project, environment **Production**",
+    );
+    expect(setup).toContain("Infisical secret references");
+    for (const name of [
+      "RUNNER_TOKEN",
+      "RUNNER_WEBHOOK_SECRET",
+      "DISPATCHER_SIGNING_SECRET",
+      "RUNNER_DISPATCH_MAX_RUNNING",
+      "DISPATCHER_MAX_RUNNING",
+      "BETTER_AUTH_URL",
+      "RUNNER_API_URL",
+    ])
+      expect(setup, name).toContain(`\`${name}\``);
+    expect(setup).toContain("**Universal Auth**");
+    expect(flat(setup)).toContain("**read-only** access");
+    expect(setup).toContain("**`/ci` only**");
+  });
+
+  // #403-T11
+  it("lists the Vercel dashboard steps: the root directories, Git auto-deploy off and the bypass", () => {
+    expect(setup).toContain("**Root Directory**");
+    expect(setup).toContain("`app`");
+    expect(setup).toContain("`dispatcher`");
+    expect(setup).toContain("**Git auto-deploy off.**");
+    expect(setup).toContain('"git": { "deploymentEnabled": false }');
+    expect(setup).toContain("**Protection Bypass for Automation**");
+  });
+
+  // #403-T11
+  it("marks the retired environments and the list of hosts as retired, and no workflow uses them", () => {
+    for (const name of [
+      "hosted-snapshot",
+      "hosted-canary",
+      "DISPATCHER_CANARY_HOSTS",
+    ]) {
+      expect(setup, name).toContain(name);
+      expect(everything, name).not.toContain(name);
+    }
+    expect(setup).toMatch(/Retired: the environments/);
+  });
+
+  // #403-T11
+  it("names the pipeline's jobs in their order and the rollback workflow", () => {
+    const update = section("### 5.6 Updating the App or the Dispatcher");
+    const order = [
+      "migrate",
+      "stage-app",
+      "stage-dispatcher",
+      "health-app",
+      "canary",
+      "promote",
+      "record",
+    ].map((job) => update.indexOf(`| \`${job}\``));
+    expect(order.every((index) => index >= 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    expect(update).toContain("SCHEMA_BEHIND");
+    expect(update).toContain("deploy-production");
+    expect(section("## 7. Rolling back")).toContain("*Rollback production*");
   });
 });

@@ -475,23 +475,34 @@ describe("the commands and names the guide gives", () => {
   });
 
   // #333-T04
+  // #403-T11
   it("names the workflows, environments, secrets, inputs and variables as they are", () => {
+    // The environments of the former pipeline are retired: the guide says so, and no workflow uses them.
     for (const name of ["hosted-snapshot", "hosted-canary"]) {
       expect(guide).toContain(name);
+      expect(snapshotWorkflow).not.toContain(name);
+      expect(canaryWorkflow).not.toContain(name);
     }
-    expect(snapshotWorkflow).toContain("environment: hosted-snapshot");
-    expect(canaryWorkflow).toContain("environment: hosted-canary");
+    expect(snapshotWorkflow).toContain("environment: production");
+    expect(canaryWorkflow).toContain("environment: production");
     for (const secret of [
       "VERCEL_TOKEN",
       "VERCEL_TEAM_ID",
-      "VERCEL_PROJECT_ID",
+      "VERCEL_DISPATCHER_PROJECT_ID",
     ]) {
-      expect(snapshotWorkflow).toContain(`secrets.${secret}`);
+      expect(snapshotWorkflow).toContain(secret);
       expect(guide).toContain(secret);
     }
-    expect(canaryWorkflow).toContain("secrets.RUNNER_TOKEN");
-    expect(canaryWorkflow).toContain("secrets.VERCEL_AUTOMATION_BYPASS_SECRET");
-    expect(canaryWorkflow).toContain("vars.DISPATCHER_CANARY_HOSTS");
+    for (const secret of [
+      "RUNNER_TOKEN",
+      "VERCEL_DISPATCHER_AUTOMATION_BYPASS_SECRET",
+    ]) {
+      expect(canaryWorkflow).toContain(secret);
+      expect(guide).toContain(secret);
+    }
+    // The list of hosts is retired.
+    expect(canaryWorkflow).not.toContain("DISPATCHER_CANARY_HOSTS");
+    expect(canaryWorkflow).toContain("--verify-vercel");
     expect(snapshotWorkflow).toContain("vars.GOLDEN_SNAPSHOT_ENABLED");
     for (const input of ["pinned_snapshot", "target"]) {
       expect(snapshotWorkflow).toContain(`${input}:`);

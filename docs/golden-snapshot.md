@@ -59,14 +59,21 @@ summary. Nothing in the pipeline changes a deployment: **marking a snapshot curr
 
 ## Running it
 
-Once, in the repository settings: an environment `hosted-snapshot` (add a required reviewer if wanted) with the secrets
-`VERCEL_TOKEN`, `VERCEL_TEAM_ID`, `VERCEL_PROJECT_ID` of the Dispatcher's Vercel project. A run then starts with
-_Actions > Golden snapshot > Run workflow_ (inputs: `target`, default `sandbox`; `pinned_snapshot`, the snapshot id the
-Dispatcher uses now). To rebuild automatically on every release, set the repository variable
+Once: the setup of `docs/deployment-vercel.md`, section 2.1. The build reads its platform credentials from Infisical
+`prod` `/ci` (#403): `VERCEL_TOKEN`, `VERCEL_TEAM_ID` and `VERCEL_DISPATCHER_PROJECT_ID`, the id of the **Dispatcher's**
+Vercel project, with the machine identity whose sign-in is stored as four secrets of the GitHub environment `production`.
+The job loads them in one step, just before the build step and after the dependencies were installed, and hands the
+project id to the build as `VERCEL_PROJECT_ID`. (The environment `hosted-snapshot` is **retired**.)
+
+A run starts with _Actions > Golden snapshot > Run workflow_ (inputs: `target`, default `sandbox`; `pinned_snapshot`, the
+snapshot id the Dispatcher uses now). To rebuild automatically on every release, set the repository variable
 `GOLDEN_SNAPSHOT_ENABLED` to `true`: a push to `main` then runs it. Without it the push does nothing. It never runs for a
-pull request, and the job runs only from `main` and `development` (its own condition, as the canary's, because a manual
-run executes the code of the branch it is started on; the environment's branch rule is the second layer). Locally the
-same command works with the three variables exported and `--context` made with
+pull request, and the job runs **only from `main`**: its own condition (a manual run executes the code of the branch it
+is started on, with the Infisical sign-in), and the environment `production`, whose deployment branches are restricted to
+`main`, as the second layer. It used to run from `development` too; it cannot any more, because the one environment that
+holds the sign-in is main-only. A release that changes the Worker image is therefore merged first and its snapshot built
+after, from `main` (`docs/deployment-vercel.md`, section 5.1). Locally the same command works with the three variables
+exported (`VERCEL_PROJECT_ID` being the Dispatcher's) and `--context` made with
 `git archive --format=tar.gz --output /tmp/context.tgz HEAD` (never run it against a platform account you do not mean
 to change).
 
@@ -84,23 +91,25 @@ check refuses it, and the fix is a rebuild). Also rebuild when the pinned Docker
 `docker_version_mismatch` instead of snapshotting something nobody tested: update the pin, re-run the checks of spike
 #317 on the new base).
 
-1. Run the workflow, passing the snapshot id in use as `pinned_snapshot`.
-2. Read the record from the summary or the artifact.
-3. Run the canary (#331) on the new snapshot: deploy the Dispatcher as a staged production deployment (`vercel deploy --prod --skip-domain`,
-   not a preview: a preview has no production variables) with the new `SANDBOX_SNAPSHOT_ID` and
-   `SANDBOX_IMAGE_DIGEST` and run the _Dispatcher canary_ workflow (`.github/workflows/dispatcher-canary.yml`, or
-   `pnpm --dir dispatcher probe:canary --url <staged deployment>`) against it: it calls `POST /probe`, which runs the image's `probe`
-   mode in a fresh VM from the snapshot, and fails unless `opencode` is advertised (`dispatcher/README.md`, "The capability
-   probe"). The workflow sends the dispatcher credential only to a host listed in the repository variable
-   `DISPATCHER_CANARY_HOSTS`, only runs from `main` and `development`, and needs the environment `hosted-canary` protected
-   (selected branches `main` and `development`, required reviewers: `dispatcher/README.md`, "The deploy canary"). Only when it passes, promote that deployment (`vercel promote`); `docs/deployment-vercel.md`, section 5.1, has the steps, including the allow-list of hosts and the protection bypass.
+1. Run the workflow on `main`, passing the snapshot id in use as `pinned_snapshot`.
+2. Read the record from the summary or the artifact, and put `snapshotId` and `imageDigest` into Infisical `prod`
+   `/dispatcher` as `SANDBOX_SNAPSHOT_ID` and `SANDBOX_IMAGE_DIGEST`. Wait for the Secret Sync.
+3. Run the canary (#331) on the new snapshot by running _Deploy production_: it stages the Dispatcher as a staged
+   production deployment (`vercel deploy --prebuilt --prod --skip-domain`, not a preview: a preview has no production
+   variables) with the new pair and runs the _Dispatcher canary_ workflow (`.github/workflows/dispatcher-canary.yml`) on
+   it. The canary calls `POST /probe`, which runs the image's `probe` mode in a fresh VM from the snapshot, and fails
+   unless `opencode` is advertised (`dispatcher/README.md`, "The capability probe"). The workflow sends the dispatcher
+   credential only to a staged host that the Vercel API confirms to be the Dispatcher project's own deployment, and only
+   runs from `main` (`dispatcher/README.md`, "The deploy canary"). Only when it and the App's health check pass, the
+   workflow promotes (`vercel promote`); `docs/deployment-vercel.md`, section 5.1, has the steps, including the failure
+   path. The list of hosts of earlier versions (`DISPATCHER_CANARY_HOSTS`) is **retired**.
 4. The previous snapshot stays until the next build's retention removes it.
 
 ## Roll back to the previous snapshot
 
 The previous snapshot is kept by retention (the newest two builders, plus any `--pin-snapshot`). To go back: take its
 record (the artifact of that run, or the builder `code-reviewer-golden-builder-<time>` whose time you want; its snapshot id
-is the builder's current snapshot) and put its `snapshotId` and `imageDigest` back into the Dispatcher configuration.
+is the builder's current snapshot) and put its `snapshotId` and `imageDigest` back into Infisical `/dispatcher`, wait for the sync and run _Deploy production_.
 The digest must go with the snapshot: they were checked together. Then pin the snapshot in use in the next run so
 retention does not remove it while a newer, failed build exists.
 
