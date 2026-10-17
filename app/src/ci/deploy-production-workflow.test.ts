@@ -136,7 +136,8 @@ describe("the production deployment workflow", () => {
     expect(canary.with?.image_digest).toBe(
       "${{ needs.snapshot-build.outputs.image-digest || needs.snapshot-decide.outputs.image-digest }}",
     );
-    expect(canary.secrets).toBeUndefined();
+    // #408-T01: the environment's secrets reach a called workflow only when the caller passes them (called-workflow-secrets.test.ts).
+    expect(canary.secrets).not.toBe("inherit");
     expect(String(canary.if)).toContain(
       "needs.stage-dispatcher.result == 'success'",
     );
@@ -327,7 +328,7 @@ describe("the production deployment workflow", () => {
         "project-id-secret": project,
         ref: "${{ github.sha }}",
       });
-      expect(found.secrets).toBeUndefined();
+      expect(found.secrets).not.toBe("inherit");
     }
   });
 
