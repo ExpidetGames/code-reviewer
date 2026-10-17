@@ -69,6 +69,11 @@ export type CanaryOptions = {
    * image the pipeline built and not whichever one the project variables happen to name. Never printed.
    */
   expectedImageDigest?: string;
+  /**
+   * The snapshot id the deployment must report: with the image id it covers the whole pair, including a rebuild of
+   * the same layers (same image id, new snapshot). Never printed.
+   */
+  expectedSnapshotId?: string;
   /** Platform deployment protection: sent as `x-vercel-protection-bypass`. A secret. */
   bypassSecret?: string;
   fetch?: typeof fetch;
@@ -97,7 +102,9 @@ const ReportSchema = z.object({
   reasons: z.array(z.string()).max(64),
   failure: z.string().max(100).optional(),
   imageDigest: z.string().max(100).optional(),
+  snapshotId: z.string().max(130).optional(),
 });
+const SNAPSHOT_ID = /^[A-Za-z0-9][A-Za-z0-9_.-]{2,127}$/;
 
 export class CanaryUsageError extends Error {
   constructor(what: string) {
@@ -209,6 +216,15 @@ export function parseCanaryArguments(
     throw new CanaryUsageError(
       "CANARY_EXPECT_IMAGE_DIGEST must be an image id (sha256:...)",
     );
+  const expectedSnapshotId = env.CANARY_EXPECT_SNAPSHOT_ID;
+  if (
+    expectedSnapshotId !== undefined &&
+    expectedSnapshotId !== "" &&
+    !SNAPSHOT_ID.test(expectedSnapshotId)
+  )
+    throw new CanaryUsageError(
+      "CANARY_EXPECT_SNAPSHOT_ID must be a snapshot id",
+    );
   return {
     url,
     token,
@@ -217,6 +233,9 @@ export function parseCanaryArguments(
     ...(expectedImageDigest === undefined || expectedImageDigest === ""
       ? {}
       : { expectedImageDigest }),
+    ...(expectedSnapshotId === undefined || expectedSnapshotId === ""
+      ? {}
+      : { expectedSnapshotId }),
     ...(checkOnly ? { checkOnly } : {}),
     requiredEngines,
     healthWaitSeconds: values.has("--wait-seconds")
@@ -446,10 +465,12 @@ export async function runCanary(options: CanaryOptions): Promise<0 | 1 | 2> {
   ].join(" ");
   const missing = required.filter((engine) => !engines.includes(engine));
   if (answer.status === 200 && report.ok && missing.length === 0) {
-    // The probe passed; was it the image the pipeline built? Neither id is printed.
+    // The probe passed; was it the pair the pipeline built? No id is printed.
     if (
-      options.expectedImageDigest !== undefined &&
-      report.imageDigest !== options.expectedImageDigest
+      (options.expectedImageDigest !== undefined &&
+        report.imageDigest !== options.expectedImageDigest) ||
+      (options.expectedSnapshotId !== undefined &&
+        report.snapshotId !== options.expectedSnapshotId)
     ) {
       write(
         `canary: canary_image_mismatch (the deployment does not report the image this run built), the release is blocked`,

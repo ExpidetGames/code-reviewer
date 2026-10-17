@@ -27,6 +27,8 @@ export type AppOptions = {
   clock?: Clock;
   /** The Worker image id of the golden snapshot (`SANDBOX_IMAGE_DIGEST`): named in the answer of `POST /probe`. */
   imageDigest?: string;
+  /** The golden snapshot (`SANDBOX_SNAPSHOT_ID`): named in the answer of `POST /probe` too. */
+  snapshotId?: string;
 };
 
 export type Dispatcher = { app: Hono; core: DispatcherCore };
@@ -53,6 +55,9 @@ export function createDispatcher(options: AppOptions): Dispatcher {
     ...(options.imageDigest === undefined
       ? {}
       : { imageDigest: options.imageDigest }),
+    ...(options.snapshotId === undefined
+      ? {}
+      : { snapshotId: options.snapshotId }),
   });
   app.onError((_error, c) => {
     // The error is not logged with its text: it may carry what a caller sent.

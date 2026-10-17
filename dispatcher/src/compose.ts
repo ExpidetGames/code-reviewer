@@ -59,6 +59,9 @@ export function composeDispatcher(
     ...(options.env.SANDBOX_IMAGE_DIGEST === undefined
       ? {}
       : { imageDigest: options.env.SANDBOX_IMAGE_DIGEST }),
+    ...(options.env.SANDBOX_SNAPSHOT_ID === undefined
+      ? {}
+      : { snapshotId: options.env.SANDBOX_SNAPSHOT_ID }),
   });
   // A malformed CRON_SECRET matters only where the route exists: there it refuses the start (fail closed), elsewhere
   // a Dispatcher that never reaps is not taken down by a variable it does not use.

@@ -8,10 +8,7 @@
     "ProbeEngine": {
       "description": "An engine a container may advertise: `pr-agent` runs Diff jobs, `opencode` runs Dynamic jobs.",
       "type": "string",
-      "enum": [
-        "pr-agent",
-        "opencode"
-      ]
+      "enum": ["pr-agent", "opencode"]
     },
     "ProbeReason": {
       "description": "Why `opencode` is not advertised: the `SelfCheckReason` values of the runner (runner/src/code_reviewer_runner/dynamic_review/self_check.py). A closed set, so that the Dispatcher can keep a verdict to stable reasons and drop anything else. Both ends check their lists against this one.",
@@ -40,11 +37,7 @@
       "description": "The line the `probe` mode prints. `engines` always holds `pr-agent`; `opencode` is in it only when the whole self-check passed (the hardening of the container, the egress mode, IPv6 off where the fallback ruleset needs it, the pins), and then `reasons` is empty.",
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "version",
-        "engines",
-        "reasons"
-      ],
+      "required": ["version", "engines", "reasons"],
       "properties": {
         "version": {
           "const": 1
@@ -70,11 +63,7 @@
     "ProbeStatus": {
       "description": "`passed`: the canary container answered and advertises `opencode`. `denied`: it answered and does not (the reasons say why). `failed`: no verdict was read (the canary VM, the container or the clock failed); `failure` says which.",
       "type": "string",
-      "enum": [
-        "passed",
-        "denied",
-        "failed"
-      ]
+      "enum": ["passed", "denied", "failed"]
     },
     "ProbeFailure": {
       "description": "Why no verdict was read: a closed list of stable codes, the launch codes of a job VM and the codes of the probe itself. The Dispatcher keeps the list in dispatcher/src/probe/failure-codes.ts (a test holds them equal); a code that is not on it is probe_error.",
@@ -146,6 +135,11 @@
         },
         "checkedAt": {
           "$ref": "runner-api.v1.json#/$defs/Timestamp"
+        },
+        "snapshotId": {
+          "description": "The golden snapshot this deployment creates job VMs from (`SANDBOX_SNAPSHOT_ID`), present when one is configured. With `imageDigest` it names the whole pair, so that a deploy step can tell that the deployment runs the snapshot its pipeline built, also when a rebuild left the image id unchanged (#403).",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{2,127}$"
         },
         "imageDigest": {
           "description": "The id of the Worker image this deployment is configured with (`SANDBOX_IMAGE_DIGEST`), present when one is configured. A deploy step compares it with the image its pipeline built, so that a canary that passed is known to have proven that image (#403).",

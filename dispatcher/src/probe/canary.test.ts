@@ -749,6 +749,73 @@ describe("the commit and the retries of the deployment check", () => {
   );
 });
 
+const SNAPSHOT = "snap_example01";
+
+describe("the whole pair the canary proves", () => {
+  function reporting(report: unknown) {
+    return script((request) =>
+      request.url.endsWith("/health")
+        ? respond({ status: "ok" })
+        : respond(report),
+    );
+  }
+  const expected = {
+    expectedImageDigest: DIGEST,
+    expectedSnapshotId: SNAPSHOT,
+  };
+
+  // #403-T12
+  it("passes when the report names both the snapshot and the image of the run", async () => {
+    const { fetch } = reporting({
+      ...REPORT,
+      imageDigest: DIGEST,
+      snapshotId: SNAPSHOT,
+    });
+    const { run, lines } = options(fetch, expected);
+
+    expect(await run()).toBe(0);
+    expect(lines.join("\n")).not.toContain(SNAPSHOT);
+  });
+
+  // #403-T12
+  it.each([
+    [
+      "another snapshot with the same image (a rebuild of the same layers)",
+      { imageDigest: DIGEST, snapshotId: "snap_other02" },
+    ],
+    ["no snapshot", { imageDigest: DIGEST }],
+    [
+      "the snapshot of the run on another image",
+      { imageDigest: `sha256:${"c".repeat(64)}`, snapshotId: SNAPSHOT },
+    ],
+  ])(
+    "blocks the release when the report names %s, without printing an id",
+    async (_name, fields) => {
+      const { fetch } = reporting({ ...REPORT, ...fields });
+      const { run, lines } = options(fetch, expected);
+
+      expect(await run()).toBe(1);
+
+      const text = lines.join("\n");
+      expect(text).toContain("canary_image_mismatch");
+      expect(text).not.toContain(SNAPSHOT);
+      expect(text).not.toContain("snap_other02");
+    },
+  );
+
+  // #403-T12
+  it("checks the snapshot alone when only that is expected", async () => {
+    const { fetch } = reporting({ ...REPORT, snapshotId: SNAPSHOT });
+
+    expect(await options(fetch, { expectedSnapshotId: SNAPSHOT }).run()).toBe(
+      0,
+    );
+    expect(
+      await options(fetch, { expectedSnapshotId: "snap_other02" }).run(),
+    ).toBe(1);
+  });
+});
+
 describe("the image id the canary proves", () => {
   function reporting(report: unknown) {
     return script((request) =>
@@ -877,6 +944,22 @@ describe("the arguments of the deployment check", () => {
       ).toThrow(/expect-commit/);
     },
   );
+
+  // #403-T12
+  it("takes the snapshot id to expect from the environment, and refuses one that is not an id", () => {
+    expect(
+      parseCanaryArguments(["--url", `https://${STAGED_HOST}`], {
+        ...env,
+        CANARY_EXPECT_SNAPSHOT_ID: SNAPSHOT,
+      }).expectedSnapshotId,
+    ).toBe(SNAPSHOT);
+    expect(() =>
+      parseCanaryArguments(["--url", `https://${STAGED_HOST}`], {
+        ...env,
+        CANARY_EXPECT_SNAPSHOT_ID: "snap x",
+      }),
+    ).toThrow(/CANARY_EXPECT_SNAPSHOT_ID/);
+  });
 
   // #403-T12
   it("refuses an image id that is not one", () => {

@@ -43,6 +43,7 @@ function build(
   probe?: () => Promise<ProbeResult>,
   engines: ("pr-agent" | "opencode")[] = ["pr-agent", "opencode"],
   imageDigest?: string,
+  snapshotId?: string,
 ) {
   const launcher = createFakeLauncher(probe === undefined ? {} : { probe });
   const logger = recordingLogger();
@@ -55,6 +56,7 @@ function build(
       keys: [{ kid: KEY_ID, secret: SIGNING_SECRET }],
     }),
     ...(imageDigest === undefined ? {} : { imageDigest }),
+    ...(snapshotId === undefined ? {} : { snapshotId }),
   });
   return { app, launcher, logger };
 }
@@ -287,5 +289,61 @@ describe("the image id in the probe report", () => {
 
     expect(response.status).toBe(401);
     expect(JSON.stringify(await response.json())).not.toContain(DIGEST);
+  });
+});
+
+describe("the snapshot id in the probe report", () => {
+  // #403-T12
+  it("names the snapshot this deployment creates job VMs from, so that a pair that did not reach it is seen", async () => {
+    const { app } = build(
+      () => Promise.resolve(PASSED),
+      undefined,
+      undefined,
+      "snap_example01",
+    );
+
+    const response = await post(app, authorized);
+
+    expect(await response.json()).toMatchObject({
+      snapshotId: "snap_example01",
+    });
+  });
+
+  // #403-T12
+  it.each(["", "snap x", "snap_\nid", "a".repeat(200)])(
+    "drops %j: it is not a snapshot id",
+    async (value) => {
+      const { app } = build(
+        () => Promise.resolve(PASSED),
+        undefined,
+        undefined,
+        value,
+      );
+
+      const body = (await (await post(app, authorized)).json()) as Record<
+        string,
+        unknown
+      >;
+
+      expect(body).not.toHaveProperty("snapshotId");
+    },
+  );
+
+  // #403-T12
+  it("leaves it out when none is configured and from a refused call", async () => {
+    const none = build(() => Promise.resolve(PASSED));
+    expect(await (await post(none.app, authorized)).json()).not.toHaveProperty(
+      "snapshotId",
+    );
+
+    const refused = build(
+      () => Promise.resolve(PASSED),
+      undefined,
+      undefined,
+      "snap_example01",
+    );
+    expect(
+      JSON.stringify(await (await post(refused.app)).json()),
+    ).not.toContain("snap_example01");
   });
 });
