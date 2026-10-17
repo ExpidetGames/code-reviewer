@@ -2,8 +2,9 @@
 
 The hosted deployment (#316) runs every review job in a fresh Vercel Sandbox VM that is a clone of one **golden
 snapshot**: a VM image with a pinned Docker installed, the cgroup preparation script in place and the Worker image
-already built. This document is the runbook for that snapshot: how it is made, what proves it, how to rebuild it, roll
-back to the previous one and what happens to old ones. The code is `dispatcher/src/snapshot/`; the workflow is
+already built. This document is the runbook for that snapshot: how it is made, what proves it, when it is rebuilt, how
+it is rolled back and what happens to old ones. Since #403 **nobody runs any of it by hand**: the deployment pipeline
+decides, builds, proves, wires in and cleans up (`deployment-vercel.md`, section 5.1). The code is `dispatcher/src/snapshot/`; the workflow is
 `.github/workflows/golden-snapshot.yml`; the Sandbox double the tests use is `fakes/vercel-sandbox/`.
 
 The place of the snapshot in a whole deployment, and the order of the steps around it, is in [`deployment-vercel.md`](deployment-vercel.md).
@@ -26,7 +27,7 @@ In order:
 | 9   | `scan_filesystem`                                             | No secret and no job data in what the pipeline added or changed in the restored snapshot (below).                                                                                                                                                                                                               | `scan_findings`, `scan_unreadable`                                |
 | 10  | `start_daemon_check`, `inspect_restored_image`                | `vm-prepare.sh` brings the daemon up; the image id must equal step 5.                                                                                                                                                                                                                                           | `host_prepare_failed`, `image_digest_mismatch`                    |
 | 11  | `probe`                                                       | The image runs in `probe` mode (#324) with the flags the shared renderer (#325) makes for the Sandbox variant (the hardened container spec plus the IPv6 sysctls); its verdict must advertise every engine in `requiredEngines` (`pr-agent`, `opencode`).                                                       | `probe_failed`, `probe_unreadable`, `engine_missing`              |
-| 12  | record, retention                                             | The record is returned and written; older builders are removed (below); the check VM is deleted.                                                                                                                                                                                                                | `record_invalid`; retention only warns                            |
+| 12  | record, retention                                             | The record is returned and written; older builders are removed unless `--skip-retention` is given (the deployment removes them itself, below); the check VM is deleted.                                                                                                                                                                                                                | `record_invalid`; retention only warns                            |
 
 **Fail closed.** If any step fails after the snapshot exists, the builder is deleted **with** its snapshots, so a bad
 snapshot is withdrawn and the run leaves no record. The record file named by `--out` is deleted when the run starts, so
@@ -55,64 +56,76 @@ environment, no argument, no log line: every log line is masked). The VMs hold n
 `snapshotId` and `imageDigest` are what the Sandbox-Launcher (#329) is configured with. The Launcher creates job VMs
 from `snapshotId` in `fra1` and refuses to run when `docker image inspect` in the VM reports another id than
 `imageDigest`. The workflow keeps the record as the artifact `golden-snapshot-record` (90 days) and shows it in the run
-summary. Nothing in the pipeline changes a deployment: **marking a snapshot current is a manual step**, see below.
+summary and as the outputs `snapshot-id`, `image-digest` and `commit` of the workflow. The build itself changes no
+deployment, removes no snapshot of an earlier run and writes nothing to Infisical: *Deploy production* wires the
+snapshot into a staged Dispatcher deployment, proves it with the canary, and only after the promotion writes it to
+Infisical (`SANDBOX_SNAPSHOT_ID`, `SANDBOX_IMAGE_DIGEST` and `SANDBOX_SNAPSHOT_COMMIT` of `/dispatcher`) and removes
+the snapshots nobody needs.
 
 ## Running it
 
-Once, in the repository settings: an environment `hosted-snapshot` (add a required reviewer if wanted) with the secrets
-`VERCEL_TOKEN`, `VERCEL_TEAM_ID`, `VERCEL_PROJECT_ID` of the Dispatcher's Vercel project. A run then starts with
-_Actions > Golden snapshot > Run workflow_ (inputs: `target`, default `sandbox`; `pinned_snapshot`, the snapshot id the
-Dispatcher uses now). To rebuild automatically on every release, set the repository variable
-`GOLDEN_SNAPSHOT_ENABLED` to `true`: a push to `main` then runs it. Without it the push does nothing. It never runs for a
-pull request, and the job runs only from `main` and `development` (its own condition, as the canary's, because a manual
-run executes the code of the branch it is started on; the environment's branch rule is the second layer). Locally the
-same command works with the three variables exported and `--context` made with
-`git archive --format=tar.gz --output /tmp/context.tgz HEAD` (never run it against a platform account you do not mean
-to change).
+Once: the setup of `docs/deployment-vercel.md`, section 2.1. The build reads its platform credentials from Infisical
+`prod` `/ci` (#403): `VERCEL_TOKEN`, `VERCEL_TEAM_ID` and `VERCEL_DISPATCHER_PROJECT_ID`, the id of the **Dispatcher's**
+Vercel project, with the machine identity whose sign-in is stored as four secrets of the GitHub environment `production`.
+The job loads them in one step, just before the build step and after the dependencies were installed, and hands the
+project id to the build as `VERCEL_PROJECT_ID`. (The environment `hosted-snapshot` is **retired**.)
+
+The workflow is called by *Deploy production* when the Worker image has to be rebuilt (a `workflow_call`, with the
+same environment, branch and secret rules). Started by hand (_Actions > Golden snapshot > Run workflow_, input
+`target`, default `sandbox`) it is a **rehearsal**: it builds and checks a snapshot and leaves it, and wires nothing in
+and persists nothing, because a manual build that wrote the pair would let the pair drift away from what production runs
+and break the cleanup rule below. The next deployment that cleans up removes it. The repository variable
+`GOLDEN_SNAPSHOT_ENABLED` and the input `pinned_snapshot` are **retired**: nothing builds on a push by itself any more,
+and the cleanup, not the build, decides what is kept. It never runs for a pull request, and the job runs **only from
+`main`**: its own condition guards against accidents, and the boundary is the environment `production`, whose deployment
+branches are restricted to `main`. It used to run from `development` too; it cannot any more, because the one environment
+that holds the Infisical sign-in is main-only, and a release needs no earlier build: the deployment builds when it merges.
+Locally the same command works with the three variables exported (`VERCEL_PROJECT_ID` being the Dispatcher's) and
+`--context` made with `git archive --format=tar.gz --output /tmp/context.tgz HEAD` (never run it against a platform
+account you do not mean to change).
 
 Options of the command: `--target`, `--dockerfile`, `--image-tag`, `--docker-version`, `--buildx-version`, `--commit`,
-`--keep` (default 2), `--pin-snapshot` (repeatable). Without `VERCEL_TOKEN` the platform client uses the OIDC token of
+`--keep` (default 2) and `--pin-snapshot` (repeatable) for the retention that runs at the end of a build unless
+`--skip-retention` is given (the workflow always gives it). Without `VERCEL_TOKEN` the platform client uses the OIDC token of
 the environment. Exit status: 0 the record was written, 1 the run failed (the log line `golden_snapshot_failed` has the
 code and, for a failed command, its exit status and the last lines of its error output), 2 wrong use, nothing created.
 
-## Rebuild
+## When it is rebuilt
 
-A snapshot is rebuilt **on every image release** (a stale snapshot means a stale Worker image: the Launcher's digest
-check refuses it, and the fix is a rebuild). Also rebuild when the pinned Docker version changes
-(`dockerVersion`/`buildxVersion` in `dispatcher/src/snapshot/config.ts`, or `--docker-version`), when
-`docker/sandbox/vm-prepare.sh` changes, or when the platform's base image changes (the install step then fails with
-`docker_version_mismatch` instead of snapshotting something nobody tested: update the pin, re-run the checks of spike
-#317 on the new base).
-
-1. Run the workflow, passing the snapshot id in use as `pinned_snapshot`.
-2. Read the record from the summary or the artifact.
-3. Run the canary (#331) on the new snapshot: deploy the Dispatcher as a staged production deployment (`vercel deploy --prod --skip-domain`,
-   not a preview: a preview has no production variables) with the new `SANDBOX_SNAPSHOT_ID` and
-   `SANDBOX_IMAGE_DIGEST` and run the _Dispatcher canary_ workflow (`.github/workflows/dispatcher-canary.yml`, or
-   `pnpm --dir dispatcher probe:canary --url <staged deployment>`) against it: it calls `POST /probe`, which runs the image's `probe`
-   mode in a fresh VM from the snapshot, and fails unless `opencode` is advertised (`dispatcher/README.md`, "The capability
-   probe"). The workflow sends the dispatcher credential only to a host listed in the repository variable
-   `DISPATCHER_CANARY_HOSTS`, only runs from `main` and `development`, and needs the environment `hosted-canary` protected
-   (selected branches `main` and `development`, required reviewers: `dispatcher/README.md`, "The deploy canary"). Only when it passes, promote that deployment (`vercel promote`); `docs/deployment-vercel.md`, section 5.1, has the steps, including the allow-list of hosts and the protection bypass.
-4. The previous snapshot stays until the next build's retention removes it.
+The deployment rebuilds the snapshot when something that goes into the Worker image changed since the commit the
+snapshot in use was built from (exactly the files the image build consumes: what `runner/Dockerfile` copies, its ignore
+files, the license files, `docker/sandbox/vm-prepare.sh` and the four files of the build tool that decide what is
+installed in the snapshot, `config.ts` with the pinned Docker and buildx versions and the default target among them: see
+`IMAGE_INPUT_PATHS` in `dispatcher/src/snapshot/pair.ts`), when that commit or the pair is missing (the first
+deployment), when the snapshot of the pair no longer exists, or when *Deploy production* is started with
+`rebuild_snapshot`. That last one is for what the
+repository cannot show: the platform's base image changed (the install step then fails with `docker_version_mismatch`
+instead of snapshotting something nobody tested: update the pin in `dispatcher/src/snapshot/config.ts`, re-run the
+checks of spike #317 on the new base). The decision, the proof by the canary, the promotion, the write to Infisical and
+the cleanup are described in `deployment-vercel.md`, section 5.1; the canary (#331) calls `POST /probe`, which runs the
+image's `probe` mode in a fresh VM from the snapshot, and fails unless `opencode` is advertised and the answer names the
+image of this run (`dispatcher/README.md`, "The capability probe" and "The deploy canary"). The list of hosts of
+earlier versions (`DISPATCHER_CANARY_HOSTS`) is **retired**.
 
 ## Roll back to the previous snapshot
 
-The previous snapshot is kept by retention (the newest two builders, plus any `--pin-snapshot`). To go back: take its
-record (the artifact of that run, or the builder `code-reviewer-golden-builder-<time>` whose time you want; its snapshot id
-is the builder's current snapshot) and put its `snapshotId` and `imageDigest` back into the Dispatcher configuration.
-The digest must go with the snapshot: they were checked together. Then pin the snapshot in use in the next run so
-retention does not remove it while a newer, failed build exists.
+Roll the Dispatcher back (_Actions > Rollback production_, `deployment-vercel.md`, section 7): the previous Dispatcher
+deployment carries its own pair, and the rollback writes that pair back to Infisical. Its snapshot still exists because
+the cleanup always keeps the new snapshot **and the previous one**. There is no separate rollback of a snapshot, and an
+older one than the previous may already be deleted.
 
 ## Expiry and retention
 
 - **Snapshots do not expire** (`expiration: 0`). The platform's default of 30 days applies to automatic snapshots of
   persistent VMs, not to this one; if retention stops running, snapshots stay (and are billed as storage).
-- **Retention** runs after a new snapshot passed every check. It keeps the newest `--keep` builders (default 2: the
-  current one and one previous) and every `--pin-snapshot`, and deletes the other builders **with** their snapshots
-  (`deleteOrphanSnapshots`). It only touches builders whose name starts with `code-reviewer-golden-builder-`.
-- A failed retention step is a warning (`retention_failed` in the log): the new record is valid. Delete the named
-  builders by hand.
+- **The cleanup** (`pnpm snapshot:ops cleanup`, the `cleanup` job of *Deploy production*) runs only after the new
+  pair is written to Infisical. It keeps the new snapshot, the previous one and the one the live Dispatcher deployment
+  runs (read from the platform at that moment; if it cannot be read nothing is removed), and deletes every other
+  builder **with** its snapshot (`deleteOrphanSnapshots`). It only touches builders whose name starts with
+  `code-reviewer-golden-builder-`, and a keep list that matches none of the builders removes nothing. The `discard` job
+  removes just the snapshot of a run that did not get live. The retention at the end of a build (`--keep`,
+  `--pin-snapshot`) still exists for a build run by hand from the command line; the workflow turns it off.
+- A failed cleanup is a failed job (`cleanup_incomplete` in the log): what is left is removed by the next one.
 - A builder whose snapshot the platform did not report is never deleted automatically (warning
   `builder_without_snapshot`). A run that was killed leaves a builder without a snapshot behind: it is a VM that ends at
   its timeout; delete it by hand once it is stopped.

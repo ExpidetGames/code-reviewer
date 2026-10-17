@@ -30,6 +30,7 @@ issue has no such table.
 - [ ] Tests were written first and are included (a bug fix has a test that was red before the fix).
 - [ ] `make verify` is green.
 - [ ] Documentation is updated where the change needs it (README, `docs/`, `TESTING.md`, `.env.example`).
+- [ ] A new database migration only adds (a removal waits one release): the deployment migrates before it stages anything, so the live version must still work on the new schema (`docs/deployment-vercel.md`, section 5.6).
 - [ ] No secrets: no keys, tokens, private keys, `.env` files or real credentials in the code, the tests, the logs or this description.
 
 ## Follow-ups

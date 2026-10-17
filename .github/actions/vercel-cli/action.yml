@@ -1,0 +1,29 @@
+name: Install the Vercel CLI
+description: >-
+  Installs the Vercel CLI from tools/vercel: the exact version in its package.json with its whole dependency tree from
+  the committed package-lock.json (`npm ci --ignore-scripts`), and puts it on the PATH. Node.js must be set up before,
+  and the repository checked out (this is a local action). No credential is read here.
+
+runs:
+  using: composite
+  steps:
+    - name: Install from the lockfile
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: |
+        set -euo pipefail
+        npm ci --prefix tools/vercel --ignore-scripts --no-audit --no-fund
+        echo "${GITHUB_WORKSPACE}/tools/vercel/node_modules/.bin" >> "$GITHUB_PATH"
+    - name: Check the version
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        VERCEL_TELEMETRY_DISABLED: "1"
+      run: |
+        set -euo pipefail
+        expected="$(node -p "require('./tools/vercel/package.json').dependencies.vercel")"
+        installed="$(tools/vercel/node_modules/.bin/vercel --version | tail -n 1)"
+        if [ "${installed}" != "${expected}" ]; then
+          echo "::error::The installed Vercel CLI is not the pinned version."
+          exit 1
+        fi
