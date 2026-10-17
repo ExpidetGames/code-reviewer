@@ -134,6 +134,56 @@ describe("verifyPaddleSignature", () => {
   });
 
   // #436-T02
+  it("takes a wider tolerance as a parameter, for retries that keep the ts of the first try (research S3)", () => {
+    const header = `ts=${TS};h1=${KNOWN_H1}`;
+    const threeDays = 3 * 24 * 60 * 60;
+    const twoDaysLater = at(TS + 2 * 24 * 60 * 60);
+    expect(verify(header, { now: twoDaysLater }).ok).toBe(false);
+    expect(
+      verify(header, { now: twoDaysLater, toleranceSeconds: threeDays }),
+    ).toEqual({ ok: true, timestamp: TS });
+    // Wide or not, the signature still binds the body and the secret.
+    expect(
+      verify(header, {
+        now: twoDaysLater,
+        toleranceSeconds: threeDays,
+        rawBody: `${BODY} `,
+      }),
+    ).toEqual({ ok: false, code: "signature_mismatch" });
+    expect(
+      verify(header, {
+        now: twoDaysLater,
+        toleranceSeconds: threeDays,
+        secret: "another_secret",
+      }),
+    ).toEqual({ ok: false, code: "signature_mismatch" });
+  });
+
+  // #436-T02
+  it.each([Number.NaN, -1, Number.POSITIVE_INFINITY])(
+    "refuses a tolerance of %s instead of accepting every age",
+    (toleranceSeconds) => {
+      const header = `ts=${TS};h1=${KNOWN_H1}`;
+      expect(
+        verify(header, { now: at(TS + 10_000_000), toleranceSeconds }),
+      ).toEqual({ ok: false, code: "tolerance_invalid" });
+      expect(verify(header, { toleranceSeconds })).toEqual({
+        ok: false,
+        code: "tolerance_invalid",
+      });
+    },
+  );
+
+  // #436-T02
+  it("accepts a tolerance of zero: only the exact second", () => {
+    const header = `ts=${TS};h1=${KNOWN_H1}`;
+    expect(verify(header, { now: at(TS), toleranceSeconds: 0 }).ok).toBe(true);
+    expect(verify(header, { now: at(TS + 1), toleranceSeconds: 0 }).ok).toBe(
+      false,
+    );
+  });
+
+  // #436-T02
   it("checks the signature before the age, so an unsigned replay learns nothing about the clock", () => {
     expect(
       verify(`ts=${TS};h1=${"0".repeat(64)}`, { now: at(TS + 10_000) }),
@@ -157,6 +207,7 @@ describe("verifyPaddleSignature", () => {
       "signature_mismatch",
       "signature_missing",
       "timestamp_out_of_tolerance",
+      "tolerance_invalid",
     ]);
   });
 

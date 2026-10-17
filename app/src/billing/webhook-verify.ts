@@ -4,11 +4,17 @@
 // is the HMAC-SHA256 of `<ts>:<raw body>` made with the secret of the notification destination. Our own check, not
 // the SDK's: it accepts several `h1` values (Paddle sends more than one while a secret is rotated), compares in
 // constant time and allows a tolerance of minutes, not seconds. Replay is stopped by the dedupe on `event_id`,
-// not by the clock. Pure: the body, the secret and the time come in, a verdict comes out; nothing is logged.
+// not by the clock. The tolerance is a parameter (`toleranceSeconds`): the default suits a `ts` that Paddle makes
+// fresh for each try; if the sandbox shows that a retry keeps the `ts` of the first try (research S3), the caller
+// widens it to cover the retry window, and the signature still binds the body. Pure: the body, the secret and the
+// time come in, a verdict comes out; nothing is logged.
 import "server-only";
 import { createHmac, timingSafeEqual } from "node:crypto";
 
-/** Five minutes either way: room for clock skew and a cold start, short enough to bound a replayed header. */
+/**
+ * The default: five minutes either way, room for clock skew and a cold start, short enough to bound a replayed
+ * header. It assumes Paddle signs each retry with a fresh `ts`; that is unverified (research S3, sandbox).
+ */
 export const PADDLE_SIGNATURE_TOLERANCE_SECONDS = 300;
 
 export const PADDLE_SIGNATURE_ERROR_CODES = [
@@ -17,6 +23,7 @@ export const PADDLE_SIGNATURE_ERROR_CODES = [
   "signature_malformed",
   "signature_mismatch",
   "timestamp_out_of_tolerance",
+  "tolerance_invalid",
 ] as const;
 export type PaddleSignatureErrorCode =
   (typeof PADDLE_SIGNATURE_ERROR_CODES)[number];
@@ -58,10 +65,16 @@ export function verifyPaddleSignature(input: {
   rawBody: string;
   secret: string;
   now: Date;
+  /** How far `ts` may be from `now`, either way. Default `PADDLE_SIGNATURE_TOLERANCE_SECONDS`. */
   toleranceSeconds?: number;
 }): PaddleSignatureVerdict {
   // An empty key would make a signature that anybody can compute.
   if (input.secret === "") return { ok: false, code: "secret_missing" };
+  // `NaN` would make every age pass the comparison below, and a negative number would refuse every one.
+  const tolerance =
+    input.toleranceSeconds ?? PADDLE_SIGNATURE_TOLERANCE_SECONDS;
+  if (!Number.isFinite(tolerance) || tolerance < 0)
+    return { ok: false, code: "tolerance_invalid" };
   const header = input.header?.trim();
   if (header === undefined || header === "")
     return { ok: false, code: "signature_missing" };
@@ -77,8 +90,6 @@ export function verifyPaddleSignature(input: {
     if (timingSafeEqual(candidate, expected)) matched = true;
   if (!matched) return { ok: false, code: "signature_mismatch" };
 
-  const tolerance =
-    input.toleranceSeconds ?? PADDLE_SIGNATURE_TOLERANCE_SECONDS;
   const ageSeconds = input.now.getTime() / 1000 - parsed.timestamp;
   if (Math.abs(ageSeconds) > tolerance)
     return { ok: false, code: "timestamp_out_of_tolerance" };
