@@ -20,7 +20,7 @@ code has no default for a tier: a tier without a model fails closed.
 
 Instance setting `managed_model_tiers` (`instance_settings`, JSON, no migration):
 `{ "low": { "diff": "<model id>", "dynamic": "<model id>" }, "medium": { … }, "high": { … } }`. Each tier and each kind
-is optional; the ids are OpenRouter ids validated with the rule of the review settings (`MODEL_NAME_PATTERN`).
+is optional; the ids are OpenRouter ids validated with the rule of the review settings (`isModelId`, the provider's model-id rule).
 
 **It is written and read through the operator API only**: `GET|PUT /api/operator/v1/model-tiers`
 (`src/operator-api/README.md`). A `PUT` replaces the whole configuration. The instance admin portal shows **whether**

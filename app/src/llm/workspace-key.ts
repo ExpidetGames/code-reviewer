@@ -14,7 +14,11 @@
 //   or control characters inside and more than 4096 characters are refused.
 // - Who may do this is decided before the service is reached (`manage_llm_key`, an Admin or an Owner); the service
 //   does not see roles.
-import { checkLlmApiKey, LLM_PROVIDERS, type LlmProvider } from "./config.ts";
+import { checkLlmApiKey, type LlmProvider } from "./config.ts";
+import {
+  DEFAULT_LLM_PROVIDER,
+  llmProviderDescriptors,
+} from "./providers/index.ts";
 import type { WorkspaceSecretStore } from "../secrets/workspace-store.ts";
 import type { SecretValue } from "../secrets/secret-value.ts";
 import type { WorkspaceKeyForJob } from "./resolve.ts";
@@ -86,12 +90,13 @@ export type WorkspaceLlmKeyService = {
   forJob(): Promise<WorkspaceKeyForJob>;
 };
 
-const NAME = "llm_api_key" as const;
+// One slot per workspace, whatever the provider: the key is bound to the provider it was entered for. The slot
+// is the one of the default provider, and the name it has always had (src/llm/providers/).
+const NAME =
+  llmProviderDescriptors.get(DEFAULT_LLM_PROVIDER).secretNames.workspace;
 
 function providerOf(raw: unknown): LlmProvider | undefined {
-  if (typeof raw !== "string") return undefined;
-  const value = raw.trim().toLowerCase();
-  return LLM_PROVIDERS.find((provider) => provider === value);
+  return llmProviderDescriptors.find(raw)?.id;
 }
 
 export function createWorkspaceLlmKeyService({
@@ -130,7 +135,9 @@ export function createWorkspaceLlmKeyService({
         reason:
           used.error === "secret_not_configured" ? "no_key" : "key_unreadable",
       };
-    const provider = LLM_PROVIDERS.find((known) => known === used.binding);
+    const provider = llmProviderDescriptors.ids.find(
+      (known) => known === used.binding,
+    );
     if (provider === undefined)
       return { ok: false, reason: "key_binding_mismatch" };
     return { ok: true, provider, apiKey: used.value };

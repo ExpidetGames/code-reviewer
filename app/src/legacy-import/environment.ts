@@ -25,7 +25,7 @@ import {
   checkLlmApiKey,
   DEFAULT_LLM_MODEL,
   LLM_PROVIDERS,
-  MODEL_NAME_PATTERN,
+  isModelId,
   type LlmProvider,
 } from "../llm/config.ts";
 
@@ -175,9 +175,7 @@ function readLlm(env: Env): LegacyLlm {
     provider,
     apiKey: key.key,
     model:
-      model !== "" &&
-      model !== DEFAULT_LLM_MODEL &&
-      MODEL_NAME_PATTERN.test(model)
+      model !== "" && model !== DEFAULT_LLM_MODEL && isModelId(model, provider)
         ? model
         : null,
   };

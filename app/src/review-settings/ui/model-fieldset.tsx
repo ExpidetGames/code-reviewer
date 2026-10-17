@@ -7,6 +7,7 @@
 // taken back to the layer below with "Reset to default".
 import type { ReactNode } from "react";
 import { QUALITY_HEADING } from "../../copy/model-quality.ts";
+import { DEFAULT_LLM_PROVIDER_LABEL } from "../../llm/providers/index.ts";
 import type { ReviewCostGuard } from "../cost.ts";
 import {
   SettingsCard,
@@ -18,8 +19,7 @@ import { CostSummary } from "./cost-summary.tsx";
 import { REVIEW_SETTING_LIMITS } from "../settings.ts";
 
 /** The one sentence about the model, the fact people ask about most. */
-export const MODEL_HINT =
-  "The AI model that writes the review. Pick one from the list or type the name of any model OpenRouter offers. Smaller models cost less per review, larger ones usually review more thoroughly.";
+export const MODEL_HINT = `The AI model that writes the review. Pick one from the list or type the name of any model ${DEFAULT_LLM_PROVIDER_LABEL} offers. Smaller models cost less per review, larger ones usually review more thoroughly.`;
 
 // The settings accept a fallback model, but the app does not send it to the runner yet (lead
 // decision for the MVP, src/review-settings/README.md), so the form says so instead of promising it.
