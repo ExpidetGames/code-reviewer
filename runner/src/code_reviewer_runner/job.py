@@ -9,7 +9,8 @@ Shape (basis of the runner contract v1, see the lead decisions for CR-10):
       "command": "review",
       "git": {"provider": "github", "baseUrl": "https://api.github.com",
               "token": "<installation token>", "botLogin": "<app slug>[bot]"},
-      "llm": {"provider": "openrouter", "model": "<vendor>/<model>", "apiKey": "<key>",
+      "llm": {"provider": "openrouter",                       // a slug of llm_providers.PROVIDERS
+              "model": "<vendor>/<model>", "apiKey": "<key>",
               "baseUrl": "http://127.0.0.1:<port>/api/v1",     // optional, loopback only (fakes)
               "requireParameters": true,                       // optional, with baseUrl (fakes)
               "maxTokens": 163840,                             // optional, context window
@@ -41,6 +42,12 @@ from typing import Any, NoReturn, cast
 from urllib.parse import SplitResult, urlsplit
 
 from code_reviewer_runner.dynamic_review.prompts import MAX_SKILL_BYTES as MAX_DYNAMIC_SKILL_BYTES
+from code_reviewer_runner.llm_providers import (
+    LlmProviderSpec,
+    provider_for,
+    registered_provider_ids,
+    without_prefix,
+)
 from code_reviewer_runner.platforms import PLATFORMS
 from code_reviewer_runner.result import ErrorCode
 
@@ -134,17 +141,6 @@ RESERVED_OPTIONS = frozenset(
         "PR_REVIEWER__ENABLE_REVIEW_LABELS_EFFORT",
     }
 )
-OPENROUTER_PREFIX = "openrouter/"
-
-
-def with_openrouter_prefix(model: str) -> str:
-    """The model name as PR-Agent needs it to route through OpenRouter."""
-    return model if model.startswith(OPENROUTER_PREFIX) else f"{OPENROUTER_PREFIX}{model}"
-
-
-def without_openrouter_prefix(model: str) -> str:
-    """The model name without the routing prefix, to compare two names."""
-    return model.removeprefix(OPENROUTER_PREFIX)
 
 
 class Command(StrEnum):
@@ -231,13 +227,16 @@ class GitAccess:
 
 @dataclass(frozen=True)
 class LlmAccess:
+    # The slug of the registry entry (`llm_providers.py`) this job's model is reached through.
+    provider: str
     model: str
     api_key: str
     base_url: str | None = None
     max_tokens: int | None = None
     fallback_models: tuple[str, ...] = ()
-    # Whether every request carries OpenRouter's `provider.require_parameters` (#270). True for the
-    # provider itself; a local fake only gets it when the test double that gave it its address asks.
+    # Whether every request carries the provider's require-parameters field (OpenRouter's
+    # `provider.require_parameters`, #270). True for the provider itself when its entry has the
+    # mechanism; a local fake only gets it when the test double that gave it its address asks.
     # `_llm_access` is the one constructor in production and always sets it.
     require_parameters: bool = True
 
@@ -340,19 +339,24 @@ def _git_access(data: dict[str, Any]) -> GitAccess:
 def _llm_access(data: dict[str, Any]) -> LlmAccess:
     llm = _section(data, "llm")
     _check_fields(llm, _LLM_FIELDS, "llm.")
-    if _string(llm, "provider", "llm.") != "openrouter":
-        raise _invalid("llm.provider must be 'openrouter'")
+    provider = provider_for(_string(llm, "provider", "llm."))
+    if provider is None:
+        raise _invalid(
+            f"llm.provider must be one of: {', '.join(sorted(registered_provider_ids()))}"
+        )
     model = _string(llm, "model", "llm.")
     if not _MODEL.fullmatch(model):
         raise _invalid("llm.model contains characters that are not allowed in a model name")
     base_url = _llm_base_url(llm)
     return LlmAccess(
+        provider=provider.id,
         model=model,
         api_key=_secret(llm, "apiKey", "llm."),
         base_url=base_url,
-        require_parameters=_require_parameters(llm, base_url),
+        require_parameters=_require_parameters(llm, base_url)
+        and provider.require_parameters is not None,
         max_tokens=_max_tokens(llm),
-        fallback_models=_fallback_models(llm, model),
+        fallback_models=_fallback_models(llm, model, provider),
     )
 
 
@@ -368,10 +372,10 @@ def _llm_base_url(llm: dict[str, Any]) -> str | None:
 
 
 def _require_parameters(llm: dict[str, Any], base_url: str | None) -> bool:
-    """OpenRouter itself always requires the parameters; only a local fake may differ (#270).
+    """The provider itself always requires the parameters; only a local fake may differ (#270).
 
     `requireParameters` exists for the test doubles that add `llm.baseUrl`: without that address
-    the destination is OpenRouter and there is nothing to switch.
+    the destination is the provider itself and there is nothing to switch.
     """
     if base_url is None:
         if "requireParameters" in llm:
@@ -394,7 +398,9 @@ def _max_tokens(llm: dict[str, Any]) -> int | None:
     return value
 
 
-def _fallback_models(llm: dict[str, Any], primary: str) -> tuple[str, ...]:
+def _fallback_models(
+    llm: dict[str, Any], primary: str, provider: LlmProviderSpec
+) -> tuple[str, ...]:
     if "fallbackModels" not in llm:
         return ()
     value: Any = llm["fallbackModels"]
@@ -403,13 +409,13 @@ def _fallback_models(llm: dict[str, Any], primary: str) -> tuple[str, ...]:
     models: list[Any] = value  # pyright: ignore[reportUnknownVariableType]
     if len(models) > MAX_FALLBACK_MODELS:
         raise _invalid(f"llm.fallbackModels may hold at most {MAX_FALLBACK_MODELS} models")
-    seen = {without_openrouter_prefix(primary)}
+    seen = {without_prefix(provider, primary)}
     for model in models:
         if not isinstance(model, str) or not _MODEL.fullmatch(model):
             raise _invalid("llm.fallbackModels must hold valid model names")
-        if without_openrouter_prefix(model) in seen:
+        if without_prefix(provider, model) in seen:
             raise _invalid("llm.fallbackModels must not repeat a model or the primary model")
-        seen.add(without_openrouter_prefix(model))
+        seen.add(without_prefix(provider, model))
     return tuple(models)
 
 

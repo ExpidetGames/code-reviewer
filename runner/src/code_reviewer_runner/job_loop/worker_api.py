@@ -42,6 +42,7 @@ from code_reviewer_runner.job_loop.http import (
 )
 from code_reviewer_runner.job_loop.jsonvalues import as_object
 from code_reviewer_runner.job_loop.worker_errors import WorkerFailure, WorkerSetupError
+from code_reviewer_runner.llm_providers import registered_provider_ids
 
 _JOB_ID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
 # A heartbeat interval above this would let the 2 minute lease run out between two beats.
@@ -121,7 +122,12 @@ class HttpWorkerApi:
     async def fetch(self, job_id: str) -> WorkerJob:
         path = f"/api/workers/v1/jobs/{self._safe_id(job_id)}"
         features = ",".join(WORKER_FEATURES)
-        reply = await asyncio.to_thread(self._send, "GET", f"{path}?features={features}", None)
+        # #424: and the providers of the registry, a comma separated list like the features. An app
+        # from before ignores the parameter; a newer one reads its absence as `openrouter`.
+        providers = ",".join(registered_provider_ids())
+        reply = await asyncio.to_thread(
+            self._send, "GET", f"{path}?features={features}&llmProviders={providers}", None
+        )
         if reply.status in (404, 405, 501) and error_code(reply) is None:
             # An answer of a Worker API route always has the contract's error body.
             raise WorkerSetupError(

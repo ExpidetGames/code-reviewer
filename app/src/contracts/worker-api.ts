@@ -33,7 +33,10 @@ export type RunnerJobInput = {
     botLogin: string;
   };
   llm: {
-    provider: "openrouter";
+    /**
+     * #424: the slug of an LLM provider, checked against the registry of the runner (`runner/src/code_reviewer_runner/llm_providers.py`), which refuses one it has none for with invalid_job. The app sends a provider only to a caller that advertised it in `llmProviders`; this release knows KnownLlmProvider.
+     */
+    provider: string;
     model: string;
     apiKey: string;
     baseUrl?: string;
@@ -91,6 +94,14 @@ export type RunnerResult = {
   [k: string]: unknown;
 };
 
+/**
+ * #424: the query string of GET /api/workers/v1/jobs/{id}, as an object of its parameters. Both are optional comma separated lists: `features` (the names of KnownClaimFeature, unknown names are ignored) and `llmProviders` (slugs of LlmProviderId: the LLM providers the Worker can run; absent means `openrouter`). The app ignores the list today (the claim issue of epic #420 will use it); it still always sends `openrouter`.
+ */
+export interface WorkerJobDetailsRequest {
+  features?: string;
+  llmProviders?: string;
+  [k: string]: unknown;
+}
 /**
  * 200 from GET /api/workers/v1/jobs/{id}: the job, with the git token and the model key minted at this call. Cache-Control is always no-store. The credential is not repeated here and there is no lease token: the credential is the proof of the claim.
  */

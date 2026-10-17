@@ -27,10 +27,10 @@ process (other secrets, stray CONFIG or GITHUB variables) reaches PR-Agent.
 import re
 from collections.abc import Callable, Mapping
 
-from code_reviewer_runner.job import RESERVED_OPTIONS, Job, with_openrouter_prefix
+from code_reviewer_runner.job import RESERVED_OPTIONS, Job
+from code_reviewer_runner.llm_providers import require_provider, with_prefix
 from code_reviewer_runner.platforms import Platform, platform_for
 
-OPENROUTER_API_BASE = "https://openrouter.ai/api/v1"
 # The Dynaconf setting that decides whether `@format`, `@jinja`, ... are evaluated at all.
 AUTO_CAST_SETTING = "AUTO_CAST_FOR_DYNACONF"
 _INTEGER = re.compile(r"[+-]?[0-9]{1,18}")
@@ -71,7 +71,8 @@ def build_environment(job: Job, parent: Mapping[str, str]) -> dict[str, str]:
     """The complete process environment for PR-Agent: no secret and no value from the job."""
     platform = _platform_of(job)
     env = {name: parent[name] for name in PASSTHROUGH_VARIABLES if name in parent}
-    pinned_model = with_openrouter_prefix(job.llm.model)
+    provider = require_provider(job.llm.provider)
+    pinned_model = with_prefix(provider, job.llm.model)
     env.update(
         {
             # Read by Dynaconf when its settings are created, i.e. before the first variable is
@@ -86,7 +87,7 @@ def build_environment(job: Job, parent: Mapping[str, str]) -> dict[str, str]:
             "CONFIG__MODEL": pinned_model,
             "CONFIG__MODEL_WEAK": pinned_model,
             "CONFIG__MODEL_REASONING": pinned_model,
-            "OPENROUTER__API_BASE": job.llm.base_url or OPENROUTER_API_BASE,
+            provider.api_base_variable: job.llm.base_url or provider.default_api_base,
             "LITELLM_LOCAL_MODEL_COST_MAP": "True",
             "LITELLM_LOG": "ERROR",
         }
@@ -98,7 +99,7 @@ def build_secret_settings(job: Job) -> dict[str, str]:
     """The credentials of the job as typed settings. Never log or print this mapping."""
     return {
         _platform_of(job).token_setting: job.git.token,
-        "openrouter.key": job.llm.api_key,
+        require_provider(job.llm.provider).key_setting: job.llm.api_key,
     }
 
 
@@ -108,6 +109,7 @@ def build_typed_settings(job: Job) -> dict[str, bool | int | str | list[str]]:
     The order matters: the switch that stops Dynaconf from evaluating values comes first, because
     every later `set` of a text goes through its parser.
     """
+    provider = require_provider(job.llm.provider)
     settings: dict[str, bool | int | str | list[str]] = {
         AUTO_CAST_SETTING: False,
         "config.publish_output": True,
@@ -130,7 +132,7 @@ def build_typed_settings(job: Job) -> dict[str, bool | int | str | list[str]]:
         "config.num_retries": 0,
         # The job's list, or none: the default fallback model belongs to another vendor.
         "config.fallback_models": [
-            with_openrouter_prefix(model) for model in job.llm.fallback_models
+            with_prefix(provider, model) for model in job.llm.fallback_models
         ],
         # A repository file must not move the place its own settings are read from (the default
         # branch) and must not add settings files of directories.

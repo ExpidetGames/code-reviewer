@@ -73,6 +73,8 @@ def test_a_claim_with_a_job_returns_the_lease_and_the_input_and_sends_token_and_
     assert app.requests[0]["body"] == {
         "engines": ["pr-agent"],
         "features": ["dynamic_capabilities", "supersede"],
+        # #424-T08: and the providers its registry holds.
+        "llmProviders": ["openrouter"],
     }
     assert app.violations == []
 
@@ -94,6 +96,7 @@ def test_a_claim_advertises_the_configured_engines(app: FakeApp) -> None:
     assert app.requests[0]["body"] == {
         "engines": ["pr-agent", "opencode"],
         "features": ["dynamic_capabilities", "supersede"],
+        "llmProviders": ["openrouter"],
     }
     assert app.violations == []
 

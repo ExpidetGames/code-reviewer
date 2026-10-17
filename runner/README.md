@@ -223,7 +223,7 @@ The job is JSON on stdin (the shape is documented in `src/code_reviewer_runner/j
 | `prUrl`, `command` | `https://<host>/<owner>/<repo>/pull/<n>` on the host of `git.baseUrl`; `review` (the only command; `/ask`, `/improve` and `/describe` were removed) |
 | `args` | legacy field of the removed `/ask`: a previous release may send it; the runner accepts and ignores it and never hands it to PR-Agent |
 | `git` | `provider` (`github`), `baseUrl`, `token` (installation token), `botLogin` (`<app slug>[bot]`) |
-| `llm` | `provider` (`openrouter`), `model`, `apiKey`; optional `baseUrl` (loopback only, for test fakes), `requireParameters` (only with `baseUrl`, for test fakes: see "Required parameters on OpenRouter"), `maxTokens` and `fallbackModels` (see below) |
+| `llm` | `provider` (a slug of the provider registry, see "LLM providers"; `openrouter` is the only one), `model`, `apiKey`; optional `baseUrl` (loopback only, for test fakes), `requireParameters` (only with `baseUrl`, for test fakes: see "Required parameters on OpenRouter"), `maxTokens` and `fallbackModels` (see below) |
 | `env` | optional options of the PR-Agent tools, as strings; one option per key (`PR_REVIEWER__NUM_MAX_FINDINGS`, never a second `__`). The app sends only `PR_REVIEWER__*`; the removed tools' families (`PR_DESCRIPTION__*`, `PR_CODE_SUGGESTIONS__*`, `PR_QUESTIONS__*`) are accepted for v1 compatibility and ignored. Nothing else is accepted. See "Settings policy" for how the values are read. |
 | `reviewKind`, `dynamic`, `base` | #195: a tagged **Dynamic** job. Absent means a Diff job (the legacy shape). `dynamic` is a closed object `{ model, skill, limits: { maxFindings } }` — model/skill/limits only, the skill is literal data and no field can add a command, a core override, a permission or an endpoint. `base` is `{ repository, baseRef, headSha, previousReviewedSha, comparison }`, the checkout facts; `comparison` is a declared mode, not proof of completeness. `previousReviewedSha` is the head of the last successful review of the same kind (#199), or null; the optional `attemptedShas` (#255) lists the heads of earlier jobs of that pull request that did not succeed (at most 20, distinct; absent means none), and the optional `attemptedShasTruncated` (#257, a boolean the app only sends as `true`) says the list was cut: only then does the publisher rewrite a bot-owned summary whose state head it cannot account for, with a full review (the checkout is full too; earlier findings are not carried over, the summary says so in a one-shot notice and the result log carries `state_reset_attempted_shas_truncated`). The skill is untrusted project data, bounded to 16 KiB of UTF-8 bytes; the runner composes it after its own fixed core (see "Dynamic Review prompts"). |
 
@@ -743,7 +743,10 @@ How a job becomes PR-Agent configuration (`pr_agent_config.py`, `pr_agent_runtim
   publishing switches) and the sections in `PROTECTED_SECTIONS`, which are pinned as a whole so a
   key PR-Agent does not declare cannot be added either (`model_routing`, which can swap the model per
   pull request size, `openrouter` provider routing and limits, `litellm`, `openai`, `azure_ad`,
-  `aws`, `vertexai` and every provider section PR-Agent reads a key or endpoint from). A unit test
+  `aws`, `vertexai` and every provider section PR-Agent reads a key or endpoint from). The key,
+  the endpoint and the section of every provider of the registry (`llm_providers.py`) are added to
+  both lists when the guard takes its snapshot, so a provider the runner learns to use is pinned
+  without touching the guard (`protected_settings`, `protected_sections`). A unit test
   feeds a malicious file with all of these through PR-Agent's own merge function; another compares
   the provider sections with PR-Agent's own list, so a new provider after an upgrade is noticed.
 - **The review comment never names the model** (#280). PR-Agent can append the model to the comment it publishes:
@@ -778,6 +781,41 @@ How a job becomes PR-Agent configuration (`pr_agent_config.py`, `pr_agent_runtim
 - `job.env` cannot carry credentials, endpoints or model settings. The only LLM endpoint override
   is `llm.baseUrl`, accepted for loopback addresses.
 
+## LLM providers (#424)
+
+`llm_providers.py` is the registry of the providers the runner can talk to, keyed by the slug a job
+names in `llm.provider` (ADR 0005, 2.4). Adding a provider is one entry; no other module names a
+provider. An entry holds:
+
+| Field | OpenRouter | Read by |
+|---|---|---|
+| `litellm_prefix` | `openrouter/` | `pr_agent_config.py` (the model roles and the fallbacks), `job.py` (the fallback comparison) |
+| `default_api_base`, `api_base_variable` | `https://openrouter.ai/api/v1`, `OPENROUTER__API_BASE` | `pr_agent_config.py`, `runner.py` (the Dynamic upstream) |
+| `key_setting`, `api_base_setting` | `openrouter.key`, `openrouter.api_base` | `pr_agent_config.py` (the secret), `repo_settings_guard.py` (pinned, with the section) |
+| `require_parameters` | method `_apply_openrouter_request_controls`, body `provider: {require_parameters: true}` | `require_parameters_patch.py`, the Dynamic proxy |
+| `no_endpoint_for_parameters` | the 404 texts of "Required parameters on OpenRouter" | the Dynamic proxy |
+| `cost_extractor` | `usage.cost` as an exact decimal | the Dynamic proxy (the Diff meter still reads `usage.cost` itself; it follows with the second provider) |
+
+- **Jobs.** `parse_job` looks `llm.provider` up in the registry and refuses a slug it has no entry
+  for with `invalid_job` (the contract only fixes the form, `^[a-z][a-z0-9_]{1,31}$`). The parsed
+  `Job.llm.provider` is what every later module reads; a job of the previous release names
+  `openrouter` and is configured exactly as before.
+- **Advertising.** The runner lists its registry: `llmProviders` in the claim body and
+  `llmProviders=<slugs>` (comma separated, next to `features`) in the Worker's details request. An
+  app of the previous release ignores both; an app that gets neither reads it as `["openrouter"]`,
+  which is what a runner of the previous release can run. A new app therefore never hands an old
+  runner a job it cannot read. The app still only sends `openrouter`.
+  The app only parses and validates the list today; it does not use it before the claim issue of
+  epic #420 (#432).
+- **Checks of an entry.** The `require_parameters` field must not be one the Dynamic proxy forwards
+  from the engine (`PROXY_FORWARDED_FIELDS`): the proxy sets it after the copy and would overwrite what
+  the engine sent, so such an entry cannot be built. The key and the base setting share one section.
+  `ModelProxy` and `apply_require_parameters_patch` take the provider as a required argument, with no
+  default.
+- **Tests.** A second, fake provider (`tests/unit/support.py`, `fake_provider`) is registered for the
+  duration of a test to prove that the job parser, the PR-Agent configuration, the patch, the proxy
+  and the guard follow the entry. There is no second real provider and no cost policy for one yet.
+
 ## Required parameters on OpenRouter (#270)
 
 OpenRouter may route a request to a provider that silently ignores a parameter it does not support
@@ -791,13 +829,13 @@ provider and expresses no preference, so it is no provider-specific routing (epi
 - **Dynamic Review:** the model proxy adds the field to the body it forwards
   (`ModelProxy(require_parameters=...)`). The engine still cannot send `provider` or any other
   routing field: such a request stops the run with `dynamic_policy_violation` and never reaches the
-  provider. A 404 whose text says that no endpoint "can handle the requested parameters" or "supports tool use" / "the provided 'tool_choice' value" (the wordings seen from OpenRouter; `openrouter_parameters.py`) ends the run with
+  provider. A 404 whose text says that no endpoint "can handle the requested parameters" or "supports tool use" / "the provided 'tool_choice' value" (the wordings seen from OpenRouter; `llm_providers.py`) ends the run with
   `dynamic_model_features_unsupported`; any other 404 (an unknown model, a data policy) stays `model_unknown`. No retry on another
   model or provider.
 - **Diff Review:** PR-Agent 0.47.0 has no setting for it (`litellm.extra_body` takes three other
   keys, and `openrouter.provider_only` / `provider_order` are provider selectors). The runner wraps
   `LiteLLMAIHandler._apply_openrouter_request_controls` for the length of the job
-  (`require_parameters_patch.py`) and adds the field to the `extra_body` PR-Agent has built; LiteLLM
+  (`require_parameters_patch.py`, the method name and the body field come from the provider's registry entry) and adds the field to the `extra_body` PR-Agent has built; LiteLLM
   sends it verbatim. The patch refuses a handler class whose method has another shape, and
   `PATCHED_FOR_VERSION` (checked at the start of every job) ties it to the pinned PR-Agent. The
   engine suite (`tests/engine/test_engine_require_parameters.py`) reads the request that reaches the

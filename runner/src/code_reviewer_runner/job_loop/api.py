@@ -40,6 +40,7 @@ from code_reviewer_runner.job_loop.http import (
     send,
 )
 from code_reviewer_runner.job_loop.jsonvalues import as_object
+from code_reviewer_runner.llm_providers import registered_provider_ids
 
 _JOB_ID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
 # A heartbeat interval above this would let the 2 minute lease run out between two beats.
@@ -164,7 +165,13 @@ class HttpRunnerApi:
         reply = await asyncio.to_thread(
             self._send,
             "/claim",
-            {"engines": list(self._engines), "features": list(CLAIM_FEATURES)},
+            {
+                "engines": list(self._engines),
+                "features": list(CLAIM_FEATURES),
+                # #424: the providers this runner can run; an app sends a job for no other, and a
+                # previous-release app ignores the key (absent means `openrouter` to a newer one).
+                "llmProviders": list(registered_provider_ids()),
+            },
         )
         if reply.status == 204:
             return None
