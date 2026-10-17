@@ -54,6 +54,7 @@ written on `26126076` and are the evidence for the code facts below. Production 
 | 0001, 2.8 addendum: one operator key, "until managed tiers replace this" | One operator key **per provider**; tiers are replaced by catalog entries. |
 | 0001, section 6: billing and prices out of scope | In scope, as an optional module of the app (2.10 to 2.17). The operator API of #268 stays and keeps working for manual use (2.9). |
 | 0001, 2.7: pricing at instance level, "later" | Plans and prices are instance-level admin data. |
+| #276, #277: the key mode is a per-workspace entitlement that the operator sets | Unchanged without billing. While billing is on, the key mode of a billed workspace is the **key mode of its pinned plan version** (M18), and the own key needs an `own` plan (M19, 2.8). |
 
 ### 2.2 Decisions of the maintainer (binding)
 
@@ -62,10 +63,10 @@ written on `26126076` and are the evidence for the code facts below. Production 
 | M1 | **Providers** are a code-level list of supported LLM providers. Today only OpenRouter, built as an adapter registry so that another can be added. API keys are per provider at workspace level. Each project picks provider and model, separately for Diff and for Dynamic. |
 | M2 | **Managed workspaces** (instance-managed key mode): the provider keys are set in the admin portal. Projects can only use models the operator released, from a **model catalog** with free names set in the admin portal. Real model ids are never shown to members. This **replaces** the fixed Low/Medium/High tiers (#280, #283). |
 | M3 | **Billing is Paddle Billing** (Merchant of Record), not Stripe. There is no separate billing service or database: an optional module inside the app (`app/src/billing/`), off unless Paddle is configured, with its own tables in the app database. The code is public, but no amounts are in code. |
-| M4 | **Plans** are editable in the admin dashboard: name, price, limits, `modelAccess` and the Paddle linkage. A plan grants run limits, cost limits and the catalog entries a workspace may use (`modelAccess`), all reusing the entitlements machinery of #271 and #277. |
+| M4 | **Plans** are editable in the admin dashboard: name, price, key mode, limits, `modelAccess` and the Paddle linkage. A plan grants a key mode, run limits, cost limits and the catalog entries a workspace may use (`modelAccess`, managed plans only), all reusing the entitlements machinery of #271 and #277. |
 | M5 | **Hybrid catalog.** The app creates new prices in Paddle through the API and **never edits the amount of an existing price**; the operator can also link price ids created by hand in Paddle. Link-and-validate ships first, then "create a new price version". |
-| M6 | **Plan versions.** Every subscription is pinned to a **plan version**: a fixed price together with fixed limits (run limits, cost limits, `modelAccess`). A plan configuration in the admin dashboard bundles its price and its limits; changing the price or the limits creates a new version. Subscribers keep their version, price and limits, until they change plan. The app stores which version each subscription is on and enforces that version's limits. |
-| M7 | **Free plan.** A workspace without a subscription falls onto a configurable **Free plan** (defaults: 10 Diff and 2 Dynamic runs per month). It is a plan like the others, with editable limits and `modelAccess`, but has no Paddle price and no checkout. |
+| M6 | **Plan versions.** Every subscription is pinned to a **plan version**: a fixed price together with a fixed key mode and fixed limits (run limits, cost limits, `modelAccess`). A plan configuration in the admin dashboard bundles its price, its key mode and its limits; changing the price, the key mode or the limits creates a new version. Subscribers keep their version, price and limits, until they change plan. The app stores which version each subscription is on and enforces that version's key mode and limits. |
+| M7 | **Free plan.** A workspace without a subscription falls onto a configurable **Free plan** (defaults: 10 Diff and 2 Dynamic runs per month). It is a plan like the others, with editable limits and `modelAccess`, but has no Paddle price and no checkout, and its key mode is always `managed` (M18). |
 | M8 | `past_due` gets **7 days of grace**, then managed reviews pause. |
 | M9 | **Yearly plans** are in v1. Whether a yearly option is offered is **configurable per plan**. Limits are still per month. |
 | M10 | **Plan changes.** An upgrade applies immediately with proration. A downgrade applies at the end of the period, scheduled by the app. |
@@ -76,6 +77,8 @@ written on `26126076` and are the evidence for the code facts below. Production 
 | M15 | Luca creates the Paddle sandbox and live accounts himself. |
 | M16 | Tests use a fake Paddle API and a webhook signer in `fakes/`, with duplicates, reordering and lost responses. The sandbox checks are a go-live checklist issue. |
 | M17 | An optional trial is **off by default** and configurable per plan. |
+| M18 | **A plan has a key mode** (2.11): `managed` (the operator's key and the released catalog entries) or `own` (the workspace's own provider keys). The **Free plan is `managed`**, with defaults of 10 Diff and 2 Dynamic runs per month on the operator's released models; its key mode cannot be changed. A paid plan may be `managed` or `own`. An **own-key plan** (for example an "Own key" plan at a price that covers the operator's server costs) is a paid plan with key mode `own`: its run limits are **unlimited by default** but stay configurable like on any plan; the operator's cost limit does not apply to it (that limit counts runs on the operator's key), the optional own-key cost limit (#361) may still be set. The key mode is pinned with the plan version, together with price, limits and `modelAccess`. `modelAccess` applies to `managed` plans only; an `own` plan chooses provider and model freely (epic #420). |
+| M19 | **Reviewing with the workspace's own key needs a paid plan with key mode `own`** while billing is on. Without a subscription (the Free plan) the own key is **not used**: Free reviews run only on the operator's models within the Free limits. A workspace that has stored its own key but has no `own` plan sees a clear notice with a link to Manage plan, and its jobs end with the stable code `own_key_requires_plan`; they never fall back silently, neither to the operator's key nor to the own key. **Billing off (self-hosters): nothing changes**, the own key works unlimited as today. Prices stay admin data (M12: USD, tax-inclusive); no amount goes into the repository. |
 
 ### 2.3 Lead defaults (default, confirm with Luca)
 
@@ -92,6 +95,7 @@ list in a comment.
 | C6 | **Changing the model behind a released entry is allowed** after a re-check, with an audit line and a confirmation that shows how many projects use the entry. | catalog admin |
 | C7 | **Own mode may select a provider without a stored key.** The form warns; the job fails with `llm_not_configured`, reason `no_key`. | settings UI, claim |
 | C8 | **No operator API for the catalog.** Billing is in-app. `modelAccess` stays in the entitlements. | entitlements |
+| C9 | **What triggers `own_key_requires_plan` (M19):** the effective entitlements come from billing (a row with source `billing`, or the Free plan written to `default_entitlements`), their key mode is `managed`, **and the workspace holds a stored own key** (a workspace key of any provider). The way out is to buy an `own` plan or to delete the stored key, after which the workspace reviews on the operator's models within its plan. A workspace without a stored key is unaffected. A `manual` entitlements row is never subject to this rule: the operator decides its key mode. | #442, #444 |
 
 ### 2.4 Providers: an adapter registry (decisions M1, C2)
 
@@ -199,6 +203,12 @@ selection, not the other way round (today `loadLlm` runs first and knows neither
 0. **Admission, unchanged and first** (`entitlements_invalid`, `workspace_suspended`, run limits,
    cost limits), inside the claim transaction. A refused job has no credential and no usage record.
 1. **Key mode** from the effective entitlements: `own`, `managed`, or unreadable (fail closed).
+   **Own key needs an own plan (M19, C9).** If the entitlements come from billing (source `billing`,
+   or the Free plan in `default_entitlements`), the key mode is `managed` and the workspace holds a
+   stored own key, the job ends with `own_key_requires_plan`: no credential, no usage record, no
+   fallback to the operator's key or to the own key. The decision uses the entitlements and the
+   workspace's key rows only; **it reads no billing table and no billing setting**. A `manual`
+   entitlements row and an instance without billing never trigger it.
 2. **Effective settings** of the project for the **job's pinned kind** (never the project's current
    kind).
 3. **Own:** provider is `settings.provider` or the default; model is the project, workspace or
@@ -224,12 +234,15 @@ cannot disagree. An `own` claim reads no catalog row (a test pins zero catalog q
 New stable codes: `managed_model_unavailable` (replaces `managed_tier_unavailable`, which stays in the
 Runs copy for old rows), `llm_provider_unsupported`, `PROVIDER_UNKNOWN`, `CATALOG_ENTRY_UNKNOWN`,
 `CATALOG_ENTRY_NOT_RELEASED`, `CATALOG_ENTRY_KIND_MISMATCH`, `CATALOG_ENTRY_NOT_ALLOWED`,
-`name_reveals_model`, `catalog_entry_invalid`.
+`name_reveals_model`, `catalog_entry_invalid`, and (billing, M19) `own_key_requires_plan` (a stable job
+error code with member copy that names no model and links to Manage plan).
 
 ### 2.9 Entitlements gain `modelAccess` and a source (C8, M4)
 
 - `modelAccess: { catalogEntries: string[] | null }`; `null` or absent means every released entry,
-  `[]` means none. Stored as a nullable JSON column `model_access` on `workspace_entitlements` and as
+  `[]` means none. It is read **only for `managed` entitlements**: an `own` workspace never reads the
+  catalog and never evaluates `modelAccess` (a stored value is kept and ignored, so a switch back to
+  `managed` finds it again). Stored as a nullable JSON column `model_access` on `workspace_entitlements` and as
   a field of `default_entitlements`, read leniently (a missing field is `null`, never
   `entitlements_invalid`). Unknown ids are accepted (a plan may be written before the entry) and match
   nothing. One function `entryAllowed(entitlements, entry)` serves the claim and the picker.
@@ -237,7 +250,9 @@ Runs copy for old rows), `llm_provider_unsupported`, `PROVIDER_UNKNOWN`, `CATALO
   (`managed_model_unavailable`, reason `entry_not_allowed`) and the project page shows a notice.
 - **Source marker.** `workspace_entitlements` gets `source` (`manual` or `billing`). Any write through
   the operator API or an admin action stores `manual`; only the billing module writes `billing`.
-  **Billing never writes or deletes a row whose source is `manual`.** This is the whole protection
+  The Free plan that billing writes to `default_entitlements` carries the same marker `billing`, which
+  is how the claim tells a billed workspace from an operator-provisioned one (2.8, C9) without reading
+  a billing table. **Billing never writes or deletes a row whose source is `manual`.** This is the whole protection
   of manually provisioned workspaces (for example a later Enterprise arrangement); there is no
   provisioning flow in v1 (M13).
 - The operator API keeps working without billing exactly as today (off by default). While billing is
@@ -282,7 +297,7 @@ billing_plans(id, plan_key unique, name, description, sort,
   paddle_product_id null, created_at, updated_at)
 
 billing_plan_versions(id, plan_id, number, role 'current' | 'legacy',
-  key_mode 'own' | 'managed',
+  key_mode 'own' | 'managed',           -- pinned with the version; 'managed' for kind 'free'
   limits json,                          -- the entitlement limits of #271/#361
   model_access json null,               -- catalog entry ids; null = all released
   monthly_price_id null, yearly_price_id null,    -- billing_plan_prices
@@ -307,9 +322,19 @@ billing_plan_prices(id, plan_id, paddle_price_id unique, paddle_env,
   `default_entitlements` whenever billing is on and whenever the Free plan gets a new version, so every
   workspace without a billing row falls onto it through the existing "no row means default" rule.
   Changing the Free plan applies to all Free workspaces at once (there is no subscription to
-  protect). Defaults: 10 Diff runs and 2 Dynamic runs per month. Its key mode and `modelAccess` are
-  editable; the seeded key mode is `managed` and the seeded `modelAccess` is empty until the operator
-  picks entries.
+  protect). Defaults: 10 Diff runs and 2 Dynamic runs per month. **Its key mode is `managed` and cannot
+  be changed** (M18, M19: no review on the own key without a paid `own` plan; saving `own` on a `free`
+  plan is refused); its `modelAccess` is editable and seeded empty until the operator picks entries.
+- **Key mode of a plan** (M18). Every plan version has `key_mode` (`managed` or `own`), pinned with the
+  version like price and limits. A `managed` version runs on the operator's key and on the released
+  catalog entries its `modelAccess` allows, with the usual limits including the operator's cost limit.
+  An `own` version is sellable only for a `paid` plan and runs on the workspace's own provider keys,
+  with provider and model chosen freely per project (epic #420): `model_access` must be `null`
+  (`model_access_requires_managed_plan`) and the operator's cost limit `managedCostLimitMicroUsd` must
+  be `null` (the existing `cost_limit_requires_managed_key`). **Run limits of an `own` plan are
+  unlimited by default** (`null`) but stay configurable like on any plan, and the optional own-key cost
+  limit `ownKeyCostLimitMicroUsd` (#361) may be set. A form default of "unlimited" is not an amount in
+  code. Which prices and limits an "Own key" plan has is admin data; the repository holds none.
 - **Enterprise** is a plan of kind `contact`: it shows "Please contact us" with the configured link or
   email and has no versions, no price and no checkout (M13).
 - **Yearly** (M9). A version has an optional yearly price; the checkout offers the yearly option only
@@ -386,10 +411,10 @@ the same validation as the operator API (`validateEntitlements`).
 
 | Subscription state | Entitlements |
 |---|---|
-| `active`, `trialing` | the pinned version's key mode, limits and `modelAccess`; `planLabel` is the plan name |
+| `active`, `trialing` | the pinned version's key mode, limits and `modelAccess` (`modelAccess` only for `managed`), source `billing`; `planLabel` is the plan name. An `own` version gives `keyMode: own` and its run limits (unlimited unless set) |
 | `past_due`, first 7 days (`past_due_since` plus `graceDays`) | unchanged; the plan page shows a banner with the portal link |
-| `past_due` after the grace, `paused` | `suspended` with `suspensionCode` `payment_overdue` or `subscription_paused`: managed reviews pause with a clear refusal (`workspace_suspended`) |
-| `canceled`, or ended | the billing row is **deleted**, so the Free plan (the default) applies |
+| `past_due` after the grace, `paused` | `suspended` with `suspensionCode` `payment_overdue` or `subscription_paused`: reviews pause, on either key mode, with a clear refusal (`workspace_suspended`) |
+| `canceled`, or ended | the billing row is **deleted**, so the Free plan (the default, `managed`) applies; an own key the workspace still holds is then not used and its jobs end `own_key_requires_plan` (M19) |
 | scheduled change `cancel` | unchanged until `canceled` arrives; the plan page shows the end date |
 | price not mapped to any version | unchanged, outcome `price_unmapped`, a log line with ids only; never a suspension |
 | workspace row is `manual` | not touched, outcome `workspace_manual` |
@@ -421,6 +446,10 @@ prices in the same interval.
   new price. The workspace keeps the old version's entitlements until the period has ended. If the
   window was missed, the change is applied after the renewal with `prorated_immediately` (a credit for
   the unused part) and an alert code is logged.
+- **A change can cross key modes** (for example from an `own` plan to a `managed` one). Entitlements
+  follow the pin as for any change: the own key keeps working until the pin moves (a downgrade: the
+  period end), after which a stored own key is not used and the workspace sees the M19 notice. The
+  confirmation step names the key mode of the target plan.
 - **Blocked states** are shown, not hidden: `past_due`, a pending scheduled change (cancel), a pending
   downgrade, and the 30 minutes before a renewal give stable codes (`plan_change_blocked_*`).
 - **Cancel and payment methods** are done in the Paddle customer portal (cancel at period end,
@@ -445,7 +474,7 @@ stop the other steps of the sweep.
 | Table or setting | Level | New in |
 |---|---|---|
 | `model_catalog_entries`, instance setting `catalog_defaults` | instance | epic #420 |
-| `workspace_entitlements.model_access`, `.source`; `default_entitlements.modelAccess` | workspace / instance | epic #420 (`model_access`), epic #421 (`source`) |
+| `workspace_entitlements.model_access`, `.source`; `default_entitlements.modelAccess`, `.source` | workspace / instance | epic #420 (`model_access`), epic #421 (`source`) |
 | `usage_records.catalog_entry_id`, `.catalog_entry_name`, `.llm_provider` | workspace | epic #420 |
 | settings JSON: `provider`, `dynamicProvider`, `catalogEntryDiff`, `catalogEntryDynamic` | workspace | epic #420 |
 | `billing_plans`, `billing_plan_versions`, `billing_plan_prices`, `billing_webhook_events` | instance | epic #421 |
@@ -492,6 +521,10 @@ stop the other steps of the sweep.
 | Billing turned off again | | routes inert; rows stay; `default_entitlements` returns to the operator; existing billing rows keep working until changed |
 | Catalog entry retired or not allowed any more | project cannot start a managed review | fails closed with `managed_model_unavailable` and a notice (C5) |
 | Provider key missing | job cannot start | `llm_not_configured` with a reason; the key of another provider is never used |
+| Billing on, workspace on the Free plan or any `managed` plan, with a stored own key | the job must not run on the operator's key behind the workspace's back, nor on the own key without a plan | `own_key_requires_plan`, no credential, no usage record; the plan page and the LLM access page show a notice with a link to Manage plan; deleting the key or buying an `own` plan ends it (M19, C9) |
+| `own` plan, no stored key for the selected provider | job cannot start | `llm_not_configured`, reason `no_key`, as without billing |
+| `own` subscription canceled, suspended or downgraded to a `managed` plan | the own key must stop at the right moment | cancel: row deleted, Free plan, `own_key_requires_plan`; suspension: `workspace_suspended`; downgrade: at the period end, the pin moves, `own_key_requires_plan` |
+| Billing enabled on an instance whose workspaces use their own key | those workspaces stop reviewing until they buy an `own` plan or delete the key | the enabling step names the count; the notice and the code say what to do; self-hosters who never enable billing are unaffected |
 
 ## 4. Alternatives considered
 
@@ -525,6 +558,12 @@ stop the other steps of the sweep.
   iteration: it forces a re-encryption step because the ciphertext binds the name.
 - **Creating Paddle customers through the API with the member's email.** Rejected: it sends personal
   data we do not need to send, and a duplicate email is an extra failure. The checkout collects it.
+- **The own key stays usable on the Free plan** (or on every paid plan). Rejected by M19: the own key
+  is what a paid plan sells (it covers the server costs); a key mode is a property of the plan.
+- **Falling back to the operator's key when a workspace without an `own` plan holds its own key.**
+  Rejected: it spends the operator's money behind the workspace's back and hides the cause. The job
+  ends with `own_key_requires_plan` instead.
+- **Falling back to the own key when the plan is `managed`.** Rejected: that is the free ride M19 closes.
 - **Per-workspace default catalog entry.** Rejected (C3): the project-only rule of the Dynamic model
   already exists, and one instance default per kind is enough.
 
@@ -548,7 +587,13 @@ stop the other steps of the sweep.
 - The tier removal is a breaking change of the operator API (`/model-tiers`), accepted because
   production is fresh (C1, to be confirmed by a read-only count).
 - Enabling billing on an instance with workspaces on their own key moves them onto the Free plan, whose
-  seeded key mode is `managed`. The enabling step in the admin portal says so and shows the count.
+  key mode is `managed` (M18). Those workspaces stop reviewing on their own key until they buy an `own`
+  plan or delete the key; their jobs end with `own_key_requires_plan` (M19). The enabling step in the
+  admin portal says so and shows the count. Without billing nothing changes. The operator has to create
+  an `own` plan before it enables billing on such an instance, otherwise these workspaces have nothing
+  to buy.
+- The claim learns one more case (a billed `managed` workspace with a stored own key), decided from
+  entitlements and key rows only; the claim still reads no billing table.
 - Docs to update with the issues: `src/llm/README.md`, `src/model-tiers/README.md` (replaced by a
   catalog README), `src/review-settings/README.md`, `src/runner-api/README.md`,
   `src/workspaces/README.md`, `src/operator-api/README.md`, `src/db/README.md`,
@@ -584,3 +629,5 @@ stop the other steps of the sweep.
 - A subscriber migration tool (moving existing subscribers to a newer plan version or price).
 - Refund handling in the app, invoices in the app, dunning emails (Paddle's job).
 - Sales tax or VAT calculation in the app.
+- Mixing key modes inside one workspace (own key for some projects, operator models for others): a plan has one key mode.
+- Choosing amounts for the "Own key" plan or any other plan: admin data, a business decision.
