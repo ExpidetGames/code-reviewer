@@ -2,7 +2,12 @@
 
 import { describe, expect, it } from "vitest";
 import { pairToMeta, type SnapshotPair } from "./pair.ts";
-import { livePair, pairOfDeployment, type VercelAuth } from "./vercel-api.ts";
+import {
+  livePair,
+  pairOfDeployment,
+  productionDeployment,
+  type VercelAuth,
+} from "./vercel-api.ts";
 
 const AUTH: VercelAuth = {
   token: "vercel-token-not-a-real-one-0123456789",
@@ -149,5 +154,64 @@ describe("the pair of the live production deployment", () => {
       pair: PAIR,
     });
     expect(seen[0]?.url.pathname).toBe("/v13/deployments/dpl_old01");
+  });
+});
+
+describe("whether a deployment is a ready production deployment of the project", () => {
+  const ready =
+    (overrides: Record<string, unknown> = {}) =>
+    () =>
+      json({
+        id: "dpl_old01",
+        projectId: AUTH.projectId,
+        ownerId: AUTH.teamId,
+        target: "production",
+        readyState: "READY",
+        ...overrides,
+      });
+
+  // #403-T18
+  it("says yes for a ready production deployment of this project and team, by id or by address", async () => {
+    const { fetch } = platform({
+      "/v13/deployments/dpl_old01": ready(),
+      "/v13/deployments/example-abc.vercel.app": ready(),
+    });
+
+    expect(await productionDeployment(AUTH, "dpl_old01", fetch)).toBe("yes");
+    expect(
+      await productionDeployment(AUTH, "example-abc.vercel.app", fetch),
+    ).toBe("yes");
+  });
+
+  // #403-T18
+  it.each([
+    ["another project", { projectId: "prj_other" }],
+    ["another team", { ownerId: "team_other" }],
+    ["a preview deployment", { target: null }],
+    ["a deployment that is not ready", { readyState: "ERROR" }],
+  ])("says no for %s", async (_name, overrides) => {
+    const { fetch } = platform({
+      "/v13/deployments/dpl_old01": ready(overrides),
+    });
+
+    expect(await productionDeployment(AUTH, "dpl_old01", fetch)).toBe("no");
+  });
+
+  // #403-T18
+  it("says it does not know, rather than no, when the platform cannot be asked", async () => {
+    const { fetch } = platform({
+      "/v13/deployments/dpl_old01": () => json({}, 500),
+    });
+
+    expect(await productionDeployment(AUTH, "dpl_old01", fetch)).toBe(
+      "unavailable",
+    );
+  });
+
+  // #403-T18
+  it("says no for a deployment the platform does not know", async () => {
+    const { fetch } = platform({});
+
+    expect(await productionDeployment(AUTH, "dpl_gone", fetch)).toBe("no");
   });
 });

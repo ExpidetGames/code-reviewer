@@ -90,6 +90,21 @@ describe("which golden snapshots are removed after a deployment", () => {
   });
 
   // #403-T16
+  it("discards the snapshot of the very first deployment that failed, when there is nothing to keep", () => {
+    const plan = planCleanup(B, { keep: [], discard: "snap_d" });
+
+    expect(plan.refused).toBeUndefined();
+    expect(plan.remove.map((b) => b.snapshotId)).toEqual(["snap_d"]);
+  });
+
+  // #403-T16
+  it("never discards more than the one snapshot, whatever else is in the list", () => {
+    const plan = planCleanup(B, { keep: ["snap_unknown"], discard: "snap_b" });
+
+    expect(plan.remove.map((b) => b.snapshotId)).toEqual(["snap_b"]);
+  });
+
+  // #403-T16
   it("discards nothing, without an error, when the snapshot is already gone (a run that failed halfway before)", () => {
     const plan = planCleanup(B, { keep: ["snap_c"], discard: "snap_gone" });
 

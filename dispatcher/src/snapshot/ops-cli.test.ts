@@ -140,10 +140,9 @@ describe("snapshot:ops decide", () => {
     expect(output).toContain(`image-digest=${PAIR.imageDigest}\n`);
     expect(output).toContain(`commit=${PAIR.commit}\n`);
     expect(output).toContain("repair=false\n");
-    // The ids reach the log only as masks.
-    expect(h.out.join("")).toContain(`::add-mask::${PAIR.snapshotId}`);
-    expect(h.out.join("")).toContain(`::add-mask::${PAIR.imageDigest}`);
-    expect(h.err.join("\n")).not.toContain(PAIR.snapshotId);
+    // The ids go to the outputs file only (they are not secrets, and GitHub drops an output that holds a masked value).
+    expect(text(h)).not.toContain(PAIR.snapshotId);
+    expect(text(h)).not.toContain(PAIR.imageDigest);
   });
 
   // #403-T13
@@ -240,9 +239,9 @@ describe("snapshot:ops persist", () => {
     expect(
       writes.map((r) => (r.body as { secretValue: string }).secretValue),
     ).toEqual([NEW.snapshotId, NEW.imageDigest, NEW.commit]);
-    // The ids appear in the log only as masks; every other line is a code.
-    expect(h.err.join("\n")).not.toContain(NEW.snapshotId);
-    expect(h.out.join("")).toContain(`::add-mask::${NEW.snapshotId}`);
+    // Every line the command prints is a code.
+    expect(text(h)).not.toContain(NEW.snapshotId);
+    expect(text(h)).not.toContain(NEW.imageDigest);
     expect(text(h)).not.toContain(INFISICAL.INFISICAL_CLIENT_SECRET);
   });
 
@@ -427,5 +426,94 @@ describe("snapshot:ops cleanup", () => {
 
     for (const id of ["snap_a", PAIR.snapshotId, NEW.snapshotId])
       expect(text(h)).not.toContain(id);
+  });
+});
+
+describe("snapshot:ops verify", () => {
+  const deployment = (overrides: Record<string, unknown> = {}) => ({
+    id: "dpl_oldexample01",
+    projectId: VERCEL.VERCEL_PROJECT_ID,
+    ownerId: VERCEL.VERCEL_TEAM_ID,
+    target: "production",
+    readyState: "READY",
+    ...overrides,
+  });
+
+  function verifying(body: Record<string, unknown>, status = 200) {
+    const h = harness();
+    const inner = h.deps.fetch;
+    h.deps.fetch = (input, init) => {
+      const url = new URL(new Request(input, init).url);
+      if (url.pathname === "/v13/deployments/dpl_oldexample01")
+        return Promise.resolve(Response.json(body, { status }));
+      return inner(input, init);
+    };
+    return h;
+  }
+
+  // #403-T18
+  it("passes for a ready production deployment of the project", async () => {
+    const h = verifying(deployment());
+
+    expect(
+      await runOps(["verify", "--deployment", "dpl_oldexample01"], h.deps),
+    ).toBe(0);
+  });
+
+  // #403-T18
+  it.each([
+    ["another project", { projectId: "prj_other" }],
+    ["a preview", { target: null }],
+  ])("refuses %s with a code and exit 1", async (_name, overrides) => {
+    const h = verifying(deployment(overrides));
+
+    expect(
+      await runOps(["verify", "--deployment", "dpl_oldexample01"], h.deps),
+    ).toBe(1);
+    expect(text(h)).toContain("deployment_not_production");
+  });
+
+  // #403-T18
+  it("fails, with another code, when the platform cannot be asked", async () => {
+    const h = verifying({}, 500);
+
+    expect(
+      await runOps(["verify", "--deployment", "dpl_oldexample01"], h.deps),
+    ).toBe(1);
+    expect(text(h)).toContain("deployment_lookup_failed");
+  });
+
+  // #403-T18
+  it.each([
+    ["no deployment", ["verify"]],
+    [
+      "a deployment that is neither an id nor an address",
+      ["verify", "--deployment", "--evil"],
+    ],
+    ["a path", ["verify", "--deployment", "https://example.vercel.app/x"]],
+  ])("refuses %s with exit 2", async (_name, argv) => {
+    const h = harness();
+
+    expect(await runOps(argv, h.deps)).toBe(2);
+    expect(h.requests).toEqual([]);
+  });
+
+  // #403-T18
+  it("takes a deployment address with its scheme, as the CLI prints it", async () => {
+    const h = verifying(deployment());
+    const inner = h.deps.fetch;
+    h.deps.fetch = (input, init) => {
+      const url = new URL(new Request(input, init).url);
+      if (url.pathname === "/v13/deployments/example-abc.vercel.app")
+        return Promise.resolve(Response.json(deployment()));
+      return inner(input, init);
+    };
+
+    expect(
+      await runOps(
+        ["verify", "--deployment", "https://example-abc.vercel.app"],
+        h.deps,
+      ),
+    ).toBe(0);
   });
 });

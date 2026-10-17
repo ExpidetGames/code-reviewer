@@ -5,11 +5,13 @@
 //
 //   decide    does the Worker image need a new snapshot? Writes the answer and the pair to use as step outputs.
 //   persist   writes a pair to Infisical `prod` `/dispatcher` (after the promotion, or for a rollback).
+//   verify    is a deployment a ready production deployment of the project? (before a rollback)
 //   cleanup   removes the snapshots that are neither the current one, the previous one nor the live one; or
 //             discards the snapshot of a run that did not reach production.
 //
-// Ids, tokens and the client secret come from the environment, never from arguments. Snapshot ids and image ids
-// reach the log only as `::add-mask::` lines; every other line is a stable code.
+// Ids, tokens and the client secret come from the environment, never from arguments. Every line printed is a stable
+// code. The snapshot and image ids go to the step outputs file only: they are not secrets, and GitHub drops an
+// output that holds a masked value, so they are not masked.
 //
 // Exit status: 0 done, 1 failed (a code was printed), 2 wrong use (nothing was done).
 import type { SnapshotService } from "./service.ts";
@@ -28,6 +30,7 @@ import { BUILDER_PREFIX } from "./pipeline.ts";
 import {
   livePair,
   pairOfDeployment,
+  productionDeployment,
   type PairLookup,
   type VercelAuth,
 } from "./vercel-api.ts";
@@ -94,11 +97,6 @@ function vercelAuth(env: OpsDeps["env"]): VercelAuth {
   };
 }
 
-function mask(deps: OpsDeps, pair: SnapshotPair): void {
-  for (const value of [pair.snapshotId, pair.imageDigest])
-    deps.stdout(`::add-mask::${value}\n`);
-}
-
 async function runDecide(
   argv: readonly string[],
   deps: OpsDeps,
@@ -150,7 +148,6 @@ async function runDecide(
           `commit=${decision.pair.commit}`,
         ]),
   ];
-  if (decision.pair !== undefined) mask(deps, decision.pair);
   deps.appendText(output, `${lines.join("\n")}\n`);
   deps.stderr(
     `ops: decided rebuild=${String(decision.rebuild)} reason=${decision.reason} repair=${String(decision.repair)}`,
@@ -196,7 +193,6 @@ async function runPersist(
     if (pair === undefined)
       throw new Usage("PAIR_SNAPSHOT_ID, PAIR_IMAGE_DIGEST and PAIR_COMMIT");
   }
-  mask(deps, pair);
   const result = await persistPair(
     {
       domain: env.INFISICAL_DOMAIN as string,
@@ -212,6 +208,33 @@ async function runPersist(
     return 1;
   }
   deps.stderr("ops: pair_persisted");
+  return 0;
+}
+
+const DEPLOYMENT =
+  /^(dpl_[A-Za-z0-9]{8,64}|(https:\/\/)?[a-z0-9-]+\.vercel\.app)$/;
+
+async function runVerify(
+  argv: readonly string[],
+  deps: OpsDeps,
+): Promise<number> {
+  const { values } = parseOptions(argv, ["--deployment"], []);
+  const deployment = values.get("--deployment");
+  if (deployment === undefined || !DEPLOYMENT.test(deployment))
+    throw new Usage("--deployment");
+  const answer = await productionDeployment(
+    vercelAuth(deps.env),
+    deployment.replace(/^https:\/\//, ""),
+    deps.fetch,
+  );
+  if (answer === "unavailable") {
+    deps.stderr("ops: deployment_lookup_failed");
+    return 1;
+  }
+  if (answer === "no") {
+    deps.stderr("ops: deployment_not_production");
+    return 1;
+  }
   return 0;
 }
 
@@ -280,6 +303,7 @@ export async function runOps(
   try {
     if (command === "decide") return await runDecide(rest, deps);
     if (command === "persist") return await runPersist(rest, deps);
+    if (command === "verify") return await runVerify(rest, deps);
     if (command === "cleanup") return await runCleanup(rest, deps);
     throw new Usage("command");
   } catch (error) {

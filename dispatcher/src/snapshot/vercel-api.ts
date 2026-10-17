@@ -85,3 +85,38 @@ export async function livePair(
   if (typeof id !== "string" || id === "") return { status: "none" };
   return pairOfDeployment(auth, id, request);
 }
+
+/** Whether a deployment is a ready production deployment of the project and team. "unavailable" is not "no". */
+export async function productionDeployment(
+  auth: VercelAuth,
+  idOrHost: string,
+  request: typeof fetch = fetch,
+): Promise<"yes" | "no" | "unavailable"> {
+  const url = new URL(`/v13/deployments/${encodeURIComponent(idOrHost)}`, API);
+  url.searchParams.set("teamId", auth.teamId);
+  let answer: Response;
+  try {
+    answer = await request(url, {
+      headers: { authorization: `Bearer ${auth.token}` },
+      redirect: "manual",
+      signal: AbortSignal.timeout(15_000),
+    });
+  } catch {
+    return "unavailable";
+  }
+  if (answer.status === 429 || answer.status >= 500) return "unavailable";
+  if (answer.status !== 200) return "no";
+  let deployment: unknown;
+  try {
+    deployment = await answer.json();
+  } catch {
+    return "unavailable";
+  }
+  if (!isRecord(deployment)) return "no";
+  return deployment.projectId === auth.projectId &&
+    deployment.ownerId === auth.teamId &&
+    deployment.target === "production" &&
+    deployment.readyState === "READY"
+    ? "yes"
+    : "no";
+}

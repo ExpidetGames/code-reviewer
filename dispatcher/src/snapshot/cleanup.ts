@@ -32,10 +32,14 @@ export function planCleanup(
     (builder) =>
       builder.snapshotId !== undefined && kept.has(builder.snapshotId),
   );
-  if (kept.size === 0)
-    return { keep, remove: [], unmanaged, refused: "nothing_to_keep" };
-  if (keep.length === 0)
-    return { keep, remove: [], unmanaged, refused: "keep_not_found" };
+  // A discard removes one named snapshot and nothing else, so it needs no check of the list. Anything wider does:
+  // an empty or truncated list must never turn "everything but these" into "everything".
+  if (options.discard === undefined) {
+    if (kept.size === 0)
+      return { keep, remove: [], unmanaged, refused: "nothing_to_keep" };
+    if (keep.length === 0)
+      return { keep, remove: [], unmanaged, refused: "keep_not_found" };
+  }
   const remove = managed
     .filter(
       (builder) =>
