@@ -14,9 +14,10 @@ import type { Job } from "../jobs/job-types.ts";
 import type { ClaimOptions } from "../db/repositories/runner-jobs-repository.ts";
 import type { Integration, RepoRef } from "../integrations/types.ts";
 import type { IntegrationProvider } from "../integrations/provider.ts";
-import { createIntegrationRegistry } from "../integrations/registry.ts";
-import { loadGithubAppConfig } from "../integrations/providers/github-app/config.ts";
-import { createGithubAppProvider } from "../integrations/providers/github-app/provider.ts";
+import {
+  createDefaultIntegrationRegistry,
+  loadGithubAppConfig,
+} from "../integrations/registry.ts";
 import {
   DEFAULT_REVIEW_VERDICT_MODE,
   type ReviewVerdictMode,
@@ -102,10 +103,11 @@ export async function createCheckRunsHarness(
   if (options.permissions !== undefined)
     fake.setAppPermissions(options.permissions);
 
-  const provider = createGithubAppProvider({
-    config: loadGithubAppConfig(github.env),
-    clientOptions: { now: github.clock.now },
+  const registry = createDefaultIntegrationRegistry({
+    loadConfig: () => loadGithubAppConfig(github.env),
+    githubClient: { now: github.clock.now },
   });
+  const provider = registry.resolve("github_app");
   let verdictMode: ReviewVerdictMode = DEFAULT_REVIEW_VERDICT_MODE;
   const lines = { info: [] as string[], error: [] as string[] };
   const { db, workspaceId } = fixture;
@@ -123,7 +125,7 @@ export async function createCheckRunsHarness(
     checks: (id) => createJobCheckRunsRepository(db, id, fixture.clock.now),
     dueJobs: (at, limits) => listJobsWithCheckWork(db, at, limits),
     verdictMode: async () => verdictMode,
-    registry: createIntegrationRegistry({ github_app: provider }),
+    registry,
     now: fixture.clock.now,
     log: {
       info: (line) => lines.info.push(line),
