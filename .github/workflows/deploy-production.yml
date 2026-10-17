@@ -1,27 +1,40 @@
 name: Deploy production
 
 # Deploys the hosted version (the App and the Dispatcher) to Vercel production (#403). A push to main, or a manual
-# run on main, goes through these jobs in this order, and a failure of any of them stops the pipeline before
-# `promote`, so production stays on the deployments it has:
+# run on main, goes through these jobs, and a failure of any job before `promote-app` leaves production on the
+# deployments and the golden snapshot it has. Merging to main is the whole release: there is no manual step.
 #
-#   migrate -> stage-app -> stage-dispatcher
-#                        -> health-app      -> canary -> promote -> record
+#   fresh -> migrate -> snapshot-decide -> snapshot-build (only if needed) -+
+#                    -> stage-app -----------------------------------------+-> stage-dispatcher
+#                                    -> health-app ------------------------+--> canary
+#   canary -> promote-app -> promote-dispatcher -> persist -> cleanup           (discard: a run that did not get live)
 #
-# 1. migrate: `pnpm --dir app migrate` against the migrate role's URL. A failed migration means no deployment.
-# 2. stage-app, stage-dispatcher: a staged production deployment of each project (vercel-stage.yml), the App first
-#    (docs/deployment-vercel.md, section 5.6). A staged deployment uses the production variables and takes no domain.
-# 3. health-app: the staged App answers `/api/health` with 200 and `{"status":"ok"}`. `SCHEMA_BEHIND` (the schema is
-#    behind this version) and every other failure block.
-# 4. canary: the Dispatcher canary (dispatcher-canary.yml) on the staged Dispatcher, which proves the golden
-#    snapshot and the container hardening of this very deployment.
-# 5. promote: `vercel promote` of the App and then of the Dispatcher.
+#  1. fresh: the commit of this run is still the head of main; an older run (a re-run) is refused.
+#  2. migrate: `pnpm --dir app migrate` against the migrate role's URL. A failed migration means no deployment.
+#  3. snapshot-decide: does the Worker image need a new golden snapshot? Yes if an input of the image
+#     (dispatcher/src/snapshot/pair.ts, IMAGE_INPUT_PATHS) changed since the commit of the snapshot in use, if that
+#     commit or the pair is missing, or if asked to. Otherwise the pair in use is reused.
+#  4. snapshot-build: golden-snapshot.yml, when needed. It builds, checks and records the snapshot and removes nothing.
+#  5. stage-app, stage-dispatcher: a staged production deployment of each project (vercel-stage.yml), the App first
+#     (docs/deployment-vercel.md, section 5.6). The Dispatcher's carries the pair of this run as its own run-time
+#     variables and meta. The project's variables, Infisical and the live deployment are not touched.
+#  6. health-app: the staged App answers `/api/health` with 200 and `{"status":"ok"}`.
+#  7. canary: dispatcher-canary.yml on the staged Dispatcher, which must report the image id of the pair of this run:
+#     the new snapshot is proven by the deployment that will use it.
+#  8. promote-app, promote-dispatcher: `vercel promote`, one job per project, so that a partial promotion is recorded
+#     as it is.
+#  9. persist: only after the Dispatcher is live, the pair is written to Infisical /dispatcher (the one write path of
+#     the repository, its own composite action), and Secret Sync carries it to the project's variables for later
+#     deployments. A failure here fails the run: production runs the new pair but the variables are behind. The next
+#     run reads the live deployment's meta, finds the live pair, and writes it again (docs, section 5.1).
+# 10. cleanup: only after persist, every golden snapshot but the new one and the one before it (the rollback target)
+#     is removed, and never the one the live deployment runs. `discard` removes the snapshot of a run that built one
+#     and did not get live.
 #
 # Production only: no staging, no preview. It never runs for a pull request and never on `pull_request_target`. Every
-# job runs only for this repository on main (the job's own condition: a manual run executes the workflow of the
-# branch it is started on); the environment `production` is restricted to main as well. Every job that signs in to
-# Infisical runs in that environment, which holds the sign-in as secrets (docs/deployment-vercel.md, section 2).
-# Deployments queue one behind the other and are never cancelled: a migration or a promotion in progress runs to its
-# end.
+# job runs only for this repository on main (the job's own condition guards against accidents; the boundary is the
+# environment `production`, restricted to main, which holds the Infisical sign-in as secrets). Deployments queue one
+# behind the other and are never cancelled: a migration or a promotion in progress runs to its end.
 on:
   push:
     branches: [main]
@@ -30,6 +43,16 @@ on:
       canary_engines:
         description: "Engines the canary requires: pr-agent,opencode, or pr-agent for a Diff-only deployment"
         default: "pr-agent,opencode"
+        required: false
+      rebuild_snapshot:
+        description: "Build a new golden snapshot even if the Worker image inputs did not change (the platform's base image changed, say)"
+        type: boolean
+        default: false
+        required: false
+      allow_stale:
+        description: "Deploy even though a newer commit is on main (deliberate, for a re-run of an old commit)"
+        type: boolean
+        default: false
         required: false
 
 permissions:
@@ -40,13 +63,39 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # An exact version, never `latest` (the same in vercel-stage.yml and rollback-production.yml).
-  VERCEL_CLI_VERSION: 64.5.0
   VERCEL_TELEMETRY_DISABLED: "1"
 
 jobs:
+  # A re-run of an old run rebuilds that run's commit. Without this it would be staged and promoted over a newer
+  # production. Needs no secret.
+  fresh:
+    name: Check that the commit is the head of main
+    if: ${{ github.repository == 'ExpidetGames/code-reviewer' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Compare with the head of main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ALLOW_STALE: ${{ inputs.allow_stale }}
+        run: |
+          set -euo pipefail
+          head="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq .object.sha)"
+          if [ "${head}" = "${GITHUB_SHA}" ]; then
+            exit 0
+          fi
+          if [ "${ALLOW_STALE}" = "true" ]; then
+            echo "::warning::A newer commit is on main; this run deploys an older one because it was told to."
+            exit 0
+          fi
+          echo "::error::A newer commit is on main. This run would put an older version over it. Nothing is deployed; the newer commit has its own run."
+          exit 1
+
   migrate:
     name: Migrate the database
+    needs: fresh
     if: ${{ github.repository == 'ExpidetGames/code-reviewer' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -54,18 +103,16 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
           package_json_file: app/package.json
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version-file: .nvmrc
-          cache: pnpm
-          cache-dependency-path: app/pnpm-lock.yaml
       - name: Install dependencies
         run: pnpm --dir app install --frozen-lockfile
       # After the install and just before the command that uses it.
@@ -83,6 +130,76 @@ jobs:
       - name: Apply the migrations
         run: pnpm --dir app migrate
 
+  snapshot-decide:
+    name: Decide whether the golden snapshot is rebuilt
+    needs: migrate
+    if: ${{ github.repository == 'ExpidetGames/code-reviewer' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: production
+    permissions:
+      contents: read
+    outputs:
+      rebuild: ${{ steps.decide.outputs.rebuild }}
+      reason: ${{ steps.decide.outputs.reason }}
+      repair: ${{ steps.decide.outputs.repair }}
+      snapshot-id: ${{ steps.decide.outputs.snapshot-id }}
+      image-digest: ${{ steps.decide.outputs.image-digest }}
+      commit: ${{ steps.decide.outputs.commit }}
+      previous-snapshot-id: ${{ steps.decide.outputs.previous-snapshot-id }}
+    steps:
+      # The whole history: the commit of the snapshot in use is compared with this one.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: dispatcher/package.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version-file: .nvmrc
+      - name: Install dependencies
+        run: pnpm --dir dispatcher install --frozen-lockfile
+      - name: Install the Vercel CLI
+        uses: ./.github/actions/vercel-cli
+      - name: Load the Vercel credentials from Infisical
+        uses: ./.github/actions/infisical-ci-secrets
+        with:
+          secret-names: VERCEL_TOKEN VERCEL_TEAM_ID VERCEL_DISPATCHER_PROJECT_ID
+          client-id: ${{ secrets.INFISICAL_CLIENT_ID }}
+          client-secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+          domain: ${{ secrets.INFISICAL_DOMAIN }}
+          project-slug: ${{ secrets.INFISICAL_PROJECT_SLUG }}
+          consequence: Nothing is deployed.
+      # The variables of the Dispatcher project as a deployment made now would get them. Read-only: nothing is built.
+      - name: Pull the Dispatcher's production variables
+        env:
+          VERCEL_ORG_ID: ${{ env.VERCEL_TEAM_ID }}
+          VERCEL_PROJECT_ID: ${{ env.VERCEL_DISPATCHER_PROJECT_ID }}
+        run: vercel pull --yes --environment=production
+      - name: Decide
+        id: decide
+        env:
+          VERCEL_PROJECT_ID: ${{ env.VERCEL_DISPATCHER_PROJECT_ID }}
+          FORCE: ${{ inputs.rebuild_snapshot }}
+        run: |
+          set -euo pipefail
+          args=(decide --sha "${GITHUB_SHA}" --env-file "${GITHUB_WORKSPACE}/.vercel/.env.production.local" --github-output "${GITHUB_OUTPUT}")
+          if [ "${FORCE}" = "true" ]; then
+            args+=(--force)
+          fi
+          pnpm --dir dispatcher snapshot:ops "${args[@]}"
+
+  snapshot-build:
+    name: Build the golden snapshot
+    needs: snapshot-decide
+    if: ${{ github.repository == 'ExpidetGames/code-reviewer' && github.ref == 'refs/heads/main' && needs.snapshot-decide.outputs.rebuild == 'true' }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/golden-snapshot.yml
+
   stage-app:
     name: Stage the App
     needs: migrate
@@ -97,11 +214,12 @@ jobs:
       project-id-secret: VERCEL_APP_PROJECT_ID
       ref: ${{ github.sha }}
 
-  # After the App: a release that changes the runner API needs the App first (docs/deployment-vercel.md, 5.6).
+  # After the App: a release that changes the runner API needs the App first (docs/deployment-vercel.md, 5.6). The
+  # snapshot job may have been skipped (nothing to rebuild), which is why the condition names the results.
   stage-dispatcher:
     name: Stage the Dispatcher
-    needs: stage-app
-    if: ${{ github.repository == 'ExpidetGames/code-reviewer' && github.ref == 'refs/heads/main' }}
+    needs: [stage-app, snapshot-decide, snapshot-build]
+    if: ${{ !cancelled() && github.repository == 'ExpidetGames/code-reviewer' && github.ref == 'refs/heads/main' && needs.stage-app.result == 'success' && needs.snapshot-decide.result == 'success' && (needs.snapshot-build.result == 'success' || needs.snapshot-build.result == 'skipped') }}
     permissions:
       contents: read
       deployments: write
@@ -111,18 +229,21 @@ jobs:
       directory: dispatcher
       project-id-secret: VERCEL_DISPATCHER_PROJECT_ID
       ref: ${{ github.sha }}
+      snapshot-id: ${{ needs.snapshot-build.outputs.snapshot-id || needs.snapshot-decide.outputs.snapshot-id }}
+      image-digest: ${{ needs.snapshot-build.outputs.image-digest || needs.snapshot-decide.outputs.image-digest }}
+      snapshot-commit: ${{ needs.snapshot-build.outputs.commit || needs.snapshot-decide.outputs.commit }}
 
   health-app:
     name: Check the staged App's health
     needs: stage-app
     if: ${{ github.repository == 'ExpidetGames/code-reviewer' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     environment: production
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
@@ -138,7 +259,7 @@ jobs:
           project-slug: ${{ secrets.INFISICAL_PROJECT_SLUG }}
           consequence: The staged App was not checked, so nothing is promoted.
       # 200 with {"status":"ok"} or the check fails. 503 {"status":"error","code":"SCHEMA_BEHIND"} means the
-      # migration did not reach this database; any other answer is retried for about four minutes (a cold start, a
+      # migration did not reach this database; any other answer is retried for about five minutes (a cold start, a
       # database that is waking up) and then fails. Only a status code and a stable error code are printed, never a
       # body. No redirect is followed, and the secret goes only to a Vercel deployment address, in a header file
       # (an argument would show up in the process list).
@@ -158,7 +279,7 @@ jobs:
           body_file="${RUNNER_TEMP}/health.json"
 
           status=000
-          for attempt in $(seq 1 24); do
+          for attempt in $(seq 1 12); do
             status="$(
               curl --silent --output "${body_file}" --write-out '%{http_code}' --max-time 15 \
                 --header @"${header_file}" "${DEPLOYMENT_URL}/api/health" || true
@@ -180,17 +301,18 @@ jobs:
 
   canary:
     name: Run the Dispatcher canary
-    needs: [stage-dispatcher, health-app]
-    if: ${{ github.repository == 'ExpidetGames/code-reviewer' && github.ref == 'refs/heads/main' }}
+    needs: [stage-dispatcher, health-app, snapshot-decide, snapshot-build]
+    if: ${{ github.repository == 'ExpidetGames/code-reviewer' && github.ref == 'refs/heads/main' && !cancelled() && needs.stage-dispatcher.result == 'success' && needs.health-app.result == 'success' }}
     permissions:
       contents: read
     uses: ./.github/workflows/dispatcher-canary.yml
     with:
       url: ${{ needs.stage-dispatcher.outputs.url }}
       engines: ${{ inputs.canary_engines || 'pr-agent,opencode' }}
+      image_digest: ${{ needs.snapshot-build.outputs.image-digest || needs.snapshot-decide.outputs.image-digest }}
 
-  promote:
-    name: Promote the App and the Dispatcher
+  promote-app:
+    name: Promote the App
     needs: [stage-app, stage-dispatcher, health-app, canary]
     if: ${{ github.repository == 'ExpidetGames/code-reviewer' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-24.04
@@ -199,19 +321,19 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version-file: .nvmrc
       - name: Install the Vercel CLI
-        run: npm install --global "vercel@${VERCEL_CLI_VERSION}"
+        uses: ./.github/actions/vercel-cli
       - name: Load the Vercel credentials from Infisical
         uses: ./.github/actions/infisical-ci-secrets
         with:
-          secret-names: VERCEL_TOKEN VERCEL_TEAM_ID VERCEL_APP_PROJECT_ID VERCEL_DISPATCHER_PROJECT_ID
+          secret-names: VERCEL_TOKEN VERCEL_TEAM_ID VERCEL_APP_PROJECT_ID
           client-id: ${{ secrets.INFISICAL_CLIENT_ID }}
           client-secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
           domain: ${{ secrets.INFISICAL_DOMAIN }}
@@ -224,6 +346,35 @@ jobs:
           VERCEL_ORG_ID: ${{ env.VERCEL_TEAM_ID }}
           VERCEL_PROJECT_ID: ${{ env.VERCEL_APP_PROJECT_ID }}
         run: vercel promote "$DEPLOYMENT_URL" --yes --timeout 5m
+
+  promote-dispatcher:
+    name: Promote the Dispatcher
+    needs: [stage-app, stage-dispatcher, health-app, canary, promote-app]
+    if: ${{ github.repository == 'ExpidetGames/code-reviewer' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: production
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version-file: .nvmrc
+      - name: Install the Vercel CLI
+        uses: ./.github/actions/vercel-cli
+      - name: Load the Vercel credentials from Infisical
+        uses: ./.github/actions/infisical-ci-secrets
+        with:
+          secret-names: VERCEL_TOKEN VERCEL_TEAM_ID VERCEL_DISPATCHER_PROJECT_ID
+          client-id: ${{ secrets.INFISICAL_CLIENT_ID }}
+          client-secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+          domain: ${{ secrets.INFISICAL_DOMAIN }}
+          project-slug: ${{ secrets.INFISICAL_PROJECT_SLUG }}
+          consequence: The Dispatcher is not promoted; production stays on its previous Dispatcher.
       - name: Promote the Dispatcher
         env:
           DEPLOYMENT_URL: ${{ needs.stage-dispatcher.outputs.url }}
@@ -231,11 +382,133 @@ jobs:
           VERCEL_PROJECT_ID: ${{ env.VERCEL_DISPATCHER_PROJECT_ID }}
         run: vercel promote "$DEPLOYMENT_URL" --yes --timeout 5m
 
-  # Closes the GitHub deployment records of the two stages: success when the promotion went through, failure when
-  # the pipeline stopped anywhere before it.
+  # Only after the Dispatcher is live: the pair production runs is written to Infisical, where Secret Sync carries it
+  # to the project's variables. Also when nothing was rebuilt but the variables are behind the live pair (an earlier
+  # run could not write them). This and the rollback are the only jobs that use the write path.
+  persist:
+    name: Write the golden snapshot pair to Infisical
+    needs: [snapshot-decide, snapshot-build, promote-dispatcher]
+    if: ${{ !cancelled() && github.repository == 'ExpidetGames/code-reviewer' && github.ref == 'refs/heads/main' && needs.promote-dispatcher.result == 'success' && (needs.snapshot-decide.outputs.rebuild == 'true' || needs.snapshot-decide.outputs.repair == 'true') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: production
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: dispatcher/package.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version-file: .nvmrc
+      - name: Install dependencies
+        run: pnpm --dir dispatcher install --frozen-lockfile
+      - name: Write the pair
+        uses: ./.github/actions/infisical-write-snapshot-pair
+        with:
+          client-id: ${{ secrets.INFISICAL_CLIENT_ID }}
+          client-secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+          domain: ${{ secrets.INFISICAL_DOMAIN }}
+          project-slug: ${{ secrets.INFISICAL_PROJECT_SLUG }}
+          snapshot-id: ${{ needs.snapshot-build.outputs.snapshot-id || needs.snapshot-decide.outputs.snapshot-id }}
+          image-digest: ${{ needs.snapshot-build.outputs.image-digest || needs.snapshot-decide.outputs.image-digest }}
+          commit: ${{ needs.snapshot-build.outputs.commit || needs.snapshot-decide.outputs.commit }}
+
+  # Only after persist: the new and the previous snapshot stay (the previous deployment, the rollback target, still
+  # references it), the live one is never removed, everything else the pipeline built goes.
+  cleanup:
+    name: Remove the golden snapshots nobody needs
+    needs: [snapshot-decide, snapshot-build, persist]
+    if: ${{ !cancelled() && github.repository == 'ExpidetGames/code-reviewer' && github.ref == 'refs/heads/main' && needs.persist.result == 'success' && needs.snapshot-decide.outputs.rebuild == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: production
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: dispatcher/package.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version-file: .nvmrc
+      - name: Install dependencies
+        run: pnpm --dir dispatcher install --frozen-lockfile
+      - name: Load the Vercel credentials from Infisical
+        uses: ./.github/actions/infisical-ci-secrets
+        with:
+          secret-names: VERCEL_TOKEN VERCEL_TEAM_ID VERCEL_DISPATCHER_PROJECT_ID
+          client-id: ${{ secrets.INFISICAL_CLIENT_ID }}
+          client-secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+          domain: ${{ secrets.INFISICAL_DOMAIN }}
+          project-slug: ${{ secrets.INFISICAL_PROJECT_SLUG }}
+          consequence: Old golden snapshots were not removed; the next deployment that rebuilds removes them.
+      - name: Remove the old snapshots
+        env:
+          VERCEL_PROJECT_ID: ${{ env.VERCEL_DISPATCHER_PROJECT_ID }}
+          NEW_SNAPSHOT_ID: ${{ needs.snapshot-build.outputs.snapshot-id }}
+          PREVIOUS_SNAPSHOT_ID: ${{ needs.snapshot-decide.outputs.previous-snapshot-id }}
+        run: |
+          set -euo pipefail
+          export KEEP_SNAPSHOT_IDS="${NEW_SNAPSHOT_ID} ${PREVIOUS_SNAPSHOT_ID}"
+          pnpm --dir dispatcher snapshot:ops cleanup
+
+  # A run that built a snapshot and did not get live: the snapshot is removed, unless the live deployment turns out to
+  # use it (a promotion that timed out and went through). The next cleanup removes it too if this one cannot.
+  discard:
+    name: Discard the snapshot of a run that did not get live
+    needs: [snapshot-decide, snapshot-build, promote-dispatcher]
+    if: ${{ always() && github.repository == 'ExpidetGames/code-reviewer' && github.ref == 'refs/heads/main' && needs.snapshot-build.result == 'success' && needs.promote-dispatcher.result != 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: production
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: dispatcher/package.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version-file: .nvmrc
+      - name: Install dependencies
+        run: pnpm --dir dispatcher install --frozen-lockfile
+      - name: Load the Vercel credentials from Infisical
+        uses: ./.github/actions/infisical-ci-secrets
+        with:
+          secret-names: VERCEL_TOKEN VERCEL_TEAM_ID VERCEL_DISPATCHER_PROJECT_ID
+          client-id: ${{ secrets.INFISICAL_CLIENT_ID }}
+          client-secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+          domain: ${{ secrets.INFISICAL_DOMAIN }}
+          project-slug: ${{ secrets.INFISICAL_PROJECT_SLUG }}
+          consequence: The snapshot of this run was not removed; the next deployment that rebuilds removes it.
+      - name: Discard the new snapshot
+        env:
+          VERCEL_PROJECT_ID: ${{ env.VERCEL_DISPATCHER_PROJECT_ID }}
+          DISCARD_SNAPSHOT_ID: ${{ needs.snapshot-build.outputs.snapshot-id }}
+          PREVIOUS_SNAPSHOT_ID: ${{ needs.snapshot-decide.outputs.previous-snapshot-id }}
+        run: |
+          set -euo pipefail
+          export KEEP_SNAPSHOT_IDS="${PREVIOUS_SNAPSHOT_ID}"
+          pnpm --dir dispatcher snapshot:ops cleanup
+
+  # Closes the GitHub deployment records of the two stages, each with what happened to it: a project is `success`
+  # only if its own promotion went through.
   record:
     name: Close the GitHub deployments
-    needs: [stage-app, stage-dispatcher, promote]
+    needs: [stage-app, stage-dispatcher, promote-app, promote-dispatcher]
     if: ${{ always() && github.repository == 'ExpidetGames/code-reviewer' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -243,29 +516,29 @@ jobs:
       contents: read
       deployments: write
     steps:
-      - uses: actions/github-script@v9
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         env:
-          PROMOTE_RESULT: ${{ needs.promote.result }}
+          APP_RESULT: ${{ needs.promote-app.result }}
           APP_DEPLOYMENT_ID: ${{ needs.stage-app.outputs.deployment-id }}
           APP_URL: ${{ needs.stage-app.outputs.url }}
+          DISPATCHER_RESULT: ${{ needs.promote-dispatcher.result }}
           DISPATCHER_DEPLOYMENT_ID: ${{ needs.stage-dispatcher.outputs.deployment-id }}
           DISPATCHER_URL: ${{ needs.stage-dispatcher.outputs.url }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         with:
           script: |
-            const promoted = process.env.PROMOTE_RESULT === 'success';
-            const cancelled = process.env.PROMOTE_RESULT === 'cancelled';
             const stages = [
-              ['app', process.env.APP_DEPLOYMENT_ID, process.env.APP_URL],
-              ['dispatcher', process.env.DISPATCHER_DEPLOYMENT_ID, process.env.DISPATCHER_URL],
+              ['app', process.env.APP_RESULT, process.env.APP_DEPLOYMENT_ID, process.env.APP_URL],
+              ['dispatcher', process.env.DISPATCHER_RESULT, process.env.DISPATCHER_DEPLOYMENT_ID, process.env.DISPATCHER_URL],
             ];
-            for (const [project, id, url] of stages) {
+            for (const [project, result, id, url] of stages) {
               if (!id) continue;
+              const promoted = result === 'success';
               await github.rest.repos.createDeploymentStatus({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 deployment_id: Number(id),
-                state: promoted ? 'success' : cancelled ? 'inactive' : 'failure',
+                state: promoted ? 'success' : result === 'cancelled' ? 'inactive' : 'failure',
                 environment: `${project}-production`,
                 ...(promoted && url ? { environment_url: url } : {}),
                 log_url: process.env.RUN_URL,

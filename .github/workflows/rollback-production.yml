@@ -2,14 +2,21 @@ name: Rollback production
 
 # Puts a previous deployment of the hosted version back into production (#403): the App, the Dispatcher or both, each
 # with the deployment id (dpl_...) or the deployment address (https://....vercel.app) to restore, from the Vercel
-# dashboard or from the summary of an earlier run of deploy-production. It runs `vercel rollback` with the pinned CLI.
-# A rollback does not undo a migration (docs/deployment-vercel.md, section 7): it is safe while the migrations since
-# were additive. After a rollback Vercel stops assigning the production domains to new deployments of that project;
-# the `vercel promote` of the next deploy-production run assigns them again.
+# dashboard or from the summary of an earlier run of deploy-production. It first checks, with the Vercel API, that
+# each deployment is a ready production deployment of the right project and team, then runs `vercel rollback` with the
+# pinned CLI. A rollback does not undo a migration (docs/deployment-vercel.md, section 7): it is safe while the
+# migrations since were additive. After a rollback Vercel stops assigning the production domains to new deployments
+# of that project; the `vercel promote` of the next deploy-production run assigns them again.
 #
-# Manual only, and only for this repository on main (the job's own condition: a manual run executes the workflow of
-# the branch it is started on, with the Infisical sign-in of the environment `production`). It shares the
-# deployment's queue, so it never runs in the middle of a migration or a promotion.
+# For the Dispatcher it also writes the golden snapshot pair of the restored deployment (read from its meta) back to
+# Infisical /dispatcher, with the write path the persist job uses, so that the next deployment does not decide from a
+# pair that production no longer runs. The restored deployment's snapshot still exists as long as it is the current or
+# the previous one (the cleanup of deploy-production keeps both); an older one may be gone.
+#
+# Manual only, and only for this repository on main (the job's own condition guards against accidents; the boundary is
+# the environment `production`, restricted to main). It has a queue of its own: an emergency rollback must not wait
+# behind a deployment, and a waiting deployment must not drop a waiting rollback. It needs no approval: whoever can run
+# a workflow on main can roll back (docs/deployment-vercel.md, section 7).
 on:
   workflow_dispatch:
     inputs:
@@ -26,12 +33,10 @@ permissions:
   contents: read
 
 concurrency:
-  group: deploy-production
+  group: rollback-production
   cancel-in-progress: false
 
 env:
-  # An exact version, never `latest` (the same in vercel-stage.yml and deploy-production.yml).
-  VERCEL_CLI_VERSION: 64.5.0
   VERCEL_TELEMETRY_DISABLED: "1"
 
 jobs:
@@ -39,12 +44,12 @@ jobs:
     name: Roll production back
     if: ${{ github.repository == 'ExpidetGames/code-reviewer' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     environment: production
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
       - name: Check the inputs
@@ -65,11 +70,17 @@ jobs:
               exit 1
             fi
           done
-      - uses: actions/setup-node@v7
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: dispatcher/package.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version-file: .nvmrc
+      # Before the token is loaded.
+      - name: Install dependencies
+        run: pnpm --dir dispatcher install --frozen-lockfile
       - name: Install the Vercel CLI
-        run: npm install --global "vercel@${VERCEL_CLI_VERSION}"
+        uses: ./.github/actions/vercel-cli
       - name: Load the Vercel credentials from Infisical
         uses: ./.github/actions/infisical-ci-secrets
         with:
@@ -79,6 +90,19 @@ jobs:
           domain: ${{ secrets.INFISICAL_DOMAIN }}
           project-slug: ${{ secrets.INFISICAL_PROJECT_SLUG }}
           consequence: Nothing was rolled back.
+      # Both are checked before either is rolled back: a mistake in the second must not leave the first moved.
+      - name: Check that the App deployment is a production deployment of the App
+        if: ${{ inputs.app_deployment != '' }}
+        env:
+          DEPLOYMENT: ${{ inputs.app_deployment }}
+          VERCEL_PROJECT_ID: ${{ env.VERCEL_APP_PROJECT_ID }}
+        run: pnpm --dir dispatcher snapshot:ops verify --deployment "$DEPLOYMENT"
+      - name: Check that the Dispatcher deployment is a production deployment of the Dispatcher
+        if: ${{ inputs.dispatcher_deployment != '' }}
+        env:
+          DEPLOYMENT: ${{ inputs.dispatcher_deployment }}
+          VERCEL_PROJECT_ID: ${{ env.VERCEL_DISPATCHER_PROJECT_ID }}
+        run: pnpm --dir dispatcher snapshot:ops verify --deployment "$DEPLOYMENT"
       - name: Roll the App back
         if: ${{ inputs.app_deployment != '' }}
         env:
@@ -93,3 +117,13 @@ jobs:
           VERCEL_ORG_ID: ${{ env.VERCEL_TEAM_ID }}
           VERCEL_PROJECT_ID: ${{ env.VERCEL_DISPATCHER_PROJECT_ID }}
         run: vercel rollback "$DEPLOYMENT" --yes --timeout 5m
+      - name: Write the restored Dispatcher's golden snapshot pair back to Infisical
+        if: ${{ inputs.dispatcher_deployment != '' }}
+        uses: ./.github/actions/infisical-write-snapshot-pair
+        with:
+          client-id: ${{ secrets.INFISICAL_CLIENT_ID }}
+          client-secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+          domain: ${{ secrets.INFISICAL_DOMAIN }}
+          project-slug: ${{ secrets.INFISICAL_PROJECT_SLUG }}
+          from-deployment: ${{ inputs.dispatcher_deployment }}
+          vercel-project-id: ${{ env.VERCEL_DISPATCHER_PROJECT_ID }}

@@ -3,16 +3,24 @@ name: Vercel stage
 # Reusable (#403): stages one project of the hosted deployment on Vercel production with the Vercel CLI, for
 # deploy-production.yml. It builds the commit here (`vercel pull`, `vercel build --prod`) and uploads the result
 # (`vercel deploy --prebuilt --prod --skip-domain`): a staged production deployment, which uses the production
-# variables and is not assigned the production domains. Nothing goes live here; promoting is the last job of
+# variables and is not assigned the production domains. Nothing goes live here; promoting is a job of
 # deploy-production.yml, after the canary. The project's Git integration is switched off (vercel.json), so the CLI
 # is the only way a deployment is made.
 #
 # The runtime variables of the project come from Vercel (`vercel pull`; Infisical's Secret Sync keeps them there,
 # docs/deployment-vercel.md, section 3). The credentials the CLI needs - the token, the team id and the project id
 # of this project - come from Infisical /ci, loaded by .github/actions/infisical-ci-secrets with the sign-in secrets
-# of the environment `production`. They are loaded just before the first CLI step, so the dependencies' install
-# scripts never see the token, and the CLI reads them from the environment: the token is never on a command line.
-# The job runs only for this repository on main, whoever calls it.
+# of the environment `production`. The order matters: the dependencies are installed FIRST, so that their install
+# scripts never see the token; the token is loaded then, for `vercel pull` and `vercel deploy`; and `vercel build`,
+# which runs the project's code (`next build`, bundlers, plugins), runs with the token blanked, because it works from
+# the files `vercel pull` wrote and needs no platform call (checked against the CLI's source and a run without a
+# token). The CLI reads the credentials from the environment: the token is never on a command line.
+#
+# For the Dispatcher the deployment carries the golden snapshot pair this run uses (`snapshot-id`, `image-digest`,
+# `snapshot-commit`): as run-time variables of this one deployment (`--env`) and as its meta. The project's own
+# variables are not touched, so the live deployment keeps the pair it has until the promotion; the canary compares
+# the image id the staged deployment reports with the one passed here, so a pair that did not reach the deployment
+# stops the pipeline instead of passing on the old image. The job runs only for this repository on main.
 on:
   workflow_call:
     inputs:
@@ -32,6 +40,21 @@ on:
         description: Commit SHA to check out and build
         required: true
         type: string
+      snapshot-id:
+        description: Golden snapshot this deployment uses (the Dispatcher only; empty for the App)
+        required: false
+        default: ""
+        type: string
+      image-digest:
+        description: Worker image id in that snapshot
+        required: false
+        default: ""
+        type: string
+      snapshot-commit:
+        description: Commit the snapshot was built from
+        required: false
+        default: ""
+        type: string
     outputs:
       url:
         description: Address of the staged deployment (https, a Vercel deployment host)
@@ -44,8 +67,6 @@ permissions:
   contents: read
 
 env:
-  # An exact version, never `latest`: a deployment must not change because the CLI did. Raise it deliberately.
-  VERCEL_CLI_VERSION: 64.5.0
   VERCEL_TELEMETRY_DISABLED: "1"
 
 jobs:
@@ -63,13 +84,13 @@ jobs:
       url: ${{ steps.deploy.outputs.url }}
       deployment-id: ${{ steps.record.outputs.deployment-id }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ inputs.ref }}
           persist-credentials: false
       - name: Record the deployment on GitHub
         id: record
-        uses: actions/github-script@v9
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         env:
           PROJECT: ${{ inputs.project }}
           COMMIT_SHA: ${{ inputs.ref }}
@@ -102,14 +123,18 @@ jobs:
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
           package_json_file: ${{ inputs.directory }}/package.json
-      - uses: actions/setup-node@v7
+      # No cache: what is promoted is built from the lockfile, not from a cache another run wrote.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version-file: .nvmrc
-          cache: pnpm
-          cache-dependency-path: ${{ inputs.directory }}/pnpm-lock.yaml
+      # Before the token is loaded: the install scripts of the dependencies run without it. The install command of
+      # the project, which `vercel build` runs later, finds nothing to do.
+      - name: Install the dependencies
+        env:
+          DIRECTORY: ${{ inputs.directory }}
+        run: pnpm --dir "$DIRECTORY" install --frozen-lockfile
       - name: Install the Vercel CLI
-        run: npm install --global "vercel@${VERCEL_CLI_VERSION}"
-      # Just before the first CLI step. Exports the values, masked, for every later step.
+        uses: ./.github/actions/vercel-cli
       - name: Load the Vercel credentials from Infisical
         uses: ./.github/actions/infisical-ci-secrets
         with:
@@ -130,33 +155,64 @@ jobs:
           echo "VERCEL_PROJECT_ID=${!PROJECT_ID_SECRET}" >> "$GITHUB_ENV"
       - name: Pull the production settings and variables
         run: vercel pull --yes --environment=production
+      # The code of the project runs here. The token is blanked for it.
       - name: Build
+        env:
+          VERCEL_TOKEN: ""
         run: vercel build --prod
-      # `--skip-domain`: the staged deployment of docs/deployment-vercel.md, section 5.1. Its address is the only
-      # thing the CLI prints on stdout.
+      # `--skip-domain`: the staged deployment of docs/deployment-vercel.md, section 5.1. `--json` prints the
+      # deployment as one JSON document on stdout (the CLI's other output goes to stderr).
       - name: Deploy the build, staged
         id: deploy
         env:
           COMMIT_SHA: ${{ inputs.ref }}
           REPOSITORY: ${{ github.repository }}
           REPOSITORY_OWNER: ${{ github.repository_owner }}
+          SNAPSHOT_ID: ${{ inputs.snapshot-id }}
+          IMAGE_DIGEST: ${{ inputs.image-digest }}
+          SNAPSHOT_COMMIT: ${{ inputs.snapshot-commit }}
         run: |
           set -euo pipefail
-          url="$(
-            vercel deploy --prebuilt --prod --skip-domain --archive=tgz \
+
+          # The pair is all three values or none, each of its own shape.
+          pair=()
+          if [ -n "${SNAPSHOT_ID}${IMAGE_DIGEST}${SNAPSHOT_COMMIT}" ]; then
+            if ! [[ "${SNAPSHOT_ID}" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{2,127}$ ]] \
+              || ! [[ "${IMAGE_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]] \
+              || ! [[ "${SNAPSHOT_COMMIT}" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "::error::The golden snapshot pair of this deployment is incomplete or malformed."
+              exit 1
+            fi
+            pair=(
+              --env "SANDBOX_SNAPSHOT_ID=${SNAPSHOT_ID}"
+              --env "SANDBOX_IMAGE_DIGEST=${IMAGE_DIGEST}"
+              --meta "sandboxSnapshotId=${SNAPSHOT_ID}"
+              --meta "sandboxImageDigest=${IMAGE_DIGEST}"
+              --meta "sandboxSnapshotCommit=${SNAPSHOT_COMMIT}"
+            )
+          fi
+
+          document="$(
+            vercel deploy --prebuilt --prod --skip-domain --archive=tgz --json \
               --meta githubDeployment=1 \
               --meta githubCommitRef=main \
               --meta githubCommitSha="${COMMIT_SHA}" \
               --meta githubCommitOrg="${REPOSITORY_OWNER}" \
               --meta githubCommitRepo="${REPOSITORY#*/}" \
               --meta githubOrg="${REPOSITORY_OWNER}" \
-              --meta githubRepo="${REPOSITORY#*/}"
+              --meta githubRepo="${REPOSITORY#*/}" \
+              ${pair[@]+"${pair[@]}"}
           )"
-          if ! [[ "${url}" =~ ^https://[a-z0-9-]+\.vercel\.app$ ]]; then
-            echo "::error::The CLI did not print a deployment address."
+          url="$(jq -r '.url // empty' <<< "${document}")"
+          id="$(jq -r '.id // empty' <<< "${document}")"
+          if ! [[ "${url}" =~ ^https://[a-z0-9-]+\.vercel\.app$ ]] || ! [[ "${id}" =~ ^dpl_[A-Za-z0-9]+$ ]]; then
+            echo "::error::The CLI did not report a deployment."
             exit 1
           fi
-          echo "url=${url}" >> "$GITHUB_OUTPUT"
+          {
+            echo "url=${url}"
+            echo "vercel-id=${id}"
+          } >> "$GITHUB_OUTPUT"
       - name: Summarize
         env:
           PROJECT: ${{ inputs.project }}
@@ -170,7 +226,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Mark the GitHub deployment failed
         if: ${{ failure() && steps.record.outputs.deployment-id != '' }}
-        uses: actions/github-script@v9
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         env:
           DEPLOYMENT_ID: ${{ steps.record.outputs.deployment-id }}
           PROJECT: ${{ inputs.project }}

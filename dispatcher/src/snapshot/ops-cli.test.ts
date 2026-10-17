@@ -252,11 +252,14 @@ describe("snapshot:ops persist", () => {
     const h = harness({ live: PAIR });
 
     expect(
-      await runOps(["persist", "--from-deployment", "dpl_old01"], h.deps),
+      await runOps(
+        ["persist", "--from-deployment", "dpl_oldexample01"],
+        h.deps,
+      ),
     ).toBe(0);
 
     const lookup = h.requests.find(
-      (r) => r.url.pathname === "/v13/deployments/dpl_old01",
+      (r) => r.url.pathname === "/v13/deployments/dpl_oldexample01",
     );
     expect(lookup).toBeDefined();
     const writes = h.requests.filter((r) =>
@@ -268,11 +271,51 @@ describe("snapshot:ops persist", () => {
   });
 
   // #403-T15
+  it("takes the deployment as an address with its scheme too, as the CLI and the dashboard print it", async () => {
+    const h = harness({ live: PAIR });
+
+    expect(
+      await runOps(
+        ["persist", "--from-deployment", "https://example-abc.vercel.app"],
+        h.deps,
+      ),
+    ).toBe(0);
+
+    expect(
+      h.requests.some(
+        (r) => r.url.pathname === "/v13/deployments/example-abc.vercel.app",
+      ),
+    ).toBe(true);
+  });
+
+  // #403-T15
+  it.each([
+    "--evil",
+    "https://example.com",
+    "dpl_x y",
+    "https://example.vercel.app/x",
+  ])(
+    "refuses %j as the deployment to restore from, with exit 2 and no request",
+    async (value) => {
+      const h = harness({ live: PAIR });
+
+      expect(
+        await runOps(["persist", "--from-deployment", value], h.deps),
+      ).toBe(2);
+
+      expect(h.requests).toEqual([]);
+    },
+  );
+
+  // #403-T15
   it("does nothing, and says so, for a deployment that carries no pair", async () => {
     const h = harness({ live: "none" });
 
     expect(
-      await runOps(["persist", "--from-deployment", "dpl_old01"], h.deps),
+      await runOps(
+        ["persist", "--from-deployment", "dpl_oldexample01"],
+        h.deps,
+      ),
     ).toBe(0);
 
     expect(

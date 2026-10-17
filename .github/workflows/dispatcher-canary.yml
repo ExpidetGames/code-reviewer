@@ -11,8 +11,10 @@ name: Dispatcher canary
 # code of any branch with the Infisical sign-in of the environment `production`, which is restricted to main as
 # well). It sends the dispatcher credential to the one URL it is given, and only after the Vercel API, asked with
 # the access token from Infisical, has confirmed that the deployment behind the host belongs to the Dispatcher
-# project and the team (https, no redirect followed, the deployment's own address and not an alias): every staged
-# deployment has a host of its own, so there is no list of hosts to keep. It prints only stable codes. The
+# project and the team, as a ready production deployment built from the commit of this run (https, no redirect
+# followed, the deployment's own address and not an alias): every staged deployment has a host of its own, so there is
+# no list of hosts to keep. When `image_digest` is given, the canary must also find that Worker image id in the
+# Dispatcher's own report, which proves the image the pipeline built and not whichever one the variables name. It prints only stable codes. The
 # credentials are loaded from Infisical /ci by one step, as environment variables, never in a command line or a log.
 on:
   workflow_dispatch:
@@ -24,6 +26,10 @@ on:
         description: "Engines the release needs: pr-agent,opencode, or pr-agent for a Diff-only deployment"
         default: "pr-agent,opencode"
         required: false
+      image_digest:
+        description: "Worker image id the deployment must report (sha256:...); empty does not check the image"
+        default: ""
+        required: false
   workflow_call:
     inputs:
       url:
@@ -33,6 +39,11 @@ on:
       engines:
         description: "Engines the release needs: pr-agent,opencode, or pr-agent"
         default: "pr-agent,opencode"
+        required: false
+        type: string
+      image_digest:
+        description: "Worker image id the deployment must report (sha256:...); empty does not check the image"
+        default: ""
         required: false
         type: string
 
@@ -55,17 +66,16 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
           package_json_file: dispatcher/package.json
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version-file: .nvmrc
-          cache: pnpm
-          cache-dependency-path: dispatcher/pnpm-lock.yaml
       - name: Install dependencies
         working-directory: dispatcher
         run: pnpm install --frozen-lockfile
@@ -90,4 +100,5 @@ jobs:
           VERCEL_AUTOMATION_BYPASS_SECRET: ${{ env.VERCEL_DISPATCHER_AUTOMATION_BYPASS_SECRET }}
           CANARY_URL: ${{ inputs.url }}
           CANARY_ENGINES: ${{ inputs.engines || 'pr-agent,opencode' }}
-        run: pnpm probe:canary --url "$CANARY_URL" --verify-vercel --engines "$CANARY_ENGINES"
+          CANARY_EXPECT_IMAGE_DIGEST: ${{ inputs.image_digest }}
+        run: pnpm probe:canary --url "$CANARY_URL" --verify-vercel --expect-commit "$GITHUB_SHA" --engines "$CANARY_ENGINES"

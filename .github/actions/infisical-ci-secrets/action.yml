@@ -56,6 +56,12 @@ runs:
           exit 1
         fi
 
+        # The client secret is sent to this address: never in clear text, and never to another path than the API's.
+        if ! [[ "${INFISICAL_DOMAIN}" =~ ^https://[^/@[:space:]]+/?$ ]]; then
+          echo "::error::INFISICAL_DOMAIN must be an https address without a path (https://<host>). ${CONSEQUENCE}"
+          exit 1
+        fi
+
         read -r -a names <<< "${SECRET_NAMES}"
         if [ "${#names[@]}" -eq 0 ] || [ "${#names[@]}" -gt 6 ]; then
           echo "::error::secret-names must name one to six secrets, got ${#names[@]}."

@@ -97,6 +97,9 @@ function vercelAuth(env: OpsDeps["env"]): VercelAuth {
   };
 }
 
+const DEPLOYMENT =
+  /^(dpl_[A-Za-z0-9]{8,64}|(https:\/\/)?[a-z0-9-]+\.vercel\.app)$/;
+
 async function runDecide(
   argv: readonly string[],
   deps: OpsDeps,
@@ -171,11 +174,12 @@ async function runPersist(
     "INFISICAL_PROJECT_SLUG",
   ]);
   let pair: SnapshotPair | undefined;
-  const deployment = values.get("--from-deployment");
-  if (deployment !== undefined) {
+  const given = values.get("--from-deployment");
+  if (given !== undefined) {
+    if (!DEPLOYMENT.test(given)) throw new Usage("--from-deployment");
     const lookup: PairLookup = await pairOfDeployment(
       vercelAuth(env),
-      deployment,
+      given.replace(/^https:\/\//, ""),
       deps.fetch,
     );
     if (lookup.status === "unavailable") {
@@ -213,9 +217,6 @@ async function runPersist(
   deps.stderr("ops: pair_persisted");
   return 0;
 }
-
-const DEPLOYMENT =
-  /^(dpl_[A-Za-z0-9]{8,64}|(https:\/\/)?[a-z0-9-]+\.vercel\.app)$/;
 
 async function runVerify(
   argv: readonly string[],
