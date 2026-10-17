@@ -68,11 +68,11 @@ written on `26126076` and are the evidence for the code facts below. Production 
 | M6 | **Plan versions.** Every subscription is pinned to a **plan version**: a fixed price together with a fixed key mode and fixed limits (run limits, cost limits, `modelAccess`). A plan configuration in the admin dashboard bundles its price, its key mode and its limits; changing the price, the key mode or the limits creates a new version. Subscribers keep their version, price and limits, until they change plan. The app stores which version each subscription is on and enforces that version's key mode and limits. |
 | M7 | **Free plan.** A workspace without a subscription falls onto a configurable **Free plan** (defaults: 10 Diff and 2 Dynamic runs per month). It is a plan like the others, with editable limits and `modelAccess`, but has no Paddle price and no checkout, and its key mode is always `managed` (M18). |
 | M8 | `past_due` gets **7 days of grace**, then managed reviews pause. |
-| M9 | **Yearly plans** are in v1. Whether a yearly option is offered is **configurable per plan**. Limits are still per month. |
+| M9 | **Yearly plans** are in v1. A yearly option is offered **when the operator enters a yearly price** for the plan version (an amount, not a discount percentage); without one there is no yearly option. Limits are still per month. |
 | M10 | **Plan changes.** An upgrade applies immediately with proration. A downgrade applies at the end of the period, scheduled by the app. |
 | M11 | The Paddle **API key and webhook secret are stored encrypted** in the admin dashboard. The app creates the notification destination through the API. |
 | M12 | **USD prices, always tax-inclusive** (Paddle `tax_mode: internal`). No country overrides. |
-| M13 | **Enterprise** is only a call to action ("Please contact us") with a configurable contact link or email. There is no provisioning flow in v1. |
+| M13 | **Enterprise** is only a call to action ("Let's talk" and a "Contact us" button) with a configurable contact link or email. There is no provisioning flow in v1. |
 | M14 | **No overage** in v1. At a limit the workspace sees an upgrade notice. |
 | M15 | Luca creates the Paddle sandbox and live accounts himself. |
 | M16 | Tests use a fake Paddle API and a webhook signer in `fakes/`, with duplicates, reordering and lost responses. The sandbox checks are a go-live checklist issue. |
@@ -292,7 +292,7 @@ Tables (instance level unless noted; all in the app database):
 ```
 billing_plans(id, plan_key unique, name, description, sort,
   kind 'free' | 'paid' | 'contact',
-  offered bool, yearly_enabled bool,
+  offered bool, popular bool,           -- popular: at most one plan (partial unique index)
   contact_target null,                  -- https link or mailto, kind 'contact' only
   paddle_product_id null, created_at, updated_at)
 
@@ -300,6 +300,7 @@ billing_plan_versions(id, plan_id, number, role 'current' | 'legacy',
   key_mode 'own' | 'managed',           -- pinned with the version; 'managed' for kind 'free'
   limits json,                          -- the entitlement limits of #271/#361
   model_access json null,               -- catalog entry ids; null = all released
+  monthly_amount_minor null, yearly_amount_minor null,  -- USD minor units, admin data (2.11, 2.18)
   monthly_price_id null, yearly_price_id null,    -- billing_plan_prices
   created_at, created_by)               -- immutable after creation except role
 
@@ -312,7 +313,7 @@ billing_plan_prices(id, plan_id, paddle_price_id unique, paddle_env,
 
 - **A plan version is the sold unit.** Saving a plan's price or limits creates a new version with
   the new numbers; the previous current version becomes `legacy`. Metadata that does not change
-  what is sold (name, description, sort, `offered`, `yearly_enabled`, contact target) is edited in
+  what is sold (name, description, `sort`, `offered`, `popular`, contact target) is edited in
   place. Versions may share a Paddle price (a limits-only change needs no new price).
 - **Subscribers keep their version** (M6). `billing_subscriptions.plan_version_id` is set when the
   subscription is created (from the checkout row that the server wrote, see 2.12) and changes only
@@ -335,10 +336,19 @@ billing_plan_prices(id, plan_id, paddle_price_id unique, paddle_env,
   unlimited by default** (`null`) but stay configurable like on any plan, and the optional own-key cost
   limit `ownKeyCostLimitMicroUsd` (#361) may be set. A form default of "unlimited" is not an amount in
   code. Which prices and limits an "Own key" plan has is admin data; the repository holds none.
-- **Enterprise** is a plan of kind `contact`: it shows "Please contact us" with the configured link or
-  email and has no versions, no price and no checkout (M13).
-- **Yearly** (M9). A version has an optional yearly price; the checkout offers the yearly option only
-  when the plan has `yearly_enabled` and the version has a yearly price. Limits are per month, see 2.13.
+- **Enterprise** is a plan of kind `contact`: it shows "Let's talk" and a "Contact us"
+  button with the configured link or email and has no versions, no price and no checkout (M13).
+- **Prices are admin data** (M4, M9, M12). The operator enters per paid version a **monthly price** and an
+  **optional yearly price**, USD, tax-inclusive, as dollars and cents (at most two decimals), stored as
+  integers in minor units (`monthly_amount_minor`, `yearly_amount_minor`). The yearly price is an amount,
+  not a discount; the screen's "save N%" is computed (2.18). A version offers yearly **exactly when it
+  has a yearly price**; there is no `yearly_enabled` flag. A price change creates a new version (M6). A
+  `free` or `contact` plan has no price. The Paddle price behind an amount (linked or created, below)
+  must carry exactly that amount: linking refuses a price whose amount differs, and creating uses the
+  entered amount. Limits are per month, see 2.13.
+- **Display fields** (2.18): `sort` is the order of the cards, `popular` marks at most one paid plan (the
+  flag moves in one transaction and a partial unique index refuses a second), and a `contact` plan is
+  offered only with a contact target.
 - **Trial** (M17). A trial is a property of the Paddle price (`trial_period`). The admin's "create
   price" form may set trial days (off by default); a linked price shows the trial it has. `trialing`
   is mapped like `active`.
@@ -348,10 +358,11 @@ billing_plan_prices(id, plan_id, paddle_price_id unique, paddle_env,
   default). No `unit_price_overrides` are created, and a linked price that has overrides is refused.
 - **Link and validate first (M5).** Linking reads `GET /prices/{id}`: it must exist, be `active`,
   recurring with the declared interval, USD, `tax_mode: internal`, belong to the plan's product and
-  match the configured environment. The cached amount and status come from Paddle, so the admin
-  screen shows the amount but never lets you type a different one.
+  match the configured environment and **carry the amount the operator entered for that interval**. The
+  cached amount and status come from Paddle, and a difference is refused (or, later, shown as drift); the
+  app never edits the Paddle price to make it match.
 - **Create a new price version second (M5).** The server creates the product on first use, then a new
-  price with `custom_data { cr_plan_key, cr_intent }`. An **intent row** is written first. Paddle has
+  price with the amount entered for the version and `custom_data { cr_plan_key, cr_intent }`. An **intent row** is written first. Paddle has
   no client idempotency keys, so after a lost response the app lists the product's prices and matches
   the intent before it retries; the `price.created` webhook adopts a price whose intent matches.
 - **Money guardrails.** The client wrapper and the fake refuse a `PATCH` of `unit_price`,
@@ -450,6 +461,7 @@ prices in the same interval.
   follow the pin as for any change: the own key keeps working until the pin moves (a downgrade: the
   period end), after which a stored own key is not used and the workspace sees the M19 notice. The
   confirmation step names the key mode of the target plan.
+- The plan change starts from the purchase panel of the plan screen (2.18).
 - **Blocked states** are shown, not hidden: `past_due`, a pending scheduled change (cancel), a pending
   downgrade, and the 30 minutes before a renewal give stable codes (`plan_change_blocked_*`).
 - **Cancel and payment methods** are done in the Paddle customer portal (cancel at period end,
@@ -496,6 +508,41 @@ stop the other steps of the sweep.
   member can read, pull request comment or error copy. An instance admin sees nothing inside a
   customer workspace beyond what 0001 already allows.
 - Stable error codes as `as const` sets; the UI maps codes to copy.
+
+### 2.18 The plan selection screen (M9, M10, M13, M18; Luca's decision)
+
+One screen, Workspace settings → **Plan** (`/w/:ws/settings/plan`), serves buying and changing plans.
+Owners and Admins can buy and change; Members see it **read-only** (no select, no panel, no buy or
+portal control). The limit notice (`quota_exhausted`) and the `own_key_requires_plan` notice (2.8, M19)
+link to it; the latter opens the "Bring your own key" side. UI copy is English.
+
+- **Header:** the current plan and the usage this month, as what is left ("7 of 10 Diff, 1 of 2 Dynamic
+  left"; a `null` limit reads "Unlimited").
+- **Toggle at the top:** "Plans with our models" lists the `managed` plans (Free, the paid ones and
+  Enterprise); "Bring your own key" lists the `own` plans. It opens on the side of the current plan. A
+  side with no offered plan is not shown.
+- **One card per offered plan**, ordered by the operator's `sort`: the plan name; **"from $X/mo"**
+  (X = the **yearly price ÷ 12** when the version has a yearly price, otherwise the monthly price);
+  the key limits (Diff and Dynamic runs per month, "Unlimited" for `null`); the allowed models by
+  their **catalog names** (`managed`) or "Any model with your keys" (`own`). The current plan is
+  marked. The **"Popular" badge** is the `popular` flag of at most one plan, set by the operator. The
+  **Enterprise card** reads "Let's talk" with a "Contact us" button to the configured link or email
+  and has no checkout; Free reads "Free".
+- **Selecting a paid card** opens a panel below the cards: a Monthly/Yearly toggle (Yearly only when the
+  version has a yearly price; a subscriber is fixed to the interval of the subscription, the interval
+  switch being out of v1, 2.14), the price of the chosen interval **tax included**, for Yearly a
+  **"save N%" computed** from the two amounts, the effective date ("now" for a new subscription,
+  "now, pro rata" for an upgrade, "on <period end>" for a downgrade, 2.14) and **"Continue to
+  payment"**. For a workspace without a subscription it opens the Paddle overlay on the transaction the
+  server created (2.12); for a subscriber it starts the plan change of 2.14.
+- **Rules for amounts**, pure functions with made-up numbers in their tests, no amount in code. All
+  arithmetic is on integer minor units: the "from" price is `round(yearly / 12)`, **rounded half up to
+  a whole cent**; the saving is `N = floor(100 × (12 × monthly − yearly) / (12 × monthly))`, a whole
+  percent rounded down, **hidden when N ≤ 0**; a price is shown **without cents when whole** ("$10")
+  and with two decimals otherwise ("$8.33").
+- Catalog names are free names that the operator chose (M2), so showing them to members is allowed;
+  the screen still never shows a provider or a model id (2.17).
+- Issues: the admin fields are #438, the panel and checkout #443, the screen #444, the plan change #445.
 
 ## 3. Failure modes
 
