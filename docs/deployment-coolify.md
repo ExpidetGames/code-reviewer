@@ -609,6 +609,8 @@ App ([`github-app.md`](github-app.md), webhook secret rotation).
 
 ## 11. Updates and rollback
 
+> **Release with check runs and review verdicts (#405).** Accept the new *Checks* permission of the GitHub App on each installation, and know that every existing project starts to submit a review verdict (`APPROVE` / `REQUEST_CHANGES`) after the update; set a project's *Review verdict* to `off` to keep it as it was. Details: [Updating to the release with check runs and review verdicts](../README.md#updating-to-the-release-with-check-runs-and-review-verdicts).
+
 **Update.**
 
 1. Make a restore point: run the backup command by hand

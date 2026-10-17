@@ -17,6 +17,8 @@ import { DEFAULT_SEND_LIMIT, type DispatchService } from "./service.ts";
 export const OPPORTUNISTIC_INTERVAL_MS = 30_000;
 /** A job younger than this is left to the request that queued it (its inline retries take up to 35 seconds). */
 export const OPPORTUNISTIC_MIN_JOB_AGE_MS = 40_000;
+/** The check runs get little time: this runs in the `after()` of a request that has a minute in all (#405). */
+const CHECKS_BUDGET_MS = 15_000;
 
 export type OpportunisticOutcome = "ran" | "throttled" | "locked" | "failed";
 
@@ -26,6 +28,10 @@ export type OpportunisticDependencies = {
   queue: Pick<RunnerQueue, "expireStaleJobs">;
   /** Absent in poll mode: nothing is sent, leases are still released. */
   dispatch?: Pick<DispatchService, "sendDue">;
+  /** #405: brings the check runs of the jobs that just ended or went back to the queue in line with GitHub. */
+  checks?: {
+    reconcileDue(options?: { budgetMs?: number }): Promise<{ synced: number }>;
+  };
   now?: () => number;
   intervalMs?: number;
   log?: Pick<Console, "error">;
@@ -53,6 +59,8 @@ export function createOpportunisticMaintenance(
           await deps.dispatch?.sendDue(DEFAULT_SEND_LIMIT, {
             minAgeMs: OPPORTUNISTIC_MIN_JOB_AGE_MS,
           });
+          // The leases released above changed jobs no request named: their check runs follow.
+          await deps.checks?.reconcileDue({ budgetMs: CHECKS_BUDGET_MS });
         });
         return outcome.acquired ? "ran" : "locked";
       } catch {

@@ -50,6 +50,7 @@ import {
   resetSkill,
   setDynamicModel,
   setReviewKind,
+  setReviewVerdict,
   setSkillText,
 } from "./dynamic-form-state.ts";
 import {
@@ -80,6 +81,7 @@ import {
   type ReviewKindHandlers,
 } from "./review-kind-fieldset.tsx";
 import { ReviewFieldset } from "./review-fieldset.tsx";
+import { ReviewVerdictFieldset } from "./review-verdict-fieldset.tsx";
 import { WhenFieldset } from "./when-fieldset.tsx";
 import {
   settingsOrigin,
@@ -489,6 +491,19 @@ export function SettingsForm({
             quality={model.managed ? quality("dynamic") : undefined}
           />
         ) : null}
+        {projectView !== undefined && state.dynamic !== undefined ? (
+          <ReviewVerdictFieldset
+            value={state.dynamic.reviewVerdict}
+            kind={kind}
+            defaultMode={projectView.defaults.reviewVerdict}
+            source={projectView.sources.reviewVerdict}
+            error={errors.reviewVerdict}
+            disabled={disabled}
+            onChange={(mode) =>
+              edit(setReviewVerdict(state, mode), "reviewVerdict")
+            }
+          />
+        ) : null}
         {kind === "diff" ? (
           <ModelFieldset
             model={model}
@@ -581,10 +596,10 @@ export function SettingsForm({
       {api.reset === undefined ? null : (
         <DangerZone
           title="Reset to defaults"
-          description="Removes every value set for this project — the Review kind, the Dynamic Review model and the review skill, together with the Diff settings — and follows the workspace defaults again."
+          description="Removes every value set for this project — the Review kind, the Dynamic Review model, the review skill and the review verdict, together with the Diff settings — and follows the workspace defaults again."
           actionLabel="Reset everything"
           confirmTitle="Reset this project to the defaults?"
-          confirmDescription="Every value set for this project is removed, including the Review kind, the Dynamic Review model and the review skill, and the workspace defaults apply again. Reviews started afterwards use the defaults."
+          confirmDescription="Every value set for this project is removed, including the Review kind, the Dynamic Review model, the review skill and the review verdict, and the workspace defaults apply again. Reviews started afterwards use the defaults."
           confirmLabel="Reset to defaults"
           onConfirm={resetAll}
         />

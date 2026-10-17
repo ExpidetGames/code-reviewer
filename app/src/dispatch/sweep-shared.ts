@@ -6,6 +6,7 @@ import "server-only";
 import { createAppMetaRepository } from "../db/repositories/app-meta-repository.ts";
 import { createJobDispatchesRepository } from "../db/repositories/job-dispatches-repository.ts";
 import { getDatabase } from "../db/startup.ts";
+import { getCheckRunService } from "../check-runs/shared.ts";
 import { getRunnerQueue } from "../jobs/shared.ts";
 import { cleanUpExpiredRows } from "../maintenance/cleanup.ts";
 import { getMailSender } from "../mail/shared.ts";
@@ -35,6 +36,8 @@ export function getDispatchSweep(
     meta: createAppMetaRepository(db),
     // #281: the notices of refused reviews whose post failed.
     notices: getRefusalNoticeService(),
+    // #405: the check runs and review verdicts of the jobs the steps before ended or no request named.
+    checks: getCheckRunService(),
     cleanup: () =>
       cleanUpExpiredRows(db, undefined, {
         // Read when it matters, never remembered: the admin can add or remove the mail server at any time.

@@ -91,6 +91,15 @@ function projectOnlyChanges(
     if (check({ dynamicModel: wanted })) body.dynamicModel = wanted;
   }
 
+  // The default mode put back (or chosen again) clears the override; any other mode is the new override (#405).
+  if (values.reviewVerdict !== view.effective.reviewVerdict) {
+    const wanted =
+      values.reviewVerdict === view.defaults.reviewVerdict
+        ? null
+        : values.reviewVerdict;
+    if (check({ reviewVerdict: wanted })) body.reviewVerdict = wanted;
+  }
+
   const shipped = view.defaults.reviewSkill;
   const current = view.reviewSkillIsDefault ? null : view.effective.reviewSkill;
   let wanted: string | null = null;

@@ -15,7 +15,9 @@
 //     (`RUNNER_DISPATCH_MAX_RUNNING`): at most as many as there are free slots.
 //  5. `notices`: the notices of refused reviews whose post failed and whose wait is over (#281), at most one
 //     batch, each tried a few times at most.
-//  6. `cleanup`: the hourly cleanup a long-lived server runs on a timer, once when the hour has changed.
+//  6. `checks`: the check runs and review verdicts of jobs whose GitHub state is behind (#405): jobs the steps above
+//     ended or requeued, jobs no request named, syncs whose retry is due. At most one batch, within a time budget.
+//  7. `cleanup`: the hourly cleanup a long-lived server runs on a timer, once when the hour has changed.
 //
 // A step that fails is logged by its name and does not stop the others; the next run tries again. Nothing a
 // database or an answer said is ever logged: a connection string can be in it.
@@ -33,6 +35,8 @@ export const STOPPED_REVIVE_MS = 10 * 60 * 1000;
 /** Where the hour of the last cleanup is kept, so that every instance sees the same one. */
 export const CLEANUP_HOUR_KEY = "maintenance.sweep_cleanup_hour";
 const HOUR_MS = 60 * 60 * 1000;
+/** The sweep runs in an internal route (five minutes), so the check runs may have most of a minute (#405). */
+const CHECKS_BUDGET_MS = 40_000;
 
 export const SWEEP_STEPS = [
   "expire",
@@ -40,6 +44,7 @@ export const SWEEP_STEPS = [
   "revive",
   "send",
   "notices",
+  "checks",
   "cleanup",
 ] as const;
 export type SweepStep = (typeof SWEEP_STEPS)[number];
@@ -58,6 +63,8 @@ export type SweepReport = {
   sent: number;
   /** How many notices of refused reviews were tried again (#281). */
   noticesTried: number;
+  /** How many jobs had their check run or review verdict synced with GitHub (#405). */
+  checksSynced: number;
   cleanedUp: boolean;
   /** The steps that failed in this run. */
   failedSteps: SweepStep[];
@@ -78,6 +85,10 @@ export type SweepDependencies = {
   cleanup: () => Promise<CleanupResult>;
   /** #281: tries the notices of refused reviews that are due again. Left out, none is tried. */
   notices?: { retryDue(): Promise<{ tried: number }> };
+  /** #405: brings the check runs and verdicts of jobs in line with GitHub. Left out, none is touched. */
+  checks?: {
+    reconcileDue(options?: { budgetMs?: number }): Promise<{ synced: number }>;
+  };
   settings: SweepSettings;
   log?: SweepLog;
 };
@@ -95,6 +106,7 @@ export function createDispatchSweep(deps: SweepDependencies): DispatchSweep {
       revived: 0,
       sent: 0,
       noticesTried: 0,
+      checksSynced: 0,
       cleanedUp: false,
       failedSteps: [],
     };
@@ -139,6 +151,13 @@ export function createDispatchSweep(deps: SweepDependencies): DispatchSweep {
     if (notices !== undefined)
       await step("notices", async () => {
         report.noticesTried = (await notices.retryDue()).tried;
+      });
+    const checks = deps.checks;
+    if (checks !== undefined)
+      await step("checks", async () => {
+        report.checksSynced = (
+          await checks.reconcileDue({ budgetMs: CHECKS_BUDGET_MS })
+        ).synced;
       });
     await step("cleanup", async () => {
       const hour = Math.floor(now().getTime() / HOUR_MS);

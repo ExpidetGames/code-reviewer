@@ -628,13 +628,24 @@ describe("what the portal shows", () => {
     const manual = await createGithubConfigHarness();
     await manual.service.saveApp("admin-1", manual.validManualInput());
     manual.github.setAppAccountPermissions({});
+    // An App made before the check run: the four permissions of a job and nothing else.
+    manual.github.setAppPermissions({
+      metadata: "read",
+      contents: "read",
+      pull_requests: "write",
+      issues: "write",
+    });
     const manifest = await createGithubConfigHarness();
     await manifest.createAppThroughManifest();
 
     const lacking = await manual.service.checkPermissions("admin-1");
     const complete = await manifest.service.checkPermissions("admin-1");
 
-    expect(lacking).toEqual({ ok: true, missing: ["emails", "members"] });
+    // #405-T14
+    expect(lacking).toEqual({
+      ok: true,
+      missing: ["checks", "emails", "members"],
+    });
     expect(complete).toEqual({ ok: true, missing: [] });
   });
 });

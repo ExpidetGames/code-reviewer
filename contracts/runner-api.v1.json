@@ -398,6 +398,39 @@
         }
       }
     },
+    "ReviewFindings": {
+      "description": "#405: what a successful review left open on the pull request. `open` counts the findings that are open AFTER the run (a Dynamic Review carries the findings of earlier runs over, PR-Agent keeps a record of active ones), not the ones the run found. `bySeverity` is the count per priority of a Dynamic Review, of the findings its summary lists (so `open` may exceed the sum when lower priority findings did not fit); null for a Diff Review, whose findings have no severity.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["open", "bySeverity"],
+      "properties": {
+        "open": { "type": "integer", "minimum": 0, "maximum": 100000 },
+        "incomplete": {
+          "description": "True when the review did not cover everything it was asked to: a finding its validation dropped, a chunk that failed, files left out for the token budget. `open` may then miss a blocker, so the app never approves on it. Absent means complete.",
+          "type": "boolean"
+        },
+        "bySeverity": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["P0", "P1", "P2", "P3"],
+              "properties": {
+                "P0": { "type": "integer", "minimum": 0, "maximum": 100000 },
+                "P1": { "type": "integer", "minimum": 0, "maximum": 100000 },
+                "P2": { "type": "integer", "minimum": 0, "maximum": 100000 },
+                "P3": { "type": "integer", "minimum": 0, "maximum": 100000 }
+              }
+            },
+            { "type": "null" }
+          ]
+        }
+      },
+      "examples": [
+        { "open": 3, "bySeverity": { "P0": 1, "P1": 0, "P2": 2, "P3": 0 } },
+        { "open": 2, "bySeverity": null }
+      ]
+    },
     "RunnerResult": {
       "description": "What the runner prints when a job ends (the output of code-reviewer-run-job), plus an optional errorMessage. The runner has redacted secrets from logTail; the app removes anything that still looks like one before it stores the result.",
       "type": "object",
@@ -428,6 +461,10 @@
         },
         "logTail": { "type": "string", "maxLength": 8192 },
         "logTruncated": { "type": "boolean" },
+        "findings": {
+          "description": "#405: the findings left open on the pull request by a successful review, which the app turns into the review verdict it submits. Absent (or null) where the runner cannot say, and on every failure: the app then submits no verdict. Additive: a runner that does not send it, or an app that does not read it, keeps working.",
+          "oneOf": [{ "$ref": "#/$defs/ReviewFindings" }, { "type": "null" }]
+        },
         "usage": {
           "description": "What the run used. A failed result carries it too, whenever the run made at least one model call before it failed (a timeout at the end, an answer the validator refuses, a publish error): the app counts such a run exactly like a successful one. A run that failed before its first model call reports null. The cost follows the same rule as for a successful run: exact, or null when any call is unpriced; the token counters are reported either way.",
           "oneOf": [{ "$ref": "#/$defs/RunnerUsage" }, { "type": "null" }]

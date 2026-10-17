@@ -154,6 +154,7 @@ describe.each(databases)("the dispatch sweep route on %s", (name, open) => {
       revived: 0,
       sent: 0,
       noticesTried: 0,
+      checksSynced: 0,
       cleanedUp: true,
     });
     expect((await t.queue.get(job.id))?.status).toBe("queued");

@@ -612,17 +612,20 @@ describe("the project-only settings of a project", () => {
       reviewKind: "diff",
       dynamicModel: DEFAULT_DYNAMIC_MODEL,
       reviewSkill: TEST_DEFAULT_SKILL.text,
+      reviewVerdict: "blocking",
     });
     expect(view.dynamic.reviewSkillIsDefault).toBe(true);
     expect(view.dynamic.sources).toEqual({
       reviewKind: "built_in",
       dynamicModel: "built_in",
       reviewSkill: "built_in",
+      reviewVerdict: "built_in",
     });
     expect(view.dynamic.defaults).toEqual({
       reviewKind: "diff",
       dynamicModel: DEFAULT_DYNAMIC_MODEL,
       reviewSkill: TEST_DEFAULT_SKILL.text,
+      reviewVerdict: "blocking",
     });
     expect(view.dynamic.defaultSkill).toEqual({
       id: TEST_DEFAULT_SKILL.id,
@@ -648,11 +651,13 @@ describe("the project-only settings of a project", () => {
       reviewKind: "dynamic",
       dynamicModel: "vendor/dynamic-model",
       reviewSkill: "Review for the Dynamic kind.",
+      reviewVerdict: "blocking",
     });
     expect(saved.dynamic.sources).toEqual({
       reviewKind: "project",
       dynamicModel: "project",
       reviewSkill: "project",
+      reviewVerdict: "built_in",
     });
 
     const reloaded = await app.service.getProjectSettings(app.first.id);
@@ -722,7 +727,93 @@ describe("the project-only settings of a project", () => {
       reviewKind: "diff",
       dynamicModel: DEFAULT_DYNAMIC_MODEL,
       reviewSkill: TEST_DEFAULT_SKILL.text,
+      reviewVerdict: "blocking",
     });
+  });
+
+  // #405-T28
+  it("save the verdict mode on a project of either kind, show it as the project's own, and keep the Diff overrides", async () => {
+    const app = await setupReviewSettings();
+    await app.projects.activate(app.first.id);
+    await app.service.updateProjectSettings(app.first.id, { maxFindings: 2 });
+
+    const saved = await app.service.updateProjectSettings(app.first.id, {
+      reviewVerdict: "any",
+    });
+
+    expect(saved.dynamic.effective.reviewVerdict).toBe("any");
+    expect(saved.dynamic.sources.reviewVerdict).toBe("project");
+    expect(saved.dynamic.overrides).toEqual({ reviewVerdict: "any" });
+    // A save of only project-only fields never touches the Diff group.
+    expect(saved.overrides).toEqual({ maxFindings: 2 });
+    expect(
+      (await app.service.getProjectSettings(app.first.id)).dynamic.effective
+        .reviewVerdict,
+    ).toBe("any");
+    expect(
+      (await app.service.resolveForRepository(app.first.id))?.dynamic
+        .reviewVerdict,
+    ).toBe("any");
+  });
+
+  // #405-T28
+  it("keep the verdict mode through an ordinary Diff-only save, and go back to the default when it is cleared", async () => {
+    const app = await setupReviewSettings();
+    await app.projects.activate(app.first.id);
+    await app.service.updateProjectSettings(app.first.id, {
+      reviewVerdict: "off",
+    });
+
+    const afterDiffSave = await app.service.updateProjectSettings(
+      app.first.id,
+      { maxFindings: 3 },
+    );
+    const cleared = await app.service.updateProjectSettings(app.first.id, {
+      reviewVerdict: null,
+    });
+
+    expect(afterDiffSave.dynamic.effective.reviewVerdict).toBe("off");
+    expect(cleared.dynamic.effective.reviewVerdict).toBe("blocking");
+    expect(cleared.dynamic.sources.reviewVerdict).toBe("built_in");
+    expect((await app.projects.get(app.first.id))?.settings).toEqual({
+      maxFindings: 3,
+    });
+  });
+
+  // #405-T28
+  it("refuse an unknown verdict mode, name the field and store nothing", async () => {
+    const app = await setupReviewSettings();
+    await app.projects.activate(app.first.id);
+
+    const error = await refusal(
+      app.service.updateProjectSettings(app.first.id, {
+        reviewVerdict: "always",
+      }),
+    );
+
+    expect(error.code).toBe("REVIEW_SETTINGS_INVALID");
+    expect(error.issues).toEqual([
+      { field: "reviewVerdict", code: "INVALID_FORMAT" },
+    ]);
+    expect((await app.projects.get(app.first.id))?.settings).toEqual({});
+  });
+
+  // #405-T28
+  it("clear the verdict mode with the rest when the project is reset, and read an unknown stored one as the default", async () => {
+    const app = await setupReviewSettings();
+    await app.projects.activate(app.first.id);
+    await app.service.updateProjectSettings(app.first.id, {
+      reviewVerdict: "any",
+    });
+
+    const reset = await app.service.resetProjectSettings(app.first.id);
+    await app.projects.updateSettings(app.first.id, {
+      reviewVerdict: "sometimes",
+    });
+    const stored = await app.service.getProjectSettings(app.first.id);
+
+    expect(reset.dynamic.effective.reviewVerdict).toBe("blocking");
+    expect(stored.dynamic.effective.reviewVerdict).toBe("blocking");
   });
 
   // #194-T06

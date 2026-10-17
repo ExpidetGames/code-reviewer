@@ -19,6 +19,20 @@ export const GITHUB_APP_ERROR_CODES = [
   "GITHUB_APP_REQUEST_FAILED",
 ] as const;
 
+/**
+ * Why GitHub refused a call with 403, or a token request with 422, as far as its answer says (#405). A closed set
+ * read from the answer's message; the message itself is never kept. `permission_missing`: the App lacks a
+ * permission or the installation has not accepted it. `repository_archived`: the repository is read-only.
+ * `repository_not_accessible`: the repository is not part of the installation. `other`: GitHub said something else.
+ */
+export const GITHUB_REFUSAL_REASONS = [
+  "permission_missing",
+  "repository_archived",
+  "repository_not_accessible",
+  "other",
+] as const;
+export type GithubRefusalReason = (typeof GITHUB_REFUSAL_REASONS)[number];
+
 export type GithubAppErrorCode = (typeof GITHUB_APP_ERROR_CODES)[number];
 
 export class GithubAppError extends Error implements SafeMessageError {
@@ -34,6 +48,8 @@ export class GithubAppError extends Error implements SafeMessageError {
    * means the thing it asked for does not exist (a pull request, a repository).
    */
   readonly duringTokenRequest: boolean;
+  /** Why GitHub refused (403, or 422 for a token request); undefined where the answer was not read. */
+  readonly refusal: GithubRefusalReason | undefined;
 
   constructor(
     code: GithubAppErrorCode,
@@ -42,6 +58,7 @@ export class GithubAppError extends Error implements SafeMessageError {
       status?: number | null;
       retryAfterSeconds?: number | null;
       duringTokenRequest?: boolean;
+      refusal?: GithubRefusalReason;
     } = {},
   ) {
     super(message);
@@ -50,6 +67,7 @@ export class GithubAppError extends Error implements SafeMessageError {
     this.status = options.status ?? null;
     this.retryAfterSeconds = options.retryAfterSeconds ?? null;
     this.duringTokenRequest = options.duringTokenRequest ?? false;
+    this.refusal = options.refusal;
   }
 }
 

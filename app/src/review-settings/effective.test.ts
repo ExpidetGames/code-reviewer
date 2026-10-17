@@ -185,11 +185,40 @@ describe("the project-only review kind, model and skill", () => {
     expect(dynamic.dynamicModel).toBe("deepseek/deepseek-v4.1-flash");
     expect(dynamic.reviewSkill).toBe(SHIPPED_SKILL);
     expect(dynamic.reviewSkillIsDefault).toBe(true);
+    // #405-T28: the default verdict mode is the one that blocks on the highest severity only.
+    expect(dynamic.reviewVerdict).toBe("blocking");
     expect(dynamic.sources).toEqual({
       reviewKind: "built_in",
       dynamicModel: "built_in",
       reviewSkill: "built_in",
+      reviewVerdict: "built_in",
     });
+  });
+
+  // #405-T28
+  it("take the verdict mode of the project, whatever its review kind, and fall back to the default when it is cleared", () => {
+    for (const reviewKind of ["diff", "dynamic"] as const) {
+      const set = resolveProjectDynamicSettings({
+        builtIn: builtInProjectDynamicSettings(),
+        project: { reviewKind, reviewVerdict: "any" },
+        defaultSkill: SHIPPED_SKILL,
+      });
+      expect(set.reviewVerdict).toBe("any");
+      expect(set.sources.reviewVerdict).toBe("project");
+    }
+    const off = resolveProjectDynamicSettings({
+      builtIn: builtInProjectDynamicSettings(),
+      project: { reviewVerdict: "off" },
+      defaultSkill: SHIPPED_SKILL,
+    });
+    expect(off.reviewVerdict).toBe("off");
+    expect(
+      resolveProjectDynamicSettings({
+        builtIn: builtInProjectDynamicSettings(),
+        project: {},
+        defaultSkill: SHIPPED_SKILL,
+      }).reviewVerdict,
+    ).toBe("blocking");
   });
 
   // #194-T01

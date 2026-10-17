@@ -2,7 +2,7 @@
 
 // Pins down the start of a serverless instance (#319): the settings are checked, and none of the work
 // of a long-lived server happens (migrations, the backup of an old database, the legacy import, the
-// in-memory setup code, the GitHub sync, the cleanup and backup timers). A bad setting aborts the start
+// in-memory setup code, the GitHub sync, the cleanup, backup and check run timers: #405). A bad setting aborts the start
 // with a thrown error, never with `process.exit`. The server start is pinned in instrumentation.test.ts.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -26,6 +26,9 @@ vi.mock("./integrations/sync/startup.ts", () => ({
 }));
 vi.mock("./maintenance/startup.ts", () => ({
   startCleanupOnStart: spied("cleanup"),
+}));
+vi.mock("./check-runs/startup.ts", () => ({
+  startCheckReconcilerOnStart: spied("check-run-timer"),
 }));
 vi.mock("./db/startup.ts", () => ({
   getDatabase: () => {
@@ -54,6 +57,16 @@ afterEach(() => {
 });
 
 describe("starting a serverless instance", () => {
+  // #405-T32
+  it("starts no check run timer: the sweep and the requests reconcile the check runs of a hosted deployment", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+
+    await register();
+
+    expect(forbidden).not.toContain("check-run-timer");
+    expect(forbidden).toEqual([]);
+  });
+
   // #319-T01
   it("starts no timer, sync, backup or import, and does not even touch the database", async () => {
     const setIntervalSpy = vi.spyOn(globalThis, "setInterval");
