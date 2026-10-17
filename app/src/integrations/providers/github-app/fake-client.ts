@@ -6,6 +6,7 @@ import type {
   CollaboratorPermission,
   GithubAppClient,
   IssueComment,
+  PullRequestReview,
   RemoteInstallation,
   RemoteRepository,
 } from "./client.ts";
@@ -30,6 +31,14 @@ export type FakeGithubAppClientData = {
   listCommentsFailure?: Error;
   /** What `listIssueComments` answers, by "owner/name#number". */
   comments?: Record<string, IssueComment[]>;
+  /** Makes `createCheckRun`, `updateCheckRun` and `findCheckRun` reject with this error (#405). */
+  checkRunFailure?: Error;
+  /** What `findCheckRun` answers; null (the default) finds none. */
+  foundCheckRun?: { id: string } | null;
+  /** Makes `createPullRequestReview` reject with this error (#405). */
+  reviewFailure?: Error;
+  /** What `listPullRequestReviews` answers, by "owner/name#number" (#405). */
+  reviews?: Record<string, PullRequestReview[]>;
   /** Makes `getPullRequest` reject with this error (an unknown pull request is rejected anyway). */
   getPullRequestFailure?: Error;
 };
@@ -167,6 +176,67 @@ export function fakeGithubAppClient(
       );
       if (data.commentFailure) throw data.commentFailure;
       return { id: "5001" };
+    },
+    async createCheckRun(installationId, scope, repoFullName, input) {
+      record("createCheckRun", installationId, scope, repoFullName, input);
+      if (data.checkRunFailure) throw data.checkRunFailure;
+      return { id: "9001" };
+    },
+    async updateCheckRun(
+      installationId,
+      scope,
+      repoFullName,
+      checkRunId,
+      input,
+    ) {
+      record(
+        "updateCheckRun",
+        installationId,
+        scope,
+        repoFullName,
+        checkRunId,
+        input,
+      );
+      if (data.checkRunFailure) throw data.checkRunFailure;
+    },
+    async findCheckRun(installationId, scope, repoFullName, lookup) {
+      record("findCheckRun", installationId, scope, repoFullName, lookup);
+      if (data.checkRunFailure) throw data.checkRunFailure;
+      return data.foundCheckRun ?? null;
+    },
+    async createPullRequestReview(
+      installationId,
+      scope,
+      repoFullName,
+      prNumber,
+      input,
+    ) {
+      record(
+        "createPullRequestReview",
+        installationId,
+        scope,
+        repoFullName,
+        prNumber,
+        input,
+      );
+      if (data.reviewFailure) throw data.reviewFailure;
+      return { id: "6001" };
+    },
+    async listPullRequestReviews(
+      installationId,
+      scope,
+      repoFullName,
+      prNumber,
+    ) {
+      record(
+        "listPullRequestReviews",
+        installationId,
+        scope,
+        repoFullName,
+        prNumber,
+      );
+      if (data.reviewFailure) throw data.reviewFailure;
+      return data.reviews?.[`${repoFullName}#${prNumber}`] ?? [];
     },
     async mintInstallationToken(installationId, scope) {
       record("mintInstallationToken", installationId, scope);

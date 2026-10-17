@@ -11,7 +11,9 @@ import type {
   IntegrationType,
   PullRequestRef,
   RepoRef,
+  ReviewCheck,
   ReviewTrigger,
+  ReviewVerdict,
 } from "./types.ts";
 
 /** How a user connects this kind of integration. */
@@ -106,6 +108,36 @@ export interface IntegrationProvider {
     prNumber: number,
     notice: { body: string; marker: string; lookForEarlierSince?: string },
   ): Promise<"posted" | "already_there">;
+
+  /**
+   * Only where the platform shows the progress of a review next to the pull request (#405; GitHub: a check run):
+   * makes the check of the job or, with `known.checkRunId`, changes it, with a token of the app's own limited to
+   * this repository and the permission to write checks (never the credentials of a job). `known.mayExist` says an
+   * earlier call may have made the check without its id being kept: it is looked for by the job first. Rejects with
+   * an `IntegrationError`; `INTEGRATION_ACCESS_SCOPE_REFUSED` is an app that was not granted the permission (an
+   * installation that has not accepted it yet). The message never holds a token or a body.
+   */
+  publishReviewCheck?(
+    integration: Integration,
+    repo: RepoRef,
+    check: ReviewCheck,
+    known: { checkRunId: string | null; mayExist: boolean },
+  ): Promise<{ checkRunId: string }>;
+
+  /**
+   * Only where the app can review a pull request (#405): submits the verdict as the app, with a token limited to
+   * this repository and the pull request permission. With `lookForEarlier` it first looks for a review of the app
+   * itself that holds `verdict.marker` and submits nothing if there is one, the way an instance that is unsure
+   * whether another one submitted does not submit twice. Rejects like `publishReviewCheck`;
+   * `INTEGRATION_REQUEST_REFUSED` is a review the platform refuses for its content (the app's own pull request).
+   */
+  submitReviewVerdict?(
+    integration: Integration,
+    repo: RepoRef,
+    prNumber: number,
+    verdict: ReviewVerdict,
+    options: { lookForEarlier: boolean },
+  ): Promise<{ outcome: "submitted" | "already_there"; reviewId: string }>;
 
   /** Credentials for one job on one repository; short-lived where the platform allows it. */
   jobAccess(integration: Integration, repo: RepoRef): Promise<GitAccess>;

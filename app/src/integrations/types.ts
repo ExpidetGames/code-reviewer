@@ -198,6 +198,35 @@ export type GitAccess = {
 export const PULL_REQUEST_STATES = ["open", "closed", "merged"] as const;
 export type PullRequestState = (typeof PULL_REQUEST_STATES)[number];
 
+/**
+ * The check of a review as the pull request shows it (#405), provider neutral: GitHub renders it as a check run in
+ * the checks area. Never red: a conclusion is `success` or `neutral`.
+ */
+export type ReviewCheck = {
+  /** The job: identifies the check among those of the commit, so a check that was made twice can be told. */
+  jobId: string;
+  headSha: string;
+  name: string;
+  status: "queued" | "in_progress" | "completed";
+  /** Required with `completed`. */
+  conclusion?: "success" | "neutral";
+  title: string;
+  summary: string;
+  /** Where "details" leads: the review comment. */
+  detailsUrl?: string;
+};
+
+/** The verdict a finished review leaves on its pull request (#405). The body never holds anything of the pull request. */
+export type ReviewVerdict = {
+  jobId: string;
+  headSha: string;
+  event: "approve" | "request_changes";
+  /** Short: a verdict line, a link and the marker. */
+  body: string;
+  /** Hidden text in `body`, by which an earlier review of the app for this job is recognised. */
+  marker: string;
+};
+
 /** A pull request as the app needs to know it, for example to start a review by hand. */
 export type PullRequestRef = {
   number: number;

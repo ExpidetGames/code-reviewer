@@ -26,6 +26,11 @@ export const INTEGRATION_ERROR_CODES = [
    * credentials are tried instead.
    */
   "INTEGRATION_ACCESS_SCOPE_REFUSED",
+  /**
+   * The platform understood the call and refused it for its content (GitHub: a 422 on the call itself, for
+   * example a review of the app's own pull request). Trying the same call again does not help.
+   */
+  "INTEGRATION_REQUEST_REFUSED",
   /** The platform did not accept the app's own identity (GitHub: the App JWT, so key or app id). */
   "INTEGRATION_ACCESS_APP_AUTH_FAILED",
   /** Retryable. `retryAfterSeconds` (never negative) says when, or is null if the platform did not say. */

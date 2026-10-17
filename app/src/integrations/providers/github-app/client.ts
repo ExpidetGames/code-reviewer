@@ -69,6 +69,38 @@ export type IssueComment = {
   authorLogin: string;
 };
 
+/** The fields of a check run (#405) that the app writes: the name and commit only when it is created. */
+export type CheckRunFields = {
+  status: "queued" | "in_progress" | "completed";
+  /** Required with `completed`. The app only ever uses `success` and `neutral`: a check run is never red. */
+  conclusion?: "success" | "neutral";
+  /** The id of the job, so a check run that was created but whose id was not kept can be found again. */
+  externalId?: string;
+  detailsUrl?: string;
+  /** ISO 8601 text in UTC. */
+  startedAt?: string;
+  completedAt?: string;
+  output?: { title: string; summary: string };
+};
+
+export type NewCheckRun = CheckRunFields & { name: string; headSha: string };
+
+/** A review of a pull request (#405), as far as the app needs it. */
+export type PullRequestReview = {
+  id: string;
+  body: string;
+  /** The login of the author (`<slug>[bot]` for the app's own reviews). */
+  authorLogin: string;
+  /** `APPROVED`, `CHANGES_REQUESTED`, `COMMENTED`, `DISMISSED` or `PENDING`. */
+  state: string;
+};
+
+export type NewPullRequestReview = {
+  commitId: string;
+  body: string;
+  event: "APPROVE" | "REQUEST_CHANGES";
+};
+
 export type GithubAppClient = {
   /**
    * The app itself (`GET /app`, App JWT): proves that the key belongs to the app id, and says what the
@@ -130,6 +162,54 @@ export type GithubAppClient = {
     prNumber: number,
     body: string,
   ): Promise<{ id: string }>;
+  /**
+   * Creates the check run of a review on a commit (#405), as the app, with a token of its own limited to `scope`
+   * (minted for this call and switched off after it, also when the call fails). Rejects with the stable code of
+   * the answer; an App that was not granted the Checks permission fails while the token is requested (422, see
+   * `duringTokenRequest`) or with 403.
+   */
+  createCheckRun(
+    installationId: string,
+    scope: JobTokenScope,
+    repoFullName: string,
+    input: NewCheckRun,
+  ): Promise<{ id: string }>;
+  /** Changes a check run that `createCheckRun` made. Same token rules and failures. */
+  updateCheckRun(
+    installationId: string,
+    scope: JobTokenScope,
+    repoFullName: string,
+    checkRunId: string,
+    input: Partial<CheckRunFields>,
+  ): Promise<void>;
+  /**
+   * The check run of the app with this name and external id on the commit, or null: how a check run is found
+   * again when it was created and its id was not kept (the process died between the two).
+   */
+  findCheckRun(
+    installationId: string,
+    scope: JobTokenScope,
+    repoFullName: string,
+    lookup: { headSha: string; name: string; externalId: string },
+  ): Promise<{ id: string } | null>;
+  /**
+   * Submits a review of a pull request as the app (#405), with a token limited to `scope`. The body is the
+   * caller's: it must not carry anything of the pull request.
+   */
+  createPullRequestReview(
+    installationId: string,
+    scope: JobTokenScope,
+    repoFullName: string,
+    prNumber: number,
+    input: NewPullRequestReview,
+  ): Promise<{ id: string }>;
+  /** The reviews of a pull request, all pages. Only the author, the state and the body are read. */
+  listPullRequestReviews(
+    installationId: string,
+    scope: JobTokenScope,
+    repoFullName: string,
+    prNumber: number,
+  ): Promise<PullRequestReview[]>;
   /**
    * Mints a fresh installation access token, never from the cache, limited to the given repositories
    * and permissions. The one place a token for a job is created. Refuses (without a request) a scope
@@ -222,6 +302,61 @@ function toIssueComment(value: unknown): IssueComment {
   )
     throw shapeError("GET /repos/{owner}/{repo}/issues/{n}/comments");
   return { id: String(value.id), body: value.body, authorLogin: user.login };
+}
+
+function toPullRequestReview(value: unknown): PullRequestReview {
+  const user = isRecord(value) ? value.user : undefined;
+  if (
+    !isRecord(value) ||
+    typeof value.id !== "number" ||
+    typeof value.state !== "string" ||
+    !isRecord(user) ||
+    typeof user.login !== "string"
+  )
+    throw shapeError("GET /repos/{owner}/{repo}/pulls/{n}/reviews");
+  return {
+    id: String(value.id),
+    body: typeof value.body === "string" ? value.body : "",
+    authorLogin: user.login,
+    state: value.state,
+  };
+}
+
+/** The body of a create or update of a check run, in GitHub's field names. */
+function checkRunBody(input: Partial<NewCheckRun>): Record<string, unknown> {
+  return {
+    ...(input.name === undefined ? {} : { name: input.name }),
+    ...(input.headSha === undefined ? {} : { head_sha: input.headSha }),
+    ...(input.status === undefined ? {} : { status: input.status }),
+    ...(input.conclusion === undefined ? {} : { conclusion: input.conclusion }),
+    ...(input.externalId === undefined
+      ? {}
+      : { external_id: input.externalId }),
+    ...(input.detailsUrl === undefined
+      ? {}
+      : { details_url: input.detailsUrl }),
+    ...(input.startedAt === undefined ? {} : { started_at: input.startedAt }),
+    ...(input.completedAt === undefined
+      ? {}
+      : { completed_at: input.completedAt }),
+    ...(input.output === undefined ? {} : { output: input.output }),
+  };
+}
+
+function checkCommitSha(sha: string): void {
+  if (!/^[0-9a-f]{40}$/.test(sha))
+    throw new GithubAppError(
+      "GITHUB_APP_REQUEST_FAILED",
+      "The commit is not a full lower case sha.",
+    );
+}
+
+function checkCheckRunId(id: string): void {
+  if (!/^[1-9]\d{0,15}$/.test(id))
+    throw new GithubAppError(
+      "GITHUB_APP_REQUEST_FAILED",
+      "The check run id is not a number.",
+    );
 }
 
 function checkInstallationId(installationId: string): void {
@@ -369,7 +504,7 @@ export function createGithubAppClient(
 
   async function request(
     credential: string,
-    method: "GET" | "POST",
+    method: "GET" | "POST" | "PATCH",
     path: string,
     body?: unknown,
     signal?: AbortSignal,
@@ -803,6 +938,107 @@ export function createGithubAppClient(
           throw shapeError("POST /repos/{owner}/{repo}/issues/{n}/comments");
         return { id: String(json.id) };
       });
+    },
+
+    async createCheckRun(installationId, scope, repoFullName, input) {
+      checkInstallationId(installationId);
+      checkCommitSha(input.headSha);
+      const path = `${repoPath(repoFullName)}/check-runs`;
+      return withScopedToken(installationId, scope, async (token) => {
+        const json = await request(token, "POST", path, checkRunBody(input));
+        if (!isRecord(json) || typeof json.id !== "number")
+          throw shapeError("POST /repos/{owner}/{repo}/check-runs");
+        return { id: String(json.id) };
+      });
+    },
+
+    async updateCheckRun(
+      installationId,
+      scope,
+      repoFullName,
+      checkRunId,
+      input,
+    ) {
+      checkInstallationId(installationId);
+      checkCheckRunId(checkRunId);
+      const path = `${repoPath(repoFullName)}/check-runs/${checkRunId}`;
+      await withScopedToken(installationId, scope, async (token) => {
+        await request(token, "PATCH", path, checkRunBody(input));
+      });
+    },
+
+    async findCheckRun(installationId, scope, repoFullName, lookup) {
+      checkInstallationId(installationId);
+      checkCommitSha(lookup.headSha);
+      const path = `${repoPath(repoFullName)}/commits/${lookup.headSha}/check-runs?check_name=${encodeURIComponent(lookup.name)}`;
+      return withScopedToken(installationId, scope, async (token) => {
+        const runs = await allPages(
+          async () => token,
+          path,
+          (json) => {
+            if (!isRecord(json) || !Array.isArray(json.check_runs))
+              throw shapeError(
+                "GET /repos/{owner}/{repo}/commits/{ref}/check-runs",
+              );
+            return json.check_runs;
+          },
+          (item) => ({
+            id: isRecord(item) ? item.id : undefined,
+            externalId: isRecord(item) ? item.external_id : undefined,
+          }),
+        );
+        const found = runs.find(
+          (run) =>
+            typeof run.id === "number" && run.externalId === lookup.externalId,
+        );
+        return found === undefined ? null : { id: String(found.id) };
+      });
+    },
+
+    async createPullRequestReview(
+      installationId,
+      scope,
+      repoFullName,
+      prNumber,
+      input,
+    ) {
+      checkInstallationId(installationId);
+      checkPullRequestNumber(prNumber);
+      checkCommitSha(input.commitId);
+      const path = `${repoPath(repoFullName)}/pulls/${prNumber}/reviews`;
+      return withScopedToken(installationId, scope, async (token) => {
+        const json = await request(token, "POST", path, {
+          commit_id: input.commitId,
+          body: input.body,
+          event: input.event,
+        });
+        if (!isRecord(json) || typeof json.id !== "number")
+          throw shapeError("POST /repos/{owner}/{repo}/pulls/{n}/reviews");
+        return { id: String(json.id) };
+      });
+    },
+
+    async listPullRequestReviews(
+      installationId,
+      scope,
+      repoFullName,
+      prNumber,
+    ) {
+      checkInstallationId(installationId);
+      checkPullRequestNumber(prNumber);
+      const path = `${repoPath(repoFullName)}/pulls/${prNumber}/reviews`;
+      return withScopedToken(installationId, scope, (token) =>
+        allPages(
+          async () => token,
+          path,
+          (json) => {
+            if (!Array.isArray(json))
+              throw shapeError("GET /repos/{owner}/{repo}/pulls/{n}/reviews");
+            return json;
+          },
+          (item) => toPullRequestReview(item),
+        ),
+      );
     },
 
     async mintInstallationToken(installationId, scope) {

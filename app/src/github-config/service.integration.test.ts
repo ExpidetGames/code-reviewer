@@ -628,6 +628,13 @@ describe("what the portal shows", () => {
     const manual = await createGithubConfigHarness();
     await manual.service.saveApp("admin-1", manual.validManualInput());
     manual.github.setAppAccountPermissions({});
+    // An App made before the check run: the four permissions of a job and nothing else.
+    manual.github.setAppPermissions({
+      metadata: "read",
+      contents: "read",
+      pull_requests: "write",
+      issues: "write",
+    });
     const manifest = await createGithubConfigHarness();
     await manifest.createAppThroughManifest();
 

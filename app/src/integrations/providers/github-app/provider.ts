@@ -22,11 +22,14 @@ import type { GithubAppConfig } from "./config.ts";
 import { GithubAppError } from "./errors.ts";
 import { parseGithubEvent } from "./events.ts";
 import {
+  CHECK_TOKEN_PERMISSIONS,
   JOB_TOKEN_PERMISSIONS,
   NOTICE_TOKEN_PERMISSIONS,
+  VERDICT_TOKEN_PERMISSIONS,
   jobTokenRepositoryIds,
   toJobAccessError,
   toReadError,
+  toWriteError,
 } from "./job-access.ts";
 import { isValidSignature } from "./webhook-signature.ts";
 import { field, payloadProblems } from "./webhook-fields.ts";
@@ -274,6 +277,109 @@ export function createGithubAppProvider(
         return "posted";
       } catch (error) {
         throw toReadError(error);
+      }
+    },
+
+    async publishReviewCheck(integration, repo, check, known) {
+      try {
+        const repositoryIds = jobTokenRepositoryIds(repo.externalId);
+        if (repo.integrationId !== integration.id || repositoryIds === null)
+          throw new IntegrationError(
+            "INTEGRATION_ACCESS_SCOPE_REFUSED",
+            "The repository does not belong to this integration or has no usable id.",
+          );
+        const scope = { repositoryIds, permissions: CHECK_TOKEN_PERMISSIONS };
+        const client = await getClient();
+        const fields = {
+          status: check.status,
+          externalId: check.jobId,
+          ...(check.conclusion === undefined
+            ? {}
+            : { conclusion: check.conclusion }),
+          ...(check.detailsUrl === undefined
+            ? {}
+            : { detailsUrl: check.detailsUrl }),
+          output: { title: check.title, summary: check.summary },
+        } as const;
+        let checkRunId = known.checkRunId;
+        if (checkRunId === null && known.mayExist)
+          checkRunId =
+            (
+              await client.findCheckRun(
+                integration.externalId,
+                scope,
+                repo.fullName,
+                {
+                  headSha: check.headSha,
+                  name: check.name,
+                  externalId: check.jobId,
+                },
+              )
+            )?.id ?? null;
+        if (checkRunId !== null) {
+          await client.updateCheckRun(
+            integration.externalId,
+            scope,
+            repo.fullName,
+            checkRunId,
+            fields,
+          );
+          return { checkRunId };
+        }
+        const created = await client.createCheckRun(
+          integration.externalId,
+          scope,
+          repo.fullName,
+          { name: check.name, headSha: check.headSha, ...fields },
+        );
+        return { checkRunId: created.id };
+      } catch (error) {
+        throw toWriteError(error);
+      }
+    },
+
+    async submitReviewVerdict(integration, repo, prNumber, verdict, options) {
+      try {
+        const repositoryIds = jobTokenRepositoryIds(repo.externalId);
+        if (repo.integrationId !== integration.id || repositoryIds === null)
+          throw new IntegrationError(
+            "INTEGRATION_ACCESS_SCOPE_REFUSED",
+            "The repository does not belong to this integration or has no usable id.",
+          );
+        const scope = { repositoryIds, permissions: VERDICT_TOKEN_PERMISSIONS };
+        const client = await getClient();
+        if (options.lookForEarlier) {
+          const botLogin = `${(await getConfig()).slug}[bot]`;
+          const earlier = (
+            await client.listPullRequestReviews(
+              integration.externalId,
+              scope,
+              repo.fullName,
+              prNumber,
+            )
+          ).find(
+            // Only the app's own review counts: anybody can copy a marker into theirs.
+            (review) =>
+              review.authorLogin === botLogin &&
+              review.body.includes(verdict.marker),
+          );
+          if (earlier !== undefined)
+            return { outcome: "already_there" as const, reviewId: earlier.id };
+        }
+        const created = await client.createPullRequestReview(
+          integration.externalId,
+          scope,
+          repo.fullName,
+          prNumber,
+          {
+            commitId: verdict.headSha,
+            body: verdict.body,
+            event: verdict.event === "approve" ? "APPROVE" : "REQUEST_CHANGES",
+          },
+        );
+        return { outcome: "submitted" as const, reviewId: created.id };
+      } catch (error) {
+        throw toWriteError(error);
       }
     },
 
