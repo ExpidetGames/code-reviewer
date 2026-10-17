@@ -18,7 +18,7 @@ export const DYNAMIC_OUTPUT_ALLOWANCE_TOKENS = 8192;
 /**
  * The allowance of a model that is cheap enough for it (#309). A review with up to 30 findings plus
  * the reasoning tokens of a reasoning model, which count against `max_tokens`, does not fit 8192
- * tokens; a turn cut off there ends without an answer. The default model's endpoints on OpenRouter
+ * tokens; a turn cut off there ends without an answer. The default model's endpoints at the provider
  * state at least 131072 completion tokens (`/api/v1/models/deepseek/deepseek-v4.1-flash/endpoints`,
  * read on 2026-10-14; the model's top provider states 943718), so 32768 is below every limit. The
  * runner's built-in descriptor of the default model uses the same value.

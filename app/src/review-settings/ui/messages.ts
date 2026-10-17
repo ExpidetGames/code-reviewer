@@ -3,6 +3,8 @@
 // The copy for review settings: what a problem with one field means and what to do about it, and what
 // a save that failed as a whole means. The service answers with stable codes (a field and a code per
 // problem); this is where a code becomes a sentence next to its field. A code is never shown.
+import { DEFAULT_LLM_MODEL } from "../../llm/config.ts";
+import { DEFAULT_LLM_PROVIDER_LABEL } from "../../llm/providers/index.ts";
 import {
   DEFAULT_DYNAMIC_MODEL,
   PROJECT_DYNAMIC_LIMITS,
@@ -88,7 +90,7 @@ const ISSUE_COPY: Record<ReviewSettingIssueCode, (field: string) => string> = {
     if (field === "dynamicModel")
       return `Use a model name as your provider spells it, for example ${DEFAULT_DYNAMIC_MODEL} (letters, digits and . _ : / + -, no spaces).`;
     if (MODEL_FIELDS.includes(field))
-      return "Use a model name as OpenRouter spells it, for example anthropic/claude-haiku-5.5 (letters, digits and . _ : / + -, no spaces).";
+      return `Use a model name as ${DEFAULT_LLM_PROVIDER_LABEL} spells it, for example ${DEFAULT_LLM_MODEL} (letters, digits and . _ : / + -, no spaces).`;
     return GENERIC_ISSUE;
   },
   DUPLICATE_ENTRY: () => "Each command can be chosen only once.",

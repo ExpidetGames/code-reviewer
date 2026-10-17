@@ -2,6 +2,12 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  createFakeAdapter,
+  FAKE_PROVIDER_ID,
+} from "./providers/fake-adapter.ts";
+import { createAdapterRegistry } from "./providers/registry.ts";
+import type { ModelCapabilityResult as Answer } from "./providers/types.ts";
+import {
   checkModelCapabilities,
   createModelCapabilityChecker,
   MODEL_METADATA_MAX_BYTES,
@@ -699,5 +705,85 @@ describe("the claim path of the checker (#280)", () => {
     expect(app.lines).toEqual([
       "[llm] MODEL_CAPABILITY_CHECK: model=tier=high outcome=supported",
     ]);
+  });
+});
+
+describe("the memory is per provider (#423)", () => {
+  const SECOND_ID = "otherai";
+  const supportedAnswer = (): Answer => ({
+    outcome: "supported",
+    capabilities: {
+      tools: true,
+      toolChoice: true,
+      toolChoiceRequired: true,
+      responseFormat: false,
+      structuredOutputs: false,
+      maxCompletionTokens: null,
+      smallestCompletionTokens: null,
+      contextLength: 100_000,
+      inputUsdPerMtok: null,
+      outputUsdPerMtok: null,
+    },
+  });
+
+  function setup(answer: () => Answer) {
+    const asked: string[] = [];
+    const adapterOf = (id: string) =>
+      createFakeAdapter({
+        id,
+        secretNames: {
+          workspace: `llm_api_key.${id}`,
+          operator: `operator_llm_key.${id}`,
+        },
+        checkModelCapabilities: () => {
+          asked.push(id);
+          return Promise.resolve(answer());
+        },
+      });
+    const checker = createModelCapabilityChecker({
+      adapters: createAdapterRegistry([
+        adapterOf(FAKE_PROVIDER_ID),
+        adapterOf(SECOND_ID),
+      ]),
+      baseUrl: () => BASE,
+      log: () => undefined,
+    });
+    return { checker, asked };
+  }
+
+  // #423-T06
+  it("asks again for the same model id at another provider and remembers a supported answer for each", async () => {
+    const app = setup(supportedAnswer);
+
+    await app.checker.check("shared-model", { provider: FAKE_PROVIDER_ID });
+    await app.checker.check("shared-model", { provider: SECOND_ID });
+    await app.checker.check("shared-model", { provider: FAKE_PROVIDER_ID });
+    await app.checker.check("shared-model", { provider: SECOND_ID });
+
+    expect(app.asked).toEqual([FAKE_PROVIDER_ID, SECOND_ID]);
+  });
+
+  // #423-T06
+  it("remembers a failed answer of the claim path per provider too", async () => {
+    const app = setup((): Answer => ({ outcome: "unverifiable" }));
+
+    for (const provider of [FAKE_PROVIDER_ID, SECOND_ID, FAKE_PROVIDER_ID])
+      await app.checker.check("shared-model", { provider, forClaim: true });
+
+    expect(app.asked).toEqual([FAKE_PROVIDER_ID, SECOND_ID]);
+  });
+
+  // #423-T06
+  it("keeps the last known context window of a model per provider", async () => {
+    const app = setup(supportedAnswer);
+
+    await app.checker.check("shared-model", { provider: SECOND_ID });
+
+    expect(
+      app.checker.lastKnownContextLength?.("shared-model", SECOND_ID),
+    ).toBe(100_000);
+    expect(
+      app.checker.lastKnownContextLength?.("shared-model", FAKE_PROVIDER_ID),
+    ).toBeNull();
   });
 });

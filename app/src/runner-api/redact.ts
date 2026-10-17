@@ -12,8 +12,8 @@ export const REDACTED = "[redacted]";
 /** A secret shorter than this is more likely an ordinary word than a credential. */
 const MIN_SECRET_LENGTH = 8;
 
-// GitHub tokens (ghp_, gho_, ghu_, ghs_, ghr_ and fine-grained github_pat_), OpenRouter and
-// OpenAI style keys, the per-job credential of a Worker (`crj_`, #320) and the credential of an
+// GitHub tokens (ghp_, gho_, ghu_, ghs_, ghr_ and fine-grained github_pat_), the `sk-` keys
+// of the LLM providers, the per-job credential of a Worker (`crj_`, #320) and the credential of an
 // `Authorization: Bearer` line.
 const SECRET_SHAPES: readonly RegExp[] = [
   /\bgh[pousr]_[A-Za-z0-9]{16,}\b/g,

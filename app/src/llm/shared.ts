@@ -16,7 +16,7 @@ import { createModelCapabilityChecker } from "./model-capabilities.ts";
 // metadata is public and the same for everybody. The settings save (#269) and the claim of a Dynamic job
 // (#279) both read through it. The address is read on every ask (the test stack's switch).
 export const modelCapabilities = createModelCapabilityChecker({
-  baseUrl: () => llmApiBaseUrl(process.env, "openrouter").url,
+  baseUrl: (provider) => llmApiBaseUrl(process.env, provider).url,
 });
 
 export function getWorkspaceLlm(): WorkspaceLlmAssembly {
