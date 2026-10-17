@@ -59,20 +59,34 @@ describe("what the check run says about the verdict", () => {
 
   // #405-T19 (review P2-1)
   it.each([
-    ["review_incomplete", "did not cover everything"],
-    ["no_severity", "no severities"],
-    ["findings_unknown", "did not report"],
-    ["no_model_work", "no model call"],
+    [
+      "review_incomplete",
+      "did not cover everything",
+      "complete review replaces it",
+    ],
+    ["no_model_work", "no model call", "complete review replaces it"],
+    ["findings_unknown", "did not report", "reports its findings"],
+    ["no_severity", "no severities", "Any finding"],
   ] as const)(
     "says that no verdict was submitted because of %s, and that an earlier request for changes stays",
-    (reason, because) => {
+    (reason, because, wayOut) => {
       const summary = skipped(reason);
 
       expect(summary).toContain("No review verdict was submitted");
       expect(summary).toContain(because);
       expect(summary).toContain("earlier request for changes");
+      expect(summary).toContain(wayOut);
     },
   );
+
+  // #405-T19 (review round 2): a Diff project under blocking never gets a verdict, so no later review replaces it.
+  it("tells a Diff project how to get rid of an earlier request instead of promising a review that never comes", () => {
+    const summary = skipped("no_severity");
+
+    expect(summary).not.toContain("complete review replaces it");
+    expect(summary).toContain("Off");
+    expect(summary).toContain("by hand");
+  });
 
   // #405-T18
   it("says the verdict is switched off, without the warning about an earlier request", () => {

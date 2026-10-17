@@ -57,13 +57,27 @@ const VERDICT_SKIP_TEXT: Readonly<Record<string, string>> = {
   no_model_work: "the review made no model call",
 };
 
+/** What happens to an earlier request for changes of the app, by the reason no verdict was submitted. */
+const VERDICT_SKIP_WAY_OUT: Readonly<Record<string, string>> = {
+  review_incomplete: "stays until a complete review replaces it",
+  no_model_work: "stays until a complete review replaces it",
+  findings_unknown:
+    "stays until a review reports its findings or it is dismissed by hand",
+  // No later review of the project submits anything under this setting: only a change of the setting does.
+  no_severity:
+    "stays: a Diff Review submits no verdict under the setting for blocking findings. Choose Any finding in the project settings to get one, or Off to have it dismissed, or dismiss it by hand",
+};
+
 /** What a successful review says about its verdict when it submitted none; empty when it submitted one. */
 function verdictLine(verdict: VerdictDecision | undefined): string | null {
   if (verdict === undefined || verdict.kind === "submit") return null;
   if (verdict.reason === "off")
     return "The review verdict is switched off for this project.";
   const because = VERDICT_SKIP_TEXT[verdict.reason] ?? "of an unknown reason";
-  return `No review verdict was submitted: ${because}. An earlier request for changes by Code Reviewer on this pull request stays until a complete review replaces it.`;
+  const wayOut =
+    VERDICT_SKIP_WAY_OUT[verdict.reason] ??
+    "stays until it is dismissed by hand";
+  return `No review verdict was submitted: ${because}. An earlier request for changes by Code Reviewer on this pull request ${wayOut}.`;
 }
 
 function linkLine(commentUrl: string | null): string | null {

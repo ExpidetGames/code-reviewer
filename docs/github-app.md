@@ -164,8 +164,10 @@ at its cost or time limit, dropped a finding its validation refused, left files 
 made no model call or did not report its findings submits **no** review, and the check run says so and why. Such a
 run does not dismiss an earlier `REQUEST_CHANGES` of the App (it fails closed): a complete review on a later push
 replaces it. Only the setting `off` dismisses it, with a message, and only the App's own latest request, found by the
-author and the marker in its body; a review of a person is never dismissed, whatever its text says. The same holds
-when a project changes from Dynamic to Diff Review under `blocking`.
+author and the marker in its body; a review of a person is never dismissed, whatever its text says. A Diff project
+under `blocking` never gets a verdict, so no later review replaces such a request (for example after a project
+changed from Dynamic to Diff Review): choose `any` for it, or `off` to have it dismissed, or dismiss it by hand. The
+check run says this.
 
 **The verdict comes from the model and can be wrong or manipulated.** Text in the diff, the pull request or the
 repository can try to talk a model into reporting no finding, and a review that fails in a way the runner does not
