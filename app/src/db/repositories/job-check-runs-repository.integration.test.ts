@@ -52,6 +52,7 @@ describe("taking the check of a job", () => {
         syncedStatus: null,
         checkCreateAttempts: 0,
         reviewSubmitAttempts: 0,
+        checkState: "active",
         reviewState: "pending",
         state: "active",
         attempts: 0,
@@ -219,6 +220,25 @@ describe("a failed sync", () => {
     expect(await t.checks.take(t.job.id, LEASE)).toEqual({ acquired: false });
   });
 
+  // #405-T12
+  it("drops the check run alone for a missing permission, and the row stays active for the verdict", async () => {
+    const t = await setup();
+    await t.checks.take(t.job.id, LEASE);
+
+    await t.checks.dropCheck(t.job.id, "CHECK_RUN_PERMISSION_MISSING");
+    await t.checks.recordReview(t.job.id, {
+      reviewId: "5001",
+      reviewState: "done",
+    });
+
+    expect(await t.checks.find(t.job.id)).toMatchObject({
+      state: "active",
+      checkState: "dropped",
+      lastCode: "CHECK_RUN_PERMISSION_MISSING",
+      reviewId: "5001",
+    });
+  });
+
   it("is not made pending again by a success after the retries began", async () => {
     const t = await setup();
     await t.checks.take(t.job.id, LEASE);
@@ -276,6 +296,24 @@ describe("finding the jobs whose check run is behind", () => {
     const listed = await listJobsWithCheckWork(t.db, t.now(), { limit: 10 });
 
     expect(listed).toEqual([{ jobId: t.job.id, workspaceId: t.workspaceId }]);
+  });
+
+  // #405-T12
+  it("does not list a job for its check run once that was dropped, only for a verdict that is still due", async () => {
+    const t = await setup();
+    await t.checks.take(t.job.id, LEASE);
+    await t.checks.dropCheck(t.job.id, "CHECK_RUN_PERMISSION_MISSING");
+    await t.checks.finish(t.job.id, { settled: false });
+    await t.queue.claimNext("runner-1");
+
+    expect(await listJobsWithCheckWork(t.db, t.now(), { limit: 10 })).toEqual(
+      [],
+    );
+    const token = await t.tokenOf(t.job.id);
+    await t.queue.complete(t.job.id, token, { ok: true, result: { ok: true } });
+    expect(await listJobsWithCheckWork(t.db, t.now(), { limit: 10 })).toEqual([
+      { jobId: t.job.id, workspaceId: t.workspaceId },
+    ]);
   });
 
   // #405-T17

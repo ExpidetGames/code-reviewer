@@ -8,7 +8,8 @@
 // back-off of a failed one), `settled` (the job ended and everything is on GitHub) or `dropped` (nothing more will
 // be done: the App lacks the permission, or the retries are used up; `last_code` says why). `review_state` is where
 // the verdict stands: `pending`, `done` (submitted, or decided not to) or `dropped` (GitHub refused it).
-// `check_create_attempts` and `review_submit_attempts` are counted BEFORE the call, so a later attempt knows that an
+// `check_state` is the same for the check run alone: `dropped` when the App lacks the Checks permission (the review
+// verdict, which needs another permission, goes on). `check_create_attempts` and `review_submit_attempts` are counted BEFORE the call, so a later attempt knows that an
 // earlier one may have made the check run or the review without its id being kept, and looks for it first.
 //
 // The table is new and empty, and no existing row is touched, so an app of the previous release (which never reads
@@ -36,6 +37,9 @@ export const migration: Migration = {
       .addColumn("review_submit_attempts", "integer", (column) =>
         column.notNull().defaultTo(0),
       )
+      .addColumn("check_state", "text", (column) =>
+        column.notNull().defaultTo("active"),
+      )
       .addColumn("review_state", "text", (column) =>
         column.notNull().defaultTo("pending"),
       )
@@ -52,6 +56,10 @@ export const migration: Migration = {
       .addCheckConstraint(
         "job_check_runs_state_check",
         sql`state in ('active', 'settled', 'dropped')`,
+      )
+      .addCheckConstraint(
+        "job_check_runs_check_state_check",
+        sql`check_state in ('active', 'dropped')`,
       )
       .addCheckConstraint(
         "job_check_runs_review_state_check",

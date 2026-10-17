@@ -23,6 +23,7 @@ const LEASE = { leaseMs: MINUTE };
 /** Direct writes that the checks of the table must refuse, whatever the engine. */
 const REFUSED_UPDATES = [
   ["a state the code does not know", "state = 'lost'"],
+  ["a check state the code does not know", "check_state = 'maybe'"],
   ["a review state the code does not know", "review_state = 'maybe'"],
   ["a negative failure count", "attempts = -1"],
   ["a negative creation count", "check_create_attempts = -1"],

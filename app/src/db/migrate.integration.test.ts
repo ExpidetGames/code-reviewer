@@ -96,6 +96,7 @@ describe("the migrations of both epics", () => {
       "20261016120000_create_plan_handoff_tokens",
       "20261016140000_add_job_accepts_supersede",
       "20261016140100_widen_usage_record_settled_reason",
+      "20261017100000_create_job_check_runs",
     ]);
   });
 
@@ -143,6 +144,7 @@ describe("starting the database", () => {
       "instance_settings",
       "integrations",
       "invitations",
+      "job_check_runs",
       "job_claimed_keys",
       "job_comments",
       "job_dispatches",

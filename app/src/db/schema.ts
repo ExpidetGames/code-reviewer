@@ -466,6 +466,8 @@ export interface JobCheckRunsTable {
   check_create_attempts: ColumnType<number, number | undefined, number>;
   /** How many times the submission of the review was started (counted before the call). */
   review_submit_attempts: ColumnType<number, number | undefined, number>;
+  /** `active` or `dropped` (`CHECK_RUN_STATES`): the check run alone, dropped when the App may not write it. */
+  check_state: ColumnType<string, string | undefined, string>;
   /** `pending`, `done` or `dropped` (`REVIEW_VERDICT_STATES`). */
   review_state: ColumnType<string, string | undefined, string>;
   /** `active`, `settled` or `dropped` (`JOB_CHECK_STATES`). */

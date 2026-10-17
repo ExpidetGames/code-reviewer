@@ -16,6 +16,10 @@ import type { WorkspaceId } from "../workspace-scope.ts";
 export const JOB_CHECK_STATES = ["active", "settled", "dropped"] as const;
 export type JobCheckState = (typeof JOB_CHECK_STATES)[number];
 
+/** Where the check run alone stands: `dropped` when the App may not write check runs (the verdict goes on). */
+export const CHECK_RUN_STATES = ["active", "dropped"] as const;
+export type CheckRunState = (typeof CHECK_RUN_STATES)[number];
+
 /** Where the verdict stands: not decided yet, submitted or decided not to (`done`), or refused by the platform. */
 export const REVIEW_VERDICT_STATES = ["pending", "done", "dropped"] as const;
 export type ReviewVerdictState = (typeof REVIEW_VERDICT_STATES)[number];
@@ -30,6 +34,7 @@ export type StoredJobCheck = {
   syncedStatus: string | null;
   checkCreateAttempts: number;
   reviewSubmitAttempts: number;
+  checkState: CheckRunState;
   reviewState: ReviewVerdictState;
   state: JobCheckState;
   attempts: number;
@@ -63,6 +68,8 @@ export type JobCheckRunsRepository = {
     jobId: string,
     check: { checkRunId: string; syncedStatus: string },
   ): Promise<void>;
+  /** No check run will be written for the job (the App lacks the permission); the verdict is not affected. */
+  dropCheck(jobId: string, code: string): Promise<void>;
   /** The verdict is submitted (`reviewId`) or decided not to be (null), or the platform refused it (`dropped`). */
   recordReview(
     jobId: string,
@@ -90,6 +97,7 @@ export function toStoredJobCheck(
     syncedStatus: row.synced_status,
     checkCreateAttempts: row.check_create_attempts,
     reviewSubmitAttempts: row.review_submit_attempts,
+    checkState: row.check_state as CheckRunState,
     reviewState: row.review_state as ReviewVerdictState,
     state: row.state as JobCheckState,
     attempts: row.attempts,
@@ -146,6 +154,7 @@ export function createJobCheckRunsRepository(
         synced_status: null,
         check_create_attempts: 0,
         review_submit_attempts: 0,
+        check_state: "active",
         review_state: "pending",
         state: "active",
         attempts: 0,
@@ -194,6 +203,16 @@ export function createJobCheckRunsRepository(
         .set({
           check_run_id: check.checkRunId,
           synced_status: check.syncedStatus,
+          updated_at: formatTimestamp(now()),
+        })
+        .execute();
+    },
+
+    async dropCheck(jobId, code) {
+      await active(jobId)
+        .set({
+          check_state: "dropped",
+          last_code: code,
           updated_at: formatTimestamp(now()),
         })
         .execute();

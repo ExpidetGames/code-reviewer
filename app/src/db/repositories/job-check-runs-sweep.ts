@@ -14,8 +14,8 @@ export type JobWithCheckWork = { jobId: string; workspaceId: string };
 /**
  * Jobs that need a sync, oldest change first, at most `limit`:
  * - a waiting or running job that has no row yet (its first sync never started or never finished);
- * - a job with an `active` row whose lease or back-off is over and that is behind: the check run shows another
- *   status than the job has now (a lease that ran out, a timeout, a give-up or a switch-off ended it without a
+ * - a job with an `active` row whose lease or back-off is over and that is behind: the check run (unless it was
+ *   dropped) shows another status than the job has now (a lease that ran out, a timeout, a give-up or a switch-off ended it without a
  *   request of its own), or the job succeeded and its verdict is not decided yet.
  * A job that ended before it had a row (for example before this feature) is not listed: nothing was ever shown.
  */
@@ -39,8 +39,13 @@ export async function listJobsWithCheckWork(
           eb("job_check_runs.state", "=", "active"),
           eb("job_check_runs.next_attempt_at", "<=", timestamp),
           eb.or([
-            eb("job_check_runs.synced_status", "is", null),
-            eb("job_check_runs.synced_status", "<>", eb.ref("jobs.status")),
+            eb.and([
+              eb("job_check_runs.check_state", "=", "active"),
+              eb.or([
+                eb("job_check_runs.synced_status", "is", null),
+                eb("job_check_runs.synced_status", "<>", eb.ref("jobs.status")),
+              ]),
+            ]),
             eb.and([
               eb("jobs.status", "=", "succeeded"),
               eb("job_check_runs.review_state", "=", "pending"),
