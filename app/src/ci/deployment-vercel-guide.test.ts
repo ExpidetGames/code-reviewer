@@ -991,6 +991,28 @@ describe("the deployment pipeline in the guide", () => {
   });
 
   // #403-T11
+  it("writes every Infisical reference as ${<env>.<folder>.<KEY>} with the environment slug first", () => {
+    const references = [
+      ...guide.matchAll(/\$\{([A-Za-z0-9_]+\.[A-Za-z0-9_.]+)\}/g),
+    ].map((match) => match[1] as string);
+    expect(references.length).toBeGreaterThanOrEqual(6);
+    for (const reference of references)
+      expect(reference, reference).toMatch(
+        /^prod\.(ci|app|dispatcher)\.[A-Z][A-Z0-9_]+$/,
+      );
+    expect(guide).not.toMatch(/\$\{(ci|app|dispatcher)\./);
+    expect(flat(setup)).toContain("environment slug first");
+  });
+
+  // #403-T11
+  it("says where the GitHub App credentials and the model keys come from, since no folder holds them", () => {
+    const text = flat(setup);
+    expect(text).toContain("no GitHub App credential and no model API key");
+    expect(text).toContain("encrypted with `APP_SECRET`");
+    expect(text).toContain("/admin/llm");
+  });
+
+  // #403-T11
   it("lists the Vercel dashboard steps: the root directories, Git auto-deploy off and the bypass", () => {
     expect(setup).toContain("**Root Directory**");
     expect(setup).toContain("`app`");

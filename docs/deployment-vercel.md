@@ -283,16 +283,25 @@ yours.
 
   | Value | Stored in | The other key is a reference |
   |---|---|---|
-  | `RUNNER_TOKEN` | `/ci` `RUNNER_TOKEN` | `/app` `RUNNER_TOKEN` = `${ci.RUNNER_TOKEN}`, `/dispatcher` `RUNNER_TOKEN` = `${ci.RUNNER_TOKEN}` |
-  | Signing secret | `/app` `RUNNER_WEBHOOK_SECRET` | `/dispatcher` `DISPATCHER_SIGNING_SECRET` = `${app.RUNNER_WEBHOOK_SECRET}` |
-  | Signing key id | `/app` `RUNNER_WEBHOOK_KEY_ID` | `/dispatcher` `DISPATCHER_SIGNING_KEY_ID` = `${app.RUNNER_WEBHOOK_KEY_ID}` |
-  | Pool cap | `/app` `RUNNER_DISPATCH_MAX_RUNNING` | `/dispatcher` `DISPATCHER_MAX_RUNNING` = `${app.RUNNER_DISPATCH_MAX_RUNNING}` |
-  | The App's address | `/app` `BETTER_AUTH_URL` | `/dispatcher` `RUNNER_API_URL` = `${app.BETTER_AUTH_URL}` |
-  | The Dispatcher's bypass secret (only if protected) | `/ci` `VERCEL_DISPATCHER_AUTOMATION_BYPASS_SECRET` | `/app` `RUNNER_WEBHOOK_BYPASS_TOKEN` = `${ci.VERCEL_DISPATCHER_AUTOMATION_BYPASS_SECRET}` |
+  | `RUNNER_TOKEN` | `/ci` `RUNNER_TOKEN` | `/app` `RUNNER_TOKEN` = `${prod.ci.RUNNER_TOKEN}`, `/dispatcher` `RUNNER_TOKEN` = `${prod.ci.RUNNER_TOKEN}` |
+  | Signing secret | `/app` `RUNNER_WEBHOOK_SECRET` | `/dispatcher` `DISPATCHER_SIGNING_SECRET` = `${prod.app.RUNNER_WEBHOOK_SECRET}` |
+  | Signing key id | `/app` `RUNNER_WEBHOOK_KEY_ID` | `/dispatcher` `DISPATCHER_SIGNING_KEY_ID` = `${prod.app.RUNNER_WEBHOOK_KEY_ID}` |
+  | Pool cap | `/app` `RUNNER_DISPATCH_MAX_RUNNING` | `/dispatcher` `DISPATCHER_MAX_RUNNING` = `${prod.app.RUNNER_DISPATCH_MAX_RUNNING}` |
+  | The App's address | `/app` `BETTER_AUTH_URL` | `/dispatcher` `RUNNER_API_URL` = `${prod.app.BETTER_AUTH_URL}` |
+  | The Dispatcher's bypass secret (only if protected) | `/ci` `VERCEL_DISPATCHER_AUTOMATION_BYPASS_SECRET` | `/app` `RUNNER_WEBHOOK_BYPASS_TOKEN` = `${prod.ci.VERCEL_DISPATCHER_AUTOMATION_BYPASS_SECRET}` |
 
-  The notation `${<folder>.<KEY>}` is Infisical's reference to a key of another folder of the same environment; check it
-  against your Infisical version before you rely on it. Everything else is **not** shared: in particular the two
-  `CRON_SECRET`s are two values (section 3.3).
+  The notation is `${<env>.<folder>.<KEY>}`, with the **environment slug first**, then the folder path with dots, then the
+  key: `${prod.ci.RUNNER_TOKEN}`. A short form without the environment slug is not resolved on a real
+  instance: it stays literal text and would be synced to Vercel as such. After you set a reference up, check in the
+  Infisical dashboard that the value shows as resolved, and once in Vercel that the synced variable holds the value and
+  not the text of the reference. Everything else is **not** shared: in particular the two `CRON_SECRET`s are two values (section 3.3).
+
+  **What is not in a folder.** There is no GitHub App credential and no model API key in `/ci`, `/app` or `/dispatcher`:
+  the hosted App takes neither from its environment. The GitHub App is created from the deployed App in the admin portal
+  (step 3) and its id, private key and secrets are stored in the database, encrypted with `APP_SECRET`; each workspace
+  enters its own model key in its settings, and the operator's key for `managed` workspaces is saved in the admin portal
+  under **LLM key** (`/admin/llm`, section 3.5), also encrypted in the database. The legacy `GITHUB_*` and `LLM_API_KEY`
+  variables are for an update of an old self-hosted installation and a hosted instance never sets them (section 3.1).
 
 **Machine identity** (Infisical, Access Control): one identity with **Universal Auth**, **read-only** access to the
 secrets of the environment **`prod`** at the path **`/ci` only**: no `/app`, no `/dispatcher`, no other environment, no
@@ -420,13 +429,13 @@ Vercel) reads `DISPATCHER_SHUTDOWN_GRACE_SECONDS` and `PORT`.
 
 | App | Dispatcher | Notes |
 |---|---|---|
-| `RUNNER_TOKEN` | `RUNNER_TOKEN` (and `RUNNER_TOKEN` in `/ci`) | One credential, three keys, one stored value (section 2.1) |
-| `RUNNER_WEBHOOK_SECRET` | `DISPATCHER_SIGNING_SECRET` | The signing key |
-| `RUNNER_WEBHOOK_KEY_ID` (default `k1`) | `DISPATCHER_SIGNING_KEY_ID` | Its name |
-| `RUNNER_DISPATCH_MAX_RUNNING` | `DISPATCHER_MAX_RUNNING` | The pool cap, both must be set |
+| `RUNNER_TOKEN` | `RUNNER_TOKEN` (and `RUNNER_TOKEN` in `/ci`) | One credential, three keys, one stored value: `/ci` holds it, the other two are `${prod.ci.RUNNER_TOKEN}` (section 2.1) |
+| `RUNNER_WEBHOOK_SECRET` | `DISPATCHER_SIGNING_SECRET` | The signing key; the Dispatcher's is `${prod.app.RUNNER_WEBHOOK_SECRET}` |
+| `RUNNER_WEBHOOK_KEY_ID` (default `k1`) | `DISPATCHER_SIGNING_KEY_ID` | Its name; `${prod.app.RUNNER_WEBHOOK_KEY_ID}` |
+| `RUNNER_DISPATCH_MAX_RUNNING` | `DISPATCHER_MAX_RUNNING` | The pool cap, both must be set; the Dispatcher's is `${prod.app.RUNNER_DISPATCH_MAX_RUNNING}` |
 | `RUNNER_WEBHOOK_URL` = `https://<dispatcher>/dispatch` | (the Dispatcher's own domain) | |
-| `BETTER_AUTH_URL` (the App's domain) | `RUNNER_API_URL` | The same address. The Dispatcher hands it to every Worker as the App URL |
-| `RUNNER_WEBHOOK_BYPASS_TOKEN` | the Dispatcher project's bypass secret | Only with Deployment Protection |
+| `BETTER_AUTH_URL` (the App's domain) | `RUNNER_API_URL` | The same address; the Dispatcher's is `${prod.app.BETTER_AUTH_URL}`. The Dispatcher hands it to every Worker as the App URL |
+| `RUNNER_WEBHOOK_BYPASS_TOKEN` | the Dispatcher project's bypass secret | Only with Deployment Protection; the App's is `${prod.ci.VERCEL_DISPATCHER_AUTOMATION_BYPASS_SECRET}` |
 | `CRON_SECRET` | `CRON_SECRET` | **Not** the same value: each project has its own, because each cron route must open with its own secret only |
 
 ### 3.4 The GitHub side
