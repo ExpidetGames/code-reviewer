@@ -242,9 +242,9 @@ describe("the model access of a workspace (#428)", () => {
 
     // #428-T07
     it("allows every entry for null, for an absent field and without any entitlements", () => {
-      expect(
-        entryAllowed(limitedWith({ catalogEntries: null }), ENTRY_A),
-      ).toBe(true);
+      expect(entryAllowed(limitedWith({ catalogEntries: null }), ENTRY_A)).toBe(
+        true,
+      );
       expect(entryAllowed(limitedWith(undefined), ENTRY_A)).toBe(true);
       expect(entryAllowed({ kind: "unlimited" }, ENTRY_A)).toBe(true);
     });
@@ -266,7 +266,9 @@ describe("the model access of a workspace (#428)", () => {
 
     // #428-T07
     it("keeps an id that matches no entry harmlessly in the list", () => {
-      const resolved = limitedWith({ catalogEntries: [UNKNOWN_ID, ENTRY_B.id] });
+      const resolved = limitedWith({
+        catalogEntries: [UNKNOWN_ID, ENTRY_B.id],
+      });
 
       expect(entryAllowed(resolved, ENTRY_B)).toBe(true);
       expect(entryAllowed(resolved, ENTRY_A)).toBe(false);

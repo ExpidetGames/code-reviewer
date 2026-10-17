@@ -1033,11 +1033,27 @@ describe("the model access (#428)", () => {
     ["a string", "all", "modelAccess"],
     ["null", null, "modelAccess"],
     ["a list instead of the object", [ID_A], "modelAccess"],
-    ["a key it does not know", { catalogEntries: null, extra: 1 }, "modelAccess"],
+    [
+      "a key it does not know",
+      { catalogEntries: null, extra: 1 },
+      "modelAccess",
+    ],
     ["no list", {}, "modelAccess.catalogEntries"],
-    ["a list that is not an array", { catalogEntries: ID_A }, "modelAccess.catalogEntries"],
-    ["a number as an id", { catalogEntries: [1] }, "modelAccess.catalogEntries"],
-    ["an id of a bad shape", { catalogEntries: ["gpt-5"] }, "modelAccess.catalogEntries"],
+    [
+      "a list that is not an array",
+      { catalogEntries: ID_A },
+      "modelAccess.catalogEntries",
+    ],
+    [
+      "a number as an id",
+      { catalogEntries: [1] },
+      "modelAccess.catalogEntries",
+    ],
+    [
+      "an id of a bad shape",
+      { catalogEntries: ["gpt-5"] },
+      "modelAccess.catalogEntries",
+    ],
     [
       "more than 100 ids",
       {

@@ -719,18 +719,21 @@ describe("the model access (#428)", () => {
     ["JSON that is not an object", '"all"'],
     ["an object without the list", "{}"],
     ["ids of a bad shape", '{"catalogEntries":[1]}'],
-  ])("reads a column with %s as invalid: damaged data grants no model", async (_name, text) => {
-    const { db, workspaceId, repository } = await setup();
-    await insertRaw(db, workspaceId, text);
+  ])(
+    "reads a column with %s as invalid: damaged data grants no model",
+    async (_name, text) => {
+      const { db, workspaceId, repository } = await setup();
+      await insertRaw(db, workspaceId, text);
 
-    const stored = await repository.get();
+      const stored = await repository.get();
 
-    expect(stored).toMatchObject({ invalid: true });
-    expect(resolveEntitlements(stored, undefined)).toMatchObject({
-      kind: "invalid",
-      code: "entitlements_invalid",
-    });
-  });
+      expect(stored).toMatchObject({ invalid: true });
+      expect(resolveEntitlements(stored, undefined)).toMatchObject({
+        kind: "invalid",
+        code: "entitlements_invalid",
+      });
+    },
+  );
 
   describe("in the default of the instance", () => {
     // #428-T05

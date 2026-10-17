@@ -558,7 +558,10 @@ describe("the model access (#428)", () => {
     ["an empty id", { catalogEntries: [""] }],
     ["an id with a space", { catalogEntries: [`${ID_A} `] }],
     ["an id with a slash", { catalogEntries: ["vendor/model"] }],
-    ["an id that is far too long", { catalogEntries: [`mce_${"a".repeat(80)}`] }],
+    [
+      "an id that is far too long",
+      { catalogEntries: [`mce_${"a".repeat(80)}`] },
+    ],
     ["more than 100 ids", { catalogEntries: manyIds(101) }],
     ["a key it does not know", { catalogEntries: null, extra: 1 }],
   ])("refuses %s with catalog_entry_invalid", (_name, modelAccess) => {

@@ -542,13 +542,19 @@ describe("what the app answers", () => {
     ]) {
       await answer(
         await h.call("PUT", "/api/operator/v1/entitlements/default", {
-          body: { ...WRITE, ...(modelAccess === undefined ? {} : { modelAccess }) },
+          body: {
+            ...WRITE,
+            ...(modelAccess === undefined ? {} : { modelAccess }),
+          },
         }),
         "DefaultEntitlementsResponse",
       );
       await answer(
         await h.call("PUT", path(h.workspaceId), {
-          body: { ...WRITE, ...(modelAccess === undefined ? {} : { modelAccess }) },
+          body: {
+            ...WRITE,
+            ...(modelAccess === undefined ? {} : { modelAccess }),
+          },
         }),
         "WorkspaceEntitlementsResponse",
       );

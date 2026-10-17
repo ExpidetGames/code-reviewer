@@ -104,10 +104,11 @@ workspace has them. A change takes effect at the next claim. An older app instan
 ### The PUT body of the entitlements
 
 The whole entitlements (`planLabel`, `keyMode`, `limits` with every limit, `periodStart`, `suspended`,
-`suspensionCode`), validated by `validateEntitlements` of #271 (unknown keys are refused). A refusal is `422` with
-the stable code of the validation (`plan_label_invalid`, `key_mode_invalid`, `limits_invalid`, `limit_invalid`,
-`cost_limit_requires_managed_key`, `period_start_invalid`, `period_start_in_future`, `suspended_invalid`,
-`suspension_code_invalid`, `entitlements_invalid`), or `409 period_start_backwards`.
+`suspensionCode`, and optionally `modelAccess`), validated by `validateEntitlements` of #271 (unknown keys are refused).
+A refusal is `422` with the stable code of the validation (`plan_label_invalid`, `key_mode_invalid`, `limits_invalid`,
+`limit_invalid`, `cost_limit_requires_managed_key`, `period_start_invalid`, `period_start_in_future`,
+`suspended_invalid`, `suspension_code_invalid`, `catalog_entry_invalid`, `entitlements_invalid`), or
+`409 period_start_backwards`.
 
 `managedCostLimitMicroUsd` counts the cost of runs on the operator's key, so a non-null value (even `0`) with
 `keyMode: "own"` is refused as `cost_limit_requires_managed_key` (field `managedCostLimitMicroUsd`). Send `null` for it,
@@ -151,6 +152,30 @@ Content-Type: application/json
   "suspensionCode": null
 }
 ```
+
+### `modelAccess`: which catalog entries a workspace may use (#428)
+
+`"modelAccess": { "catalogEntries": ["mce_...", ...] }` grants catalog entries by their ids (the ids the admin portal
+shows; the API has no catalog route, decision C8 of ADR 0005, so a writer without the portal can only use `null`).
+`catalogEntries: null` is every released entry, `[]` none, a list those entries (at most 100, each `mce_` and opaque
+text; an id that no entry has is accepted and matches nothing). Anything else is `422 catalog_entry_invalid` (`field`:
+`modelAccess` for a value that is not the object or has another key, `modelAccess.catalogEntries` for the list) and
+nothing is stored. It has a meaning for `keyMode: "managed"` only: next to `"own"` it is accepted and kept, not read
+(a workspace on its own key chooses provider and model freely); the plan form of the billing epic is where an `own` plan
+is refused it. Every answer states it (`{ "catalogEntries": null }` for an entry that never set it).
+
+**A write without `modelAccess` keeps the stored value**, as one without `periodStart` keeps the stored start, so a writer
+that does not know the field (the first release of a billing service, a script) cannot clear what an operator granted in
+the admin portal or a plan wrote. To clear it, send `{ "catalogEntries": null }`; a row that has none starts with every
+released entry. The keep happens in the single statement of the write, so two writers do not race on it. The same holds
+for `PUT /entitlements/default`. The log names the field (`modelAccess`) when it changed, never the ids.
+
+**Rollout of `modelAccess`.** Existing writers need no change: the field is optional, so a body that never mentions it
+is accepted before and after the upgrade and changes nothing. A writer that sends it can only do so **after every app
+instance is upgraded**: an instance of an earlier release refuses the key as it refuses any unknown key, with
+`422 entitlements_invalid` (`field: "modelAccess"`), so that a typo cannot pass; treat a `422` with that field during the
+upgrade window as retry-later, not as a refused plan. (An earlier instance that reads a row or default written by a newer
+one ignores the field.) There is no cutover as with `ownKeyCostLimitMicroUsd`, because nothing requires the field.
 
 Limits are JSON numbers. A number above 2^53 − 1 loses precision when JSON is parsed, so it can never be stored
 as sent: it is refused as `limit_invalid`, not rounded.

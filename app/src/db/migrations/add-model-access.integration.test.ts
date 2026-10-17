@@ -59,17 +59,15 @@ describe("the model access migration", () => {
         values ('w-1', 'team', 'managed', '{"diffRunsPerPeriod":5}', ${T}, 0, null, ${T}, null)`.execute(
         db,
       );
-      const { rows: before } =
-        await sql<Record<string, unknown>>`select * from workspace_entitlements`.execute(
-          db,
-        );
+      const { rows: before } = await sql<
+        Record<string, unknown>
+      >`select * from workspace_entitlements`.execute(db);
 
       await migrateToLatest(db, migrationProvider);
 
-      const { rows: after } =
-        await sql<Record<string, unknown>>`select * from workspace_entitlements`.execute(
-          db,
-        );
+      const { rows: after } = await sql<
+        Record<string, unknown>
+      >`select * from workspace_entitlements`.execute(db);
       expect(after).toEqual([{ ...before[0], model_access: null }]);
       const column = (await db.introspection.getTables())
         .find((table) => table.name === "workspace_entitlements")

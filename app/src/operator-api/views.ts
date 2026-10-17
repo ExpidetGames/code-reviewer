@@ -10,9 +10,7 @@ import type {
   ResolvedEntitlements,
 } from "../workspaces/entitlements.ts";
 
-export function fieldsOf(
-  data: EntitlementsData,
-): Required<EntitlementsData> {
+export function fieldsOf(data: EntitlementsData): Required<EntitlementsData> {
   return {
     planLabel: data.planLabel,
     keyMode: data.keyMode,

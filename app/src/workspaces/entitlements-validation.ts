@@ -165,8 +165,7 @@ const ENTITLEMENT_KEYS = [
 ] as const;
 
 type ModelAccessValidation =
-  | { ok: true; value: ModelAccess }
-  | { ok: false; field: string };
+  { ok: true; value: ModelAccess } | { ok: false; field: string };
 
 /**
  * Checks `{ catalogEntries }`: null or a list of at most 100 id-shaped strings. A missing field is every released
