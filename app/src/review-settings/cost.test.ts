@@ -14,7 +14,10 @@ import {
   modelsExceedingContext,
   type CostSettings,
 } from "./cost.ts";
-import { MODEL_PRICES, PRICING_AS_OF } from "./model-pricing.ts";
+import {
+  MODEL_PRICES,
+  PRICING_AS_OF,
+} from "../llm/providers/openrouter/model-pricing.ts";
 
 const prices = {
   "test/cheap": {

@@ -1,0 +1,15 @@
+{
+  "id": "ntfset_01fake00000000000000000001",
+  "description": "Code Reviewer billing webhook",
+  "type": "url",
+  "destination": "https://app.example.test/api/billing/webhook",
+  "active": true,
+  "api_version": 1,
+  "include_sensitive_fields": false,
+  "traffic_source": "platform",
+  "subscribed_events": [
+    { "name": "subscription.updated" },
+    { "name": "transaction.completed" }
+  ],
+  "endpoint_secret_key": "pdl_ntfset_fake_secret_for_tests"
+}

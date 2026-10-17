@@ -1,0 +1,13 @@
+{
+  "id": "pro_01fake00000000000000000001",
+  "name": "Fake plan product",
+  "description": "A made-up product for tests",
+  "type": "standard",
+  "tax_category": "standard",
+  "image_url": null,
+  "custom_data": { "cr_plan_key": "team" },
+  "status": "active",
+  "import_meta": null,
+  "created_at": "2026-01-01T00:00:00.000000Z",
+  "updated_at": "2026-01-01T00:00:00.000000Z"
+}

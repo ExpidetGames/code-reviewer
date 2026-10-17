@@ -24,7 +24,11 @@ import {
 import { isCrossSite } from "../http/request-checks.ts";
 import type { WorkspaceAccess } from "../workspaces/access.ts";
 import { can } from "../workspaces/permissions.ts";
-import { checkLlmApiKey, LLM_PROVIDERS, type LlmProvider } from "./config.ts";
+import { checkLlmApiKey, type LlmProvider } from "./config.ts";
+import {
+  DEFAULT_LLM_PROVIDER,
+  llmProviderDescriptors,
+} from "./providers/index.ts";
 import type { LlmKeyTestService } from "./key-test.ts";
 import type {
   LlmKeyIssue,
@@ -99,8 +103,7 @@ export type LlmKeyRouteHandlers = {
 
 function providerOf(raw: unknown): LlmProvider | undefined {
   if (typeof raw !== "string") return undefined;
-  const value = raw.trim().toLowerCase();
-  return LLM_PROVIDERS.find((provider) => provider === value);
+  return llmProviderDescriptors.find(raw)?.id;
 }
 
 export function createLlmKeyRouteHandlers({
@@ -160,7 +163,7 @@ export function createLlmKeyRouteHandlers({
           typeof body.value.apiKey === "string"
             ? checkLlmApiKey(body.value.apiKey)
             : { ok: false as const };
-        const chosen = providerOf(body.value.provider ?? "openrouter");
+        const chosen = providerOf(body.value.provider ?? DEFAULT_LLM_PROVIDER);
         const issues: LlmKeyIssue[] = [];
         if (chosen === undefined)
           issues.push({ field: "provider", code: "provider_invalid" });
