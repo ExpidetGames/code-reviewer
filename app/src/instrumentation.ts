@@ -65,6 +65,11 @@ export async function register(): Promise<void> {
   // Old counters and spent verification links are removed now and every hour (production only).
   const { startCleanupOnStart } = await import("./maintenance/startup.ts");
   startCleanupOnStart();
+  // The check runs of the review jobs are brought in line with GitHub every minute: the jobs that ended without
+  // a request of their own (a lease that ran out, a timeout) are found here (production only).
+  const { startCheckReconcilerOnStart } =
+    await import("./check-runs/startup.ts");
+  startCheckReconcilerOnStart();
   // Last: the daily backup timer (production only). It needs nothing from the app's own connection,
   // and a problem with it never stops the app from serving.
   startBackupSchedulerOnStart();

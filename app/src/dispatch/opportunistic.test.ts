@@ -7,7 +7,9 @@ import {
   OPPORTUNISTIC_MIN_JOB_AGE_MS,
 } from "./opportunistic.ts";
 
-function setup(options: { held?: boolean; failWith?: Error } = {}) {
+function setup(
+  options: { held?: boolean; failWith?: Error; checks?: boolean } = {},
+) {
   let time = 1_000_000;
   const queue = {
     expireStaleJobs: vi.fn(() => {
@@ -22,6 +24,9 @@ function setup(options: { held?: boolean; failWith?: Error } = {}) {
   };
   const dispatch = { sendDue: vi.fn(() => Promise.resolve({ sent: 1 })) };
   const log = { error: vi.fn() };
+  const checks = {
+    reconcileDue: vi.fn(() => Promise.resolve({ synced: 0 })),
+  };
   const maintenance = createOpportunisticMaintenance({
     withLock: async (work) =>
       options.held === true
@@ -29,6 +34,7 @@ function setup(options: { held?: boolean; failWith?: Error } = {}) {
         : { acquired: true, value: await work() },
     queue,
     dispatch,
+    ...(options.checks === false ? {} : { checks }),
     now: () => time,
     log,
   });
@@ -36,6 +42,7 @@ function setup(options: { held?: boolean; failWith?: Error } = {}) {
     maintenance,
     queue,
     dispatch,
+    checks,
     log,
     advance: (ms: number) => {
       time += ms;
@@ -52,6 +59,37 @@ describe("the repair work of the requests that touch the database", () => {
 
     expect(t.queue.expireStaleJobs).toHaveBeenCalledOnce();
     expect(t.dispatch.sendDue).toHaveBeenCalledOnce();
+  });
+
+  // #405-T06, #405-T32
+  it("reconciles the check runs after the leases were released, in the same run", async () => {
+    const t = setup();
+
+    await t.maintenance.run();
+
+    expect(t.checks.reconcileDue).toHaveBeenCalledOnce();
+    expect(t.queue.expireStaleJobs.mock.invocationCallOrder[0]).toBeLessThan(
+      t.checks.reconcileDue.mock.invocationCallOrder[0] ?? 0,
+    );
+  });
+
+  // #405-T32
+  it("does the check runs as often as the rest, and not when the lock is held elsewhere", async () => {
+    const throttled = setup();
+    await throttled.maintenance.run();
+    await throttled.maintenance.run();
+    expect(throttled.checks.reconcileDue).toHaveBeenCalledOnce();
+
+    const held = setup({ held: true });
+    await held.maintenance.run();
+    expect(held.checks.reconcileDue).not.toHaveBeenCalled();
+  });
+
+  // #405-T32
+  it("runs without a reconciler, as before the check runs", async () => {
+    const t = setup({ checks: false });
+
+    expect(await t.maintenance.run()).toBe("ran");
   });
 
   // #395-T11

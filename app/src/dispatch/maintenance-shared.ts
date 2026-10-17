@@ -7,6 +7,7 @@
 import "server-only";
 import { getDatabase } from "../db/startup.ts";
 import { OPPORTUNISTIC_LOCK, tryWithLock } from "../db/try-lock.ts";
+import { getCheckRunService } from "../check-runs/shared.ts";
 import { getRunnerQueue } from "../jobs/shared.ts";
 import {
   createJobEndedReaction,
@@ -70,6 +71,7 @@ function getMaintenance(env: Env): OpportunisticMaintenance | undefined {
     withLock: (work) => tryWithLock(getDatabase(), OPPORTUNISTIC_LOCK, work),
     queue: getRunnerQueue(),
     dispatch,
+    checks: getCheckRunService(),
   });
   return maintenance;
 }

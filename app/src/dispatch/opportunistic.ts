@@ -26,6 +26,8 @@ export type OpportunisticDependencies = {
   queue: Pick<RunnerQueue, "expireStaleJobs">;
   /** Absent in poll mode: nothing is sent, leases are still released. */
   dispatch?: Pick<DispatchService, "sendDue">;
+  /** #405: brings the check runs of the jobs that just ended or went back to the queue in line with GitHub. */
+  checks?: { reconcileDue(): Promise<{ synced: number }> };
   now?: () => number;
   intervalMs?: number;
   log?: Pick<Console, "error">;
@@ -53,6 +55,8 @@ export function createOpportunisticMaintenance(
           await deps.dispatch?.sendDue(DEFAULT_SEND_LIMIT, {
             minAgeMs: OPPORTUNISTIC_MIN_JOB_AGE_MS,
           });
+          // The leases released above changed jobs no request named: their check runs follow.
+          await deps.checks?.reconcileDue();
         });
         return outcome.acquired ? "ran" : "locked";
       } catch {

@@ -5,6 +5,11 @@
 // and `createRunnerQueue`.
 import "server-only";
 import { getDatabase } from "../db/startup.ts";
+import { checkNotifier } from "../check-runs/shared.ts";
+import {
+  notifyingJobQueue,
+  notifyingRunnerQueue,
+} from "../check-runs/notifying-queues.ts";
 import { dispatchHook } from "../dispatch/shared.ts";
 import { createJobQueue, type JobQueue } from "./job-queue.ts";
 import { configuredNoCapableRunnerMs } from "./job-limits.ts";
@@ -18,17 +23,37 @@ import { createRunnerQueue, type RunnerQueue } from "./runner-queue.ts";
  * (#326); by default there is no hook and nothing changes.
  */
 export function jobQueueFor(workspaceId: string): JobQueue {
-  const onEnqueued = dispatchHook();
-  return createJobQueue(getDatabase(), workspaceId, {
-    ...(onEnqueued === undefined ? {} : { onEnqueued }),
-  });
+  const dispatch = dispatchHook();
+  const checks = notifyingJobQueue.onEnqueued(checkNotifier);
+  // Both hooks run after the enqueue committed, and neither may keep the other from running.
+  const onEnqueued: NonNullable<
+    Parameters<typeof createJobQueue>[2]
+  >["onEnqueued"] = (result) => {
+    try {
+      dispatch?.(result);
+    } finally {
+      checks(result);
+    }
+  };
+  // #405: a waiting job that was dropped changes what GitHub should show: the check run is completed after it.
+  return notifyingJobQueue(
+    createJobQueue(getDatabase(), workspaceId, { onEnqueued }),
+    checkNotifier,
+  );
 }
 
 /** The workspaces whose ignored cost limit was logged already (#277): once per workspace and process is enough. */
 const ignoredCostLimitLogged = new Set<string>();
 
-/** The queue as runners use it: one for the whole instance, every workspace. */
+/**
+ * The queue as runners use it: one for the whole instance, every workspace. #405: it tells the check run
+ * reconciler about every change of a job (src/check-runs/README.md), so GitHub shows what the job is.
+ */
 export function getRunnerQueue(): RunnerQueue {
+  return notifyingRunnerQueue(createRunnerQueueOfTheServer(), checkNotifier);
+}
+
+function createRunnerQueueOfTheServer(): RunnerQueue {
   return createRunnerQueue(getDatabase(), {
     // #195: how long a job no capable runner claims may wait; the operator owns the value.
     limits: { noCapableRunnerMs: configuredNoCapableRunnerMs(process.env) },

@@ -48,6 +48,9 @@ function setup(options: { settings?: SweepSettings; poll?: boolean } = {}) {
     retryDue: vi.fn<() => Promise<{ tried: number }>>(async () => ({
       tried: 0,
     })),
+    reconcileDue: vi.fn<() => Promise<{ synced: number }>>(async () => ({
+      synced: 0,
+    })),
     info: vi.fn<(line: string) => void>(),
     error: vi.fn<(line: string) => void>(),
   };
@@ -63,6 +66,7 @@ function setup(options: { settings?: SweepSettings; poll?: boolean } = {}) {
     meta: { get: mocks.get, set: mocks.set },
     cleanup: mocks.cleanup,
     notices: { retryDue: mocks.retryDue },
+    checks: { reconcileDue: mocks.reconcileDue },
     settings: options.settings ?? { giveUpMs: 3_600_000, maxRunning: null },
     log: { info: mocks.info, error: mocks.error },
   });
@@ -95,6 +99,76 @@ describe("the notices of refused reviews in a run of the sweep", () => {
     expect(t.error).toHaveBeenCalledWith(
       "[sweep] SWEEP_STEP_FAILED step=notices",
     );
+  });
+});
+
+describe("the check runs in a run of the sweep (#405)", () => {
+  // #405-T06, #405-T32
+  it("reconciles the check runs after the steps that end jobs, and reports how many it synced", async () => {
+    const t = setup();
+    const order: string[] = [];
+    t.expireStaleJobs.mockImplementationOnce(async () => {
+      order.push("expire");
+      return expiry;
+    });
+    t.failUndispatched.mockImplementationOnce(async () => {
+      order.push("give_up");
+      return 0;
+    });
+    t.reconcileDue.mockImplementationOnce(async () => {
+      order.push("checks");
+      return { synced: 4 };
+    });
+
+    const report = await t.sweep.run();
+
+    expect(order).toEqual(["expire", "give_up", "checks"]);
+    expect(report.checksSynced).toBe(4);
+    expect(report.failedSteps).toEqual([]);
+  });
+
+  // #405-T33
+  it("reconciles in poll mode too: the check runs need no Dispatcher", async () => {
+    const t = setup({ poll: true });
+
+    await t.sweep.run();
+
+    expect(t.reconcileDue).toHaveBeenCalledOnce();
+  });
+
+  // #405-T32
+  it("names a failed reconcile and still does the cleanup, without what the failure said", async () => {
+    const t = setup();
+    t.reconcileDue.mockRejectedValueOnce(
+      new Error("postgres://u:hunter2@db/app"),
+    );
+
+    const report = await t.sweep.run();
+
+    expect(report.failedSteps).toEqual(["checks"]);
+    expect(t.cleanup).toHaveBeenCalledOnce();
+    expect(JSON.stringify(t.error.mock.calls)).not.toContain("hunter2");
+    expect(t.error).toHaveBeenCalledWith(
+      "[sweep] SWEEP_STEP_FAILED step=checks",
+    );
+  });
+
+  it("works without a reconciler, as a sweep that was made before the check runs", async () => {
+    const t = setup();
+    const bare = createDispatchSweep({
+      queue: {
+        expireStaleJobs: t.expireStaleJobs,
+        failUndispatched: t.failUndispatched,
+        countRunning: t.countRunning,
+      },
+      dispatches: { reviveStopped: t.reviveStopped },
+      meta: { get: t.get, set: t.set },
+      cleanup: t.cleanup,
+      settings: { giveUpMs: null, maxRunning: null },
+      log: { info: t.info, error: t.error },
+    });
+
+    expect((await bare.run()).checksSynced).toBe(0);
   });
 });
 
