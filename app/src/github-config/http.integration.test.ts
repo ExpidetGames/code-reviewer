@@ -369,7 +369,7 @@ describe("the check of the permissions through the route", () => {
 
     expect(await response.json()).toEqual({
       ok: true,
-      missing: ["emails", "members"],
+      missing: ["checks", "emails", "members"],
     });
   });
 

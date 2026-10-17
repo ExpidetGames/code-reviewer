@@ -147,6 +147,7 @@ export const PERMISSION_LABELS: Record<string, string> = {
   issues: "Repository permissions > Issues: Read and write",
   contents: "Repository permissions > Contents: Read-only",
   metadata: "Repository permissions > Metadata: Read-only",
+  checks: "Repository permissions > Checks: Read and write",
   emails: "Account permissions > Email addresses: Read-only",
   members: "Organization permissions > Members: Read-only",
 };

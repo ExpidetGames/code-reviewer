@@ -99,7 +99,7 @@ both together.
 
 ### Repository permissions
 
-Set these four and nothing else. There is **no Checks permission** in the MVP.
+Set these five and nothing else.
 
 | Permission (API name) | Access | What the app uses it for |
 |---|---|---|
@@ -107,10 +107,12 @@ Set these four and nothing else. There is **no Checks permission** in the MVP.
 | Issues (`issues`) | Read and write | Pull request conversation comments are issue comments: the persistent review comment; labels and reactions on comments |
 | Contents (`contents`) | Read-only | Read the changed files and the other repository files a review needs, such as `AGENTS.md` (the app never pushes) |
 | Metadata (`metadata`) | Read-only | Mandatory for every app: list the installation's repositories and ask whether a commenter has write access |
+| Checks (`checks`) | Read and write | The **check run** "Code Reviewer" in the checks area of the pull request (waiting, reviewing, finished). Only the App itself writes it, with a token of its own; a review job never gets this permission |
 
-The code asks for the same four permissions when it creates the token of a review job, scoped to the single
+The code asks for the first four permissions when it creates the token of a review job, scoped to the single
 repository of that job (`JOB_TOKEN_PERMISSIONS` in
-`app/src/integrations/providers/github-app/job-access.ts`).
+`app/src/integrations/providers/github-app/job-access.ts`). `pull_requests` is also what the App uses to submit the
+review verdict (`APPROVE` or `REQUEST_CHANGES`, see [Check runs and the review verdict](#check-runs-and-the-review-verdict)).
 
 ### Account permissions
 
@@ -124,11 +126,42 @@ repository of that job (`JOB_TOKEN_PERMISSIONS` in
 |---|---|---|
 | Members (`members`) | Read-only | Read a person's role in an organization with their user token, when a workspace connects an installation of that organization |
 
-An App that was imported from an older installation, or made by hand without these two permissions, still
-reviews pull requests, but signing in with a GitHub account and binding organization installations need them.
+An App that was imported from an older installation, or made by hand without these permissions, still
+reviews pull requests, but signing in with a GitHub account and binding organization installations need the
+account and organization permissions, and the check run needs **Checks**.
 The Integrations page lists them, and **Check the permissions** asks GitHub which of them the App really lacks.
 After you add a permission in the App's settings, every installation has to accept the changed permissions on
 GitHub (GitHub asks the installing account).
+
+### Check runs and the review verdict
+
+A review shows up in the checks area of its pull request as the check run **Code Reviewer**: *Waiting* when the
+job is queued, *Reviewing* while a Worker runs it, and a conclusion when it ends. **It is never red**: a finished
+review is `success` and everything else (a failure, a timeout, a cancel, a newer commit that replaced the run) is
+`neutral` with the reason in words. The App writes it, not the Worker, so it also covers runs that end without a
+Worker (a lost lease, the hard time limit, the cron sweep).
+
+**An existing installation or an App made by hand has no Checks permission** until you add it in the App's settings
+(*Repository permissions > Checks: Read and write*) and accept the changed permissions on each installation. Until
+then nothing breaks: reviews run and are published as before, no check run appears, and the log says
+`CHECK_RUN_PERMISSION_MISSING` (once per job, ids only). **Check the permissions** on the Integrations page lists
+*Checks* as missing.
+
+After a successful review the App also submits a pull request review as itself: `REQUEST_CHANGES` when the review
+found blocking findings, otherwise `APPROVE`, with a one line body and a link to the review comment. A later run on a
+new push submits a new review, which replaces the earlier verdict of the App on GitHub (a reviewer's latest review
+counts, so no dismissal is needed). Human reviews are never touched, and a failed, cancelled or superseded run
+submits nothing. Which findings block is a project setting, **Review verdict**, next to the review kind:
+
+| Value | Dynamic Review | Diff Review (PR-Agent has no severities) |
+|---|---|---|
+| `off` | no review is submitted | no review is submitted |
+| `blocking` (default) | `REQUEST_CHANGES` while a P0 finding is open, otherwise `APPROVE` | no review is submitted: a review without severities cannot tell a blocker from a nit |
+| `any` | `REQUEST_CHANGES` while any finding is open, otherwise `APPROVE` | `REQUEST_CHANGES` while a finding is active, otherwise `APPROVE` |
+
+A Dynamic review that stopped early (cost or time limit) never approves. **Branch protection:** an `APPROVE` of the
+App counts like any other approval, so a rule that requires approving reviews can be satisfied by it; set the
+project to `off` where that is not wanted.
 
 ## Events
 
@@ -267,7 +300,7 @@ slug with a space) is not imported: the log and the notice in the admin portal n
 tile says GitHub is not configured, and you enter the App in the portal. The imported App has no user
 authorization and no "private app" flag yet: the Integrations page asks for the client id and secret of the App
 (to switch on sign in with GitHub) and whether the App can only be installed on its own account, and its
-**Check permissions** button says which of the two permissions "Email addresses" and "Members" (read-only) the App
+**Check permissions** button says which of the permissions "Checks", "Email addresses" and "Members" the App
 lacks. `GITHUB_OAUTH_CLIENT_ID` and `GITHUB_OAUTH_CLIENT_SECRET` (the separate OAuth app of the earlier sign in) are
 not used any more and not imported. The steps of the update are in
 [`deployment-coolify.md`](deployment-coolify.md), "Updating an installation from before accounts".
@@ -277,7 +310,7 @@ not used any more and not imported. The steps of the update are in
 - [ ] The App exists (one click, or by hand with the addresses and settings above), webhook active, SSL
       verification enabled
 - [ ] Permissions: Pull requests Read and write, Issues Read and write, Contents Read-only, Metadata Read-only,
-      Email addresses Read-only, Members Read-only, and nothing else
+      Checks Read and write, Email addresses Read-only, Members Read-only, and nothing else
 - [ ] Events: Pull request and Issue comment ticked
 - [ ] The tile on Integrations shows **Configured**, and **Sign in with GitHub** is enabled
 - [ ] Only for the way by hand: the `.pem` file is in the password manager and deleted from the laptop

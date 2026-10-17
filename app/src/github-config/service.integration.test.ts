@@ -634,7 +634,11 @@ describe("what the portal shows", () => {
     const lacking = await manual.service.checkPermissions("admin-1");
     const complete = await manifest.service.checkPermissions("admin-1");
 
-    expect(lacking).toEqual({ ok: true, missing: ["emails", "members"] });
+    // #405-T14
+    expect(lacking).toEqual({
+      ok: true,
+      missing: ["checks", "emails", "members"],
+    });
     expect(complete).toEqual({ ok: true, missing: [] });
   });
 });
