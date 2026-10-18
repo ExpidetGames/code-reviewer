@@ -130,13 +130,13 @@ valid. Two families sit side by side and only the one that matches the workspace
   model. Both are `null` on an own key; the stored entries are not shown there.
 - **Effective resolution** (`effective.ts`): `provider` layers like any Diff field (project over workspace default over the
   built-in default provider, with its source); `dynamicProvider` and the entries are the project's or the built-in value
-  (`null` for the entries). `resolveForRepository` returns them for the claim, which does not use them yet
-  (#431, #432): `toRunnerSettings` is unchanged.
+  (`null` for the entries). `resolveForRepository` returns them for the claim, which hands the entry of the job's kind to the model
+  selection resolver (#432, `runner-api/claim-selection.ts`): `toRunnerSettings` is unchanged.
 - **The Dynamic metadata check** (#269) asks the adapter of the provider the project selected (`dynamic-check.ts`): the
   model of the request at the provider of the request, else the stored one, else the default; a request that only
   changes the provider asks again about the stored model at the new provider.
-- **Not done here**: the claim and the migration of `modelTier` (#432, #434). The model a provider other than the
-  default would use when no layer sets one is the claim's business (#432): the views show the model of the layers.
+- **Not done here**: the migration of `modelTier` (#434). The model a provider other than the default would use when no
+  layer sets one is the claim's business (#432): the views show the model of the layers.
 
 ## The settings form: provider, model and catalog entry (#433)
 
@@ -175,11 +175,10 @@ the Review kind card (Dynamic Review) show depends on the key mode of the worksp
   `PROVIDER_UNKNOWN`, the four `CATALOG_ENTRY_*` codes and `CATALOG_ENTRY_OWN_KEY_MODE`; the chooser's own words are
   `src/copy/model-choice.ts`, scanned by a test for model, vendor, price and cost words (the sentences about the plan are
   the one place that says "plan").
-- **Until the claim reads the entries (#432)** a chosen entry is stored and shown, but it drives no job: the model of a
-  managed job still follows `modelTier`. A tier stored earlier (a managed workspace that chose High under #283) stays in
-  force and now **cannot be seen or changed in the form** (the form carries it through every Diff save untouched), while
-  the chooser says "Default of this instance". New data has no tier, so the default level applies. This interim state is
-  expected: #432, #433 and #434 are released together, and nobody should test it on its own as a defect.
+- **The claim reads the entries (#432).** A managed job runs on the entry the project chose for the kind of the job, else
+  the instance default of that kind, and the usage record names the entry. A tier stored earlier (a managed workspace that
+  chose High under #283) is no longer read by the claim; it stays in the settings until #434 migrates it, and the form
+  neither shows nor changes it.
 
 ## From settings to a runner job
 

@@ -58,14 +58,13 @@ entitlements) `model` and the Dynamic model apply and the tier is ignored.
 
 The tiers had a **Quality** choice, Low, Medium or High, in the settings forms of a managed workspace. Since #433 the
 project form shows the **catalog chooser** in its place (an entry per review kind, `src/review-settings/README.md`) and no
-control sets `modelTier` any more; the claim still reads the stored `modelTier` until the catalog reaches it (#432), and
-the tiers are retired with #434. The copy is in `src/copy/model-choice.ts`, and a test scans it for a model name, a
+control sets `modelTier` any more; the claim no longer reads it (#432), and the tiers are retired with #434. The copy is in `src/copy/model-choice.ts`, and a test scans it for a model name, a
 vendor, a price or a cost. The settings routes return `modelTier` and no model field for such a workspace and refuse a
 write that sets one with `MODEL_MANAGED_BY_INSTANCE`.
 
-No form shows the levels any more, so there is no "Not available" level to explain. The tier is still **read at claim**
-(below): a level without a model for the kind of review fails the job with `managed_tier_unavailable`. The yes or no per
-level and kind (`tierAvailability`, `configuredTiers`) stays on the settings view until #434 retires the tiers.
+No form shows the levels any more, so there is no "Not available" level to explain. The claim does not read the tier
+any more (the banner above; the "At claim" section below is the retired behaviour). The yes or no per level and kind
+(`tierAvailability`, `configuredTiers`) stays on the settings view until #434 retires the tiers.
 
 ## At claim
 
