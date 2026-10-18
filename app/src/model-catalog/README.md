@@ -155,7 +155,9 @@ moves the data over so that no managed workspace changes model:
   `UPDATE … FROM (VALUES …)` each, so the time does not grow with a statement per project (about 0.2 s for 5,000 and 0.8 s
   for 20,000 projects on a local Postgres, instead of 2.2 s and 10.3 s). A row is written only if it still holds the text
   that was read (a settings save that lands between the read and the write is never overwritten) and a row that changed
-  is read again, three times at most. A differential test
+  is read again, three times at most; if a project still changed after the third write, the migration fails and rolls
+  everything back, naming the projects (twenty at most), so the deploy is run again instead of the project silently
+  keeping its old tier. A differential test
   (`integration-tests/http/model-tiers-migration-claim.integration.test.ts`) hands the same (tier, kind) to the new claim
   and compares the model with the old rule.
 - **What differs from the tiers, on purpose.** (1) A tier that had no model for a review kind used to end that kind's job

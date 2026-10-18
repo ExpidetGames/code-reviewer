@@ -320,6 +320,67 @@ const DIFFERENT = {
   high: { diff: "acme/high-d", dynamic: "acme/high-y" },
 };
 
+/**
+ * The migrations of the previous release plus this one, where every read of the projects' settings is followed by a
+ * save of p-1 by someone else (the first `saves` reads, or every read) before the migration writes. The hook runs on
+ * the connection of the runner's transaction, so a failure rolls the whole batch back like in production.
+ */
+function withConcurrentSaves(saves: number): MigrationProvider {
+  let reads = 0;
+  return {
+    async getMigrations() {
+      const { migration } =
+        await import("./20261018170000_migrate_model_tiers_to_catalog.ts");
+      return {
+        ...(await beforeThisMigration.getMigrations()),
+        [KEY]: {
+          async up(db) {
+            await migration.up(
+              db.withPlugin({
+                transformQuery: (args) => args.node,
+                async transformResult(args) {
+                  const row = args.result.rows[0] as
+                    Record<string, unknown> | undefined;
+                  if (row?.id !== "p-1" || !("settings" in row))
+                    return args.result;
+                  reads += 1;
+                  if (reads <= saves)
+                    await db
+                      .updateTable("projects")
+                      .set({
+                        settings: JSON.stringify({
+                          modelTier: "low",
+                          maxFindings: 8 + reads,
+                        }),
+                      })
+                      .where("id", "=", "p-1")
+                      .execute();
+                  return args.result;
+                },
+              }),
+            );
+          },
+        },
+      };
+    },
+  };
+}
+
+async function seedConcurrent(db: Kysely<Database>): Promise<void> {
+  await seed(db, {
+    tiers: DIFFERENT,
+    workspaces: [
+      {
+        id: "w-1",
+        projects: [
+          { id: "p-1", settings: { modelTier: "low", maxFindings: 1 } },
+          { id: "p-2", settings: { modelTier: "high" } },
+        ],
+      },
+    ],
+  });
+}
+
 for (const engine of engines) {
   describe(`the tier migration on ${engine.name}`, () => {
     // #434-T01, #434-T06, #434-T07
@@ -834,6 +895,70 @@ for (const engine of engines) {
         maxFindings: 2,
         catalogEntryDiff: "x",
       });
+    });
+
+    // #434-N-B
+    it("keeps a settings save that landed between the read and the write, and adds the entries on the retry", async () => {
+      const db = await engine.open();
+      await seedConcurrent(db);
+
+      // p-1 is saved once by someone else after the first read (it changes maxFindings and still has its tier).
+      await migrateToLatest(db, withConcurrentSaves(1));
+
+      const entries = {
+        catalogEntryDiff: entryIdOf("low-diff"),
+        catalogEntryDynamic: entryIdOf("low-dynamic"),
+      };
+      expect(await projectSettings(db, "p-1")).toEqual({
+        modelTier: "low",
+        maxFindings: 9,
+        ...entries,
+      });
+      expect(await projectSettings(db, "p-2")).toEqual({
+        modelTier: "high",
+        catalogEntryDiff: entryIdOf("high-diff"),
+        catalogEntryDynamic: entryIdOf("high-dynamic"),
+      });
+    });
+
+    // #434-N-A
+    it("fails loudly and rolls everything back when a project keeps changing, so a rerun is safe", async () => {
+      const db = await engine.open();
+      await seedConcurrent(db);
+      const before = await snapshot(db);
+
+      // Every read of p-1 is followed by another save: the three attempts run out.
+      const failure = await migrateToLatest(
+        db,
+        withConcurrentSaves(Number.POSITIVE_INFINITY),
+      ).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+
+      expect(failure).toBeInstanceOf(Error);
+      const message = (failure as Error).message;
+      expect(message).toContain("1 project");
+      expect(message).toContain("p-1");
+      expect(message).not.toContain("p-2");
+      expect(message).toContain("Run the deploy again");
+      // Nothing of the batch is applied or recorded: no entry, no default, no project rewritten, and not marked as run.
+      // (The saves of the hook were made on the same connection, so they are rolled back too.)
+      expect(await snapshot(db)).toEqual(before);
+      expect(await defaults(db)).toBeUndefined();
+      const recorded = await sql<{ name: string }>`
+        select name from kysely_migration where name = ${KEY}
+      `.execute(db);
+      expect(recorded.rows).toEqual([]);
+
+      // The rerun finds the quiet database, migrates every project and records the migration.
+      await migrate(db);
+      expect((await projectSettings(db, "p-1")).catalogEntryDiff).toBe(
+        entryIdOf("low-diff"),
+      );
+      expect((await projectSettings(db, "p-2")).catalogEntryDiff).toBe(
+        entryIdOf("high-diff"),
+      );
     });
   });
 }

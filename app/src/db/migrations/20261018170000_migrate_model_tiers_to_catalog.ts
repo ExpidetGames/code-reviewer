@@ -43,6 +43,9 @@ type AnyDb = Kysely<any>;
 /** How often a row that changed between the read and the write is read again. */
 const ATTEMPTS = 3;
 
+/** How many project ids the error of a migration that gave up names. */
+const NAMED_PROJECTS = 20;
+
 function parse(text: unknown): unknown {
   if (typeof text !== "string") return undefined;
   try {
@@ -190,6 +193,19 @@ export async function writeIfUnchanged(
   return written;
 }
 
+function gaveUp(ids: readonly string[]): Error {
+  const named = ids.slice(0, NAMED_PROJECTS).join(", ");
+  const more =
+    ids.length > NAMED_PROJECTS
+      ? ` and ${ids.length - NAMED_PROJECTS} more`
+      : "";
+  return new Error(
+    `model tiers: ${ids.length} project${ids.length === 1 ? "" : "s"} (${named}${more}) changed while the migration ` +
+      `wrote them, ${ATTEMPTS} times in a row. Nothing was applied. Run the deploy again; if this repeats, stop the ` +
+      `instances of the previous release first.`,
+  );
+}
+
 async function rewriteProjects(
   db: AnyDb,
   tiers: Map<string, Tier>,
@@ -233,6 +249,9 @@ async function rewriteProjects(
     // A row that changed meanwhile is read again, and rewritten from what it holds now.
     const missed = rewrites.filter((rewrite) => !written.has(rewrite.id));
     if (missed.length === 0) return;
+    // Giving up would leave the project on its old tier, which runs on the default entry: a silent model change.
+    // Failing rolls the whole migration back, and a rerun starts from the old state.
+    if (attempt === ATTEMPTS - 1) throw gaveUp(missed.map((row) => row.id));
     const workspaceOf = new Map(
       pending.map((project) => [project.id, project.workspace_id]),
     );
