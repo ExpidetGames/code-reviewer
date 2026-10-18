@@ -319,6 +319,27 @@ describe("the Sandbox-Launcher", () => {
     expect(service.running()).toStrictEqual([]);
   });
 
+  // #473-T03
+  it("logs a stable code and the redacted tail of the stderr of a failed vm-prepare.sh", async () => {
+    service.onExec("vm-prepare", {
+      exitCode: 1,
+      stderr: `vm-prepare: cgroup_root_busy tries=100 last_error=Device or resource busy\ncrj_${"A".repeat(43)}\n`,
+    });
+
+    await launch(build());
+
+    const line = logger.lines.find((entry) =>
+      entry.startsWith("warn vm_prepare_failed "),
+    );
+    expect(line).toBeDefined();
+    expect(line).toContain('"code":"docker_not_ready"');
+    expect(line).toContain('"exitCode":1');
+    expect(line).toContain(`"jobId":"${JOB_ID}"`);
+    expect(line).toContain("cgroup_root_busy tries=100");
+    expect(line).toContain("[redacted]");
+    expect(line).not.toContain("crj_AAAA");
+  });
+
   // #329-T06
   it("refuses an image whose id is not the configured digest and stops the VM", async () => {
     service.onExec("image-id", { stdout: `${OTHER_IMAGE_ID}\n` });

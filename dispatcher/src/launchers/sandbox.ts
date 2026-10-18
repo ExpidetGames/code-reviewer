@@ -403,6 +403,8 @@ export function createSandboxLauncher(
       const host = new SandboxDockerHost({
         vm,
         clock,
+        logger,
+        logFields: { jobId: spec.jobId },
         imageReference: options.imageReference ?? SANDBOX_IMAGE_REFERENCE,
         imageDigest: options.imageDigest,
         handoverSeconds,

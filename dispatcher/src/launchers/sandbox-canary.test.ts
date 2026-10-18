@@ -235,6 +235,25 @@ describe("the canary VM of the capability probe", () => {
     expect(probeCall()).toBeUndefined();
   });
 
+  // #473-T03
+  it("logs a stable code and the tail of the stderr of a failed vm-prepare.sh", async () => {
+    service.onExec("vm-prepare", {
+      exitCode: 1,
+      stderr:
+        "vm-prepare: cgroup_root_busy tries=100 last_error=Device or resource busy\n",
+    });
+
+    await failure(canary()(signal()));
+
+    const line = logger.lines.find((entry) =>
+      entry.startsWith("warn vm_prepare_failed "),
+    );
+    expect(line).toContain('"code":"docker_not_ready"');
+    expect(line).toContain('"exitCode":1');
+    expect(line).toContain('"canary":true');
+    expect(line).toContain("cgroup_root_busy tries=100");
+  });
+
   // #331-T02
   it("refuses an image that is not the configured one: a probe of another image proves nothing", async () => {
     service.onExec("image-id", { stdout: `${OTHER_IMAGE_ID}\n` });
