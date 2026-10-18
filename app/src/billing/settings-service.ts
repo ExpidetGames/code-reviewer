@@ -377,12 +377,6 @@ export function createBillingSettingsService({
         if (!check.ok) return check;
       }
 
-      // The webhook secret of the other environment goes before anything else is written: if the write below is then
-      // refused, the secret is missing (switching on is refused) and not a secret that no destination of this
-      // environment can have signed.
-      if (environmentChanges && webhookSecret === undefined)
-        await secrets.remove("paddle_webhook_secret");
-
       const written = await writeIfUnchanged(adminId, stored, {
         environment,
         clientToken,
@@ -391,6 +385,10 @@ export function createBillingSettingsService({
       });
       if (!written) return CHANGED;
 
+      // The webhook secret of the other environment goes after the write that was guarded, so a refused write leaves
+      // it alone. A process that ends in between leaves a stale secret, which `recreate` replaces.
+      if (environmentChanges && webhookSecret === undefined)
+        await secrets.remove("paddle_webhook_secret");
       const writer = { updatedBy: adminId, showLastFour: true };
       if (apiKey !== undefined)
         await secrets.save("paddle_api_key", apiKey, writer);

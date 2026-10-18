@@ -1300,6 +1300,43 @@ describe("one environment for every credential", () => {
     });
   });
 
+  // #437-T06
+  it("keeps the webhook secret when the switch of the environment finds the settings changed meanwhile", async () => {
+    const portal = await createAdminHarness();
+    await saved(portal, { apiKey: undefined });
+    const otherTab = await serviceOver(portal);
+    // No key is stored, so the save reads it (`use`) and the other tab gets its turn before the write.
+    const switching = await serviceOver(portal, {
+      beforeUse: {
+        n: 1,
+        run: () =>
+          otherTab.saveSettings(
+            portal.adminId,
+            settings({ apiKey: undefined, webhookSecret: undefined, graceDays: 14 }),
+          ),
+      },
+    });
+
+    const result = await switching.saveSettings(
+      portal.adminId,
+      settings({
+        environment: "live",
+        clientToken: LIVE_TOKEN,
+        apiKey: undefined,
+        webhookSecret: undefined,
+      }),
+    );
+
+    expect(result).toEqual({ ok: false, error: "billing_settings_changed" });
+    expect((await portal.secrets.status("paddle_webhook_secret")).state).toBe(
+      "configured",
+    );
+    expect(await (await get(portal)).json()).toMatchObject({
+      environment: "sandbox",
+      graceDays: 14,
+    });
+  });
+
   // #437-T03
   it("refuses a client token of the other environment, and one that is no token of Paddle", async () => {
     const portal = await createAdminHarness();
