@@ -93,6 +93,56 @@ describe("the project provider and the workspace model of another provider", () 
   });
 
   // #432-T17
+  it("does not stop a save of another field of a project that already had the pairing", async () => {
+    const app = await start();
+    // The pairing is stored by an earlier release, which did not check it.
+    await app.appSettings.set(
+      "review_defaults",
+      { provider: FAKE_PROVIDER_ID, model: "fake-large" },
+      "a",
+    );
+    await app.projects.updateSettings(app.first.id, {
+      provider: DEFAULT_PROVIDER,
+    });
+
+    // The form sends the whole Diff group again, the provider it already holds included.
+    await app.service.updateProjectSettings(app.first.id, {
+      provider: DEFAULT_PROVIDER,
+      maxFindings: 3,
+    });
+
+    expect((await app.projects.get(app.first.id))?.settings).toMatchObject({
+      provider: DEFAULT_PROVIDER,
+      maxFindings: 3,
+    });
+  });
+
+  // #432-T17
+  it("is still refused when a save of a project that had a clean pairing introduces it", async () => {
+    const app = await start();
+    await app.service.updateGlobalSettings(
+      { provider: FAKE_PROVIDER_ID, model: "fake-large" },
+      "a",
+    );
+    await app.service.updateProjectSettings(app.first.id, {
+      maxFindings: 3,
+    });
+    const before = await app.projectRows();
+
+    const refused = await issuesOf(
+      app.service.updateProjectSettings(app.first.id, {
+        provider: DEFAULT_PROVIDER,
+        maxFindings: 4,
+      }),
+    );
+
+    expect(refused.issues).toEqual([
+      { field: "provider", code: "MODEL_PROVIDER_MISMATCH" },
+    ]);
+    expect(await app.projectRows()).toEqual(before);
+  });
+
+  // #432-T17
   it("is refused when the workspace default changes under a project that inherits its model", async () => {
     const app = await start();
     await app.service.updateProjectSettings(app.first.id, {

@@ -881,8 +881,16 @@ export function createReviewSettingsService(deps: {
         repositoryId,
         (current) => {
           const merged = mergeProjectSettings(current, patch, providers);
-          // Own key mode only: a managed workspace selects an entry, not a provider and a model.
-          if (!managed)
+          // Own key mode only: a managed workspace selects an entry, not a provider and a model. A pairing the project
+          // already had is not blamed again, as for a change of the workspace default.
+          if (
+            !managed &&
+            !modelProviderMismatch(
+              diffLayerOf(workspaceLayer),
+              diffLayerOf(parseReview(current)),
+              providers.defaultProvider.id,
+            )
+          )
             refuseModelProviderMismatch(
               "provider",
               workspaceLayer,
