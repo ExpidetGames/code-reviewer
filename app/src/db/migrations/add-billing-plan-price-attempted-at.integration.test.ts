@@ -16,7 +16,7 @@ import {
 import { createTestDirectory } from "../../test-support/test-database.ts";
 import { migrationProvider } from "./index.ts";
 
-const THIS = "20261018180000_add_billing_plan_price_attempted_at";
+const THIS = "20261018190000_add_billing_plan_price_attempted_at";
 const T = "2026-10-18T08:00:00.000Z";
 
 const beforeThisMigration: MigrationProvider = {

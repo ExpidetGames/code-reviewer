@@ -103,7 +103,7 @@ describe("the migrations of both epics", () => {
       "20261018120000_create_billing_plans",
       "20261018140000_protect_billing_plan_versions",
       "20261018160000_create_billing_plan_prices",
-      "20261018180000_add_billing_plan_price_attempted_at",
+      "20261018190000_add_billing_plan_price_attempted_at",
     ]);
   });
 
