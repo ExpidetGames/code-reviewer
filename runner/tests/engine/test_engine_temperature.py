@@ -28,6 +28,8 @@ WITHOUT_TEMPERATURE = [
     "anthropic/claude-haiku-5.5:batch",
     "openai/gpt-6-luna",
     "openai/gpt-6.1-sol",
+    # The `~` aliases (`~anthropic/claude-haiku-latest`) are refused by the job's model pattern.
+    "openai/gpt-chat-latest",
 ]
 WITH_TEMPERATURE = [
     "anthropic/claude-haiku-4.5",

@@ -808,9 +808,10 @@ provider and expresses no preference, so it is no provider-specific routing (epi
   request that carries it finds no endpoint. PR-Agent 0.47.0 withholds it for a fixed list of families and otherwise asks
   litellm's metadata, which still lists it for Haiku 5.x. The runner wraps
   `LiteLLMAIHandler._litellm_supports_temperature` for the length of the job (`temperature_patch.py`)
-  and answers no for every Claude model from 4.7 on and every GPT model from 6 on, by version, so a
-  new point release, a `:variant` or a later family needs no list entry (GPT-5 and `gpt-6-astra` are
-  PR-Agent's own). `config.no_temperature_models` would need every id spelled out.
+  and answers no for every Claude model from 4.7 on and every GPT model from 6 on, and the `latest` aliases of both (`openai/gpt-chat-latest`), by
+  version, so a new point release, a `:variant` or a later family needs no list entry (GPT-5 and `gpt-6-astra` are
+  PR-Agent's own). A patch that cannot be applied ends the job with `runner_error` and a detail that
+  names it. `config.no_temperature_models` would need every id spelled out.
   Every other model is left to PR-Agent. The patch refuses a handler whose method has another shape.
 - **Only for OpenRouter.** A job without `llm.baseUrl` talks to OpenRouter and always gets the
   field. A job with `llm.baseUrl` talks to a local fake and gets the request unchanged, unless the

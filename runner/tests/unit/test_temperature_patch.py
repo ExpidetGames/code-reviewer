@@ -64,6 +64,16 @@ class WrongSignature:
         "openrouter/openai/gpt-6-astra",
         "openrouter/openai/gpt-7-luna",
         "openrouter/openai/gpt-10",
+        # OpenRouter's rolling aliases have no version in their id and list no temperature either.
+        "openrouter/~anthropic/claude-haiku-latest",
+        "openrouter/~anthropic/claude-fable-latest",
+        "openrouter/~anthropic/claude-opus-latest",
+        "openrouter/~anthropic/claude-sonnet-latest",
+        "openrouter/~openai/gpt-luna-latest",
+        "openrouter/~openai/gpt-sol-latest",
+        "openrouter/~openai/gpt-mini-latest",
+        "openrouter/openai/gpt-chat-latest",
+        "~anthropic/claude-haiku-latest:batch",
     ],
 )
 def test_claude_models_from_4_7_on_get_no_temperature(model: str) -> None:
@@ -92,6 +102,11 @@ def test_claude_models_from_4_7_on_get_no_temperature(model: str) -> None:
         "openrouter/openai/gpt-5.5",
         "openrouter/vendor/notgpt-6",
         "openrouter/google/gemini-2.5-pro",
+        # Aliases of models that do take temperature.
+        "openrouter/~google/gemini-pro-latest",
+        "openrouter/~x-ai/grok-latest",
+        "openrouter/~deepseek/deepseek-flash-latest",
+        "openrouter/vendor/claude-latest",
         "openrouter/x-ai/grok-5",
         "openrouter/vendor/not-claude-5",
         "claude",
