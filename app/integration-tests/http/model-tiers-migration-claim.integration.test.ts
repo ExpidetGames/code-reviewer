@@ -9,6 +9,7 @@
 import { describe, expect, it } from "vitest";
 import { migration } from "../../src/db/migrations/20261018160000_migrate_model_tiers_to_catalog.ts";
 import { createWorkspaceEntitlementsRepository } from "../../src/db/repositories/workspace-entitlements-repository.ts";
+import { entryIdOf } from "../../src/db/migrations/model-tiers-to-catalog.ts";
 import { startRunnerApiHarness } from "../../src/test-support/runner-api-harness.ts";
 
 const OPERATOR_KEY = "plain-operator-key-0001-aaaaaaaa";
@@ -52,6 +53,12 @@ async function start(options: {
   projectTier?: Tier;
   /** The tier of the workspace's review defaults, or none. */
   workspaceTier?: Tier;
+  /** The key mode of the workspace; managed unless said otherwise. */
+  keyMode?: "own" | "managed";
+  /** The entries the plan lists in `modelAccess`; all released entries when absent. */
+  modelAccess?: string[];
+  /** Run the migration (the default), or leave the database as the previous release wrote it. */
+  migrate?: boolean;
 }) {
   const h = await startRunnerApiHarness({
     llmKey: WORKSPACE_KEY,
@@ -70,7 +77,10 @@ async function start(options: {
   ).put(
     {
       planLabel: "plan",
-      keyMode: "managed",
+      keyMode: options.keyMode ?? "managed",
+      ...(options.modelAccess === undefined
+        ? {}
+        : { modelAccess: { catalogEntries: options.modelAccess } }),
       limits: {
         diffRunsPerPeriod: null,
         dynamicRunsPerPeriod: null,
@@ -127,7 +137,7 @@ async function start(options: {
       })
       .execute();
 
-  await migration.up(h.db);
+  if (options.migrate !== false) await migration.up(h.db);
   await h.enqueueNew();
   return h;
 }
@@ -228,5 +238,68 @@ describe("the claim after the tier migration", () => {
 
     expect(job.input.llm.model).toBe("tier/mid-diff");
     expect(job.input.llm.model).not.toBe("tier/high-dyn");
+  });
+
+  // #434-T06
+  it("leaves the claim of a workspace on its own key as it was, whatever tier its project stored", async () => {
+    const tiers = CONFIGURATIONS["a model per tier and kind"]!;
+    const options = {
+      tiers,
+      kind: "diff",
+      projectTier: "high",
+      workspaceTier: "low",
+      keyMode: "own",
+    } as const;
+    const unmigrated = await start({ ...options, migrate: false });
+    const { job: before } = await unmigrated.claimed();
+    const migrated = await start(options);
+    const { job: after } = await migrated.claimed();
+
+    expect(after.input.llm).toEqual(before.input.llm);
+    expect(after.input.llm.apiKey).toBe(WORKSPACE_KEY);
+    expect(JSON.stringify(after.input)).not.toContain("tier/");
+  });
+
+  // #434-X5
+  it.each([
+    ["an empty list", []],
+    ["a list that names only another entry", ["mce_other"]],
+  ])(
+    "stops a managed workspace whose plan has %s, for a project on a tier and for one that chose none",
+    async (_name, modelAccess) => {
+      const tiers = CONFIGURATIONS["a model per tier and kind"]!;
+      for (const projectTier of ["high", undefined] as const) {
+        const h = await start({
+          tiers,
+          kind: "diff",
+          projectTier,
+          modelAccess,
+        });
+        const [job] = await h.snapshotJobs();
+
+        expect((await h.claim()).status).toBe(204);
+
+        expect(await h.queue.get(job!.id)).toMatchObject({
+          status: "failed",
+          errorCode: "managed_model_unavailable",
+        });
+        expect(h.issuedJobTokens()).toEqual([]);
+      }
+    },
+  );
+
+  // #434-X5
+  it("runs again once the plan lists the migrated entries, which is what the operator does after the release", async () => {
+    const tiers = CONFIGURATIONS["a model per tier and kind"]!;
+    const h = await start({
+      tiers,
+      kind: "diff",
+      projectTier: "high",
+      modelAccess: [entryIdOf("high-diff"), entryIdOf("medium-diff")],
+    });
+
+    const { job } = await h.claimed();
+
+    expect(job.input.llm.model).toBe("tier/high-diff");
   });
 });
