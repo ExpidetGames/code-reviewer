@@ -144,23 +144,21 @@ export function createBillingPricesService({
     async link(adminId, planKey, input) {
       void adminId;
       const body = isRecord(input) ? input : undefined;
+      const versionNumber = body?.versionNumber;
+      const interval = body?.interval;
+      const paddlePriceId = body?.paddlePriceId;
       if (
         body === undefined ||
         Object.keys(body).some((key) => !LINK_KEYS.includes(key)) ||
-        typeof body.versionNumber !== "number" ||
-        !Number.isSafeInteger(body.versionNumber) ||
-        body.versionNumber < 1 ||
-        (body.interval !== "month" && body.interval !== "year") ||
-        typeof body.paddlePriceId !== "string"
+        typeof versionNumber !== "number" ||
+        !Number.isSafeInteger(versionNumber) ||
+        versionNumber < 1 ||
+        (interval !== "month" && interval !== "year") ||
+        typeof paddlePriceId !== "string"
       )
         return { ok: false, code: "price_input_invalid" };
-      if (!PRICE_ID.test(body.paddlePriceId))
+      if (!PRICE_ID.test(paddlePriceId))
         return { ok: false, code: "price_id_invalid", field: "paddlePriceId" };
-      const { versionNumber, interval, paddlePriceId } = {
-        versionNumber: body.versionNumber,
-        interval: body.interval,
-        paddlePriceId: body.paddlePriceId,
-      };
 
       const { plans, versions, prices } = repositories(db);
       const plan = await plans.get(planKey);

@@ -54,7 +54,12 @@ function plan(planKey: string, overrides: Record<string, unknown> = {}) {
   };
 }
 
-type PriceInput = Parameters<PaddleClient["createPrice"]>[0];
+type PriceInput = Parameters<PaddleClient["createPrice"]>[0] & {
+  unit_price_overrides?: Array<{
+    country_codes: string[];
+    unit_price: { amount: string; currency_code: string };
+  }>;
+};
 
 async function start() {
   const { db } = await createTestDatabase();
@@ -90,6 +95,7 @@ async function start() {
     overrides: Partial<PriceInput> = {},
     productId = product.id,
   ) {
+    // `unit_price_overrides` is not a field the app's client creates; the fake takes it, as Paddle does.
     return paddle.createPrice({
       product_id: productId,
       description: "Monthly",
@@ -97,7 +103,7 @@ async function start() {
       billing_cycle: { interval: "month", frequency: 1 },
       tax_mode: "internal",
       ...overrides,
-    });
+    } as Parameters<PaddleClient["createPrice"]>[0]);
   }
   const yearlyPrice = (overrides: Partial<PriceInput> = {}) =>
     makePrice({
