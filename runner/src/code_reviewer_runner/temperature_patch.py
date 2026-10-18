@@ -15,8 +15,8 @@ models and every later family would carry it. Its `config.no_temperature_models`
 for the ids known today, but it matches whole ids (exact or after a `/`), so every new point
 release, `:variant` and future family would fail the same way until somebody added it. The runner
 decides by version instead: the one place that asks whether a model takes `temperature`,
-`LiteLLMAIHandler._litellm_supports_temperature`, answers no for a Claude model from 4.7 on and for
-a GPT model from 6 on, and leaves every other answer to PR-Agent.
+`LiteLLMAIHandler._litellm_supports_temperature`, answers no for a Claude model from 4.7 on, for a
+GPT model from 6 on and for the `latest` aliases of both, and leaves every other answer to PR-Agent.
 
 The patch reaches into a private method, so it is tied to the version it was written and tested for
 (`identity_patch.check_pr_agent_version` runs before it, and the signature of the method is
@@ -47,6 +47,14 @@ _FIRST_GPT_WITHOUT_TEMPERATURE = 6
 _CLAUDE_VERSION = re.compile(r"(?:^|[/.])claude-(?:[a-z]+-)?(\d+)(?:[-.](\d{1,2})(?!\d))?")
 # `gpt-<major>[.<minor>][-<name>]`: `gpt-6-luna`, `gpt-6.1-sol`. Starts the id or follows a `/`.
 _GPT_VERSION = re.compile(r"(?:^|/)gpt-(\d+)")
+# OpenRouter's rolling aliases carry no version and list no `temperature` either:
+# `~anthropic/claude-haiku-latest`, `~openai/gpt-luna-latest`, `openai/gpt-chat-latest`. They point
+# at the newest model of a family, which is past the versions above. The other vendors' aliases
+# (`~google/gemini-pro-latest`) do take it and are left alone. A job refuses a model id that starts
+# with `~` (`job.py`), so the `~` is matched only in case that pattern is ever widened.
+_ALIAS = re.compile(
+    r"(?:^|/)~?(?:anthropic/claude-[a-z]+|openai/gpt-(?:[a-z]+-)?)-?latest(?::[a-z0-9-]+)?$"
+)
 
 
 class TemperaturePatchError(Exception):
@@ -55,14 +63,16 @@ class TemperaturePatchError(Exception):
 
 def withholds_temperature(model: str) -> bool:
     """True for a Claude model from 4.7 on and a GPT model from 6 on, whatever the provider prefix
-    or `:variant`."""
+    or `:variant`, and for the `latest` aliases of both."""
     normalized = model.lower().replace("_", "-")
     claude = _CLAUDE_VERSION.search(normalized)
     if claude is not None:
         version = (int(claude.group(1)), int(claude.group(2) or 0))
         return version >= _FIRST_CLAUDE_WITHOUT_TEMPERATURE
     gpt = _GPT_VERSION.search(normalized)
-    return gpt is not None and int(gpt.group(1)) >= _FIRST_GPT_WITHOUT_TEMPERATURE
+    if gpt is not None:
+        return int(gpt.group(1)) >= _FIRST_GPT_WITHOUT_TEMPERATURE
+    return _ALIAS.search(normalized) is not None
 
 
 def apply_temperature_patch(handler_class: type[Any] | None = None) -> Callable[[], None]:

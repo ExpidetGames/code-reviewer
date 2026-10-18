@@ -132,7 +132,7 @@ from code_reviewer_runner.supersede import (
     install_write_guard,
 )
 from code_reviewer_runner.supersede_timing import SUPERSEDED_DRAIN_SECONDS
-from code_reviewer_runner.temperature_patch import apply_temperature_patch
+from code_reviewer_runner.temperature_patch import TemperaturePatchError, apply_temperature_patch
 from code_reviewer_runner.usage_probe import UsageProbe
 
 PROGRAM_NAME = "code-reviewer-run-job"
@@ -308,6 +308,15 @@ def _run_diff_job(
             return _failure(
                 ErrorCode.RUNNER_ERROR,
                 f"cannot patch the OpenRouter request controls of PR-Agent: {error}",
+                started,
+                capture,
+            )
+        except TemperaturePatchError as error:
+            # Fails closed, like the patch above: a request that would carry `temperature` to a
+            # model that does not take it never goes out. The cause is named in the result.
+            return _failure(
+                ErrorCode.RUNNER_ERROR,
+                f"cannot patch the temperature handling of PR-Agent: {error}",
                 started,
                 capture,
             )

@@ -593,7 +593,7 @@ and the enum agree. Callers branch on the code, never on the text.
 | `llm_context_length_exceeded` | A Dynamic Review request was larger than the model's context window (the provider said so, #290) |
 | `llm_output_invalid` | The model answered, but its answer could not be turned into a review |
 | `model_unknown` | PR-Agent does not know the model (set `llm.maxTokens`) or the provider has no such model |
-| `llm_parameters_unsupported` | The provider answered 404 that no endpoint can handle the requested parameters (OpenRouter after `provider.require_parameters`, #270): the model exists, but not for this request. Before #477 this was `model_unknown`. The runner no longer sends `temperature` to the Claude models that do not take it (`temperature_patch.py`) |
+| `llm_parameters_unsupported` | The provider answered 404 that no endpoint can handle the requested parameters (OpenRouter after `provider.require_parameters`, #270): the model exists, but not for this request. Before #477 this was `model_unknown`. The runner no longer sends `temperature` to the Claude (4.7 on) and GPT-6 models that do not take it (`temperature_patch.py`) |
 | `dynamic_engine_unavailable` | A Dynamic Review job arrived but no engine is available to run it; the runner never falls back to PR-Agent |
 | `dynamic_isolation_self_check_failed` | The Dynamic engine's startup self-check did not prove the dedicated user, read-only export and proxy-only egress, so the engine is not advertised or launched |
 | `dynamic_config_invalid` | The Dynamic options of a job are missing or unusable (model, skill or limits) |
@@ -848,9 +848,10 @@ provider and expresses no preference, so it is no provider-specific routing (epi
   request that carries it finds no endpoint. PR-Agent 0.47.0 withholds it for a fixed list of families and otherwise asks
   litellm's metadata, which still lists it for Haiku 5.x. The runner wraps
   `LiteLLMAIHandler._litellm_supports_temperature` for the length of the job (`temperature_patch.py`)
-  and answers no for every Claude model from 4.7 on and every GPT model from 6 on, by version, so a
-  new point release, a `:variant` or a later family needs no list entry (GPT-5 and `gpt-6-astra` are
-  PR-Agent's own). `config.no_temperature_models` would need every id spelled out.
+  and answers no for every Claude model from 4.7 on and every GPT model from 6 on, and the `latest` aliases of both (`openai/gpt-chat-latest`), by
+  version, so a new point release, a `:variant` or a later family needs no list entry (GPT-5 and `gpt-6-astra` are
+  PR-Agent's own). A patch that cannot be applied ends the job with `runner_error` and a detail that
+  names it. `config.no_temperature_models` would need every id spelled out.
   Every other model is left to PR-Agent. The patch refuses a handler whose method has another shape.
 - **Only for OpenRouter.** A job without `llm.baseUrl` talks to OpenRouter and always gets the
   field. A job with `llm.baseUrl` talks to a local fake and gets the request unchanged, unless the
