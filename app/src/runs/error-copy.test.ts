@@ -143,6 +143,17 @@ describe("the sentences for error codes", () => {
     expect(text).not.toContain("llm_context_length_exceeded");
   });
 
+  // #477-T04
+  it("tells a person that no provider can serve this model with the request's parameters, and what to do", () => {
+    const { text, known } = describeErrorCode("llm_parameters_unsupported");
+
+    expect(known).toBe(true);
+    expect(text).toMatch(/no provider/i);
+    expect(text).toMatch(/another model/);
+    expect(text).toMatch(/^[A-Z].*\.$/);
+    expect(text).not.toContain("llm_parameters_unsupported");
+  });
+
   // #260: the code is also reported when the app could not be asked, not only when the job was lost.
   it("says for lease_lost that the job may have been lost or that this could not be confirmed, and that nothing was written", () => {
     const { text } = describeErrorCode("lease_lost");

@@ -116,6 +116,8 @@ export const ERROR_COPY: Readonly<Record<string, string>> = {
   llm_output_invalid:
     "The AI model answered in a form the review engine could not use.",
   model_unknown: "The configured model is not known to the AI provider.",
+  llm_parameters_unsupported:
+    "No provider can serve this model with everything the review asks for, so the AI service refused the request. Choose another model for this project.",
   runner_shutdown: "The runner was shut down while it worked on this run.",
   dynamic_engine_unavailable:
     "This run needs the Dynamic Review engine, which no runner that answered has available yet.",

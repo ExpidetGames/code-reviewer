@@ -778,6 +778,17 @@ def test_the_findings_schema_refuses_unsafe_locations_and_keeps_resolutions_on_t
     assert not _accepts_findings(without_envelope)
 
 
+# #477-T04
+def test_the_diff_parameters_failure_code_is_listed_once_and_reachable() -> None:
+    schema: Document = _load(SCHEMA_PATH)
+    codes: list[str] = schema["$defs"]["KnownRunnerErrorCode"]["enum"]
+    assert codes.count("llm_parameters_unsupported") == 1
+
+    from code_reviewer_runner.result import ErrorCode
+
+    assert ErrorCode.LLM_PARAMETERS_UNSUPPORTED.value == "llm_parameters_unsupported"
+
+
 # #195-T10: the stable feature/isolation/accounting failure codes are in the contract.
 def test_the_dynamic_failure_codes_are_listed_once_and_reachable() -> None:
     schema: Document = _load(SCHEMA_PATH)
