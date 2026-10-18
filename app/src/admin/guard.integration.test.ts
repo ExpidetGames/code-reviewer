@@ -75,6 +75,7 @@ describe("the routes of the portal", () => {
       "/api/admin/github/manifest",
       "/api/admin/github/manifest/callback",
       "/api/admin/integrations/sync",
+      "/api/admin/llm-keys/[provider]/test",
       "/api/admin/mail/test",
       "/api/admin/settings",
     ]);

@@ -23,6 +23,7 @@ import { createRateLimitsRepository } from "../db/repositories/rate-limits-repos
 import { createSmtpConfigStore } from "../mail/smtp-config.ts";
 import type { SmtpTimeouts } from "../mail/smtp-delivery.ts";
 import { createTestMailService } from "../mail/test-mail.ts";
+import { createOperatorKeyTestService } from "../llm/operator-key-test.ts";
 import { createSecretStore } from "../secrets/store.ts";
 import type { FakeGithub } from "../../../fakes/github/server.ts";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
@@ -62,6 +63,8 @@ export type AdminHarnessOptions = {
   mailConfigured?: boolean;
   /** The fake GitHub the GitHub routes talk to. Default: one is started the first time a GitHub route is used. */
   github?: FakeGithub;
+  /** The fake LLM the Test button of the operator's keys talks to. Default: an address where nothing answers. */
+  llm?: { baseUrl: string };
 };
 
 /** Short waits, so a test of a mail server that never answers does not take half a minute. */
@@ -115,6 +118,11 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
       rateLimits: createRateLimitsRepository(db),
       baseUrl: ADMIN_TEST_BASE_URL,
       timeouts: ADMIN_TEST_SMTP_TIMEOUTS,
+    }),
+    operatorKeyTest: createOperatorKeyTestService({
+      rateLimits: createRateLimitsRepository(db),
+      baseUrlOf: () => options.llm?.baseUrl ?? "http://127.0.0.1:1",
+      log: () => undefined,
     }),
     // A test switches the flag; a user authorization saved through the portal counts as well.
     githubConfigured: async () =>
@@ -397,6 +405,13 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
         request.method === "POST"
       )
         return await handlers.testMail(request);
+      const llmKeyTest =
+        /^\/api\/instance-portal\/llm-keys\/([^/]+)\/test$/.exec(pathname);
+      if (llmKeyTest !== null && request.method === "POST")
+        return await handlers.testLlmKey(
+          request,
+          decodeURIComponent(llmKeyTest[1] ?? ""),
+        );
       if (pathname.startsWith("/api/instance-portal/github")) {
         const { routes } = await github();
         if (

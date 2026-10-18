@@ -6,6 +6,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createWorkspacesRepository } from "../db/repositories/workspaces-repository.ts";
 import { createWorkspaceLlm } from "../llm/assemble.ts";
+import { startLlmFake } from "../../../fakes/llm/server.ts";
+import { OPERATOR_KEY_TEST_ADMIN_MAX } from "../llm/operator-key-test.ts";
+import { DEFAULT_LLM_PROVIDER } from "../llm/providers/index.ts";
+import { cleanUpAfterTest } from "../test-support/test-database.ts";
 import {
   createAdminHarness,
   type AdminHarness,
@@ -30,6 +34,7 @@ async function statusOf(portal: AdminHarness) {
   });
   return (await read.json()) as {
     operatorLlmKey: Record<string, unknown>;
+    operatorLlmKeys: Record<string, Record<string, unknown>>;
     secrets: Array<Record<string, unknown>>;
   };
 }
@@ -42,7 +47,7 @@ function operatorKeyOf(portal: AdminHarness) {
     env: () => ({}),
   })
     .operatorKey()
-    .forJob();
+    .forJob(DEFAULT_LLM_PROVIDER);
 }
 
 afterEach(() => {
@@ -298,5 +303,343 @@ describe("who can read or write the operator's key", () => {
       }
     }
     expect(await operatorKeyOf(portal)).toEqual({ state: "key", apiKey: KEY });
+  });
+});
+
+describe("the operator's keys per provider", () => {
+  const OPENROUTER = DEFAULT_LLM_PROVIDER;
+
+  // #427-T01
+  it("lists the state of the key of every provider in the settings, next to the old field", async () => {
+    const portal = await createAdminHarness();
+    expect(await statusOf(portal)).toMatchObject({
+      operatorLlmKeys: { [OPENROUTER]: { state: "not_configured" } },
+    });
+
+    await put(portal, { operatorLlmKeys: { [OPENROUTER]: { apiKey: KEY } } });
+
+    const status = await statusOf(portal);
+    expect(status.operatorLlmKeys[OPENROUTER]).toMatchObject({
+      state: "configured",
+      lastFour: "wxyz",
+    });
+    expect(status.operatorLlmKey).toEqual(status.operatorLlmKeys[OPENROUTER]);
+    expect(Object.keys(status.operatorLlmKeys)).toEqual([OPENROUTER]);
+  });
+
+  // #427-T01
+  it("saves, replaces and removes the key of a provider with { operatorLlmKeys: { <provider>: ... } }", async () => {
+    const portal = await createAdminHarness();
+
+    const saved = await put(portal, {
+      operatorLlmKeys: { [OPENROUTER]: { apiKey: KEY } },
+    });
+    expect(saved.status).toBe(200);
+    expect(
+      (await saved.json()).settings.operatorLlmKeys[OPENROUTER],
+    ).toMatchObject({ state: "configured", lastFour: "wxyz" });
+    expect(await operatorKeyOf(portal)).toEqual({ state: "key", apiKey: KEY });
+
+    await put(portal, {
+      operatorLlmKeys: { [OPENROUTER]: { apiKey: OTHER_KEY } },
+    });
+    expect(await operatorKeyOf(portal)).toEqual({
+      state: "key",
+      apiKey: OTHER_KEY,
+    });
+
+    const removed = await put(portal, {
+      operatorLlmKeys: { [OPENROUTER]: null },
+    });
+    expect(removed.status).toBe(200);
+    expect(await operatorKeyOf(portal)).toEqual({ state: "none" });
+    expect((await statusOf(portal)).operatorLlmKeys[OPENROUTER]).toEqual({
+      state: "not_configured",
+    });
+  });
+
+  // #427-T06
+  it("still accepts { operatorLlmKey } for the default provider, and both shapes act on the same key", async () => {
+    const portal = await createAdminHarness();
+
+    await put(portal, { operatorLlmKey: { apiKey: KEY } });
+    expect((await statusOf(portal)).operatorLlmKeys[OPENROUTER]).toMatchObject({
+      state: "configured",
+      lastFour: "wxyz",
+    });
+    await put(portal, { operatorLlmKeys: { [OPENROUTER]: null } });
+    expect(await operatorKeyOf(portal)).toEqual({ state: "none" });
+    await put(portal, { operatorLlmKeys: { [OPENROUTER]: { apiKey: KEY } } });
+    await put(portal, { operatorLlmKey: null });
+    expect(await operatorKeyOf(portal)).toEqual({ state: "none" });
+  });
+
+  // #427-T01
+  it("refuses a provider that is not registered, in any spelling, and more than one provider, and changes nothing", async () => {
+    const portal = await createAdminHarness();
+    await put(portal, { operatorLlmKeys: { [OPENROUTER]: { apiKey: KEY } } });
+
+    for (const [body, issues] of [
+      [
+        { operatorLlmKeys: { nobody: { apiKey: OTHER_KEY } } },
+        [{ field: "provider", code: "provider_invalid" }],
+      ],
+      [
+        { operatorLlmKeys: { OpenRouter: null } },
+        [{ field: "provider", code: "provider_invalid" }],
+      ],
+      [
+        { operatorLlmKeys: { [` ${OPENROUTER}`]: null } },
+        [{ field: "provider", code: "provider_invalid" }],
+      ],
+      [
+        { operatorLlmKeys: { operator_llm_key: null } },
+        [{ field: "provider", code: "provider_invalid" }],
+      ],
+      [
+        { operatorLlmKeys: {} },
+        [{ field: "operatorLlmKeys", code: "operator_llm_key_invalid" }],
+      ],
+      [
+        { operatorLlmKeys: [{ apiKey: OTHER_KEY }] },
+        [{ field: "operatorLlmKeys", code: "operator_llm_key_invalid" }],
+      ],
+      [
+        { operatorLlmKeys: { [OPENROUTER]: { apiKey: "with space" } } },
+        [{ field: "apiKey", code: "api_key_invalid" }],
+      ],
+      [
+        { operatorLlmKeys: { [OPENROUTER]: {} } },
+        [{ field: "apiKey", code: "api_key_required" }],
+      ],
+    ] as const) {
+      const response = await put(portal, body);
+      const text = await response.text();
+
+      expect(response.status, JSON.stringify(body)).toBe(422);
+      expect(JSON.parse(text)).toEqual({ error: "invalid_input", issues });
+      expect(text).not.toContain(OTHER_KEY);
+    }
+    // Neither setting together with the other in one request.
+    expect(
+      (
+        await put(portal, {
+          operatorLlmKeys: { [OPENROUTER]: null },
+          operatorLlmKey: null,
+        })
+      ).status,
+    ).toBe(422);
+    expect(await operatorKeyOf(portal)).toEqual({ state: "key", apiKey: KEY });
+  });
+
+  // #427-T07
+  it("puts no key into any answer of the settings, and no secret name of a key into the page's data but the status of the secrets", async () => {
+    const portal = await createAdminHarness();
+
+    const answers = [
+      await (
+        await put(portal, {
+          operatorLlmKeys: { [OPENROUTER]: { apiKey: KEY } },
+        })
+      ).text(),
+      await (
+        await portal.visit("/api/admin/settings", {
+          cookies: portal.adminCookies,
+        })
+      ).text(),
+      await (
+        await put(portal, {
+          operatorLlmKeys: { [OPENROUTER]: { apiKey: "has a space" } },
+        })
+      ).text(),
+    ];
+
+    for (const answer of answers) {
+      expect(answer).not.toContain(KEY.slice(0, -4));
+      expect(answer).not.toContain("has a space");
+    }
+  });
+});
+
+describe("the Test button of the operator's keys", () => {
+  const OPENROUTER = DEFAULT_LLM_PROVIDER;
+  const test = (
+    portal: AdminHarness,
+    body: unknown = {},
+    provider: string = OPENROUTER,
+    cookies = portal.adminCookies,
+  ) =>
+    portal.visit(`/api/admin/llm-keys/${encodeURIComponent(provider)}/test`, {
+      method: "POST",
+      body,
+      cookies,
+    });
+  async function start() {
+    const llm = await startLlmFake();
+    cleanUpAfterTest(() => llm.close());
+    return { llm, portal: await createAdminHarness({ llm }) };
+  }
+
+  // #427-T01
+  it("tests the typed key, or the stored one when the field is empty, and answers with the class of a failure", async () => {
+    const { llm, portal } = await start();
+
+    const typed = await test(portal, { apiKey: KEY });
+    expect(typed.status).toBe(200);
+    expect(await typed.json()).toEqual({ ok: true });
+    expect(llm.keyChecks()).toHaveLength(1);
+
+    // Nothing is stored yet: the empty field has nothing to test.
+    const missing = await test(portal, { apiKey: "" });
+    expect(missing.status).toBe(422);
+    expect(await missing.json()).toEqual({
+      error: "invalid_input",
+      issues: [{ field: "apiKey", code: "api_key_required" }],
+    });
+
+    await put(portal, {
+      operatorLlmKeys: { [OPENROUTER]: { apiKey: OTHER_KEY } },
+    });
+    expect(await (await test(portal, {})).json()).toEqual({ ok: true });
+    expect(llm.keyChecks()).toHaveLength(2);
+
+    llm.failWith({ status: 401, message: "no" });
+    const rejected = await test(portal, { apiKey: KEY });
+    expect(rejected.status).toBe(200);
+    expect(await rejected.json()).toMatchObject({
+      ok: false,
+      error: "llm_key_rejected",
+    });
+    const invalid = await test(portal, { apiKey: "has a space" });
+    expect(invalid.status).toBe(422);
+    expect(await invalid.json()).toEqual({
+      error: "invalid_input",
+      issues: [{ field: "apiKey", code: "api_key_invalid" }],
+    });
+  });
+
+  // #427-T07
+  it("is write-only: no answer holds the key, no log line does, and the headers say no-store", async () => {
+    const lines: string[] = [];
+    for (const method of ["log", "info", "warn", "error", "debug"] as const)
+      vi.spyOn(console, method).mockImplementation((...args: unknown[]) => {
+        lines.push(args.map(String).join(" "));
+      });
+    const { llm, portal } = await start();
+    llm.failWith({ status: 401, message: `bad key ${KEY}` });
+    await put(portal, {
+      operatorLlmKeys: { [OPENROUTER]: { apiKey: OTHER_KEY } },
+    });
+
+    const answers = [
+      await test(portal, { apiKey: KEY }),
+      await test(portal, { apiKey: "has a space" }),
+      await test(portal, {}),
+    ];
+
+    for (const response of answers) {
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      const text = await response.text();
+      expect(text).not.toContain(KEY);
+      expect(text).not.toContain(OTHER_KEY);
+    }
+    expect(lines.join("\n")).not.toContain(KEY);
+    expect(lines.join("\n")).not.toContain(OTHER_KEY);
+    expect(lines.join("\n")).not.toContain("has a space");
+  });
+
+  // #427-T01
+  it("is limited per admin with 429 and Retry-After, counted apart from the workspaces' test button", async () => {
+    const { llm, portal } = await start();
+    for (let i = 0; i < OPERATOR_KEY_TEST_ADMIN_MAX; i += 1)
+      expect((await test(portal, { apiKey: KEY })).status).toBe(200);
+
+    const refused = await test(portal, { apiKey: KEY });
+
+    expect(refused.status).toBe(429);
+    expect(await refused.json()).toEqual({ error: "rate_limited" });
+    expect(Number(refused.headers.get("retry-after"))).toBeGreaterThan(0);
+    expect(llm.keyChecks()).toHaveLength(OPERATOR_KEY_TEST_ADMIN_MAX);
+    const keys = await portal.db
+      .selectFrom("rate_limits")
+      .select("key")
+      .execute();
+    expect(
+      keys
+        .map((row) => row.key)
+        .every((key) => key.startsWith("operator-llm-key-test:")),
+    ).toBe(true);
+  });
+
+  // #427-T01
+  it("answers 404 provider_not_found for a provider that is not registered or not spelled as its id, after the admin was settled", async () => {
+    const { llm, portal } = await start();
+
+    for (const provider of [
+      "nobody",
+      "OpenRouter",
+      " openrouter",
+      "operator_llm_key",
+    ]) {
+      const response = await test(portal, { apiKey: KEY }, provider);
+
+      expect(response.status, provider).toBe(404);
+      expect(await response.json()).toEqual({ error: "provider_not_found" });
+    }
+    expect(llm.keyChecks()).toHaveLength(0);
+  });
+
+  // #427-T02
+  it("is for an instance admin only: a person who is not one gets the answer of a missing path and nothing is tested", async () => {
+    const { llm, portal } = await start();
+    await put(portal, { operatorLlmKeys: { [OPENROUTER]: { apiKey: KEY } } });
+    await portal.createUser({ id: "member-1", ...MEMBER });
+    const memberCookies = await portal.signIn(MEMBER.email, MEMBER.password);
+
+    const asMember = await test(portal, {}, OPENROUTER, memberCookies);
+    const anonymous = await portal.visit(
+      `/api/admin/llm-keys/${OPENROUTER}/test`,
+      {
+        method: "POST",
+        body: {},
+      },
+    );
+
+    expect(asMember.status).toBe(404);
+    expect(anonymous.status).toBe(401);
+    expect(llm.keyChecks()).toHaveLength(0);
+  });
+
+  // #427-T01
+  it("refuses a request from another site, a body that is not JSON and a body that is not an object", async () => {
+    const { llm, portal } = await start();
+
+    const crossSite = await portal.visit(
+      `/api/admin/llm-keys/${OPENROUTER}/test`,
+      {
+        method: "POST",
+        body: { apiKey: KEY },
+        cookies: portal.adminCookies,
+        headers: {
+          "sec-fetch-site": "cross-site",
+          origin: "https://evil.test",
+        },
+      },
+    );
+    const notJson = await portal.visit(
+      `/api/admin/llm-keys/${OPENROUTER}/test`,
+      {
+        method: "POST",
+        body: "apiKey=x",
+        cookies: portal.adminCookies,
+        headers: { "content-type": "text/plain" },
+      },
+    );
+    const array = await test(portal, [KEY]);
+
+    expect(crossSite.status).toBe(403);
+    expect(notJson.status).toBe(415);
+    expect(array.status).toBe(422);
+    expect(llm.keyChecks()).toHaveLength(0);
   });
 });
