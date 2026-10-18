@@ -5,30 +5,35 @@ epic #421): billing with Paddle Billing as Merchant of Record. Server-only: ever
 `server-only`, and a test (`server-only.test.ts`) fails when a client component reaches the module.
 
 #436 added the building blocks (client, schemas, webhook verifier); #437 added the settings in the admin portal and
-the switch; #438 added the plans, their versions and the Free plan; #439 links and validates Paddle prices for a version. No webhook route, checkout, subscription table or sweep
+the switch; #438 added the plans, their versions and the Free plan; #439 links and validates Paddle prices for a version; #440 creates them. No webhook route, checkout, subscription table or sweep
 exists yet; later issues of the epic add them, and each starts with `isBillingOn` / `guardBillingRoute` (below).
 
-| File                               | What it is                                                                                                                              |
-| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `paddle-client.ts`                 | A thin typed `fetch` client of the Paddle API. Not the Paddle SDK (ADR 0005, 2.10): about ten endpoints, easier to fake, no dependency. |
-| `paddle-schemas.ts`                | Our own response schemas (zod): only the fields we read. Unknown fields are dropped, an answer that does not fit is refused.            |
-| `webhook-verify.ts`                | The pure check of the `Paddle-Signature` header.                                                                                        |
-| `settings.ts`                      | The instance setting `billing_settings` and the rules for what may be saved (pure).                                                     |
-| `public-url.ts`                    | Whether an address is one Paddle can reach: https, no credentials, no loopback, private, link-local or local name (pure).               |
-| `settings-service.ts`              | What the admin page reads and changes: settings, the two secrets, the connection check, the notification destination, the switch.       |
-| `admin-http.ts`, `admin-errors.ts` | The handlers of `/api/admin/billing` and their stable error codes.                                                                      |
-| `enabled.ts`                       | `isBillingOn` and `guardBillingRoute`: the first question of every billing route, page and sweep step.                                  |
-| `enabling-copy.ts`                 | What the admin is told before switching billing on.                                                                                     |
-| `webhook-events.ts`                | The event types the notification destination subscribes to, and the webhook path.                                                       |
-| `shared.ts`                        | The wiring of the running server (database, secret store, Paddle's address for the environment, `BETTER_AUTH_URL`).                     |
-| `plans-service.ts`                 | The plans, their versions and the Free plan: what the plans page reads and changes (#438), below.                                       |
-| `plans-http.ts`                    | The handlers of `/api/admin/billing/plans` and their order of checks.                                                                   |
-| `plan-rules.ts`                    | The pure rules for a plan, its display fields and the terms of a version (stable codes in `plan-errors.ts`).                            |
-| `plan-entitlements.ts`             | From a plan version to the entitlements it writes; cannot build a payload without `modelAccess`.                                        |
-| `price-rules.ts`                   | The pure check of a Paddle price against the slot of a version, and the integer comparison of amounts (#439), below.                    |
-| `price-view.ts`                    | The cached price next to the entered amount, the drift, and whether a version is sellable (pure).                                       |
-| `price-errors.ts`                  | The stable codes of a refused link and their HTTP status.                                                                               |
-| `prices-service.ts`                | Links a Paddle price to a slot of the current version and refreshes the cache. Reads from Paddle, never writes (#439).                  |
+| File                               | What it is                                                                                                                                  |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `paddle-client.ts`                 | A thin typed `fetch` client of the Paddle API. Not the Paddle SDK (ADR 0005, 2.10): about ten endpoints, easier to fake, no dependency.     |
+| `paddle-schemas.ts`                | Our own response schemas (zod): only the fields we read. Unknown fields are dropped, an answer that does not fit is refused.                |
+| `webhook-verify.ts`                | The pure check of the `Paddle-Signature` header.                                                                                            |
+| `settings.ts`                      | The instance setting `billing_settings` and the rules for what may be saved (pure).                                                         |
+| `public-url.ts`                    | Whether an address is one Paddle can reach: https, no credentials, no loopback, private, link-local or local name (pure).                   |
+| `settings-service.ts`              | What the admin page reads and changes: settings, the two secrets, the connection check, the notification destination, the switch.           |
+| `admin-http.ts`, `admin-errors.ts` | The handlers of `/api/admin/billing` and their stable error codes.                                                                          |
+| `enabled.ts`                       | `isBillingOn` and `guardBillingRoute`: the first question of every billing route, page and sweep step.                                      |
+| `enabling-copy.ts`                 | What the admin is told before switching billing on.                                                                                         |
+| `webhook-events.ts`                | The event types the notification destination subscribes to, and the webhook path.                                                           |
+| `shared.ts`                        | The wiring of the running server (database, secret store, Paddle's address for the environment, `BETTER_AUTH_URL`).                         |
+| `plans-service.ts`                 | The plans, their versions and the Free plan: what the plans page reads and changes (#438), below.                                           |
+| `plans-http.ts`                    | The handlers of `/api/admin/billing/plans` and their order of checks.                                                                       |
+| `plan-rules.ts`                    | The pure rules for a plan, its display fields and the terms of a version (stable codes in `plan-errors.ts`).                                |
+| `plan-entitlements.ts`             | From a plan version to the entitlements it writes; cannot build a payload without `modelAccess`.                                            |
+| `price-rules.ts`                   | The pure check of a Paddle price against the slot of a version, and the integer comparison of amounts (#439), below.                        |
+| `price-view.ts`                    | The cached price next to the entered amount, the drift, and whether a version is sellable (pure).                                           |
+| `price-errors.ts`                  | The stable codes of a refused link and their HTTP status.                                                                                   |
+| `prices-service.ts`                | Links a Paddle price to a slot of the current version and refreshes the cache (#439); builds the shared core and offers create and archive. |
+| `price-link.ts`                    | The one way a price becomes the price of a slot: the rules, the cache, the compare-and-set on the current version (#439, #440).             |
+| `price-create-rules.ts`            | Pure: the amount to send, the trial, the request of a product and a price, the name of an attempt, the match of a Paddle price (#440).      |
+| `prices-create.ts`                 | Creates the product and the prices of the current version, with an intent row, list-and-match and bounded retries (#440).                   |
+| `prices-archive.ts`                | Archives a price nobody uses: the only edit of an existing price, the status alone (#440).                                                  |
+| `prices-core.ts`                   | What the parts of the prices service share: database, clock, environment, client, the reading of a Paddle failure.                          |
 
 ## The client
 
@@ -351,6 +356,58 @@ opens a checkout** and not trust it. A plan is bound to the first Paddle product
 (`price_environment_mismatch` afterwards); there is no unbinding, so moving from sandbox to live needs its own step (go-live checklist, #448). A version is
 `sellable` when every slot it has an entered amount for is linked to a price without drift; a version without a yearly price needs no yearly price.
 The trial is read from the price (months and years count as 30 and 365 days, for display); the app sets none.
+
+## Creating Paddle prices (#440)
+
+"Create prices" in the plan form makes the Paddle prices of the **current** version from the amounts entered for it (#438): a
+monthly price and, only when a yearly amount is entered, a yearly one. The request body is `{ createPrices: { versionNumber,
+trialDays? } }` and nothing else is read: no amount, currency, interval or tax mode (`price_input_invalid`). Each price is
+created with the entered amount as a string of minor units, `USD`, `tax_mode: internal`, `billing_cycle` of one month or one
+year, `quantity` 1 to 1, `type: standard`, no overrides, the optional trial in days, and `custom_data { cr_plan_key, cr_intent }`.
+A stored amount that is not a positive whole number is refused before Paddle is asked (`price_amount_invalid`). A slot that
+is linked already is skipped, so a second click changes nothing. The app **never PATCHes an amount**: a changed amount is a new
+version with new prices (the version keeps its old, legacy prices). `prices-guardrail.test.ts` pins the callers: `updatePrice`
+is called in `prices-archive.ts` only, with `{ status: "archived" }`.
+
+**One way to link.** A price the app created is judged by `checkPrice` and linked by `linkPrice` (`price-link.ts`), the same code
+and the same compare-and-set as a price pasted by the operator (#439): current version only, against the link read, never cleared.
+
+**Idempotent creation** (Paddle has no idempotency keys). The sequence for a slot:
+
+1. The product: the plan's, or one an earlier attempt made (listed and matched by `custom_data.cr_intent = crp_<plan id>`), or a
+   new one (`tax_category: saas`), then bound to the plan by the conditional write of #439. Two admins who make a product at
+   the very same moment can leave one empty, unused product at Paddle; no price is made on it, because prices go on the bound product.
+2. The **intent row** (`billing_plan_prices`, `origin: created`, `state: pending`, with the values that will be sent and
+   `attempted_at`) is written before Paddle is asked. Its `intent_id` is `cri_<version id>_<interval>_<trial days>`, unique, so
+   the same version, slot and trial always meet one row. The second of two requests finds it: while its attempt is younger than ten
+   minutes the answer is `price_creation_pending`; a `failed` row, or a `pending` one older than that (the request died), is taken
+   over by one request only (compare-and-set on state and attempt time). A trial change is another intent.
+3. A row that is taken over is **reconciled** first: the product's active prices are listed and the one whose `custom_data`
+   carries the intent is taken (Paddle echoes it; there is no filter, so the list is paged and matched here). Only if there is
+   none is the price created.
+4. After a create that ended without a clear answer (timeout, reset, 5xx, unreadable answer, 429 after the client's own retries)
+   the same list-and-match runs before the next create; at most three creates are tried. If the list cannot be read the app does
+   not create blind. A clear refusal (4xx) is not retried.
+5. The price is **recorded** on its row in a write of its own (`ready`, with what Paddle said; or `failed` with the rule it
+   breaks if it is not the price asked for), then linked.
+
+**Partial failure.** If Paddle made the price but the link is refused (`plan_changed` because the plan was saved again, or
+`price_link_changed` because another admin linked a different price), the price is **recorded, not archived**: its row is `ready`
+and linked to no version, the plans page lists it as "created at Paddle but no version is sold with it" with an Archive button, and
+the answer carries the refusal code. Reason: an automatic archive is a second write to Paddle that can fail the same way, whether
+an archived price can be brought back is unknown (research S2), and the operator may still want the price for the next version. A
+failed slot leaves a `failed` row with a stable code (`price_create_rejected`, `paddle_unavailable`, ...; never Paddle's text),
+shown on the page, and "Create prices" retries it. When the monthly price is made and the yearly one fails, the monthly one is
+kept and linked and a retry makes only the yearly one. A request stops at its first failed slot.
+
+**Archive** (`{ archivePrice: { paddlePriceId } }`): only a price of the plan that the current version is not sold with
+(`price_in_use`) and that no live subscription uses at Paddle (`price_has_subscribers`, read with `GET /subscriptions?price_id=`);
+the PATCH carries `status: archived` and nothing else. The price stays a row (`archived_at`). Prices are never deleted.
+
+**Not done here:** the `price.created` webhook that adopts a matching price (#441; the list-and-match is the base path),
+moving subscribers to a new price, replacing a link that has drifted (use a new version, or link another price by hand).
+A price that comes back wrong for its own request (a dashboard edit between the create and the read) leaves its slot's
+intent `failed` with the rule; save a new version (new intent) to try again.
 
 ## Testing
 

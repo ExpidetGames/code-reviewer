@@ -24,6 +24,13 @@ ruff/strict pyright. It invokes only local fixed Git commands, never an external
 
 ## The fake Paddle (`paddle/`): what is verified and what is not
 
+Creating a product and a price follows the field limits of Paddle's documentation (#440): a price's `description` has 2 to 500
+characters with a non-blank one, `name` 1 to 150, `product_id` is `pro_` and 26 lowercase letters or digits, `trial_period`
+needs a `billing_cycle` and keeps `requires_payment_method` (default `true`), `quantity` is 1 to 999999999 with the maximum not
+below the minimum, `unit_price_overrides` has at most 250 entries with unique country codes; a product has a `type`, a non-blank
+name and may have an empty `image_url`. What the documentation does not say (the error codes of these refusals) is unverified, like
+the other codes below.
+
 Field shapes come from the research of epic #421 (documentation), not from the sandbox. Two things in the fake are
 **not Paddle behaviour** and must not be read as such:
 

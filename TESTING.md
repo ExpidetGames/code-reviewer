@@ -625,6 +625,12 @@ Inside `runner/`: `uv sync --locked`, `uv run ruff check . ../fakes`, `uv run ru
   second connection to the same database for two-instance tests. `createJobQueueFixture({ database })`
   seeds such a database for the queue tests. The Postgres URL must point at loopback (`127.0.0.1`) so
   the network guard allows it.
+- The tests of creating prices (#440: `price-create-rules.test.ts`, `prices-guardrail.test.ts`, `prices-create` and
+  `prices-create-http` integration tests, the prices repository and the attempt time migration) run on SQLite and Postgres. A
+  lost answer is `fake.faults.dropResponse` (the request runs, the answer is lost) with a short client timeout; a race between two
+  admins is staged with `fake.faults.delay` on the create so the second request meets the first one's pending row; a link that
+  fails after Paddle made the price is staged in a stand-in `createPrice` that saves the plan or links another price once the
+  create has returned. The fake follows the documented limits of creating a product and a price (`paddle-fake.integration.test.ts`).
 - The Paddle price tests (#439: `price-rules.test.ts`, `prices-service` and `prices-http` integration tests, the
   repositories of the prices and of the plan versions, the migration of `billing_plan_prices`) run on SQLite and, with
   `TEST_DATABASE_URL`, on Postgres (`describe.each` over both engines). A race that needs a second admin to commit between
