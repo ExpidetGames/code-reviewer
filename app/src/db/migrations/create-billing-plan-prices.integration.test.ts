@@ -151,9 +151,18 @@ describe("the billing plan prices migration", () => {
         await sql`update billing_plan_versions set monthly_price_id = 'pr1' where id = 'v1'`.execute(
           db,
         );
-        await sql`update billing_plan_versions set monthly_price_id = null, yearly_price_id = 'pr1' where id = 'v1'`.execute(
+        await insertPrice(db, { id: "pr2", paddle_price_id: "pri_pr2" });
+        await sql`update billing_plan_versions set monthly_price_id = 'pr2', yearly_price_id = 'pr1' where id = 'v1'`.execute(
           db,
         );
+        // Review of #468, N1: a link is replaced, never cleared.
+        for (const slot of ["monthly_price_id", "yearly_price_id"])
+          await expect(
+            sql`update billing_plan_versions set ${sql.ref(slot)} = null where id = 'v1'`.execute(
+              db,
+            ),
+            slot,
+          ).rejects.toThrow(/billing_plan_versions_immutable/);
 
         await expect(
           sql`update billing_plan_versions set monthly_amount_minor = 1 where id = 'v1'`.execute(

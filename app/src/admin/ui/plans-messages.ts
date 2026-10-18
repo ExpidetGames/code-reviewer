@@ -82,6 +82,10 @@ const FAILURE_COPY: Record<string, string> = {
     "This version has no yearly price entered, so there is no yearly price to link. Enter one as a new version first.",
   price_used_by_other_plan: "This Paddle price is linked to another plan.",
   price_plan_not_paid: "Only a paid plan has Paddle prices.",
+  price_link_not_clearable:
+    "A price that is linked cannot be removed from its slot, only replaced by another price.",
+  price_link_changed:
+    "Another admin linked a different price to this slot meanwhile. Reload the page and decide again.",
   api_key_missing: "Store the Paddle API key in the billing settings first.",
   api_key_unreadable:
     "The stored Paddle API key cannot be read. Enter it again in the billing settings.",

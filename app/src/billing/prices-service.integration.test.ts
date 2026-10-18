@@ -600,6 +600,55 @@ describe.each(ENGINES)(
       },
     );
 
+    // #439-T16 (review of #468, N1): relinking is allowed, clearing a link is not.
+    it_(
+      "never clears a link: a request without a price id answers a stable code and the link stays",
+      async () => {
+        const t = await start();
+        const monthly = await t.makePrice();
+        expect(await t.link("month", monthly.id)).toEqual({ ok: true });
+
+        const result = await t.prices.link(t.admin, "team", {
+          versionNumber: 1,
+          interval: "month",
+          paddlePriceId: null,
+        });
+
+        expect(refused(result).code).toBe("price_link_not_clearable");
+        expect((await t.current()).monthlyPrice?.paddlePriceId).toBe(
+          monthly.id,
+        );
+      },
+    );
+
+    // #439-T16 (review of #468, N1)
+    it_(
+      "lets one of two admins who relink the same slot at once win and tells the other",
+      async () => {
+        const t = await start();
+        const first = await t.makePrice();
+        const second = await t.makePrice({ description: "Monthly B" });
+        const third = await t.makePrice({ description: "Monthly C" });
+        expect(await t.link("month", first.id)).toEqual({ ok: true });
+
+        const results = await Promise.all(
+          [second, third].map((price) =>
+            t.prices.link(t.admin, "team", {
+              versionNumber: 1,
+              interval: "month",
+              paddlePriceId: price.id,
+            }),
+          ),
+        );
+
+        expect(
+          results.map((result) => (result.ok ? "ok" : result.code)).sort(),
+        ).toEqual(["ok", "price_link_changed"]);
+        const winner = results[0]?.ok === true ? second : third;
+        expect((await t.current()).monthlyPrice?.paddlePriceId).toBe(winner.id);
+      },
+    );
+
     // #439-T06
     it_("refuses a price that is linked to another plan", async () => {
       const t = await start();

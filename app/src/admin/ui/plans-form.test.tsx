@@ -50,6 +50,8 @@ const PRICE_CODES = [
   "price_id_invalid",
   "price_used_by_other_plan",
   "price_plan_not_paid",
+  "price_link_not_clearable",
+  "price_link_changed",
   "api_key_missing",
   "api_key_unreadable",
   "paddle_key_rejected",

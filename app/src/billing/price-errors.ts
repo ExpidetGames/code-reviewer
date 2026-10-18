@@ -25,6 +25,10 @@ export const PRICE_LINK_ERROR_CODES = [
   "price_used_by_other_plan",
   /** Only a paid plan has prices. */
   "price_plan_not_paid",
+  /** A slot that has a price is relinked to another price; it is never emptied. */
+  "price_link_not_clearable",
+  /** Another admin linked another price to this slot meanwhile; reload and decide again. */
+  "price_link_changed",
   ...BILLING_CHECK_ERROR_CODES,
 ] as const;
 export type PriceLinkErrorCode = (typeof PRICE_LINK_ERROR_CODES)[number];
@@ -38,6 +42,8 @@ export type PriceRefusal = {
     | "price_id_invalid"
     | "price_used_by_other_plan"
     | "price_plan_not_paid"
+    | "price_link_not_clearable"
+    | "price_link_changed"
     | "plan_not_found"
     | "plan_archived"
     | "plan_changed";
@@ -68,6 +74,8 @@ export const PRICE_ERROR_STATUS: Record<PriceRefusal["code"], number> = {
   price_id_invalid: 422,
   price_used_by_other_plan: 409,
   price_plan_not_paid: 422,
+  price_link_not_clearable: 422,
+  price_link_changed: 409,
   plan_not_found: 404,
   plan_archived: 409,
   plan_changed: 409,

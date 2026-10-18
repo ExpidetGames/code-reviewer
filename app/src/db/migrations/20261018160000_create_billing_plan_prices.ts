@@ -24,7 +24,13 @@ import { databaseDriver } from "../driver.ts";
 /** The message every refusal carries; the app and its tests look for this name. */
 const MESSAGE = "billing_plan_versions_immutable";
 
-function guardFunction(mutable: readonly string[]): string {
+/** Postgres: a link, once set, may be replaced by another but never cleared (review of #468, N1). */
+const LINKS_KEPT = `  if (old.monthly_price_id is not null and new.monthly_price_id is null) or (old.yearly_price_id is not null and new.yearly_price_id is null) then
+    raise exception '${MESSAGE}: a price link is replaced, never cleared' using errcode = 'restrict_violation';
+  end if;
+`;
+
+function guardFunction(mutable: readonly string[], keepLinks: boolean): string {
   const removed = mutable.map((column) => ` - '${column}'`).join("");
   return `create or replace function billing_plan_versions_guard() returns trigger language plpgsql as $$
 begin
@@ -34,7 +40,7 @@ begin
   if (to_jsonb(new)${removed}) is distinct from (to_jsonb(old)${removed}) then
     raise exception '${MESSAGE}: a plan version changes only its role and its price links' using errcode = 'restrict_violation';
   end if;
-  return new;
+${keepLinks ? LINKS_KEPT : ""}  return new;
 end
 $$`;
 }
@@ -136,19 +142,32 @@ export const migration: Migration = {
     if (databaseDriver(db) === "postgres")
       await sql
         .raw(
-          guardFunction([
-            "role",
-            "created_by",
-            "monthly_price_id",
-            "yearly_price_id",
-          ]),
+          guardFunction(
+            ["role", "created_by", "monthly_price_id", "yearly_price_id"],
+            true,
+          ),
         )
         .execute(db);
+    else
+      // SQLite: the trigger of the frozen columns does not name the links; this one lets them change but not become empty.
+      // The stored row is read with a select (it is not changed yet in a `before` trigger): a rebuild check of the workspace
+      // migration looks for the text "_old" in every schema object, and the reference to the old row would read as a leftover.
+      for (const column of ["monthly_price_id", "yearly_price_id"])
+        await sql
+          .raw(
+            `create trigger billing_plan_versions_${column}_kept before update of ${column} on billing_plan_versions when new.${column} is null and (select ${column} from billing_plan_versions where id = new.id) is not null begin select raise(abort, '${MESSAGE}: a price link is replaced, never cleared'); end`,
+          )
+          .execute(db);
   },
 
   async down(db) {
     if (databaseDriver(db) === "postgres")
-      await sql.raw(guardFunction(["role", "created_by"])).execute(db);
+      await sql.raw(guardFunction(["role", "created_by"], false)).execute(db);
+    else
+      for (const column of ["monthly_price_id", "yearly_price_id"])
+        await sql
+          .raw(`drop trigger billing_plan_versions_${column}_kept`)
+          .execute(db);
     await db.schema
       .alterTable("billing_plan_versions")
       .dropColumn("yearly_price_id")

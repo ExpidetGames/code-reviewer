@@ -163,9 +163,12 @@ export function createBillingPricesService({
         !Number.isSafeInteger(versionNumber) ||
         versionNumber < 1 ||
         (interval !== "month" && interval !== "year") ||
-        typeof paddlePriceId !== "string"
+        (paddlePriceId !== null && typeof paddlePriceId !== "string")
       )
         return { ok: false, code: "price_input_invalid" };
+      // A slot that was linked is relinked to another price, never emptied (review of #468, N1).
+      if (paddlePriceId === null)
+        return { ok: false, code: "price_link_not_clearable" };
       if (!PRICE_ID.test(paddlePriceId))
         return { ok: false, code: "price_id_invalid", field: "paddlePriceId" };
 
@@ -178,6 +181,9 @@ export function createBillingPricesService({
       const current = await versions.current(plan.id);
       if (current === undefined || current.number !== versionNumber)
         return { ok: false, code: "plan_changed" };
+      // The link the slot holds now: the write below is made only if it still holds it (two admins relinking at once).
+      const expectedLink =
+        interval === "month" ? current.monthlyPriceId : current.yearlyPriceId;
       const entered =
         interval === "month"
           ? current.monthlyAmountMinor
@@ -256,8 +262,15 @@ export function createBillingPricesService({
               latest.id,
               interval,
               row.id,
+              expectedLink,
             );
-            if (!linked.ok) throw new Refused({ code: "plan_changed" });
+            if (!linked.ok)
+              throw new Refused({
+                code:
+                  linked.reason === "link_changed"
+                    ? "price_link_changed"
+                    : "plan_changed",
+              });
             return { ok: true } as const;
           });
         } catch (error) {
