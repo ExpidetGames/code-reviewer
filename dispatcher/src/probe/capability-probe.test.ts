@@ -10,7 +10,6 @@ import {
 } from "./capability-probe.ts";
 
 const MINUTE = 60_000;
-const HOUR = 60 * MINUTE;
 
 const PASSING = `${JSON.stringify({ version: 1, engines: ["pr-agent", "opencode"], reasons: [] })}\n`;
 const DENYING = `${JSON.stringify({ version: 1, engines: ["pr-agent"], reasons: ["ipv6_not_disabled"] })}\n`;
@@ -20,8 +19,6 @@ type Script = (call: number, signal: AbortSignal) => Promise<string>;
 function setup(
   script: Script,
   options: {
-    ttlMs?: number;
-    failureTtlMs?: number;
     timeoutMs?: number;
     forceReuseMs?: number;
     abortGraceMs?: number;
@@ -46,7 +43,7 @@ function setup(
 
 describe("the capability probe", () => {
   // #331-T01
-  it("proves opencode from a passing verdict and says so until the time to live is over", async () => {
+  it("proves opencode from a passing verdict", async () => {
     const { probe, calls } = setup(() => Promise.resolve(PASSING));
 
     const outcome = await probe.refresh();
@@ -56,7 +53,6 @@ describe("the capability probe", () => {
       engines: ["pr-agent", "opencode"],
       reasons: [],
     });
-    expect(probe.fresh()).toStrictEqual(outcome);
     expect(calls).toHaveLength(1);
   });
 
@@ -144,81 +140,6 @@ describe("the capability probe", () => {
     expect(JSON.stringify(outcome)).not.toContain("ghp_");
   });
 
-  // #331-T03
-  it("runs no probe within the time to live and one after it", async () => {
-    const { probe, clock, calls } = setup(() => Promise.resolve(PASSING));
-    await probe.refresh();
-
-    await clock.advance(HOUR - MINUTE);
-    expect(probe.fresh()?.status).toBe("passed");
-    expect(probe.ensure()).toBeUndefined();
-    expect(calls).toHaveLength(1);
-
-    await clock.advance(2 * MINUTE);
-    expect(probe.fresh()).toBeUndefined();
-    const started = probe.ensure();
-    expect(started).toBeDefined();
-    await started;
-    expect(calls).toHaveLength(2);
-    expect(probe.fresh()?.status).toBe("passed");
-  });
-
-  // #331-T03
-  it("keeps the time to live configurable", async () => {
-    const { probe, clock } = setup(() => Promise.resolve(PASSING), {
-      ttlMs: 5 * MINUTE,
-    });
-    await probe.refresh();
-
-    await clock.advance(5 * MINUTE + 1);
-
-    expect(probe.fresh()).toBeUndefined();
-  });
-
-  // #331-T04
-  it("tries again soon after a failure, so that a probe that recovers restores opencode", async () => {
-    const { probe, clock, calls } = setup(
-      (call) =>
-        call === 1
-          ? Promise.reject(new ProbeRunError("sandbox_network"))
-          : Promise.resolve(PASSING),
-      { failureTtlMs: MINUTE },
-    );
-    await probe.refresh();
-    expect(probe.fresh()?.engines).toStrictEqual(["pr-agent"]);
-
-    await clock.advance(MINUTE - 1000);
-    expect(probe.ensure()).toBeUndefined();
-    expect(calls).toHaveLength(1);
-
-    await clock.advance(2000);
-    expect(probe.fresh()).toBeUndefined();
-    await probe.ensure();
-
-    expect(probe.fresh()).toMatchObject({
-      status: "passed",
-      engines: ["pr-agent", "opencode"],
-    });
-  });
-
-  // #331-T04
-  it("takes opencode away again when a later probe fails: a pass is never carried past its time", async () => {
-    const { probe, clock } = setup((call) =>
-      call === 1
-        ? Promise.resolve(PASSING)
-        : Promise.reject(new ProbeRunError("sandbox_unavailable")),
-    );
-    await probe.refresh();
-    await clock.advance(HOUR + 1);
-
-    await probe.refresh();
-
-    expect(probe.fresh()).toMatchObject({
-      status: "failed",
-      engines: ["pr-agent"],
-    });
-  });
-
   // #331-T06
   it("runs one probe for any number of concurrent callers", async () => {
     let finish: (stdout: string) => void = () => undefined;
@@ -232,16 +153,16 @@ describe("the capability probe", () => {
     const all = [
       probe.refresh(),
       probe.refresh(),
-      probe.ensure(),
+      probe.force(),
       probe.refresh(),
-      probe.ensure(),
+      probe.force(),
     ];
     await settle();
     finish(PASSING);
     const outcomes = await Promise.all(all);
 
     expect(calls).toHaveLength(1);
-    for (const outcome of outcomes) expect(outcome?.status).toBe("passed");
+    for (const outcome of outcomes) expect(outcome.status).toBe("passed");
   });
 
   // #331-T06
@@ -336,28 +257,30 @@ describe("the capability probe", () => {
   });
 
   // #331-R03
-  it("does not let a forced probe that failed overwrite a pass that still counts, but still reports the failure", async () => {
-    const { probe, clock } = setup(
+  it("reports a forced probe that failed after a pass, and serves that failure while it is young", async () => {
+    const { probe, clock, calls } = setup(
       (call) =>
         call === 1
           ? Promise.resolve(PASSING)
           : Promise.reject(new ProbeRunError("probe_exec_failed")),
       { forceReuseMs: 1000 },
     );
-    const passed = await probe.force();
+    await probe.force();
     await clock.advance(5_000);
 
     const forced = await probe.force();
+    const again = await probe.force();
 
     expect(forced).toMatchObject({
       status: "failed",
       failure: "probe_exec_failed",
     });
-    expect(probe.fresh()).toStrictEqual(passed);
+    expect(again).toStrictEqual(forced);
+    expect(calls).toHaveLength(2);
   });
 
   // #331-R03
-  it("does not let a forced probe that timed out overwrite a pass either", async () => {
+  it("reports a forced probe that timed out as probe_timeout", async () => {
     const { probe, clock } = setup(
       (call) =>
         call === 1
@@ -365,7 +288,7 @@ describe("the capability probe", () => {
           : new Promise<string>(() => undefined),
       { forceReuseMs: 1000, timeoutMs: 30_000 },
     );
-    const passed = await probe.force();
+    await probe.force();
     await clock.advance(5_000);
 
     const pending = probe.force();
@@ -377,11 +300,10 @@ describe("the capability probe", () => {
       status: "failed",
       failure: "probe_timeout",
     });
-    expect(probe.fresh()).toStrictEqual(passed);
   });
 
   // #331-R03
-  it("lets a forced probe that got a real denial overwrite a pass", async () => {
+  it("reports a forced probe that got a real denial after a pass", async () => {
     const { probe, clock } = setup(
       (call) => Promise.resolve(call === 1 ? PASSING : DENYING),
       { forceReuseMs: 1000 },
@@ -392,22 +314,6 @@ describe("the capability probe", () => {
     const forced = await probe.force();
 
     expect(forced.status).toBe("denied");
-    expect(probe.fresh()?.status).toBe("denied");
-  });
-
-  // #331-R03
-  it("lets a failure overwrite a pass that no longer counts", async () => {
-    const { probe, clock } = setup((call) =>
-      call === 1
-        ? Promise.resolve(PASSING)
-        : Promise.reject(new ProbeRunError("sandbox_network")),
-    );
-    await probe.force();
-    await clock.advance(HOUR + 1000);
-
-    await probe.force();
-
-    expect(probe.fresh()?.status).toBe("failed");
   });
 
   // #331-R05

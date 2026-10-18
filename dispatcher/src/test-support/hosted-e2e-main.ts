@@ -37,7 +37,7 @@ import {
   type SandboxService,
 } from "../launchers/sandbox-service.ts";
 import { createCapabilityProbe } from "../probe/capability-probe.ts";
-import { withCapabilityProbe } from "../probe/probed-launcher.ts";
+import { withProbeEndpoint } from "../probe/probe-endpoint.ts";
 
 const SNAPSHOT_ID = "snap_e2e_local";
 const DEFAULT_DOCKER = join(
@@ -145,9 +145,10 @@ const sandbox = createSandboxLauncher({
   background: background.run,
   dynamicEnvironment,
 });
-// The same rule as the deployment: a Dispatcher that serves Dynamic jobs advertises `opencode` from a canary only.
+// The same rule as the deployment (#479): a Dispatcher that serves Dynamic jobs runs no probe on a dispatch; the canary
+// is reached through `POST /probe` only.
 const launcher = settings.core.engines.includes("opencode")
-  ? withCapabilityProbe({
+  ? withProbeEndpoint({
       launcher: sandbox,
       probe: createCapabilityProbe({
         run: createSandboxCanary({
@@ -162,7 +163,6 @@ const launcher = settings.core.engines.includes("opencode")
         now: () => Date.now(),
         logger,
       }),
-      background: background.run,
     })
   : sandbox;
 

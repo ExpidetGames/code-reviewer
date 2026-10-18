@@ -30,12 +30,20 @@ export type DispatchRow = {
 };
 
 /**
- * The answer that means "not now, ask again when something frees up" (#395): the Dispatcher said `not_claimable` (the
- * pool cap, or the running job of the same pull request). A row with this code is sent again when a job ends,
- * whatever time it says. A busy or unavailable Dispatcher (`429`/`503`) is not in the list: its `Retry-After` is the
- * time of the row, and the row is sent when it is due.
+ * The answers that mean "not now, ask again when something frees up" (#395, #479): the Dispatcher said
+ * `not_claimable` (the pool cap, or the running job of the same pull request), `429` (busy: it is at its own cap) or
+ * `503` (not ready: it is starting, launching or its platform failed). A row with one of these codes is sent again when a
+ * job ends, whatever time it says: a `Retry-After` longer than a request can wait for (`INLINE_RETRY_MAX_WAIT_MS`)
+ * used to leave the job to the repair work or the 2 hour sweep, which in a quiet system is the next event or two
+ * hours. The row's own time still holds for every other sender (`listDue`, the sweep). The last call must be at
+ * least `WAITING_MIN_GAP_MS` old, so a send in flight is never taken over, and no timer or poll is added: this runs
+ * only in the request that ends a job.
  */
-export const WAITING_DISPATCH_CODES = ["ignored_not_claimable"] as const;
+export const WAITING_DISPATCH_CODES = [
+  "ignored_not_claimable",
+  "rate_limited",
+  "unavailable",
+] as const;
 
 /**
  * A waiting row is sent again only when its last call is at least this old. A call in flight holds the row (its

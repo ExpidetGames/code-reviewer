@@ -20,7 +20,6 @@ import {
 } from "./app-client.ts";
 import { systemClock } from "./clock.ts";
 import {
-  CapabilitiesPending,
   ENGINE_BY_KIND,
   type Clock,
   type CoreSettings,
@@ -86,24 +85,8 @@ export function createDispatcherCore(deps: CoreDependencies): DispatcherCore {
   async function engines(hint: JobHint): Promise<EnginesAnswer> {
     let offered: readonly Engine[];
     try {
-      offered = await launcher.capabilities(
-        shutdown.signal,
-        hint.reviewKind === undefined
-          ? undefined
-          : ENGINE_BY_KIND[hint.reviewKind],
-      );
-    } catch (error) {
-      // Not a failure: an engine is being proven and the answer is "ask again soon".
-      if (error instanceof CapabilitiesPending) {
-        logger.info("capabilities_pending", { reviewKind: hint.reviewKind });
-        return {
-          kind: "retry",
-          retryAfterSeconds: clampRetry(
-            error.retryAfterSeconds,
-            DEFAULT_RETRY_UNAVAILABLE_SECONDS,
-          ),
-        };
-      }
+      offered = await launcher.capabilities(shutdown.signal);
+    } catch {
       logger.error("capabilities_failed");
       return {
         kind: "retry",

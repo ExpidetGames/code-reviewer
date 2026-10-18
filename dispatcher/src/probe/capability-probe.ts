@@ -1,23 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// The capability probe of a Dispatcher instance (#331): it runs the Worker image's `probe` mode somewhere that
-// has the real hardening (a canary VM, see launchers/sandbox-canary.ts) and remembers the answer, so that
-// `opencode` is advertised only from a fresh proof. Fail closed, in every direction:
+// The canary probe of a Dispatcher instance (#331, #479): it runs the Worker image's `probe` mode somewhere that has
+// the real hardening (a canary VM, see launchers/sandbox-canary.ts) and reports what it found. It serves `POST /probe`,
+// the deploy canary, and nothing else: **dispatch and claim never run it and never wait for it** (#479). The proof that
+// a deployment may run Dynamic jobs is the canary that passed before the deployment went live; the snapshot pair and
+// the settings cannot change during its lifetime. Fail closed, in every direction:
 //
-//   - no probe yet, or the answer is older than its time to live: nothing is proven (`fresh()` is undefined)
 //   - the container says no, or says something that is not a verdict, or the probe cannot run, or it takes too
-//     long: PR-Agent only, with a stable reason or code, never the text of anything
+//     long: the report says so with a stable reason or code, never the text of anything
 //   - one probe at a time per instance: any number of callers share the one that is running
+//   - a forced probe is served from the last answer when it is younger than `forceReuseMs`, so a holder of the
+//     credential cannot run canary VMs back to back
 //
-// A pass lives for `ttlMs` (1 hour); a probe that could not give an answer is asked again after `failureTtlMs`
-// (a minute), so a platform that comes back is used again soon, and an outage does not create a VM per wake-up.
 // Platform-free: the run itself is a function the caller brings.
 import type { Clock, Engine, Logger } from "../core/types.ts";
 import { probeFailureCode, type ProbeFailureCode } from "./failure-codes.ts";
 import { parseProbeOutput, type ProbeReason } from "./verdict.ts";
 
-export const DEFAULT_PROBE_TTL_MS = 60 * 60 * 1000;
-export const DEFAULT_PROBE_FAILURE_TTL_MS = 60 * 1000;
 export const DEFAULT_PROBE_TIMEOUT_MS = 150 * 1000;
 /** A forced probe (`POST /probe`) is served from an answer younger than this instead of starting another VM. */
 export const DEFAULT_PROBE_FORCE_REUSE_MS = 60 * 1000;
@@ -47,7 +46,7 @@ export type ProbeStatus = "passed" | "denied" | "failed";
 /** What the probe found. Holds engines, stable reasons and a stable code and nothing else. */
 export type ProbeOutcome = {
   status: ProbeStatus;
-  /** What this instance may advertise: `opencode` only for `passed`. */
+  /** What the container may advertise: `opencode` only for `passed`. */
   engines: Engine[];
   /** Why the container left `opencode` out (`denied`). */
   reasons: ProbeReason[];
@@ -55,8 +54,6 @@ export type ProbeOutcome = {
   failure?: ProbeFailureCode;
   /** Milliseconds on the probe's clock when the answer was read. */
   checkedAt: number;
-  /** Milliseconds on the probe's clock until which the answer counts. */
-  expiresAt: number;
 };
 
 export type CapabilityProbeOptions = {
@@ -65,8 +62,6 @@ export type CapabilityProbeOptions = {
   /** Milliseconds, on the same time line as the clock; a test moves both by hand. */
   now: () => number;
   logger: Logger;
-  ttlMs?: number;
-  failureTtlMs?: number;
   timeoutMs?: number;
   /** A forced probe is served from an answer younger than this (0: never). */
   forceReuseMs?: number;
@@ -75,20 +70,11 @@ export type CapabilityProbeOptions = {
 };
 
 export interface CapabilityProbe {
-  /** The answer that still counts, or undefined (never probed, or older than its time to live). Runs nothing. */
-  fresh(): ProbeOutcome | undefined;
-  /**
-   * Makes sure a probe is on its way when no answer counts: undefined when one does, otherwise the running probe
-   * (started now unless one runs already). Never rejects. The caller hands the promise to the platform
-   * (`waitUntil`) so that the work is not cut off.
-   */
-  ensure(): Promise<ProbeOutcome> | undefined;
   /** Runs a probe now, or joins the one that runs, whatever the age of the last answer. Never rejects. */
   refresh(): Promise<ProbeOutcome>;
   /**
    * A forced probe (`POST /probe`): joins the one that runs, else serves the last answer (any status) when it is
-   * younger than the reuse time, else runs one. A forced probe that only failed (the platform, a timeout) never
-   * replaces a pass that still counts, though the caller is told of the failure; a real denial does replace it.
+   * younger than the reuse time, else runs one.
    */
   force(): Promise<ProbeOutcome>;
 }
@@ -97,22 +83,12 @@ export function createCapabilityProbe(
   options: CapabilityProbeOptions,
 ): CapabilityProbe {
   const { run, clock, now, logger } = options;
-  const ttlMs = options.ttlMs ?? DEFAULT_PROBE_TTL_MS;
-  const failureTtlMs = options.failureTtlMs ?? DEFAULT_PROBE_FAILURE_TTL_MS;
   const timeoutMs = options.timeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS;
   const forceReuseMs = options.forceReuseMs ?? DEFAULT_PROBE_FORCE_REUSE_MS;
   const abortGraceMs = options.abortGraceMs ?? DEFAULT_PROBE_ABORT_GRACE_MS;
-  /** The answer that counts for the Launcher (never replaced by a bare failure while it is valid). */
-  let current: ProbeOutcome | undefined;
   /** The latest answer of any status: what a forced probe may reuse. */
   let last: ProbeOutcome | undefined;
   let running: Promise<ProbeOutcome> | undefined;
-
-  function fresh(): ProbeOutcome | undefined {
-    return current !== undefined && now() < current.expiresAt
-      ? current
-      : undefined;
-  }
 
   function failed(value: unknown): ProbeOutcome {
     const code = probeFailureCode(value);
@@ -124,7 +100,6 @@ export function createCapabilityProbe(
       reasons: [],
       failure: code,
       checkedAt: at,
-      expiresAt: at + failureTtlMs,
     };
   }
 
@@ -168,7 +143,6 @@ export function createCapabilityProbe(
           engines: verdict.engines,
           reasons: [],
           checkedAt: at,
-          expiresAt: at + ttlMs,
         };
       }
       logger.warn("probe_denied", { reasons: verdict.reasons });
@@ -177,7 +151,6 @@ export function createCapabilityProbe(
         engines: verdict.engines.filter((engine) => engine !== "opencode"),
         reasons: verdict.reasons,
         checkedAt: at,
-        expiresAt: at + ttlMs,
       };
     } catch (error) {
       stop.abort();
@@ -196,10 +169,6 @@ export function createCapabilityProbe(
     const started = execute()
       .then((outcome) => {
         last = outcome;
-        // A probe that only failed does not take away a pass that still counts: the platform had a bad minute,
-        // the container did not change its answer. A denial is the container's answer and does replace it.
-        if (outcome.status !== "failed" || fresh()?.status !== "passed")
-          current = outcome;
         return outcome;
       })
       .finally(() => {
@@ -210,11 +179,6 @@ export function createCapabilityProbe(
   }
 
   return {
-    fresh,
-    ensure() {
-      if (fresh() !== undefined) return undefined;
-      return refresh();
-    },
     refresh,
     force() {
       if (running !== undefined) return running;

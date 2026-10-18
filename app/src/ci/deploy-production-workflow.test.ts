@@ -151,16 +151,19 @@ describe("the production deployment workflow", () => {
       for (const need of required)
         expect(needsOf(job(name)), name).toContain(need);
     expect(needsOf(job("promote-dispatcher"))).toContain("promote-app");
-    // Nothing that can promote may run after a failure: no status function in their conditions.
-    for (const name of [
-      "promote-app",
-      "promote-dispatcher",
-      "health-app",
-      "stage-app",
-    ])
+    // The jobs in front of the promotion take the implicit success(), so a failure upstream skips them.
+    for (const name of ["health-app", "stage-app"])
       expect(String(job(name).if), name).not.toMatch(
         /always\(\)|failure\(\)|cancelled\(\)|success\(\)/,
       );
+    // The promotions need a status function to run when the snapshot job was skipped (#480), so they check every job
+    // they need instead, and never run after a failure or a cancel (deploy-production-promotion.test.ts).
+    for (const name of ["promote-app", "promote-dispatcher"]) {
+      expect(String(job(name).if), name).toContain("!cancelled()");
+      expect(String(job(name).if), name).not.toMatch(
+        /always\(\)|failure\(\)|success\(\)|(?<!!)cancelled\(\)/,
+      );
+    }
   });
 
   // #403-T19
