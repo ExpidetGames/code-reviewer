@@ -17,6 +17,7 @@ import {
   CATALOG_ROUTE_ERROR_CODES,
   CATALOG_ROUTE_ERROR_STATUS,
 } from "./admin-errors.ts";
+import { CATALOG_ERROR_CODES } from "./errors.ts";
 
 const BASE = "/api/admin/model-catalog";
 const MEMBER = { email: "member@example.com", password: "k4Pq-v8Zm2Xw" };
@@ -372,6 +373,56 @@ describe("a refused change", () => {
         call(portal, "POST", "", { ...SMALL, name: "Quick 1 by acme/quick-1" }),
     },
     {
+      name: "a rename to a name that gives the model away (PUT)",
+      code: "name_reveals_model",
+      field: "name",
+      run: async (portal) => {
+        const entry = await createEntry(portal);
+        return call(portal, "PUT", `/${entry.id}`, {
+          name: "Quick 1 by acme/quick-1",
+        });
+      },
+    },
+    {
+      name: "a new description that gives the model away (PUT)",
+      code: "description_invalid",
+      field: "description",
+      run: async (portal) => {
+        const entry = await createEntry(portal);
+        return call(portal, "PUT", `/${entry.id}`, {
+          description: "Like Quick 1, only slower.",
+        });
+      },
+    },
+    {
+      name: "a model change whose new id is in the name the entry has (PUT)",
+      code: "name_reveals_model",
+      field: "name",
+      run: async (portal) => {
+        const entry = await createEntry(portal, {
+          ...SMALL,
+          name: "Better 2 tier",
+        });
+        return call(portal, "PUT", `/${entry.id}`, {
+          modelId: "acme/better-2",
+        });
+      },
+    },
+    {
+      name: "a model change whose new id is in the description the entry has (PUT)",
+      code: "description_invalid",
+      field: "description",
+      run: async (portal) => {
+        const entry = await createEntry(portal, {
+          ...SMALL,
+          description: "Better 2 is the thorough one.",
+        });
+        return call(portal, "PUT", `/${entry.id}`, {
+          modelId: "acme/better-2",
+        });
+      },
+    },
+    {
       name: "a name that is taken, whatever the case",
       code: "catalog_name_taken",
       run: async (portal) => {
@@ -531,6 +582,30 @@ describe("a refused change", () => {
       expect(status, code).toBeGreaterThanOrEqual(400);
       expect(status, code).toBeLessThan(600);
     }
+  });
+
+  // #429-T03
+  it("answers a refusal of the catalog's rules with a status below 500, so a proxy keeps the body", () => {
+    for (const code of CATALOG_ERROR_CODES)
+      expect(CATALOG_ROUTE_ERROR_STATUS[code], code).toBeLessThan(500);
+  });
+
+  // #429-T03
+  it("refuses releasing a Dynamic entry whose provider cannot be asked with 422, not with a 5xx", async () => {
+    // No fake LLM: nothing answers at the provider's address, so the metadata cannot be read.
+    const portal = await createAdminHarness({});
+    const entry = await createEntry(portal, {
+      ...SMALL,
+      kinds: ["dynamic"],
+    });
+
+    const response = await call(portal, "POST", `/${entry.id}/release`, {});
+
+    expect(await response.json()).toEqual({
+      error: "DYNAMIC_MODEL_UNVERIFIED",
+    });
+    expect(response.status).toBe(422);
+    expect((await portal.catalog.get(entry.id))?.status).toBe("draft");
   });
 
   // #429-T03

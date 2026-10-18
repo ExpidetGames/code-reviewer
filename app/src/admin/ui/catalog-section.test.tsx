@@ -166,6 +166,18 @@ describe("the form", () => {
     ).toMatch(/never the model/i);
   });
 
+  // #429-T04
+  it("limits the name to the 40 characters the rule allows", async () => {
+    const user = userEvent.setup();
+    renderSection(catalogOf([SMALL]));
+
+    const dialog = await openAdd(user);
+
+    expect(
+      (within(dialog).getByLabelText("Name") as HTMLInputElement).maxLength,
+    ).toBe(40);
+  });
+
   it("sends what was typed and closes after a save", async () => {
     const user = userEvent.setup();
     const mock = renderSection(catalogOf([SMALL]));

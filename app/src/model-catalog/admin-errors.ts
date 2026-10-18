@@ -42,8 +42,10 @@ const CATALOG_STATUS: Record<CatalogErrorCode, number> = {
   MODEL_UNKNOWN: 422,
   DYNAMIC_MODEL_TOOLS_UNSUPPORTED: 422,
   DYNAMIC_MODEL_UNKNOWN: 422,
-  // The provider could not be asked: not the admin's mistake.
-  DYNAMIC_MODEL_UNVERIFIED: 502,
+  // The provider could not be asked, so the model cannot be accepted for Dynamic: a refusal of the entry like the others
+  // (the review settings refuse it as a field problem too). Not a 5xx: a proxy or a CDN may swap the body of a 502 for
+  // its own page, and the page would lose the sentence.
+  DYNAMIC_MODEL_UNVERIFIED: 422,
 };
 
 export const CATALOG_ROUTE_ERROR_STATUS: Record<CatalogRouteErrorCode, number> =

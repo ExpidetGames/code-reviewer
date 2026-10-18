@@ -48,7 +48,10 @@ import type {
   AdminCatalogEntry,
   AdminCatalogProvider,
 } from "../../model-catalog/admin-view.ts";
-import { CATALOG_KINDS } from "../../model-catalog/entries.ts";
+import {
+  CATALOG_KINDS,
+  MAX_NAME_CHARS,
+} from "../../model-catalog/entries.ts";
 import type { ProjectReviewKind } from "../../review-settings/settings.ts";
 import type { RequestIssue } from "../../ui/json-request.ts";
 import type { CatalogApi, EntryInput } from "./catalog-api.ts";
@@ -238,7 +241,7 @@ export function EntryDialog({
               id={controlId("name")}
               value={name}
               onChange={(event) => setName(event.target.value)}
-              maxLength={80}
+              maxLength={MAX_NAME_CHARS}
               autoComplete="off"
               aria-invalid={issueOf("name") !== undefined}
               aria-describedby={describedBy("name", `${ids}-name-hint`)}
