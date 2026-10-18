@@ -103,6 +103,14 @@ describe("the sentences for error codes", () => {
     );
   });
 
+  // #432-T22
+  it("tells the user of a Dynamic Review that the Dynamic model counts as a model setting, without naming a model", () => {
+    const { text } = describeErrorCode("job_llm_options_invalid");
+
+    expect(text).toMatch(/Dynamic model/);
+    expect(text).toMatch(/project page/);
+  });
+
   // #277-T12
   it("explains a refusal for the plan of the workspace in one sentence, without a number or a figure", () => {
     for (const code of [

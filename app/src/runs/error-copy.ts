@@ -63,7 +63,7 @@ export const ERROR_COPY: Readonly<Record<string, string>> = {
   job_env_invalid:
     "The review settings of this project could not be used for this run. Check them on the project page.",
   job_llm_options_invalid:
-    "The model settings of this project could not be used for this run. Check them on the project page.",
+    "The model settings of this project, for a Dynamic Review its Dynamic model too, could not be used for this run. Check them on the project page.",
   git_access_unavailable:
     "GitHub could not be reached to prepare this run, even after several tries.",
   pull_request_unavailable:
