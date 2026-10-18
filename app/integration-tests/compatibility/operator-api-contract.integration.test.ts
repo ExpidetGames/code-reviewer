@@ -40,6 +40,10 @@ import { PROJECT_REVIEW_KINDS } from "../../src/review-settings/settings.ts";
 import { MODEL_TIER_ERROR_CODES } from "../../src/model-tiers/errors.ts";
 import { MODEL_TIERS } from "../../src/model-tiers/tiers.ts";
 import { KEY_MODES, LIMIT_NAMES } from "../../src/workspaces/entitlements.ts";
+import {
+  CATALOG_ENTRY_ID_PATTERN,
+  MODEL_ACCESS_MAX_ENTRIES,
+} from "../../src/workspaces/entitlements-validation.ts";
 
 const contract = createContractValidator(OPERATOR_CONTRACT_FILE);
 
@@ -47,6 +51,8 @@ function expectValid(definition: string, document: unknown) {
   const { valid, errors } = contract.check(definition, document);
   expect({ valid, errors }).toStrictEqual({ valid: true, errors: "" });
 }
+
+const ENTRY_ID = "mce_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
 const WRITE = {
   planLabel: "team",
@@ -103,6 +109,39 @@ describe("the contract file", () => {
     ).toMatchObject({
       description: expect.stringContaining(String(OPERATOR_MAX_BODY_BYTES)),
     });
+  });
+
+  // #428-T08
+  it("names the code, the id shape and the most entries of the model access like the app", () => {
+    const defs = readContract(OPERATOR_CONTRACT_FILE).$defs as unknown as {
+      ApiErrorCode: { enum: string[] };
+      ModelAccess: {
+        required: string[];
+        additionalProperties: boolean;
+        properties: {
+          catalogEntries: {
+            type: string[];
+            maxItems: number;
+            items: { pattern: string };
+          };
+        };
+      };
+    };
+
+    expect(defs.ApiErrorCode.enum).toContain("catalog_entry_invalid");
+    expect(OPERATOR_API_ERROR_CODES).toContain("catalog_entry_invalid");
+    expect(defs.ModelAccess.required).toEqual(["catalogEntries"]);
+    expect(defs.ModelAccess.additionalProperties).toBe(false);
+    expect(defs.ModelAccess.properties.catalogEntries.type).toEqual([
+      "array",
+      "null",
+    ]);
+    expect(defs.ModelAccess.properties.catalogEntries.maxItems).toBe(
+      MODEL_ACCESS_MAX_ENTRIES,
+    );
+    expect(defs.ModelAccess.properties.catalogEntries.items.pattern).toBe(
+      CATALOG_ENTRY_ID_PATTERN.source,
+    );
   });
 
   // #275-T10
@@ -491,6 +530,78 @@ describe("what the app answers", () => {
     }
   });
 
+  // #428-T01
+  it("answers a row with a model access, one without it and the default with documents valid against the file", async () => {
+    const h = await startOperatorApiHarness();
+
+    for (const modelAccess of [
+      undefined,
+      { catalogEntries: [ENTRY_ID] },
+      { catalogEntries: [] },
+      { catalogEntries: null },
+    ]) {
+      await answer(
+        await h.call("PUT", "/api/operator/v1/entitlements/default", {
+          body: {
+            ...WRITE,
+            ...(modelAccess === undefined ? {} : { modelAccess }),
+          },
+        }),
+        "DefaultEntitlementsResponse",
+      );
+      await answer(
+        await h.call("PUT", path(h.workspaceId), {
+          body: {
+            ...WRITE,
+            ...(modelAccess === undefined ? {} : { modelAccess }),
+          },
+        }),
+        "WorkspaceEntitlementsResponse",
+      );
+    }
+    // A row of before the field existed.
+    await h.db
+      .updateTable("workspace_entitlements")
+      .set({ model_access: null })
+      .execute();
+    await answer(
+      await h.call("GET", path(h.workspaceId)),
+      "WorkspaceEntitlementsResponse",
+    );
+    // The refusal.
+    const refused = await h.call("PUT", path(h.workspaceId), {
+      body: { ...WRITE, modelAccess: { catalogEntries: "all" } },
+    });
+    expect(refused.status).toBe(422);
+    await answer(refused, "ErrorResponse");
+  });
+
+  // #428-T01
+  it("accepts the answers of an instance that is not yet upgraded: a response without modelAccess is valid, a write without it too", () => {
+    const fields = {
+      planLabel: "team",
+      keyMode: "managed",
+      limits: Object.fromEntries(LIMIT_NAMES.map((name) => [name, null])),
+      periodStart: "2026-10-01T00:00:00.000Z",
+      suspended: false,
+      suspensionCode: null,
+    };
+
+    expectValid("EntitlementsFields", fields);
+    expectValid("StoredEntitlements", {
+      ...fields,
+      updatedAt: "2026-10-01T00:00:00.000Z",
+    });
+    expectValid("DefaultEntitlementsResponse", {
+      version: 1,
+      default: fields,
+    });
+    expect(
+      contract.check("EntitlementsFields", { ...fields, modelAccess: null })
+        .valid,
+    ).toBe(false);
+  });
+
   // #275-T10
   it("answers every kind of error with a document valid against the file", async () => {
     const h = await startOperatorApiHarness();
@@ -574,6 +685,26 @@ describe("what the app accepts", () => {
     },
     { ...WRITE, suspended: true, suspensionCode: "unpaid" },
     { ...WRITE, periodStart: "2026-10-01T00:00:00Z".replace("Z", ".000Z") },
+    // #428: the model access is optional (an older writer leaves it out and keeps the stored one), null is every
+    // released entry, [] none; ids that no entry has are accepted; it is kept next to the own key.
+    { ...WRITE, modelAccess: { catalogEntries: null } },
+    { ...WRITE, modelAccess: { catalogEntries: [] } },
+    { ...WRITE, modelAccess: { catalogEntries: [ENTRY_ID] } },
+    {
+      ...WRITE,
+      modelAccess: {
+        catalogEntries: Array.from(
+          { length: 100 },
+          (_unused, index) => `mce_${String(index)}`,
+        ),
+      },
+    },
+    {
+      ...WRITE,
+      keyMode: "own",
+      limits: { ...WRITE.limits, managedCostLimitMicroUsd: null },
+      modelAccess: { catalogEntries: [ENTRY_ID] },
+    },
   ];
   const BAD: unknown[] = [
     null,
@@ -611,6 +742,25 @@ describe("what the app accepts", () => {
     { ...WRITE, limits: { ...WRITE.limits, diffRunsPerPeriod: 1.5 } },
     { ...WRITE, limits: { ...WRITE.limits, diffRunsPerPeriod: "5" } },
     { ...WRITE, limits: { ...WRITE.limits, diffRunPerPeriod: 5 } },
+    // #428: the shape of the model access.
+    { ...WRITE, modelAccess: null },
+    { ...WRITE, modelAccess: "all" },
+    { ...WRITE, modelAccess: [ENTRY_ID] },
+    { ...WRITE, modelAccess: {} },
+    { ...WRITE, modelAccess: { catalogEntries: ENTRY_ID } },
+    { ...WRITE, modelAccess: { catalogEntries: [1] } },
+    { ...WRITE, modelAccess: { catalogEntries: ["gpt-5"] } },
+    { ...WRITE, modelAccess: { catalogEntries: [`${ENTRY_ID} `] } },
+    { ...WRITE, modelAccess: { catalogEntries: null, extra: 1 } },
+    {
+      ...WRITE,
+      modelAccess: {
+        catalogEntries: Array.from(
+          { length: 101 },
+          (_unused, index) => `mce_${String(index)}`,
+        ),
+      },
+    },
   ];
 
   async function accepted(body: unknown): Promise<boolean> {

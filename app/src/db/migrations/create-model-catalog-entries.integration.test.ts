@@ -51,7 +51,11 @@ describe("the model catalog migration", () => {
   it("sorts after every migration that was merged before it", async () => {
     const names = Object.keys(await migrationProvider.getMigrations());
 
-    expect(names.at(-1)).toBe(SPLIT);
+    // Later migrations sort after it; the newest one that sorts before it is the last of the previous release, so a
+    // migration inserted between the two (whatever its place in the list) fails here.
+    const before = names.filter((name) => name < SPLIT).sort();
+    expect(before.at(-1)).toBe("20261017100000_create_job_check_runs");
+    expect(names).toContain(SPLIT);
   });
 
   // #425-T10

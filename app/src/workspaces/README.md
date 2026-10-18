@@ -169,6 +169,34 @@ claimed (#277, `src/usage/README.md`, "Limits and suspension at claim"); the key
   on, and the sums count records by their own key mode, so switching a workspace between the two never moves cost from
   one limit to the other. Both are soft caps and neither bounds a run whose cost is unknown
   (`src/usage/README.md`, "Limits and suspension at claim").
+- **The model access (#428; epic #420, ADR 0005, 2.9).** `modelAccess: { catalogEntries: string[] | null }` says which
+  entries of the model catalog (`src/model-catalog/`) a workspace may use: `null`, or no field at all, is every
+  released entry, `[]` is none, a list is those entries. The ids are the ids of the admin portal (`mce_` and opaque text,
+  at most 100, `CATALOG_ENTRY_ID_PATTERN`); an id that no entry has is accepted and matches nothing. It is the same pair of
+  stores as every other field: the nullable JSON text column `model_access` of `workspace_entitlements` (NULL for
+  `null`) and a field of `default_entitlements`, and a row wins entirely, the model access included.
+  `entryAllowed(resolved, entry)` in `entitlements.ts` is the one question the claim (#432) and the picker (#433) ask:
+  no entitlements and `null` allow every entry, `[]` none, unreadable entitlements none. It answers about the list only;
+  whether the entry is released and serves the kind, and whether the workspace reads the catalog at all, is the caller's.
+  **It means something for the key mode `managed` only**: next to `own` it is accepted and kept (so a switch back finds
+  it) but the claim and the picker never read it, because a workspace on its own key chooses provider and model freely;
+  the plan form (#438) is the place that refuses it for an `own` plan. **Off by default**: a row or default without the
+  field, and an instance that never sets it, behave as before. Reading is lenient like `LIMITS_ADDED_LATER`: a missing
+  field reads as `{ catalogEntries: null }` and never makes the entry `entitlements_invalid`, a key of a newer version
+  inside the field is ignored; a field that is there and damaged makes the entry unreadable, so damaged data grants no
+  model. A write refuses a field that is not `{ catalogEntries }` with `null` or a list of at most 100 distinct id-shaped
+  strings (the same id twice is refused, not deduplicated; reading tolerates a repeat), and a key it does not know, as
+  `catalog_entry_invalid` (field `modelAccess` or `modelAccess.catalogEntries`).
+  **A write that leaves the field out keeps the stored value** (the `periodStart` rule): the repositories do not touch
+  the column or the key in the JSON, so a writer that does not know the field never clears what was granted, and two
+  writers cannot race on it; `{ catalogEntries: null }` clears it. The write is intentionally not "replace everything"
+  (unlike `ownKeyCostLimitMicroUsd`, which every write states): it needs no cutover, as `periodStart` needs none.
+  **Damaged data stays closed on both stores.** A workspace row whose column is damaged stays unreadable under a write
+  that leaves the field out (the column is not touched), and the default is refused: `set` over a stored default that
+  cannot be read, with no `modelAccess`, throws `catalog_entry_invalid` (field `modelAccess`) and writes nothing, because
+  "every released entry" is not a safe guess for data that may have been restrictive. Only a write that states
+  `modelAccess` repairs either. **A row wins entirely over the instance default**, so a restrictive default does not
+  protect a workspace that has a row of its own. The rollout order is in `src/operator-api/README.md`.
 - **Adding a limit later.** A new limit goes into `LIMIT_NAMES` and, so that existing entries stay readable, into
   `LIMITS_ADDED_LATER` (`entitlements-validation.ts`): when reading, its missing key means `null` (unlimited), which
   is true because no such limit existed when the entry was written. Writes still require every key. (The alternative
@@ -185,8 +213,8 @@ claimed (#277, `src/usage/README.md`, "Limits and suspension at claim"); the key
   `period_start_in_future` (more than five minutes ahead), `period_start_backwards` (earlier than the stored one;
   the same value again is accepted), `suspended_invalid`, `suspension_code_invalid` (lower case letters, digits,
   `_` and `-`, starting with a letter, at most 64 characters; checked even when not suspended). A valid code is
-  kept only while suspended: clearing the suspension clears the code. The repositories throw `EntitlementsError`
-  with the code.
+  kept only while suspended: clearing the suspension clears the code. `catalog_entry_invalid` (#428: the model
+  access, see above). The repositories throw `EntitlementsError` with the code.
 - **The plan page (#282).** Every member can read `/w/<slug>/settings/plan`: the plan label, the used and allowed runs
   of each review kind, the share of the cost limit as a percentage (never an amount), the start of the period and a
   notice while reviews are paused. The settings navigation lists it only for a workspace with entitlements

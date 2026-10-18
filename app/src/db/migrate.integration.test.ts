@@ -98,6 +98,7 @@ describe("the migrations of both epics", () => {
       "20261016140100_widen_usage_record_settled_reason",
       "20261017100000_create_job_check_runs",
       "20261017140000_create_model_catalog_entries",
+      "20261017160000_add_workspace_entitlements_model_access",
     ]);
   });
 

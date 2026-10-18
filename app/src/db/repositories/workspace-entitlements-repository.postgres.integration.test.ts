@@ -140,7 +140,38 @@ describePostgres("the entitlements on Postgres", () => {
       ),
     ).rejects.toMatchObject({ code: "period_start_backwards" });
 
-    expect(await settings.getDefaultEntitlements()).toEqual(ENTITLEMENTS);
+    expect(await settings.getDefaultEntitlements()).toEqual({
+      ...ENTITLEMENTS,
+      modelAccess: { catalogEntries: null },
+    });
+  });
+
+  // #428-T06
+  it("keeps the stored model access when a put leaves it out, and clears it when told to", async () => {
+    const postgres = await createPostgresTestDatabase();
+    const repository = createWorkspaceEntitlementsRepository(
+      postgres.db,
+      await defaultWorkspaceId(postgres.db),
+      () => NOW,
+    );
+    const id = "mce_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    await repository.put(
+      { ...ENTITLEMENTS, modelAccess: { catalogEntries: [id] } },
+      null,
+    );
+
+    await repository.put({ ...ENTITLEMENTS, planLabel: "other" }, null);
+    expect(await repository.get()).toMatchObject({
+      planLabel: "other",
+      modelAccess: { catalogEntries: [id] },
+    });
+    await repository.put(
+      { ...ENTITLEMENTS, modelAccess: { catalogEntries: null } },
+      null,
+    );
+    expect(await repository.get()).toMatchObject({
+      modelAccess: { catalogEntries: null },
+    });
   });
 
   // #271-T05
