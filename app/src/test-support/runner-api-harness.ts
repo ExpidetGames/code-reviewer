@@ -13,6 +13,7 @@ import { loadGithubAppConfig } from "../integrations/registry.ts";
 import type { JobQueueLimits } from "../jobs/job-limits.ts";
 import type { LlmAccessResult } from "../llm/access.ts";
 import { createWorkspaceLlm } from "../llm/assemble.ts";
+import { configuredLlmModel } from "../llm/config.ts";
 import { llmProviderDescriptors } from "../llm/providers/index.ts";
 import type { LlmProviderDescriptor } from "../llm/providers/types.ts";
 import { createCatalogFixture } from "./review-settings-harness.ts";
@@ -307,7 +308,7 @@ export async function startRunnerApiHarness(
       fixture.workspaceId,
       fixture.clock.now,
     ),
-    builtIn: () => builtInReviewSettings(env.LLM_MODEL ?? TEST_LLM_MODEL),
+    builtIn: () => builtInReviewSettings(configuredLlmModel(env)),
     operatorsModels: async () =>
       keyModeForJob(await settingsEntitlements()) !== "own",
     catalog: catalogSelectionFrom(catalogFixture.service, async (id) =>
@@ -392,7 +393,7 @@ export async function startRunnerApiHarness(
       providers,
       builtInModel: (kind) =>
         kind === "diff"
-          ? (env.LLM_MODEL ?? TEST_LLM_MODEL)
+          ? configuredLlmModel(env)
           : llmProviderDescriptors.defaultProvider.defaultModels.dynamic,
       managedModels: async (job) => {
         const record = await createUsageRecordsRepository(
