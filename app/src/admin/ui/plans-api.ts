@@ -29,7 +29,17 @@ export type NewPlanBody = {
 export type PlanChange =
   | { metadata: Partial<PlanMetadata> }
   | { terms: { basedOnVersion: number; terms: PlanTerms } }
-  | { archived: boolean };
+  | { archived: boolean }
+  /** Links a Paddle price to the slot of the current version (#439). No amount: it is the version's and Paddle's. */
+  | {
+      priceLink: {
+        versionNumber: number;
+        interval: "month" | "year";
+        paddlePriceId: string;
+      };
+    }
+  /** Reads the linked prices of the plan again from Paddle. */
+  | { refreshPrices: true };
 
 export type PlansApi = {
   create(body: NewPlanBody): Promise<RequestResult<PlansWriteAnswer>>;

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // The repository of the billing plan versions (#438) on a real SQLite file and, when TEST_DATABASE_URL is set, on a
-// real Postgres. A version is immutable after creation but for its role.
+// real Postgres. A version is immutable after creation but for its role and its two price links.
 import { sql, type Kysely } from "kysely";
 import { describe, expect, it } from "vitest";
 import type { PlanTerms } from "../../admin/ui/plans-view.ts";
@@ -15,7 +15,11 @@ import {
   PlanChangedError,
   createBillingPlansRepository,
 } from "./billing-plans-repository.ts";
-import { createBillingPlanVersionsRepository } from "./billing-plan-versions-repository.ts";
+import { createBillingPlanPricesRepository } from "./billing-plan-prices-repository.ts";
+import {
+  PriceLinkNotClearableError,
+  createBillingPlanVersionsRepository,
+} from "./billing-plan-versions-repository.ts";
 
 const ENGINES: Array<{
   name: string;
@@ -35,6 +39,28 @@ const ENGINES: Array<{
 ];
 
 const T0 = new Date("2026-10-18T10:00:00.000Z");
+
+function aPrice(db: Kysely<Database>, planId: string, paddlePriceId: string) {
+  return createBillingPlanPricesRepository(db, () => T0).insertLinked({
+    planId,
+    paddlePriceId,
+    env: "sandbox",
+    snapshot: {
+      productId: "pro_1",
+      priceType: "standard",
+      interval: "month",
+      frequency: 1,
+      currency: "USD",
+      amount: "1234",
+      taxMode: "internal",
+      hasOverrides: false,
+      trialDays: null,
+      quantityMinimum: 1,
+      quantityMaximum: 100,
+      status: "active",
+    },
+  });
+}
 
 // Made-up numbers: no amount or limit of a real plan lives in the repository.
 function managed(overrides: Partial<PlanTerms> = {}): PlanTerms {
@@ -163,6 +189,118 @@ describe.each(ENGINES)(
       },
     );
 
+    // #439-T05 (review of #468, B1): the link is written to the current version only, whatever the caller read before.
+    it_(
+      "does not link a version that a newer version replaced, and keeps the links of that legacy version",
+      async () => {
+        const { db, plan, versions } = await start();
+        const price = await aPrice(db, plan.id, "pri_m");
+        const first = await versions.createNext(plan.id, managed(), null, 0);
+        await versions.createNext(
+          plan.id,
+          managed({ monthlyAmountMinor: 5 }),
+          null,
+          1,
+        );
+
+        const result = await versions.setPriceLink(
+          first.id,
+          "month",
+          price.id,
+          null,
+        );
+
+        expect(result).toEqual({ ok: false, reason: "not_current" });
+        const [second, legacy] = await versions.list(plan.id);
+        expect(legacy).toMatchObject({ role: "legacy", monthlyPriceId: null });
+        expect(second).toMatchObject({ role: "current", monthlyPriceId: null });
+      },
+    );
+
+    // #439-T16 (review of #468, N1): relinking is allowed, but only from the link the caller saw.
+    it_(
+      "relinks a slot only from the link the caller read: a second writer that read the old link is refused",
+      async () => {
+        const { db, plan, versions } = await start();
+        const version = await versions.createNext(plan.id, managed(), null, 0);
+        const a = await aPrice(db, plan.id, "pri_a");
+        const b = await aPrice(db, plan.id, "pri_b");
+        const c = await aPrice(db, plan.id, "pri_c");
+
+        expect(
+          await versions.setPriceLink(version.id, "month", a.id, null),
+        ).toEqual({
+          ok: true,
+        });
+        expect(
+          await versions.setPriceLink(version.id, "month", b.id, a.id),
+        ).toEqual({
+          ok: true,
+        });
+        // Both read `a`: the second one finds `b` and writes nothing.
+        expect(
+          await versions.setPriceLink(version.id, "month", c.id, a.id),
+        ).toEqual({
+          ok: false,
+          reason: "link_changed",
+        });
+        // A first link over a link somebody set meanwhile is a conflict as well.
+        expect(
+          await versions.setPriceLink(version.id, "month", c.id, null),
+        ).toEqual({
+          ok: false,
+          reason: "link_changed",
+        });
+
+        expect(await versions.current(plan.id)).toMatchObject({
+          monthlyPriceId: b.id,
+          yearlyPriceId: null,
+        });
+      },
+    );
+
+    // #439-T16 (review of #468, N1)
+    it_("treats a link that is the one asked for already as done", async () => {
+      const { db, plan, versions } = await start();
+      const version = await versions.createNext(plan.id, managed(), null, 0);
+      const a = await aPrice(db, plan.id, "pri_a");
+      await versions.setPriceLink(version.id, "month", a.id, null);
+
+      expect(
+        await versions.setPriceLink(version.id, "month", a.id, null),
+      ).toEqual({
+        ok: true,
+      });
+      expect(
+        await versions.setPriceLink(version.id, "month", a.id, a.id),
+      ).toEqual({
+        ok: true,
+      });
+    });
+
+    // #439-T16 (review of #468, N1): a link, once set, is never cleared; the repository has no way to and says so.
+    it_("never clears a link, with a stable code", async () => {
+      const { db, plan, versions } = await start();
+      const version = await versions.createNext(plan.id, managed(), null, 0);
+      const a = await aPrice(db, plan.id, "pri_a");
+      await versions.setPriceLink(version.id, "month", a.id, null);
+
+      const attempt = versions.setPriceLink(
+        version.id,
+        "month",
+        null as never,
+        a.id,
+      );
+
+      await expect(attempt).rejects.toBeInstanceOf(PriceLinkNotClearableError);
+      await expect(attempt).rejects.toMatchObject({
+        code: "price_link_not_clearable",
+      });
+      expect(await versions.current(plan.id)).toMatchObject({
+        monthlyPriceId: a.id,
+      });
+    });
+
     // #438-T12
     it_("offers no way to update a version", async () => {
       const { versions } = await start();
@@ -172,12 +310,14 @@ describe.each(ENGINES)(
         "current",
         "list",
         "listForPlans",
+        "setPriceLink",
       ]);
     });
 
     // The database refuses what the repository merely does not offer (#438, review N6): whoever writes, an app instance
     // of another release or somebody with SQL, a version is never changed beyond `role` and never deleted. `created_by`
-    // is the one other column that moves: the account merge and the deletion of a user rewrite who made a version.
+    // moves too: the account merge and the deletion of a user rewrite who made a version. And so do the two price links
+    // (#439): linking a Paddle price to a slot is the one thing that happens to a version after it was saved.
     const IMMUTABLE_MESSAGE = /billing_plan_versions_immutable/;
 
     // #438-T12
@@ -190,9 +330,18 @@ describe.each(ENGINES)(
           .find((table) => table.name === "billing_plan_versions")
           ?.columns.map((column) => column.name);
         // The mutable ones are named here, so a column that is added later is checked without anybody remembering to.
+        const mutable = [
+          "role",
+          "created_by",
+          "monthly_price_id",
+          "yearly_price_id",
+        ];
         const frozen = (columns ?? []).filter(
-          (column) => column !== "role" && column !== "created_by",
+          (column) => !mutable.includes(column),
         );
+        expect(
+          columns?.filter((column) => mutable.includes(column)).sort(),
+        ).toEqual([...mutable].sort());
         expect(frozen.sort()).toEqual([
           "created_at",
           "id",
@@ -253,6 +402,52 @@ describe.each(ENGINES)(
         expect((await versions.current(plan.id))?.monthlyAmountMinor).toBe(
           1234,
         );
+      },
+    );
+
+    // #439 (review of #462, N6: the every-column test is extended with the two columns this issue adds)
+    it_(
+      "lets the two price links of a version be set and changed, never cleared, and refuses to set one together with a frozen column",
+      async () => {
+        const { db, plan, versions } = await start();
+        const version = await versions.createNext(plan.id, managed(), null, 0);
+        await aPrice(db, plan.id, "pri_1");
+        const rows = await sql<{
+          id: string;
+        }>`select id from billing_plan_prices`.execute(db);
+        const priceId = rows.rows[0]?.id ?? "";
+
+        await sql`update billing_plan_versions set monthly_price_id = ${priceId}, yearly_price_id = ${priceId} where id = ${version.id}`.execute(
+          db,
+        );
+        // Review of #468, N1: value to null is refused for either slot, whoever writes; relinking stays possible.
+        for (const slot of ["monthly_price_id", "yearly_price_id"])
+          await expect(
+            sql`update billing_plan_versions set ${sql.ref(slot)} = null where id = ${version.id}`.execute(
+              db,
+            ),
+            slot,
+          ).rejects.toThrow(/billing_plan_versions_immutable/);
+        await expect(
+          sql`update billing_plan_versions set yearly_price_id = ${priceId}, yearly_amount_minor = 5 where id = ${version.id}`.execute(
+            db,
+          ),
+        ).rejects.toThrow(/billing_plan_versions_immutable/);
+
+        const row = (
+          await sql<{
+            monthly_price_id: string | null;
+            yearly_price_id: string | null;
+            yearly_amount_minor: number;
+          }>`select * from billing_plan_versions where id = ${version.id}`.execute(
+            db,
+          )
+        ).rows[0];
+        expect(row).toMatchObject({
+          monthly_price_id: priceId,
+          yearly_price_id: priceId,
+          yearly_amount_minor: 12_340,
+        });
       },
     );
 

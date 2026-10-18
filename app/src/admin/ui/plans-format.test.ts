@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   describeLimit,
   describeModelAccess,
+  describePaddleAmount,
   describePrice,
   emptyTermsForm,
   termsFormFrom,
@@ -255,5 +256,26 @@ describe("the words for a version", () => {
     expect(describeModelAccess(null, catalog)).toBe(
       "Any model with the workspace's own keys",
     );
+  });
+});
+
+describe("an amount as Paddle writes it", () => {
+  // #439-T17
+  it("is shown as dollars and cents from the string of minor units, by splitting the text, with no float", () => {
+    expect(describePaddleAmount("1234")).toBe("$12.34");
+    expect(describePaddleAmount("5")).toBe("$0.05");
+    expect(describePaddleAmount("100")).toBe("$1.00");
+    expect(describePaddleAmount("01000")).toBe("$10.00");
+    expect(describePaddleAmount("99999999999999999999")).toBe(
+      "$999999999999999999.99",
+    );
+  });
+
+  // #439-T17
+  it("is not shown as an amount when it is not minor units", () => {
+    for (const text of ["", "12.5", "1e3", "-5", "abc", " 12"])
+      expect(describePaddleAmount(text), text).toBe(
+        "an amount that is not in minor units",
+      );
   });
 });

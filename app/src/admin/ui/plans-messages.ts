@@ -7,6 +7,7 @@ import {
   INVALID_VALUES,
   UNAVAILABLE,
 } from "../../copy/messages.ts";
+import { describePaddleAmount } from "./plans-format.ts";
 import {
   describeTransportFailure,
   GENERIC_FAILURE,
@@ -54,6 +55,49 @@ const FAILURE_COPY: Record<string, string> = {
     "Nothing changed compared with the current version, so no new version was created.",
   plan_changed:
     "The plan changed meanwhile, in another tab or by another admin. Reload the page and try again.",
+  price_input_invalid:
+    "The price could not be linked: choose a slot and enter a Paddle price ID.",
+  price_id_invalid:
+    "A Paddle price ID starts with pri_ and has only letters and digits after it.",
+  price_not_found:
+    "Paddle does not know this price. Check the ID and that it belongs to the Paddle environment billing is set to.",
+  price_not_active:
+    "This price is archived at Paddle. Use an active price, or create a new one in Paddle.",
+  price_not_recurring:
+    "This is a one-time price. A plan needs a price that renews every month or every year.",
+  price_amount_mismatch:
+    "The price at Paddle does not carry the amount entered for this version.",
+  price_interval_mismatch:
+    "The price does not renew every month for the monthly slot, or every year for the yearly slot.",
+  price_currency_mismatch: "The price is not in US dollars.",
+  price_tax_mode_mismatch:
+    "The price is not tax inclusive. Its tax mode must be set to internal at Paddle, not to the account setting.",
+  price_type_unsupported:
+    "The price is a custom price, made for a single transaction. Use a standard price from the Paddle catalog.",
+  price_has_overrides:
+    "The price has country specific prices. Use a price without overrides.",
+  price_quantity_unsupported:
+    "The price has a minimum quantity above one, or a maximum below one. A subscription is bought with a quantity of one: set the minimum to 1 at Paddle.",
+  price_product_mismatch:
+    "The price belongs to another Paddle product than the one this plan is sold under.",
+  price_environment_mismatch:
+    "This plan or price is from the other Paddle environment (sandbox or live) than the one billing is set to.",
+  price_yearly_not_entered:
+    "This version has no yearly price entered, so there is no yearly price to link. Enter one as a new version first.",
+  price_used_by_other_plan: "This Paddle price is linked to another plan.",
+  price_plan_not_paid: "Only a paid plan has Paddle prices.",
+  price_link_not_clearable:
+    "A price that is linked cannot be removed from its slot, only replaced by another price.",
+  price_link_changed:
+    "Another admin linked a different price to this slot meanwhile. Reload the page and decide again.",
+  api_key_missing: "Store the Paddle API key in the billing settings first.",
+  api_key_unreadable:
+    "The stored Paddle API key cannot be read. Enter it again in the billing settings.",
+  paddle_key_rejected:
+    "Paddle did not accept the stored API key. Check it in the billing settings.",
+  paddle_rate_limited: "Paddle asked the app to slow down. Try again shortly.",
+  paddle_unreachable: "Paddle could not be reached. Try again shortly.",
+  paddle_unavailable: "Paddle failed to answer. Try again shortly.",
   limits_invalid: "The limits are not valid.",
   limit_invalid: "Enter a whole number, or leave the field empty for no limit.",
   cost_limit_requires_managed_key:
@@ -70,4 +114,28 @@ export function describePlanFailure(code: string): string {
     (Object.hasOwn(FAILURE_COPY, code) ? FAILURE_COPY[code] : undefined) ??
     GENERIC_FAILURE
   );
+}
+
+/** What a price that was refused or has drifted differs in, in words, with the two values (minor units as text) when given. */
+export function describePriceDifference(
+  code: string,
+  values: { entered?: string; paddle?: string } = {},
+): string {
+  const { entered, paddle } = values;
+  if (entered === undefined || paddle === undefined)
+    return describePlanFailure(code);
+  switch (code) {
+    case "price_amount_mismatch":
+      return `Paddle has ${describePaddleAmount(paddle)}, but ${describePaddleAmount(entered)} is entered for this version.`;
+    case "price_interval_mismatch":
+      return `Paddle renews every ${paddle}, but this slot is for every ${entered}.`;
+    case "price_currency_mismatch":
+      return `Paddle has the currency ${paddle}, but only ${entered} is supported.`;
+    case "price_quantity_unsupported":
+      return `Paddle allows a quantity of ${paddle} for this price, but a subscription is bought with a quantity of ${entered}: set the minimum to 1 at Paddle.`;
+    case "price_tax_mode_mismatch":
+      return `Paddle has the tax mode ${paddle}, but it must be ${entered} (tax inclusive).`;
+    default:
+      return describePlanFailure(code);
+  }
 }

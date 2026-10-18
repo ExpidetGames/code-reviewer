@@ -625,6 +625,13 @@ Inside `runner/`: `uv sync --locked`, `uv run ruff check . ../fakes`, `uv run ru
   second connection to the same database for two-instance tests. `createJobQueueFixture({ database })`
   seeds such a database for the queue tests. The Postgres URL must point at loopback (`127.0.0.1`) so
   the network guard allows it.
+- The Paddle price tests (#439: `price-rules.test.ts`, `prices-service` and `prices-http` integration tests, the
+  repositories of the prices and of the plan versions, the migration of `billing_plan_prices`) run on SQLite and, with
+  `TEST_DATABASE_URL`, on Postgres (`describe.each` over both engines). A race that needs a second admin to commit between
+  two statements of a transaction (a price linked while new terms are saved, the unique violation of two requests storing
+  one price) is tested on Postgres only, with `afterQueryPlugin` (`src/test-support/query-hook.ts`, `db.withPlugin(...)`): a
+  plugin that awaits a callback after a statement answered, which works on its own connection. SQLite has one connection, so
+  a race there is staged at the Paddle read (`getPrice` of the stand-in client) instead, which is before the transaction.
 
 `make test-engine` runs the engine suite on your machine (after priming the tiktoken cache, see above; without the network namespace, which is Linux and CI only). Planned targets: `test-stack-up`,
 `test-stack-down`, `test:docker`, `test:e2e:docker` (they arrive with the Docker test stack).

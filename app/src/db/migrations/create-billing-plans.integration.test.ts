@@ -20,6 +20,8 @@ import {
 
 const SPLIT = "20261018120000_create_billing_plans";
 const NEW_TABLES = ["billing_plans", "billing_plan_versions"];
+/** A table a later migration adds (#439); it is not part of what this migration made. */
+const LATER_TABLES = ["billing_plan_prices"];
 
 /** The migrations the previous release's database ran: everything before the new one. */
 const beforeThisMigration: MigrationProvider = {
@@ -40,7 +42,8 @@ async function rowsOfEveryTable(
 ): Promise<Record<string, unknown[]>> {
   const result: Record<string, unknown[]> = {};
   for (const table of await db.introspection.getTables()) {
-    if (NEW_TABLES.includes(table.name)) continue;
+    if (NEW_TABLES.includes(table.name) || LATER_TABLES.includes(table.name))
+      continue;
     const { rows } =
       await sql<unknown>`select * from ${sql.table(table.name)}`.execute(db);
     result[table.name] = rows;
@@ -102,7 +105,7 @@ describe("the billing plans migration", () => {
     await db.destroy();
   });
 
-  it("has the columns the repositories read and no default for a price, a key mode or a limit", async () => {
+  it("has the columns the repositories read (with the ones #439 adds: the Paddle product of a plan and the two price links of a version) and no default for a price, a key mode or a limit", async () => {
     const { db } = await createTestDatabase();
     const tables = await db.introspection.getTables();
     const columns = (name: string) =>
@@ -121,6 +124,8 @@ describe("the billing plans migration", () => {
       "kind",
       "name",
       "offered",
+      "paddle_product_env",
+      "paddle_product_id",
       "plan_key",
       "popular",
       "sort",
@@ -139,10 +144,12 @@ describe("the billing plans migration", () => {
       "limits",
       "model_access",
       "monthly_amount_minor",
+      "monthly_price_id",
       "number",
       "plan_id",
       "role",
       "yearly_amount_minor",
+      "yearly_price_id",
     ]);
     // An amount is admin data, never a default of the table.
     for (const name of [

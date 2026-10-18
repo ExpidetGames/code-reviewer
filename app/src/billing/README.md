@@ -5,7 +5,7 @@ epic #421): billing with Paddle Billing as Merchant of Record. Server-only: ever
 `server-only`, and a test (`server-only.test.ts`) fails when a client component reaches the module.
 
 #436 added the building blocks (client, schemas, webhook verifier); #437 added the settings in the admin portal and
-the switch; #438 added the plans, their versions and the Free plan. No webhook route, checkout, subscription table or sweep
+the switch; #438 added the plans, their versions and the Free plan; #439 links and validates Paddle prices for a version. No webhook route, checkout, subscription table or sweep
 exists yet; later issues of the epic add them, and each starts with `isBillingOn` / `guardBillingRoute` (below).
 
 | File                               | What it is                                                                                                                              |
@@ -25,6 +25,10 @@ exists yet; later issues of the epic add them, and each starts with `isBillingOn
 | `plans-http.ts`                    | The handlers of `/api/admin/billing/plans` and their order of checks.                                                                   |
 | `plan-rules.ts`                    | The pure rules for a plan, its display fields and the terms of a version (stable codes in `plan-errors.ts`).                            |
 | `plan-entitlements.ts`             | From a plan version to the entitlements it writes; cannot build a payload without `modelAccess`.                                        |
+| `price-rules.ts`                   | The pure check of a Paddle price against the slot of a version, and the integer comparison of amounts (#439), below.                    |
+| `price-view.ts`                    | The cached price next to the entered amount, the drift, and whether a version is sellable (pure).                                       |
+| `price-errors.ts`                  | The stable codes of a refused link and their HTTP status.                                                                               |
+| `prices-service.ts`                | Links a Paddle price to a slot of the current version and refreshes the cache. Reads from Paddle, never writes (#439).                  |
 
 ## The client
 
@@ -211,10 +215,12 @@ role, and the repository offers no other update (a unit test pins the list of it
 migration `20261018140000_protect_billing_plan_versions` adds triggers that refuse a delete and an update of any column but
 `role` and `created_by` (message `billing_plan_versions_immutable`), for whichever app instance or SQL writes. A test updates
 every column the table has and fails for one the trigger does not protect, so a later issue that adds a column to the table
-(#439, #440) has to extend the trigger (SQLite lists the columns; the Postgres trigger compares the whole row and needs no change). The caller states the number of
+(#439, #440) has to extend the trigger (SQLite lists the frozen columns; the Postgres trigger compares the whole row without the mutable ones, so a column that must stay frozen needs no change, and a column that must be mutable needs a migration that replaces `billing_plan_versions_guard()`, as `20261018160000_create_billing_plan_prices` does for the two price links). The caller states the number of
 the version it saw (`basedOnVersion`): another number means somebody saved meanwhile (`plan_changed`), and two writers that read
 the same version cannot both win (a partial unique index on the one `current` version per plan and the unique `(plan, number)`).
-Terms equal to the current version are refused (`plan_version_unchanged`). The page asks for a confirmation that names the
+Terms equal to the current version are refused (`plan_version_unchanged`). In short: **versions are immutable except `role`, and the price
+links, which may be relinked until a subscription uses the version (enforced in #441/#442)**; a link is replaced, never cleared (below).
+The page asks for a confirmation that names the
 version and says that existing subscribers keep theirs, and names a change of key mode.
 
 **Edited in place (no new version):** `name`, `description`, `sort` (the display order: ascending, ties by plan key, every kind),
@@ -287,10 +293,64 @@ and the proxy's `/admin` rewrite serves them under the public address `/api/admi
   provider and model for the admin's own view) and the warnings.
 - `POST /api/admin/billing/plans`: a `paid` plan with its first terms, or a `contact` plan.
 - `PUT /api/admin/billing/plans/:planKey`, exactly one of `{ metadata }`, `{ terms: { basedOnVersion, terms } }`,
-  `{ archived: boolean }`.
+  `{ archived: boolean }`, `{ priceLink: { versionNumber, interval, paddlePriceId } }` and `{ refreshPrices: true }` (#439, below).
 - `DELETE /api/admin/billing/plans/:planKey`.
 
 Order: admin (401 / the 404 of a missing path), billing on (else the 404 of a missing path), same origin and JSON body, rules.
+
+## Linking Paddle prices (#439)
+
+The first, small way to get a sellable plan (ADR 0005, M5): the operator creates the product and the prices in the Paddle
+dashboard and pastes the price ids into the plans page. The version already holds the amounts entered in #438 (a required
+monthly price and an optional yearly price, USD, tax inclusive, minor units); the link form has **no amount field**, and the route reads
+nothing but `{ versionNumber, interval, paddlePriceId }` (any other key is `price_input_invalid`). The app only **reads** from
+Paddle (`GET /prices/{id}`); it never changes a price and never changes an entered amount to fit one. Prices are never deleted.
+
+**Data.** `billing_plan_prices` is the cache of one Paddle price: what Paddle said (interval, frequency, currency, amount as
+Paddle's string of minor units, tax mode, overrides, trial days, status) at `snapshot_at`. `paddle_price_id` is unique, a price
+belongs to one plan, and any number of versions may share it. `origin`, `intent_id`, `state` and `last_error_code` are
+for #440 (the app creating prices); a linked price is `linked` / `ready`. `billing_plans.paddle_product_id` and
+`paddle_product_env` are set by the first price that is linked (a conditional write that does not touch `updated_at`), and every
+later price must belong to that product and environment. `billing_plan_versions.monthly_price_id` and `yearly_price_id` are
+the only columns of a version beside `role` (and the audit `created_by`) that change after it was saved: they say which price a slot is sold with.
+A version is linked only while it is the **current** one (`plan_changed` otherwise): a legacy version keeps the prices its
+subscribers bought. The statement that writes the link itself says `where role = 'current'` and the service undoes the whole
+link transaction (the product binding and a new price row too) when it hit no row, because on Postgres the earlier read of the
+role proves nothing once another admin commits: an admin who links while another saves new terms gets `plan_changed`, and the
+legacy version keeps what it had. **A link is relinked, never cleared**: the service answers `price_link_not_clearable` to a request
+without a price id, and the database refuses a link that becomes empty (message `billing_plan_versions_immutable`, both engines).
+Relinking is a compare-and-set on the link the service read (the version's slot before Paddle was asked): two admins relinking one
+slot at once cannot overwrite each other, the second gets `price_link_changed` (409) and decides again; a slot that already holds the
+price asked for is simply done. Until a subscription uses the version nothing but this app code and the Paddle subscription itself
+pins the price a subscriber bought (#441/#442 must forbid relinking a version with live subscriptions).
+The identity of a price row (`id`, `plan_id`, `paddle_env`, `origin`, `created_at`) never changes and the Paddle price id is set once
+(trigger, message `billing_plan_prices_immutable`; a test names every column as frozen, write once or mutable). A yearly link needs a yearly amount on the version (`price_yearly_not_entered`, answered before Paddle is asked).
+
+**The checks** (`price-rules.ts`) run in a fixed order and report one code, so the same price always gets the same answer:
+`price_not_active` (status), `price_type_unsupported` (only a `standard` price: a `custom` price is made for one transaction and hidden
+from the catalog; the type is cached, so a linked price that becomes custom at Paddle is a drift), `price_not_recurring`, `price_interval_mismatch` (the interval of the slot, frequency 1),
+`price_currency_mismatch` (USD), `price_tax_mode_mismatch` (`internal`; `account_setting`, `external` and `location` are refused),
+`price_amount_mismatch`, `price_has_overrides`, `price_quantity_unsupported` (the quantity limits must allow a quantity of one:
+minimum 1, maximum at least 1; checkout buys one), `price_product_mismatch`. Before them: `price_environment_mismatch` (the plan's
+product, the stored price or billing is on the other environment), `price_used_by_other_plan` and `price_not_found` (Paddle's 404).
+A mismatch is answered with `entered` and `paddle` (an amount in minor units as text), never by editing either side.
+Paddle's text is untrusted: a currency is passed on, cached and shown only when it is three capital letters, anything else is
+the placeholder `???` and a currency mismatch. **The amount is compared
+as integers**: the entered number and Paddle's string of digits (`"1000"` equals 1000; a decimal point, an exponent, a sign or
+a space is no amount, and a number beyond a float's precision keeps every digit). Paddle problems have their own codes
+(`api_key_missing`, `paddle_key_rejected`, `paddle_rate_limited`, `paddle_unreachable`, `paddle_unavailable`) and nothing is stored.
+
+**Drift and sellable.** The plans view shows, per slot, the cached price next to the entered amount, with `drift`: the first
+rule the cached price breaks now (the same checks on the cache, plus the environment). Refreshing (`{ refreshPrices: true }`,
+or later `price.updated`) reads every price of the plan again with `GET` and replaces the cache; a price archived in Paddle, or whose
+amount, interval, currency, tax mode or quantity limits no longer fit, shows a drift badge and the version is not `sellable`. A price
+that Paddle cannot answer does not stop the others: they are read and cached, and the answer names each price that failed (the code
+of the first as `error`, one issue per price with its id as the field); a refused key ends the run, since every read would fail alike.
+`sellable` comes from the cache and is stale until the next refresh: **checkout (#443) must read the price from Paddle right before it
+opens a checkout** and not trust it. A plan is bound to the first Paddle product and environment it is linked to
+(`price_environment_mismatch` afterwards); there is no unbinding, so moving from sandbox to live needs its own step (go-live checklist, #448). A version is
+`sellable` when every slot it has an entered amount for is linked to a price without drift; a version without a yearly price needs no yearly price.
+The trial is read from the price (months and years count as 30 and 365 days, for display); the app sets none.
 
 ## Testing
 
