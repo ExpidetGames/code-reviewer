@@ -10,13 +10,23 @@ import { getSecretStore } from "../secrets/shared.ts";
 import { isBillingOn } from "./enabled.ts";
 import { createPaddleClient, paddleBaseUrl } from "./paddle-client.ts";
 import {
+  createBillingPlansService,
+  type BillingPlansService,
+} from "./plans-service.ts";
+import {
   createBillingSettingsService,
   type BillingSettingsService,
 } from "./settings-service.ts";
 
+/** The plans (#438): the plans page and its data routes, and the Free plan that billing switches on with. */
+export function getBillingPlansService(): BillingPlansService {
+  return createBillingPlansService({ db: getDatabase() });
+}
+
 export function getBillingSettingsService(): BillingSettingsService {
   return createBillingSettingsService({
     db: getDatabase(),
+    plans: getBillingPlansService(),
     secrets: getSecretStore(),
     clientFor: (apiKey, environment) =>
       createPaddleClient({ apiKey, baseUrl: paddleBaseUrl(environment) }),

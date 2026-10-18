@@ -3,6 +3,7 @@
 // Billing: the Paddle credentials, the notification destination and the switch (#437, ADR 0005). Instance admin only.
 // Opening this page changes nothing and calls nobody; billing stays off until the admin switches it on.
 import type { Metadata } from "next";
+import Link from "next/link";
 import { requireAdmin } from "@/admin/session";
 import { BillingForm } from "@/admin/ui/billing-form";
 import { enablingNotice } from "@/billing/enabling-copy";
@@ -33,6 +34,13 @@ export default async function AdminBillingPage() {
             ownKeyWorkspaces: billing.ownKeyWorkspaces,
           })}
         />
+        <p className="text-sm text-muted-foreground">
+          The plans you sell, their versions and the Free plan are on the{" "}
+          <Link href="/admin/billing/plans" className="underline">
+            Plans page
+          </Link>{" "}
+          (it works while billing is on).
+        </p>
       </div>
     </>
   );

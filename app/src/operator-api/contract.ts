@@ -65,6 +65,8 @@ export const OPERATOR_OWN_ERROR_CODES = [
   "period_invalid",
   /** The handoff token is not (or no longer) valid: unknown, used, expired, revoked, or its person lost the role (#284). */
   "invalid_token",
+  /** #438: the default entitlements are written by billing from the Free plan while billing is on (ADR 0005, 2.9). */
+  "entitlements_default_managed_by_billing",
   "internal_error",
 ] as const;
 
