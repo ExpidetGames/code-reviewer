@@ -700,6 +700,10 @@ export interface BillingPlansTable {
   updated_at: string;
   /** The user who changed it last, or null (the system, or a user who was deleted since). */
   updated_by: string | null;
+  /** The Paddle product the plan is sold under: set when the first price is linked (#439); every later price belongs to it. */
+  paddle_product_id: string | null;
+  /** `sandbox` or `live`: the Paddle environment `paddle_product_id` belongs to. */
+  paddle_product_env: string | null;
 }
 
 /**
@@ -724,6 +728,51 @@ export interface BillingPlanVersionsTable {
   yearly_amount_minor: number | null;
   created_at: string;
   created_by: string | null;
+  /** The Paddle price the monthly slot is sold with (`billing_plan_prices.id`); changes only by linking (#439). */
+  monthly_price_id: string | null;
+  /** The same for the yearly slot; only a version with a yearly amount has one. */
+  yearly_price_id: string | null;
+}
+
+/**
+ * A Paddle price the app knows (#439, src/billing/README.md): what Paddle said about it at `snapshot_at`, never written
+ * back. A version links to one per slot; versions may share a price, and a price belongs to one plan.
+ */
+export interface BillingPlanPricesTable {
+  id: string;
+  plan_id: string;
+  /** Unique; null while a price that the app creates (#440) has not been answered by Paddle yet. */
+  paddle_price_id: string | null;
+  paddle_product_id: string;
+  /** Paddle's price type, `standard` or `custom`, as Paddle said at `snapshot_at`. */
+  price_type: string;
+  /** `sandbox` or `live`. */
+  paddle_env: string;
+  /** Paddle's billing cycle interval: `day`, `week`, `month` or `year`. */
+  interval: string;
+  frequency: number;
+  currency: string;
+  /** Paddle's own string of minor units ("1234"); text, so any amount a price is changed to is cached whole. */
+  unit_amount_minor: string;
+  tax_mode: string;
+  /** 0 or 1: the price has country overrides. */
+  has_overrides: number;
+  /** The trial in days, as Paddle says it; null for none. */
+  trial_days: number | null;
+  /** The limits Paddle puts on the quantity of one item (`quantity.minimum` / `maximum`), whole numbers from one up. */
+  quantity_min: number;
+  quantity_max: number;
+  /** `active` or `archived`, as Paddle said at `snapshot_at`; null before the first read. */
+  paddle_status: string | null;
+  /** `linked` (pasted by the operator, #439) or `created` (by the app, #440). */
+  origin: string;
+  intent_id: string | null;
+  /** `pending`, `ready` or `failed`. */
+  state: string;
+  last_error_code: string | null;
+  snapshot_at: string | null;
+  created_at: string;
+  archived_at: string | null;
 }
 
 export interface Database {
@@ -757,6 +806,7 @@ export interface Database {
   model_catalog_entries: ModelCatalogEntriesTable;
   billing_plans: BillingPlansTable;
   billing_plan_versions: BillingPlanVersionsTable;
+  billing_plan_prices: BillingPlanPricesTable;
   password_reset_tokens: PasswordResetTokensTable;
   email_verification_tokens: EmailVerificationTokensTable;
   signed_states: SignedStatesTable;

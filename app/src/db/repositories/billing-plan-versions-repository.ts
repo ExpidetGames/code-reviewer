@@ -29,7 +29,29 @@ export type PlanVersionRow = PlanTerms & {
   role: PlanVersionRole;
   createdAt: string;
   createdBy: string | null;
+  /** The `billing_plan_prices` row each slot is sold with (#439); null until a price is linked. */
+  monthlyPriceId: string | null;
+  yearlyPriceId: string | null;
 };
+
+/** Stable code of a refused clearing of a link (`PriceLinkNotClearableError`; the database refuses it with the same words). */
+export const PRICE_LINK_NOT_CLEARABLE = "price_link_not_clearable";
+
+/** Thrown by `setPriceLink` when asked to clear a link: a slot that was linked once is relinked, never emptied. */
+export class PriceLinkNotClearableError extends Error {
+  readonly code = PRICE_LINK_NOT_CLEARABLE;
+  constructor() {
+    super("A price link is never cleared, only replaced.");
+    this.name = "PriceLinkNotClearableError";
+  }
+}
+
+export type PriceLinkChange =
+  | { ok: true }
+  /** The version is not the current one (any more). */
+  | { ok: false; reason: "not_current" }
+  /** The slot holds another link than the one the caller read: somebody linked meanwhile. */
+  | { ok: false; reason: "link_changed" };
 
 export type BillingPlanVersionsRepository = {
   /** The versions of one plan, newest first. */
@@ -49,6 +71,21 @@ export type BillingPlanVersionsRepository = {
     createdBy: string | null,
     basedOn: number,
   ): Promise<PlanVersionRow>;
+  /**
+   * Links the version's slot to a `billing_plan_prices` row (#439). The one change besides the role that a version gets
+   * after it was saved: it says which Paddle price the slot is sold with, never what it costs. Written to the current
+   * version only, in the statement itself: a version that a newer one replaced meanwhile keeps the prices its subscribers
+   * bought and the answer is `not_current` (the caller's earlier read of the role proves nothing once it is written).
+   * `expected` is the link the caller read in the slot (`null` for none): the write happens only if the slot still holds
+   * it, otherwise nothing is written and the answer is `link_changed` (two admins relinking at once: one of them wins).
+   * A link is replaced, never cleared: `priceId` is always a row (`PriceLinkNotClearableError`).
+   */
+  setPriceLink(
+    versionId: string,
+    slot: "month" | "year",
+    priceId: string,
+    expected: string | null,
+  ): Promise<PriceLinkChange>;
 };
 
 type Row = Selectable<BillingPlanVersionsTable>;
@@ -81,6 +118,8 @@ function toVersion(row: Row): PlanVersionRow {
     yearlyAmountMinor: row.yearly_amount_minor,
     createdAt: row.created_at,
     createdBy: row.created_by,
+    monthlyPriceId: row.monthly_price_id,
+    yearlyPriceId: row.yearly_price_id,
   };
 }
 
@@ -110,6 +149,37 @@ export function createBillingPlanVersionsRepository(
   return {
     list: (planId) => listForPlans([planId]),
     listForPlans,
+
+    async setPriceLink(versionId, slot, priceId, expected) {
+      if (slot !== "month" && slot !== "year")
+        throw new Error("A price slot is month or year.");
+      // Callers are typed, but a link cleared by a lax caller would be a version sold without its price.
+      if (typeof priceId !== "string") throw new PriceLinkNotClearableError();
+      const column = slot === "month" ? "monthly_price_id" : "yearly_price_id";
+      const updated = await db
+        .updateTable("billing_plan_versions")
+        .set(
+          slot === "month"
+            ? { monthly_price_id: priceId }
+            : { yearly_price_id: priceId },
+        )
+        .where("id", "=", versionId)
+        .where("role", "=", "current")
+        .where(column, expected === null ? "is" : "=", expected)
+        .executeTakeFirst();
+      if (Number(updated.numUpdatedRows) === 1) return { ok: true };
+      // Nothing was written: say why from what is there now.
+      const found = await db
+        .selectFrom("billing_plan_versions")
+        .select(["role", column])
+        .where("id", "=", versionId)
+        .executeTakeFirst();
+      if (found === undefined || found.role !== "current")
+        return { ok: false, reason: "not_current" };
+      // Somebody linked the very price asked for: the slot is as the caller wants it.
+      if (found[column] === priceId) return { ok: true };
+      return { ok: false, reason: "link_changed" };
+    },
 
     async current(planId) {
       const row = await db

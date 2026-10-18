@@ -133,7 +133,7 @@ kind, the picker) are in `src/review-settings/README.md`.
 Before the catalog a workspace on the operator's key chose a quality tier, Low, Medium or High (#280, #283), and the
 operator said which model backed each tier and kind (the instance setting `managed_model_tiers`, written through
 `PUT /api/operator/v1/model-tiers`). The tiers are removed in the same series as the catalog (ADR 0005, decision C1); the
-migration `20261018160000_migrate_model_tiers_to_catalog.ts` (its pure part is `db/migrations/model-tiers-to-catalog.ts`)
+migration `20261018170000_migrate_model_tiers_to_catalog.ts` (its pure part is `db/migrations/model-tiers-to-catalog.ts`)
 moves the data over so that no managed workspace changes model:
 
 - **Entries.** For each tier and kind with a model there is a `released` entry of the default provider. A tier whose Diff

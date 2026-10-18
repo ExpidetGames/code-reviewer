@@ -85,6 +85,8 @@ const SCOPED = [
  * - job-claimed-keys: the encrypted LLM key handed out with the claim of a job. It is keyed by the job and read
  *   only by the runner API when that job is completed (the job and its workspace are known there); it never
  *   lists, and a key is only ever looked up by the id of a job the caller holds;
+ * - billing-plan-prices: the cache of the Paddle prices a plan version is sold with (#439), instance configuration like the
+ *   plans; it is read by the plan and the version it belongs to and by no workspace;
  * - billing-plans, billing-plan-versions: the plans the operator sells and their versions (#438, ADR 0005, 2.11). They are
  *   instance configuration, not customer data, and no workspace owns a plan or a version; nothing reads them for a
  *   workspace but the billing module of a later issue, which pins a workspace's subscription to a version it holds
@@ -97,6 +99,7 @@ const SCOPED = [
 const INSTANCE_LEVEL = [
   "allowed-login-pins-repository.ts",
   "app-meta-repository.ts",
+  "billing-plan-prices-repository.ts",
   "billing-plan-versions-repository.ts",
   "billing-plans-repository.ts",
   "catalog-repository.ts",
@@ -207,6 +210,23 @@ describe("the repositories and workspace scoping", () => {
           `${file}: ${fn.name}`,
         ).not.toContain("workspaceId");
     }
+  });
+
+  // #439-T10
+  it("classifies the repository of the linked Paddle prices as instance level, read from the file and its signatures", () => {
+    const file = "billing-plan-prices-repository.ts";
+
+    expect(sourceFiles()).toContain(file);
+    expect(INSTANCE_LEVEL).toContain(file);
+    expect(SCOPED).not.toContain(file);
+    const databaseFunctions =
+      exportedFunctions(file).filter(touchesTheDatabase);
+    expect(databaseFunctions.length).toBeGreaterThan(0);
+    for (const fn of databaseFunctions)
+      expect(
+        fn.parameters.map((parameter) => parameter.name),
+        fn.name,
+      ).not.toContain("workspaceId");
   });
 
   // DM-08

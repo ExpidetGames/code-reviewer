@@ -7,7 +7,7 @@
 // place. The old claim's answer is the model that the stored configuration names for the (tier, kind): that is what it
 // swapped into the job. The model ids below are made up for the test.
 import { describe, expect, it } from "vitest";
-import { migration } from "../../src/db/migrations/20261018160000_migrate_model_tiers_to_catalog.ts";
+import { migration } from "../../src/db/migrations/20261018170000_migrate_model_tiers_to_catalog.ts";
 import { createWorkspaceEntitlementsRepository } from "../../src/db/repositories/workspace-entitlements-repository.ts";
 import { entryIdOf } from "../../src/db/migrations/model-tiers-to-catalog.ts";
 import { startRunnerApiHarness } from "../../src/test-support/runner-api-harness.ts";

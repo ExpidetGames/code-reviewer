@@ -139,6 +139,10 @@ describe("creating a paid plan", () => {
         modelAccess: { catalogEntries: ["mce_one"] },
         monthlyAmountMinor: 1234,
         yearlyAmountMinor: null,
+        // No Paddle price is linked yet (#439): the version is not for sale.
+        monthlyPrice: null,
+        yearlyPrice: null,
+        sellable: false,
       },
     ]);
   });

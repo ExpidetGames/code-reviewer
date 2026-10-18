@@ -5,6 +5,10 @@ import {
   PLAN_ERROR_CODES,
   PLAN_ERROR_STATUS,
 } from "../../billing/plan-errors.ts";
+import {
+  PRICE_ERROR_STATUS,
+  PRICE_LINK_ERROR_CODES,
+} from "../../billing/price-errors.ts";
 import { GENERIC_FAILURE } from "../../ui/transport-messages.ts";
 import { describePlanFailure } from "./plans-messages.ts";
 
@@ -32,5 +36,22 @@ describe("the copy of the plans page", () => {
     const sentences = PLAN_ERROR_CODES.map((code) => describePlanFailure(code));
 
     expect(new Set(sentences).size).toBe(sentences.length);
+  });
+
+  // #439-T02
+  it("tells the admin something specific, and different, for every code a price link can be refused with", () => {
+    const sentences = PRICE_LINK_ERROR_CODES.map((code) => {
+      const sentence = describePlanFailure(code);
+      expect(sentence, code).not.toBe(GENERIC_FAILURE);
+      return sentence;
+    });
+
+    expect(new Set(sentences).size).toBe(sentences.length);
+  });
+
+  // #439-T02
+  it("gives the HTTP status of every code a price link can be refused with", () => {
+    for (const code of PRICE_LINK_ERROR_CODES)
+      expect(PRICE_ERROR_STATUS[code], code).toBeGreaterThanOrEqual(400);
   });
 });

@@ -21,7 +21,7 @@ import type { Database } from "../schema.ts";
 import { migrationProvider } from "./index.ts";
 import { entryIdOf } from "./model-tiers-to-catalog.ts";
 
-const KEY = "20261018160000_migrate_model_tiers_to_catalog";
+const KEY = "20261018170000_migrate_model_tiers_to_catalog";
 const T = "2026-10-18T08:00:00.000Z";
 
 /** The migrations the previous release's database ran: everything before the new one. */
@@ -619,7 +619,7 @@ for (const engine of engines) {
       await migrate(db);
       const first = await snapshot(db);
       const { migration } =
-        await import("./20261018160000_migrate_model_tiers_to_catalog.ts");
+        await import("./20261018170000_migrate_model_tiers_to_catalog.ts");
       await migration.up(db);
       expect(await snapshot(db)).toEqual(first);
     });
@@ -642,7 +642,7 @@ for (const engine of engines) {
         .where("key", "=", "catalog_defaults")
         .execute();
       const { migration } =
-        await import("./20261018160000_migrate_model_tiers_to_catalog.ts");
+        await import("./20261018170000_migrate_model_tiers_to_catalog.ts");
       await migration.up(db);
       const high = await db
         .selectFrom("model_catalog_entries")
@@ -750,7 +750,7 @@ for (const engine of engines) {
     // #434-X4
     it("rewrites the projects with a number of statements that does not grow with their number", async () => {
       const { migration } =
-        await import("./20261018160000_migrate_model_tiers_to_catalog.ts");
+        await import("./20261018170000_migrate_model_tiers_to_catalog.ts");
       const few = await engine.open();
       await seedMany(few, 9);
       const forFew = await statementsOf(few, (counted) =>
@@ -807,7 +807,7 @@ for (const engine of engines) {
         ],
       });
       const { writeIfUnchanged } =
-        await import("./20261018160000_migrate_model_tiers_to_catalog.ts");
+        await import("./20261018170000_migrate_model_tiers_to_catalog.ts");
       // p-1 was saved by someone else since it was read; p-2 is as it was read.
       await db
         .updateTable("projects")

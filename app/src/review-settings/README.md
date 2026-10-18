@@ -54,7 +54,7 @@ cuts the budget to the window of the catalog entry's model (`src/model-catalog/R
 job").
 
 **The quality level `modelTier` is gone (#434).** The tiers Low, Medium and High were turned into catalog entries
-(`20261018160000_migrate_model_tiers_to_catalog.ts`, `src/model-catalog/README.md`, "Migrated from the tiers") and are no
+(`20261018170000_migrate_model_tiers_to_catalog.ts`, `src/model-catalog/README.md`, "Migrated from the tiers") and are no
 setting any more: a request that carries `modelTier` is refused as an unknown field (`400 UNKNOWN_FIELD`, `field` is the name,
 never a value), and a stored `modelTier` is read by nothing (`parseStoredOverrides` knows the fields of the table above
 only). It stays in the stored JSON until a later migration removes it; **a save of the Diff group of a project or of the

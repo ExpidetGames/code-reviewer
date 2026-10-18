@@ -56,7 +56,7 @@ Version 1 of the operator API "only grows", and the rule for a breaking change i
   missing path. A deprecation stage would keep that lie for a release.
 - **The one caller is the operator's own tooling**, behind `OPERATOR_API_TOKEN`; there is no published client of this route
   and no other consumer of the file. The configuration it wrote has been turned into catalog entries by the migration
-  (`app/src/db/migrations/20261018160000_migrate_model_tiers_to_catalog.ts`), so nothing is lost by the removal. Whether an
+  (`app/src/db/migrations/20261018170000_migrate_model_tiers_to_catalog.ts`), so nothing is lost by the removal. Whether an
   external caller exists is a read-only check of the access log of the production instance, which is the maintainers' to do
   before the release (a follow-up in the pull request); a caller found there is the trigger for a facade, which this series
   does not build.

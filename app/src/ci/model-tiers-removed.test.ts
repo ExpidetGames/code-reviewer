@@ -42,7 +42,7 @@ const ALLOWED: ReadonlyArray<{ path: string; why: string }> = [
     why: "lists the migrations in their order, the one that migrated the tiers by its file name",
   },
   {
-    path: "app/src/db/migrations/20261018160000_migrate_model_tiers_to_catalog.ts",
+    path: "app/src/db/migrations/20261018170000_migrate_model_tiers_to_catalog.ts",
     why: "the migration that turns the old data into catalog entries",
   },
   {

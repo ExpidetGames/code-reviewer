@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // The pure part of the migration that turns the old managed model tiers into catalog entries (#434, ADR 0005, decision
-// C1; `20261018160000_migrate_model_tiers_to_catalog.ts`). No database, no clock, no secret. It does not import the tier
+// C1; `20261018170000_migrate_model_tiers_to_catalog.ts`). No database, no clock, no secret. It does not import the tier
 // code, which this issue removes: the tiers are described here once, as the data that exists in the field.
 //
 // The old data: the instance setting `managed_model_tiers` (`{ low?: { diff?, dynamic? }, medium?, high? }`, the model

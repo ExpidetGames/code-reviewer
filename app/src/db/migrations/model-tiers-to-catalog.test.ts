@@ -349,15 +349,15 @@ describe("workspaceTierOf", () => {
 });
 
 describe("the tier migration", () => {
-  const KEY = "20261018160000_migrate_model_tiers_to_catalog";
+  const KEY = "20261018170000_migrate_model_tiers_to_catalog";
 
   // #434-T08
   it("is registered and sorts after the newest migration that was merged before it", async () => {
     const names = Object.keys(await migrationProvider.getMigrations());
     expect(names).toContain(KEY);
-    expect(KEY > "20261018140000_protect_billing_plan_versions").toBe(true);
+    expect(KEY > "20261018160000_create_billing_plan_prices").toBe(true);
     expect(names.filter((name) => name < KEY)).toContain(
-      "20261018140000_protect_billing_plan_versions",
+      "20261018160000_create_billing_plan_prices",
     );
   });
 });

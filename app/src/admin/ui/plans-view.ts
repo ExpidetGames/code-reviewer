@@ -43,16 +43,52 @@ export type PlanTerms = {
   yearlyAmountMinor: number | null;
 };
 
+/**
+ * A Paddle price linked to a slot of a version (#439), as Paddle last said it (`snapshotAt`): shown read-only next to the
+ * amount the operator entered, which belongs to the version. Amounts are Paddle's own strings of minor units.
+ */
+export type PriceLinkView = {
+  paddlePriceId: string;
+  interval: string;
+  frequency: number;
+  currency: string;
+  taxMode: string;
+  amount: string;
+  status: string;
+  /** The trial in days, as the price has it at Paddle; the app sets none on a linked price. */
+  trialDays: number | null;
+  snapshotAt: string | null;
+  /**
+   * The rule the cached price breaks now (`price_not_active`, `price_amount_mismatch`, `price_environment_mismatch`, ...),
+   * or null when it is exactly the price of its slot. A drift blocks offering; it is never fixed by changing Paddle.
+   */
+  drift: string | null;
+  /** For a drift that has two values (an amount, a currency, an interval, a tax mode): the entered one and Paddle's. */
+  driftEntered?: string;
+  driftPaddle?: string;
+};
+
 export type PlanVersionView = PlanTerms & {
   number: number;
   role: PlanVersionRole;
   createdAt: string;
+  /** The price the monthly slot is sold with; null until one is linked. Paid plans only. */
+  monthlyPrice: PriceLinkView | null;
+  /** The price of the yearly slot; null until linked, and always null on a version without a yearly amount. */
+  yearlyPrice: PriceLinkView | null;
+  /**
+   * Whether the version can be sold: every slot it has an entered amount for is linked to a price that is exactly that
+   * price now (no drift). A version without a yearly amount needs no yearly price.
+   */
+  sellable: boolean;
 };
 
 export type PlanView = PlanMetadata & {
   planKey: string;
   kind: PlanKind;
   archived: boolean;
+  /** The Paddle product the plan's prices belong to: set by the first price that is linked (#439). */
+  paddleProductId: string | null;
   /** Newest first. Empty for a `contact` plan. */
   versions: PlanVersionView[];
 };

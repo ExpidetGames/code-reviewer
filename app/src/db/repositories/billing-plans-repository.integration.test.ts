@@ -94,6 +94,8 @@ describe.each(ENGINES)("the billing plans repository on $name", (engine) => {
         archivedAt: null,
         createdAt: T0.toISOString(),
         updatedAt: T0.toISOString(),
+        paddleProductId: null,
+        paddleProductEnv: null,
       });
       expect(await repository.get("team")).toEqual(plan);
       expect(await repository.get("nope")).toBeUndefined();

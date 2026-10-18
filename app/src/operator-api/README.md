@@ -90,7 +90,7 @@ without one (the credential is checked before the path, so the path is not revea
 `OPERATOR_API_TOKEN`) it is the plain `404` of the platform. The tier configuration is neither read nor stored. This is a **documented breaking change** of version 1 (ADR 0005, decision C1;
 `contracts/README.md`, "The removal of `/model-tiers`", has the decision and the compatibility table). There is no facade
 and no `410`: the route has no effect since #432, so a write to it would only look as if it did something. The setting
-`managed_model_tiers` was turned into catalog entries by the migration `20261018160000_migrate_model_tiers_to_catalog.ts`
+`managed_model_tiers` was turned into catalog entries by the migration `20261018170000_migrate_model_tiers_to_catalog.ts`
 and stays in the database, unread, until a later migration removes it. There is no operator API for the catalog (C8).
 
 ### The PUT body of the entitlements
