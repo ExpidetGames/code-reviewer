@@ -118,6 +118,9 @@ export function createRunnerApi(deps: RunnerApiDeps): RunnerApi {
             ...(parsed.value.maxRunning === undefined
               ? {}
               : { maxRunning: parsed.value.maxRunning }),
+            ...(parsed.value.llmProviders === undefined
+              ? {}
+              : { llmProviders: parsed.value.llmProviders }),
           },
         );
       } catch (error) {

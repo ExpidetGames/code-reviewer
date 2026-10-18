@@ -43,11 +43,11 @@ export type ReportDeps = {
    */
   claimedKeys: Pick<ClaimedKeys, "keysOf" | "modelsOf">;
   /**
-   * Whether the job ran on a managed tier (its usage record names one), and every model id the operator has
-   * configured for the tiers right now (#280). The remembered model of the job is not enough: its row may be
-   * unreadable, and the runner may spell the model differently.
+   * Whether the job ran on the operator's key (its usage record says so), and every model id of every catalog entry,
+   * whatever its status (#280, #432). The remembered model of the job is not enough: its row may be unreadable, the
+   * runner may spell the model differently, and the result may name another entry's model.
    */
-  tierModels: (
+  managedModels: (
     job: Job,
   ) => Promise<{ managed: boolean; models: readonly string[] }>;
   /**
@@ -81,13 +81,13 @@ export function mapRunnerErrorCode(code: string): string {
 }
 
 /**
- * The result without the model of a managed tier (#280): `usage.model` is not reported (null) whatever the runner calls
+ * The result without the model of a catalog entry (#280, #432): `usage.model` is not reported (null) whatever the runner calls
  * the model, and the ids become `[model]` in the text fields at any length (the generic rule that follows ignores
  * secrets shorter than a credential could be). The link to the comment is left alone: the app builds it from GitHub
  * data, it never carries a model, and a short id that also occurs in a repository name would break the link. `hide`
- * is whether the job ran on a tier.
+ * is whether the job ran on the operator's key.
  */
-function withoutTierModel(
+function withoutManagedModel(
   result: RunnerResult,
   models: readonly string[],
   hide: boolean,
@@ -211,10 +211,14 @@ export async function finishJob(
   // remembered with its keys, so it is taken out whichever app instance serves the completion and whatever the
   // operator changed since; the tokens and the cost of the usage stay.
   const remembered = await deps.claimedKeys.modelsOf(jobId);
-  const tier = await deps.tierModels(job);
-  const models = [...new Set([...remembered, ...tier.models])];
+  const managed = await deps.managedModels(job);
+  const models = [...new Set([...remembered, ...managed.models])];
   const stored = redactResult(
-    withoutTierModel(reported, models, tier.managed || remembered.length > 0),
+    withoutManagedModel(
+      reported,
+      models,
+      managed.managed || remembered.length > 0,
+    ),
     [
       ...(await deps.knownSecrets(job.workspaceId)),
       ...(await deps.claimedKeys.keysOf(jobId)),
