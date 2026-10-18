@@ -29,7 +29,7 @@ import {
   type PaddleClient,
   type PaddlePrice,
 } from "./paddle-client.ts";
-import type { PriceRefusal } from "./price-errors.ts";
+import type { PriceReadFailure, PriceRefusal } from "./price-errors.ts";
 import { checkPrice, factsOf, trialDaysOf } from "./price-rules.ts";
 import { readBillingSettings } from "./settings.ts";
 
@@ -303,17 +303,29 @@ export function createBillingPricesService({
       if (rows.length === 0) return { ok: true };
       const made = await storedClient(env);
       if (!made.ok) return { ok: false, ...made.refusal };
+      // A price that Paddle cannot answer does not keep the others from being read: each one is updated or named.
+      const failures: PriceReadFailure[] = [];
       for (const row of rows) {
         if (row.paddlePriceId === null) continue;
         let price: PaddlePrice;
         try {
           price = await made.client.getPrice(row.paddlePriceId);
         } catch (error) {
-          return { ok: false, ...paddleRefusal(error) };
+          const refusal = paddleRefusal(error);
+          failures.push({
+            paddlePriceId: row.paddlePriceId,
+            code: refusal.code,
+          });
+          // A refused key fails every read the same way.
+          if (refusal.code === "paddle_key_rejected") break;
+          continue;
         }
         await prices.refresh(row.id, snapshotOf(price));
       }
-      return { ok: true };
+      const first = failures[0];
+      return first === undefined
+        ? { ok: true }
+        : { ok: false, code: first.code, failures };
     },
   };
 }

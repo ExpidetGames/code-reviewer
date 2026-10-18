@@ -118,7 +118,21 @@ export function PlanPrices({
     const result = await request;
     setPending(false);
     if (!result.ok) {
-      setFailure(describePriceDifference(result.code, result.values ?? {}));
+      // A refresh that could not read some prices names each one (its id is the field of the issue).
+      const unread = result.issues.filter((issue) =>
+        issue.field.startsWith("pri_"),
+      );
+      setFailure(
+        unread.length === 0
+          ? describePriceDifference(result.code, result.values ?? {})
+          : `${unread
+              .map(
+                (issue) => `${issue.field}: ${describePlanFailure(issue.code)}`,
+              )
+              .join(
+                " ",
+              )} The other prices were read again. Reload the page to see them.`,
+      );
       return;
     }
     after?.();

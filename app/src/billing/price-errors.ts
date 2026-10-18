@@ -33,6 +33,12 @@ export const PRICE_LINK_ERROR_CODES = [
 ] as const;
 export type PriceLinkErrorCode = (typeof PRICE_LINK_ERROR_CODES)[number];
 
+/** A price a refresh could not read: which one, and why (the code of the failure, never Paddle's text). */
+export type PriceReadFailure = {
+  paddlePriceId: string;
+  code: PriceRefusal["code"];
+};
+
 /** What a refused link or refresh reports. `plan_not_found`, `plan_archived` and `plan_changed` are the plan codes. */
 export type PriceRefusal = {
   code:
@@ -51,6 +57,8 @@ export type PriceRefusal = {
   /** For a mismatch: what the version holds and what Paddle says. */
   entered?: string;
   paddle?: string;
+  /** For a refresh that could not read every price: each price that failed. `code` is the first one's. */
+  failures?: PriceReadFailure[];
 };
 
 type RuleStatus = Record<PriceRuleErrorCode, number>;

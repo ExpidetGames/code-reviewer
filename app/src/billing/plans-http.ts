@@ -105,6 +105,15 @@ function fromPriceRefusal(result: PriceRefusal): Response {
           field: result.field,
           issues: [{ field: result.field, code: result.code }],
         }),
+    // A refresh that could not read some prices: one issue per price, its id as the field.
+    ...(result.failures === undefined
+      ? {}
+      : {
+          issues: result.failures.map((failure) => ({
+            field: failure.paddlePriceId,
+            code: failure.code,
+          })),
+        }),
     // The two values of a mismatch, in minor units for an amount: what the version holds and what Paddle says.
     ...(result.entered === undefined ? {} : { entered: result.entered }),
     ...(result.paddle === undefined ? {} : { paddle: result.paddle }),

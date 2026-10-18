@@ -757,6 +757,87 @@ describe.each(ENGINES)(
       },
     );
 
+    // #439-T04 (review of #468, N7)
+    it_(
+      "goes on with the other prices when Paddle fails for one, and reports which price failed",
+      async () => {
+        const t = await start();
+        const monthly = await t.makePrice();
+        const yearly = await t.yearlyPrice();
+        await t.link("month", monthly.id);
+        await t.link("year", yearly.id);
+        const before = (await t.priceRows()).find(
+          (row) => row.paddle_price_id === monthly.id,
+        );
+        await t.editAtPaddle(monthly.id, {
+          unit_price: { amount: "1500", currency_code: "USD" },
+        });
+        await t.editAtPaddle(yearly.id, {
+          unit_price: { amount: "15000", currency_code: "USD" },
+        });
+        // Paddle fails for the monthly price only.
+        t.fake.faults.failWith(
+          { method: "GET", path: `/prices/${monthly.id}` },
+          500,
+          {
+            times: 1,
+          },
+        );
+
+        const result = refused(await t.prices.refresh("team"));
+
+        expect(result).toMatchObject({
+          code: "paddle_unavailable",
+          failures: [{ paddlePriceId: monthly.id, code: "paddle_unavailable" }],
+        });
+        const rows = await t.priceRows();
+        expect(
+          rows.find((row) => row.paddle_price_id === yearly.id),
+          "the price after the failing one was read",
+        ).toMatchObject({ unit_amount_minor: "15000" });
+        expect(
+          rows.find((row) => row.paddle_price_id === monthly.id),
+          "the failing price keeps what it had",
+        ).toEqual(before);
+        // The next refresh finds Paddle well again and reports nothing.
+        expect(await t.prices.refresh("team")).toEqual({ ok: true });
+        expect((await t.current()).monthlyPrice?.amount).toBe("1500");
+      },
+    );
+
+    // #439-T04 (review of #468, N7)
+    it_(
+      "names every price that failed, and stops at a refused key because every other read would fail the same",
+      async () => {
+        const t = await start();
+        const monthly = await t.makePrice();
+        const yearly = await t.yearlyPrice();
+        await t.link("month", monthly.id);
+        await t.link("year", yearly.id);
+
+        t.fake.faults.failWith({ method: "GET", path: /^\/prices\// }, 500, {
+          times: 2,
+        });
+        const both = refused(await t.prices.refresh("team"));
+        // Rows saved in the same instant come in the order of their ids: compare as sets.
+        expect(
+          both.failures?.map((failure) => failure.paddlePriceId).sort(),
+        ).toEqual([monthly.id, yearly.id].sort());
+
+        const reads = t.fake.requests().length;
+        t.fake.faults.failWith({ method: "GET", path: /^\/prices\// }, 403, {
+          times: 5,
+        });
+        const rejected = refused(await t.prices.refresh("team"));
+        expect(rejected.code).toBe("paddle_key_rejected");
+        expect(rejected.failures).toHaveLength(1);
+        expect(
+          t.fake.requests().length - reads,
+          "one read, then it stopped",
+        ).toBe(1);
+      },
+    );
+
     // #439-T09
     it_(
       "answers a rate limit, a refused key and a failing Paddle with their own codes and stores nothing",

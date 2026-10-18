@@ -370,4 +370,32 @@ describe.each(ENGINES)("the price routes on $name", (engine) => {
       });
     },
   );
+  // #439-T04 (review of #468, N7)
+  it_(
+    "answer a refresh in which Paddle failed for one price with the code, and one issue per failed price",
+    async () => {
+      const t = await start();
+      await t.setUp();
+      const monthly = await t.price();
+      await t.handlers.change(link(monthly.id), "team");
+      t.fake.faults.failWith(
+        { method: "GET", path: `/prices/${monthly.id}` },
+        500,
+        {
+          times: 1,
+        },
+      );
+
+      const response = await t.handlers.change(
+        put({ refreshPrices: true }),
+        "team",
+      );
+
+      expect(response.status).toBe(502);
+      expect(await response.json()).toMatchObject({
+        error: "paddle_unavailable",
+        issues: [{ field: monthly.id, code: "paddle_unavailable" }],
+      });
+    },
+  );
 });

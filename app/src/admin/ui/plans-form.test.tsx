@@ -994,6 +994,34 @@ describe("the Paddle prices of a plan version", () => {
     );
   });
 
+  // #439-T04 (review of #468, N7)
+  it("names the prices a refresh could not read, with the reason of each", async () => {
+    const { api: mock } = api({
+      ok: false,
+      status: 502,
+      code: "paddle_unavailable",
+      issues: [
+        { field: "pri_01fakeaaaa", code: "paddle_unavailable" },
+        { field: "pri_01fakebbbb", code: "price_not_found" },
+      ],
+    });
+    const { user, prices } = await openPrices(
+      teamWith({ monthlyPrice: MONTHLY_PRICE }),
+      mock,
+    );
+
+    await user.click(
+      prices.getByRole("button", { name: "Refresh from Paddle" }),
+    );
+
+    expect(
+      await prices.findByText(
+        /pri_01fakeaaaa: Paddle failed to answer.*pri_01fakebbbb: Paddle does not know this price/,
+      ),
+    ).toBeTruthy();
+    expect(prices.getByText(/Reload the page to see them/)).toBeTruthy();
+  });
+
   it("offers no refresh while no price is linked", async () => {
     const { api: mock } = api();
     const { prices } = await openPrices(teamWith({}), mock);
