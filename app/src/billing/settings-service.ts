@@ -38,6 +38,7 @@ import type {
   BillingView,
 } from "../admin/ui/billing-view.ts";
 import { formatTimestamp } from "../db/codecs.ts";
+import { lockDefaultEntitlements } from "../db/entitlements-lock.ts";
 import {
   createInstanceSettingsRepository,
   type InstanceSettingWithMeta,
@@ -167,11 +168,11 @@ export function createBillingSettingsService({
   type Stored = InstanceSettingWithMeta<"billing_settings"> | undefined;
 
   /** The settings and the row they came from: what a later write is conditional on. */
-  async function readCurrent(): Promise<{
+  async function readCurrent(repository = settingsRepository): Promise<{
     settings: BillingSettings;
     stored: Stored;
   }> {
-    const stored = await settingsRepository.getWithMeta("billing_settings");
+    const stored = await repository.getWithMeta("billing_settings");
     return { settings: readBillingSettings(stored?.value), stored };
   }
 
@@ -321,22 +322,34 @@ export function createBillingSettingsService({
 
   /**
    * Switching off always wins: a change in between is read again, a few times. `was_off` is a billing that never was on
-   * (nothing is written), `changed` is a settings row that kept changing under it.
+   * (nothing is written), `changed` is a settings row that kept changing under it. The switch and the removal of a default
+   * that billing wrote are one transaction under the lock of the default (#438): the writers of the default read the
+   * switch under the same lock, so no default with the billing marker is left behind a switch that is off, whether the
+   * process ends in between or another request seeds at the same time. A billing that is already off is cleaned the same way.
    */
   async function flipOff(
     adminId: string,
   ): Promise<"switched_off" | "was_off" | "changed"> {
     for (let attempt = 0; attempt < SWITCH_OFF_ATTEMPTS; attempt += 1) {
-      const { settings, stored } = await readCurrent();
-      // Never configured and never on: nothing to write.
-      if (!settings.enabled) return "was_off";
-      if (
-        await writeIfUnchanged(adminId, stored, {
-          ...settings,
-          enabled: false,
-        })
-      )
-        return "switched_off";
+      const outcome = await db.transaction().execute(async (trx) => {
+        await lockDefaultEntitlements(trx);
+        const repository = createInstanceSettingsRepository(trx);
+        const { settings, stored } = await readCurrent(repository);
+        if (settings.enabled) {
+          const written = await repository.setIfUnchanged(
+            "billing_settings",
+            stored,
+            { ...settings, enabled: false },
+            adminId,
+          );
+          if (!written) return "changed" as const;
+        }
+        await plans?.release(trx);
+        return settings.enabled
+          ? ("switched_off" as const)
+          : ("was_off" as const);
+      });
+      if (outcome !== "changed") return outcome;
     }
     return "changed";
   }
@@ -497,10 +510,9 @@ export function createBillingSettingsService({
           issues: [{ field: "enabled", code: "body_invalid" }],
         };
       if (!enabled) {
+        // The default entitlements return to the operator (#438), in the same transaction as the switch.
         const result = await flipOff(adminId);
         if (result === "changed") return CHANGED;
-        // The default entitlements return to the operator (#438).
-        if (result === "switched_off") await plans?.release();
         return { ok: true };
       }
       const { settings, stored } = await readCurrent();
@@ -527,22 +539,24 @@ export function createBillingSettingsService({
         missing.push("connection_check_failed");
       if (missing.length > 0)
         return { ok: false, error: "billing_incomplete", missing };
-      // Exactly the settings that were checked, or nothing.
-      if (
-        !(await writeIfUnchanged(adminId, stored, {
-          ...settings,
-          enabled: true,
-        }))
-      )
-        return CHANGED;
-      if (plans === undefined) return { ok: true };
-      try {
-        await plans.enable(adminId);
-      } catch (error) {
-        // Billing must not be on without the Free plan as the default of every workspace: put the switch back.
-        await flipOff(adminId);
-        throw error;
-      }
+      // Exactly the settings that were checked, or nothing. The switch and the seeding of the Free plan with the default
+      // it writes are one transaction under the lock of the default (#438): a process that ends in between leaves billing
+      // off and nothing seeded, and a switch-off that comes in between waits and then removes what was seeded.
+      const switchedOn = await db.transaction().execute(async (trx) => {
+        await lockDefaultEntitlements(trx);
+        const written = await createInstanceSettingsRepository(
+          trx,
+        ).setIfUnchanged(
+          "billing_settings",
+          stored,
+          { ...settings, enabled: true },
+          adminId,
+        );
+        if (!written) return false;
+        await plans?.enable(adminId, trx);
+        return true;
+      });
+      if (!switchedOn) return CHANGED;
       return { ok: true };
     },
   };

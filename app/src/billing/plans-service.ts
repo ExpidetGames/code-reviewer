@@ -72,10 +72,17 @@ export type BillingPlansService = {
     archived: boolean,
   ): Promise<PlansResult<{ plan: PlanView }>>;
   deletePlan(planKey: string): Promise<PlansResult>;
-  /** Billing was switched on: seeds the Free plan the first time and writes its current version as the default. */
-  enable(adminId: string): Promise<void>;
-  /** Billing was switched off: the default entitlements return to the operator. */
-  release(): Promise<void>;
+  /**
+   * Billing is being switched on: seeds the Free plan the first time and writes its current version as the default. Given
+   * the transaction that flips the switch (`executor`), it works inside it, so the switch and the seeding commit together
+   * or not at all; without one it runs in a transaction of its own.
+   */
+  enable(adminId: string, executor?: Kysely<Database>): Promise<void>;
+  /**
+   * Billing is being switched off: the default entitlements return to the operator (a default that billing wrote is
+   * removed). Given the transaction that flips the switch off, it works inside it.
+   */
+  release(executor?: Kysely<Database>): Promise<void>;
 };
 
 export type BillingPlansServiceOptions = {
@@ -202,7 +209,10 @@ export function createBillingPlansService({
     return toPlanView(plan, await versions.list(plan.id));
   }
 
-  /** The current version of the Free plan becomes the default entitlements of every workspace without a row. */
+  /**
+   * The current version of the Free plan becomes the default entitlements of every workspace without a row, while
+   * billing is on: the writer reads the switch in this transaction and writes nothing for a billing that is off.
+   */
   async function writeFreeDefault(
     { plans, versions, settings }: Repositories,
     adminId: string,
@@ -435,48 +445,50 @@ export function createBillingPlansService({
       return { ok: true };
     },
 
-    async enable(adminId) {
-      const seed = () =>
-        db.transaction().execute(async (trx) => {
-          const repos = repositories(trx);
-          let free = (await repos.plans.list()).find(
-            (plan) => plan.kind === "free",
-          );
-          free ??= await repos.plans.insert(
-            {
-              planKey: FREE_PLAN_KEY,
-              kind: "free",
-              metadata: {
-                name: FREE_PLAN_SEED.name,
-                description: FREE_PLAN_SEED.description,
-                sort: FREE_PLAN_SEED.sort,
-                offered: true,
-                popular: false,
-                contactTarget: null,
-              },
+    async enable(adminId, executor) {
+      const seed = async (trx: Kysely<Database>) => {
+        const repos = repositories(trx);
+        let free = (await repos.plans.list()).find(
+          (plan) => plan.kind === "free",
+        );
+        free ??= await repos.plans.insert(
+          {
+            planKey: FREE_PLAN_KEY,
+            kind: "free",
+            metadata: {
+              name: FREE_PLAN_SEED.name,
+              description: FREE_PLAN_SEED.description,
+              sort: FREE_PLAN_SEED.sort,
+              offered: true,
+              popular: false,
+              contactTarget: null,
             },
+          },
+          adminId,
+        );
+        if ((await repos.versions.current(free.id)) === undefined)
+          await repos.versions.createNext(
+            free.id,
+            FREE_PLAN_SEED.terms,
             adminId,
+            0,
           );
-          if ((await repos.versions.current(free.id)) === undefined)
-            await repos.versions.createNext(
-              free.id,
-              FREE_PLAN_SEED.terms,
-              adminId,
-              0,
-            );
-          await writeFreeDefault(repos, adminId);
-        });
+        await writeFreeDefault(repos, adminId);
+      };
+      // Inside the transaction of the switch: it holds the lock of the default, so no other seeding runs at the same time
+      // and there is nothing to look at again (a unique violation would end the transaction anyway).
+      if (executor !== undefined) return seed(executor);
       try {
-        await seed();
+        await db.transaction().execute(seed);
       } catch (error) {
-        // Two admins switching billing on at once: the other one seeded the Free plan first. Look again, once.
+        // Two seedings at once: the other one seeded the Free plan first. Look again, once.
         if (refusalOf(error) === undefined) throw error;
-        await seed();
+        await db.transaction().execute(seed);
       }
     },
 
-    async release() {
-      await repositories(db).settings.removeBillingDefaultEntitlements();
+    async release(executor = db) {
+      await repositories(executor).settings.removeBillingDefaultEntitlements();
     },
   };
 }

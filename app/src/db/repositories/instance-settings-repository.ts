@@ -29,7 +29,10 @@ import {
   readEntitlements,
   validateEntitlements,
 } from "../../workspaces/entitlements-validation.ts";
-import type { BillingSettings } from "../../billing/settings.ts";
+import {
+  readBillingSettings,
+  type BillingSettings,
+} from "../../billing/settings.ts";
 import type { StoredGithubApp } from "../../github-config/settings.ts";
 import type { CatalogDefaults } from "../../model-catalog/entries.ts";
 import type { ManagedModelTiers } from "../../model-tiers/tiers.ts";
@@ -166,14 +169,27 @@ export type InstanceSettingsRepository = {
    * default of every workspace without a row while it is on (ADR 0005, 2.9, 2.11). Validated like any write; the type
    * states `modelAccess` (the plan-to-entitlements function cannot build a payload without it), and the period start
    * never moves back: an earlier one is replaced by the stored one. A write of the operator through `set` stores no marker.
+   * The switch is read in the same transaction, under the lock of the default: a billing that is off writes nothing and
+   * the answer is false, so a default that carries the marker cannot appear behind a switch that went off in between.
    */
   setBillingDefaultEntitlements(
     value: EntitlementsData & { modelAccess: ModelAccess },
     updatedBy: string | null,
-  ): Promise<void>;
+  ): Promise<boolean>;
+  /**
+   * #438: the write of the operator (the operator API) that refuses while billing owns the default. The switch is read in
+   * the transaction of the write, under the lock of the default, so a billing that is switched on in between cannot have
+   * its default replaced by an unmarked one. False when billing is on (nothing is written); validated like `set`, which
+   * throws an `EntitlementsError` for what it refuses.
+   */
+  setDefaultEntitlementsUnlessBilling(
+    value: EntitlementsData,
+    updatedBy: string | null,
+  ): Promise<boolean>;
   /**
    * #438: removes the default when billing wrote it (billing switched off again: the default returns to the operator,
-   * who has none). Leaves a default of the operator alone. True when a default was removed.
+   * who has none). Leaves a default of the operator alone. True when a default was removed. Called in the transaction
+   * that flips the switch off (a repository made over a transaction), so no billing default outlives the switch.
    */
   removeBillingDefaultEntitlements(): Promise<boolean>;
   /** Inserts the setting or replaces its value, recording who and when. */
@@ -287,17 +303,37 @@ export function createInstanceSettingsRepository(
    * stored one under a lock (an advisory transaction lock on Postgres, where the value is JSON and there may
    * be no row to lock; SQLite's transactions take the write lock up front).
    */
+  async function billingSwitchedOn(trx: Kysely<Database>): Promise<boolean> {
+    const row = await trx
+      .selectFrom("instance_settings")
+      .select("value")
+      .where("key", "=", "billing_settings")
+      .executeTakeFirst();
+    if (row === undefined) return false;
+    const decoded = tryDecodeJson(row.value);
+    return decoded.ok && readBillingSettings(decoded.value).enabled;
+  }
+
+  /**
+   * Who owns the default is decided under the lock, in the transaction of the write (#438): `billing` writes only while
+   * the switch is on, `operator_unless_billing` only while it is off, `operator` whatever the switch says. False when the
+   * write was not made for that reason.
+   */
   async function setDefaultEntitlements(
     value: EntitlementsData,
     updatedBy: string | null,
-    writer: "operator" | "billing" = "operator",
-  ): Promise<void> {
+    writer: "operator" | "operator_unless_billing" | "billing" = "operator",
+  ): Promise<boolean> {
     const moment = now();
     const checked = validateEntitlements(value, moment);
     if (!checked.ok) throw new EntitlementsError(checked.code, checked.field);
     const key = "default_entitlements";
-    const write = async (trx: Kysely<Database>) => {
+    const write = async (trx: Kysely<Database>): Promise<boolean> => {
       await lockDefaultEntitlements(trx);
+      if (writer !== "operator") {
+        const on = await billingSwitchedOn(trx);
+        if (on !== (writer === "billing")) return false;
+      }
       const stored = await trx
         .selectFrom("instance_settings")
         .select("value")
@@ -356,6 +392,7 @@ export function createInstanceSettingsRepository(
           }),
         )
         .execute();
+      return true;
     };
     return db.isTransaction ? write(db) : db.transaction().execute(write);
   }
@@ -385,6 +422,9 @@ export function createInstanceSettingsRepository(
   return {
     setBillingDefaultEntitlements: (value, updatedBy) =>
       setDefaultEntitlements(value, updatedBy, "billing"),
+
+    setDefaultEntitlementsUnlessBilling: (value, updatedBy) =>
+      setDefaultEntitlements(value, updatedBy, "operator_unless_billing"),
 
     removeBillingDefaultEntitlements: removeBillingDefault,
 
@@ -499,11 +539,13 @@ export function createInstanceSettingsRepository(
     },
 
     async set(key, value, updatedBy) {
-      if (key === "default_entitlements")
-        return setDefaultEntitlements(
+      if (key === "default_entitlements") {
+        await setDefaultEntitlements(
           value as InstanceSettingValues["default_entitlements"],
           updatedBy,
         );
+        return;
+      }
       const row = {
         key,
         value: encodeJson(value),

@@ -5,7 +5,10 @@
 // is exactly what it was.
 import { describe, expect, it } from "vitest";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
+import { createBillingPlansService } from "../billing/plans-service.ts";
+import { setBillingSwitch } from "../test-support/billing-switch.ts";
 import { startOperatorApiHarness } from "../test-support/operator-api-harness.ts";
+import { insertUser } from "../test-support/users.ts";
 
 const DEFAULT_PATH = "/api/operator/v1/entitlements/default";
 
@@ -106,5 +109,36 @@ describe("the default entitlements through the operator API", () => {
       error: "entitlements_invalid",
       field: "source",
     });
+  });
+
+  // #438-N3
+  it("are refused by the write itself when billing was switched on after the check that said off", async () => {
+    // The check of the request read "off" (the stub) and billing was switched on, and seeded its default, before the
+    // write: the write has to read the switch again, in its own transaction.
+    const harness = await startOperatorApiHarness({ billingOn: false });
+    await insertUser(harness.db, { id: "admin-1", isInstanceAdmin: true });
+    await setBillingSwitch(harness.db, true);
+    await createBillingPlansService({ db: harness.db }).enable("admin-1");
+    const settings = createInstanceSettingsRepository(harness.db);
+    const seeded = await settings.getDefaultEntitlements();
+    expect(seeded).toMatchObject({ planLabel: "Free", source: "billing" });
+
+    const response = await harness.call("PUT", DEFAULT_PATH, { body: BODY });
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      error: "entitlements_default_managed_by_billing",
+    });
+    expect(await settings.getDefaultEntitlements()).toEqual(seeded);
+  });
+
+  // #438-N3
+  it("are written when the switch is off in the database, whatever else is stored", async () => {
+    const harness = await startOperatorApiHarness({ billingOn: false });
+    await setBillingSwitch(harness.db, false);
+
+    const response = await harness.call("PUT", DEFAULT_PATH, { body: BODY });
+
+    expect(response.status).toBe(200);
   });
 });

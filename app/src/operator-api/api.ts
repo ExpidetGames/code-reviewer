@@ -78,9 +78,11 @@ export type OperatorApiDeps = {
   entitlementsFor: (workspaceId: string) => WorkspaceEntitlementsRepository;
   settings: InstanceSettingsRepository;
   /**
-   * #438: whether the billing switch is on right now (`isBillingSwitchedOn`: the switch only, the operator API has no way to the secret store). While it is, the default entitlements are written by the billing
-   * module from the Free plan, and a write through this API is refused `entitlements_default_managed_by_billing`. Asked
-   * only by a write of the default, never by a read or a workspace row.
+   * #438: whether the billing switch is on right now (`isBillingSwitchedOn`: the switch only, the operator API has no way
+   * to the secret store). While it is, the default entitlements are written by the billing module from the Free plan, and
+   * a write through this API is refused `entitlements_default_managed_by_billing`. Asked only by a write of the default,
+   * never by a read or a workspace row. It answers early; the write of the default reads the switch again in its own
+   * transaction (`setDefaultEntitlementsUnlessBilling`), which is what makes the refusal hold against a switch-on in between.
    */
   billingOn: () => Promise<boolean>;
   /** The settled usage records of every workspace (the feed). */
@@ -274,19 +276,21 @@ export function createOperatorApi(deps: OperatorApiDeps): OperatorApi {
 
     const body = await readJson(request);
     if (!body.ok) return body.response;
-    // #438: billing owns the default while it is on, whatever the body says.
-    if (await deps.billingOn()) {
+    // #438: billing owns the default while it is on, whatever the body says. This read answers a wrong body early; the
+    // write reads the switch again in its own transaction, so billing switched on in between is refused too.
+    const managedByBilling = () => {
       logWrite("put", "default", [], "entitlements_default_managed_by_billing");
       return errorResponse(409, "entitlements_default_managed_by_billing");
-    }
+    };
+    if (await deps.billingOn()) return managedByBilling();
     const before = await deps.settings.getDefaultEntitlements();
     try {
-      await deps.settings.set(
-        "default_entitlements",
-        // Not yet checked: `set` validates, and refuses with an EntitlementsError.
+      const written = await deps.settings.setDefaultEntitlementsUnlessBilling(
+        // Not yet checked: the write validates, and refuses with an EntitlementsError.
         withPeriodStart(body.value, before) as EntitlementsData,
         null,
       );
+      if (!written) return managedByBilling();
     } catch (error) {
       if (!(error instanceof EntitlementsError)) throw error;
       logWrite("put", "default", [], error.code);

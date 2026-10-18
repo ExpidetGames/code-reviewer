@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import { createCatalogRepository } from "../db/repositories/catalog-repository.ts";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
 import { createWorkspaceEntitlementsRepository } from "../db/repositories/workspace-entitlements-repository.ts";
+import { setBillingSwitch } from "../test-support/billing-switch.ts";
 import { createTestDatabase } from "../test-support/test-database.ts";
 import { insertUser } from "../test-support/users.ts";
 import { addWorkspace } from "../test-support/workspaces.ts";
@@ -80,6 +81,8 @@ async function start() {
   const { db } = await createTestDatabase();
   let now = T0;
   const admin = await insertUser(db, { id: "admin-1", isInstanceAdmin: true });
+  // The service runs while billing is on, and the writer of the default reads the switch (#438).
+  await setBillingSwitch(db, true);
   const service = createBillingPlansService({ db, now: () => now });
   const settings = createInstanceSettingsRepository(db, () => now);
   return {
@@ -939,6 +942,26 @@ describe("the Free plan", () => {
       planLabel: "Starter",
       source: "billing",
     });
+  });
+
+  // #438-N2
+  it("saves a Free version that arrives after billing was switched off without writing the default", async () => {
+    const started = await start();
+    await started.service.enable(started.admin);
+    await started.service.release();
+    await setBillingSwitch(started.db, false);
+
+    const saved = await started.service.saveTerms(started.admin, "free", {
+      basedOnVersion: 1,
+      terms: terms({
+        monthlyAmountMinor: null,
+        modelAccess: { catalogEntries: [] },
+        limits: { ...LIMITS, diffRunsPerPeriod: 11 },
+      }),
+    });
+
+    expect(saved).toMatchObject({ ok: true });
+    expect(await started.settings.getDefaultEntitlements()).toBeUndefined();
   });
 
   it("refuses a Free version when billing was never enabled", async () => {

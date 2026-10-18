@@ -5,6 +5,7 @@
 // writer sets it: a write of the operator (the API, the portal) stores no marker, and a marker in its input is refused.
 import { describe, expect, it } from "vitest";
 import { planEntitlements } from "../../billing/plan-entitlements.ts";
+import { setBillingSwitch } from "../../test-support/billing-switch.ts";
 import { createTestDatabase } from "../../test-support/test-database.ts";
 import type { EntitlementsData } from "../../workspaces/entitlements.ts";
 import { EntitlementsError } from "../../workspaces/entitlements-validation.ts";
@@ -44,6 +45,8 @@ const OPERATOR_DEFAULT: EntitlementsData = {
 
 async function start() {
   const { db } = await createTestDatabase();
+  // The billing writer works while billing is on: it reads the switch in its own transaction (#438).
+  await setBillingSwitch(db, true);
   return createInstanceSettingsRepository(db, () => NOW);
 }
 
