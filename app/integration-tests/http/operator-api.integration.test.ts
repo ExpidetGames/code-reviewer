@@ -6,10 +6,10 @@
 // operator-api-route-files.integration.test.ts.
 import { describe, expect, it } from "vitest";
 import { createSecretStore } from "../../src/secrets/store.ts";
-import {
-  DEFAULT_LLM_PROVIDER,
-  llmProviderDescriptors,
-} from "../../src/llm/providers/index.ts";
+import { DEFAULT_LLM_PROVIDER } from "../../src/llm/providers/index.ts";
+import { createFakeAdapter } from "../../src/llm/providers/fake-adapter.ts";
+import { openrouterDescriptor } from "../../src/llm/providers/openrouter/descriptor.ts";
+import { createProviderRegistry } from "../../src/llm/providers/registry.ts";
 import type { SecretName } from "../../src/secrets/names.ts";
 import {
   NotFoundMarker,
@@ -878,34 +878,37 @@ describe("the operator's own LLM key", () => {
   });
 
   // #427-T03
-  it("has no call for the key of any provider either: whoever holds the API token can neither read nor write one", async () => {
+  it("has no call for the key of any provider either, and no answer holds the key of either provider: whoever holds the API token can neither read nor write one", async () => {
     const h = await startOperatorApiHarness();
     const secrets = createSecretStore({
       db: h.db,
       appSecret: "operator-api-test-app-secret-0123456789-01",
     });
-    // A key of every registered provider is stored, by the name its adapter gives it.
-    for (const provider of llmProviderDescriptors.providers)
-      await secrets.save(
-        provider.secretNames.operator as SecretName,
-        `${KEY}-${provider.id}`,
-        { updatedBy: null, showLastFour: true },
-      );
-    const ids = llmProviderDescriptors.ids;
+    // Two providers, each with a key of its own under the name its adapter gives it. The second one exists only in
+    // this test registry, so a leak that is written for "the" provider (the first one) is not enough to pass.
+    const registry = createProviderRegistry([
+      openrouterDescriptor,
+      createFakeAdapter(),
+    ]);
+    const sentinels = registry.providers.map((provider) => ({
+      id: provider.id,
+      name: provider.secretNames.operator,
+      key: `${KEY}-${provider.id}`,
+    }));
+    for (const { name, key } of sentinels)
+      await secrets.save(name as SecretName, key, {
+        updatedBy: null,
+        showLastFour: true,
+      });
     const answers: string[] = [];
 
+    // A tripwire only: the router answers 404 for every path it does not know, so this fails if someone adds a call
+    // for a key. The proof that no key leaves the API is the reading below and `no-operator-keys.test.ts`.
     for (const path of [
       "/api/operator/v1/llm-keys",
-      "/api/operator/v1/operator-llm-keys",
-      "/api/operator/v1/providers",
-      ...ids.flatMap((id) => [
+      ...registry.ids.flatMap((id) => [
         `/api/operator/v1/llm-keys/${id}`,
         `/api/operator/v1/llm-keys/${id}/test`,
-        `/api/operator/v1/operator-llm-keys/${id}`,
-        `/api/operator/v1/providers/${id}`,
-        `/api/operator/v1/providers/${id}/key`,
-        `/api/operator/v1/secrets/${id}`,
-        `/api/operator/v1/workspaces/${h.workspaceId}/llm-keys/${id}`,
       ]),
     ])
       for (const method of ["GET", "PUT", "POST", "DELETE"]) {
@@ -917,16 +920,19 @@ describe("the operator's own LLM key", () => {
         answers.push(await response.text());
       }
 
+    // The proof: every answer the API gives with both keys stored holds neither key.
     for (const read of [
       "/api/operator/v1/workspaces",
       path(h.workspaceId),
       "/api/operator/v1/entitlements/default",
+      "/api/operator/v1/model-tiers",
       "/api/operator/v1/usage",
     ])
       answers.push(await (await h.call("GET", read)).text());
-    for (const provider of llmProviderDescriptors.providers) {
-      expect(answers.join("\n")).not.toContain(`${KEY}-${provider.id}`);
-      expect(answers.join("\n")).not.toContain(provider.secretNames.operator);
+    expect(answers.length).toBeGreaterThan(5);
+    for (const { key, name } of sentinels) {
+      expect(answers.join("\n")).not.toContain(key);
+      expect(answers.join("\n")).not.toContain(name);
     }
     expect(h.lines.join("\n")).not.toContain(KEY);
   });
