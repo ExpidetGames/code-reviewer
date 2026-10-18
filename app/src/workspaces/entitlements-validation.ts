@@ -30,7 +30,10 @@ export const ENTITLEMENT_ERROR_CODES = [
   "period_start_backwards",
   "suspended_invalid",
   "suspension_code_invalid",
-  /** #428: the model access is not `{ catalogEntries }` with null or at most 100 catalog entry ids. */
+  /**
+   * #428: the model access is not `{ catalogEntries }` with null or at most 100 distinct catalog entry ids. Also the
+   * refusal of a default write that leaves `modelAccess` out over an unreadable stored default (`field` modelAccess).
+   */
   "catalog_entry_invalid",
 ] as const;
 export type EntitlementErrorCode = (typeof ENTITLEMENT_ERROR_CODES)[number];
@@ -168,7 +171,7 @@ type ModelAccessValidation =
   { ok: true; value: ModelAccess } | { ok: false; field: string };
 
 /**
- * Checks `{ catalogEntries }`: null or a list of at most 100 id-shaped strings. A missing field is every released
+ * Checks `{ catalogEntries }`: null or a list of at most 100 distinct id-shaped strings (a write refuses a repeated id). A missing field is every released
  * entry. A write refuses a key it does not know; reading ignores it (a newer app wrote it). Damaged data is refused
  * when reading too, so the entry is unreadable and grants nothing.
  */
@@ -191,6 +194,8 @@ function checkModelAccess(
       return { ok: false, field };
     ids.push(id);
   }
+  // A write refuses the same id twice (a list that repeats itself is a client bug); reading tolerates it.
+  if (!reading && new Set(ids).size !== ids.length) return { ok: false, field };
   return { ok: true, value: { catalogEntries: ids } };
 }
 

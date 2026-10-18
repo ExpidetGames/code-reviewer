@@ -563,6 +563,7 @@ describe("the model access (#428)", () => {
       { catalogEntries: [`mce_${"a".repeat(80)}`] },
     ],
     ["more than 100 ids", { catalogEntries: manyIds(101) }],
+    ["the same id twice", { catalogEntries: [ID_A, ID_B, ID_A] }],
     ["a key it does not know", { catalogEntries: null, extra: 1 }],
   ])("refuses %s with catalog_entry_invalid", (_name, modelAccess) => {
     expect(validateEntitlements(input({ modelAccess }), NOW)).toMatchObject({
@@ -633,6 +634,15 @@ describe("the model access (#428)", () => {
       ["more than 100 ids", { catalogEntries: manyIds(101) }],
     ])("reads %s as unreadable: damaged data grants no model", (_n, value) => {
       expect(readEntitlements(input({ modelAccess: value }))).toBeUndefined();
+    });
+
+    // #428-T03
+    it("reads a list with the same id twice (only a write refuses it)", () => {
+      expect(
+        readEntitlements(
+          input({ modelAccess: { catalogEntries: [ID_A, ID_A] } }),
+        ),
+      ).toMatchObject({ modelAccess: { catalogEntries: [ID_A, ID_A] } });
     });
 
     // #428-T10
