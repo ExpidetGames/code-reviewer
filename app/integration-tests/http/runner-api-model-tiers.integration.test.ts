@@ -5,6 +5,7 @@
 // configured for the project's tier and the job's review kind, never on a model the workspace named; a tier without a
 // model fails the job closed; a workspace on its own key is untouched. The model ids are operator data: they reach the
 // runner and nothing a workspace member can read.
+import { DEFAULT_LLM_PROVIDER } from "../../src/llm/providers/index.ts";
 import { describe, expect, it } from "vitest";
 import { startLlmFake } from "../../../fakes/llm/server.ts";
 import { createModelCapabilityChecker } from "../../src/llm/model-capabilities.ts";
@@ -114,7 +115,9 @@ async function start({
     env: { LLM_MODEL: "vendor/instance-model", LLM_MAX_TOKENS: "64000" },
     ...harness,
   });
-  const saved = await h.llm.operatorKey().save({ apiKey: OPERATOR_KEY }, null);
+  const saved = await h.llm
+    .operatorKey()
+    .save({ provider: DEFAULT_LLM_PROVIDER, apiKey: OPERATOR_KEY }, null);
   expect(saved.ok).toBe(true);
   if (keyMode !== null)
     await createWorkspaceEntitlementsRepository(

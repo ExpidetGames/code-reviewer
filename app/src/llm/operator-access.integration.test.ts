@@ -12,10 +12,18 @@ import { createTestDatabase } from "../test-support/test-database.ts";
 import { addWorkspace } from "../test-support/workspaces.ts";
 import type { EntitlementsData } from "../workspaces/entitlements.ts";
 import { createWorkspaceLlm } from "./assemble.ts";
+import {
+  FAKE_PROVIDER_ID,
+  createFakeAdapter,
+} from "./providers/fake-adapter.ts";
+import { openrouterDescriptor } from "./providers/openrouter/descriptor.ts";
+import { createProviderRegistry } from "./providers/registry.ts";
 
 const APP_SECRET = "operator-access-test-app-secret-0123456789-0";
 const WORKSPACE_KEY = "sk-or-v1-workspace-key-0000000000000000";
 const OPERATOR_KEY = "sk-or-v1-operator-key-1111111111111111";
+const FAKE_OPERATOR_KEY = "fk-live-operator-2222222222222222";
+const FAKE_WORKSPACE_KEY = "fk-live-workspace-3333333333333333";
 const ENV = { LLM_MODEL: "vendor/instance-model", LLM_MAX_TOKENS: "64000" };
 
 function entitlements(
@@ -38,7 +46,12 @@ function entitlements(
   };
 }
 
-async function start(options: { appSecret?: () => string } = {}) {
+async function start(
+  options: {
+    appSecret?: () => string;
+    providers?: Parameters<typeof createWorkspaceLlm>[0]["providers"];
+  } = {},
+) {
   const { db } = await createTestDatabase();
   const workspaceId = await addWorkspace(db, "alpha");
   // Every statement the assembly makes, as text, to see which tables a call touched.
@@ -54,6 +67,9 @@ async function start(options: { appSecret?: () => string } = {}) {
     db: db.withPlugin(recorder),
     appSecret: options.appSecret ?? (() => APP_SECRET),
     env: () => ENV,
+    ...(options.providers === undefined
+      ? {}
+      : { providers: options.providers }),
   });
   return {
     db,
@@ -74,7 +90,15 @@ async function start(options: { appSecret?: () => string } = {}) {
       expect(saved.ok).toBe(true);
     },
     async setOperatorKey(key = OPERATOR_KEY) {
-      const saved = await llm.operatorKey().save({ apiKey: key }, null);
+      const saved = await llm
+        .operatorKey()
+        .save({ provider: "openrouter", apiKey: key }, null);
+      expect(saved.ok).toBe(true);
+    },
+    async setOperatorKeyOf(provider: string, key: string) {
+      const saved = await llm
+        .operatorKey()
+        .save({ provider, apiKey: key }, null);
       expect(saved.ok).toBe(true);
     },
     setEntitlements: (data: EntitlementsData, id = workspaceId) =>
@@ -352,5 +376,95 @@ describe("a workspace with the key mode managed", () => {
     await t.setEntitlements(entitlements("managed"));
 
     expect(await t.llm.currentKeysFor(t.workspaceId)).toEqual([]);
+  });
+});
+
+describe("a workspace with the key mode managed and several providers", () => {
+  const providers = createProviderRegistry([
+    openrouterDescriptor,
+    createFakeAdapter(),
+  ]);
+
+  // #427-T04
+  it("fails closed with operator_key_missing for a provider without an operator key, though another provider has one", async () => {
+    const t = await start({ providers });
+    await t.setOperatorKeyOf("openrouter", OPERATOR_KEY);
+    await t.setEntitlements(entitlements("managed"));
+
+    const result = await t.llm.accessFor(t.workspaceId, FAKE_PROVIDER_ID);
+
+    expect(result).toEqual({
+      ok: false,
+      errorCode: "llm_not_configured",
+      reason: "operator_key_missing",
+      issues: [],
+    });
+    expect(JSON.stringify(result)).not.toContain(OPERATOR_KEY);
+    expect(await t.llm.summaryFor(t.workspaceId, FAKE_PROVIDER_ID)).toEqual({
+      configured: false,
+      reason: "operator_key_missing",
+    });
+  });
+
+  // #427-T04
+  it("uses the key of the provider of the job and never the key of the other one, in both directions", async () => {
+    const t = await start({ providers });
+    await t.setOperatorKeyOf("openrouter", OPERATOR_KEY);
+    await t.setOperatorKeyOf(FAKE_PROVIDER_ID, FAKE_OPERATOR_KEY);
+    await t.setEntitlements(entitlements("managed"));
+
+    expect(await t.llm.accessFor(t.workspaceId, "openrouter")).toMatchObject({
+      ok: true,
+      source: "operator",
+      access: { provider: "openrouter", apiKey: OPERATOR_KEY },
+    });
+    expect(
+      await t.llm.accessFor(t.workspaceId, FAKE_PROVIDER_ID),
+    ).toMatchObject({
+      ok: true,
+      source: "operator",
+      access: { provider: FAKE_PROVIDER_ID, apiKey: FAKE_OPERATOR_KEY },
+    });
+    // Without a provider, the default provider's key.
+    expect(await t.llm.accessFor(t.workspaceId)).toMatchObject({
+      access: { provider: "openrouter", apiKey: OPERATOR_KEY },
+    });
+  });
+
+  // #427-T04
+  it("fails closed for a provider whose key is missing even when the workspace has a key of its own for it", async () => {
+    const t = await start({ providers });
+    await t.setOperatorKeyOf("openrouter", OPERATOR_KEY);
+    await t.llm
+      .keyServiceFor(t.workspaceId)
+      .save({ provider: FAKE_PROVIDER_ID, apiKey: FAKE_WORKSPACE_KEY }, null);
+    await t.setEntitlements(entitlements("managed"));
+
+    const result = await t.llm.accessFor(t.workspaceId, FAKE_PROVIDER_ID);
+
+    expect(result).toMatchObject({ ok: false, reason: "operator_key_missing" });
+    expect(JSON.stringify(result)).not.toContain(FAKE_WORKSPACE_KEY);
+  });
+
+  // #427-T05
+  it("masks the operator's key of every provider while the workspace is managed, and none of them otherwise", async () => {
+    const t = await start({ providers });
+    await t.setOperatorKeyOf("openrouter", OPERATOR_KEY);
+    await t.setOperatorKeyOf(FAKE_PROVIDER_ID, FAKE_OPERATOR_KEY);
+    await t.llm
+      .keyServiceFor(t.workspaceId)
+      .save({ provider: FAKE_PROVIDER_ID, apiKey: FAKE_WORKSPACE_KEY }, null);
+
+    await t.setEntitlements(entitlements("own"));
+    expect(await t.llm.currentKeysFor(t.workspaceId)).toEqual([
+      FAKE_WORKSPACE_KEY,
+    ]);
+
+    await t.setEntitlements(entitlements("managed"));
+    expect(await t.llm.currentKeysFor(t.workspaceId)).toEqual([
+      FAKE_WORKSPACE_KEY,
+      OPERATOR_KEY,
+      FAKE_OPERATOR_KEY,
+    ]);
   });
 });

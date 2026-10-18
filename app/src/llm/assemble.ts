@@ -52,8 +52,8 @@ export function summarizeLlmAccess(
 export type WorkspaceLlmAssembly = {
   keyServiceFor(workspaceId: string): WorkspaceLlmKeyService;
   /**
-   * The operator's own key (the instance admin saves it; only the admin portal and this assembly use it). It is
-   * the key of a workspace whose key mode is `managed`, and of no other.
+   * The operator's own keys, one for each provider (the instance admin saves them; only the admin portal and this
+   * assembly use them). They are the keys of a workspace whose key mode is `managed`, and of no other.
    */
   operatorKey(): OperatorLlmKeyService;
   /**
@@ -68,7 +68,7 @@ export type WorkspaceLlmAssembly = {
   ): Promise<WorkspaceLlmSummary>;
   /**
    * The LLM keys that are current for this workspace right now, to mask in the result of one of its jobs: its
-   * own key of every provider, and the operator's while the workspace is `managed`. Best effort: a key that cannot
+   * own key of every provider, and the operator's key of every provider while the workspace is `managed`. Best effort: a key that cannot
    * be read is left out.
    */
   currentKeysFor(workspaceId: string): Promise<string[]>;
@@ -111,6 +111,7 @@ export function createWorkspaceLlm({
         appSecret: appSecret(),
         ...(now === undefined ? {} : { now }),
       }),
+      providers,
     });
 
   // What the key mode of the workspace's entitlements asks for, and only that: a managed job never reads the
@@ -128,7 +129,8 @@ export function createWorkspaceLlm({
     if (mode === "managed")
       return {
         keyMode: mode,
-        operatorKey: await operatorKey().forJob(),
+        provider,
+        operatorKey: await operatorKey().forJob(provider),
         defaults,
       };
     return {
@@ -167,8 +169,11 @@ export function createWorkspaceLlm({
         await readEffectiveEntitlements(db, workspaceId, now),
       );
       if (mode !== "managed") return keys;
-      const operator = await operatorKey().forJob();
-      if (operator.state === "key") keys.push(operator.apiKey);
+      const operators = operatorKey();
+      for (const id of providers.ids) {
+        const operator = await operators.forJob(id);
+        if (operator.state === "key") keys.push(operator.apiKey);
+      }
       return keys;
     },
   };

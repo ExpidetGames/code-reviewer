@@ -5,6 +5,7 @@
 // claim and the completion (the runner reports the model, repeats it in its log and in its error), and then reads
 // everything a workspace member can read - settings, the Runs list and detail, the plan page, the usage
 // records, the comments the app wrote on the pull request - and searches all of it for any model id of any tier.
+import { DEFAULT_LLM_PROVIDER } from "../../src/llm/providers/index.ts";
 import { describe, expect, it } from "vitest";
 import type { SessionUser } from "../../src/auth/access-policy.ts";
 import { createAppSettingsRepository } from "../../src/db/repositories/app-settings-repository.ts";
@@ -69,7 +70,9 @@ async function start() {
     modelTiers: TIERS,
     refusalNotices: {},
   });
-  await h.llm.operatorKey().save({ apiKey: OPERATOR_KEY }, null);
+  await h.llm
+    .operatorKey()
+    .save({ provider: DEFAULT_LLM_PROVIDER, apiKey: OPERATOR_KEY }, null);
   await createWorkspaceEntitlementsRepository(
     h.db,
     h.workspaceId,

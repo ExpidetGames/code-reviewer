@@ -71,8 +71,16 @@ export type ResolveLlmInput =
       key: WorkspaceKeyForJob;
       defaults: Defaults;
     }
-  /** The operator's key. The workspace's own key has no place here. */
-  | { keyMode: "managed"; operatorKey: OperatorKeyForJob; defaults: Defaults }
+  /**
+   * The operator's key, the one of `provider` (the provider the job is to run on; the default provider until a project
+   * can choose, #427). The workspace's own key has no place here.
+   */
+  | {
+      keyMode: "managed";
+      provider?: string;
+      operatorKey: OperatorKeyForJob;
+      defaults: Defaults;
+    }
   /** The entitlements of the workspace cannot be read. */
   | { keyMode: "unreadable"; defaults: Defaults };
 
@@ -106,6 +114,12 @@ export function resolveWorkspaceLlmAccess(
 
   if (input.keyMode === "managed") {
     const { operatorKey } = input;
+    // The operator's key of one provider is never used for another: the caller read the key of the provider asked
+    // for, and that provider must exist. One that does not has no key.
+    const wanted = input.provider ?? DEFAULT_LLM_PROVIDER;
+    const provider = providers.find(wanted)?.id;
+    if (provider === undefined || provider !== wanted)
+      return failure("operator_key_missing");
     if (operatorKey.state === "unreadable")
       return failure("operator_key_unreadable");
     if (operatorKey.state === "none") return failure("operator_key_missing");
@@ -113,8 +127,8 @@ export function resolveWorkspaceLlmAccess(
       ok: true,
       source: "operator",
       access: createLlmAccess({
-        // The operator's key is not bound to a provider: it is the default provider's.
-        provider: DEFAULT_LLM_PROVIDER,
+        // A registry of a test may have providers the type does not know.
+        provider: provider as LlmProvider,
         model: defaults.model,
         apiKey: operatorKey.apiKey,
         contextWindowTokens: defaults.contextWindowTokens,
