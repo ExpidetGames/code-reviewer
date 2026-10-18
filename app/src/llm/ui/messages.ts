@@ -10,12 +10,10 @@ import { NOT_AVAILABLE_TO_YOU } from "../../copy/messages.ts";
 import type { LlmKeyIssueCode } from "../workspace-key.ts";
 
 const ISSUE_COPY: Record<LlmKeyIssueCode, string> = {
-  provider_invalid: "Choose one of the providers in the list.",
+  provider_invalid: "This instance does not support that provider.",
   api_key_invalid:
     "That does not look like an API key: it may have no spaces or line breaks inside and at most 4096 characters. Copy it again from the provider.",
   api_key_required: "Enter the API key. There is no saved key to keep.",
-  api_key_required_for_new_provider:
-    "The saved key was made for another provider and is not carried over. Enter the key for this provider.",
 };
 
 export function describeLlmKeyIssue(code: string): string {
@@ -27,6 +25,7 @@ export function describeLlmKeyIssue(code: string): string {
 const FAILURE_COPY: Record<string, string> = {
   forbidden: "Only an Admin or an Owner of this workspace can change the key.",
   not_found: NOT_AVAILABLE_TO_YOU,
+  provider_not_found: "This instance does not support that provider.",
   cross_site_request:
     "The request did not come from this page. Reload it and try again.",
   unsupported_content_type: GENERIC_FAILURE,

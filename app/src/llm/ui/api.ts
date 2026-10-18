@@ -21,14 +21,17 @@ export type SaveKeyAnswer = {
 export type TestKeyAnswer =
   { ok: true } | { ok: false; error: string; detail: string | null };
 
+/** Every call is for the key of one provider (`/llm-keys/:provider`, #426). */
 export type LlmKeyApi = {
-  /** An empty `apiKey` keeps the stored one (while the provider is unchanged). */
+  /** An empty `apiKey` keeps the stored key of that provider. */
   save(input: {
     provider: string;
     apiKey: string;
   }): Promise<RequestResult<SaveKeyAnswer>>;
-  remove(): Promise<RequestResult<{ ok: true; removed: boolean }>>;
-  /** Checks the typed key, or the stored one when `apiKey` is empty. */
+  remove(
+    provider: string,
+  ): Promise<RequestResult<{ ok: true; removed: boolean }>>;
+  /** Checks the typed key, or the stored one of that provider when `apiKey` is empty. */
   test(input: {
     provider: string;
     apiKey: string;
@@ -39,12 +42,18 @@ export function createLlmKeyApi(
   fetchImpl: FetchLike,
   workspaceSlug: string,
 ): LlmKeyApi {
-  const path = (rest = "") =>
-    workspaceApiPath(workspaceSlug, `/llm-key${rest}`);
+  const path = (provider: string, rest = "") =>
+    workspaceApiPath(
+      workspaceSlug,
+      `/llm-keys/${encodeURIComponent(provider)}${rest}`,
+    );
+  // The provider is in the address; the body holds the key only.
   return {
-    save: (input) => requestJson(fetchImpl, "PUT", path(), input),
-    remove: () => requestJson(fetchImpl, "DELETE", path()),
-    test: (input) => requestJson(fetchImpl, "POST", path("/test"), input),
+    save: ({ provider, apiKey }) =>
+      requestJson(fetchImpl, "PUT", path(provider), { apiKey }),
+    remove: (provider) => requestJson(fetchImpl, "DELETE", path(provider)),
+    test: ({ provider, apiKey }) =>
+      requestJson(fetchImpl, "POST", path(provider, "/test"), { apiKey }),
   };
 }
 

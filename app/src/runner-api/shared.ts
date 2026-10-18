@@ -32,7 +32,7 @@ import { createProjectClaimGuard } from "./project-claim-guard.ts";
 import { HEARTBEAT_INTERVAL_SECONDS } from "./contract.ts";
 import { createReviewSettingsJobOptionsSource } from "./review-settings-job-options.ts";
 import { consoleRunnerApiLogger, describeError } from "./logger.ts";
-import { knownSecretsFromEnv } from "./redact.ts";
+import { createKnownSecrets } from "./known-secrets.ts";
 import { errorResponse } from "./responses.ts";
 import { configuredRunnerToken } from "./token-auth.ts";
 
@@ -133,10 +133,11 @@ function sharedDeps(): WorkerApiDeps {
     logger: consoleRunnerApiLogger,
     heartbeatIntervalSeconds: HEARTBEAT_INTERVAL_SECONDS,
     // The runner token and the current LLM key of the job's workspace (the key of the claim is in the database).
-    knownSecrets: async (workspaceId) => [
-      ...knownSecretsFromEnv(process.env),
-      ...(await llm.currentKeysFor(workspaceId).catch(() => [])),
-    ],
+    // Fails closed (known-secrets.ts): a key that cannot be read fails the completion instead of masking less.
+    knownSecrets: createKnownSecrets({
+      env: process.env,
+      currentKeysFor: (workspaceId) => llm.currentKeysFor(workspaceId),
+    }),
   };
 }
 

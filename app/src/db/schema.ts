@@ -354,6 +354,8 @@ export interface WorkspaceEntitlementsTable {
   suspended: number;
   /** A short lowercase code that says why; null unless `suspended` is 1. */
   suspension_code: string | null;
+  /** #428: JSON text `{"catalogEntries":[ids]}`; null means every released entry (and is what a row of before #428 has). */
+  model_access: string | null;
   /** ISO 8601 text in UTC. */
   updated_at: string;
   /** The id of the user who saved it last, or null (the operator API, or a user who was deleted since). */

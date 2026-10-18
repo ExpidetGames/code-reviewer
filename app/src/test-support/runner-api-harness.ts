@@ -41,7 +41,7 @@ import {
 } from "../runner-api/job-options.ts";
 import { createClaimedKeys } from "../runner-api/claimed-keys.ts";
 import { createProjectClaimGuard } from "../runner-api/project-claim-guard.ts";
-import { knownSecretsFromEnv } from "../runner-api/redact.ts";
+import { createKnownSecrets } from "../runner-api/known-secrets.ts";
 import { createReviewSettingsJobOptionsSource } from "../runner-api/review-settings-job-options.ts";
 import { configuredRunnerToken } from "../runner-api/token-auth.ts";
 import type { RunnerApiLogger } from "../runner-api/logger.ts";
@@ -112,6 +112,8 @@ export async function startRunnerApiHarness(
      * the workspace). Default: `TEST_LLM_API_KEY`. `null`: the workspace has none.
      */
     llmKey?: string | null;
+    /** Replaces how the keys to mask in a result are read (for example to make the read of one provider's key fail). */
+    currentKeysFor?: (workspaceId: string) => Promise<readonly string[]>;
     /** Replaces how the claim resolves the LLM access of a workspace (for example to answer with the operator's key). */
     loadLlm?: (workspaceId: string) => Promise<LlmAccessResult>;
     /** #279: where a Dynamic claim reads the model metadata from. Left out, the claim reads none. */
@@ -356,10 +358,12 @@ export async function startRunnerApiHarness(
       now: fixture.clock.now,
       logger,
       heartbeatIntervalSeconds: 30,
-      knownSecrets: async (workspaceId) => [
-        ...knownSecretsFromEnv(env),
-        ...(await llm.currentKeysFor(workspaceId)),
-      ],
+      knownSecrets: createKnownSecrets({
+        env,
+        currentKeysFor:
+          options.currentKeysFor ??
+          ((workspaceId) => llm.currentKeysFor(workspaceId)),
+      }),
     };
     const api = createRunnerApi({
       ...apiDeps,
@@ -375,7 +379,7 @@ export async function startRunnerApiHarness(
   async function setLlmKey(key: string | null): Promise<void> {
     const keys = llm.keyServiceFor(fixture.workspaceId);
     if (key === null) {
-      await keys.remove();
+      await keys.remove("openrouter");
       return;
     }
     const saved = await keys.save(

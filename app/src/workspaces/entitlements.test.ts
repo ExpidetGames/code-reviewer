@@ -2,6 +2,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  entryAllowed,
   INVALID_ENTITLEMENTS,
   resolveEntitlements,
   type EntitlementsData,
@@ -168,5 +169,130 @@ describe("resolving entitlements that could not be read", () => {
     expect(
       resolveEntitlements(WORKSPACE_ROW, INVALID_ENTITLEMENTS),
     ).toMatchObject({ kind: "limited", source: "workspace" });
+  });
+});
+
+const ENTRY_A = { id: "mce_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" };
+const ENTRY_B = { id: "mce_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" };
+const UNKNOWN_ID = "mce_00000000000000000000000000000000";
+
+describe("the model access of a workspace (#428)", () => {
+  // #428-T04
+  it("lets the row win entirely, the model access included", () => {
+    const row: EntitlementsData = {
+      ...WORKSPACE_ROW,
+      modelAccess: { catalogEntries: [ENTRY_A.id] },
+    };
+    const withList: EntitlementsData = {
+      ...DEFAULT,
+      modelAccess: { catalogEntries: [ENTRY_B.id] },
+    };
+
+    expect(resolveEntitlements(row, withList)).toMatchObject({
+      source: "workspace",
+      modelAccess: { catalogEntries: [ENTRY_A.id] },
+    });
+    // A row that states nothing about it does not inherit the list of the default.
+    const resolved = resolveEntitlements(WORKSPACE_ROW, withList);
+    expect(entryAllowed(resolved, ENTRY_B)).toBe(true);
+    expect(entryAllowed(resolved, ENTRY_A)).toBe(true);
+    expect(
+      entryAllowed(
+        resolveEntitlements(
+          { ...WORKSPACE_ROW, modelAccess: { catalogEntries: [] } },
+          undefined,
+        ),
+        ENTRY_B,
+      ),
+    ).toBe(false);
+  });
+
+  // #428-T04
+  it("applies the model access of the default to a workspace without a row", () => {
+    const withList: EntitlementsData = {
+      ...DEFAULT,
+      modelAccess: { catalogEntries: [ENTRY_B.id] },
+    };
+
+    const resolved = resolveEntitlements(undefined, withList);
+
+    expect(resolved).toMatchObject({
+      source: "default",
+      modelAccess: { catalogEntries: [ENTRY_B.id] },
+    });
+    expect(entryAllowed(resolved, ENTRY_B)).toBe(true);
+    expect(entryAllowed(resolved, ENTRY_A)).toBe(false);
+  });
+
+  describe("entryAllowed", () => {
+    function limitedWith(
+      modelAccess: EntitlementsData["modelAccess"],
+      keyMode: EntitlementsData["keyMode"] = "managed",
+    ) {
+      return resolveEntitlements(
+        {
+          ...WORKSPACE_ROW,
+          keyMode,
+          limits: { ...WORKSPACE_ROW.limits, managedCostLimitMicroUsd: null },
+          ...(modelAccess === undefined ? {} : { modelAccess }),
+        },
+        undefined,
+      );
+    }
+
+    // #428-T07
+    it("allows every entry for null, for an absent field and without any entitlements", () => {
+      expect(entryAllowed(limitedWith({ catalogEntries: null }), ENTRY_A)).toBe(
+        true,
+      );
+      expect(entryAllowed(limitedWith(undefined), ENTRY_A)).toBe(true);
+      expect(entryAllowed({ kind: "unlimited" }, ENTRY_A)).toBe(true);
+    });
+
+    // #428-T07
+    it("allows no entry for an empty list", () => {
+      expect(entryAllowed(limitedWith({ catalogEntries: [] }), ENTRY_A)).toBe(
+        false,
+      );
+    });
+
+    // #428-T07
+    it("allows the listed entries and not the unlisted ones", () => {
+      const resolved = limitedWith({ catalogEntries: [ENTRY_A.id] });
+
+      expect(entryAllowed(resolved, ENTRY_A)).toBe(true);
+      expect(entryAllowed(resolved, ENTRY_B)).toBe(false);
+    });
+
+    // #428-T07
+    it("keeps an id that matches no entry harmlessly in the list", () => {
+      const resolved = limitedWith({
+        catalogEntries: [UNKNOWN_ID, ENTRY_B.id],
+      });
+
+      expect(entryAllowed(resolved, ENTRY_B)).toBe(true);
+      expect(entryAllowed(resolved, ENTRY_A)).toBe(false);
+      expect(entryAllowed(resolved, { id: UNKNOWN_ID })).toBe(true);
+    });
+
+    // #428-T07
+    it("allows nothing when the entitlements cannot be read: damaged data does not grant a model", () => {
+      expect(
+        entryAllowed(
+          resolveEntitlements(INVALID_ENTITLEMENTS, undefined),
+          ENTRY_A,
+        ),
+      ).toBe(false);
+    });
+
+    // #428-T10
+    it("reads the list whatever the key mode: that the own key ignores it is the decision of the caller", () => {
+      expect(
+        entryAllowed(
+          limitedWith({ catalogEntries: [ENTRY_A.id] }, "own"),
+          ENTRY_B,
+        ),
+      ).toBe(false);
+    });
   });
 });

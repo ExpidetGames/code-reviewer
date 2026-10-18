@@ -16,6 +16,10 @@ import {
 } from "./access.ts";
 import { readLlmDefaults } from "./config.ts";
 import {
+  DEFAULT_LLM_PROVIDER,
+  llmProviderDescriptors,
+} from "./providers/index.ts";
+import {
   createOperatorLlmKeyService,
   type OperatorLlmKeyService,
 } from "./operator-key.ts";
@@ -26,6 +30,7 @@ import {
 } from "./resolve.ts";
 import {
   createWorkspaceLlmKeyService,
+  type ProviderLookup,
   type WorkspaceLlmKeyService,
 } from "./workspace-key.ts";
 
@@ -53,14 +58,18 @@ export type WorkspaceLlmAssembly = {
   operatorKey(): OperatorLlmKeyService;
   /**
    * The access a job of this workspace gets, or `llm_not_configured`: the key its key mode names, the
-   * workspace's own or the operator's, never the other. Nothing of another workspace is read.
+   * workspace's own or the operator's, never the other. The own key is the one of `provider` (the default provider
+   * until a project can choose); a key of another provider is never used. Nothing of another workspace is read.
    */
-  accessFor(workspaceId: string): Promise<LlmAccessResult>;
-  summaryFor(workspaceId: string): Promise<WorkspaceLlmSummary>;
+  accessFor(workspaceId: string, provider?: string): Promise<LlmAccessResult>;
+  summaryFor(
+    workspaceId: string,
+    provider?: string,
+  ): Promise<WorkspaceLlmSummary>;
   /**
    * The LLM keys that are current for this workspace right now, to mask in the result of one of its jobs: its
-   * own key, and the operator's while the workspace is `managed`. Best effort: a key that cannot be read is left
-   * out.
+   * own key of every provider, and the operator's while the workspace is `managed`. Best effort: a key that cannot
+   * be read is left out.
    */
   currentKeysFor(workspaceId: string): Promise<string[]>;
 };
@@ -70,6 +79,7 @@ export function createWorkspaceLlm({
   appSecret,
   env,
   now,
+  providers = llmProviderDescriptors,
 }: {
   db: Kysely<Database>;
   /**
@@ -80,6 +90,8 @@ export function createWorkspaceLlm({
   /** The environment as it is NOW; read on every call, never cached. */
   env: () => Env;
   now?: () => Date;
+  /** The providers the app supports; a test passes its own. */
+  providers?: ProviderLookup;
 }): WorkspaceLlmAssembly {
   const keyServiceFor = (workspaceId: string) =>
     createWorkspaceLlmKeyService({
@@ -89,6 +101,7 @@ export function createWorkspaceLlm({
         appSecret: appSecret(),
         ...(now === undefined ? {} : { now }),
       }),
+      providers,
     });
 
   const operatorKey = () =>
@@ -102,7 +115,10 @@ export function createWorkspaceLlm({
 
   // What the key mode of the workspace's entitlements asks for, and only that: a managed job never reads the
   // workspace's key, and any other job never reads the operator's.
-  async function resolveInput(workspaceId: string): Promise<ResolveLlmInput> {
+  async function resolveInput(
+    workspaceId: string,
+    provider: string,
+  ): Promise<ResolveLlmInput> {
     const mode = keyModeForJob(
       await readEffectiveEntitlements(db, workspaceId, now),
     );
@@ -117,26 +133,36 @@ export function createWorkspaceLlm({
       };
     return {
       keyMode: mode,
-      key: await keyServiceFor(workspaceId).forJob(),
+      provider,
+      key: await keyServiceFor(workspaceId).keyFor(provider),
       defaults,
     };
   }
 
-  async function accessFor(workspaceId: string): Promise<LlmAccessResult> {
-    return resolveWorkspaceLlmAccess(await resolveInput(workspaceId));
+  async function accessFor(
+    workspaceId: string,
+    provider: string = DEFAULT_LLM_PROVIDER,
+  ): Promise<LlmAccessResult> {
+    return resolveWorkspaceLlmAccess(
+      await resolveInput(workspaceId, provider),
+      providers,
+    );
   }
 
   return {
     keyServiceFor,
     operatorKey,
     accessFor,
-    async summaryFor(workspaceId) {
-      return summarizeLlmAccess(await accessFor(workspaceId));
+    async summaryFor(workspaceId, provider) {
+      return summarizeLlmAccess(await accessFor(workspaceId, provider));
     },
     async currentKeysFor(workspaceId) {
       const keys: string[] = [];
-      const own = await keyServiceFor(workspaceId).forJob();
-      if (own.state === "key") keys.push(own.apiKey);
+      const service = keyServiceFor(workspaceId);
+      for (const id of providers.ids) {
+        const own = await service.keyFor(id);
+        if (own.state === "key") keys.push(own.apiKey);
+      }
       const mode = keyModeForJob(
         await readEffectiveEntitlements(db, workspaceId, now),
       );

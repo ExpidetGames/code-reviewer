@@ -13,6 +13,12 @@
     "periodStart": "2026-10-01T00:00:00.000Z",
     "suspended": false,
     "suspensionCode": null,
+    "modelAccess": {
+      "catalogEntries": [
+        "mce_3f9a1c07d25e4b86a0d25e3c8f1b4a60",
+        "mce_9b04d7e1c2a84f3d8e6a51b7c0d92f14"
+      ]
+    },
     "updatedAt": "2026-10-14T12:00:00.000Z"
   },
   "effective": {
@@ -28,6 +34,12 @@
     },
     "periodStart": "2026-10-01T00:00:00.000Z",
     "suspended": false,
-    "suspensionCode": null
+    "suspensionCode": null,
+    "modelAccess": {
+      "catalogEntries": [
+        "mce_3f9a1c07d25e4b86a0d25e3c8f1b4a60",
+        "mce_9b04d7e1c2a84f3d8e6a51b7c0d92f14"
+      ]
+    }
   }
 }
