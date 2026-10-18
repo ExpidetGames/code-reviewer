@@ -21,20 +21,19 @@ A save **replaces the whole set** of its layer: a field left out is inherited ag
 allow list may change both layers (no admin role in the MVP); `app_settings.updated_by` records who saved
 the global defaults last.
 
-| Field               | Meaning                                                                                                                                                                                                                                    | Built-in value                                 | Limits                                                           |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------- | ---------------------------------------------------------------- |
-| `provider`          | The provider of `model` (#430): a provider of the registry (`src/llm/providers/`), stored by its id. A workspace default that a project may override. Own key mode only                                                                    | the default provider (`openrouter`)            | an id of the registry (`PROVIDER_UNKNOWN` otherwise)             |
-| `model`             | The model (as the provider spells it, no prefix); the key is not a review setting but the workspace's own (`src/llm/`)                                                                                                                     | `LLM_MODEL`, else `anthropic/claude-haiku-5.5` | the pattern the runner accepts                                   |
-| `fallbackModel`     | Tried when the model fails; `null` = none                                                                                                                                                                                                  | none                                           | same pattern                                                     |
-| `extraInstructions` | Project rules for the model, free text                                                                                                                                                                                                     | none                                           | 4000 characters, no control characters                           |
-| `maxFindings`       | The most findings one review lists                                                                                                                                                                                                         | 5                                              | 1 to 30                                                          |
-| `maxTokens`         | Token budget of a review (`llm.maxTokens`)                                                                                                                                                                                                 | 100000 (PR-Agent's own: 32000)                 | 8000 to 2000000, not above the model's context window (if known) |
-| `largePrChunking`   | Review a large pull request in chunks instead of leaving files out                                                                                                                                                                         | on                                             | boolean                                                          |
-| `inlineKeyIssues`   | Also post every finding as an inline comment                                                                                                                                                                                               | off                                            | boolean                                                          |
-| `autoReviewOnOpen`  | Review when a pull request is opened, reopened or marked ready                                                                                                                                                                             | on                                             | boolean                                                          |
-| `autoReviewOnPush`  | Review again when commits are pushed                                                                                                                                                                                                       | on                                             | boolean                                                          |
-| `allowedCommands`   | The comment commands people may use (`review`; the removed commands became `[]` on upgrade)                                                                                                                                                | `["review"]`                                   | a subset of `["review"]`, no duplicates                          |
-| `modelTier`         | **Deprecated** (ADR 0005). The quality level of a workspace on the operator's key (#280): which of the operator's models backs its reviews, never shown. Ignored unless the key mode is `managed`; new code uses the catalog entries below | `medium`                                       | `low`, `medium` or `high` (`INVALID_FORMAT` otherwise)           |
+| Field               | Meaning                                                                                                                                                                 | Built-in value                                 | Limits                                                           |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------- |
+| `provider`          | The provider of `model` (#430): a provider of the registry (`src/llm/providers/`), stored by its id. A workspace default that a project may override. Own key mode only | the default provider (`openrouter`)            | an id of the registry (`PROVIDER_UNKNOWN` otherwise)             |
+| `model`             | The model (as the provider spells it, no prefix); the key is not a review setting but the workspace's own (`src/llm/`)                                                  | `LLM_MODEL`, else `anthropic/claude-haiku-5.5` | the pattern the runner accepts                                   |
+| `fallbackModel`     | Tried when the model fails; `null` = none                                                                                                                               | none                                           | same pattern                                                     |
+| `extraInstructions` | Project rules for the model, free text                                                                                                                                  | none                                           | 4000 characters, no control characters                           |
+| `maxFindings`       | The most findings one review lists                                                                                                                                      | 5                                              | 1 to 30                                                          |
+| `maxTokens`         | Token budget of a review (`llm.maxTokens`)                                                                                                                              | 100000 (PR-Agent's own: 32000)                 | 8000 to 2000000, not above the model's context window (if known) |
+| `largePrChunking`   | Review a large pull request in chunks instead of leaving files out                                                                                                      | on                                             | boolean                                                          |
+| `inlineKeyIssues`   | Also post every finding as an inline comment                                                                                                                            | off                                            | boolean                                                          |
+| `autoReviewOnOpen`  | Review when a pull request is opened, reopened or marked ready                                                                                                          | on                                             | boolean                                                          |
+| `autoReviewOnPush`  | Review again when commits are pushed                                                                                                                                    | on                                             | boolean                                                          |
+| `allowedCommands`   | The comment commands people may use (`review`; the removed commands became `[]` on upgrade)                                                                             | `["review"]`                                   | a subset of `["review"]`, no duplicates                          |
 
 The limits are `REVIEW_SETTING_LIMITS`; `validate.ts` checks every field and reports each problem as
 `{ field, code }` with a stable code (`REVIEW_SETTING_ISSUE_CODES`), never with the value.
@@ -51,38 +50,40 @@ request only changed the model). A combination that a later change of another la
 not blamed on an unrelated save; `cost.exceedsContext` lists it for the UI. **For a workspace on the operator's key**
 (key mode `managed`, #280) none of this applies: the stored model is not the one that runs and the user does not know
 the one that does, so the save does not check `maxTokens` against a model and `cost.exceedsContext` is empty; the claim
-cuts the budget to the window of the tier's model (`src/model-tiers/README.md`).
+cuts the budget to the window of the catalog entry's model (`src/model-catalog/README.md`, "The token budget of a managed
+job").
 
-`modelTier` is not sent to the runner: it is read by the claim of a job on the operator's key, which swaps the model
-for the operator's model of the tier.
+**The quality level `modelTier` is gone (#434).** The tiers Low, Medium and High were turned into catalog entries
+(`20261018160000_migrate_model_tiers_to_catalog.ts`, `src/model-catalog/README.md`, "Migrated from the tiers") and are no
+setting any more: a request that carries `modelTier` is refused as an unknown field (`400 UNKNOWN_FIELD`, `field` is the name,
+never a value), and a stored `modelTier` is read by nothing (`parseStoredOverrides` knows the fields of the table above
+only). It stays in the stored JSON until a later migration removes it; **a save of the Diff group of a project or of the
+defaults replaces that group as a whole, so the member goes with the first save of its row** (the migration has already
+copied its meaning into `catalogEntryDiff` and `catalogEntryDynamic`).
 
-## A workspace on the operator's key chooses a quality level, not a model (#283)
+## A workspace on the operator's key chooses a catalog entry, not a model (#283, #433)
 
 For a workspace whose key mode is `managed` (`operatorsModels` of the service, read on every call) the models are the
-operator's and the workspace never sees them (`src/model-tiers/README.md`):
+operator's and the workspace never sees them (`src/model-catalog/README.md`):
 
 - **The views carry no model.** `getGlobalSettings`, `getProjectSettings` and the answer of a save have no `model`, no
   `fallbackModel` and no Dynamic model: not in `effective`, `overrides`, `builtIn`, `inherited`, `sources` or
   `dynamic`. `cost` is `null` (the estimate would be for a model that is not used). They add
-  `modelManagedByInstance: true` and `tierAvailability`, whether each level has a model for each review kind (yes or
-  no, from the operator's configuration, never which model). Other workspaces get `modelManagedByInstance: false`,
-  `tierAvailability: null` and the views exactly as before.
+  `modelManagedByInstance: true`. Other workspaces get `modelManagedByInstance: false` and the views exactly as before.
 - **A write may not set a model.** A body with `model` or `fallbackModel` (and, for a project, `dynamicModel`, also
   `null`) is refused `400 REVIEW_SETTINGS_INVALID` with an issue `{ field, code: "MODEL_MANAGED_BY_INSTANCE" }` for
-  every such field, judged on the names before any value, and nothing is stored. `modelTier` is accepted at the
-  workspace defaults and the project, with the usual layering.
+  every such field, judged on the names before any value, and nothing is stored.
 - **Stored models are kept.** The models a workspace saved on its own key stay stored: a save from a managed
   workspace carries them through (the defaults replace their layer as a whole, so the service puts the stored
   `model`/`fallbackModel` back; the Dynamic model is a project-only field that a save already keeps). The workspace
   gets them back if it returns to its own key.
 - **The form** shows the catalog chooser in place of the provider, model, fallback model, Dynamic model, model
   suggestions and cost estimate (see "The settings form" below); the Low/Medium/High choice of #283 is gone from it
-  (#433). The token budget stays. The form reads everything from the view (`managed`, `catalogChoices`), so a save that
+  (#433, and the setting itself with #434). The token budget stays. The form reads everything from the view (`managed`, `catalogChoices`), so a save that
   changes the key mode adapts the next answer.
 - **The instance admin is not special inside a workspace (decision).** An instance admin who is a member of a managed
   workspace gets the same stripped view and the same refusal as its other members: the view depends on the workspace's
-  key mode, never on the user. The operator sees and sets which model backs each level through the operator API
-  (`GET|PUT /api/operator/v1/model-tiers`) and sees whether each level is configured in the instance portal, not inside a
+  key mode, never on the user. The operator sees and sets which model backs each catalog entry in the instance admin portal, not inside a
   customer workspace. The admin's view of a workspace on its own key (the admin's usual one) is unchanged.
 - **Fail closed for display.** The models are hidden whenever the key mode is anything but `own`, so a workspace whose
   entitlements cannot be read (`unreadable`) also shows no model field and no estimate, and refuses a model write; its
@@ -135,7 +136,7 @@ valid. Two families sit side by side and only the one that matches the workspace
 - **The Dynamic metadata check** (#269) asks the adapter of the provider the project selected (`dynamic-check.ts`): the
   model of the request at the provider of the request, else the stored one, else the default; a request that only
   changes the provider asks again about the stored model at the new provider.
-- **Not done here**: the migration of `modelTier` (#434). The model a provider other than the default would use when no
+- The model a provider other than the default would use when no
   layer sets one is the claim's business (#432): the views show the model of the layers.
 
 ## The settings form: provider, model and catalog entry (#433)
@@ -268,13 +269,13 @@ Admin or an Owner (`manage_review_defaults`); the settings of a project are read
 a workspace that is not the person's) and by `withWorkspace(...)` (called first). A change must come from
 this site (`Sec-Fetch-Site`/`Origin`), be `application/json` and at most 64 KB.
 
-| Route                                                                  | Does                                                                                                                                                          |
-| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /api/w/:workspace/review-settings`                                | the global defaults: `overrides`, `effective`, `sources`, `builtIn`, `cost`, `modelManagedByInstance`, `tierAvailability`, `limits`, `updatedAt`, `updatedBy` |
-| `PUT /api/w/:workspace/review-settings`                                | body `{ "settings": { ... } }`, replaces the global defaults                                                                                                  |
-| `GET /api/w/:workspace/repositories/:repositoryId/project/settings`    | the project's `overrides`, `effective`, `sources`, `inherited`, `cost`, `limits`, and on the operator's key `catalogChoices`, `catalogSelection`              |
-| `PUT /api/w/:workspace/repositories/:repositoryId/project/settings`    | body `{ "settings": { ... } }`, replaces the project's overrides                                                                                              |
-| `DELETE /api/w/:workspace/repositories/:repositoryId/project/settings` | removes the project's overrides                                                                                                                               |
+| Route                                                                  | Does                                                                                                                                             |
+| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GET /api/w/:workspace/review-settings`                                | the global defaults: `overrides`, `effective`, `sources`, `builtIn`, `cost`, `modelManagedByInstance`, `limits`, `updatedAt`, `updatedBy`        |
+| `PUT /api/w/:workspace/review-settings`                                | body `{ "settings": { ... } }`, replaces the global defaults                                                                                     |
+| `GET /api/w/:workspace/repositories/:repositoryId/project/settings`    | the project's `overrides`, `effective`, `sources`, `inherited`, `cost`, `limits`, and on the operator's key `catalogChoices`, `catalogSelection` |
+| `PUT /api/w/:workspace/repositories/:repositoryId/project/settings`    | body `{ "settings": { ... } }`, replaces the project's overrides                                                                                 |
+| `DELETE /api/w/:workspace/repositories/:repositoryId/project/settings` | removes the project's overrides                                                                                                                  |
 
 A repository that was never activated can be read (the defaults, `projectId` null, `active` false) and
 saved: the first save creates its project with `active = 0`, so the settings are in place when it is

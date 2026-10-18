@@ -13,10 +13,7 @@ import {
   type ModelCapabilityChecker,
 } from "../llm/model-capabilities.ts";
 import { cleanUpAfterTest } from "../test-support/test-database.ts";
-import {
-  ALL_TIERS_CONFIGURED,
-  setupReviewSettings,
-} from "../test-support/review-settings-harness.ts";
+import { setupReviewSettings } from "../test-support/review-settings-harness.ts";
 import {
   REVIEW_SETTINGS_REQUEST_MAX_BYTES,
   createReviewSettingsRouteHandlers,
@@ -547,12 +544,11 @@ describe("the check of the Dynamic model over HTTP", () => {
   });
 });
 
-// #283: the routes of a workspace on the operator's key carry the quality level and no model.
+// #283: the routes of a workspace on the operator's key carry no model.
 describe("the settings routes of a workspace on the operator's key", () => {
   async function managed() {
     const app = await setupReviewSettings(undefined, {
       operatorsModels: true,
-      tierAvailability: ALL_TIERS_CONFIGURED,
     });
     await app.projects.activate(app.first.id);
     const handlers = createReviewSettingsRouteHandlers({
@@ -570,11 +566,8 @@ describe("the settings routes of a workspace on the operator's key", () => {
   }
 
   // #283-T07
-  it("answer the level and no model field, and no model name, for the defaults and a project", async () => {
+  it("answer no model field and no model name, for the defaults and a project", async () => {
     const app = await managed();
-    await app.service.updateProjectSettings(app.first.id, {
-      modelTier: "high",
-    });
 
     const responses = [
       await app.handlers.getGlobal(
@@ -596,29 +589,28 @@ describe("the settings routes of a workspace on the operator's key", () => {
     }
     for (const body of bodies)
       expect(body).toMatchObject({ modelManagedByInstance: true, cost: null });
-    expect(bodies[1]).toMatchObject({ effective: { modelTier: "high" } });
   });
 
-  // #283-T01
-  it("accept the level at the defaults and at a project", async () => {
+  // #434-T03
+  it("refuse the old quality level at the defaults and at a project with 400 and UNKNOWN_FIELD", async () => {
     const app = await managed();
+    const legacy = ["model", "Tier"].join("");
 
     const global = await app.handlers.putGlobal(
-      app.put("/api/review-settings", { settings: { modelTier: "low" } }),
+      app.put("/api/review-settings", { settings: { [legacy]: "low" } }),
     );
     const project = await app.handlers.putProject(
-      app.put(app.projectPath, { settings: { modelTier: "high" } }),
+      app.put(app.projectPath, { settings: { [legacy]: "high" } }),
       app.first.id,
     );
 
-    expect(global.status).toBe(200);
-    expect(await global.json()).toMatchObject({
-      overrides: { modelTier: "low" },
-    });
-    expect(project.status).toBe(200);
-    expect(await project.json()).toMatchObject({
-      overrides: { modelTier: "high" },
-    });
+    for (const response of [global, project]) {
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        error: "REVIEW_SETTINGS_INVALID",
+        issues: [{ field: legacy, code: "UNKNOWN_FIELD" }],
+      });
+    }
   });
 
   // #283-T04
@@ -718,7 +710,6 @@ describe("the settings routes of a workspace on the operator's key", () => {
     } as unknown as SessionUser;
     const app = await setupReviewSettings(undefined, {
       operatorsModels: true,
-      tierAvailability: ALL_TIERS_CONFIGURED,
     });
     const handlers = createReviewSettingsRouteHandlers({
       requireUser: async () => admin,

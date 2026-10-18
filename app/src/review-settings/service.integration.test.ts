@@ -10,7 +10,6 @@ import { describe, expect, it } from "vitest";
 
 import { ReviewSettingsError } from "./errors.ts";
 import {
-  ALL_TIERS_CONFIGURED,
   setupReviewSettings,
   TEST_DEFAULT_SKILL,
   TEST_MODEL,
@@ -131,43 +130,18 @@ describe("the global defaults", () => {
     expect(project.effective.maxTokens).toBe(70_000);
   });
 
-  // #280-T10
-  it("have the tier medium when nothing sets it, the workspace default for every project, and the project's own over it", async () => {
+  // #434-T03
+  it("refuse the old quality level as an unknown field, and store nothing", async () => {
     const app = await setupReviewSettings();
-    await app.projects.activate(app.first.id);
-
-    const fresh = await app.service.getProjectSettings(app.first.id);
-    expect(fresh.effective.modelTier).toBe("medium");
-    expect(fresh.sources.modelTier).toBe("built_in");
-
-    await app.service.updateGlobalSettings({ modelTier: "low" }, "octocat");
-    const inherited = await app.service.getProjectSettings(app.first.id);
-    expect(inherited.effective.modelTier).toBe("low");
-    expect(inherited.sources.modelTier).toBe("global");
-
-    await app.service.updateProjectSettings(app.first.id, {
-      modelTier: "high",
-    });
-    const own = await app.service.getProjectSettings(app.first.id);
-    expect(own.effective.modelTier).toBe("high");
-    expect(own.sources.modelTier).toBe("project");
-    expect(own.inherited.modelTier).toBe("low");
-    expect(
-      (await app.service.resolveForRepository(app.first.id))?.settings
-        .modelTier,
-    ).toBe("high");
-  });
-
-  // #280-T10
-  it("refuse a tier that does not exist", async () => {
-    const app = await setupReviewSettings();
+    const legacy = ["model", "Tier"].join("");
 
     await expect(
-      app.service.updateGlobalSettings({ modelTier: "ultra" }, "octocat"),
+      app.service.updateGlobalSettings({ [legacy]: "high" }, "octocat"),
     ).rejects.toMatchObject({
       code: "REVIEW_SETTINGS_INVALID",
-      issues: [{ field: "modelTier", code: "INVALID_FORMAT" }],
+      issues: [{ field: legacy, code: "UNKNOWN_FIELD" }],
     });
+    expect(await app.appSettingRows()).toEqual([]);
   });
 
   // CR-25-T07
@@ -1126,14 +1100,13 @@ describe("the settings of a workspace on the operator's key", () => {
   async function managedWorkspace() {
     const app = await setupReviewSettings(undefined, {
       operatorsModels: true,
-      tierAvailability: ALL_TIERS_CONFIGURED,
     });
     await app.projects.activate(app.first.id);
     return app;
   }
 
   // #283-T01
-  it("shows the quality level and no model, in the workspace defaults and in a project", async () => {
+  it("shows no model, in the workspace defaults and in a project", async () => {
     const app = await managedWorkspace();
 
     const global = await app.service.getGlobalSettings();
@@ -1141,11 +1114,9 @@ describe("the settings of a workspace on the operator's key", () => {
 
     for (const view of [global, project]) {
       expect(view.modelManagedByInstance).toBe(true);
-      expect(view.effective.modelTier).toBe("medium");
       expect(view.effective).not.toHaveProperty("model");
       expect(view.effective).not.toHaveProperty("fallbackModel");
       expect(view.cost).toBeNull();
-      expect(view.tierAvailability).toEqual(ALL_TIERS_CONFIGURED);
     }
     expect(project.dynamic.effective).not.toHaveProperty("dynamicModel");
     expect(project.dynamic.defaults).not.toHaveProperty("dynamicModel");
@@ -1156,7 +1127,6 @@ describe("the settings of a workspace on the operator's key", () => {
   // #283-T07
   it("holds no model field and no model name anywhere in the answer", async () => {
     const app = await managedWorkspace();
-    await app.service.updateGlobalSettings({ modelTier: "high" }, "octocat");
     const global = await app.service.getGlobalSettings();
     const project = await app.service.getProjectSettings(app.first.id);
 
@@ -1170,26 +1140,6 @@ describe("the settings of a workspace on the operator's key", () => {
     }
   });
 
-  // #283-T01
-  it("saves the level at the workspace default and at the project, and the project's wins", async () => {
-    const app = await managedWorkspace();
-
-    const global = await app.service.updateGlobalSettings(
-      { modelTier: "low" },
-      "octocat",
-    );
-    const inherited = await app.service.getProjectSettings(app.first.id);
-    const project = await app.service.updateProjectSettings(app.first.id, {
-      modelTier: "high",
-    });
-
-    expect(global.overrides).toEqual({ modelTier: "low" });
-    expect(inherited.effective.modelTier).toBe("low");
-    expect(inherited.sources.modelTier).toBe("global");
-    expect(project.effective.modelTier).toBe("high");
-    expect(project.sources.modelTier).toBe("project");
-  });
-
   // #283-T04
   it.each([
     ["model", { model: "acme-x/y-1" }],
@@ -1201,10 +1151,7 @@ describe("the settings of a workspace on the operator's key", () => {
       const app = await managedWorkspace();
 
       const error = await refusal(
-        app.service.updateGlobalSettings(
-          { ...body, modelTier: "high" },
-          "octocat",
-        ),
+        app.service.updateGlobalSettings({ ...body }, "octocat"),
       );
 
       expect(error.code).toBe("REVIEW_SETTINGS_INVALID");
@@ -1227,10 +1174,7 @@ describe("the settings of a workspace on the operator's key", () => {
       const app = await managedWorkspace();
 
       const error = await refusal(
-        app.service.updateProjectSettings(app.first.id, {
-          ...body,
-          modelTier: "high",
-        }),
+        app.service.updateProjectSettings(app.first.id, { ...body }),
       );
 
       expect(error.issues).toEqual([
@@ -1272,11 +1216,10 @@ describe("the settings of a workspace on the operator's key", () => {
     expect(view.effective.model).toBe("acme-x/y-1");
     expect(view.dynamic.effective.dynamicModel).toBe("acme-x/y-2");
     expect(view.cost).not.toBeNull();
-    expect(view.tierAvailability).toBeNull();
   });
 
   // #283-T01
-  it("keeps the models a workspace saved on its own key through a save of the level, and gives them back on its own key", async () => {
+  it("keeps the models a workspace saved on its own key through a save of another setting, and gives them back on its own key", async () => {
     const app = await setupReviewSettings();
     await app.projects.activate(app.first.id);
     await app.service.updateGlobalSettings(
@@ -1289,15 +1232,13 @@ describe("the settings of a workspace on the operator's key", () => {
       maxFindings: 6,
     });
     app.setOperatorsModels(true);
-    app.setTierAvailability(ALL_TIERS_CONFIGURED);
 
     const global = await app.service.updateGlobalSettings(
-      { maxFindings: 5, modelTier: "low" },
+      { maxFindings: 5 },
       "octocat",
     );
     const project = await app.service.updateProjectSettings(app.first.id, {
       maxFindings: 7,
-      modelTier: "high",
     });
 
     expect(JSON.stringify([global, project])).not.toContain(OWN_MODEL);
@@ -1307,14 +1248,12 @@ describe("the settings of a workspace on the operator's key", () => {
     expect(back.overrides).toMatchObject({
       model: OWN_MODEL,
       maxFindings: 7,
-      modelTier: "high",
     });
     expect(back.dynamic.overrides.dynamicModel).toBe(OWN_DYNAMIC);
     expect((await app.service.getGlobalSettings()).overrides).toMatchObject({
       model: OWN_MODEL,
       fallbackModel: OWN_FALLBACK,
       maxFindings: 5,
-      modelTier: "low",
     });
   });
 
@@ -1358,23 +1297,5 @@ describe("the settings of a workspace on the operator's key", () => {
     expect(JSON.stringify(project)).not.toContain(OWN_MODEL);
     expect(JSON.stringify(project)).not.toContain(OWN_DYNAMIC);
     expect(project.overrides).not.toHaveProperty("model");
-  });
-
-  // #283-T01
-  it("reports which levels have a model for a kind, as yes or no, and nothing more", async () => {
-    const app = await managedWorkspace();
-    app.setTierAvailability({
-      low: { diff: true, dynamic: false },
-      medium: { diff: true, dynamic: true },
-      high: { diff: false, dynamic: false },
-    });
-
-    const view = await app.service.getProjectSettings(app.first.id);
-
-    expect(view.tierAvailability).toEqual({
-      low: { diff: true, dynamic: false },
-      medium: { diff: true, dynamic: true },
-      high: { diff: false, dynamic: false },
-    });
   });
 });
