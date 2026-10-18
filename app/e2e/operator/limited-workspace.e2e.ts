@@ -525,6 +525,14 @@ test.describe("a limited workspace on an instance with the operator API on", () 
       [["the review defaults", await page.content()]],
       "the review defaults",
     );
+
+    // No form sets the quality level any more, but one stored before the catalog stays in force and the claim still
+    // reads it (until #432). The setup stores High as the settings route accepts it, so T05 and the usage feed keep
+    // proving that a stored level reaches the model of the review and the usage record.
+    const stored = await page.request.put(`/api/w/${slugA}/review-settings`, {
+      data: { settings: { modelTier: "high" } },
+    });
+    expect(stored.status(), await stored.text()).toBe(200);
   });
 
   // #433-T10
@@ -624,7 +632,7 @@ test.describe("a limited workspace on an instance with the operator API on", () 
   });
 
   // #285-T05, #285-T11
-  test("the script moves the start of the period forward and the next push is reviewed, on the model of the default level; the plan page follows", async ({
+  test("the script moves the start of the period forward and the next push is reviewed, on the model of the stored level; the plan page follows", async ({
     request,
   }) => {
     test.setTimeout(240_000);
@@ -660,12 +668,11 @@ test.describe("a limited workspace on an instance with the operator API on", () 
       runsOf(page, REPO_A.fullName, 3).locator("[data-status]"),
     ).toHaveText([/Succeeded/, /Failed/, /Failed/], RUN_TIMEOUT);
 
-    // The claim still reads the quality level (the catalog entries reach it with #432): nobody chose one, so the review
-    // ran for the default level.
+    // The review ran for the High level stored in T10 (the claim reads it until the catalog entries reach it, #432).
     const asked = fakeLlm().requests();
     expect(asked).toHaveLength(1);
     expect(asked[0]?.authorization).toBe(`Bearer ${OPERATOR_KEY}`);
-    expect(asked[0]?.model).toContain(TIER_MODELS.medium.diff);
+    expect(asked[0]?.model).toContain(TIER_MODELS.high.diff);
     expect(reviewsOf(await commentsOf(request, REPO_A, 3))).toHaveLength(1);
     await page.goto(`/w/${slugA}/settings/plan`);
     await expect(page.getByText("1 of 2", { exact: true })).toBeVisible();
@@ -1011,12 +1018,11 @@ test.describe("a limited workspace on an instance with the operator API on", () 
   test("the usage feed, read again at the end, holds every settled record of the workspace in order, with the level each ran on", async () => {
     test.setTimeout(240_000);
     const records = await pollUsage(script(), workspaceIdA, 4);
-    // The default level for every run: the claim reads the quality level, which nobody changes any more (#433).
     expect(records.map((record) => record.modelTier)).toEqual([
       "medium",
       "medium",
-      "medium",
-      "medium",
+      "high",
+      "high",
     ]);
     expect(
       records.every(
