@@ -576,6 +576,32 @@ describe("what the app answers", () => {
     await answer(refused, "ErrorResponse");
   });
 
+  // #428-T01
+  it("accepts the answers of an instance that is not yet upgraded: a response without modelAccess is valid, a write without it too", () => {
+    const fields = {
+      planLabel: "team",
+      keyMode: "managed",
+      limits: Object.fromEntries(LIMIT_NAMES.map((name) => [name, null])),
+      periodStart: "2026-10-01T00:00:00.000Z",
+      suspended: false,
+      suspensionCode: null,
+    };
+
+    expectValid("EntitlementsFields", fields);
+    expectValid("StoredEntitlements", {
+      ...fields,
+      updatedAt: "2026-10-01T00:00:00.000Z",
+    });
+    expectValid("DefaultEntitlementsResponse", {
+      version: 1,
+      default: fields,
+    });
+    expect(
+      contract.check("EntitlementsFields", { ...fields, modelAccess: null })
+        .valid,
+    ).toBe(false);
+  });
+
   // #275-T10
   it("answers every kind of error with a document valid against the file", async () => {
     const h = await startOperatorApiHarness();

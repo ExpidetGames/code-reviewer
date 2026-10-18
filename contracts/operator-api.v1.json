@@ -177,7 +177,7 @@
       "additionalProperties": false
     },
     "ModelAccess": {
-      "description": "Which catalog entries a workspace on the operator's key (keyMode 'managed') may use, by the ids of the entries as the admin portal shows them. catalogEntries null: every released entry. []: none. A list: those entries. An id that no entry has is accepted and matches nothing. Next to keyMode 'own' it is accepted and kept but never read: a workspace on its own key chooses provider and model freely and reads no catalog.",
+      "description": "Which catalog entries a workspace on the operator's key (keyMode 'managed') may use, by the ids of the entries as the admin portal shows them. catalogEntries null: every released entry. []: none. A list: those entries. An id that no entry has is accepted and matches nothing; an id listed twice is refused on a write. Next to keyMode 'own' it is accepted and kept but never read: a workspace on its own key chooses provider and model freely and reads no catalog.",
       "type": "object",
       "required": [
         "catalogEntries"
@@ -198,7 +198,7 @@
       "additionalProperties": false
     },
     "EntitlementsFields": {
-      "description": "What an operator allows a workspace, as read back.",
+      "description": "What an operator allows a workspace, as read back. 'modelAccess' (#428) is optional in an answer: an instance of an earlier release does not send it, so a reader that validates strictly must accept an answer without it during a rollout, and treats a missing field as {\"catalogEntries\": null} (every released entry), which is what such an instance grants. An upgraded instance always sends it. A write has its own rule (EntitlementsWrite).",
       "type": "object",
       "required": [
         "planLabel",
@@ -206,8 +206,7 @@
         "limits",
         "periodStart",
         "suspended",
-        "suspensionCode",
-        "modelAccess"
+        "suspensionCode"
       ],
       "properties": {
         "planLabel": {
@@ -248,7 +247,7 @@
       }
     },
     "EntitlementsWrite": {
-      "description": "The body of PUT /workspaces/{id}/entitlements and PUT /entitlements/default: the whole entitlements, replacing what was stored. Unknown keys are refused (a typo must not pass). 'periodStart' may be left out: the stored start is kept, or the period starts now when nothing is stored. A start earlier than the stored one is refused (period_start_backwards, 409) and one more than five minutes ahead as period_start_in_future. A write is idempotent. A numeric limit above 2^53-1 is refused (limit_invalid) instead of being rounded. Removing a workspace's row (DELETE) ends the 'never backwards' guard for that workspace: a later PUT without periodStart begins now. A managed cost limit (managedCostLimitMicroUsd, even 0) next to keyMode 'own' is refused (cost_limit_requires_managed_key): it only counts runs on the operator's key, so it would never be read. An entry of that shape that was stored earlier keeps working: it is read as before and the limit is ignored. The workspace's own key has its own cost limit, ownKeyCostLimitMicroUsd (#361), which is allowed with either key mode and decides by the key a run actually used; every write states it, an entry stored before it existed reads it as null. 'modelAccess' (#428) may be left out: the stored value is kept (a write of an older writer never clears what was granted), a row that has none starts with every released entry, and {\"catalogEntries\": null} clears it. Roll out in this order: upgrade every app instance first, because an instance of an earlier release refuses the unknown key (422 entitlements_invalid, field modelAccess) as it refuses any typo, then let the writer send it.",
+      "description": "The body of PUT /workspaces/{id}/entitlements and PUT /entitlements/default: the whole entitlements, replacing what was stored, except 'periodStart' and 'modelAccess', which are kept when left out (see below). Unknown keys are refused (a typo must not pass). 'periodStart' may be left out: the stored start is kept, or the period starts now when nothing is stored. A start earlier than the stored one is refused (period_start_backwards, 409) and one more than five minutes ahead as period_start_in_future. A write is idempotent. A numeric limit above 2^53-1 is refused (limit_invalid) instead of being rounded. Removing a workspace's row (DELETE) ends the 'never backwards' guard for that workspace: a later PUT without periodStart begins now. A managed cost limit (managedCostLimitMicroUsd, even 0) next to keyMode 'own' is refused (cost_limit_requires_managed_key): it only counts runs on the operator's key, so it would never be read. An entry of that shape that was stored earlier keeps working: it is read as before and the limit is ignored. The workspace's own key has its own cost limit, ownKeyCostLimitMicroUsd (#361), which is allowed with either key mode and decides by the key a run actually used; every write states it, an entry stored before it existed reads it as null. 'modelAccess' (#428) may be left out: the stored value is kept (a write of an older writer never clears what was granted), a row that has none starts with every released entry, and {\"catalogEntries\": null} clears it. This is deliberately not 'replace everything' (unlike ownKeyCostLimitMicroUsd, which every write states): it needs no cutover, as 'periodStart' needs none. A PUT /entitlements/default without it over a stored default that cannot be read is refused as catalog_entry_invalid (field 'modelAccess'): there is nothing to keep, and only a write that states it repairs the default. The list holds each id once (a repeated id is refused as catalog_entry_invalid). Roll out in this order: upgrade every app instance first, because an instance of an earlier release refuses the unknown key (422 entitlements_invalid, field modelAccess) as it refuses any typo, then let the writer send it.",
       "type": "object",
       "required": [
         "planLabel",
