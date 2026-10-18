@@ -1256,9 +1256,9 @@ describe("two workspaces", () => {
     expect(await reposA.workspaceSecrets.get("llm_api_key.onlyb")).toBe(
       undefined,
     );
-    expect(await reposB.workspaceSecrets.get("llm_api_key.onlyb")).toMatchObject(
-      { binding: "onlyb-b" },
-    );
+    expect(
+      await reposB.workspaceSecrets.get("llm_api_key.onlyb"),
+    ).toMatchObject({ binding: "onlyb-b" });
   });
 
   it("keep the entitlements apart: changing A's leaves B with its own", async () => {

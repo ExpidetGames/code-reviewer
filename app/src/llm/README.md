@@ -284,7 +284,9 @@ claimed-keys.ts`: one row per job, the sealed text is the list of the keys hande
 - **Masking is best effort.** A text that comes back from a runner (`complete`) is run through
   `maskSecretInText(text, ...keys)` before it is stored. It masks the plain, percent-encoded, JSON-escaped and
   base64 form; a secret that was cut or transformed in another way is not found. Mask with the key that was handed
-  out with the claim of that job _and_ the current key of its workspace.
+  out with the claim of that job _and_ the current keys of its workspace. A read of those keys that fails **fails
+  closed**: `complete` answers `RUNNER_INTERNAL_ERROR` and stores nothing (`runner-api/known-secrets.ts`), it never
+  masks with fewer keys.
 - **Model and token budget per project** are review settings (`src/review-settings`); they replace the model and the
   context window of the access when a job is built. The provider and the key always come from here.
 
