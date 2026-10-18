@@ -89,6 +89,32 @@ key service, `accessFor`, `summaryFor`, `currentKeysFor`); it reads the effectiv
 uses). `shared.ts` wires it to the running server. The claim of the runner API calls `accessFor(job.workspaceId)`, so a
 job never sees another workspace's key (`integration-tests/http/runner-api-llm-key.integration.test.ts`).
 
+## Which provider, model and entry a job gets (#431)
+
+`selection.ts` (`resolveModelSelection`, pure, not called by the claim yet; #432 wires it) decides provider, model, catalog
+entry and key source for a job **before any key is loaded** (ADR 0005, 2.8). The input is a union on the key mode like
+`ResolveLlmInput`, and the job's kind is an input, never the project's current kind:
+
+- **`own`**: the workspace and project layers of provider and model for the kind (a Dynamic job passes the project layer
+  only) over the built-in model. Provider and model are paired: a model is used only for the provider that was in force
+  where it was set, so a workspace model with a project provider of another provider fails with
+  `job_llm_options_invalid` / `model_provider_mismatch` instead of sending the model to the wrong provider. A provider
+  chosen without any model takes that provider's own default for the kind. The model must pass the rule of the provider
+  that applies (`model_invalid`). A provider the app does not know or the runner did not advertise ends with
+  `llm_provider_unsupported`. An own job reads no catalog and no `modelAccess`; whether the workspace holds a key for the
+  provider (`no_key`) is for the caller, which loads the key the selection names.
+- **`managed`**: the entry of the project, else the instance default of the kind, else `managed_model_unavailable` /
+  `no_selection`. The entry must exist (`missing`), be released (`not_released`), serve the kind (`kind_mismatch`), be
+  allowed by `modelAccess` (`not_allowed`, `entryAllowed`) and have a provider the app knows and the runner advertised
+  (`provider_unsupported`), checked in that order. **No fallback**: a failing project entry never moves the job to the
+  default entry, another provider or `LLM_MODEL` (C5). A failure carries the entry's opaque id at most, never a provider or
+  a model.
+- **`unreadable`**: `llm_not_configured` / `entitlements_invalid`; nothing is selected.
+
+A selection names whose key to load (`keySource`: the workspace's key of `provider`, or the operator's key of the entry's
+provider) but holds no key. An own selection has no `entry`; a managed one has no place for the workspace's key (both are
+compile-time, `selection.test.ts`).
+
 ## The operator's own key (#276)
 
 The instance admin stores **one key of the operator's own** for the workspaces whose key mode is `managed`, in the
