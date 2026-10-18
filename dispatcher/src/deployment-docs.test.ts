@@ -48,6 +48,12 @@ function sourceFiles(directory: string): string[] {
   });
 }
 
+/**
+ * Variables the code still accepts, only to warn that they are retired (#479): they are not settings any more, so they
+ * are neither a placeholder in .env.example nor a row of the guide's table.
+ */
+const RETIRED_VARIABLES = ["DISPATCHER_PROBE_TTL_SECONDS"];
+
 /** Every variable the Dispatcher's source reads from its environment, the deploy canary and the snapshot command too. */
 function variablesRead(): Set<string> {
   const names = new Set<string>();
@@ -63,6 +69,7 @@ function variablesRead(): Set<string> {
     add(source, /\bdeps\.env\.([A-Z][A-Z0-9_]+)/g);
     add(source, /\bmissing: "([A-Z][A-Z0-9_]+)"/g);
   }
+  for (const retired of RETIRED_VARIABLES) names.delete(retired);
   return names;
 }
 
@@ -184,6 +191,16 @@ describe("dispatcher/.env.example", () => {
     expect(envExample).not.toMatch(/sha256:[0-9a-f]{64}/);
   });
 
+  // #479-T07
+  it("has no placeholder for a retired variable, and says in a comment that it is retired", () => {
+    for (const name of RETIRED_VARIABLES) {
+      expect(documented().has(name), name).toBe(false);
+      expect(envExample, name).toMatch(
+        new RegExp(`Retired \\(#479\\): ${name}`),
+      );
+    }
+  });
+
   // #333-T02
   it("keeps the required variables uncommented, and they load once the secrets are filled in", () => {
     for (const name of Object.keys(VALID))
@@ -227,6 +244,14 @@ describe("the Dispatcher section of the guide", () => {
     );
 
     expect(deployed.filter((name) => !named.includes(name))).toEqual([]);
+  });
+
+  // #479-T07
+  it("has no row for a retired variable and states that it is retired", () => {
+    for (const name of RETIRED_VARIABLES) {
+      expect(named, name).not.toContain(name);
+      expect(table, name).toContain(`**Retired:** \`${name}\``);
+    }
   });
 
   // #333-T04
@@ -321,12 +346,6 @@ describe("the Dispatcher section of the guide", () => {
         fallback: 1200,
       },
       { name: "SANDBOX_HANDOVER_SECONDS", min: 1, max: 120, fallback: 20 },
-      {
-        name: "DISPATCHER_PROBE_TTL_SECONDS",
-        min: 60,
-        max: 86400,
-        fallback: 3600,
-      },
       {
         name: "DISPATCHER_PROBE_REUSE_SECONDS",
         min: 0,

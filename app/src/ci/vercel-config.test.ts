@@ -88,6 +88,37 @@ describe("app/vercel.json", () => {
     ]);
   });
 
+  // #479-T11
+  it("gives the routes that enqueue a review (Review now, the pull request list) the minute the inline retries are counted in", () => {
+    const matches = (pattern: string, file: string): boolean =>
+      new RegExp(
+        `^${pattern
+          .replaceAll(".", "\\.")
+          .replaceAll("**", "\u0000")
+          .replaceAll("*", "[^/]*")
+          .replaceAll("\u0000", ".*")}$`,
+      ).test(file);
+    const files = routeFiles(`${appRoot}src/app/api/w`).map((file) =>
+      file.slice(appRoot.length),
+    );
+    const enqueuing = files.filter((file) =>
+      /\/repositories\/\[repositoryId\]\/(reviews|pull-requests)\/route\.ts$/.test(
+        file,
+      ),
+    );
+
+    expect(enqueuing).toHaveLength(2);
+    for (const file of enqueuing) {
+      const durations = Object.entries(config.functions ?? {})
+        .filter(([pattern]) => matches(pattern, file))
+        .map(([, { maxDuration }]) => maxDuration ?? 0);
+      expect(
+        Math.max(0, ...durations),
+        `${file} has a duration of at least a minute`,
+      ).toBeGreaterThanOrEqual(60);
+    }
+  });
+
   // #319-T08
   it("sets a duration only for patterns that match a route file", () => {
     const files = routeFiles(`${appRoot}src/app`).map((file) =>

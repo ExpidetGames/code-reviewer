@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// A Dynamic job on a deployment whose container cannot prove its hardening (#332-T09, the probe failing, and the deploy canary
-// of #331 end to end): the Dispatcher serves both engines but advertises `opencode` only from a canary that passed. The
-// canary here runs the real `probe` entry mode of the Worker through the real Sandbox-Launcher, in a process that is not
-// root and has no capabilities, so the container's own startup cannot establish its hardening and the verdict has no
-// `opencode`:
+// A Dynamic job on a deployment whose container cannot prove its hardening (#332-T09, #479): the deploy canary of #331 is
+// the only proof a deployment has (#479), so the Dispatcher runs no probe when a job is dispatched. The canary here runs
+// the real `probe` entry mode of the Worker through the real Sandbox-Launcher, in a process that is not root and has no
+// capabilities, so the container's own startup cannot establish its hardening and the verdict has no `opencode`:
 //
-//  - the deploy canary (`pnpm probe:canary`, the release gate) fails with exit 1 and no credential in its output;
-//  - a Dynamic job's call is answered `not_capable`, the app stops sending it, no sandbox is created for it, and with
-//    the time the run is cancelled with `no_capable_runner` and the page says what that means;
+//  - the deploy canary (`pnpm probe:canary`, the release gate) fails with exit 1 and no credential in its output; that is
+//    what keeps such a deployment from going live;
+//  - if such a deployment is live anyway, a Dynamic job's call is accepted at once (no `503` for a probe, no canary VM),
+//    and the Worker's own startup self-check refuses to run the review: the run fails with `dynamic_engine_unavailable`,
+//    no model is called, and the page says what that means (defence in depth, not the gate);
 //  - a Diff job of another project, on the same Dispatcher, is reviewed as ever.
 // The privileged lane (e2e/dynamic/hosted-dynamic.e2e.ts) is the same Dispatcher with a container that does prove it.
 import { expect, test } from "@playwright/test";
@@ -19,7 +20,7 @@ import {
   addGithubPullRequest,
   getPullRequestComments,
 } from "../helpers/github-fake";
-import { dispatchOf, letTimePass, onlyJobOf } from "../helpers/hosted-db";
+import { dispatchOf, onlyJobOf } from "../helpers/hosted-db";
 import { hostedEnv } from "../helpers/hosted-env";
 import {
   startHostedDispatcher,
@@ -30,7 +31,6 @@ import {
   eventually,
   OWNER,
   runDeployCanary,
-  runSweep,
   setUpReviewedRepositories,
   signInAsAdmin,
 } from "../helpers/hosted-instance";
@@ -115,7 +115,7 @@ test.describe("a Dynamic job where the container's hardening cannot be proven", 
   }
 
   // #332-T09
-  test("the deploy canary fails, a Dynamic job is not run and ends no_capable_runner, and a Diff job on the same Dispatcher is reviewed", async ({
+  test("the deploy canary fails; a Dynamic job on that deployment is accepted at once without a probe and refused by the Worker's own self-check, and a Diff job on the same Dispatcher is reviewed", async ({
     page,
     request,
   }) => {
@@ -136,7 +136,7 @@ test.describe("a Dynamic job where the container's hardening cannot be proven", 
     // The canary has no job, no URL and no credential: its container was given the flags of a Dynamic Worker and nothing of the app.
     expect(probes[0]?.args.join("\n")).not.toContain(hostedEnv.appUrl);
 
-    // A Dynamic job: the signed call arrives, the answer is `not_capable`, and the app stops sending it.
+    // A Dynamic job: the signed call is accepted at once and no probe runs for it (the canary above is the only one).
     await openRuns(page);
     const dynamicNumber = 40;
     const dynamicHead = headSha("1", dynamicNumber);
@@ -157,14 +157,34 @@ test.describe("a Dynamic job where the container's hardening cannot be proven", 
     ).toEqual({ status: "accepted", outcome: "trigger_enqueued" });
     const dynamicJob = await onlyJobOf(DYNAMIC.fullName, dynamicNumber);
     expect(dynamicJob.reviewKind).toBe("dynamic");
-    await eventually("the call to be answered not_capable", async () => {
-      return (await dispatchOf(dynamicJob.id))?.state === "stopped";
-    });
-    expect(theDispatcher().output()).toContain('"event":"not_capable"');
-    expect(theDispatcher().workersOf(dynamicJob.id)).toHaveLength(0);
-    expect((await onlyJobOf(DYNAMIC.fullName, dynamicNumber)).status).toBe(
-      "queued",
+    await eventually(
+      "the Worker's own self-check to refuse the Dynamic job",
+      async () =>
+        (await onlyJobOf(DYNAMIC.fullName, dynamicNumber)).status === "failed",
+      90_000,
     );
+    // The first call was accepted: no 503 and no second call for a probe, one Worker was started for it ...
+    expect(await dispatchOf(dynamicJob.id)).toMatchObject({
+      state: "acked",
+      attempts: 1,
+      consecutiveFailures: 0,
+      lastStatus: 202,
+    });
+    expect(theDispatcher().output()).not.toContain('"event":"not_capable"');
+    expect(theDispatcher().output()).not.toContain("capabilities_pending");
+    expect(theDispatcher().workersOf(dynamicJob.id)).toHaveLength(1);
+    // ... and the only canary container is the one the deploy canary asked for.
+    expect(
+      theDispatcher()
+        .containers()
+        .filter((container) => container.mode === "probe"),
+    ).toHaveLength(1);
+    expect(await onlyJobOf(DYNAMIC.fullName, dynamicNumber)).toMatchObject({
+      status: "failed",
+      errorCode: "dynamic_engine_unavailable",
+    });
+    // The refusal came before any model call.
+    expect(llm?.requests() ?? []).toHaveLength(0);
 
     // A Diff job on the same Dispatcher is not affected.
     const diffNumber = 41;
@@ -194,23 +214,12 @@ test.describe("a Dynamic job where the container's hardening cannot be proven", 
     expect(comments).toHaveLength(1);
     expect(comments[0]?.body).toContain(REVIEW_MARKER);
 
-    // Half an hour later nobody has run the Dynamic job: the cron cancels it, with its own code and copy.
-    await letTimePass(dynamicJob.id, 1900);
-    await runSweep(request);
-    expect(await onlyJobOf(DYNAMIC.fullName, dynamicNumber)).toMatchObject({
-      status: "cancelled",
-      errorCode: "no_capable_runner",
-      attempts: 0,
-    });
-    expect(theDispatcher().workersOf(dynamicJob.id)).toHaveLength(0);
     expect(
       await getPullRequestComments(request, DYNAMIC.fullName, dynamicNumber),
     ).toEqual([]);
     await page.reload();
     const dynamicRun = runsOf(page, DYNAMIC.fullName, dynamicNumber);
-    await expect(dynamicRun.locator("[data-status]")).toContainText(
-      "Cancelled",
-    );
+    await expect(dynamicRun.locator("[data-status]")).toContainText("Failed");
     await dynamicRun
       .getByRole("link", {
         name: `${DYNAMIC.fullName} #${String(dynamicNumber)}`,
@@ -219,11 +228,6 @@ test.describe("a Dynamic job where the container's hardening cannot be proven", 
     const detail = page
       .locator('[data-slot="run-detail"]')
       .filter({ visible: true });
-    await expect(detail.getByText("no_capable_runner")).toBeVisible();
-    await expect(
-      detail.getByText(
-        "No runner that can run this kind of review picked up the run within the time limit, so it was cancelled.",
-      ),
-    ).toBeVisible();
+    await expect(detail.getByText("dynamic_engine_unavailable")).toBeVisible();
   });
 });

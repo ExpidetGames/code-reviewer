@@ -14,18 +14,18 @@ App ──signed POST /dispatch──▶ Trigger ──▶ core ──claim─�
                                             └──▶ Launcher.launch(...)   (heartbeats with the credential meanwhile)
 ```
 
-| Part                                                                              | Where                                              | Status                                                                                   |
-| --------------------------------------------------------------------------------- | -------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| Dispatcher core: claim, capacity, heartbeat during the launch, release on failure | `src/core/`                                        | here; platform-free (no `node:*`, no platform SDK: ESLint and a test check it)           |
-| Webhook-Trigger: `POST /dispatch`, `GET /health`                                  | `src/triggers/webhook.ts`, `src/dispatcher-app.ts` | here                                                                                     |
-| Fake Launcher (tests)                                                             | `src/launchers/fake.ts`                            | here                                                                                     |
-| Hardened container spec renderer and `ContainerLauncher` (#325)                   | `src/launchers/container*.ts`                      | here, used by the Sandbox-Launcher (#329) and the Docker-Launcher (#334)                 |
-| Sandbox-Launcher over the Vercel Sandbox SDK (#329)                               | `src/launchers/sandbox*.ts`, `vercel-sandbox.ts`   | here, wired into the Vercel entry when `SANDBOX_SNAPSHOT_ID` is set                      |
-| Capability probe, `POST /probe`, canary VM, deploy canary command (#331)          | `src/probe/`, `src/launchers/sandbox-canary.ts`    | here, in front of the Sandbox-Launcher: `opencode` is advertised from a fresh probe only |
-| Vercel entry, a default export                                                    | `src/index.ts`                                     | here: the Sandbox-Launcher when a golden snapshot is configured, else `noLauncher`       |
-| Node entry, `@hono/node-server` and a graceful shutdown                           | `src/node.ts` (`pnpm start`)                       | here, with no engine until the Docker-Launcher (#334) is wired in                        |
-| Poll-Trigger, Docker-Launcher                                                     | `src/triggers/poll.ts`, `src/launchers/`           | #334                                                                                     |
-| Golden snapshot pipeline (a command, not a runtime part)                          | `src/snapshot/`, `pnpm snapshot:build`             | here (#330), `docs/golden-snapshot.md`                                                   |
+| Part                                                                              | Where                                              | Status                                                                             |
+| --------------------------------------------------------------------------------- | -------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Dispatcher core: claim, capacity, heartbeat during the launch, release on failure | `src/core/`                                        | here; platform-free (no `node:*`, no platform SDK: ESLint and a test check it)     |
+| Webhook-Trigger: `POST /dispatch`, `GET /health`                                  | `src/triggers/webhook.ts`, `src/dispatcher-app.ts` | here                                                                               |
+| Fake Launcher (tests)                                                             | `src/launchers/fake.ts`                            | here                                                                               |
+| Hardened container spec renderer and `ContainerLauncher` (#325)                   | `src/launchers/container*.ts`                      | here, used by the Sandbox-Launcher (#329) and the Docker-Launcher (#334)           |
+| Sandbox-Launcher over the Vercel Sandbox SDK (#329)                               | `src/launchers/sandbox*.ts`, `vercel-sandbox.ts`   | here, wired into the Vercel entry when `SANDBOX_SNAPSHOT_ID` is set                |
+| Canary probe, `POST /probe`, canary VM, deploy canary command (#331, #479)        | `src/probe/`, `src/launchers/sandbox-canary.ts`    | here: the deploy canary's only way in; dispatch never runs a probe                 |
+| Vercel entry, a default export                                                    | `src/index.ts`                                     | here: the Sandbox-Launcher when a golden snapshot is configured, else `noLauncher` |
+| Node entry, `@hono/node-server` and a graceful shutdown                           | `src/node.ts` (`pnpm start`)                       | here, with no engine until the Docker-Launcher (#334) is wired in                  |
+| Poll-Trigger, Docker-Launcher                                                     | `src/triggers/poll.ts`, `src/launchers/`           | #334                                                                               |
+| Golden snapshot pipeline (a command, not a runtime part)                          | `src/snapshot/`, `pnpm snapshot:build`             | here (#330), `docs/golden-snapshot.md`                                             |
 
 Two entry files keep `node:child_process` (the Docker-Launcher's way of starting a process) out of the serverless
 bundle (none of ours: the Sandbox SDK's dependency tree holds `execa` for a local-development token fetch and `undici`; the
@@ -49,11 +49,10 @@ runs that kind; nothing is claimed), `429` or `503` with `Retry-After`.
 
 ## What the core does
 
-1. Engines are the configured ones that the Launcher advertises now (`capabilities`, fail closed). The job's kind
-   must be among them, else `not_capable`. The core says which engine it is about to need (`want`: the job's kind),
-   so a Launcher that must prove an engine first can answer for the other one at once. A Launcher that is still
-   proving the wanted engine throws `CapabilitiesPending` (a probe is on its way): the answer is `503` with its
-   `Retry-After`, nothing is claimed and no error is logged ("The capability probe", below).
+1. Engines are the configured ones (`DISPATCHER_ENGINES`) that the Launcher advertises (`capabilities`, fail closed).
+   The job's kind must be among them, else `not_capable`. Nothing is probed or waited for here (#479): a Dynamic job is
+   accepted whenever `opencode` is configured and a snapshot pair is set, on a cold instance too. The proof of the
+   container's hardening is the deploy canary ("The canary probe", below).
 2. Capacity: no more launches in progress than `DISPATCHER_MAX_RUNNING`, else `429`; the same number is sent as
    `maxRunning` so the App enforces the cap atomically.
 3. The App must offer the features of the split (`GET /api/runners/v1/version`: `worker_api`, `claim_by_job_id`,
@@ -91,9 +90,9 @@ raises an alert in the App's log.
 
 ```ts
 interface Launcher {
-  capabilities(signal, want?: Engine): Promise<readonly Engine[]>; // what it can run right now; fail closed
+  capabilities(signal): Promise<readonly Engine[]>; // what it can run; fail closed
   launch(spec: LaunchSpec, signal): Promise<void>; // resolves when the Worker has taken over; throws LaunchError
-  probe?(signal): Promise<ProbeResult>; // runs the capability probe now (POST /probe); never rejects
+  probe?(signal): Promise<ProbeResult>; // runs the canary probe now (POST /probe only); never rejects
 }
 ```
 
@@ -208,9 +207,10 @@ for `dockerd` and the OS; a limit that leaves the VM less than 256 MiB is refuse
 the Dynamic-Worker; its real peak is not measured yet, so that is a configuration change, not a code change. A wrong
 value fails the deployment at start (`DISPATCHER_WORKER_CONFIG`), not the first job.
 
-**Capabilities.** The Launcher itself advertises `pr-agent` only. `opencode` is added in front of it by the capability
-probe (#331) when a canary VM has vouched for the hardening: until then the Dynamic-Worker is not claimed here (fail
-closed). Next section.
+**Capabilities.** The Launcher advertises `pr-agent` and `opencode`; the engines the deployment serves are its
+`DISPATCHER_ENGINES` (#479). No probe stands between a Dynamic job and its claim: the hardening of the container is
+proven by the deploy canary before a deployment goes live (next section), and the Worker checks itself again when it
+starts.
 
 **The Dynamic configuration of the container.** The container of a Dynamic job (not a Diff job's) is given the operator's
 `RUNNER_DYNAMIC_CAPABILITIES` (the model's descriptor, a JSON object) and `RUNNER_DYNAMIC_MAX_COST_USD` (the cost limit of
@@ -229,12 +229,17 @@ VM is unrestricted by design (#82 stays an open hosted gate). The platform opera
 With `VERCEL_TOKEN`, `VERCEL_TEAM_ID` and `VERCEL_PROJECT_ID` it uses that access token. The token is masked in every log
 line and is never sent anywhere but to the SDK.
 
-## The capability probe
+## The canary probe
 
-The Dynamic-Worker must be advertised only if our hardening is established in the VM, and "established" means proven now,
-not configured: advertising `opencode` from configuration alone would claim Dynamic jobs that the container then fails
-(#331). The Vercel entry therefore puts the Sandbox-Launcher behind `withCapabilityProbe`
-(`src/probe/probed-launcher.ts`) when `DISPATCHER_ENGINES` includes `opencode`.
+The Dynamic-Worker's container must be hardened, and "hardened" is proven, not configured. **The deploy canary is the only
+proof** (#479): a deployment goes live only after `POST /probe` of the staged Dispatcher passed with `opencode`, and the
+snapshot pair and the settings cannot change during a deployment's lifetime. The Dispatcher therefore runs **no probe when
+a job is dispatched or claimed**, keeps no in-memory proof and has no time to live for one: a Dynamic job is accepted
+whenever `DISPATCHER_ENGINES` contains `opencode` and a snapshot pair is set, on a cold instance as on a warm one, and no
+canary VM is started by a dispatch. (Earlier, a cold instance answered the first Dynamic wake-up `503` with
+`Retry-After: 20` while a probe ran, which the App did not wait for; `CapabilitiesPending` and `withCapabilityProbe` are
+gone.) The Vercel entry gives the Sandbox-Launcher its `probe` with `withProbeEndpoint` (`src/probe/probe-endpoint.ts`)
+when `DISPATCHER_ENGINES` includes `opencode`; a Diff-only deployment has no probe and no canary VM.
 
 **What is proven.** The image's `probe` mode (#324, `runner/README.md`) runs the container's own startup in a canary VM
 and prints one line, the verdict (`contracts/probe-verdict.v1.json`): the engines the container may advertise and, when
@@ -257,40 +262,18 @@ content: one line, at most 64 KiB, version 1; the engines it knows and the reaso
 kept, anything else (a field, a text, a value shaped like a secret) is dropped and never echoed or logged. `opencode`
 counts as proven only when the verdict says it **and** gives no reason against it, and no reason was dropped as unknown.
 
-**Cache and refresh** (`src/probe/capability-probe.ts`). One answer per Dispatcher instance, in memory:
+**One probe at a time** (`src/probe/capability-probe.ts`). Any number of forced probes share the one that runs. A probe that
+takes longer than `DISPATCHER_PROBE_TIMEOUT_SECONDS` (150) is a `failed` answer (`probe_timeout`). The probe then waits up
+to 10 seconds for the run to finish stopping its canary VM before it answers, so the stop is part of the work held in
+`waitUntil` and a frozen function does not leave the VM to its timeout. The last answer, whatever its status, is kept in
+memory only to serve a forced probe within `DISPATCHER_PROBE_REUSE_SECONDS` (below); it is never read by a dispatch.
 
-| Answer                                                               | Counts for                              | Then                                                                                                                          |
-| -------------------------------------------------------------------- | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `passed` (`opencode` proven)                                         | `DISPATCHER_PROBE_TTL_SECONDS` (1 hour) | refreshed lazily when the next call finds it stale                                                                            |
-| `denied` (the container answered without `opencode`: its reasons)    | the same hour                           | the same                                                                                                                      |
-| `failed` (no verdict: the platform, the VM, the container, the time) | one minute                              | tried again by the next call, so a platform that comes back is used again soon and an outage does not create a VM per wake-up |
-
-Only one probe runs at a time per instance: any number of wake-up calls and a forced probe share it. A probe that takes
-longer than `DISPATCHER_PROBE_TIMEOUT_SECONDS` (150) is a `failed` answer (`probe_timeout`). The probe then waits up to 10
-seconds for the run to finish stopping its canary VM before it answers, so the stop is part of the work held in `waitUntil`
-and a frozen function does not leave the VM to its timeout. **A stale answer is not used**: the first call after the hour
-finds nothing proven. A `failed` answer never replaces a `passed` one that still counts (below).
-
-**What a wake-up call sees.** A Diff job never waits for a probe and never starts one. A Dynamic job:
-
-- with a fresh `passed` answer: `opencode` is advertised and the job is claimed;
-- with no fresh answer: the probe is started in the background (`waitUntil`), and the call is answered `503` with
-  `Retry-After: 20`. The App's sender (8 second timeout) must not wait for a canary VM, and it asks again after the
-  retry time. Nothing is claimed;
-- with a fresh `failed` answer (no verdict: a platform error, a timeout): `503` with `Retry-After` of what is left of the
-  failure minute, at least 20 s. A transient error must not look like "not capable": the App stops sending a job
-  that was answered `not_capable` for ten minutes, a `503` is retried on its back-off (10 s, 30 s, 2 min, ...; the longer of
-  that and the header). Nothing is claimed. `app/src/dispatch/capability-probe-answers.test.ts` holds both answers against the
-  sender;
-- with a fresh `denied` answer (the container's own "no", with its reasons): PR-Agent only, so the call is answered
-  `200 ignored` with `not_capable` and nothing is claimed. The App stops sending that job, revives the dispatch ten minutes
-  later (a Dispatcher that was fixed is asked again, slowly), and a Dynamic job that nobody can run ends `no_capable_runner`
-  after 30 minutes (`app/src/dispatch/README.md`). Diff jobs are unaffected throughout.
-
-Between the claim and the launch the proof is checked once more: a Dynamic job is launched only while a `passed` answer still
-counts, otherwise the launch fails with the retryable `capability_not_proven` and the job is released like any failed launch
-(the Worker proves the same again itself in `worker-once`; this is defence in depth). A "poll" call that wants no engine in
-particular gets PR-Agent only while nothing is proven.
+**What a wake-up call sees.** The same for both kinds: the core applies `DISPATCHER_ENGINES`, the cap and the claim. A Dynamic
+job on a Dispatcher that is not configured for `opencode` is answered `200 ignored` with `not_capable` (the App stops
+sending it, revives the dispatch ten minutes later, and a Dynamic job that nobody can run ends `no_capable_runner` after 30
+minutes, `app/src/dispatch/README.md`). A `503`/`429` the App sees now comes from a busy or failing Dispatcher or platform,
+never from a probe; the App repeats it inside the request and wakes it again from the repair work
+(`app/src/dispatch/README.md`, "Between two sweeps").
 
 The stable reasons and codes are logged (`probe_passed`, `probe_denied` with the reasons, `probe_failed` with the code):
 the reasons of the self-check list, and for a probe that gave no verdict a code of the **closed** list `ProbeFailure`
@@ -299,8 +282,12 @@ the reasons of the self-check list, and for a probe that gave no verdict a code 
 `probe_exit_nonzero`, `probe_exec_failed`, `probe_aborted`, `probe_not_supported`, `probe_error`. Anything else, such as a code in
 a platform's error, is `probe_error`.
 
-**Cost.** A probe is one short VM (tens of seconds) per instance per hour of Dynamic traffic, and one more for every new
-serverless instance that serves its first Dynamic call. A Diff-only deployment (`DISPATCHER_ENGINES=pr-agent`) has no probe.
+**Cost.** One short canary VM (tens of seconds) per deploy canary, and no other. A Diff-only deployment
+(`DISPATCHER_ENGINES=pr-agent`) has no probe.
+
+**Retired setting.** `DISPATCHER_PROBE_TTL_SECONDS` (how long an answer counted) is obsolete. A deployment that still sets
+it starts, ignores the value (whatever it holds) and logs `deprecated_setting` once per instance; support for it is removed in
+a later release.
 
 ### `POST /probe`
 
@@ -311,10 +298,8 @@ refused call creates no VM, and every refusal is the same `401` with the same bo
 **Throttle.** A forced probe is served from the last answer, whatever its status, when that is younger than
 `DISPATCHER_PROBE_REUSE_SECONDS` (60; 0 turns it off; `checkedAt` of the report says when it was made), so a holder of the
 credential cannot run canary VMs back to back. A fresh deployment instance has an empty cache, so the deploy canary
-against a new deployment is always a real run. **A forced probe that only failed** (a platform error, a timeout) is
-reported to its caller, and the deploy step is blocked, but it does **not** replace a `passed` answer that still counts:
-production Dynamic is not switched off by a bad minute of the platform during a release check. A real `denied` verdict
-(the container's own answer) does replace it.
+against a new deployment is always a real run. A probe that failed or was denied is reported to its caller and the deploy
+step is blocked; it changes nothing about what the running Dispatcher dispatches.
 
 | Status | Body                                                                                          | Meaning                                                           |
 | ------ | --------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
@@ -322,8 +307,8 @@ production Dynamic is not switched off by a bad minute of the platform during a 
 | `503`  | the same with `ok: false`; `status` is `denied` (with `reasons`) or `failed` (with `failure`) | the canary did not pass, or could not run: block the release      |
 | `401`  | `RUNNER_UNAUTHORIZED`                                                                         | no, a wrong or a malformed credential                             |
 
-`status: failed` with `failure: probe_not_supported` is a Launcher that has no probe (the Node entry's `noLauncher`): it
-proves nothing and advertises what it advertises.
+`status: failed` with `failure: probe_not_supported` is a Launcher that has no probe (the Node entry's `noLauncher`, or a
+Diff-only deployment): it proves nothing and advertises what it advertises.
 
 ### The deploy canary
 
@@ -454,7 +439,7 @@ Names only: a refusal names the variable, never the value.
 | `SANDBOX_IMAGE_DIGEST`                                                     | The Worker image id in that snapshot (#330 record `imageDigest`, `sha256:` and 64 hex). Required with the snapshot                                                                            | none         |
 | `SANDBOX_HANDOVER_SECONDS`                                                 | How long the container runs before the Worker counts as having taken over, 1 to 120; with create, `vm-prepare.sh` and the image check (150 s) it must fit in the core's 300 s launch deadline | `20`         |
 | `SANDBOX_VM_TIMEOUT_MARGIN_SECONDS`                                        | Seconds added to the job's timeout for the VM's own, 180 to 3600 and at least the hand-over time plus 150                                                                                     | `300`        |
-| `DISPATCHER_PROBE_TTL_SECONDS`                                             | How long a capability probe's answer counts before a new canary VM is asked, 60 to 86400 (#331)                                                                                               | `3600`       |
+| `DISPATCHER_PROBE_TTL_SECONDS`                                             | **Retired (#479), ignored.** Accepted with any value and a `deprecated_setting` warning; removed in a later release                                                                           | none         |
 | `DISPATCHER_PROBE_REUSE_SECONDS`                                           | A forced probe (`POST /probe`) is served from an answer younger than this instead of a new canary VM, 0 to 600; 0 runs every one                                                              | `60`         |
 | `DISPATCHER_PROBE_TIMEOUT_SECONDS`                                         | How long a probe may take, the canary VM included, 30 to 600; the reaper (#364) takes a canary's lifetime from it plus the margin                                                             | `150`        |
 | `RUNNER_DYNAMIC_CAPABILITIES`, `RUNNER_DYNAMIC_MAX_COST_USD`               | The operator's Dynamic configuration for the container of a Dynamic job and for the canary: a JSON object (no line breaks, at most 4096 characters) and a plain positive decimal              | none         |
@@ -480,7 +465,7 @@ imports nothing from `app/` or `runner/`; what is shared is the contracts and `f
 fake App every test here runs against). See `TESTING.md` for the test rules.
 
 The hosted end-to-end lane (#332, `TESTING.md`, "Hosted e2e lane") runs this project as a process: `src/test-support/hosted-e2e-main.ts` is the
-Node entry's composition with the Sandbox-Launcher and the capability probe over the local mode of the Sandbox double
+Node entry's composition with the Sandbox-Launcher and the canary probe (`POST /probe`) over the local mode of the Sandbox double
 (`fakes/sandbox/local.ts`) and `fakes/sandbox/bin/docker-worker.sh`, which runs the real Worker as a local process in place of the
 container. It repeats the wiring of `sandboxFromEnvironment` with that one platform, so a change to the wiring is a change there too. It
 is test code: no entry of a deployment imports it.
