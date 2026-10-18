@@ -60,6 +60,32 @@ describe("the sentences for error codes", () => {
     expect(text).not.toMatch(/\bmodel\b(?! was used)/);
   });
 
+  // #432-T19
+  it("tells a person about an unavailable model choice without naming a model, and where to change it", () => {
+    expect(CLAIM_FAILURE_CODES).toContain("managed_model_unavailable");
+    const { text, known } = describeErrorCode("managed_model_unavailable");
+
+    expect(known).toBe(true);
+    expect(text).toMatch(/Owner or Admin/);
+    expect(text).toMatch(/review settings/);
+    expect(text).toMatch(/whoever runs this instance/);
+    expect(text).toMatch(/no AI model was used/);
+    expect(text).not.toMatch(/\bmodel\b(?! was used)/);
+    // The old code keeps its copy for the rows that carry it.
+    expect(describeErrorCode("managed_tier_unavailable").known).toBe(true);
+  });
+
+  // #432-T19
+  it("tells a person that the runner cannot use the provider chosen for the project, naming no provider", () => {
+    expect(CLAIM_FAILURE_CODES).toContain("llm_provider_unsupported");
+    const { text, known } = describeErrorCode("llm_provider_unsupported");
+
+    expect(known).toBe(true);
+    expect(text).toMatch(/no AI model was used/);
+    expect(text).toMatch(/model settings/);
+    expect(text).not.toMatch(/openrouter/i);
+  });
+
   // #200: the codes a Dynamic project's run can end with are read by people on the Runs pages.
   it("tells a person what to do about a Dynamic Review that is not enabled, and about a model the engine cannot use", () => {
     expect(describeErrorCode("dynamic_review_disabled").text).toMatch(

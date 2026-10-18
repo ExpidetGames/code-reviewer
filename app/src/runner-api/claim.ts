@@ -110,6 +110,12 @@ export const CLAIM_FAILURE_CODES = [
   // #280: the job runs on the operator's key and the operator configured no model for the project's tier and the
   // job's review kind. Never a move to another tier or to the instance default model.
   "managed_tier_unavailable",
+  // #432 (ADR 0005, 2.8): the job runs on the operator's key and the catalog entry it selects cannot be used (none
+  // selected, unknown, not released, not for this kind, not in the plan, or its provider is not available). Never a move to
+  // another entry. Replaces `managed_tier_unavailable`, which stays for old rows.
+  "managed_model_unavailable",
+  // #432: the provider an own project selected is one the app does not know or the runner did not advertise.
+  "llm_provider_unsupported",
 ] as const;
 
 /** Why a job is given back (the code becomes the job's error code if it was the last attempt). */

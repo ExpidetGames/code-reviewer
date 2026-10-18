@@ -39,6 +39,11 @@ export const ERROR_COPY: Readonly<Record<string, string>> = {
   managed_tier_unavailable:
     "The quality level chosen for this project is not available right now, so this run did not start and no AI model was used. A workspace Owner or Admin can choose another level in the review settings of the project. If no level is available, contact whoever runs this instance.",
 
+  managed_model_unavailable:
+    "The review option chosen for this project is not available right now, so this run did not start and no AI model was used. A workspace Owner or Admin can choose another option in the review settings of the project. If none is available, contact whoever runs this instance.",
+  llm_provider_unsupported:
+    "The AI provider chosen in the model settings of this project cannot be used for this run, so it did not start and no AI model was used. Check the model settings of the project, or ask whoever runs this instance.",
+
   // The claim of the runner API
   llm_not_configured:
     "No access to an AI model is set up on this server. Ask whoever runs it to set the LLM provider and key.",
