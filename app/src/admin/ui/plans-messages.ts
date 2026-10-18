@@ -26,7 +26,7 @@ const FAILURE_COPY: Record<string, string> = {
     "The description is one line of at most 400 characters.",
   plan_sort_invalid: "Enter a whole number from 0 to 100000 for the order.",
   plan_price_invalid:
-    "Enter the price in dollars and cents (at most two decimals), more than zero. A paid plan needs a monthly price.",
+    "Enter the price in dollars and cents (at most two decimals), more than zero and at most 1,000,000. A paid plan needs a monthly price.",
   plan_price_not_allowed: "The Free plan and an Enterprise plan have no price.",
   popular_requires_paid_plan: "Only a paid plan can be marked Popular.",
   contact_target_required:

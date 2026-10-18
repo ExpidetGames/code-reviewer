@@ -119,6 +119,26 @@ describe("the terms form", () => {
     });
   });
 
+  // #438-N5
+  it("refuses a price above 1,000,000 dollars before it is sent", () => {
+    const base = termsFormFrom(MANAGED);
+
+    expect(
+      termsFromForm("paid", { ...base, monthly: "1000000" }),
+    ).toMatchObject({
+      ok: true,
+      terms: { monthlyAmountMinor: 100_000_000 },
+    });
+    expect(termsFromForm("paid", { ...base, monthly: "1000000.01" })).toEqual({
+      ok: false,
+      issues: [{ field: "monthlyAmountMinor", code: "plan_price_invalid" }],
+    });
+    expect(termsFromForm("paid", { ...base, yearly: "21474837" })).toEqual({
+      ok: false,
+      issues: [{ field: "yearlyAmountMinor", code: "plan_price_invalid" }],
+    });
+  });
+
   // #438-T24
   it("refuses a missing monthly price, a zero price and a price with three decimals", () => {
     const base = termsFormFrom(MANAGED);

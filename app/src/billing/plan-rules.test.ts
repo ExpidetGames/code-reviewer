@@ -2,6 +2,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { PlanKind, PlanTerms } from "../admin/ui/plans-view.ts";
+import { PRICE_MAX_MINOR } from "../admin/ui/plan-money.ts";
 import {
   validateNewPlan,
   validatePlanMetadata,
@@ -324,6 +325,63 @@ describe("the terms of a plan version", () => {
 
     // #438-T24
     it.each([0, -5, 1.5, "100", Number.NaN])(
+      "refuses %j as a yearly price",
+      (yearlyAmountMinor) => {
+        expect(
+          validatePlanTerms("paid", managed({ yearlyAmountMinor }), CONTEXT),
+        ).toEqual({
+          ok: false,
+          code: "plan_price_invalid",
+          field: "yearlyAmountMinor",
+        });
+      },
+    );
+
+    // #438-N5
+    it("takes a price up to the upper bound, which is 1,000,000 USD in cents and fits the integer column", () => {
+      expect(PRICE_MAX_MINOR).toBe(100_000_000);
+      expect(PRICE_MAX_MINOR).toBeLessThan(2 ** 31);
+      expect(
+        validatePlanTerms(
+          "paid",
+          managed({
+            monthlyAmountMinor: PRICE_MAX_MINOR,
+            yearlyAmountMinor: PRICE_MAX_MINOR,
+          }),
+          CONTEXT,
+        ),
+      ).toMatchObject({
+        ok: true,
+        value: {
+          monthlyAmountMinor: PRICE_MAX_MINOR,
+          yearlyAmountMinor: PRICE_MAX_MINOR,
+        },
+      });
+      expect(
+        validatePlanTerms(
+          "paid",
+          managed({ monthlyAmountMinor: 1, yearlyAmountMinor: 1 }),
+          CONTEXT,
+        ),
+      ).toMatchObject({ ok: true });
+    });
+
+    // #438-N5
+    it.each([PRICE_MAX_MINOR + 1, 2 ** 31 - 1, 2 ** 31, 2 ** 40])(
+      "refuses %j as a monthly price: above the bound, or what an integer column cannot hold",
+      (monthlyAmountMinor) => {
+        expect(
+          validatePlanTerms("paid", managed({ monthlyAmountMinor }), CONTEXT),
+        ).toEqual({
+          ok: false,
+          code: "plan_price_invalid",
+          field: "monthlyAmountMinor",
+        });
+      },
+    );
+
+    // #438-N5
+    it.each([PRICE_MAX_MINOR + 1, 2 ** 31, 2 ** 40])(
       "refuses %j as a yearly price",
       (yearlyAmountMinor) => {
         expect(

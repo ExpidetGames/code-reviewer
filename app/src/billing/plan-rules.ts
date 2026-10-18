@@ -6,6 +6,7 @@
 // so a version can only hold what an entitlement can hold. Money is an integer in minor units; where the text of a
 // price becomes one is `src/admin/ui/plan-money.ts`.
 import "server-only";
+import { PRICE_MAX_MINOR } from "../admin/ui/plan-money.ts";
 import {
   PLAN_KINDS,
   type PlanKind,
@@ -47,8 +48,14 @@ function unknownKey(
   return Object.keys(input).find((key) => !known.includes(key));
 }
 
+/** A positive integer in minor units, at most `PRICE_MAX_MINOR`: what the column holds, so the database never refuses it. */
 function isPrice(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+  return (
+    typeof value === "number" &&
+    Number.isSafeInteger(value) &&
+    value > 0 &&
+    value <= PRICE_MAX_MINOR
+  );
 }
 
 /**

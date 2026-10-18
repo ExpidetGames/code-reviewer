@@ -180,6 +180,46 @@ describe("creating a paid plan", () => {
     expect(result.plan.versions[0]?.limits).toEqual(limits);
   });
 
+  // #438-N5
+  it("stores a price at the upper bound and refuses one above it with plan_price_invalid, not a database error", async () => {
+    const started = await start();
+
+    const atBound = await started.service.createPlan(
+      started.admin,
+      paid({ terms: terms({ monthlyAmountMinor: 100_000_000 }) }),
+    );
+    // More than an integer column holds (2,147,483,647): a database that checks it would answer "out of range".
+    const above = await started.service.createPlan(
+      started.admin,
+      paid({
+        planKey: "huge",
+        terms: terms({ monthlyAmountMinor: 2_147_483_648 }),
+      }),
+    );
+    const nextVersion = await started.service.saveTerms(started.admin, "team", {
+      basedOnVersion: 1,
+      terms: terms({
+        monthlyAmountMinor: 1234,
+        yearlyAmountMinor: 100_000_001,
+      }),
+    });
+
+    expect(atBound).toMatchObject({ ok: true });
+    expect(above).toEqual({
+      ok: false,
+      code: "plan_price_invalid",
+      field: "monthlyAmountMinor",
+    });
+    expect(nextVersion).toEqual({
+      ok: false,
+      code: "plan_price_invalid",
+      field: "yearlyAmountMinor",
+    });
+    expect((await started.service.view()).plans.map((p) => p.planKey)).toEqual([
+      "team",
+    ]);
+  });
+
   // #438-T21
   it("stores a monthly and a yearly price as integer minor units", async () => {
     const started = await start();

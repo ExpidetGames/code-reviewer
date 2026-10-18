@@ -2,6 +2,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  PRICE_MAX_MINOR,
   formatMicroAsUsd,
   formatMinorAsUsd,
   parseUsdToMicro,
@@ -40,6 +41,24 @@ describe("the price input", () => {
     "9007199254740993",
   ])("refuses %j", (text) => {
     expect(parseUsdToMinor(text)).toEqual({ ok: false });
+  });
+
+  // #438-N5
+  it("reads a price up to 1,000,000 USD and refuses one above it, so the text never becomes a number the column cannot hold", () => {
+    expect(parseUsdToMinor("1000000")).toEqual({
+      ok: true,
+      minor: PRICE_MAX_MINOR,
+    });
+    expect(parseUsdToMinor("1000000.00")).toEqual({
+      ok: true,
+      minor: PRICE_MAX_MINOR,
+    });
+    expect(parseUsdToMinor("999999.99")).toEqual({
+      ok: true,
+      minor: PRICE_MAX_MINOR - 1,
+    });
+    for (const text of ["1000000.01", "1000001", "21474836.48", "999999999"])
+      expect(parseUsdToMinor(text), text).toEqual({ ok: false });
   });
 
   // #438-T25

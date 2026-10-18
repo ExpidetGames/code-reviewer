@@ -4,7 +4,14 @@
 // units (cents). No floating point anywhere: the text is split, never multiplied. Pure, so the form and the server
 // share it. An amount is admin data; nothing here knows one.
 
-/** At most nine digits before the point: far below a safe integer in cents, far above any plan. */
+/**
+ * The highest price of a plan version: 1,000,000 USD in cents. The columns are `integer` (int4 on Postgres, at most
+ * 2,147,483,647 minor units), and no plan costs this much; the bound keeps a typo from reaching the database, which would
+ * answer "out of range" and the route a generic 503. Shared by the form and the validation of the service.
+ */
+export const PRICE_MAX_MINOR = 100_000_000;
+
+/** At most nine digits before the point, so the text becomes a number safely; the bound above is checked after. */
 const USD_TEXT = /^(\d{1,9})(?:\.(\d{1,2}))?$/;
 
 export type UsdParse = { ok: true; minor: number | null } | { ok: false };
@@ -12,7 +19,7 @@ export type UsdParse = { ok: true; minor: number | null } | { ok: false };
 /**
  * "9.99" is 999, "10" is 1000, "10.5" is 1050. An empty field is `null` (no price: for the yearly price, no yearly
  * option). Anything else that is not dollars with at most two decimals ("9.999", "-5", "abc", "1,000", "$10") is
- * refused. Zero parses (it is a number); the validation of a version refuses it as a price.
+ * refused, and so is an amount above `PRICE_MAX_MINOR`. Zero parses (it is a number); the validation of a version refuses it as a price.
  */
 export function parseUsdToMinor(text: string): UsdParse {
   const trimmed = text.trim();
@@ -21,7 +28,10 @@ export function parseUsdToMinor(text: string): UsdParse {
   if (match === null) return { ok: false };
   const dollars = Number(match[1]);
   const cents = Number((match[2] ?? "").padEnd(2, "0"));
-  return { ok: true, minor: dollars * 100 + cents };
+  const minor = dollars * 100 + cents;
+  // Above the bound is no price (the same refusal as an amount that is not dollars and cents).
+  if (minor > PRICE_MAX_MINOR) return { ok: false };
+  return { ok: true, minor };
 }
 
 /** Minor units as the text an input holds: 999 is "9.99", 1000 is "10.00". */
