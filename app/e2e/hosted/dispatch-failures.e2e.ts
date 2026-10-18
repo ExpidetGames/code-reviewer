@@ -85,8 +85,10 @@ async function startNotReadyDispatcher(retryAfterSeconds: number): Promise<{
   });
   return {
     calls: () => calls,
+    // Ends the stand-in; ending it again is harmless.
     release: () =>
       new Promise<void>((resolve) => {
+        if (!server.listening) return resolve();
         server.closeAllConnections();
         server.close(() => resolve());
       }),
@@ -216,7 +218,6 @@ test.describe("what the hosted deployment does when the Dispatcher, the platform
     request,
   }) => {
     const notReady = await startNotReadyDispatcher(3);
-    let released = false;
     try {
       const { number } = await openPullRequest(page, request, 27, "b");
       const job = await onlyJobOf(REPOSITORY.fullName, number);
@@ -229,7 +230,6 @@ test.describe("what the hosted deployment does when the Dispatcher, the platform
       });
       // The Dispatcher becomes ready while the app waits for the Retry-After.
       await notReady.release();
-      released = true;
       await startDispatcher();
 
       const run = runsOf(page, REPOSITORY.fullName, number);
@@ -244,7 +244,7 @@ test.describe("what the hosted deployment does when the Dispatcher, the platform
       expect(fakeLlm().requests()).toHaveLength(1);
       expect(await dispatchOf(job.id)).toMatchObject({ state: "acked" });
     } finally {
-      if (!released) await notReady.release();
+      await notReady.release();
     }
   });
 
@@ -254,7 +254,6 @@ test.describe("what the hosted deployment does when the Dispatcher, the platform
     request,
   }) => {
     const notReady = await startNotReadyDispatcher(120);
-    let released = false;
     try {
       const waiting = await openPullRequest(page, request, 28, "c");
       const job = await onlyJobOf(REPOSITORY.fullName, waiting.number);
@@ -262,7 +261,6 @@ test.describe("what the hosted deployment does when the Dispatcher, the platform
         return notReady.calls() >= 1;
       });
       await notReady.release();
-      released = true;
       // Not repeated inside the request: one call, and the row says "not before two minutes".
       expect(notReady.calls()).toBe(1);
       expect(await dispatchOf(job.id)).toMatchObject({
@@ -296,7 +294,7 @@ test.describe("what the hosted deployment does when the Dispatcher, the platform
       expect(fakeLlm().requests()).toHaveLength(2);
       expect(await dispatchOf(job.id)).toMatchObject({ state: "acked" });
     } finally {
-      if (!released) await notReady.release();
+      await notReady.release();
     }
   });
 
