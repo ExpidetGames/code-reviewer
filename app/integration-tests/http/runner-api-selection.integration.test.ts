@@ -800,7 +800,7 @@ describe("the token budget of a job on the operator's key", () => {
   it("uses the last window read for the entry's model of that provider when the provider cannot be asked now", async () => {
     let answer: ModelCapabilityResult = supported(64_000);
     const known = new Map<string, number>();
-    const lookups: Array<[string, string]> = [];
+    const lookups: Array<[string, string | undefined]> = [];
     const checker: ModelCapabilityChecker = {
       check: async (model, options) => {
         if (answer.outcome === "supported")
