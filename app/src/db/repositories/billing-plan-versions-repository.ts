@@ -60,6 +60,10 @@ export type BillingPlanVersionsRepository = {
   listForPlans(planIds: readonly string[]): Promise<PlanVersionRow[]>;
   /** What a new subscriber gets: the version with the role `current`. */
   current(planId: string): Promise<PlanVersionRow | undefined>;
+  /** One version by its id, whatever its role (a subscription is pinned to a version that may be legacy by now). */
+  get(versionId: string): Promise<PlanVersionRow | undefined>;
+  /** The versions with the role `current` that sell with this `billing_plan_prices` row, in the monthly or the yearly slot. */
+  currentLinkedTo(priceId: string): Promise<PlanVersionRow[]>;
   /**
    * Saves the next version as the current one and turns the previous current version into `legacy`, in one transaction.
    * `basedOn` is the number of the version the caller saw as current (0 for a plan without one): a different number
@@ -179,6 +183,31 @@ export function createBillingPlanVersionsRepository(
       // Somebody linked the very price asked for: the slot is as the caller wants it.
       if (found[column] === priceId) return { ok: true };
       return { ok: false, reason: "link_changed" };
+    },
+
+    async get(versionId) {
+      const row = await db
+        .selectFrom("billing_plan_versions")
+        .selectAll()
+        .where("id", "=", versionId)
+        .executeTakeFirst();
+      return row === undefined ? undefined : toVersion(row);
+    },
+
+    async currentLinkedTo(priceId) {
+      const rows = await db
+        .selectFrom("billing_plan_versions")
+        .selectAll()
+        .where("role", "=", "current")
+        .where((eb) =>
+          eb.or([
+            eb("monthly_price_id", "=", priceId),
+            eb("yearly_price_id", "=", priceId),
+          ]),
+        )
+        .orderBy("plan_id", "asc")
+        .execute();
+      return rows.map(toVersion);
     },
 
     async current(planId) {

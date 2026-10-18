@@ -308,11 +308,60 @@ describe.each(ENGINES)(
       expect(Object.keys(versions).sort()).toEqual([
         "createNext",
         "current",
+        "currentLinkedTo",
+        "get",
         "list",
         "listForPlans",
         "setPriceLink",
       ]);
     });
+
+    // #441-T03
+    it_(
+      "reads a version by its id, a legacy one too, and nothing for an id it does not have",
+      async () => {
+        const { plan, versions } = await start();
+        const first = await versions.createNext(plan.id, managed(), null, 0);
+        await versions.createNext(
+          plan.id,
+          managed({ monthlyAmountMinor: 999 }),
+          null,
+          1,
+        );
+
+        expect(await versions.get(first.id)).toEqual({
+          ...first,
+          role: "legacy",
+        });
+        expect(await versions.get("bpv_missing")).toBeUndefined();
+      },
+    );
+
+    // #441-T03
+    it_(
+      "finds the current versions a price is linked to, in either slot, and not a legacy version",
+      async () => {
+        const { db, plan, versions } = await start();
+        const month = await aPrice(db, plan.id, "pri_m");
+        const year = await aPrice(db, plan.id, "pri_y");
+        const first = await versions.createNext(plan.id, managed(), null, 0);
+        await versions.setPriceLink(first.id, "month", month.id, null);
+        await versions.setPriceLink(first.id, "year", year.id, null);
+
+        expect(
+          (await versions.currentLinkedTo(month.id)).map((v) => v.id),
+        ).toEqual([first.id]);
+        expect(
+          (await versions.currentLinkedTo(year.id)).map((v) => v.id),
+        ).toEqual([first.id]);
+        const second = await versions.createNext(plan.id, managed(), null, 1);
+        expect(await versions.currentLinkedTo(month.id)).toEqual([]);
+        await versions.setPriceLink(second.id, "month", month.id, null);
+        expect(
+          (await versions.currentLinkedTo(month.id)).map((v) => v.id),
+        ).toEqual([second.id]);
+      },
+    );
 
     // The database refuses what the repository merely does not offer (#438, review N6): whoever writes, an app instance
     // of another release or somebody with SQL, a version is never changed beyond `role` and never deleted. `created_by`
