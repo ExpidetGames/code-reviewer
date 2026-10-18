@@ -176,7 +176,7 @@ test.describe("an instance without an operator token and without entitlements", 
   });
 
   // #285-T01
-  test("the workspace pages show no limits, no plan, no quality level and no hand-over", async ({
+  test("@smoke the workspace pages show no limits, no plan, no quality level and no hand-over", async ({
     page,
   }) => {
     await signInThroughTheForm(page, account);
