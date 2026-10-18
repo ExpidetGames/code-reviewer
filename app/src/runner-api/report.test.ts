@@ -47,15 +47,42 @@ describe("the result of a job on the operator's key", () => {
     expect(masked.errorMessage).toBe("[model] is busy");
   });
 
-  // #432-T08
-  it("masks the id inside a provider-prefixed spelling and leaves only the prefix", () => {
+  // #432-T08, #435-T06
+  it("masks the id inside a provider-prefixed spelling, and the provider with it (ADR 0005: no log line a member reads names a provider)", () => {
     const masked = withoutManagedModel(
       resultOf({ logTail: "calling openrouter/vendor/entry-model now" }),
       ["vendor/entry-model"],
       true,
     );
 
-    expect(masked.logTail).toBe("calling openrouter/[model] now");
+    expect(masked.logTail).toBe("calling [provider]/[model] now");
+  });
+
+  // #435-T06
+  it("masks the provider in any letter case, inside the name of an exception, in the log and the error", () => {
+    const masked = withoutManagedModel(
+      resultOf({
+        logTail:
+          'litellm.NotFoundError: NotFoundError: OpenrouterException - {"error":{"message":"OpenRouter: model gone"}}',
+        errorMessage: "OPENROUTER said no (openrouter)",
+      }),
+      [],
+      true,
+    );
+
+    expect(masked.logTail).toBe(
+      'litellm.NotFoundError: NotFoundError: [provider]Exception - {"error":{"message":"[provider]: model gone"}}',
+    );
+    expect(masked.errorMessage).toBe("[provider] said no ([provider])");
+  });
+
+  // #435-T06
+  it("leaves the provider in the text of a job that did not run on the operator's key", () => {
+    const result = resultOf({ logTail: "OpenRouter answered" });
+
+    expect(withoutManagedModel(result, [], false).logTail).toBe(
+      "OpenRouter answered",
+    );
   });
 
   // #432-T08
