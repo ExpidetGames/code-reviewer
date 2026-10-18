@@ -349,28 +349,46 @@ describe("the form", () => {
   });
 });
 
+const NOT_CONFIRMED = (projects: number): Answer => ({
+  ok: false,
+  status: 409,
+  code: "model_change_not_confirmed",
+  issues: [],
+  details: { projects },
+});
+
+async function changeModelOfSmall(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole("button", { name: "Edit Small" }));
+  const dialog = screen.getByRole("dialog");
+  await user.clear(within(dialog).getByLabelText("Model id"));
+  await user.type(within(dialog).getByLabelText("Model id"), "acme/better-2");
+  await user.click(within(dialog).getByRole("button", { name: "Save" }));
+}
+
 describe("changing the model behind a released entry", () => {
   // #429-T09
-  it("asks first, shows how many projects use the entry, and sends the change only when confirmed", async () => {
+  it("sends the change, and asks only when the server asks, with the count the server answered", async () => {
     const user = userEvent.setup();
     const mock = renderSection(catalogOf([SMALL]));
+    // The page was loaded when 3 projects used the entry; the server counts 5 now.
+    mock.update.mockResolvedValueOnce(NOT_CONFIRMED(5));
 
-    await user.click(screen.getByRole("button", { name: "Edit Small" }));
-    const dialog = screen.getByRole("dialog");
-    await user.clear(within(dialog).getByLabelText("Model id"));
-    await user.type(within(dialog).getByLabelText("Model id"), "acme/better-2");
-    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    await changeModelOfSmall(user);
 
     const confirmation = await screen.findByRole("alertdialog");
-    expect(confirmation.textContent).toMatch(/3 projects/);
-    expect(mock.update).not.toHaveBeenCalled();
+    expect(confirmation.textContent).toMatch(/5 projects/);
+    expect(confirmation.textContent).not.toMatch(/3 projects/);
+    expect(mock.update).toHaveBeenCalledTimes(1);
+    expect(mock.update.mock.calls[0]?.[1]).not.toHaveProperty(
+      "confirmModelChange",
+    );
 
     await user.click(
       within(confirmation).getByRole("button", { name: "Change the model" }),
     );
 
-    await waitFor(() => expect(mock.update).toHaveBeenCalled());
-    expect(mock.update).toHaveBeenCalledWith(
+    await waitFor(() => expect(mock.update).toHaveBeenCalledTimes(2));
+    expect(mock.update).toHaveBeenLastCalledWith(
       "mce_small",
       expect.objectContaining({
         modelId: "acme/better-2",
@@ -380,46 +398,72 @@ describe("changing the model behind a released entry", () => {
   });
 
   // #429-T09
-  it("sends nothing when the confirmation is cancelled", async () => {
+  it("says that no project uses the entry when the server counts none, however many the page showed", async () => {
     const user = userEvent.setup();
     const mock = renderSection(catalogOf([SMALL]));
+    mock.update.mockResolvedValueOnce(NOT_CONFIRMED(0));
 
-    await user.click(screen.getByRole("button", { name: "Edit Small" }));
-    const dialog = screen.getByRole("dialog");
-    await user.clear(within(dialog).getByLabelText("Model id"));
-    await user.type(within(dialog).getByLabelText("Model id"), "acme/better-2");
-    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    await changeModelOfSmall(user);
+
+    const confirmation = await screen.findByRole("alertdialog");
+    expect(confirmation.textContent).toMatch(/no project uses this entry/i);
+  });
+
+  // #429-T09
+  it("sends nothing more when the confirmation is cancelled", async () => {
+    const user = userEvent.setup();
+    const mock = renderSection(catalogOf([SMALL]));
+    mock.update.mockResolvedValueOnce(NOT_CONFIRMED(3));
+
+    await changeModelOfSmall(user);
     const confirmation = await screen.findByRole("alertdialog");
     await user.click(
       within(confirmation).getByRole("button", { name: "Cancel" }),
     );
 
-    expect(mock.update).not.toHaveBeenCalled();
+    expect(mock.update).toHaveBeenCalledTimes(1);
+    expect(mock.update.mock.calls[0]?.[1]).not.toHaveProperty(
+      "confirmModelChange",
+    );
+    expect(navigation.refresh).not.toHaveBeenCalled();
   });
 
   // #429-T09
-  it("does not ask when only the name changes, or when the entry is a draft", async () => {
+  it("does not ask when the server accepts the change, or when only the name changes, or when the entry is a draft", async () => {
     const user = userEvent.setup();
     const mock = renderSection(catalogOf([SMALL, BIG]));
 
-    await user.click(screen.getByRole("button", { name: "Edit Small" }));
-    let dialog = screen.getByRole("dialog");
-    await user.type(within(dialog).getByLabelText("Name"), " 2");
-    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    await changeModelOfSmall(user);
     await waitFor(() => expect(mock.update).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.queryByRole("alertdialog")).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "Edit Big" }));
-    dialog = screen.getByRole("dialog");
+    const dialog = screen.getByRole("dialog");
     await user.clear(within(dialog).getByLabelText("Model id"));
     await user.type(within(dialog).getByLabelText("Model id"), "acme/deeper");
     await user.click(within(dialog).getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(mock.update).toHaveBeenCalledTimes(2));
     expect(screen.queryByRole("alertdialog")).toBeNull();
-    expect(mock.update.mock.calls[0]?.[1]).not.toHaveProperty(
+    expect(mock.update.mock.calls[1]?.[1]).not.toHaveProperty(
       "confirmModelChange",
     );
+  });
+
+  // #429-T09
+  it("mentions the projects that fall back to the entry when it is a default", async () => {
+    const user = userEvent.setup();
+    const mock = renderSection(
+      catalogOf([SMALL], { diff: "mce_small", dynamic: null }),
+    );
+    mock.update.mockResolvedValueOnce(NOT_CONFIRMED(4));
+
+    await changeModelOfSmall(user);
+
+    const confirmation = await screen.findByRole("alertdialog");
+    expect(confirmation.textContent).toMatch(/default/i);
+    expect(confirmation.textContent).toMatch(/4 projects/);
   });
 });
 
@@ -550,6 +594,23 @@ describe("the actions of a row", () => {
     );
     // Big first, then Small, then Old: the order the page now shows. Big is at 0 already, so only the others are sent.
     expect(sent).toEqual({ mce_small: 1, mce_old: 2 });
+  });
+
+  // #429-T02
+  it("says in the Used by cell of a default that the number includes the projects that fall back to it", () => {
+    renderSection(
+      catalogOf([SMALL, { ...OLD, status: "released" }], {
+        diff: "mce_small",
+        dynamic: null,
+      }),
+    );
+
+    const rows = within(screen.getByRole("table")).getAllByRole("row").slice(1);
+    expect(rows[0]?.textContent).toMatch(/3 projects/);
+    expect(rows[0]?.textContent).toMatch(/includes projects on the default/i);
+    expect(rows[1]?.textContent).not.toMatch(
+      /includes projects on the default/i,
+    );
   });
 
   it("shows which entry is the default of each kind", () => {

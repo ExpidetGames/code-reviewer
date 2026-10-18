@@ -47,7 +47,10 @@ import type {
   AdminCatalogEntry,
   AdminCatalogView,
 } from "../../model-catalog/admin-view.ts";
-import type { CatalogStatus } from "../../model-catalog/entries.ts";
+import {
+  CATALOG_KINDS,
+  type CatalogStatus,
+} from "../../model-catalog/entries.ts";
 import type { ProjectReviewKind } from "../../review-settings/settings.ts";
 import type { RequestResult } from "../../ui/json-request.ts";
 import { browserCatalogApi, type CatalogApi } from "./catalog-api.ts";
@@ -94,6 +97,9 @@ export function ModelCatalogSection({
 
   const providerLabel = (id: string) =>
     catalog.providers.find((provider) => provider.id === id)?.label ?? id;
+  /** Whether the entry is the instance default of a kind: projects without a choice of their own fall back to it. */
+  const isDefault = (entry: AdminCatalogEntry) =>
+    CATALOG_KINDS.some((kind) => catalog.defaults[kind] === entry.id);
   const defaultName = (kind: ProjectReviewKind) =>
     catalog.entries.find((entry) => entry.id === catalog.defaults[kind])
       ?.name ?? "none";
@@ -252,8 +258,13 @@ export function ModelCatalogSection({
                             {STATUS_LABEL[entry.status]}
                           </Badge>
                         </TableCell>
-                        <TableCell>
-                          {projectsText(entry.usedByProjects)}
+                        <TableCell className="whitespace-normal">
+                          <div>{projectsText(entry.usedByProjects)}</div>
+                          {isDefault(entry) ? (
+                            <div className="text-xs text-muted-foreground">
+                              Includes projects on the default
+                            </div>
+                          ) : null}
                         </TableCell>
                         <TableCell className="whitespace-normal">
                           <div className="flex flex-wrap gap-1">
@@ -365,6 +376,7 @@ export function ModelCatalogSection({
         <EntryDialog
           key={editing === "new" ? "new" : editing.id}
           entry={editing === "new" ? null : editing}
+          isDefault={editing !== "new" && isDefault(editing)}
           providers={catalog.providers}
           api={api}
           onClose={() => setEditing(null)}

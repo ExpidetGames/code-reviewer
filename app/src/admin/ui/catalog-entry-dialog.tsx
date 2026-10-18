@@ -4,8 +4,8 @@
 // The dialog that adds or edits one catalog entry (#429): name (with the warning that members see it), description,
 // provider, model id with "Check model", and the kinds the entry serves. A refusal is a stable code that
 // catalog-messages.ts turns into a sentence next to its field, and the focus moves to the first field that was refused
-// (rulebook R20). Changing the model behind a released entry asks first, with the number of projects that use it
-// (decision C6); the server refuses such a change without the confirmation too.
+// (rulebook R20). Changing the model behind a released entry asks first, with the number of projects that use it, as the
+// server counted it when it refused the first attempt (decision C6); the dialog never decides that on its own.
 import { useId, useState, type FormEvent } from "react";
 import { Button } from "../../components/button.tsx";
 import {
@@ -48,10 +48,7 @@ import type {
   AdminCatalogEntry,
   AdminCatalogProvider,
 } from "../../model-catalog/admin-view.ts";
-import {
-  CATALOG_KINDS,
-  MAX_NAME_CHARS,
-} from "../../model-catalog/entries.ts";
+import { CATALOG_KINDS, MAX_NAME_CHARS } from "../../model-catalog/entries.ts";
 import type { ProjectReviewKind } from "../../review-settings/settings.ts";
 import type { RequestIssue } from "../../ui/json-request.ts";
 import type { CatalogApi, EntryInput } from "./catalog-api.ts";
@@ -76,6 +73,7 @@ type Checked =
 
 export function EntryDialog({
   entry,
+  isDefault,
   providers,
   api,
   onClose,
@@ -83,6 +81,8 @@ export function EntryDialog({
 }: {
   /** The entry to edit, or null for a new one. */
   entry: AdminCatalogEntry | null;
+  /** Whether the entry is the instance default of a kind. */
+  isDefault: boolean;
   providers: AdminCatalogProvider[];
   api: CatalogApi;
   onClose: () => void;
@@ -102,7 +102,11 @@ export function EntryDialog({
   const [pending, setPending] = useState(false);
   const [checking, setChecking] = useState(false);
   const [checked, setChecked] = useState<Checked>(null);
-  const [confirming, setConfirming] = useState<EntryInput | null>(null);
+  /** The change the server wants confirmed, with the number of projects it counted when it asked. */
+  const [confirming, setConfirming] = useState<{
+    input: EntryInput;
+    projects: number | null;
+  } | null>(null);
 
   const controlId = (field: Field) =>
     field === "kinds" ? `${ids}-kind-${CATALOG_KINDS[0]}` : `${ids}-${field}`;
@@ -141,6 +145,16 @@ export function EntryDialog({
       onSaved();
       return;
     }
+    // The server decides whether the change of a model needs the confirmation, and counts the projects when it asks: the
+    // number of the page, loaded some time ago, is not shown.
+    if (result.code === "model_change_not_confirmed") {
+      const projects = result.details?.projects;
+      setConfirming({
+        input,
+        projects: typeof projects === "number" ? projects : null,
+      });
+      return;
+    }
     showRefusal(result.code, result.issues);
   }
 
@@ -152,22 +166,16 @@ export function EntryDialog({
       showRefusal("kinds_invalid", [{ field: "kinds", code: "kinds_invalid" }]);
       return;
     }
-    const input: EntryInput = {
-      name: name.trim(),
-      description: description.trim() === "" ? null : description.trim(),
-      provider,
-      modelId: modelId.trim(),
-      kinds,
-    };
-    const changesModel =
-      entry !== null &&
-      entry.status === "released" &&
-      (input.provider !== entry.provider || input.modelId !== entry.modelId);
-    if (changesModel) {
-      setConfirming(input);
-      return;
-    }
-    void send(input, false);
+    void send(
+      {
+        name: name.trim(),
+        description: description.trim() === "" ? null : description.trim(),
+        provider,
+        modelId: modelId.trim(),
+        kinds,
+      },
+      false,
+    );
   }
 
   async function check() {
@@ -214,7 +222,7 @@ export function EntryDialog({
     );
   }
 
-  const projects = entry?.usedByProjects ?? 0;
+  const projects = confirming?.projects ?? null;
 
   return (
     <Dialog open onOpenChange={(open) => (open ? undefined : onClose())}>
@@ -401,9 +409,14 @@ export function EntryDialog({
                 Change the model behind {entry?.name ?? "this entry"}?
               </AlertDialogTitle>
               <AlertDialogDescription>
-                {projects === 0
-                  ? "No project uses this entry yet."
-                  : `${String(projects)} ${projects === 1 ? "project uses" : "projects use"} this entry, and their next reviews run on the new model.`}{" "}
+                {projects === null
+                  ? "Projects may use this entry, and their next reviews run on the new model."
+                  : projects === 0
+                    ? "No project uses this entry yet."
+                    : `${String(projects)} ${projects === 1 ? "project uses" : "projects use"} this entry, and their next reviews run on the new model.`}{" "}
+                {isDefault
+                  ? "The count includes the projects that have chosen no model and fall back to this entry as the default. "
+                  : null}
                 The model is checked with the provider first, and the change is
                 written to the server log with your account.
               </AlertDialogDescription>
@@ -412,9 +425,9 @@ export function EntryDialog({
               <AlertDialogCancel>Cancel</AlertDialogCancel>
               <AlertDialogAction
                 onClick={() => {
-                  const input = confirming;
+                  const pending = confirming;
                   setConfirming(null);
-                  if (input !== null) void send(input, true);
+                  if (pending !== null) void send(pending.input, true);
                 }}
               >
                 Change the model
