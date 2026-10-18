@@ -6,7 +6,8 @@
 // metadata check is answered "supported" here (the journey has no provider to ask), everything else is the service's
 // own rules. The app is a separate process with the same file open (WAL), so the entries show up in its pages.
 //
-//   seed <db> <json>   [{name, description?, modelId, kinds, sortOrder?}, ...]   -> {names: {<name>: <entry id>}}
+//   seed <db> <json>       [{name, description?, modelId, kinds, sortOrder?}, ...]   -> {names: {<name>: <entry id>}}
+//   defaults <db> <json>   {diff: <entry id> | null, dynamic: <entry id> | null}          -> {defaults: {diff, dynamic}}
 //
 // Every entry is created for the default provider and released. Prints one JSON line.
 import { openDatabase } from "../db/connection.ts";
@@ -16,8 +17,12 @@ import { DEFAULT_LLM_PROVIDER } from "../llm/providers/index.ts";
 import { createCatalogService } from "../model-catalog/service.ts";
 
 const [command, databasePath, argument] = process.argv.slice(2);
-if (command !== "seed" || !databasePath || !argument)
-  throw new Error("Usage: e2e-catalog-child.ts seed <db> <json>");
+if (
+  (command !== "seed" && command !== "defaults") ||
+  !databasePath ||
+  !argument
+)
+  throw new Error("Usage: e2e-catalog-child.ts seed|defaults <db> <json>");
 
 type Seed = {
   name: string;
@@ -27,7 +32,6 @@ type Seed = {
   sortOrder?: number;
 };
 
-const entries = JSON.parse(argument) as Seed[];
 const db = openDatabase({
   driver: "sqlite",
   path: databasePath,
@@ -57,18 +61,29 @@ try {
     },
     logger: { info: () => undefined },
   });
-  const names: Record<string, string> = {};
-  for (const seed of entries) {
-    const created = await service.create(
-      { ...seed, provider: DEFAULT_LLM_PROVIDER },
-      null,
-    );
-    if (!created.ok) throw new Error(`Entry ${seed.name}: ${created.code}`);
-    const released = await service.release(created.entry.id, null);
-    if (!released.ok) throw new Error(`Entry ${seed.name}: ${released.code}`);
-    names[seed.name] = created.entry.id;
+  if (command === "defaults") {
+    const chosen = JSON.parse(argument) as {
+      diff: string | null;
+      dynamic: string | null;
+    };
+    const saved = await service.setDefaults(chosen, null);
+    if (!saved.ok) throw new Error(`Defaults: ${saved.code}`);
+    console.log(JSON.stringify({ defaults: saved.defaults }));
+  } else {
+    const entries = JSON.parse(argument) as Seed[];
+    const names: Record<string, string> = {};
+    for (const seed of entries) {
+      const created = await service.create(
+        { ...seed, provider: DEFAULT_LLM_PROVIDER },
+        null,
+      );
+      if (!created.ok) throw new Error(`Entry ${seed.name}: ${created.code}`);
+      const released = await service.release(created.entry.id, null);
+      if (!released.ok) throw new Error(`Entry ${seed.name}: ${released.code}`);
+      names[seed.name] = created.entry.id;
+    }
+    console.log(JSON.stringify({ names }));
   }
-  console.log(JSON.stringify({ names }));
 } finally {
   await db.destroy();
 }

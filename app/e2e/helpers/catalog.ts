@@ -39,3 +39,22 @@ export async function seedCatalog(
   const line = stdout.trim().split("\n").at(-1) ?? "{}";
   return (JSON.parse(line) as { names: Record<string, string> }).names;
 }
+
+/** Sets the instance defaults (an entry id per kind, or null) the way the operator does in the admin portal. */
+export async function setCatalogDefaults(
+  databasePath: string,
+  defaults: { diff: string | null; dynamic: string | null },
+): Promise<void> {
+  await run(
+    process.execPath,
+    [
+      "--no-warnings",
+      "--conditions=react-server",
+      CHILD,
+      "defaults",
+      resolve(process.cwd(), databasePath),
+      JSON.stringify(defaults),
+    ],
+    { cwd: process.cwd() },
+  );
+}

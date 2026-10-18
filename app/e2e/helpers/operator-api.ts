@@ -33,6 +33,8 @@ export type UsageItem = {
   reviewKind: "diff" | "dynamic";
   keyMode: "own" | "managed";
   modelTier: string | null;
+  catalogEntryId: string | null;
+  catalogEntryName: string | null;
   costMicroUsd: number | null;
   promptTokens: number | null;
   completionTokens: number | null;
