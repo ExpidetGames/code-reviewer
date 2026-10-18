@@ -2,7 +2,8 @@
 
 "use client";
 // The "Review kind" card of a project's settings form (#200): exactly one of Diff Review and Dynamic
-// Review, and, while Dynamic Review is chosen, its model and review skill. The card never implies that
+// Review, and, while Dynamic Review is chosen, its provider, model and review skill (or, for a workspace on the
+// operator's key, its catalog choice). The card never implies that
 // Dynamic Review works while the instance has not enabled it (#195 gate): the option says so and
 // choosing it shows what happens to the runs. Switching is confirmed by the form when it is saved.
 import { useId, type ReactNode } from "react";
@@ -14,6 +15,7 @@ import {
   RadioGroupItem,
 } from "../../components/ui/radio-group.tsx";
 import { cn } from "../../lib/utils.ts";
+import { ProviderSelect, type ProviderOption } from "./provider-select.tsx";
 import { KIND_NAMES } from "../kind-names.ts";
 import type { ProjectDynamicView } from "../service.ts";
 import type { ProjectReviewKind } from "../settings.ts";
@@ -47,6 +49,8 @@ export type ReviewKindHandlers = {
   setKind: (kind: ProjectReviewKind) => void;
   setModel: (text: string) => void;
   resetModel: () => void;
+  setProvider: (provider: string) => void;
+  resetProvider: () => void;
   editSkill: () => void;
   setSkill: (text: string) => void;
   resetSkill: () => void;
@@ -61,12 +65,21 @@ export function ReviewKindFieldset({
   hiddenProblem,
   kindError,
   handlers,
-  quality,
+  choice,
+  workspaceSlug,
+  providers,
+  datalistId,
 }: {
   /**
-   * The quality choice of a workspace on the operator's key (#283): it takes the place of the Dynamic model field.
+   * The catalog choice of a workspace on the operator's key (#283, #433): it takes the place of the Dynamic provider
+   * and model fields.
    */
-  quality?: ReactNode;
+  choice?: ReactNode;
+  workspaceSlug: string;
+  /** The registered providers, with whether a key is stored for each. */
+  providers: readonly ProviderOption[];
+  /** The id of the `<datalist>` of the known model names of the Dynamic provider, rendered by the container. */
+  datalistId: string;
   view: ProjectDynamicView;
   values: DynamicFormValues;
   errors: Partial<Record<string, string>>;
@@ -95,6 +108,19 @@ export function ReviewKindFieldset({
         : RESET_LABEL,
     resetAriaLabel: "Reset to default for Dynamic Review model",
     onReset: handlers.resetModel,
+  };
+  const providerOrigin: SettingsOrigin = {
+    source:
+      view.sources.dynamicProvider === "project" ||
+      values.dynamicProvider !== (view.defaults.dynamicProvider ?? "")
+        ? "Set for this project"
+        : "Built-in value",
+    resetLabel:
+      values.dynamicProvider === (view.defaults.dynamicProvider ?? "")
+        ? null
+        : RESET_LABEL,
+    resetAriaLabel: "Reset to default for Dynamic Review provider",
+    onReset: handlers.resetProvider,
   };
   return (
     <SettingsCard title="Review kind" disabled={disabled}>
@@ -182,18 +208,31 @@ export function ReviewKindFieldset({
 
       {dynamic ? (
         <>
-          {quality !== undefined ? (
-            quality
+          {choice !== undefined ? (
+            choice
           ) : (
-            <SettingsTextField
-              name="dynamicModel"
-              label="Dynamic Review model"
-              hint={`The model the agent uses. Type the name of any model your provider serves; the default is ${view.defaults.dynamicModel ?? ""}.`}
-              error={errors.dynamicModel}
-              origin={modelOrigin}
-              value={values.dynamicModel}
-              onChange={handlers.setModel}
-            />
+            <>
+              <ProviderSelect
+                workspaceSlug={workspaceSlug}
+                name="dynamicProvider"
+                label="Dynamic Review provider"
+                value={values.dynamicProvider}
+                options={providers}
+                origin={providerOrigin}
+                error={errors.dynamicProvider}
+                onChange={handlers.setProvider}
+              />
+              <SettingsTextField
+                name="dynamicModel"
+                label="Dynamic Review model"
+                hint={`The model the agent uses. Type the name of any model your provider serves; the default is ${view.defaults.dynamicModel ?? ""}.`}
+                error={errors.dynamicModel}
+                origin={modelOrigin}
+                value={values.dynamicModel}
+                onChange={handlers.setModel}
+                list={datalistId}
+              />
+            </>
           )}
           <SkillEditor
             view={view}

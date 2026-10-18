@@ -32,6 +32,7 @@ import { Button } from "../../components/button.tsx";
 import { DangerZone } from "../../components/danger-zone.tsx";
 import { formatUtc } from "../../ui/format-time.ts";
 import {
+  CATALOG_FIELD_OF_KIND,
   PROJECT_DYNAMIC_SETTING_FIELDS,
   REVIEW_SETTING_FIELDS,
   type ProjectReviewKind,
@@ -40,6 +41,7 @@ import {
 import type { ReviewCostGuard } from "../cost.ts";
 import { estimateReviewCost } from "../cost.ts";
 import { llmProviderDescriptors } from "../../llm/providers/index.ts";
+import type { LlmProviderDescriptor } from "../../llm/providers/types.ts";
 import {
   browserGlobalSettingsApi,
   browserProjectSettingsApi,
@@ -48,7 +50,9 @@ import {
 import {
   editSkill,
   resetSkill,
+  setCatalogEntry,
   setDynamicModel,
+  setDynamicProvider,
   setReviewKind,
   setReviewVerdict,
   setSkillText,
@@ -65,7 +69,7 @@ import {
   resetField,
   setBoolean,
   setCommand,
-  setModelTier,
+  setProvider,
   setText,
   type BooleanField,
   type FormState,
@@ -73,7 +77,8 @@ import {
 } from "./form-state.ts";
 import { adoptCards, planProjectSave, type SaveStep } from "./project-save.ts";
 import { ModelFieldset } from "./model-fieldset.tsx";
-import { QualityChoice } from "./quality-choice.tsx";
+import { ModelChoice, ModelChoiceNote } from "./model-choice.tsx";
+import { providerOptions } from "./provider-select.tsx";
 import { KIND_NAMES } from "../kind-names.ts";
 import {
   GATE_OFF_WARNING,
@@ -83,10 +88,7 @@ import {
 import { ReviewFieldset } from "./review-fieldset.tsx";
 import { ReviewVerdictFieldset } from "./review-verdict-fieldset.tsx";
 import { WhenFieldset } from "./when-fieldset.tsx";
-import {
-  settingsOrigin,
-  type SettingsFieldHandlers,
-} from "./settings-fields.tsx";
+import { type SettingsFieldHandlers } from "./settings-fields.tsx";
 import {
   describeIssue,
   describeSaveFailure,
@@ -98,6 +100,8 @@ type Errors = Partial<Record<string, string>>;
 
 /** The Diff fields an agent review does not show: an error on one of them is hidden while Dynamic is chosen. */
 const DIFF_ONLY_FIELDS: readonly string[] = [
+  "provider",
+  "catalogEntryDiff",
   "model",
   "fallbackModel",
   "maxTokens",
@@ -105,7 +109,12 @@ const DIFF_ONLY_FIELDS: readonly string[] = [
   "inlineKeyIssues",
   "extraInstructions",
 ];
-const DYNAMIC_ONLY_FIELDS: readonly string[] = ["dynamicModel", "reviewSkill"];
+const DYNAMIC_ONLY_FIELDS: readonly string[] = [
+  "dynamicProvider",
+  "dynamicModel",
+  "catalogEntryDynamic",
+  "reviewSkill",
+];
 
 /** The kind that has a problem the selected kind does not show, or null. */
 function hiddenProblemOf(
@@ -166,6 +175,8 @@ export function SettingsForm({
   repositoryId,
   readOnly = false,
   dynamicReviewEnabled = false,
+  keyedProviders,
+  providers: providerDescriptors = llmProviderDescriptors.providers,
   api: apiOverride,
 }: {
   /** The workspace of the page: the call is made in it. */
@@ -183,6 +194,15 @@ export function SettingsForm({
    * never implies that Dynamic Review works when it may not.
    */
   dynamicReviewEnabled?: boolean;
+  /**
+   * The providers that have a stored key in this workspace (#433). A workspace on its own key is warned about a
+   * chosen provider that is not in the list; unknown (not given) warns about nothing.
+   */
+  keyedProviders?: readonly string[];
+  /** Only tests pass this: the providers the selects offer, the registry's by default. */
+  providers?: ReadonlyArray<
+    Pick<LlmProviderDescriptor, "id" | "label" | "suggestedModels">
+  >;
   /** Only tests pass this: a server component cannot hand functions to this client component. */
   api?: SettingsApi;
 }) {
@@ -196,6 +216,10 @@ export function SettingsForm({
   );
   const api = apiOverride ?? defaultApi;
   const datalistId = `${useId()}-models`;
+  const providerChoices = useMemo(
+    () => providerOptions(providerDescriptors, keyedProviders),
+    [providerDescriptors, keyedProviders],
+  );
   const formRef = useRef<HTMLFormElement>(null);
   const saveRef = useRef<HTMLButtonElement>(null);
   // Set synchronously, so a confirmation that fires twice cannot start two saves (#200 review).
@@ -421,7 +445,12 @@ export function SettingsForm({
 
   const handlers: SettingsFieldHandlers = {
     setText: (name: TextField, value: string) =>
-      edit(setText(state, name, value), name),
+      edit(
+        name === "provider"
+          ? setProvider(state, value)
+          : setText(state, name, value),
+        name,
+      ),
     setBoolean: (name: BooleanField, value: boolean) =>
       edit(setBoolean(state, name, value), name),
     setCommand: (command, allowed) =>
@@ -431,32 +460,47 @@ export function SettingsForm({
   };
   const shippedSkill = projectView?.defaults.reviewSkill ?? "";
   const defaultModel = projectView?.defaults.dynamicModel ?? "";
+  const defaultProvider = projectView?.defaults.dynamicProvider ?? "";
   const kindHandlers: ReviewKindHandlers = {
     setKind: (next) => edit(setReviewKind(state, next), "reviewKind"),
     setModel: (text) => edit(setDynamicModel(state, text), "dynamicModel"),
     resetModel: () =>
       edit(setDynamicModel(state, defaultModel), "dynamicModel"),
+    setProvider: (provider) =>
+      edit(setDynamicProvider(state, provider), "dynamicProvider"),
+    // The model goes back with the provider it belongs to.
+    resetProvider: () =>
+      edit(
+        setDynamicModel(
+          setDynamicProvider(state, defaultProvider),
+          defaultModel,
+        ),
+        "dynamicProvider",
+      ),
     editSkill: () => edit(editSkill(state, shippedSkill), "reviewSkill"),
     setSkill: (text) => edit(setSkillText(state, text), "reviewSkill"),
     resetSkill: () => edit(resetSkill(state, shippedSkill), "reviewSkill"),
   };
-  // The workspace reviews on the operator's key (#283): a quality level takes the place of the model fields.
-  const quality = (reviewKind: ProjectReviewKind | "every") => (
-    <QualityChoice
-      value={state.values.modelTier}
-      availability={model.tierAvailability}
-      kind={reviewKind}
-      origin={settingsOrigin({
-        model,
-        state,
-        name: "modelTier",
-        label: "Quality",
-        onReset: () => handlers.reset("modelTier"),
-      })}
-      error={errors.modelTier}
-      onChange={(tier) => edit(setModelTier(state, tier), "modelTier")}
-    />
-  );
+  // The workspace reviews on the operator's key (#283, #433): the entry of the catalog for a kind takes the place of
+  // its provider and model fields. The workspace defaults hold no entry (decision C3), only a note.
+  const choice = (reviewKind: ProjectReviewKind) =>
+    state.dynamic === undefined ? (
+      <ModelChoiceNote />
+    ) : (
+      <ModelChoice
+        workspaceSlug={workspaceSlug}
+        kind={reviewKind}
+        choices={model.catalog?.choices[reviewKind] ?? []}
+        value={state.dynamic.catalogEntries[reviewKind]}
+        error={errors[CATALOG_FIELD_OF_KIND[reviewKind]]}
+        onChange={(id) =>
+          edit(
+            setCatalogEntry(state, reviewKind, id),
+            CATALOG_FIELD_OF_KIND[reviewKind],
+          )
+        }
+      />
+    );
   const disabled = busy || readOnly;
   const saveLabel =
     model.mode === "project" ? "Save review settings" : "Save review defaults";
@@ -470,15 +514,15 @@ export function SettingsForm({
         noValidate
         className="flex flex-col gap-6"
       >
-        {model.managed ? null : (
-          <datalist id={datalistId}>
-            {llmProviderDescriptors.defaultProvider.suggestedModels.map(
-              (name) => (
-                <option key={name} value={name} />
-              ),
-            )}
-          </datalist>
-        )}
+        {model.managed
+          ? null
+          : providerDescriptors.map((provider) => (
+              <datalist key={provider.id} id={`${datalistId}-${provider.id}`}>
+                {provider.suggestedModels.map((name) => (
+                  <option key={name} value={name} />
+                ))}
+              </datalist>
+            ))}
 
         {projectView !== undefined && state.dynamic !== undefined ? (
           <ReviewKindFieldset
@@ -490,7 +534,10 @@ export function SettingsForm({
             hiddenProblem={hiddenProblem}
             kindError={kindError}
             handlers={kindHandlers}
-            quality={model.managed ? quality("dynamic") : undefined}
+            workspaceSlug={workspaceSlug}
+            providers={providerChoices}
+            datalistId={`${datalistId}-${state.dynamic.dynamicProvider}`}
+            choice={model.managed ? choice("dynamic") : undefined}
           />
         ) : null}
         {projectView !== undefined && state.dynamic !== undefined ? (
@@ -514,12 +561,10 @@ export function SettingsForm({
             disabled={disabled}
             handlers={handlers}
             cost={cost}
-            datalistId={datalistId}
-            quality={
-              model.managed
-                ? quality(projectView === undefined ? "every" : "diff")
-                : undefined
-            }
+            workspaceSlug={workspaceSlug}
+            providers={providerChoices}
+            datalistId={`${datalistId}-${state.values.provider}`}
+            choice={model.managed ? choice("diff") : undefined}
           />
         ) : null}
         <ReviewFieldset

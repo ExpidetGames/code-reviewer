@@ -54,18 +54,17 @@ the project level, with the same layering as every other setting: the project's 
 **It only has an effect while the workspace's key mode is `managed`.** For a workspace on its own key (or without
 entitlements) `model` and the Dynamic model apply and the tier is ignored.
 
-### The Quality choice (#283)
+### The Quality choice (#283, replaced by the catalog chooser in #433)
 
-The settings forms of a managed workspace (the workspace defaults and every project) show one **Quality** choice, Low,
-Medium or High, instead of the model, the fallback model, the Dynamic model and the cost estimate
-(`src/review-settings/README.md`). Each level is described in a sentence by speed and depth only; the labels and the
-sentences are in `src/copy/model-quality.ts`, and a test scans them for a model name, a vendor, a price or a cost. The
-settings routes return `modelTier` and no model field for such a workspace and refuse a write that sets one with
-`MODEL_MANAGED_BY_INSTANCE`.
+The tiers had a **Quality** choice, Low, Medium or High, in the settings forms of a managed workspace. Since #433 the
+project form shows the **catalog chooser** in its place (an entry per review kind, `src/review-settings/README.md`) and no
+control sets `modelTier` any more; the claim no longer reads it (#432), and the tiers are retired with #434. The copy is in `src/copy/model-choice.ts`, and a test scans it for a model name, a
+vendor, a price or a cost. The settings routes return `modelTier` and no model field for such a workspace and refuse a
+write that sets one with `MODEL_MANAGED_BY_INSTANCE`.
 
-A level that has no model for the kind of review in force is shown as **Not available**, and cannot be chosen, without
-saying why or which model would back it: the form gets a yes or no per level and kind (`tierAvailability`,
-`configuredTiers`), read from this configuration on every request, never an id.
+No form shows the levels any more, so there is no "Not available" level to explain. The claim does not read the tier
+any more (the banner above; the "At claim" section below is the retired behaviour). The yes or no per level and kind
+(`tierAvailability`, `configuredTiers`) stays on the settings view until #434 retires the tiers.
 
 ## At claim
 
@@ -146,7 +145,7 @@ refusals, nothing stored on a refusal), `integration-tests/http/operator-api-mod
 kind, the default, the layering, the closed failure, the workspace on its own key, the clamp, the masking),
 `integration-tests/http/model-tiers-privacy.integration.test.ts` (also the settings answers of a managed workspace),
 `src/review-settings/*.integration.test.ts` and `ui/*.test.tsx` (the Quality choice, the refusal of a model write, the
-views without a model), `src/copy/model-quality.test.ts` (the copy scan), the published Dynamic and Diff comment in
+views without a model), `src/copy/model-choice.test.ts` (the copy scan), the published Dynamic and Diff comment in
 `runner/tests/integration/test_dynamic_review_job.py` and `runner/tests/engine/test_engine_hostile_repo.py`, the contract in
 `integration-tests/compatibility/operator-api-contract.integration.test.ts` and the portal row in
 `src/admin/http.integration.test.ts` and `src/admin/ui/overview.test.tsx`.

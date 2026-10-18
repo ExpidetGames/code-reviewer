@@ -29,6 +29,10 @@ import { SettingsForm } from "./settings-form.tsx";
 
 afterEach(cleanup);
 
+// The one place the form says "provider" since #433: the two pickers. Anything else that does (a hosting provider, a
+// routing control) is still a field this card must not have.
+const PROVIDER_LABELS = ["Provider", "Dynamic Review provider"];
+
 const BUILT_IN = builtInReviewSettings("anthropic/claude-haiku-5.5");
 const SHIPPED = DEFAULT_REVIEW_SKILL.text;
 
@@ -40,6 +44,7 @@ function dynamicView(
     effective: {
       reviewKind: overrides.reviewKind ?? "diff",
       dynamicModel: overrides.dynamicModel ?? DEFAULT_DYNAMIC_MODEL,
+      dynamicProvider: overrides.dynamicProvider ?? "openrouter",
       reviewSkill: overrides.reviewSkill ?? SHIPPED,
       reviewVerdict: overrides.reviewVerdict ?? "blocking",
     },
@@ -47,6 +52,8 @@ function dynamicView(
       reviewKind: overrides.reviewKind === undefined ? "built_in" : "project",
       dynamicModel:
         overrides.dynamicModel === undefined ? "built_in" : "project",
+      dynamicProvider:
+        overrides.dynamicProvider === undefined ? "built_in" : "project",
       reviewSkill: overrides.reviewSkill === undefined ? "built_in" : "project",
       reviewVerdict:
         overrides.reviewVerdict === undefined ? "built_in" : "project",
@@ -54,6 +61,7 @@ function dynamicView(
     defaults: {
       reviewKind: "diff",
       dynamicModel: DEFAULT_DYNAMIC_MODEL,
+      dynamicProvider: "openrouter",
       reviewSkill: SHIPPED,
       reviewVerdict: "blocking",
     },
@@ -86,7 +94,7 @@ function projectModel(
     ) as SettingsFormModel["sources"],
     cost: estimateReviewCost(effective),
     managed: false,
-    tierAvailability: null,
+    catalog: null,
     lastSaved: null,
     dynamic,
   };
@@ -222,8 +230,14 @@ describe("the Review kind card", () => {
         "Review when a pull request is opened, reopened or marked ready",
       ),
     ).toBeTruthy();
-    // There are no engine, command or provider controls.
-    expect(screen.queryByLabelText(/provider|command line|tool/i)).toBeNull();
+    // There are no engine or command controls, and the only provider control is the picker of #433.
+    expect(
+      screen.queryAllByLabelText(
+        (content) =>
+          /provider|command line|tool/i.test(content) &&
+          !PROVIDER_LABELS.includes(content),
+      ),
+    ).toEqual([]);
   });
 
   it("keeps what was typed for the other kind while the kind is toggled", async () => {
@@ -882,7 +896,7 @@ describe("text from the settings", () => {
     expect((window as unknown as { pwned?: number }).pwned).toBeUndefined();
   });
 
-  it("has no field for a permission, a tool, a command, a provider or a credential", async () => {
+  it("has no field for a permission, a tool, a command or a credential, and no provider control but the two pickers", async () => {
     const user = userEvent.setup();
     renderForm(projectModel(), fakeApi().api);
     await user.click(screen.getByRole("radio", { name: "Dynamic Review" }));
@@ -890,7 +904,9 @@ describe("text from the settings", () => {
     const labels = [...document.querySelectorAll("label, legend")].map(
       (node) => node.textContent ?? "",
     );
-    for (const label of labels)
+    for (const label of labels.filter(
+      (label) => !PROVIDER_LABELS.includes(label),
+    ))
       expect(label, label).not.toMatch(
         /permission|tool|shell|command line|provider|api key|token(?! budget)|secret|endpoint/i,
       );

@@ -81,7 +81,7 @@ function projectModel(
     ) as SettingsFormModel["sources"],
     cost: estimateReviewCost(BUILT_IN),
     managed: false,
-    tierAvailability: null,
+    catalog: null,
     lastSaved: null,
     dynamic,
   };
