@@ -316,7 +316,7 @@ test.describe("a limited workspace on an instance with the operator API on", () 
     comments.filter((comment) => comment.body.includes(REVIEW_MARKER));
 
   // #285-T02
-  test("@smoke the script sets default entitlements and a tier configuration, and two pull requests are reviewed with the operator's key and the tier model", async ({
+  test("the script sets default entitlements and a tier configuration, and two pull requests are reviewed with the operator's key and the tier model", async ({
     request,
   }) => {
     test.setTimeout(240_000);
@@ -528,7 +528,7 @@ test.describe("a limited workspace on an instance with the operator API on", () 
   });
 
   // #433-T10
-  test("@smoke an Owner chooses two different catalog entries for Diff and Dynamic Review of a project, and sees no model or provider", async () => {
+  test("an Owner chooses two different catalog entries for Diff and Dynamic Review of a project, and sees no model or provider", async () => {
     const page = ownerPage();
     await seedCatalog(e2eEnv.operatorDatabasePath, [
       {
