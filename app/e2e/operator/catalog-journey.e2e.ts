@@ -54,6 +54,7 @@ import {
 } from "../helpers/github-fake";
 import {
   browse,
+  expectSignedIn,
   findLeaks,
   forbiddenFor,
   formsOf,
@@ -954,11 +955,21 @@ test.describe("the catalog from the admin portal to a member's run", () => {
       );
       expect(leaks).toEqual([]);
       expect(read.apiOk).toBeGreaterThan(5);
+
+      // The Owner of M asks for the pages and the data of O, which is not theirs: the answer is the one of a path that
+      // does not exist, and holds nothing of O or of the catalog.
+      const foreign = [
+        ...(await readOthers(ownerOfM(), slugO, "refused")),
+        ...(await readOthers(member(), slugO, "refused")),
+      ];
+      expect(findLeaks(foreign, await forbiddenForM())).toEqual([]);
     });
   });
 
   // #435-T06
-  test("@smoke the search finds a model, a provider and a key in every shape a page or an answer holds them, and passes the words of the product", async () => {
+  test("@smoke the search finds a model, a provider and a key in every shape a page or an answer holds them, and passes the words of the product", async ({
+    browser,
+  }) => {
     const catalog = await adminCatalog();
     const forbidden = await forbiddenForM();
     const provider = firstOf(catalog.providers, "provider");
@@ -989,6 +1000,17 @@ test.describe("the catalog from the admin portal to a member's run", () => {
     const forms = formsOf(ENTRIES.small.model);
     expect(forms.length).toBeGreaterThan(8);
     expect(forms).toContain(encodeURIComponent(ENTRIES.small.model));
+
+    // A collector that is not signed in fails the run; it never reports "nothing found" for the login page.
+    const stranger = await browser.newContext({
+      baseURL: e2eEnv.catalogAppUrl,
+    });
+    const strangerPage = await stranger.newPage();
+    await expect(
+      readAs(strangerPage, `/w/${slugM}/projects`, { marker: "Projects" }),
+    ).rejects.toThrow(/login/);
+    await expect(expectSignedIn(strangerPage, slugM)).rejects.toThrow();
+    await stranger.close();
   });
 
   // #435-T06
@@ -1049,9 +1071,10 @@ test.describe("the catalog from the admin portal to a member's run", () => {
         opened.filter(({ which }) => which === "M").length,
       );
       const read = await readRoutes(page, slugM, ids);
-      expect(read.apiOk, `${who}: data routes that answered`).toBeGreaterThan(
-        8,
-      );
+      expect(
+        read.apiOk,
+        `${who}: data routes that answered`,
+      ).toBeGreaterThanOrEqual(6 + ids.runIds.length);
       expect(read.pages, `${who}: pages read`).toBeGreaterThan(10);
       const browsed = await browseRoutes(page, slugM, ids);
       expect(browsed.visited.length).toBeGreaterThan(10);
@@ -1242,6 +1265,24 @@ async function signInAsAdmin(browser: Browser): Promise<Page> {
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.waitForURL((url) => !url.pathname.startsWith("/login"));
   return page;
+}
+
+/** What a person who is not in the workspace gets for its pages and its data: asked as a person would, and read. */
+async function readOthers(
+  page: Page,
+  slug: string,
+  status: "refused" | "any",
+): Promise<Surface[]> {
+  const surfaces: Surface[] = [];
+  for (const path of [
+    `/w/${slug}/runs`,
+    `/w/${slug}/settings/llm`,
+    `/api/w/${slug}/runs`,
+    `/api/w/${slug}/plan`,
+    `/api/w/${slug}/llm-keys/openrouter`,
+  ])
+    surfaces.push(...(await readAs(page, path, { status })).surfaces);
+  return surfaces;
 }
 
 /** Claims the Dynamic job as the runner would, once the webhook has made it. */
