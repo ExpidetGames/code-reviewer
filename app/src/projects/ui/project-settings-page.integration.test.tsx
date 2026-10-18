@@ -450,6 +450,7 @@ describe("the Review kind card of the settings page of a project", () => {
     expect(reloaded.model.dynamic?.effective).toEqual({
       reviewKind: "dynamic",
       dynamicModel: "vendor/agent-1",
+      dynamicProvider: "openrouter",
       reviewSkill: "Look for security problems only.",
       reviewVerdict: "blocking",
     });

@@ -4,6 +4,9 @@
 // a request are reported at once with a stable code per field, that no value is echoed back, and
 // that stored settings that are no longer valid are dropped instead of failing a review.
 import { describe, expect, it } from "vitest";
+import { createFakeAdapter } from "../llm/providers/fake-adapter.ts";
+import { llmProviderDescriptors } from "../llm/providers/index.ts";
+import { createProviderRegistry } from "../llm/providers/registry.ts";
 import {
   REVIEW_SETTING_ISSUE_CODES,
   parseStoredOverrides,
@@ -602,5 +605,190 @@ describe("validating the project-only settings", () => {
         dynamicModel: null,
       }),
     ).toEqual({ reviewKind: "dynamic" });
+  });
+});
+
+// #430: the provider and the catalog entry a project selects (ADR 0005, 2.7).
+describe("validating the provider and catalog selection", () => {
+  // The default provider and a second one that exists only in tests, whose model ids have another shape.
+  const twoProviders = createProviderRegistry([
+    ...llmProviderDescriptors.providers,
+    createFakeAdapter(),
+  ]);
+
+  // #430-T01
+  it("accepts a provider of the registry as the workspace default and the project, stored by its id", () => {
+    expect(validateReviewSettingsPatch({ provider: " OpenRouter " })).toEqual({
+      ok: true,
+      value: { provider: "openrouter" },
+    });
+    expect(
+      validateProjectSettingsPatch({
+        provider: "openrouter",
+        dynamicProvider: "openrouter",
+      }),
+    ).toEqual({
+      ok: true,
+      value: {
+        review: { provider: "openrouter" },
+        dynamic: { dynamicProvider: "openrouter" },
+      },
+    });
+  });
+
+  // #430-T01
+  it.each([
+    [7, "INVALID_TYPE"],
+    [null, "INVALID_TYPE"],
+    ["", "EMPTY"],
+    ["   ", "EMPTY"],
+    ["no-such-provider", "PROVIDER_UNKNOWN"],
+    ["openrouter/extra", "PROVIDER_UNKNOWN"],
+  ])("refuses the provider %j with %s", (value, code) => {
+    expect(issuesOf({ provider: value })).toEqual([
+      { field: "provider", code },
+    ]);
+  });
+
+  // #430-T01
+  it("lets a project clear the Dynamic provider with null and refuses anything else that is no provider", () => {
+    expect(validateProjectSettingsPatch({ dynamicProvider: null })).toEqual({
+      ok: true,
+      value: { review: {}, dynamic: { dynamicProvider: null } },
+    });
+    expect(projectIssuesOf({ dynamicProvider: "nope" })).toEqual([
+      { field: "dynamicProvider", code: "PROVIDER_UNKNOWN" },
+    ]);
+    expect(projectIssuesOf({ dynamicProvider: 3 })).toEqual([
+      { field: "dynamicProvider", code: "INVALID_TYPE" },
+    ]);
+  });
+
+  // #430-T01, #430-T02
+  it("keeps the Dynamic provider and the catalog entries out of the workspace defaults", () => {
+    for (const field of [
+      "dynamicProvider",
+      "catalogEntryDiff",
+      "catalogEntryDynamic",
+    ])
+      expect(issuesOf({ [field]: null })).toEqual([
+        { field, code: "UNKNOWN_FIELD" },
+      ]);
+  });
+
+  // #430-T01
+  it("accepts a catalog entry id per kind, and null to clear it", () => {
+    expect(
+      validateProjectSettingsPatch({
+        catalogEntryDiff: "mce_0123456789abcdef0123456789abcdef",
+        catalogEntryDynamic: null,
+      }),
+    ).toEqual({
+      ok: true,
+      value: {
+        review: {},
+        dynamic: {
+          catalogEntryDiff: "mce_0123456789abcdef0123456789abcdef",
+          catalogEntryDynamic: null,
+        },
+      },
+    });
+  });
+
+  // #430-T01
+  it.each([
+    [42, "INVALID_TYPE"],
+    ["", "EMPTY"],
+    ["  ", "EMPTY"],
+    ["mce 1; drop", "INVALID_FORMAT"],
+    ["Ünicode", "INVALID_FORMAT"],
+    ["m".repeat(65), "TOO_LONG"],
+  ])(
+    "refuses the catalog entry %j with %s, without echoing it",
+    (value, code) => {
+      const issues = projectIssuesOf({ catalogEntryDynamic: value });
+
+      expect(issues).toEqual([{ field: "catalogEntryDynamic", code }]);
+      expect(JSON.stringify(issues)).not.toContain(
+        String(value).trim() || "\0",
+      );
+    },
+  );
+
+  // #430-T01
+  it("lists the codes of the selection in the stable set", () => {
+    expect(REVIEW_SETTING_ISSUE_CODES).toEqual(
+      expect.arrayContaining([
+        "PROVIDER_UNKNOWN",
+        "CATALOG_ENTRY_UNKNOWN",
+        "CATALOG_ENTRY_NOT_RELEASED",
+        "CATALOG_ENTRY_KIND_MISMATCH",
+        "CATALOG_ENTRY_NOT_ALLOWED",
+        "CATALOG_ENTRY_OWN_KEY_MODE",
+      ]),
+    );
+  });
+
+  // #430-T01
+  it("checks a model against the rule of the provider the same request names", () => {
+    // `vendor/model` is a model id of the default provider and none of the second one.
+    expect(
+      validateReviewSettingsPatch(
+        { provider: "fakeai", model: "vendor/model" },
+        twoProviders,
+      ),
+    ).toEqual({
+      ok: false,
+      issues: [{ field: "model", code: "INVALID_FORMAT" }],
+    });
+    expect(
+      validateReviewSettingsPatch(
+        { provider: "fakeai", model: "fake-small" },
+        twoProviders,
+      ),
+    ).toEqual({ ok: true, value: { provider: "fakeai", model: "fake-small" } });
+    expect(
+      validateProjectSettingsPatch(
+        { dynamicProvider: "fakeai", dynamicModel: "vendor/model" },
+        twoProviders,
+      ),
+    ).toEqual({
+      ok: false,
+      issues: [{ field: "dynamicModel", code: "INVALID_FORMAT" }],
+    });
+    expect(
+      validateReviewSettingsPatch({ model: "vendor/model" }, twoProviders).ok,
+    ).toBe(true);
+  });
+
+  // #430-T01
+  it("does not know a provider the registry lacks", () => {
+    expect(validateReviewSettingsPatch({ provider: "fakeai" }).ok).toBe(false);
+    expect(
+      validateReviewSettingsPatch({ provider: "fakeai" }, twoProviders).ok,
+    ).toBe(true);
+  });
+
+  // #430-T03
+  it("reads the stored selection and drops what this version would not accept", () => {
+    expect(parseStoredOverrides({ provider: "openrouter" })).toEqual({
+      provider: "openrouter",
+    });
+    // A provider whose adapter was removed: the default provider applies again.
+    expect(parseStoredOverrides({ provider: "removed_provider" })).toEqual({});
+    expect(
+      parseStoredProjectDynamicOverrides({
+        dynamicProvider: "openrouter",
+        catalogEntryDiff: "mce_abc",
+        catalogEntryDynamic: null,
+      }),
+    ).toEqual({ dynamicProvider: "openrouter", catalogEntryDiff: "mce_abc" });
+    expect(
+      parseStoredProjectDynamicOverrides({
+        dynamicProvider: "removed_provider",
+        catalogEntryDiff: 7,
+        catalogEntryDynamic: "not valid!",
+      }),
+    ).toEqual({});
   });
 });

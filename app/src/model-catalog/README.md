@@ -58,7 +58,7 @@ table), `status`, `sortOrder`, who changed it last and when.
   line to the log (the entry, the person, the model before and after, how many projects use it) and returns
   `modelChange: { projects }`. `usedByProjects(id)` gives the same number beforehand, for the confirmation of the
   portal. It counts the projects whose settings select the entry (`catalogEntryDiff` or `catalogEntryDynamic`, the
-  fields #430 will write), of any workspace, and returns a number only.
+  fields of the review settings, #430), of any workspace, and returns a number only.
 - Every write is guarded by what the check saw (`updated_at`, and the status for a move): a change that lost a race
   writes nothing and is refused `catalog_conflict`.
 
@@ -81,6 +81,7 @@ anything a member reads.
 
 ## Not here
 
-The admin portal, the claim and `resolveModelSelection`, the selection settings of a project, the `modelAccess`
+The admin portal, the claim and `resolveModelSelection`, the `modelAccess`
 entitlement and the migration of the old tiers (`src/model-tiers/`, which stays untouched). There is no operator API for
-the catalog (decision C8).
+the catalog (decision C8). The selection settings of a project (the entry per kind, the picker) are in
+`src/review-settings/README.md`.

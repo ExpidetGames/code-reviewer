@@ -11,11 +11,19 @@
 // `job.env` win over the repository file (README.md, "Things to know"), so the file only reaches keys
 // that are left out (empty project rules, switches that are off, everything else PR-Agent has).
 import { REVIEW_COMMANDS, type ReviewCommand } from "../integrations/types.ts";
-import { DEFAULT_LLM_MODEL } from "../llm/config.ts";
-import { llmProviderDescriptors } from "../llm/providers/index.ts";
+import { DEFAULT_LLM_MODEL, type LlmProvider } from "../llm/config.ts";
+import {
+  DEFAULT_LLM_PROVIDER,
+  llmProviderDescriptors,
+} from "../llm/providers/index.ts";
 import { DEFAULT_MODEL_TIER, type ModelTier } from "../model-tiers/tiers.ts";
 
 export type ReviewSettings = {
+  /**
+   * The provider of `model` (ADR 0005, 2.7), a workspace default that a project may override. Absent in storage means
+   * the default provider, so every setting stored before the field existed stays valid. Own key mode only.
+   */
+  provider: LlmProvider;
   /** The model reviews run with, as the provider spells it (no provider prefix). */
   model: string;
   /** Tried when the model fails; `null` means none. */
@@ -40,14 +48,21 @@ export type ReviewSettings = {
    * The quality level of a workspace on the operator's key (#280): which of the operator's models a review uses. It
    * only has an effect while the workspace's key mode is `managed`; otherwise `model` (and the Dynamic model) apply
    * and this is ignored. A workspace never sees which model a tier is.
+   *
+   * @deprecated The catalog entries (`catalogEntryDiff`, `catalogEntryDynamic`) replace the tiers (ADR 0005). Still
+   * accepted and stored; new code ignores it.
    */
   modelTier: ModelTier;
 };
 
 export type ReviewSettingField = keyof ReviewSettings;
 
-/** The fields that name a model. A workspace on the operator's key neither reads nor writes them (#283). */
+/**
+ * The fields that name a model or the provider it belongs to. A workspace on the operator's key neither reads nor
+ * writes them (#283, #430): the provider would give the model away as well.
+ */
 export const MODEL_SETTING_FIELDS = [
+  "provider",
   "model",
   "fallbackModel",
 ] as const satisfies readonly ReviewSettingField[];
@@ -97,6 +112,22 @@ export const DEFAULT_DYNAMIC_MODEL =
   llmProviderDescriptors.defaultProvider.defaultModels.dynamic;
 
 /**
+ * The catalog entry a project selects per review kind, on the operator's key (ADR 0005, 2.7). The setting of a kind
+ * holds the opaque id of an entry; the entry's provider and model never reach a workspace.
+ */
+export const PROJECT_CATALOG_FIELDS = [
+  "catalogEntryDiff",
+  "catalogEntryDynamic",
+] as const;
+export type ProjectCatalogField = (typeof PROJECT_CATALOG_FIELDS)[number];
+
+/** The setting that holds the entry of a review kind. */
+export const CATALOG_FIELD_OF_KIND = {
+  diff: "catalogEntryDiff",
+  dynamic: "catalogEntryDynamic",
+} as const satisfies Record<ProjectReviewKind, ProjectCatalogField>;
+
+/**
  * The settings that only a project has (#194): one review kind, the Dynamic model and an optional
  * skill override. They live in `projects.settings` next to the Diff overrides but are never workspace
  * defaults: the global layer cannot hold them (`validate.ts`, `REVIEW_SETTINGS_...`).
@@ -104,6 +135,14 @@ export const DEFAULT_DYNAMIC_MODEL =
 export type ProjectDynamicSettings = {
   reviewKind: ProjectReviewKind;
   dynamicModel: string;
+  /** The provider of `dynamicModel` (#430); absent in storage means the default provider. */
+  dynamicProvider: LlmProvider;
+  /**
+   * The catalog entry the project selects per kind on the operator's key (#430); `null` is none, so the instance
+   * default entry of the kind applies at the claim (#432). There is no workspace-level default (decision C3).
+   */
+  catalogEntryDiff: string | null;
+  catalogEntryDynamic: string | null;
   /** The project's skill override, or `null` for the shipped default skill. */
   reviewSkill: string | null;
   /** What a finished review does on its pull request besides the check run (#405): applies to both kinds. */
@@ -121,6 +160,11 @@ export type ProjectDynamicOverrides = Partial<ProjectDynamicSettings>;
 export type ProjectDynamicPatch = {
   reviewKind?: ProjectReviewKind;
   dynamicModel?: string | null;
+  /** `null` clears the override, so the default provider applies again (#430). */
+  dynamicProvider?: LlmProvider | null;
+  /** `null` clears the selection, so the instance default entry applies again (#430). */
+  catalogEntryDiff?: string | null;
+  catalogEntryDynamic?: string | null;
   reviewSkill?: string | null;
   /** `null` clears the override, so the default (`blocking`) applies again (#405). */
   reviewVerdict?: ReviewVerdictMode | null;
@@ -131,11 +175,15 @@ export type ProjectDynamicSettingField = keyof ProjectDynamicSettings;
 export const PROJECT_DYNAMIC_SETTING_FIELDS = [
   "reviewKind",
   "dynamicModel",
+  "dynamicProvider",
+  "catalogEntryDiff",
+  "catalogEntryDynamic",
   "reviewSkill",
   "reviewVerdict",
 ] as const satisfies readonly ProjectDynamicSettingField[];
 
 export const REVIEW_SETTING_FIELDS = [
+  "provider",
   "model",
   "fallbackModel",
   "extraInstructions",
@@ -180,6 +228,9 @@ export function builtInProjectDynamicSettings(
   return {
     reviewKind: "diff",
     dynamicModel,
+    dynamicProvider: DEFAULT_LLM_PROVIDER,
+    catalogEntryDiff: null,
+    catalogEntryDynamic: null,
     reviewSkill: null,
     reviewVerdict: DEFAULT_REVIEW_VERDICT_MODE,
   };
@@ -193,6 +244,7 @@ export function builtInReviewSettings(
   model: string = DEFAULT_LLM_MODEL,
 ): ReviewSettings {
   return {
+    provider: DEFAULT_LLM_PROVIDER,
     model,
     fallbackModel: null,
     extraInstructions: "",
