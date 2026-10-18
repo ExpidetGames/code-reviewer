@@ -52,6 +52,10 @@ function view(overrides: Partial<AdminSettingsView> = {}): AdminSettingsView {
     smtp: { value: null, password: "none", ...never },
     operatorLlmKey: { state: "not_configured" },
     operatorLlmKeys: { openrouter: { state: "not_configured" } },
+    modelCatalog: {
+      diff: { released: 0, hasDefault: false },
+      dynamic: { released: 0, hasDefault: false },
+    },
     workspaceCount: 1,
     githubConfigured: false,
     mailConfigured: false,

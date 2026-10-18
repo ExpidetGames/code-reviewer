@@ -2,17 +2,18 @@
 
 The operator's list of the models that workspaces on the operator's key may use (#425, part of epic #420;
 docs/decisions/0005-providers-model-catalog-and-paddle-billing.md, 2.6). An entry has a free **name** that members see
-and a provider and a real model id that **only the operator** sees. This folder is the data and the rules; nothing
-shows the catalog yet (the admin portal, the selection settings, the claim and the `modelAccess` entitlement come with
-later issues of the epic). **The catalog is empty by default, and an empty catalog changes nothing** for any workspace:
-nothing reads it on a claim, and no self-hoster has to do anything.
+and a provider and a real model id that **only the operator** sees. This folder is the data and the rules, and the
+operator's side of them in the admin portal (#429, below). **The catalog is empty by default, and an empty catalog changes
+nothing** for any workspace, and no self-hoster has to do anything: the section in the admin portal is collapsed while it
+is empty.
 
-| File         | Role                                                                                                                                                                                   |
-| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `entries.ts` | Pure: the statuses and the move between them, the kinds, `CatalogEntry`, `CatalogDefaults`, the checks of a name (`checkEntryName`, `nameKeyOf`, `nameRevealsModel`) and a description |
-| `member.ts`  | `MemberCatalogEntry`, the typed view of an entry for a member (no provider, no model id), and `toMemberEntry`                                                                          |
-| `errors.ts`  | `CATALOG_ERROR_CODES`, the stable codes of a refused change                                                                                                                            |
-| `service.ts` | `createCatalogService`: create, update, release, retire, remove, `usedByProjects`, the defaults, the member view and `allCatalogModelIds`                                              |
+| File                                                                                 | Role                                                                                                                                                                                    |
+| ------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `entries.ts`                                                                         | Pure: the statuses and the move between them, the kinds, `CatalogEntry`, `CatalogDefaults`, the checks of a name (`checkEntryName`, `nameKeyOf`, `nameRevealsModel`) and a description  |
+| `member.ts`                                                                          | `MemberCatalogEntry`, the typed view of an entry for a member (no provider, no model id), and `toMemberEntry`                                                                           |
+| `errors.ts`                                                                          | `CATALOG_ERROR_CODES`, the stable codes of a refused change                                                                                                                             |
+| `service.ts`                                                                         | `createCatalogService`: create, update, release, retire, remove, `usedByProjects`, the defaults, `checkModel`, `summary`, the member view and `allCatalogModelIds`                      |
+| `admin-service.ts`, `admin-view.ts`, `admin-errors.ts`, `admin-http.ts`, `shared.ts` | The admin portal's side (#429): the view with the number of projects per entry, the confirmation before a change of model, the route handlers, their codes and statuses, and the wiring |
 
 The table is `model_catalog_entries` (migration `20261017140000_create_model_catalog_entries`, `src/db/README.md`), its
 repository is the instance level `src/db/repositories/catalog-repository.ts`. `../copy/member-copy-scan.ts` is the scan
@@ -79,10 +80,52 @@ never shown), and the repository selects only those columns, so the provider and
 `allCatalogModelIds()` gives the model id of every entry of every status: with the models of a job, the ids to mask in
 anything a member reads.
 
+## The admin portal (#429)
+
+The catalog is managed in a section of the LLM page of the admin portal (`/admin/llm`, `src/admin/ui/catalog-section.tsx`):
+empty and collapsed ("Only needed for workspaces whose key mode is managed"), so an instance on its own keys has nothing
+new to do. The table lists every entry, a retired one too, with the provider and the model id, the kinds, the status and
+"used by N projects"; the dialog adds or edits an entry (the name carries the warning that members see it) and has a
+**Check model** button, which asks the provider's metadata what release asks and stores nothing. Actions: release (draft or
+retired), retire (after a confirmation with the number of projects that use the entry), delete (a draft), move up or
+down, and the default of each kind. The overview shows counts per kind and whether the kind has a default, never a name
+or a model (`summary()`).
+
+Routes (`/api/admin/model-catalog`, files in `src/app/api/instance-portal/model-catalog/`, handlers in `admin-http.ts`):
+
+| Route                                   | Does                                                                                                                                      |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /`                                 | The view: every entry (with `usedByProjects`), the two defaults, the providers                                                            |
+| `POST /`                                | A new entry, as a draft                                                                                                                   |
+| `PUT /:id`                              | Changes the given fields; the model or provider behind a released entry needs `"confirmModelChange": true`                                |
+| `DELETE /:id`                           | Deletes a draft                                                                                                                           |
+| `POST /:id/release`, `POST /:id/retire` | The status moves (release re-runs the check)                                                                                              |
+| `PUT /defaults`                         | `{ diff, dynamic }`, each an entry id or null                                                                                             |
+| `PUT /order`                            | `{ order: [id, ...] }`, every entry once, first to last, in one transaction (`catalog_conflict` when the list is not exactly the entries) |
+| `POST /check`                           | `{ provider, modelId, kinds }` answers `{ ok: true, verified }` or `{ ok: false, error }` (the provider's word)                           |
+
+The admin first (401 for nobody, the 404 of a missing path for anyone else), then for a change the request's origin
+(`cross_site_request`), `application/json` and a body of at most 64 KB, then the service. Every refusal is
+`{ error: <code>, issues?: [{ field, code }] }` with a code of `admin-errors.ts` and its status; the page turns the code
+into copy (`src/admin/ui/catalog-messages.ts`), moves the focus to the first refused field and never shows a code. **A model
+change behind a released entry** (decision C6) is answered `409 model_change_not_confirmed` with the number of `projects`
+that use it, and nothing is written, until the request repeats it with `confirmModelChange: true` (the service decides on the entry it
+writes, which the write is pinned to by `updatedAt`, so a release in between ends as `catalog_conflict` and cannot skip it; the
+dialog asks only when the server says so and shows the server's count); the service then checks
+the model again and writes the audit line (the entry, the account, the model before and after, the count) to the server
+log, which is the operator's. Nothing here is reachable by a member of a workspace or by the operator API (decision C8).
+"Used by" counts the projects whose settings select the entry and, for an instance default, the projects in a workspace
+on the operator's key that chose no entry for the kind they run (Diff unless the project says Dynamic) and so fall back to
+it. It is one pass over the projects for all entries (`countProjectsUsing`), computed once per answer.
+
+**No "back to draft".** The issue lists it, but the status rules of #425 do not allow a return to draft (a released entry's
+id is in old usage records and in the mask list), so the portal offers retire, which hides the entry from members and keeps
+it listed here, and delete for a draft.
+
 ## Not here
 
-The admin portal, the claim and `resolveModelSelection`, and the `modelAccess`
-entitlement. There is no operator API for the catalog (decision C8). The selection settings of a project (the entry per
+The claim and `resolveModelSelection`, and the `modelAccess` entitlement (the admin portal is
+#429, above). There is no operator API for the catalog (decision C8). The selection settings of a project (the entry per
 kind, the picker) are in `src/review-settings/README.md`.
 
 ## Migrated from the tiers (#434)

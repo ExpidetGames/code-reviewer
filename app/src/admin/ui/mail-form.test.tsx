@@ -57,6 +57,10 @@ function view(
     smtp: { value: null, password: "none", ...never, ...smtp },
     operatorLlmKey: { state: "not_configured" },
     operatorLlmKeys: { openrouter: { state: "not_configured" } },
+    modelCatalog: {
+      diff: { released: 0, hasDefault: false },
+      dynamic: { released: 0, hasDefault: false },
+    },
     workspaceCount: 1,
     githubConfigured: false,
     mailConfigured: false,

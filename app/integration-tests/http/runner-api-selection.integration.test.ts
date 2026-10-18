@@ -417,6 +417,7 @@ describe("the operator's key: the catalog entry of the project", () => {
       h.defaultEntry!.id,
       { modelId: "entry/default-model-v2" },
       null,
+      { confirmModelChange: true },
     );
     expect(updated.ok).toBe(true);
 
@@ -659,6 +660,7 @@ describe("the model of an entry stays on the server", () => {
       h.defaultEntry!.id,
       { modelId: "entry/default-model-v2" },
       null,
+      { confirmModelChange: true },
     );
 
     await h.anotherInstance().complete(job.id, job.leaseToken, {

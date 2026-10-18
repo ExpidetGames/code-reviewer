@@ -29,6 +29,10 @@ function view(overrides: Partial<AdminSettingsView> = {}): AdminSettingsView {
     smtp: { value: null, password: "none", ...never },
     operatorLlmKey: { state: "not_configured" },
     operatorLlmKeys: { openrouter: { state: "not_configured" } },
+    modelCatalog: {
+      diff: { released: 0, hasDefault: false },
+      dynamic: { released: 0, hasDefault: false },
+    },
     workspaceCount: 1,
     githubConfigured: false,
     mailConfigured: false,
@@ -519,9 +523,67 @@ describe("the LLM key of each provider on the overview (#427)", () => {
   });
 });
 
-describe("the managed model tiers (#434)", () => {
+describe("the model catalog (#429)", () => {
+  const catalog = (modelCatalog: AdminSettingsView["modelCatalog"]) =>
+    view({ modelCatalog });
+
+  // #429-T06
+  it("shows how many entries are released for each kind and whether the kind has a default, in place of the tiers", () => {
+    render(
+      <Overview
+        settings={catalog({
+          diff: { released: 2, hasDefault: true },
+          dynamic: { released: 0, hasDefault: false },
+        })}
+      />,
+    );
+
+    const text = row("Model catalog").textContent ?? "";
+    expect(text).toContain("Diff: 2 released, default set");
+    expect(text).toContain("Dynamic: none released, no default");
+    expect(screen.queryByText("Managed model tiers")).toBeNull();
+  });
+
+  // #429-T06
+  it("shows counts and no name, provider or model: the view has nothing else to show", () => {
+    const settings = catalog({
+      diff: { released: 1, hasDefault: false },
+      dynamic: { released: 1, hasDefault: true },
+    });
+    render(<Overview settings={settings} />);
+
+    expect(Object.keys(settings.modelCatalog).sort()).toEqual([
+      "diff",
+      "dynamic",
+    ]);
+    for (const kind of Object.values(settings.modelCatalog))
+      expect(Object.keys(kind).sort()).toEqual(["hasDefault", "released"]);
+    expect(row("Model catalog").textContent).not.toMatch(/mce_|\//);
+  });
+
+  // #429-T06
+  it("links to the LLM page, where the catalog is managed", () => {
+    render(<Overview settings={view()} />);
+
+    expect(
+      within(row("Model catalog")).getByRole("link").getAttribute("href"),
+    ).toBe("/admin/llm");
+  });
+
+  // #429-T06
+  it("is optional: an empty catalog is no warning and no attention notice", () => {
+    render(<Overview settings={view()} />);
+
+    expect(row("Model catalog").textContent).toContain(
+      "Diff: none released, no default",
+    );
+    expect(
+      screen.queryByRole("region", { name: /needs attention/i }),
+    ).toBeNull();
+  });
+
   // #434-T08
-  it("have no row any more: a model is a catalog entry, chosen on the catalog page", () => {
+  it("has no row for the managed model tiers any more: a model is a catalog entry", () => {
     render(<Overview settings={view()} />);
 
     expect(screen.queryByText("Managed model tiers")).toBeNull();

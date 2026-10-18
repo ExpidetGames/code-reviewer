@@ -43,6 +43,7 @@ import {
   readImportNotice,
   type ImportNotice,
 } from "../legacy-import/notice.ts";
+import type { CatalogSummary } from "../model-catalog/service.ts";
 import { savePlanManagementUrl } from "../plan-handoff/settings.ts";
 import { checkPlanManagementUrl } from "../plan-handoff/url.ts";
 import { githubIdentityLinked } from "./github-identity.ts";
@@ -110,6 +111,11 @@ export type AdminSettingsView = {
    * release for whoever reads it; `operatorLlmKeys` is the field to use.
    */
   operatorLlmKey: OperatorLlmKeyStatus;
+  /**
+   * #429: how many catalog entries are released for each kind and whether the kind has a default: numbers and nothing
+   * else, so the overview shows no name, provider or model.
+   */
+  modelCatalog: CatalogSummary;
   workspaceCount: number;
   githubConfigured: boolean;
   mailConfigured: boolean;
@@ -213,6 +219,8 @@ export type AdminServiceOptions = {
   testMail: TestMailService;
   /** The Test button of the operator's keys (src/llm/operator-key-test.ts). */
   operatorKeyTest: OperatorKeyTestService;
+  /** The numbers of the model catalog for the overview (src/model-catalog/service.ts, #429). */
+  catalogSummary: () => Promise<CatalogSummary>;
   /** The providers the app supports; a test passes its own. */
   providers?: ProviderLookup;
   now?: () => Date;
@@ -244,6 +252,7 @@ export function createAdminService({
   smtp,
   testMail,
   operatorKeyTest,
+  catalogSummary,
   providers = llmProviderDescriptors,
   githubConfigured,
   mailConfigured,
@@ -386,6 +395,7 @@ export function createAdminService({
         operatorLlmKey: operatorStatuses.find(
           ({ provider }) => provider === DEFAULT_LLM_PROVIDER,
         )?.status ?? { state: "not_configured" },
+        modelCatalog: await catalogSummary(),
         workspaceCount: Number(count.count),
         githubConfigured: github,
         mailConfigured: mail,

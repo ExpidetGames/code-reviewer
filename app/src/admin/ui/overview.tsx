@@ -20,6 +20,7 @@ import {
 import type { GithubConfigView } from "../../github-config/service.ts";
 import { GITHUB_SIGN_IN_NOT_ENABLED } from "../../github-config/ui/messages.ts";
 import { llmProviderDescriptors } from "../../llm/providers/index.ts";
+import { CATALOG_KINDS } from "../../model-catalog/entries.ts";
 import { UNREADABLE_SECRET_CAUSE } from "../../secrets/messages.ts";
 import type { AdminSettingsView } from "../service.ts";
 import { ImportNotice } from "./import-notice.tsx";
@@ -125,6 +126,18 @@ function operatorKeyRow(settings: AdminSettingsView): {
     summary,
     hint: "Optional. Only workspaces that use the key of the instance need one.",
   };
+}
+
+const KIND_LABELS = { diff: "Diff", dynamic: "Dynamic" } as const;
+
+/** "Diff: 2 released, default set, Dynamic: none released, no default": counts, never a name, a provider or a model (#429). */
+function modelCatalogSummary(
+  catalog: AdminSettingsView["modelCatalog"],
+): string {
+  return CATALOG_KINDS.map((kind) => {
+    const { released, hasDefault } = catalog[kind];
+    return `${KIND_LABELS[kind]}: ${released === 0 ? "none" : String(released)} released, ${hasDefault ? "default set" : "no default"}`;
+  }).join(", ");
 }
 
 function githubRow(
@@ -275,6 +288,13 @@ export function Overview({
               {...(operatorKey.hint === undefined
                 ? {}
                 : { hint: operatorKey.hint })}
+              href="/admin/llm"
+            />
+            <SetupRow
+              title="Model catalog"
+              status="ok"
+              summary={modelCatalogSummary(settings.modelCatalog)}
+              hint="Optional. Only workspaces that use the key of the instance need it: they can choose the released entries, by name. A kind with no released entry or no default cannot run a review for them."
               href="/admin/llm"
             />
             <SetupRow
