@@ -31,6 +31,7 @@ import { startLlmFake, type FakeLlm } from "../../../fakes/llm/server.ts";
 import { changeAdminSetting } from "../helpers/admin-api";
 import { seedCatalog, setCatalogDefaults } from "../helpers/catalog";
 import { e2eEnv, llmEnv } from "../helpers/e2e-env";
+import { MEASURED_COST } from "../helpers/measured-cost-pattern";
 import {
   addGithubAccount,
   addGithubInstallation,
@@ -545,14 +546,13 @@ test.describe("a limited workspace on an instance with the operator API on", () 
   });
 
   // #285-T10
-  test("an Owner reads the review defaults without a model field, a quality level or a model name anywhere on the page", async () => {
+  test("an Owner reads the review defaults without a model field, or a model name anywhere on the page", async () => {
     const page = ownerPage();
     await page.goto(`/w/${slugA}/settings/review-defaults`);
     // The workspace holds no default entry (decision C3): the page says the choice is made for each project.
     await expect(
       page.getByText(/chosen for each project, on the settings page/),
     ).toBeVisible();
-    await expect(page.locator('[data-field="modelTier"]')).toHaveCount(0);
     await expect(page.getByRole("radiogroup", { name: "Quality" })).toHaveCount(
       0,
     );
@@ -1375,10 +1375,7 @@ async function expectNothingSecret(
     // A measured cost (the fake reports 0.0001 US dollars with every answer) and an amount of money: a currency sign
     // or a currency code next to a number.
     // The name of a cost field with no figure (`"costUsd":null`, `"costHidden":true`) is no leak; a figure is.
-    const cost =
-      /0\.0001\d*|1e-4|(?:costUsd|costMicroUsd|cost_micro_usd)[\\"\s:]*\d/.exec(
-        text,
-      );
+    const cost = MEASURED_COST.exec(text);
     expect(
       cost === null
         ? ""

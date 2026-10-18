@@ -16,7 +16,6 @@ import {
   DEFAULT_LLM_PROVIDER,
   llmProviderDescriptors,
 } from "../llm/providers/index.ts";
-import { DEFAULT_MODEL_TIER, type ModelTier } from "../model-tiers/tiers.ts";
 
 export type ReviewSettings = {
   /**
@@ -44,15 +43,6 @@ export type ReviewSettings = {
   autoReviewOnPush: boolean;
   /** The comment commands people may use. */
   allowedCommands: ReviewCommand[];
-  /**
-   * The quality level of a workspace on the operator's key (#280): which of the operator's models a review uses. It
-   * only has an effect while the workspace's key mode is `managed`; otherwise `model` (and the Dynamic model) apply
-   * and this is ignored. A workspace never sees which model a tier is.
-   *
-   * @deprecated The catalog entries (`catalogEntryDiff`, `catalogEntryDynamic`) replace the tiers (ADR 0005). Still
-   * accepted and stored; new code ignores it.
-   */
-  modelTier: ModelTier;
 };
 
 export type ReviewSettingField = keyof ReviewSettings;
@@ -194,7 +184,6 @@ export const REVIEW_SETTING_FIELDS = [
   "autoReviewOnOpen",
   "autoReviewOnPush",
   "allowedCommands",
-  "modelTier",
 ] as const satisfies readonly ReviewSettingField[];
 
 /** A layer: only the fields somebody set. */
@@ -255,6 +244,5 @@ export function builtInReviewSettings(
     autoReviewOnOpen: true,
     autoReviewOnPush: true,
     allowedCommands: [...REVIEW_COMMANDS],
-    modelTier: DEFAULT_MODEL_TIER,
   };
 }

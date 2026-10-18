@@ -6,7 +6,6 @@
 import { REVIEW_COMMANDS, type ReviewCommand } from "../integrations/types.ts";
 import type { LlmProvider } from "../llm/config.ts";
 import { llmProviderDescriptors } from "../llm/providers/index.ts";
-import { isModelTier, type ModelTier } from "../model-tiers/tiers.ts";
 import {
   PROJECT_CATALOG_FIELDS,
   PROJECT_DYNAMIC_LIMITS,
@@ -253,12 +252,6 @@ function commands(value: unknown): FieldResult<ReviewCommand[]> {
   return ok(REVIEW_COMMANDS.filter((command) => seen.has(command)));
 }
 
-/** A tier name; anything else (a model id, a made-up level) is refused without being echoed. */
-function modelTier(value: unknown): FieldResult<ModelTier> {
-  if (typeof value !== "string") return fail("INVALID_TYPE");
-  return isModelTier(value) ? ok(value) : fail("INVALID_FORMAT");
-}
-
 const FIELD_CHECKS: {
   [K in ReviewSettingField]: (
     value: unknown,
@@ -282,7 +275,6 @@ const FIELD_CHECKS: {
   autoReviewOnOpen: bool,
   autoReviewOnPush: bool,
   allowedCommands: commands,
-  modelTier: (value) => modelTier(value),
 };
 
 export type ValidationResult =

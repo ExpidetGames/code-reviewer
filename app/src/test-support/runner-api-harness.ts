@@ -5,6 +5,7 @@
 // the real GitHub App provider, and the API itself wired to all of them. `claim`, `heartbeat` and
 // `complete` build requests like the runner does. The clock of the queue is the one in `clock`.
 import { createIntegrationsRepository } from "../db/repositories/integrations-repository.ts";
+import { managedModelsOf } from "../runner-api/managed-models.ts";
 import { createUsageRecordsRepository } from "../db/repositories/usage-records-repository.ts";
 import { createJobsRepository } from "../db/repositories/jobs-repository.ts";
 import { createRepositoriesRepository } from "../db/repositories/repositories-repository.ts";
@@ -395,16 +396,15 @@ export async function startRunnerApiHarness(
         kind === "diff"
           ? configuredLlmModel(env)
           : llmProviderDescriptors.defaultProvider.defaultModels.dynamic,
-      managedModels: async (job) => {
-        const record = await createUsageRecordsRepository(
-          fixture.db,
-          job.workspaceId,
-          fixture.clock.now,
-        ).get(job.id);
-        return record?.keyMode !== "managed" && record?.modelTier == null
-          ? { managed: false, models: [] }
-          : { managed: true, models: await catalog.allCatalogModelIds() };
-      },
+      managedModels: managedModelsOf({
+        usage: (job) =>
+          createUsageRecordsRepository(
+            fixture.db,
+            job.workspaceId,
+            fixture.clock.now,
+          ).get(job.id),
+        catalog,
+      }),
       entitlementsFor: (workspaceId) =>
         readEffectiveEntitlements(fixture.db, workspaceId, fixture.clock.now),
       recordKeyMode: (job, keyMode) =>

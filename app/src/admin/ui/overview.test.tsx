@@ -13,12 +13,6 @@ import { Overview } from "./overview.tsx";
 
 afterEach(cleanup);
 
-const NO_TIERS: AdminSettingsView["modelTiers"] = {
-  low: { diff: false, dynamic: false },
-  medium: { diff: false, dynamic: false },
-  high: { diff: false, dynamic: false },
-};
-
 function view(overrides: Partial<AdminSettingsView> = {}): AdminSettingsView {
   const never = { updatedBy: null, updatedAt: null };
   return {
@@ -35,7 +29,6 @@ function view(overrides: Partial<AdminSettingsView> = {}): AdminSettingsView {
     smtp: { value: null, password: "none", ...never },
     operatorLlmKey: { state: "not_configured" },
     operatorLlmKeys: { openrouter: { state: "not_configured" } },
-    modelTiers: NO_TIERS,
     modelCatalog: {
       diff: { released: 0, hasDefault: false },
       dynamic: { released: 0, hasDefault: false },
@@ -587,5 +580,12 @@ describe("the model catalog (#429)", () => {
     expect(
       screen.queryByRole("region", { name: /needs attention/i }),
     ).toBeNull();
+  });
+
+  // #434-X2
+  it("has no row for the managed model tiers any more: a model is a catalog entry", () => {
+    render(<Overview settings={view()} />);
+
+    expect(screen.queryByText("Managed model tiers")).toBeNull();
   });
 });

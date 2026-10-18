@@ -40,7 +40,7 @@ function SetupRow({
   status: RowStatus;
   summary: string;
   hint?: string;
-  /** Left out for a setting that has no page of its own (the model tiers: the operator API sets them). */
+  /** Left out for a setting that has no page of its own (a read-only status). */
   href?: string;
 }) {
   const Icon = status === "ok" ? CheckCircle2 : TriangleAlert;

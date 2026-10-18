@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/ExpidetGames/code-reviewer/contracts/operator-api.v1.json",
   "title": "Code Reviewer operator API, version 1",
-  "description": "The wire format of the operator API (#275, #278, #280, #284, #385): a machine interface for an operator who sets the entitlements of workspaces, configures the models behind the managed tiers, reads what they consumed and redeems the handover of a workspace Owner or Admin, from outside the app. Every request carries 'Authorization: Bearer <OPERATOR_API_TOKEN>'; a request body is application/json up to 16384 bytes, and GET and DELETE carry none. Every answer is JSON with 'Cache-Control: no-store' and the version in its body; an error is {version, error, field?} with a stable code, never a message. Until OPERATOR_API_TOKEN is set the paths do not exist (the 404 of a missing path, not this format). The API identifies workspaces by id and slug only: no names of people, no emails, no repositories, no pull requests. A reader ignores fields it does not know. This file is the only source of the format; the app tests validate real answers and contracts/examples/operator-api holds one valid example per definition.",
+  "description": "The wire format of the operator API (#275, #278, #280, #284, #385): a machine interface for an operator who sets the entitlements of workspaces, reads what they consumed and redeems the handover of a workspace Owner or Admin, from outside the app. Every request carries 'Authorization: Bearer <OPERATOR_API_TOKEN>'; a request body is application/json up to 16384 bytes, and GET and DELETE carry none. Every answer is JSON with 'Cache-Control: no-store' and the version in its body; an error is {version, error, field?} with a stable code, never a message. Until OPERATOR_API_TOKEN is set the paths do not exist (the 404 of a missing path, not this format). The API identifies workspaces by id and slug only: no names of people, no emails, no repositories, no pull requests. A reader ignores fields it does not know. This file is the only source of the format; the app tests validate real answers and contracts/examples/operator-api holds one valid example per definition.",
   "version": 1,
   "$defs": {
     "Version": {
@@ -20,7 +20,7 @@
       "pattern": "^[A-Za-z0-9_-]{1,64}$"
     },
     "ApiErrorCode": {
-      "description": "Callers branch on the code. 401 unauthorized; 404 not_found (unknown path) or workspace_not_found; 405 method_not_allowed (with an Allow header); 400 body_not_allowed (a GET or DELETE with a body), request_invalid (not JSON, or a bad query such as a limit out of range), cursor_invalid (a usage cursor that is not one of the API's) or period_invalid (a usage 'from' or 'to' that is not a timestamp, a period that is empty, or a summary or a count of unknown costs without both); 413 body_too_large; 415 unsupported_media_type; 409 period_start_backwards; 409 entitlements_default_managed_by_billing (a PUT /entitlements/default while billing is on: the default is written by the billing module from the Free plan and is the operator's again when billing is switched off; GET still answers; a workspace row is not affected); 422 the other codes of a refused entitlement, among them cost_limit_requires_managed_key for a managed cost limit next to keyMode 'own' (the codes of the workspace entitlements validation, with 'field' naming the limit or key concerned), among them catalog_entry_invalid for a modelAccess that is not {catalogEntries} with null or at most 100 catalog entry ids ('field' is modelAccess or modelAccess.catalogEntries); 422 also invalid_token (a handoff token that is unknown, used, expired, revoked or whose person lost the role: one answer for all) and the codes of a refused plan management address (url_invalid, url_not_https, url_has_credentials, url_has_fragment, url_too_long); 422 also the codes of a refused model tier configuration: model_id_invalid (a model id the review settings would refuse, 'field' names the place, for example 'high.diff', never the value), MODEL_UNKNOWN (a Diff model the provider's public metadata does not list; one that cannot be verified because the provider is unreachable is accepted) and, for a Dynamic model that the provider's public metadata does not vouch for, DYNAMIC_MODEL_TOOLS_UNSUPPORTED (no endpoint lists both tools and tool_choice), DYNAMIC_MODEL_UNKNOWN (the provider has no such model) and DYNAMIC_MODEL_UNVERIFIED (the metadata could not be read: unlike a user's choice in the review settings, an operator's configuration is refused when it cannot be checked); 500 internal_error.",
+      "description": "Callers branch on the code. 401 unauthorized; 404 not_found (unknown path) or workspace_not_found; 405 method_not_allowed (with an Allow header); 400 body_not_allowed (a GET or DELETE with a body), request_invalid (not JSON, or a bad query such as a limit out of range), cursor_invalid (a usage cursor that is not one of the API's) or period_invalid (a usage 'from' or 'to' that is not a timestamp, a period that is empty, or a summary or a count of unknown costs without both); 413 body_too_large; 415 unsupported_media_type; 409 period_start_backwards; 409 entitlements_default_managed_by_billing (a PUT /entitlements/default while billing is on: the default is written by the billing module from the Free plan and is the operator's again when billing is switched off; GET still answers; a workspace row is not affected); 422 the other codes of a refused entitlement, among them cost_limit_requires_managed_key for a managed cost limit next to keyMode 'own' (the codes of the workspace entitlements validation, with 'field' naming the limit or key concerned), among them catalog_entry_invalid for a modelAccess that is not {catalogEntries} with null or at most 100 catalog entry ids ('field' is modelAccess or modelAccess.catalogEntries); 422 also invalid_token (a handoff token that is unknown, used, expired, revoked or whose person lost the role: one answer for all) and the codes of a refused plan management address (url_invalid, url_not_https, url_has_credentials, url_has_fragment, url_too_long); the codes of the removed model tier configuration (model_id_invalid, MODEL_UNKNOWN and the DYNAMIC_MODEL_* codes) went with its route (#434); 500 internal_error.",
       "type": "string",
       "enum": [
         "unauthorized",
@@ -52,12 +52,7 @@
         "url_not_https",
         "url_has_credentials",
         "url_has_fragment",
-        "url_too_long",
-        "model_id_invalid",
-        "MODEL_UNKNOWN",
-        "DYNAMIC_MODEL_TOOLS_UNSUPPORTED",
-        "DYNAMIC_MODEL_UNKNOWN",
-        "DYNAMIC_MODEL_UNVERIFIED"
+        "url_too_long"
       ]
     },
     "ErrorResponse": {
@@ -615,7 +610,7 @@
           ]
         },
         "modelTier": {
-          "description": "The quality tier of a managed run, or null. Only a tier name is ever shown (lowercase letters, digits, '_' and '-', starting with a letter, at most 32 characters); anything else is served as null.",
+          "description": "Deprecated since the model catalog (#432, #434): the quality tier of a managed run from before the catalog, or null, and always null for a newer run (see catalogEntryId). Kept, required and nullable, so that a strict reader keeps working. Only a tier name is ever shown (lowercase letters, digits, '_' and '-', starting with a letter, at most 32 characters); anything else is served as null.",
           "type": [
             "string",
             "null"
@@ -779,72 +774,6 @@
           "items": {
             "$ref": "#/$defs/UsageSummaryGroup"
           }
-        }
-      }
-    },
-    "ModelId": {
-      "description": "An OpenRouter model id as the review settings accept it: letters, digits and . _ : / + -, starting with a letter or digit, at most 200 characters (for example 'author/model-name').",
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 200,
-      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/+-]{0,199}$"
-    },
-    "ModelTierModels": {
-      "description": "The models behind one tier, one per kind of review. A kind that is left out or null has none: a managed job of that kind in a workspace that chose the tier fails with managed_tier_unavailable (no other tier stands in). Unknown keys are refused (400 request_invalid).",
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "diff": {
-          "oneOf": [{ "$ref": "#/$defs/ModelId" }, { "type": "null" }]
-        },
-        "dynamic": {
-          "oneOf": [{ "$ref": "#/$defs/ModelId" }, { "type": "null" }]
-        }
-      }
-    },
-    "ModelTiersWrite": {
-      "description": "The body of PUT /model-tiers: which model backs each managed tier (low, medium, high), per kind of review. It replaces the whole configuration; a tier or a kind that is left out is not configured. A Dynamic model is checked against the provider's public model metadata and refused unless it lists tool calling and tool choice (DYNAMIC_MODEL_TOOLS_UNSUPPORTED, DYNAMIC_MODEL_UNKNOWN, DYNAMIC_MODEL_UNVERIFIED); a Diff model is refused only when the provider does not list it (MODEL_UNKNOWN). Nothing is stored on a refusal. The model ids are operator data: they are never shown to a workspace (a workspace sees and chooses the tier name only) and never in the instance admin portal, which only shows whether a tier is configured.",
-      "type": "object",
-      "required": ["tiers"],
-      "additionalProperties": false,
-      "properties": {
-        "tiers": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "low": { "$ref": "#/$defs/ModelTierModels" },
-            "medium": { "$ref": "#/$defs/ModelTierModels" },
-            "high": { "$ref": "#/$defs/ModelTierModels" }
-          }
-        }
-      }
-    },
-    "ModelTiersResponse": {
-      "description": "The answer of GET and PUT /model-tiers: every tier and every kind, null where nothing is configured. An instance that never set it answers all null.",
-      "type": "object",
-      "required": ["version", "tiers"],
-      "properties": {
-        "version": { "$ref": "#/$defs/Version" },
-        "tiers": {
-          "type": "object",
-          "required": ["low", "medium", "high"],
-          "properties": {
-            "low": { "$ref": "#/$defs/ModelTierAnswer" },
-            "medium": { "$ref": "#/$defs/ModelTierAnswer" },
-            "high": { "$ref": "#/$defs/ModelTierAnswer" }
-          }
-        }
-      }
-    },
-    "ModelTierAnswer": {
-      "type": "object",
-      "required": ["diff", "dynamic"],
-      "properties": {
-        "diff": {
-          "oneOf": [{ "$ref": "#/$defs/ModelId" }, { "type": "null" }]
-        },
-        "dynamic": {
-          "oneOf": [{ "$ref": "#/$defs/ModelId" }, { "type": "null" }]
         }
       }
     },

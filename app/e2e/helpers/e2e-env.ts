@@ -47,7 +47,7 @@ process.env.E2E_MODEL_LLM_PORT ||= String(
 );
 const modelLlmFakePort = Number(process.env.E2E_MODEL_LLM_PORT);
 // The fake LLM of the operator limits journey (#285): it answers the reviews of the real runner and, at the same
-// port, the model metadata the operator app reads when it saves and claims with a managed tier. The app needs the
+// port, the model metadata the operator app reads when it releases a catalog entry and claims with one. The app needs the
 // port when it starts. A range of its own, above the others: 65500-65534.
 process.env.E2E_OPERATOR_LLM_PORT ||= String(
   65500 + Math.floor(Math.random() * 35),

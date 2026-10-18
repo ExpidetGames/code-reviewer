@@ -86,6 +86,7 @@ describe("the feed of usage records", () => {
   });
 
   // #278-T01
+  // #434-T11
   it("shows exactly the documented fields of an item, with the unknown ones as null", async () => {
     const h = await startOperatorApiHarness();
     await h.usage.seed({

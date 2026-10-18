@@ -114,36 +114,13 @@ describe("the job options of a claimed job", () => {
     expect(options.env).toStrictEqual({});
   });
 
-  // #280-T04
-  it("carries the model tier of the project's effective settings for both kinds", async () => {
-    const tiered = (kind: ProjectReviewKind, tier?: "low" | "high") =>
-      createReviewSettingsJobOptionsSource({
-        settings: () => ({
-          resolveForRepository: async () => ({
-            ...resolveReviewSettings({
-              builtIn: builtInReviewSettings("diff-model"),
-              ...(tier === undefined ? {} : { project: { modelTier: tier } }),
-            }),
-            dynamic: resolveProjectDynamicSettings({
-              builtIn: builtInProjectDynamicSettings(),
-              project: { reviewKind: kind },
-              defaultSkill: "the shipped skill",
-            }),
-            modelLayers: NO_LAYERS,
-          }),
-        }),
-      });
-
-    expect(
-      (await tiered("diff", "high").optionsFor(job("diff"))).modelTier,
-    ).toBe("high");
-    expect(
-      (await tiered("dynamic", "low").optionsFor(job("dynamic"))).modelTier,
-    ).toBe("low");
-    // #280-T10: medium when nothing sets it.
-    expect((await tiered("diff").optionsFor(job("diff"))).modelTier).toBe(
-      "medium",
-    );
+  // #434-T03
+  it("carries no model tier for either kind: the catalog entry is the only choice", async () => {
+    const legacy = ["model", "Tier"].join("");
+    for (const kind of ["diff", "dynamic"] as const)
+      expect(
+        Object.keys(await sourceFor(kind).optionsFor(job(kind))),
+      ).not.toContain(legacy);
   });
 
   // #195 finding 2

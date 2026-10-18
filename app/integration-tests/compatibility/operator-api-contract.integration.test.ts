@@ -37,8 +37,6 @@ import {
   readExamples,
 } from "../../src/test-support/runner-contract.ts";
 import { PROJECT_REVIEW_KINDS } from "../../src/review-settings/settings.ts";
-import { MODEL_TIER_ERROR_CODES } from "../../src/model-tiers/errors.ts";
-import { MODEL_TIERS } from "../../src/model-tiers/tiers.ts";
 import { KEY_MODES, LIMIT_NAMES } from "../../src/workspaces/entitlements.ts";
 import {
   CATALOG_ENTRY_ID_PATTERN,
@@ -167,8 +165,6 @@ describe("the contract file", () => {
         "ErrorResponse",
         "HandoffRedeemRequest",
         "HandoffRedeemResponse",
-        "ModelTiersResponse",
-        "ModelTiersWrite",
         "PlanManagementResponse",
         "PlanManagementWrite",
         "StoredEntitlements",
@@ -866,80 +862,44 @@ describe("what the app answers for the plan handoff", () => {
   });
 });
 
-describe("the model tiers part of the contract file", () => {
-  // #280-T01
-  it("names the tiers and the kinds the app has, and the codes it refuses with", () => {
+describe("the removed model tiers part of the contract file (#434)", () => {
+  // #434-T09
+  it("has no definition, no error code and no path of the tier configuration any more", () => {
+    const contractText = JSON.stringify(readContract(OPERATOR_CONTRACT_FILE));
     const defs = readContract(OPERATOR_CONTRACT_FILE).$defs as unknown as {
-      ModelTiersWrite: {
-        properties: {
-          tiers: {
-            additionalProperties: boolean;
-            propertyNames: { enum: string[] };
-            properties: Record<string, unknown>;
-          };
-        };
-      };
-      ModelTiersResponse: { properties: { tiers: { required: string[] } } };
-      ModelTierModels: {
-        additionalProperties: boolean;
-        properties: Record<string, unknown>;
-      };
       ApiErrorCode: { enum: string[] };
     };
 
-    expect(
-      Object.keys(defs.ModelTiersWrite.properties.tiers.properties).sort(),
-    ).toEqual([...MODEL_TIERS].sort());
-    expect(defs.ModelTiersWrite.properties.tiers.additionalProperties).toBe(
-      false,
-    );
-    expect(
-      [...defs.ModelTiersResponse.properties.tiers.required].sort(),
-    ).toEqual([...MODEL_TIERS].sort());
-    expect(Object.keys(defs.ModelTierModels.properties).sort()).toEqual(
-      [...PROJECT_REVIEW_KINDS].sort(),
-    );
-    expect(defs.ApiErrorCode.enum).toEqual(
-      expect.arrayContaining([...MODEL_TIER_ERROR_CODES]),
-    );
+    for (const name of [
+      "ModelTiersWrite",
+      "ModelTiersResponse",
+      "ModelTierAnswer",
+      "ModelTierModels",
+      "ModelId",
+    ])
+      expect(Object.keys(defs)).not.toContain(name);
+    for (const code of [
+      "model_id_invalid",
+      "MODEL_UNKNOWN",
+      "DYNAMIC_MODEL_TOOLS_UNSUPPORTED",
+      "DYNAMIC_MODEL_UNKNOWN",
+      "DYNAMIC_MODEL_UNVERIFIED",
+    ])
+      expect(defs.ApiErrorCode.enum).not.toContain(code);
+    expect(contractText).not.toContain("/model-tiers");
   });
 
-  // #280-T01
-  it("answers the setting with documents valid against the file, and accepts what the file allows", async () => {
+  // #434-T09
+  it("answers a call of the removed path with the ErrorResponse of any missing path", async () => {
     const h = await startOperatorApiHarness();
-    const path = "/api/operator/v1/model-tiers";
-    const body = {
-      tiers: {
-        low: { diff: "vendor/low-diff" },
-        high: { diff: "vendor/high-diff", dynamic: "vendor/high-dyn:free" },
-      },
-    };
-
-    expectValid("ModelTiersWrite", body);
-    expectValid("ModelTiersWrite", { tiers: {} });
-    expectValid("ModelTiersWrite", { tiers: { medium: { diff: null } } });
-    expect(
-      contract.check("ModelTiersWrite", { tiers: { ultra: {} } }).valid,
-    ).toBe(false);
-    expect(
-      contract.check("ModelTiersWrite", { tiers: { low: { review: "a/b" } } })
-        .valid,
-    ).toBe(false);
-    expect(
-      contract.check("ModelTiersWrite", { tiers: { low: { diff: "a b" } } })
-        .valid,
-    ).toBe(false);
     for (const response of [
-      await h.call("GET", path),
-      await h.call("PUT", path, { body }),
-      await h.call("GET", path),
-    ])
-      expectValid("ModelTiersResponse", await response.json());
-    for (const response of [
-      await h.call("PUT", path, { body: { tiers: { low: { diff: "a b" } } } }),
-      await h.call("PUT", path, { body: { tiers: { ultra: {} } } }),
-      await h.call("POST", path, { body }),
-    ])
+      await h.call("GET", "/api/operator/v1/model-tiers"),
+      await h.call("PUT", "/api/operator/v1/model-tiers", {
+        body: { tiers: { low: { diff: "vendor/low-diff" } } },
+      }),
+    ]) {
+      expect(response.status).toBe(404);
       expectValid("ErrorResponse", await response.json());
+    }
   });
 });

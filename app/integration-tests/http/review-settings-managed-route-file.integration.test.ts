@@ -2,8 +2,8 @@
 
 // The review settings of a workspace on the operator's key through the real route files and the real
 // `reviewSettingsServiceFor` (#283): the key mode is read from the entitlements of the workspace in the database, the
-// availability of the quality levels from the operator's `managed_model_tiers`, and nothing is passed in by hand. A
-// wrong wiring (the key mode, the availability, the hiding decision) fails here and in no unit test.
+// catalog from its tables, and nothing is passed in by hand. A wrong wiring (the key mode, the catalog, the hiding
+// decision) fails here and in no unit test.
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SessionLookup } from "../../src/auth/session-user.ts";
@@ -12,7 +12,6 @@ import {
   getDatabase,
   initializeDatabaseOnStart,
 } from "../../src/db/startup.ts";
-import { createInstanceSettingsRepository } from "../../src/db/repositories/instance-settings-repository.ts";
 import { createProjectsRepository } from "../../src/db/repositories/projects-repository.ts";
 import { createWorkspaceEntitlementsRepository } from "../../src/db/repositories/workspace-entitlements-repository.ts";
 import {
@@ -59,8 +58,8 @@ vi.mock("next/server", async (importOriginal) => ({
   connection: async () => undefined,
 }));
 
-// Made-up ids; nothing in the repository names a real model for a tier.
-const TIER_IDS = ["wired-vendor/low-diff", "wired-vendor/high-diff"];
+// Made-up ids; nothing in the repository names a real model for a catalog entry.
+const ENTRY_IDS = ["wired-vendor/low-diff", "wired-vendor/high-diff"];
 const OWN_MODEL = "own-vendor/chosen-model";
 const OWN_DYNAMIC = "own-vendor/chosen-dynamic";
 
@@ -100,14 +99,7 @@ async function start() {
       githubLogin: "octocat",
     }),
   );
-  await createInstanceSettingsRepository(db).set(
-    "managed_model_tiers",
-    {
-      low: { diff: TIER_IDS[0] as string },
-      high: { diff: TIER_IDS[1] as string, dynamic: "wired-vendor/high-dyn" },
-    },
-    null,
-  );
+  const catalog = createCatalogFixture(db);
   const setKeyMode = (
     keyMode: "own" | "managed",
     modelAccess?: EntitlementsData["modelAccess"],
@@ -145,7 +137,7 @@ async function start() {
     putProject: (settings: unknown) =>
       PUT_PROJECT(request("PUT", projectPath, { settings }), projectContext),
     resetProject: () => DELETE(request("DELETE", projectPath), projectContext),
-    catalog: createCatalogFixture(db),
+    catalog,
   };
 }
 
@@ -155,37 +147,32 @@ afterEach(async () => {
 
 describe("the review settings routes of a workspace whose entitlements say managed", () => {
   // #283-T01
-  it("answer the level, the availability read from the operator's tiers, and no model", async () => {
+  it("answer no model and no model id of the catalog", async () => {
     const t = await start();
     await t.setKeyMode("managed");
+    await t.catalog.entry({ name: "Quick", modelId: ENTRY_IDS[0] as string });
+    await t.catalog.entry({ name: "Deep", modelId: ENTRY_IDS[1] as string });
 
     const text = await (await t.readProject()).text();
     const globalText = await (await t.readGlobal()).text();
 
     for (const body of [text, globalText]) {
       expect(body).not.toMatch(/"(model|fallbackModel|dynamicModel)"/);
-      for (const id of TIER_IDS) expect(body).not.toContain(id);
+      for (const id of ENTRY_IDS) expect(body).not.toContain(id);
       expect(JSON.parse(body)).toMatchObject({
         modelManagedByInstance: true,
         cost: null,
-        effective: { modelTier: "medium" },
       });
     }
-    // Only `low` has a Diff model and only `high` has both: yes or no per level and kind, from the stored tiers.
-    expect(JSON.parse(text).tierAvailability).toEqual({
-      low: { diff: true, dynamic: false },
-      medium: { diff: false, dynamic: false },
-      high: { diff: true, dynamic: true },
-    });
   });
 
   // #283-T04
-  it("refuse a model in a write with MODEL_MANAGED_BY_INSTANCE and accept the level", async () => {
+  it("refuse a model in a write with MODEL_MANAGED_BY_INSTANCE and accept another setting", async () => {
     const t = await start();
     await t.setKeyMode("managed");
 
     const refused = await t.putProject({ model: OWN_MODEL });
-    const accepted = await t.putProject({ modelTier: "low" });
+    const accepted = await t.putProject({ maxFindings: 3 });
 
     expect(refused.status).toBe(400);
     expect(await refused.json()).toEqual({
@@ -194,7 +181,7 @@ describe("the review settings routes of a workspace whose entitlements say manag
     });
     expect(accepted.status).toBe(200);
     expect(await accepted.json()).toMatchObject({
-      overrides: { modelTier: "low" },
+      overrides: { maxFindings: 3 },
     });
   });
 
@@ -209,7 +196,6 @@ describe("the review settings routes of a workspace whose entitlements say manag
     for (const body of [unlimited, own])
       expect(body).toMatchObject({
         modelManagedByInstance: false,
-        tierAvailability: null,
         effective: { model: expect.any(String) },
         cost: { warn: false },
       });

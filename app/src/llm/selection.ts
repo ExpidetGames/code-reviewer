@@ -36,7 +36,7 @@ import { LLM_NOT_CONFIGURED_ERROR } from "./access.ts";
 import { llmProviderDescriptors } from "./providers/index.ts";
 import type { LlmProviderDescriptor } from "./providers/types.ts";
 
-/** The job error code of a job whose catalog entry cannot be used (replaces `managed_tier_unavailable`). */
+/** The job error code of a job whose catalog entry cannot be used (the catalog replaced the tiers, #434). */
 export const MANAGED_MODEL_UNAVAILABLE = "managed_model_unavailable" as const;
 /** The job error code of an own job whose provider the app does not know or the runner did not advertise. */
 export const LLM_PROVIDER_UNSUPPORTED = "llm_provider_unsupported" as const;

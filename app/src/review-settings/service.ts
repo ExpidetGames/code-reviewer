@@ -46,10 +46,6 @@ import { ReviewSettingsError } from "./errors.ts";
 import type { ReviewSettingsHooks } from "./hooks.ts";
 import { noopReviewSettingsHooks } from "./hooks.ts";
 import {
-  configuredTiers,
-  type TierAvailability,
-} from "../model-tiers/tiers.ts";
-import {
   builtInProjectDynamicSettings,
   CATALOG_FIELD_OF_KIND,
   MODEL_SETTING_FIELDS,
@@ -109,14 +105,9 @@ type ViewBase = {
   cost: ReviewCostGuard | null;
   /**
    * The models of this workspace's reviews are the operator's (its key mode is `managed`): the workspace chooses a
-   * quality level (`modelTier`) and the view carries no model field, no Dynamic model and no cost (#283).
+   * catalog entry per project and the view carries no model field, no Dynamic model and no cost (#283, #433).
    */
   modelManagedByInstance: boolean;
-  /**
-   * For such a workspace, whether each level has a model for each kind of review: yes or no, never which model.
-   * `null` for every other workspace.
-   */
-  tierAvailability: TierAvailability | null;
 };
 
 export type GlobalSettingsView = ViewBase & {
@@ -530,15 +521,10 @@ export function createReviewSettingsService(deps: {
   /**
    * Whether the models of this workspace's reviews are the operator's, not its own (its key mode is `managed`, #280).
    * Then the workspace does not know the model, so its token budget is not checked against the context window of
-   * the stored model, which does not apply (the claim clamps the budget to the window of the tier's model). Default:
+   * the stored model, which does not apply (the claim clamps the budget to the window of the entry's model). Default:
    * never.
    */
   operatorsModels?: () => Promise<boolean>;
-  /**
-   * Whether each quality level has a model for each kind of review, for the quality choice of a workspace on the
-   * operator's key (#283). Only that: never which model. Default: nothing is configured.
-   */
-  tierAvailability?: () => Promise<TierAvailability>;
   /**
    * The model catalog as far as a project's selection needs it (#430): what the picker lists, whether an entry may be
    * chosen. Only read for a workspace on the operator's key. Default: an empty catalog.
@@ -564,8 +550,6 @@ export function createReviewSettingsService(deps: {
     parseStoredOverrides(stored, providers);
   const parseDynamic = (stored: unknown) =>
     parseStoredProjectDynamicOverrides(stored, providers);
-  const tierAvailability =
-    deps.tierAvailability ?? (async () => configuredTiers({}));
 
   async function readGlobal() {
     const stored = await appSettings.get(REVIEW_DEFAULTS_KEY);
@@ -603,7 +587,6 @@ export function createReviewSettingsService(deps: {
         sources: withoutModelFields(effective.sources),
         cost: null,
         modelManagedByInstance: true,
-        tierAvailability: await tierAvailability(),
       };
     return {
       overrides,
@@ -611,7 +594,6 @@ export function createReviewSettingsService(deps: {
       sources: effective.sources,
       cost: estimateReviewCost(effective.settings),
       modelManagedByInstance: false,
-      tierAvailability: null,
     };
   }
 
