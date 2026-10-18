@@ -23,8 +23,10 @@ import { createTestDatabase } from "../test-support/test-database.ts";
 import { insertUser } from "../test-support/users.ts";
 import type { PaddleClient, PaddlePrice } from "./paddle-client.ts";
 import { createBillingPlansService } from "./plans-service.ts";
+import { createBillingPlanPricesRepository } from "../db/repositories/billing-plan-prices-repository.ts";
 import {
   createBillingPricesService,
+  snapshotOf,
   type PricesResult,
 } from "./prices-service.ts";
 
@@ -722,6 +724,86 @@ describe.each(ENGINES)(
           (await t.priceRows()).map((row) => row.paddle_price_id).sort(),
           "the price admin 2 asked for is not stored: its write was undone",
         ).toEqual([first.id, second.id].sort());
+      },
+    );
+
+    // #439-T05 (review of #468, N6)
+    it_(
+      "lets two admins who link the same new price at once both succeed, with one row for the price",
+      async () => {
+        const t = await start();
+        const monthly = await t.makePrice();
+
+        const results = await Promise.all([
+          t.link("month", monthly.id, "team", 1),
+          t.link("month", monthly.id, "team", 1),
+        ]);
+
+        expect(results).toEqual([{ ok: true }, { ok: true }]);
+        expect(await t.priceRows()).toHaveLength(1);
+        expect((await t.current()).monthlyPrice?.paddlePriceId).toBe(
+          monthly.id,
+        );
+      },
+    );
+
+    // #439-T05 (review of #468, N6): the second admin reads the price and the first has linked it before the second writes
+    it_(
+      "takes the row the other admin made when a price was linked in the meantime, and links to it",
+      async () => {
+        const t = await start();
+        const monthly = await t.makePrice();
+        let other: PricesResult | undefined;
+        t.afterPriceRead(async () => {
+          t.afterPriceRead(undefined);
+          other = await t.link("month", monthly.id);
+        });
+
+        const result = await t.link("month", monthly.id);
+
+        expect(other).toEqual({ ok: true });
+        expect(result).toEqual({ ok: true });
+        expect(await t.priceRows()).toHaveLength(1);
+      },
+    );
+
+    // #439-T05 (review of #468, N6): the unique index lets one insert through; the loser tries again with a refresh
+    itPg(
+      "tries again as a refresh when another request stored the same price between the check and the insert",
+      async () => {
+        const t = await start();
+        const monthly = await t.makePrice();
+        const planRow = await t.db
+          .selectFrom("billing_plans")
+          .select("id")
+          .where("plan_key", "=", "team")
+          .executeTakeFirstOrThrow();
+        let priceReads = 0;
+        t.onStatement(async (query) => {
+          if (query.kind !== "select" || query.table !== "billing_plan_prices")
+            return;
+          priceReads += 1;
+          // The first read is the check before Paddle is asked, the second the one inside the link transaction.
+          if (priceReads !== 2) return;
+          t.onStatement(undefined);
+          const paddle = await t.paddle.getPrice(monthly.id);
+          await createBillingPlanPricesRepository(t.db).insertLinked({
+            planId: planRow.id,
+            paddlePriceId: monthly.id,
+            env: "sandbox",
+            snapshot: snapshotOf(paddle),
+          });
+        });
+
+        const result = await t.link("month", monthly.id);
+
+        expect(result).toEqual({ ok: true });
+        const rows = await t.priceRows();
+        expect(rows, "one row, not two").toHaveLength(1);
+        expect((await t.current()).monthlyPrice?.paddlePriceId).toBe(
+          monthly.id,
+        );
+        expect((await t.current()).sellable).toBe(false);
       },
     );
 
