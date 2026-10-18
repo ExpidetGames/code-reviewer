@@ -75,6 +75,13 @@ export const REVIEW_SETTING_ISSUE_CODES = [
    * unchecked (#430).
    */
   "CATALOG_ENTRY_OWN_KEY_MODE",
+  /**
+   * A provider and a model of different layers do not belong together: a project sets another provider while the
+   * workspace default holds a model of the first (or the workspace default changes under such a project). The claim fails
+   * such a job closed; the save refuses it so the user does not find out only when a job fails (#432). Own key mode only.
+   * Never reported by the validation itself.
+   */
+  "MODEL_PROVIDER_MISMATCH",
 ] as const;
 export type ReviewSettingIssueCode =
   (typeof REVIEW_SETTING_ISSUE_CODES)[number];

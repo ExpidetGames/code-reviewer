@@ -30,6 +30,8 @@ import type { FakePaddle } from "../../../fakes/paddle/server.ts";
 import { createBillingRouteHandlers } from "../billing/admin-http.ts";
 import { isBillingOn } from "../billing/enabled.ts";
 import { createPaddleClient } from "../billing/paddle-client.ts";
+import { createPlansRouteHandlers } from "../billing/plans-http.ts";
+import { createBillingPlansService } from "../billing/plans-service.ts";
 import { createBillingSettingsService } from "../billing/settings-service.ts";
 import { startTestPaddle } from "./paddle-fake.ts";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
@@ -220,14 +222,17 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
     | Promise<{
         fake: FakePaddle;
         routes: ReturnType<typeof createBillingRouteHandlers>;
+        plans: ReturnType<typeof createPlansRouteHandlers>;
       }>
     | undefined;
   function billing() {
     billingPart ??= (async () => {
       const fake = options.paddle ?? (await startTestPaddle());
+      const plansService = createBillingPlansService({ db });
       const service = createBillingSettingsService({
         db,
         secrets,
+        plans: plansService,
         clientFor: (apiKey) =>
           createPaddleClient({
             apiKey,
@@ -246,7 +251,17 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
         },
         service,
       });
-      return { fake, routes };
+      const access = async () =>
+        adminAccessOf(await lookupSession(auth, current.headers, setup.gates));
+      const plans = createPlansRouteHandlers({
+        access,
+        notFound: () => {
+          throw new NotFoundSignal();
+        },
+        isOn: () => isBillingOn(db, secrets),
+        service: plansService,
+      });
+      return { fake, routes, plans };
     })();
     return billingPart;
   }
@@ -549,6 +564,23 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
           request.method === "POST"
         )
           return await routes.check(request);
+      }
+      if (pathname.startsWith("/api/instance-portal/billing/plans")) {
+        const { plans } = await billing();
+        if (pathname === "/api/instance-portal/billing/plans") {
+          if (request.method === "GET") return await plans.get(request);
+          if (request.method === "POST") return await plans.create(request);
+        }
+        const one = /^\/api\/instance-portal\/billing\/plans\/([^/]+)$/.exec(
+          pathname,
+        );
+        if (one !== null) {
+          const planKey = decodeURIComponent(one[1] ?? "");
+          if (request.method === "PUT")
+            return await plans.change(request, planKey);
+          if (request.method === "DELETE")
+            return await plans.remove(request, planKey);
+        }
       }
       if (pathname.startsWith("/api/instance-portal/billing")) {
         const { routes } = await billing();

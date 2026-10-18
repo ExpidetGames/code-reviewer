@@ -45,6 +45,9 @@ export const USAGE_SAFETY_LAG_MS = 60_000;
  */
 export const TIER_NAME_PATTERN = /^[a-z][a-z0-9_-]{0,31}$/;
 
+/** What a usage item may show as `catalogEntryId`: the shape of an entry id (the contract's pattern). At most 64 characters. */
+export const ENTRY_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+
 /** The longest cursor the feed accepts (the contract's `UsageCursor.maxLength`). */
 export const MAX_USAGE_CURSOR_LENGTH = 128;
 
@@ -62,6 +65,8 @@ export const OPERATOR_OWN_ERROR_CODES = [
   "period_invalid",
   /** The handoff token is not (or no longer) valid: unknown, used, expired, revoked, or its person lost the role (#284). */
   "invalid_token",
+  /** #438: the default entitlements are written by billing from the Free plan while billing is on (ADR 0005, 2.9). */
+  "entitlements_default_managed_by_billing",
   "internal_error",
 ] as const;
 

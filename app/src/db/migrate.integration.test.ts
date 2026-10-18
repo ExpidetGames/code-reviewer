@@ -99,6 +99,9 @@ describe("the migrations of both epics", () => {
       "20261017100000_create_job_check_runs",
       "20261017140000_create_model_catalog_entries",
       "20261017160000_add_workspace_entitlements_model_access",
+      "20261018090000_add_usage_record_catalog_entry",
+      "20261018120000_create_billing_plans",
+      "20261018140000_protect_billing_plan_versions",
     ]);
   });
 
@@ -141,6 +144,8 @@ describe("starting the database", () => {
       "allowed_login_pins",
       "app_meta",
       "app_settings",
+      "billing_plan_versions",
+      "billing_plans",
       "email_verification_tokens",
       "installation_link_requests",
       "instance_settings",

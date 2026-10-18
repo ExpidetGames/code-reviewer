@@ -97,7 +97,7 @@ function isKeyMode(value: unknown): value is KeyMode {
   return KEY_MODES.some((mode) => mode === value);
 }
 
-function isValidPlanLabel(value: unknown): value is string {
+export function isValidPlanLabel(value: unknown): value is string {
   if (typeof value !== "string") return false;
   const characters = [...value];
   if (characters.length < 1 || characters.length > PLAN_LABEL_MAX_LENGTH)
@@ -283,6 +283,10 @@ function check(input: unknown, mode: CheckMode): EntitlementsValidation {
       suspended: input.suspended,
       suspensionCode,
       modelAccess: modelAccess.value,
+      // #438: only the marker of billing is kept, and only when reading a stored default; a write never carries one.
+      ...(mode.reading && input.source === "billing"
+        ? { source: "billing" as const }
+        : {}),
     },
   };
 }

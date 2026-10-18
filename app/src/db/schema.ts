@@ -376,8 +376,14 @@ export interface UsageRecordsTable {
   review_kind: string;
   /** `own` or `managed` (KEY_MODES): whose key the run used. */
   key_mode: string;
-  /** The managed model tier; null until the tiers exist. */
+  /** The managed model tier; null until the tiers exist. Old rows only: the catalog entry replaces it (#432). */
   model_tier: string | null;
+  /** The catalog entry a managed run used (#432); null for an own run and for a row from before the catalog. */
+  catalog_entry_id: string | null;
+  /** The name of that entry when the run was claimed (a snapshot: a rename does not rewrite history). */
+  catalog_entry_name: string | null;
+  /** The provider the run was sent to (#432); operator data, never served to a member. Null before #432. */
+  llm_provider: string | null;
   /** `reserved`, `settled` or `void` (USAGE_STATES). */
   state: string;
   /** The measured cost in millionths of a US dollar; null when unknown. Only on a settled record. */
@@ -668,6 +674,58 @@ export interface ModelCatalogEntriesTable {
   updated_by: string | null;
 }
 
+/**
+ * A plan the operator sells (#438, src/billing/, ADR 0005, 2.11). Instance level: no workspace owns a plan. The fields
+ * the operator edits in place are the display fields; what is sold lives in `billing_plan_versions`.
+ */
+export interface BillingPlansTable {
+  id: string;
+  /** Unique, lower case, chosen once. */
+  plan_key: string;
+  name: string;
+  description: string;
+  /** The display order of the plan screen, ascending. */
+  sort: number;
+  /** `free`, `paid` or `contact` (`PLAN_KINDS`). At most one plan is `free`. */
+  kind: string;
+  /** 0 or 1. */
+  offered: number;
+  /** 0 or 1; at most one plan has 1 (a partial unique index), and only a `paid` one. */
+  popular: number;
+  /** An https link or a `mailto:` address; a `contact` plan only. */
+  contact_target: string | null;
+  /** ISO 8601 text in UTC: the plan is hidden from new subscribers since then. */
+  archived_at: string | null;
+  created_at: string;
+  updated_at: string;
+  /** The user who changed it last, or null (the system, or a user who was deleted since). */
+  updated_by: string | null;
+}
+
+/**
+ * One version of a plan: the sold unit. Immutable after creation but for `role` (src/db/repositories/billing-plan-versions-repository.ts).
+ */
+export interface BillingPlanVersionsTable {
+  id: string;
+  plan_id: string;
+  /** 1, 2, ...: unique per plan. */
+  number: number;
+  /** `current` (one per plan, what a new subscriber gets) or `legacy`. */
+  role: string;
+  /** `own` or `managed` (KEY_MODES). */
+  key_mode: string;
+  /** JSON text of the four limits, each a count or null. */
+  limits: string;
+  /** JSON text `{"catalogEntries":[ids] or null}` for a `managed` version; null for `own`. */
+  model_access: string | null;
+  /** USD minor units, tax inclusive; null on a plan that is not paid. */
+  monthly_amount_minor: number | null;
+  /** USD minor units; null is no yearly option. An amount, never a percentage. */
+  yearly_amount_minor: number | null;
+  created_at: string;
+  created_by: string | null;
+}
+
 export interface Database {
   app_meta: AppMetaTable;
   users: UsersTable;
@@ -697,6 +755,8 @@ export interface Database {
   job_check_runs: JobCheckRunsTable;
   plan_handoff_tokens: PlanHandoffTokensTable;
   model_catalog_entries: ModelCatalogEntriesTable;
+  billing_plans: BillingPlansTable;
+  billing_plan_versions: BillingPlanVersionsTable;
   password_reset_tokens: PasswordResetTokensTable;
   email_verification_tokens: EmailVerificationTokensTable;
   signed_states: SignedStatesTable;

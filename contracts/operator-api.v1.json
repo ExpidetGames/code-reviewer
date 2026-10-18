@@ -20,7 +20,7 @@
       "pattern": "^[A-Za-z0-9_-]{1,64}$"
     },
     "ApiErrorCode": {
-      "description": "Callers branch on the code. 401 unauthorized; 404 not_found (unknown path) or workspace_not_found; 405 method_not_allowed (with an Allow header); 400 body_not_allowed (a GET or DELETE with a body), request_invalid (not JSON, or a bad query such as a limit out of range), cursor_invalid (a usage cursor that is not one of the API's) or period_invalid (a usage 'from' or 'to' that is not a timestamp, a period that is empty, or a summary or a count of unknown costs without both); 413 body_too_large; 415 unsupported_media_type; 409 period_start_backwards; 422 the other codes of a refused entitlement, among them cost_limit_requires_managed_key for a managed cost limit next to keyMode 'own' (the codes of the workspace entitlements validation, with 'field' naming the limit or key concerned), among them catalog_entry_invalid for a modelAccess that is not {catalogEntries} with null or at most 100 catalog entry ids ('field' is modelAccess or modelAccess.catalogEntries); 422 also invalid_token (a handoff token that is unknown, used, expired, revoked or whose person lost the role: one answer for all) and the codes of a refused plan management address (url_invalid, url_not_https, url_has_credentials, url_has_fragment, url_too_long); 422 also the codes of a refused model tier configuration: model_id_invalid (a model id the review settings would refuse, 'field' names the place, for example 'high.diff', never the value), MODEL_UNKNOWN (a Diff model the provider's public metadata does not list; one that cannot be verified because the provider is unreachable is accepted) and, for a Dynamic model that the provider's public metadata does not vouch for, DYNAMIC_MODEL_TOOLS_UNSUPPORTED (no endpoint lists both tools and tool_choice), DYNAMIC_MODEL_UNKNOWN (the provider has no such model) and DYNAMIC_MODEL_UNVERIFIED (the metadata could not be read: unlike a user's choice in the review settings, an operator's configuration is refused when it cannot be checked); 500 internal_error.",
+      "description": "Callers branch on the code. 401 unauthorized; 404 not_found (unknown path) or workspace_not_found; 405 method_not_allowed (with an Allow header); 400 body_not_allowed (a GET or DELETE with a body), request_invalid (not JSON, or a bad query such as a limit out of range), cursor_invalid (a usage cursor that is not one of the API's) or period_invalid (a usage 'from' or 'to' that is not a timestamp, a period that is empty, or a summary or a count of unknown costs without both); 413 body_too_large; 415 unsupported_media_type; 409 period_start_backwards; 409 entitlements_default_managed_by_billing (a PUT /entitlements/default while billing is on: the default is written by the billing module from the Free plan and is the operator's again when billing is switched off; GET still answers; a workspace row is not affected); 422 the other codes of a refused entitlement, among them cost_limit_requires_managed_key for a managed cost limit next to keyMode 'own' (the codes of the workspace entitlements validation, with 'field' naming the limit or key concerned), among them catalog_entry_invalid for a modelAccess that is not {catalogEntries} with null or at most 100 catalog entry ids ('field' is modelAccess or modelAccess.catalogEntries); 422 also invalid_token (a handoff token that is unknown, used, expired, revoked or whose person lost the role: one answer for all) and the codes of a refused plan management address (url_invalid, url_not_https, url_has_credentials, url_has_fragment, url_too_long); 422 also the codes of a refused model tier configuration: model_id_invalid (a model id the review settings would refuse, 'field' names the place, for example 'high.diff', never the value), MODEL_UNKNOWN (a Diff model the provider's public metadata does not list; one that cannot be verified because the provider is unreachable is accepted) and, for a Dynamic model that the provider's public metadata does not vouch for, DYNAMIC_MODEL_TOOLS_UNSUPPORTED (no endpoint lists both tools and tool_choice), DYNAMIC_MODEL_UNKNOWN (the provider has no such model) and DYNAMIC_MODEL_UNVERIFIED (the metadata could not be read: unlike a user's choice in the review settings, an operator's configuration is refused when it cannot be checked); 500 internal_error.",
       "type": "string",
       "enum": [
         "unauthorized",
@@ -47,6 +47,7 @@
         "suspension_code_invalid",
         "catalog_entry_invalid",
         "invalid_token",
+        "entitlements_default_managed_by_billing",
         "url_invalid",
         "url_not_https",
         "url_has_credentials",
@@ -564,7 +565,7 @@
       "pattern": "^[a-z][a-z0-9_]*$"
     },
     "UsageItem": {
-      "description": "One settled run. Nothing about the pull request, the repository, the branch, the title or any person is in it, and 'modelTier' is the name of a quality tier, never the name of a model. 'costMicroUsd' is millionths of a US dollar of measured model cost, null when the run could not be measured (never a guess); the token counts are null when unknown. A record is immutable once it is served.",
+      "description": "One settled run. Nothing about the pull request, the repository, the branch, the title or any person is in it, 'modelTier' is the name of a quality tier of a run from before the model catalog (null for newer runs), and 'catalogEntryId' / 'catalogEntryName' name the catalog entry a managed run used (null for an own-key run and for older runs); none of them is ever the name of a model. 'costMicroUsd' is millionths of a US dollar of measured model cost, null when the run could not be measured (never a guess); the token counts are null when unknown. A record is immutable once it is served.",
       "type": "object",
       "required": [
         "id",
@@ -621,6 +622,17 @@
           ],
           "maxLength": 32,
           "pattern": "^[a-z][a-z0-9_-]{0,31}$"
+        },
+        "catalogEntryId": {
+          "description": "The catalog entry a managed run used (#432), or null for a run on the workspace's own key and for a run from before the catalog. Optional: an instance of an earlier release does not send it.",
+          "type": ["string", "null"],
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "catalogEntryName": {
+          "description": "The name of that entry when the run was claimed (a rename does not rewrite history), or null. Never a model id.",
+          "type": ["string", "null"],
+          "maxLength": 40
         },
         "costMicroUsd": {
           "type": [

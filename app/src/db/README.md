@@ -379,6 +379,30 @@ set null`): the operator's list of the models that workspaces on the operator's 
   (`catalog-repository.ts`): no workspace owns an entry. A released entry is never hard-deleted. See
   `src/model-catalog/README.md`. The user merge moves `updated_by` (`github-signin/merge.ts`).
 
+### Billing plans and plan versions
+
+Migration `20261018120000_create_billing_plans` (#438; epic #421). It adds two empty tables and touches no existing row, so an
+app of the previous release on the same database is unaffected (it never reads them):
+
+- `billing_plans` (`id`, `plan_key` unique, `name`, `description`, `sort`, `kind` `free`/`paid`/`contact`, `offered`, `popular`,
+  `contact_target`, `archived_at`, `created_at`, `updated_at`, `updated_by` → `users.id` `on delete set null`). Checks: the
+  flags are 0 or 1, `popular` only on a `paid` plan, a contact target only on a `contact` plan. Partial unique indexes: at most one
+  plan with `popular = 1` and at most one `free` plan.
+- `billing_plan_versions` (`id`, `plan_id` → `billing_plans.id` `on delete restrict`, `number` unique per plan, `role`
+  `current`/`legacy` with at most one `current` per plan (partial unique index), `key_mode` `own`/`managed`, `limits` JSON,
+  `model_access` JSON (`NULL` for `own`, a check), `monthly_amount_minor` and `yearly_amount_minor` (positive integers or `NULL`,
+  a yearly price needs a monthly one), `created_at`, `created_by`). Immutable after creation except `role` (and `created_by`, an audit reference that the account merge
+  and the deletion of a user rewrite): migration `20261018140000_protect_billing_plan_versions` adds triggers that refuse a delete
+  and any other update (message `billing_plan_versions_immutable`; the one place of the schema that is not the schema builder,
+  so the statements differ by engine, and a test updates every column to catch one that a later migration adds without extending
+  the SQLite trigger). `monthly_amount_minor` and `yearly_amount_minor` are int4 on Postgres: the service refuses a price above
+  1,000,000 USD (`PRICE_MAX_MINOR`).
+- The users: `billing_plans.updated_by` and `billing_plan_versions.created_by` are the audit trail of who changed a plan and who
+  made a version (`src/billing/README.md`, "Why the two tables reference users"); the user merge moves them.
+
+Both are instance level (`billing-plans-repository.ts`, `billing-plan-versions-repository.ts`): no workspace owns a plan. See
+`src/billing/README.md`.
+
 ## Workspace scoping
 
 Every repository that reads or writes customer data is created for one workspace:
