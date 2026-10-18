@@ -26,6 +26,12 @@ import { createTestMailService } from "../mail/test-mail.ts";
 import { createOperatorKeyTestService } from "../llm/operator-key-test.ts";
 import { createSecretStore } from "../secrets/store.ts";
 import type { FakeGithub } from "../../../fakes/github/server.ts";
+import type { FakePaddle } from "../../../fakes/paddle/server.ts";
+import { createBillingRouteHandlers } from "../billing/admin-http.ts";
+import { isBillingOn } from "../billing/enabled.ts";
+import { createPaddleClient } from "../billing/paddle-client.ts";
+import { createBillingSettingsService } from "../billing/settings-service.ts";
+import { startTestPaddle } from "./paddle-fake.ts";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
 import { createGithubCredentialStore } from "../github-config/credentials.ts";
 import { createGithubRouteHandlers } from "../github-config/http.ts";
@@ -65,7 +71,14 @@ export type AdminHarnessOptions = {
   github?: FakeGithub;
   /** The fake LLM the Test button of the operator's keys talks to. Default: an address where nothing answers. */
   llm?: { baseUrl: string };
+  /** The fake Paddle the billing routes talk to. Default: one is started the first time a billing route is used. */
+  paddle?: FakePaddle;
+  /** The public address the notification destination is created with. Default: `BILLING_TEST_PUBLIC_URL`. */
+  billingPublicUrl?: string;
 };
+
+/** A public-looking address for the billing routes: the real rule refuses a loopback or plain http address. */
+export const BILLING_TEST_PUBLIC_URL = "https://reviews.example.test";
 
 /** Short waits, so a test of a mail server that never answers does not take half a minute. */
 export const ADMIN_TEST_SMTP_TIMEOUTS: SmtpTimeouts = {
@@ -180,6 +193,42 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
       return { fake, routes };
     })();
     return githubPart;
+  }
+  // The routes of the billing settings, built on first use over the fake Paddle (#437). The client is the real one,
+  // pointed at the fake whatever the environment is, and its address is the only one it reaches.
+  let billingPart:
+    | Promise<{
+        fake: FakePaddle;
+        routes: ReturnType<typeof createBillingRouteHandlers>;
+      }>
+    | undefined;
+  function billing() {
+    billingPart ??= (async () => {
+      const fake = options.paddle ?? (await startTestPaddle());
+      const service = createBillingSettingsService({
+        db,
+        secrets,
+        clientFor: (apiKey) =>
+          createPaddleClient({
+            apiKey,
+            baseUrl: fake.baseUrl,
+            sleep: () => Promise.resolve(),
+          }),
+        publicUrl: options.billingPublicUrl ?? BILLING_TEST_PUBLIC_URL,
+      });
+      const routes = createBillingRouteHandlers({
+        access: async () =>
+          adminAccessOf(
+            await lookupSession(auth, current.headers, setup.gates),
+          ),
+        notFound: () => {
+          throw new NotFoundSignal();
+        },
+        service,
+      });
+      return { fake, routes };
+    })();
+    return billingPart;
   }
   // The synchronization with GitHub is a double that counts how often it was asked: what these tests need to
   // know is whether a request got as far as the synchronization.
@@ -440,6 +489,30 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
         )
           return await routes.check(request);
       }
+      if (pathname.startsWith("/api/instance-portal/billing")) {
+        const { routes } = await billing();
+        if (
+          pathname === "/api/instance-portal/billing" &&
+          request.method === "GET"
+        )
+          return await routes.get(request);
+        if (
+          pathname === "/api/instance-portal/billing" &&
+          request.method === "PUT"
+        )
+          return await routes.put(request);
+        if (
+          pathname === "/api/instance-portal/billing/check" &&
+          request.method === "POST"
+        )
+          return await routes.check(request);
+        if (
+          pathname ===
+            "/api/instance-portal/billing/notification-destination" &&
+          request.method === "POST"
+        )
+          return await routes.createNotificationDestination(request);
+      }
       if (
         pathname === "/api/instance-portal/integrations/sync" &&
         request.method === "POST"
@@ -528,6 +601,10 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
     credentials,
     /** The fake GitHub behind the GitHub routes (started on first use). */
     fakeGithub: async () => (await github()).fake,
+    /** The fake Paddle behind the billing routes (started on first use). */
+    fakePaddle: async () => (await billing()).fake,
+    /** Whether billing is on, read the way every billing route reads it. */
+    isBillingOn: () => isBillingOn(db, secrets),
     flags,
     /** How many times a request got as far as the synchronization with GitHub. */
     syncCalls,
