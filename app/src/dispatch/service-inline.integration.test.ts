@@ -10,7 +10,11 @@ import {
   createPostgresTestDatabase,
   hasPostgres,
 } from "../test-support/postgres-test-database.ts";
-import { createJobDispatchesRepository } from "../db/repositories/job-dispatches-repository.ts";
+import {
+  createJobDispatchesRepository,
+  WAITING_DISPATCH_CODES,
+  WAITING_MIN_GAP_MS,
+} from "../db/repositories/job-dispatches-repository.ts";
 import { createJobQueue } from "../jobs/job-queue.ts";
 import type { EnqueueJobInput, EnqueueResult } from "../jobs/job-types.ts";
 import {
@@ -20,7 +24,14 @@ import {
 } from "../test-support/fake-dispatch-receiver.ts";
 import { createJobQueueFixture, sha } from "../test-support/jobs.ts";
 import type { WebhookDispatchConfig } from "./config.ts";
-import { createDispatchService, REDISPATCH_SLACK_MS } from "./service.ts";
+import { DISPATCH_RESULT_CODES, type DispatchResultCode } from "./outcome.ts";
+import {
+  createDispatchService,
+  INLINE_RETRY_BUDGET_MS,
+  INLINE_RETRY_MAX_WAIT_MS,
+  REDISPATCH_SLACK_MS,
+} from "./service.ts";
+import { DISPATCH_TIMEOUT_MS } from "./send.ts";
 
 const CURRENT = {
   kid: "k2",
@@ -45,7 +56,10 @@ const databases: Array<
   ],
 ];
 
-async function setupOn(open: (() => Promise<Kysely<Database>>) | undefined) {
+async function setupOn(
+  open: (() => Promise<Kysely<Database>>) | undefined,
+  options: { timeoutMs?: number } = {},
+) {
   const database = await open?.();
   const fixture = await createJobQueueFixture({
     ...(database === undefined ? {} : { database }),
@@ -68,7 +82,7 @@ async function setupOn(open: (() => Promise<Kysely<Database>>) | undefined) {
     config: webhookConfig,
     fetch: receiver.fetch,
     now: fixture.clock.now,
-    timeoutMs: 40,
+    timeoutMs: options.timeoutMs ?? 40,
     sleep: async (ms) => {
       sleeps.push(ms);
       monotonic += ms;
@@ -82,10 +96,15 @@ async function setupOn(open: (() => Promise<Kysely<Database>>) | undefined) {
     },
   });
   const work: Promise<void>[] = [];
+  // How long ago the request that enqueues began, on the monotonic clock (#479): the hook of the app notes the time
+  // when it is scheduled, `after()` runs it later.
+  const request = { age: 0 };
   const queue = createJobQueue(fixture.db, fixture.workspaceId, {
     now: fixture.clock.now,
     onEnqueued: (result: EnqueueResult) => {
-      work.push(service.onEnqueued(result));
+      work.push(
+        service.onEnqueued(result, { receivedAt: monotonic - request.age }),
+      );
     },
   });
   const enqueue = (overrides: Partial<EnqueueJobInput> = {}) =>
@@ -109,6 +128,7 @@ async function setupOn(open: (() => Promise<Kysely<Database>>) | undefined) {
     sleeps,
     during,
     timing,
+    request,
     monotonic: () => monotonic,
     dispatches: createJobDispatchesRepository(fixture.db, fixture.clock.now),
     async settled() {
@@ -122,7 +142,7 @@ describe.each(databases)(
   (name, open) => {
     const it =
       name === "Postgres" && open === undefined ? vitestIt.skip : vitestIt;
-    const setup = () => setupOn(open);
+    const setup = (options?: { timeoutMs?: number }) => setupOn(open, options);
 
     describe("a call that failed", () => {
       // #395-T06
@@ -175,6 +195,117 @@ describe.each(databases)(
           new Set(t.receiver.received.map((call) => call.body?.dispatchId))
             .size,
         ).toBe(2);
+      });
+
+      // #479-T01
+      it.each([
+        ["a 503 of a Dispatcher that is not ready (20 seconds)", 503, 20],
+        ["a 429 of a busy Dispatcher (30 seconds)", 429, 30],
+      ])(
+        "repeats %s inside the request, and the job is acknowledged on the repeat",
+        async (_what, status, seconds) => {
+          const t = await setup();
+          t.receiver.reply(
+            { status, headers: { "retry-after": String(seconds) } },
+            accepted,
+          );
+
+          const { job } = await t.enqueue();
+          await t.settled();
+
+          expect(t.sleeps).toEqual([seconds * SECOND]);
+          expect(t.receiver.received).toHaveLength(2);
+          expect(await t.dispatches.get(job.id)).toMatchObject({
+            state: "acked",
+            lastCode: "accepted",
+          });
+        },
+      );
+
+      // #479-T01
+      it("fits the longest Retry-After it waits for, and the call after it, into the budget of the request", () => {
+        expect(INLINE_RETRY_MAX_WAIT_MS).toBeGreaterThanOrEqual(30 * SECOND);
+        expect(
+          INLINE_RETRY_MAX_WAIT_MS + DISPATCH_TIMEOUT_MS + 5 * SECOND,
+        ).toBeLessThanOrEqual(INLINE_RETRY_BUDGET_MS);
+        // The function lives 60 seconds (`app/vercel.json`): the budget leaves room for the request that queued the job.
+        expect(INLINE_RETRY_BUDGET_MS).toBeLessThanOrEqual(50 * SECOND);
+      });
+
+      // #479-T02
+      it.each([
+        ["a 503", 503],
+        ["a 429", 429],
+      ])(
+        "does not wait inside the request for %s with a Retry-After over the cap, and the job is woken when a slot frees",
+        async (_what, status) => {
+          const t = await setup();
+          const longer = INLINE_RETRY_MAX_WAIT_MS / SECOND + 90;
+          t.receiver.reply({
+            status,
+            headers: { "retry-after": String(longer) },
+          });
+
+          const { job } = await t.enqueue();
+          await t.settled();
+
+          expect(t.receiver.received).toHaveLength(1);
+          expect(t.sleeps).toEqual([]);
+          const waiting = await t.dispatches.get(job.id);
+          expect(waiting).toMatchObject({
+            state: "pending",
+            lastCode: status === 503 ? "unavailable" : "rate_limited",
+          });
+          // The row is not due for minutes, so neither the sweep nor the repair work would send it ...
+          expect(await t.service.sendDue()).toEqual({ sent: 0 });
+          // ... but a slot that frees (a job ended) wakes it, without a sweep and without waiting for its time.
+          t.fixture.clock.advance(WAITING_MIN_GAP_MS + SECOND);
+          t.receiver.reply(accepted);
+
+          expect(await t.service.sendWaiting({ limit: 1 })).toEqual({
+            sent: 1,
+          });
+
+          expect(await t.dispatches.get(job.id)).toMatchObject({
+            state: "acked",
+            lastCode: "accepted",
+          });
+        },
+      );
+
+      // #479-T09
+      it("counts the budget from the start of the request, not from the first call: a request that already used 30 seconds does not wait 20 more", async () => {
+        const t = await setup();
+        t.request.age = 30 * SECOND;
+        t.receiver.reply({ status: 503, headers: { "retry-after": "20" } });
+
+        const { job } = await t.enqueue();
+        await t.settled();
+
+        expect(t.sleeps).toEqual([]);
+        expect(t.receiver.received).toHaveLength(1);
+        expect(await t.dispatches.get(job.id)).toMatchObject({
+          state: "pending",
+          lastCode: "unavailable",
+        });
+      });
+
+      // #479-T09
+      it("still repeats inside the request when the request is young", async () => {
+        const t = await setup();
+        t.request.age = 2 * SECOND;
+        t.receiver.reply(
+          { status: 503, headers: { "retry-after": "20" } },
+          accepted,
+        );
+
+        const { job } = await t.enqueue();
+        await t.settled();
+
+        expect(t.sleeps).toEqual([20 * SECOND]);
+        expect(await t.dispatches.get(job.id)).toMatchObject({
+          state: "acked",
+        });
       });
 
       // #395-T07
@@ -423,6 +554,74 @@ describe.each(databases)(
         expect(t.receiver.received).toHaveLength(before);
       });
 
+      // #479-T10
+      it("does not start a send that could still be running at the deadline: the longest call is counted in", async () => {
+        const t = await setup({ timeoutMs: 8_000 });
+        await refusedJob(t, 8, "c");
+        t.fixture.clock.advance(10 * SECOND);
+        const before = t.receiver.received.length;
+
+        // A call started now may take 8 seconds: a deadline 7.9 seconds away is too near.
+        expect(
+          await t.service.sendWaiting({
+            limit: 1,
+            deadline: t.monotonic() + 7_900,
+          }),
+        ).toEqual({ sent: 0 });
+        expect(t.receiver.received).toHaveLength(before);
+
+        // 8.1 seconds away it fits.
+        t.receiver.reply(accepted);
+        expect(
+          await t.service.sendWaiting({
+            limit: 1,
+            deadline: t.monotonic() + 8_100,
+          }),
+        ).toEqual({ sent: 1 });
+      });
+
+      // #479-T10
+      it.each([
+        ["429", { status: 429, headers: { "retry-after": "30" } }],
+        ["503", { status: 503, headers: { "retry-after": "60" } }],
+        ["a timeout", "hang" as const],
+        ["a lost connection", { fails: "connect ECONNRESET" }],
+      ])(
+        "stops asking the other waiting jobs at the first %s: it says something about the Dispatcher, not about the job",
+        async (_what, answer) => {
+          const t = await setup();
+          await refusedJob(t, 8, "c");
+          await refusedJob(t, 9, "d");
+          await refusedJob(t, 10, "e");
+          t.fixture.clock.advance(10 * SECOND);
+          const before = t.receiver.received.length;
+          t.receiver.reply(answer, accepted, accepted, accepted);
+
+          const done = await t.service.sendWaiting({ limit: 1 });
+
+          expect(done).toEqual({ sent: 0 });
+          expect(t.receiver.received.length - before).toBeLessThanOrEqual(1);
+        },
+      );
+
+      // #479-T10
+      it("keeps asking the next job when one is turned away for its own pull request (not_claimable says nothing of the Dispatcher)", async () => {
+        const t = await setup();
+        const one = await refusedJob(t, 8, "c");
+        const two = await refusedJob(t, 9, "d");
+        t.fixture.clock.advance(10 * SECOND);
+        const before = t.receiver.received.length;
+        t.receiver.reply(ignored("not_claimable"), accepted);
+
+        expect(await t.service.sendWaiting({ limit: 1 })).toEqual({ sent: 1 });
+        expect(t.receiver.received.length - before).toBe(2);
+        // Both were asked, one after the other (the order of equal times is the id's), and the second took the slot.
+        const asked = t.receiver.received
+          .slice(before)
+          .map((c) => c.body?.jobId);
+        expect([...asked].sort()).toEqual([one.id, two.id].sort());
+      });
+
       // #395-T10
       it("never sends a job twice when two events ask for the same waiting job at once", async () => {
         const t = await setup();
@@ -465,26 +664,81 @@ describe.each(databases)(
         expect(t.receiver.received).toHaveLength(before);
       });
 
-      // #395-T10
-      it("leaves a job the Dispatcher answered with a Retry-After to its time", async () => {
-        const t = await setup();
-        const busy = await refusedJob(t, 9, "d");
-        await t.dispatches.record(
-          busy.id,
-          {
-            state: "pending",
-            nextDispatchAt: new Date(t.fixture.clock.now().getTime() + 60_000),
-            consecutiveFailures: 1,
-            acknowledged: false,
-            lastStatus: 429,
-            lastCode: "rate_limited",
-            alert: false,
-          },
-          t.fixture.clock.now(),
-        );
-        t.fixture.clock.advance(10 * SECOND);
+      // #479-T02
+      it.each<[string, DispatchResultCode, number]>([
+        ["429 busy", "rate_limited", 429],
+        ["503 unavailable", "unavailable", 503],
+      ])(
+        "sends a job the Dispatcher answered with %s when a slot frees, before its Retry-After is over, but not while its last call may still be in flight",
+        async (_what, lastCode, lastStatus) => {
+          const t = await setup();
+          const busy = await refusedJob(t, 9, "d");
+          await t.dispatches.record(
+            busy.id,
+            {
+              state: "pending",
+              nextDispatchAt: new Date(
+                t.fixture.clock.now().getTime() + 600 * SECOND,
+              ),
+              consecutiveFailures: 1,
+              acknowledged: false,
+              lastStatus,
+              lastCode,
+              alert: false,
+            },
+            t.fixture.clock.now(),
+          );
+          const before = t.receiver.received.length;
 
-        expect(await t.service.sendWaiting({ limit: 5 })).toEqual({ sent: 0 });
+          // The call just made may still be in flight: its row is left alone.
+          expect(await t.service.sendWaiting({ limit: 5 })).toEqual({
+            sent: 0,
+          });
+          expect(t.receiver.received).toHaveLength(before);
+
+          t.fixture.clock.advance(WAITING_MIN_GAP_MS + SECOND);
+          t.receiver.reply(accepted);
+          expect(await t.service.sendWaiting({ limit: 5 })).toEqual({
+            sent: 1,
+          });
+          expect(t.receiver.received.at(-1)?.body?.jobId).toBe(busy.id);
+        },
+      );
+
+      // #479-T03
+      it("lists exactly the answers that mean 'not now' as waiting, whatever time their row says", async () => {
+        const t = await setup();
+        const listed: DispatchResultCode[] = [];
+        for (const [index, code] of DISPATCH_RESULT_CODES.entries()) {
+          const job = await refusedJob(t, 50 + index, String(index % 10));
+          await t.dispatches.record(
+            job.id,
+            {
+              state: "pending",
+              nextDispatchAt: new Date(
+                t.fixture.clock.now().getTime() + 3600 * SECOND,
+              ),
+              consecutiveFailures: 0,
+              acknowledged: false,
+              lastStatus: null,
+              lastCode: code,
+              alert: false,
+            },
+            t.fixture.clock.now(),
+          );
+          t.fixture.clock.advance(WAITING_MIN_GAP_MS + SECOND);
+          const waiting = await t.dispatches.listWaiting(
+            t.fixture.clock.now(),
+            100,
+          );
+          if (waiting.some((entry) => entry.jobId === job.id))
+            listed.push(code);
+        }
+
+        expect([...listed].sort()).toEqual([...WAITING_DISPATCH_CODES].sort());
+        expect([...WAITING_DISPATCH_CODES].sort()).toEqual(
+          ["ignored_not_claimable", "rate_limited", "unavailable"].sort(),
+        );
       });
 
       // #395-T10

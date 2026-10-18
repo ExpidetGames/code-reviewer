@@ -15,8 +15,8 @@ import { DEFAULT_SEND_LIMIT, type DispatchService } from "./service.ts";
 
 /** The most often one process does it. */
 export const OPPORTUNISTIC_INTERVAL_MS = 30_000;
-/** A job younger than this is left to the request that queued it (its inline retries take up to 35 seconds). */
-export const OPPORTUNISTIC_MIN_JOB_AGE_MS = 40_000;
+/** A job younger than this is left to the request that queued it (its inline retries take up to 45 seconds). */
+export const OPPORTUNISTIC_MIN_JOB_AGE_MS = 50_000;
 /** The check runs get little time: this runs in the `after()` of a request that has a minute in all (#405). */
 const CHECKS_BUDGET_MS = 15_000;
 

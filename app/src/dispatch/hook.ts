@@ -26,6 +26,8 @@ export type DispatchHookOptions = {
   schedule: (work: () => Promise<void>) => void;
   /** Where a bad setting is reported. */
   reportInvalid?: (line: string) => void;
+  /** A monotonic clock in milliseconds (default `performance.now`); tests move it by hand. */
+  monotonicMs?: () => number;
   /** The service to use instead of the real one (tests). */
   service?: (config: WebhookDispatchConfig) => DispatchService;
 };
@@ -52,7 +54,11 @@ export function createDispatchHook(
       config,
       ...(delays === undefined ? {} : { inlineRetryDelaysMs: delays }),
     });
+  const monotonicMs = options.monotonicMs ?? (() => performance.now());
   return (result) => {
-    options.schedule(() => service.onEnqueued(result));
+    // The function lives from the start of the request, and `after()` runs the work later: the time is noted now so that
+    // the budget of the inline retries counts what the request already used (#479).
+    const receivedAt = monotonicMs();
+    options.schedule(() => service.onEnqueued(result, { receivedAt }));
   };
 }

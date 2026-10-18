@@ -59,7 +59,39 @@ describe("the dispatch hook", () => {
     expect(scheduled).toHaveLength(1);
     expect(onEnqueued).not.toHaveBeenCalled();
     await scheduled[0]?.();
-    expect(onEnqueued).toHaveBeenCalledExactlyOnceWith(result);
+    expect(onEnqueued).toHaveBeenCalledExactlyOnceWith(result, {
+      receivedAt: expect.any(Number),
+    });
+  });
+
+  // #479-T09
+  it("notes when the hook ran, not when the scheduler ran the work, so the budget of the retries counts the request's own time", async () => {
+    const onEnqueued = vi.fn(() => Promise.resolve());
+    const scheduled: (() => Promise<void>)[] = [];
+    let now = 1_000;
+    const hook = createDispatchHook({
+      env: webhookEnv,
+      db,
+      schedule: (work) => scheduled.push(work),
+      monotonicMs: () => now,
+      service: () =>
+        ({
+          onEnqueued,
+          sendDue: vi.fn(),
+          sendJob: vi.fn(),
+          sendWaiting: vi.fn(),
+          redispatch: vi.fn(),
+        }) as DispatchService,
+    });
+
+    hook?.(result);
+    // The response is sent, and `after()` runs the work a while later.
+    now = 9_000;
+    await scheduled[0]?.();
+
+    expect(onEnqueued).toHaveBeenCalledExactlyOnceWith(result, {
+      receivedAt: 1_000,
+    });
   });
 
   // #326-T08
