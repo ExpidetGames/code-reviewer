@@ -752,7 +752,7 @@ How a job becomes PR-Agent configuration (`pr_agent_config.py`, `pr_agent_runtim
 - **The review comment never names the model** (#280). PR-Agent can append the model to the comment it publishes:
   `config.output_run_details` adds the "Agent run details" section with the model, and
   `config.output_relevant_configurations` adds a `config` section with `model`, `model_weak` and `model_reasoning`.
-  Both are off by default, but a repository's `.pr_agent.toml` could switch them on. The model of a managed tier is
+  Both are off by default, but a repository's `.pr_agent.toml` could switch them on. The model of a managed catalog entry is
   operator data that a workspace must not read, so the runner sets both to `false` for every job (all workspaces,
   not only managed ones) and both are in `PROTECTED_SETTINGS`. Pinned by `tests/unit/test_repo_settings_guard.py`,
   `tests/unit/test_pr_agent_config.py` and, with the real PR-Agent against the fake LLM and a repository file that

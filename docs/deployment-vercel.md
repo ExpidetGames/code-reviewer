@@ -565,8 +565,9 @@ valuable key in `/ci`: it can deploy to production, which is why the environment
   The workspace's token budget is cut to the context window of the entry's model when the provider states one (the last
   window read when it cannot be asked, else 100,000 tokens: it is never sent unclamped). The model ids are visible to you
   and the runner only: not to a workspace, not in a result (`[model]` stands where a result repeated one), a record or a
-  log. The quality tiers of #280 (`PUT /api/operator/v1/model-tiers`) no longer drive the model; they go away with #434,
-  so do not configure new ones. Create and release the entries and set the defaults before you set a workspace to
+  log. The quality tiers of #280 are gone (#434): the migration turned the models you had configured for Low, Medium and High into
+  released catalog entries of the same names and made the Medium ones the defaults, and `PUT /api/operator/v1/model-tiers` is
+  answered `404`. The old setting stays in the database, unread, for one release. Create and release the entries and set the defaults before you set a workspace to
   `managed`, and roll the new App out completely first (`app/src/model-catalog/README.md`).
   The workspace's Settings, LLM access page shows a note instead of a key form.
 - **No usable operator key** (none saved, or one that cannot be decrypted, for example after a changed `APP_SECRET`):
@@ -878,7 +879,7 @@ Others you will meet: `no_capable_runner` (a Dynamic job nobody could run for 30
 `DISPATCHER_ENGINES` has no `opencode`), `dynamic_review_disabled` (the gate is off), `lease_expired` (the Worker
 stopped reporting), `quota_exhausted`, `workspace_suspended` and `entitlements_invalid` (the workspace's limits, set
 through the operator API), `managed_model_unavailable` (the workspace is `managed` and its project selects no usable catalog entry for the kind
-of review, and no instance default entry applies; `managed_tier_unavailable` stays on old rows), `llm_not_configured` (the workspace has no LLM key, or it is `managed` and the operator has no usable key: section 3.5). The wake-up call's answers (`202`,
+of review, and no instance default entry applies), `llm_not_configured` (the workspace has no LLM key, or it is `managed` and the operator has no usable key: section 3.5). The wake-up call's answers (`202`,
 `200 ignored` with `not_claimable` or `not_capable`, `429`, `503`) and the App's back-off are in
 `app/src/dispatch/README.md`, "What an answer means".
 
@@ -931,6 +932,8 @@ minutes. The reaper checks every VM itself, so it does not depend on the platfor
 ### 5.6 Updating the App or the Dispatcher
 
 > **Release with check runs and review verdicts (#405).** The App needs the *Checks* permission accepted on each installation, and every existing project starts to submit a review verdict after the update (`Review verdict` `off` keeps a project as it was): [Updating to the release with check runs and review verdicts](../README.md#updating-to-the-release-with-check-runs-and-review-verdicts). The check runs of a hosted deployment are repaired by the sweep every two hours and by the requests that touch the database; no timer runs.
+
+> **Release that removes the managed model tiers (#434, with #432 and #433).** The migration `20261018160000_migrate_model_tiers_to_catalog` runs in the `migrate` job and only adds: it turns the models you configured for Low, Medium and High into released catalog entries (`Low`, `Medium`, `High`, or `<Tier> (Diff)` and `<Tier> (Dynamic)` when a tier used two models), makes the Medium entries the instance defaults, and points every project that had a quality level at its entry, so no workspace on your key changes model. Check the entries in the admin portal after the release. `PUT /api/operator/v1/model-tiers` answers `404` afterwards: update an external script that calls it before the release. The old tier data stays in the database, unread, and is removed one release later. Instances on their own key see no change.
 
 A release is a pull request from `development` into `main`. **Merging it is the whole release**: it starts *Deploy
 production* (`.github/workflows/deploy-production.yml`; you can also start it by hand on `main`), and nothing else is
@@ -1142,7 +1145,7 @@ A self-hosted installation and a hosted one never share a database or a GitHub A
   default entry of the kind applies (`app/src/model-catalog/README.md`). An unusable entry fails the job with
   `managed_model_unavailable`, it does not move to another entry or to `LLM_MODEL`. The models never reach a workspace; a
   Dynamic model has to support tool calls. Create and release the entries and set the defaults before you set a workspace
-  to `managed`. The tiers of #280 no longer drive the model and go away with #434.
+  to `managed`. The tiers of #280 were turned into catalog entries by #434 and are gone.
 - **A Worker whose end the Dispatcher does not see still holds its slot until its lease lapses** (two minutes after its
   last heartbeat); only the next request that touches the database or the next sweep (up to 2 hours) then puts the job back, and the pull request shows "Running" meanwhile. A Worker
   that exits non-zero before it has reported a result is released at once when the Dispatcher sees the container end

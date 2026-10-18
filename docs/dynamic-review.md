@@ -300,7 +300,7 @@ checks it when an entry is released, and the capabilities below are read for the
 entry the job ends with `managed_model_unavailable` instead of moving to another entry or model. The model reaches the
 runner and nothing a workspace can read. A workspace on its own key keeps the provider and model it chose. See
 `app/src/model-catalog/README.md` and `app/src/runner-api/README.md`. The quality tiers (`low`, `medium`, `high`) that
-#280 introduced no longer drive this; their code stays only until #434 removes it.
+#280 introduced are gone; #434 turned them into catalog entries.
 
 **The app describes the model for every job (#279).** When a Dynamic job is claimed, the app reads
 OpenRouter's public metadata of the job's model (`GET /models/{author}/{slug}/endpoints`, no
