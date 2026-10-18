@@ -115,7 +115,11 @@ describe("choosing what a job runs on", () => {
 
     const result = await selectModel(deps, JOB, {
       options: { env: {} },
-      entitlements: { kind: "invalid" },
+      entitlements: {
+        kind: "invalid",
+        code: "entitlements_invalid",
+        source: "workspace",
+      },
       runnerProviders: ["openrouter"],
     });
 
