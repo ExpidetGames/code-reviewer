@@ -1,0 +1,640 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// #434: the migration that turns the old managed model tiers into catalog entries, on SQLite and on Postgres. Every case
+// builds the database the previous release left (all migrations before this one), writes the old data into it as that
+// release wrote it, and runs the real migration runner. The data is never decrypted (nothing in it is secret) and the
+// old data stays where it is.
+import { sql, type Kysely } from "kysely";
+import type { MigrationProvider } from "kysely/migration";
+import { describe, expect, it, vi } from "vitest";
+import {
+  createPostgresTestDatabase,
+  hasPostgres,
+} from "../../test-support/postgres-test-database.ts";
+import {
+  createTestDirectory,
+  track,
+} from "../../test-support/test-database.ts";
+import { openDatabase } from "../connection.ts";
+import { migrateToLatest } from "../migrate.ts";
+import type { Database } from "../schema.ts";
+import { migrationProvider } from "./index.ts";
+import { entryIdOf } from "./model-tiers-to-catalog.ts";
+
+const KEY = "20261018160000_migrate_model_tiers_to_catalog";
+const T = "2026-10-18T08:00:00.000Z";
+
+/** The migrations the previous release's database ran: everything before the new one. */
+const beforeThisMigration: MigrationProvider = {
+  async getMigrations() {
+    return Object.fromEntries(
+      Object.entries(await migrationProvider.getMigrations()).filter(
+        ([name]) => name < KEY,
+      ),
+    );
+  },
+};
+
+type Engine = {
+  name: "sqlite" | "postgres";
+  /** An empty database migrated to the state before this migration. */
+  open: () => Promise<Kysely<Database>>;
+};
+
+const sqlite: Engine = {
+  name: "sqlite",
+  open: async () => {
+    const directory = await createTestDirectory();
+    const db = track(
+      openDatabase({
+        driver: "sqlite",
+        path: `${directory}/app.db`,
+        busyTimeoutMs: 5000,
+      }),
+    );
+    await migrateToLatest(db, beforeThisMigration);
+    return db;
+  },
+};
+
+const postgres: Engine = {
+  name: "postgres",
+  open: async () => {
+    const database = await createPostgresTestDatabase({ migrate: false });
+    await migrateToLatest(database.db, beforeThisMigration);
+    return database.db;
+  },
+};
+
+const engines: Engine[] = hasPostgres() ? [sqlite, postgres] : [sqlite];
+
+type Fixture = {
+  /** The stored `managed_model_tiers` (a value to encode, or raw text), or none. */
+  tiers?: unknown;
+  rawTiers?: string;
+  workspaces?: Array<{
+    id: string;
+    /** The stored workspace review defaults (a value or raw text). */
+    defaults?: unknown;
+    rawDefaults?: string;
+    keyMode?: "own" | "managed";
+    projects?: Array<{
+      id: string;
+      settings?: unknown;
+      rawSettings?: string;
+    }>;
+  }>;
+};
+
+async function seed(db: Kysely<Database>, fixture: Fixture): Promise<void> {
+  if (fixture.tiers !== undefined || fixture.rawTiers !== undefined)
+    await db
+      .insertInto("instance_settings")
+      .values({
+        key: "managed_model_tiers",
+        value: fixture.rawTiers ?? JSON.stringify(fixture.tiers),
+        updated_by: null,
+        updated_at: T,
+      })
+      .execute();
+  for (const workspace of fixture.workspaces ?? []) {
+    await db
+      .insertInto("workspaces")
+      .values({
+        id: workspace.id,
+        name: workspace.id,
+        slug: workspace.id,
+        created_by: null,
+        created_at: T,
+      })
+      .execute();
+    if (workspace.keyMode !== undefined)
+      await sql`insert into workspace_entitlements
+        (workspace_id, plan_label, key_mode, limits, period_start, suspended, suspension_code, updated_by, updated_at)
+        values (${workspace.id}, 'plan', ${workspace.keyMode}, '{}', ${T}, 0, null, null, ${T})`.execute(
+        db,
+      );
+    if (workspace.defaults !== undefined || workspace.rawDefaults !== undefined)
+      await db
+        .insertInto("app_settings")
+        .values({
+          workspace_id: workspace.id,
+          key: "review_defaults",
+          value: workspace.rawDefaults ?? JSON.stringify(workspace.defaults),
+          updated_by: null,
+          updated_at: T,
+        })
+        .execute();
+    if ((workspace.projects ?? []).length === 0) continue;
+    await db
+      .insertInto("integrations")
+      .values({
+        id: `i-${workspace.id}`,
+        workspace_id: workspace.id,
+        type: "github_app",
+        display_name: "acme",
+        external_id: `inst-${workspace.id}`,
+        config: "{}",
+        credentials: null,
+        webhook_secret: null,
+        status: "active",
+        created_at: T,
+        updated_at: T,
+      })
+      .execute();
+    for (const project of workspace.projects ?? []) {
+      await db
+        .insertInto("repositories")
+        .values({
+          id: `r-${project.id}`,
+          workspace_id: workspace.id,
+          integration_id: `i-${workspace.id}`,
+          external_id: `ext-${project.id}`,
+          full_name: `acme/${project.id}`,
+          url: `https://github.test/acme/${project.id}`,
+          active: 1,
+          created_at: T,
+          updated_at: T,
+        })
+        .execute();
+      await db
+        .insertInto("projects")
+        .values({
+          id: project.id,
+          repository_id: `r-${project.id}`,
+          active: 1,
+          settings:
+            project.rawSettings ?? JSON.stringify(project.settings ?? {}),
+          created_at: T,
+          updated_at: T,
+        })
+        .execute();
+    }
+  }
+}
+
+async function snapshot(db: Kysely<Database>) {
+  return {
+    entries: await db
+      .selectFrom("model_catalog_entries")
+      .selectAll()
+      .orderBy("sort_order")
+      .orderBy("name")
+      .execute(),
+    settings: await db
+      .selectFrom("instance_settings")
+      .selectAll()
+      .orderBy("key")
+      .execute(),
+    projects: await db
+      .selectFrom("projects")
+      .select(["id", "settings"])
+      .orderBy("id")
+      .execute(),
+    appSettings: await db
+      .selectFrom("app_settings")
+      .select(["workspace_id", "key", "value"])
+      .orderBy("workspace_id")
+      .execute(),
+  };
+}
+
+async function projectSettings(db: Kysely<Database>, id: string) {
+  const row = await db
+    .selectFrom("projects")
+    .select("settings")
+    .where("id", "=", id)
+    .executeTakeFirstOrThrow();
+  return JSON.parse(row.settings) as Record<string, unknown>;
+}
+
+async function defaults(db: Kysely<Database>) {
+  const row = await db
+    .selectFrom("instance_settings")
+    .select("value")
+    .where("key", "=", "catalog_defaults")
+    .executeTakeFirst();
+  return row === undefined ? undefined : (JSON.parse(row.value) as unknown);
+}
+
+async function migrate(db: Kysely<Database>): Promise<void> {
+  await migrateToLatest(db, migrationProvider);
+}
+
+const EQUAL = {
+  low: { diff: "acme/low-1", dynamic: "acme/low-1" },
+  medium: { diff: "acme/mid-1", dynamic: "acme/mid-1" },
+  high: { diff: "acme/high-1", dynamic: "acme/high-1" },
+};
+const DIFFERENT = {
+  low: { diff: "acme/low-d", dynamic: "acme/low-y" },
+  medium: { diff: "acme/mid-d", dynamic: "acme/mid-y" },
+  high: { diff: "acme/high-d", dynamic: "acme/high-y" },
+};
+
+for (const engine of engines) {
+  describe(`the tier migration on ${engine.name}`, () => {
+    // #434-T01, #434-T07
+    it("changes nothing on an empty database and on an instance that never configured tiers", async () => {
+      const db = await engine.open();
+      await seed(db, {
+        workspaces: [
+          {
+            id: "w-1",
+            keyMode: "own",
+            defaults: { maxFindings: 3 },
+            projects: [{ id: "p-1", settings: { maxFindings: 4 } }],
+          },
+        ],
+      });
+      const before = await snapshot(db);
+      await migrate(db);
+      expect(await snapshot(db)).toEqual(before);
+      expect(await defaults(db)).toBeUndefined();
+    });
+
+    // #434-T01, #434-T07
+    it("makes one released entry per tier when Diff and Dynamic share a model, and the medium ones the defaults", async () => {
+      const db = await engine.open();
+      await seed(db, { tiers: EQUAL });
+      await migrate(db);
+
+      const entries = await db
+        .selectFrom("model_catalog_entries")
+        .selectAll()
+        .orderBy("sort_order")
+        .execute();
+      expect(
+        entries.map((entry) => ({
+          name: entry.name,
+          name_key: entry.name_key,
+          provider: entry.provider,
+          model_id: entry.model_id,
+          serves_diff: entry.serves_diff,
+          serves_dynamic: entry.serves_dynamic,
+          status: entry.status,
+          updated_by: entry.updated_by,
+        })),
+      ).toEqual([
+        {
+          name: "Low",
+          name_key: "low",
+          provider: "openrouter",
+          model_id: "acme/low-1",
+          serves_diff: 1,
+          serves_dynamic: 1,
+          status: "released",
+          updated_by: null,
+        },
+        {
+          name: "Medium",
+          name_key: "medium",
+          provider: "openrouter",
+          model_id: "acme/mid-1",
+          serves_diff: 1,
+          serves_dynamic: 1,
+          status: "released",
+          updated_by: null,
+        },
+        {
+          name: "High",
+          name_key: "high",
+          provider: "openrouter",
+          model_id: "acme/high-1",
+          serves_diff: 1,
+          serves_dynamic: 1,
+          status: "released",
+          updated_by: null,
+        },
+      ]);
+      expect(entries.map((entry) => entry.sort_order)).toEqual([0, 1, 2]);
+      for (const entry of entries) {
+        expect(entry.description).toMatch(/^\S.{10,158}\.$/);
+        expect(entry.description).not.toContain("acme");
+        expect(entry.created_at).toBe(entry.updated_at);
+      }
+      expect(await defaults(db)).toEqual({
+        diff: entryIdOf("medium"),
+        dynamic: entryIdOf("medium"),
+      });
+    });
+
+    // #434-T01, #434-T07
+    it("makes two entries per tier when the models differ, named by kind", async () => {
+      const db = await engine.open();
+      await seed(db, { tiers: DIFFERENT });
+      await migrate(db);
+      const entries = await db
+        .selectFrom("model_catalog_entries")
+        .select(["name", "model_id", "serves_diff", "serves_dynamic"])
+        .orderBy("sort_order")
+        .execute();
+      expect(entries.map((entry) => entry.name)).toEqual([
+        "Low (Diff)",
+        "Low (Dynamic)",
+        "Medium (Diff)",
+        "Medium (Dynamic)",
+        "High (Diff)",
+        "High (Dynamic)",
+      ]);
+      expect(entries[1]).toEqual({
+        name: "Low (Dynamic)",
+        model_id: "acme/low-y",
+        serves_diff: 0,
+        serves_dynamic: 1,
+      });
+      expect(await defaults(db)).toEqual({
+        diff: entryIdOf("medium-diff"),
+        dynamic: entryIdOf("medium-dynamic"),
+      });
+    });
+
+    // #434-T01, #434-T07
+    it("copes with a tier that has no model for a kind and with a partial configuration", async () => {
+      const db = await engine.open();
+      await seed(db, {
+        tiers: {
+          low: { diff: "acme/low-d" },
+          high: { dynamic: "acme/high-y", diff: "not a model id" },
+        },
+        workspaces: [
+          {
+            id: "w-1",
+            projects: [
+              { id: "p-low", settings: { modelTier: "low" } },
+              { id: "p-high", settings: { modelTier: "high" } },
+              { id: "p-medium", settings: { modelTier: "medium" } },
+            ],
+          },
+        ],
+      });
+      await migrate(db);
+      expect(
+        (
+          await db
+            .selectFrom("model_catalog_entries")
+            .select("name")
+            .orderBy("sort_order")
+            .execute()
+        ).map((entry) => entry.name),
+      ).toEqual(["Low (Diff)", "High (Dynamic)"]);
+      // The medium tier had no model at all: no default is written, and a project that chose it gets no entry.
+      expect(await defaults(db)).toBeUndefined();
+      expect(await projectSettings(db, "p-low")).toEqual({
+        modelTier: "low",
+        catalogEntryDiff: entryIdOf("low-diff"),
+      });
+      expect(await projectSettings(db, "p-high")).toEqual({
+        modelTier: "high",
+        catalogEntryDynamic: entryIdOf("high-dynamic"),
+      });
+      expect(await projectSettings(db, "p-medium")).toEqual({
+        modelTier: "medium",
+      });
+    });
+
+    // #434-T01, #434-T12, #434-T07
+    it("maps the tier of every project and of the workspace to the entries, and keeps the default tier unwritten", async () => {
+      const db = await engine.open();
+      await seed(db, {
+        tiers: DIFFERENT,
+        workspaces: [
+          {
+            id: "w-managed",
+            keyMode: "managed",
+            defaults: { modelTier: "high", maxFindings: 7 },
+            projects: [
+              { id: "p-inherits", settings: { maxFindings: 2 } },
+              { id: "p-own-low", settings: { modelTier: "low" } },
+              { id: "p-own-medium", settings: { modelTier: "medium" } },
+              { id: "p-chosen", settings: { catalogEntryDiff: "mce_chosen" } },
+            ],
+          },
+          {
+            id: "w-default",
+            keyMode: "managed",
+            defaults: { modelTier: "medium" },
+            projects: [
+              { id: "q-inherits", settings: {} },
+              { id: "q-high", settings: { modelTier: "high" } },
+            ],
+          },
+          {
+            id: "w-own",
+            keyMode: "own",
+            projects: [{ id: "o-1", settings: { modelTier: "low" } }],
+          },
+        ],
+      });
+      await migrate(db);
+
+      const high = {
+        catalogEntryDiff: entryIdOf("high-diff"),
+        catalogEntryDynamic: entryIdOf("high-dynamic"),
+      };
+      expect(await projectSettings(db, "p-inherits")).toEqual({
+        maxFindings: 2,
+        ...high,
+      });
+      expect(await projectSettings(db, "p-own-low")).toEqual({
+        modelTier: "low",
+        catalogEntryDiff: entryIdOf("low-diff"),
+        catalogEntryDynamic: entryIdOf("low-dynamic"),
+      });
+      // An explicit tier wins over the workspace's, and the default tier is pinned when it was chosen explicitly.
+      expect(await projectSettings(db, "p-own-medium")).toEqual({
+        modelTier: "medium",
+        catalogEntryDiff: entryIdOf("medium-diff"),
+        catalogEntryDynamic: entryIdOf("medium-dynamic"),
+      });
+      // A selection made in the catalog chooser is never replaced; the kind it left open follows the workspace's tier.
+      expect(await projectSettings(db, "p-chosen")).toEqual({
+        catalogEntryDiff: "mce_chosen",
+        catalogEntryDynamic: high.catalogEntryDynamic,
+      });
+      expect(await projectSettings(db, "q-inherits")).toEqual({});
+      expect(await projectSettings(db, "q-high")).toEqual({
+        modelTier: "high",
+        ...high,
+      });
+      // The tier of a project of a workspace on its own key becomes an entry too: it applies if the workspace turns managed.
+      expect(await projectSettings(db, "o-1")).toEqual({
+        modelTier: "low",
+        catalogEntryDiff: entryIdOf("low-diff"),
+        catalogEntryDynamic: entryIdOf("low-dynamic"),
+      });
+    });
+
+    // #434-T03, #434-T07
+    it("leaves the old tier data in place: the setting, the workspace defaults and every modelTier", async () => {
+      const db = await engine.open();
+      await seed(db, {
+        tiers: EQUAL,
+        workspaces: [
+          {
+            id: "w-1",
+            defaults: { modelTier: "high" },
+            projects: [{ id: "p-1", settings: { modelTier: "low" } }],
+          },
+        ],
+      });
+      const before = await snapshot(db);
+      await migrate(db);
+      const after = await snapshot(db);
+      expect(
+        after.settings.find((row) => row.key === "managed_model_tiers"),
+      ).toEqual(
+        before.settings.find((row) => row.key === "managed_model_tiers"),
+      );
+      expect(after.appSettings).toEqual(before.appSettings);
+      expect((await projectSettings(db, "p-1")).modelTier).toBe("low");
+    });
+
+    // #434-T02, #434-T07
+    it("is a no-op when its body runs a second time", async () => {
+      const db = await engine.open();
+      await seed(db, {
+        tiers: DIFFERENT,
+        workspaces: [
+          {
+            id: "w-1",
+            defaults: { modelTier: "low" },
+            projects: [
+              { id: "p-1", settings: {} },
+              { id: "p-2", settings: { modelTier: "high" } },
+            ],
+          },
+        ],
+      });
+      await migrate(db);
+      const first = await snapshot(db);
+      const { migration } =
+        await import("./20261018160000_migrate_model_tiers_to_catalog.ts");
+      await migration.up(db);
+      expect(await snapshot(db)).toEqual(first);
+    });
+
+    // #434-T02
+    it("keeps what the operator did since: a changed model, a retired entry, a chosen default", async () => {
+      const db = await engine.open();
+      await seed(db, { tiers: EQUAL });
+      await migrate(db);
+      await db
+        .updateTable("model_catalog_entries")
+        .set({ model_id: "acme/changed", status: "retired" })
+        .where("id", "=", entryIdOf("high"))
+        .execute();
+      await db
+        .updateTable("instance_settings")
+        .set({
+          value: JSON.stringify({ diff: entryIdOf("low"), dynamic: null }),
+        })
+        .where("key", "=", "catalog_defaults")
+        .execute();
+      const { migration } =
+        await import("./20261018160000_migrate_model_tiers_to_catalog.ts");
+      await migration.up(db);
+      const high = await db
+        .selectFrom("model_catalog_entries")
+        .select(["model_id", "status"])
+        .where("id", "=", entryIdOf("high"))
+        .executeTakeFirstOrThrow();
+      expect(high).toEqual({ model_id: "acme/changed", status: "retired" });
+      expect(await defaults(db)).toEqual({
+        diff: entryIdOf("low"),
+        dynamic: entryIdOf("medium"),
+      });
+    });
+
+    // #434-T05
+    it("skips damaged settings, names them by id in the log, and still succeeds", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const db = await engine.open();
+      await seed(db, {
+        tiers: EQUAL,
+        workspaces: [
+          {
+            id: "w-bad",
+            rawDefaults: "{not json",
+            projects: [
+              { id: "p-bad", rawSettings: "{{{ secret-looking-text" },
+              { id: "p-array", rawSettings: "[1,2]" },
+              { id: "p-fine", settings: { modelTier: "high" } },
+            ],
+          },
+        ],
+      });
+      await migrate(db);
+      const lines = warn.mock.calls.map((call) => String(call[0]));
+      expect(lines.some((line) => line.includes("p-bad"))).toBe(true);
+      expect(lines.some((line) => line.includes("p-array"))).toBe(true);
+      expect(lines.some((line) => line.includes("w-bad"))).toBe(true);
+      expect(lines.join("\n")).not.toContain("secret-looking-text");
+      const row = await db
+        .selectFrom("projects")
+        .select("settings")
+        .where("id", "=", "p-bad")
+        .executeTakeFirstOrThrow();
+      expect(row.settings).toBe("{{{ secret-looking-text");
+      expect(await projectSettings(db, "p-fine")).toEqual({
+        modelTier: "high",
+        catalogEntryDiff: entryIdOf("high"),
+        catalogEntryDynamic: entryIdOf("high"),
+      });
+    });
+
+    // #434-T05
+    it("treats a damaged tier configuration as none and still succeeds", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      void warn;
+      const db = await engine.open();
+      await seed(db, {
+        rawTiers: "this is not json",
+        workspaces: [
+          {
+            id: "w-1",
+            projects: [{ id: "p-1", settings: { modelTier: "high" } }],
+          },
+        ],
+      });
+      await migrate(db);
+      expect(
+        await db.selectFrom("model_catalog_entries").selectAll().execute(),
+      ).toEqual([]);
+      expect(await projectSettings(db, "p-1")).toEqual({ modelTier: "high" });
+    });
+
+    // #434-T01
+    it("gives an entry a different name when the operator already has one with the name", async () => {
+      const db = await engine.open();
+      await seed(db, { tiers: EQUAL });
+      await db
+        .insertInto("model_catalog_entries")
+        .values({
+          id: "mce_operators",
+          name: "MEDIUM",
+          name_key: "medium",
+          description: null,
+          provider: "openrouter",
+          model_id: "acme/other",
+          serves_diff: 1,
+          serves_dynamic: 0,
+          status: "draft",
+          sort_order: 5,
+          created_at: T,
+          updated_at: T,
+          updated_by: null,
+        })
+        .execute();
+      await migrate(db);
+      const names = (
+        await db
+          .selectFrom("model_catalog_entries")
+          .select(["name", "sort_order"])
+          .orderBy("sort_order")
+          .execute()
+      ).map((entry) => entry.name);
+      expect(names).toEqual(["MEDIUM", "Low", "Medium (migrated)", "High"]);
+    });
+  });
+}
