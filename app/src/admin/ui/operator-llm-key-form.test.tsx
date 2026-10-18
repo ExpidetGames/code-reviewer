@@ -369,6 +369,37 @@ describe("the card of one provider (#427)", () => {
   });
 });
 
+describe("the Test button of a key that cannot be read (#427)", () => {
+  // #427-T01
+  it("asks to enter the key again and does not claim that no key is saved", async () => {
+    const { api: mock, testMock } = api();
+    testMock.mockResolvedValueOnce({
+      ok: false,
+      code: "invalid_input",
+      status: 422,
+      issues: [{ field: "apiKey", code: "api_key_unreadable" }],
+    });
+    const user = userEvent.setup();
+    render(
+      <OperatorLlmKeyForm
+        provider="openrouter"
+        label="OpenRouter"
+        status={UNREADABLE}
+        api={mock}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Test key" }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(/Enter the key in the field to test it/),
+      ).toBeTruthy(),
+    );
+    expect(document.body.textContent).not.toContain("There is no saved key");
+  });
+});
+
 describe("the page of the operator's keys (#427)", () => {
   const TWO = { openrouter: CONFIGURED, fakeai: NOT_CONFIGURED } as const;
 

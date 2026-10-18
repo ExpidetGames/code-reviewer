@@ -515,7 +515,16 @@ export function createAdminService({
           return {
             ok: false,
             error: "invalid_input",
-            issues: [{ field: "apiKey", code: "api_key_required" }],
+            issues: [
+              {
+                field: "apiKey",
+                // A key that is there but cannot be read is not a missing key: the admin must enter it again.
+                code:
+                  stored.state === "unreadable"
+                    ? "api_key_unreadable"
+                    : "api_key_required",
+              },
+            ],
           };
         apiKey = stored.apiKey;
       }

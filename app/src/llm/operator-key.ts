@@ -32,6 +32,8 @@ export const OPERATOR_KEY_ISSUE_CODES = [
   "api_key_invalid",
   /** The field is empty: there is nothing to save. */
   "api_key_required",
+  /** The Test button with an empty field found a saved key that cannot be decrypted (sealed with another master key). */
+  "api_key_unreadable",
 ] as const;
 export type OperatorKeyIssueCode = (typeof OPERATOR_KEY_ISSUE_CODES)[number];
 export type OperatorKeyIssue = {

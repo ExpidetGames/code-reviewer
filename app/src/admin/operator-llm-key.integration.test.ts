@@ -518,6 +518,24 @@ describe("the Test button of the operator's keys", () => {
     });
   });
 
+  // #427-T01
+  it("tells a saved key that cannot be read from no key at all, for an empty field", async () => {
+    const { llm, portal } = await start();
+    await put(portal, { operatorLlmKeys: { [OPENROUTER]: { apiKey: KEY } } });
+    await portal.db.updateTable("secrets").set({ nonce: "AAAA" }).execute();
+
+    const unreadable = await test(portal, {});
+
+    expect(unreadable.status).toBe(422);
+    expect(await unreadable.json()).toEqual({
+      error: "invalid_input",
+      issues: [{ field: "apiKey", code: "api_key_unreadable" }],
+    });
+    // A typed key still works: it is what the admin enters to repair the slot.
+    expect((await test(portal, { apiKey: OTHER_KEY })).status).toBe(200);
+    expect(llm.keyChecks()).toHaveLength(1);
+  });
+
   // #427-T07
   it("is write-only: no answer holds the key, no log line does, and the headers say no-store", async () => {
     const lines: string[] = [];

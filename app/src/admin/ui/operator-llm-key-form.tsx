@@ -124,7 +124,9 @@ export function OperatorLlmKeyForm({
         kind: "failed",
         text:
           result.code === "invalid_input" && issue !== undefined
-            ? describeLlmKeyIssue(issue.code)
+            ? issue.code === "api_key_unreadable"
+              ? describeAdminIssue(issue)
+              : describeLlmKeyIssue(issue.code)
             : describeLlmKeyFailure(result.code),
       });
       return;
