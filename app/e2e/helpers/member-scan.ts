@@ -250,7 +250,7 @@ export async function browse(
         requests = now;
         return settled;
       },
-      { timeout: 10_000, intervals: [300] },
+      { timeout: 10_000, intervals: [100] },
     )
     .toBe(true);
   return [

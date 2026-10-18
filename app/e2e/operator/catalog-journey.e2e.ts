@@ -1058,12 +1058,12 @@ test.describe("the catalog from the admin portal to a member's run", () => {
       [...CATALOG_MODEL_IDS].sort(),
     );
     const forbidden = await forbiddenForM();
-    const surfaces: Surface[] = [];
-
-    for (const [who, page, recorderOrNone] of [
-      ["Member", member(), networkMember],
-      ["Owner", ownerOfM(), networkOwner],
-    ] as const) {
+    // The two people read in parallel: each has a browser of their own.
+    const scanOne = async (
+      who: string,
+      page: Page,
+      recorderOrNone: NetworkRecorder | undefined,
+    ): Promise<Surface[]> => {
       const recorder = firstOf(recorderOrNone ? [recorderOrNone] : [], who);
       const ids = await idsOf(page, slugM);
       // Runs of every outcome the journey made so far: reviewed, handed out as Dynamic, failed, refused.
@@ -1088,13 +1088,16 @@ test.describe("the catalog from the admin portal to a member's run", () => {
       expect(responses.length, `${who}'s responses`).toBeGreaterThan(
         browsed.visited.length,
       );
-      for (const surface of [
-        ...read.surfaces,
-        ...browsed.surfaces,
-        ...responses,
+      return [...read.surfaces, ...browsed.surfaces, ...responses].map(
+        (surface) => ({ name: `${who}: ${surface.name}`, text: surface.text }),
+      );
+    };
+    const surfaces: Surface[] = (
+      await Promise.all([
+        scanOne("Member", member(), networkMember),
+        scanOne("Owner", ownerOfM(), networkOwner),
       ])
-        surfaces.push({ name: `${who}: ${surface.name}`, text: surface.text });
-    }
+    ).flat();
 
     surfaces.push(...(await allComments(request)));
     // The logs are the operator's side and name the models they work with; what no log may hold is a key, in any form
