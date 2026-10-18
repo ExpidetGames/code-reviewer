@@ -619,7 +619,17 @@ export function createRoutes(store: Store, now: () => number): Route[] {
       pattern: /^\/notification-settings$/,
       handler: ({ query }) => {
         checkQuery(query, ["active", "traffic_source"]);
-        return { status: 200, data: [...store.notificationSettings.values()] };
+        const settings = [...store.notificationSettings.values()];
+        return {
+          status: 200,
+          data: store.listWithSecrets
+            ? settings
+            : settings.map((setting) => {
+                const visible = { ...setting };
+                delete visible.endpoint_secret_key;
+                return visible;
+              }),
+        };
       },
     },
     {

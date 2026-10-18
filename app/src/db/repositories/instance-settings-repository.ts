@@ -114,6 +114,11 @@ export type InstanceSettingValues = {
    * (`paddle_api_key`, `paddle_webhook_secret`). No row: billing was never configured, which is off and inert (`isBillingOn`).
    */
   billing_settings: BillingSettings;
+  /**
+   * #437: the lease that serializes the creation of the Paddle notification destination (src/billing/): one admin
+   * action at a time makes one. Taken with `claim`, released with `remove`; a lease that ran out is taken over.
+   */
+  billing_destination_lock: { startedAt: string };
 };
 export type InstanceSettingKey = keyof InstanceSettingValues;
 /**
@@ -123,6 +128,12 @@ export type InstanceSettingKey = keyof InstanceSettingValues;
 export type ReadableSettingKey = Exclude<
   InstanceSettingKey,
   "default_entitlements"
+>;
+
+/** The settings `setIfUnchanged` and `claim` serve: those with no side effect of their own on a write. */
+export type GuardedSettingKey = Exclude<
+  InstanceSettingKey,
+  "dynamic_review" | "default_entitlements"
 >;
 
 /** A setting with who saved it last and when. */
@@ -155,6 +166,28 @@ export type InstanceSettingsRepository = {
     value: InstanceSettingValues[K],
     updatedBy: string | null,
   ): Promise<void>;
+  /**
+   * Replaces the value only if the setting is still as `expected` (what `getWithMeta` returned) says: the same time
+   * of the last write, or still no row when `expected` is undefined. False when it changed in between, and nothing
+   * is written. The new time is always later than the expected one, so a write is never mistaken for the one before.
+   */
+  setIfUnchanged<K extends GuardedSettingKey>(
+    key: K,
+    expected:
+      InstanceSettingWithMeta<Extract<K, ReadableSettingKey>> | undefined,
+    value: InstanceSettingValues[K],
+    updatedBy: string | null,
+  ): Promise<boolean>;
+  /**
+   * Takes the setting as a lease: inserts it, or replaces it when its last write is older than `staleBefore`
+   * (ISO 8601 text). False when somebody else holds it. Release it with `remove`.
+   */
+  claim<K extends GuardedSettingKey>(
+    key: K,
+    value: InstanceSettingValues[K],
+    updatedBy: string | null,
+    staleBefore: string,
+  ): Promise<boolean>;
   /** Deletes the setting (it reads as never saved again); false when there was none. */
   remove(key: InstanceSettingKey): Promise<boolean>;
 };
@@ -295,6 +328,64 @@ export function createInstanceSettingsRepository(
             updatedBy: row.updated_by,
             updatedAt: row.updated_at,
           };
+    },
+
+    async setIfUnchanged(key, expected, value, updatedBy) {
+      const moment = now();
+      const writtenAt = new Date(
+        expected === undefined
+          ? moment.getTime()
+          : Math.max(moment.getTime(), Date.parse(expected.updatedAt) + 1),
+      );
+      const row = {
+        key,
+        value: encodeJson(value),
+        updated_by: updatedBy,
+        updated_at: formatTimestamp(writtenAt),
+      };
+      if (expected === undefined) {
+        const inserted = await db
+          .insertInto("instance_settings")
+          .values(row)
+          .onConflict((conflict) => conflict.column("key").doNothing())
+          .executeTakeFirst();
+        return Number(inserted.numInsertedOrUpdatedRows ?? 0) > 0;
+      }
+      const updated = await db
+        .updateTable("instance_settings")
+        .set({
+          value: row.value,
+          updated_by: row.updated_by,
+          updated_at: row.updated_at,
+        })
+        .where("key", "=", key)
+        .where("updated_at", "=", expected.updatedAt)
+        .executeTakeFirst();
+      return Number(updated.numUpdatedRows) > 0;
+    },
+
+    async claim(key, value, updatedBy, staleBefore) {
+      const row = {
+        key,
+        value: encodeJson(value),
+        updated_by: updatedBy,
+        updated_at: formatTimestamp(now()),
+      };
+      const claimed = await db
+        .insertInto("instance_settings")
+        .values(row)
+        .onConflict((conflict) =>
+          conflict
+            .column("key")
+            .doUpdateSet({
+              value: row.value,
+              updated_by: row.updated_by,
+              updated_at: row.updated_at,
+            })
+            .where("instance_settings.updated_at", "<", staleBefore),
+        )
+        .executeTakeFirst();
+      return Number(claimed.numInsertedOrUpdatedRows ?? 0) > 0;
     },
 
     async remove(key) {

@@ -185,6 +185,8 @@ export function createStore(options: StoreOptions) {
     subscriptions,
     customers,
     notificationSettings,
+    /** Whether the list of notification settings carries `endpoint_secret_key` (a switch for tests). */
+    listWithSecrets: true,
     get,
     activePrice,
     subscriptionItem,
@@ -391,6 +393,7 @@ export function createStore(options: StoreOptions) {
       subscriptions.clear();
       customers.clear();
       notificationSettings.clear();
+      this.listWithSecrets = true;
     },
   };
 }

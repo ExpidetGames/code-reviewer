@@ -60,6 +60,8 @@ export type FakePaddle = {
   transactions(): FakeTransaction[];
   subscriptions(): FakeSubscription[];
   notificationSettings(): FakeEntity[];
+  /** From now on the list of notification settings leaves the secret out (the get and the create keep it). */
+  hideSecretsInList(hidden?: boolean): void;
   /** A live subscription to this (recurring) price, as if the customer had paid at Paddle's checkout. */
   seedSubscription(input: {
     priceId: string;
@@ -294,6 +296,9 @@ export async function startPaddleFake(
     prices: () => structuredClone([...store.prices.values()]),
     transactions: () => structuredClone([...store.transactions.values()]),
     subscriptions: () => structuredClone([...store.subscriptions.values()]),
+    hideSecretsInList: (hidden = true) => {
+      store.listWithSecrets = !hidden;
+    },
     notificationSettings: () =>
       structuredClone([...store.notificationSettings.values()]),
     seedSubscription: (input) =>
