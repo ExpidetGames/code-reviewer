@@ -31,6 +31,7 @@ import { startLlmFake, type FakeLlm } from "../../../fakes/llm/server.ts";
 import { changeAdminSetting } from "../helpers/admin-api";
 import { seedCatalog, setCatalogDefaults } from "../helpers/catalog";
 import { e2eEnv, llmEnv } from "../helpers/e2e-env";
+import { MEASURED_COST } from "../helpers/measured-cost-pattern";
 import {
   addGithubAccount,
   addGithubInstallation,
@@ -1374,10 +1375,7 @@ async function expectNothingSecret(
     // A measured cost (the fake reports 0.0001 US dollars with every answer) and an amount of money: a currency sign
     // or a currency code next to a number.
     // The name of a cost field with no figure (`"costUsd":null`, `"costHidden":true`) is no leak; a figure is.
-    const cost =
-      /0\.0001\d*|1e-4|(?:costUsd|costMicroUsd|cost_micro_usd)[\\"\s:]*\d/.exec(
-        text,
-      );
+    const cost = MEASURED_COST.exec(text);
     expect(
       cost === null
         ? ""
