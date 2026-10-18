@@ -17,8 +17,8 @@ import {
   type RunnerResult,
 } from "./contract.ts";
 import type { ClaimedKeys } from "./claimed-keys.ts";
-import { maskModelInText, maskProviderInText } from "../llm/access.ts";
-import { llmProviderDescriptors } from "../llm/providers/index.ts";
+import { maskModelInText } from "../llm/access.ts";
+import { maskProvidersInText } from "../llm/provider-mask.ts";
 import { redactResult } from "./redact.ts";
 import type { JobEndedEvent } from "../dispatch/job-ended.ts";
 import type { RunnerApiLogger } from "./logger.ts";
@@ -81,12 +81,6 @@ export function mapRunnerErrorCode(code: string): string {
   return RUNNER_ERROR_CODES.some((known) => known === code) ? code : "unknown";
 }
 
-/** Every registered provider, by its id and by the name a person reads. */
-const PROVIDER_NAMES = llmProviderDescriptors.ids.flatMap((id) => [
-  id,
-  llmProviderDescriptors.labelOf(id),
-]);
-
 /**
  * The result without the model of a catalog entry (#280, #432): `usage.model` is not reported (null) whatever the runner calls
  * the model, and the ids become `[model]` in the text fields at any length (the generic rule that follows ignores
@@ -102,7 +96,7 @@ export function withoutManagedModel(
   if (!hide) return result;
   // The provider goes with the model: an error class or a message of the provider names it (ADR 0005, 2.17).
   const mask = (text: string) =>
-    maskProviderInText(maskModelInText(text, ...models), PROVIDER_NAMES);
+    maskProvidersInText(maskModelInText(text, ...models));
   return {
     ...result,
     logTail: mask(result.logTail),

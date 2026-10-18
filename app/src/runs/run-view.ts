@@ -6,6 +6,7 @@
 // among them, and of the stored result only the comment link and the log tail are read. Everything
 // that came from outside (the question of an `/ask`, a login, the log of the runner) is data and is
 // rendered as text; the one link made from stored data is checked here.
+import { maskProvidersInText } from "../llm/provider-mask.ts";
 import type { JsonValue, StoredReviewCommand } from "../integrations/types.ts";
 import {
   STOPPED_EARLY_REASONS,
@@ -305,7 +306,9 @@ export function toRunDetailView(
   onManagedKey = false,
 ): RunDetailView {
   const stored = readStoredResult(job.result);
-  const cleaned = redact(cleanLog(stored.logTail));
+  // A run on the operator's key never names its provider, also when it was stored before the result was masked on its way in.
+  const redactedLog = redact(cleanLog(stored.logTail));
+  const cleaned = onManagedKey ? maskProvidersInText(redactedLog) : redactedLog;
   const overlong = cleaned.length > MAX_LOG_CHARS;
   const hasPostedReview =
     job.status === "succeeded" ||

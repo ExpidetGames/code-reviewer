@@ -116,6 +116,46 @@ describe("the log of a run", () => {
   });
 });
 
+describe("the provider in the log of a run", () => {
+  // A row stored before the result was masked on its way in keeps the provider's name in the log.
+  const OLD_LOG =
+    'litellm.NotFoundError: OpenrouterException - {"error":{"message":"OpenRouter: gone"}}\ncalling openrouter/some-model';
+
+  // #435-T06
+  it("is masked on the read path for a run on the operator's key, whatever was stored", () => {
+    const stored = job({
+      status: "failed",
+      errorCode: "llm_error",
+      result: { ok: false, commentUrl: null, logTail: OLD_LOG },
+    });
+
+    const detail = toRunDetailView(
+      stored,
+      "acme/widgets",
+      NOW,
+      (text) => text,
+      true,
+    );
+
+    expect(detail.log.text).toBe(
+      'litellm.NotFoundError: [provider]Exception - {"error":{"message":"[provider]: gone"}}\ncalling [provider]/some-model',
+    );
+  });
+
+  // #435-T06
+  it("is left as the runner wrote it for a run on the workspace's own key", () => {
+    const stored = job({
+      status: "failed",
+      errorCode: "llm_error",
+      result: { ok: false, commentUrl: null, logTail: OLD_LOG },
+    });
+
+    const detail = toRunDetailView(stored, "acme/widgets", NOW);
+
+    expect(detail.log.text).toBe(OLD_LOG);
+  });
+});
+
 describe("the usage of a run", () => {
   const usage = {
     model: "vendor/dynamic-model",
