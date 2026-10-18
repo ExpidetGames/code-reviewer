@@ -24,6 +24,8 @@ export type PaddleEnv = "sandbox" | "live";
 /** What Paddle says about a price: the facts the app caches. The amount is Paddle's own string of minor units. */
 export type PriceSnapshot = {
   productId: string;
+  /** `standard` or `custom`. */
+  priceType: string;
   interval: string;
   frequency: number;
   currency: string;
@@ -91,6 +93,7 @@ function toPrice(row: Row): PriceRow {
     planId: row.plan_id,
     paddlePriceId: row.paddle_price_id,
     productId: row.paddle_product_id,
+    priceType: row.price_type,
     env,
     interval: row.interval,
     frequency: row.frequency,
@@ -167,6 +170,7 @@ export function createBillingPlanPricesRepository(
             plan_id: planId,
             paddle_price_id: paddlePriceId,
             paddle_product_id: snapshot.productId,
+            price_type: snapshot.priceType,
             paddle_env: env,
             interval: snapshot.interval,
             frequency: snapshot.frequency,
@@ -202,6 +206,7 @@ export function createBillingPlanPricesRepository(
         .updateTable("billing_plan_prices")
         .set({
           paddle_product_id: snapshot.productId,
+          price_type: snapshot.priceType,
           interval: snapshot.interval,
           frequency: snapshot.frequency,
           currency: snapshot.currency,

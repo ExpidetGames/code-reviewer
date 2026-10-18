@@ -95,6 +95,7 @@ export function snapshotOf(price: PaddlePrice): PriceSnapshot {
   const facts = factsOf(price);
   return {
     productId: price.product_id,
+    priceType: facts.priceType,
     interval: facts.interval,
     frequency: facts.frequency,
     currency: facts.currency,

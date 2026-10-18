@@ -327,7 +327,8 @@ The identity of a price row (`id`, `plan_id`, `paddle_env`, `origin`, `created_a
 (trigger, message `billing_plan_prices_immutable`; a test names every column as frozen, write once or mutable). A yearly link needs a yearly amount on the version (`price_yearly_not_entered`, answered before Paddle is asked).
 
 **The checks** (`price-rules.ts`) run in a fixed order and report one code, so the same price always gets the same answer:
-`price_not_active` (status), `price_not_recurring`, `price_interval_mismatch` (the interval of the slot, frequency 1),
+`price_not_active` (status), `price_type_unsupported` (only a `standard` price: a `custom` price is made for one transaction and hidden
+from the catalog; the type is cached, so a linked price that becomes custom at Paddle is a drift), `price_not_recurring`, `price_interval_mismatch` (the interval of the slot, frequency 1),
 `price_currency_mismatch` (USD), `price_tax_mode_mismatch` (`internal`; `account_setting`, `external` and `location` are refused),
 `price_amount_mismatch`, `price_has_overrides`, `price_quantity_unsupported` (the quantity limits must allow a quantity of one:
 minimum 1, maximum at least 1; checkout buys one), `price_product_mismatch`. Before them: `price_environment_mismatch` (the plan's

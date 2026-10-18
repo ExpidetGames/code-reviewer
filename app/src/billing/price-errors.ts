@@ -65,6 +65,7 @@ type RuleStatus = Record<PriceRuleErrorCode, number>;
 const RULE_STATUS: RuleStatus = {
   price_not_found: 422,
   price_not_active: 422,
+  price_type_unsupported: 422,
   price_not_recurring: 422,
   price_amount_mismatch: 422,
   price_interval_mismatch: 422,

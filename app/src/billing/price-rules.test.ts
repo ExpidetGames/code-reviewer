@@ -18,6 +18,7 @@ import {
 function facts(overrides: Partial<PriceFacts> = {}): PriceFacts {
   return {
     status: "active",
+    priceType: "standard",
     recurring: true,
     interval: "month",
     frequency: 1,
@@ -157,6 +158,26 @@ describe("checking a Paddle price against a version's slot", () => {
     );
   });
 
+  // #439-T20 (review of #468, N2)
+  it("refuses a custom price, which Paddle creates for one transaction and hides from the catalog", () => {
+    expect(checkPrice(facts({ priceType: "custom" }), MONTHLY)).toEqual({
+      code: "price_type_unsupported",
+    });
+  });
+
+  // #439-T20 (review of #468, N2)
+  it("checks the type after the status and before the cycle", () => {
+    const custom = facts({ priceType: "custom", recurring: false });
+
+    expect(checkPrice({ ...custom, status: "archived" }, MONTHLY)?.code).toBe(
+      "price_not_active",
+    );
+    expect(checkPrice(custom, MONTHLY)?.code).toBe("price_type_unsupported");
+    expect(
+      checkPrice({ ...custom, priceType: "standard" }, MONTHLY)?.code,
+    ).toBe("price_not_recurring");
+  });
+
   // #439-T15
   it("reports one code in the fixed order: interval, currency, tax mode, amount", () => {
     const everythingWrong = facts({
@@ -205,6 +226,7 @@ describe("checking a Paddle price against a version's slot", () => {
         "price_product_mismatch",
         "price_quantity_unsupported",
         "price_tax_mode_mismatch",
+        "price_type_unsupported",
         "price_yearly_not_entered",
       ].sort(),
     );
@@ -250,6 +272,7 @@ function paddlePrice(currencyCode: string): PaddlePrice {
     id: "pri_1",
     product_id: "pro_1",
     description: "Monthly",
+    type: "standard",
     status: "active",
     tax_mode: "internal",
     billing_cycle: { interval: "month", frequency: 1 },
@@ -288,6 +311,16 @@ describe("the currency of a Paddle price", () => {
       entered: "USD",
       paddle: UNKNOWN_CURRENCY,
     });
+  });
+});
+
+describe("the type of a Paddle price", () => {
+  // #439-T20 (review of #468, N2)
+  it("is read from the price, and only a standard price passes", () => {
+    expect(factsOf(paddlePrice("USD")).priceType).toBe("standard");
+    expect(factsOf({ ...paddlePrice("USD"), type: "custom" }).priceType).toBe(
+      "custom",
+    );
   });
 });
 

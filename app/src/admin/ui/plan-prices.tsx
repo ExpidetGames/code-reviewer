@@ -37,6 +37,7 @@ const SLOT_WORDS = {
 const DRIFT_WORDS: Record<string, string> = {
   price_not_active: "the price is archived at Paddle.",
   price_not_recurring: "the price is not a subscription price any more.",
+  price_type_unsupported: "the price is a custom price now.",
   price_has_overrides: "the price has country specific prices now.",
   price_product_mismatch: "the price belongs to another product.",
   price_environment_mismatch:

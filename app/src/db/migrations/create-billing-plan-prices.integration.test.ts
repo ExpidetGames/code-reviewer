@@ -45,6 +45,7 @@ type PriceValues = {
   paddle_env: string;
   unit_amount_minor: string;
   has_overrides: number;
+  price_type: string;
   quantity_min: number;
   quantity_max: number;
   origin: string;
@@ -61,6 +62,7 @@ function insertPrice(
     paddle_env: "sandbox",
     unit_amount_minor: "1234",
     has_overrides: 0,
+    price_type: "standard",
     quantity_min: 1,
     quantity_max: 100,
     origin: "linked",
@@ -68,8 +70,8 @@ function insertPrice(
     ...overrides,
   };
   return sql`insert into billing_plan_prices
-    (id, plan_id, paddle_price_id, paddle_product_id, paddle_env, interval, frequency, currency, unit_amount_minor, tax_mode, has_overrides, quantity_min, quantity_max, paddle_status, origin, state, snapshot_at, created_at)
-    values (${v.id}, 'p1', ${v.paddle_price_id}, 'pro_1', ${v.paddle_env}, 'month', 1, 'USD', ${v.unit_amount_minor}, 'internal', ${v.has_overrides}, ${v.quantity_min}, ${v.quantity_max}, 'active', ${v.origin}, ${v.state}, ${T}, ${T})`.execute(
+    (id, plan_id, paddle_price_id, paddle_product_id, paddle_env, interval, frequency, currency, unit_amount_minor, tax_mode, has_overrides, price_type, quantity_min, quantity_max, paddle_status, origin, state, snapshot_at, created_at)
+    values (${v.id}, 'p1', ${v.paddle_price_id}, 'pro_1', ${v.paddle_env}, 'month', 1, 'USD', ${v.unit_amount_minor}, 'internal', ${v.has_overrides}, ${v.price_type}, ${v.quantity_min}, ${v.quantity_max}, 'active', ${v.origin}, ${v.state}, ${T}, ${T})`.execute(
     db,
   );
 }
@@ -215,6 +217,8 @@ describe("the billing plan prices migration", () => {
           { paddle_env: "staging" },
           { unit_amount_minor: "" },
           { has_overrides: 2 },
+          // Review of #468, N2: Paddle has two price types.
+          { price_type: "bundle" },
           // Review of #468, N2: the quantity limits are from one up.
           { quantity_min: 0 },
           { quantity_max: 0 },

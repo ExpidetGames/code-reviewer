@@ -16,6 +16,8 @@ export type Money = { amount: string; currency_code: string };
 export type FakePrice = FakeEntity & {
   product_id: string;
   description: string;
+  /** `standard` is a catalog price; `custom` is made for one transaction and hidden from the catalog. */
+  type: "standard" | "custom";
   status: "active" | "archived";
   billing_cycle: Cycle | null;
   unit_price: Money;
@@ -226,7 +228,7 @@ export function createStore(options: StoreOptions) {
       const price: FakePrice = {
         id: fakeId("pri"),
         product_id: product.id,
-        type: input.type ?? "standard",
+        type: (input.type ?? "standard") as "standard" | "custom",
         description: input.description as string,
         name: input.name ?? null,
         tax_mode: input.tax_mode ?? "account_setting",

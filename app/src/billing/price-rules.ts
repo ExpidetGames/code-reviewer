@@ -7,7 +7,7 @@
 // linked and changed since, a drift badge.
 //
 // The checks run in a fixed order and report one code, so the same price always gets the same answer: not active, not
-// recurring, interval, currency, tax mode, amount, overrides, quantity, product. Linking additionally refuses a price that cannot be
+// standard, not recurring, interval, currency, tax mode, amount, overrides, quantity, product. Linking additionally refuses a price that cannot be
 // found, one from another environment and a yearly price on a version without one (before Paddle is asked, or from its
 // 404); those codes are here so the list is in one place.
 import "server-only";
@@ -18,6 +18,8 @@ export const PRICE_RULE_ERROR_CODES = [
   "price_not_found",
   /** The price is archived. */
   "price_not_active",
+  /** A custom price: Paddle makes it for a single transaction and hides it from the catalog. Only a standard price is linked. */
+  "price_type_unsupported",
   /** A one-time price, not a subscription price. */
   "price_not_recurring",
   /** The price does not carry the amount entered for the slot (`entered` and `paddle` in minor units). */
@@ -52,6 +54,9 @@ function currencyOf(code: string): string {
   return CURRENCY_CODE.test(code) ? code : UNKNOWN_CURRENCY;
 }
 
+/** The only price type a plan version links; a custom price belongs to one transaction. */
+export const PRICE_TYPE = "standard";
+
 /** Tax inclusive, and explicit: `account_setting` would depend on the account default. */
 export const PRICE_TAX_MODE = "internal";
 
@@ -69,6 +74,8 @@ export type PriceExpectation = {
 /** The facts of a price the rules read: from Paddle's answer when linking, from the cache when judging drift. */
 export type PriceFacts = {
   status: string;
+  /** Paddle's price type: `standard` (the catalog) or `custom` (one transaction). */
+  priceType: string;
   recurring: boolean;
   interval: string;
   frequency: number;
@@ -94,6 +101,7 @@ export type PriceMismatch = {
 export function factsOf(price: PaddlePrice): PriceFacts {
   return {
     status: price.status,
+    priceType: price.type,
     recurring: price.billing_cycle !== null,
     interval: price.billing_cycle?.interval ?? "",
     frequency: price.billing_cycle?.frequency ?? 0,
@@ -129,6 +137,7 @@ export function checkPrice(
   expected: PriceExpectation,
 ): PriceMismatch | undefined {
   if (facts.status !== "active") return { code: "price_not_active" };
+  if (facts.priceType !== PRICE_TYPE) return { code: "price_type_unsupported" };
   if (!facts.recurring) return { code: "price_not_recurring" };
   if (facts.interval !== expected.interval || facts.frequency !== 1)
     return {

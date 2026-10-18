@@ -72,6 +72,8 @@ const FAILURE_COPY: Record<string, string> = {
   price_currency_mismatch: "The price is not in US dollars.",
   price_tax_mode_mismatch:
     "The price is not tax inclusive. Its tax mode must be set to internal at Paddle, not to the account setting.",
+  price_type_unsupported:
+    "The price is a custom price, made for a single transaction. Use a standard price from the Paddle catalog.",
   price_has_overrides:
     "The price has country specific prices. Use a price without overrides.",
   price_quantity_unsupported:

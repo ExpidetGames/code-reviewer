@@ -19,6 +19,7 @@ import {
 export function factsOfRow(row: PriceRow): PriceFacts {
   return {
     status: row.status,
+    priceType: row.priceType,
     recurring: row.interval !== "",
     interval: row.interval,
     frequency: row.frequency,

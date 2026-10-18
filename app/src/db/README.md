@@ -400,7 +400,7 @@ app of the previous release on the same database is unaffected (it never reads t
 - `billing_plan_prices` (#439, `src/billing/README.md`, "Linking Paddle prices"): one row per Paddle price the app knows. `plan_id` →
   `billing_plans.id` `on delete restrict`, `paddle_price_id` and `intent_id` unique (`NULL` allowed), `paddle_product_id`,
   `paddle_env` `sandbox`/`live`, `interval`, `frequency`, `currency`, `unit_amount_minor` as **text** (Paddle's string of minor units, so
-  any amount a price is changed to is cached whole; the repository checks the digits), `tax_mode`, `has_overrides` 0/1,
+  any amount a price is changed to is cached whole; the repository checks the digits), `tax_mode`, `price_type` `standard`/`custom`, `has_overrides` 0/1,
   `trial_days`, `quantity_min` / `quantity_max` (Paddle's limits, from 1 up), `paddle_status`, `origin` `created`/`linked`, `state` `pending`/`ready`/`failed` (a `ready` row has a Paddle id, a status and a
   snapshot time). Also `billing_plans.paddle_product_id` / `paddle_product_env` and `billing_plan_versions.monthly_price_id` /
   `yearly_price_id` (→ `billing_plan_prices.id` `on delete restrict`): the two links are mutable (migration

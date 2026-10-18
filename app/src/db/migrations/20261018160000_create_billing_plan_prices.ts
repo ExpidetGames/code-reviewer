@@ -68,6 +68,9 @@ export const migration: Migration = {
       .addColumn("paddle_price_id", "text")
       .addColumn("paddle_product_id", "text", (column) => column.notNull())
       .addColumn("paddle_env", "text", (column) => column.notNull())
+      .addColumn("price_type", "text", (column) =>
+        column.notNull().defaultTo("standard"),
+      )
       .addColumn("interval", "text", (column) => column.notNull())
       .addColumn("frequency", "integer", (column) => column.notNull())
       .addColumn("currency", "text", (column) => column.notNull())
@@ -98,6 +101,10 @@ export const migration: Migration = {
       .addCheckConstraint(
         "billing_plan_prices_env_check",
         sql`paddle_env in ('sandbox', 'live')`,
+      )
+      .addCheckConstraint(
+        "billing_plan_prices_type_check",
+        sql`price_type in ('standard', 'custom')`,
       )
       .addCheckConstraint(
         "billing_plan_prices_overrides_check",

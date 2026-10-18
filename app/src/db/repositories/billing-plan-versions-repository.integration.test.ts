@@ -47,6 +47,7 @@ function aPrice(db: Kysely<Database>, planId: string, paddlePriceId: string) {
     env: "sandbox",
     snapshot: {
       productId: "pro_1",
+      priceType: "standard",
       interval: "month",
       frequency: 1,
       currency: "USD",

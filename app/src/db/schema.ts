@@ -744,6 +744,8 @@ export interface BillingPlanPricesTable {
   /** Unique; null while a price that the app creates (#440) has not been answered by Paddle yet. */
   paddle_price_id: string | null;
   paddle_product_id: string;
+  /** Paddle's price type, `standard` or `custom`, as Paddle said at `snapshot_at`. */
+  price_type: string;
   /** `sandbox` or `live`. */
   paddle_env: string;
   /** Paddle's billing cycle interval: `day`, `week`, `month` or `year`. */

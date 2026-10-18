@@ -398,6 +398,39 @@ describe.each(ENGINES)(
       },
     );
 
+    // #439-T20 (review of #468, N2)
+    it_(
+      "refuses a custom price, caches the type, and shows a drift when a linked price becomes custom at Paddle",
+      async () => {
+        const t = await start();
+        const custom = await t.makePrice();
+        await t.editAtPaddle(custom.id, { type: "custom" });
+
+        expect(refused(await t.link("month", custom.id))).toMatchObject({
+          code: "price_type_unsupported",
+          field: "paddlePriceId",
+        });
+        expect(await t.priceRows(), "the refusal stored nothing").toEqual([]);
+
+        const monthly = await t.makePrice();
+        expect(await t.link("month", monthly.id)).toEqual({ ok: true });
+        expect((await t.priceRows())[0]).toMatchObject({
+          price_type: "standard",
+        });
+
+        await t.editAtPaddle(monthly.id, { type: "custom" });
+        await t.prices.refresh("team");
+
+        expect((await t.priceRows())[0]).toMatchObject({
+          price_type: "custom",
+        });
+        expect(await t.current()).toMatchObject({
+          sellable: false,
+          monthlyPrice: { drift: "price_type_unsupported" },
+        });
+      },
+    );
+
     // #439-T18 (review of #468, N2)
     it_(
       "refuses a price that cannot be bought one at a time, and accepts one that can",

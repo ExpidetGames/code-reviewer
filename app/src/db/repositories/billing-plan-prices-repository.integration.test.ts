@@ -54,6 +54,7 @@ const TERMS: PlanTerms = {
 function snapshot(overrides: Partial<PriceSnapshot> = {}): PriceSnapshot {
   return {
     productId: "pro_01fake1",
+    priceType: "standard",
     interval: "month",
     frequency: 1,
     currency: "USD",
@@ -203,6 +204,7 @@ describe.each(ENGINES)("the billing plan prices on $name", (engine) => {
           trialDays: 7,
           quantityMinimum: 2,
           quantityMaximum: 9,
+          priceType: "custom",
         }),
       );
 
@@ -216,6 +218,7 @@ describe.each(ENGINES)("the billing plan prices on $name", (engine) => {
         trialDays: 7,
         quantityMinimum: 2,
         quantityMaximum: 9,
+        priceType: "custom",
         snapshotAt: new Date(T0.getTime() + 60_000).toISOString(),
         createdAt: stored.createdAt,
       });
@@ -410,6 +413,7 @@ describe.each(ENGINES)("the billing plan prices on $name", (engine) => {
       // The mutable ones are named here, so a column that is added later is classified by whoever adds it.
       const mutable = [
         "paddle_product_id",
+        "price_type",
         "interval",
         "frequency",
         "currency",
@@ -482,7 +486,7 @@ describe.each(ENGINES)("the billing plan prices on $name", (engine) => {
       );
 
       await sql`update billing_plan_prices set
-      paddle_product_id = 'pro_2', interval = 'year', frequency = 1, currency = 'EUR', unit_amount_minor = '99', tax_mode = 'external',
+      paddle_product_id = 'pro_2', price_type = 'custom', interval = 'year', frequency = 1, currency = 'EUR', unit_amount_minor = '99', tax_mode = 'external',
       has_overrides = 1, trial_days = 3, quantity_min = 2, quantity_max = 3, paddle_status = 'archived', intent_id = 'intent-1',
       state = 'ready', last_error_code = null, snapshot_at = ${T0.toISOString()}, archived_at = ${T0.toISOString()},
       paddle_price_id = 'pri_new'

@@ -38,6 +38,7 @@ const PRICE_CODES = [
   "price_not_found",
   "price_not_active",
   "price_not_recurring",
+  "price_type_unsupported",
   "price_amount_mismatch",
   "price_interval_mismatch",
   "price_currency_mismatch",

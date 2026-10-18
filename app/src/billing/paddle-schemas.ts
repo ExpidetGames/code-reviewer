@@ -31,6 +31,8 @@ export const paddlePriceSchema = z.object({
   product_id: z.string(),
   description: z.string(),
   name: z.string().nullable().optional(),
+  // `standard` prices are catalog prices; `custom` ones are made for a single transaction and hidden from the catalog.
+  type: z.enum(["standard", "custom"]),
   status: z.enum(["active", "archived"]),
   tax_mode: z.enum(["account_setting", "external", "internal", "location"]),
   billing_cycle: cycle.nullable(),
