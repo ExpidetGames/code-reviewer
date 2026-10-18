@@ -151,11 +151,13 @@ const ENTRIES: Entry[] = [
     minRole: MINIMUM_ROLE.change_project_settings,
     path: (ids) => `/repositories/${ids.repositoryId}/project/settings`,
     // #194-T04: a project-only save (kind, Dynamic model, skill) goes through the same role and
-    // isolation policy as any other settings save.
+    // isolation policy as any other settings save. #430-T10: so does a save of the providers.
     body: () => ({
       settings: {
         maxFindings: 3,
+        provider: "openrouter",
         reviewKind: "dynamic",
+        dynamicProvider: "openrouter",
         dynamicModel: "vendor/dynamic-model",
         reviewSkill: "Review this pull request dynamically.",
       },
@@ -207,7 +209,8 @@ const ENTRIES: Entry[] = [
     method: "PUT",
     minRole: MINIMUM_ROLE.manage_review_defaults,
     path: () => "/review-settings",
-    body: () => ({ settings: { maxFindings: 3 } }),
+    // #430-T10: the workspace default provider is a write of the workspace in the address like any other.
+    body: () => ({ settings: { maxFindings: 3, provider: "openrouter" } }),
     params: () => ({}),
     file: "review-settings/route.ts",
     takesNoIds: true,

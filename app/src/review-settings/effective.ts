@@ -2,6 +2,7 @@
 
 // Puts the layers together: built-in values, global defaults, project overrides. Pure.
 import type { ReviewCommand } from "../integrations/types.ts";
+import type { LlmProvider } from "../llm/config.ts";
 import {
   REVIEW_SETTING_FIELDS,
   type ProjectDynamicOverrides,
@@ -66,6 +67,11 @@ export type ProjectDynamicSource = "built_in" | "project";
 export type EffectiveProjectDynamic = {
   reviewKind: ProjectReviewKind;
   dynamicModel: string;
+  /** The provider of `dynamicModel`; the default provider unless the project chose one (#430). */
+  dynamicProvider: LlmProvider;
+  /** The catalog entry the project selects per kind, or null for none (#430). */
+  catalogEntryDiff: string | null;
+  catalogEntryDynamic: string | null;
   /** The skill text a Dynamic review uses: the project's override, else the shipped default. */
   reviewSkill: string;
   /** Whether `reviewSkill` is the shipped default (the project sets no override). */
@@ -85,6 +91,9 @@ export function resolveProjectDynamicSettings(layers: {
   builtIn: {
     reviewKind: ProjectReviewKind;
     dynamicModel: string;
+    dynamicProvider: LlmProvider;
+    catalogEntryDiff: string | null;
+    catalogEntryDynamic: string | null;
     reviewSkill: string | null;
     reviewVerdict: ReviewVerdictMode;
   };
@@ -102,7 +111,14 @@ export function resolveProjectDynamicSettings(layers: {
     ProjectDynamicSettingField,
     ProjectDynamicSource
   >;
-  for (const field of ["reviewKind", "dynamicModel", "reviewVerdict"] as const)
+  for (const field of [
+    "reviewKind",
+    "dynamicModel",
+    "dynamicProvider",
+    "catalogEntryDiff",
+    "catalogEntryDynamic",
+    "reviewVerdict",
+  ] as const)
     sources[field] = has(field) ? "project" : "built_in";
   // A null (or empty, already normalized to null) override means "no override" and resolves to the
   // shipped default, never to another project's skill.
@@ -111,6 +127,10 @@ export function resolveProjectDynamicSettings(layers: {
   return {
     reviewKind: project?.reviewKind ?? builtIn.reviewKind,
     dynamicModel: project?.dynamicModel ?? builtIn.dynamicModel,
+    dynamicProvider: project?.dynamicProvider ?? builtIn.dynamicProvider,
+    catalogEntryDiff: project?.catalogEntryDiff ?? builtIn.catalogEntryDiff,
+    catalogEntryDynamic:
+      project?.catalogEntryDynamic ?? builtIn.catalogEntryDynamic,
     reviewSkill: reviewSkillOverride ?? layers.defaultSkill,
     reviewSkillIsDefault,
     reviewVerdict: project?.reviewVerdict ?? builtIn.reviewVerdict,

@@ -611,6 +611,7 @@ describe("the project-only settings of a project", () => {
     expect(view.dynamic.effective).toEqual({
       reviewKind: "diff",
       dynamicModel: DEFAULT_DYNAMIC_MODEL,
+      dynamicProvider: "openrouter",
       reviewSkill: TEST_DEFAULT_SKILL.text,
       reviewVerdict: "blocking",
     });
@@ -618,12 +619,14 @@ describe("the project-only settings of a project", () => {
     expect(view.dynamic.sources).toEqual({
       reviewKind: "built_in",
       dynamicModel: "built_in",
+      dynamicProvider: "built_in",
       reviewSkill: "built_in",
       reviewVerdict: "built_in",
     });
     expect(view.dynamic.defaults).toEqual({
       reviewKind: "diff",
       dynamicModel: DEFAULT_DYNAMIC_MODEL,
+      dynamicProvider: "openrouter",
       reviewSkill: TEST_DEFAULT_SKILL.text,
       reviewVerdict: "blocking",
     });
@@ -650,12 +653,14 @@ describe("the project-only settings of a project", () => {
     expect(saved.dynamic.effective).toEqual({
       reviewKind: "dynamic",
       dynamicModel: "vendor/dynamic-model",
+      dynamicProvider: "openrouter",
       reviewSkill: "Review for the Dynamic kind.",
       reviewVerdict: "blocking",
     });
     expect(saved.dynamic.sources).toEqual({
       reviewKind: "project",
       dynamicModel: "project",
+      dynamicProvider: "built_in",
       reviewSkill: "project",
       reviewVerdict: "built_in",
     });
@@ -726,6 +731,7 @@ describe("the project-only settings of a project", () => {
     expect(view.dynamic.effective).toEqual({
       reviewKind: "diff",
       dynamicModel: DEFAULT_DYNAMIC_MODEL,
+      dynamicProvider: "openrouter",
       reviewSkill: TEST_DEFAULT_SKILL.text,
       reviewVerdict: "blocking",
     });

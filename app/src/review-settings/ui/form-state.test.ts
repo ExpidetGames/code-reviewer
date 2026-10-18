@@ -68,6 +68,26 @@ describe("the form values", () => {
     expect(state.values.maxFindings).toBe("9");
   });
 
+  // #430-T04
+  it("send a provider the project stored again with the Diff fields, so a save of the form does not drop it", () => {
+    const state = initialFormState(
+      model({ provider: "openrouter", maxFindings: 9 }),
+    );
+
+    expect(state.overridden.provider).toBe(true);
+    expect(buildPatch(state)).toEqual({
+      ok: true,
+      patch: { provider: "openrouter", maxFindings: 9 },
+    });
+  });
+
+  // #430-T04
+  it("send no provider for a project that stored none", () => {
+    const result = buildPatch(initialFormState(model({ maxFindings: 9 })));
+
+    expect(result).toEqual({ ok: true, patch: { maxFindings: 9 } });
+  });
+
   it("mark a field as set as soon as the person changes it, even back to the inherited value", () => {
     let state = initialFormState(model());
 
