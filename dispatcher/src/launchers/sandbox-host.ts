@@ -11,13 +11,14 @@
 //   handover   settles once the Worker has taken over (see `handover` below)
 //
 // A pending launch that is aborted kills the container by name; stopping the VM is the launcher's job.
-import { LaunchError, type Clock } from "../core/types.ts";
+import { LaunchError, type Clock, type Logger } from "../core/types.ts";
 import type {
   ContainerHost,
   ContainerInvocation,
   ContainerRunResult,
 } from "./container.ts";
 import type { SandboxVm } from "./sandbox-service.ts";
+import { VM_PREPARE_FAILED_EVENT, stderrTail } from "./vm-prepare-log.ts";
 
 /** Installed into the golden snapshot by the pipeline (#330) from docker/sandbox/vm-prepare.sh. */
 export const VM_PREPARE_PATH = "/usr/local/sbin/vm-prepare.sh";
@@ -28,6 +29,9 @@ const KILL_TIMEOUT_MS = 15_000;
 export type SandboxDockerHostOptions = {
   vm: SandboxVm;
   clock: Clock;
+  logger: Logger;
+  /** Fields of the log lines of this VM besides its name: the job id, or `canary: true`. */
+  logFields?: Readonly<Record<string, string | boolean>>;
   /** The tag the golden snapshot's image has (#330), looked up to read its id. */
   imageReference: string;
   /** The id the Dispatcher is configured with; the image in the VM must be this one. */
@@ -104,8 +108,18 @@ export class SandboxDockerHost implements ContainerHost {
       },
       signal,
     );
-    if (prepared.exitCode !== 0)
+    if (prepared.exitCode !== 0) {
+      // The one place the stderr of the script is read: its exit status and the end of it make the failure
+      // diagnosable. The error code stays the stable `docker_not_ready` for everyone who branches on it.
+      this.#options.logger.warn(VM_PREPARE_FAILED_EVENT, {
+        ...this.#options.logFields,
+        sandbox: vm.name,
+        code: "docker_not_ready",
+        exitCode: prepared.exitCode,
+        stderrTail: stderrTail(prepared.stderr),
+      });
       throw new LaunchError("docker_not_ready", { retryable: true });
+    }
 
     const image = await vm.exec(
       {
