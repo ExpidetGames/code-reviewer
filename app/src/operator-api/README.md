@@ -110,7 +110,7 @@ A refusal is `422` with the stable code of the validation (`plan_label_invalid`,
 `suspended_invalid`, `suspension_code_invalid`, `catalog_entry_invalid`, `entitlements_invalid`), or
 `409 period_start_backwards`.
 
-**`PUT /entitlements/default` while billing is on** is refused `409 entitlements_default_managed_by_billing` (#438): the billing
+**`PUT /entitlements/default` while the billing switch is on** (`src/billing/switch.ts`: the switch only, because the API has no way to the secret store) is refused `409 entitlements_default_managed_by_billing` (#438): the billing
 module writes the default from the Free plan (`src/billing/README.md`). The refusal comes after the body is read and before it
 is validated; a `GET` and the workspace rows are not affected, and the default is the operator's again when billing is
 switched off (a default billing wrote is removed then). The marker `source` is not a key of the body: it is refused like any key

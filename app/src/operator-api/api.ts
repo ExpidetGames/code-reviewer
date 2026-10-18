@@ -78,7 +78,7 @@ export type OperatorApiDeps = {
   entitlementsFor: (workspaceId: string) => WorkspaceEntitlementsRepository;
   settings: InstanceSettingsRepository;
   /**
-   * #438: whether billing is on right now (`isBillingOn`). While it is, the default entitlements are written by the billing
+   * #438: whether the billing switch is on right now (`isBillingSwitchedOn`: the switch only, the operator API has no way to the secret store). While it is, the default entitlements are written by the billing
    * module from the Free plan, and a write through this API is refused `entitlements_default_managed_by_billing`. Asked
    * only by a write of the default, never by a read or a workspace row.
    */

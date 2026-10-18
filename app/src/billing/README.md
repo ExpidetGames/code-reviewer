@@ -238,8 +238,8 @@ this issue** (follow-up). The writer is `setBillingDefaultEntitlements`, whose a
 stored one": a paid to Free or Free to paid write replaces the list, and an `own` version states `{ catalogEntries: null }`
 (nothing reads it). The default is a fallback for workspaces without a row; a `manual` workspace row is never touched.
 
-**While billing is on, a write to the default through the operator API is refused** `409 entitlements_default_managed_by_billing`
-(the portal has no such write; a future one must refuse it the same way). **Switching billing off** removes a default that
+**While the billing switch is on, a write to the default through the operator API is refused** `409 entitlements_default_managed_by_billing`
+(`switch.ts` reads the switch alone, since the operator API may not reach the secret store; the portal has no such write; a future one must refuse it the same way). **Switching billing off** removes a default that
 billing wrote (marker `billing`) and leaves one the operator wrote; the plans stay. Enabling again re-writes the Free default.
 **Enabling replaces a default the operator had** (the enabling notice already says that billing takes the default over).
 
