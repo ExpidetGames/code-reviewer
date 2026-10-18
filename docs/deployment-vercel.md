@@ -575,6 +575,28 @@ valuable key in `/ci`: it can deploy to production, which is why the environment
   `operator_key_unreadable`. Save the key in the admin portal and the next job runs. Save it **before** you set the
   first workspace to `managed`.
 
+### 3.6 The Paddle webhook (only with billing)
+
+Billing is optional (ADR 0005, epic #421). While it is off, nothing here applies and `POST /api/billing/webhook` is the 404 of a path
+that does not exist. With billing on, Paddle posts its notifications to **`<BETTER_AUTH_URL>/api/billing/webhook`** (the admin portal's
+"Create notification destination" registers exactly that address and stores the destination's secret encrypted).
+
+- **The route must answer within 5 seconds.** Paddle retries any notification that gets no `200` within 5 seconds, and on Vercel a cold
+  start counts. The route is small (one database transaction, no outbound call), runs on the Node runtime in the App project's region
+  (`fra1`, next to the database), and needs no raised `maxDuration`. A slow first answer is retried and applied once (dedupe on the event id),
+  but keep the database reachable and the App warm: Paddle's own guidance for Vercel is to pre-warm.
+- **No firewall may block Paddle's source.** The route is public: no session, the signature is the credential. Do not put Vercel's
+  Deployment Protection, an IP allowlist, a bot rule or an attack challenge in front of the **production** domain for this path (the same
+  rule as for the Worker API and the cron routes, section 1). If you keep a WAF rule, allow the addresses Paddle publishes for its
+  notifications (take the current list from Paddle's documentation, it is not repeated here) for `/api/billing/webhook`.
+- **What a refusal means** (all with an empty body): `401` the signature is missing, malformed, wrong, made with another secret or too old
+  (a code, `BILLING_WEBHOOK_REJECTED code=...`, is logged, never the body); `413` the body is over 256 KiB; `503` the stored webhook secret
+  cannot be read (`BILLING_WEBHOOK_UNVERIFIABLE`: it was not saved, or `APP_SECRET` changed since); `400` a signed body that is no Paddle
+  event; `500` the event was not applied and Paddle retries (`BILLING_WEBHOOK_FAILED event=...`). Alerts for the operator, with ids only:
+  `BILLING_WEBHOOK_PRICE_UNMAPPED`, `BILLING_WEBHOOK_SECOND_LIVE_SUBSCRIPTION`.
+- **Not verified on the real platform:** whether Paddle signs each retry with a fresh `ts` (research S3). The tolerance is five minutes until
+  the sandbox check of #448 says otherwise; see `app/src/billing/README.md`, "The webhook".
+
 ## 4. First deployment, step by step
 
 Do the steps in this order (migrate, variables, first deployment, setup code, webhook, smoke test); each one has a check.

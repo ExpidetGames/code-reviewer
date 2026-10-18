@@ -633,6 +633,14 @@ Inside `runner/`: `uv sync --locked`, `uv run ruff check . ../fakes`, `uv run ru
   plugin that awaits a callback after a statement answered, which works on its own connection. SQLite has one connection, so
   a race there is staged at the Paddle read (`getPrice` of the stand-in client) instead, which is before the transaction.
 
+- The tests of the billing webhook (#441: `webhook-handler.integration.test.ts`, the repositories of the subscription state, the migration
+  `create-billing-subscriptions`, `webhook-config.integration.test.ts`) run on SQLite and, with `TEST_DATABASE_URL`, on Postgres
+  (`describe.each` over both engines), because they prove persistence and races (the same event delivered six times at once; two
+  events racing for the stamp of one subscription). They post requests signed by the fake Paddle's signer
+  (`fakes/paddle/webhooks.ts`, via `src/test-support/billing-webhook-harness.ts`), move no real clock (the harness has a fixed one) and make
+  no network call. A database failure is injected with a plugin on the handler's connection (`failOn`). The fake's subscription has no
+  `transaction_id`, because only the `subscription.created` notification carries one: the harness adds it to that event.
+
 `make test-engine` runs the engine suite on your machine (after priming the tiktoken cache, see above; without the network namespace, which is Linux and CI only). Planned targets: `test-stack-up`,
 `test-stack-down`, `test:docker`, `test:e2e:docker` (they arrive with the Docker test stack).
 

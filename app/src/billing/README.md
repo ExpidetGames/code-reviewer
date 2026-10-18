@@ -5,8 +5,8 @@ epic #421): billing with Paddle Billing as Merchant of Record. Server-only: ever
 `server-only`, and a test (`server-only.test.ts`) fails when a client component reaches the module.
 
 #436 added the building blocks (client, schemas, webhook verifier); #437 added the settings in the admin portal and
-the switch; #438 added the plans, their versions and the Free plan; #439 links and validates Paddle prices for a version. No webhook route, checkout, subscription table or sweep
-exists yet; later issues of the epic add them, and each starts with `isBillingOn` / `guardBillingRoute` (below).
+the switch; #438 added the plans, their versions and the Free plan; #439 links and validates Paddle prices for a version; #441 adds the webhook and the subscription state (below). No checkout,
+entitlement writer or sweep exists yet; later issues of the epic add them, and each starts with `isBillingOn` / `guardBillingRoute` (below).
 
 | File                               | What it is                                                                                                                              |
 | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
@@ -27,6 +27,13 @@ exists yet; later issues of the epic add them, and each starts with `isBillingOn
 | `plan-entitlements.ts`             | From a plan version to the entitlements it writes; cannot build a payload without `modelAccess`.                                        |
 | `price-rules.ts`                   | The pure check of a Paddle price against the slot of a version, and the integer comparison of amounts (#439), below.                    |
 | `price-view.ts`                    | The cached price next to the entered amount, the drift, and whether a version is sellable (pure).                                       |
+| `webhook-handler.ts`               | `POST /api/billing/webhook`: size limit, signature, one transaction per event, the answer (#441, below).                                |
+| `webhook-config.ts`                | The stored webhook secret and the configured environment, read for each request.                                                        |
+| `webhook-schemas.ts`               | What the webhook reads of a notification (lenient, our own fields only) and the canonical time.                                         |
+| `webhook-subscription.ts`          | `subscription.created`, `.updated`, `.canceled`: workspace, version, status, periods.                                                   |
+| `webhook-price.ts`                 | `price.created`, `price.updated`: refreshes the price cache.                                                                            |
+| `price-resolution.ts`              | Which plan version a subscription's Paddle price belongs to.                                                                            |
+| `subscription-state.ts`            | The statuses, intervals and outcome codes (`as const` sets).                                                                            |
 | `price-errors.ts`                  | The stable codes of a refused link and their HTTP status.                                                                               |
 | `prices-service.ts`                | Links a Paddle price to a slot of the current version and refreshes the cache. Reads from Paddle, never writes (#439).                  |
 
@@ -93,6 +100,83 @@ const client = createPaddleClient({
     replay, so a wide window costs no safety. Until then a retry after more than 5 minutes would be refused with
     `timestamp_out_of_tolerance`, exactly the outage case retries exist for.
 - An empty secret is refused (`secret_missing`): a signature made with an empty key is no signature.
+
+## The webhook (#441)
+
+`POST /api/billing/webhook` is the notification destination the admin portal registers (#437). Node runtime, **public** (the signature is
+the credential: `/api/billing/webhook` is one exact path in `src/auth/access.ts`, nothing below it and nothing else of billing is open),
+and the 404 of a path that does not exist while billing is off (`guardBillingRoute`), for a signed and an unsigned request alike. The logic
+is `webhook-handler.ts`; the route file only wires it.
+
+**Order of a request.** The body is data until the signature is verified, so: the webhook secret and the environment are read
+(`webhook-config.ts`; an unreadable secret is `503`, empty body); the raw body is read once with a limit of 256 KiB (`413`); the
+`Paddle-Signature` is verified against exactly those bytes with `verifyPaddleSignature` (constant time, every `h1` value, the tolerance
+below; failure is `401`, empty body, and the log line holds a code only: `BILLING_WEBHOOK_REJECTED code=signature_mismatch`); only then is
+the body parsed (a signed body that is no Paddle event is `400`, empty). Then **one database transaction**: the event is claimed by its
+`event_id` (`insert ... on conflict do nothing` into `billing_webhook_events`: a duplicate answers `200` and stops; on Postgres a concurrent
+delivery of the same id waits for the first transaction, and if that one rolls back it inserts), the event is applied, its outcome is
+written, commit, `200 {"outcome": ...}`. Any exception answers `500`, empty, and nothing is half applied (the event row goes with the
+rest), so Paddle's retry applies the event whole. **No outbound call is made** (`webhook-no-outbound.test.ts` proves it from the imports,
+a spy on `fetch` through whole deliveries from the behavior). No payload is stored or logged: the event row has the id, the type, the
+stamp, the outcome and the Paddle id of the subscription or price; a logged line names ids and codes.
+
+**Outcomes** (`WEBHOOK_OUTCOMES`): `applied`, `duplicate_ignored` (answered only; the stored row keeps the first outcome), `stale_ignored`,
+`price_unmapped`, `workspace_unresolved`, `second_live_subscription`, `status_unknown`, `payload_invalid`, `ignored_type`, `informational`,
+`price_not_tracked`. All but the first four are an answer of `200`: the message was understood and nothing can be gained from a retry.
+
+**Who a new subscription belongs to.** Only `subscription.created` carries `transaction_id` (Paddle: "the Paddle ID of the completed or billed
+transaction that caused Paddle to create this subscription"; other subscription events and the API do not return it). The workspace is
+the one of **our own checkout row** for that transaction (`billing_checkouts`, written by the server when it creates the transaction, #443),
+found through `billing-directory-repository.ts`, which only reads. `custom_data` is a cross-check and never a source: one that names another
+workspace than the checkout leaves the subscription `workspace_unresolved`. Anybody can open Paddle.js on the payment page with data of
+their own, so a payload that names a workspace proves nothing. A transaction without a checkout row of ours (or of the other environment)
+changes nothing. Every later event finds the subscription by the Paddle id of the row we wrote; an event for a subscription we do not hold
+is `workspace_unresolved` (see the limits below). The Paddle customer id is adopted into `billing_customers` (per workspace and
+environment; a newer adoption replaces the id).
+
+**Which version.** For a new subscription the price must be a slot of **the version the checkout names**, in the interval it bought
+(`price-resolution.ts`, strict); otherwise `price_unmapped` and no row. For a later event the price is unchanged (the version stays),
+or it is the price of the pinned version, or the current version of exactly one plan that sells with it (a plan change moves the pin); else
+`price_unmapped` and the state is kept. A subscription whose items are not exactly one live item of quantity one is unmapped as well. The
+end of a subscription is always believed: a `canceled` event with a price we do not know still cancels (keeping the version and price).
+Never a suspension, only a log line `BILLING_WEBHOOK_PRICE_UNMAPPED event=... subscription=...`.
+
+**Order.** The state of a subscription is replaced as a whole by an event only if its `occurred_at` is **not older** than the stamp of the last
+applied one (`last_event_occurred_at`; ties apply). The comparison is part of the one `update` that writes (`applyEvent`), so two deliveries
+racing cannot put an old state over a new one. `occurred_at` is kept as milliseconds in UTC (Paddle sends microseconds; two events of one
+subscription within one millisecond tie, and a tie applies). `past_due_since` is the `occurred_at` of the first event that showed `past_due`
+in the current spell and is kept while it lasts and cleared on recovery (the grace of #442 counts from it). A **transaction event never
+touches the state or the stamp**: `transaction.completed`, `transaction.payment_failed` and `product.updated` are recorded (`informational`),
+because a payment failure that Paddle prevents a change for (an upgrade) must not start a grace period, and because moving the stamp
+forward with a transaction event would make an older subscription event wrongly stale.
+
+**One live subscription per workspace.** The partial unique index (`workspace_id` where `status <> 'canceled'`) decides. A second
+`subscription.created` for a workspace that holds one is `second_live_subscription`: nothing is applied (not even the customer id), the event
+is recorded, and the log line `BILLING_WEBHOOK_SECOND_LIVE_SUBSCRIPTION event=... subscription=...` is for the operator. The insert is `on
+conflict do nothing`, so the transaction is not aborted on Postgres.
+
+**Prices.** `price.created` and `price.updated` refresh the cache of a price a plan links (`refreshIfNotNewer`: the cache then reflects
+Paddle as of the event's `occurred_at`, which is what `snapshot_at` says, and an event older than the cache is `stale_ignored`). The drift
+badge of the plans view is derived from the cache, so an archived or edited price shows as drift without a click on "Refresh from Paddle".
+A price no plan links is `price_not_tracked`; #440 will adopt a price whose intent matches. The app never writes to Paddle for it.
+
+**Decisions of #441.**
+
+- _Tolerance and the status of a stale timestamp (research S3)._ `BILLING_WEBHOOK_TOLERANCE_SECONDS` is the verifier's default of five
+  minutes. Every refusal, `timestamp_out_of_tolerance` included, is `401` with an empty body: Paddle retries on any answer but `200`, so a
+  4xx does not end the retries, and a single answer does not tell a caller which check failed. If the sandbox shows that retries keep the
+  `ts` of the first try (#448), pass a wider `toleranceSeconds` to `createBillingWebhookHandler` (the window of Paddle's retries, 3 days on live):
+  the signature still binds body and secret and the dedupe on `event_id` stops a replay, so it costs no safety. Until then a retry after more
+  than five minutes would be refused, which is exactly the outage case, and the reconcile of #446 is what repairs it.
+- _Closed enums._ The webhook does not use the closed enums of `paddle-schemas.ts`: an unknown subscription status, or an unknown scheduled
+  action, must not fail an event for three days of retries. A status the app does not know is `status_unknown` (state kept, `200`); an
+  unknown scheduled action is stored as none.
+- _Nothing is retained._ No payload, no email, card, address, tax id or `custom_data` reaches a column or a log (a test sends all of them
+  and searches the tables and the log). `billing_webhook_events` grows by one row per delivered event; a retention sweep is a follow-up.
+
+**Limits, for the reconcile (#446).** An event for a subscription we hold no row of is `workspace_unresolved`, also when it arrives before
+the `subscription.created` it follows (the creation is then applied with its own snapshot, and the next event or the reconcile brings it up to
+date). The grace expiry and the monthly rollover of a yearly plan are not events. Entitlements are written by #442, not here.
 
 ## Billing is off unless it is configured (#437)
 

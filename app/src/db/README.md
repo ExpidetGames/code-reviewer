@@ -414,6 +414,33 @@ app of the previous release on the same database is unaffected (it never reads t
 Both are instance level (`billing-plans-repository.ts`, `billing-plan-versions-repository.ts`): no workspace owns a plan. See
 `src/billing/README.md`.
 
+### Billing subscriptions, customers, checkouts and webhook events
+
+Migration `20261018180000_create_billing_subscriptions` (#441; epic #421). It adds four empty tables and touches no existing row, so an
+app of the previous release on the same database is unaffected. The three workspace tables reference `workspaces.id` `on delete
+restrict`: nobody deletes a workspace today, and when somebody does, what a customer paid for must be dealt with on purpose.
+
+- `billing_customers` (`workspace_id`, `paddle_env`, `paddle_customer_id`, `created_at`, `updated_at`; primary key `workspace_id` +
+  `paddle_env`): the Paddle customer a workspace pays with, adopted from `subscription.created`. An id only. Workspace scoped.
+- `billing_subscriptions` (`id`, `workspace_id`, `paddle_env`, `paddle_subscription_id`, `paddle_customer_id`, `plan_version_id` →
+  `billing_plan_versions.id` `on delete restrict`, `paddle_price_id`, `billing_interval` `month`/`year`, `status`
+  `active`/`trialing`/`past_due`/`paused`/`canceled`, `past_due_since`, `started_at`, `current_period_start`/`_end`, `next_billed_at`,
+  `canceled_at`, `scheduled_change_action` `cancel`/`pause`/`resume` and `scheduled_change_at`, `last_event_occurred_at`,
+  `last_event_id`, `created_at`, `updated_at`). Unique: (`paddle_env`, `paddle_subscription_id`); **partial unique: `workspace_id` where
+  `status <> 'canceled'`**, so a workspace holds one live subscription whichever instance writes. Ids, states and times only; a test lists
+  the columns. Workspace scoped.
+- `billing_checkouts` (`id`, `workspace_id`, `paddle_env`, `transaction_id`, `plan_version_id`, `billing_interval`, `created_at`; unique
+  `paddle_env` + `transaction_id`): the Paddle transaction the server created for a workspace to buy a version, written by the checkout
+  (#443). The only link from a Paddle subscription to a workspace. It has no user column yet (the checkout adds the user who started it,
+  with the account merge rule). Workspace scoped.
+- `billing_webhook_events` (`event_id` primary key, `paddle_env`, `event_type`, `occurred_at`, `outcome`, `entity_id`, `received_at`):
+  the dedupe and the log of delivered events, instance level, no payload. See `src/billing/README.md`, "The webhook".
+
+The repositories are `billing-subscriptions-repository.ts`, `billing-customers-repository.ts` and `billing-checkouts-repository.ts`
+(scoped, rows in `scoped-isolation.integration.test.ts`), `billing-webhook-events-repository.ts` and `billing-directory-repository.ts`
+(instance level, classified with a reason in `scoping.test.ts`: the webhook finds the workspace of a checkout or a subscription before it
+can make a scoped repository, and the directory only reads).
+
 ## Workspace scoping
 
 Every repository that reads or writes customer data is created for one workspace:
