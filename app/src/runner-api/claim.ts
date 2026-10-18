@@ -61,7 +61,6 @@ import {
   clampMaxTokens,
   UNKNOWN_WINDOW_MAX_TOKENS,
 } from "../model-tiers/tiers.ts";
-import type { ProjectReviewKind } from "../review-settings/settings.ts";
 import type { ClaimedKeys } from "./claimed-keys.ts";
 import type { ClaimGuard } from "./claim-guard.ts";
 import { selectModel, type SelectionDeps } from "./claim-selection.ts";
