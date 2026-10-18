@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { Metadata } from "next";
+import { instanceAccessOf } from "@/llm/access";
 import { getWorkspaceLlm } from "@/llm/shared";
 import { planPageLinkedFor } from "@/usage/shared";
 import { requireWorkspace } from "@/workspaces/access-runtime";
@@ -18,18 +19,27 @@ export default async function AdvancedSettingsPage({
   const { workspace: slug } = await params;
   const { workspace, role } = await requireWorkspace(slug);
   const workspaceId = workspace.id;
-  const [keyStatuses, showPlan] = await Promise.all([
-    getWorkspaceLlm().keyServiceFor(workspaceId).statusAll(),
+  const llm = getWorkspaceLlm();
+  const [keyStatuses, summary, showPlan] = await Promise.all([
+    llm.keyServiceFor(workspaceId).statusAll(),
+    llm.summaryFor(workspaceId),
     planPageLinkedFor(workspaceId),
   ]);
+  // A managed workspace has no key of its own to remove, and the provider behind the instance's access is not for it to
+  // read (#435): the page lists no provider, as the LLM access page does.
+  const managed = instanceAccessOf(summary) !== null;
   return (
     <AdvancedSettingsPageContent
       workspaceSlug={workspace.slug}
       canManageKey={can(role, "manage_llm_key")}
-      keys={keyStatuses.map(({ provider, status }) => ({
-        provider,
-        configured: status.state !== "not_configured",
-      }))}
+      keys={
+        managed
+          ? []
+          : keyStatuses.map(({ provider, status }) => ({
+              provider,
+              configured: status.state !== "not_configured",
+            }))
+      }
       canResetDefaults={can(role, "manage_review_defaults")}
       showPlan={showPlan}
     />

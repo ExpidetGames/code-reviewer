@@ -516,6 +516,42 @@ for the reviews. No new product code, no new fake: the fake LLM already offers t
 - **Run them alone** with a build in place: `ARGS="--project=operator --project=operator-plain"` (the `prepare` project and the projects
   they depend on run first); they need the runner installed and the tiktoken encoding cached like the journey with the real runner.
 
+Providers and catalog journey (`app/e2e/operator/catalog-journey.e2e.ts`, project `catalog`, the normal Playwright lane, #435, the last issue of #420).
+It proves the catalog from the admin portal to a member's run, and that no model id or provider reaches a member, through the real UI,
+the real runner with the real PR-Agent (Diff Review) and the fakes only. No new fake; the one change to the product is the Advanced settings
+page, which listed the provider to the Owner of a managed workspace (found by the privacy search).
+
+- **App.** The eighth app of the lane, a `next start` of the same build on `E2E_CATALOG_PORT` (default `E2E_PORT` + 7), multi-tenant, with
+  `OPERATOR_API_TOKEN`, so that the catalog starts empty. Its `LLM_API_BASE_URL` is the operator journey's fake LLM (same port,
+  `E2E_OPERATOR_LLM_PORT`): the project waits for `operator` (`dependencies`), so the two never run at once, which the one App registered
+  at the fake GitHub (its setup address) needs anyway. Two workspaces made the way people make them: M takes the default entitlements
+  (`managed`), O has a row of its own (`own`); a plain Member of M reads what a member reads. `retries: 0`, as the operator journeys.
+- **What the script does:** the entitlements over the operator API, and the Dynamic runner
+  (`e2e/helpers/runner-api.ts`): it claims the Dynamic job over the runner API with `engines: ["opencode"]` and reads the model and the key
+  the app hands out. The browser lane has no engine for Dynamic Review (it needs root, so only the privileged lane runs it, `e2e/dynamic/`),
+  but the claim is the app's side of the run; the real runner of the journey advertises PR-Agent only, so it never takes that job.
+- **The privacy search** (`e2e/helpers/member-scan.ts`) collects, for the Owner and the plain Member of M, the pages as the server renders them,
+  the same pages as the Next.js payload a client navigation fetches (RSC), the data routes, the DOM and the visible text of the Runs list,
+  a run and the plan page once hydrated, every response the browser received during the whole journey (a body the browser drops, as the
+  prefetch of a page or the answer to a save, is not waited for, and the journey fails unless those are of these two kinds), the comments on
+  the pull requests and the operator's usage feed; the logs of the app and of the runner are the operator's side and name the models they
+  work with, so only the lines that carry the operator's key are searched. It looks in each for **every model id the portal lists** (the id, its name without the
+  vendor and its vendor), every provider (id and label, any case), the operator's key (and all of it but its last four characters) and the
+  name of the draft entry. It returns every place that leaks, not the first. It proves itself first on texts that must fail it, one per
+  thing it looks for, and one that must pass.
+- **Not covered:** a second provider (the app has one adapter and the lane runs the production build, which has no test-only provider; the
+  keys of two providers are told apart by the integration tests of #426), the Dynamic engine (the privileged lane), plan-based access and
+  billing (the entitlements only say whether a workspace runs on the operator's key or its own).
+
+| Case     | What it proves                                                                                                                                                                                                                                                                                                                              |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| #435-T01 | The admin saves the operator's key, adds three models in the portal (each a draft), releases two (the third stays a draft), sets the default of each kind, and the portal lists what it was given after a reload                                                                                                                              |
+| #435-T02 | A project with no choice is reviewed on the default entry; the Owner picks another entry by its name and the next review asks the model of that entry with the operator's key; the Dynamic job of the project is handed out with the model of the entry chosen for Dynamic Review, with the operator's key                                    |
+| #435-T03 | A workspace on its own key saves its key, picks provider and model for its project (no catalog on the page) and the review asks that model with that key; its pages hold no model of the catalog and not the operator's key                                                                                                                     |
+| #435-T04 | The admin retires the entry in use: the project says "No longer available", the next review fails with the copy for a member, no model is called, nothing is posted and no other entry takes over                                                                                                                                              |
+| #435-T05 | A person who is no admin (Owner, Member) gets, for the portal pages and the catalog and key routes, with every method, exactly the answer of a path that does not exist                                                                                                                                                                        |
+| #435-T06 | The privacy search above finds nothing in the surfaces of the managed workspace (the Advanced settings page of a managed Owner no longer lists a provider's key to remove) and of the usage feed (name and id of the entry, no model, no provider), and finds every kind of thing it looks for in its own controls                                                                                                                        |
+
 Images (`docker/smoke/`, bash): `app.sh <image>` starts the app image with a fresh named volume on
 `/data` and dummy settings (the master key, the public address and the runner token; without them the server refuses to start, and no `GITHUB_` variable is set), polls `/` until it answers (at most `SMOKE_WAIT_SECONDS`, default 90) and waits for the
 container's own health check; it then checks that the log has exactly one setup code line, that `/` shows the setup (and not the code), that the API, the webhook and the runner API answer 503 `setup_required`, finishes the setup through the API, and checks that afterwards `/setup` is a 404, `/` redirects to `/login` and `/api/health` answers `ok` (the setup gate, the access guard and the database work in the built server), the image user and the uid of PID 1, that the standalone

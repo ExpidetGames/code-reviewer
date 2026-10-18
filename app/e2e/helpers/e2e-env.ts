@@ -23,6 +23,10 @@ const upgradeAppPort = Number(process.env.E2E_UPGRADE_PORT) || appPort + 5;
 // The app of the journey of the operator limits (e2e/operator/, #285): multi-tenant, with the operator API on and a
 // real runner polling it. The port after the upgrade app unless E2E_OPERATOR_PORT says otherwise.
 const operatorAppPort = Number(process.env.E2E_OPERATOR_PORT) || appPort + 6;
+// The app of the catalog journey (e2e/operator/catalog-journey.e2e.ts, #435): a fresh multi-tenant instance with the operator API on,
+// so the catalog starts empty and the admin builds it in the portal. The port after the operator app unless
+// E2E_CATALOG_PORT says otherwise.
+const catalogAppPort = Number(process.env.E2E_CATALOG_PORT) || appPort + 7;
 // The fake GitHub gets a random port in a high range, so two checkouts never collide however their
 // E2E_PORT values are chosen. The choice is stored in the environment: Playwright loads this file
 // again in every worker process, which inherits the main process's environment.
@@ -82,6 +86,10 @@ export const e2eEnv = {
   /** The SQLite file of the operator app (#285), fresh for every run. */
   operatorDatabasePath: "test-results/e2e-operator-data/app.db",
   operatorAppUrl: `http://127.0.0.1:${operatorAppPort}`,
+  catalogAppPort,
+  /** The SQLite file of the catalog app (#435), fresh for every run. */
+  catalogDatabasePath: "test-results/e2e-catalog-data/app.db",
+  catalogAppUrl: `http://127.0.0.1:${catalogAppPort}`,
   operatorLlmFakePort,
   /** The fake LLM of the operator app: reviews and model metadata (`LLM_API_BASE_URL`). */
   operatorLlmFakeApiUrl: `http://127.0.0.1:${operatorLlmFakePort}/api/v1`,
@@ -111,6 +119,7 @@ export const e2eEnv = {
     signup: "test-results/e2e-signup.log",
     multi: "test-results/e2e-multi.log",
     operator: "test-results/e2e-operator.log",
+    catalog: "test-results/e2e-catalog.log",
   },
   /** The instance admin the journeys create when they set an app up. A dummy, as everything here. */
   adminEmail: "admin@e2e.test",
