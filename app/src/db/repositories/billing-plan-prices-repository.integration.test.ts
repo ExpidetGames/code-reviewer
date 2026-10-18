@@ -2,7 +2,7 @@
 
 // The cache of linked Paddle prices (#439, ADR 0005, 2.11) on a real SQLite file and, when TEST_DATABASE_URL is set, on a real
 // Postgres: one row per Paddle price, the product a plan is bound to, and the two price links of a version. Instance level.
-import type { Kysely } from "kysely";
+import { sql, type Kysely } from "kysely";
 import { describe, expect, it } from "vitest";
 import type { PlanTerms } from "../../admin/ui/plans-view.ts";
 import {
@@ -370,6 +370,146 @@ describe.each(ENGINES)("the billing plan prices on $name", (engine) => {
       await expect(
         versions.setPriceLink(version.id, "week" as never, "bpp_nope", null),
       ).rejects.toThrow();
+    },
+  );
+  // The database refuses what the repository merely does not offer (review of #468, N8; the pattern of #462): the identity
+  // of a price row never changes, whoever writes, because versions and, later, subscriptions point at it.
+  const IMMUTABLE = /billing_plan_prices_immutable/;
+  // `paddle_price_id` is written once: a price the app creates (#440) has none until Paddle answers.
+  const FROZEN = ["id", "plan_id", "paddle_env", "origin", "created_at"];
+  const WRITE_ONCE = ["paddle_price_id"];
+
+  // #439-T19
+  it_("offers no way to change the identity of a price", async () => {
+    const { prices } = await start();
+
+    expect(Object.keys(prices).sort()).toEqual([
+      "get",
+      "getByPaddleId",
+      "insertLinked",
+      "listByIds",
+      "listForPlan",
+      "refresh",
+    ]);
+  });
+
+  // #439-T19
+  it_(
+    "refuses to update an identity column, and names every column of the table as frozen, write once or mutable",
+    async () => {
+      const { db, prices, plan, other } = await start();
+      const stored = await prices.insertLinked({
+        planId: plan.id,
+        paddlePriceId: "pri_1",
+        env: "sandbox",
+        snapshot: snapshot(),
+      });
+      const columns = (await db.introspection.getTables())
+        .find((table) => table.name === "billing_plan_prices")
+        ?.columns.map((column) => column.name);
+      // The mutable ones are named here, so a column that is added later is classified by whoever adds it.
+      const mutable = [
+        "paddle_product_id",
+        "interval",
+        "frequency",
+        "currency",
+        "unit_amount_minor",
+        "tax_mode",
+        "has_overrides",
+        "trial_days",
+        "quantity_min",
+        "quantity_max",
+        "paddle_status",
+        "intent_id",
+        "state",
+        "last_error_code",
+        "snapshot_at",
+        "archived_at",
+      ];
+      expect([...(columns ?? [])].sort()).toEqual(
+        [...FROZEN, ...WRITE_ONCE, ...mutable].sort(),
+      );
+      const read = async () =>
+        (
+          await sql<
+            Record<string, unknown>
+          >`select * from billing_plan_prices where id = ${stored.id}`.execute(
+            db,
+          )
+        ).rows[0];
+      const before = await read();
+
+      const values: Record<string, unknown> = {
+        id: "bpp_other",
+        plan_id: other.id,
+        paddle_env: "live",
+        origin: "created",
+        created_at: "2020-01-01T00:00:00.000Z",
+        paddle_price_id: "pri_2",
+      };
+      for (const column of [...FROZEN, ...WRITE_ONCE])
+        await expect(
+          sql`update billing_plan_prices set ${sql.ref(column)} = ${values[column]} where id = ${stored.id}`.execute(
+            db,
+          ),
+          column,
+        ).rejects.toThrow(IMMUTABLE);
+      // One frozen column among allowed ones refuses the whole statement.
+      await expect(
+        sql`update billing_plan_prices set unit_amount_minor = '1', plan_id = ${other.id} where id = ${stored.id}`.execute(
+          db,
+        ),
+      ).rejects.toThrow(IMMUTABLE);
+      await expect(
+        sql`update billing_plan_prices set paddle_price_id = null where id = ${stored.id}`.execute(
+          db,
+        ),
+      ).rejects.toThrow(IMMUTABLE);
+
+      expect(await read()).toEqual(before);
+    },
+  );
+
+  // #439-T19
+  it_(
+    "lets every other column change, and the Paddle price id be set once on a price that has none",
+    async () => {
+      const { db, plan } = await start();
+      await sql`insert into billing_plan_prices
+      (id, plan_id, paddle_price_id, paddle_product_id, paddle_env, interval, frequency, currency, unit_amount_minor, tax_mode, has_overrides, quantity_min, quantity_max, origin, state, created_at)
+      values ('bpp_pending', ${plan.id}, null, 'pro_1', 'sandbox', 'month', 1, 'USD', '1234', 'internal', 0, 1, 100, 'created', 'pending', ${T0.toISOString()})`.execute(
+        db,
+      );
+
+      await sql`update billing_plan_prices set
+      paddle_product_id = 'pro_2', interval = 'year', frequency = 1, currency = 'EUR', unit_amount_minor = '99', tax_mode = 'external',
+      has_overrides = 1, trial_days = 3, quantity_min = 2, quantity_max = 3, paddle_status = 'archived', intent_id = 'intent-1',
+      state = 'ready', last_error_code = null, snapshot_at = ${T0.toISOString()}, archived_at = ${T0.toISOString()},
+      paddle_price_id = 'pri_new'
+      where id = 'bpp_pending'`.execute(db);
+
+      const row = (
+        await sql<
+          Record<string, unknown>
+        >`select * from billing_plan_prices where id = 'bpp_pending'`.execute(
+          db,
+        )
+      ).rows[0];
+      expect(row).toMatchObject({
+        paddle_price_id: "pri_new",
+        paddle_product_id: "pro_2",
+        interval: "year",
+        currency: "EUR",
+        unit_amount_minor: "99",
+        state: "ready",
+        plan_id: plan.id,
+        origin: "created",
+      });
+      await expect(
+        sql`update billing_plan_prices set paddle_price_id = 'pri_again' where id = 'bpp_pending'`.execute(
+          db,
+        ),
+      ).rejects.toThrow(IMMUTABLE);
     },
   );
 });

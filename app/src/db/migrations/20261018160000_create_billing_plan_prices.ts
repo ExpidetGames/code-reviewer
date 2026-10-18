@@ -30,6 +30,18 @@ const LINKS_KEPT = `  if (old.monthly_price_id is not null and new.monthly_price
   end if;
 `;
 
+/** The message the refusals of `billing_plan_prices` carry; the app and its tests look for this name. */
+const PRICE_MESSAGE = "billing_plan_prices_immutable";
+
+/** The columns of a price row that never change once it exists (review of #468, N8; the pattern of #462). */
+const PRICE_FROZEN_COLUMNS = [
+  "id",
+  "plan_id",
+  "paddle_env",
+  "origin",
+  "created_at",
+] as const;
+
 function guardFunction(mutable: readonly string[], keepLinks: boolean): string {
   const removed = mutable.map((column) => ` - '${column}'`).join("");
   return `create or replace function billing_plan_versions_guard() returns trigger language plpgsql as $$
@@ -164,9 +176,54 @@ export const migration: Migration = {
             `create trigger billing_plan_versions_${column}_kept before update of ${column} on billing_plan_versions when new.${column} is null and (select ${column} from billing_plan_versions where id = new.id) is not null begin select raise(abort, '${MESSAGE}: a price link is replaced, never cleared'); end`,
           )
           .execute(db);
+
+    // The identity of a price row never changes, whoever writes: versions and later subscriptions point at it. The facts
+    // Paddle said are refreshed, so everything else stays open; `paddle_price_id` is set once, on a price the app creates
+    // (#440) when Paddle answers, and is never changed or cleared after that. A new column has to be classified by the
+    // test (billing-plan-prices-repository.integration.test.ts): on SQLite the triggers list columns, on Postgres the
+    // function names them.
+    if (databaseDriver(db) === "postgres") {
+      await sql
+        .raw(
+          `create function billing_plan_prices_guard() returns trigger language plpgsql as $$
+begin
+  if ${PRICE_FROZEN_COLUMNS.map((column) => `new.${column} is distinct from old.${column}`).join(" or ")} then
+    raise exception '${PRICE_MESSAGE}: the identity of a price never changes' using errcode = 'restrict_violation';
+  end if;
+  if old.paddle_price_id is not null and new.paddle_price_id is distinct from old.paddle_price_id then
+    raise exception '${PRICE_MESSAGE}: the Paddle price id is set once' using errcode = 'restrict_violation';
+  end if;
+  return new;
+end
+$$`,
+        )
+        .execute(db);
+      await sql
+        .raw(
+          "create trigger billing_plan_prices_immutable before update on billing_plan_prices for each row execute function billing_plan_prices_guard()",
+        )
+        .execute(db);
+    } else {
+      await sql
+        .raw(
+          `create trigger billing_plan_prices_identity_frozen before update of ${PRICE_FROZEN_COLUMNS.join(", ")} on billing_plan_prices begin select raise(abort, '${PRICE_MESSAGE}: the identity of a price never changes'); end`,
+        )
+        .execute(db);
+      // Stored row read by select, see the links above.
+      await sql
+        .raw(
+          `create trigger billing_plan_prices_paddle_id_once before update of paddle_price_id on billing_plan_prices when (select paddle_price_id from billing_plan_prices where id = new.id) is not null begin select raise(abort, '${PRICE_MESSAGE}: the Paddle price id is set once'); end`,
+        )
+        .execute(db);
+    }
   },
 
   async down(db) {
+    // Postgres drops the trigger with the table, but not the function.
+    if (databaseDriver(db) === "postgres")
+      await sql
+        .raw("drop function billing_plan_prices_guard() cascade")
+        .execute(db);
     if (databaseDriver(db) === "postgres")
       await sql.raw(guardFunction(["role", "created_by"], false)).execute(db);
     else
