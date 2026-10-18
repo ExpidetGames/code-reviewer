@@ -34,6 +34,9 @@ class ErrorCode(StrEnum):
     LLM_QUOTA = "llm_quota"
     LLM_CONTEXT_LENGTH_EXCEEDED = "llm_context_length_exceeded"
     MODEL_UNKNOWN = "model_unknown"
+    # The provider has no endpoint that takes every parameter of the request (#477): the model
+    # exists, but not for this request. A Diff job asks for required parameters (#270).
+    LLM_PARAMETERS_UNSUPPORTED = "llm_parameters_unsupported"
     GIT_AUTH = "git_auth"
     GIT_FORBIDDEN = "git_forbidden"
     GIT_RATE_LIMIT = "git_rate_limit"

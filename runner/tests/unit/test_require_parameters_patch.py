@@ -130,8 +130,8 @@ def test_the_method_the_patch_wraps_still_has_the_shape_it_was_written_for() -> 
     ]
 
 
-# #270-T06
-def test_openrouter_finding_no_provider_for_the_parameters_is_the_existing_provider_error() -> None:
+# #270-T06, #477-T04
+def test_openrouter_finding_no_provider_for_the_parameters_is_its_own_error() -> None:
     # What the openai/litellm exceptions carry: a class from their module and a `status_code`.
     not_found = type("NotFoundError", (Exception,), {"__module__": "litellm"})
     error = not_found(
@@ -139,7 +139,7 @@ def test_openrouter_finding_no_provider_for_the_parameters_is_the_existing_provi
     )
     error.status_code = 404  # type: ignore[attr-defined]
 
-    assert classify_failure([error], []) is ErrorCode.MODEL_UNKNOWN
+    assert classify_failure([error], []) is ErrorCode.LLM_PARAMETERS_UNSUPPORTED
 
 
 class FakeHandler:

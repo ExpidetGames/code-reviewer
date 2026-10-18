@@ -3,7 +3,7 @@
 """Pins down the request that leaves the process for a Diff job (#270): the real PR-Agent and
 LiteLLM, run through the real job entry point, send `provider.require_parameters: true` to the
 OpenRouter-shaped fake LLM, and a "no provider can handle the parameters" answer ends the job with
-the existing provider error code, without a retry on another model."""
+its own error code (`llm_parameters_unsupported`, #477), without a retry on another model."""
 
 from fake_github import FakeGithub
 from fake_llm import FakeLlm, Reply
@@ -43,8 +43,8 @@ def test_a_diff_job_for_a_destination_that_does_not_ask_sends_no_provider_field(
     assert all("provider" not in request.body for request in llm.requests)
 
 
-# #270-T06
-def test_no_provider_for_the_parameters_ends_a_diff_job_with_the_provider_error_and_no_fallback(
+# #270-T06, #477-T04
+def test_no_provider_for_the_parameters_ends_a_diff_job_with_its_own_error_and_no_fallback(
     engine: Engine, github: FakeGithub, llm: FakeLlm
 ) -> None:
     llm.override = Reply(status=404, message=NO_PROVIDER)
@@ -54,7 +54,7 @@ def test_no_provider_for_the_parameters_ends_a_diff_job_with_the_provider_error_
     result = outcome.result
     assert outcome.returncode != 0
     assert result["ok"] is False
-    assert result["errorCode"] == "model_unknown"
+    assert result["errorCode"] == "llm_parameters_unsupported"
     assert result["commentUrl"] is None
     assert llm.requests
     assert {request.model for request in llm.requests} == {llm.requests[0].model}
