@@ -177,6 +177,22 @@ instance is upgraded**: an instance of an earlier release refuses the key as it 
 upgrade window as retry-later, not as a refused plan. (An earlier instance that reads a row or default written by a newer
 one ignores the field.) There is no cutover as with `ownKeyCostLimitMicroUsd`, because nothing requires the field.
 
+**Readers during the rollout (response direction).** In `EntitlementsFields` of the contract `modelAccess` is **optional**:
+an instance of an earlier release never sends it, so a client that validates answers strictly (the billing service) must
+accept an answer without it and read a missing field as `{ "catalogEntries": null }`. An upgraded instance always sends
+it. The write direction is the opposite: the field is optional in a body, but when present it is checked strictly, and an
+earlier instance refuses it (above).
+
+**Mixed fleet and rollback: upgrade every instance before anyone sets a default `modelAccess`.** An earlier instance that
+writes `default_entitlements` (a `PUT /entitlements/default` it serves, or an admin action of its own) replaces the whole
+JSON and drops `modelAccess`, which widens that default to every released entry. A workspace row is not affected (the
+earlier upsert names its columns and leaves `model_access` alone). So: upgrade all instances, then set a default
+`modelAccess`; after a rollback to an earlier release, set it again. A write that leaves `modelAccess` out over a stored
+default that cannot be read is refused with `422 catalog_entry_invalid` (field `modelAccess`): state it to repair the
+default. A list holds each id once; a repeated id is refused with the same code. A workspace row overrides the instance
+default entirely, so the default is a fallback for workspaces without a row, not a ceiling (a billing writer states
+`modelAccess` on every plan write, #442).
+
 Limits are JSON numbers. A number above 2^53 − 1 loses precision when JSON is parsed, so it can never be stored
 as sent: it is refused as `limit_invalid`, not rounded.
 

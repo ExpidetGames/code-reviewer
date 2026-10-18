@@ -184,11 +184,19 @@ claimed (#277, `src/usage/README.md`, "Limits and suspension at claim"); the key
   field, and an instance that never sets it, behave as before. Reading is lenient like `LIMITS_ADDED_LATER`: a missing
   field reads as `{ catalogEntries: null }` and never makes the entry `entitlements_invalid`, a key of a newer version
   inside the field is ignored; a field that is there and damaged makes the entry unreadable, so damaged data grants no
-  model. A write refuses a field that is not `{ catalogEntries }` with `null` or a list of at most 100 id-shaped
-  strings, and a key it does not know, as `catalog_entry_invalid` (field `modelAccess` or `modelAccess.catalogEntries`).
+  model. A write refuses a field that is not `{ catalogEntries }` with `null` or a list of at most 100 distinct id-shaped
+  strings (the same id twice is refused, not deduplicated; reading tolerates a repeat), and a key it does not know, as
+  `catalog_entry_invalid` (field `modelAccess` or `modelAccess.catalogEntries`).
   **A write that leaves the field out keeps the stored value** (the `periodStart` rule): the repositories do not touch
   the column or the key in the JSON, so a writer that does not know the field never clears what was granted, and two
-  writers cannot race on it; `{ catalogEntries: null }` clears it. The rollout order is in `src/operator-api/README.md`.
+  writers cannot race on it; `{ catalogEntries: null }` clears it. The write is intentionally not "replace everything"
+  (unlike `ownKeyCostLimitMicroUsd`, which every write states): it needs no cutover, as `periodStart` needs none.
+  **Damaged data stays closed on both stores.** A workspace row whose column is damaged stays unreadable under a write
+  that leaves the field out (the column is not touched), and the default is refused: `set` over a stored default that
+  cannot be read, with no `modelAccess`, throws `catalog_entry_invalid` (field `modelAccess`) and writes nothing, because
+  "every released entry" is not a safe guess for data that may have been restrictive. Only a write that states
+  `modelAccess` repairs either. **A row wins entirely over the instance default**, so a restrictive default does not
+  protect a workspace that has a row of its own. The rollout order is in `src/operator-api/README.md`.
 - **Adding a limit later.** A new limit goes into `LIMIT_NAMES` and, so that existing entries stay readable, into
   `LIMITS_ADDED_LATER` (`entitlements-validation.ts`): when reading, its missing key means `null` (unlimited), which
   is true because no such limit existed when the entry was written. Writes still require every key. (The alternative
