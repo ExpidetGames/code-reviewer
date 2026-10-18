@@ -40,6 +40,7 @@ function dynamicView(
     effective: {
       reviewKind: overrides.reviewKind ?? "diff",
       dynamicModel: overrides.dynamicModel ?? DEFAULT_DYNAMIC_MODEL,
+      dynamicProvider: overrides.dynamicProvider ?? "openrouter",
       reviewSkill: overrides.reviewSkill ?? SHIPPED,
       reviewVerdict: overrides.reviewVerdict ?? "blocking",
     },
@@ -47,6 +48,8 @@ function dynamicView(
       reviewKind: overrides.reviewKind === undefined ? "built_in" : "project",
       dynamicModel:
         overrides.dynamicModel === undefined ? "built_in" : "project",
+      dynamicProvider:
+        overrides.dynamicProvider === undefined ? "built_in" : "project",
       reviewSkill: overrides.reviewSkill === undefined ? "built_in" : "project",
       reviewVerdict:
         overrides.reviewVerdict === undefined ? "built_in" : "project",
@@ -54,6 +57,7 @@ function dynamicView(
     defaults: {
       reviewKind: "diff",
       dynamicModel: DEFAULT_DYNAMIC_MODEL,
+      dynamicProvider: "openrouter",
       reviewSkill: SHIPPED,
       reviewVerdict: "blocking",
     },
@@ -86,7 +90,7 @@ function projectModel(
     ) as SettingsFormModel["sources"],
     cost: estimateReviewCost(effective),
     managed: false,
-    tierAvailability: null,
+    catalog: null,
     lastSaved: null,
     dynamic,
   };
@@ -222,8 +226,8 @@ describe("the Review kind card", () => {
         "Review when a pull request is opened, reopened or marked ready",
       ),
     ).toBeTruthy();
-    // There are no engine, command or provider controls.
-    expect(screen.queryByLabelText(/provider|command line|tool/i)).toBeNull();
+    // There are no engine or command controls; the provider of the model is chosen since #433.
+    expect(screen.queryByLabelText(/command line|tool/i)).toBeNull();
   });
 
   it("keeps what was typed for the other kind while the kind is toggled", async () => {
@@ -882,7 +886,7 @@ describe("text from the settings", () => {
     expect((window as unknown as { pwned?: number }).pwned).toBeUndefined();
   });
 
-  it("has no field for a permission, a tool, a command, a provider or a credential", async () => {
+  it("has no field for a permission, a tool, a command or a credential (the provider of the model is chosen since #433)", async () => {
     const user = userEvent.setup();
     renderForm(projectModel(), fakeApi().api);
     await user.click(screen.getByRole("radio", { name: "Dynamic Review" }));
@@ -892,7 +896,7 @@ describe("text from the settings", () => {
     );
     for (const label of labels)
       expect(label, label).not.toMatch(
-        /permission|tool|shell|command line|provider|api key|token(?! budget)|secret|endpoint/i,
+        /permission|tool|shell|command line|api key|token(?! budget)|secret|endpoint/i,
       );
     // The only comment command left is the review command of the "When to review" card.
     expect(

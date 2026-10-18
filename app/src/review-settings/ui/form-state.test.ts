@@ -44,7 +44,7 @@ function model(
     },
     cost: estimateReviewCost(effective),
     managed: false,
-    tierAvailability: null,
+    catalog: null,
     lastSaved: null,
     ...(dynamic === undefined ? {} : { dynamic }),
   };

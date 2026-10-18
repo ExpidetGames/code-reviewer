@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // The scan for words that must never reach a member of a workspace that reviews on the operator's key: a model, a
-// vendor, a price or a cost. The copy of the quality levels (`model-quality.ts`, #283) is held to it by its test, and
+// vendor, a price or a cost. The copy of the catalog chooser (`model-choice.ts`, #283, #433) is held to it by its test, and
 // the description of a catalog entry (#425), which an operator types, is refused by it. Pure: no state, no flags.
 
 /** Each pattern matches something a member's copy must not say. None is global or sticky, so `test` has no memory. */

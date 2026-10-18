@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 "use client";
-// The quality choice of a workspace that reviews on the operator's key (#283): Low, Medium or High instead of a model.
-// Each level is described by speed and depth only (`src/copy/model-quality.ts`). A level that has no model for the kind
-// of review in force is shown as not available, without saying why; the one in force stays selectable so the choice
-// never silently changes.
+// The choice of a workspace that reviews on the operator's key (#283, #433): one entry of the catalog per kind of review
+// instead of a model. Each entry is shown by the name and the description the operator wrote, in the order the view
+// gives (`sort_order`), and nothing else: the view holds neither a provider nor a model. An entry the workspace's plan
+// does not include is shown locked, with a link to the plan page (decision C4); an entry that was taken out of the
+// catalog while the project still has it chosen says so (C5). The entry in force stays selectable even when it
+// cannot be used, so the choice never changes silently, and a note says its reviews would not start.
+import Link from "next/link";
 import { useId } from "react";
 import { Alert } from "../../components/ui/alert.tsx";
 import { Badge } from "../../components/ui/badge.tsx";
@@ -18,119 +21,173 @@ import {
   RadioGroupItem,
 } from "../../components/ui/radio-group.tsx";
 import {
-  QUALITY_CHOSEN_UNAVAILABLE,
-  QUALITY_HEADING,
-  QUALITY_HINT,
-  QUALITY_LEVELS,
-  QUALITY_UNAVAILABLE_BADGE,
-} from "../../copy/model-quality.ts";
+  MODEL_CHOICE_CHOSEN_UNAVAILABLE,
+  MODEL_CHOICE_DEFAULT_SOURCE,
+  MODEL_CHOICE_HEADING,
+  MODEL_CHOICE_HINT,
+  MODEL_CHOICE_LOCKED_BADGE,
+  MODEL_CHOICE_MANAGE_PLAN,
+  MODEL_CHOICE_NONE_CHOSEN,
+  MODEL_CHOICE_NONE_OFFERED,
+  MODEL_CHOICE_PER_PROJECT_NOTE,
+  MODEL_CHOICE_RETIRED_BADGE,
+} from "../../copy/model-choice.ts";
 import { cn } from "../../lib/utils.ts";
+import { workspacePath } from "../../workspaces/paths.ts";
+import type { CatalogChoice } from "../catalog-selection.ts";
+import { CATALOG_FIELD_OF_KIND, type ProjectReviewKind } from "../settings.ts";
 import {
-  isModelTier,
-  TIER_REVIEW_KINDS,
-  type ModelTier,
-  type TierAvailability,
-} from "../../model-tiers/tiers.ts";
-import type { ProjectReviewKind } from "../settings.ts";
-import { Origin, type SettingsOrigin } from "./settings-fields.tsx";
+  Origin,
+  RESET_LABEL,
+  type SettingsOrigin,
+} from "./settings-fields.tsx";
 
-/**
- * Whether a level can be used: for a project, it needs a model for the kind of review the project has; for the
- * workspace defaults, which every kind inherits, it needs one for every kind. `null` availability (not known) counts
- * as available, so a form never blocks a choice on a missing answer.
- */
-export function tierIsAvailable(
-  availability: TierAvailability | null,
-  tier: ModelTier,
-  kind: ProjectReviewKind | "every",
-): boolean {
-  if (availability === null) return true;
-  const kinds = kind === "every" ? TIER_REVIEW_KINDS : [kind];
-  return kinds.every((candidate) => availability[tier][candidate]);
+/** The origin line of the choice: set for this project, or the default of the instance (decision C3: no workspace default). */
+export function modelChoiceOrigin(
+  value: string | null,
+  onReset: () => void,
+): SettingsOrigin {
+  return {
+    source:
+      value === null ? MODEL_CHOICE_DEFAULT_SOURCE : "Set for this project",
+    resetLabel: value === null ? null : RESET_LABEL,
+    resetAriaLabel: `${RESET_LABEL} for ${MODEL_CHOICE_HEADING}`,
+    onReset,
+  };
 }
 
-export function QualityChoice({
-  value,
-  availability,
+/** Instead of the choice on the workspace defaults, which hold none: it is made for each project. */
+export function ModelChoiceNote() {
+  return (
+    <p className="text-sm text-muted-foreground">
+      {MODEL_CHOICE_PER_PROJECT_NOTE}
+    </p>
+  );
+}
+
+function badgeOf(choice: CatalogChoice): string | null {
+  if (choice.available) return null;
+  return choice.reason === "CATALOG_ENTRY_NOT_RELEASED"
+    ? MODEL_CHOICE_RETIRED_BADGE
+    : MODEL_CHOICE_LOCKED_BADGE;
+}
+
+export function ModelChoice({
+  workspaceSlug,
   kind,
-  origin,
+  choices,
+  value,
   error,
   onChange,
 }: {
-  value: ModelTier;
-  availability: TierAvailability | null;
-  /** The kind of review the choice is for; `every` on the workspace defaults. */
-  kind: ProjectReviewKind | "every";
-  origin: SettingsOrigin;
+  workspaceSlug: string;
+  /** The kind of review the choice is for. */
+  kind: ProjectReviewKind;
+  /** The entries that serve the kind, in the order they are shown. */
+  choices: readonly CatalogChoice[];
+  /** The id of the entry in force, or null: none, the default of the instance applies. */
+  value: string | null;
   error?: string | undefined;
-  onChange: (tier: ModelTier) => void;
+  /** `null` takes the choice back. */
+  onChange: (id: string | null) => void;
 }) {
   const ids = useId();
   const errorId = `${ids}-error`;
-  const chosenUnavailable = !tierIsAvailable(availability, value, kind);
+  // An entry the view does not list at all (it is gone) is as unusable as a locked one.
+  const chosenUnavailable =
+    value !== null &&
+    choices.find((choice) => choice.id === value)?.available !== true;
+  const planLink = workspacePath(workspaceSlug, "/settings/plan");
   return (
-    <div data-field="modelTier" className="flex flex-col gap-2">
+    <div
+      data-field={CATALOG_FIELD_OF_KIND[kind]}
+      className="flex flex-col gap-2"
+    >
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <FieldTitle id={`${ids}-label`}>{QUALITY_HEADING}</FieldTitle>
-        <Origin origin={origin} />
+        <FieldTitle id={`${ids}-label`}>{MODEL_CHOICE_HEADING}</FieldTitle>
+        <Origin origin={modelChoiceOrigin(value, () => onChange(null))} />
       </div>
-      <FieldDescription id={`${ids}-hint`}>{QUALITY_HINT}</FieldDescription>
-      <RadioGroup
-        value={value}
-        onValueChange={(next) => {
-          if (isModelTier(next)) onChange(next);
-        }}
-        aria-labelledby={`${ids}-label`}
-        aria-describedby={
-          error === undefined ? `${ids}-hint` : `${ids}-hint ${errorId}`
-        }
-        aria-invalid={error !== undefined}
-        className="gap-2"
-      >
-        {QUALITY_LEVELS.map((level) => {
-          const optionId = `${ids}-${level.tier}`;
-          const hintId = `${optionId}-hint`;
-          const selected = level.tier === value;
-          const available = tierIsAvailable(availability, level.tier, kind);
-          return (
-            <div
-              key={level.tier}
-              data-level={level.tier}
-              className={cn(
-                "flex flex-col rounded-lg border border-border bg-card transition-colors",
-                "focus-within:ring-2 focus-within:ring-ring/50 hover:border-ring",
-                selected && "border-primary bg-accent",
-                !available && !selected && "opacity-70",
-              )}
-            >
-              <FieldLabel
-                htmlFor={optionId}
-                className="flex min-h-11 w-full cursor-pointer items-start gap-3 p-4 pb-1"
-              >
-                <RadioGroupItem
-                  value={level.tier}
-                  id={optionId}
-                  disabled={!available && !selected}
-                  aria-describedby={hintId}
-                  className="mt-0.5"
-                />
-                <span className="font-medium text-foreground">
-                  {level.label}
-                </span>
-                {available ? null : (
-                  <Badge variant="neutral">{QUALITY_UNAVAILABLE_BADGE}</Badge>
+      <FieldDescription id={`${ids}-hint`}>
+        {MODEL_CHOICE_HINT}
+      </FieldDescription>
+      {choices.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          {MODEL_CHOICE_NONE_OFFERED}
+        </p>
+      ) : (
+        <RadioGroup
+          value={value ?? ""}
+          onValueChange={onChange}
+          aria-labelledby={`${ids}-label`}
+          aria-describedby={
+            error === undefined ? `${ids}-hint` : `${ids}-hint ${errorId}`
+          }
+          aria-invalid={error !== undefined}
+          className="gap-2"
+        >
+          {choices.map((choice) => {
+            const optionId = `${ids}-${choice.id}`;
+            const hintId = `${optionId}-hint`;
+            const selected = choice.id === value;
+            const badge = badgeOf(choice);
+            return (
+              <div
+                key={choice.id}
+                data-entry={choice.id}
+                className={cn(
+                  "flex flex-col rounded-lg border border-border bg-card transition-colors",
+                  "focus-within:ring-2 focus-within:ring-ring/50 hover:border-ring",
+                  selected && "border-primary bg-accent",
+                  !choice.available && !selected && "opacity-70",
                 )}
-              </FieldLabel>
-              <div id={hintId} className="pr-4 pb-4 pl-11">
-                <FieldDescription>{level.description}</FieldDescription>
+              >
+                <FieldLabel
+                  htmlFor={optionId}
+                  className="flex min-h-11 w-full cursor-pointer items-start gap-3 p-4 pb-1"
+                >
+                  <RadioGroupItem
+                    value={choice.id}
+                    id={optionId}
+                    disabled={!choice.available && !selected}
+                    aria-describedby={hintId}
+                    className="mt-0.5"
+                  />
+                  <span className="font-medium text-foreground">
+                    {choice.name}
+                  </span>
+                  {badge === null ? null : (
+                    <Badge variant="neutral">{badge}</Badge>
+                  )}
+                </FieldLabel>
+                <div
+                  id={hintId}
+                  className="flex flex-col items-start gap-1 pr-4 pb-4 pl-11"
+                >
+                  {choice.description === null ? null : (
+                    <FieldDescription>{choice.description}</FieldDescription>
+                  )}
+                  {choice.reason === "CATALOG_ENTRY_NOT_ALLOWED" ? (
+                    <Link
+                      href={planLink}
+                      className="text-sm font-medium text-primary underline-offset-4 hover:underline"
+                    >
+                      {MODEL_CHOICE_MANAGE_PLAN}
+                    </Link>
+                  ) : null}
+                </div>
               </div>
-            </div>
-          );
-        })}
-      </RadioGroup>
+            );
+          })}
+        </RadioGroup>
+      )}
+      {value === null && choices.length > 0 ? (
+        <p className="text-sm text-muted-foreground">
+          {MODEL_CHOICE_NONE_CHOSEN}
+        </p>
+      ) : null}
       {chosenUnavailable ? (
-        <Alert variant="warning" role="status" data-quality-unavailable="">
-          {QUALITY_CHOSEN_UNAVAILABLE}
+        <Alert variant="warning" role="status" data-choice-unavailable="">
+          {MODEL_CHOICE_CHOSEN_UNAVAILABLE}
         </Alert>
       ) : null}
       {error !== undefined ? (

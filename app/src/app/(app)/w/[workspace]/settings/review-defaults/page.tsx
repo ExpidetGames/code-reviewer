@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { Metadata } from "next";
+import { getWorkspaceLlm } from "@/llm/shared";
+import { keyedProvidersOf } from "@/review-settings/ui/keyed-providers";
 import { reviewSettingsServiceFor } from "@/review-settings/shared";
 import { planPageLinkedFor } from "@/usage/shared";
 import {
@@ -20,17 +22,19 @@ export default async function ReviewDefaultsSettingsPage({
   const { workspace: slug } = await params;
   const { workspace, role } = await requireWorkspace(slug);
   const workspaceId = workspace.id;
-  const [data, showPlan] = await Promise.all([
+  const [data, showPlan, keyStatuses] = await Promise.all([
     loadGlobalSettingsPage({
       settings: reviewSettingsServiceFor(workspaceId),
     }),
     planPageLinkedFor(workspaceId),
+    getWorkspaceLlm().keyServiceFor(workspaceId).statusAll(),
   ]);
   return (
     <GlobalSettingsPageContent
       workspaceSlug={workspace.slug}
       canEdit={can(role, "manage_review_defaults")}
       showPlan={showPlan}
+      keyedProviders={keyedProvidersOf(keyStatuses)}
       data={data}
     />
   );

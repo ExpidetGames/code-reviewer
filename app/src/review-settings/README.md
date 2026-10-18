@@ -75,12 +75,10 @@ operator's and the workspace never sees them (`src/model-tiers/README.md`):
   workspace carries them through (the defaults replace their layer as a whole, so the service puts the stored
   `model`/`fallbackModel` back; the Dynamic model is a project-only field that a save already keeps). The workspace
   gets them back if it returns to its own key.
-- **The form** (`ui/quality-choice.tsx`, copy in `src/copy/model-quality.ts`) shows one **Quality** choice, Low, Medium
-  or High, each with a sentence about speed and depth and no model, vendor or cost, in place of the model, fallback
-  model, Dynamic model, model suggestions and cost estimate. The token budget stays. A level without a model for the
-  kind in force (the project's kind; every kind on the workspace defaults) is shown "Not available" without saying why
-  and cannot be chosen; the level in force stays selectable and a note says reviews would not start. The form reads
-  everything from the view (`managed`, `tierAvailability`), so a save that changes the key mode adapts the next answer.
+- **The form** shows the catalog chooser in place of the provider, model, fallback model, Dynamic model, model
+  suggestions and cost estimate (see "The settings form" below); the Low/Medium/High choice of #283 is gone from it
+  (#433). The token budget stays. The form reads everything from the view (`managed`, `catalogChoices`), so a save that
+  changes the key mode adapts the next answer.
 - **The instance admin is not special inside a workspace (decision).** An instance admin who is a member of a managed
   workspace gets the same stripped view and the same refusal as its other members: the view depends on the workspace's
   key mode, never on the user. The operator sees and sets which model backs each level through the operator API
@@ -137,9 +135,41 @@ valid. Two families sit side by side and only the one that matches the workspace
 - **The Dynamic metadata check** (#269) asks the adapter of the provider the project selected (`dynamic-check.ts`): the
   model of the request at the provider of the request, else the stored one, else the default; a request that only
   changes the provider asks again about the stored model at the new provider.
-- **Not done here**: the UI (the form carries a stored `provider` through a save and shows nothing new), the claim, the
-  migration of `modelTier`. The model a provider other than the default would use when no layer sets one is the claim's
-  business (#432): the views show the model of the layers.
+- **Not done here**: the claim and the migration of `modelTier` (#432, #434). The model a provider other than the
+  default would use when no layer sets one is the claim's business (#432): the views show the model of the layers.
+
+## The settings form: provider, model and catalog entry (#433)
+
+`ui/settings-form.tsx` is one form for the workspace defaults and for a project. What the Model card (Diff Review) and
+the Review kind card (Dynamic Review) show depends on the key mode of the workspace, read from the view:
+
+| Key mode | Per review kind                                                                                                                                                                                                                                                                                                                                                                         | Sent when changed                                                                                                                                                         |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| own      | a **provider select** (`ui/provider-select.tsx`: the registered providers, `llmProviderDescriptors`) next to the **model** field, with the suggested models of the chosen provider as its datalist (one `<datalist>` per provider); the cost estimate of Diff Review prices the model with the chosen provider's table (`cost.ts`, `estimateReviewCost(settings, prices?, providers?)`) | `provider`, `model`, `fallbackModel` (Diff group, workspace defaults and project); `dynamicProvider`, `dynamicModel` (project, `null` when put back to the shipped value) |
+| managed  | the **catalog chooser** (`ui/model-choice.tsx`): a radio list of the entries of `catalogChoices[kind]` in the order of the view (`sort_order`), label = name, text = description, nothing else; the project's selection comes from `catalogSelection`. The workspace defaults show a note instead (no workspace-level default entry, decision C3)                                       | `catalogEntryDiff`, `catalogEntryDynamic` (project-only; `null` takes the choice back)                                                                                    |
+
+- **Locked and unusable entries.** An entry that the plan does not allow is listed disabled with "Not included in your plan"
+  and a link "Manage plan" to the plan page of the workspace (`/w/<slug>/settings/plan`, which exists for every workspace;
+  its "Manage plan" button is shown to Owners and Admins only). A retired entry the project still has chosen is badged "No
+  longer available" without a link. The entry in force stays selectable even when unusable, and a status note says
+  reviews would not start until another is chosen (decision C5: no silent fallback). A choice is taken back with "Reset to
+  default", which means "the default of this instance".
+- **Both kinds keep their choice.** The two entries (and the typed provider and model of each kind) are held side by side
+  in the form state (`dynamic-form-state.ts`: `catalogEntries`, `dynamicProvider`), so switching the kind loses neither.
+- **A managed workspace never receives a provider or a model.** The view has none; the form has no control for them, no
+  datalist and no estimate, and `project-save.ts` sends neither (a test plants a sentinel where a leak would sit and
+  searches the DOM and every request body). An untouched form still sends nothing; a changed form sends only the changed
+  groups, and the project-only entries travel in the project request.
+- **A provider without a stored key (decision C7).** The page passes `keyedProviders` (`keyed-providers.ts`, from
+  `keyServiceFor(workspaceId).statusAll()`: a readable key counts, an unreadable one does not). A provider without one is
+  marked "no key yet" in the select and can still be chosen; the chosen one shows a warning with a link to the LLM
+  access page. The warning is for the kind that is shown (Diff or Dynamic) and never appears on the operator's key.
+- **Copy.** Every code a save can answer with has a sentence in `ui/messages.ts` (`describeIssue`), including
+  `PROVIDER_UNKNOWN`, the four `CATALOG_ENTRY_*` codes and `CATALOG_ENTRY_OWN_KEY_MODE`; the chooser's own words are
+  `src/copy/model-choice.ts`, scanned by a test for model, vendor, price and cost words (the sentences about the plan are
+  the one place that says "plan").
+- **Until the claim reads the entries (#432)** the choice is stored and shown, but the model of a managed job still follows
+  `modelTier` (nothing sets it any more, so the default level applies).
 
 ## From settings to a runner job
 

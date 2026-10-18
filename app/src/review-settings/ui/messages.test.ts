@@ -118,6 +118,69 @@ describe("the copy for a problem with one setting", () => {
     );
   });
 
+  // #433-T07
+  it.each([
+    "PROVIDER_UNKNOWN",
+    "CATALOG_ENTRY_UNKNOWN",
+    "CATALOG_ENTRY_NOT_RELEASED",
+    "CATALOG_ENTRY_KIND_MISMATCH",
+    "CATALOG_ENTRY_NOT_ALLOWED",
+    "CATALOG_ENTRY_OWN_KEY_MODE",
+    "MODEL_MANAGED_BY_INSTANCE",
+  ] as const satisfies readonly (typeof REVIEW_SETTING_ISSUE_CODES)[number][])(
+    "has a specific sentence for %s on every provider and catalog field",
+    (code) => {
+      for (const field of [
+        "provider",
+        "dynamicProvider",
+        "catalogEntryDiff",
+        "catalogEntryDynamic",
+      ]) {
+        const text = describeIssue(field, code);
+
+        expect(text, `${field} ${code}`).not.toBe("This value is not valid.");
+        expect(text, `${field} ${code}`).not.toContain(code);
+      }
+    },
+  );
+
+  // #433-T07
+  it.each(["INVALID_TYPE", "EMPTY", "TOO_LONG", "INVALID_FORMAT"] as const)(
+    "does not call a provider or an entry a model name when %s is reported for it",
+    (code) => {
+      for (const field of ["provider", "dynamicProvider"])
+        expect(describeIssue(field, code), `${field} ${code}`).toMatch(
+          /provider/i,
+        );
+      for (const field of ["catalogEntryDiff", "catalogEntryDynamic"]) {
+        const text = describeIssue(field, code);
+        expect(text, `${field} ${code}`).toMatch(/choice|option|listed/i);
+        expect(text, `${field} ${code}`).not.toMatch(/model/i);
+      }
+    },
+  );
+
+  // #433-T07
+  it("tells a workspace on its own key that choices come with the key of the instance", () => {
+    const text = describeIssue(
+      "catalogEntryDiff",
+      "CATALOG_ENTRY_OWN_KEY_MODE",
+    );
+
+    expect(text).toMatch(/own AI key/);
+    expect(text).toMatch(/once the AI access comes from this instance/);
+  });
+
+  // #433-T07
+  it("names the kind in the sentence about an entry that does not serve it", () => {
+    expect(
+      describeIssue("catalogEntryDiff", "CATALOG_ENTRY_KIND_MISMATCH"),
+    ).toMatch(/Diff Review/);
+    expect(
+      describeIssue("catalogEntryDynamic", "CATALOG_ENTRY_KIND_MISMATCH"),
+    ).toMatch(/Dynamic Review/);
+  });
+
   it("falls back to a generic sentence for a field or code it does not know", () => {
     expect(describeIssue("somethingNew", "SOMETHING_NEW")).toBe(
       "This value is not valid.",

@@ -27,7 +27,7 @@ import {
 import type { SettingsFormModel } from "./form-model.ts";
 
 export type FormValues = {
-  /** Carried through a save so a stored provider is never dropped; the form has no field for it yet (#430). */
+  /** The provider of `model` (#430, #433); empty for a workspace on the operator's key, which has no field for it. */
   provider: string;
   model: string;
   /** Empty means no fallback model. */
@@ -42,7 +42,7 @@ export type FormValues = {
   allowedCommands: ReviewCommand[];
   /**
    * The quality level of a workspace on the operator's key (#280, #283). Carried through a save of any workspace, so
-   * the level that is stored is never dropped; only the quality choice changes it.
+   * the level that is stored is never dropped; no control changes it any more, the catalog entry replaced it (#433).
    */
   modelTier: ModelTier;
 };
@@ -82,12 +82,22 @@ export function initialFormState(model: SettingsFormModel): FormState {
     overridden,
     ...(model.dynamic === undefined
       ? {}
-      : { dynamic: initialDynamicValues(model.dynamic) }),
+      : {
+          dynamic: initialDynamicValues(
+            model.dynamic,
+            model.catalog?.selection ?? null,
+          ),
+        }),
   };
 }
 
 export type TextField =
-  "model" | "fallbackModel" | "extraInstructions" | "maxFindings" | "maxTokens";
+  | "provider"
+  | "model"
+  | "fallbackModel"
+  | "extraInstructions"
+  | "maxFindings"
+  | "maxTokens";
 export type BooleanField =
   | "largePrChunking"
   | "inlineKeyIssues"
@@ -103,15 +113,6 @@ export function setText(
     ...state,
     values: { ...state.values, [field]: value },
     overridden: { ...state.overridden, [field]: true },
-  };
-}
-
-/** The quality level a workspace on the operator's key chose (#283). */
-export function setModelTier(state: FormState, tier: ModelTier): FormState {
-  return {
-    ...state,
-    values: { ...state.values, modelTier: tier },
-    overridden: { ...state.overridden, modelTier: true },
   };
 }
 

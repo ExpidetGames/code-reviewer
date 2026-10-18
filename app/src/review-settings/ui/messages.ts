@@ -32,6 +32,20 @@ const MODEL_FIELDS: readonly string[] = [
   "dynamicModel",
 ];
 
+const PROVIDER_FIELDS: readonly string[] = ["provider", "dynamicProvider"];
+const ENTRY_FIELDS: readonly string[] = [
+  "catalogEntryDiff",
+  "catalogEntryDynamic",
+];
+const CHOOSE_PROVIDER = "Choose one of the listed providers.";
+const CHOOSE_OPTION = "Choose one of the listed options.";
+
+/** What to say when a provider or an entry is not a well-formed choice at all (a form can only send a listed one). */
+function malformedChoice(field: string): string | null {
+  if (PROVIDER_FIELDS.includes(field)) return CHOOSE_PROVIDER;
+  return ENTRY_FIELDS.includes(field) ? CHOOSE_OPTION : null;
+}
+
 function numberWithCommas(value: number): string {
   return value.toLocaleString("en-US");
 }
@@ -39,6 +53,8 @@ function numberWithCommas(value: number): string {
 const ISSUE_COPY: Record<ReviewSettingIssueCode, (field: string) => string> = {
   UNKNOWN_FIELD: () => "This setting does not exist.",
   INVALID_TYPE: (field) => {
+    const choice = malformedChoice(field);
+    if (choice !== null) return choice;
     switch (field) {
       case "maxFindings":
       case "maxTokens":
@@ -55,6 +71,8 @@ const ISSUE_COPY: Record<ReviewSettingIssueCode, (field: string) => string> = {
     }
   },
   EMPTY: (field) => {
+    const choice = malformedChoice(field);
+    if (choice !== null) return choice;
     if (field === "model" || field === "dynamicModel")
       return "Enter a model name.";
     if (field === "reviewSkill")
@@ -76,6 +94,8 @@ const ISSUE_COPY: Record<ReviewSettingIssueCode, (field: string) => string> = {
     return "This value is too large.";
   },
   TOO_LONG: (field) => {
+    const choice = malformedChoice(field);
+    if (choice !== null) return choice;
     if (field === "extraInstructions")
       return `Use at most ${numberWithCommas(REVIEW_SETTING_LIMITS.extraInstructionsMaxChars)} characters.`;
     if (field === "reviewSkill")
@@ -83,6 +103,8 @@ const ISSUE_COPY: Record<ReviewSettingIssueCode, (field: string) => string> = {
     return "This text is too long.";
   },
   INVALID_FORMAT: (field) => {
+    const choice = malformedChoice(field);
+    if (choice !== null) return choice;
     if (field === "allowedCommands") return "Only the command review exists.";
     if (field === "reviewKind") return "Choose Diff Review or Dynamic Review.";
     if (field === "reviewVerdict")
@@ -105,17 +127,20 @@ const ISSUE_COPY: Record<ReviewSettingIssueCode, (field: string) => string> = {
   DYNAMIC_MODEL_UNKNOWN: () =>
     `The provider lists no model with this name. Check the spelling, for example ${DEFAULT_DYNAMIC_MODEL}.`,
   MODEL_MANAGED_BY_INSTANCE: () =>
-    "This instance provides the AI models for this workspace. Choose a quality level instead.",
-  PROVIDER_UNKNOWN: () => "Choose one of the listed providers.",
+    "This instance provides the AI models for this workspace. Choose from the listed options instead.",
+  PROVIDER_UNKNOWN: () => CHOOSE_PROVIDER,
   CATALOG_ENTRY_UNKNOWN: () => "This choice does not exist. Choose another.",
   CATALOG_ENTRY_NOT_RELEASED: () =>
     "This choice is not available any more. Choose another.",
-  CATALOG_ENTRY_KIND_MISMATCH: () =>
-    "This choice is not made for this kind of review. Choose another.",
+  CATALOG_ENTRY_KIND_MISMATCH: (field) =>
+    field === "catalogEntryDynamic"
+      ? "This choice is not made for Dynamic Review. Choose another."
+      : "This choice is not made for Diff Review. Choose another.",
   CATALOG_ENTRY_NOT_ALLOWED: () =>
     "Your plan does not include this choice. Choose another or change your plan.",
+  // The user has to be on the operator's key before an entry can be chosen (#430): say so, and nothing about a model.
   CATALOG_ENTRY_OWN_KEY_MODE: () =>
-    "This workspace uses its own AI key, so the choices of the instance do not apply.",
+    "This workspace reviews with its own AI key, so the choices of this instance cannot be used. They can be chosen once the AI access comes from this instance.",
 };
 
 function hasIssueCopy(code: string): code is ReviewSettingIssueCode {
