@@ -39,7 +39,7 @@ async function openProject(page: Page) {
   ).toBeVisible();
 }
 
-test.describe("the provider and model of a project on its own key", () => {
+test.describe("@smoke the provider and model of a project on its own key", () => {
   test.beforeAll(async ({ request }) => {
     await addGithubAccount(request, account);
     await addGithubInstallation(
