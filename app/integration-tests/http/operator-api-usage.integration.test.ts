@@ -117,6 +117,9 @@ describe("the feed of usage records", () => {
       reviewKind: "dynamic",
       keyMode: "managed",
       modelTier: "standard",
+      // #432: a run from before the catalog names no entry.
+      catalogEntryId: null,
+      catalogEntryName: null,
       costMicroUsd: 12346,
       promptTokens: 1000,
       completionTokens: 100,
