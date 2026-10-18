@@ -166,6 +166,8 @@ export type Interval = "day" | "week" | "month" | "year";
 export type CreateProductInput = {
   name: string;
   tax_category: string;
+  /** `standard` (the default) is a catalog item. */
+  type?: "standard" | "custom";
   description?: string | null;
   image_url?: string | null;
   custom_data?: Record<string, unknown> | null;
@@ -179,11 +181,15 @@ export type ProductPatch = {
 export type CreatePriceInput = {
   product_id: string;
   description: string;
+  /** `standard` (the default) is a catalog price; `custom` is made for one transaction. */
+  type?: "standard" | "custom";
   unit_price: { amount: string; currency_code: string };
   name?: string | null;
   billing_cycle?: { interval: Interval; frequency: number } | null;
   trial_period?: { interval: Interval; frequency: number } | null;
   tax_mode?: "account_setting" | "external" | "internal" | "location";
+  /** The limits of the quantity of one item; Paddle's default is 1 to 100. */
+  quantity?: { minimum: number; maximum: number };
   custom_data?: Record<string, unknown> | null;
 };
 /** The only fields of a price the app edits. Anything else is refused at run time as well. */
