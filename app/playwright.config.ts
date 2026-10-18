@@ -218,12 +218,29 @@ export default defineConfig({
       retries: 0,
       use: { ...browser, baseURL: e2eEnv.operatorAppUrl },
       testMatch: /e2e\/operator\/limited-workspace\.e2e\.ts$/,
+      // After the catalog journey, which sets the same setup address at the fake GitHub for its own app.
+      dependencies: ["prepare", "connect", "catalog"],
+    },
+    // The journey of the providers and the catalog (#435): the admin builds the catalog in the portal, a managed
+    // workspace runs on its entries and a workspace on its own key on its model, and no member reads a model id. It has
+    // an app of its own (the eighth: a new multi-tenant instance with the operator API on, so the catalog starts
+    // empty) and a fake LLM of its own. It connects GitHub installations, which sets the setup address of the one app
+    // registered at the fake GitHub: so it runs after the journey of the connections, which sets the same address for
+    // the multi-tenant app, and before the operator journey, which does it for the operator app. (A journey that is
+    // not a dependency of the smoke selection stays out of a smoke run, which is why the order is this way round: the
+    // smoke run takes the catalog journey and the connections one, not the operator journey.)
+    {
+      name: "catalog",
+      // No retry, as the operator journey: a second attempt would sign the same people up again.
+      retries: 0,
+      use: { ...browser, baseURL: e2eEnv.catalogAppUrl },
+      testMatch: /e2e\/operator\/catalog-journey\.e2e\.ts$/,
       dependencies: ["prepare", "connect"],
     },
   ],
-  // Six apps under test (the seventh port, `E2E_PORT` + 5, is the one the update journey starts itself) and the two
+  // Seven apps under test (the port `E2E_PORT` + 5 is the one the update journey starts itself) and the two
   // fake servers they share, GitHub and SMTP; the journeys start their own fake LLMs. The apps take consecutive ports
-  // from `E2E_PORT` up to `E2E_PORT` + 6. The fake GitHub stands in for github.com (sign in) and api.github.com; the app
+  // from `E2E_PORT` up to `E2E_PORT` + 7. The fake GitHub stands in for github.com (sign in) and api.github.com; the app
   // under test is pointed at it by environment variables. The journeys always run against a
   // production build, never the dev server, with a fresh SQLite file in the (git-ignored)
   // test-results folder; the app migrates it on start. All values are fixed dummies.
@@ -366,6 +383,26 @@ export default defineConfig({
         LLM_MAX_TOKENS: llmEnv.maxTokens,
       },
       url: e2eEnv.operatorAppUrl,
+      reuseExistingServer: false,
+      timeout: 60_000,
+    },
+    {
+      command:
+        "rm -rf test-results/e2e-catalog-data && mkdir -p test-results/e2e-catalog-data && " +
+        `pnpm start --hostname 127.0.0.1 --port ${e2eEnv.catalogAppPort} > ${e2eEnv.logFiles.catalog} 2>&1`,
+      env: {
+        ...appEnv,
+        DATABASE_PATH: e2eEnv.catalogDatabasePath,
+        BETTER_AUTH_URL: e2eEnv.catalogAppUrl,
+        OPERATOR_API_TOKEN: e2eEnv.operatorApiToken,
+        // The model metadata the catalog is released and claimed with, the key tests and the reviews of the real
+        // runner come from the journey's fake LLM, which listens at the port of the operator journey's.
+        LLM_API_BASE_URL: e2eEnv.catalogLlmFakeApiUrl,
+        ALLOW_TEST_LLM_ENDPOINTS: "true",
+        LLM_MODEL: llmEnv.model,
+        LLM_MAX_TOKENS: llmEnv.maxTokens,
+      },
+      url: e2eEnv.catalogAppUrl,
       reuseExistingServer: false,
       timeout: 60_000,
     },

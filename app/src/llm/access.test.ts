@@ -8,6 +8,7 @@ import {
   LLM_NOT_CONFIGURED_ERROR,
   LlmAccessError,
   createLlmAccess,
+  maskProviderInText,
   maskSecretInText,
   revealLlmAccess,
 } from "./access.ts";
@@ -100,5 +101,32 @@ describe("masking a secret in a text", () => {
 
   it("masks a secret that contains another one as a whole", () => {
     expect(maskSecretInText("a abcd b", "abcd", "bc")).toBe("a [redacted] b");
+  });
+});
+
+describe("the name of a provider in a text", () => {
+  // #435-T06
+  it("is replaced in any letter case, inside a longer word, and for the label as well as the id", () => {
+    expect(
+      maskProviderInText("OpenrouterException: OpenRouter said (openrouter)", [
+        "openrouter",
+        "OpenRouter",
+      ]),
+    ).toBe("[provider]Exception: [provider] said ([provider])");
+  });
+
+  // #435-T06
+  it("takes the longer name first, and treats a name as text and not as a pattern", () => {
+    expect(
+      maskProviderInText("the Open.Router (open-router) and Open.Router.AI", [
+        "Open.Router",
+        "Open.Router.AI",
+      ]),
+    ).toBe("the [provider] (open-router) and [provider]");
+  });
+
+  // #435-T06
+  it("leaves a text alone when no name is given", () => {
+    expect(maskProviderInText("OpenRouter", [])).toBe("OpenRouter");
   });
 });

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { Metadata } from "next";
+import { instanceAccessOf } from "@/llm/access";
 import { getWorkspaceLlm } from "@/llm/shared";
 import { planPageLinkedFor } from "@/usage/shared";
 import { requireWorkspace } from "@/workspaces/access-runtime";
@@ -18,8 +19,10 @@ export default async function AdvancedSettingsPage({
   const { workspace: slug } = await params;
   const { workspace, role } = await requireWorkspace(slug);
   const workspaceId = workspace.id;
-  const [keyStatuses, showPlan] = await Promise.all([
-    getWorkspaceLlm().keyServiceFor(workspaceId).statusAll(),
+  const llm = getWorkspaceLlm();
+  const [keyStatuses, summary, showPlan] = await Promise.all([
+    llm.keyServiceFor(workspaceId).statusAll(),
+    llm.summaryFor(workspaceId),
     planPageLinkedFor(workspaceId),
   ]);
   return (
@@ -30,6 +33,7 @@ export default async function AdvancedSettingsPage({
         provider,
         configured: status.state !== "not_configured",
       }))}
+      instanceAccess={instanceAccessOf(summary)}
       canResetDefaults={can(role, "manage_review_defaults")}
       showPlan={showPlan}
     />

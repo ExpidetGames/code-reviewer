@@ -148,4 +148,46 @@ describe("the Advanced settings sub-page", () => {
     ).toBeNull();
     expect(screen.getByText(/Only an Admin or an Owner/)).toBeTruthy();
   });
+
+  describe("on the access of the instance (a managed workspace)", () => {
+    const PROVIDER = /openrouter/i;
+
+    // #435-T06
+    it("still removes a key the workspace stored earlier, without naming its provider", async () => {
+      const user = userEvent.setup();
+      const api = fakeKeyApi();
+      const view = renderAdvanced({
+        instanceAccess: "provided",
+        removeApi: api,
+        keys: [
+          { provider: "openrouter", configured: true },
+          { provider: "fakeai", configured: false },
+        ],
+      });
+
+      expect(view.container.textContent).not.toMatch(PROVIDER);
+      await user.click(
+        screen.getByRole("button", { name: "Remove the stored key…" }),
+      );
+      expect(document.body.textContent).not.toMatch(PROVIDER);
+      await user.click(screen.getByRole("button", { name: "Yes, remove it" }));
+
+      await waitFor(() =>
+        expect(api.remove).toHaveBeenCalledWith("openrouter"),
+      );
+      expect(api.remove).toHaveBeenCalledTimes(1);
+      expect(await screen.findByText("The key is removed.")).toBeTruthy();
+    });
+
+    it("lists the provider by name for a workspace on its own key, as before", () => {
+      renderAdvanced({
+        instanceAccess: null,
+        keys: [{ provider: "openrouter", configured: true }],
+      });
+
+      expect(
+        screen.getByRole("button", { name: "Remove the OpenRouter key…" }),
+      ).toBeTruthy();
+    });
+  });
 });

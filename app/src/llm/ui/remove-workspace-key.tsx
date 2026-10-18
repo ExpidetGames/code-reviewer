@@ -29,8 +29,11 @@ export function RemoveWorkspaceKey({
   workspaceSlug: string;
   /** The provider whose key this removes; the keys of the others stay. */
   provider: string;
-  /** Its name for the person. */
-  label: string;
+  /**
+   * Its name for the person, or null where the person is not told which provider it is (a workspace on the instance's
+   * access has no provider to name, but may still hold a key it stored earlier): the words are then "the stored key".
+   */
+  label: string | null;
   /** Whether the server says a key of this provider is saved right now. */
   keyConfigured: boolean;
   /** Only tests pass this. */
@@ -58,21 +61,24 @@ export function RemoveWorkspaceKey({
   // Nothing to remove and nothing to report.
   if (!configured && outcome?.kind !== "removed") return null;
 
+  const what = label === null ? "the stored key" : `the ${label} key`;
+  const consequence =
+    label === null
+      ? "The key stored earlier is not used by this workspace; removing it deletes it from this server."
+      : `Reviews of this workspace cannot run on ${label} until a new key is saved.`;
   return (
     <div className="flex flex-col gap-3">
       {configured ? (
         <DangerZone
-          title={`Remove the ${label} key`}
-          description={`Reviews of this workspace cannot run on ${label} until a new key is saved.`}
-          actionLabel={`Remove the ${label} key…`}
-          confirmTitle={`Remove the ${label} key?`}
-          confirmDescription={`Reviews of this workspace cannot run on ${label} until a new key is saved. This cannot be undone.`}
+          title={`Remove ${what}`}
+          description={consequence}
+          actionLabel={`Remove ${what}…`}
+          confirmTitle={`Remove ${what}?`}
+          confirmDescription={`${consequence} This cannot be undone.`}
           confirmLabel="Yes, remove it"
           onConfirm={remove}
         >
-          {pending ? (
-            <StatusRegion>Removing the {label} key…</StatusRegion>
-          ) : null}
+          {pending ? <StatusRegion>Removing {what}…</StatusRegion> : null}
         </DangerZone>
       ) : null}
       {outcome?.kind === "removed" ? (

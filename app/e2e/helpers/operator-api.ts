@@ -142,6 +142,20 @@ export async function operatorClient(
       );
       return body.items;
     },
+    /** The three reads of the usage feed that are not one workspace's list: every workspace, a period, unknown cost. */
+    async usageReads(workspaceId: string): Promise<OperatorAnswer[]> {
+      return [
+        await call("GET", "/usage?limit=200"),
+        await call(
+          "GET",
+          `/workspaces/${workspaceId}/usage/summary?from=2020-01-01T00:00:00.000Z&to=2100-01-01T00:00:00.000Z`,
+        ),
+        await call(
+          "GET",
+          "/usage/unknown-cost?from=2020-01-01T00:00:00.000Z&to=2100-01-01T00:00:00.000Z",
+        ),
+      ];
+    },
     async dispose() {
       await context.dispose();
     },
