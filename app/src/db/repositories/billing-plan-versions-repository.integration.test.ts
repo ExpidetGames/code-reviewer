@@ -175,6 +175,154 @@ describe.each(ENGINES)(
       ]);
     });
 
+    // The database refuses what the repository merely does not offer (#438, review N6): whoever writes, an app instance
+    // of another release or somebody with SQL, a version is never changed beyond `role` and never deleted. `created_by`
+    // is the one other column that moves: the account merge and the deletion of a user rewrite who made a version.
+    const IMMUTABLE_MESSAGE = /billing_plan_versions_immutable/;
+
+    // #438-T12
+    it_(
+      "refuses an update of any column of a version but its role and its author, whichever column the table has",
+      async () => {
+        const { db, plan, versions } = await start();
+        const version = await versions.createNext(plan.id, managed(), null, 0);
+        const columns = (await db.introspection.getTables())
+          .find((table) => table.name === "billing_plan_versions")
+          ?.columns.map((column) => column.name);
+        // The mutable ones are named here, so a column that is added later is checked without anybody remembering to.
+        const frozen = (columns ?? []).filter(
+          (column) => column !== "role" && column !== "created_by",
+        );
+        expect(frozen.sort()).toEqual([
+          "created_at",
+          "id",
+          "key_mode",
+          "limits",
+          "model_access",
+          "monthly_amount_minor",
+          "number",
+          "plan_id",
+          "yearly_amount_minor",
+        ]);
+        const before = (
+          await sql<Record<string, unknown>>`
+            select * from billing_plan_versions where id = ${version.id}`.execute(
+            db,
+          )
+        ).rows[0];
+
+        for (const column of frozen) {
+          const value =
+            column === "number" ||
+            column === "monthly_amount_minor" ||
+            column === "yearly_amount_minor"
+              ? 77
+              : "changed";
+          await expect(
+            sql`update billing_plan_versions set ${sql.ref(column)} = ${value} where id = ${version.id}`.execute(
+              db,
+            ),
+            column,
+          ).rejects.toThrow(IMMUTABLE_MESSAGE);
+        }
+
+        expect(
+          (
+            await sql<Record<string, unknown>>`
+              select * from billing_plan_versions where id = ${version.id}`.execute(
+              db,
+            )
+          ).rows[0],
+        ).toEqual(before);
+      },
+    );
+
+    // #438-T12
+    it_(
+      "refuses an update that sets several columns when one of them is not the role",
+      async () => {
+        const { db, plan, versions } = await start();
+        const version = await versions.createNext(plan.id, managed(), null, 0);
+
+        await expect(
+          sql`update billing_plan_versions set role = 'legacy', monthly_amount_minor = 1 where id = ${version.id}`.execute(
+            db,
+          ),
+        ).rejects.toThrow(IMMUTABLE_MESSAGE);
+
+        expect((await versions.current(plan.id))?.monthlyAmountMinor).toBe(
+          1234,
+        );
+      },
+    );
+
+    // #438-T12
+    it_("refuses to delete a version", async () => {
+      const { db, plan, versions } = await start();
+      const version = await versions.createNext(plan.id, managed(), null, 0);
+
+      await expect(
+        sql`delete from billing_plan_versions where id = ${version.id}`.execute(
+          db,
+        ),
+      ).rejects.toThrow(IMMUTABLE_MESSAGE);
+
+      expect(await versions.list(plan.id)).toHaveLength(1);
+    });
+
+    // #438-T12
+    it_(
+      "still lets the role change, and the author be rewritten by the merge of two accounts or the deletion of a user",
+      async () => {
+        const { db, plan, versions } = await start();
+        await db
+          .insertInto("users")
+          .values(
+            ["author-1", "author-2"].map((id) => ({
+              id,
+              name: id,
+              email: `${id}@example.test`,
+              email_verified: 0,
+              image: null,
+              github_login: null,
+              imported_at: null,
+              is_instance_admin: 0,
+              email_conflict: null,
+              org_checked_at: null,
+              org_checked_for: null,
+              created_at: T0.toISOString(),
+              updated_at: T0.toISOString(),
+            })),
+          )
+          .execute();
+        const version = await versions.createNext(
+          plan.id,
+          managed(),
+          "author-1",
+          0,
+        );
+
+        await sql`update billing_plan_versions set created_by = 'author-2' where id = ${version.id}`.execute(
+          db,
+        );
+        await sql`delete from users where id = 'author-2'`.execute(db);
+        await versions.createNext(
+          plan.id,
+          managed({ monthlyAmountMinor: 5 }),
+          null,
+          1,
+        );
+
+        const all = await versions.list(plan.id);
+        expect(all.map((row) => [row.number, row.role, row.createdBy])).toEqual(
+          [
+            [2, "current", null],
+            [1, "legacy", null],
+          ],
+        );
+      },
+    );
+
     // #438-T02
     it_(
       "refuses a version based on a number that is no longer current",

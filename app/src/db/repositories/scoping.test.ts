@@ -189,11 +189,24 @@ describe("the repositories and workspace scoping", () => {
   });
 
   // #438-T13
-  it("classifies the repositories of the billing plans and their versions as instance level", () => {
-    expect(INSTANCE_LEVEL).toContain("billing-plans-repository.ts");
-    expect(INSTANCE_LEVEL).toContain("billing-plan-versions-repository.ts");
-    expect(SCOPED).not.toContain("billing-plans-repository.ts");
-    expect(SCOPED).not.toContain("billing-plan-versions-repository.ts");
+  it("classifies the repositories of the billing plans and their versions as instance level, read from the files and their signatures", () => {
+    // Not the constants alone (they are the test's own): the files must exist, take a connection, and take no workspace.
+    for (const file of [
+      "billing-plans-repository.ts",
+      "billing-plan-versions-repository.ts",
+    ]) {
+      expect(sourceFiles(), file).toContain(file);
+      expect(INSTANCE_LEVEL, file).toContain(file);
+      expect(SCOPED, file).not.toContain(file);
+      const databaseFunctions =
+        exportedFunctions(file).filter(touchesTheDatabase);
+      expect(databaseFunctions.length, file).toBeGreaterThan(0);
+      for (const fn of databaseFunctions)
+        expect(
+          fn.parameters.map((parameter) => parameter.name),
+          `${file}: ${fn.name}`,
+        ).not.toContain("workspaceId");
+    }
   });
 
   // DM-08
