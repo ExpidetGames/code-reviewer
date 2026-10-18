@@ -7,10 +7,7 @@
 // switch, and the writer of the billing default reads the switch under the same lock before it writes.
 import type { Kysely } from "kysely";
 import { describe, expect, it } from "vitest";
-import {
-  createInstanceSettingsRepository,
-  type InstanceSettingsRepository,
-} from "../db/repositories/instance-settings-repository.ts";
+import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
 import type { Database } from "../db/schema.ts";
 import {
   createPostgresTestDatabase,

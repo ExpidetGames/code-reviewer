@@ -19,7 +19,7 @@ import { databaseDriver } from "../driver.ts";
 /** The message every refusal carries; the app and its tests look for this name. */
 const MESSAGE = "billing_plan_versions_immutable";
 
-/** The columns an update may not change on SQLite: everything but `role` and `created_by`. */
+/** The columns an update may not set on SQLite: everything but `role` and `created_by`. */
 const FROZEN_COLUMNS = [
   "id",
   "plan_id",
@@ -62,12 +62,11 @@ $$`,
         `create trigger billing_plan_versions_never_deleted before delete on billing_plan_versions begin select raise(abort, '${MESSAGE}: a plan version is never deleted'); end`,
       )
       .execute(db);
-    const changed = FROZEN_COLUMNS.map(
-      (column) => `old.${column} is not new.${column}`,
-    ).join(" or ");
+    // `update of`: the trigger fires for a statement that sets one of these columns, even to the value it has. Stricter than
+    // a comparison, and it needs no reference to the old row.
     await sql
       .raw(
-        `create trigger billing_plan_versions_terms_frozen before update on billing_plan_versions when ${changed} begin select raise(abort, '${MESSAGE}: a plan version changes only its role'); end`,
+        `create trigger billing_plan_versions_terms_frozen before update of ${FROZEN_COLUMNS.join(", ")} on billing_plan_versions begin select raise(abort, '${MESSAGE}: a plan version changes only its role'); end`,
       )
       .execute(db);
   },
