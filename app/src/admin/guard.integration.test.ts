@@ -56,10 +56,11 @@ afterEach(() => {
 });
 
 describe("the routes of the portal", () => {
-  it("are found on the file system: the pages of the sections, the settings route, the test mail route and the routes of the GitHub integration and the synchronization", () => {
+  it("are found on the file system: the pages of the sections, the settings route, the test mail route, the routes of the GitHub integration and the synchronization and the routes of the billing settings", () => {
     expect(adminRoutes.map(({ route }) => route).sort()).toEqual([
       "/admin",
       "/admin/approvals",
+      "/admin/billing",
       "/admin/integrations",
       "/admin/integrations/github",
       "/admin/limits",
@@ -70,6 +71,9 @@ describe("the routes of the portal", () => {
       "/admin/setup/sign-in",
       "/admin/setup/sign-up",
       "/api/admin/approvals/[id]",
+      "/api/admin/billing",
+      "/api/admin/billing/check",
+      "/api/admin/billing/notification-destination",
       "/api/admin/github",
       "/api/admin/github/check",
       "/api/admin/github/manifest",

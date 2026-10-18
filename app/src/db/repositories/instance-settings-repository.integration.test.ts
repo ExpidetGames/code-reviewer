@@ -127,3 +127,152 @@ describe("the instance settings repository, with who and when", () => {
     expect(await repository.get("tenancy")).toBeUndefined();
   });
 });
+
+describe("the instance settings repository, writes that guard against a change in between", () => {
+  const later = (iso: string) => () => new Date(iso);
+
+  // #437-T06
+  it("writes when the setting is as it was read, and refuses when it changed since", async () => {
+    const { db } = await createTestDatabase();
+    const first = createInstanceSettingsRepository(
+      db,
+      later("2026-10-11T09:30:00.000Z"),
+    );
+    const second = createInstanceSettingsRepository(
+      db,
+      later("2026-10-11T09:31:00.000Z"),
+    );
+    await first.set("max_workspaces_per_user", 5, null);
+    const read = await first.getWithMeta("max_workspaces_per_user");
+
+    const other = await second.setIfUnchanged(
+      "max_workspaces_per_user",
+      read,
+      6,
+      null,
+    );
+    const stale = await first.setIfUnchanged(
+      "max_workspaces_per_user",
+      read,
+      7,
+      null,
+    );
+
+    expect([other, stale]).toEqual([true, false]);
+    expect(await first.get("max_workspaces_per_user")).toBe(6);
+  });
+
+  // #437-T06
+  it("never gives two writes in the same millisecond the same time, so a stale read cannot match a newer write", async () => {
+    const { db } = await createTestDatabase();
+    const repository = createInstanceSettingsRepository(
+      db,
+      later("2026-10-11T09:30:00.000Z"),
+    );
+    await repository.set("max_workspaces_per_user", 5, null);
+    const read = await repository.getWithMeta("max_workspaces_per_user");
+
+    await repository.setIfUnchanged("max_workspaces_per_user", read, 6, null);
+    const stale = await repository.setIfUnchanged(
+      "max_workspaces_per_user",
+      read,
+      7,
+      null,
+    );
+
+    expect(stale).toBe(false);
+    expect(await repository.get("max_workspaces_per_user")).toBe(6);
+  });
+
+  // #437-T06
+  it("inserts only when there was no row at the read", async () => {
+    const { db } = await createTestDatabase();
+    const repository = createInstanceSettingsRepository(db);
+
+    const first = await repository.setIfUnchanged(
+      "tenancy",
+      undefined,
+      "multi",
+      null,
+    );
+    const second = await repository.setIfUnchanged(
+      "tenancy",
+      undefined,
+      "single",
+      null,
+    );
+
+    expect([first, second]).toEqual([true, false]);
+    expect(await repository.get("tenancy")).toBe("multi");
+  });
+
+  // #437-T05
+  it("hands a claim to one caller, and to another only once the first has run out", async () => {
+    const { db } = await createTestDatabase();
+    const repository = createInstanceSettingsRepository(
+      db,
+      later("2026-10-11T09:30:00.000Z"),
+    );
+    const value = { startedAt: "2026-10-11T09:30:00.000Z" };
+
+    const first = await repository.claim(
+      "billing_destination_lock",
+      value,
+      null,
+      "2026-10-11T09:29:00.000Z",
+    );
+    const second = await repository.claim(
+      "billing_destination_lock",
+      value,
+      null,
+      "2026-10-11T09:29:00.000Z",
+    );
+    const afterLease = await repository.claim(
+      "billing_destination_lock",
+      value,
+      null,
+      "2026-10-11T09:31:00.000Z",
+    );
+
+    expect([first, second, afterLease]).toEqual([true, false, true]);
+  });
+
+  // #437-T05
+  it("releases a claim only for the holder whose value it is, not for one that took it over", async () => {
+    const { db } = await createTestDatabase();
+    const repository = createInstanceSettingsRepository(
+      db,
+      later("2026-10-11T09:30:00.000Z"),
+    );
+    const first = { startedAt: "2026-10-11T09:30:00.000Z" };
+    const second = { startedAt: "2026-10-11T09:32:00.000Z" };
+    await repository.claim(
+      "billing_destination_lock",
+      first,
+      null,
+      "2026-10-11T09:29:00.000Z",
+    );
+    // The first holder ran out and the second took the lease over.
+    await repository.claim(
+      "billing_destination_lock",
+      second,
+      null,
+      "2026-10-11T09:31:00.000Z",
+    );
+
+    const byFirst = await repository.release("billing_destination_lock", first);
+    const heldAfter = await repository.claim(
+      "billing_destination_lock",
+      first,
+      null,
+      "2026-10-11T09:29:00.000Z",
+    );
+    const bySecond = await repository.release(
+      "billing_destination_lock",
+      second,
+    );
+
+    expect([byFirst, heldAfter, bySecond]).toEqual([false, false, true]);
+    expect(await repository.get("billing_destination_lock")).toBeUndefined();
+  });
+});

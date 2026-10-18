@@ -60,6 +60,14 @@ export type FakePaddle = {
   transactions(): FakeTransaction[];
   subscriptions(): FakeSubscription[];
   notificationSettings(): FakeEntity[];
+  /** From now on the list of notification settings leaves the secret out (the get and the create keep it). */
+  hideSecretsInList(hidden?: boolean): void;
+  /**
+   * From now on the list of notification settings is paginated like the other lists, `perPage` to a page with the
+   * `meta.pagination` block (null: one plain list again, as Paddle's documentation shows it). Whether the real list
+   * paginates is not verified (#448).
+   */
+  paginateNotificationSettings(perPage: number | null): void;
   /** A live subscription to this (recurring) price, as if the customer had paid at Paddle's checkout. */
   seedSubscription(input: {
     priceId: string;
@@ -123,6 +131,12 @@ export async function startPaddleFake(
     headers: Record<string, string> = {},
   ): void {
     if (res.destroyed || res.writableEnded) return;
+    // Paddle answers a DELETE with 204 and no body.
+    if (status === 204) {
+      res.writeHead(204, headers);
+      res.end();
+      return;
+    }
     const text = JSON.stringify(body);
     res.writeHead(status, {
       "content-type": "application/json",
@@ -288,6 +302,12 @@ export async function startPaddleFake(
     prices: () => structuredClone([...store.prices.values()]),
     transactions: () => structuredClone([...store.transactions.values()]),
     subscriptions: () => structuredClone([...store.subscriptions.values()]),
+    hideSecretsInList: (hidden = true) => {
+      store.listWithSecrets = !hidden;
+    },
+    paginateNotificationSettings: (perPage) => {
+      store.notificationListPageSize = perPage;
+    },
     notificationSettings: () =>
       structuredClone([...store.notificationSettings.values()]),
     seedSubscription: (input) =>

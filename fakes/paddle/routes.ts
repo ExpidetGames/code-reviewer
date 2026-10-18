@@ -616,6 +616,38 @@ export function createRoutes(store: Store, now: () => number): Route[] {
     },
     {
       method: "GET",
+      pattern: /^\/notification-settings$/,
+      handler: (request) => {
+        checkQuery(request.query, [
+          "active",
+          "traffic_source",
+          ...(store.notificationListPageSize === null ? [] : ["after"]),
+        ]);
+        const settings = [...store.notificationSettings.values()].map(
+          (setting) => {
+            if (store.listWithSecrets) return setting;
+            const visible = { ...setting };
+            delete visible.endpoint_secret_key;
+            return visible;
+          },
+        );
+        if (store.notificationListPageSize === null)
+          return { status: 200, data: settings };
+        const perPage = store.notificationListPageSize;
+        request.query.set("per_page", String(perPage));
+        return page(request, settings);
+      },
+    },
+    {
+      method: "DELETE",
+      pattern: /^\/notification-settings\/([^/]+)$/,
+      handler: ({ params }) => {
+        store.removeNotificationSetting(params[0] ?? "");
+        return { status: 204, data: null };
+      },
+    },
+    {
+      method: "GET",
       pattern: /^\/notification-settings\/([^/]+)$/,
       handler: ({ params }) => ({
         status: 200,

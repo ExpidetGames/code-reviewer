@@ -300,6 +300,84 @@ describe("Paddle errors", () => {
   });
 });
 
+describe("notification settings", () => {
+  const destination = "https://app.example.test/api/billing/webhook";
+  const input = (url: string) => ({
+    description: "Code Reviewer",
+    destination: url,
+    subscribed_events: ["subscription.updated"],
+  });
+
+  // #437-T05
+  it("lists the destinations with their secret and deletes one by id", async () => {
+    const fake = await startTestPaddle();
+    const client = clientFor(fake);
+    const first = await client.createNotificationSetting(input(destination));
+    const second = await client.createNotificationSetting(
+      input("https://other.example.test/hook"),
+    );
+
+    const listed = await client.listNotificationSettings();
+
+    expect(listed.map(({ id }) => id).sort()).toEqual(
+      [first.id, second.id].sort(),
+    );
+    expect(listed.find(({ id }) => id === first.id)).toMatchObject({
+      destination,
+      endpoint_secret_key: first.endpoint_secret_key,
+    });
+
+    await client.deleteNotificationSetting(first.id);
+
+    expect(
+      (await client.listNotificationSettings()).map(({ id }) => id),
+    ).toEqual([second.id]);
+    expect(
+      (await failureOf(client.deleteNotificationSetting(first.id))).code,
+    ).toBe("not_found");
+  });
+
+  // #437-T05
+  it("follows the pages when Paddle paginates the list, and refuses a list it cannot read to the end", async () => {
+    const fake = await startTestPaddle();
+    const client = clientFor(fake);
+    const created = [];
+    for (let n = 0; n < 5; n += 1)
+      created.push(
+        await client.createNotificationSetting(
+          input(`https://other${n}.example.test/hook`),
+        ),
+      );
+    fake.paginateNotificationSettings(2);
+
+    const listed = await client.listNotificationSettings();
+
+    expect(listed.map(({ id }) => id).sort()).toEqual(
+      created.map(({ id }) => id).sort(),
+    );
+    // Three pages, each with the cursor of the page before.
+    expect(
+      fake
+        .requests()
+        .filter(
+          ({ method, path }) =>
+            method === "GET" && path === "/notification-settings",
+        )
+        .map(({ query }) => query["after"] !== undefined),
+    ).toEqual([false, true, true]);
+
+    for (let n = 5; n < 30; n += 1)
+      await client.createNotificationSetting(
+        input(`https://other${n}.example.test/hook`),
+      );
+    fake.paginateNotificationSettings(1);
+
+    expect((await failureOf(client.listNotificationSettings())).code).toBe(
+      "invalid_response",
+    );
+  });
+});
+
 describe("no real network", () => {
   // #436-T11
   it("cannot reach the real Paddle from a test: the network guard blocks it", async () => {
