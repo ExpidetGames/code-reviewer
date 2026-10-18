@@ -14,7 +14,7 @@ and client secret, and the operator's own LLM key, `operator_llm_key`, #276). Ho
 
 The rows are read and written by `src/db/repositories/secrets-repository.ts`.
 
-Workspace secrets (a workspace's own LLM key, `llm_api_key`) belong to a workspace and live in the table
+Workspace secrets (a workspace's own LLM keys, one per provider: `llm_api_key` for OpenRouter, `llm_api_key.<provider>` for later ones) belong to a workspace and live in the table
 `workspace_secrets`, through `workspace-store.ts` (`createWorkspaceSecretStore`, one store per workspace; the names
 are `WORKSPACE_SECRET_NAMES`). Same encryption, but the additional authenticated data is the table, the **workspace
 id** and the name, and every secret carries a `binding` (what it was made for, the provider of an LLM key) that

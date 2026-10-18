@@ -424,7 +424,7 @@ async function importLlm({
   });
   let key: ImportSummary["llmKey"] = "already_configured";
   // Never over a key the workspace has.
-  if ((await keys.status()).state === "not_configured") {
+  if ((await keys.status(llm.provider)).state === "not_configured") {
     const saved = await keys.save(
       { provider: llm.provider, apiKey: llm.apiKey },
       null,

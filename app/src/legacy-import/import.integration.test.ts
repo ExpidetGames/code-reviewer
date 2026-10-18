@@ -184,7 +184,9 @@ describe("importing an existing installation", () => {
       appSecret: () => SECRET,
       env: () => ({}),
     });
-    const revealed = await llm.keyServiceFor(workspace?.id ?? "").reveal();
+    const revealed = await llm
+      .keyServiceFor(workspace?.id ?? "")
+      .reveal("openrouter");
     expect(revealed.ok && revealed.apiKey.reveal()).toBe(LLM_KEY);
     // Not set up yet: the short setup follows, and the sign in with GitHub waits for the admin.
     expect(await settingOf(h, "import_state")).toBe("done");
@@ -637,7 +639,7 @@ describe("importing an existing installation", () => {
     expect(
       await h.db.selectFrom("workspaces").select("id").execute(),
     ).toHaveLength(1);
-    const revealed = await llm.keyServiceFor(workspace.id).reveal();
+    const revealed = await llm.keyServiceFor(workspace.id).reveal("openrouter");
     expect(revealed.ok && revealed.apiKey.reveal()).toBe(
       "sk-or-changed-by-the-admin-0123",
     );
