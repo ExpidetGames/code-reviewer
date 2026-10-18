@@ -166,6 +166,17 @@ export const describeLimit = (value: number | null) =>
 export const describePrice = (minor: number | null) =>
   minor === null ? "none" : `$${formatMinorAsUsd(minor)}`;
 
+/**
+ * An amount as Paddle writes it (the string of minor units, "1234") as dollars and cents. The text is split, never turned
+ * into a number, so an amount of any size keeps all its digits. Anything that is not minor units is not shown as an amount.
+ */
+export function describePaddleAmount(amount: string): string {
+  if (!/^[0-9]{1,30}$/.test(amount))
+    return "an amount that is not in minor units";
+  const digits = amount.replace(/^0+(?=\d)/, "").padStart(3, "0");
+  return `$${digits.slice(0, -2)}.${digits.slice(-2)}`;
+}
+
 /** The model access of a version for the admin: the names of the entries, and a count of ids that match nothing. */
 export function describeModelAccess(
   access: ModelAccess | null,

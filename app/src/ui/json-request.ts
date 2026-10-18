@@ -31,14 +31,35 @@ export type RequestResult<T> =
       /** The route's error code or a transport code; a plain string because the routes own theirs. */
       code: string;
       issues: RequestIssue[];
+      /** The two values a refusal can carry as text (a price that differs: what was entered and what Paddle says). */
+      values?: { entered?: string; paddle?: string };
     };
 
 function failure(
   status: number | null,
   code: string,
   issues: RequestIssue[] = [],
+  values?: { entered?: string; paddle?: string },
 ): RequestResult<never> {
-  return { ok: false, status, code, issues };
+  return {
+    ok: false,
+    status,
+    code,
+    issues,
+    ...(values === undefined ? {} : { values }),
+  };
+}
+
+/** `entered` and `paddle` of a refusal, when they are text; any other field of the body is not read. */
+function readValues(
+  body: object,
+): { entered?: string; paddle?: string } | undefined {
+  const { entered, paddle } = body as { entered?: unknown; paddle?: unknown };
+  const values = {
+    ...(typeof entered === "string" ? { entered } : {}),
+    ...(typeof paddle === "string" ? { paddle } : {}),
+  };
+  return Object.keys(values).length === 0 ? undefined : values;
 }
 
 function readIssues(value: unknown): RequestIssue[] {
@@ -82,10 +103,14 @@ export async function requestJson<T>(
   }
   if (response.ok) return { ok: true, data: parsed as T };
 
-  const { error, issues } = (
-    typeof parsed === "object" && parsed !== null ? parsed : {}
-  ) as { error?: unknown; issues?: unknown };
+  const answer = typeof parsed === "object" && parsed !== null ? parsed : {};
+  const { error, issues } = answer as { error?: unknown; issues?: unknown };
   if (typeof error !== "string")
     return failure(response.status, "UNEXPECTED_RESPONSE");
-  return failure(response.status, error, readIssues(issues));
+  return failure(
+    response.status,
+    error,
+    readIssues(issues),
+    readValues(answer),
+  );
 }
