@@ -160,16 +160,20 @@ the Review kind card (Dynamic Review) show depends on the key mode of the worksp
   datalist and no estimate, and `project-save.ts` sends neither (a test plants a sentinel where a leak would sit and
   searches the DOM and every request body). An untouched form still sends nothing; a changed form sends only the changed
   groups, and the project-only entries travel in the project request.
-- **A provider without a stored key (decision C7).** The page passes `keyedProviders` (`keyed-providers.ts`, from
-  `keyServiceFor(workspaceId).statusAll()`: a readable key counts, an unreadable one does not). A provider without one is
+- **A provider without a stored key (decision C7).** A page of a workspace on its own key passes `keyedProviders`
+  (`keyed-providers.ts`, from `keyServiceFor(workspaceId).statusAll()`: a readable key counts, an unreadable one does not);
+  a managed workspace gets no list and its statuses are not read (`keyedProvidersFor`, a page test pins it). A provider without one is
   marked "no key yet" in the select and can still be chosen; the chosen one shows a warning with a link to the LLM
   access page. The warning is for the kind that is shown (Diff or Dynamic) and never appears on the operator's key.
 - **Copy.** Every code a save can answer with has a sentence in `ui/messages.ts` (`describeIssue`), including
   `PROVIDER_UNKNOWN`, the four `CATALOG_ENTRY_*` codes and `CATALOG_ENTRY_OWN_KEY_MODE`; the chooser's own words are
   `src/copy/model-choice.ts`, scanned by a test for model, vendor, price and cost words (the sentences about the plan are
   the one place that says "plan").
-- **Until the claim reads the entries (#432)** the choice is stored and shown, but the model of a managed job still follows
-  `modelTier` (nothing sets it any more, so the default level applies).
+- **Until the claim reads the entries (#432)** a chosen entry is stored and shown, but it drives no job: the model of a
+  managed job still follows `modelTier`. A tier stored earlier (a managed workspace that chose High under #283) stays in
+  force and now **cannot be seen or changed in the form** (the form carries it through every Diff save untouched), while
+  the chooser says "Default of this instance". New data has no tier, so the default level applies. This interim state is
+  expected: #432, #433 and #434 are released together, and nobody should test it on its own as a defect.
 
 ## From settings to a runner job
 

@@ -2,7 +2,7 @@
 
 import type { Metadata } from "next";
 import { getWorkspaceLlm } from "@/llm/shared";
-import { keyedProvidersOf } from "@/review-settings/ui/keyed-providers";
+import { keyedProvidersFor } from "@/review-settings/ui/keyed-providers";
 import { reviewSettingsServiceFor } from "@/review-settings/shared";
 import { planPageLinkedFor } from "@/usage/shared";
 import {
@@ -22,19 +22,23 @@ export default async function ReviewDefaultsSettingsPage({
   const { workspace: slug } = await params;
   const { workspace, role } = await requireWorkspace(slug);
   const workspaceId = workspace.id;
-  const [data, showPlan, keyStatuses] = await Promise.all([
+  const [data, showPlan] = await Promise.all([
     loadGlobalSettingsPage({
       settings: reviewSettingsServiceFor(workspaceId),
     }),
     planPageLinkedFor(workspaceId),
-    getWorkspaceLlm().keyServiceFor(workspaceId).statusAll(),
   ]);
+  // Only a workspace on its own key gets the list (and only then are its key statuses read).
+  const keyedProviders = await keyedProvidersFor(
+    data.model,
+    getWorkspaceLlm().keyServiceFor(workspaceId),
+  );
   return (
     <GlobalSettingsPageContent
       workspaceSlug={workspace.slug}
       canEdit={can(role, "manage_review_defaults")}
       showPlan={showPlan}
-      keyedProviders={keyedProvidersOf(keyStatuses)}
+      {...(keyedProviders === undefined ? {} : { keyedProviders })}
       data={data}
     />
   );

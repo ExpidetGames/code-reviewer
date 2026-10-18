@@ -8,7 +8,7 @@ import { getConfigStatusFor } from "@/config-status/shared";
 import { configAudienceOf } from "@/config-status/status";
 import { getWorkspaceLlm } from "@/llm/shared";
 import { llmAccessAttention } from "@/llm/ui/llm-access-notice";
-import { keyedProvidersOf } from "@/review-settings/ui/keyed-providers";
+import { keyedProvidersFor } from "@/review-settings/ui/keyed-providers";
 import { projectServiceFor } from "@/projects/shared";
 import {
   loadProjectSettingsPage,
@@ -66,9 +66,10 @@ async function ProjectSettingsContent({
   if (data.kind === "not_found") notFound();
   // The workspace's LLM hint is a row of the page's one "Needs attention" strip, not its own region.
   const llm = getWorkspaceLlm();
-  const [llmSummary, keyStatuses] = await Promise.all([
+  // The key statuses are read only for a workspace on its own key; a managed one is handed no provider id.
+  const [llmSummary, keyedProviders] = await Promise.all([
     llm.summaryFor(workspaceId),
-    llm.keyServiceFor(workspaceId).statusAll(),
+    keyedProvidersFor(data.model, llm.keyServiceFor(workspaceId)),
   ]);
   const llmNotice = llmAccessAttention({
     workspaceSlug,
@@ -80,7 +81,7 @@ async function ProjectSettingsContent({
       workspaceSlug={workspaceSlug}
       audience={configAudienceOf(user)}
       llmNotice={llmNotice}
-      keyedProviders={keyedProvidersOf(keyStatuses)}
+      {...(keyedProviders === undefined ? {} : { keyedProviders })}
       data={data}
     />
   );

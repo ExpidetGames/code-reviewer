@@ -58,9 +58,9 @@ the tiers are retired with #434. The copy is in `src/copy/model-choice.ts`, and 
 vendor, a price or a cost. The settings routes return `modelTier` and no model field for such a workspace and refuse a
 write that sets one with `MODEL_MANAGED_BY_INSTANCE`.
 
-A level that has no model for the kind of review in force is shown as **Not available**, and cannot be chosen, without
-saying why or which model would back it: the form gets a yes or no per level and kind (`tierAvailability`,
-`configuredTiers`), read from this configuration on every request, never an id.
+No form shows the levels any more, so there is no "Not available" level to explain. The tier is still **read at claim**
+(below): a level without a model for the kind of review fails the job with `managed_tier_unavailable`. The yes or no per
+level and kind (`tierAvailability`, `configuredTiers`) stays on the settings view until #434 retires the tiers.
 
 ## At claim
 
