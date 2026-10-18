@@ -2,10 +2,10 @@
 
 // The whole chain an operator relies on, on the real app (#285, the last issue of #268): a workspace with limits on an
 // instance whose operator API is on runs, is refused, is told so on its pull request, is reset from outside, can be
-// read in the usage feed, and never sees which model backs its quality level, while a workspace on its own key on the
+// read in the usage feed, and never sees which model backs its catalog entry, while a workspace on its own key on the
 // same instance is untouched. Nothing in the path is replaced but the outside world: the fake GitHub, the fake LLM,
 // and a script (`helpers/operator-api.ts`) that plays the external service over the operator API. The real runner
-// (the job loop and the real PR-Agent) claims the jobs, so the claim, the key mode, the tier model, the usage records
+// (the job loop and the real PR-Agent) claims the jobs, so the claim, the key mode, the catalog entry's model, the usage records
 // and the refusals all run as in production.
 //
 // The instance is the seventh app of the run (playwright.config.ts): multi-tenant, `OPERATOR_API_TOKEN` set, the
@@ -14,8 +14,11 @@
 //   B  a workspace on its own key, with an entitlement row of its own that states no limit.
 // The plain counterpart (an instance that never switched any of this on) is e2e/operator/plain-instance.e2e.ts.
 //
-// The case ids are those of #285. The Quality choice (T10) and the plan page's states (T11) are cases of the
-// follow-ups the earlier pull requests of the epic named; they are proven here and nowhere else at this level.
+// The case ids are those of #285. The review defaults without a model (T10) and the plan page's states (T11) are cases
+// of the follow-ups the earlier pull requests of the epic named; they are proven here and nowhere else at this level.
+// The catalog chooser of the project settings is the journey of #433 (T10 of that issue), in the same instance: the
+// instance default entry serves the first reviews, the Owner chooses the second entry for the project, and from then on
+// the claim and the usage feed name that entry (#432, ADR 0005).
 import {
   expect,
   test,
@@ -26,6 +29,7 @@ import {
 } from "@playwright/test";
 import { startLlmFake, type FakeLlm } from "../../../fakes/llm/server.ts";
 import { changeAdminSetting } from "../helpers/admin-api";
+import { seedCatalog, setCatalogDefaults } from "../helpers/catalog";
 import { e2eEnv, llmEnv } from "../helpers/e2e-env";
 import {
   addGithubAccount,
@@ -89,20 +93,35 @@ const MEMBER_EMAIL = "limits-member@e2e.test";
 const OPERATOR_KEY = "sk-or-v1-e2e-operator-key-0123456789abcdef-opr1";
 const OWN_KEY_B = "sk-or-v1-e2e-own-key-of-workspace-b-0123456789-own2";
 
-// Which model backs each tier: operator data, made up, and distinctive so that a search for them cannot match
-// anything else. They are in the operator API, the fake LLM and nowhere a workspace can read.
-const TIER_MODELS = {
-  low: { diff: "tierproof/low-diff-q7x2", dynamic: "tierproof/low-dyn-q7x2" },
-  medium: {
-    diff: "tierproof/medium-diff-m4k9",
-    dynamic: "tierproof/medium-dyn-m4k9",
+// Which model backs each catalog entry: operator data, made up, and distinctive so that a search for them cannot match
+// anything else. They are in the catalog, the fake LLM and nowhere a workspace can read. The names are what members
+// read; "Quick look" is the instance default of Diff Review, "Thorough" the entry the Owner chooses for the project.
+const ENTRIES = {
+  quick: {
+    name: "Quick look",
+    description: "Fast passes over small changes.",
+    model: "entryproof/m-alpha-z1y2",
   },
-  high: {
-    diff: "tierproof/high-diff-h8w3",
-    dynamic: "tierproof/high-dyn-h8w3",
+  thorough: {
+    name: "Thorough",
+    description: "Careful passes over large changes.",
+    model: "entryproof/m-beta-z1y2",
+  },
+  explorer: {
+    name: "Explorer",
+    description: "Explores the repository around a change.",
+    model: "entryproof/m-gamma-z1y2",
+  },
+  detective: {
+    name: "Detective",
+    description: "Follows every call to the end.",
+    model: "entryproof/m-delta-z1y2",
   },
 } as const;
-// What the provider's metadata says the tier models cost, per token (as the provider writes it): distinctive
+const ENTRY_MODEL_IDS: string[] = Object.values(ENTRIES).map(
+  (entry) => entry.model,
+);
+// What the provider's metadata says the entry models cost, per token (as the provider writes it): distinctive
 // figures, so that a page that shows a price, per token or per million tokens, is found.
 const PROMPT_PRICE_PER_TOKEN = "0.0000007319";
 const COMPLETION_PRICE_PER_TOKEN = "0.0000029173";
@@ -142,11 +161,13 @@ test.describe("a limited workspace on an instance with the operator API on", () 
   let workspaceIdB = "";
   // The start of the current period of workspace A, as the operator last set it.
   let periodStartA = "";
+  // The ids of the seeded catalog entries by name (the usage feed names an entry by id).
+  let entryIds: Record<string, string> = {};
 
   test.beforeAll(async ({ browser, request }) => {
     test.setTimeout(240_000);
     llm = await startLlmFake({ port: e2eEnv.operatorLlmFakePort });
-    registerTierModels(llm);
+    registerEntryModels(llm);
     runner = await startRunner({
       appUrl: e2eEnv.operatorAppUrl,
       llmBaseUrl: llm.baseUrl,
@@ -224,7 +245,7 @@ test.describe("a limited workspace on an instance with the operator API on", () 
 
   test.beforeEach(() => {
     fakeLlm().reset();
-    registerTierModels(fakeLlm());
+    registerEntryModels(fakeLlm());
   });
 
   test.afterAll(async () => {
@@ -249,6 +270,11 @@ test.describe("a limited workspace on an instance with the operator API on", () 
   function ownKeyPage(): Page {
     if (pageB === undefined) throw new Error("Owner B has no page.");
     return pageB;
+  }
+  function entryId(name: string): string {
+    const id = entryIds[name];
+    if (id === undefined) throw new Error(`The entry ${name} was not seeded.`);
+    return id;
   }
   function runnerOutput(): string {
     if (runner === undefined) throw new Error("The runner was not started.");
@@ -314,7 +340,7 @@ test.describe("a limited workspace on an instance with the operator API on", () 
     comments.filter((comment) => comment.body.includes(REVIEW_MARKER));
 
   // #285-T02
-  test("the script sets default entitlements and a tier configuration, and two pull requests are reviewed with the operator's key and the tier model", async ({
+  test("the script sets default entitlements and the catalog, and two pull requests are reviewed with the operator's key and the model of the default entry", async ({
     request,
   }) => {
     test.setTimeout(240_000);
@@ -323,9 +349,23 @@ test.describe("a limited workspace on an instance with the operator API on", () 
     await changeAdminSetting(e2eEnv.operatorAppUrl, {
       operatorLlmKey: { apiKey: OPERATOR_KEY },
     });
-    // The operator's script: which model backs each tier, the page "Manage plan" leads to, the entitlements of
-    // workspace B (its own key, no limit) and the default for everybody else.
-    await script().putModelTiers(TIER_MODELS);
+    // The operator's catalog: two released entries for Diff Review and two for Dynamic Review, the first of each kind
+    // the instance default. Then the script: the page "Manage plan" leads to, the entitlements of workspace B (its own
+    // key, no limit) and the default for everybody else.
+    entryIds = await seedCatalog(
+      e2eEnv.operatorDatabasePath,
+      Object.values(ENTRIES).map((entry, index) => ({
+        name: entry.name,
+        description: entry.description,
+        modelId: entry.model,
+        kinds: index < 2 ? ["diff"] : ["dynamic"],
+        sortOrder: (index % 2) + 1,
+      })),
+    );
+    await setCatalogDefaults(e2eEnv.operatorDatabasePath, {
+      diff: entryId(ENTRIES.quick.name),
+      dynamic: entryId(ENTRIES.explorer.name),
+    });
     await script().putPlanManagement(PLAN_PAGE);
     await script().putEntitlements(workspaceIdB, {
       planLabel: "e2e-own-key-plan",
@@ -355,7 +395,7 @@ test.describe("a limited workspace on an instance with the operator API on", () 
     ).toContainText("Succeeded", RUN_TIMEOUT);
 
     // Each pull request got one review comment. The model was asked twice, with the operator's key (not a key of
-    // the workspace, which has none), for the model of the medium tier, and with the provider's parameter
+    // the workspace, which has none), for the model of the default entry, and with the provider's parameter
     // requirement of #270.
     for (const number of [1, 2])
       expect(reviewsOf(await commentsOf(request, REPO_A, number))).toHaveLength(
@@ -365,7 +405,7 @@ test.describe("a limited workspace on an instance with the operator API on", () 
     expect(asked).toHaveLength(2);
     for (const item of asked) {
       expect(item.authorization).toBe(`Bearer ${OPERATOR_KEY}`);
-      expect(item.model).toContain(TIER_MODELS.medium.diff);
+      expect(item.model).toContain(ENTRIES.quick.model);
       expect(item.provider).toMatchObject({ require_parameters: true });
     }
     // The operator's key stays in the runner's hands: it is in no output of the runner.
@@ -435,7 +475,7 @@ test.describe("a limited workspace on an instance with the operator API on", () 
   });
 
   // #285-T04
-  test("the usage feed holds the two settled records with the measured cost and the tier, in order, and no model, repository or person", async () => {
+  test("the usage feed holds the two settled records with the measured cost and the default entry, in order, and no model, repository or person", async () => {
     test.setTimeout(240_000);
     // A record is served once it was settled more than the safety lag ago (60 seconds): the script polls like a
     // reader that is caught up would.
@@ -452,7 +492,9 @@ test.describe("a limited workspace on an instance with the operator API on", () 
         jobId: expect.any(String),
         reviewKind: "diff",
         keyMode: "managed",
-        modelTier: "medium",
+        modelTier: null,
+        catalogEntryId: entryId(ENTRIES.quick.name),
+        catalogEntryName: ENTRIES.quick.name,
         costMicroUsd: REPORTED_COST_MICRO_USD,
         promptTokens: 100,
         completionTokens: 50,
@@ -503,41 +545,97 @@ test.describe("a limited workspace on an instance with the operator API on", () 
   });
 
   // #285-T10
-  test("an Owner chooses the High quality level in the review defaults, without a model field or a model name anywhere on the page", async () => {
+  test("an Owner reads the review defaults without a model field, a quality level or a model name anywhere on the page", async () => {
     const page = ownerPage();
     await page.goto(`/w/${slugA}/settings/review-defaults`);
-    const quality = page.locator('[data-field="modelTier"]');
-    await expect(quality).toBeVisible();
-    // Three levels, all available (the operator configured a model for every tier and kind), none of them says
-    // which model it is.
-    for (const level of ["low", "medium", "high"])
-      await expect(quality.locator(`[data-level="${level}"]`)).toBeVisible();
-    await expect(page.getByText("Not available")).toHaveCount(0);
+    // The workspace holds no default entry (decision C3): the page says the choice is made for each project.
+    await expect(
+      page.getByText(/chosen for each project, on the settings page/),
+    ).toBeVisible();
+    await expect(page.locator('[data-field="modelTier"]')).toHaveCount(0);
+    await expect(page.getByRole("radiogroup", { name: "Quality" })).toHaveCount(
+      0,
+    );
     // A workspace on the operator's key has no model field to fill in.
     await expect(page.getByLabel("Model", { exact: true })).toHaveCount(0);
     await expect(page.getByLabel("Fallback model")).toHaveCount(0);
     await expect(page.getByLabel("Dynamic Review model")).toHaveCount(0);
+    await expect(page.getByLabel("Provider", { exact: true })).toHaveCount(0);
     await expectNothingSecret(
       [["the review defaults", await page.content()]],
       "the review defaults",
     );
+  });
 
-    await quality.getByRole("radio", { name: /High/ }).click();
-    await page.getByRole("button", { name: "Save review defaults" }).click();
+  // #433-T10
+  test("an Owner chooses two different catalog entries for Diff and Dynamic Review of a project, and sees no model or provider", async () => {
+    // The entries are those T02 seeded: the Owner chooses the second of each kind over the instance default.
+    const page = ownerPage();
+    await page.goto(`/w/${slugA}/projects`);
+    await page
+      .getByRole("link", { name: REPO_A.fullName, exact: true })
+      .click();
+    await expect(
+      page.getByRole("heading", { level: 1, name: REPO_A.fullName }),
+    ).toBeVisible();
+
+    const diffChoice = page.locator('[data-field="catalogEntryDiff"]');
+    await expect(diffChoice).toBeVisible();
+    // Name and description of the entries that serve Diff Review, in the order of the catalog, and no Dynamic entry.
+    await expect(diffChoice.locator("[data-entry]")).toHaveCount(2);
+    await expect(diffChoice).toContainText(ENTRIES.quick.name);
+    await expect(diffChoice).toContainText(ENTRIES.quick.description);
+    await expect(diffChoice).not.toContainText(ENTRIES.explorer.name);
+    // No model field, no provider and no estimate on the managed form.
+    await expect(page.getByLabel("Model", { exact: true })).toHaveCount(0);
+    await expect(page.getByLabel("Provider", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("Estimated cost")).toHaveCount(0);
+
+    await diffChoice.getByRole("radio", { name: /^Thorough/ }).click();
+    await page.getByRole("radio", { name: "Dynamic Review" }).click();
+    const dynamicChoice = page.locator('[data-field="catalogEntryDynamic"]');
+    await expect(dynamicChoice.locator("[data-entry]")).toHaveCount(2);
+    await dynamicChoice.getByRole("radio", { name: /^Detective/ }).click();
+    await page.getByRole("button", { name: "Save review settings" }).click();
+    await page
+      .getByRole("alertdialog")
+      .getByRole("button", { name: "Switch to Dynamic Review" })
+      .click();
     await expect(
       page.getByRole("status").filter({ hasText: "Saved." }),
     ).toBeVisible();
-    // The choice is stored: a reload shows it. Its effect is the model of the review in T05.
+
+    // Both choices are stored: a reload shows them, one per kind.
     await page.reload();
     await expect(
       page
-        .locator('[data-field="modelTier"]')
-        .getByRole("radio", { name: /High/ }),
+        .locator('[data-field="catalogEntryDynamic"]')
+        .getByRole("radio", { name: /^Detective/ }),
     ).toBeChecked();
+    await page.getByRole("radio", { name: "Diff Review" }).click();
+    await expect(
+      page
+        .locator('[data-field="catalogEntryDiff"]')
+        .getByRole("radio", { name: /^Thorough/ }),
+    ).toBeChecked();
+    // Nothing the operator keeps to itself is in the page: not a model id, not the provider.
+    const html = await page.content();
+    expect(html).not.toContain("entryproof");
+    expect(html).not.toMatch(/openrouter/i);
+
+    // The project goes back to Diff Review for the journeys that follow (confirmed, as every switch is).
+    await page.getByRole("button", { name: "Save review settings" }).click();
+    await page
+      .getByRole("alertdialog")
+      .getByRole("button", { name: "Switch to Diff Review" })
+      .click();
+    await expect(
+      page.getByRole("status").filter({ hasText: "Saved." }),
+    ).toBeVisible();
   });
 
   // #285-T05, #285-T11
-  test("the script moves the start of the period forward and the next push is reviewed, on the model of the chosen level; the plan page follows", async ({
+  test("the script moves the start of the period forward and the next push is reviewed, on the entry the Owner chose for the project; the plan page follows", async ({
     request,
   }) => {
     test.setTimeout(240_000);
@@ -573,11 +671,13 @@ test.describe("a limited workspace on an instance with the operator API on", () 
       runsOf(page, REPO_A.fullName, 3).locator("[data-status]"),
     ).toHaveText([/Succeeded/, /Failed/, /Failed/], RUN_TIMEOUT);
 
-    // The review ran for the High level the Owner chose in T10.
+    // The Owner chose "Thorough" for the project in T10 (over the instance default "Quick look"): the claim names that
+    // entry, so the review ran on its model and not on the default's.
     const asked = fakeLlm().requests();
     expect(asked).toHaveLength(1);
     expect(asked[0]?.authorization).toBe(`Bearer ${OPERATOR_KEY}`);
-    expect(asked[0]?.model).toContain(TIER_MODELS.high.diff);
+    expect(asked[0]?.model).toContain(ENTRIES.thorough.model);
+    expect(asked[0]?.model).not.toContain(ENTRIES.quick.model);
     expect(reviewsOf(await commentsOf(request, REPO_A, 3))).toHaveLength(1);
     await page.goto(`/w/${slugA}/settings/plan`);
     await expect(page.getByText("1 of 2", { exact: true })).toBeVisible();
@@ -730,7 +830,7 @@ test.describe("a limited workspace on an instance with the operator API on", () 
   });
 
   // #285-T07
-  test("a member's views and the comments on the pull requests contain no tier model id, key, price, amount or cost", async ({
+  test("a member's views and the comments on the pull requests contain no entry model id, key, price, amount or cost", async ({
     browser,
     request,
   }) => {
@@ -820,7 +920,7 @@ test.describe("a limited workspace on an instance with the operator API on", () 
   });
 
   // #285-T09
-  test("a workspace on its own key on the same instance is unaffected by the limit, the suspension and the tiers of the other", async ({
+  test("a workspace on its own key on the same instance is unaffected by the limit, the suspension and the catalog of the other", async ({
     request,
   }) => {
     test.setTimeout(240_000);
@@ -853,19 +953,17 @@ test.describe("a limited workspace on an instance with the operator API on", () 
       runsOf(page, REPO_B.fullName, 2).locator("[data-status]"),
     ).toContainText("Succeeded", RUN_TIMEOUT);
 
-    // It was reviewed with its own key and its own model: not the operator's key, not a tier model.
+    // It was reviewed with its own key and its own model: not the operator's key, not the model of an entry.
     const asked = fakeLlm().requests();
     expect(asked).toHaveLength(1);
     expect(asked[0]?.authorization).toBe(`Bearer ${OWN_KEY_B}`);
     expect(asked[0]?.model).toContain(llmEnv.model);
-    for (const tier of Object.values(TIER_MODELS))
-      for (const id of Object.values(tier))
-        expect(asked[0]?.model).not.toContain(id);
+    for (const id of ENTRY_MODEL_IDS) expect(asked[0]?.model).not.toContain(id);
     for (const number of [1, 2])
       expect(reviewsOf(await commentsOf(request, REPO_B, number))).toHaveLength(
         1,
       );
-    // The refusal notice of A, like every comment of A, holds nothing of the tiers.
+    // The refusal notice of A, like every comment of A, holds nothing of the catalog.
     await expect
       .poll(
         async () => noticesOf(await commentsOf(request, REPO_A, 4)).length,
@@ -879,7 +977,7 @@ test.describe("a limited workspace on an instance with the operator API on", () 
       "workspace A",
     );
 
-    // The usage of the two workspaces is kept apart: B's runs are its own key, no tier, a measured cost; A's records
+    // The usage of the two workspaces is kept apart: B's runs are its own key, no entry, a measured cost; A's records
     // did not change, and the refused review of A left none (the summary has no safety lag).
     const summaryB = await script().call(
       "GET",
@@ -905,10 +1003,12 @@ test.describe("a limited workspace on an instance with the operator API on", () 
       groups: [{ keyMode: "managed", recordCount: 2, settledCount: 2 }],
     });
 
-    // Its pages are those of a workspace on its own key: it chooses a model, not a quality level, and nothing says
+    // Its pages are those of a workspace on its own key: it chooses a model, not a catalog entry, and nothing says
     // the instance provides its models.
     await page.goto(`/w/${slugB}/settings/review-defaults`);
-    await expect(page.locator('[data-field="modelTier"]')).toHaveCount(0);
+    await expect(page.locator('[data-field="catalogEntryDiff"]')).toHaveCount(
+      0,
+    );
     await expect(page.getByLabel("Model", { exact: true })).toBeVisible();
     await page.goto(`/w/${slugB}/settings/plan`);
     await expect(
@@ -920,15 +1020,23 @@ test.describe("a limited workspace on an instance with the operator API on", () 
   });
 
   // #285-T04 (continued): the feed after everything.
-  test("the usage feed, read again at the end, holds every settled record of the workspace in order, with the level each ran on", async () => {
+  test("the usage feed, read again at the end, holds every settled record of the workspace in order, with the entry each ran on", async () => {
     test.setTimeout(240_000);
     const records = await pollUsage(script(), workspaceIdA, 4);
-    expect(records.map((record) => record.modelTier)).toEqual([
-      "medium",
-      "medium",
-      "high",
-      "high",
+    // The two first runs ran on the instance default, the two after the Owner's choice on the chosen entry (#432, #433).
+    expect(records.map((record) => record.catalogEntryName)).toEqual([
+      ENTRIES.quick.name,
+      ENTRIES.quick.name,
+      ENTRIES.thorough.name,
+      ENTRIES.thorough.name,
     ]);
+    expect(records.map((record) => record.catalogEntryId)).toEqual([
+      entryId(ENTRIES.quick.name),
+      entryId(ENTRIES.quick.name),
+      entryId(ENTRIES.thorough.name),
+      entryId(ENTRIES.thorough.name),
+    ]);
+    expect(records.every((record) => record.modelTier === null)).toBe(true);
     expect(
       records.every(
         (record) => record.costMicroUsd === REPORTED_COST_MICRO_USD,
@@ -946,6 +1054,8 @@ test.describe("a limited workspace on an instance with the operator API on", () 
       expect(record).toMatchObject({
         keyMode: "own",
         modelTier: null,
+        catalogEntryId: null,
+        catalogEntryName: null,
         costMicroUsd: REPORTED_COST_MICRO_USD,
       });
     await expectNothingSecret(
@@ -969,28 +1079,27 @@ const DEFAULT_ENTITLEMENTS = {
   suspensionCode: null,
 } as const;
 
-/** The fake LLM's model metadata for the tier models: what the provider says the models support and cost. */
-function registerTierModels(llm: FakeLlm): void {
-  for (const tier of Object.values(TIER_MODELS))
-    for (const id of Object.values(tier))
-      llm.setModel(id, [
-        {
-          supported_parameters: [
-            "tools",
-            "tool_choice",
-            "response_format",
-            "structured_outputs",
-            "max_tokens",
-          ],
-          max_completion_tokens: 16_384,
-          context_length: 200_000,
-          pricing: {
-            prompt: PROMPT_PRICE_PER_TOKEN,
-            completion: COMPLETION_PRICE_PER_TOKEN,
-          },
-          supports_tool_choice: { required: true },
+/** The fake LLM's model metadata for the entry models: what the provider says the models support and cost. */
+function registerEntryModels(llm: FakeLlm): void {
+  for (const id of ENTRY_MODEL_IDS)
+    llm.setModel(id, [
+      {
+        supported_parameters: [
+          "tools",
+          "tool_choice",
+          "response_format",
+          "structured_outputs",
+          "max_tokens",
+        ],
+        max_completion_tokens: 16_384,
+        context_length: 200_000,
+        pricing: {
+          prompt: PROMPT_PRICE_PER_TOKEN,
+          completion: COMPLETION_PRICE_PER_TOKEN,
         },
-      ]);
+        supports_tool_choice: { required: true },
+      },
+    ]);
 }
 
 /** `from` and `to` of a period that starts at `start` and holds everything the journey does. */
@@ -1122,7 +1231,7 @@ async function renderedViews(
   await take(
     "the review defaults",
     `/w/${slug}/settings/review-defaults`,
-    page.locator('[data-field="modelTier"]'),
+    page.getByLabel("Token budget", { exact: true }),
   );
   return texts;
 }
@@ -1135,14 +1244,14 @@ const CONTROLS: Array<{
   fails: string | null;
 }> = [
   {
-    name: "the id of a tier model",
-    text: `reviewed by ${TIER_MODELS.low.diff}`,
-    fails: `a control holds ${TIER_MODELS.low.diff}`,
+    name: "the id of an entry model",
+    text: `reviewed by ${ENTRIES.quick.model}`,
+    fails: `a control holds ${ENTRIES.quick.model}`,
   },
   {
-    name: "the name of a tier model without its vendor",
-    text: "model medium-dyn-m4k9",
-    fails: "a control holds medium-dyn-m4k9",
+    name: "the name of an entry model without its vendor",
+    text: "model m-gamma-z1y2",
+    fails: "a control holds m-gamma-z1y2",
   },
   {
     name: "the operator's key",
@@ -1203,10 +1312,10 @@ const CONTROLS: Array<{
   },
   {
     // ... and nothing else of the list.
-    name: "a tier model id, for the operator's feed",
-    text: `{"costMicroUsd":100,"model":"${TIER_MODELS.high.diff}"}`,
+    name: "an entry model id, for the operator's feed",
+    text: `{"costMicroUsd":100,"model":"${ENTRIES.thorough.model}"}`,
     options: { costIsTheOperators: true },
-    fails: `a control holds ${TIER_MODELS.high.diff}`,
+    fails: `a control holds ${ENTRIES.thorough.model}`,
   },
   {
     name: "a price, for the operator's feed",
@@ -1233,7 +1342,7 @@ async function expectTheSearchBites(): Promise<void> {
 }
 
 /**
- * Nothing in these texts is a model id of a tier, a price of a model, a key, an amount of money or a measured cost.
+ * Nothing in these texts is a model id of an entry, a price of a model, a key, an amount of money or a measured cost.
  * `where` names the kind of text for the failure message.
  */
 async function expectNothingSecret(
@@ -1242,11 +1351,11 @@ async function expectNothingSecret(
   /** The operator reads the measured cost of the runs (the feed); a workspace never does. */
   options: { costIsTheOperators?: boolean } = {},
 ): Promise<void> {
-  const ids = Object.values(TIER_MODELS).flatMap((tier) => Object.values(tier));
+  const ids = ENTRY_MODEL_IDS;
   const secrets = [
     ...ids,
     ...ids.map((id) => id.split("/")[1] ?? id),
-    "tierproof",
+    "entryproof",
     OPERATOR_KEY,
     OPERATOR_KEY.slice(0, -4),
     SUSPENSION_CODE,

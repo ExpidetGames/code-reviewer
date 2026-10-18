@@ -90,6 +90,7 @@ export function ProjectSettingsPageContent({
   workspaceSlug,
   audience = "member",
   llmNotice = null,
+  keyedProviders,
   data,
   api,
 }: {
@@ -99,6 +100,8 @@ export function ProjectSettingsPageContent({
   audience?: ConfigAudience;
   /** The workspace's LLM notice, built by the page (it needs the server's summary); a row of the strip. */
   llmNotice?: AttentionNotice | null;
+  /** The providers that have a stored key in the workspace (#433): the form warns about a chosen one that has none. */
+  keyedProviders?: readonly string[];
   data: Extract<ProjectSettingsPageData, { kind: "ready" }>;
   /** Only tests pass this: a server component cannot hand functions to the client form. */
   api?: SettingsApi;
@@ -127,6 +130,7 @@ export function ProjectSettingsPageContent({
           initial={data.model}
           dynamicReviewEnabled={data.dynamicReviewEnabled}
           repositoryId={data.row.repositoryId}
+          {...(keyedProviders === undefined ? {} : { keyedProviders })}
           {...(api === undefined ? {} : { api })}
         />
       </div>

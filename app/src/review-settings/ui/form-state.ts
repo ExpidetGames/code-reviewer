@@ -27,7 +27,7 @@ import {
 import type { SettingsFormModel } from "./form-model.ts";
 
 export type FormValues = {
-  /** Carried through a save so a stored provider is never dropped; the form has no field for it yet (#430). */
+  /** The provider of `model` (#430, #433); empty for a workspace on the operator's key, which has no field for it. */
   provider: string;
   model: string;
   /** Empty means no fallback model. */
@@ -42,7 +42,7 @@ export type FormValues = {
   allowedCommands: ReviewCommand[];
   /**
    * The quality level of a workspace on the operator's key (#280, #283). Carried through a save of any workspace, so
-   * the level that is stored is never dropped; only the quality choice changes it.
+   * the level that is stored is never dropped; no control changes it any more, the catalog entry replaced it (#433).
    */
   modelTier: ModelTier;
 };
@@ -82,12 +82,22 @@ export function initialFormState(model: SettingsFormModel): FormState {
     overridden,
     ...(model.dynamic === undefined
       ? {}
-      : { dynamic: initialDynamicValues(model.dynamic) }),
+      : {
+          dynamic: initialDynamicValues(
+            model.dynamic,
+            model.catalog?.selection ?? null,
+          ),
+        }),
   };
 }
 
 export type TextField =
-  "model" | "fallbackModel" | "extraInstructions" | "maxFindings" | "maxTokens";
+  | "provider"
+  | "model"
+  | "fallbackModel"
+  | "extraInstructions"
+  | "maxFindings"
+  | "maxTokens";
 export type BooleanField =
   | "largePrChunking"
   | "inlineKeyIssues"
@@ -106,12 +116,23 @@ export function setText(
   };
 }
 
-/** The quality level a workspace on the operator's key chose (#283). */
-export function setModelTier(state: FormState, tier: ModelTier): FormState {
+/**
+ * Chooses the provider of the Diff models. A model exists only at its provider, so a different provider clears the
+ * model and the fallback model typed for the old one: the person names them again (the suggestions switch with the
+ * provider). Choosing the provider that is already chosen changes nothing.
+ */
+export function setProvider(state: FormState, provider: string): FormState {
+  if (provider === state.values.provider) return state;
   return {
     ...state,
-    values: { ...state.values, modelTier: tier },
-    overridden: { ...state.overridden, modelTier: true },
+    values: { ...state.values, provider, model: "", fallbackModel: "" },
+    overridden: {
+      ...state.overridden,
+      provider: true,
+      model: true,
+      fallbackModel:
+        state.overridden.fallbackModel || state.values.fallbackModel !== "",
+    },
   };
 }
 
@@ -153,11 +174,16 @@ export function resetField(
   model: SettingsFormModel,
 ): FormState {
   const inherited = valuesOf(model.inherited);
-  return {
-    ...state,
-    values: { ...state.values, [field]: inherited[field] },
-    overridden: { ...state.overridden, [field]: false },
-  };
+  // The models belong to the provider (see `setProvider`): they go back to the inherited ones together with it.
+  const fields: readonly ReviewSettingField[] =
+    field === "provider" ? ["provider", "model", "fallbackModel"] : [field];
+  const values = { ...state.values };
+  const overridden = { ...state.overridden };
+  for (const each of fields) {
+    Object.assign(values, { [each]: inherited[each] });
+    overridden[each] = false;
+  }
+  return { ...state, values, overridden };
 }
 
 const WHOLE_NUMBER = /^[+-]?\d+$/;

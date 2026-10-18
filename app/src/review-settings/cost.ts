@@ -17,7 +17,10 @@
 // `upperUsd` is what the review can cost at most with the model: the whole budget as the prompt, and
 // as many calls as the chunking of large pull requests allows. It is shown, never used to warn.
 import { llmProviderDescriptors } from "../llm/providers/index.ts";
-import type { ModelPrice } from "../llm/providers/types.ts";
+import type {
+  LlmProviderDescriptor,
+  ModelPrice,
+} from "../llm/providers/types.ts";
 import type { ReviewSettings } from "./settings.ts";
 
 /** The customer's limit: at most this many USD per review on average. Above it the UI warns. */
@@ -32,7 +35,16 @@ export const UPPER_COMPLETION_TOKENS = 8_000;
 export type CostSettings = Pick<
   ReviewSettings,
   "model" | "fallbackModel" | "maxTokens" | "largePrChunking"
->;
+> & {
+  /** The provider of the models (#433); absent: the default provider's price table. */
+  provider?: string | undefined;
+};
+
+/** What the estimate reads of the registry: the provider a setting names, else the default one. */
+export type CostProviders = {
+  find(raw: unknown): Pick<LlmProviderDescriptor, "priceOf"> | undefined;
+  defaultProvider: Pick<LlmProviderDescriptor, "priceOf">;
+};
 
 export type ModelCostEstimate =
   | {
@@ -75,22 +87,29 @@ function roundUsd(value: number): number {
   return Math.round(value * 1_000_000) / 1_000_000;
 }
 
-/** The price from `prices` when a table is given (tests), otherwise from the default provider's adapter. */
+/**
+ * The price from `prices` when a table is given (tests), otherwise from the adapter of the provider the settings
+ * name, else from the default provider's.
+ */
 function priceOf(
   model: string,
   prices: Readonly<Record<string, ModelPrice>> | undefined,
+  provider?: string,
+  providers: CostProviders = llmProviderDescriptors,
 ): ModelPrice | undefined {
-  if (prices === undefined)
-    return llmProviderDescriptors.defaultProvider.priceOf(model) ?? undefined;
-  return Object.hasOwn(prices, model) ? prices[model] : undefined;
+  if (prices !== undefined)
+    return Object.hasOwn(prices, model) ? prices[model] : undefined;
+  const adapter = providers.find(provider) ?? providers.defaultProvider;
+  return adapter.priceOf(model) ?? undefined;
 }
 
 function estimate(
   model: string,
   settings: CostSettings,
   prices: Readonly<Record<string, ModelPrice>> | undefined,
+  providers: CostProviders | undefined,
 ): ModelCostEstimate {
-  const price = priceOf(model, prices);
+  const price = priceOf(model, prices, settings.provider, providers);
   if (price === undefined) return { status: "unknown_model", model };
   const cost = (promptTokens: number, completionTokens: number) =>
     (promptTokens * price.inputPerMillion +
@@ -123,12 +142,15 @@ function estimate(
  * never listed.
  */
 export function modelsExceedingContext(
-  settings: Pick<ReviewSettings, "model" | "fallbackModel" | "maxTokens">,
+  settings: Pick<ReviewSettings, "model" | "fallbackModel" | "maxTokens"> & {
+    provider?: string | undefined;
+  },
   prices?: Readonly<Record<string, ModelPrice>>,
+  providers?: CostProviders,
 ): Array<"model" | "fallbackModel"> {
   const exceeds = (model: string | null): boolean => {
     if (model === null) return false;
-    const price = priceOf(model, prices);
+    const price = priceOf(model, prices, settings.provider, providers);
     return (
       price !== undefined &&
       settings.maxTokens * price.inputTokenFactor > price.contextTokens
@@ -143,12 +165,13 @@ export function modelsExceedingContext(
 export function estimateReviewCost(
   settings: CostSettings,
   prices?: Readonly<Record<string, ModelPrice>>,
+  providers?: CostProviders,
 ): ReviewCostGuard {
-  const primary = estimate(settings.model, settings, prices);
+  const primary = estimate(settings.model, settings, prices, providers);
   const fallback =
     settings.fallbackModel === null
       ? null
-      : estimate(settings.fallbackModel, settings, prices);
+      : estimate(settings.fallbackModel, settings, prices, providers);
   const warnings: CostWarning[] = [];
   for (const [which, entry] of [
     ["primary", primary],
@@ -166,8 +189,8 @@ export function estimateReviewCost(
     fallback,
     warnings,
     warn: warnings.length > 0,
-    exceedsContext: modelsExceedingContext(settings, prices).map((field) =>
-      field === "model" ? "primary" : "fallback",
+    exceedsContext: modelsExceedingContext(settings, prices, providers).map(
+      (field) => (field === "model" ? "primary" : "fallback"),
     ),
   };
 }

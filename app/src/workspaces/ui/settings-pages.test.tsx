@@ -32,12 +32,6 @@ import { GeneralSettingsPageContent } from "./general-settings-page.tsx";
 
 afterEach(cleanup);
 
-const ALL_TIERS = {
-  low: { diff: true, dynamic: true },
-  medium: { diff: true, dynamic: true },
-  high: { diff: true, dynamic: true },
-};
-
 const BUILT_IN = builtInReviewSettings("anthropic/claude-haiku-5.5");
 const GLOBAL_DATA = {
   model: modelFromGlobalView({
@@ -139,8 +133,8 @@ describe("the workspace settings sub-pages", () => {
 });
 
 describe("the review defaults of a workspace that uses the instance's key (#283)", () => {
-  // #283-T01
-  it("shows the Quality choice instead of the model fields, and no model name", () => {
+  // #433-T02
+  it("shows a note about the choice per project instead of the model fields, and no model name", () => {
     const readable = withoutModelFields(BUILT_IN);
     render(
       <GlobalSettingsPageContent
@@ -152,13 +146,13 @@ describe("the review defaults of a workspace that uses the instance's key (#283)
             effective: readable,
             cost: null,
             managed: true,
-            tierAvailability: ALL_TIERS,
           },
         }}
       />,
     );
 
-    expect(screen.getByRole("radiogroup", { name: "Quality" })).toBeTruthy();
+    expect(screen.queryByRole("radiogroup", { name: "Quality" })).toBeNull();
+    expect(screen.getByText(/chosen for each project/)).toBeTruthy();
     expect(screen.queryByLabelText("Model")).toBeNull();
     expect(screen.queryByLabelText("Fallback model")).toBeNull();
     expect(document.body.innerHTML).not.toContain(BUILT_IN.model);
