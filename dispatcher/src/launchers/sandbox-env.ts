@@ -9,9 +9,9 @@
 // | SANDBOX_IMAGE_DIGEST                               | The Worker image id in it (#330 record `imageDigest`), `sha256:...` | required with the snapshot |
 // | SANDBOX_HANDOVER_SECONDS                           | How long the container runs before the Worker counts as having taken over (1 to 120) | 20 |
 // | SANDBOX_VM_TIMEOUT_MARGIN_SECONDS                 | Seconds added to the job's timeout for the VM's own (the backstop that ends a VM nobody stops); at least 180 and 150 more than the hand-over time, at most 3600 | 300 |
-// | DISPATCHER_PROBE_TTL_SECONDS                      | How long a capability probe's answer counts before a new canary VM is asked (60 to 86400, #331) | 3600 |
-// | DISPATCHER_PROBE_TIMEOUT_SECONDS                  | How long a probe may take, canary VM included (30 to 600); the reaper (#364) takes a canary's lifetime from it | 150 |
+// | DISPATCHER_PROBE_TIMEOUT_SECONDS                  | How long a probe (`POST /probe`, the deploy canary) may take, canary VM included (30 to 600); the reaper (#364) takes a canary's lifetime from it | 150 |
 // | DISPATCHER_PROBE_REUSE_SECONDS                    | A forced probe (`POST /probe`) is served from an answer younger than this instead of a new canary VM (0 to 600; 0: never) | 60 |
+// | DISPATCHER_PROBE_TTL_SECONDS                      | **Deprecated (#479), ignored.** Dispatch no longer runs a probe, so no answer has a time to live. Any value is accepted with a warning, for one release, so that an existing deployment still starts | none |
 // | RUNNER_DYNAMIC_CAPABILITIES, RUNNER_DYNAMIC_MAX_COST_USD | The operator's Dynamic configuration, given to the container of a Dynamic job and to the canary, as the self-hosted `runner-dynamic` service has them (a JSON object; a plain positive decimal) | none |
 // | VERCEL_TOKEN, VERCEL_TEAM_ID, VERCEL_PROJECT_ID    | Platform access by token. Without a token the OIDC token is used   | OIDC |
 //
@@ -27,7 +27,7 @@ import {
 import type { Launcher, Logger } from "../core/types.ts";
 import { systemClock } from "../core/clock.ts";
 import { createCapabilityProbe } from "../probe/capability-probe.ts";
-import { withCapabilityProbe } from "../probe/probed-launcher.ts";
+import { withProbeEndpoint } from "../probe/probe-endpoint.ts";
 import type { SandboxFleet } from "./sandbox-service.ts";
 import { noLauncher } from "./none.ts";
 import { createSandboxCanary } from "./sandbox-canary.ts";
@@ -157,11 +157,8 @@ export function sandboxFromEnvironment(
   );
   if (vmTimeoutMarginSeconds < minimumVmTimeoutMargin(handoverSeconds))
     throw new ConfigError("SANDBOX_VM_TIMEOUT_MARGIN_SECONDS", "invalid");
-  const probeTtlSeconds = integer(env, "DISPATCHER_PROBE_TTL_SECONDS", {
-    min: 60,
-    max: 86400,
-    fallback: 3600,
-  });
+  // Obsolete since #479: dispatch runs no probe. Accepted, whatever it holds, so an existing deployment still starts.
+  const probeTtlSet = read(env, "DISPATCHER_PROBE_TTL_SECONDS") !== undefined;
   const probeTimeoutSeconds = integer(env, "DISPATCHER_PROBE_TIMEOUT_SECONDS", {
     min: 30,
     max: 600,
@@ -188,6 +185,11 @@ export function sandboxFromEnvironment(
       canaryLifetimeSeconds: probeTimeoutSeconds + vmTimeoutMarginSeconds,
     }),
     launcher({ settings, logger, background }) {
+      if (probeTtlSet)
+        logger.warn("deprecated_setting", {
+          variable: "DISPATCHER_PROBE_TTL_SECONDS",
+          note: "ignored since #479: dispatch runs no capability probe; the deploy canary is the proof",
+        });
       // The launch has the core's deadline from the claim: the hand-over comes after create, the host preparation
       // and the image check, whose own timeouts add up to LAUNCH_STEPS_SECONDS.
       if (
@@ -218,7 +220,10 @@ export function sandboxFromEnvironment(
       });
       // A deployment that serves no Dynamic job has nothing to prove: no canary VM is ever made for it.
       if (!serversDynamic) return launcher;
-      // opencode is advertised only from a fresh canary (#331): the Launcher's own word is never taken.
+      // `opencode` is advertised by the Launcher like any engine (#479): a Dynamic job is accepted whenever
+      // `DISPATCHER_ENGINES` has it and the snapshot pair is set, and no canary VM is started by a dispatch. The proof is the
+      // deploy canary, which must pass before a deployment goes live; the snapshot pair and the settings cannot change
+      // during its lifetime. The canary reaches the probe through `POST /probe` only.
       const probe = createCapabilityProbe({
         run: createSandboxCanary({
           service,
@@ -233,11 +238,10 @@ export function sandboxFromEnvironment(
         clock: systemClock,
         now: () => Date.now(),
         logger,
-        ttlMs: probeTtlSeconds * 1000,
         timeoutMs: probeTimeoutSeconds * 1000,
         forceReuseMs: probeReuseSeconds * 1000,
       });
-      return withCapabilityProbe({ launcher, probe, background });
+      return withProbeEndpoint({ launcher, probe });
     },
   };
 }

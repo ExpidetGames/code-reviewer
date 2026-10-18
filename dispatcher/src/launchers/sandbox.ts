@@ -109,8 +109,9 @@ export type SandboxLauncherOptions = {
   /** Seconds added to the job's timeout for the VM's own; at least `minimumVmTimeoutMargin(handoverSeconds)`. */
   vmTimeoutMarginSeconds?: number;
   /**
-   * The engines this Launcher can run right now. PR-Agent only until the capability probe (#331) vouches for the
-   * Dynamic-Worker: fail closed.
+   * The engines this Launcher can run: both by default (#479). Which of them a deployment serves is its
+   * `DISPATCHER_ENGINES`, which the core applies; the proof that the Dynamic-Worker's container is hardened is the
+   * deploy canary (`POST /probe`), not a check per instance or per job.
    */
   capabilities?: (signal: AbortSignal) => Promise<readonly Engine[]>;
   /** The unique part of a VM name; random unless a test brings its own. */
@@ -388,7 +389,10 @@ export function createSandboxLauncher(
 
   return {
     capabilities(signal) {
-      return options.capabilities?.(signal) ?? Promise.resolve(["pr-agent"]);
+      return (
+        options.capabilities?.(signal) ??
+        Promise.resolve(["pr-agent", "opencode"])
+      );
     },
 
     async launch(spec, signal) {

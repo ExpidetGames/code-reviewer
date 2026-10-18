@@ -67,21 +67,6 @@ export class LaunchError extends Error {
 }
 
 /**
- * Thrown by `capabilities` while it cannot say yet whether an engine is proven, because the probe that proves it is
- * on its way (#331). It is not a failure and not "not capable": the core answers `unavailable` with this retry
- * time, so that the App asks again once the probe is done, and logs no error.
- */
-export class CapabilitiesPending extends Error {
-  readonly retryAfterSeconds: number;
-
-  constructor(retryAfterSeconds: number) {
-    super("capabilities_pending");
-    this.name = "CapabilitiesPending";
-    this.retryAfterSeconds = retryAfterSeconds;
-  }
-}
-
-/**
  * What a probe found (contracts/probe-verdict.v1.json, `ProbeReport` without `ok`): `passed` (the canary
  * container advertises `opencode`), `denied` (it answered and does not: `reasons`) or `failed` (no answer was
  * read: `failure`). Only engines, stable reasons and a stable code; never text of the container or the platform.
@@ -97,17 +82,15 @@ export type ProbeResult = {
 };
 
 /**
- * How a Worker is started. `capabilities` names the engines this Launcher can run right now and fails
- * closed (an engine it cannot prove is left out). `want` is the engine the caller is about to need (the
- * job's kind) or undefined for any: a Launcher that has to prove an engine first need not wait for a proof
- * of another one, and may throw `CapabilitiesPending` when it is proving the wanted one. `launch` resolves
- * once the Worker has taken over the job (it heartbeats itself) and rejects, ideally with a LaunchError, when
- * it could not be started. It must stop what it started when `signal` aborts (the deadline, a lost lease, a
- * shutdown). `probe`, when there is one, runs the capability probe now whatever the cache says (`POST /probe`,
- * the deploy canary) and never rejects.
+ * How a Worker is started. `capabilities` names the engines this Launcher can run and fails closed (a Launcher that
+ * cannot tell advertises nothing); the core intersects it with the engines the deployment is configured for.
+ * `launch` resolves once the Worker has taken over the job (it heartbeats itself) and rejects, ideally with a
+ * LaunchError, when it could not be started. It must stop what it started when `signal` aborts (the deadline, a lost
+ * lease, a shutdown). `probe`, when there is one, runs the canary probe now (`POST /probe`, the deploy canary) and
+ * never rejects; dispatch and claim never call it (#479).
  */
 export interface Launcher {
-  capabilities(signal: AbortSignal, want?: Engine): Promise<readonly Engine[]>;
+  capabilities(signal: AbortSignal): Promise<readonly Engine[]>;
   launch(spec: LaunchSpec, signal: AbortSignal): Promise<void>;
   probe?(signal: AbortSignal): Promise<ProbeResult>;
 }

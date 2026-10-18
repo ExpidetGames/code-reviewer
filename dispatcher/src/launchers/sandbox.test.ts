@@ -606,15 +606,18 @@ describe("the Sandbox-Launcher", () => {
   });
 
   // #329 (additional): capabilities
-  it("advertises PR-Agent only until a probe vouches for the Dynamic-Worker (#331)", async () => {
+  it("advertises both engines unless told otherwise: the deploy canary is the proof, the deployment's engines decide (#479)", async () => {
     const signal = new AbortController().signal;
 
-    expect(await build().capabilities(signal)).toStrictEqual(["pr-agent"]);
+    expect(await build().capabilities(signal)).toStrictEqual([
+      "pr-agent",
+      "opencode",
+    ]);
     expect(
       await build({
-        capabilities: () => Promise.resolve(["pr-agent", "opencode"]),
+        capabilities: () => Promise.resolve(["pr-agent"]),
       }).capabilities(signal),
-    ).toStrictEqual(["pr-agent", "opencode"]);
+    ).toStrictEqual(["pr-agent"]);
   });
 
   // #329 (additional): the Launcher and the golden snapshot pipeline (#330) name the same things

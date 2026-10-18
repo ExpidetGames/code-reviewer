@@ -423,7 +423,7 @@ hosted flow of umbrella #316 with nothing of ours replaced. The app runs as a se
 a production build, Postgres: the lane makes its own database on the server of `E2E_DATABASE_URL`, runs `pnpm migrate`, and sets the
 instance up with the code of `pnpm setup-code`), in the dispatch mode (`RUNNER_DISPATCH=webhook`). The journeys start the real
 Dispatcher as a process (`dispatcher/src/test-support/hosted-e2e-main.ts`: the Node entry's composition with the Sandbox-Launcher and
-the capability probe, over the local mode of the Sandbox double), whose `docker` is `fakes/sandbox/bin/docker-worker.sh`: the
+the canary probe, over the local mode of the Sandbox double), whose `docker` is `fakes/sandbox/bin/docker-worker.sh`: the
 `docker run` with the flags of the hardened container spec arrives, and the stand-in runs the REAL Worker (`code-reviewer-runner
 worker-once`: fetch, heartbeat, result, with the real PR-Agent and the fake LLM), or the real `probe` mode. GitHub, the model and the
 platform are the loopback fakes. A Worker in this lane is not root with capabilities, so the stand-in takes `RUNNER_DIFF_JOB_USER`

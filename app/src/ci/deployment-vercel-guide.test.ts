@@ -721,26 +721,32 @@ describe("the hosted deployment guide as a procedure", () => {
 
     expect(operations).toContain("`snapshot-decide`");
     expect(operations).toContain("### 5.2 Rotating secrets");
-    for (const code of [
-      "dispatch_unavailable",
-      "launch_failed",
-      "capability_not_proven",
-    ])
+    for (const code of ["dispatch_unavailable", "launch_failed"])
       expect(operations, code).toContain(`\`${code}\``);
     expect(guide).toContain("## 7. Rolling back");
   });
 
   // #333-T04
-  it("explains codes that exist: the two on the Runs pages have a text, the third is a launch code", () => {
+  it("explains codes that exist: the two on the Runs pages have a text, and no code of the retired per-instance probe is left", () => {
     expect(ERROR_COPY).toHaveProperty("dispatch_unavailable");
     expect(ERROR_COPY).toHaveProperty("launch_failed");
-    expect(read("dispatcher/src/probe/probed-launcher.ts")).toContain(
-      '"capability_not_proven"',
+    // #479: the Dispatcher runs no probe on a dispatch, so `capability_not_proven` is not raised any more.
+    expect(guide).not.toContain("capability_not_proven");
+    expect(guide).not.toContain("withCapabilityProbe");
+  });
+
+  // #479-T08
+  it("states that the deploy canary is the only proof, and that DISPATCHER_PROBE_TTL_SECONDS is retired", () => {
+    const text = flat(guide);
+
+    expect(text).toContain("The canary is the only proof");
+    expect(text).toContain("deprecated_setting");
+    expect(text).toMatch(/\*\*Retired:\*\* `DISPATCHER_PROBE_TTL_SECONDS`/);
+    // No row of the variable table is left for it: nothing is set by the operator any more.
+    expect(text).not.toContain("| `DISPATCHER_PROBE_TTL_SECONDS` |");
+    expect(text).not.toContain(
+      "held in memory for `DISPATCHER_PROBE_TTL_SECONDS`",
     );
-    expect(ERROR_COPY).not.toHaveProperty("capability_not_proven");
-    expect(
-      section("### 5.3 Reading what the Runs page and the logs say"),
-    ).toMatch(/Dispatcher log only \| `capability_not_proven`/);
   });
 
   // #333-T04
