@@ -13,6 +13,10 @@
 //                                               { "terms": { "basedOnVersion": n, "terms": { keyMode, limits, modelAccess,
 //                                                 monthlyAmountMinor, yearlyAmountMinor } } }   (creates version n + 1)
 //                                               { "archived": boolean }
+//                                               { "priceLink": { versionNumber, interval: "month" | "year", paddlePriceId } }
+//                                                 (#439: links a Paddle price to the slot of the current version; the body has
+//                                                 no amount, currency or tax mode, they are the version's and Paddle's)
+//                                               { "refreshPrices": true }   (reads the linked prices again from Paddle)
 //   DELETE /api/admin/billing/plans/:planKey    deletes a plan that has no version (an Enterprise plan)
 //
 // Order: the admin first (nothing is read before the caller is known: not signed in is 401, signed in but not an admin is
@@ -29,7 +33,9 @@ import { isCrossSite } from "../http/request-checks.ts";
 import { ENTITLEMENT_ERROR_CODES } from "../workspaces/entitlements-validation.ts";
 import { guardBillingRoute } from "./enabled.ts";
 import { PLAN_ERROR_STATUS, type PlanRefusal } from "./plan-errors.ts";
+import { PRICE_ERROR_STATUS, type PriceRefusal } from "./price-errors.ts";
 import type { BillingPlansService, PlansResult } from "./plans-service.ts";
+import type { BillingPricesService, PricesResult } from "./prices-service.ts";
 
 /** Limits, a list of entries and a few lines of text: far below this. */
 export const PLANS_REQUEST_MAX_BYTES = 64 * 1024;
@@ -42,6 +48,8 @@ export type PlansRouteDependencies = {
   /** Whether billing is on right now (`isBillingOn`). */
   isOn: () => Promise<boolean>;
   service: BillingPlansService;
+  /** The Paddle prices linked to plan versions (#439). */
+  prices: BillingPricesService;
 };
 
 export type PlansRouteHandlers = {
@@ -52,7 +60,13 @@ export type PlansRouteHandlers = {
 };
 
 const NO_STORE = { "cache-control": "no-store" };
-const CHANGE_KEYS = ["metadata", "terms", "archived"] as const;
+const CHANGE_KEYS = [
+  "metadata",
+  "terms",
+  "archived",
+  "priceLink",
+  "refreshPrices",
+] as const;
 const PLAN_KEY = /^[a-z][a-z0-9-]{1,31}$/;
 
 function statusOf(code: PlanRefusal["code"]): number {
@@ -83,6 +97,20 @@ function fromRefusal(result: PlanRefusal): Response {
   );
 }
 
+function fromPriceRefusal(result: PriceRefusal): Response {
+  return refusal(result.code, PRICE_ERROR_STATUS[result.code], {
+    ...(result.field === undefined
+      ? {}
+      : {
+          field: result.field,
+          issues: [{ field: result.field, code: result.code }],
+        }),
+    // The two values of a mismatch, in minor units for an amount: what the version holds and what Paddle says.
+    ...(result.entered === undefined ? {} : { entered: result.entered }),
+    ...(result.paddle === undefined ? {} : { paddle: result.paddle }),
+  });
+}
+
 function invalidInput(): Response {
   return refusal("invalid_input", JSON_BODY_ERROR_STATUS.invalid_input, {
     issues: [{ field: "", code: "body_invalid" }],
@@ -94,6 +122,7 @@ export function createPlansRouteHandlers({
   notFound,
   isOn,
   service,
+  prices,
 }: PlansRouteDependencies): PlansRouteHandlers {
   // The user first. The proxy has turned these away already; this is the second guard.
   async function admin(): Promise<SessionUser | Response> {
@@ -139,16 +168,28 @@ export function createPlansRouteHandlers({
     }
   }
 
+  /** The whole list after a successful write, and the key of the plan that lost the Popular badge. */
+  async function listAfterWrite(
+    clearedPopular: string | null,
+  ): Promise<Response> {
+    const plans = await guarded(() => service.view());
+    if (plans instanceof Response) return plans;
+    return Response.json(
+      { ok: true, clearedPopular, plans },
+      { headers: NO_STORE },
+    );
+  }
+
   async function answer(
     result: PlansResult<{ clearedPopular?: string | null }>,
   ): Promise<Response> {
     if (!result.ok) return fromRefusal(result);
-    const plans = await guarded(() => service.view());
-    if (plans instanceof Response) return plans;
-    return Response.json(
-      { ok: true, clearedPopular: result.clearedPopular ?? null, plans },
-      { headers: NO_STORE },
-    );
+    return listAfterWrite(result.clearedPopular ?? null);
+  }
+
+  async function answerPrice(result: PricesResult): Promise<Response> {
+    if (!result.ok) return fromPriceRefusal(result);
+    return listAfterWrite(null);
   }
 
   function validPlanKey(planKey: string): boolean {
@@ -182,20 +223,33 @@ export function createPlansRouteHandlers({
       if (given.length !== 1 || Object.keys(fields).length !== 1)
         return invalidInput();
       if (!validPlanKey(planKey)) return refusal("plan_not_found", 404);
-      const result = await guarded(async () => {
-        switch (given[0]) {
-          case "metadata":
-            return service.updatePlan(who.id, planKey, fields.metadata);
-          case "terms":
-            return service.saveTerms(who.id, planKey, fields.terms);
-          default:
-            if (typeof fields.archived !== "boolean") return undefined;
-            return service.setArchived(who.id, planKey, fields.archived);
-        }
-      });
-      if (result instanceof Response) return result;
-      if (result === undefined) return invalidInput();
-      return answer(result);
+      const answered = await guarded(
+        async (): Promise<Response | undefined> => {
+          switch (given[0]) {
+            case "metadata":
+              return answer(
+                await service.updatePlan(who.id, planKey, fields.metadata),
+              );
+            case "terms":
+              return answer(
+                await service.saveTerms(who.id, planKey, fields.terms),
+              );
+            case "priceLink":
+              return answerPrice(
+                await prices.link(who.id, planKey, fields.priceLink),
+              );
+            case "refreshPrices":
+              if (fields.refreshPrices !== true) return undefined;
+              return answerPrice(await prices.refresh(planKey));
+            default:
+              if (typeof fields.archived !== "boolean") return undefined;
+              return answer(
+                await service.setArchived(who.id, planKey, fields.archived),
+              );
+          }
+        },
+      );
+      return answered ?? invalidInput();
     }),
 
     remove: route(async (_who, request, planKey: string) => {

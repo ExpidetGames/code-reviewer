@@ -32,6 +32,7 @@ import { isBillingOn } from "../billing/enabled.ts";
 import { createPaddleClient } from "../billing/paddle-client.ts";
 import { createPlansRouteHandlers } from "../billing/plans-http.ts";
 import { createBillingPlansService } from "../billing/plans-service.ts";
+import { createBillingPricesService } from "../billing/prices-service.ts";
 import { createBillingSettingsService } from "../billing/settings-service.ts";
 import { startTestPaddle } from "./paddle-fake.ts";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
@@ -240,6 +241,16 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
         },
         isOn: () => isBillingOn(db, secrets),
         service: plansService,
+        prices: createBillingPricesService({
+          db,
+          secrets,
+          clientFor: (apiKey) =>
+            createPaddleClient({
+              apiKey,
+              baseUrl: fake.baseUrl,
+              sleep: () => Promise.resolve(),
+            }),
+        }),
       });
       return { fake, routes, plans };
     })();

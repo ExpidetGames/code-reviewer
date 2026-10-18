@@ -12,7 +12,9 @@ import { NotFoundSignal } from "../test-support/admin-harness.ts";
 import { createTestDatabase } from "../test-support/test-database.ts";
 import { insertUser } from "../test-support/users.ts";
 import { createPlansRouteHandlers } from "./plans-http.ts";
+import { createSecretStore } from "../secrets/store.ts";
 import { createBillingPlansService } from "./plans-service.ts";
+import { createBillingPricesService } from "./prices-service.ts";
 
 const LIMITS = {
   diffRunsPerPeriod: 40,
@@ -66,6 +68,17 @@ async function start(
     },
     isOn: () => Promise.resolve(options.billingOn ?? true),
     service,
+    // The price changes have their own tests (prices-http.integration.test.ts); Paddle is never reached from here.
+    prices: createBillingPricesService({
+      db,
+      secrets: createSecretStore({
+        db,
+        appSecret: "plans-http-test-secret-0123456789-0123456789",
+      }),
+      clientFor: () => {
+        throw new Error("Paddle is not reached by the tests of the plans.");
+      },
+    }),
   });
   return {
     handlers,
