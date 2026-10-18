@@ -17,9 +17,9 @@ export async function POST(request: Request): Promise<Response> {
 }
 
 // Every other method is the 404 of a missing path while billing is off (a 405 would show that the route exists), and a 405 once it is on.
-const notAllowed = guardBillingRoute(guard, async (_request: Request) =>
+const notAllowed = guardBillingRoute(guard, async (request: Request) =>
   Response.json(
-    { error: "method_not_allowed" },
+    { error: "method_not_allowed", method: request.method },
     { status: 405, headers: { allow: "POST" } },
   ),
 );
