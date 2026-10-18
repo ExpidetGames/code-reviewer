@@ -1126,7 +1126,7 @@ A self-hosted installation and a hosted one never share a database or a GitHub A
   CI runs the whole flow on fakes in the lane **`e2e-hosted`** (#332; `make test-e2e-hosted`, which needs a Postgres
   in `E2E_DATABASE_URL`; `TESTING.md`, "Hosted e2e lane"): the App in serverless mode on Postgres, the Dispatcher, the
   real Worker and PR-Agent, the Sandbox-Launcher over the local Sandbox double, and the failure journeys (Dispatcher
-  down, give-up, launch failures, a Worker that dies, the pool cap, a probe that fails, secrets in logs); the privileged
+  down, give-up, launch failures, a Worker that dies, the pool cap, a deploy canary that fails, secrets in logs); the privileged
   lane `e2e-dynamic` adds the Dynamic journey with the real container's hardening. None of it touches Vercel, a real
   GitHub or a real model: this guide's step 6 is the manual twin on the real platform.
 - **The reaper** against the live platform (section 5.5), and whether the platform's cron reaches it while the Dispatcher project is behind Deployment Protection.
