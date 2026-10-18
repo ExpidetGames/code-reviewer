@@ -197,6 +197,16 @@ claimed (#277, `src/usage/README.md`, "Limits and suspension at claim"); the key
   "every released entry" is not a safe guess for data that may have been restrictive. Only a write that states
   `modelAccess` repairs either. **A row wins entirely over the instance default**, so a restrictive default does not
   protect a workspace that has a row of its own. The rollout order is in `src/operator-api/README.md`.
+- **Source marker of the default (#438).** The instance default may carry `source: billing`: the billing module writes the current
+  version of the Free plan there while billing is on (`setBillingDefaultEntitlements`; `src/billing/README.md`, "Plans and plan
+  versions"). Absent, and anything but `billing`, means `manual`, so a default written before this field, or by the operator, reads
+  as the operator's. `validateEntitlements` refuses the key in any write (the operator API answers `entitlements_invalid`, field
+  `source`), and a write of the operator stores no marker, so only the billing writer can set it. A read keeps it on
+  `EntitlementsData.source` for the claim of #442; `resolveEntitlements` does not copy it (its `source` is `workspace` or
+  `default`). The billing writer states `modelAccess` on every write (`planEntitlements` cannot build a payload without it), so a
+  restrictive Free list never survives into a paid plan and the other way round; the period start never moves back (an earlier
+  one is replaced by the stored one). While billing is on, a write of the default through the operator API is refused
+  `entitlements_default_managed_by_billing`.
 - **Adding a limit later.** A new limit goes into `LIMIT_NAMES` and, so that existing entries stay readable, into
   `LIMITS_ADDED_LATER` (`entitlements-validation.ts`): when reading, its missing key means `null` (unlimited), which
   is true because no such limit existed when the entry was written. Writes still require every key. (The alternative
