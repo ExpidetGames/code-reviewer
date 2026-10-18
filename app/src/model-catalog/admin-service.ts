@@ -93,13 +93,13 @@ export function createCatalogAdminService({
   }
 
   async function view(): Promise<AdminCatalogView> {
-    const entries = await catalog.list();
-    const used = await Promise.all(
-      entries.map((entry) => catalog.usedByProjects(entry.id)),
-    );
+    const [entries, used] = await Promise.all([
+      catalog.list(),
+      catalog.projectCounts(),
+    ]);
     return {
-      entries: entries.map((entry, index) =>
-        toAdminEntry(entry, used[index] ?? 0),
+      entries: entries.map((entry) =>
+        toAdminEntry(entry, used.get(entry.id) ?? 0),
       ),
       defaults: await catalog.defaults(),
       providers: providers(),

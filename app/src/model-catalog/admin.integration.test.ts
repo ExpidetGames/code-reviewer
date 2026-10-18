@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { startLlmFake } from "../../../fakes/llm/server.ts";
 import { createCatalogRepository } from "../db/repositories/catalog-repository.ts";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
+import { createWorkspaceEntitlementsRepository } from "../db/repositories/workspace-entitlements-repository.ts";
 import { createModelCapabilityChecker } from "../llm/model-capabilities.ts";
 import {
   MISSING_ANSWER_MARKER,
@@ -16,6 +17,8 @@ import {
 } from "../test-support/admin-harness.ts";
 import { createJobQueueFixture } from "../test-support/jobs.ts";
 import { cleanUpAfterTest } from "../test-support/test-database.ts";
+import { defaultWorkspaceId } from "../test-support/workspaces.ts";
+import type { EntitlementsData } from "../workspaces/entitlements.ts";
 import {
   CATALOG_ROUTE_ERROR_CODES,
   CATALOG_ROUTE_ERROR_STATUS,
@@ -28,6 +31,20 @@ const BASE = "/api/admin/model-catalog";
 const MEMBER = { email: "member@example.com", password: "k4Pq-v8Zm2Xw" };
 const TOOLS = { supported_parameters: ["tools", "tool_choice"] };
 const NO_TOOLS = { supported_parameters: ["temperature"] };
+
+const MANAGED: EntitlementsData = {
+  planLabel: "Team",
+  keyMode: "managed",
+  limits: {
+    diffRunsPerPeriod: null,
+    dynamicRunsPerPeriod: null,
+    managedCostLimitMicroUsd: null,
+    ownKeyCostLimitMicroUsd: null,
+  },
+  periodStart: "2026-10-01T00:00:00.000Z",
+  suspended: false,
+  suspensionCode: null,
+};
 
 const SMALL = {
   name: "Small",
@@ -686,11 +703,15 @@ describe("a retired entry", () => {
   });
 });
 
-/** Makes `count` projects (one or two: the fixture has two repositories) select the entry for Diff. */
+/**
+ * Makes `count` projects (one or two: the fixture has two repositories) select the entry for Diff, or, with `settings`,
+ * have those settings.
+ */
 async function seedProjects(
   portal: AdminHarness,
   entryId: string,
   count: 1 | 2,
+  settings: Record<string, unknown> = { catalogEntryDiff: entryId },
 ) {
   const fixture = await createJobQueueFixture({ database: portal.db });
   const repositories = [fixture.repositoryId, fixture.otherRepositoryId];
@@ -701,7 +722,7 @@ async function seedProjects(
         id: `p${String(index)}`,
         repository_id: repositoryId,
         active: 1,
-        settings: JSON.stringify({ catalogEntryDiff: entryId }),
+        settings: JSON.stringify(settings),
         created_at: "2026-10-17T10:00:00.000Z",
         updated_at: "2026-10-17T10:00:00.000Z",
       })
@@ -779,6 +800,35 @@ describe("changing the model behind a released entry", () => {
       modelId: "acme/quick-1",
     });
     expect(lines).toEqual([]);
+  });
+
+  // #429-T02
+  // #429-T09
+  it("counts the projects that fall back to a default entry, in the table and in the confirmation", async () => {
+    const { portal } = await start();
+    const entry = await createEntry(portal);
+    await releaseEntry(portal, entry.id);
+    // Two projects choose nothing; once the workspace is on the operator's key, the default of Diff applies to them.
+    await seedProjects(portal, entry.id, 2, {});
+    await call(portal, "PUT", "/defaults", { diff: entry.id, dynamic: null });
+    const workspace = await defaultWorkspaceId(portal.db);
+
+    const own = await catalogOf(portal);
+    await createWorkspaceEntitlementsRepository(portal.db, workspace).put(
+      MANAGED,
+      null,
+    );
+    const managed = await catalogOf(portal);
+    const refused = await call(portal, "PUT", `/${entry.id}`, {
+      modelId: "acme/better-2",
+    });
+
+    expect(own.entries[0]?.usedByProjects).toBe(0);
+    expect(managed.entries[0]?.usedByProjects).toBe(2);
+    expect(await refused.json()).toEqual({
+      error: "model_change_not_confirmed",
+      projects: 2,
+    });
   });
 
   // #429-T09

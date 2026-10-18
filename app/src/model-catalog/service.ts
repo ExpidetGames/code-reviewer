@@ -89,8 +89,14 @@ export type CatalogService = {
   retire(id: string, updatedBy: string | null): Promise<EntryResult>;
   /** Deletes a draft; a released or retired entry is never deleted (its id stays in the mask list and in old usage). */
   remove(id: string): Promise<{ ok: true } | Refused>;
-  /** How many projects select the entry: the number the confirmation of a change of model shows. */
+  /**
+   * How many projects use the entry: the number the confirmation of a change of model shows. It counts the projects
+   * that select the entry and, for an instance default, the projects of workspaces on the operator's key that have
+   * chosen no entry for the kind they run and so fall back to it (ADR 0005, 2.7).
+   */
   usedByProjects(id: string): Promise<number>;
+  /** `usedByProjects` of every entry in one pass over the projects (an entry nobody uses is absent). */
+  projectCounts(): Promise<ReadonlyMap<string, number>>;
   /** The instance defaults, each a released entry that serves the kind, else null. */
   defaults(): Promise<CatalogDefaults>;
   /** Replaces both defaults: `{ diff, dynamic }`, each an entry id or null. Nothing is stored on a refusal. */
@@ -212,6 +218,15 @@ export function createCatalogService(deps: {
         : null;
     };
     return { diff: fit("diff"), dynamic: fit("dynamic") };
+  }
+
+  async function projectCounts(): Promise<ReadonlyMap<string, number>> {
+    const defaults = fitDefaults(await storedDefaults(), await catalog.list());
+    return catalog.countProjectsUsing(defaults);
+  }
+
+  async function usedByProjects(id: string): Promise<number> {
+    return (await projectCounts()).get(id) ?? 0;
   }
 
   async function writeOrRefuse<T>(
@@ -374,7 +389,7 @@ export function createCatalogService(deps: {
         return {
           ok: false,
           code: "model_change_not_confirmed",
-          projects: await catalog.countProjectsSelecting(id),
+          projects: await usedByProjects(id),
         };
       if (entry.status === "released" && (modelChanged || kindsChanged)) {
         const defaults = await storedDefaults();
@@ -408,7 +423,7 @@ export function createCatalogService(deps: {
 
       if (!(entry.status === "released" && modelChanged))
         return { ok: true, entry: updated, modelChange: null };
-      const projects = await catalog.countProjectsSelecting(id);
+      const projects = await usedByProjects(id);
       logger.info(
         `model catalog: the model behind released entry ${id} changed from ${entry.provider}:${entry.modelId} to ${provider}:${modelId} by ${updatedBy ?? "the system"}; ${projects} ${projects === 1 ? "project uses" : "projects use"} it`,
       );
@@ -428,7 +443,8 @@ export function createCatalogService(deps: {
         : refused("catalog_entry_not_draft");
     },
 
-    usedByProjects: (id) => catalog.countProjectsSelecting(id),
+    usedByProjects,
+    projectCounts,
 
     async defaults() {
       return fitDefaults(await storedDefaults(), await catalog.list());

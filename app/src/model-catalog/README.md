@@ -111,8 +111,9 @@ change behind a released entry** (decision C6) is answered `409 model_change_not
 that use it, and nothing is written, until the request repeats it with `confirmModelChange: true`; the service then checks
 the model again and writes the audit line (the entry, the account, the model before and after, the count) to the server
 log, which is the operator's. Nothing here is reachable by a member of a workspace or by the operator API (decision C8).
-"Used by" counts the projects whose settings select the entry, one scan of the settings per entry, which is fine for a
-catalog of a few entries (`countProjectsSelecting`).
+"Used by" counts the projects whose settings select the entry and, for an instance default, the projects in a workspace
+on the operator's key that chose no entry for the kind they run (Diff unless the project says Dynamic) and so fall back to
+it. It is one pass over the projects for all entries (`countProjectsUsing`), computed once per answer.
 
 **No "back to draft".** The issue lists it, but the status rules of #425 do not allow a return to draft (a released entry's
 id is in old usage records and in the mask list), so the portal offers retire, which hides the entry from members and keeps
