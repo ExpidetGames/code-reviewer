@@ -41,7 +41,7 @@ function renderAdvanced(
     <AdvancedSettingsPageContent
       workspaceSlug="acme"
       canManageKey
-      keyConfigured
+      keys={[{ provider: "openrouter", configured: true }]}
       canResetDefaults
       {...props}
     />,
@@ -56,7 +56,9 @@ describe("the Advanced settings sub-page", () => {
     const view = renderAdvanced({ removeApi: api });
 
     expect(view.container.querySelectorAll("form")).toHaveLength(0);
-    await user.click(screen.getByRole("button", { name: "Remove the key…" }));
+    await user.click(
+      screen.getByRole("button", { name: "Remove the OpenRouter key…" }),
+    );
     expect(api.remove).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole("button", { name: "Yes, remove it" }));
@@ -70,14 +72,14 @@ describe("the Advanced settings sub-page", () => {
       <AdvancedSettingsPageContent
         workspaceSlug="acme"
         canManageKey
-        keyConfigured={false}
+        keys={[{ provider: "openrouter", configured: false }]}
         canResetDefaults
         removeApi={api}
       />,
     );
     expect(screen.getByText("The key is removed.")).toBeTruthy();
     expect(
-      screen.queryByRole("button", { name: "Remove the key…" }),
+      screen.queryByRole("button", { name: "Remove the OpenRouter key…" }),
     ).toBeNull();
   });
 
@@ -98,11 +100,41 @@ describe("the Advanced settings sub-page", () => {
     expect(await screen.findByText("The defaults are reset.")).toBeTruthy();
   });
 
-  it("offers no removal when there is no key", () => {
-    renderAdvanced({ keyConfigured: false });
+  // #426-T07
+  it("offers one removal for each provider that has a key, and removes only that one", async () => {
+    const user = userEvent.setup();
+    const api = fakeKeyApi();
+    renderAdvanced({
+      removeApi: api,
+      keys: [
+        { provider: "openrouter", configured: true },
+        { provider: "fakeai", configured: true },
+        { provider: "third", configured: false },
+      ],
+    });
 
     expect(
-      screen.queryByRole("button", { name: "Remove the key…" }),
+      screen.getByRole("button", { name: "Remove the OpenRouter key…" }),
+    ).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: /Remove the third key/ }),
+    ).toBeNull();
+    await user.click(
+      screen.getByRole("button", { name: "Remove the fakeai key…" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Yes, remove it" }));
+
+    await waitFor(() => expect(api.remove).toHaveBeenCalledWith("fakeai"));
+    expect(api.remove).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers no removal when there is no key", () => {
+    renderAdvanced({
+      keys: [{ provider: "openrouter", configured: false }],
+    });
+
+    expect(
+      screen.queryByRole("button", { name: "Remove the OpenRouter key…" }),
     ).toBeNull();
   });
 
@@ -111,7 +143,7 @@ describe("the Advanced settings sub-page", () => {
 
     expect(
       screen.queryByRole("button", {
-        name: /Remove the key|Reset every default/,
+        name: /Remove the .* key|Reset every default/,
       }),
     ).toBeNull();
     expect(screen.getByText(/Only an Admin or an Owner/)).toBeTruthy();

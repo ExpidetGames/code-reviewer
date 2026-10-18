@@ -271,7 +271,9 @@ describe("removing or replacing the key of a workspace", () => {
     await saveKey(h, first.workspaceId, KEY_A);
     const running = await h.claimed();
 
-    expect(await h.llm.keyServiceFor(first.workspaceId).remove()).toBe(true);
+    expect(
+      await h.llm.keyServiceFor(first.workspaceId).remove("openrouter"),
+    ).toBe(true);
     const next = await h.claim();
     const heartbeat = await h.heartbeat(running.job.id, running.job.leaseToken);
     const complete = await h.complete(running.job.id, running.job.leaseToken);
@@ -342,13 +344,51 @@ describe("removing or replacing the key of a workspace", () => {
     expect(stored).not.toContain(PLAIN_KEY_A);
   });
 
+  // #426-T05
+  it("fails the completion with RUNNER_INTERNAL_ERROR and stores nothing when the read of one provider's key fails, so a result is never stored with less masking", async () => {
+    let failing = false;
+    const h = await startRunnerApiHarness({
+      llmKey: null,
+      currentKeysFor: async (workspaceId) => {
+        if (failing) throw new Error("the read of the second key failed");
+        return h.llm.currentKeysFor(workspaceId);
+      },
+    });
+    const job = await h.enqueueNew();
+    await saveKey(h, job.workspaceId, PLAIN_KEY_A);
+    const claimed = await h.claimed();
+    failing = true;
+
+    const completed = await h.complete(job.id, claimed.job.leaseToken, {
+      logTail: `the provider refused ${PLAIN_KEY_A}`,
+    });
+
+    expect(completed.status).toBe(500);
+    expect(await completed.json()).toMatchObject({
+      error: { code: "RUNNER_INTERNAL_ERROR" },
+    });
+    const stored = await h.queue.get(job.id);
+    expect(stored?.status).toBe("running");
+    expect(JSON.stringify(stored?.result ?? null)).not.toContain(PLAIN_KEY_A);
+
+    // The read works again: the same completion is accepted and masked.
+    failing = false;
+    const retried = await h.complete(job.id, claimed.job.leaseToken, {
+      logTail: `the provider refused ${PLAIN_KEY_A}`,
+    });
+    expect(retried.status).toBe(200);
+    const final = JSON.stringify((await h.queue.get(job.id))?.result ?? null);
+    expect(final).toContain("[redacted]");
+    expect(final).not.toContain(PLAIN_KEY_A);
+  });
+
   // #104-LK-07
   it("masks the key of the claim in the result even when the workspace has no key any more", async () => {
     const h = await startWithoutLegacyKey();
     const job = await h.enqueueNew();
     await saveKey(h, job.workspaceId, PLAIN_KEY_A);
     const claimed = await h.claimed();
-    await h.llm.keyServiceFor(job.workspaceId).remove();
+    await h.llm.keyServiceFor(job.workspaceId).remove("openrouter");
 
     await h.anotherInstance().complete(job.id, claimed.job.leaseToken, {
       logTail: `the provider refused ${PLAIN_KEY_A}`,

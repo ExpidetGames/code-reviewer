@@ -3,6 +3,12 @@
 import { describe, expect, it } from "vitest";
 import { ENTITLEMENTS_INVALID_CODE } from "../workspaces/entitlements.ts";
 import {
+  createFakeAdapter,
+  FAKE_PROVIDER_ID,
+} from "./providers/fake-adapter.ts";
+import { openrouterDescriptor } from "./providers/openrouter/descriptor.ts";
+import { createProviderRegistry } from "./providers/registry.ts";
+import {
   keyModeForJob,
   resolveWorkspaceLlmAccess,
   type ResolveLlmInput,
@@ -78,6 +84,56 @@ describe("which LLM access a workspace gets", () => {
     const result = resolveWorkspaceLlmAccess(own({ state: "unreadable" }));
 
     expect(result).toMatchObject({ ok: false, reason: "key_unreadable" });
+  });
+
+  // #426-T01
+  it("takes the key of the provider the job asks for, with that provider in the access", () => {
+    const result = resolveWorkspaceLlmAccess({
+      keyMode: "own",
+      provider: "openrouter",
+      key: { state: "key", binding: "openrouter", apiKey: WORKSPACE_KEY },
+      defaults: DEFAULTS,
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      source: "workspace",
+      access: { provider: "openrouter", apiKey: WORKSPACE_KEY },
+    });
+  });
+
+  // #426-T01
+  it("takes the key of a second registered provider when that provider is asked for", () => {
+    const result = resolveWorkspaceLlmAccess(
+      {
+        keyMode: "own",
+        provider: FAKE_PROVIDER_ID,
+        key: { state: "key", binding: FAKE_PROVIDER_ID, apiKey: WORKSPACE_KEY },
+        defaults: DEFAULTS,
+      },
+      createProviderRegistry([openrouterDescriptor, createFakeAdapter()]),
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      source: "workspace",
+      access: { provider: FAKE_PROVIDER_ID, apiKey: WORKSPACE_KEY },
+    });
+  });
+
+  // #426-T01 (a key of one provider is never used for another)
+  it("fails closed for a key of a registered provider that is not the one asked for", () => {
+    const result = resolveWorkspaceLlmAccess(
+      {
+        keyMode: "own",
+        provider: "openrouter",
+        key: { state: "key", binding: FAKE_PROVIDER_ID, apiKey: WORKSPACE_KEY },
+        defaults: DEFAULTS,
+      },
+      createProviderRegistry([openrouterDescriptor, createFakeAdapter()]),
+    );
+
+    expect(result).toMatchObject({ ok: false, reason: "key_binding_mismatch" });
   });
 
   // #104-LK-01 (the lesson of #100: a stored secret is never carried to another endpoint)

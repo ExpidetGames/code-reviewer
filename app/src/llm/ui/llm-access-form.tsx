@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 "use client";
-// The form of the "LLM access" sub-page, for an Admin or an Owner: the provider, the API key, "Save
-// key" and "Test key". The key is write-only: the page shows whether one is saved (and its last four
-// characters), an empty field keeps it, and the saved value never reaches this page. Changing the
-// provider asks for the key again, because a saved key is never carried over to another provider.
-// Removing the key is a destructive action of the "Advanced" sub-page (`remove-workspace-key.tsx`).
+// The form of one provider's card on the "LLM access" sub-page, for an Admin or an Owner: the API key,
+// "Save key" and "Test key". Every provider has its own key and its own form (#426). The key is write-only:
+// the page shows whether one is saved (and its last four characters), an empty field keeps it, and the saved
+// value never reaches this page. A saved key that was made for another provider than this card's is not
+// carried over. Removing the key is a destructive action of the "Advanced" sub-page
+// (`remove-workspace-key.tsx`).
 import { useRouter } from "next/navigation";
 import { useId, useState, type FormEvent } from "react";
 import { Button } from "../../components/button.tsx";
@@ -18,16 +19,7 @@ import {
   FieldLabel,
 } from "../../components/ui/field.tsx";
 import { Input } from "../../components/ui/input.tsx";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "../../components/ui/select.tsx";
 import { UNREADABLE_SECRET_CAUSE } from "../../secrets/messages.ts";
-import { LLM_PROVIDERS } from "../config.ts";
-import { llmProviderDescriptors } from "../providers/index.ts";
 import type { WorkspaceLlmKeyStatus } from "../workspace-key.ts";
 import { browserLlmKeyApi, type LlmKeyApi } from "./api.ts";
 import {
@@ -49,10 +41,17 @@ type Outcome =
 
 export function LlmAccessForm({
   workspaceSlug,
+  provider,
+  label,
   keyStatus,
   api = browserLlmKeyApi(workspaceSlug),
 }: {
   workspaceSlug: string;
+  /** The provider whose key this form sets. */
+  provider: string;
+  /** Its name for the person. */
+  label: string;
+  /** The state of the key of this provider. */
   keyStatus: WorkspaceLlmKeyStatus;
   /** Only tests pass this. */
   api?: LlmKeyApi;
@@ -60,11 +59,6 @@ export function LlmAccessForm({
   const router = useRouter();
   const ids = useId();
   const stored = keyStatus.state === "not_configured" ? null : keyStatus;
-  const [provider, setProvider] = useState(
-    stored !== null && LLM_PROVIDERS.some((known) => known === stored.provider)
-      ? stored.provider
-      : LLM_PROVIDERS[0],
-  );
   const [apiKey, setApiKey] = useState("");
   const [pending, setPending] = useState<"save" | "test" | null>(null);
   const [outcome, setOutcome] = useState<Outcome>(null);
@@ -74,7 +68,6 @@ export function LlmAccessForm({
       ? outcome.issues.find((issue) => issue.field === field)
       : undefined;
   const keyIssue = issueFor("apiKey");
-  const providerIssue = issueFor("provider");
 
   // A saved key is never carried over to another provider: the field must be filled then.
   const changedProvider = stored !== null && stored.provider !== provider;
@@ -137,7 +130,7 @@ export function LlmAccessForm({
   return (
     <form
       onSubmit={(event) => void save(event)}
-      aria-label="LLM key"
+      aria-label={`${label} LLM key`}
       noValidate
       className="flex max-w-[44rem] flex-col gap-4"
     >
@@ -152,36 +145,6 @@ export function LlmAccessForm({
           </AlertDescription>
         </Alert>
       ) : null}
-      <Field data-invalid={providerIssue !== undefined || undefined}>
-        <FieldLabel htmlFor={`${ids}-provider`}>Provider</FieldLabel>
-        <Select
-          value={provider}
-          onValueChange={(value) => setProvider(value as typeof provider)}
-        >
-          <SelectTrigger
-            id={`${ids}-provider`}
-            className="w-full"
-            aria-invalid={providerIssue !== undefined}
-            aria-describedby={
-              providerIssue !== undefined ? `${ids}-provider-error` : undefined
-            }
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {LLM_PROVIDERS.map((known) => (
-              <SelectItem key={known} value={known}>
-                {llmProviderDescriptors.labelOf(known)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        {providerIssue ? (
-          <FieldError id={`${ids}-provider-error`}>
-            {describeLlmKeyIssue(providerIssue.code)}
-          </FieldError>
-        ) : null}
-      </Field>
       <Field data-invalid={keyIssue !== undefined || undefined}>
         <div className="flex items-center gap-2">
           <FieldLabel htmlFor={`${ids}-key`}>API key</FieldLabel>
