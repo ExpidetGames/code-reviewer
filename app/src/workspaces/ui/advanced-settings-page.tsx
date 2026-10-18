@@ -6,6 +6,7 @@
 // `manage_llm_key`, resetting the review defaults needs `manage_review_defaults`; a person with
 // neither only reads that these actions are not theirs. `RemoveWorkspaceKey` owns whether the key is
 // still there, so its confirmation survives the refresh that removes the zone (#178 review M1).
+import type { InstanceAccess } from "../../llm/access.ts";
 import type { LlmKeyApi } from "../../llm/ui/api.ts";
 import { llmProviderDescriptors } from "../../llm/providers/index.ts";
 import { RemoveWorkspaceKey } from "../../llm/ui/remove-workspace-key.tsx";
@@ -17,6 +18,7 @@ export function AdvancedSettingsPageContent({
   workspaceSlug,
   canManageKey,
   keys,
+  instanceAccess = null,
   canResetDefaults,
   showPlan = false,
   removeApi,
@@ -30,6 +32,12 @@ export function AdvancedSettingsPageContent({
    * them are listed, so a component that removed its key stays mounted to confirm it.
    */
   keys: ReadonlyArray<{ provider: string; configured: boolean }>;
+  /**
+   * Set when this instance provides the access of the workspace (its key mode is managed, `instanceAccessOf`): the
+   * provider behind that access is not for the workspace to read, so no card names one. A key the workspace stored
+   * earlier is still listed, by the words "the stored key" (it can be removed, it is not used), and only while it exists.
+   */
+  instanceAccess?: InstanceAccess | null;
   /** An Admin or an Owner (`manage_review_defaults`): they may reset the defaults. */
   canResetDefaults: boolean;
   /** The workspace has entitlements (#282): the settings navigation lists the Plan page. */
@@ -46,16 +54,22 @@ export function AdvancedSettingsPageContent({
     >
       <div className="flex max-w-[64rem] flex-col gap-6">
         {canManageKey
-          ? keys.map(({ provider, configured }) => (
-              <RemoveWorkspaceKey
-                key={provider}
-                workspaceSlug={workspaceSlug}
-                provider={provider}
-                label={llmProviderDescriptors.labelOf(provider)}
-                keyConfigured={configured}
-                {...(removeApi === undefined ? {} : { api: removeApi })}
-              />
-            ))
+          ? keys
+              .filter(({ configured }) => instanceAccess === null || configured)
+              .map(({ provider, configured }) => (
+                <RemoveWorkspaceKey
+                  key={provider}
+                  workspaceSlug={workspaceSlug}
+                  provider={provider}
+                  label={
+                    instanceAccess === null
+                      ? llmProviderDescriptors.labelOf(provider)
+                      : null
+                  }
+                  keyConfigured={configured}
+                  {...(removeApi === undefined ? {} : { api: removeApi })}
+                />
+              ))
           : null}
         {canResetDefaults ? (
           <ResetReviewDefaults

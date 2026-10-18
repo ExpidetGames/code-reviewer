@@ -25,21 +25,15 @@ export default async function AdvancedSettingsPage({
     llm.summaryFor(workspaceId),
     planPageLinkedFor(workspaceId),
   ]);
-  // A managed workspace has no key of its own to remove, and the provider behind the instance's access is not for it to
-  // read (#435): the page lists no provider, as the LLM access page does.
-  const managed = instanceAccessOf(summary) !== null;
   return (
     <AdvancedSettingsPageContent
       workspaceSlug={workspace.slug}
       canManageKey={can(role, "manage_llm_key")}
-      keys={
-        managed
-          ? []
-          : keyStatuses.map(({ provider, status }) => ({
-              provider,
-              configured: status.state !== "not_configured",
-            }))
-      }
+      keys={keyStatuses.map(({ provider, status }) => ({
+        provider,
+        configured: status.state !== "not_configured",
+      }))}
+      instanceAccess={instanceAccessOf(summary)}
       canResetDefaults={can(role, "manage_review_defaults")}
       showPlan={showPlan}
     />
