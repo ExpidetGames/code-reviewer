@@ -316,7 +316,7 @@ test.describe("a limited workspace on an instance with the operator API on", () 
     comments.filter((comment) => comment.body.includes(REVIEW_MARKER));
 
   // #285-T02
-  test("the script sets default entitlements and a tier configuration, and two pull requests are reviewed with the operator's key and the tier model", async ({
+  test("@smoke the script sets default entitlements and a tier configuration, and two pull requests are reviewed with the operator's key and the tier model", async ({
     request,
   }) => {
     test.setTimeout(240_000);
