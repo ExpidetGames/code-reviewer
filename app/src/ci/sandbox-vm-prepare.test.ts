@@ -92,7 +92,8 @@ describe("docker/sandbox/vm-prepare.sh", () => {
 describe("docker/sandbox/vm-prepare.sh against a busy cgroup root", () => {
   const roots: string[] = [];
   afterEach(() => {
-    for (const dir of roots.splice(0)) rmSync(dir, { recursive: true, force: true });
+    for (const dir of roots.splice(0))
+      rmSync(dir, { recursive: true, force: true });
   });
 
   function fixture() {
