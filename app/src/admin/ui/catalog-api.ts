@@ -51,6 +51,8 @@ export type CatalogApi = {
   release(id: string): Promise<RequestResult<CatalogChanged>>;
   retire(id: string): Promise<RequestResult<CatalogChanged>>;
   remove(id: string): Promise<RequestResult<CatalogChanged>>;
+  /** Puts the entries in the given order, every entry's id once, first to last: one request, all or nothing. */
+  reorder(order: string[]): Promise<RequestResult<CatalogChanged>>;
   setDefaults(
     defaults: CatalogDefaults,
   ): Promise<RequestResult<CatalogChanged>>;
@@ -72,6 +74,8 @@ export function createCatalogApi(fetchImpl: FetchLike): CatalogApi {
     release: (id) => requestJson(fetchImpl, "POST", `${entry(id)}/release`, {}),
     retire: (id) => requestJson(fetchImpl, "POST", `${entry(id)}/retire`, {}),
     remove: (id) => requestJson(fetchImpl, "DELETE", entry(id), {}),
+    reorder: (order) =>
+      requestJson(fetchImpl, "PUT", `${BASE}/order`, { order }),
     setDefaults: (defaults) =>
       requestJson(fetchImpl, "PUT", `${BASE}/defaults`, defaults),
     check: (input) => requestJson(fetchImpl, "POST", `${BASE}/check`, input),

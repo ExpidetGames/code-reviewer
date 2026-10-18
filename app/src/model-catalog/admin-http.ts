@@ -13,6 +13,8 @@
 //   POST   /api/admin/model-catalog/:id/release   draft or retired to released, after the provider's metadata vouches for it
 //   POST   /api/admin/model-catalog/:id/retire    released to retired (not while it is a default)
 //   PUT    /api/admin/model-catalog/defaults      { diff: <id> | null, dynamic: <id> | null }
+//   PUT    /api/admin/model-catalog/order         { order: [<id>, ...] }: every entry once, first to last, in one transaction;
+//                                                 a list that is not exactly the entries is 409 `catalog_conflict`
 //   POST   /api/admin/model-catalog/check         { provider, modelId, kinds }: "Check model" without storing anything;
 //                                                 answers { ok: true, verified } or { ok: false, error: <code> }
 //
@@ -47,6 +49,7 @@ export type CatalogRouteHandlers = {
   create(request: Request): Promise<Response>;
   update(request: Request, id: string): Promise<Response>;
   remove(request: Request, id: string): Promise<Response>;
+  reorder(request: Request): Promise<Response>;
   release(request: Request, id: string): Promise<Response>;
   retire(request: Request, id: string): Promise<Response>;
   setDefaults(request: Request): Promise<Response>;
@@ -150,6 +153,11 @@ export function createCatalogRouteHandlers({
 
     retire: (request, id) =>
       change(request, async (who) => answer(await service.retire(who.id, id))),
+
+    reorder: (request) =>
+      change(request, async (who, body) =>
+        answer(await service.reorder(who.id, body)),
+      ),
 
     setDefaults: (request) =>
       change(request, async (who, body) =>

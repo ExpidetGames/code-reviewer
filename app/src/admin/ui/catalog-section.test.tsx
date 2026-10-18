@@ -99,6 +99,7 @@ function api(answers: Partial<Record<keyof CatalogApi, unknown>> = {}) {
     retire: mockOf(answers.retire ?? OK),
     remove: mockOf(answers.remove ?? OK),
     setDefaults: mockOf(answers.setDefaults ?? OK),
+    reorder: mockOf(answers.reorder ?? OK),
     check: mockOf(answers.check ?? CHECKED),
   };
   return { api: calls as unknown as CatalogApi, ...calls };
@@ -568,13 +569,14 @@ describe("the actions of a row", () => {
     expect(screen.queryByRole("button", { name: /default for/i })).toBeNull();
   });
 
-  it("moves an entry up or down by re-numbering the entries that changed place", async () => {
+  // #429-T02
+  it("moves an entry up or down with one request that carries the whole order", async () => {
     const user = userEvent.setup();
     const mock = renderSection(
       catalogOf([
         { ...SMALL, sortOrder: 0 },
-        { ...BIG, sortOrder: 0 },
-        { ...OLD, sortOrder: 0 },
+        { ...BIG, sortOrder: 1 },
+        { ...OLD, sortOrder: 2 },
       ]),
     );
 
@@ -585,15 +587,31 @@ describe("the actions of a row", () => {
     ).toBe(true);
     await user.click(screen.getByRole("button", { name: "Move Big up" }));
 
-    await waitFor(() => expect(mock.update).toHaveBeenCalled());
-    const sent = Object.fromEntries(
-      mock.update.mock.calls.map((call) => [
-        call[0] as string,
-        (call[1] as { sortOrder: number }).sortOrder,
-      ]),
+    await waitFor(() => expect(mock.reorder).toHaveBeenCalled());
+    // Big first, then Small, then Old: the order the page now shows, in one call and not one per entry.
+    expect(mock.reorder).toHaveBeenCalledTimes(1);
+    expect(mock.reorder).toHaveBeenCalledWith([
+      "mce_big",
+      "mce_small",
+      "mce_old",
+    ]);
+    expect(mock.update).not.toHaveBeenCalled();
+    await waitFor(() => expect(navigation.refresh).toHaveBeenCalled());
+  });
+
+  // #429-T03
+  it("shows the copy of a refused move and does not reload as if it had worked", async () => {
+    const user = userEvent.setup();
+    const mock = renderSection(
+      catalogOf([SMALL, BIG]),
+      api({ reorder: refused("catalog_conflict") }),
     );
-    // Big first, then Small, then Old: the order the page now shows. Big is at 0 already, so only the others are sent.
-    expect(sent).toEqual({ mce_small: 1, mce_old: 2 });
+
+    await user.click(screen.getByRole("button", { name: "Move Big up" }));
+
+    expect(await screen.findByText(/changed meanwhile/i)).toBeTruthy();
+    expect(mock.reorder).toHaveBeenCalledTimes(1);
+    expect(navigation.refresh).not.toHaveBeenCalled();
   });
 
   // #429-T02

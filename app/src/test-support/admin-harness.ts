@@ -525,6 +525,8 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
           if (method === "POST") return await catalogRoutes.create(request);
         } else if (action === undefined && segment === "check") {
           if (method === "POST") return await catalogRoutes.check(request);
+        } else if (action === undefined && segment === "order") {
+          if (method === "PUT") return await catalogRoutes.reorder(request);
         } else if (action === undefined && segment === "defaults") {
           if (method === "PUT") return await catalogRoutes.setDefaults(request);
         } else if (action === undefined) {

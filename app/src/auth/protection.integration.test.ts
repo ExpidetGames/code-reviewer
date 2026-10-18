@@ -138,6 +138,7 @@ const PROTECTED_DATA_ROUTES = [
   "/api/instance-portal/model-catalog/[id]/retire",
   "/api/instance-portal/model-catalog/check",
   "/api/instance-portal/model-catalog/defaults",
+  "/api/instance-portal/model-catalog/order",
   "/api/instance-portal/github",
   "/api/instance-portal/github/check",
   "/api/instance-portal/github/manifest",

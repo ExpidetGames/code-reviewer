@@ -90,6 +90,7 @@ describe("the routes of the portal", () => {
       "/api/admin/model-catalog/[id]/retire",
       "/api/admin/model-catalog/check",
       "/api/admin/model-catalog/defaults",
+      "/api/admin/model-catalog/order",
       "/api/admin/settings",
     ]);
   });

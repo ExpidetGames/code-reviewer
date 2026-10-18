@@ -135,6 +135,7 @@ const WRITES: Array<{ method: string; path: string; body: unknown }> = [
   { method: "POST", path: "/mce_x/release", body: {} },
   { method: "POST", path: "/mce_x/retire", body: {} },
   { method: "PUT", path: "/defaults", body: { diff: null, dynamic: null } },
+  { method: "PUT", path: "/order", body: { order: [] } },
   {
     method: "POST",
     path: "/check",
@@ -358,6 +359,54 @@ describe("creating, checking and releasing an entry", () => {
     expect((await catalogOf(portal)).entries.map((entry) => entry.id)).toEqual([
       second.id,
       first.id,
+    ]);
+  });
+
+  // #429-T02
+  it("puts the entries in the given order with one request, and refuses a list that is not exactly the entries", async () => {
+    const { portal } = await start();
+    const first = await createEntry(portal);
+    const second = await createEntry(portal, {
+      ...SMALL,
+      name: "Medium",
+      modelId: "acme/better-2",
+    });
+    const third = await createEntry(portal, {
+      ...SMALL,
+      name: "Large",
+      modelId: "acme/quick-1",
+    });
+
+    const moved = await call(portal, "PUT", "/order", {
+      order: [third.id, first.id, second.id],
+    });
+
+    expect(moved.status).toBe(200);
+    const answered = (await moved.json()) as { catalog: Catalog };
+    expect(answered.catalog.entries.map((entry) => entry.id)).toEqual([
+      third.id,
+      first.id,
+      second.id,
+    ]);
+    expect((await catalogOf(portal)).entries.map((entry) => entry.id)).toEqual([
+      third.id,
+      first.id,
+      second.id,
+    ]);
+    for (const order of [
+      [first.id, second.id],
+      [first.id, second.id, third.id, "mce_nothing"],
+      [first.id, first.id, second.id],
+      "not a list",
+    ]) {
+      const refused = await call(portal, "PUT", "/order", { order });
+      expect(refused.status, JSON.stringify(order)).toBeGreaterThanOrEqual(409);
+      expect(refused.status).toBeLessThan(500);
+    }
+    expect((await catalogOf(portal)).entries.map((entry) => entry.id)).toEqual([
+      third.id,
+      first.id,
+      second.id,
     ]);
   });
 

@@ -11,7 +11,7 @@
 // "used by" and for the confirmation of a change of model, and returns no row, project or workspace.
 import "server-only";
 import { randomUUID } from "node:crypto";
-import { sql, type Kysely, type Selectable } from "kysely";
+import type { Kysely, Selectable } from "kysely";
 import { formatTimestamp, tryDecodeJson } from "../codecs.ts";
 import { errorCode } from "../errors.ts";
 import {
@@ -80,6 +80,12 @@ export type CatalogRepository = {
     updatedBy: string | null,
     expectedUpdatedAt?: string,
   ): Promise<CatalogEntry | undefined>;
+  /**
+   * Puts the entries at the places of their position in `ids` (sort order 0, 1, 2, ...) in one transaction, writing only
+   * the entries that move. False, and nothing written, when `ids` is not exactly the set of entries (one is missing,
+   * unknown or repeated): the caller saw a list that is not the catalog any more.
+   */
+  reorder(ids: readonly string[], updatedBy: string | null): Promise<boolean>;
   /** Deletes the entry when it is a draft; false for any other status and for an id that is not there. */
   deleteDraft(id: string): Promise<boolean>;
   /** What a member may see: the released and the retired entries, with no provider and no model id. */
@@ -313,6 +319,37 @@ export function createCatalogRepository(
             : { updatedAt: expectedUpdatedAt }),
         },
       );
+    },
+
+    async reorder(ids, updatedBy) {
+      const run = async (trx: Kysely<Database>): Promise<boolean> => {
+        const rows = await trx
+          .selectFrom("model_catalog_entries")
+          .select(["id", "sort_order"])
+          .execute();
+        const current = new Map(rows.map((row) => [row.id, row.sort_order]));
+        if (
+          current.size !== ids.length ||
+          new Set(ids).size !== ids.length ||
+          !ids.every((id) => current.has(id))
+        )
+          return false;
+        const timestamp = formatTimestamp(now());
+        for (const [position, id] of ids.entries()) {
+          if (current.get(id) === position) continue;
+          await trx
+            .updateTable("model_catalog_entries")
+            .set({
+              sort_order: position,
+              updated_by: updatedBy,
+              updated_at: timestamp,
+            })
+            .where("id", "=", id)
+            .execute();
+        }
+        return true;
+      };
+      return db.isTransaction ? run(db) : db.transaction().execute(run);
     },
 
     async deleteDraft(id) {

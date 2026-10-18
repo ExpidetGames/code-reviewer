@@ -46,6 +46,8 @@ export type CatalogAdminService = {
   release(actorId: string, id: string): Promise<AdminChange>;
   retire(actorId: string, id: string): Promise<AdminChange>;
   remove(id: string): Promise<AdminChange>;
+  /** Puts the entries in the order of `{ order: [id, ...] }`, every entry once, in one transaction. */
+  reorder(actorId: string, input: unknown): Promise<AdminChange>;
   setDefaults(actorId: string, input: unknown): Promise<AdminChange>;
   check(input: unknown): Promise<AdminCheck>;
 };
@@ -164,6 +166,13 @@ export function createCatalogAdminService({
 
     async remove(id) {
       const result = await catalog.remove(id);
+      return result.ok ? changed(undefined) : failure(result);
+    },
+
+    async reorder(actorId, input) {
+      if (!isPlainObject(input))
+        return { ok: false, code: "request_invalid", field: "order" };
+      const result = await catalog.reorder(input.order, actorId);
       return result.ok ? changed(undefined) : failure(result);
     },
 

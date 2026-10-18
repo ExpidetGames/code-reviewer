@@ -108,6 +108,7 @@ describe("the guards of the admin portal", () => {
       "/api/instance-portal/model-catalog/[id]/retire",
       "/api/instance-portal/model-catalog/check",
       "/api/instance-portal/model-catalog/defaults",
+      "/api/instance-portal/model-catalog/order",
     ]);
     for (const { route, file } of catalog) {
       expect(isInternalPortalPath(concretePath(route))).toBe(true);

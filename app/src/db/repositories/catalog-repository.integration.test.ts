@@ -5,6 +5,7 @@
 import { sql, type Kysely } from "kysely";
 import { describe, expect, it } from "vitest";
 import { createJobQueueFixture } from "../../test-support/jobs.ts";
+import type { CatalogDefaults } from "../../model-catalog/entries.ts";
 import type { EntitlementsData } from "../../workspaces/entitlements.ts";
 import { defaultWorkspaceId } from "../../test-support/workspaces.ts";
 import { createInstanceSettingsRepository } from "./instance-settings-repository.ts";
@@ -401,8 +402,11 @@ describe.each(ENGINES)("the model catalog repository on $name", (engine) => {
         entry({ name: "Deep", nameKey: "deep", kinds: ["dynamic"] }),
         null,
       );
-      const defaults = { diff: diffDefault.id, dynamic: dynamicDefault.id };
-      const none = { diff: null, dynamic: null };
+      const defaults: CatalogDefaults = {
+        diff: diffDefault.id,
+        dynamic: dynamicDefault.id,
+      };
+      const none: CatalogDefaults = { diff: null, dynamic: null };
       const put = (id: string, repositoryId: string, settings: unknown) =>
         database
           .insertInto("projects")
@@ -529,6 +533,53 @@ describe.each(ENGINES)("the model catalog repository on $name", (engine) => {
       expect(
         (await repository.countProjectsUsing(defaults)).get(created.id) ?? 0,
       ).toBe(1);
+    },
+  );
+
+  // #429-T02
+  it_(
+    "puts every entry at its place in the given order in one go, and changes nothing when the list is not exactly the entries",
+    async () => {
+      const { db, repository } = await start();
+      await insertUser(db, { id: "user-1" });
+      const a = await repository.insert(
+        entry({ name: "A", nameKey: "a", sortOrder: 0 }),
+        null,
+      );
+      const b = await repository.insert(
+        entry({ name: "B", nameKey: "b", sortOrder: 1 }),
+        null,
+      );
+      const c = await repository.insert(
+        entry({ name: "C", nameKey: "c", sortOrder: 2 }),
+        null,
+      );
+
+      expect(await repository.reorder([c.id, a.id, b.id], "user-1")).toBe(true);
+
+      const listed = await repository.list();
+      expect(listed.map((item) => [item.id, item.sortOrder])).toEqual([
+        [c.id, 0],
+        [a.id, 1],
+        [b.id, 2],
+      ]);
+      // Only the entries that changed place were written.
+      expect(listed.find((item) => item.id === c.id)?.updatedBy).toBe("user-1");
+      // A missing entry, an unknown one and a repeated one are refused, and nothing is written.
+      for (const given of [
+        [a.id, b.id],
+        [a.id, b.id, c.id, "mce_nothing"],
+        [a.id, a.id, b.id],
+        [a.id, b.id, "mce_nothing"],
+      ])
+        expect(await repository.reorder(given, null)).toBe(false);
+      expect(
+        (await repository.list()).map((item) => [item.id, item.sortOrder]),
+      ).toEqual([
+        [c.id, 0],
+        [a.id, 1],
+        [b.id, 2],
+      ]);
     },
   );
 

@@ -126,22 +126,13 @@ export function ModelCatalogSection({
     void run(() => api.setDefaults(next));
   }
 
-  /** Moves the entry one place and numbers the entries that changed place by their position. */
+  /** Moves the entry one place: the new order of all entries goes to the server in one request. */
   function move(index: number, by: -1 | 1) {
     const order = [...catalog.entries];
     const [moved] = order.splice(index, 1);
     if (moved === undefined) return;
     order.splice(index + by, 0, moved);
-    const changes = order.flatMap((entry, position) =>
-      entry.sortOrder === position ? [] : [{ id: entry.id, position }],
-    );
-    void run(async () => {
-      for (const { id, position } of changes) {
-        const result = await api.update(id, { sortOrder: position });
-        if (!result.ok) return result;
-      }
-      return { ok: true as const, data: null };
-    });
+    void run(() => api.reorder(order.map((entry) => entry.id)));
   }
 
   function decide() {

@@ -87,6 +87,15 @@ export type CatalogService = {
   release(id: string, updatedBy: string | null): Promise<EntryResult>;
   /** Released to retired. Not while the entry is an instance default. */
   retire(id: string, updatedBy: string | null): Promise<EntryResult>;
+  /**
+   * Puts the entries in the given order: `ids` is every entry's id once, first to last, and each entry gets its position as
+   * its sort order, all in one transaction. A list that is not exactly the entries (one was added, deleted or left out
+   * meanwhile) is `catalog_conflict` and writes nothing; a list that is no list of ids is `request_invalid`.
+   */
+  reorder(
+    ids: unknown,
+    updatedBy: string | null,
+  ): Promise<{ ok: true } | Refused>;
   /** Deletes a draft; a released or retired entry is never deleted (its id stays in the mask list and in old usage). */
   remove(id: string): Promise<{ ok: true } | Refused>;
   /**
@@ -432,6 +441,17 @@ export function createCatalogService(deps: {
 
     release: (id, updatedBy) => change(id, "released", updatedBy),
     retire: (id, updatedBy) => change(id, "retired", updatedBy),
+
+    async reorder(ids, updatedBy) {
+      if (!Array.isArray(ids) || !ids.every((id) => typeof id === "string"))
+        return refused("request_invalid", "order");
+      const order: string[] = ids;
+      if (new Set(order).size !== order.length)
+        return refused("request_invalid", "order");
+      return (await catalog.reorder(order, updatedBy))
+        ? { ok: true }
+        : refused("catalog_conflict");
+    },
 
     async remove(id) {
       const entry = await catalog.get(id);

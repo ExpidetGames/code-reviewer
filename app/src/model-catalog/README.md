@@ -93,22 +93,25 @@ or a model (`summary()`).
 
 Routes (`/api/admin/model-catalog`, files in `src/app/api/instance-portal/model-catalog/`, handlers in `admin-http.ts`):
 
-| Route                                   | Does                                                                                                            |
-| --------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `GET /`                                 | The view: every entry (with `usedByProjects`), the two defaults, the providers                                  |
-| `POST /`                                | A new entry, as a draft                                                                                         |
-| `PUT /:id`                              | Changes the given fields; the model or provider behind a released entry needs `"confirmModelChange": true`      |
-| `DELETE /:id`                           | Deletes a draft                                                                                                 |
-| `POST /:id/release`, `POST /:id/retire` | The status moves (release re-runs the check)                                                                    |
-| `PUT /defaults`                         | `{ diff, dynamic }`, each an entry id or null                                                                   |
-| `POST /check`                           | `{ provider, modelId, kinds }` answers `{ ok: true, verified }` or `{ ok: false, error }` (the provider's word) |
+| Route                                   | Does                                                                                                                                      |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /`                                 | The view: every entry (with `usedByProjects`), the two defaults, the providers                                                            |
+| `POST /`                                | A new entry, as a draft                                                                                                                   |
+| `PUT /:id`                              | Changes the given fields; the model or provider behind a released entry needs `"confirmModelChange": true`                                |
+| `DELETE /:id`                           | Deletes a draft                                                                                                                           |
+| `POST /:id/release`, `POST /:id/retire` | The status moves (release re-runs the check)                                                                                              |
+| `PUT /defaults`                         | `{ diff, dynamic }`, each an entry id or null                                                                                             |
+| `PUT /order`                            | `{ order: [id, ...] }`, every entry once, first to last, in one transaction (`catalog_conflict` when the list is not exactly the entries) |
+| `POST /check`                           | `{ provider, modelId, kinds }` answers `{ ok: true, verified }` or `{ ok: false, error }` (the provider's word)                           |
 
 The admin first (401 for nobody, the 404 of a missing path for anyone else), then for a change the request's origin
 (`cross_site_request`), `application/json` and a body of at most 64 KB, then the service. Every refusal is
 `{ error: <code>, issues?: [{ field, code }] }` with a code of `admin-errors.ts` and its status; the page turns the code
 into copy (`src/admin/ui/catalog-messages.ts`), moves the focus to the first refused field and never shows a code. **A model
 change behind a released entry** (decision C6) is answered `409 model_change_not_confirmed` with the number of `projects`
-that use it, and nothing is written, until the request repeats it with `confirmModelChange: true`; the service then checks
+that use it, and nothing is written, until the request repeats it with `confirmModelChange: true` (the service decides on the entry it
+writes, which the write is pinned to by `updatedAt`, so a release in between ends as `catalog_conflict` and cannot skip it; the
+dialog asks only when the server says so and shows the server's count); the service then checks
 the model again and writes the audit line (the entry, the account, the model before and after, the count) to the server
 log, which is the operator's. Nothing here is reachable by a member of a workspace or by the operator API (decision C8).
 "Used by" counts the projects whose settings select the entry and, for an instance default, the projects in a workspace
