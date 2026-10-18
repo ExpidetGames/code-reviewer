@@ -16,6 +16,7 @@ import {
 } from "../test-support/postgres-test-database.ts";
 import { createTestDatabase } from "../test-support/test-database.ts";
 import {
+  NOW,
   WEBHOOK_SECRET,
   WEBHOOK_URL,
   event,
@@ -126,7 +127,7 @@ describe.each(ENGINES)("the billing webhook on $name", (engine) => {
           secret: "pdl_ntfset_other",
         });
         const future = await h.deliverOne(created, {
-          signedAt: Date.now() + 3_600_000 * 24,
+          signedAt: NOW.getTime() + 3_600_000 * 24,
         });
 
         expect([other.status, future.status]).toEqual([401, 401]);
@@ -165,7 +166,7 @@ describe.each(ENGINES)("the billing webhook on $name", (engine) => {
         const bytes = "{not json";
         const header = buildDeliveries(
           [event("subscription.updated", {}, { at: T1 })],
-          { secret: WEBHOOK_SECRET, now: () => Date.now() },
+          { secret: WEBHOOK_SECRET, now: () => NOW.getTime() },
         )[0]?.headers["paddle-signature"];
 
         const unsigned = await h.handler(
@@ -191,7 +192,7 @@ describe.each(ENGINES)("the billing webhook on $name", (engine) => {
         const { signPaddleWebhook } =
           await import("../../../fakes/paddle/webhooks.ts");
         const body = JSON.stringify({ hello: "world" });
-        const ts = Math.floor(Date.now() / 1000);
+        const ts = Math.floor(NOW.getTime() / 1000);
 
         const answer = await h.handler(
           new Request(WEBHOOK_URL, {
