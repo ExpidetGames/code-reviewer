@@ -17,7 +17,8 @@ import {
   type RunnerResult,
 } from "./contract.ts";
 import type { ClaimedKeys } from "./claimed-keys.ts";
-import { maskModelInText } from "../llm/access.ts";
+import { maskModelInText, maskProviderInText } from "../llm/access.ts";
+import { llmProviderDescriptors } from "../llm/providers/index.ts";
 import { redactResult } from "./redact.ts";
 import type { JobEndedEvent } from "../dispatch/job-ended.ts";
 import type { RunnerApiLogger } from "./logger.ts";
@@ -80,12 +81,18 @@ export function mapRunnerErrorCode(code: string): string {
   return RUNNER_ERROR_CODES.some((known) => known === code) ? code : "unknown";
 }
 
+/** Every registered provider, by its id and by the name a person reads. */
+const PROVIDER_NAMES = llmProviderDescriptors.ids.flatMap((id) => [
+  id,
+  llmProviderDescriptors.labelOf(id),
+]);
+
 /**
  * The result without the model of a catalog entry (#280, #432): `usage.model` is not reported (null) whatever the runner calls
  * the model, and the ids become `[model]` in the text fields at any length (the generic rule that follows ignores
  * secrets shorter than a credential could be). The link to the comment is left alone: the app builds it from GitHub
- * data, it never carries a model, and a short id that also occurs in a repository name would break the link. `hide`
- * is whether the job ran on the operator's key.
+ * data, it never carries a model, and a short id that also occurs in a repository name would break the link. The
+ * provider is taken out of the text the same way (`[provider]`). `hide` is whether the job ran on the operator's key.
  */
 export function withoutManagedModel(
   result: RunnerResult,
@@ -93,7 +100,9 @@ export function withoutManagedModel(
   hide: boolean,
 ): RunnerResult {
   if (!hide) return result;
-  const mask = (text: string) => maskModelInText(text, ...models);
+  // The provider goes with the model: an error class or a message of the provider names it (ADR 0005, 2.17).
+  const mask = (text: string) =>
+    maskProviderInText(maskModelInText(text, ...models), PROVIDER_NAMES);
   return {
     ...result,
     logTail: mask(result.logTail),

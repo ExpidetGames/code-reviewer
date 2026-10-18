@@ -129,6 +129,27 @@ const MASK = "[redacted]";
 /** What stands in a text where the id of a managed entry's model was (#283). */
 export const MODEL_MASK = "[model]";
 
+/** What stands in a text where the name of a provider was (#435). */
+export const PROVIDER_MASK = "[provider]";
+
+/**
+ * Replaces the name of a provider (its id and its label) in a text with `[provider]`, in any letter case and also inside
+ * a longer word, so that the `OpenrouterException` of an error class goes with the `OpenRouter:` of its message. A
+ * member of a workspace on the operator's key does not read which provider answers (ADR 0005, 2.17).
+ */
+export function maskProviderInText(text: string, names: string[]): string {
+  let masked = text;
+  // Longest first, so a label that contains an id is masked as a whole.
+  for (const name of [...new Set(names)]
+    .filter((value) => value !== "")
+    .sort((a, b) => b.length - a.length))
+    masked = masked.replace(
+      new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"),
+      PROVIDER_MASK,
+    );
+  return masked;
+}
+
 // The forms a secret takes in an error text besides the plain one: percent-encoded (in a URL),
 // escaped for JSON (in a logged body) and base64 (in an `Authorization: Basic` header or a dump).
 function forms(secret: string): string[] {
