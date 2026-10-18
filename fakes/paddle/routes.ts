@@ -25,6 +25,8 @@ import {
   record,
   required,
   string,
+  uniqueItems,
+  type Check,
   type Shape,
 } from "./validate.ts";
 
@@ -77,43 +79,81 @@ const items: Shape = {
   quantity: required(integer({ min: 1 })),
 };
 
+const PRODUCT_NAME = string({ min: 1, max: 200, notBlank: true });
+// Either an address or an empty string (Paddle does not host the image).
+const IMAGE_URL = string({ pattern: /^(https?:\/\/.+)?$/ });
 const PRODUCT_CREATE: Shape = {
-  name: required(string({ min: 1, max: 200 })),
+  name: required(PRODUCT_NAME),
   tax_category: required(string({ oneOf: TAX_CATEGORIES })),
   description: optional(nullable(string({ max: 2048 }))),
-  image_url: optional(nullable(string({ pattern: /^https?:\/\// }))),
+  type: optional(string({ oneOf: ["standard", "custom"] })),
+  image_url: optional(nullable(IMAGE_URL)),
   custom_data: optional(nullable(record)),
 };
 const PRODUCT_PATCH: Shape = {
-  name: optional(string({ min: 1, max: 200 })),
+  name: optional(PRODUCT_NAME),
   tax_category: optional(string({ oneOf: TAX_CATEGORIES })),
   description: optional(nullable(string({ max: 2048 }))),
-  image_url: optional(nullable(string({ pattern: /^https?:\/\// }))),
+  image_url: optional(nullable(IMAGE_URL)),
   custom_data: optional(nullable(record)),
   status: optional(string({ oneOf: STATUSES })),
 };
+const COUNTRY_CODES = uniqueItems(
+  array(string({ pattern: /^[A-Z]{2}$/ }), { min: 1 }),
+);
 const UNIT_PRICE_OVERRIDES = array(
   object({
-    country_codes: required(array(string({ pattern: /^[A-Z]{2}$/ }))),
+    country_codes: required(COUNTRY_CODES),
     unit_price: required(object(MONEY)),
   }),
+  { max: 250 },
 );
+// The trial of a price (documentation: create price): a cycle, and optionally whether it needs a payment method, its
+// own price during the trial and its own overrides.
+const TRIAL_PERIOD: Shape = {
+  ...CYCLE,
+  requires_payment_method: optional(boolean),
+  unit_price: optional(
+    nullable(
+      object({
+        amount: required(string({ pattern: /^\d{1,18}$/ })),
+        currency_code: optional(string({ pattern: /^[A-Z]{3}$/ })),
+      }),
+    ),
+  ),
+  unit_price_overrides: optional(UNIT_PRICE_OVERRIDES),
+};
+const QUANTITY_LIMIT = 999_999_999;
+const QUANTITY: Check = (value, path, errors) => {
+  object({
+    minimum: required(integer({ min: 1, max: QUANTITY_LIMIT })),
+    maximum: required(integer({ min: 1, max: QUANTITY_LIMIT })),
+  })(value, path, errors);
+  const limits = value as { minimum?: unknown; maximum?: unknown };
+  if (
+    typeof limits.minimum === "number" &&
+    typeof limits.maximum === "number" &&
+    limits.maximum < limits.minimum &&
+    !errors.some((error) => error.field === `${path}.maximum`)
+  )
+    errors.push({
+      field: `${path}.maximum`,
+      message: "Must be at least the minimum",
+    });
+};
+const PRICE_DESCRIPTION = string({ min: 2, max: 500, notBlank: true });
+const PRICE_NAME = nullable(string({ min: 1, max: 150 }));
 const PRICE_CREATE: Shape = {
-  product_id: required(string({ pattern: /^pro_[a-z0-9]+$/ })),
-  description: required(string({ min: 1, max: 500 })),
+  product_id: required(string({ pattern: /^pro_[a-z0-9]{26}$/ })),
+  description: required(PRICE_DESCRIPTION),
   unit_price: required(object(MONEY)),
-  name: optional(nullable(string({ max: 200 }))),
+  name: optional(PRICE_NAME),
   type: optional(string({ oneOf: ["standard", "custom"] })),
   billing_cycle: optional(nullable(object(CYCLE))),
-  trial_period: optional(nullable(object(CYCLE))),
+  trial_period: optional(nullable(object(TRIAL_PERIOD))),
   tax_mode: optional(string({ oneOf: TAX_MODES })),
   unit_price_overrides: optional(UNIT_PRICE_OVERRIDES),
-  quantity: optional(
-    object({
-      minimum: required(integer({ min: 1 })),
-      maximum: required(integer({ min: 1 })),
-    }),
-  ),
+  quantity: optional(QUANTITY),
   custom_data: optional(nullable(record)),
 };
 // The fields Paddle's PATCH accepts (research §1, verified), including the money fields. That Paddle locks them
@@ -123,20 +163,29 @@ const PRICE_PATCH: Shape = {
   unit_price: optional(object(MONEY)),
   unit_price_overrides: optional(UNIT_PRICE_OVERRIDES),
   billing_cycle: optional(nullable(object(CYCLE))),
-  trial_period: optional(nullable(object(CYCLE))),
+  trial_period: optional(nullable(object(TRIAL_PERIOD))),
   tax_mode: optional(string({ oneOf: TAX_MODES })),
-  name: optional(nullable(string({ max: 200 }))),
-  description: optional(string({ min: 1, max: 500 })),
+  name: optional(PRICE_NAME),
+  description: optional(PRICE_DESCRIPTION),
   type: optional(string({ oneOf: ["standard", "custom"] })),
-  quantity: optional(
-    object({
-      minimum: required(integer({ min: 1 })),
-      maximum: required(integer({ min: 1 })),
-    }),
-  ),
+  quantity: optional(QUANTITY),
   status: optional(string({ oneOf: STATUSES })),
   custom_data: optional(nullable(record)),
 };
+/** A trial needs a billing cycle: a one-time price has none (documentation: create price, `trial_period`). */
+function checkTrialNeedsCycle(trial: unknown, cycle: unknown): void {
+  if (
+    trial !== null &&
+    trial !== undefined &&
+    (cycle === null || cycle === undefined)
+  )
+    throw invalidFields([
+      {
+        field: "trial_period",
+        message: "Needs a billing cycle: a one-time price has no trial",
+      },
+    ]);
+}
 const TRANSACTION_CREATE: Shape = {
   items: required(array(object(items), { min: 1, max: 100 })),
   customer_id: optional(string({ pattern: /^ctm_[a-z0-9]+$/ })),
@@ -379,10 +428,11 @@ export function createRoutes(store: Store, now: () => number): Route[] {
     {
       method: "POST",
       pattern: /^\/prices$/,
-      handler: ({ body }) => ({
-        status: 201,
-        data: store.addPrice(parseBody(body, PRICE_CREATE) as never),
-      }),
+      handler: ({ body }) => {
+        const price = parseBody(body, PRICE_CREATE);
+        checkTrialNeedsCycle(price.trial_period, price.billing_cycle);
+        return { status: 201, data: store.addPrice(price as never) };
+      },
     },
     {
       method: "GET",
@@ -397,7 +447,14 @@ export function createRoutes(store: Store, now: () => number): Route[] {
       pattern: /^\/prices\/([^/]+)$/,
       handler: ({ params, body }) => {
         const price = store.get(store.prices, params[0] ?? "");
-        patchEntity(price, parseBody(body, PRICE_PATCH));
+        const patch = parseBody(body, PRICE_PATCH);
+        checkTrialNeedsCycle(
+          patch.trial_period ?? price.trial_period,
+          patch.billing_cycle === undefined
+            ? price.billing_cycle
+            : patch.billing_cycle,
+        );
+        patchEntity(price, patch);
         return { status: 200, data: price };
       },
     },

@@ -73,6 +73,12 @@ export type Store = ReturnType<typeof createStore>;
 export const stamp = (ms: number) =>
   new Date(ms).toISOString().replace("Z", "000Z");
 
+/** A trial as Paddle answers it: a cardless trial has to be asked for, the default needs a payment method. */
+function trialOf(trial: unknown): Record<string, unknown> | null {
+  if (trial === null || trial === undefined) return null;
+  return { requires_payment_method: true, ...(trial as object) };
+}
+
 export function addCycle(from: Date, cycle: Cycle): Date {
   const next = new Date(from);
   const n = cycle.frequency;
@@ -198,6 +204,7 @@ export function createStore(options: StoreOptions) {
     addProduct(input: {
       name: string;
       tax_category: string;
+      type?: "standard" | "custom";
       description?: string | null;
       image_url?: string | null;
       custom_data?: Record<string, unknown> | null;
@@ -206,7 +213,7 @@ export function createStore(options: StoreOptions) {
         id: fakeId("pro"),
         name: input.name,
         description: input.description ?? null,
-        type: "standard",
+        type: input.type ?? "standard",
         tax_category: input.tax_category,
         image_url: input.image_url ?? null,
         custom_data: input.custom_data ?? null,
@@ -233,7 +240,7 @@ export function createStore(options: StoreOptions) {
         name: input.name ?? null,
         tax_mode: input.tax_mode ?? "account_setting",
         billing_cycle: (input.billing_cycle ?? null) as Cycle | null,
-        trial_period: input.trial_period ?? null,
+        trial_period: trialOf(input.trial_period),
         unit_price: input.unit_price as Money,
         unit_price_overrides: input.unit_price_overrides ?? [],
         quantity: input.quantity ?? { minimum: 1, maximum: 100 },

@@ -30,11 +30,19 @@ export const string =
       max?: number;
       pattern?: RegExp;
       oneOf?: readonly string[];
+      /** At least one character that is not white space (Paddle's `.*\S.*`). */
+      notBlank?: boolean;
     } = {},
   ): Check =>
   (value, path, errors) => {
     if (typeof value !== "string")
       return fail(errors, path, "Must be a string");
+    if (options.notBlank === true && value.trim() === "")
+      return fail(
+        errors,
+        path,
+        "Must contain a character that is not white space",
+      );
     if (value.length < (options.min ?? 0))
       return fail(errors, path, `Must be at least ${options.min} characters`);
     if (value.length > (options.max ?? 10_000))
@@ -80,6 +88,15 @@ export const array =
     if (value.length > (options.max ?? Infinity))
       return fail(errors, path, `Must have at most ${options.max} items`);
     value.forEach((entry, index) => item(entry, `${path}[${index}]`, errors));
+  };
+
+/** An array whose items are all different (Paddle: "unique" country codes). */
+export const uniqueItems =
+  (check: Check): Check =>
+  (value, path, errors) => {
+    check(value, path, errors);
+    if (Array.isArray(value) && new Set(value).size !== value.length)
+      fail(errors, path, "Must not contain the same value twice");
   };
 
 export const object =

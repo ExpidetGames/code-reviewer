@@ -108,7 +108,7 @@ describe("a price PATCH of a money field", () => {
     const { price } = await seedPrice(fake);
     const answer = await call(fake, "PATCH", `/prices/${price.id}`, {
       name: "Renamed",
-      description: "d",
+      description: "Renamed price",
       custom_data: { a: 1 },
       status: "archived",
     });
@@ -219,7 +219,7 @@ describe("authentication, validation and errors", () => {
     const { product } = await seedPrice(fake);
     const badAmount = await call(fake, "POST", "/prices", {
       product_id: product.id,
-      description: "d",
+      description: "Bad amount",
       unit_price: { amount: 15, currency_code: "usd" },
     });
     expect(badAmount.status).toBe(400);
@@ -256,7 +256,7 @@ describe("authentication, validation and errors", () => {
     });
     const conflict = await call(fake, "POST", "/prices", {
       product_id: product.id,
-      description: "d",
+      description: "Archived product",
       unit_price: { amount: "1", currency_code: "USD" },
     });
     expect(conflict.status).toBe(409);
@@ -287,6 +287,179 @@ describe("authentication, validation and errors", () => {
     expect(Object.keys(setting.json.data).sort()).toEqual(
       Object.keys(loadPaddleFixture("notification-setting")).sort(),
     );
+  });
+});
+
+describe("creating a product and a price like Paddle documents it", () => {
+  const monthly = (productId: string, extra: Record<string, unknown> = {}) => ({
+    product_id: productId,
+    description: "Monthly",
+    unit_price: { amount: "1234", currency_code: "USD" },
+    billing_cycle: { interval: "month", frequency: 1 },
+    tax_mode: "internal",
+    ...extra,
+  });
+  const fieldsOf = (answer: Answer): string[] =>
+    answer.json.error.errors.map((e: { field: string }) => e.field);
+
+  // #440-T16
+  it("keeps what a product is created with: its type, custom data and an empty image address", async () => {
+    const fake = await startTestPaddle();
+    const made = await call(fake, "POST", "/products", {
+      name: "Team",
+      tax_category: "saas",
+      type: "custom",
+      image_url: "",
+      custom_data: { cr_plan_key: "team" },
+    });
+    expect(made.status).toBe(201);
+    expect(made.json.data).toMatchObject({
+      type: "custom",
+      tax_category: "saas",
+      image_url: "",
+      custom_data: { cr_plan_key: "team" },
+      status: "active",
+    });
+    const plain = await call(fake, "POST", "/products", {
+      name: "Team",
+      tax_category: "saas",
+    });
+    expect(plain.json.data.type).toBe("standard");
+    const blank = await call(fake, "POST", "/products", {
+      name: "   ",
+      tax_category: "saas",
+    });
+    expect(blank.status).toBe(400);
+    expect(fieldsOf(blank)).toEqual(["name"]);
+    const badType = await call(fake, "POST", "/products", {
+      name: "x",
+      tax_category: "saas",
+      type: "bundle",
+    });
+    expect(fieldsOf(badType)).toEqual(["type"]);
+  });
+
+  // #440-T17
+  it("refuses a trial without a billing cycle and keeps the trial of a recurring price", async () => {
+    const fake = await startTestPaddle();
+    const { product } = await seedPrice(fake);
+    const oneTime = await call(
+      fake,
+      "POST",
+      "/prices",
+      monthly(product.id, {
+        billing_cycle: null,
+        trial_period: { interval: "day", frequency: 7 },
+      }),
+    );
+    expect(oneTime.status).toBe(400);
+    expect(fieldsOf(oneTime)).toEqual(["trial_period"]);
+    const noCycle = await call(fake, "POST", "/prices", {
+      product_id: product.id,
+      description: "One time",
+      unit_price: { amount: "100", currency_code: "USD" },
+      trial_period: { interval: "day", frequency: 7 },
+    });
+    expect(fieldsOf(noCycle)).toEqual(["trial_period"]);
+    const trial = await call(
+      fake,
+      "POST",
+      "/prices",
+      monthly(product.id, { trial_period: { interval: "day", frequency: 14 } }),
+    );
+    expect(trial.status).toBe(201);
+    expect(trial.json.data.trial_period).toEqual({
+      interval: "day",
+      frequency: 14,
+      requires_payment_method: true,
+    });
+    const cardless = await call(
+      fake,
+      "POST",
+      "/prices",
+      monthly(product.id, {
+        trial_period: {
+          interval: "day",
+          frequency: 3,
+          requires_payment_method: false,
+        },
+      }),
+    );
+    expect(cardless.json.data.trial_period.requires_payment_method).toBe(false);
+  });
+
+  // #440-T18
+  it("applies the length, quantity and override limits of the documentation", async () => {
+    const fake = await startTestPaddle();
+    const { product } = await seedPrice(fake);
+    const create = (extra: Record<string, unknown>) =>
+      call(fake, "POST", "/prices", monthly(product.id, extra));
+    expect(fieldsOf(await create({ description: "x" }))).toEqual([
+      "description",
+    ]);
+    expect(fieldsOf(await create({ description: "  " }))).toEqual([
+      "description",
+    ]);
+    expect(fieldsOf(await create({ name: "n".repeat(151) }))).toEqual(["name"]);
+    expect(fieldsOf(await create({ name: "" }))).toEqual(["name"]);
+    expect(
+      fieldsOf(await create({ quantity: { minimum: 5, maximum: 2 } })),
+    ).toEqual(["quantity.maximum"]);
+    expect(
+      fieldsOf(
+        await create({ quantity: { minimum: 1, maximum: 1_000_000_000 } }),
+      ),
+    ).toEqual(["quantity.maximum"]);
+    expect(
+      fieldsOf(
+        await create({
+          unit_price_overrides: [
+            {
+              country_codes: ["DE", "DE"],
+              unit_price: { amount: "1", currency_code: "EUR" },
+            },
+          ],
+        }),
+      ),
+    ).toEqual(["unit_price_overrides[0].country_codes"]);
+    expect(
+      fieldsOf(
+        await call(fake, "POST", "/prices", {
+          ...monthly("pro_short"),
+        }),
+      ),
+    ).toEqual(["product_id"]);
+    const exactlyOne = await create({ quantity: { minimum: 1, maximum: 1 } });
+    expect(exactlyOne.status).toBe(201);
+    expect(exactlyOne.json.data.quantity).toEqual({ minimum: 1, maximum: 1 });
+  });
+
+  // #440-T19
+  it("lists the prices of a product with their custom data, and archived ones only when asked", async () => {
+    const fake = await startTestPaddle();
+    const { product } = await seedPrice(fake);
+    const mine = await call(
+      fake,
+      "POST",
+      "/prices",
+      monthly(product.id, { custom_data: { cr_intent: "intent-a" } }),
+    );
+    await call(fake, "PATCH", `/prices/${mine.json.data.id}`, {
+      status: "archived",
+    });
+    const active = await call(fake, "GET", `/prices?product_id=${product.id}`);
+    expect(
+      active.json.data.map((price: { id: string }) => price.id),
+    ).not.toContain(mine.json.data.id);
+    const both = await call(
+      fake,
+      "GET",
+      `/prices?product_id=${product.id}&status=active,archived`,
+    );
+    const found = both.json.data.find(
+      (price: { id: string }) => price.id === mine.json.data.id,
+    );
+    expect(found.custom_data).toEqual({ cr_intent: "intent-a" });
   });
 });
 
