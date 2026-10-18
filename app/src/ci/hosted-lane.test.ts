@@ -182,7 +182,8 @@ describe("the Dispatcher and the Worker of the hosted lane", () => {
     expect(dispatcherMain).toContain("LocalSandboxService");
     expect(dispatcherMain).toContain("startNodeServer");
     expect(dispatcherMain).toContain("createSandboxLauncher");
-    expect(dispatcherMain).toContain("withCapabilityProbe");
+    expect(dispatcherMain).toContain("withProbeEndpoint");
+    expect(dispatcherMain).not.toContain("withCapabilityProbe");
     expect(dispatcherMain).not.toContain("@vercel/sandbox");
   });
 

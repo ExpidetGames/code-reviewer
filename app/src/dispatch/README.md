@@ -64,7 +64,10 @@ The Dispatcher's own names for the same key are `DISPATCHER_SIGNING_KEY_ID` and 
 
 5. A call that failed with a transient answer (a 5xx, a timeout, no connection, `429`/`503`) is made again **inside the
    same request** (#395), at most three more times, after 1, 3 and 8 seconds (`INLINE_RETRY_DELAYS_MS`), a `Retry-After`
-   of up to 10 seconds honoured, and never longer than 35 seconds in all (`INLINE_RETRY_BUDGET_MS`, the function lives 60).
+   of up to 30 seconds honoured (`INLINE_RETRY_MAX_WAIT_MS`: the 20 of a Dispatcher that is not ready, the 30 of a busy one),
+   and never longer than 45 seconds in all (`INLINE_RETRY_BUDGET_MS`; the function lives 60, and a repeat is started only
+   when its pause and its longest possible call, 8 seconds, still fit). A longer `Retry-After` is not waited for: the row
+   keeps it and the job is woken by a slot that frees ("Between two sweeps"), by the repair work or by the sweep.
    A refusal (`rejected`) is never repeated inline. A job that was taken meanwhile (it is no longer `queued`) is not
    sent again. What is still unsent after that is left to the row's back-off, to "Between two sweeps" and to the sweep.
 
@@ -97,7 +100,10 @@ causes it, after the response (`after()`), with no timer and no queue, and only 
   `RUNNER_DISPATCH_MAX_RUNNING` (one when the cap is not set), at most 20 candidates: a job that is refused again does
   not use the slot. Left out: a job whose own pull request has a running job (it would be refused again), a job whose
   last call is younger than 9 seconds (`WAITING_MIN_GAP_MS`: a call in flight holds the row, and two events must not
-  send one job twice) and a job the Dispatcher answered `429`/`503` (its `Retry-After` is its time; it is sent when due).
+  send one job twice) . A job the Dispatcher answered `429` (busy) or `503` (not ready) **is** asked (#479, `WAITING_DISPATCH_CODES`): whatever its
+  `Retry-After` says, a slot that freed is the moment the Dispatcher is most likely to take it, and a `Retry-After` longer than
+  a request waits for would otherwise leave the job to the repair work or the 2 hour sweep. The row's own time still holds for
+  every other sender. No timer or poll is added: this runs in the request that ends a job, so an idle system stays idle.
   **Then** a job that was **given back** (queued again) is sent again by `redispatch`: its retry time is waited for
   inside the request when it fits (the Dispatcher gives a job back with 30 seconds; a little slack is added because a
   timer can fire early), else the next sender sends it. One deadline of 45 seconds from the start of the reaction

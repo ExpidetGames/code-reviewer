@@ -50,10 +50,19 @@ const SEND_CONCURRENCY = 5;
  * these pauses (at most three more calls), so a hiccup of the Dispatcher does not wait for the sweep.
  */
 export const INLINE_RETRY_DELAYS_MS: readonly number[] = [1_000, 3_000, 8_000];
-/** The longest a request spends on inline retries, pauses and calls together (the function lives 60 seconds). */
-export const INLINE_RETRY_BUDGET_MS = 35_000;
-/** A `Retry-After` longer than this is not waited for inline; the row keeps it for the next sender. */
-export const INLINE_RETRY_MAX_WAIT_MS = 10_000;
+/**
+ * The longest a request spends on inline retries, pauses and calls together (the function lives 60 seconds; the
+ * request that queued the job needs a few of them before this starts). A retry is started only when its pause and its
+ * longest possible call still fit, so the budget is a bound, not a target (#479: it was 35 seconds, too little for the
+ * 20 or 30 seconds a not-ready or busy Dispatcher asks for).
+ */
+export const INLINE_RETRY_BUDGET_MS = 45_000;
+/**
+ * A `Retry-After` longer than this is not waited for inline; the row keeps it, and a slot that frees, a request that
+ * touches the database or the sweep sends the job (`WAITING_DISPATCH_CODES`). 30 seconds covers the `Retry-After` of a
+ * busy Dispatcher (30) and of a Dispatcher that is not ready (20), the two it gives while it is launching (#479).
+ */
+export const INLINE_RETRY_MAX_WAIT_MS = 30_000;
 /**
  * How long a job that was given back may wait for its retry time inside the request that gave it back: the
  * Dispatcher gives a job back with 30 seconds, so that it does not start again in a hot loop (#395).
