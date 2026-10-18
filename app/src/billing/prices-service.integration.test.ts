@@ -21,7 +21,7 @@ import {
 } from "../test-support/postgres-test-database.ts";
 import { createTestDatabase } from "../test-support/test-database.ts";
 import { insertUser } from "../test-support/users.ts";
-import type { PaddleClient } from "./paddle-client.ts";
+import type { PaddleClient, PaddlePrice } from "./paddle-client.ts";
 import { createBillingPlansService } from "./plans-service.ts";
 import {
   createBillingPricesService,
@@ -104,12 +104,24 @@ async function startOn(open: () => Promise<Kysely<Database>>) {
   await secrets.save("paddle_api_key", fake.apiKey, { updatedBy: admin });
   const plans = createBillingPlansService({ db, now: () => T0 });
   const clients: PaddleClient[] = [];
+  // What the dashboard cannot make but a damaged or hostile answer could: the price as the client hands it to the service.
+  let rewriteAnswer: ((price: PaddlePrice) => PaddlePrice) | undefined;
+  // Runs once the service has read a price and before it writes: the moment another admin can get in between.
+  let afterPriceRead: (() => Promise<void>) | undefined;
   const prices = createBillingPricesService({
     db: serviceDb,
     secrets,
     now: () => T0,
     clientFor: () => {
-      const client = clientFor(fake);
+      const real = clientFor(fake);
+      const client: PaddleClient = {
+        ...real,
+        getPrice: async (priceId) => {
+          const price = await real.getPrice(priceId);
+          await afterPriceRead?.();
+          return rewriteAnswer === undefined ? price : rewriteAnswer(price);
+        },
+      };
       clients.push(client);
       return client;
     },
@@ -193,6 +205,16 @@ async function startOn(open: () => Promise<Kysely<Database>>) {
   return {
     db,
     admin,
+    /** `hook` runs when the service has read a price from Paddle, before it writes anything (both engines). */
+    afterPriceRead: (hook: (() => Promise<void>) | undefined) => {
+      afterPriceRead = hook;
+    },
+    /** `rewrite` changes every price the service reads from Paddle, as the client returns it. */
+    rewriteAnswer: (
+      rewrite: ((price: PaddlePrice) => PaddlePrice) | undefined,
+    ) => {
+      rewriteAnswer = rewrite;
+    },
     /** `hook` runs after each statement of the service until it is replaced; it works on `db`, a connection of its own. */
     onStatement: (hook: ((query: QueryInfo) => Promise<void>) | undefined) => {
       betweenStatements = hook;
@@ -623,29 +645,29 @@ describe.each(ENGINES)(
 
     // #439-T16 (review of #468, N1)
     it_(
-      "lets one of two admins who relink the same slot at once win and tells the other",
+      "lets the admin who writes first win when two relink the same slot at once, and tells the other",
       async () => {
         const t = await start();
         const first = await t.makePrice();
         const second = await t.makePrice({ description: "Monthly B" });
         const third = await t.makePrice({ description: "Monthly C" });
         expect(await t.link("month", first.id)).toEqual({ ok: true });
+        // Both admins saw `first` linked. Admin 2 has read their price when admin 1 relinks the slot to `second`.
+        let other: PricesResult | undefined;
+        t.afterPriceRead(async () => {
+          t.afterPriceRead(undefined);
+          other = await t.link("month", second.id);
+        });
 
-        const results = await Promise.all(
-          [second, third].map((price) =>
-            t.prices.link(t.admin, "team", {
-              versionNumber: 1,
-              interval: "month",
-              paddlePriceId: price.id,
-            }),
-          ),
-        );
+        const result = await t.link("month", third.id);
 
+        expect(other).toEqual({ ok: true });
+        expect(refused(result).code).toBe("price_link_changed");
+        expect((await t.current()).monthlyPrice?.paddlePriceId).toBe(second.id);
         expect(
-          results.map((result) => (result.ok ? "ok" : result.code)).sort(),
-        ).toEqual(["ok", "price_link_changed"]);
-        const winner = results[0]?.ok === true ? second : third;
-        expect((await t.current()).monthlyPrice?.paddlePriceId).toBe(winner.id);
+          (await t.priceRows()).map((row) => row.paddle_price_id).sort(),
+          "the price admin 2 asked for is not stored: its write was undone",
+        ).toEqual([first.id, second.id].sort());
       },
     );
 
@@ -775,6 +797,57 @@ describe.each(ENGINES)(
         paddle: "EUR",
       });
     });
+
+    // #439-T13 (review of #468, N5)
+    it_(
+      "treats a currency that is not three capital letters as a mismatch with a placeholder and stores nothing",
+      async () => {
+        const t = await start();
+        const monthly = await t.makePrice();
+        t.rewriteAnswer((price) => ({
+          ...price,
+          unit_price: {
+            ...price.unit_price,
+            currency_code: "<img src=x onerror=alert(1)>",
+          },
+        }));
+
+        const result = refused(await t.link("month", monthly.id));
+
+        expect(result).toMatchObject({
+          code: "price_currency_mismatch",
+          entered: "USD",
+          paddle: "???",
+        });
+        expect(JSON.stringify(result)).not.toContain("onerror");
+        expect(await t.priceRows()).toEqual([]);
+      },
+    );
+
+    // #439-T13 (review of #468, N5)
+    it_(
+      "caches the placeholder, not the text, when a linked price comes back with such a currency",
+      async () => {
+        const t = await start();
+        const monthly = await t.makePrice();
+        expect(await t.link("month", monthly.id)).toEqual({ ok: true });
+        t.rewriteAnswer((price) => ({
+          ...price,
+          unit_price: { ...price.unit_price, currency_code: "usd; drop table" },
+        }));
+
+        expect(await t.prices.refresh("team")).toEqual({ ok: true });
+
+        expect((await t.priceRows()).map((row) => row.currency)).toEqual([
+          "???",
+        ]);
+        expect((await t.current()).monthlyPrice).toMatchObject({
+          currency: "???",
+          drift: "price_currency_mismatch",
+          driftPaddle: "???",
+        });
+      },
+    );
 
     // #439-T14
     it_(

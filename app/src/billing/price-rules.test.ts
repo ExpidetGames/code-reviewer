@@ -4,10 +4,13 @@
 // operator entered, the interval of the slot, USD, tax inclusive, active, without overrides, of the plan's product. No
 // database, no Paddle: the facts of a price are made up here.
 import { describe, expect, it } from "vitest";
+import type { PaddlePrice } from "./paddle-schemas.ts";
 import {
   PRICE_RULE_ERROR_CODES,
+  UNKNOWN_CURRENCY,
   amountEquals,
   checkPrice,
+  factsOf,
   trialDaysOf,
   type PriceFacts,
 } from "./price-rules.ts";
@@ -194,5 +197,51 @@ describe("the trial of a price", () => {
     expect(trialDaysOf(undefined)).toBeNull();
     expect(trialDaysOf({ interval: "day", frequency: 14 })).toBe(14);
     expect(trialDaysOf({ interval: "week", frequency: 2 })).toBe(14);
+  });
+});
+
+// What Paddle sends is untrusted text (ADR 0005, 2.10); a currency is cached and shown, so only a code is passed on.
+function paddlePrice(currencyCode: string): PaddlePrice {
+  return {
+    id: "pri_1",
+    product_id: "pro_1",
+    description: "Monthly",
+    status: "active",
+    tax_mode: "internal",
+    billing_cycle: { interval: "month", frequency: 1 },
+    unit_price: { amount: "1234", currency_code: currencyCode },
+    created_at: "2026-10-18T10:00:00Z",
+    updated_at: "2026-10-18T10:00:00Z",
+  };
+}
+
+describe("the currency of a Paddle price", () => {
+  // #439-T13 (review of #468, N5)
+  it("is passed on only when it is three capital letters", () => {
+    expect(factsOf(paddlePrice("USD")).currency).toBe("USD");
+    expect(factsOf(paddlePrice("EUR")).currency).toBe("EUR");
+    for (const odd of [
+      "usd",
+      "US",
+      "USDX",
+      "",
+      " USD",
+      "USD\n",
+      "U$D",
+      "<b>USD</b>",
+      "ＵＳＤ",
+    ])
+      expect(factsOf(paddlePrice(odd)).currency, JSON.stringify(odd)).toBe(
+        UNKNOWN_CURRENCY,
+      );
+  });
+
+  // #439-T13 (review of #468, N5)
+  it("is a currency mismatch with a placeholder when it is anything else", () => {
+    expect(checkPrice(factsOf(paddlePrice("<script>")), MONTHLY)).toEqual({
+      code: "price_currency_mismatch",
+      entered: "USD",
+      paddle: UNKNOWN_CURRENCY,
+    });
   });
 });

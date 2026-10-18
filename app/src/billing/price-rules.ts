@@ -41,6 +41,15 @@ export type PriceRuleErrorCode = (typeof PRICE_RULE_ERROR_CODES)[number];
 
 /** The only currency (ADR 0005, M12). */
 export const PRICE_CURRENCY = "USD";
+/** What stands for a currency Paddle sent that is not a code (see `currencyOf`): shown and cached instead of Paddle's text. */
+export const UNKNOWN_CURRENCY = "???";
+const CURRENCY_CODE = /^[A-Z]{3}$/;
+
+/** Paddle's text is untrusted and this one is cached and shown: only three capital letters pass, the rest is a placeholder. */
+function currencyOf(code: string): string {
+  return CURRENCY_CODE.test(code) ? code : UNKNOWN_CURRENCY;
+}
+
 /** Tax inclusive, and explicit: `account_setting` would depend on the account default. */
 export const PRICE_TAX_MODE = "internal";
 
@@ -83,7 +92,7 @@ export function factsOf(price: PaddlePrice): PriceFacts {
     recurring: price.billing_cycle !== null,
     interval: price.billing_cycle?.interval ?? "",
     frequency: price.billing_cycle?.frequency ?? 0,
-    currency: price.unit_price.currency_code,
+    currency: currencyOf(price.unit_price.currency_code),
     taxMode: price.tax_mode,
     amount: price.unit_price.amount,
     hasOverrides: (price.unit_price_overrides ?? []).length > 0,
