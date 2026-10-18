@@ -68,6 +68,17 @@ export type BillingPlanPricesRepository = {
   insertLinked(input: NewLinkedPrice): Promise<PriceRow>;
   /** Replaces what is cached with a new answer of Paddle and the time it was read; the identity of the row never changes. */
   refresh(id: string, snapshot: PriceSnapshot): Promise<PriceRow>;
+  /**
+   * Replaces the cache with what a Paddle event says (#441), as of the moment the event occurred: the cache then reflects
+   * Paddle at `asOf`, which is what `snapshot_at` says. The statement writes only if the cache is not newer than `asOf`
+   * (ties apply), so a late event cannot put an old price over a new one, whichever delivery wins a race. Undefined when it
+   * did not write: the event is stale, or the price is not there.
+   */
+  refreshIfNotNewer(
+    id: string,
+    snapshot: PriceSnapshot,
+    asOf: Date,
+  ): Promise<PriceRow | undefined>;
 };
 
 type Row = Selectable<BillingPlanPricesTable>;
@@ -123,6 +134,23 @@ export function createBillingPlanPricesRepository(
   now: () => Date = () => new Date(),
   newId: () => string = () => `bpp_${randomUUID().replaceAll("-", "")}`,
 ): BillingPlanPricesRepository {
+  function snapshotColumns(snapshot: PriceSnapshot) {
+    return {
+      paddle_product_id: snapshot.productId,
+      price_type: snapshot.priceType,
+      interval: snapshot.interval,
+      frequency: snapshot.frequency,
+      currency: snapshot.currency,
+      unit_amount_minor: snapshot.amount,
+      tax_mode: snapshot.taxMode,
+      has_overrides: encodeBoolean(snapshot.hasOverrides),
+      trial_days: snapshot.trialDays,
+      quantity_min: snapshot.quantityMinimum,
+      quantity_max: snapshot.quantityMaximum,
+      paddle_status: snapshot.status,
+    };
+  }
+
   async function byColumn(column: "id" | "paddle_price_id", value: string) {
     const row = await db
       .selectFrom("billing_plan_prices")
@@ -205,18 +233,7 @@ export function createBillingPlanPricesRepository(
       await db
         .updateTable("billing_plan_prices")
         .set({
-          paddle_product_id: snapshot.productId,
-          price_type: snapshot.priceType,
-          interval: snapshot.interval,
-          frequency: snapshot.frequency,
-          currency: snapshot.currency,
-          unit_amount_minor: snapshot.amount,
-          tax_mode: snapshot.taxMode,
-          has_overrides: encodeBoolean(snapshot.hasOverrides),
-          trial_days: snapshot.trialDays,
-          quantity_min: snapshot.quantityMinimum,
-          quantity_max: snapshot.quantityMaximum,
-          paddle_status: snapshot.status,
+          ...snapshotColumns(snapshot),
           snapshot_at: formatTimestamp(now()),
         })
         .where("id", "=", id)
@@ -224,6 +241,22 @@ export function createBillingPlanPricesRepository(
       const stored = await byColumn("id", id);
       if (stored === undefined) throw new Error("The price cannot be read.");
       return stored;
+    },
+
+    async refreshIfNotNewer(id, snapshot, asOf) {
+      assertSnapshot(snapshot);
+      const at = formatTimestamp(asOf);
+      const updated = await db
+        .updateTable("billing_plan_prices")
+        .set({ ...snapshotColumns(snapshot), snapshot_at: at })
+        .where("id", "=", id)
+        // A text of fixed width compares as time. A cache that was never read has no stamp and takes any event.
+        .where((eb) =>
+          eb.or([eb("snapshot_at", "is", null), eb("snapshot_at", "<=", at)]),
+        )
+        .executeTakeFirst();
+      if (Number(updated.numUpdatedRows) !== 1) return undefined;
+      return byColumn("id", id);
     },
   };
 }

@@ -393,8 +393,52 @@ describe.each(ENGINES)("the billing plan prices on $name", (engine) => {
       "listByIds",
       "listForPlan",
       "refresh",
+      "refreshIfNotNewer",
     ]);
   });
+
+  // #441-T10
+  it_(
+    "refreshes the cache from an event as of its time, and refuses an event older than the cache",
+    async () => {
+      const { prices, plan } = await start();
+      const stored = await prices.insertLinked({
+        planId: plan.id,
+        paddlePriceId: "pri_event",
+        env: "sandbox",
+        snapshot: snapshot(),
+      });
+      const t1 = new Date("2026-10-18T11:00:00.000Z");
+      const t2 = new Date("2026-10-18T12:00:00.000Z");
+
+      const newer = await prices.refreshIfNotNewer(
+        stored.id,
+        snapshot({ amount: "4321" }),
+        t2,
+      );
+      const older = await prices.refreshIfNotNewer(
+        stored.id,
+        snapshot({ amount: "1111" }),
+        t1,
+      );
+      const tie = await prices.refreshIfNotNewer(
+        stored.id,
+        snapshot({ amount: "5555" }),
+        t2,
+      );
+
+      expect(newer).toMatchObject({
+        amount: "4321",
+        snapshotAt: t2.toISOString(),
+      });
+      expect(older).toBeUndefined();
+      expect(tie).toMatchObject({ amount: "5555" });
+      expect(await prices.get(stored.id)).toMatchObject({
+        amount: "5555",
+        snapshotAt: t2.toISOString(),
+      });
+    },
+  );
 
   // #439-T19
   it_(
