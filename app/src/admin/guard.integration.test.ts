@@ -56,7 +56,7 @@ afterEach(() => {
 });
 
 describe("the routes of the portal", () => {
-  it("are found on the file system: the pages of the sections, the settings route, the test mail route, the routes of the GitHub integration and the synchronization and the routes of the billing settings", () => {
+  it("are found on the file system: the pages of the sections, the settings route, the test mail route, the routes of the GitHub integration and the synchronization and the routes of the billing settings and the routes of the model catalog", () => {
     expect(adminRoutes.map(({ route }) => route).sort()).toEqual([
       "/admin",
       "/admin/approvals",
@@ -81,6 +81,12 @@ describe("the routes of the portal", () => {
       "/api/admin/integrations/sync",
       "/api/admin/llm-keys/[provider]/test",
       "/api/admin/mail/test",
+      "/api/admin/model-catalog",
+      "/api/admin/model-catalog/[id]",
+      "/api/admin/model-catalog/[id]/release",
+      "/api/admin/model-catalog/[id]/retire",
+      "/api/admin/model-catalog/check",
+      "/api/admin/model-catalog/defaults",
       "/api/admin/settings",
     ]);
   });

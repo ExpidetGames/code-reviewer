@@ -37,6 +37,13 @@ export type UpdateResult =
     }
   | Refused;
 export type DefaultsResult = { ok: true; defaults: CatalogDefaults } | Refused;
+/** What the check of a model found: `verified` is false when the provider could not be asked (a Diff model is accepted then). */
+export type CheckModelResult = { ok: true; verified: boolean } | Refused;
+/** How many entries are released for each kind and whether the kind has a default: numbers and nothing else (#429). */
+export type CatalogSummary = Record<
+  ProjectReviewKind,
+  { released: number; hasDefault: boolean }
+>;
 
 /** Where the audit line of a change of model goes (the console in production, a list in tests). */
 export type CatalogLogger = { info(line: string): void };
@@ -72,6 +79,13 @@ export type CatalogService = {
     input: unknown,
     updatedBy: string | null,
   ): Promise<DefaultsResult>;
+  /**
+   * Asks the provider's metadata what release would ask, for a model that is not an entry yet or not released yet (the
+   * "Check model" button of the admin portal). `{ provider, modelId, kinds }`; nothing is stored.
+   */
+  checkModel(input: unknown): Promise<CheckModelResult>;
+  /** The numbers the overview of the admin portal shows: released entries per kind, and whether the kind has a default. */
+  summary(): Promise<CatalogSummary>;
   /** What a member may see: released and retired entries with no provider and no model id. */
   memberEntries(): Promise<MemberCatalogEntry[]>;
   /** The model id of every entry of every status: with the models of a job, the ids to mask in what a member reads. */
@@ -133,23 +147,52 @@ export function createCatalogService(deps: {
    * The refusal when the provider's metadata does not vouch for the model, undefined when it does. A Dynamic entry needs
    * tool calling and tool choice and must be verifiable (operator configuration, not a user's choice); a Diff entry
    * needs no tool support and may be unverifiable (the provider is unreachable), but a model the provider does not know
-   * is a typo that would fail every job. An entry that serves both is held to the stricter rule.
+   * is a typo that would fail every job. An entry that serves both is held to the stricter rule. `verified` is false
+   * when the provider could not be asked.
    */
+  async function judgeModel(
+    provider: LlmProvider,
+    modelId: string,
+    kinds: readonly ProjectReviewKind[],
+  ): Promise<{ refusal: Refused | undefined; verified: boolean }> {
+    const result = await modelCapabilities.check(modelId, { provider });
+    const verified = result.outcome !== "unverifiable";
+    const dynamic = kinds.includes("dynamic");
+    if (result.outcome === "unknown_model")
+      return {
+        refusal: refused(dynamic ? "DYNAMIC_MODEL_UNKNOWN" : "MODEL_UNKNOWN"),
+        verified,
+      };
+    if (!dynamic) return { refusal: undefined, verified };
+    if (result.outcome === "unsupported")
+      return { refusal: refused("DYNAMIC_MODEL_TOOLS_UNSUPPORTED"), verified };
+    if (result.outcome === "unverifiable")
+      return { refusal: refused("DYNAMIC_MODEL_UNVERIFIED"), verified };
+    return { refusal: undefined, verified };
+  }
+
   async function refuseUnsuitableModel(
     provider: LlmProvider,
     modelId: string,
     kinds: readonly ProjectReviewKind[],
   ): Promise<Refused | undefined> {
-    const result = await modelCapabilities.check(modelId, { provider });
-    const dynamic = kinds.includes("dynamic");
-    if (result.outcome === "unknown_model")
-      return refused(dynamic ? "DYNAMIC_MODEL_UNKNOWN" : "MODEL_UNKNOWN");
-    if (!dynamic) return undefined;
-    if (result.outcome === "unsupported")
-      return refused("DYNAMIC_MODEL_TOOLS_UNSUPPORTED");
-    if (result.outcome === "unverifiable")
-      return refused("DYNAMIC_MODEL_UNVERIFIED");
-    return undefined;
+    return (await judgeModel(provider, modelId, kinds)).refusal;
+  }
+
+  /** The stored defaults read against the entries: one that is no longer fit for its kind reads as none. */
+  function fitDefaults(
+    stored: CatalogDefaults,
+    entries: readonly CatalogEntry[],
+  ): CatalogDefaults {
+    const byId = new Map(entries.map((entry) => [entry.id, entry]));
+    const fit = (kind: ProjectReviewKind): string | null => {
+      const id = stored[kind];
+      const entry = id === null ? undefined : byId.get(id);
+      return entry?.status === "released" && entry.kinds.includes(kind)
+        ? entry.id
+        : null;
+    };
+    return { diff: fit("diff"), dynamic: fit("dynamic") };
   }
 
   async function writeOrRefuse<T>(
@@ -359,18 +402,32 @@ export function createCatalogService(deps: {
     usedByProjects: (id) => catalog.countProjectsSelecting(id),
 
     async defaults() {
-      const stored = await storedDefaults();
-      const entries = new Map(
-        (await catalog.list()).map((entry) => [entry.id, entry]),
-      );
-      const fit = (kind: ProjectReviewKind): string | null => {
-        const id = stored[kind];
-        const entry = id === null ? undefined : entries.get(id);
-        return entry?.status === "released" && entry.kinds.includes(kind)
-          ? entry.id
-          : null;
-      };
-      return { diff: fit("diff"), dynamic: fit("dynamic") };
+      return fitDefaults(await storedDefaults(), await catalog.list());
+    },
+
+    async checkModel(input) {
+      if (!isPlainObject(input)) return refused("request_invalid");
+      const provider = input.provider;
+      if (!isProvider(provider)) return refused("PROVIDER_UNKNOWN", "provider");
+      const modelId = input.modelId;
+      if (typeof modelId !== "string" || !isModelId(modelId, provider))
+        return refused("model_id_invalid", "modelId");
+      const kinds = checkKinds(input.kinds);
+      if (kinds === undefined) return refused("kinds_invalid", "kinds");
+      const { refusal, verified } = await judgeModel(provider, modelId, kinds);
+      return refusal ?? { ok: true, verified };
+    },
+
+    async summary() {
+      const entries = await catalog.list();
+      const defaults = fitDefaults(await storedDefaults(), entries);
+      const of = (kind: ProjectReviewKind) => ({
+        released: entries.filter(
+          (entry) => entry.status === "released" && entry.kinds.includes(kind),
+        ).length,
+        hasDefault: defaults[kind] !== null,
+      });
+      return { diff: of("diff"), dynamic: of("dynamic") };
     },
 
     // Check then act, and harmless: `retire`, `update` (a narrowed kind) and this method can interleave, so a default
