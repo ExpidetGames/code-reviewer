@@ -59,6 +59,7 @@ import {
   type BillingIssue,
   type BillingSettings,
 } from "./settings.ts";
+import type { BillingPlansService } from "./plans-service.ts";
 import {
   BILLING_WEBHOOK_PATH,
   PADDLE_WEBHOOK_EVENTS,
@@ -71,6 +72,11 @@ export type BillingSettingsServiceOptions = {
   clientFor: (apiKey: string, environment: BillingEnvironment) => PaddleClient;
   /** The public address of this app (`BETTER_AUTH_URL`): where Paddle is told to post its events. Never from a request. */
   publicUrl: string;
+  /**
+   * The plans (#438): switching billing on seeds the Free plan and writes it to the default entitlements; switching it off
+   * gives the default back to the operator. Left out, switching only flips the setting (the tests of the settings alone).
+   */
+  plans?: Pick<BillingPlansService, "enable" | "release">;
 };
 
 export type BillingFailure =
@@ -153,6 +159,7 @@ export function createBillingSettingsService({
   secrets,
   clientFor,
   publicUrl,
+  plans,
 }: BillingSettingsServiceOptions): BillingSettingsService {
   const settingsRepository = createInstanceSettingsRepository(db);
   const ownKeys = createOwnKeyCountRepository(db);
@@ -312,6 +319,28 @@ export function createBillingSettingsService({
     }
   }
 
+  /**
+   * Switching off always wins: a change in between is read again, a few times. `was_off` is a billing that never was on
+   * (nothing is written), `changed` is a settings row that kept changing under it.
+   */
+  async function flipOff(
+    adminId: string,
+  ): Promise<"switched_off" | "was_off" | "changed"> {
+    for (let attempt = 0; attempt < SWITCH_OFF_ATTEMPTS; attempt += 1) {
+      const { settings, stored } = await readCurrent();
+      // Never configured and never on: nothing to write.
+      if (!settings.enabled) return "was_off";
+      if (
+        await writeIfUnchanged(adminId, stored, {
+          ...settings,
+          enabled: false,
+        })
+      )
+        return "switched_off";
+    }
+    return "changed";
+  }
+
   return {
     async view() {
       const stored = await settingsRepository.getWithMeta("billing_settings");
@@ -468,20 +497,11 @@ export function createBillingSettingsService({
           issues: [{ field: "enabled", code: "body_invalid" }],
         };
       if (!enabled) {
-        // Switching off always wins: a change in between is read again, a few times.
-        for (let attempt = 0; attempt < SWITCH_OFF_ATTEMPTS; attempt += 1) {
-          const { settings, stored } = await readCurrent();
-          // Never configured and never on: nothing to write.
-          if (!settings.enabled) return { ok: true };
-          if (
-            await writeIfUnchanged(adminId, stored, {
-              ...settings,
-              enabled: false,
-            })
-          )
-            return { ok: true };
-        }
-        return CHANGED;
+        const result = await flipOff(adminId);
+        if (result === "changed") return CHANGED;
+        // The default entitlements return to the operator (#438).
+        if (result === "switched_off") await plans?.release();
+        return { ok: true };
       }
       const { settings, stored } = await readCurrent();
       const missing: BillingMissingItem[] = [];
@@ -515,6 +535,14 @@ export function createBillingSettingsService({
         }))
       )
         return CHANGED;
+      if (plans === undefined) return { ok: true };
+      try {
+        await plans.enable(adminId);
+      } catch (error) {
+        // Billing must not be on without the Free plan as the default of every workspace: put the switch back.
+        await flipOff(adminId);
+        throw error;
+      }
       return { ok: true };
     },
   };

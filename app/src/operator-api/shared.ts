@@ -15,6 +15,7 @@ import { getDatabase } from "../db/startup.ts";
 import { modelCapabilities } from "../llm/shared.ts";
 import { createModelTiersService } from "../model-tiers/service.ts";
 import { consoleRunnerApiLogger, describeError } from "../runner-api/logger.ts";
+import { isBillingOnNow } from "../billing/shared.ts";
 import { createOperatorApi, type OperatorApi } from "./api.ts";
 import type { OperatorRoute } from "./contract.ts";
 import { errorResponse } from "./responses.ts";
@@ -28,6 +29,7 @@ export function getOperatorApi(): OperatorApi {
     entitlementsFor: (workspaceId) =>
       createWorkspaceEntitlementsRepository(db, workspaceId),
     settings: createInstanceSettingsRepository(db),
+    billingOn: isBillingOnNow,
     usageFeed: createUsageFeedRepository(db),
     usageFor: (workspaceId) => createUsageRecordsRepository(db, workspaceId),
     handoffs: createPlanHandoffRedeemRepository(db),

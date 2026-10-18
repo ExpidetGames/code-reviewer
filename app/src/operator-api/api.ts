@@ -77,6 +77,12 @@ export type OperatorApiDeps = {
   workspaces: WorkspacesRepository;
   entitlementsFor: (workspaceId: string) => WorkspaceEntitlementsRepository;
   settings: InstanceSettingsRepository;
+  /**
+   * #438: whether billing is on right now (`isBillingOn`). While it is, the default entitlements are written by the billing
+   * module from the Free plan, and a write through this API is refused `entitlements_default_managed_by_billing`. Asked
+   * only by a write of the default, never by a read or a workspace row.
+   */
+  billingOn: () => Promise<boolean>;
   /** The settled usage records of every workspace (the feed). */
   usageFeed: UsageFeedRepository;
   /** The usage records of one workspace (its page and its summary). */
@@ -268,6 +274,11 @@ export function createOperatorApi(deps: OperatorApiDeps): OperatorApi {
 
     const body = await readJson(request);
     if (!body.ok) return body.response;
+    // #438: billing owns the default while it is on, whatever the body says.
+    if (await deps.billingOn()) {
+      logWrite("put", "default", [], "entitlements_default_managed_by_billing");
+      return errorResponse(409, "entitlements_default_managed_by_billing");
+    }
     const before = await deps.settings.getDefaultEntitlements();
     try {
       await deps.settings.set(
