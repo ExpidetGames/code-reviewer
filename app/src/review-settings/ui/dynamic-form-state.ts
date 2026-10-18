@@ -5,6 +5,7 @@
 // read-only, nothing stored) or a custom text the person edits; resetting it only changes the form until
 // the save, and the form keeps the typed values of the kind that is not selected, so toggling the kind
 // loses nothing.
+import type { CatalogSelection } from "../catalog-selection.ts";
 import type { ProjectReviewKind, ReviewVerdictMode } from "../settings.ts";
 import type { ProjectDynamicView } from "../service.ts";
 import type { FormState } from "./form-state.ts";
@@ -12,6 +13,13 @@ import type { FormState } from "./form-state.ts";
 export type DynamicFormValues = {
   reviewKind: ProjectReviewKind;
   dynamicModel: string;
+  /** The provider of the Dynamic model (#433); empty for a workspace on the operator's key, which has no field for it. */
+  dynamicProvider: string;
+  /**
+   * The catalog entry chosen for each kind (#433), kept side by side so switching the kind loses neither; null: none
+   * (the instance default applies). Always null on an own key, where no entry is read or written.
+   */
+  catalogEntries: CatalogSelection;
   /** `default`: the shipped skill applies and nothing is stored. `custom`: the text below is the override. */
   skillMode: "default" | "custom";
   /** The text of the editor; the shipped text while the default applies. */
@@ -27,11 +35,14 @@ export type DynamicFormValues = {
 
 export function initialDynamicValues(
   view: ProjectDynamicView,
+  selection: CatalogSelection | null,
 ): DynamicFormValues {
   return {
     reviewKind: view.effective.reviewKind,
     // Absent for a workspace on the operator's key (#283); the form has no field for it then.
     dynamicModel: view.effective.dynamicModel ?? "",
+    dynamicProvider: view.effective.dynamicProvider ?? "",
+    catalogEntries: selection ?? { diff: null, dynamic: null },
     skillMode: view.reviewSkillIsDefault ? "default" : "custom",
     skillText: view.effective.reviewSkill,
     draft: null,
@@ -73,6 +84,31 @@ export function setDynamicModel(
   dynamicModel: string,
 ): FormState {
   return withDynamic(state, { dynamicModel });
+}
+
+/**
+ * Chooses the provider of the Dynamic model. A model exists only at its provider, so a different provider clears the
+ * model typed for the old one (see `setProvider`).
+ */
+export function setDynamicProvider(
+  state: FormState,
+  dynamicProvider: string,
+): FormState {
+  if (state.dynamic === undefined) return state;
+  if (dynamicProvider === state.dynamic.dynamicProvider) return state;
+  return withDynamic(state, { dynamicProvider, dynamicModel: "" });
+}
+
+/** Chooses the catalog entry of one kind (`null` takes the choice back); the other kind keeps its choice. */
+export function setCatalogEntry(
+  state: FormState,
+  kind: ProjectReviewKind,
+  id: string | null,
+): FormState {
+  if (state.dynamic === undefined) return state;
+  return withDynamic(state, {
+    catalogEntries: { ...state.dynamic.catalogEntries, [kind]: id },
+  });
 }
 
 /**

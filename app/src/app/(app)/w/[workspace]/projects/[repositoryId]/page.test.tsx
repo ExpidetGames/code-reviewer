@@ -1,0 +1,94 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// @vitest-environment node
+// The project settings page decides what its form is handed. A workspace on the operator's key never gets a
+// provider id in the form's props, not even one it stored a key of its own for earlier, and the page does not
+// read the key statuses for it (#433, "the form never receives provider or model for a managed workspace").
+import { describe, expect, it, vi } from "vitest";
+import type { ReactElement } from "react";
+
+const state = vi.hoisted(() => ({
+  managed: false,
+  statusAll: vi.fn(),
+}));
+
+vi.mock("@/workspaces/access-runtime", () => ({
+  requireWorkspace: async () => ({
+    workspace: { id: "workspace-1", slug: "acme" },
+    role: "owner",
+    user: { isInstanceAdmin: false },
+  }),
+}));
+vi.mock("@/llm/shared", () => ({
+  getWorkspaceLlm: () => ({
+    summaryFor: async () => ({ configured: true }),
+    keyServiceFor: () => ({ statusAll: state.statusAll }),
+  }),
+}));
+vi.mock("@/llm/ui/llm-access-notice", () => ({
+  llmAccessAttention: () => null,
+}));
+vi.mock("@/db/startup", () => ({ getDatabase: () => ({}) }));
+vi.mock("@/jobs/dynamic-review-gate", () => ({
+  isDynamicReviewEnabled: async () => false,
+}));
+vi.mock("@/config-status/shared", () => ({ getConfigStatusFor: () => ({}) }));
+vi.mock("@/projects/shared", () => ({ projectServiceFor: () => ({}) }));
+vi.mock("@/review-settings/shared", () => ({
+  reviewSettingsServiceFor: () => ({}),
+}));
+vi.mock("@/projects/ui/project-settings-page", () => ({
+  loadProjectSettingsPage: async () => ({
+    kind: "ready",
+    model: { managed: state.managed },
+  }),
+  ProjectSettingsPageContent: () => null,
+}));
+
+import ProjectSettingsPage from "./page.tsx";
+
+const OWN_OPENROUTER_KEY = [
+  {
+    provider: "openrouter",
+    status: {
+      state: "configured",
+      provider: "openrouter",
+      lastFour: null,
+      updatedAt: "2026-10-01T00:00:00.000Z",
+      updatedBy: null,
+    },
+  },
+];
+
+async function renderedProps(): Promise<Record<string, unknown>> {
+  const page = (await ProjectSettingsPage({
+    params: Promise.resolve({ workspace: "acme", repositoryId: "repo-1" }),
+    searchParams: Promise.resolve({}),
+  })) as ReactElement<Record<string, unknown>>;
+  // The page hands over to an async server component of its own; run it the way the server would.
+  const content = (await (
+    page.type as (props: unknown) => Promise<ReactElement>
+  )(page.props)) as ReactElement<Record<string, unknown>>;
+  return content.props;
+}
+
+describe("the project settings page", () => {
+  // #433-T04
+  it("hands a workspace on the operator's key no provider id, even with a stored key of its own", async () => {
+    state.managed = true;
+    state.statusAll.mockResolvedValue(OWN_OPENROUTER_KEY);
+
+    const props = await renderedProps();
+
+    expect(props).not.toHaveProperty("keyedProviders");
+    expect(state.statusAll).not.toHaveBeenCalled();
+  });
+
+  // #433-T11
+  it("hands a workspace on its own key the providers that have a stored key", async () => {
+    state.managed = false;
+    state.statusAll.mockResolvedValue(OWN_OPENROUTER_KEY);
+
+    expect((await renderedProps()).keyedProviders).toEqual(["openrouter"]);
+  });
+});

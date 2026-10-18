@@ -26,6 +26,7 @@ export function GlobalSettingsPageContent({
   workspaceSlug,
   canEdit = true,
   showPlan = false,
+  keyedProviders,
   data,
   api,
 }: {
@@ -35,6 +36,8 @@ export function GlobalSettingsPageContent({
   canEdit?: boolean;
   /** The workspace has entitlements (#282): the settings navigation lists the Plan page. */
   showPlan?: boolean;
+  /** The providers that have a stored key in the workspace (#433): the form warns about a chosen one that has none. */
+  keyedProviders?: readonly string[];
   data: GlobalSettingsPageData;
   api?: SettingsApi;
 }) {
@@ -55,6 +58,7 @@ export function GlobalSettingsPageContent({
           workspaceSlug={workspaceSlug}
           readOnly={!canEdit}
           initial={data.model}
+          {...(keyedProviders === undefined ? {} : { keyedProviders })}
           {...(api === undefined ? {} : { api })}
         />
       </div>
