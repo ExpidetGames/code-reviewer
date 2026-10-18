@@ -1111,3 +1111,299 @@ describe("the Paddle prices of a plan version", () => {
     expect(screen.queryByRole("form", { name: /Paddle prices/ })).toBeNull();
   });
 });
+
+// Creating the Paddle prices of a version (#440): a button and one optional field (trial days), no amount, currency, interval
+// or tax mode; the attempts that no version is sold with, and the copy for every refusal.
+const CREATE_CODES = [
+  "price_amount_invalid",
+  "price_trial_invalid",
+  "price_creation_pending",
+  "price_create_rejected",
+  "price_in_use",
+  "price_has_subscribers",
+];
+
+function teamAttempts(
+  attempts: PlanView["priceAttempts"],
+  prices: Partial<Pick<PlanVersionView, "monthlyPrice" | "yearlyPrice">> = {},
+  version: Partial<PlanVersionView> = {},
+): PlansView {
+  return view([
+    FREE,
+    {
+      ...TEAM,
+      paddleProductId: null,
+      priceAttempts: attempts,
+      versions: [{ ...TEAM.versions[0]!, ...prices, ...version }],
+    },
+  ]);
+}
+
+async function openCreate(initial: PlansView, mock: PlansApi) {
+  const user = userEvent.setup();
+  render(<PlansForm billingOn initial={initial} api={mock} />);
+  await user.click(screen.getByRole("button", { name: "Edit Team" }));
+  return {
+    user,
+    create: within(
+      screen.getByRole("form", { name: "Create Paddle prices of Team" }),
+    ),
+  };
+}
+
+describe("creating the Paddle prices of a plan version", () => {
+  // #440-T13
+  it("has a button and a field for trial days, and no field for an amount, a currency, an interval or a tax mode", async () => {
+    const { api: mock } = api();
+    const { create } = await openCreate(teamAttempts([]), mock);
+
+    expect(
+      create
+        .getAllByRole("textbox")
+        .map((field) => field.getAttribute("aria-label")),
+    ).toEqual(["Trial days"]);
+    expect(create.queryByRole("spinbutton")).toBeNull();
+    expect(create.queryByRole("combobox")).toBeNull();
+    expect(
+      create.queryByLabelText(/amount|currency|interval|tax mode/i),
+    ).toBeNull();
+    expect(create.getByRole("button", { name: "Create prices" })).toBeTruthy();
+    // It says which prices it will make, from the version, as text.
+    expect(create.getByText(/\$12\.34 per month/)).toBeTruthy();
+    expect(create.getByText(/\$123\.40 per year/)).toBeTruthy();
+  });
+
+  // #440-T11
+  it("names only the monthly price for a version without a yearly price", async () => {
+    const { api: mock } = api();
+    const { create } = await openCreate(
+      teamAttempts([], {}, { yearlyAmountMinor: null }),
+      mock,
+    );
+
+    expect(create.getByText(/\$12\.34 per month/)).toBeTruthy();
+    expect(create.queryByText(/per year/)).toBeNull();
+  });
+
+  // #440-T01
+  it("sends only the version number, with no trial by default, and says the prices were created", async () => {
+    const { api: mock, change } = api();
+    const { user, create } = await openCreate(teamAttempts([]), mock);
+
+    await user.click(create.getByRole("button", { name: "Create prices" }));
+
+    await waitFor(() =>
+      expect(change).toHaveBeenCalledWith("team", {
+        createPrices: { versionNumber: 1 },
+      }),
+    );
+    expect(
+      await screen.findByText(/Paddle prices of Team created and linked\./),
+    ).toBeTruthy();
+  });
+
+  // #440-T06
+  it("sends the trial days as a number when they are entered", async () => {
+    const { api: mock, change } = api();
+    const { user, create } = await openCreate(teamAttempts([]), mock);
+
+    await user.type(create.getByLabelText("Trial days"), " 14 ");
+    await user.click(create.getByRole("button", { name: "Create prices" }));
+
+    await waitFor(() =>
+      expect(change).toHaveBeenCalledWith("team", {
+        createPrices: { versionNumber: 1, trialDays: 14 },
+      }),
+    );
+  });
+
+  // #440-T06
+  it.each(["abc", "0", "1.5", "-3", "366", "1e2"])(
+    "does not send trial days that are not whole days from 1 to 365: %s",
+    async (text) => {
+      const { api: mock, change } = api();
+      const { user, create } = await openCreate(teamAttempts([]), mock);
+
+      await user.type(create.getByLabelText("Trial days"), text);
+      await user.click(create.getByRole("button", { name: "Create prices" }));
+
+      expect(change).not.toHaveBeenCalled();
+      expect(
+        await create.findByText(/Trial days are whole days, from 1 to 365/),
+      ).toBeTruthy();
+    },
+  );
+
+  // #440-T04
+  it("says which slot failed and why, with the copy of the code only, and that what was made is kept", async () => {
+    const { api: mock } = api({
+      ok: false,
+      status: 502,
+      code: "price_create_rejected",
+      issues: [{ field: "year", code: "price_create_rejected" }],
+      details: { detail: "PADDLE-TEXT-NEVER-SHOWN" },
+    });
+    const { user, create } = await openCreate(teamAttempts([]), mock);
+
+    await user.click(create.getByRole("button", { name: "Create prices" }));
+
+    expect(
+      await create.findByText(/Yearly price: Paddle refused to create/),
+    ).toBeTruthy();
+    expect(
+      create.getByText(/Reload the page to see what was made/),
+    ).toBeTruthy();
+    expect(screen.queryByText(/PADDLE-TEXT-NEVER-SHOWN/)).toBeNull();
+  });
+
+  // #440-T01
+  it("offers no create once every price of the version is linked", async () => {
+    const { api: mock } = api();
+    const user = userEvent.setup();
+    render(
+      <PlansForm
+        billingOn
+        initial={teamAttempts(
+          [],
+          { monthlyPrice: MONTHLY_PRICE, yearlyPrice: YEARLY_PRICE },
+          { sellable: true },
+        )}
+        api={mock}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Edit Team" }));
+
+    expect(screen.queryByRole("button", { name: "Create prices" })).toBeNull();
+  });
+
+  // #440-T26
+  it("lists a failed attempt with its reason and a pending one, as text", async () => {
+    const { api: mock } = api();
+    const { create } = await openCreate(
+      teamAttempts([
+        {
+          interval: "month",
+          amount: "1234",
+          trialDays: null,
+          state: "failed",
+          errorCode: "price_create_rejected",
+          paddlePriceId: null,
+          attemptedAt: "2026-10-18T10:00:00.000Z",
+        },
+        {
+          interval: "year",
+          amount: "12340",
+          trialDays: 14,
+          state: "pending",
+          errorCode: null,
+          paddlePriceId: null,
+          attemptedAt: "2026-10-18T10:00:00.000Z",
+        },
+      ]),
+      mock,
+    );
+
+    expect(
+      create.getByText(/Monthly price \$12\.34: not created\. Paddle refused/),
+    ).toBeTruthy();
+    expect(
+      create.getByText(/Yearly price \$123\.40: being created/),
+    ).toBeTruthy();
+  });
+
+  // #440-T27
+  it("lists a price that was created but is linked to no version and archives it on request", async () => {
+    const { api: mock, change } = api();
+    const { user, create } = await openCreate(
+      teamAttempts([
+        {
+          interval: "month",
+          amount: "1234",
+          trialDays: null,
+          state: "ready",
+          errorCode: null,
+          paddlePriceId: "pri_01fake0000000000000000009",
+          attemptedAt: "2026-10-18T10:00:00.000Z",
+        },
+      ]),
+      mock,
+    );
+
+    expect(
+      create.getByText(/was created at Paddle but no version is sold with it/),
+    ).toBeTruthy();
+    expect(create.getByText("pri_01fake0000000000000000009")).toBeTruthy();
+    await user.click(
+      create.getByRole("button", {
+        name: "Archive price pri_01fake0000000000000000009",
+      }),
+    );
+
+    await waitFor(() =>
+      expect(change).toHaveBeenCalledWith("team", {
+        archivePrice: { paddlePriceId: "pri_01fake0000000000000000009" },
+      }),
+    );
+    expect(await screen.findByText(/Price archived at Paddle\./)).toBeTruthy();
+  });
+
+  // #440-T08
+  it("says why a price cannot be archived", async () => {
+    const { api: mock } = api({
+      ok: false,
+      status: 409,
+      code: "price_has_subscribers",
+      issues: [{ field: "paddlePriceId", code: "price_has_subscribers" }],
+    });
+    const { user, create } = await openCreate(
+      teamAttempts([
+        {
+          interval: "month",
+          amount: "1234",
+          trialDays: null,
+          state: "ready",
+          errorCode: null,
+          paddlePriceId: "pri_01fake0000000000000000009",
+          attemptedAt: null,
+        },
+      ]),
+      mock,
+    );
+
+    await user.click(
+      create.getByRole("button", {
+        name: "Archive price pri_01fake0000000000000000009",
+      }),
+    );
+
+    expect(
+      await create.findByText(/A live subscription still uses this price/),
+    ).toBeTruthy();
+  });
+
+  // #440-T04
+  it("has its own sentence for every refusal of a create or an archive", () => {
+    const sentences = new Set<string>();
+    for (const code of CREATE_CODES) {
+      const sentence = describePlanFailure(code);
+      expect(sentence, code).not.toBe(GENERIC_FAILURE);
+      sentences.add(sentence);
+    }
+    expect(sentences.size).toBe(CREATE_CODES.length);
+  });
+
+  it("gives the Free plan and an Enterprise plan no create form", async () => {
+    const { api: mock } = api();
+    const user = userEvent.setup();
+    render(<PlansForm billingOn initial={ALL} api={mock} />);
+
+    await user.click(screen.getByRole("button", { name: "Edit Free" }));
+    expect(
+      screen.queryByRole("form", { name: /Create Paddle prices/ }),
+    ).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Edit Enterprise" }));
+    expect(
+      screen.queryByRole("form", { name: /Create Paddle prices/ }),
+    ).toBeNull();
+  });
+});

@@ -39,7 +39,14 @@ export type PlanChange =
       };
     }
   /** Reads the linked prices of the plan again from Paddle. */
-  | { refreshPrices: true };
+  | { refreshPrices: true }
+  /**
+   * Creates the Paddle prices of the current version that have none (#440). No amount, currency, interval or tax mode: they
+   * are the version's. `trialDays` is the one choice, and it is left out for no trial.
+   */
+  | { createPrices: { versionNumber: number; trialDays?: number } }
+  /** Archives a price of the plan that the current version is not sold with and no live subscription uses (#440). */
+  | { archivePrice: { paddlePriceId: string } };
 
 export type PlansApi = {
   create(body: NewPlanBody): Promise<RequestResult<PlansWriteAnswer>>;

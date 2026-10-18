@@ -90,6 +90,18 @@ const FAILURE_COPY: Record<string, string> = {
     "A price that is linked cannot be removed from its slot, only replaced by another price.",
   price_link_changed:
     "Another admin linked a different price to this slot meanwhile. Reload the page and decide again.",
+  price_amount_invalid:
+    "The amount stored for this version is not a price Paddle can take. Save the version again with a monthly price (and a yearly price if there is one).",
+  price_trial_invalid:
+    "Trial days are whole days, from 1 to 365. Leave the field empty for no trial.",
+  price_creation_pending:
+    "These prices are being created right now, by another request or by one that was interrupted. Wait a moment and reload the page; an interrupted attempt can be retried after ten minutes.",
+  price_create_rejected:
+    "Paddle refused to create the product or the price. Check that the Paddle API key may write products and prices, then try again.",
+  price_in_use:
+    "The current version of this plan is sold with this price, so it cannot be archived. Save a new version first.",
+  price_has_subscribers:
+    "A live subscription still uses this price at Paddle, so it stays active.",
   api_key_missing: "Store the Paddle API key in the billing settings first.",
   api_key_unreadable:
     "The stored Paddle API key cannot be read. Enter it again in the billing settings.",
