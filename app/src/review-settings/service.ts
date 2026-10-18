@@ -28,6 +28,7 @@ import {
   type SettingSource,
 } from "./effective.ts";
 import type { LlmProvider } from "../llm/config.ts";
+import { modelProviderMismatch, type ModelLayer } from "../llm/selection.ts";
 import type { ModelCapabilityChecker } from "../llm/model-capabilities.ts";
 import { llmProviderDescriptors } from "../llm/providers/index.ts";
 import {
@@ -248,9 +249,21 @@ export type ReviewSettingsService = {
   ): Promise<ResolvedProjectSettings | undefined>;
 };
 
+/**
+ * The layers a model is resolved from for each kind (#432): what the workspace default and the project wrote, apart,
+ * with a field no layer set left out. The claim of a workspace on its own key hands them to `resolveModelSelection`,
+ * which pairs a model with the provider it was set for; the merged settings cannot say that.
+ */
+export type ResolvedModelLayers = {
+  diff: { workspace: ModelLayer; project: ModelLayer };
+  /** The Dynamic model and provider are project-only fields (#194): there is no workspace layer. */
+  dynamic: { project: ModelLayer };
+};
+
 /** The Diff settings of a project plus its project-only kind, model and skill (#194). */
 export type ResolvedProjectSettings = EffectiveReviewSettings & {
   dynamic: EffectiveProjectDynamic;
+  modelLayers: ResolvedModelLayers;
 };
 
 function notFound(): ReviewSettingsError {
@@ -258,6 +271,24 @@ function notFound(): ReviewSettingsError {
     "REVIEW_SETTINGS_PROJECT_NOT_FOUND",
     "There is no such repository.",
   );
+}
+
+/** The provider and model a Diff layer wrote; a field it left out is not in the result. */
+function diffLayerOf(layer: ReviewSettingsOverrides): ModelLayer {
+  return {
+    ...(layer.provider === undefined ? {} : { provider: layer.provider }),
+    ...(layer.model === undefined ? {} : { model: layer.model }),
+  };
+}
+
+/** The provider and model of the project's Dynamic settings; a field it left out is not in the result. */
+function dynamicLayerOf(layer: ProjectDynamicOverrides): ModelLayer {
+  return {
+    ...(layer.dynamicProvider == null
+      ? {}
+      : { provider: layer.dynamicProvider }),
+    ...(layer.dynamicModel == null ? {} : { model: layer.dynamicModel }),
+  };
 }
 
 /** The model fields (and the provider they belong to) a layer holds, to carry through a save that cannot set them (#283, #430). */
@@ -341,6 +372,31 @@ function refuseModelFields(input: unknown, fields: readonly string[]): void {
       "Some settings are not valid.",
       issues,
     );
+}
+
+/**
+ * The pairing of a model with a provider of another layer (a workspace model next to a project provider) is refused when
+ * it is saved, with the rule of the claim (#432). `field` is the field the user changed.
+ */
+function refuseModelProviderMismatch(
+  field: "provider" | "model",
+  workspace: ReviewSettingsOverrides,
+  project: ReviewSettingsOverrides,
+  defaultProvider: string,
+): void {
+  if (
+    !modelProviderMismatch(
+      diffLayerOf(workspace),
+      diffLayerOf(project),
+      defaultProvider,
+    )
+  )
+    return;
+  throw new ReviewSettingsError(
+    "REVIEW_SETTINGS_INVALID",
+    "Some settings are not valid.",
+    [{ field, code: "MODEL_PROVIDER_MISMATCH" }],
+  );
 }
 
 function checked(
@@ -733,6 +789,33 @@ export function createReviewSettingsService(deps: {
       );
   }
 
+  /**
+   * A change of the workspace default may not newly pair the model it holds with a project's provider of another
+   * provider (#432). A project that already had the pairing is not blamed again: the claim still fails its job closed, and
+   * this save must not stay impossible for it.
+   */
+  async function refuseGlobalChangeBreakingProjects(
+    before: ReviewSettingsOverrides,
+    after: ReviewSettingsOverrides,
+  ): Promise<void> {
+    for (const entry of await projects.list()) {
+      if (entry.project === null) continue;
+      const project = parseReview(entry.project.settings);
+      const wasMismatched = modelProviderMismatch(
+        diffLayerOf(before),
+        diffLayerOf(project),
+        providers.defaultProvider.id,
+      );
+      if (wasMismatched) continue;
+      refuseModelProviderMismatch(
+        "model",
+        after,
+        project,
+        providers.defaultProvider.id,
+      );
+    }
+  }
+
   return {
     getGlobalSettings: globalView,
 
@@ -745,12 +828,17 @@ export function createReviewSettingsService(deps: {
       const overrides = managed
         ? { ...requested, ...modelFieldsOf((await readGlobal()).overrides) }
         : requested;
-      if (!managed)
+      if (!managed) {
         refuseBudgetAboveContext(
           overrides,
           resolveReviewSettings({ builtIn: deps.builtIn(), global: overrides })
             .settings,
         );
+        await refuseGlobalChangeBreakingProjects(
+          (await readGlobal()).overrides,
+          overrides,
+        );
+      }
       await appSettings.set(REVIEW_DEFAULTS_KEY, overrides, actor);
       return globalView();
     },
@@ -786,12 +874,21 @@ export function createReviewSettingsService(deps: {
             project: patch.review,
           }).settings,
         );
+      const workspaceLayer = managed ? {} : (await readGlobal()).overrides;
       let previousKind: ProjectReviewKind = "diff";
       let kindChanged = false;
       const project = await projects.updateSettingsWith(
         repositoryId,
         (current) => {
           const merged = mergeProjectSettings(current, patch, providers);
+          // Own key mode only: a managed workspace selects an entry, not a provider and a model.
+          if (!managed)
+            refuseModelProviderMismatch(
+              "provider",
+              workspaceLayer,
+              parseReview(merged),
+              providers.defaultProvider.id,
+            );
           // The models saved on the workspace's own key stay stored (see the global defaults).
           const next = managed
             ? { ...merged, ...modelFieldsOf(parseReview(current)) }
@@ -860,17 +957,32 @@ export function createReviewSettingsService(deps: {
     async resolveForRepository(repositoryId) {
       const project = await projects.get(repositoryId);
       if (project === undefined) return undefined;
+      const globalOverrides = (await readGlobal()).overrides;
+      const projectOverrides = parseReview(project.settings);
+      const projectDynamic = parseDynamic(project.settings);
       const review = resolveReviewSettings({
         builtIn: deps.builtIn(),
-        global: (await readGlobal()).overrides,
-        project: parseReview(project.settings),
+        global: globalOverrides,
+        project: projectOverrides,
       });
       const dynamic = resolveProjectDynamicSettings({
         builtIn: dynamicDefaults(),
-        project: parseDynamic(project.settings),
+        project: projectDynamic,
         defaultSkill: defaultSkill().text,
       });
-      return { ...review, dynamic };
+      return {
+        ...review,
+        dynamic,
+        modelLayers: {
+          diff: {
+            workspace: diffLayerOf(globalOverrides),
+            project: diffLayerOf(projectOverrides),
+          },
+          dynamic: {
+            project: dynamicLayerOf(projectDynamic),
+          },
+        },
+      };
     },
   };
 }

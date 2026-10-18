@@ -114,6 +114,8 @@ const ISSUE_COPY: Record<ReviewSettingIssueCode, (field: string) => string> = {
     "This choice is not made for this kind of review. Choose another.",
   CATALOG_ENTRY_NOT_ALLOWED: () =>
     "Your plan does not include this choice. Choose another or change your plan.",
+  MODEL_PROVIDER_MISMATCH: () =>
+    "The model that applies was chosen for another provider. Set a model for this provider too, or use the provider the model was chosen for.",
   CATALOG_ENTRY_OWN_KEY_MODE: () =>
     "This workspace uses its own AI key, so the choices of the instance do not apply.",
 };
