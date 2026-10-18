@@ -50,6 +50,7 @@ const OWN_OPENROUTER_KEY = [
 async function renderedProps(): Promise<Record<string, unknown>> {
   const element = (await ReviewDefaultsSettingsPage({
     params: Promise.resolve({ workspace: "acme" }),
+    searchParams: Promise.resolve({}),
   })) as ReactElement<Record<string, unknown>>;
   return element.props;
 }

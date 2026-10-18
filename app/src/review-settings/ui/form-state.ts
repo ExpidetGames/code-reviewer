@@ -116,6 +116,26 @@ export function setText(
   };
 }
 
+/**
+ * Chooses the provider of the Diff models. A model exists only at its provider, so a different provider clears the
+ * model and the fallback model typed for the old one: the person names them again (the suggestions switch with the
+ * provider). Choosing the provider that is already chosen changes nothing.
+ */
+export function setProvider(state: FormState, provider: string): FormState {
+  if (provider === state.values.provider) return state;
+  return {
+    ...state,
+    values: { ...state.values, provider, model: "", fallbackModel: "" },
+    overridden: {
+      ...state.overridden,
+      provider: true,
+      model: true,
+      fallbackModel:
+        state.overridden.fallbackModel || state.values.fallbackModel !== "",
+    },
+  };
+}
+
 export function setBoolean(
   state: FormState,
   field: BooleanField,
@@ -154,11 +174,16 @@ export function resetField(
   model: SettingsFormModel,
 ): FormState {
   const inherited = valuesOf(model.inherited);
-  return {
-    ...state,
-    values: { ...state.values, [field]: inherited[field] },
-    overridden: { ...state.overridden, [field]: false },
-  };
+  // The models belong to the provider (see `setProvider`): they go back to the inherited ones together with it.
+  const fields: readonly ReviewSettingField[] =
+    field === "provider" ? ["provider", "model", "fallbackModel"] : [field];
+  const values = { ...state.values };
+  const overridden = { ...state.overridden };
+  for (const each of fields) {
+    Object.assign(values, { [each]: inherited[each] });
+    overridden[each] = false;
+  }
+  return { ...state, values, overridden };
 }
 
 const WHOLE_NUMBER = /^[+-]?\d+$/;

@@ -500,7 +500,11 @@ describe("a project save of a workspace on its own key", () => {
   // #433-T05
   it("checks the Dynamic provider the person chose with the validator of the server", () => {
     const m = model();
-    const state = setDynamicProvider(initialFormState(m), "no-such-provider");
+    // A different provider clears the model, so the person names one for it too.
+    const state = setDynamicModel(
+      setDynamicProvider(initialFormState(m), "no-such-provider"),
+      "vendor/other-model",
+    );
 
     expect(planProjectSave(m, state)).toEqual({
       ok: false,

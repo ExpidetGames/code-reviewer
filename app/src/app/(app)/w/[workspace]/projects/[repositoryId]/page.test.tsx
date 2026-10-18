@@ -63,6 +63,7 @@ const OWN_OPENROUTER_KEY = [
 async function renderedProps(): Promise<Record<string, unknown>> {
   const page = (await ProjectSettingsPage({
     params: Promise.resolve({ workspace: "acme", repositoryId: "repo-1" }),
+    searchParams: Promise.resolve({}),
   })) as ReactElement<Record<string, unknown>>;
   // The page hands over to an async server component of its own; run it the way the server would.
   const content = (await (

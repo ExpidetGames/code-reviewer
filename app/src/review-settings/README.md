@@ -160,6 +160,12 @@ the Review kind card (Dynamic Review) show depends on the key mode of the worksp
   datalist and no estimate, and `project-save.ts` sends neither (a test plants a sentinel where a leak would sit and
   searches the DOM and every request body). An untouched form still sends nothing; a changed form sends only the changed
   groups, and the project-only entries travel in the project request.
+- **A model belongs to its provider.** Choosing a different provider clears the model (and the Diff fallback model) typed
+  for the old one, because a model id means something only at its provider; the person names it again, with the
+  suggestions and the cost estimate of the new provider (the estimate waits for a model). Choosing the same provider again
+  changes nothing, and "Reset to default" on the provider takes its models back with it (`form-state.ts` `setProvider`,
+  `dynamic-form-state.ts` `setDynamicProvider`). The server checks each model against the rule of the provider named in the
+  same request, so a mismatched pair is also refused there.
 - **A provider without a stored key (decision C7).** A page of a workspace on its own key passes `keyedProviders`
   (`keyed-providers.ts`, from `keyServiceFor(workspaceId).statusAll()`: a readable key counts, an unreadable one does not);
   a managed workspace gets no list and its statuses are not read (`keyedProvidersFor`, a page test pins it). A provider without one is

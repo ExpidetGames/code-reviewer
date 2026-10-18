@@ -86,11 +86,17 @@ export function setDynamicModel(
   return withDynamic(state, { dynamicModel });
 }
 
+/**
+ * Chooses the provider of the Dynamic model. A model exists only at its provider, so a different provider clears the
+ * model typed for the old one (see `setProvider`).
+ */
 export function setDynamicProvider(
   state: FormState,
   dynamicProvider: string,
 ): FormState {
-  return withDynamic(state, { dynamicProvider });
+  if (state.dynamic === undefined) return state;
+  if (dynamicProvider === state.dynamic.dynamicProvider) return state;
+  return withDynamic(state, { dynamicProvider, dynamicModel: "" });
 }
 
 /** Chooses the catalog entry of one kind (`null` takes the choice back); the other kind keeps its choice. */

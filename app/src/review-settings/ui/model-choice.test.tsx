@@ -29,6 +29,25 @@ import type { SettingsApi } from "./api.ts";
 import type { SettingsFormModel } from "./form-model.ts";
 import { SettingsForm } from "./settings-form.tsx";
 
+// A second provider is registered for this file (the fake adapter of #423), so that what the form derives from the
+// registry (the validation of a provider id, the model-id rule, the price table of the cost estimate) is the real
+// path for it too. Production registers one provider only.
+vi.mock("../../llm/providers/index.ts", async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import("../../llm/providers/index.ts")>();
+  const { createProviderRegistry } =
+    await import("../../llm/providers/registry.ts");
+  const { createFakeAdapter } =
+    await import("../../llm/providers/fake-adapter.ts");
+  return {
+    ...original,
+    llmProviderDescriptors: createProviderRegistry([
+      ...original.llmProviderDescriptors.providers,
+      createFakeAdapter(),
+    ]),
+  };
+});
+
 afterEach(cleanup);
 
 const BUILT_IN = builtInReviewSettings("anthropic/claude-haiku-5.5");
@@ -342,6 +361,151 @@ describe("the provider and model pickers of a workspace on its own key", () => {
 
     expect(save).toHaveBeenCalledTimes(1);
     expect(save.mock.calls[0]?.[0]).toEqual({ model: "vendor/other-model" });
+  });
+});
+
+// The second provider (#423 fake adapter): everything the form derives from the provider follows the chosen one.
+describe("choosing a provider other than the default", () => {
+  const SECOND = createFakeAdapter();
+
+  function renderTwoProviders(model: SettingsFormModel, api: SettingsApi) {
+    return render(
+      <SettingsForm
+        workspaceSlug="acme"
+        initial={model}
+        keyedProviders={["openrouter", SECOND.id]}
+        providers={[openrouterDescriptor, SECOND]}
+        api={api}
+      />,
+    );
+  }
+
+  async function choose(
+    user: ReturnType<typeof userEvent.setup>,
+    select: string,
+    label: string,
+  ) {
+    await user.click(screen.getByRole("combobox", { name: select }));
+    await user.click(screen.getByRole("option", { name: label }));
+  }
+
+  function suggestionsOf(field: HTMLElement): string[] {
+    const list = document.getElementById(field.getAttribute("list") ?? "");
+    return [...(list?.querySelectorAll("option") ?? [])].map(
+      (option) => option.getAttribute("value") ?? "",
+    );
+  }
+
+  // #433-T01
+  it("switches the suggested models, sends the provider with the model and estimates the cost from the chosen adapter", async () => {
+    const user = userEvent.setup();
+    const { api, save } = fakeApi();
+    renderTwoProviders(ownModel(), api);
+    const model = screen.getByLabelText("Model", { exact: true });
+    expect(suggestionsOf(model)).toEqual([
+      ...openrouterDescriptor.suggestedModels,
+    ]);
+
+    await choose(user, "Provider", "FakeAI");
+
+    expect(suggestionsOf(model)).toEqual(["fake-small", "fake-large"]);
+    await user.type(model, "fake-small");
+    // The price table of FakeAI (1 and 2 USD per million tokens), not OpenRouter's.
+    expect(
+      screen.getByText(/about \$0\.036, at most/, { selector: "li" })
+        .textContent,
+    ).toMatch(/^Model fake-small:/);
+    await user.click(screen.getByRole("button", SAVE));
+
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(save.mock.calls[0]?.[0]).toEqual({
+      provider: "fakeai",
+      model: "fake-small",
+    });
+  });
+
+  // #433-T01
+  it("clears the model typed for the old provider, and a save without a new one is refused next to the model", async () => {
+    const user = userEvent.setup();
+    const { api, save } = fakeApi();
+    renderTwoProviders(ownModel(), api);
+    const model = screen.getByLabelText("Model", { exact: true });
+    expect((model as HTMLInputElement).value).toBe(BUILT_IN.model);
+
+    await choose(user, "Provider", "FakeAI");
+
+    expect((model as HTMLInputElement).value).toBe("");
+    // Nothing can be estimated without a model.
+    expect(
+      screen.getByText(/shows after the marked values are fixed/),
+    ).toBeTruthy();
+    await user.click(screen.getByRole("button", SAVE));
+    expect(save).not.toHaveBeenCalled();
+    expect(
+      within(model.closest("[data-field]") as HTMLElement).getByText(
+        "Enter a model name.",
+      ),
+    ).toBeTruthy();
+  });
+
+  // #433-T01
+  it("keeps the model when the same provider is chosen again", async () => {
+    const user = userEvent.setup();
+    renderTwoProviders(ownModel(), fakeApi().api);
+
+    await choose(user, "Provider", "OpenRouter");
+
+    expect(
+      (screen.getByLabelText("Model", { exact: true }) as HTMLInputElement)
+        .value,
+    ).toBe(BUILT_IN.model);
+  });
+
+  // #433-T01
+  it("takes the provider back to the default together with the model", async () => {
+    const user = userEvent.setup();
+    renderTwoProviders(ownModel(), fakeApi().api);
+    await choose(user, "Provider", "FakeAI");
+    await user.type(
+      screen.getByLabelText("Model", { exact: true }),
+      "fake-small",
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Reset to default for Provider" }),
+    );
+
+    expect(
+      (screen.getByLabelText("Model", { exact: true }) as HTMLInputElement)
+        .value,
+    ).toBe(BUILT_IN.model);
+    expect(
+      screen.getByRole("combobox", { name: "Provider" }).textContent,
+    ).toMatch(/OpenRouter/);
+  });
+
+  // #433-T01
+  it("does the same for the provider and the model of Dynamic Review", async () => {
+    const user = userEvent.setup();
+    const { api, save } = fakeApi();
+    renderTwoProviders(ownModel({ kind: "dynamic" }), api);
+    const model = screen.getByLabelText("Dynamic Review model");
+    expect(suggestionsOf(model)).toEqual([
+      ...openrouterDescriptor.suggestedModels,
+    ]);
+
+    await choose(user, "Dynamic Review provider", "FakeAI");
+
+    expect((model as HTMLInputElement).value).toBe("");
+    expect(suggestionsOf(model)).toEqual(["fake-small", "fake-large"]);
+    await user.type(model, "fake-large");
+    await user.click(screen.getByRole("button", SAVE));
+
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(save.mock.calls[0]?.[0]).toEqual({
+      dynamicProvider: "fakeai",
+      dynamicModel: "fake-large",
+    });
   });
 });
 

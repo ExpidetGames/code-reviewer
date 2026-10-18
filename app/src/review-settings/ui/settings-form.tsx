@@ -69,6 +69,7 @@ import {
   resetField,
   setBoolean,
   setCommand,
+  setProvider,
   setText,
   type BooleanField,
   type FormState,
@@ -444,7 +445,12 @@ export function SettingsForm({
 
   const handlers: SettingsFieldHandlers = {
     setText: (name: TextField, value: string) =>
-      edit(setText(state, name, value), name),
+      edit(
+        name === "provider"
+          ? setProvider(state, value)
+          : setText(state, name, value),
+        name,
+      ),
     setBoolean: (name: BooleanField, value: boolean) =>
       edit(setBoolean(state, name, value), name),
     setCommand: (command, allowed) =>
@@ -462,8 +468,15 @@ export function SettingsForm({
       edit(setDynamicModel(state, defaultModel), "dynamicModel"),
     setProvider: (provider) =>
       edit(setDynamicProvider(state, provider), "dynamicProvider"),
+    // The model goes back with the provider it belongs to.
     resetProvider: () =>
-      edit(setDynamicProvider(state, defaultProvider), "dynamicProvider"),
+      edit(
+        setDynamicModel(
+          setDynamicProvider(state, defaultProvider),
+          defaultModel,
+        ),
+        "dynamicProvider",
+      ),
     editSkill: () => edit(editSkill(state, shippedSkill), "reviewSkill"),
     setSkill: (text) => edit(setSkillText(state, text), "reviewSkill"),
     resetSkill: () => edit(resetSkill(state, shippedSkill), "reviewSkill"),
