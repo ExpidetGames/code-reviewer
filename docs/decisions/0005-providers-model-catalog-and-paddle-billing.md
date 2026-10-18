@@ -215,6 +215,8 @@ selection, not the other way round (today `loadLlm` runs first and knows neither
    built-in value of the kind. The provider must be registered and, for the runner, advertised.
    Key is the workspace key **of that provider**: no key gives `llm_not_configured`, reason `no_key`
    (C7). The fallback model is not sent (as today).
+   A non-default provider with no model at any layer gets that adapter's default model for the kind
+   (2.4); the cost falls on the workspace's own key.
 4. **Managed:** entry id is the project's `catalogEntry<Kind>`, else the instance
    `catalog_defaults[kind]`, else `managed_model_unavailable`, reason `no_selection`. The entry must
    exist, be `released`, serve the kind, be **allowed by `modelAccess`** and have a provider that
@@ -247,7 +249,7 @@ error code with member copy that names no model and links to Manage plan).
   `entitlements_invalid`). Unknown ids are accepted (a plan may be written before the entry) and match
   nothing. One function `entryAllowed(entitlements, entry)` serves the claim and the picker.
 - A plan change mid-period: a project whose entry is no longer allowed fails closed at its next claim
-  (`managed_model_unavailable`, reason `entry_not_allowed`) and the project page shows a notice.
+  (`managed_model_unavailable`, reason `not_allowed`) and the project page shows a notice.
 - **Source marker.** `workspace_entitlements` gets `source` (`manual` or `billing`). Any write through
   the operator API or an admin action stores `manual`; only the billing module writes `billing`.
   The Free plan that billing writes to `default_entitlements` carries the same marker `billing`, which
