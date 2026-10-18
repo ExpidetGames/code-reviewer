@@ -23,8 +23,8 @@ Instance setting `managed_model_tiers` (`instance_settings`, JSON, no migration)
 is optional; the ids are OpenRouter ids validated with the rule of the review settings (`isModelId`, the provider's model-id rule).
 
 **It is written and read through the operator API only**: `GET|PUT /api/operator/v1/model-tiers`
-(`src/operator-api/README.md`). A `PUT` replaces the whole configuration. The instance admin portal shows **whether**
-each tier has a model per kind (the "Managed model tiers" row of the overview), never an id, and cannot write them.
+(`src/operator-api/README.md`). A `PUT` replaces the whole configuration. The instance admin portal no longer shows
+the tiers (the "Managed model tiers" row of the overview was replaced by the "Model catalog" row, #429) and cannot write them.
 Nothing else reads the setting except the claim of a job (below).
 
 - **A Dynamic model is checked on write** with the capability module of #269 (`src/llm/model-capabilities.ts`): a model

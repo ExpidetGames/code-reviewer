@@ -172,10 +172,10 @@ test.describe("the admin portal", () => {
     await expect(setup.getByText("Sign-up rule")).toBeVisible();
     await expect(setup.getByText("Ways to sign in")).toBeVisible();
     await expect(setup.getByText("LLM keys of the instance")).toBeVisible();
-    // #280: shown with no link, because the operator API sets the models and this portal only says whether they are.
-    await expect(setup.getByText("Managed model tiers")).toBeVisible();
+    // #429: the catalog replaced the row of the managed tiers; it links to the LLM page, where it is managed.
+    await expect(setup.getByText("Model catalog")).toBeVisible();
     await expect(setup.getByRole("link", { name: /^Configure / })).toHaveCount(
-      6,
+      7,
     );
   });
 
