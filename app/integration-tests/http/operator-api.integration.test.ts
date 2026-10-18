@@ -7,6 +7,11 @@
 import { describe, expect, it } from "vitest";
 import { createSecretStore } from "../../src/secrets/store.ts";
 import {
+  DEFAULT_LLM_PROVIDER,
+  llmProviderDescriptors,
+} from "../../src/llm/providers/index.ts";
+import type { SecretName } from "../../src/secrets/names.ts";
+import {
   NotFoundMarker,
   startOperatorApiHarness,
   TEST_OPERATOR_TOKEN,
@@ -870,6 +875,79 @@ describe("the operator's own LLM key", () => {
     expect(answers.join("\n")).not.toContain("wxyz");
     expect(answers.join("\n")).not.toContain("operator_llm_key");
     expect(h.lines.join("\n")).not.toContain(KEY);
+  });
+
+  // #427-T03
+  it("has no call for the key of any provider either: whoever holds the API token can neither read nor write one", async () => {
+    const h = await startOperatorApiHarness();
+    const secrets = createSecretStore({
+      db: h.db,
+      appSecret: "operator-api-test-app-secret-0123456789-01",
+    });
+    // A key of every registered provider is stored, by the name its adapter gives it.
+    for (const provider of llmProviderDescriptors.providers)
+      await secrets.save(
+        provider.secretNames.operator as SecretName,
+        `${KEY}-${provider.id}`,
+        { updatedBy: null, showLastFour: true },
+      );
+    const ids = llmProviderDescriptors.ids;
+    const answers: string[] = [];
+
+    for (const path of [
+      "/api/operator/v1/llm-keys",
+      "/api/operator/v1/operator-llm-keys",
+      "/api/operator/v1/providers",
+      ...ids.flatMap((id) => [
+        `/api/operator/v1/llm-keys/${id}`,
+        `/api/operator/v1/llm-keys/${id}/test`,
+        `/api/operator/v1/operator-llm-keys/${id}`,
+        `/api/operator/v1/providers/${id}`,
+        `/api/operator/v1/providers/${id}/key`,
+        `/api/operator/v1/secrets/${id}`,
+        `/api/operator/v1/workspaces/${h.workspaceId}/llm-keys/${id}`,
+      ]),
+    ])
+      for (const method of ["GET", "PUT", "POST", "DELETE"]) {
+        const response = await h.call(method, path, {
+          body:
+            method === "PUT" || method === "POST" ? { apiKey: KEY } : undefined,
+        });
+        expect(response.status, `${method} ${path}`).toBe(404);
+        answers.push(await response.text());
+      }
+
+    for (const read of [
+      "/api/operator/v1/workspaces",
+      path(h.workspaceId),
+      "/api/operator/v1/entitlements/default",
+      "/api/operator/v1/usage",
+    ])
+      answers.push(await (await h.call("GET", read)).text());
+    for (const provider of llmProviderDescriptors.providers) {
+      expect(answers.join("\n")).not.toContain(`${KEY}-${provider.id}`);
+      expect(answers.join("\n")).not.toContain(provider.secretNames.operator);
+    }
+    expect(h.lines.join("\n")).not.toContain(KEY);
+  });
+
+  // #427-T03
+  it("cannot set the key of a provider through the entitlements either: nothing is stored", async () => {
+    const h = await startOperatorApiHarness();
+
+    for (const extra of [
+      { operatorLlmKeys: { [DEFAULT_LLM_PROVIDER]: { apiKey: KEY } } },
+      { llmKeys: { [DEFAULT_LLM_PROVIDER]: KEY } },
+    ]) {
+      const response = await h.call("PUT", path(h.workspaceId), {
+        body: { ...ENTITLEMENTS, ...extra },
+      });
+      expect(response.status).toBe(422);
+      expect(await response.text()).not.toContain(KEY);
+    }
+    expect(await h.db.selectFrom("secrets").select("name").execute()).toEqual(
+      [],
+    );
   });
 
   // #276-T07
