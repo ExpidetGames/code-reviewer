@@ -56,9 +56,14 @@ async function start(
   const workspaceId = await addWorkspace(db, "alpha");
   // Every statement the assembly makes, as text, to see which tables a call touched.
   const statements: string[] = [];
+  // Secret names whose read fails like a database that stops answering (set by `failReadOf`).
+  const failing: string[] = [];
   const recorder: KyselyPlugin = {
     transformQuery: ({ node }) => {
-      statements.push(JSON.stringify(node));
+      const text = JSON.stringify(node);
+      if (failing.some((name) => text.includes(`"${name}"`)))
+        throw new Error("the read of a stored secret failed");
+      statements.push(text);
       return node;
     },
     transformResult: (args) => Promise.resolve(args.result),
@@ -82,6 +87,10 @@ async function start(
       );
       statements.length = 0;
       return touched;
+    },
+    /** From now on, any statement that names this stored secret throws. */
+    failReadOf(name: string) {
+      failing.push(name);
     },
     async setWorkspaceKey(key = WORKSPACE_KEY, id = workspaceId) {
       const saved = await llm
@@ -384,6 +393,24 @@ describe("a workspace with the key mode managed and several providers", () => {
     openrouterDescriptor,
     createFakeAdapter(),
   ]);
+
+  // #427-T05
+  it("fails closed when the read of the operator's key of one provider fails: the masking list is not returned with fewer keys", async () => {
+    const t = await start({ providers });
+    await t.setOperatorKeyOf("openrouter", OPERATOR_KEY);
+    await t.setOperatorKeyOf(FAKE_PROVIDER_ID, FAKE_OPERATOR_KEY);
+    await t.setEntitlements(entitlements("managed"));
+    expect(await t.llm.currentKeysFor(t.workspaceId)).toEqual([
+      OPERATOR_KEY,
+      FAKE_OPERATOR_KEY,
+    ]);
+
+    t.failReadOf(`operator_llm_key.${FAKE_PROVIDER_ID}`);
+
+    await expect(t.llm.currentKeysFor(t.workspaceId)).rejects.toThrow(
+      "the read of a stored secret failed",
+    );
+  });
 
   // #427-T04
   it("fails closed with operator_key_missing for a provider without an operator key, though another provider has one", async () => {

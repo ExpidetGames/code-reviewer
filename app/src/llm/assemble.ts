@@ -68,8 +68,9 @@ export type WorkspaceLlmAssembly = {
   ): Promise<WorkspaceLlmSummary>;
   /**
    * The LLM keys that are current for this workspace right now, to mask in the result of one of its jobs: its
-   * own key of every provider, and the operator's key of every provider while the workspace is `managed`. Best effort: a key that cannot
-   * be read is left out.
+   * own key of every provider, and the operator's key of every provider while the workspace is `managed`. Fails
+   * closed: a key that exists but cannot be decrypted is left out (it cannot appear in a result), but a read that
+   * fails throws, so a caller never masks with fewer keys than it should (src/runner-api/known-secrets.ts).
    */
   currentKeysFor(workspaceId: string): Promise<string[]>;
 };
