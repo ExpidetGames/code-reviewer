@@ -610,6 +610,42 @@ describe("the Test button of the operator's keys", () => {
     expect(llm.keyChecks()).toHaveLength(0);
   });
 
+  // #427-T02
+  it("is guarded by the handler itself, with no proxy in front: 401 without a session, 404 for a person who is not an admin, and nothing is tested or stored", async () => {
+    const { llm, portal } = await start();
+    await portal.createUser({ id: "member-1", ...MEMBER });
+    const memberCookies = await portal.signIn(MEMBER.email, MEMBER.password);
+    const path = `/api/instance-portal/llm-keys/${OPENROUTER}/test`;
+    const settings = "/api/instance-portal/settings";
+    const keyBody = { apiKey: KEY };
+
+    const answers = [
+      await portal.callRoute(path, { method: "POST", body: keyBody }),
+      await portal.callRoute(path, {
+        method: "POST",
+        body: keyBody,
+        cookies: memberCookies,
+      }),
+      await portal.callRoute(settings, {
+        method: "PUT",
+        body: { operatorLlmKeys: { [OPENROUTER]: { apiKey: KEY } } },
+      }),
+      await portal.callRoute(settings, {
+        method: "PUT",
+        body: { operatorLlmKeys: { [OPENROUTER]: { apiKey: KEY } } },
+        cookies: memberCookies,
+      }),
+    ];
+
+    expect(answers.map((response) => response.status)).toEqual([
+      401, 404, 401, 404,
+    ]);
+    expect(llm.keyChecks()).toHaveLength(0);
+    expect(await statusOf(portal)).toMatchObject({
+      operatorLlmKeys: { [OPENROUTER]: { state: "not_configured" } },
+    });
+  });
+
   // #427-T01
   it("refuses a request from another site, a body that is not JSON and a body that is not an object", async () => {
     const { llm, portal } = await start();
