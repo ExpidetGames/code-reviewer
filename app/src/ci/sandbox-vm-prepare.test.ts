@@ -121,6 +121,7 @@ describe("docker/sandbox/vm-prepare.sh against a busy cgroup root", () => {
       const started = Date.now();
       const child = spawn("bash", [path], {
         env: {
+          ...process.env,
           PATH: `${fx.bin}:${process.env.PATH ?? ""}`,
           VM_PREPARE_CGROUP_ROOT: fx.cgroup,
           VM_PREPARE_TRIES: String(tries),
