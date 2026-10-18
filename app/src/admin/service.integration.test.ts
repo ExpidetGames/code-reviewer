@@ -57,6 +57,11 @@ async function startService(
       now: () => now,
     }),
     operatorKeyTest: { test: () => Promise.resolve({ ok: true }) },
+    catalogSummary: () =>
+      Promise.resolve({
+        diff: { released: 0, hasDefault: false },
+        dynamic: { released: 0, hasDefault: false },
+      }),
     githubConfigured: () => flags.github,
     // A test switches the flag; a mail server saved through the service counts as well.
     mailConfigured: () => Promise.resolve(flags.mail),

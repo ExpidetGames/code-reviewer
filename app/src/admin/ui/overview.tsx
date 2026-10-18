@@ -20,7 +20,7 @@ import {
 import type { GithubConfigView } from "../../github-config/service.ts";
 import { GITHUB_SIGN_IN_NOT_ENABLED } from "../../github-config/ui/messages.ts";
 import { llmProviderDescriptors } from "../../llm/providers/index.ts";
-import { MODEL_TIERS } from "../../model-tiers/tiers.ts";
+import { CATALOG_KINDS } from "../../model-catalog/entries.ts";
 import { UNREADABLE_SECRET_CAUSE } from "../../secrets/messages.ts";
 import type { AdminSettingsView } from "../service.ts";
 import { ImportNotice } from "./import-notice.tsx";
@@ -128,21 +128,15 @@ function operatorKeyRow(settings: AdminSettingsView): {
   };
 }
 
-const TIER_LABELS = { low: "Low", medium: "Medium", high: "High" } as const;
+const KIND_LABELS = { diff: "Diff", dynamic: "Dynamic" } as const;
 
-/** "Low: Diff only, Medium: not configured, High: Diff and Dynamic": whether, never which model (#280). */
-function modelTiersSummary(tiers: AdminSettingsView["modelTiers"]): string {
-  return MODEL_TIERS.map((tier) => {
-    const { diff, dynamic } = tiers[tier];
-    const state =
-      diff && dynamic
-        ? "Diff and Dynamic"
-        : diff
-          ? "Diff only"
-          : dynamic
-            ? "Dynamic only"
-            : "not configured";
-    return `${TIER_LABELS[tier]}: ${state}`;
+/** "Diff: 2 released, default set, Dynamic: none released, no default": counts, never a name, a provider or a model (#429). */
+function modelCatalogSummary(
+  catalog: AdminSettingsView["modelCatalog"],
+): string {
+  return CATALOG_KINDS.map((kind) => {
+    const { released, hasDefault } = catalog[kind];
+    return `${KIND_LABELS[kind]}: ${released === 0 ? "none" : String(released)} released, ${hasDefault ? "default set" : "no default"}`;
   }).join(", ");
 }
 
@@ -297,10 +291,11 @@ export function Overview({
               href="/admin/llm"
             />
             <SetupRow
-              title="Managed model tiers"
+              title="Model catalog"
               status="ok"
-              summary={modelTiersSummary(settings.modelTiers)}
-              hint="Optional. Which model backs each tier is set through the operator API and is not shown here. A workspace on the key of the instance cannot run a review of a kind its tier has no model for."
+              summary={modelCatalogSummary(settings.modelCatalog)}
+              hint="Optional. Only workspaces that use the key of the instance need it: they can choose the released entries, by name. A kind with no released entry or no default cannot run a review for them."
+              href="/admin/llm"
             />
             <SetupRow
               title="Tenancy"
