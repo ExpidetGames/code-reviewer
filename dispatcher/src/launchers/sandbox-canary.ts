@@ -146,6 +146,8 @@ export function createSandboxCanary(
       const host = new SandboxDockerHost({
         vm,
         clock,
+        logger,
+        logFields: { canary: true },
         imageReference: options.imageReference ?? SANDBOX_IMAGE_REFERENCE,
         imageDigest: options.imageDigest,
         handoverSeconds: 0,
