@@ -41,7 +41,7 @@ test.describe("the apps under test", () => {
     expect(page.status()).toBe(307);
   });
 
-  test("@smoke the operator app of the limits journey is set up before it runs", async ({
+  test("the operator app of the limits journey is set up before it runs", async ({
     request,
   }) => {
     await setUpApp(e2eEnv.operatorAppUrl, e2eEnv.logFiles.operator, "multi");

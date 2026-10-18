@@ -148,7 +148,7 @@ const headSha = (variant: string, number: number) =>
 
 test.describe.configure({ mode: "serial" });
 
-test.describe("@smoke a limited workspace on an instance with the operator API on", () => {
+test.describe("a limited workspace on an instance with the operator API on", () => {
   let llm: FakeLlm | undefined;
   let runner: RunnerProcess | undefined;
   let operator: OperatorClient | undefined;
