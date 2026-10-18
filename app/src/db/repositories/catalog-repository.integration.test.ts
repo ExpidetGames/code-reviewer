@@ -5,6 +5,11 @@
 import { sql, type Kysely } from "kysely";
 import { describe, expect, it } from "vitest";
 import { createJobQueueFixture } from "../../test-support/jobs.ts";
+import type { CatalogDefaults } from "../../model-catalog/entries.ts";
+import type { EntitlementsData } from "../../workspaces/entitlements.ts";
+import { defaultWorkspaceId } from "../../test-support/workspaces.ts";
+import { createInstanceSettingsRepository } from "./instance-settings-repository.ts";
+import { createWorkspaceEntitlementsRepository } from "./workspace-entitlements-repository.ts";
 import {
   createPostgresTestDatabase,
   hasPostgres,
@@ -358,22 +363,223 @@ describe.each(ENGINES)("the model catalog repository on $name", (engine) => {
           })
           .execute();
 
-      expect(await repository.countProjectsSelecting(created.id)).toBe(0);
+      const none = { diff: null, dynamic: null };
+      const countOf = async (id: string) =>
+        (await repository.countProjectsUsing(none)).get(id) ?? 0;
+
+      expect(await countOf(created.id)).toBe(0);
       await put("p1", fixture.repositoryId, { catalogEntryDiff: created.id });
       await put("p2", fixture.otherRepositoryId, {
         catalogEntryDynamic: created.id,
         model: "x/y",
       });
 
-      expect(await repository.countProjectsSelecting(created.id)).toBe(2);
-      expect(await repository.countProjectsSelecting(other.id)).toBe(0);
+      expect(await countOf(created.id)).toBe(2);
+      expect(await countOf(other.id)).toBe(0);
       // An id that merely appears somewhere in the settings is not a selection.
       await database
         .updateTable("projects")
         .set({ settings: JSON.stringify({ note: created.id }) })
         .where("id", "=", "p2")
         .execute();
-      expect(await repository.countProjectsSelecting(created.id)).toBe(1);
+      expect(await countOf(created.id)).toBe(1);
+    },
+  );
+
+  // #429-T02
+  it_(
+    "counts a project that falls back to an instance default only in a workspace on the operator's key, once, next to the explicit selections",
+    async () => {
+      const database = await engine.open();
+      const fixture = await createJobQueueFixture({ database });
+      const workspaceId = await defaultWorkspaceId(database);
+      const repository = createCatalogRepository(database, () => T0);
+      const diffDefault = await repository.insert(
+        entry({ kinds: ["diff", "dynamic"] }),
+        null,
+      );
+      const dynamicDefault = await repository.insert(
+        entry({ name: "Deep", nameKey: "deep", kinds: ["dynamic"] }),
+        null,
+      );
+      const defaults: CatalogDefaults = {
+        diff: diffDefault.id,
+        dynamic: dynamicDefault.id,
+      };
+      const none: CatalogDefaults = { diff: null, dynamic: null };
+      const put = (id: string, repositoryId: string, settings: unknown) =>
+        database
+          .insertInto("projects")
+          .values({
+            id,
+            repository_id: repositoryId,
+            active: 1,
+            settings: JSON.stringify(settings),
+            created_at: T0.toISOString(),
+            updated_at: T0.toISOString(),
+          })
+          .execute();
+      const used = async (given = defaults) => {
+        const counts = await repository.countProjectsUsing(given);
+        return [
+          counts.get(diffDefault.id) ?? 0,
+          counts.get(dynamicDefault.id) ?? 0,
+        ];
+      };
+      const entitle = (keyMode: "own" | "managed") => {
+        const data: EntitlementsData = {
+          planLabel: "Team",
+          keyMode,
+          limits: {
+            diffRunsPerPeriod: null,
+            dynamicRunsPerPeriod: null,
+            managedCostLimitMicroUsd: null,
+            ownKeyCostLimitMicroUsd: null,
+          },
+          periodStart: "2026-10-01T00:00:00.000Z",
+          suspended: false,
+          suspensionCode: null,
+        };
+        return createWorkspaceEntitlementsRepository(database, workspaceId).put(
+          data,
+          null,
+        );
+      };
+      // p1 runs Diff and p2 runs Dynamic, neither has chosen an entry.
+      await put("p1", fixture.repositoryId, {});
+      await put("p2", fixture.otherRepositoryId, { reviewKind: "dynamic" });
+
+      // No entitlements at all: the workspace reviews on its own key, the catalog is not in play.
+      expect(await used()).toEqual([0, 0]);
+      await entitle("own");
+      expect(await used()).toEqual([0, 0]);
+
+      await entitle("managed");
+      expect(await used()).toEqual([1, 1]);
+      // With no default of a kind there is nothing to fall back to.
+      expect(await used({ diff: null, dynamic: dynamicDefault.id })).toEqual([
+        0, 1,
+      ]);
+      expect(await used(none)).toEqual([0, 0]);
+
+      // A choice of the project replaces the fallback of its kind; a choice for the other kind does not.
+      await database
+        .updateTable("projects")
+        .set({
+          settings: JSON.stringify({ catalogEntryDiff: dynamicDefault.id }),
+        })
+        .where("id", "=", "p1")
+        .execute();
+      expect(await used()).toEqual([0, 2]);
+      await database
+        .updateTable("projects")
+        .set({
+          settings: JSON.stringify({ catalogEntryDynamic: dynamicDefault.id }),
+        })
+        .where("id", "=", "p1")
+        .execute();
+      expect(await used()).toEqual([1, 2]);
+
+      // A project that chose the default itself is counted once, not twice.
+      await database
+        .updateTable("projects")
+        .set({ settings: JSON.stringify({ catalogEntryDiff: diffDefault.id }) })
+        .where("id", "=", "p1")
+        .execute();
+      expect(await used()).toEqual([1, 1]);
+    },
+  );
+
+  // #429-T02
+  it_(
+    "treats a workspace without a row of its own as managed when the default of the instance is managed",
+    async () => {
+      const database = await engine.open();
+      const fixture = await createJobQueueFixture({ database });
+      const repository = createCatalogRepository(database, () => T0);
+      const created = await repository.insert(entry(), null);
+      await database
+        .insertInto("projects")
+        .values({
+          id: "p1",
+          repository_id: fixture.repositoryId,
+          active: 1,
+          settings: "{}",
+          created_at: T0.toISOString(),
+          updated_at: T0.toISOString(),
+        })
+        .execute();
+      const defaults = { diff: created.id, dynamic: null };
+      const settings = createInstanceSettingsRepository(database);
+      const entitlements = (keyMode: "own" | "managed"): EntitlementsData => ({
+        planLabel: "Free",
+        keyMode,
+        limits: {
+          diffRunsPerPeriod: 10,
+          dynamicRunsPerPeriod: 0,
+          managedCostLimitMicroUsd: null,
+          ownKeyCostLimitMicroUsd: null,
+        },
+        periodStart: "2026-10-01T00:00:00.000Z",
+        suspended: false,
+        suspensionCode: null,
+      });
+
+      await settings.set("default_entitlements", entitlements("own"), null);
+      expect(
+        (await repository.countProjectsUsing(defaults)).get(created.id) ?? 0,
+      ).toBe(0);
+      await settings.set("default_entitlements", entitlements("managed"), null);
+      expect(
+        (await repository.countProjectsUsing(defaults)).get(created.id) ?? 0,
+      ).toBe(1);
+    },
+  );
+
+  // #429-T02
+  it_(
+    "puts every entry at its place in the given order in one go, and changes nothing when the list is not exactly the entries",
+    async () => {
+      const { db, repository } = await start();
+      await insertUser(db, { id: "user-1" });
+      const a = await repository.insert(
+        entry({ name: "A", nameKey: "a", sortOrder: 0 }),
+        null,
+      );
+      const b = await repository.insert(
+        entry({ name: "B", nameKey: "b", sortOrder: 1 }),
+        null,
+      );
+      const c = await repository.insert(
+        entry({ name: "C", nameKey: "c", sortOrder: 2 }),
+        null,
+      );
+
+      expect(await repository.reorder([c.id, a.id, b.id], "user-1")).toBe(true);
+
+      const listed = await repository.list();
+      expect(listed.map((item) => [item.id, item.sortOrder])).toEqual([
+        [c.id, 0],
+        [a.id, 1],
+        [b.id, 2],
+      ]);
+      // Only the entries that changed place were written.
+      expect(listed.find((item) => item.id === c.id)?.updatedBy).toBe("user-1");
+      // A missing entry, an unknown one and a repeated one are refused, and nothing is written.
+      for (const given of [
+        [a.id, b.id],
+        [a.id, b.id, c.id, "mce_nothing"],
+        [a.id, a.id, b.id],
+        [a.id, b.id, "mce_nothing"],
+      ])
+        expect(await repository.reorder(given, null)).toBe(false);
+      expect(
+        (await repository.list()).map((item) => [item.id, item.sortOrder]),
+      ).toEqual([
+        [c.id, 0],
+        [a.id, 1],
+        [b.id, 2],
+      ]);
     },
   );
 

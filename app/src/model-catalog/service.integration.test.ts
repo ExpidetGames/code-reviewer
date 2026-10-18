@@ -590,6 +590,7 @@ describe.each(ENGINES)("the model catalog service on $name", (engine) => {
         entry.id,
         { modelId: "acme/no-tools" },
         "user-9",
+        { confirmModelChange: true },
       );
       expect(refused).toEqual({
         ok: false,
@@ -602,6 +603,7 @@ describe.each(ENGINES)("the model catalog service on $name", (engine) => {
         entry.id,
         { modelId: "acme/better-2" },
         "user-9",
+        { confirmModelChange: true },
       );
 
       expect(changed).toMatchObject({
@@ -629,6 +631,55 @@ describe.each(ENGINES)("the model catalog service on $name", (engine) => {
       expect(renamed).toMatchObject({ ok: true, modelChange: null });
       expect(lines).toHaveLength(1);
       expect(asked).toHaveLength(2);
+    },
+  );
+
+  // #429-T09
+  it_(
+    "decides on the entry it writes: the model behind a released entry changes only with the confirmation, which is refused with the count and writes nothing",
+    async () => {
+      const { service, db, asked, lines } = await start();
+      const fixture = await createJobQueueFixture({ database: db });
+      const entry = await created(service);
+      await service.release(entry.id, null);
+      await db
+        .insertInto("projects")
+        .values({
+          id: "p1",
+          repository_id: fixture.repositoryId,
+          active: 1,
+          settings: JSON.stringify({ catalogEntryDiff: entry.id }),
+          created_at: "2026-10-17T10:00:00.000Z",
+          updated_at: "2026-10-17T10:00:00.000Z",
+        })
+        .execute();
+      asked.length = 0;
+
+      const unconfirmed = await service.update(
+        entry.id,
+        { modelId: "acme/better-2" },
+        null,
+      );
+      const falsy = await service.update(
+        entry.id,
+        { modelId: "acme/better-2" },
+        null,
+        { confirmModelChange: false },
+      );
+
+      expect(unconfirmed).toEqual({
+        ok: false,
+        code: "model_change_not_confirmed",
+        projects: 1,
+      });
+      expect(falsy).toEqual(unconfirmed);
+      expect((await service.get(entry.id))?.modelId).toBe("acme/quick-1");
+      expect(asked).toEqual([]);
+      expect(lines).toEqual([]);
+      // A change that leaves the model alone needs none.
+      expect(
+        await service.update(entry.id, { name: "Renamed" }, null),
+      ).toMatchObject({ ok: true, modelChange: null });
     },
   );
 

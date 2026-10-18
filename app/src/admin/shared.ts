@@ -11,6 +11,7 @@ import { llmApiBaseUrl } from "../llm/endpoint.ts";
 import { createOperatorKeyTestService } from "../llm/operator-key-test.ts";
 import { getSmtpConfigStore } from "../mail/shared.ts";
 import { createTestMailService } from "../mail/test-mail.ts";
+import { getCatalogService } from "../model-catalog/shared.ts";
 import { getSecretStore } from "../secrets/shared.ts";
 import { createAdminService, type AdminService } from "./service.ts";
 
@@ -32,6 +33,8 @@ export function getAdminService(): AdminService {
       rateLimits: createRateLimitsRepository(getDatabase()),
       baseUrlOf: (provider) => llmApiBaseUrl(process.env, provider).url,
     }),
+    // The overview's numbers of the model catalog (#429).
+    catalogSummary: () => getCatalogService().summary(),
     // Sign-in with GitHub exists while the GitHub App's user authorization is configured, read from the
     // database on every call.
     githubConfigured: isGithubSignInConfigured,

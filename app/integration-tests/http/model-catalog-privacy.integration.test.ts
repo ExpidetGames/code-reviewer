@@ -270,6 +270,7 @@ describe("what a workspace member can read after managed runs", () => {
       selected.id,
       { modelId: "hidden-vendor/new-model" },
       null,
+      { confirmModelChange: true },
     );
 
     const text = await whatAMemberCanRead(h);

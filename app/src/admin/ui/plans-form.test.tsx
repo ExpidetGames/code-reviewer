@@ -1038,7 +1038,7 @@ describe("the Paddle prices of a plan version", () => {
       status: 422,
       code: "price_amount_mismatch",
       issues: [{ field: "paddlePriceId", code: "price_amount_mismatch" }],
-      values: { entered: "1234", paddle: "1235" },
+      details: { entered: "1234", paddle: "1235" },
     });
     const { user, prices } = await openPrices(teamWith({}), mock);
 
@@ -1055,6 +1055,33 @@ describe("the Paddle prices of a plan version", () => {
         /Paddle has \$12\.35, but \$12\.34 is entered for this version\./,
       ),
     ).toBeTruthy();
+  });
+
+  // #439-T11
+  it("reads nothing but text from the two values of a refusal", async () => {
+    const { api: mock } = api({
+      ok: false,
+      status: 422,
+      code: "price_amount_mismatch",
+      issues: [{ field: "paddlePriceId", code: "price_amount_mismatch" }],
+      details: { entered: 5, paddle: { a: 1 }, secret: "never-shown" },
+    });
+    const { user, prices } = await openPrices(teamWith({}), mock);
+
+    await user.type(
+      prices.getByLabelText("Monthly Paddle price ID"),
+      "pri_01fakeaaaa",
+    );
+    await user.click(
+      prices.getByRole("button", { name: "Link monthly price" }),
+    );
+
+    expect(
+      await prices.findByText(
+        /The price at Paddle does not carry the amount entered/,
+      ),
+    ).toBeTruthy();
+    expect(prices.queryByText(/never-shown/)).toBeNull();
   });
 
   // #439-T02

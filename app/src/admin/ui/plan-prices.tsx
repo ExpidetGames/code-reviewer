@@ -43,6 +43,18 @@ const DRIFT_WORDS: Record<string, string> = {
     "the price is from the other Paddle environment than the one billing is set to.",
 };
 
+/** The two values a refusal carries; only text is read from the answer, any other field is ignored. */
+function valuesOf(details: Record<string, unknown> | undefined): {
+  entered?: string;
+  paddle?: string;
+} {
+  const { entered, paddle } = details ?? {};
+  return {
+    ...(typeof entered === "string" ? { entered } : {}),
+    ...(typeof paddle === "string" ? { paddle } : {}),
+  };
+}
+
 function driftSentence(price: PriceLinkView): string {
   const drift = price.drift ?? "";
   const known = Object.hasOwn(DRIFT_WORDS, drift)
@@ -124,7 +136,7 @@ export function PlanPrices({
       );
       setFailure(
         unread.length === 0
-          ? describePriceDifference(result.code, result.values ?? {})
+          ? describePriceDifference(result.code, valuesOf(result.details))
           : `${unread
               .map(
                 (issue) => `${issue.field}: ${describePlanFailure(issue.code)}`,

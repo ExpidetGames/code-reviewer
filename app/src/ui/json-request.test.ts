@@ -63,40 +63,28 @@ describe("requesting JSON from the app", () => {
     });
   });
 
-  // #439-T11
-  it("returns the two values of a mismatch (what was entered, what Paddle says) as text, and nothing else of the body", async () => {
-    const result = await requestJson(
-      answering(422, {
-        error: "price_amount_mismatch",
-        entered: "1234",
-        paddle: "1235",
-        secret: "never-read",
-        issues: [],
-      }),
+  it("keeps the other fields of a refusal as details, and has none when there are none", async () => {
+    const withDetails = await requestJson(
+      answering(409, { error: "model_change_not_confirmed", projects: 5 }),
+      "PUT",
+      "/api/x",
+      {},
+    );
+    const without = await requestJson(
+      answering(422, { error: "name_invalid" }),
       "PUT",
       "/api/x",
       {},
     );
 
-    expect(result).toEqual({
+    expect(withDetails).toEqual({
       ok: false,
-      status: 422,
-      code: "price_amount_mismatch",
+      status: 409,
+      code: "model_change_not_confirmed",
       issues: [],
-      values: { entered: "1234", paddle: "1235" },
+      details: { projects: 5 },
     });
-  });
-
-  // #439-T11
-  it("ignores values that are not text", async () => {
-    const result = await requestJson(
-      answering(422, { error: "x", entered: 5, paddle: { a: 1 } }),
-      "PUT",
-      "/api/x",
-      {},
-    );
-
-    expect(result).toEqual({ ok: false, status: 422, code: "x", issues: [] });
+    expect(without).not.toHaveProperty("details");
   });
 
   it("keeps the codes the access proxy answers with", async () => {
