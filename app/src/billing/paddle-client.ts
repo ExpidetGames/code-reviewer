@@ -18,8 +18,11 @@ import "server-only";
 import type { z } from "zod";
 import { parseRetryAfter, type DispatchFetch } from "../dispatch/send.ts";
 import {
+  emptyAnswerSchema,
   envelope,
   listEnvelope,
+  paddleNotificationSettingListItemSchema,
+  plainListEnvelope,
   paddleErrorSchema,
   paddleNotificationSettingSchema,
   paddlePortalSessionSchema,
@@ -29,6 +32,7 @@ import {
   paddleSubscriptionSchema,
   paddleTransactionSchema,
   type PaddleNotificationSetting,
+  type PaddleNotificationSettingListItem,
   type PaddlePortalSession,
   type PaddlePrice,
   type PaddleProduct,
@@ -39,6 +43,7 @@ import {
 
 export type {
   PaddleNotificationSetting,
+  PaddleNotificationSettingListItem,
   PaddlePortalSession,
   PaddlePrice,
   PaddleProduct,
@@ -235,6 +240,13 @@ export type CreateNotificationSettingInput = {
   include_sensitive_fields?: boolean;
 };
 
+/** The most pages `listNotificationSettings` follows: a list longer than this is refused, not cut. */
+const MAX_LIST_PAGES = 20;
+
+const notificationListSchema = plainListEnvelope(
+  paddleNotificationSettingListItemSchema,
+);
+
 /** One page of a list. Pass `nextAfter` as `after` for the next page; null on the last page. */
 export type PaddlePage<T> = { items: T[]; nextAfter: string | null };
 
@@ -265,7 +277,7 @@ const MAX_RESPONSE_BYTES = 2_000_000;
 const ID = /^[A-Za-z0-9_]{1,64}$/;
 const PLAIN_CODE = /^[a-z][a-z0-9_]{0,63}$/;
 
-type Method = "GET" | "POST" | "PATCH";
+type Method = "GET" | "POST" | "PATCH" | "DELETE";
 type Query = Record<string, string | number | boolean | string[] | undefined>;
 
 function statusCode(status: number): PaddleClientErrorCode {
@@ -420,6 +432,8 @@ export function createPaddleClient(options: PaddleClientOptions) {
         paddleCode: text === null ? null : paddleCodeOf(text),
         context,
       });
+    // A DELETE answers 204 with no body.
+    if (status === 204) return { json: null };
     if (text === null)
       throw new PaddleClientError("invalid_response", { status, context });
     try {
@@ -598,6 +612,43 @@ export function createPaddleClient(options: PaddleClientOptions) {
       one("POST", "/notification-settings", paddleNotificationSettingSchema, {
         body: { type: "url", ...input },
       }),
+    /**
+     * Every destination of the account, each with its secret when Paddle sends it. The documentation shows no
+     * pagination for this list (unverified, #448): a page that says there are more is followed, and a list that
+     * cannot be read to the end is refused, because a destination of ours on a page not seen would be created twice.
+     */
+    listNotificationSettings: async (): Promise<
+      PaddleNotificationSettingListItem[]
+    > => {
+      const settings: PaddleNotificationSettingListItem[] = [];
+      let after: string | null = null;
+      for (let pages = 0; pages < MAX_LIST_PAGES; pages += 1) {
+        const answer = await request(
+          "GET",
+          "/notification-settings",
+          notificationListSchema,
+          after === null ? {} : { query: { after } },
+        );
+        settings.push(...answer.data);
+        const pagination = answer.meta?.pagination;
+        if (pagination?.has_more !== true) return settings;
+        after = afterOf(pagination.next);
+        if (after === null)
+          throw new PaddleClientError("invalid_response", {
+            context: "GET /notification-settings",
+          });
+      }
+      throw new PaddleClientError("invalid_response", {
+        context: "GET /notification-settings",
+      });
+    },
+    deleteNotificationSetting: async (settingId: string): Promise<void> => {
+      await request(
+        "DELETE",
+        `/notification-settings/${id(settingId)}`,
+        emptyAnswerSchema,
+      );
+    },
     getNotificationSetting: (
       settingId: string,
     ): Promise<PaddleNotificationSetting> =>

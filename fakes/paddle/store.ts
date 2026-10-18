@@ -185,6 +185,10 @@ export function createStore(options: StoreOptions) {
     subscriptions,
     customers,
     notificationSettings,
+    /** Whether the list of notification settings carries `endpoint_secret_key` (a switch for tests). */
+    listWithSecrets: true,
+    /** Page size of the list of notification settings, or null for the plain, unpaginated list (a switch for tests). */
+    notificationListPageSize: null as number | null,
     get,
     activePrice,
     subscriptionItem,
@@ -351,6 +355,11 @@ export function createStore(options: StoreOptions) {
       return setting;
     },
 
+    removeNotificationSetting(settingId: string): void {
+      get(notificationSettings, settingId);
+      notificationSettings.delete(settingId);
+    },
+
     addPortalSession(
       customerId: string,
       subscriptionIds: string[],
@@ -386,6 +395,8 @@ export function createStore(options: StoreOptions) {
       subscriptions.clear();
       customers.clear();
       notificationSettings.clear();
+      this.listWithSecrets = true;
+      this.notificationListPageSize = null;
     },
   };
 }

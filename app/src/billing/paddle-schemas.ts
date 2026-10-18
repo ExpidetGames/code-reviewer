@@ -160,6 +160,18 @@ export type PaddleNotificationSetting = z.infer<
   typeof paddleNotificationSettingSchema
 >;
 
+/**
+ * A destination as the list gives it. The secret is read when Paddle sends it and its absence is no parse error: the
+ * caller decides what a destination without one means (it cannot be adopted).
+ */
+export const paddleNotificationSettingListItemSchema =
+  paddleNotificationSettingSchema.extend({
+    endpoint_secret_key: z.string().optional(),
+  });
+export type PaddleNotificationSettingListItem = z.infer<
+  typeof paddleNotificationSettingListItemSchema
+>;
+
 /** The pagination block of a list answer; `next` is a full URL carrying the `after` cursor. */
 export const paddlePaginationSchema = z.object({
   next: z.string().nullable().optional(),
@@ -176,6 +188,22 @@ export function listEnvelope<T extends z.ZodType>(item: T) {
     meta: z.object({ pagination: paddlePaginationSchema }),
   });
 }
+
+/**
+ * A list that Paddle's documentation shows without pagination (the notification destinations). Whether it paginates
+ * is not verified (#448), so the pagination block is read when it is there.
+ */
+export function plainListEnvelope<T extends z.ZodType>(item: T) {
+  return z.object({
+    data: z.array(item),
+    meta: z
+      .object({ pagination: paddlePaginationSchema.partial().optional() })
+      .optional(),
+  });
+}
+
+/** The answer of a DELETE: 204, no body. */
+export const emptyAnswerSchema = z.null();
 
 /** `{ error: { type, code, detail } }`. Only `code` is ever read, and only when it is a plain identifier. */
 export const paddleErrorSchema = z.object({

@@ -48,6 +48,8 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
       { href: "/admin/mail", label: "Mail", exact: false },
       // The operator's own LLM key (#276).
       { href: "/admin/llm", label: "LLM key", exact: false },
+      // The Paddle credentials and the switch of billing (#437).
+      { href: "/admin/billing", label: "Billing", exact: false },
     ],
   },
 ];
