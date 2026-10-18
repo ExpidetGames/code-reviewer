@@ -388,11 +388,18 @@ describe.each(ENGINES)("the billing plan prices on $name", (engine) => {
 
     expect(Object.keys(prices).sort()).toEqual([
       "get",
+      "getByIntent",
       "getByPaddleId",
       "insertLinked",
+      "insertPending",
       "listByIds",
       "listForPlan",
+      "listUnlinkedCreated",
+      "markArchived",
+      "markFailed",
+      "recordCreated",
       "refresh",
+      "startAttempt",
     ]);
   });
 
@@ -429,6 +436,7 @@ describe.each(ENGINES)("the billing plan prices on $name", (engine) => {
         "last_error_code",
         "snapshot_at",
         "archived_at",
+        "attempted_at",
       ];
       expect([...(columns ?? [])].sort()).toEqual(
         [...FROZEN, ...WRITE_ONCE, ...mutable].sort(),
@@ -514,6 +522,257 @@ describe.each(ENGINES)("the billing plan prices on $name", (engine) => {
           db,
         ),
       ).rejects.toThrow(IMMUTABLE);
+    },
+  );
+  const PENDING = {
+    intentId: "cri_v1_month_0",
+    env: "sandbox" as const,
+    productId: "pro_01fake1",
+    interval: "month" as const,
+    amount: "1234",
+    currency: "USD",
+    taxMode: "internal",
+    quantityMinimum: 1,
+    quantityMaximum: 1,
+    trialDays: null,
+  };
+
+  // #440-T21
+  it_(
+    "writes the intent row before Paddle is asked: pending, with the values that will be sent and no Paddle price yet",
+    async () => {
+      const { prices, plan } = await start();
+
+      const { row, created } = await prices.insertPending({
+        planId: plan.id,
+        ...PENDING,
+        trialDays: 14,
+      });
+
+      expect(created).toBe(true);
+      expect(row).toMatchObject({
+        planId: plan.id,
+        paddlePriceId: null,
+        origin: "created",
+        state: "pending",
+        intentId: "cri_v1_month_0",
+        lastErrorCode: null,
+        interval: "month",
+        frequency: 1,
+        currency: "USD",
+        amount: "1234",
+        taxMode: "internal",
+        trialDays: 14,
+        hasOverrides: false,
+        quantityMinimum: 1,
+        quantityMaximum: 1,
+        status: "",
+        snapshotAt: null,
+        attemptedAt: T0.toISOString(),
+      });
+      expect(await prices.getByIntent("cri_v1_month_0")).toEqual(row);
+      expect(await prices.getByIntent("cri_other")).toBeUndefined();
+    },
+  );
+
+  // #440-T09
+  it_(
+    "gives the second of two requests with one intent the row of the first and creates no second row",
+    async () => {
+      const { prices, plan, db } = await start();
+
+      const first = await prices.insertPending({ planId: plan.id, ...PENDING });
+      const second = await prices.insertPending({
+        planId: plan.id,
+        ...PENDING,
+      });
+
+      expect(first.created).toBe(true);
+      expect(second.created).toBe(false);
+      expect(second.row.id).toBe(first.row.id);
+      expect(
+        (await db.selectFrom("billing_plan_prices").selectAll().execute())
+          .length,
+      ).toBe(1);
+    },
+  );
+
+  // #440-T04
+  it_(
+    "marks an attempt failed with a stable code and takes it over once, whoever asks first",
+    async () => {
+      const { prices, plan, advance } = await start();
+      const { row } = await prices.insertPending({
+        planId: plan.id,
+        ...PENDING,
+      });
+
+      await prices.markFailed(row.id, "paddle_unavailable");
+      const failed = await prices.get(row.id);
+      expect(failed).toMatchObject({
+        state: "failed",
+        lastErrorCode: "paddle_unavailable",
+      });
+
+      advance(5000);
+      const mine = await prices.startAttempt(row.id, {
+        state: "failed",
+        attemptedAt: row.attemptedAt,
+      });
+      const theirs = await prices.startAttempt(row.id, {
+        state: "failed",
+        attemptedAt: row.attemptedAt,
+      });
+
+      expect([mine, theirs]).toEqual([true, false]);
+      expect(await prices.get(row.id)).toMatchObject({
+        state: "pending",
+        lastErrorCode: null,
+        attemptedAt: new Date(T0.getTime() + 5000).toISOString(),
+      });
+    },
+  );
+
+  // #440-T01
+  it_(
+    "records the price Paddle created once: ready with what Paddle said, and the same price again only refreshes it",
+    async () => {
+      const { prices, plan, advance } = await start();
+      const { row } = await prices.insertPending({
+        planId: plan.id,
+        ...PENDING,
+      });
+
+      const recorded = await prices.recordCreated(
+        row.id,
+        "pri_01fake5",
+        snapshot({ quantityMaximum: 1 }),
+        { state: "ready" },
+      );
+      advance(1000);
+      const again = await prices.recordCreated(
+        row.id,
+        "pri_01fake5",
+        snapshot({ quantityMaximum: 1, status: "active" }),
+        { state: "ready" },
+      );
+
+      expect(recorded).toMatchObject({
+        paddlePriceId: "pri_01fake5",
+        state: "ready",
+        status: "active",
+        origin: "created",
+        snapshotAt: T0.toISOString(),
+      });
+      expect(again.snapshotAt).toBe(
+        new Date(T0.getTime() + 1000).toISOString(),
+      );
+      expect(await prices.getByPaddleId("pri_01fake5")).toMatchObject({
+        id: row.id,
+      });
+      await expect(
+        prices.recordCreated(row.id, "pri_01fake6", snapshot(), {
+          state: "ready",
+        }),
+      ).rejects.toThrow();
+    },
+  );
+
+  // #440-T14
+  it_(
+    "records a created price that is not the price asked for as failed with the rule it breaks, and keeps its Paddle id",
+    async () => {
+      const { prices, plan } = await start();
+      const { row } = await prices.insertPending({
+        planId: plan.id,
+        ...PENDING,
+      });
+
+      const recorded = await prices.recordCreated(
+        row.id,
+        "pri_01fake7",
+        snapshot({ amount: "999" }),
+        { state: "failed", code: "price_amount_mismatch" },
+      );
+
+      expect(recorded).toMatchObject({
+        paddlePriceId: "pri_01fake7",
+        state: "failed",
+        lastErrorCode: "price_amount_mismatch",
+        amount: "999",
+      });
+    },
+  );
+
+  // #440-T22
+  it_("refuses to record a Paddle price another row has already", async () => {
+    const { prices, plan } = await start();
+    await prices.insertLinked({
+      planId: plan.id,
+      paddlePriceId: "pri_01fake8",
+      env: "sandbox",
+      snapshot: snapshot(),
+    });
+    const { row } = await prices.insertPending({
+      planId: plan.id,
+      ...PENDING,
+    });
+
+    await expect(
+      prices.recordCreated(row.id, "pri_01fake8", snapshot(), {
+        state: "ready",
+      }),
+    ).rejects.toBeInstanceOf(PriceTakenError);
+  });
+
+  // #440-T23
+  it_(
+    "lists the prices the app created that no version links, without the linked and the archived ones",
+    async () => {
+      const { prices, versions, version, plan, other } = await start();
+      const created = async (intentId: string, paddleId: string) => {
+        const { row } = await prices.insertPending({
+          planId: plan.id,
+          ...PENDING,
+          intentId,
+        });
+        return prices.recordCreated(row.id, paddleId, snapshot(), {
+          state: "ready",
+        });
+      };
+      const linked = await created("cri_a", "pri_a");
+      const orphan = await created("cri_b", "pri_b");
+      const archived = await created("cri_c", "pri_c");
+      await prices.markArchived(archived.id);
+      const failed = (
+        await prices.insertPending({
+          planId: plan.id,
+          ...PENDING,
+          intentId: "cri_d",
+        })
+      ).row;
+      await prices.markFailed(failed.id, "paddle_unavailable");
+      await prices.insertLinked({
+        planId: plan.id,
+        paddlePriceId: "pri_by_hand",
+        env: "sandbox",
+        snapshot: snapshot(),
+      });
+      await prices.insertPending({
+        planId: other.id,
+        ...PENDING,
+        intentId: "cri_other_plan",
+      });
+      await versions.setPriceLink(version.id, "month", linked.id, null);
+
+      const rows = await prices.listUnlinkedCreated(plan.id);
+
+      expect(rows.map((row) => row.intentId).sort()).toEqual([
+        "cri_b",
+        "cri_d",
+      ]);
+      expect(rows.find((row) => row.id === orphan.id)).toBeDefined();
+      expect((await prices.get(archived.id))?.status).toBe("archived");
     },
   );
 });

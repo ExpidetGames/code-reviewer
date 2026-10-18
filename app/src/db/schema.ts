@@ -773,6 +773,8 @@ export interface BillingPlanPricesTable {
   snapshot_at: string | null;
   created_at: string;
   archived_at: string | null;
+  /** When the app last started creating this price at Paddle (#440); null for a price that was linked. */
+  attempted_at: string | null;
 }
 
 export interface Database {
