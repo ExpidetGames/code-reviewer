@@ -8,6 +8,10 @@
 //
 //  - the Dispatcher is down for a moment when a job is queued: the app repeats the call inside the request and the review
 //    runs once, no sweep (#395-T06);
+//  - the Dispatcher is not ready and answers 503 with a Retry-After of a few seconds (a cold or launching instance): the
+//    app waits for it inside the request and the review runs once, no sweep (#479);
+//  - the Dispatcher answers 503 with a Retry-After longer than a request waits for: the job is woken by the next job that
+//    ends, no sweep and no clock moved (#479);
 //  - the Dispatcher is down for longer than the repeats: the sweep sends the call again when it is back and the review
 //    runs once;
 //  - the Dispatcher stays down past the give-up: the run fails with `dispatch_unavailable`, the page says what it means,
@@ -21,9 +25,11 @@
 //    attempt, and after three the run fails with `worker_exited` (#375-T02);
 //  - a Worker dies and the Dispatcher cannot see its container end (`worker_wait_failed`): nothing is released, the lease
 //    runs out, the sweep requeues the job and a second Worker finishes it (#375-T10).
+import { createServer, type Server } from "node:http";
 import { expect, test, type Page } from "@playwright/test";
 import { startLlmFake, type FakeLlm } from "../../../fakes/llm/server.ts";
 import { e2eEnv } from "../helpers/e2e-env";
+import { hostedEnv } from "../helpers/hosted-env";
 import {
   addGithubPullRequest,
   getPullRequestComments,
@@ -57,6 +63,35 @@ import { deliverPullRequestEvent } from "../helpers/webhooks";
 const INSTALLATION_ID = 9500302;
 const REPOSITORY = { id: 9700002, fullName: "hosted-failures/widgets" };
 const OWNER_OF_REPOSITORY = { login: "hosted-failures", id: OWNER.id };
+
+/**
+ * Stands in for a Dispatcher that is not ready (#479): listens on the Dispatcher's address and answers every call with
+ * `503` and a `Retry-After`. `release()` ends it, so the real Dispatcher can take the address.
+ */
+async function startNotReadyDispatcher(retryAfterSeconds: number): Promise<{
+  calls(): number;
+  release(): Promise<void>;
+}> {
+  let calls = 0;
+  const server: Server = createServer((request, response) => {
+    request.resume();
+    calls += 1;
+    response.writeHead(503, { "retry-after": String(retryAfterSeconds) });
+    response.end();
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(hostedEnv.dispatcherPort, "127.0.0.1", resolve);
+  });
+  return {
+    calls: () => calls,
+    release: () =>
+      new Promise<void>((resolve) => {
+        server.closeAllConnections();
+        server.close(() => resolve());
+      }),
+  };
+}
 
 test.describe.configure({ mode: "serial" });
 
@@ -112,6 +147,7 @@ test.describe("what the hosted deployment does when the Dispatcher, the platform
     request: import("@playwright/test").APIRequestContext,
     number: number,
     variant: string,
+    options: { signedIn?: boolean } = {},
   ): Promise<{ number: number; head: string }> {
     const head = headSha(variant, number);
     await addGithubPullRequest(request, REPOSITORY.fullName, {
@@ -119,7 +155,7 @@ test.describe("what the hosted deployment does when the Dispatcher, the platform
       title: `Pull request ${String(number)}`,
       headSha: head,
     });
-    await openRuns(page);
+    if (options.signedIn !== true) await openRuns(page);
     const answer = await deliverPullRequestEvent(request, {
       action: "opened",
       installationId: INSTALLATION_ID,
@@ -172,6 +208,96 @@ test.describe("what the hosted deployment does when the Dispatcher, the platform
     expect(theDispatcher().workersOf(job.id)).toHaveLength(1);
     expect(fakeLlm().requests()).toHaveLength(1);
     expect(await dispatchOf(job.id)).toMatchObject({ state: "acked" });
+  });
+
+  // #479-T07
+  test("a Dispatcher that is not ready answers 503 with a Retry-After of a few seconds: the app waits for it inside the request and the review runs once, without a sweep", async ({
+    page,
+    request,
+  }) => {
+    const notReady = await startNotReadyDispatcher(3);
+    let released = false;
+    try {
+      const { number } = await openPullRequest(page, request, 27, "b");
+      const job = await onlyJobOf(REPOSITORY.fullName, number);
+      await eventually("the app's first call to be answered 503", async () => {
+        return notReady.calls() >= 1;
+      });
+      expect(await dispatchOf(job.id)).toMatchObject({
+        lastStatus: 503,
+        lastCode: "unavailable",
+      });
+      // The Dispatcher becomes ready while the app waits for the Retry-After.
+      await notReady.release();
+      released = true;
+      await startDispatcher();
+
+      const run = runsOf(page, REPOSITORY.fullName, number);
+      await page.reload();
+      await expect(run.locator("[data-status]")).toContainText(
+        "Succeeded",
+        RUN_TIMEOUT,
+      );
+      // One 503, then calls the real Dispatcher answered: nothing waited for a sweep, and the job ran once.
+      expect(notReady.calls()).toBe(1);
+      expect(theDispatcher().workersOf(job.id)).toHaveLength(1);
+      expect(fakeLlm().requests()).toHaveLength(1);
+      expect(await dispatchOf(job.id)).toMatchObject({ state: "acked" });
+    } finally {
+      if (!released) await notReady.release();
+    }
+  });
+
+  // #479-T08
+  test("a Dispatcher answers 503 with a Retry-After longer than a request waits for: the app does not wait, and the job that ends next wakes it, without a sweep or a moved clock", async ({
+    page,
+    request,
+  }) => {
+    const notReady = await startNotReadyDispatcher(120);
+    let released = false;
+    try {
+      const waiting = await openPullRequest(page, request, 28, "c");
+      const job = await onlyJobOf(REPOSITORY.fullName, waiting.number);
+      await eventually("the app's call to be answered 503", async () => {
+        return notReady.calls() >= 1;
+      });
+      await notReady.release();
+      released = true;
+      // Not repeated inside the request: one call, and the row says "not before two minutes".
+      expect(notReady.calls()).toBe(1);
+      expect(await dispatchOf(job.id)).toMatchObject({
+        state: "pending",
+        lastStatus: 503,
+        lastCode: "unavailable",
+        attempts: 1,
+      });
+      await startDispatcher();
+      // The last call of the waiting job is older than the gap that protects a call in flight.
+      await new Promise((resolve) => setTimeout(resolve, 10_000));
+
+      // Another pull request is reviewed and its job ends: a slot freed, and the waiting job is asked, whatever its row says.
+      const other = await openPullRequest(page, request, 29, "d", {
+        signedIn: true,
+      });
+      const otherRun = runsOf(page, REPOSITORY.fullName, other.number);
+      await page.reload();
+      await expect(otherRun.locator("[data-status]")).toContainText(
+        "Succeeded",
+        RUN_TIMEOUT,
+      );
+      const waitingRun = runsOf(page, REPOSITORY.fullName, waiting.number);
+      await page.reload();
+      await expect(waitingRun.locator("[data-status]")).toContainText(
+        "Succeeded",
+        RUN_TIMEOUT,
+      );
+      expect(notReady.calls()).toBe(1);
+      expect(theDispatcher().workersOf(job.id)).toHaveLength(1);
+      expect(fakeLlm().requests()).toHaveLength(2);
+      expect(await dispatchOf(job.id)).toMatchObject({ state: "acked" });
+    } finally {
+      if (!released) await notReady.release();
+    }
   });
 
   // #332-T03
