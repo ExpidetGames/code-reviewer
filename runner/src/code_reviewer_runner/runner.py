@@ -125,6 +125,7 @@ from code_reviewer_runner.supersede import (
     install_write_guard,
 )
 from code_reviewer_runner.supersede_timing import SUPERSEDED_DRAIN_SECONDS
+from code_reviewer_runner.temperature_patch import apply_temperature_patch
 from code_reviewer_runner.usage_probe import UsageProbe
 
 PROGRAM_NAME = "code-reviewer-run-job"
@@ -273,6 +274,8 @@ def _run_diff_job(
 
             litellm.suppress_debug_info = True
             patches.callback(apply_identity_patch(job.git.bot_login))
+            # No temperature for a Claude model that does not take it (#477).
+            patches.callback(apply_temperature_patch())
             if job.llm.require_parameters:
                 # Every OpenRouter request carries `provider.require_parameters` (#270).
                 patches.callback(apply_require_parameters_patch())
