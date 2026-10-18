@@ -41,6 +41,27 @@ describe("the pattern of a measured cost in a text", () => {
     expect(MEASURED_COST.test(text)).toBe(true);
   });
 
+  // #434-N-C
+  it.each([
+    ["a chunk file name", "static/chunks/app-z1e-4q.js"],
+    ["a nanoid-like id", "run_Vx1e-4Qk3_9"],
+    ["an id with a letter after it", "id q1e-4t"],
+    ["an id with an underscore around it", "a_1e-4_b"],
+  ])(
+    "does not match inside %s: any letter, digit or underscore around it",
+    (_name, text) => {
+      expect(MEASURED_COST.test(text)).toBe(false);
+    },
+  );
+
+  // #434-N-C
+  it.each([["2.1e-4"], ["(1e-4)"], ['"1e-4"'], [":1e-4,"], ["- 1e-4 USD"]])(
+    "still finds 1e-4 next to punctuation: %s",
+    (text) => {
+      expect(MEASURED_COST.test(text)).toBe(true);
+    },
+  );
+
   // #434-X6
   it("does not take the name of a cost field with no figure for a leak", () => {
     expect(MEASURED_COST.test('{"costUsd":null,"costHidden":true}')).toBe(
