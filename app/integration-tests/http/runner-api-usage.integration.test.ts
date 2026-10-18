@@ -6,8 +6,8 @@
 // is handed and what a job does are pinned by the other runner API tests.
 import { describe, expect, it } from "vitest";
 import { createInstanceSettingsRepository } from "../../src/db/repositories/instance-settings-repository.ts";
+import { createWorkspaceEntitlementsRepository } from "../../src/db/repositories/workspace-entitlements-repository.ts";
 import { createUsageRecordsRepository } from "../../src/db/repositories/usage-records-repository.ts";
-import { createLlmAccess } from "../../src/llm/access.ts";
 import { sha } from "../../src/test-support/jobs.ts";
 import {
   goodResult,
@@ -85,20 +85,33 @@ describe("the claim of a job", () => {
 
   // #272-T01
   it("records the operator's key as managed", async () => {
-    const h = await startRunnerApiHarness({
-      // A job on the operator's key needs a model for its tier (#280); which one is not what this test is about.
-      modelTiers: { medium: { diff: "tier/medium-diff" } },
-      loadLlm: async () => ({
-        ok: true,
-        source: "operator",
-        access: createLlmAccess({
-          provider: "openrouter",
-          model: TEST_LLM_MODEL,
-          apiKey: TEST_LLM_API_KEY,
-          contextWindowTokens: null,
-        }),
-      }),
-    });
+    const h = await startRunnerApiHarness();
+    await h.llm
+      .operatorKey()
+      .save(
+        { provider: "openrouter", apiKey: "plain-operator-key-0001-aaaa" },
+        null,
+      );
+    await createWorkspaceEntitlementsRepository(
+      h.db,
+      h.workspaceId,
+      h.clock.now,
+    ).put(
+      {
+        planLabel: "plan",
+        keyMode: "managed",
+        limits: {
+          diffRunsPerPeriod: null,
+          dynamicRunsPerPeriod: null,
+          managedCostLimitMicroUsd: null,
+          ownKeyCostLimitMicroUsd: null,
+        },
+        periodStart: "2026-10-01T00:00:00.000Z",
+        suspended: false,
+        suspensionCode: null,
+      },
+      null,
+    );
     const job = await claimedJob(h);
 
     expect(await recordsOf(h).get(job.id)).toMatchObject({

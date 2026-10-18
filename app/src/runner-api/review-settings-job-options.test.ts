@@ -17,6 +17,11 @@ import {
 import type { Job } from "../jobs/job-types.ts";
 import { createReviewSettingsJobOptionsSource } from "./review-settings-job-options.ts";
 
+const NO_LAYERS = {
+  diff: { workspace: {}, project: {} },
+  dynamic: { project: {} },
+};
+
 function resolved(projectKind: ProjectReviewKind) {
   const builtInDynamic = {
     ...builtInProjectDynamicSettings(),
@@ -29,6 +34,7 @@ function resolved(projectKind: ProjectReviewKind) {
       project: { reviewKind: projectKind },
       defaultSkill: "the shipped skill",
     }),
+    modelLayers: NO_LAYERS,
   };
 }
 
@@ -85,6 +91,7 @@ describe("the job options of a claimed job", () => {
             project: { reviewKind: "dynamic" },
             defaultSkill: "the shipped skill",
           }),
+          modelLayers: NO_LAYERS,
         }),
       }),
     });
@@ -122,6 +129,7 @@ describe("the job options of a claimed job", () => {
               project: { reviewKind: kind },
               defaultSkill: "the shipped skill",
             }),
+            modelLayers: NO_LAYERS,
           }),
         }),
       });
@@ -145,5 +153,51 @@ describe("the job options of a claimed job", () => {
     expect(options.dynamic).toBeUndefined();
     expect(options.llm?.model).toBe("diff-model");
     expect(options.env).toHaveProperty("PR_REVIEWER__NUM_MAX_FINDINGS");
+  });
+  // #432-T01
+  it("hands the claim the layers of the job's pinned kind and the entry the project selected for it", async () => {
+    const source = (kind: ProjectReviewKind) =>
+      createReviewSettingsJobOptionsSource({
+        settings: () => ({
+          resolveForRepository: async () => ({
+            ...resolveReviewSettings({
+              builtIn: builtInReviewSettings("diff-model"),
+            }),
+            dynamic: {
+              ...resolveProjectDynamicSettings({
+                builtIn: builtInProjectDynamicSettings(),
+                project: { reviewKind: kind },
+                defaultSkill: "the shipped skill",
+              }),
+              catalogEntryDiff: "mce_diff",
+              catalogEntryDynamic: "mce_dynamic",
+            },
+            modelLayers: {
+              diff: {
+                workspace: { provider: "p", model: "workspace-model" },
+                project: { model: "project-model" },
+              },
+              dynamic: { project: { model: "dynamic-project-model" } },
+            },
+          }),
+        }),
+      });
+
+    // The project moved to Dynamic after the Diff job was claimed: the job keeps the selection of its own kind.
+    expect((await source("dynamic").optionsFor(job("diff"))).selection).toEqual(
+      {
+        layers: {
+          workspace: { provider: "p", model: "workspace-model" },
+          project: { model: "project-model" },
+        },
+        entryId: "mce_diff",
+      },
+    );
+    expect((await source("diff").optionsFor(job("dynamic"))).selection).toEqual(
+      {
+        layers: { project: { model: "dynamic-project-model" } },
+        entryId: "mce_dynamic",
+      },
+    );
   });
 });

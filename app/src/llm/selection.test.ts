@@ -14,6 +14,7 @@ import { openrouterDescriptor } from "./providers/openrouter/descriptor.ts";
 import { createProviderRegistry } from "./providers/registry.ts";
 import {
   MANAGED_MODEL_UNAVAILABLE,
+  modelProviderMismatch,
   resolveModelSelection,
   type SelectableEntry,
   type Selection,
@@ -889,5 +890,79 @@ describe("the shape of a selection", () => {
       takesManaged({ ...managed(), entitlements: { kind: "unlimited" } }),
     ];
     expect(rejected).toHaveLength(5);
+  });
+});
+
+// #432-T17 (binding comment of #459): the save path refuses the pairing the resolver would fail at the claim, with the
+// same rule: the model of a layer only counts for the provider in force where it was set.
+describe("the pairing of a model with a provider across layers", () => {
+  const layerPairs: [string, Own["layers"]][] = [
+    ["nothing set", {}],
+    ["a project provider only", { project: { provider: FAKE_PROVIDER_ID } }],
+    [
+      "a workspace model of the default provider and a project provider",
+      {
+        workspace: { model: "vendor/workspace-model" },
+        project: { provider: FAKE_PROVIDER_ID },
+      },
+    ],
+    [
+      "a workspace provider and model and a project provider back to the default",
+      {
+        workspace: { provider: FAKE_PROVIDER_ID, model: "fake-large" },
+        project: { provider: DEFAULT_PROVIDER },
+      },
+    ],
+    [
+      "a workspace provider and a project model",
+      {
+        workspace: { provider: FAKE_PROVIDER_ID },
+        project: { model: "fake-large" },
+      },
+    ],
+    [
+      "a project provider with its own model",
+      { project: { provider: FAKE_PROVIDER_ID, model: "fake-large" } },
+    ],
+    ["a workspace model only", { workspace: { model: "vendor/m" } }],
+  ];
+
+  it("refuses a project provider next to a workspace model of another provider", () => {
+    expect(
+      modelProviderMismatch(
+        { provider: FAKE_PROVIDER_ID, model: "fake-large" },
+        { provider: DEFAULT_PROVIDER },
+        DEFAULT_PROVIDER,
+      ),
+    ).toBe(true);
+    expect(
+      modelProviderMismatch(
+        { model: "vendor/workspace-model" },
+        { provider: FAKE_PROVIDER_ID },
+        DEFAULT_PROVIDER,
+      ),
+    ).toBe(true);
+  });
+
+  it("accepts the same provider change when the project brings a model of the new provider", () => {
+    expect(
+      modelProviderMismatch(
+        { model: "vendor/workspace-model" },
+        { provider: FAKE_PROVIDER_ID, model: "fake-large" },
+        DEFAULT_PROVIDER,
+      ),
+    ).toBe(false);
+    expect(
+      modelProviderMismatch(undefined, { provider: FAKE_PROVIDER_ID }, "x"),
+    ).toBe(false);
+  });
+
+  it.each(layerPairs)("agrees with the resolver on %s", (_name, layers) => {
+    const result = resolveModelSelection(own({ layers }), TWO_PROVIDERS);
+    const resolverSaysMismatch =
+      !result.ok && result.reason === "model_provider_mismatch";
+    expect(
+      modelProviderMismatch(layers.workspace, layers.project, DEFAULT_PROVIDER),
+    ).toBe(resolverSaysMismatch);
   });
 });

@@ -373,6 +373,44 @@ describe("the usage of a run on a managed quality level (#283)", () => {
     expect(JSON.stringify(detail)).not.toContain("0.0123");
   });
 
+  // #432-T08
+  it("hides the cost of a run on a catalog entry, which has no tier", async () => {
+    const f = await createRunsFixture();
+    const finished = await f.finished({
+      ok: true,
+      result: {
+        ok: true,
+        commentUrl: "https://github.com/acme/widgets/pull/1#c",
+        logTail: "ok",
+        usage,
+      },
+    });
+    const records = createUsageRecordsRepository(
+      f.db,
+      f.workspaceId,
+      f.clock.now,
+    );
+    await records.reserve(finished.id, "managed");
+    // The record may be settled already (setSelection only changes a reserved one): write the columns.
+    await f.db
+      .updateTable("usage_records")
+      .set({
+        key_mode: "managed",
+        catalog_entry_id: "mce_a",
+        catalog_entry_name: "Thorough",
+      })
+      .where("job_id", "=", finished.id)
+      .execute();
+
+    const detail = await f.runs.get(finished.id);
+
+    expect(detail?.run).toMatchObject({
+      costHidden: true,
+      usage: { totalTokens: 120, aiCalls: 2, costUsd: null },
+    });
+    expect(JSON.stringify(detail)).not.toContain("0.0123");
+  });
+
   // #283-T07
   it("keeps the cost of a run on the workspace's own key", async () => {
     const { f, finished } = await finishedRun(null);

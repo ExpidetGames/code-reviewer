@@ -211,9 +211,19 @@ The change is additive in both directions, so there is no deploy order to keep:
 | new      | previous        | no list is sent, so the app reads `["openrouter"]`; it sends `openrouter`, which the old runner reads (`"provider": "openrouter"` is valid under both the enum and the pattern) |
 | new      | new             | the claim list is parsed and validated, the details list is ignored for now; neither is used yet, so the job is the same                                                        |
 
-The first app change that sends another provider (the claim issue of epic #420) must deploy only after
+The first app change that sends another provider (the claim issue of epic #420, #432) must deploy only after
 every runner it serves advertises that provider: it sends a provider only to a caller that listed it
-and ends the job with `llm_provider_unsupported` otherwise. Until then the contract is as above.
+and ends the job with `llm_provider_unsupported` otherwise (`managed_model_unavailable` for a job on the operator's
+key, whose entry names the provider). Until then the contract is as above.
+
+#432 is that change. The caller that decides is the one that runs the job: a runner's list is its claim's
+`llmProviders`, a Worker's list is the `llmProviders=` query of its details call. The claim of a Dispatcher is not
+judged against a list it did not send (it says nothing certain about its Worker), so the Worker's fetch ends the job when
+the provider is not listed. A caller that names no list can run `openrouter` only. A self-hosted instance with the own
+key and the default provider sends exactly what it sent before (`provider`, `model`, `apiKey`, `maxTokens`, in this order).
+The operator API's `UsageItem` gains the optional `catalogEntryId` and `catalogEntryName` (null for a run on the
+workspace's own key and for runs from before the catalog); `modelTier` stays (required, nullable) and is null for new rows. The fields are optional in the schema and the definition is open, so a reader of
+the previous release ignores them.
 
 ### Rolling out Dynamic Review (#195, finding 4)
 
