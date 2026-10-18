@@ -283,6 +283,10 @@ function check(input: unknown, mode: CheckMode): EntitlementsValidation {
       suspended: input.suspended,
       suspensionCode,
       modelAccess: modelAccess.value,
+      // #438: only the marker of billing is kept, and only when reading a stored default; a write never carries one.
+      ...(mode.reading && input.source === "billing"
+        ? { source: "billing" as const }
+        : {}),
     },
   };
 }

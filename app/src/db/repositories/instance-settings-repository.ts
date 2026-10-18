@@ -161,6 +161,21 @@ export type InstanceSettingsRepository = {
    * `resolveEntitlements` turns it into `invalid` for every workspace without a row of its own.
    */
   getDefaultEntitlements(): Promise<EntitlementsEntry | undefined>;
+  /**
+   * #438: the one writer of the marker `source: billing`. Billing writes the current version of the Free plan as the
+   * default of every workspace without a row while it is on (ADR 0005, 2.9, 2.11). Validated like any write; the type
+   * states `modelAccess` (the plan-to-entitlements function cannot build a payload without it), and the period start
+   * never moves back: an earlier one is replaced by the stored one. A write of the operator through `set` stores no marker.
+   */
+  setBillingDefaultEntitlements(
+    value: EntitlementsData & { modelAccess: ModelAccess },
+    updatedBy: string | null,
+  ): Promise<void>;
+  /**
+   * #438: removes the default when billing wrote it (billing switched off again: the default returns to the operator,
+   * who has none). Leaves a default of the operator alone. True when a default was removed.
+   */
+  removeBillingDefaultEntitlements(): Promise<boolean>;
   /** Inserts the setting or replaces its value, recording who and when. */
   set<K extends InstanceSettingKey>(
     key: K,
@@ -275,6 +290,7 @@ export function createInstanceSettingsRepository(
   async function setDefaultEntitlements(
     value: EntitlementsData,
     updatedBy: string | null,
+    writer: "operator" | "billing" = "operator",
   ): Promise<void> {
     const moment = now();
     const checked = validateEntitlements(value, moment);
@@ -290,8 +306,17 @@ export function createInstanceSettingsRepository(
       // An unreadable stored default has no period start to protect; a valid write that states `modelAccess` repairs it.
       const storedDefault =
         stored === undefined ? undefined : readStoredDefault(stored.value);
+      // The operator is told when a start goes backwards; billing re-states the period on every new Free version, so a
+      // start earlier than the stored one is replaced by it instead of failing the save of the plan.
+      const storedStart = storedDefault?.periodStart;
+      const periodStart =
+        writer === "billing" &&
+        storedStart !== undefined &&
+        checked.value.periodStart < storedStart
+          ? storedStart
+          : checked.value.periodStart;
       const refused = checkPeriodStartNotBackwards(
-        checked.value.periodStart,
+        periodStart,
         storedDefault?.periodStart,
       );
       if (refused !== undefined) throw new EntitlementsError(refused);
@@ -311,7 +336,12 @@ export function createInstanceSettingsRepository(
           : checked.value.modelAccess;
       const row = {
         key,
-        value: encodeJson({ ...checked.value, modelAccess }),
+        value: encodeJson({
+          ...checked.value,
+          periodStart,
+          modelAccess,
+          ...(writer === "billing" ? { source: "billing" } : {}),
+        }),
         updated_by: updatedBy,
         updated_at: formatTimestamp(moment),
       };
@@ -330,7 +360,34 @@ export function createInstanceSettingsRepository(
     return db.isTransaction ? write(db) : db.transaction().execute(write);
   }
 
+  async function removeBillingDefault(): Promise<boolean> {
+    const key = "default_entitlements";
+    const remove = async (trx: Kysely<Database>) => {
+      await lockDefaultEntitlements(trx);
+      const stored = await trx
+        .selectFrom("instance_settings")
+        .select("value")
+        .where("key", "=", key)
+        .executeTakeFirst();
+      if (stored === undefined) return false;
+      const decoded = tryDecodeJson<{ source?: unknown }>(stored.value);
+      if (!decoded.ok || decoded.value?.source !== "billing") return false;
+      const result = await trx
+        .deleteFrom("instance_settings")
+        .where("key", "=", key)
+        .where("value", "=", stored.value)
+        .executeTakeFirst();
+      return Number(result.numDeletedRows) > 0;
+    };
+    return db.isTransaction ? remove(db) : db.transaction().execute(remove);
+  }
+
   return {
+    setBillingDefaultEntitlements: (value, updatedBy) =>
+      setDefaultEntitlements(value, updatedBy, "billing"),
+
+    removeBillingDefaultEntitlements: removeBillingDefault,
+
     async getDefaultEntitlements() {
       const row = await db
         .selectFrom("instance_settings")

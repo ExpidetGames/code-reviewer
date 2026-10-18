@@ -52,8 +52,6 @@ export const PLAN_ERROR_CODES = [
   "plan_version_unchanged",
   /** The plan changed since the page read it (another admin, another tab); nothing was written. */
   "plan_changed",
-  /** Billing has not been switched on yet, so there is no Free plan to change. */
-  "free_plan_missing",
 ] as const;
 export type PlanErrorCode = (typeof PLAN_ERROR_CODES)[number];
 
@@ -89,5 +87,4 @@ export const PLAN_ERROR_STATUS: Record<PlanErrorCode, number> = {
   plan_archived: 409,
   plan_version_unchanged: 409,
   plan_changed: 409,
-  free_plan_missing: 409,
 };

@@ -339,7 +339,7 @@ describe.each(ENGINES)(
         role: "current",
         key_mode: "managed",
         limits: "{}",
-        model_access: null,
+        model_access: null as string | null,
         monthly_amount_minor: 100 as number | null,
         yearly_amount_minor: null as number | null,
         created_at: T0.toISOString(),
