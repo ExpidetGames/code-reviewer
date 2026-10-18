@@ -100,6 +100,7 @@ export type KnownRunnerErrorCode =
   | "llm_context_length_exceeded"
   | "llm_output_invalid"
   | "model_unknown"
+  | "llm_parameters_unsupported"
   | "timeout"
   | "runner_shutdown"
   | "unknown"

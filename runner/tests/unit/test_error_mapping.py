@@ -116,6 +116,52 @@ def test_an_unknown_model_without_a_token_limit_maps_to_model_unknown() -> None:
     assert classify_failure([error], []) is ErrorCode.MODEL_UNKNOWN
 
 
+# #477-T04
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "No endpoints found that can handle the requested parameters.",
+        "No endpoints found that support tool use.",
+        "No endpoints found that support the provided 'tool_choice' value.",
+    ],
+)
+def test_a_404_that_says_no_endpoint_takes_the_parameters_is_its_own_code(answer: str) -> None:
+    error = NotFoundError(
+        message=f"OpenrouterException - {answer}", llm_provider="openrouter", model=MODEL
+    )
+
+    exhausted = exhausted_fallbacks(error)
+
+    assert classify_failure([error], []) is ErrorCode.LLM_PARAMETERS_UNSUPPORTED
+    assert classify_failure([exhausted], []) is ErrorCode.LLM_PARAMETERS_UNSUPPORTED
+
+
+# #477-T04
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "No endpoints found for anthropic/claude-nope.",
+        "No endpoints found matching your data policy (Free model training).",
+        "Model not found",
+    ],
+)
+def test_any_other_404_stays_model_unknown(answer: str) -> None:
+    error = NotFoundError(
+        message=f"OpenrouterException - {answer}", llm_provider="openrouter", model=MODEL
+    )
+
+    assert classify_failure([error], []) is ErrorCode.MODEL_UNKNOWN
+
+
+# #477-T04
+def test_the_words_of_the_provider_in_another_status_or_a_log_line_change_nothing() -> None:
+    text = "No endpoints found that can handle the requested parameters."
+    rate_limited = RateLimitError(message=text, llm_provider="openrouter", model=MODEL)
+
+    assert classify_failure([rate_limited], []) is ErrorCode.LLM_RATE_LIMIT
+    assert classify_failure([], [f"pull request says: {text}"]) is ErrorCode.UNKNOWN
+
+
 def test_the_cause_chain_is_walked_through_context_as_well() -> None:
     outer = RuntimeError("tool failed")
     outer.__context__ = GithubException(404, {"message": "Not Found"}, {})
