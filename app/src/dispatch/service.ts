@@ -87,8 +87,15 @@ export type DispatchLog = {
 };
 
 export type DispatchService = {
-  /** The hook of the job queue. Never rejects. */
-  onEnqueued(result: EnqueueResult): Promise<void>;
+  /**
+   * The hook of the job queue. Never rejects. `receivedAt` (#479) is when the request that enqueued the job began its
+   * hook, on the monotonic clock of the service: the budget of the inline retries is counted from it, so the work the
+   * request did before `after()` ran is part of it. Without it the budget starts with the first call.
+   */
+  onEnqueued(
+    result: EnqueueResult,
+    context?: { receivedAt?: number },
+  ): Promise<void>;
   /**
    * The hook of the sweep: sends what is due. Never rejects. With `minAgeMs` (#395) a job that changed less than that
    * long ago is left to the request that queued it (the repair work of the other requests asks for it).
@@ -317,7 +324,7 @@ export function createDispatchService(options: {
   }
 
   return {
-    async onEnqueued(result) {
+    async onEnqueued(result, context = {}) {
       // A job that is returned because it exists already needs nothing, except the one a person pulled
       // forward (`already_active`): it was waiting behind a retry time and is due now.
       if (result.status === "existing" && result.reason !== "already_active")
@@ -340,7 +347,7 @@ export function createDispatchService(options: {
         if (row === undefined || row.attempts > 0 || row.state !== "pending")
           return;
         if (!due) return;
-        const began = monotonicMs();
+        const began = context.receivedAt ?? monotonicMs();
         const toSend = {
           jobId: job.id,
           reviewKind: job.reviewKind,
@@ -372,7 +379,8 @@ export function createDispatchService(options: {
       // full after all) does not use it, so the next candidate is asked, a batch of the missing number at a time.
       let accepted = 0;
       while (accepted < limit && candidates.length > 0) {
-        if (monotonicMs() >= deadline) break;
+        // A send started now may take the longest a call takes: it must end before the deadline, not start before it.
+        if (monotonicMs() + timeoutMs >= deadline) break;
         const batch = candidates.splice(
           0,
           Math.min(limit - accepted, SEND_CONCURRENCY),
@@ -383,6 +391,16 @@ export function createDispatchService(options: {
         accepted += updates.filter(
           (update) => update !== false && update.lastCode === "accepted",
         ).length;
+        // `busy`, `not ready`, a timeout or a lost connection say something about the Dispatcher, not about the job
+        // that was asked: the other candidates would get the same answer. Only `not_claimable` (its own pull request,
+        // the pool) is per job, and the walk goes on after it (#479).
+        if (
+          updates.some(
+            (update) =>
+              update !== false && TRANSIENT_CODES.includes(update.lastCode),
+          )
+        )
+          break;
       }
       return { sent: accepted };
     },

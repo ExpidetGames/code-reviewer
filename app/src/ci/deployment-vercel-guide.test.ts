@@ -735,6 +735,21 @@ describe("the hosted deployment guide as a procedure", () => {
     expect(guide).not.toContain("withCapabilityProbe");
   });
 
+  // #479-T12
+  it("has a row for the signal that a hosted container cannot be hardened, and does not promise that the function limit is never reached", () => {
+    const codes = section(
+      "### 5.3 Reading what the Runs page and the logs say",
+    );
+    const text = flat(guide);
+
+    expect(codes).toMatch(/\| Runs page \| `dynamic_engine_unavailable` \|/);
+    expect(flat(codes)).toContain("run the canary against it");
+    expect(text).not.toContain("are never reached");
+    expect(flat(read("docs/dynamic-review.md"))).toContain(
+      "Run the deploy canary on the live deployment",
+    );
+  });
+
   // #479-T08
   it("states that the deploy canary is the only proof, and that DISPATCHER_PROBE_TTL_SECONDS is retired", () => {
     const text = flat(guide);

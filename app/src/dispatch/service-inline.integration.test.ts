@@ -56,7 +56,10 @@ const databases: Array<
   ],
 ];
 
-async function setupOn(open: (() => Promise<Kysely<Database>>) | undefined) {
+async function setupOn(
+  open: (() => Promise<Kysely<Database>>) | undefined,
+  options: { timeoutMs?: number } = {},
+) {
   const database = await open?.();
   const fixture = await createJobQueueFixture({
     ...(database === undefined ? {} : { database }),
@@ -79,7 +82,7 @@ async function setupOn(open: (() => Promise<Kysely<Database>>) | undefined) {
     config: webhookConfig,
     fetch: receiver.fetch,
     now: fixture.clock.now,
-    timeoutMs: 40,
+    timeoutMs: options.timeoutMs ?? 40,
     sleep: async (ms) => {
       sleeps.push(ms);
       monotonic += ms;
@@ -93,10 +96,15 @@ async function setupOn(open: (() => Promise<Kysely<Database>>) | undefined) {
     },
   });
   const work: Promise<void>[] = [];
+  // How long ago the request that enqueues began, on the monotonic clock (#479): the hook of the app notes the time
+  // when it is scheduled, `after()` runs it later.
+  const request = { age: 0 };
   const queue = createJobQueue(fixture.db, fixture.workspaceId, {
     now: fixture.clock.now,
     onEnqueued: (result: EnqueueResult) => {
-      work.push(service.onEnqueued(result));
+      work.push(
+        service.onEnqueued(result, { receivedAt: monotonic - request.age }),
+      );
     },
   });
   const enqueue = (overrides: Partial<EnqueueJobInput> = {}) =>
@@ -120,6 +128,7 @@ async function setupOn(open: (() => Promise<Kysely<Database>>) | undefined) {
     sleeps,
     during,
     timing,
+    request,
     monotonic: () => monotonic,
     dispatches: createJobDispatchesRepository(fixture.db, fixture.clock.now),
     async settled() {
@@ -133,7 +142,7 @@ describe.each(databases)(
   (name, open) => {
     const it =
       name === "Postgres" && open === undefined ? vitestIt.skip : vitestIt;
-    const setup = () => setupOn(open);
+    const setup = (options?: { timeoutMs?: number }) => setupOn(open, options);
 
     describe("a call that failed", () => {
       // #395-T06
@@ -263,6 +272,41 @@ describe.each(databases)(
           });
         },
       );
+
+      // #479-T09
+      it("counts the budget from the start of the request, not from the first call: a request that already used 30 seconds does not wait 20 more", async () => {
+        const t = await setup();
+        t.request.age = 30 * SECOND;
+        t.receiver.reply({ status: 503, headers: { "retry-after": "20" } });
+
+        const { job } = await t.enqueue();
+        await t.settled();
+
+        expect(t.sleeps).toEqual([]);
+        expect(t.receiver.received).toHaveLength(1);
+        expect(await t.dispatches.get(job.id)).toMatchObject({
+          state: "pending",
+          lastCode: "unavailable",
+        });
+      });
+
+      // #479-T09
+      it("still repeats inside the request when the request is young", async () => {
+        const t = await setup();
+        t.request.age = 2 * SECOND;
+        t.receiver.reply(
+          { status: 503, headers: { "retry-after": "20" } },
+          accepted,
+        );
+
+        const { job } = await t.enqueue();
+        await t.settled();
+
+        expect(t.sleeps).toEqual([20 * SECOND]);
+        expect(await t.dispatches.get(job.id)).toMatchObject({
+          state: "acked",
+        });
+      });
 
       // #395-T07
       it("stops after the bound and leaves the back-off to the next sender", async () => {
@@ -508,6 +552,74 @@ describe.each(databases)(
 
         expect(done).toEqual({ sent: 0 });
         expect(t.receiver.received).toHaveLength(before);
+      });
+
+      // #479-T10
+      it("does not start a send that could still be running at the deadline: the longest call is counted in", async () => {
+        const t = await setup({ timeoutMs: 8_000 });
+        await refusedJob(t, 8, "c");
+        t.fixture.clock.advance(10 * SECOND);
+        const before = t.receiver.received.length;
+
+        // A call started now may take 8 seconds: a deadline 7.9 seconds away is too near.
+        expect(
+          await t.service.sendWaiting({
+            limit: 1,
+            deadline: t.monotonic() + 7_900,
+          }),
+        ).toEqual({ sent: 0 });
+        expect(t.receiver.received).toHaveLength(before);
+
+        // 8.1 seconds away it fits.
+        t.receiver.reply(accepted);
+        expect(
+          await t.service.sendWaiting({
+            limit: 1,
+            deadline: t.monotonic() + 8_100,
+          }),
+        ).toEqual({ sent: 1 });
+      });
+
+      // #479-T10
+      it.each([
+        ["429", { status: 429, headers: { "retry-after": "30" } }],
+        ["503", { status: 503, headers: { "retry-after": "60" } }],
+        ["a timeout", "hang" as const],
+        ["a lost connection", { fails: "connect ECONNRESET" }],
+      ])(
+        "stops asking the other waiting jobs at the first %s: it says something about the Dispatcher, not about the job",
+        async (_what, answer) => {
+          const t = await setup();
+          await refusedJob(t, 8, "c");
+          await refusedJob(t, 9, "d");
+          await refusedJob(t, 10, "e");
+          t.fixture.clock.advance(10 * SECOND);
+          const before = t.receiver.received.length;
+          t.receiver.reply(answer, accepted, accepted, accepted);
+
+          const done = await t.service.sendWaiting({ limit: 1 });
+
+          expect(done).toEqual({ sent: 0 });
+          expect(t.receiver.received.length - before).toBeLessThanOrEqual(1);
+        },
+      );
+
+      // #479-T10
+      it("keeps asking the next job when one is turned away for its own pull request (not_claimable says nothing of the Dispatcher)", async () => {
+        const t = await setup();
+        const one = await refusedJob(t, 8, "c");
+        const two = await refusedJob(t, 9, "d");
+        t.fixture.clock.advance(10 * SECOND);
+        const before = t.receiver.received.length;
+        t.receiver.reply(ignored("not_claimable"), accepted);
+
+        expect(await t.service.sendWaiting({ limit: 1 })).toEqual({ sent: 1 });
+        expect(t.receiver.received.length - before).toBe(2);
+        // Both were asked, one after the other (the order of equal times is the id's), and the second took the slot.
+        const asked = t.receiver.received
+          .slice(before)
+          .map((c) => c.body?.jobId);
+        expect([...asked].sort()).toEqual([one.id, two.id].sort());
       });
 
       // #395-T10

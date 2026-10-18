@@ -65,7 +65,7 @@ The Dispatcher's own names for the same key are `DISPATCHER_SIGNING_KEY_ID` and 
 5. A call that failed with a transient answer (a 5xx, a timeout, no connection, `429`/`503`) is made again **inside the
    same request** (#395), at most three more times, after 1, 3 and 8 seconds (`INLINE_RETRY_DELAYS_MS`), a `Retry-After`
    of up to 30 seconds honoured (`INLINE_RETRY_MAX_WAIT_MS`: the 20 of a Dispatcher that is not ready, the 30 of a busy one),
-   and never longer than 45 seconds in all (`INLINE_RETRY_BUDGET_MS`; the function lives 60, and a repeat is started only
+   and never longer than 45 seconds in all, counted from the moment the request queued the job (`INLINE_RETRY_BUDGET_MS`, `receivedAt` of the hook; the `/api/w/**` routes have their 60 seconds set in `app/vercel.json`; the function lives 60, and a repeat is started only
    when its pause and its longest possible call, 8 seconds, still fit). A longer `Retry-After` is not waited for: the row
    keeps it and the job is woken by a slot that frees ("Between two sweeps"), by the repair work or by the sweep.
    A refusal (`rejected`) is never repeated inline. A job that was taken meanwhile (it is no longer `queued`) is not
@@ -98,9 +98,9 @@ causes it, after the response (`after()`), with no timer and no queue, and only 
   cap, the running job of their pull request), whatever time their row says, the job of the same pull request first,
   then the oldest, **until as many wake-ups were accepted as there are free slots** below
   `RUNNER_DISPATCH_MAX_RUNNING` (one when the cap is not set), at most 20 candidates: a job that is refused again does
-  not use the slot. Left out: a job whose own pull request has a running job (it would be refused again), a job whose
+  not use the slot. The walk stops at the first `429`, `503`, timeout or lost connection (that answer is about the Dispatcher, not about the job: the others would get it too), and no send starts that could not end before the deadline (the longest call, 8 seconds, is counted in). Left out: a job whose own pull request has a running job (it would be refused again), a job whose
   last call is younger than 9 seconds (`WAITING_MIN_GAP_MS`: a call in flight holds the row, and two events must not
-  send one job twice) . A job the Dispatcher answered `429` (busy) or `503` (not ready) **is** asked (#479, `WAITING_DISPATCH_CODES`): whatever its
+  send one job twice). A job the Dispatcher answered `429` (busy) or `503` (not ready) **is** asked (#479, `WAITING_DISPATCH_CODES`): whatever its
   `Retry-After` says, a slot that freed is the moment the Dispatcher is most likely to take it, and a `Retry-After` longer than
   a request waits for would otherwise leave the job to the repair work or the 2 hour sweep. The row's own time still holds for
   every other sender. No timer or poll is added: this runs in the request that ends a job, so an idle system stays idle.
