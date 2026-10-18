@@ -30,3 +30,29 @@ export function formatMinorAsUsd(minor: number): string {
   const cents = minor % 100;
   return `${dollars}.${String(cents).padStart(2, "0")}`;
 }
+
+/** Cost limits are micro-USD of measured model cost, so their input takes up to six decimals. */
+const USD_MICRO_TEXT = /^(\d{1,9})(?:\.(\d{1,6}))?$/;
+
+export type MicroParse = { ok: true; micro: number | null } | { ok: false };
+
+/** "3" is 3,000,000, "2.5" is 2,500,000, "0.000001" is 1; an empty field is `null` (no limit). */
+export function parseUsdToMicro(text: string): MicroParse {
+  const trimmed = text.trim();
+  if (trimmed === "") return { ok: true, micro: null };
+  const match = USD_MICRO_TEXT.exec(trimmed);
+  if (match === null) return { ok: false };
+  const dollars = Number(match[1]);
+  const micro = Number((match[2] ?? "").padEnd(6, "0"));
+  return { ok: true, micro: dollars * 1_000_000 + micro };
+}
+
+/** Micro-USD as the text an input holds, with at least two decimals and no digit lost. */
+export function formatMicroAsUsd(micro: number): string {
+  const dollars = Math.floor(micro / 1_000_000);
+  const fraction = String(micro % 1_000_000)
+    .padStart(6, "0")
+    .replace(/0+$/, "")
+    .padEnd(2, "0");
+  return `${dollars}.${fraction}`;
+}

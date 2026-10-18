@@ -307,6 +307,7 @@ describe("the plans routes", () => {
     expect(await price.json()).toEqual({
       error: "plan_price_invalid",
       field: "monthlyAmountMinor",
+      issues: [{ field: "monthlyAmountMinor", code: "plan_price_invalid" }],
     });
     expect(taken.status).toBe(409);
     expect(await taken.json()).toMatchObject({ error: "plan_key_taken" });
@@ -314,6 +315,7 @@ describe("the plans routes", () => {
     expect(await limit.json()).toEqual({
       error: "limit_invalid",
       field: "diffRunsPerPeriod",
+      issues: [{ field: "diffRunsPerPeriod", code: "limit_invalid" }],
     });
   });
 

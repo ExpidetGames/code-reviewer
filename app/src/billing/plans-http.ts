@@ -69,10 +69,16 @@ function refusal(
 }
 
 function fromRefusal(result: PlanRefusal): Response {
+  // `field` names the field to blame; `issues` is the same for the pages (src/ui/json-request.ts reads it).
   return refusal(
     result.code,
     statusOf(result.code),
-    result.field === undefined ? {} : { field: result.field },
+    result.field === undefined
+      ? {}
+      : {
+          field: result.field,
+          issues: [{ field: result.field, code: result.code }],
+        },
   );
 }
 

@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { formatMinorAsUsd, parseUsdToMinor } from "./plan-money.ts";
+import {
+  formatMicroAsUsd,
+  formatMinorAsUsd,
+  parseUsdToMicro,
+  parseUsdToMinor,
+} from "./plan-money.ts";
 
 describe("the price input", () => {
   // #438-T25
@@ -51,6 +56,36 @@ describe("the price input", () => {
     expect(parseUsdToMinor(formatMinorAsUsd(1234))).toEqual({
       ok: true,
       minor: 1234,
+    });
+  });
+});
+
+describe("the cost limit input", () => {
+  // #438-T15
+  it.each([
+    ["3", 3_000_000],
+    ["2.5", 2_500_000],
+    ["0.000001", 1],
+    ["1.234567", 1_234_567],
+    ["", null],
+  ])("reads %j as %s micro-USD", (text, micro) => {
+    expect(parseUsdToMicro(text)).toEqual({ ok: true, micro });
+  });
+
+  // #438-T15
+  it.each(["1.2345678", "-1", "abc", "1,5", "$3"])("refuses %j", (text) => {
+    expect(parseUsdToMicro(text)).toEqual({ ok: false });
+  });
+
+  // #438-T15
+  it("writes micro-USD back without losing a digit", () => {
+    expect(formatMicroAsUsd(2_500_000)).toBe("2.50");
+    expect(formatMicroAsUsd(3_000_000)).toBe("3.00");
+    expect(formatMicroAsUsd(1_234_567)).toBe("1.234567");
+    expect(formatMicroAsUsd(1)).toBe("0.000001");
+    expect(parseUsdToMicro(formatMicroAsUsd(1_234_560))).toEqual({
+      ok: true,
+      micro: 1_234_560,
     });
   });
 });

@@ -82,15 +82,15 @@ describe("the default entitlements through the operator API", () => {
   // #438-T06
   it("are the operator's again once billing is switched off", async () => {
     const harness = await startOperatorApiHarness({ billingOn: true });
-    expect((await harness.call("PUT", DEFAULT_PATH, { body: BODY })).status).toBe(
-      409,
-    );
+    expect(
+      (await harness.call("PUT", DEFAULT_PATH, { body: BODY })).status,
+    ).toBe(409);
 
     harness.setBillingOn(false);
 
-    expect((await harness.call("PUT", DEFAULT_PATH, { body: BODY })).status).toBe(
-      200,
-    );
+    expect(
+      (await harness.call("PUT", DEFAULT_PATH, { body: BODY })).status,
+    ).toBe(200);
   });
 
   // #438-T06

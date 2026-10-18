@@ -408,7 +408,7 @@ export function createBillingPlansService({
     },
 
     setArchived(adminId, planKey, archived) {
-      return guardedWrite(async () => {
+      return guardedWrite<{ plan: PlanView }>(async () => {
         const { plans, versions } = repositories(db);
         const stored = await plans.get(planKey);
         if (stored === undefined) return REFUSE_NOT_FOUND;
@@ -436,35 +436,43 @@ export function createBillingPlansService({
     },
 
     async enable(adminId) {
-      await db.transaction().execute(async (trx) => {
-        const repos = repositories(trx);
-        let free = (await repos.plans.list()).find(
-          (plan) => plan.kind === "free",
-        );
-        free ??= await repos.plans.insert(
-          {
-            planKey: FREE_PLAN_KEY,
-            kind: "free",
-            metadata: {
-              name: FREE_PLAN_SEED.name,
-              description: FREE_PLAN_SEED.description,
-              sort: FREE_PLAN_SEED.sort,
-              offered: true,
-              popular: false,
-              contactTarget: null,
-            },
-          },
-          adminId,
-        );
-        if ((await repos.versions.current(free.id)) === undefined)
-          await repos.versions.createNext(
-            free.id,
-            FREE_PLAN_SEED.terms,
-            adminId,
-            0,
+      const seed = () =>
+        db.transaction().execute(async (trx) => {
+          const repos = repositories(trx);
+          let free = (await repos.plans.list()).find(
+            (plan) => plan.kind === "free",
           );
-        await writeFreeDefault(repos, adminId);
-      });
+          free ??= await repos.plans.insert(
+            {
+              planKey: FREE_PLAN_KEY,
+              kind: "free",
+              metadata: {
+                name: FREE_PLAN_SEED.name,
+                description: FREE_PLAN_SEED.description,
+                sort: FREE_PLAN_SEED.sort,
+                offered: true,
+                popular: false,
+                contactTarget: null,
+              },
+            },
+            adminId,
+          );
+          if ((await repos.versions.current(free.id)) === undefined)
+            await repos.versions.createNext(
+              free.id,
+              FREE_PLAN_SEED.terms,
+              adminId,
+              0,
+            );
+          await writeFreeDefault(repos, adminId);
+        });
+      try {
+        await seed();
+      } catch (error) {
+        // Two admins switching billing on at once: the other one seeded the Free plan first. Look again, once.
+        if (refusalOf(error) === undefined) throw error;
+        await seed();
+      }
     },
 
     async release() {
