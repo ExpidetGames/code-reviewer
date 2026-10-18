@@ -134,8 +134,8 @@ export const PROVIDER_MASK = "[provider]";
 
 /**
  * Replaces the name of a provider (its id and its label) in a text with `[provider]`, in any letter case and also inside
- * a longer word, so that the `OpenrouterException` of an error class goes with the `OpenRouter:` of its message. A
- * member of a workspace on the operator's key does not read which provider answers (ADR 0005, 2.17).
+ * a longer word, so that the exception class named after the provider goes with the provider's own name in its message.
+ * A member of a workspace on the operator's key does not read which provider answers (ADR 0005, 2.17).
  */
 export function maskProviderInText(text: string, names: string[]): string {
   let masked = text;
