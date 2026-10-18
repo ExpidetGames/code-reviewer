@@ -18,15 +18,18 @@ export default async function AdvancedSettingsPage({
   const { workspace: slug } = await params;
   const { workspace, role } = await requireWorkspace(slug);
   const workspaceId = workspace.id;
-  const [keyStatus, showPlan] = await Promise.all([
-    getWorkspaceLlm().keyServiceFor(workspaceId).status(),
+  const [keyStatuses, showPlan] = await Promise.all([
+    getWorkspaceLlm().keyServiceFor(workspaceId).statusAll(),
     planPageLinkedFor(workspaceId),
   ]);
   return (
     <AdvancedSettingsPageContent
       workspaceSlug={workspace.slug}
       canManageKey={can(role, "manage_llm_key")}
-      keyConfigured={keyStatus.state !== "not_configured"}
+      keys={keyStatuses.map(({ provider, status }) => ({
+        provider,
+        configured: status.state !== "not_configured",
+      }))}
       canResetDefaults={can(role, "manage_review_defaults")}
       showPlan={showPlan}
     />

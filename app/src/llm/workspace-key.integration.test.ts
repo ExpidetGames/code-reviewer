@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // The LLM key of a workspace over a real SQLite file: what a save accepts and refuses (the same rules as the
-// legacy variable), that an empty field keeps the stored key only while the provider is unchanged, that the
+// legacy variable), that an empty field keeps the stored key of that provider, that the
 // answers carry no key, and that the stored value is encrypted.
 import { sql } from "kysely";
 import { describe, expect, it } from "vitest";
@@ -72,7 +72,7 @@ describe("saving the key of a workspace", () => {
       "admin-1",
     );
 
-    const revealed = await service.reveal();
+    const revealed = await service.reveal("openrouter");
     expect(revealed.ok && revealed.apiKey.reveal()).toBe(KEY);
   });
 
@@ -96,7 +96,9 @@ describe("saving the key of a workspace", () => {
       ok: false,
       issues: [{ field: "apiKey", code: "api_key_invalid" }],
     });
-    expect(await service.status()).toEqual({ state: "not_configured" });
+    expect(await service.status("openrouter")).toEqual({
+      state: "not_configured",
+    });
   });
 
   // #104-LK-02
@@ -146,7 +148,7 @@ describe("saving the key of a workspace", () => {
       "admin-1",
     );
 
-    expect(await service.status()).toMatchObject({
+    expect(await service.status("openrouter")).toMatchObject({
       state: "configured",
       lastFour: null,
     });
@@ -167,7 +169,7 @@ describe("an empty field", () => {
       expect(result).toMatchObject({ ok: true, changed: false });
     }
 
-    const revealed = await service.reveal();
+    const revealed = await service.reveal("openrouter");
     expect(revealed.ok && revealed.apiKey.reveal()).toBe(KEY);
   });
 
@@ -205,7 +207,8 @@ describe("an empty field", () => {
   });
 
   // #104-LK-03 (the lesson of #100: a stored secret is never carried to another provider or endpoint)
-  it("does not carry the stored key over to another provider", async () => {
+  // #426-T01
+  it("does not reveal a key that was entered for another provider than the one of its slot", async () => {
     const { db, service } = await start();
     await service.save({ provider: "openrouter", apiKey: KEY }, "admin-1");
     // A key that was entered for another provider (a later version, or an edited row).
@@ -214,17 +217,14 @@ describe("an empty field", () => {
       .set({ binding: "another-provider" })
       .execute();
 
-    const result = await service.save(
-      { provider: "openrouter", apiKey: "" },
-      "admin-1",
-    );
-
-    expect(result).toEqual({
+    // It is not revealed for the provider (the test button); the resolver compares the binding, so it is handed
+    // over as stored.
+    expect(await service.reveal("openrouter")).toEqual({
       ok: false,
-      issues: [{ field: "apiKey", code: "api_key_required_for_new_provider" }],
+      reason: "key_binding_mismatch",
     });
-    expect((await service.forJob()).state).toBe("key");
-    expect(await service.status()).toMatchObject({
+    expect((await service.keyFor("openrouter")).state).toBe("key");
+    expect(await service.status("openrouter")).toMatchObject({
       provider: "another-provider",
     });
   });
@@ -238,9 +238,9 @@ describe("an empty field", () => {
       "admin-1",
     );
 
-    const revealed = await service.reveal();
+    const revealed = await service.reveal("openrouter");
     expect(revealed.ok && revealed.apiKey.reveal()).toBe(OTHER_KEY);
-    expect(await service.status()).toMatchObject({
+    expect(await service.status("openrouter")).toMatchObject({
       lastFour: OTHER_KEY.slice(-4),
     });
   });
@@ -252,11 +252,13 @@ describe("removing the key", () => {
     const { service } = await start();
     await service.save({ provider: "openrouter", apiKey: KEY }, "admin-1");
 
-    expect(await service.remove()).toBe(true);
+    expect(await service.remove("openrouter")).toBe(true);
 
-    expect(await service.status()).toEqual({ state: "not_configured" });
-    expect(await service.forJob()).toEqual({ state: "none" });
-    expect(await service.remove()).toBe(false);
+    expect(await service.status("openrouter")).toEqual({
+      state: "not_configured",
+    });
+    expect(await service.keyFor("openrouter")).toEqual({ state: "none" });
+    expect(await service.remove("openrouter")).toBe(false);
   });
 });
 
@@ -270,11 +272,11 @@ describe("a key that was entered for another provider", () => {
       .set({ binding: "another-provider" })
       .execute();
 
-    expect(await service.reveal()).toEqual({
+    expect(await service.reveal("openrouter")).toEqual({
       ok: false,
       reason: "key_binding_mismatch",
     });
-    expect(await service.forJob()).toMatchObject({
+    expect(await service.keyFor("openrouter")).toMatchObject({
       state: "key",
       binding: "another-provider",
     });
@@ -287,12 +289,12 @@ describe("a key that cannot be read", () => {
     await service.save({ provider: "openrouter", apiKey: KEY }, "admin-1");
     await db.updateTable("workspace_secrets").set({ nonce: "AAAA" }).execute();
 
-    expect(await service.status()).toMatchObject({
+    expect(await service.status("openrouter")).toMatchObject({
       state: "unreadable",
       provider: "openrouter",
     });
-    expect(await service.forJob()).toEqual({ state: "unreadable" });
-    expect(await service.reveal()).toEqual({
+    expect(await service.keyFor("openrouter")).toEqual({ state: "unreadable" });
+    expect(await service.reveal("openrouter")).toEqual({
       ok: false,
       reason: "key_unreadable",
     });

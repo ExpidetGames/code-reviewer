@@ -197,10 +197,14 @@ describe("a workspace with the key mode managed", () => {
 
     await t.llm.accessFor(t.workspaceId);
 
-    expect(await t.llm.keyServiceFor(t.workspaceId).status()).toMatchObject({
+    expect(
+      await t.llm.keyServiceFor(t.workspaceId).status("openrouter"),
+    ).toMatchObject({
       state: "configured",
     });
-    expect(await t.llm.keyServiceFor(t.workspaceId).forJob()).toMatchObject({
+    expect(
+      await t.llm.keyServiceFor(t.workspaceId).keyFor("openrouter"),
+    ).toMatchObject({
       state: "key",
       apiKey: WORKSPACE_KEY,
     });

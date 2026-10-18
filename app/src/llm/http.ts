@@ -1,12 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// The handlers behind the routes of the LLM access of a workspace, with their collaborators passed in so the
+// The handlers behind the routes of the LLM keys of a workspace, with their collaborators passed in so the
 // route files only wire the real ones and tests wire the real services over a test database:
 //
-//   GET    /api/w/:workspace/llm-key        whether a key is configured (every member); details for an Admin or Owner
-//   PUT    /api/w/:workspace/llm-key        { provider, apiKey? }   save; an empty or missing apiKey keeps the stored one
-//   DELETE /api/w/:workspace/llm-key        remove the key
-//   POST   /api/w/:workspace/llm-key/test   { provider?, apiKey? }  ask the provider whether the key is accepted
+//   GET    /api/w/:workspace/llm-keys/:provider        whether the key of the provider is configured (every member)
+//   PUT    /api/w/:workspace/llm-keys/:provider        { apiKey? }   save; an empty or missing apiKey keeps the stored one
+//   DELETE /api/w/:workspace/llm-keys/:provider        remove the key of this provider
+//   POST   /api/w/:workspace/llm-keys/:provider/test   { apiKey? }   ask the provider whether the key is accepted
+//
+// `/api/w/:workspace/llm-key` and `/llm-key/test` stay as an alias for the default provider (their body may name
+// the provider, `provider`, which must then be the default one). A body that names another provider than the
+// address is refused (`provider_invalid`); a provider in the address that is not registered is 404
+// `provider_not_found`, after the workspace and the role were settled.
 //
 // Who is asking and in which workspace is settled before these run (`withWorkspace`, src/workspaces/access-
 // runtime.ts): a Member reaches only GET; the other three need `manage_llm_key` (an Admin or an Owner) and the
@@ -25,10 +30,7 @@ import { isCrossSite } from "../http/request-checks.ts";
 import type { WorkspaceAccess } from "../workspaces/access.ts";
 import { can } from "../workspaces/permissions.ts";
 import { checkLlmApiKey, type LlmProvider } from "./config.ts";
-import {
-  DEFAULT_LLM_PROVIDER,
-  llmProviderDescriptors,
-} from "./providers/index.ts";
+import { llmProviderDescriptors } from "./providers/index.ts";
 import type { LlmKeyTestService } from "./key-test.ts";
 import type {
   LlmKeyIssue,
@@ -41,12 +43,14 @@ export const LLM_KEY_REQUEST_MAX_BYTES = 32 * 1024;
 
 const NO_STORE = { "cache-control": "no-store" };
 
-type RefusalCode = JsonBodyErrorCode | "rate_limited" | "forbidden";
+type RefusalCode =
+  JsonBodyErrorCode | "rate_limited" | "forbidden" | "provider_not_found";
 
 const STATUS: Record<RefusalCode, number> = {
   ...JSON_BODY_ERROR_STATUS,
   rate_limited: 429,
   forbidden: 403,
+  provider_not_found: 404,
 };
 
 function refusal(
@@ -94,16 +98,50 @@ export type LlmKeyRouteDependencies = {
   tester: LlmKeyTestService;
 };
 
+/**
+ * Every handler works on the key of one provider: the one in the address, or the default provider for the alias
+ * routes. `provider` is as the address had it (the alias passes the default provider's id).
+ */
 export type LlmKeyRouteHandlers = {
-  get(request: Request, access: WorkspaceAccess): Promise<Response>;
-  put(request: Request, access: WorkspaceAccess): Promise<Response>;
-  remove(request: Request, access: WorkspaceAccess): Promise<Response>;
-  test(request: Request, access: WorkspaceAccess): Promise<Response>;
+  get(
+    request: Request,
+    access: WorkspaceAccess,
+    provider: string,
+  ): Promise<Response>;
+  put(
+    request: Request,
+    access: WorkspaceAccess,
+    provider: string,
+  ): Promise<Response>;
+  remove(
+    request: Request,
+    access: WorkspaceAccess,
+    provider: string,
+  ): Promise<Response>;
+  test(
+    request: Request,
+    access: WorkspaceAccess,
+    provider: string,
+  ): Promise<Response>;
 };
 
 function providerOf(raw: unknown): LlmProvider | undefined {
   if (typeof raw !== "string") return undefined;
   return llmProviderDescriptors.find(raw)?.id;
+}
+
+/** The provider of the address: the registry's id exactly, with no trimming and no case folding (as `slotOf` does). */
+function providerOfPath(raw: string): LlmProvider | undefined {
+  const found = providerOf(raw);
+  return found === raw ? found : undefined;
+}
+
+/** A body that names a provider must name the one of the address. */
+function bodyNamesAnotherProvider(
+  body: Record<string, unknown>,
+  provider: LlmProvider,
+): boolean {
+  return body.provider !== undefined && providerOf(body.provider) !== provider;
 }
 
 export function createLlmKeyRouteHandlers({
@@ -115,20 +153,26 @@ export function createLlmKeyRouteHandlers({
     can(access.role, "manage_llm_key");
 
   return {
-    async get(_request, access) {
+    async get(_request, access, raw) {
+      const provider = providerOfPath(raw);
+      if (provider === undefined) return refusal("provider_not_found");
       const canManage = mayManage(access);
       return done({
         canManage,
-        key: viewOf(await keys.status(), canManage),
+        key: viewOf(await keys.status(provider), canManage),
       });
     },
 
-    async put(request, access) {
+    async put(request, access, raw) {
       if (!mayManage(access)) return refusal("forbidden");
+      const provider = providerOfPath(raw);
+      if (provider === undefined) return refusal("provider_not_found");
       const body = await readJsonObject(request, LLM_KEY_REQUEST_MAX_BYTES);
       if (!body.ok) return refusal(body.error);
+      if (bodyNamesAnotherProvider(body.value, provider))
+        return invalid([{ field: "provider", code: "provider_invalid" }]);
       const result = await keys.save(
-        { provider: body.value.provider, apiKey: body.value.apiKey },
+        { provider, apiKey: body.value.apiKey },
         access.user.id,
       );
       if (!result.ok) return invalid(result.issues);
@@ -139,19 +183,25 @@ export function createLlmKeyRouteHandlers({
       });
     },
 
-    async remove(request, access) {
+    async remove(request, access, raw) {
       if (!mayManage(access)) return refusal("forbidden");
+      const provider = providerOfPath(raw);
+      if (provider === undefined) return refusal("provider_not_found");
       if (isCrossSite(request)) return refusal("cross_site_request");
-      return done({ ok: true, removed: await keys.remove() });
+      return done({ ok: true, removed: await keys.remove(provider) });
     },
 
-    async test(request, access) {
+    async test(request, access, raw) {
       if (!mayManage(access)) return refusal("forbidden");
+      const provider = providerOfPath(raw);
+      if (provider === undefined) return refusal("provider_not_found");
       const body = await readJsonObject(request, LLM_KEY_REQUEST_MAX_BYTES);
       if (!body.ok) return refusal(body.error);
+      if (bodyNamesAnotherProvider(body.value, provider))
+        return invalid([{ field: "provider", code: "provider_invalid" }]);
 
-      // A key typed into the field is checked as it is (and forgotten); with an empty field the stored key is.
-      let provider: LlmProvider;
+      // A key typed into the field is checked as it is (and forgotten); with an empty field the stored key of
+      // this provider is.
       let apiKey: string;
       const typedValue = body.value.apiKey;
       const typed =
@@ -160,23 +210,16 @@ export function createLlmKeyRouteHandlers({
         !(typeof typedValue === "string" && typedValue.trim() === "");
       if (typed) {
         const checked =
-          typeof body.value.apiKey === "string"
-            ? checkLlmApiKey(body.value.apiKey)
+          typeof typedValue === "string"
+            ? checkLlmApiKey(typedValue)
             : { ok: false as const };
-        const chosen = providerOf(body.value.provider ?? DEFAULT_LLM_PROVIDER);
-        const issues: LlmKeyIssue[] = [];
-        if (chosen === undefined)
-          issues.push({ field: "provider", code: "provider_invalid" });
         if (!checked.ok)
-          issues.push({ field: "apiKey", code: "api_key_invalid" });
-        if (!checked.ok || chosen === undefined) return invalid(issues);
-        provider = chosen;
+          return invalid([{ field: "apiKey", code: "api_key_invalid" }]);
         apiKey = checked.key;
       } else {
-        const stored = await keys.reveal();
+        const stored = await keys.reveal(provider);
         if (!stored.ok)
           return invalid([{ field: "apiKey", code: "api_key_required" }]);
-        provider = stored.provider;
         apiKey = stored.apiKey.reveal();
       }
 

@@ -252,6 +252,16 @@ async function seed(
     lastFour: null,
     updatedBy: `user-${tag}`,
   });
+  // #426-T10: the key of a second provider has a name of its own in the same workspace.
+  await repos.workspaceSecrets.put({
+    name: "llm_api_key.fakeai",
+    binding: `fakeai-${tag}`,
+    ciphertext: `ciphertext-fakeai-${tag}`,
+    nonce: `nonce-fakeai-${tag}`,
+    keyVersion: 1,
+    lastFour: null,
+    updatedBy: `user-${tag}`,
+  });
   return {
     workspaceId,
     userId: `user-${tag}`,
@@ -797,6 +807,32 @@ const CASES: Case[] = [
     run: (a) => a.workspaceSecrets.remove("llm_api_key"),
     expectAnswer: (answer) => expect(answer).toBe(true),
   },
+  // #426-T10: the same, for the name of a second provider's key
+  {
+    name: "workspaceSecrets.get (provider-qualified name)",
+    run: (a) => a.workspaceSecrets.get("llm_api_key.fakeai"),
+    expectAnswer: (answer) =>
+      expect(answer).toMatchObject({ binding: "fakeai-a" }),
+  },
+  {
+    name: "workspaceSecrets.put (provider-qualified name)",
+    run: (a) =>
+      a.workspaceSecrets.put({
+        name: "llm_api_key.fakeai",
+        binding: "fakeai-a-changed",
+        ciphertext: "ciphertext-fakeai-a-changed",
+        nonce: "nonce-fakeai-a-changed",
+        keyVersion: 1,
+        lastFour: null,
+        updatedBy: null,
+      }),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
+    name: "workspaceSecrets.remove (provider-qualified name)",
+    run: (a) => a.workspaceSecrets.remove("llm_api_key.fakeai"),
+    expectAnswer: (answer) => expect(answer).toBe(true),
+  },
   // entitlements: one row per workspace, so the scope alone decides whose row it is
   {
     name: "entitlements.get",
@@ -1203,6 +1239,28 @@ describe("two workspaces", () => {
   });
 
   // #271-T06
+  // #426-T10: both workspaces hold the same names, so a read that lost its workspace filter would still find a row;
+  // only a name that B alone holds shows it.
+  it("keep the key of a provider apart on a read: A does not see the provider-qualified secret only B has", async () => {
+    const { reposA, reposB } = await twoWorkspaces();
+    await reposB.workspaceSecrets.put({
+      name: "llm_api_key.onlyb",
+      binding: "onlyb-b",
+      ciphertext: "ciphertext-onlyb-b",
+      nonce: "nonce-onlyb-b",
+      keyVersion: 1,
+      lastFour: null,
+      updatedBy: "user-b",
+    });
+
+    expect(await reposA.workspaceSecrets.get("llm_api_key.onlyb")).toBe(
+      undefined,
+    );
+    expect(
+      await reposB.workspaceSecrets.get("llm_api_key.onlyb"),
+    ).toMatchObject({ binding: "onlyb-b" });
+  });
+
   it("keep the entitlements apart: changing A's leaves B with its own", async () => {
     const { reposA, reposB } = await twoWorkspaces();
 

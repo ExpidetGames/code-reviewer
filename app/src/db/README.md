@@ -300,6 +300,15 @@ existing row:
 - No row and no default means unlimited, as before. Only `resolveEntitlements` (`src/workspaces/entitlements.ts`)
   interprets the data; see `src/workspaces/README.md`, "Entitlements".
 
+Migration `20261017160000_add_workspace_entitlements_model_access` (#428; epic #420) adds one nullable text column
+`model_access` to `workspace_entitlements`: JSON `{"catalogEntries":[...]}`, or NULL for every released entry (what every
+earlier row has). Nothing else changes and no existing row is touched; an app of the previous release never names the
+column, so it keeps inserting and reading rows. `put` does not write the column when the entitlements leave
+`modelAccess` out (the upsert's update set omits it), and the default keeps its stored list the same way under the lock. A write that leaves the field out over a stored
+default that cannot be read is refused (`catalog_entry_invalid`, field `modelAccess`, nothing written): a damaged row
+stays unreadable under such a write, and the default must not widen to every released entry; stating `modelAccess` repairs it.
+The default (`default_entitlements`) holds the field inside its JSON and needs no column.
+
 ### Usage records
 
 Migration `20261014150000_create_usage_records` (#272; epic #268). It adds an empty table and touches no existing row:

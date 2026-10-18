@@ -145,6 +145,8 @@ const PROTECTED_DATA_ROUTES = [
   "/api/w/[workspace]/invitations/[invitationId]/resend",
   "/api/w/[workspace]/llm-key",
   "/api/w/[workspace]/llm-key/test",
+  "/api/w/[workspace]/llm-keys/[provider]",
+  "/api/w/[workspace]/llm-keys/[provider]/test",
   "/api/w/[workspace]/plan",
   "/api/w/[workspace]/plan-handoff",
   "/api/w/[workspace]/members/[userId]",

@@ -11,6 +11,13 @@ import {
   cleanUpAfterTest,
   createTestDatabase,
 } from "../test-support/test-database.ts";
+import type { LlmProvider } from "./config.ts";
+import { openrouterAdapter } from "./providers/openrouter/adapter.ts";
+import {
+  createFakeAdapter,
+  FAKE_PROVIDER_ID,
+} from "./providers/fake-adapter.ts";
+import { createAdapterRegistry } from "./providers/registry.ts";
 import {
   checkLlmKey,
   createLlmKeyTestService,
@@ -306,6 +313,50 @@ describe("the limits of the test button", () => {
       .where("key", "=", "llm-key-test:all")
       .executeTakeFirstOrThrow();
     expect(row.count).toBe(KEY_TEST_WORKSPACE_MAX);
+  });
+
+  // #426-T09
+  it("counts the tests of a workspace together across providers, and the instance's budget too", async () => {
+    const { db } = await createTestDatabase();
+    const fake = await setup();
+    const checked: string[] = [];
+    const key = createLlmKeyTestService({
+      rateLimits: createRateLimitsRepository(db),
+      baseUrlOf: () => fake.baseUrl,
+      adapters: createAdapterRegistry([
+        openrouterAdapter,
+        createFakeAdapter({
+          testKey: () => {
+            checked.push(FAKE_PROVIDER_ID);
+            return Promise.resolve({ ok: true });
+          },
+        }),
+      ]),
+      log: () => undefined,
+    });
+    // The registry of this test has a provider the type of the app's providers does not know.
+    const fakeai = FAKE_PROVIDER_ID as LlmProvider;
+    const as = (provider: LlmProvider, workspaceId: string) =>
+      key.test({ workspaceId, provider, apiKey: KEY });
+    for (let i = 0; i < KEY_TEST_WORKSPACE_MAX; i += 1)
+      expect(await as(i % 2 === 0 ? "openrouter" : fakeai, "ws-a")).toEqual({
+        ok: true,
+      });
+
+    const second = await as(fakeai, "ws-a");
+    const first = await as("openrouter", "ws-a");
+
+    for (const refused of [first, second])
+      expect(refused).toMatchObject({ ok: false, error: "rate_limited" });
+    expect(checked).toHaveLength(Math.floor(KEY_TEST_WORKSPACE_MAX / 2));
+    // Another workspace has its own allowance, whichever provider it asks about.
+    expect(await as(fakeai, "ws-b")).toEqual({ ok: true });
+    const row = await db
+      .selectFrom("rate_limits")
+      .select("count")
+      .where("key", "=", "llm-key-test:all")
+      .executeTakeFirstOrThrow();
+    expect(row.count).toBe(KEY_TEST_WORKSPACE_MAX + 1);
   });
 
   it("counts again after the window is over", async () => {
