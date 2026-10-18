@@ -469,6 +469,98 @@ describe("the operator's key: the catalog entry of the job's kind", () => {
   });
 
   // #431-T06
+  describe.each<[string, Partial<Managed>]>([
+    ["a project entry", { projectEntryId: "mce_a", defaultEntryId: null }],
+    [
+      "the instance default entry",
+      { projectEntryId: null, defaultEntryId: "mce_a" },
+    ],
+    [
+      "the instance default entry when the project id is undefined",
+      {
+        projectEntryId: undefined,
+        defaultEntryId: "mce_a",
+      } as Partial<Managed>,
+    ],
+  ])("the reasons for %s", (_origin, ids) => {
+    it.each<[string, Partial<Managed>, string]>([
+      ["an id no entry has", { entries: [] }, "missing"],
+      [
+        "a draft entry",
+        { entries: [entry({ status: "draft" })] },
+        "not_released",
+      ],
+      [
+        "a retired entry",
+        { entries: [entry({ status: "retired" })] },
+        "not_released",
+      ],
+      [
+        "an entry of the other kind",
+        { entries: [entry({ kinds: ["dynamic"] })] },
+        "kind_mismatch",
+      ],
+      [
+        "an entry the plan does not list",
+        {
+          entitlements: limited({ modelAccess: { catalogEntries: ["mce_b"] } }),
+        },
+        "not_allowed",
+      ],
+      [
+        "an entry when the plan allows none",
+        { entitlements: limited({ modelAccess: { catalogEntries: [] } }) },
+        "not_allowed",
+      ],
+      [
+        "an entry of a provider the app does not know",
+        { entries: [entry({ provider: "nope" })] },
+        "provider_unsupported",
+      ],
+      [
+        "an entry of a provider the runner did not advertise",
+        {
+          runnerProviders: [DEFAULT_PROVIDER],
+          entries: [entry({ provider: FAKE_PROVIDER_ID })],
+        },
+        "provider_unsupported",
+      ],
+    ])("maps %s to its reason", (_name, overrides, reason) => {
+      expect(
+        resolveModelSelection(
+          managed({ entries: [entry()], ...ids, ...overrides }),
+          TWO_PROVIDERS,
+        ),
+      ).toEqual({
+        ok: false,
+        errorCode: MANAGED_MODEL_UNAVAILABLE,
+        reason,
+        entryId: "mce_a",
+      });
+    });
+  });
+
+  // #431-T03
+  it("labels the origin of the entry by one rule: a null or undefined project id selects the instance default", () => {
+    const origins = [null, undefined, "mce_p"].map((projectEntryId) => {
+      const result = resolveModelSelection(
+        managed({
+          projectEntryId: projectEntryId as string | null,
+          defaultEntryId: "mce_a",
+          entries: [entry(), entry({ id: "mce_p" })],
+        }),
+      );
+      const chosen = selected(result);
+      return [chosen.entry?.id, chosen.entry?.origin];
+    });
+    expect(origins).toEqual([
+      ["mce_a", "instance_default"],
+      ["mce_a", "instance_default"],
+      ["mce_p", "project"],
+    ]);
+  });
+
+  // #431-T06
   it("checks the reasons in a fixed order: missing, released, kind, plan, provider", () => {
     const worst = entry({
       status: "draft",

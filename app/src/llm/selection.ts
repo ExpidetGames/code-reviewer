@@ -279,9 +279,10 @@ function resolveManaged(
   // A caller that hands over entitlements of another key mode has a bug; the plan's list is not evaluated for them.
   if (entitlements.keyMode !== "managed") return failClosed();
 
-  const origin: EntryOrigin =
-    input.projectEntryId === null ? "instance_default" : "project";
-  const id = input.projectEntryId ?? input.defaultEntryId;
+  // One test decides both the id and its origin: no project id (null, or undefined from a mapper) is the default.
+  const fromProject = input.projectEntryId != null;
+  const origin: EntryOrigin = fromProject ? "project" : "instance_default";
+  const id = fromProject ? input.projectEntryId : input.defaultEntryId;
   if (id === null) return unavailable("no_selection");
 
   const entry = entries.find((candidate) => candidate.id === id);
