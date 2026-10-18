@@ -208,6 +208,94 @@ async function projectSettings(db: Kysely<Database>, id: string) {
   return JSON.parse(row.settings) as Record<string, unknown>;
 }
 
+/** Many projects of one workspace with a high tier, written in bulk: a third own a low tier, a third inherit, a third chose. */
+async function seedMany(db: Kysely<Database>, count: number): Promise<void> {
+  await seed(db, {
+    tiers: DIFFERENT,
+    workspaces: [{ id: "w-big", defaults: { modelTier: "high" } }],
+  });
+  await db
+    .insertInto("integrations")
+    .values({
+      id: "i-w-big",
+      workspace_id: "w-big",
+      type: "github_app",
+      display_name: "acme",
+      external_id: "inst-w-big",
+      config: "{}",
+      credentials: null,
+      webhook_secret: null,
+      status: "active",
+      created_at: T,
+      updated_at: T,
+    })
+    .execute();
+  const settingsOf = (index: number): string =>
+    index % 3 === 0
+      ? JSON.stringify({ modelTier: "low", maxFindings: 3 })
+      : index % 3 === 1
+        ? "{}"
+        : JSON.stringify({
+            catalogEntryDiff: "mce_chosen",
+            catalogEntryDynamic: "mce_chosen",
+          });
+  for (let from = 0; from < count; from += 300) {
+    const indexes = Array.from(
+      { length: Math.min(300, count - from) },
+      (_, offset) => from + offset,
+    );
+    await db
+      .insertInto("repositories")
+      .values(
+        indexes.map((index) => ({
+          id: `r-${index}`,
+          workspace_id: "w-big",
+          integration_id: "i-w-big",
+          external_id: `ext-${index}`,
+          full_name: `acme/${index}`,
+          url: `https://github.test/acme/${index}`,
+          active: 1,
+          created_at: T,
+          updated_at: T,
+        })),
+      )
+      .execute();
+    await db
+      .insertInto("projects")
+      .values(
+        indexes.map((index) => ({
+          id: `p-${index}`,
+          repository_id: `r-${index}`,
+          active: 1,
+          settings: settingsOf(index),
+          created_at: T,
+          updated_at: T,
+        })),
+      )
+      .execute();
+  }
+}
+
+/** The number of statements a function sends to the database. */
+async function statementsOf(
+  db: Kysely<Database>,
+  run: (counted: Kysely<Database>) => Promise<void>,
+): Promise<number> {
+  let statements = 0;
+  await run(
+    db.withPlugin({
+      transformQuery(args) {
+        statements += 1;
+        return args.node;
+      },
+      async transformResult(args) {
+        return args.result;
+      },
+    }),
+  );
+  return statements;
+}
+
 async function defaults(db: Kysely<Database>) {
   const row = await db
     .selectFrom("instance_settings")
@@ -635,6 +723,95 @@ for (const engine of engines) {
           .execute()
       ).map((entry) => entry.name);
       expect(names).toEqual(["MEDIUM", "Low", "Medium (migrated)", "High"]);
+    });
+
+    // #434-X4
+    it("rewrites the projects with a number of statements that does not grow with their number", async () => {
+      const { migration } =
+        await import("./20261018160000_migrate_model_tiers_to_catalog.ts");
+      const few = await engine.open();
+      await seedMany(few, 9);
+      const forFew = await statementsOf(few, (counted) =>
+        migration.up(counted),
+      );
+      const many = await engine.open();
+      await seedMany(many, 1_200);
+      const forMany = await statementsOf(many, (counted) =>
+        migration.up(counted),
+      );
+
+      // 1,200 projects are written in chunks (three at most), never one statement each.
+      expect(forMany).toBeLessThanOrEqual(forFew + 2);
+
+      const low = {
+        modelTier: "low",
+        maxFindings: 3,
+        catalogEntryDiff: entryIdOf("low-diff"),
+        catalogEntryDynamic: entryIdOf("low-dynamic"),
+      };
+      const high = {
+        catalogEntryDiff: entryIdOf("high-diff"),
+        catalogEntryDynamic: entryIdOf("high-dynamic"),
+      };
+      const chosen = {
+        catalogEntryDiff: "mce_chosen",
+        catalogEntryDynamic: "mce_chosen",
+      };
+      for (const index of [0, 3, 600, 1_197])
+        expect(await projectSettings(many, `p-${index}`)).toEqual(low);
+      for (const index of [1, 4, 700, 1_198])
+        expect(await projectSettings(many, `p-${index}`)).toEqual(high);
+      for (const index of [2, 5, 800, 1_199])
+        expect(await projectSettings(many, `p-${index}`)).toEqual(chosen);
+
+      // A second run finds everything written and sends no write.
+      const again = await snapshot(many);
+      await migration.up(many);
+      expect(await snapshot(many)).toEqual(again);
+    });
+
+    // #434-X4
+    it("never overwrites a settings text that changed after it was read", async () => {
+      const db = await engine.open();
+      await seed(db, {
+        workspaces: [
+          {
+            id: "w-1",
+            projects: [
+              { id: "p-1", settings: { maxFindings: 1 } },
+              { id: "p-2", settings: { maxFindings: 2 } },
+            ],
+          },
+        ],
+      });
+      const { writeIfUnchanged } =
+        await import("./20261018160000_migrate_model_tiers_to_catalog.ts");
+      // p-1 was saved by someone else since it was read; p-2 is as it was read.
+      await db
+        .updateTable("projects")
+        .set({ settings: JSON.stringify({ maxFindings: 9 }) })
+        .where("id", "=", "p-1")
+        .execute();
+
+      const written = await writeIfUnchanged(db, [
+        {
+          id: "p-1",
+          read: JSON.stringify({ maxFindings: 1 }),
+          text: JSON.stringify({ maxFindings: 1, catalogEntryDiff: "x" }),
+        },
+        {
+          id: "p-2",
+          read: JSON.stringify({ maxFindings: 2 }),
+          text: JSON.stringify({ maxFindings: 2, catalogEntryDiff: "x" }),
+        },
+      ]);
+
+      expect([...written]).toEqual(["p-2"]);
+      expect(await projectSettings(db, "p-1")).toEqual({ maxFindings: 9 });
+      expect(await projectSettings(db, "p-2")).toEqual({
+        maxFindings: 2,
+        catalogEntryDiff: "x",
+      });
     });
   });
 }

@@ -153,42 +153,98 @@ async function workspaceTiers(db: AnyDb): Promise<Map<string, Tier>> {
   return tiers;
 }
 
+type ProjectRow = { id: string; workspace_id: string; settings: unknown };
+
+/** A settings text to write, and the text it was made from. */
+export type Rewrite = { id: string; read: string; text: string };
+
+/** How many projects one statement writes (three parameters each, far below the limit of either engine). */
+const CHUNK = 500;
+
+function valuesOf(rows: readonly Rewrite[]) {
+  return sql.join(
+    rows.map((row) => sql`(${row.id}, ${row.read}, ${row.text})`),
+  );
+}
+
+/**
+ * Writes the settings of many projects with one statement per chunk. A row is written only if it still holds the text
+ * it was read as, so a settings save that landed in between is never overwritten. Answers the ids that were written.
+ */
+export async function writeIfUnchanged(
+  db: AnyDb,
+  rewrites: readonly Rewrite[],
+): Promise<Set<string>> {
+  const written = new Set<string>();
+  for (let from = 0; from < rewrites.length; from += CHUNK) {
+    const chunk = rewrites.slice(from, from + CHUNK);
+    const updated = await sql<{ id: string }>`
+      with changes (id, read, written) as (values ${valuesOf(chunk)})
+      update projects set settings = changes.written
+      from changes
+      where projects.id = changes.id and projects.settings = changes.read
+      returning projects.id as id
+    `.execute(db);
+    for (const row of updated.rows) written.add(row.id);
+  }
+  return written;
+}
+
 async function rewriteProjects(
   db: AnyDb,
   tiers: Map<string, Tier>,
   ids: EntryIds,
 ): Promise<void> {
-  const projects = await sql<{
-    id: string;
-    workspace_id: string;
-  }>`
-    select p.id as id, r.workspace_id as workspace_id
-    from projects p join repositories r on r.id = p.repository_id
-  `.execute(db);
-  for (const project of projects.rows) {
-    for (let attempt = 0; attempt < ATTEMPTS; attempt += 1) {
-      const row = await sql<{ settings: string | null }>`
-        select settings from projects where id = ${project.id}
-      `.execute(db);
-      const read = row.rows[0]?.settings;
-      if (typeof read !== "string") break;
-      const result = rewriteSettings(read, {
+  // Every project in one read; the settings text comes with it. Damaged ones are named once, by id.
+  let pending = (
+    await sql<ProjectRow>`
+      select p.id as id, r.workspace_id as workspace_id, p.settings as settings
+      from projects p join repositories r on r.id = p.repository_id
+      order by p.id
+    `.execute(db)
+  ).rows;
+  for (
+    let attempt = 0;
+    attempt < ATTEMPTS && pending.length > 0;
+    attempt += 1
+  ) {
+    const rewrites: Rewrite[] = [];
+    for (const project of pending) {
+      if (typeof project.settings !== "string") continue;
+      const result = rewriteSettings(project.settings, {
         workspaceTier: tiers.get(project.workspace_id),
         ids,
       });
       if (result.kind === "damaged") {
-        console.warn(
-          `[migration] model tiers: the settings of project ${project.id} cannot be read and were skipped.`,
-        );
-        break;
+        if (attempt === 0)
+          console.warn(
+            `[migration] model tiers: the settings of project ${project.id} cannot be read and were skipped.`,
+          );
+        continue;
       }
-      if (result.kind === "unchanged") break;
-      const updated = await sql`
-        update projects set settings = ${result.text}
-        where id = ${project.id} and settings = ${read}
-      `.execute(db);
-      if (Number(updated.numAffectedRows ?? 0) > 0) break;
+      if (result.kind === "changed")
+        rewrites.push({
+          id: project.id,
+          read: project.settings,
+          text: result.text,
+        });
     }
+    const written = await writeIfUnchanged(db, rewrites);
+    // A row that changed meanwhile is read again, and rewritten from what it holds now.
+    const missed = rewrites.filter((rewrite) => !written.has(rewrite.id));
+    if (missed.length === 0) return;
+    const workspaceOf = new Map(
+      pending.map((project) => [project.id, project.workspace_id]),
+    );
+    const current = await sql<{ id: string; settings: unknown }>`
+      select id, settings from projects
+      where id in (${sql.join(missed.map((rewrite) => rewrite.id))})
+    `.execute(db);
+    pending = current.rows.map((row) => ({
+      id: row.id,
+      workspace_id: workspaceOf.get(row.id) ?? "",
+      settings: row.settings,
+    }));
   }
 }
 
