@@ -28,6 +28,11 @@ import { createPlanHandoffTokensRepository } from "./plan-handoff-tokens-reposit
 import { createJobCheckRunsRepository } from "./job-check-runs-repository.ts";
 import { createRefusalNoticesRepository } from "./refusal-notices-repository.ts";
 import { createUsageRecordsRepository } from "./usage-records-repository.ts";
+import { createBillingCheckoutsRepository } from "./billing-checkouts-repository.ts";
+import { createBillingCustomersRepository } from "./billing-customers-repository.ts";
+import { createBillingPlansRepository } from "./billing-plans-repository.ts";
+import { createBillingPlanVersionsRepository } from "./billing-plan-versions-repository.ts";
+import { createBillingSubscriptionsRepository } from "./billing-subscriptions-repository.ts";
 
 const SHA = "b".repeat(40);
 const FAILED_SHA = "c".repeat(40);
@@ -49,6 +54,9 @@ function reposOf(db: Kysely<Database>, workspaceId: string) {
     notices: createRefusalNoticesRepository(db, workspaceId),
     jobChecks: createJobCheckRunsRepository(db, workspaceId),
     planHandoff: createPlanHandoffTokensRepository(db, workspaceId),
+    billingSubscriptions: createBillingSubscriptionsRepository(db, workspaceId),
+    billingCustomers: createBillingCustomersRepository(db, workspaceId),
+    billingCheckouts: createBillingCheckoutsRepository(db, workspaceId),
   };
 }
 type Repos = ReturnType<typeof reposOf>;
@@ -262,9 +270,72 @@ async function seed(
     lastFour: null,
     updatedBy: `user-${tag}`,
   });
+  // #441: the subscription, the customer and the checkout of the workspace, on a plan version of its own.
+  const plan = await createBillingPlansRepository(db).insert(
+    {
+      planKey: `plan-${tag}`,
+      kind: "paid",
+      metadata: {
+        name: `Plan ${tag}`,
+        description: "",
+        sort: 1,
+        offered: true,
+        popular: false,
+        contactTarget: null,
+      },
+    },
+    null,
+  );
+  const version = await createBillingPlanVersionsRepository(db).createNext(
+    plan.id,
+    {
+      keyMode: "managed",
+      limits: {
+        diffRunsPerPeriod: 10,
+        dynamicRunsPerPeriod: null,
+        managedCostLimitMicroUsd: null,
+        ownKeyCostLimitMicroUsd: null,
+      },
+      modelAccess: { catalogEntries: null },
+      monthlyAmountMinor: 1234,
+      yearlyAmountMinor: null,
+    },
+    null,
+    0,
+  );
+  const subscribed = await repos.billingSubscriptions.insert({
+    env: "sandbox",
+    paddleSubscriptionId: `sub-${tag}`,
+    paddleCustomerId: `ctm-${tag}`,
+    planVersionId: version.id,
+    paddlePriceId: `pri-${tag}`,
+    billingInterval: "month",
+    status: "active",
+    pastDueSince: null,
+    startedAt: null,
+    currentPeriodStart: null,
+    currentPeriodEnd: null,
+    nextBilledAt: null,
+    canceledAt: null,
+    scheduledChangeAction: null,
+    scheduledChangeAt: null,
+    stamp: { occurredAt: "2026-10-18T10:00:00.000Z", eventId: `evt-${tag}` },
+  });
+  if (!subscribed.ok) throw new Error("seeding failed");
+  await repos.billingCustomers.adopt("sandbox", `ctm-${tag}`);
+  await repos.billingCheckouts.create({
+    env: "sandbox",
+    transactionId: `txn-${tag}`,
+    planVersionId: version.id,
+    billingInterval: "month",
+  });
   return {
     workspaceId,
     userId: `user-${tag}`,
+    subscriptionId: `sub-${tag}`,
+    subscriptionRowId: subscribed.subscription.id,
+    transactionId: `txn-${tag}`,
+    versionId: version.id,
     invitation,
     linkRequest,
     integration,
@@ -343,6 +414,24 @@ async function rowsOf(db: Kysely<Database>, workspaceId: string) {
       .selectFrom("workspace_entitlements")
       .selectAll()
       .where("workspace_id", "=", workspaceId)
+      .execute(),
+    billingSubscriptions: await db
+      .selectFrom("billing_subscriptions")
+      .selectAll()
+      .where("workspace_id", "=", workspaceId)
+      .orderBy("id")
+      .execute(),
+    billingCustomers: await db
+      .selectFrom("billing_customers")
+      .selectAll()
+      .where("workspace_id", "=", workspaceId)
+      .orderBy("paddle_env")
+      .execute(),
+    billingCheckouts: await db
+      .selectFrom("billing_checkouts")
+      .selectAll()
+      .where("workspace_id", "=", workspaceId)
+      .orderBy("id")
       .execute(),
     workspaceSecrets: await db
       .selectFrom("workspace_secrets")
@@ -851,6 +940,98 @@ const CASES: Case[] = [
     name: "entitlements.remove",
     run: (a) => a.entitlements.remove(),
     expectAnswer: (answer) => expect(answer).toBe(true),
+  },
+  // billing (#441): a Paddle subscription, customer or checkout of B is not there for A
+  {
+    name: "billingSubscriptions.getByPaddleId",
+    run: (a, b) =>
+      a.billingSubscriptions.getByPaddleId("sandbox", b.subscriptionId),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
+    name: "billingSubscriptions.getLive",
+    run: (a) => a.billingSubscriptions.getLive(),
+    expectAnswer: (answer, a) =>
+      expect(answer).toMatchObject({
+        workspaceId: a.workspaceId,
+        paddleSubscriptionId: a.subscriptionId,
+      }),
+  },
+  {
+    name: "billingSubscriptions.insert",
+    run: (a, b) =>
+      a.billingSubscriptions.insert({
+        env: "sandbox",
+        paddleSubscriptionId: b.subscriptionId,
+        paddleCustomerId: "ctm-x",
+        planVersionId: b.versionId,
+        paddlePriceId: "pri-x",
+        billingInterval: "month",
+        status: "active",
+        pastDueSince: null,
+        startedAt: null,
+        currentPeriodStart: null,
+        currentPeriodEnd: null,
+        nextBilledAt: null,
+        canceledAt: null,
+        scheduledChangeAction: null,
+        scheduledChangeAt: null,
+        stamp: { occurredAt: "2026-10-19T10:00:00.000Z", eventId: "evt-x" },
+      }),
+    expectAnswer: (answer) => expect(answer).toMatchObject({ ok: false }),
+  },
+  {
+    name: "billingSubscriptions.applyEvent",
+    run: (a, b) =>
+      a.billingSubscriptions.applyEvent(
+        b.subscriptionRowId,
+        {
+          planVersionId: b.versionId,
+          paddlePriceId: "pri-x",
+          billingInterval: "month",
+          status: "canceled",
+          pastDueSince: null,
+          startedAt: null,
+          currentPeriodStart: null,
+          currentPeriodEnd: null,
+          nextBilledAt: null,
+          canceledAt: null,
+          scheduledChangeAction: null,
+          scheduledChangeAt: null,
+        },
+        { occurredAt: "2026-10-19T10:00:00.000Z", eventId: "evt-x" },
+      ),
+    expectAnswer: (answer) => expect(answer).toBe(false),
+  },
+  {
+    name: "billingCustomers.get",
+    run: (a) => a.billingCustomers.get("sandbox"),
+    expectAnswer: (answer) => expect(answer).toBe("ctm-a"),
+  },
+  {
+    name: "billingCustomers.adopt",
+    run: (a) => a.billingCustomers.adopt("sandbox", "ctm-changed"),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
+    name: "billingCheckouts.getByTransaction",
+    run: (a, b) =>
+      a.billingCheckouts.getByTransaction("sandbox", b.transactionId),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
+    name: "billingCheckouts.create",
+    run: (a, b) =>
+      settle(() =>
+        a.billingCheckouts.create({
+          env: "sandbox",
+          transactionId: b.transactionId,
+          planVersionId: b.versionId,
+          billingInterval: "month",
+        }),
+      ),
+    expectAnswer: (answer) =>
+      expect(answer).toMatchObject({ rejected: expect.anything() }),
   },
   // usage records: a job of B is not there for A, so it is neither reserved, changed nor settled, and
   // A's reads and pages do not see B's records

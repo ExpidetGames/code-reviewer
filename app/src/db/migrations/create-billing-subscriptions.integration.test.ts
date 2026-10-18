@@ -114,147 +114,178 @@ describe("the billing subscriptions migration", () => {
       return db;
     }
 
-    it_("adds four empty tables and changes no row that was there", async () => {
-      const db = await engine.open();
-      await migrateToLatest(db, beforeThisMigration);
-      await seedWorkspacesAndVersion(db);
+    it_(
+      "adds four empty tables and changes no row that was there",
+      async () => {
+        const db = await engine.open();
+        await migrateToLatest(db, beforeThisMigration);
+        await seedWorkspacesAndVersion(db);
 
-      await migrateToLatest(db);
+        await migrateToLatest(db);
 
-      for (const table of [
-        "billing_customers",
-        "billing_subscriptions",
-        "billing_checkouts",
-        "billing_webhook_events",
-      ] as const)
-        expect(await db.selectFrom(table).selectAll().execute()).toEqual([]);
-      const plans = await db.selectFrom("billing_plans").selectAll().execute();
-      expect(plans.map((plan) => plan.plan_key)).toEqual(["team"]);
-      await db.destroy();
-    });
-
-    // #441-T11
-    it_("refuses a second live subscription for one workspace, whatever app instance writes", async () => {
-      const db = await migrated();
-      await insertSubscription(db);
-
-      await expect(
-        insertSubscription(db, { id: "s2", paddleId: "sub_2" }),
-      ).rejects.toThrow();
-      // A paused subscription is live too: the workspace still holds it.
-      await sql`update billing_subscriptions set status = 'paused' where id = 's1'`.execute(
-        db,
-      );
-      await expect(
-        insertSubscription(db, { id: "s2", paddleId: "sub_2" }),
-      ).rejects.toThrow();
-      await db.destroy();
-    });
+        for (const table of [
+          "billing_customers",
+          "billing_subscriptions",
+          "billing_checkouts",
+          "billing_webhook_events",
+        ] as const)
+          expect(await db.selectFrom(table).selectAll().execute()).toEqual([]);
+        const plans = await db
+          .selectFrom("billing_plans")
+          .selectAll()
+          .execute();
+        expect(plans.map((plan) => plan.plan_key)).toEqual(["team"]);
+        await db.destroy();
+      },
+    );
 
     // #441-T11
-    it_("lets a workspace subscribe again once its subscription is canceled, and keeps workspaces apart", async () => {
-      const db = await migrated();
-      await insertSubscription(db);
-      await insertSubscription(db, {
-        id: "s9",
-        workspace: "w2",
-        paddleId: "sub_9",
-      });
-      await sql`update billing_subscriptions set status = 'canceled' where id = 's1'`.execute(
-        db,
-      );
+    it_(
+      "refuses a second live subscription for one workspace, whatever app instance writes",
+      async () => {
+        const db = await migrated();
+        await insertSubscription(db);
 
-      await insertSubscription(db, { id: "s2", paddleId: "sub_2" });
+        await expect(
+          insertSubscription(db, { id: "s2", paddleId: "sub_2" }),
+        ).rejects.toThrow();
+        // A paused subscription is live too: the workspace still holds it.
+        await sql`update billing_subscriptions set status = 'paused' where id = 's1'`.execute(
+          db,
+        );
+        await expect(
+          insertSubscription(db, { id: "s2", paddleId: "sub_2" }),
+        ).rejects.toThrow();
+        await db.destroy();
+      },
+    );
 
-      const live = await sql<{
-        workspace_id: string;
-      }>`select workspace_id from billing_subscriptions where status <> 'canceled' order by workspace_id`.execute(
-        db,
-      );
-      expect(live.rows.map((row) => row.workspace_id)).toEqual(["w1", "w2"]);
-      await db.destroy();
-    });
+    // #441-T11
+    it_(
+      "lets a workspace subscribe again once its subscription is canceled, and keeps workspaces apart",
+      async () => {
+        const db = await migrated();
+        await insertSubscription(db);
+        await insertSubscription(db, {
+          id: "s9",
+          workspace: "w2",
+          paddleId: "sub_9",
+        });
+        await sql`update billing_subscriptions set status = 'canceled' where id = 's1'`.execute(
+          db,
+        );
 
-    it_("keeps one row for a Paddle subscription of an environment, and lets the other environment reuse the id", async () => {
-      const db = await migrated();
-      await insertSubscription(db);
-      await sql`update billing_subscriptions set status = 'canceled' where id = 's1'`.execute(
-        db,
-      );
+        await insertSubscription(db, { id: "s2", paddleId: "sub_2" });
 
-      await expect(
-        insertSubscription(db, { id: "s2", paddleId: "sub_1" }),
-      ).rejects.toThrow();
-      await insertSubscription(db, {
-        id: "s3",
-        paddleId: "sub_1",
-        env: "live",
-      });
-      await db.destroy();
-    });
+        const live = await sql<{
+          workspace_id: string;
+        }>`select workspace_id from billing_subscriptions where status <> 'canceled' order by workspace_id`.execute(
+          db,
+        );
+        expect(live.rows.map((row) => row.workspace_id)).toEqual(["w1", "w2"]);
+        await db.destroy();
+      },
+    );
 
-    it_("refuses a status, an interval and an environment the code does not know", async () => {
-      const db = await migrated();
+    it_(
+      "keeps one row for a Paddle subscription of an environment, and lets the other environment reuse the id",
+      async () => {
+        const db = await migrated();
+        await insertSubscription(db);
+        await sql`update billing_subscriptions set status = 'canceled' where id = 's1'`.execute(
+          db,
+        );
 
-      await expect(insertSubscription(db, { status: "gone" })).rejects.toThrow();
-      await expect(
-        insertSubscription(db, { interval: "week" }),
-      ).rejects.toThrow();
-      await expect(insertSubscription(db, { env: "staging" })).rejects.toThrow();
-      await db.destroy();
-    });
+        await expect(
+          insertSubscription(db, { id: "s2", paddleId: "sub_1" }),
+        ).rejects.toThrow();
+        await insertSubscription(db, {
+          id: "s3",
+          paddleId: "sub_1",
+          env: "live",
+        });
+        await db.destroy();
+      },
+    );
+
+    it_(
+      "refuses a status, an interval and an environment the code does not know",
+      async () => {
+        const db = await migrated();
+
+        await expect(
+          insertSubscription(db, { status: "gone" }),
+        ).rejects.toThrow();
+        await expect(
+          insertSubscription(db, { interval: "week" }),
+        ).rejects.toThrow();
+        await expect(
+          insertSubscription(db, { env: "staging" }),
+        ).rejects.toThrow();
+        await db.destroy();
+      },
+    );
 
     // #441-T04
-    it_("keeps one row per event id and lets `on conflict do nothing` answer that nothing was inserted", async () => {
-      const db = await migrated();
-      const insert = () =>
-        sql`insert into billing_webhook_events (event_id, paddle_env, event_type, occurred_at, outcome, received_at)
+    it_(
+      "keeps one row per event id and lets `on conflict do nothing` answer that nothing was inserted",
+      async () => {
+        const db = await migrated();
+        const insert = () =>
+          sql`insert into billing_webhook_events (event_id, paddle_env, event_type, occurred_at, outcome, received_at)
           values ('evt_1', 'sandbox', 'subscription.created', ${T}, 'applied', ${T}) on conflict do nothing`.execute(
-          db,
-        );
+            db,
+          );
 
-      const first = await insert();
-      const second = await insert();
+        const first = await insert();
+        const second = await insert();
 
-      expect(Number(first.numAffectedRows)).toBe(1);
-      expect(Number(second.numAffectedRows)).toBe(0);
-      await db.destroy();
-    });
+        expect(Number(first.numAffectedRows)).toBe(1);
+        expect(Number(second.numAffectedRows)).toBe(0);
+        await db.destroy();
+      },
+    );
 
-    it_("keeps one checkout per Paddle transaction of an environment and one customer per workspace and environment", async () => {
-      const db = await migrated();
-      const checkout = (id: string, env: string, transaction: string) =>
-        sql`insert into billing_checkouts (id, workspace_id, paddle_env, transaction_id, plan_version_id, billing_interval, created_at)
+    it_(
+      "keeps one checkout per Paddle transaction of an environment and one customer per workspace and environment",
+      async () => {
+        const db = await migrated();
+        const checkout = (id: string, env: string, transaction: string) =>
+          sql`insert into billing_checkouts (id, workspace_id, paddle_env, transaction_id, plan_version_id, billing_interval, created_at)
           values (${id}, 'w1', ${env}, ${transaction}, 'v1', 'month', ${T})`.execute(
+            db,
+          );
+        await checkout("c1", "sandbox", "txn_1");
+
+        await expect(checkout("c2", "sandbox", "txn_1")).rejects.toThrow();
+        await checkout("c3", "live", "txn_1");
+        await sql`insert into billing_customers (workspace_id, paddle_env, paddle_customer_id, created_at, updated_at) values ('w1', 'sandbox', 'ctm_1', ${T}, ${T})`.execute(
           db,
         );
-      await checkout("c1", "sandbox", "txn_1");
+        await expect(
+          sql`insert into billing_customers (workspace_id, paddle_env, paddle_customer_id, created_at, updated_at) values ('w1', 'sandbox', 'ctm_2', ${T}, ${T})`.execute(
+            db,
+          ),
+        ).rejects.toThrow();
+        await db.destroy();
+      },
+    );
 
-      await expect(checkout("c2", "sandbox", "txn_1")).rejects.toThrow();
-      await checkout("c3", "live", "txn_1");
-      await sql`insert into billing_customers (workspace_id, paddle_env, paddle_customer_id, created_at, updated_at) values ('w1', 'sandbox', 'ctm_1', ${T}, ${T})`.execute(
-        db,
-      );
-      await expect(
-        sql`insert into billing_customers (workspace_id, paddle_env, paddle_customer_id, created_at, updated_at) values ('w1', 'sandbox', 'ctm_2', ${T}, ${T})`.execute(
-          db,
-        ),
-      ).rejects.toThrow();
-      await db.destroy();
-    });
+    it_(
+      "refuses a subscription that points at a version or a workspace that does not exist, and never deletes a version in use",
+      async () => {
+        const db = await migrated();
 
-    it_("refuses a subscription that points at a version or a workspace that does not exist, and never deletes a version in use", async () => {
-      const db = await migrated();
-
-      await expect(
-        insertSubscription(db, { workspace: "nobody" }),
-      ).rejects.toThrow();
-      await insertSubscription(db);
-      await expect(
-        sql`delete from billing_plan_versions where id = 'v1'`.execute(db),
-      ).rejects.toThrow();
-      await db.destroy();
-    });
+        await expect(
+          insertSubscription(db, { workspace: "nobody" }),
+        ).rejects.toThrow();
+        await insertSubscription(db);
+        await expect(
+          sql`delete from billing_plan_versions where id = 'v1'`.execute(db),
+        ).rejects.toThrow();
+        await db.destroy();
+      },
+    );
 
     it_("drops the four tables again when migrated down", async () => {
       const db = await migrated();

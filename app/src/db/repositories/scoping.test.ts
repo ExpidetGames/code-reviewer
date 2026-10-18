@@ -20,6 +20,9 @@ import { describe, expect, it } from "vitest";
 /** Repositories of customer data: created for one workspace, every query filters by it. */
 const SCOPED = [
   "app-settings-repository.ts",
+  "billing-checkouts-repository.ts",
+  "billing-customers-repository.ts",
+  "billing-subscriptions-repository.ts",
   "installation-link-requests-repository.ts",
   "integrations-repository.ts",
   "invitations-repository.ts",
@@ -85,6 +88,13 @@ const SCOPED = [
  * - job-claimed-keys: the encrypted LLM key handed out with the claim of a job. It is keyed by the job and read
  *   only by the runner API when that job is completed (the job and its workspace are known there); it never
  *   lists, and a key is only ever looked up by the id of a job the caller holds;
+ * - billing-directory: finds the workspace of a Paddle checkout or subscription for the webhook (#441), which arrives with Paddle's
+ *   ids before any workspace is known; it only reads, never lists, and every answer is the id of the one workspace that owns
+ *   the Paddle id (a checkout row the server wrote, or a subscription row). All that follows goes through the scoped repositories
+ *   of the checkouts, customers and subscriptions;
+ * - billing-webhook-events: the dedupe and the log of the Paddle events (#441, ADR 0005, 2.12). An event is claimed by its id before
+ *   the workspace it is about is known; the row names no workspace, holds no payload and no customer data (event type, stamp,
+ *   outcome, the Paddle id of the subscription or price);
  * - billing-plan-prices: the cache of the Paddle prices a plan version is sold with (#439), instance configuration like the
  *   plans; it is read by the plan and the version it belongs to and by no workspace;
  * - billing-plans, billing-plan-versions: the plans the operator sells and their versions (#438, ADR 0005, 2.11). They are
@@ -99,9 +109,11 @@ const SCOPED = [
 const INSTANCE_LEVEL = [
   "allowed-login-pins-repository.ts",
   "app-meta-repository.ts",
+  "billing-directory-repository.ts",
   "billing-plan-prices-repository.ts",
   "billing-plan-versions-repository.ts",
   "billing-plans-repository.ts",
+  "billing-webhook-events-repository.ts",
   "catalog-repository.ts",
   "claim-admission.ts",
   "installation-link-request-directory-repository.ts",
