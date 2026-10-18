@@ -150,18 +150,39 @@ moves the data over so that no managed workspace changes model:
   for gets none, so the instance default of that kind applies, as it does to any project without a choice. Damaged JSON
   is skipped and named by id in the log, never by content.
 - **Safe to run.** It only adds. It is idempotent, needs no `APP_SECRET`, decrypts nothing, uses the same SQL on SQLite
-  and Postgres, rewrites a row with a compare-and-set update (a settings save that lands between the read and the write
-  is never overwritten) and does nothing when `managed_model_tiers` is missing, empty or holds no readable model (a
-  self-hosted instance on its own key never had one). A differential test
+  and Postgres and does nothing when `managed_model_tiers` is missing, empty or holds no readable model (a self-hosted
+  instance on its own key never had one). The projects are read in one query and written in chunks of 500 with one
+  `UPDATE … FROM (VALUES …)` each, so the time does not grow with a statement per project (about 0.2 s for 5,000 and 0.8 s
+  for 20,000 projects on a local Postgres, instead of 2.2 s and 10.3 s). A row is written only if it still holds the text
+  that was read (a settings save that lands between the read and the write is never overwritten) and a row that changed
+  is read again, three times at most. A differential test
   (`integration-tests/http/model-tiers-migration-claim.integration.test.ts`) hands the same (tier, kind) to the new claim
   and compares the model with the old rule.
+- **What differs from the tiers, on purpose.** (1) A tier that had no model for a review kind used to end that kind's job
+  with `managed_tier_unavailable` (fail closed). The migration makes no entry for it, so a project on that tier gets no
+  selection for the kind and runs it on the instance default entry (the Medium one), the same as a project that chose
+  nothing. The differential test pins this (`tiers that lack a kind`). (2) A workspace-level tier is written into the
+  projects that exist at the migration, because there is no workspace-level entry; a repository activated later starts
+  with settings `{}` and gets the instance default entry, not its workspace's old Low or High. The operator chooses an
+  entry for it in the project's settings, or changes the default. (3) A project of a workspace on its own key is rewritten
+  like any other (the workspace may turn managed later), but its entries are inert while the key is the workspace's own: an
+  own job reads no catalog and no entry (`src/llm/selection.ts`); the claim of such a workspace is the same before and
+  after (`model-tiers-migration-claim.integration.test.ts`, T06).
+- **After the release: the plans' `modelAccess`.** The migrated entries are new, so a `modelAccess` list that was set
+  before (an explicit list, `[]` included) does not contain them. For such a workspace both the entry of a project that had
+  a tier and the default entry are outside the list, and every job ends with `managed_model_unavailable` (the claim fails
+  closed, as #428 intends; a list that is absent allows every released entry). The operator adds the migrated entries to
+  every plan's list, the Free plan included once billing is on (it is created with `[]`), and to every list set by hand.
+  Tests pin both the stop and the way out (`model-tiers-migration-claim.integration.test.ts`, X5).
 - **The old data stays.** `managed_model_tiers`, the `modelTier` members of the stored settings and the column
   `usage_records.model_tier` are read by nothing (the usage feed and the Runs view still show a run that was written under a
   tier). A later forward-only migration, one release after, deletes them (`docs/deployment-vercel.md`, 5.6). A save of
   the settings of a project drops its `modelTier` with the Diff group, which is why the migration copies its meaning first.
-- **Rollback.** The app of the previous release still finds the old data, so it runs the tiers as before; no migration is
-  undone (Kysely migrations are forward only). Projects whose settings were saved on the new release lost their `modelTier`
-  and run on the default tier on the old release; entries the migration made stay in the catalog and are harmless there.
+- **Rollback is not safe.** The app of the previous release still finds the old data, so it runs the tiers as before; no
+  migration is undone (Kysely migrations are forward only). Projects whose settings were saved on the new release lost their
+  `modelTier` and run on the default tier on the old release; entries the migration made stay in the catalog and are
+  harmless there. #432, #433 and #434 go back together, and a fix forward is the normal way out. A settings page opened
+  before the release can send the old quality level once: the save is refused with `UNKNOWN_FIELD` and a reload fixes it.
 
 ## The token budget of a managed job
 

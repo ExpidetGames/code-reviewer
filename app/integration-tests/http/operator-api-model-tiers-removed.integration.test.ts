@@ -41,6 +41,28 @@ describe("the removed /model-tiers route", () => {
   );
 
   // #434-T09
+  it.each([
+    ["no token", { token: null }],
+    ["a wrong token", { token: "wrong-token-value-0123456789-0123456789" }],
+  ] as const)(
+    "answers 401 to a call with %s, as it does for any path: the credential is checked before the path",
+    async (_name, options) => {
+      const h = await startOperatorApiHarness();
+
+      const response = await h.call("PUT", PATH, {
+        ...options,
+        body: { tiers: { high: { diff: "vendor/high-diff" } } },
+      });
+
+      expect(response.status).toBe(401);
+      expect(await response.json()).toEqual({
+        version: 1,
+        error: "unauthorized",
+      });
+    },
+  );
+
+  // #434-T09
   it("has no route file any more", () => {
     expect(
       existsSync(

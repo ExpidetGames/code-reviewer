@@ -85,8 +85,9 @@ ignores the key mode: it would run the workspace's jobs on the workspace's own k
 
 `GET|PUT /api/operator/v1/model-tiers` (#280) is **gone**: the model behind a workspace's reviews is a catalog entry now
 (`src/model-catalog/README.md`), chosen in the instance admin portal, and the claim has not read the tiers since #432. A call
-of the old path gets the `404 not_found` of any path the API does not have, with the token or without (the tier
-configuration is neither read nor stored). This is a **documented breaking change** of version 1 (ADR 0005, decision C1;
+of the old path gets the answer of any path the API does not have: `404 not_found` with a valid token, and `401 unauthorized`
+without one (the credential is checked before the path, so the path is not revealed); while the API is off (no usable
+`OPERATOR_API_TOKEN`) it is the plain `404` of the platform. The tier configuration is neither read nor stored. This is a **documented breaking change** of version 1 (ADR 0005, decision C1;
 `contracts/README.md`, "The removal of `/model-tiers`", has the decision and the compatibility table). There is no facade
 and no `410`: the route has no effect since #432, so a write to it would only look as if it did something. The setting
 `managed_model_tiers` was turned into catalog entries by the migration `20261018160000_migrate_model_tiers_to_catalog.ts`

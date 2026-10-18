@@ -18,7 +18,7 @@ export const CATALOG_KINDS = [
 
 /** An entry as the operator sees it. Never handed to a member: see `member.ts`. */
 export type CatalogEntry = {
-  /** Opaque (`mce_` and random text), never reused, the only thing about an entry that leaves the server. */
+  /** Opaque (`mce_` and random text; the entries of the tier migration have a digest of their slug), never reused, the only thing about an entry that leaves the server. */
   id: string;
   name: string;
   description: string | null;

@@ -16,7 +16,7 @@
 //   provider that was down, must be seen at the next try. The memory is keyed by provider and model: the same
 //   name at two providers is two models.
 //
-// The fetch is a parameter. #279 (per-job capabilities) and #280 (managed tiers) reuse the module.
+// The fetch is a parameter. #279 (per-job capabilities) and the catalog (#429, #432: the managed models, formerly the tiers of #280) reuse the module.
 import "server-only";
 import type { LlmProvider } from "./config.ts";
 import { DEFAULT_LLM_PROVIDER } from "./providers/index.ts";

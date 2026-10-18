@@ -60,15 +60,16 @@ Version 1 of the operator API "only grows", and the rule for a breaking change i
   external caller exists is a read-only check of the access log of the production instance, which is the maintainers' to do
   before the release (a follow-up in the pull request); a caller found there is the trigger for a facade, which this series
   does not build.
-- **A `410` would need a new error code and a handler to keep**, to tell a caller what the path's absence already says. The
-  answer is the `404 not_found` of any path the API does not have, validated against `ErrorResponse` by a test.
+- **A `410` would need a new error code and a handler to keep**, to tell a caller what the path's absence already says. With
+  a valid token the answer is the `404 not_found` of any path the API does not have, validated against `ErrorResponse` by a
+  test; without a valid token it is the `401 unauthorized` of every path (the credential is checked first), also by a test.
 - The file still grows for a reader that ignores unknown things: `UsageItem.modelTier` **stays, required and nullable**
   (null for every run since the catalog), so a strict reader of the feed keeps working. Nothing else in the file changed
   its meaning.
 
 | Caller / peer                                                       | Before #434                                  | After #434                                                                                      |
 | ------------------------------------------------------------------- | -------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| Operator tooling that calls `/model-tiers`                          | `200` (since #432 without effect)            | `404 not_found`; set the models as catalog entries in the admin portal                          |
+| Operator tooling that calls `/model-tiers`                          | `200` (since #432 without effect)            | `404 not_found` with a valid token, `401 unauthorized` without one; set the models as catalog entries in the admin portal |
 | Reader of the usage feed (strict or not)                            | `modelTier` present, null for catalog runs   | the same: present, null for every run since #432; old rows keep their tier name                 |
 | Client that branches on `ApiErrorCode`                              | may see the five tier codes                  | never sees them; the codes are out of the enum (a client that lists them still works)           |
 | Runner, Worker, Dispatcher                                          | `RunnerJobInput` as it is                    | unchanged: no runner or Worker contract changes (the model reaches them as `llm.model`, as ever) |
