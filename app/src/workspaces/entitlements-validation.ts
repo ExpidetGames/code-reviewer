@@ -97,7 +97,7 @@ function isKeyMode(value: unknown): value is KeyMode {
   return KEY_MODES.some((mode) => mode === value);
 }
 
-function isValidPlanLabel(value: unknown): value is string {
+export function isValidPlanLabel(value: unknown): value is string {
   if (typeof value !== "string") return false;
   const characters = [...value];
   if (characters.length < 1 || characters.length > PLAN_LABEL_MAX_LENGTH)
