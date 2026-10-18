@@ -528,7 +528,7 @@ test.describe("a limited workspace on an instance with the operator API on", () 
   });
 
   // #433-T10
-  test("an Owner chooses two different catalog entries for Diff and Dynamic Review of a project, and sees no model or provider", async () => {
+  test("@smoke an Owner chooses two different catalog entries for Diff and Dynamic Review of a project, and sees no model or provider", async () => {
     const page = ownerPage();
     await seedCatalog(e2eEnv.operatorDatabasePath, [
       {

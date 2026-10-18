@@ -51,7 +51,7 @@ test.describe("the provider and model of a project on its own key", () => {
   });
 
   // #433-T09
-  test("a person picks the provider and the model for Diff Review and for Dynamic Review, and finds them after a reload", async ({
+  test("@smoke a person picks the provider and the model for Diff Review and for Dynamic Review, and finds them after a reload", async ({
     page,
   }) => {
     await openProject(page);
