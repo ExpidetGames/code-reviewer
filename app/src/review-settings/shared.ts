@@ -15,6 +15,10 @@ import { createCatalogService } from "../model-catalog/service.ts";
 import { createModelTiersService } from "../model-tiers/service.ts";
 import { configuredTiers } from "../model-tiers/tiers.ts";
 import { readEffectiveEntitlements } from "../workspaces/effective-entitlements.ts";
+import {
+  entryAllowed,
+  type ResolvedEntitlements,
+} from "../workspaces/entitlements.ts";
 import { keyModeForJob } from "../llm/resolve.ts";
 import { catalogSelectionFrom } from "./catalog-selection.ts";
 import {
@@ -38,6 +42,11 @@ export function reviewSettingsServiceFor(
     modelCapabilities,
     logger: { info: (line) => console.info(line) },
   });
+  // The service is made for one request. The key mode and every entry of the picker ask about the same entitlements, so
+  // they are read once, on first use, and not once per question.
+  let entitlements: Promise<ResolvedEntitlements> | undefined;
+  const readEntitlements = () =>
+    (entitlements ??= readEffectiveEntitlements(db, workspaceId));
   return createReviewSettingsService({
     appSettings: createAppSettingsRepository(db, workspaceId),
     projects: createProjectsRepository(db, workspaceId),
@@ -47,15 +56,18 @@ export function reviewSettingsServiceFor(
     // #280, #283: the models of a workspace on the operator's key are the operator's, and the workspace's budget is not
     // checked against the stored one. Anything but the workspace's own key hides the model fields and the estimate,
     // including entitlements that cannot be read: the jobs fail closed then, and the page and the API must not show
-    // what the workspace may not see. Read on every call, so a change of the key mode takes effect at once.
+    // what the workspace may not see. Read for each request, so a change of the key mode takes effect at once.
     operatorsModels: async () =>
-      keyModeForJob(await readEffectiveEntitlements(db, workspaceId)) !== "own",
+      keyModeForJob(await readEntitlements()) !== "own",
     // #283: for the quality choice, whether each level has a model for each kind: yes or no, never which model. Read
     // on every call, so a change of the operator's configuration shows at once.
     tierAvailability: async () => configuredTiers(await modelTiers.read()),
-    // #430: the catalog a workspace on the operator's key picks from. Every released entry is allowed until the
-    // `modelAccess` entitlement exists (#428); the service reads this only for a workspace on the operator's key.
-    catalog: catalogSelectionFrom(catalog, async () => true),
+    // #430: the catalog a workspace on the operator's key picks from; the entitlements of the workspace decide which
+    // entries it may pick (`modelAccess`, #428). Entitlements that cannot be read allow nothing. The service reads this
+    // only for a workspace on the operator's key.
+    catalog: catalogSelectionFrom(catalog, async (id) =>
+      entryAllowed(await readEntitlements(), { id }),
+    ),
     // Read on every call, so a changed LLM_MODEL reaches the next review.
     builtIn: () => builtInReviewSettings(configuredLlmModel(process.env)),
   });
