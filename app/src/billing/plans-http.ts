@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// The handlers behind the plans data routes of the admin portal (#438), with their collaborators passed in so the route
+// The handlers behind the plans data routes of the admin portal (#438; the route files are below
+// src/app/api/instance-portal/billing/plans and the proxy's /admin rewrite serves them at the addresses below), with their collaborators passed in so the route
 // files only wire the real ones and tests wire a test database:
 //
 //   GET    /api/admin/billing/plans             the plans in display order with their versions, the catalog entries to

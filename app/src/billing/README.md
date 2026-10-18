@@ -197,9 +197,21 @@ and `default_entitlements` stays the operator's. Instance admin only.
 minor units, tax inclusive, `NULL` for none). Later issues add the Paddle price links to a version (#439, #440) and the
 subscriptions that pin one (#441).
 
+**Why the two tables reference users.** `billing_plans.updated_by` and `billing_plan_versions.created_by` say who last changed
+a plan and who made a version: the audit trail of a price or a limit that customers were sold, which the operator will want to
+read back when a subscriber asks why the terms are what they are. They are foreign keys to `users` with `on delete set null`,
+like `model_catalog_entries.updated_by`, so deleting an account never deletes a plan or a version; the account merge moves them
+to the surviving account (`github-signin/merge.ts`, and `merge.integration.test.ts` fails for a user column that is not listed
+there). `created_by` is the one column of a version that may change after it was written (the merge and the deletion of a user
+rewrite it), which is why the guard below names it.
+
 **A version is the sold unit.** Saving the price, the limits, the key mode or the model access creates the next version
 (`createNext`: the previous current one becomes `legacy` in the same transaction); a version is never updated except for that
-role, and the repository offers no other update (a unit test pins the list of its functions). The caller states the number of
+role, and the repository offers no other update (a unit test pins the list of its functions). The **database enforces it too**:
+migration `20261018140000_protect_billing_plan_versions` adds triggers that refuse a delete and an update of any column but
+`role` and `created_by` (message `billing_plan_versions_immutable`), for whichever app instance or SQL writes. A test updates
+every column the table has and fails for one the trigger does not protect, so a later issue that adds a column to the table
+(#439, #440) has to extend the trigger (SQLite lists the columns; the Postgres trigger compares the whole row and needs no change). The caller states the number of
 the version it saw (`basedOnVersion`): another number means somebody saved meanwhile (`plan_changed`), and two writers that read
 the same version cannot both win (a partial unique index on the one `current` version per plan and the unique `(plan, number)`).
 Terms equal to the current version are refused (`plan_version_unchanged`). The page asks for a confirmation that names the
@@ -222,33 +234,53 @@ editable. The plans page warns (non-blocking) when workspaces with a stored own 
 **Prices** are admin data: typed as dollars and cents (`parseUsdToMinor`, at most two decimals, shared by the form and its tests
 in `src/admin/ui/plan-money.ts`), stored as integers in minor units. A paid version needs a monthly price (a positive integer);
 the yearly price is optional, **an amount and not a discount** (the plan screen computes "save N%" from the two, #443), and no
-yearly price means no yearly option; there is no `yearly_enabled`. A `free` or `contact` plan has no price
+yearly price means no yearly option; there is no `yearly_enabled`. A price is at most `PRICE_MAX_MINOR` (1,000,000 USD in cents,
+`plan-money.ts`): the columns are `integer`, which Postgres holds as int4 (at most 2,147,483,647), and a larger amount is
+refused by the service as `plan_price_invalid` before the database could answer "out of range". A `free` or `contact` plan has no price
 (`plan_price_not_allowed`), a bad amount is `plan_price_invalid`. No amount, limit or price is a constant of the code; the seeded
 Free limits are the starting values of an editable version. #439 must refuse a Paddle price whose amount differs from the
 entered one and #440 must create the price from it.
 
-**The Free plan.** Seeded the first time billing is switched on (`enable`, called by the switch in `settings-service.ts`; if it
-cannot be written the switch is put back and the request fails `unavailable`): kind `free`, key mode `managed` (fixed), 10 Diff and
+**The Free plan.** Seeded the first time billing is switched on (`enable`, called by the switch in `settings-service.ts` inside the
+transaction that flips it: if it cannot be written nothing is switched on and the request fails `unavailable`): kind `free`, key mode `managed` (fixed), 10 Diff and
 2 Dynamic runs per month, `modelAccess` `[]` until the operator picks entries, no price, never deleted or archived, no checkout.
 Its **current version is written to `default_entitlements` with the marker `source: billing`** on enabling, on every new Free
 version and when the Free plan is renamed (the plan label is the name), in the same transaction as the change. The period start
 is the first day of the current UTC month and never moves back; **the monthly rollover of the Free period is not written by
-this issue** (follow-up). The writer is `setBillingDefaultEntitlements`, whose argument type requires `modelAccess`
+this issue**: it is #465 (until it exists, Free usage is counted from the month in which the default was last written). The writer is `setBillingDefaultEntitlements`, whose argument type requires `modelAccess`
 (`plan-entitlements.ts` throws for a managed version without one), so billing never relies on "an omitted `modelAccess` keeps the
 stored one": a paid to Free or Free to paid write replaces the list, and an `own` version states `{ catalogEntries: null }`
 (nothing reads it). The default is a fallback for workspaces without a row; a `manual` workspace row is never touched.
 
 **While the billing switch is on, a write to the default through the operator API is refused** `409 entitlements_default_managed_by_billing`
-(`switch.ts` reads the switch alone, since the operator API may not reach the secret store; the portal has no such write; a future one must refuse it the same way). **Switching billing off** removes a default that
-billing wrote (marker `billing`) and leaves one the operator wrote; the plans stay. Enabling again re-writes the Free default.
-**Enabling replaces a default the operator had** (the enabling notice already says that billing takes the default over).
+(`switch.ts` reads the switch alone, since the operator API may not reach the secret store; the portal has no such write; a
+future one must refuse it the same way). **Switching billing off** removes a default that billing wrote (marker `billing`) and
+leaves one the operator wrote; the plans stay. Enabling again re-writes the Free default. **Enabling replaces a default the
+operator had, and switching off does not bring it back** (the instance has no default then, which is unlimited); the enabling
+notice says so (`enabling-copy.ts`).
+
+**A default with the marker never outlives a switched off billing** (review of #462, N2, N3). Everything that writes the default
+takes the same lock (`lockDefaultEntitlements`, an advisory transaction lock on Postgres; SQLite's transactions are
+serialized) and reads the switch under it:
+
+- Switching on is one transaction: the switch is flipped and the Free plan seeded with its default (`plans.enable(adminId,
+transaction)`). A crash or a failure in between leaves billing off and nothing seeded; a repeated enable that fails changes
+  nothing (billing stays on with the default it had).
+- Switching off is one transaction: the switch is flipped and a default with the marker removed (`plans.release(transaction)`),
+  also when billing was already off and a marker was left behind. A failure in between keeps the switch on.
+- `setBillingDefaultEntitlements` reads the switch in its own transaction and writes nothing (returns `false`) while it is off, so
+  a Free save that was in flight when billing was switched off cannot leave the marker behind.
+- The operator API write reads the switch in its transaction too (`setDefaultEntitlementsUnlessBilling`), after the early check
+  of the request, so a switch-on in between is refused with the 409 and its default is not overwritten by an unmarked one.
 
 **Enterprise** is a `contact` plan: name, text, contact target, no versions, no price, no checkout (`contact_plan_has_no_versions`).
 **Archive** hides a plan from new subscribers (and clears `offered` and `popular`; the Free plan cannot be archived). A plan with
 versions is not deleted (`plan_has_versions`: its subscribers bought them), an Enterprise plan is; the Free plan never
 (`free_plan_not_deletable`).
 
-**Routes** (`plans-http.ts`; all `Cache-Control: no-store`, errors `{ "error": <code>, "field"?, "issues"? }`, a write answers
+**Routes** (`plans-http.ts`; the files are `src/app/api/instance-portal/billing/plans/route.ts` and `.../plans/[planKey]/route.ts`,
+and the proxy's `/admin` rewrite serves them under the public address `/api/admin/billing/plans`, the page `/admin/billing/plans` is
+`src/app/(app)/instance-portal/billing/plans/page.tsx`; all `Cache-Control: no-store`, errors `{ "error": <code>, "field"?, "issues"? }`, a write answers
 `{ ok: true, clearedPopular, plans }`):
 
 - `GET /api/admin/billing/plans`: the plans in display order with their versions, the catalog entries to pick from (id, name,

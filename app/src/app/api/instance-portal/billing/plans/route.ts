@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// GET|POST /api/admin/billing/plans: the plans of the billing module (#438), for the instance admin only. Not signed in is
+// GET|POST /api/admin/billing/plans (this file is below instance-portal; the proxy's /admin rewrite serves it at that public
+// address): the plans of the billing module (#438), for the instance admin only. Not signed in is
 // 401, signed in but not an admin is a 404 (src/admin/access.ts); the proxy has done that first and the handlers do it again
 // before anything is read. While billing is off these routes are the 404 of a path that does not exist and read no billing
 // table (src/billing/enabled.ts). The logic is in src/billing/plans-http.ts.

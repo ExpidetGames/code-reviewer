@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// PUT|DELETE /api/admin/billing/plans/:planKey: one change to a plan, or the deletion of a plan that has no version (#438),
+// PUT|DELETE /api/admin/billing/plans/:planKey (this file is below instance-portal; the proxy's /admin rewrite serves it at that
+// public address): one change to a plan, or the deletion of a plan that has no version (#438),
 // for the instance admin only; the 404 of a missing path while billing is off. See src/billing/plans-http.ts.
 import { notFound } from "next/navigation";
 import { connection } from "next/server";

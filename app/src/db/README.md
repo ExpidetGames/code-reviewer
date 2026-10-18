@@ -391,7 +391,14 @@ app of the previous release on the same database is unaffected (it never reads t
 - `billing_plan_versions` (`id`, `plan_id` → `billing_plans.id` `on delete restrict`, `number` unique per plan, `role`
   `current`/`legacy` with at most one `current` per plan (partial unique index), `key_mode` `own`/`managed`, `limits` JSON,
   `model_access` JSON (`NULL` for `own`, a check), `monthly_amount_minor` and `yearly_amount_minor` (positive integers or `NULL`,
-  a yearly price needs a monthly one), `created_at`, `created_by`). Immutable after creation except `role`.
+  a yearly price needs a monthly one), `created_at`, `created_by`). Immutable after creation except `role` (and `created_by`, an audit reference that the account merge
+  and the deletion of a user rewrite): migration `20261018140000_protect_billing_plan_versions` adds triggers that refuse a delete
+  and any other update (message `billing_plan_versions_immutable`; the one place of the schema that is not the schema builder,
+  so the statements differ by engine, and a test updates every column to catch one that a later migration adds without extending
+  the SQLite trigger). `monthly_amount_minor` and `yearly_amount_minor` are int4 on Postgres: the service refuses a price above
+  1,000,000 USD (`PRICE_MAX_MINOR`).
+- The users: `billing_plans.updated_by` and `billing_plan_versions.created_by` are the audit trail of who changed a plan and who
+  made a version (`src/billing/README.md`, "Why the two tables reference users"); the user merge moves them.
 
 Both are instance level (`billing-plans-repository.ts`, `billing-plan-versions-repository.ts`): no workspace owns a plan. See
 `src/billing/README.md`.
