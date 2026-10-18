@@ -3,7 +3,7 @@
 // The hosted deployment's Dynamic Review in the privileged lane (#332-T02, and the `worker-once` and `probe` modes end to
 // end that #324 and #331 left for it): the deploy canary passes first, then a signed `opened` webhook reaches the app
 // (in the dispatch mode of the hosted deployment), the app wakes the REAL Dispatcher, which claims exactly that job
-// because its capability probe passed, and its Sandbox-Launcher starts the Worker through the stand-in `docker` in the
+// (the deploy canary passed first and is the only proof; the dispatch runs no probe, #479), and its Sandbox-Launcher starts the Worker through the stand-in `docker` in the
 // way of the hardened container: root with exactly the eight capabilities of the spec, no-new-privileges and a read-only
 // root (runner/scripts/dynamic_e2e_worker_container.sh). The REAL Worker (`worker-once`) runs its own startup (the
 // engine user's network rules, the end of NET_ADMIN, the self-check on the pinned OpenCode), fetches its job with the
@@ -185,7 +185,7 @@ test.describe("a pull request on its way to a Dynamic Review summary through the
     const repo = required(repository, "The repository");
 
     // The release gate, as the pipeline runs it: the probe container (the `probe` mode of the image, in the
-    // container's own layout) vouches for the hardening, and `opencode` is advertised from that.
+    // container's own layout) vouches for the hardening of the deployment; the dispatch below runs no probe of its own (#479).
     const canary = await runDeployCanary(150);
     expect(
       canary.code,
@@ -270,7 +270,7 @@ test.describe("a pull request on its way to a Dynamic Review summary through the
       asked.flatMap((item) => Object.values(item.toolResults)).join("\n"),
     ).toContain("def find_user(connection, name):");
 
-    // The order of the design: the probe, then the claim and the launch, then one Worker in a container with the
+    // The order of the design: the deploy canary, then the claim and the launch, then one Worker in a container with the
     // hardened flags (the eight capabilities of the spec among them) that advertised `opencode` on its own merits.
     const log = theDispatcher.output();
     expect(log.indexOf('"event":"probe_passed"')).toBeLessThan(
