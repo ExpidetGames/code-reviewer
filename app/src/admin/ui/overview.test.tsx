@@ -36,6 +36,10 @@ function view(overrides: Partial<AdminSettingsView> = {}): AdminSettingsView {
     operatorLlmKey: { state: "not_configured" },
     operatorLlmKeys: { openrouter: { state: "not_configured" } },
     modelTiers: NO_TIERS,
+    modelCatalog: {
+      diff: { released: 0, hasDefault: false },
+      dynamic: { released: 0, hasDefault: false },
+    },
     workspaceCount: 1,
     githubConfigured: false,
     mailConfigured: false,
@@ -526,37 +530,59 @@ describe("the LLM key of each provider on the overview (#427)", () => {
   });
 });
 
-describe("the model tiers (#280)", () => {
-  const tiers = (modelTiers: AdminSettingsView["modelTiers"]) =>
-    view({ modelTiers });
+describe("the model catalog (#429)", () => {
+  const catalog = (modelCatalog: AdminSettingsView["modelCatalog"]) =>
+    view({ modelCatalog });
 
-  // #280-T01
-  it("shows a row that says which tiers are configured, without a form: the operator API sets them", () => {
+  // #429-T06
+  it("shows how many entries are released for each kind and whether the kind has a default, in place of the tiers", () => {
     render(
       <Overview
-        settings={tiers({
-          low: { diff: true, dynamic: false },
-          medium: { diff: false, dynamic: false },
-          high: { diff: true, dynamic: true },
+        settings={catalog({
+          diff: { released: 2, hasDefault: true },
+          dynamic: { released: 0, hasDefault: false },
         })}
       />,
     );
 
-    const text = row("Managed model tiers").textContent ?? "";
-    expect(text).toContain("Low: Diff only");
-    expect(text).toContain("Medium: not configured");
-    expect(text).toContain("High: Diff and Dynamic");
-    expect(text).toContain("operator API");
-    // Nothing to follow: there is no page that sets them.
-    expect(within(row("Managed model tiers")).queryByRole("link")).toBeNull();
+    const text = row("Model catalog").textContent ?? "";
+    expect(text).toContain("Diff: 2 released, default set");
+    expect(text).toContain("Dynamic: none released, no default");
+    expect(screen.queryByText("Managed model tiers")).toBeNull();
   });
 
-  // #280-T01
-  it("is optional: no tier is no warning and no attention notice", () => {
+  // #429-T06
+  it("shows counts and no name, provider or model: the view has nothing else to show", () => {
+    const settings = catalog({
+      diff: { released: 1, hasDefault: false },
+      dynamic: { released: 1, hasDefault: true },
+    });
+    render(<Overview settings={settings} />);
+
+    expect(Object.keys(settings.modelCatalog).sort()).toEqual([
+      "diff",
+      "dynamic",
+    ]);
+    for (const kind of Object.values(settings.modelCatalog))
+      expect(Object.keys(kind).sort()).toEqual(["hasDefault", "released"]);
+    expect(row("Model catalog").textContent).not.toMatch(/mce_|\//);
+  });
+
+  // #429-T06
+  it("links to the LLM page, where the catalog is managed", () => {
     render(<Overview settings={view()} />);
 
-    expect(row("Managed model tiers").textContent).toContain(
-      "Low: not configured",
+    expect(
+      within(row("Model catalog")).getByRole("link").getAttribute("href"),
+    ).toBe("/admin/llm");
+  });
+
+  // #429-T06
+  it("is optional: an empty catalog is no warning and no attention notice", () => {
+    render(<Overview settings={view()} />);
+
+    expect(row("Model catalog").textContent).toContain(
+      "Diff: none released, no default",
     );
     expect(
       screen.queryByRole("region", { name: /needs attention/i }),

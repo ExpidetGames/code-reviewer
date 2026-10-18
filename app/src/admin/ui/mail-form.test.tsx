@@ -62,6 +62,10 @@ function view(
       medium: { diff: false, dynamic: false },
       high: { diff: false, dynamic: false },
     },
+    modelCatalog: {
+      diff: { released: 0, hasDefault: false },
+      dynamic: { released: 0, hasDefault: false },
+    },
     workspaceCount: 1,
     githubConfigured: false,
     mailConfigured: false,
