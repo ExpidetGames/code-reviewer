@@ -79,8 +79,78 @@ describe("the Vercel entry", () => {
     );
   });
 
+  // #479-T04
+  it("accepts the first Dynamic call of a fresh instance at once, claims it and starts its job VM, and starts no canary VM", async () => {
+    const fake = await startApp();
+    try {
+      stubEnvironment();
+      vi.stubEnv("RUNNER_API_URL", fake.url);
+      stubSandbox();
+      sdk.create.mockRejectedValue(
+        Object.assign(new Error("too many requests"), {
+          name: "APIError",
+          response: { status: 429 },
+        }),
+      );
+      const jobId = fake.enqueue({ reviewKind: "dynamic" });
+      const { default: app } = await import("./index.ts");
+      const { signedRequest, webhookBody } =
+        await import("./test-support/harness.ts");
+
+      const response = await app.fetch(
+        signedRequest({
+          body: webhookBody({ jobId, reviewKind: "dynamic" }),
+          nowSeconds: Math.floor(Date.now() / 1000),
+          secret: "dummy-signing-secret-current-0000000000",
+          keyId: "k1",
+        }),
+      );
+
+      // No `503 Retry-After` for a probe that is on its way: there is no probe on the dispatch path.
+      expect(response.status).toBe(202);
+      expect(response.headers.get("retry-after")).toBeNull();
+      await waitFor(
+        () => fake.requests().some((request) => request.route === "release"),
+        "the release of the job",
+      );
+      expect(fake.requests().filter((r) => r.route === "claim")).toHaveLength(
+        1,
+      );
+      // The only VM asked for is the job's (the platform refused it); not one of them is a canary.
+      expect(sdk.create).toHaveBeenCalledTimes(1);
+      expect(JSON.stringify(sdk.create.mock.calls[0]?.[0])).not.toContain(
+        "canary",
+      );
+    } finally {
+      await fake.close();
+    }
+  });
+
+  // #479-T04
+  it("claims no Dynamic job when the deployment is configured for Diff jobs only", async () => {
+    stubEnvironment();
+    stubSandbox();
+    vi.stubEnv("DISPATCHER_ENGINES", "pr-agent");
+    const { default: app } = await import("./index.ts");
+    const { signedRequest, webhookBody } =
+      await import("./test-support/harness.ts");
+
+    const response = await app.fetch(
+      signedRequest({
+        body: webhookBody({ reviewKind: "dynamic" }),
+        nowSeconds: Math.floor(Date.now() / 1000),
+        secret: "dummy-signing-secret-current-0000000000",
+        keyId: "k1",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ reason: "not_capable" });
+    expect(sdk.create).not.toHaveBeenCalled();
+  });
+
   // #331-T01
-  it("starts a canary VM for the first Dynamic call and asks the App to ask again, instead of claiming on the Launcher's word", async () => {
+  it("makes a canary VM for POST /probe, the deploy canary, and for nothing else", async () => {
     stubEnvironment();
     stubSandbox();
     sdk.create.mockRejectedValue(
@@ -90,66 +160,56 @@ describe("the Vercel entry", () => {
       }),
     );
     const { default: app } = await import("./index.ts");
-    const { signedRequest, webhookBody } =
-      await import("./test-support/harness.ts");
-    const call = () =>
-      app.fetch(
-        signedRequest({
-          body: webhookBody({ reviewKind: "dynamic" }),
-          nowSeconds: Math.floor(Date.now() / 1000),
-          secret: "dummy-signing-secret-current-0000000000",
-          keyId: "k1",
-        }),
-      );
 
-    const first = await call();
+    const response = await app.fetch(
+      new Request("http://dispatcher.test/probe", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer dummy-dispatcher-token-for-tests",
+        },
+      }),
+    );
 
-    expect(first.status).toBe(503);
-    expect(first.headers.get("retry-after")).toMatch(/^\d+$/);
-    await waitFor(() => sdk.create.mock.calls.length === 1, "the canary VM");
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({
+      ok: false,
+      status: "failed",
+    });
+    expect(sdk.create).toHaveBeenCalledTimes(1);
     expect(sdk.create.mock.calls[0]?.[0]).toMatchObject({
       source: { type: "snapshot", snapshotId: "snap_dummy_golden_0001" },
       region: "fra1",
       persistent: false,
     });
-    expect(String(JSON.stringify(sdk.create.mock.calls[0]?.[0]))).toContain(
-      "canary",
-    );
+    expect(JSON.stringify(sdk.create.mock.calls[0]?.[0])).toContain("canary");
   });
 
-  // #331-T02
-  it("claims no Dynamic job while the canary cannot be made, and the App is told to try again", async () => {
+  // #479-T07
+  it("starts with the retired DISPATCHER_PROBE_TTL_SECONDS set to anything, and warns about it", async () => {
     stubEnvironment();
     stubSandbox();
-    sdk.create.mockRejectedValue(
-      Object.assign(new Error("unavailable"), {
-        name: "APIError",
-        response: { status: 503 },
-      }),
-    );
-    const { default: app } = await import("./index.ts");
-    const { signedRequest, webhookBody } =
-      await import("./test-support/harness.ts");
-    const call = () =>
-      app.fetch(
-        signedRequest({
-          body: webhookBody({ reviewKind: "dynamic" }),
-          nowSeconds: Math.floor(Date.now() / 1000),
-          secret: "dummy-signing-secret-current-0000000000",
-          keyId: "k1",
-        }),
+    vi.stubEnv("DISPATCHER_PROBE_TTL_SECONDS", "not-a-number");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    try {
+      const { default: app } = await import("./index.ts");
+      const response = await app.fetch(
+        new Request("http://dispatcher.test/health"),
       );
-    await call();
-    await waitFor(() => sdk.create.mock.calls.length === 1, "the canary VM");
 
-    // The failed probe is remembered for a minute: no second VM, and the App is told to try again after what is
-    // left of that minute (not "not capable", which it would hold against the job for ten minutes).
-    await vi.waitFor(async () => {
-      const response = await call();
-      expect(response.status).toBe(503);
-      expect(Number(response.headers.get("retry-after"))).toBeGreaterThan(20);
-    });
-    expect(sdk.create).toHaveBeenCalledTimes(1);
+      expect(response.status).toBe(200);
+      const written = [warn, log, info]
+        .flatMap((spy) => spy.mock.calls)
+        .map((call) => call.join(" "))
+        .join("\n");
+      expect(written).toContain("deprecated_setting");
+      expect(written).toContain("DISPATCHER_PROBE_TTL_SECONDS");
+    } finally {
+      warn.mockRestore();
+      log.mockRestore();
+      info.mockRestore();
+    }
   });
 
   // #329 (additional)

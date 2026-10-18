@@ -2,7 +2,6 @@
 
 import { describe, expect, it } from "vitest";
 import { ConfigError } from "../config.ts";
-import { CapabilitiesPending } from "../core/types.ts";
 import { noLauncher } from "./none.ts";
 import { sandboxFromEnvironment } from "./sandbox-env.ts";
 import { recordingLogger } from "../test-support/harness.ts";
@@ -58,7 +57,7 @@ describe("the Sandbox-Launcher's configuration from the environment", () => {
   });
 
   // #329 (additional)
-  it("builds the Sandbox-Launcher, which advertises PR-Agent, when the snapshot and the image are configured", async () => {
+  it("builds the Sandbox-Launcher, which advertises both engines, when the snapshot and the image are configured", async () => {
     const sandbox = sandboxFromEnvironment(configured(), never);
 
     const launcher = sandbox.launcher({
@@ -70,7 +69,7 @@ describe("the Sandbox-Launcher's configuration from the environment", () => {
     expect(launcher).not.toBe(noLauncher);
     expect(
       await launcher.capabilities(new AbortController().signal),
-    ).toStrictEqual(["pr-agent"]);
+    ).toStrictEqual(["pr-agent", "opencode"]);
   });
 
   // #329 (additional): the record of the golden snapshot pipeline (#330) is what these variables hold
@@ -338,28 +337,27 @@ describe("the Sandbox-Launcher's configuration from the environment", () => {
   });
 });
 
-describe("the capability probe's configuration from the environment", () => {
+describe("the probe's configuration from the environment", () => {
   const launcherFor = (
     env: Record<string, string>,
     extra: Record<string, string> = {},
+    logger = recordingLogger(),
   ) =>
     sandboxFromEnvironment(env, never).launcher({
       settings: loadSettings({ ...BASE, ...extra }),
-      logger: recordingLogger(),
+      logger,
       background: () => undefined,
     });
 
-  // #331-T01
-  it("puts the Sandbox-Launcher behind the capability probe: it can be asked for a probe, and opencode waits for it", async () => {
+  // #479-T04
+  it("advertises opencode at once, with no proof in between, and keeps a probe for POST /probe only", async () => {
     const launcher = launcherFor(configured());
     const signal = new AbortController().signal;
 
     expect(launcher.probe).toBeTypeOf("function");
-    await expect(
-      launcher.capabilities(signal, "opencode"),
-    ).rejects.toBeInstanceOf(CapabilitiesPending);
-    expect(await launcher.capabilities(signal, "pr-agent")).toStrictEqual([
+    expect(await launcher.capabilities(signal)).toStrictEqual([
       "pr-agent",
+      "opencode",
     ]);
   });
 
@@ -370,28 +368,36 @@ describe("the capability probe's configuration from the environment", () => {
     });
 
     expect(launcher.probe).toBeUndefined();
-    expect(
-      await launcher.capabilities(new AbortController().signal, "opencode"),
-    ).toStrictEqual(["pr-agent"]);
+  });
+
+  // #479-T07
+  it("accepts DISPATCHER_PROBE_TTL_SECONDS, whatever it holds, with a deprecation warning and no other effect", () => {
+    for (const value of ["59", "86401", "hour", "3600"]) {
+      const logger = recordingLogger();
+
+      const launcher = launcherFor(
+        configured({ DISPATCHER_PROBE_TTL_SECONDS: value }),
+        {},
+        logger,
+      );
+
+      expect(launcher.probe).toBeTypeOf("function");
+      expect(logger.text()).toContain("deprecated_setting");
+      expect(logger.text()).toContain("DISPATCHER_PROBE_TTL_SECONDS");
+    }
+  });
+
+  // #479-T07
+  it("does not warn when the deprecated variable is not set", () => {
+    const logger = recordingLogger();
+
+    launcherFor(configured(), {}, logger);
+
+    expect(logger.text()).not.toContain("deprecated_setting");
   });
 
   // #331-T03
   it.each<[string, Record<string, string>, string]>([
-    [
-      "a time to live of 59 seconds",
-      configured({ DISPATCHER_PROBE_TTL_SECONDS: "59" }),
-      "DISPATCHER_PROBE_TTL_SECONDS",
-    ],
-    [
-      "a time to live above a day",
-      configured({ DISPATCHER_PROBE_TTL_SECONDS: "86401" }),
-      "DISPATCHER_PROBE_TTL_SECONDS",
-    ],
-    [
-      "a time to live that is not a number",
-      configured({ DISPATCHER_PROBE_TTL_SECONDS: "hour" }),
-      "DISPATCHER_PROBE_TTL_SECONDS",
-    ],
     [
       "a probe time of 29 seconds",
       configured({ DISPATCHER_PROBE_TIMEOUT_SECONDS: "29" }),
@@ -407,19 +413,11 @@ describe("the capability probe's configuration from the environment", () => {
   });
 
   // #331-T03
-  it("accepts the time to live and the probe time at their bounds", () => {
-    const bounds: [string, string][] = [
-      ["60", "30"],
-      ["3600", "150"],
-      ["86400", "600"],
-    ];
-    for (const [ttl, timeout] of bounds)
+  it("accepts the probe time at its bounds", () => {
+    for (const timeout of ["30", "150", "600"])
       expect(() =>
         sandboxFromEnvironment(
-          configured({
-            DISPATCHER_PROBE_TTL_SECONDS: ttl,
-            DISPATCHER_PROBE_TIMEOUT_SECONDS: timeout,
-          }),
+          configured({ DISPATCHER_PROBE_TIMEOUT_SECONDS: timeout }),
           never,
         ),
       ).not.toThrow();
