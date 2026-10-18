@@ -565,7 +565,7 @@
       "pattern": "^[a-z][a-z0-9_]*$"
     },
     "UsageItem": {
-      "description": "One settled run. Nothing about the pull request, the repository, the branch, the title or any person is in it, and 'modelTier' is the name of a quality tier, never the name of a model. 'costMicroUsd' is millionths of a US dollar of measured model cost, null when the run could not be measured (never a guess); the token counts are null when unknown. A record is immutable once it is served.",
+      "description": "One settled run. Nothing about the pull request, the repository, the branch, the title or any person is in it, 'modelTier' is the name of a quality tier of a run from before the model catalog (null for newer runs), and 'catalogEntryId' / 'catalogEntryName' name the catalog entry a managed run used (null for an own-key run and for older runs); none of them is ever the name of a model. 'costMicroUsd' is millionths of a US dollar of measured model cost, null when the run could not be measured (never a guess); the token counts are null when unknown. A record is immutable once it is served.",
       "type": "object",
       "required": [
         "id",
@@ -622,6 +622,17 @@
           ],
           "maxLength": 32,
           "pattern": "^[a-z][a-z0-9_-]{0,31}$"
+        },
+        "catalogEntryId": {
+          "description": "The catalog entry a managed run used (#432), or null for a run on the workspace's own key and for a run from before the catalog. Optional: an instance of an earlier release does not send it.",
+          "type": ["string", "null"],
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "catalogEntryName": {
+          "description": "The name of that entry when the run was claimed (a rename does not rewrite history), or null. Never a model id.",
+          "type": ["string", "null"],
+          "maxLength": 40
         },
         "costMicroUsd": {
           "type": [

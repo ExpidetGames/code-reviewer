@@ -376,8 +376,14 @@ export interface UsageRecordsTable {
   review_kind: string;
   /** `own` or `managed` (KEY_MODES): whose key the run used. */
   key_mode: string;
-  /** The managed model tier; null until the tiers exist. */
+  /** The managed model tier; null until the tiers exist. Old rows only: the catalog entry replaces it (#432). */
   model_tier: string | null;
+  /** The catalog entry a managed run used (#432); null for an own run and for a row from before the catalog. */
+  catalog_entry_id: string | null;
+  /** The name of that entry when the run was claimed (a snapshot: a rename does not rewrite history). */
+  catalog_entry_name: string | null;
+  /** The provider the run was sent to (#432); operator data, never served to a member. Null before #432. */
+  llm_provider: string | null;
   /** `reserved`, `settled` or `void` (USAGE_STATES). */
   state: string;
   /** The measured cost in millionths of a US dollar; null when unknown. Only on a settled record. */

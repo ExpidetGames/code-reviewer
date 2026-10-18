@@ -62,6 +62,16 @@ export type WorkspaceLlmAssembly = {
    * until a project can choose); a key of another provider is never used. Nothing of another workspace is read.
    */
   accessFor(workspaceId: string, provider?: string): Promise<LlmAccessResult>;
+  /**
+   * The key a job needs once its provider is chosen (#432, ADR 0005, 2.8): the workspace's own key of `provider`, or the
+   * operator's key of `provider`, as the selection says (`keySource`). Unlike `accessFor` it does not read the
+   * entitlements again, so the key always belongs to the key mode the selection was made for. Nothing of the other key
+   * is read, and nothing of another provider.
+   */
+  keyFor(
+    workspaceId: string,
+    selection: { keyMode: "own" | "managed"; provider: string },
+  ): Promise<LlmAccessResult>;
   summaryFor(
     workspaceId: string,
     provider?: string,
@@ -152,10 +162,35 @@ export function createWorkspaceLlm({
     );
   }
 
+  async function keyFor(
+    workspaceId: string,
+    { keyMode, provider }: { keyMode: "own" | "managed"; provider: string },
+  ): Promise<LlmAccessResult> {
+    // The model and the context window of the instance; the model of the job is the selection's, not this one.
+    const defaults = readLlmDefaults(env());
+    return resolveWorkspaceLlmAccess(
+      keyMode === "managed"
+        ? {
+            keyMode,
+            provider,
+            operatorKey: await operatorKey().forJob(provider),
+            defaults,
+          }
+        : {
+            keyMode,
+            provider,
+            key: await keyServiceFor(workspaceId).keyFor(provider),
+            defaults,
+          },
+      providers,
+    );
+  }
+
   return {
     keyServiceFor,
     operatorKey,
     accessFor,
+    keyFor,
     async summaryFor(workspaceId, provider) {
       return summarizeLlmAccess(await accessFor(workspaceId, provider));
     },

@@ -53,9 +53,7 @@ describe("the billing plans migration", () => {
     const names = Object.keys(await migrationProvider.getMigrations());
 
     const before = names.filter((name) => name < SPLIT).sort();
-    expect(before.at(-1)).toBe(
-      "20261017160000_add_workspace_entitlements_model_access",
-    );
+    expect(before.at(-1)).toBe("20261018090000_add_usage_record_catalog_entry");
     expect(names).toContain(SPLIT);
   });
 

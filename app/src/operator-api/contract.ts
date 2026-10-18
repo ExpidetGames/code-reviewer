@@ -45,6 +45,9 @@ export const USAGE_SAFETY_LAG_MS = 60_000;
  */
 export const TIER_NAME_PATTERN = /^[a-z][a-z0-9_-]{0,31}$/;
 
+/** What a usage item may show as `catalogEntryId`: the shape of an entry id (the contract's pattern). At most 64 characters. */
+export const ENTRY_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+
 /** The longest cursor the feed accepts (the contract's `UsageCursor.maxLength`). */
 export const MAX_USAGE_CURSOR_LENGTH = 128;
 

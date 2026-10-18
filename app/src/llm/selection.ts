@@ -207,19 +207,32 @@ export function resolveModelSelection(
 const advertised = (runnerProviders: readonly string[], id: string): boolean =>
   runnerProviders.includes(id);
 
-function resolveOwn(
-  input: Extract<SelectionInput, { keyMode: "own" }>,
-  providers: SelectionProviders,
-): SelectionResult {
-  const { kind, runnerProviders, builtInModel, layers } = input;
+/** The outcome of walking the layers of one kind: what is in force, and where the model was set. */
+export type ModelWalk = {
+  /** The provider in force after the last layer. */
+  provider: string;
+  /** The provider as the last layer that set one wrote it, or undefined when none did. */
+  providerAsWritten: string | undefined;
+  /** The model of the last layer that set one, or undefined. */
+  model: string | undefined;
+  /** The provider in force where `model` was set; a model only counts for that provider. */
+  modelProvider: string;
+};
 
-  // Walk the layers from the weakest: a field a layer sets replaces the one below. The provider in force when the
-  // model was set is kept next to the model, so a model is only used for the provider it was set for.
-  let provider: string = providers.defaultProvider.id;
+/**
+ * Walks the layers from the weakest: a field a layer sets replaces the one below. The provider in force when the model was
+ * set is kept next to the model, so a model is only used for the provider it was set for. The one rule of the claim (the
+ * resolver) and of the save (`modelProviderMismatch`), so the two cannot drift.
+ */
+export function walkModelLayers(
+  layers: readonly (ModelLayer | undefined)[],
+  defaultProvider: string,
+): ModelWalk {
+  let provider = defaultProvider;
   let model: string | undefined;
   let modelProvider = provider;
   let providerAsWritten: string | undefined;
-  for (const layer of [layers.workspace, layers.project]) {
+  for (const layer of layers) {
     if (layer === undefined) continue;
     if (layer.provider !== undefined) {
       provider = layer.provider;
@@ -230,6 +243,42 @@ function resolveOwn(
       modelProvider = provider;
     }
   }
+  return { provider, providerAsWritten, model, modelProvider };
+}
+
+/**
+ * Whether the layers pair a model with a provider other than the one it was set for (a workspace model next to a project
+ * provider, or the reverse). The claim fails such a job closed (`model_provider_mismatch`); the settings save refuses the
+ * same combination so the user does not find out only when a job fails (#432, own key mode only).
+ */
+export function modelProviderMismatch(
+  workspace: ModelLayer | undefined,
+  project: ModelLayer | undefined,
+  defaultProvider: string,
+): boolean {
+  const { provider, model, modelProvider } = walkModelLayers(
+    [workspace, project],
+    defaultProvider,
+  );
+  return model !== undefined && modelProvider !== provider;
+}
+
+function resolveOwn(
+  input: Extract<SelectionInput, { keyMode: "own" }>,
+  providers: SelectionProviders,
+): SelectionResult {
+  const { kind, runnerProviders, builtInModel, layers } = input;
+
+  const {
+    provider,
+    model: setModel,
+    modelProvider,
+    providerAsWritten,
+  } = walkModelLayers(
+    [layers.workspace, layers.project],
+    providers.defaultProvider.id,
+  );
+  let model = setModel;
 
   const descriptor = providers.find(provider);
   if (descriptor === undefined || !advertised(runnerProviders, descriptor.id))

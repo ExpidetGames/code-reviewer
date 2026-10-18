@@ -151,20 +151,22 @@ provider_not_found`.
   before it leaves, so `maskSecretInText` masks it in the result whichever app instance serves it and after a rotation:
   1. **The legacy claim**: the claim response carries it to the runner, like the workspace key (`claim.ts`).
   2. **The Worker API** (#320): the claim of a Dispatcher carries no key; the **first fetch** of the job with the
-     per-job credential mints and reveals it (`buildJobInput`, after `checkJob` resolved the access again). A key
+     per-job credential mints and reveals it (`buildJobInput`, after `checkJob` chose the model and loaded the key again). A key
      that was removed or rotated between the claim and the fetch is the one the fetch uses; one that is gone ends the
      job with `llm_not_configured`.
-- **The model is the operator's, per tier.** While a job runs on the operator's key, the operator chooses the model,
-  never the tenant (#280, `src/model-tiers/README.md`): the workspace chooses a **tier** (the review setting
-  `modelTier`: `low`, `medium`, `high`; default `medium`) and the model of that tier for the job's review kind, which the
-  operator configured through the operator API, replaces `model` (Diff) or the Dynamic model, in the job, in the Dynamic
-  options and in the capabilities read (`withTierModel` in `runner-api/claim.ts`), on both delivery paths. The review
-  settings' `model`, fallback model and Dynamic model stay stored and take effect again if the workspace goes back to
-  its own key; the workspace's `maxTokens` is kept and cut to the context window of the tier's model when it is known.
-  A tier without a model fails the job with `managed_tier_unavailable`: no move to another tier and not to the
-  instance's `LLM_MODEL`, which a managed job no longer uses at all. The model of a tier never reaches a workspace
-  (not the settings, a page, a result, a record or a log). The settings pages replace the model fields with a Quality
-  choice (Low, Medium, High; `src/review-settings/README.md`, #283).
+- **The model is the operator's, per catalog entry.** While a job runs on the operator's key, the operator chooses the
+  model, never the tenant (#432, ADR 0005, 2.8): the project selects a **catalog entry** per kind (`catalogEntryDiff`,
+  `catalogEntryDynamic`), else the instance default entry of the kind applies, and the entry's provider, model and the
+  operator's key of that provider are what the job gets, in the job, in the Dynamic options and in the capabilities
+  read, on both delivery paths (`runner-api/claim-selection.ts`, `src/llm/selection.ts`). The review settings' `model`,
+  provider, fallback model and Dynamic model stay stored and take effect again if the workspace goes back to its own
+  key; the workspace's `maxTokens` is kept and cut to the context window of the entry's model when it is known. An
+  entry that is missing, retired, not for the kind, not in the plan's `modelAccess` or of a provider the runner cannot
+  run fails the job with `managed_model_unavailable`: no move to another entry and not to the instance's `LLM_MODEL`,
+  which a managed job does not use at all. The model of an entry never reaches a workspace (not the settings, a page, a
+  result, a record or a log). An **own** workspace never reads the catalog or `modelAccess` (#432-T06, T16): its
+  provider and model come from its settings layers, and the key is its own key **of that provider** (`keyFor`).
+  The old tiers (`modelTier`, `src/model-tiers`) are no longer read by the claim; their removal is the migration issue.
 - **The Worker's fetch asks for the standing again.** A workspace suspended after the claim, or whose entitlements
   became unreadable, gets no key: the job ends with the code of the claim (`runner-api/README.md`). Quotas are not
   counted again.
@@ -176,7 +178,7 @@ provider_not_found`.
   managed**, the operator's current key of **every** provider (not only the one the job runs on: a result must not
   show any of them); the key of the claim comes from `job_claimed_keys`.
 - **The usage record says the key that was used.** The claim reserves the record as `own` and `recordKeyMode` sets it
-  from the source of the resolved access (`managed` for `operator`), on both paths. The cost limit of #277 watches the
+  from the key mode of the workspace's entitlements (`managed` for the operator's key), on both paths. The cost limit of #277 watches the
   records whose key mode is `managed` for a workspace whose entitlements say `managed`; since the key mode of the
   entitlements is also what picks the key, the two cannot disagree except in the moment an operator changes the mode
   between the claim's admission and the key lookup, and then the record follows the key that is actually used.

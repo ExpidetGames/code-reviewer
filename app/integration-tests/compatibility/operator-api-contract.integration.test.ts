@@ -213,6 +213,17 @@ describe("the usage part of the contract file", () => {
     expect(defs.UsagePage.description).toContain("idempotency key");
   });
 
+  // #432-T14
+  it("grows by the entry id and name as optional fields, so a strict reader of the previous release still validates", () => {
+    const defs = readContract(OPERATOR_CONTRACT_FILE).$defs as unknown as {
+      UsageItem: { required: string[] };
+    };
+
+    expect(defs.UsageItem.required).not.toContain("catalogEntryId");
+    expect(defs.UsageItem.required).not.toContain("catalogEntryName");
+    expect(defs.UsageItem.required).toContain("modelTier");
+  });
+
   // #278-T09
   it("promises no field that could carry a repository, a pull request, a title, a user or a model name", () => {
     const defs = readContract(OPERATOR_CONTRACT_FILE).$defs as unknown as {
@@ -224,6 +235,8 @@ describe("the usage part of the contract file", () => {
 
     expect(Object.keys(defs.UsageItem.properties).sort()).toEqual(
       [
+        "catalogEntryId",
+        "catalogEntryName",
         "completionTokens",
         "costMicroUsd",
         "id",
