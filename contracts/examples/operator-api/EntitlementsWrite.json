@@ -8,5 +8,11 @@
     "ownKeyCostLimitMicroUsd": 2000000
   },
   "suspended": false,
-  "suspensionCode": null
+  "suspensionCode": null,
+  "modelAccess": {
+    "catalogEntries": [
+      "mce_3f9a1c07d25e4b86a0d25e3c8f1b4a60",
+      "mce_9b04d7e1c2a84f3d8e6a51b7c0d92f14"
+    ]
+  }
 }

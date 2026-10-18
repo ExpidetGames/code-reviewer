@@ -10,6 +10,7 @@ import {
   type EntitlementsData,
   type KeyMode,
   type LimitName,
+  type ModelAccess,
 } from "./entitlements.ts";
 
 export const ENTITLEMENT_ERROR_CODES = [
@@ -29,11 +30,23 @@ export const ENTITLEMENT_ERROR_CODES = [
   "period_start_backwards",
   "suspended_invalid",
   "suspension_code_invalid",
+  /**
+   * #428: the model access is not `{ catalogEntries }` with null or at most 100 distinct catalog entry ids. Also the
+   * refusal of a default write that leaves `modelAccess` out over an unreadable stored default (`field` modelAccess).
+   */
+  "catalog_entry_invalid",
 ] as const;
 export type EntitlementErrorCode = (typeof ENTITLEMENT_ERROR_CODES)[number];
 
 export const PLAN_LABEL_MAX_LENGTH = 64;
 export const SUSPENSION_CODE_MAX_LENGTH = 64;
+/** The most entries a model access may list (#428). */
+export const MODEL_ACCESS_MAX_ENTRIES = 100;
+/**
+ * What an id of the model access looks like: the prefix of a catalog entry id and opaque text. Only the shape is checked;
+ * whether an entry with that id exists is not (an unknown id matches nothing).
+ */
+export const CATALOG_ENTRY_ID_PATTERN = /^mce_[A-Za-z0-9_-]{1,64}$/;
 /** A clock that runs a little ahead is fine; a reset dated further ahead is a mistake. */
 export const PERIOD_START_FUTURE_TOLERANCE_MS = 5 * 60 * 1000;
 
@@ -151,7 +164,40 @@ const ENTITLEMENT_KEYS = [
   "periodStart",
   "suspended",
   "suspensionCode",
+  "modelAccess",
 ] as const;
+
+type ModelAccessValidation =
+  { ok: true; value: ModelAccess } | { ok: false; field: string };
+
+/**
+ * Checks `{ catalogEntries }`: null or a list of at most 100 distinct id-shaped strings (a write refuses a repeated id). A missing field is every released
+ * entry. A write refuses a key it does not know; reading ignores it (a newer app wrote it). Damaged data is refused
+ * when reading too, so the entry is unreadable and grants nothing.
+ */
+function checkModelAccess(
+  value: unknown,
+  reading: boolean,
+): ModelAccessValidation {
+  if (value === undefined) return { ok: true, value: { catalogEntries: null } };
+  if (!isRecord(value)) return { ok: false, field: "modelAccess" };
+  if (!reading && Object.keys(value).some((key) => key !== "catalogEntries"))
+    return { ok: false, field: "modelAccess" };
+  const listed = value.catalogEntries;
+  if (listed === null) return { ok: true, value: { catalogEntries: null } };
+  const field = "modelAccess.catalogEntries";
+  if (!Array.isArray(listed) || listed.length > MODEL_ACCESS_MAX_ENTRIES)
+    return { ok: false, field };
+  const ids: string[] = [];
+  for (const id of listed as unknown[]) {
+    if (typeof id !== "string" || !CATALOG_ENTRY_ID_PATTERN.test(id))
+      return { ok: false, field };
+    ids.push(id);
+  }
+  // A write refuses the same id twice (a list that repeats itself is a client bug); reading tolerates it.
+  if (!reading && new Set(ids).size !== ids.length) return { ok: false, field };
+  return { ok: true, value: { catalogEntries: ids } };
+}
 
 type CheckMode = { reading: false; now: Date } | { reading: true };
 
@@ -218,6 +264,15 @@ function check(input: unknown, mode: CheckMode): EntitlementsValidation {
     suspensionCode = null;
   }
 
+  // Last, so that an entry that was refused before #428 is refused for the same reason as before.
+  const modelAccess = checkModelAccess(input.modelAccess, mode.reading);
+  if (!modelAccess.ok)
+    return {
+      ok: false,
+      code: "catalog_entry_invalid",
+      field: modelAccess.field,
+    };
+
   return {
     ok: true,
     value: {
@@ -227,6 +282,7 @@ function check(input: unknown, mode: CheckMode): EntitlementsValidation {
       periodStart,
       suspended: input.suspended,
       suspensionCode,
+      modelAccess: modelAccess.value,
     },
   };
 }
