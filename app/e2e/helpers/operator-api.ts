@@ -150,7 +150,10 @@ export async function operatorClient(
           "GET",
           `/workspaces/${workspaceId}/usage/summary?from=2020-01-01T00:00:00.000Z&to=2100-01-01T00:00:00.000Z`,
         ),
-        await call("GET", "/usage/unknown-cost"),
+        await call(
+          "GET",
+          "/usage/unknown-cost?from=2020-01-01T00:00:00.000Z&to=2100-01-01T00:00:00.000Z",
+        ),
       ];
     },
     async dispose() {

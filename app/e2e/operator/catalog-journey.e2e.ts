@@ -3,19 +3,28 @@
 // Providers and the model catalog, from the admin portal to a member's run, and what no member may read on the way
 // (#435, the last issue of #420). On a new multi-tenant instance with the operator API on, through the real UI and the
 // fakes only (the fake GitHub, the fake LLM, and a script that plays the Dynamic runner and the operator's service):
+//   - a person who is no admin gets the answer of a path that does not exist for the portal and its data routes (T05);
 //   - the instance admin saves the operator's key, adds three models in the portal (a draft stays a draft), releases two
 //     and sets the default of each kind (T01);
-//   - a person who is no admin gets the answer of a path that does not exist for the portal and its data routes (T05);
-//   - a managed workspace reviews on the default entry, its Owner picks another entry by name and the review runs with
-//     that entry's model on the operator's key; the Dynamic job of the same project is handed out with its entry's
-//     model, also on the operator's key (T02);
+//   - a managed workspace reviews on the default entry (T02); its Owner reads an Advanced page that names no provider;
+//     the Owner picks another entry by name and the review runs with that entry's model on the operator's key; the
+//     Dynamic job of the same project is handed out with its entry's model, also on the operator's key (T02);
+//   - the provider answers with an error that names the model, the provider and the operator's key: nothing of it reaches
+//     the workspace (T06);
 //   - the admin retires the entry in use: the project says so and the next review stops with neutral copy (T04);
+//   - an Owner and a Member send the API choices the page never offers (a draft, a retired, an unknown entry, a raw
+//     model): each is refused and nothing changes (T06);
 //   - a workspace on its own key picks provider and model for its project and the review runs on its own key and its own
 //     model, and the catalog is nowhere in its pages (T03);
-//   - a plain Member and the Owner of the managed workspace read no model id and no provider anywhere: the pages and
-//     their Next.js payloads, the data routes, what the browser shows, every response it received, the comments on the
-//     pull requests, the operator's usage feed and the log of the app, searched for every model id of the catalog (T06).
-// The search is checked on texts that must fail it before a clean answer is trusted. The case ids are those of #435.
+//   - the Owner and a plain Member of the managed workspace read no model id and no provider anywhere: every route of
+//     the app they can read, the pages in their browsers, every response those browsers received, the comments on the
+//     pull requests and the logs, searched for every model id of the catalog in every form (T06).
+// The search is proven before its clean answer is trusted: leaks planted in realistic shapes must fail it, an admin
+// surface that holds the ids must fail it through every collector, and a collector that is not signed in fails the run.
+// The case ids are those of #435.
+//
+// `@smoke` is the cheap slice that pull requests run: the portal gate, the catalog, one managed review, the Advanced
+// page and the whole privacy search over what that review left. The rest runs in the full lane.
 //
 // Not in this journey: a second provider (the app has one adapter and the browser lane runs the production build, which
 // has no test-only provider; the keys of two providers are told apart by integration tests, #426-T01), and the Dynamic
@@ -44,14 +53,23 @@ import {
   type GithubAccount,
 } from "../helpers/github-fake";
 import {
-  collectViews,
-  controlsFor,
+  browse,
   findLeaks,
-  forbiddenForMembers,
+  forbiddenFor,
+  formsOf,
+  readAs,
   recordNetwork,
-  renderedViews,
+  type Forbidden,
+  type NetworkRecorder,
   type Surface,
 } from "../helpers/member-scan";
+import { cleanTexts, plantedLeaks } from "../helpers/member-scan-proof";
+import {
+  browseRoutes,
+  expectRecorded,
+  idsOf,
+  readRoutes,
+} from "../helpers/member-surfaces";
 import {
   connectGithub,
   founder,
@@ -105,29 +123,31 @@ const OWNER_O_EMAIL = "catalog-o@e2e.test";
 const MEMBER_EMAIL = "catalog-member@e2e.test";
 
 // The operator's key (saved in the admin portal) and the own key of workspace O: dummies that must show up in no page,
-// comment or answer of a person. The ids are made up and distinctive, so that a search for them matches nothing else.
+// comment or answer of a person, in no form. The ids are made up and distinctive, so that a search for them matches
+// nothing else.
 const OPERATOR_KEY = "sk-or-v1-e2e-catalog-operator-key-0123456789abcdef-op35";
 const OWN_KEY = "sk-or-v1-e2e-catalog-own-key-of-workspace-o-0123456789-ow35";
 
-// The catalog: what members read is the name and the description. The model ids are the operator's.
+// The catalog: what members read is the name and the description. The model ids are the operator's. They carry a dot
+// and a variant after a colon, as real ids do, so that an encoding of them is not the id.
 const ENTRIES = {
   small: {
     name: "Small",
     description: "Quick passes over small changes.",
-    model: "e2eproof/m-small-q7w8",
+    model: "e2eproof/m-small-q7w8.5:beta",
     kinds: ["Diff", "Dynamic"],
   },
   big: {
     name: "Big",
     description: "Careful passes over large changes.",
-    model: "e2eproof/m-big-q7w8",
+    model: "e2eproof/m-big-q7w8.5:beta",
     kinds: ["Diff", "Dynamic"],
   },
   // Stays a draft for the whole journey: no member may read its name, and its model id is searched for as well.
   draft: {
     name: "Hidden draft",
     description: "Not released.",
-    model: "e2eproof/m-draft-q7w8",
+    model: "e2eproof/m-draft-q7w8.5:beta",
     kinds: ["Diff"],
   },
 } as const;
@@ -136,6 +156,7 @@ const CATALOG_MODEL_IDS: string[] = Object.values(ENTRIES).map(
 );
 // What workspace O chooses for its project: its own model, not an entry of the catalog.
 const OWN_MODEL = "ownproof/own-model-k3j4";
+const UNKNOWN_ENTRY = "00000000-0000-4000-8000-000000000000";
 
 const REVIEW_MARKER = "<!-- pr-agent:review:full -->";
 // A review through the real PR-Agent takes a few seconds; the first one also loads PR-Agent.
@@ -144,6 +165,17 @@ const RUN_TIMEOUT = { timeout: 120_000 };
 /** A head commit that is different for every pull request (`variant`). */
 const headSha = (variant: string, number: number) =>
   variant + String(number).padStart(39, "0");
+
+type Catalog = {
+  entries: Array<{
+    id: string;
+    name: string;
+    modelId: string;
+    provider: string;
+    status: string;
+  }>;
+  providers: Array<{ id: string; label: string }>;
+};
 
 test.describe.configure({ mode: "serial" });
 
@@ -161,15 +193,17 @@ test.describe("the catalog from the admin portal to a member's run", () => {
   let slugO = "";
   let workspaceIdM = "";
   let workspaceIdO = "";
-  // What the browsers of the Owner and the Member of M received, from the first page on.
-  let networkOwner: ReturnType<typeof recordNetwork> | undefined;
-  let networkMember: ReturnType<typeof recordNetwork> | undefined;
+  // What the browsers of the Owner and the Member of M receive from the moment the workspace is managed.
+  let networkOwner: NetworkRecorder | undefined;
+  let networkMember: NetworkRecorder | undefined;
   // The ids of the entries by name, as the admin portal lists them.
   const entryIds: Record<string, string> = {};
+  // The pull requests the journey opened, to read the comments on all of them.
+  const opened: Array<{ which: "M" | "O"; number: number }> = [];
 
   test.beforeAll(async ({ browser, request }) => {
     test.setTimeout(240_000);
-    llm = await startLlmFake({ port: e2eEnv.operatorLlmFakePort });
+    llm = await startLlmFake({ port: e2eEnv.catalogLlmFakePort });
     registerModels(llm);
     runner = await startRunner({
       appUrl: e2eEnv.catalogAppUrl,
@@ -205,36 +239,22 @@ test.describe("the catalog from the admin portal to a member's run", () => {
       `${e2eEnv.catalogAppUrl}/github/connected`,
     );
 
-    // Two people found two workspaces, connect their installation and switch their repository on, as in the product.
-    // The reviews of the first are on the operator's key, the second brings its own: that is the entitlement.
+    // A person founds a workspace, connects their installation and switches their repository on, as in the product.
+    // The reviews of this one are on the operator's key (the entitlement is set below).
     const m = await founder(
       browser,
       e2eEnv.catalogAppUrl,
       OWNER_M_EMAIL,
       "Catalog M",
     );
-    const o = await founder(
-      browser,
-      e2eEnv.catalogAppUrl,
-      OWNER_O_EMAIL,
-      "Catalog O",
-    );
     pageM = m.page;
-    pageO = o.page;
-    contexts.push(m.page.context(), o.page.context());
+    contexts.push(m.page.context());
     slugM = m.slug;
-    slugO = o.slug;
-    networkOwner = recordNetwork(m.page);
     await connectGithub(m.page, slugM, {
       installOn: ORG_M.login,
       authorizeAs: ownerM,
     });
-    await connectGithub(o.page, slugO, {
-      installOn: ORG_O.login,
-      authorizeAs: ownerO,
-    });
     await switchRepositoryOn(m.page, slugM, REPO_M.fullName);
-    await switchRepositoryOn(o.page, slugO, REPO_O.fullName);
 
     // A plain Member of M, who reads what a member reads.
     const memberContext = await browser.newContext({
@@ -242,7 +262,6 @@ test.describe("the catalog from the admin portal to a member's run", () => {
     });
     contexts.push(memberContext);
     memberPage = await memberContext.newPage();
-    networkMember = recordNetwork(memberPage);
     await signUpAndIn(memberPage, MEMBER_EMAIL);
     await joinWorkspace(memberPage, { email: MEMBER_EMAIL }, "member", slugM);
 
@@ -251,11 +270,12 @@ test.describe("the catalog from the admin portal to a member's run", () => {
     contexts.push(adminPage.context());
 
     workspaceIdM = await script().workspaceId(slugM);
-    workspaceIdO = await script().workspaceId(slugO);
     // Workspace M takes the operator's key; the default entitlements say so for everybody who has none of their own.
-    // Workspace O has an entitlement row of its own: its own key.
     await script().putDefaultEntitlements(MANAGED);
-    await script().putEntitlements(workspaceIdO, OWN);
+
+    // From here on the workspace is managed: every answer the browsers of its Owner and its Member receive is kept.
+    networkOwner = await recordNetwork(m.page.context());
+    networkMember = await recordNetwork(memberContext);
   });
 
   test.beforeEach(() => {
@@ -342,6 +362,7 @@ test.describe("the catalog from the admin portal to a member's run", () => {
       headSha: head,
     });
     expect(answer).toEqual({ status: "accepted", outcome: "trigger_enqueued" });
+    opened.push({ which, number });
   }
 
   const reviewsOf = (comments: Array<{ body: string }>) =>
@@ -369,31 +390,67 @@ test.describe("the catalog from the admin portal to a member's run", () => {
   }
 
   /** The catalog as the admin portal's data route lists it (the operator's view: ids, models, providers). */
-  async function adminCatalog() {
+  async function adminCatalog(): Promise<Catalog> {
     const response = await admin().request.get("/api/admin/model-catalog");
     expect(response.status(), await response.text()).toBe(200);
-    return (await response.json()) as {
-      entries: Array<{
-        id: string;
-        name: string;
-        modelId: string;
-        provider: string;
-        status: string;
-      }>;
-      providers: Array<{ id: string; label: string }>;
-    };
+    return (await response.json()) as Catalog;
+  }
+
+  /** What no member of the managed workspace may read, from the catalog the portal lists and the keys of the journey. */
+  async function forbiddenForM(): Promise<Forbidden[]> {
+    return forbiddenFor(membersLook(await adminCatalog()));
+  }
+
+  /** The comments the app wrote on every pull request the journey opened (a failed run leaves its words there too). */
+  async function allComments(request: APIRequestContext): Promise<Surface[]> {
+    const surfaces: Surface[] = [];
+    for (const { which, number } of opened) {
+      const repository = which === "M" ? REPO_M : REPO_O;
+      for (const comment of await commentsOf(request, repository, number))
+        surfaces.push({
+          name: `a comment on pull request ${String(number)} of ${repository.fullName}`,
+          text: comment.body,
+        });
+    }
+    return surfaces;
+  }
+
+  /**
+   * The run page as the Owner opens it for a run that fails. The Runs list stays mounted (hidden) behind the run page,
+   * so every assertion is scoped to the visible detail.
+   */
+  async function openFailedRun(page: Page, number: number) {
+    const row = runsOf(page, REPO_M.fullName, number);
+    await expect(row.locator("[data-status]")).toContainText(
+      "Failed",
+      RUN_TIMEOUT,
+    );
+    await row
+      .getByRole("link", { name: `${REPO_M.fullName} #${String(number)}` })
+      .click();
+    const detail = page
+      .locator('[data-slot="run-detail"]')
+      .filter({ visible: true });
+    await expect(detail).toBeVisible();
+    // The words of this run, read now: the locator follows whichever run page is open next.
+    await expect(detail).toContainText("Failed");
+    return { detail, text: await detail.innerText() };
   }
 
   // #435-T05
-  test("a person who is no admin gets the answer of a path that does not exist for the portal and the catalog routes", async () => {
+  test("@smoke a person who is no admin gets the answer of a path that does not exist for the portal and the catalog routes", async () => {
     const MISSING = "/there-is-no-such-page";
     const paths = [
       "/admin",
       "/admin/llm",
+      "/api/admin/settings",
       "/api/admin/model-catalog",
       "/api/admin/model-catalog/defaults",
       "/api/admin/model-catalog/order",
       "/api/admin/model-catalog/check",
+      "/api/admin/model-catalog/no-such-entry",
+      "/api/admin/model-catalog/no-such-entry/release",
+      "/api/admin/model-catalog/no-such-entry/retire",
       "/api/admin/llm-keys/openrouter/test",
     ];
     for (const page of [ownerOfM(), member()]) {
@@ -429,7 +486,7 @@ test.describe("the catalog from the admin portal to a member's run", () => {
   });
 
   // #435-T01
-  test("the admin saves the operator's key, adds three models, releases two and sets a default for each kind, all in the portal", async () => {
+  test("@smoke the admin saves the operator's key, adds three models, releases two and sets a default for each kind, all in the portal", async () => {
     test.setTimeout(240_000);
     const page = admin();
     await page.goto("/admin/llm");
@@ -507,7 +564,7 @@ test.describe("the catalog from the admin portal to a member's run", () => {
   });
 
   // #435-T02
-  test("a project that chose nothing is reviewed on the default entry, with the operator's key", async ({
+  test("@smoke a project that chose nothing is reviewed on the default entry, with the operator's key", async ({
     request,
   }) => {
     test.setTimeout(240_000);
@@ -523,7 +580,39 @@ test.describe("the catalog from the admin portal to a member's run", () => {
     expect(asked).toHaveLength(1);
     expect(asked[0]?.authorization).toBe(`Bearer ${OPERATOR_KEY}`);
     expect(asked[0]?.model).toContain(ENTRIES.small.model);
-    expect(runnerOutput()).not.toContain(OPERATOR_KEY.slice(0, -4));
+    expect(runnerOutput()).not.toContain(OPERATOR_KEY);
+  });
+
+  // #435-T06
+  test("@smoke the Advanced settings page of the Owner of a managed workspace names no provider", async () => {
+    const page = ownerOfM();
+    const catalog = await adminCatalog();
+    const providers = forbiddenFor({
+      modelIds: [],
+      providerIds: catalog.providers.map((provider) => provider.id),
+      providerLabels: catalog.providers.map((provider) => provider.label),
+      keys: [],
+    });
+    const path = `/w/${slugM}/settings/advanced`;
+    const surfaces = [
+      ...(await readAs(page, path, { marker: "Settings · Advanced" })).surfaces,
+      ...(
+        await readAs(page, path, {
+          headers: { RSC: "1" },
+          marker: slugM,
+          label: `${path} (RSC payload)`,
+        })
+      ).surfaces,
+      ...(await browse(page, path, { title: "Settings · Advanced" })),
+    ];
+    // The page is the one that holds the other danger zone, so it was read as the Owner and not as a shell.
+    await expect(
+      page.getByRole("button", { name: "Reset every default…" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: /Remove .*key/ }),
+    ).toHaveCount(0);
+    expect(findLeaks(surfaces, providers)).toEqual([]);
   });
 
   // #435-T02
@@ -598,6 +687,47 @@ test.describe("the catalog from the admin portal to a member's run", () => {
     await save(page, "Switch to Diff Review");
   });
 
+  // #435-T06
+  test("a provider error that names the model, the provider and the key reaches the workspace as neutral copy", async ({
+    request,
+  }) => {
+    test.setTimeout(240_000);
+    const page = ownerOfM();
+    await openRuns(page, slugM);
+
+    // The provider says which model it could not find, and who it is.
+    fakeLlm().failWith({
+      status: 404,
+      message: `OpenRouter: the model ${ENTRIES.big.model} does not exist (openrouter/${ENTRIES.big.model})`,
+    });
+    await open(request, "M", 4);
+    const notFound = (await openFailedRun(page, 4)).text;
+    expect(fakeLlm().requests().length).toBeGreaterThan(0);
+    expect(reviewsOf(await commentsOf(request, REPO_M, 4))).toHaveLength(0);
+
+    // The provider answers a rejected key by quoting it.
+    fakeLlm().reset();
+    registerModels(fakeLlm());
+    fakeLlm().failWith({ status: 401, message: "No auth credentials found" });
+    fakeLlm().quoteKeyInErrors(true);
+    await openRuns(page, slugM);
+    await open(request, "M", 5);
+    const rejected = (await openFailedRun(page, 5)).text;
+    expect(reviewsOf(await commentsOf(request, REPO_M, 5))).toHaveLength(0);
+
+    // What the details say, in the words of the app. The model and the provider are nowhere in them.
+    const forbidden = await forbiddenForM();
+    for (const [name, text] of [
+      ["the model could not be found", notFound],
+      ["the key was rejected", rejected],
+    ] as const) {
+      expect(text, name).toMatch(/failed/i);
+      expect(
+        findLeaks([{ name: `the run detail (${name})`, text }], forbidden),
+      ).toEqual([]);
+    }
+  });
+
   // #435-T04
   test("the admin retires the entry in use: the project says so and the next review stops with copy for a member, without any model call", async ({
     request,
@@ -630,185 +760,339 @@ test.describe("the catalog from the admin portal to a member's run", () => {
     await expect(page.locator("[data-choice-unavailable]")).toBeVisible();
 
     await openRuns(page, slugM);
-    await open(request, "M", 4);
-    const refused = runsOf(page, REPO_M.fullName, 4);
-    await expect(refused.locator("[data-status]")).toContainText(
-      "Failed",
-      RUN_TIMEOUT,
-    );
-    await refused.getByRole("link", { name: `${REPO_M.fullName} #4` }).click();
+    await open(request, "M", 6);
+    const { detail } = await openFailedRun(page, 6);
     await expect(
-      page
-        .locator('[data-slot="run-detail"]')
-        .filter({ visible: true })
-        .getByText(/review option chosen for this project is not available/),
+      detail.getByText(
+        /review option chosen for this project is not available/,
+      ),
     ).toBeVisible();
     // No move to another entry, and no call to any model.
     expect(fakeLlm().requests()).toHaveLength(0);
-    expect(await commentsOf(request, REPO_M, 4)).toEqual([]);
+    expect(await commentsOf(request, REPO_M, 6)).toEqual([]);
   });
 
-  // #435-T03
-  test("a workspace on its own key picks provider and model for its project and the review runs on its own key and model", async ({
-    request,
-  }) => {
-    test.setTimeout(240_000);
-    const page = ownerOfO();
-    // The Owner enters the key of the workspace, as the form of the LLM access does it.
-    await page.goto(`/w/${slugO}/settings/llm`);
-    const form = page.getByRole("form", { name: "OpenRouter LLM key" });
-    await form.getByLabel("API key").fill(OWN_KEY);
-    await form.getByRole("button", { name: "Save key" }).click();
-    await expect(
-      form.getByText(`A key is saved (ends in ${OWN_KEY.slice(-4)})`),
-    ).toBeVisible();
+  // #435-T06
+  test("an Owner and a Member who send a choice the page never offers are refused, and nothing changes or leaks", async () => {
+    const forbidden = await forbiddenForM();
+    const ids = await idsOf(ownerOfM(), slugM);
+    const settingsPath = `/api/w/${slugM}/repositories/${ids.repositoryId}/project/settings`;
+    const globalPath = `/api/w/${slugM}/review-settings`;
+    const attempts = [
+      {
+        name: "an entry that is a draft",
+        path: settingsPath,
+        settings: { catalogEntryDiff: entryId(ENTRIES.draft.name) },
+      },
+      {
+        name: "an entry that was retired",
+        path: settingsPath,
+        settings: { catalogEntryDiff: entryId(ENTRIES.big.name) },
+      },
+      {
+        name: "an entry nobody made",
+        path: settingsPath,
+        settings: { catalogEntryDynamic: UNKNOWN_ENTRY },
+      },
+      {
+        name: "a draft for Dynamic Review",
+        path: settingsPath,
+        settings: { catalogEntryDynamic: entryId(ENTRIES.draft.name) },
+      },
+      {
+        name: "a provider and a model of their own",
+        path: settingsPath,
+        settings: { provider: "openrouter", model: "attacker/own-model" },
+      },
+      {
+        name: "a model for Dynamic Review",
+        path: settingsPath,
+        settings: {
+          dynamicProvider: "openrouter",
+          dynamicModel: "attacker/own-model",
+        },
+      },
+      {
+        name: "a model in the defaults of the workspace",
+        path: globalPath,
+        settings: { provider: "openrouter", model: "attacker/own-model" },
+      },
+    ];
+    const answers: Surface[] = [];
+    for (const [who, page] of [
+      ["Owner", ownerOfM()],
+      ["Member", member()],
+    ] as const) {
+      const before = await readAs(page, settingsPath, {
+        marker: "catalogSelection",
+      });
+      const globalBefore = await readAs(page, globalPath, { marker: "{" });
+      for (const attempt of attempts) {
+        const response = await page.request.put(attempt.path, {
+          data: { settings: attempt.settings },
+        });
+        const text = await response.text();
+        answers.push({ name: `${who}: ${attempt.name}`, text });
+        expect(
+          response.status(),
+          `${who}: ${attempt.name} answered ${text.slice(0, 200)}`,
+        ).toBeGreaterThanOrEqual(400);
+        expect(response.status()).toBeLessThan(500);
+        // The choice in force is the one it was.
+        expect((await readAs(page, settingsPath)).text).toBe(before.text);
+        expect((await readAs(page, globalPath)).text).toBe(globalBefore.text);
+      }
+      // The key tests of a managed workspace say nothing about a provider either.
+      for (const path of [
+        `/api/w/${slugM}/llm-key/test`,
+        `/api/w/${slugM}/llm-keys/openrouter/test`,
+      ]) {
+        const response = await page.request.post(path, { data: {} });
+        answers.push({
+          name: `${who}: POST ${path}`,
+          text: await response.text(),
+        });
+        expect(response.status(), path).toBeLessThan(500);
+      }
+    }
+    expect(findLeaks(answers, forbidden)).toEqual([]);
+  });
 
-    // The project chooses a provider and a model, not an entry: the catalog is nowhere on the page.
-    await openProject(page, slugO, REPO_O.fullName);
-    await expect(page.locator('[data-field="catalogEntryDiff"]')).toHaveCount(
-      0,
-    );
-    const provider = page.getByRole("combobox", {
-      name: "Provider",
-      exact: true,
+  test.describe("a workspace on its own key", () => {
+    test.beforeAll(async ({ browser }) => {
+      test.setTimeout(240_000);
+      const o = await founder(
+        browser,
+        e2eEnv.catalogAppUrl,
+        OWNER_O_EMAIL,
+        "Catalog O",
+      );
+      pageO = o.page;
+      contexts.push(o.page.context());
+      slugO = o.slug;
+      await connectGithub(o.page, slugO, {
+        installOn: ORG_O.login,
+        authorizeAs: ownerO,
+      });
+      await switchRepositoryOn(o.page, slugO, REPO_O.fullName);
+      workspaceIdO = await script().workspaceId(slugO);
+      // Workspace O has an entitlement row of its own: its own key.
+      await script().putEntitlements(workspaceIdO, OWN);
     });
-    await provider.click();
-    await page.getByRole("option", { name: /^OpenRouter/ }).click();
-    await page.getByLabel("Model", { exact: true }).fill(OWN_MODEL);
-    await save(page);
-    await page.reload();
-    await expect(page.getByLabel("Model", { exact: true })).toHaveValue(
-      OWN_MODEL,
-    );
 
-    await openRuns(page, slugO);
-    await open(request, "O", 1);
-    await expect(
-      runsOf(page, REPO_O.fullName, 1).locator("[data-status]"),
-    ).toContainText("Succeeded", RUN_TIMEOUT);
-    const asked = fakeLlm().requests();
-    expect(asked).toHaveLength(1);
-    // Its own key and its own model: not the operator's key, and no model of the catalog.
-    expect(asked[0]?.authorization).toBe(`Bearer ${OWN_KEY}`);
-    expect(asked[0]?.model).toContain(OWN_MODEL);
-    for (const id of CATALOG_MODEL_IDS)
-      expect(asked[0]?.model).not.toContain(id);
-    expect(reviewsOf(await commentsOf(request, REPO_O, 1))).toHaveLength(1);
+    // #435-T03
+    test("a workspace on its own key picks provider and model for its project and the review runs on its own key and model", async ({
+      request,
+    }) => {
+      test.setTimeout(240_000);
+      const page = ownerOfO();
+      // The Owner enters the key of the workspace, as the form of the LLM access does it.
+      await page.goto(`/w/${slugO}/settings/llm`);
+      const form = page.getByRole("form", { name: "OpenRouter LLM key" });
+      await form.getByLabel("API key").fill(OWN_KEY);
+      await form.getByRole("button", { name: "Save key" }).click();
+      await expect(
+        form.getByText(`A key is saved (ends in ${OWN_KEY.slice(-4)})`),
+      ).toBeVisible();
 
-    // The catalog is not read for it: the pages of workspace O hold neither a model of the catalog nor the operator's key.
-    const leaks = findLeaks(
-      [
-        ...(await collectViews(page, slugO)),
-        ...(await commentsOf(request, REPO_O, 1)).map((comment) => ({
-          name: "a comment on a pull request of workspace O",
-          text: comment.body,
-        })),
-      ],
-      forbiddenForMembers({
-        modelIds: CATALOG_MODEL_IDS,
-        providerIds: [],
-        providerLabels: [],
-        secrets: [{ label: "the operator's key", value: OPERATOR_KEY }],
-      }),
-    );
-    expect(leaks).toEqual([]);
+      // The project chooses a provider and a model, not an entry: the catalog is nowhere on the page.
+      await openProject(page, slugO, REPO_O.fullName);
+      await expect(page.locator('[data-field="catalogEntryDiff"]')).toHaveCount(
+        0,
+      );
+      const provider = page.getByRole("combobox", {
+        name: "Provider",
+        exact: true,
+      });
+      await provider.click();
+      await page.getByRole("option", { name: /^OpenRouter/ }).click();
+      await page.getByLabel("Model", { exact: true }).fill(OWN_MODEL);
+      await save(page);
+      await page.reload();
+      await expect(page.getByLabel("Model", { exact: true })).toHaveValue(
+        OWN_MODEL,
+      );
+
+      await openRuns(page, slugO);
+      await open(request, "O", 1);
+      await expect(
+        runsOf(page, REPO_O.fullName, 1).locator("[data-status]"),
+      ).toContainText("Succeeded", RUN_TIMEOUT);
+      const asked = fakeLlm().requests();
+      expect(asked).toHaveLength(1);
+      // Its own key and its own model: not the operator's key, and no model of the catalog.
+      expect(asked[0]?.authorization).toBe(`Bearer ${OWN_KEY}`);
+      expect(asked[0]?.model).toContain(OWN_MODEL);
+      for (const id of CATALOG_MODEL_IDS)
+        expect(asked[0]?.model).not.toContain(id);
+      expect(reviewsOf(await commentsOf(request, REPO_O, 1))).toHaveLength(1);
+
+      // The catalog is not read for it: its pages hold no model of the catalog, not the operator's key, and not its
+      // own key, which is write-only (the provider is its own and may be named).
+      const ids = await idsOf(page, slugO);
+      const read = await readRoutes(page, slugO, ids);
+      const browsed = await browseRoutes(page, slugO, ids);
+      const catalog = await adminCatalog();
+      const leaks = findLeaks(
+        [
+          ...read.surfaces,
+          ...browsed.surfaces,
+          ...(await allComments(request)).filter(({ name }) =>
+            name.includes(REPO_O.fullName),
+          ),
+        ],
+        forbiddenFor({
+          modelIds: catalog.entries.map((entry) => entry.modelId),
+          providerIds: [],
+          providerLabels: [],
+          keys: [
+            { label: "the operator's key", value: OPERATOR_KEY },
+            { label: "the own key of workspace O", value: OWN_KEY },
+          ],
+          names: [{ label: "the name of a draft", value: ENTRIES.draft.name }],
+        }),
+      );
+      expect(leaks).toEqual([]);
+      expect(read.apiOk).toBeGreaterThan(5);
+    });
   });
 
   // #435-T06
-  test("the search for models and providers finds every kind of thing it looks for, and passes a page with none of them", async () => {
+  test("@smoke the search finds a model, a provider and a key in every shape a page or an answer holds them, and passes the words of the product", async () => {
     const catalog = await adminCatalog();
-    const forbidden = forbiddenForMembers(membersLook(catalog));
-    for (const control of controlsFor(forbidden))
-      expect(
-        findLeaks([{ name: control.name, text: control.text }], forbidden)
-          .length > 0,
-        control.name,
-      ).toBe(control.leaks);
+    const forbidden = await forbiddenForM();
+    const provider = firstOf(catalog.providers, "provider");
+
+    // A leak the search misses is a text it passes: the plants are made here, with encoders of their own.
+    const plants = (modelId: string, key: string, only: string) =>
+      plantedLeaks({
+        modelId,
+        providerId: provider.id,
+        providerLabel: provider.label,
+        key,
+      })
+        .filter(({ name }) => name.includes(only))
+        .map((planted) => ({ planted, modelId, key }));
+    const missed = [
+      ...CATALOG_MODEL_IDS.flatMap((id) => plants(id, OPERATOR_KEY, "")),
+      // The own key of workspace O is as secret in the pages of M.
+      ...plants(ENTRIES.small.model, OWN_KEY, "key"),
+    ]
+      .filter(({ planted }) => findLeaks([planted], forbidden).length === 0)
+      .map(
+        ({ planted, modelId, key }) => `${planted.name} (${modelId}, ${key})`,
+      );
+    expect(missed, "leaks the search did not find").toEqual([]);
+
+    expect(findLeaks(cleanTexts(), forbidden)).toEqual([]);
+    // The forms are real: an id with a dot and a colon is not itself in its encoded forms.
+    const forms = formsOf(ENTRIES.small.model);
+    expect(forms.length).toBeGreaterThan(8);
+    expect(forms).toContain(encodeURIComponent(ENTRIES.small.model));
   });
 
   // #435-T06
-  test("a Member and the Owner of the managed workspace read no model id and no provider anywhere, and no draft", async ({
+  test("@smoke an admin surface that holds the ids fails the search through every way of reading it", async () => {
+    const page = admin();
+    const catalog = await adminCatalog();
+    const recorder = await recordNetwork(page.context());
+    const read: Record<string, Surface[]> = {
+      "the page": (await readAs(page, "/admin/llm")).surfaces,
+      "the RSC payload": (
+        await readAs(page, "/admin/llm", { headers: { RSC: "1" } })
+      ).surfaces,
+      "the data route": (await readAs(page, "/api/admin/model-catalog"))
+        .surfaces,
+      "the browser": await browse(page, "/admin/llm"),
+    };
+    const { surfaces: recorded, failures } = await recorder.stop();
+    expect(failures).toEqual([]);
+    read["the responses the browser received"] = recorded;
+
+    // The ids the portal lists, in the forms of the search; and the providers.
+    const forbidden = forbiddenFor({
+      modelIds: catalog.entries.map((entry) => entry.modelId),
+      providerIds: catalog.providers.map((entry) => entry.id),
+      providerLabels: catalog.providers.map((entry) => entry.label),
+      keys: [],
+    });
+    const blind = Object.entries(read)
+      .filter(([, surfaces]) => findLeaks(surfaces, forbidden).length === 0)
+      .map(([how]) => how);
+    expect(
+      blind,
+      "ways of reading that found nothing on the admin page",
+    ).toEqual([]);
+  });
+
+  // #435-T06
+  test("@smoke the Owner and a Member of the managed workspace read no model id, no provider and no key anywhere", async ({
     request,
   }) => {
-    test.setTimeout(240_000);
+    test.setTimeout(300_000);
     const catalog = await adminCatalog();
     // The ids the portal lists are those the journey made: nothing was added that the search does not look for.
     expect(catalog.entries.map((entry) => entry.modelId).sort()).toEqual(
       [...CATALOG_MODEL_IDS].sort(),
     );
-    const forbidden = [
-      ...forbiddenForMembers(membersLook(catalog)),
-      // A draft is not offered, so its name is nowhere either.
-      { label: "the name of a draft", needle: ENTRIES.draft.name },
-    ];
-
+    const forbidden = await forbiddenForM();
     const surfaces: Surface[] = [];
-    for (const [who, page] of [
-      ["Member", member()],
-      ["Owner", ownerOfM()],
+
+    for (const [who, page, recorderOrNone] of [
+      ["Member", member(), networkMember],
+      ["Owner", ownerOfM(), networkOwner],
     ] as const) {
-      const views = await collectViews(page, slugM);
-      const runs = JSON.parse(
-        views.find(({ name }) => name === `/api/w/${slugM}/runs`)?.text ?? "{}",
-      ) as { runs?: Array<{ id: string }> };
-      // Runs of every outcome: reviewed, handed out as Dynamic and refused for the retirement.
-      expect(runs.runs?.length ?? 0).toBeGreaterThanOrEqual(4);
-      const rendered = await renderedViews(
-        page,
-        slugM,
-        String(runs.runs?.[0]?.id),
+      const recorder = firstOf(recorderOrNone ? [recorderOrNone] : [], who);
+      const ids = await idsOf(page, slugM);
+      // Runs of every outcome the journey made so far: reviewed, handed out as Dynamic, failed, refused.
+      expect(ids.runIds.length).toBeGreaterThanOrEqual(
+        opened.filter(({ which }) => which === "M").length,
       );
-      for (const surface of [...views, ...rendered])
+      const read = await readRoutes(page, slugM, ids);
+      expect(read.apiOk, `${who}: data routes that answered`).toBeGreaterThan(
+        8,
+      );
+      expect(read.pages, `${who}: pages read`).toBeGreaterThan(10);
+      const browsed = await browseRoutes(page, slugM, ids);
+      expect(browsed.visited.length).toBeGreaterThan(10);
+      // The browser really asked for every page it showed, and the run pages are among them.
+      expectRecorded(recorder, browsed.visited, who);
+      for (const runId of ids.runIds)
+        expect(browsed.visited).toContain(`/w/${slugM}/runs/${runId}`);
+
+      const { surfaces: responses, failures } = await recorder.stop();
+      expect(failures, `${who}: requests that failed`).toEqual([]);
+      expect(responses.length, `${who}'s responses`).toBeGreaterThan(
+        browsed.visited.length,
+      );
+      for (const surface of [
+        ...read.surfaces,
+        ...browsed.surfaces,
+        ...responses,
+      ])
         surfaces.push({ name: `${who}: ${surface.name}`, text: surface.text });
     }
-    for (const [who, recorder] of [
-      ["Owner", networkOwner],
-      ["Member", networkMember],
-    ] as const) {
-      const { surfaces: responses, unread } = await (recorder?.stop() ??
-        Promise.resolve({ surfaces: [], unread: [] }));
-      expect(responses.length, `${who}'s responses`).toBeGreaterThan(20);
-      // The bodies the browser dropped are the prefetches of pages (the pages themselves are read above), and the answers
-      // to a save, which the settings read back (also above).
-      expect(
-        unread.filter(
-          ({ method, path }) =>
-            !(method === "GET" && path.includes("_rsc=")) &&
-            !(method !== "GET" && path.startsWith(`/api/w/${slugM}/`)),
-        ),
-        `${who}'s responses that were not read`,
-      ).toEqual([]);
-      for (const surface of responses)
-        surfaces.push({
-          name: `${who}: ${surface.name}`,
-          text: surface.text,
-        });
-    }
-    for (const [repo, numbers] of [
-      [REPO_M, [1, 2, 3, 4]],
-      [REPO_O, [1]],
-    ] as const)
-      for (const number of numbers)
-        for (const comment of await commentsOf(request, repo, number))
-          surfaces.push({
-            name: `a comment on pull request ${String(number)} of ${repo.fullName}`,
-            text: comment.body,
-          });
-    // The logs of the app and of the runner are the operator's side and name the models they work with; what no log may
-    // hold is the operator's key, so the lines that carry (any part of) it are searched with the rest.
-    const keyLines = (text: string) =>
-      text
-        .split("\n")
-        .filter((line) => line.includes(OPERATOR_KEY.slice(0, -4)))
-        .join("\n");
-    surfaces.push({
-      name: "the log of the app",
-      text: keyLines(readFileSync(e2eEnv.logFiles.catalog, "utf8")),
+
+    surfaces.push(...(await allComments(request)));
+    // The logs are the operator's side and name the models they work with; what no log may hold is a key, in any form
+    // (the runner repeats what it is told, the app redacts what the provider quotes).
+    const keysOnly = forbiddenFor({
+      modelIds: [],
+      providerIds: [],
+      providerLabels: [],
+      keys: [
+        { label: "the operator's key", value: OPERATOR_KEY },
+        { label: "the own key of workspace O", value: OWN_KEY },
+      ],
     });
-    surfaces.push({
-      name: "the output of the runner",
-      text: keyLines(runnerOutput()),
-    });
+    const logs = [
+      {
+        name: "the log of the app",
+        text: readFileSync(e2eEnv.logFiles.catalog, "utf8"),
+      },
+      { name: "the output of the runner", text: runnerOutput() },
+    ];
+    expect(findLeaks(logs, keysOnly)).toEqual([]);
 
     expect(findLeaks(surfaces, forbidden)).toEqual([]);
   });
@@ -817,34 +1101,52 @@ test.describe("the catalog from the admin portal to a member's run", () => {
   test("the usage feed names the entry and its id for the managed runs and no model and no provider", async () => {
     test.setTimeout(240_000);
     const records = await pollUsage(script(), workspaceIdM, 3);
+    // One record for each managed run that reached a model or was handed out, whatever order they were settled in.
     expect(
-      records.map((record) => [
-        record.reviewKind,
-        record.keyMode,
-        record.catalogEntryName,
-      ]),
-    ).toEqual([
-      ["diff", "managed", ENTRIES.small.name],
-      ["diff", "managed", ENTRIES.big.name],
-      ["dynamic", "managed", ENTRIES.small.name],
-    ]);
-    expect(records.map((record) => record.catalogEntryId)).toEqual([
-      entryId(ENTRIES.small.name),
-      entryId(ENTRIES.big.name),
-      entryId(ENTRIES.small.name),
-    ]);
-    const forbidden = forbiddenForMembers(membersLook(await adminCatalog()));
-    expect(
-      findLeaks(
-        [{ name: "the usage feed", text: JSON.stringify(records) }],
-        forbidden,
-      ),
-    ).toEqual([]);
+      records
+        .map((record) =>
+          [record.reviewKind, record.keyMode, record.catalogEntryName].join(
+            " ",
+          ),
+        )
+        .sort(),
+    ).toEqual(
+      [
+        `diff managed ${ENTRIES.small.name}`,
+        `diff managed ${ENTRIES.big.name}`,
+        `dynamic managed ${ENTRIES.small.name}`,
+      ].sort(),
+    );
+    expect(records.map((record) => record.catalogEntryId).sort()).toEqual(
+      [
+        entryId(ENTRIES.small.name),
+        entryId(ENTRIES.big.name),
+        entryId(ENTRIES.small.name),
+      ].sort(),
+    );
     // The own workspace has no entry in its records.
     const own = await pollUsage(script(), workspaceIdO, 1);
     expect(
       own.map((record) => [record.keyMode, record.catalogEntryId]),
     ).toEqual([["own", null]]);
+
+    // Every read of the feed: the list of each workspace, every workspace, a period, the runs of unknown cost.
+    const reads = await script().usageReads(workspaceIdM);
+    const forbidden = await forbiddenForM();
+    expect(
+      findLeaks(
+        [
+          { name: "the usage of M", text: JSON.stringify(records) },
+          { name: "the usage of O", text: JSON.stringify(own) },
+          ...reads.map((read, index) => ({
+            name: `the usage read ${String(index + 1)}`,
+            text: read.text,
+          })),
+        ],
+        forbidden,
+      ),
+    ).toEqual([]);
+    for (const read of reads) expect(read.status, read.text).toBe(200);
   });
 });
 
@@ -869,7 +1171,10 @@ const OWN = {
 
 /** What the fake LLM says about the models of the catalog: tools, parameters, window and price. */
 function registerModels(llm: FakeLlm): void {
-  for (const id of CATALOG_MODEL_IDS)
+  // The provider is asked about the model without its variant (":beta" is a way of routing the same model).
+  for (const id of CATALOG_MODEL_IDS.map(
+    (model) => model.split(":")[0] ?? model,
+  ))
     llm.setModel(id, [
       {
         supported_parameters: [
@@ -887,11 +1192,8 @@ function registerModels(llm: FakeLlm): void {
     ]);
 }
 
-/** What no member may read, from the catalog the portal lists and the keys the journey made. */
-function membersLook(catalog: {
-  entries: Array<{ modelId: string }>;
-  providers: Array<{ id: string; label: string }>;
-}) {
+/** What no member of the managed workspace may read, from the catalog the portal lists and the keys the journey made. */
+function membersLook(catalog: Catalog) {
   return {
     modelIds: [
       ...new Set([
@@ -901,8 +1203,20 @@ function membersLook(catalog: {
     ],
     providerIds: catalog.providers.map((provider) => provider.id),
     providerLabels: catalog.providers.map((provider) => provider.label),
-    secrets: [{ label: "the operator's key", value: OPERATOR_KEY }],
+    keys: [
+      { label: "the operator's key", value: OPERATOR_KEY },
+      { label: "the own key of workspace O", value: OWN_KEY },
+    ],
+    names: [{ label: "the name of a draft", value: ENTRIES.draft.name }],
+    keyShapes: ["sk-or-v1-"],
   };
+}
+
+/** The first of a list a step needs to have, or a failure that says what is missing. */
+function firstOf<T>(items: readonly T[], what: string): T {
+  const first = items[0];
+  if (first === undefined) throw new Error(`There is no ${what}.`);
+  return first;
 }
 
 function rowOf(page: Page, name: string) {
@@ -928,28 +1242,6 @@ async function signInAsAdmin(browser: Browser): Promise<Page> {
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.waitForURL((url) => !url.pathname.startsWith("/login"));
   return page;
-}
-
-/**
- * Reads the usage feed of a workspace until it holds `count` records: a record is served once it was settled more than
- * the safety lag ago, so a reader waits for it (no sleep: the wait is for the condition).
- */
-async function pollUsage(
-  client: OperatorClient,
-  workspaceId: string,
-  count: number,
-): Promise<UsageItem[]> {
-  let records: UsageItem[] = [];
-  await expect
-    .poll(
-      async () => {
-        records = await client.usageOf(workspaceId);
-        return records.length;
-      },
-      { timeout: 150_000, intervals: [2_000, 5_000] },
-    )
-    .toBe(count);
-  return records;
 }
 
 /** Claims the Dynamic job as the runner would, once the webhook has made it. */
@@ -979,4 +1271,26 @@ function initOf(method: string) {
         headers: { "content-type": "application/json" },
         body: "{}",
       };
+}
+
+/**
+ * Reads the usage feed of a workspace until it holds `count` records: a record is served once it was settled more than
+ * the safety lag ago, so a reader waits for it (no sleep: the wait is for the condition).
+ */
+async function pollUsage(
+  client: OperatorClient,
+  workspaceId: string,
+  count: number,
+): Promise<UsageItem[]> {
+  let records: UsageItem[] = [];
+  await expect
+    .poll(
+      async () => {
+        records = await client.usageOf(workspaceId);
+        return records.length;
+      },
+      { timeout: 150_000, intervals: [2_000, 5_000] },
+    )
+    .toBe(count);
+  return records;
 }

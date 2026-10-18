@@ -57,6 +57,12 @@ process.env.E2E_OPERATOR_LLM_PORT ||= String(
   65500 + Math.floor(Math.random() * 35),
 );
 const operatorLlmFakePort = Number(process.env.E2E_OPERATOR_LLM_PORT);
+// The fake LLM of the catalog journey (#435): the same duties as the operator journey's, at a port of its own, so that the
+// two journeys can run side by side. A range of its own, below the fake SMTP server's: 40000-40499.
+process.env.E2E_CATALOG_LLM_PORT ||= String(
+  40000 + Math.floor(Math.random() * 500),
+);
+const catalogLlmFakePort = Number(process.env.E2E_CATALOG_LLM_PORT);
 
 export const e2eEnv = {
   appPort,
@@ -90,6 +96,9 @@ export const e2eEnv = {
   /** The SQLite file of the catalog app (#435), fresh for every run. */
   catalogDatabasePath: "test-results/e2e-catalog-data/app.db",
   catalogAppUrl: `http://127.0.0.1:${catalogAppPort}`,
+  catalogLlmFakePort,
+  /** The fake LLM of the catalog app: reviews and model metadata (`LLM_API_BASE_URL`). */
+  catalogLlmFakeApiUrl: `http://127.0.0.1:${catalogLlmFakePort}/api/v1`,
   operatorLlmFakePort,
   /** The fake LLM of the operator app: reviews and model metadata (`LLM_API_BASE_URL`). */
   operatorLlmFakeApiUrl: `http://127.0.0.1:${operatorLlmFakePort}/api/v1`,
