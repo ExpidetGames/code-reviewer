@@ -322,7 +322,7 @@ const DIFFERENT = {
 
 for (const engine of engines) {
   describe(`the tier migration on ${engine.name}`, () => {
-    // #434-T01, #434-T07
+    // #434-T01, #434-T06, #434-T07
     it("changes nothing on an empty database and on an instance that never configured tiers", async () => {
       const db = await engine.open();
       await seed(db, {
@@ -507,11 +507,6 @@ for (const engine of engines) {
               { id: "q-high", settings: { modelTier: "high" } },
             ],
           },
-          {
-            id: "w-own",
-            keyMode: "own",
-            projects: [{ id: "o-1", settings: { modelTier: "low" } }],
-          },
         ],
       });
       await migrate(db);
@@ -545,11 +540,38 @@ for (const engine of engines) {
         modelTier: "high",
         ...high,
       });
-      // The tier of a project of a workspace on its own key becomes an entry too: it applies if the workspace turns managed.
+    });
+
+    // #434-T06
+    it("rewrites the settings of a project of a workspace on its own key too, and nothing reads them while the key is its own", async () => {
+      const db = await engine.open();
+      await seed(db, {
+        tiers: DIFFERENT,
+        workspaces: [
+          {
+            id: "w-own",
+            keyMode: "own",
+            defaults: { modelTier: "high" },
+            projects: [
+              { id: "o-1", settings: { modelTier: "low" } },
+              { id: "o-2", settings: { maxFindings: 2 } },
+            ],
+          },
+        ],
+      });
+      await migrate(db);
+
+      // The data of such a project does change (the workspace may turn managed later, and then the entry applies). What a
+      // workspace on its own key runs does not: its claim never looks at an entry (`model-tiers-migration-claim`, T06).
       expect(await projectSettings(db, "o-1")).toEqual({
         modelTier: "low",
         catalogEntryDiff: entryIdOf("low-diff"),
         catalogEntryDynamic: entryIdOf("low-dynamic"),
+      });
+      expect(await projectSettings(db, "o-2")).toEqual({
+        maxFindings: 2,
+        catalogEntryDiff: entryIdOf("high-diff"),
+        catalogEntryDynamic: entryIdOf("high-dynamic"),
       });
     });
 

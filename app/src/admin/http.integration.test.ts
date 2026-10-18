@@ -199,7 +199,7 @@ describe("changing a setting", () => {
     );
   });
 
-  // #434-T08
+  // #434-X2
   it("answers no model tier, whatever the old setting holds, and has no way to change one", async () => {
     const portal = await startPortal();
     const legacy = ["managed", "_model", "_tiers"].join("");

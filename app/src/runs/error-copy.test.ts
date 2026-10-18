@@ -51,7 +51,7 @@ describe("the sentences for error codes", () => {
     }
   });
 
-  // #434-T07: the code no part of the system produces any more, kept for the runs that ended with it.
+  // #434-X1: the code no part of the system produces any more, kept for the runs that ended with it.
   it("keeps the sentence of the removed tier code for old runs, points at the review options that replaced the levels, and the claim cannot end a job with it", () => {
     const code = "managed_tier_unavailable";
     const { text, known } = describeErrorCode(code);

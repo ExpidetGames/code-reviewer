@@ -582,7 +582,7 @@ describe("the model catalog (#429)", () => {
     ).toBeNull();
   });
 
-  // #434-T08
+  // #434-X2
   it("has no row for the managed model tiers any more: a model is a catalog entry", () => {
     render(<Overview settings={view()} />);
 
