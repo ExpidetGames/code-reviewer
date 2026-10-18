@@ -10,9 +10,22 @@ import { getBillingWebhookHandler, isBillingOnNow } from "@/billing/shared";
 
 export const runtime = "nodejs";
 
+const guard = { isOn: isBillingOnNow, notFound };
+
 export async function POST(request: Request): Promise<Response> {
-  return guardBillingRoute(
-    { isOn: isBillingOnNow, notFound },
-    getBillingWebhookHandler(),
-  )(request);
+  return guardBillingRoute(guard, getBillingWebhookHandler())(request);
 }
+
+// Every other method is the 404 of a missing path while billing is off (a 405 would show that the route exists), and a 405 once it is on.
+const notAllowed = guardBillingRoute(guard, async () =>
+  Response.json(
+    { error: "method_not_allowed" },
+    { status: 405, headers: { allow: "POST" } },
+  ),
+);
+export const GET = notAllowed;
+export const HEAD = notAllowed;
+export const PUT = notAllowed;
+export const PATCH = notAllowed;
+export const DELETE = notAllowed;
+export const OPTIONS = notAllowed;

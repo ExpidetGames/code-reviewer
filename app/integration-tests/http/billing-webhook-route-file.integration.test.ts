@@ -118,6 +118,34 @@ describe("the billing webhook route file", () => {
     ).rejects.toMatchObject(NOT_FOUND);
   });
 
+  // #441-T01
+  it("is the 404 of a missing path for every method while billing is off, and a 405 naming POST once it is on", async () => {
+    const off = await startRoute({ billing: "off" });
+    const methods = [
+      "GET",
+      "HEAD",
+      "PUT",
+      "PATCH",
+      "DELETE",
+      "OPTIONS",
+    ] as const;
+
+    for (const method of methods)
+      await expect(
+        off.route[method](new Request(WEBHOOK_URL, { method })),
+        method,
+      ).rejects.toMatchObject(NOT_FOUND);
+    await closeDatabase();
+    const on = await startRoute({ billing: "on" });
+    for (const method of methods) {
+      const answer = await on.route[method](
+        new Request(WEBHOOK_URL, { method }),
+      );
+      expect(answer.status, method).toBe(405);
+      expect(answer.headers.get("allow"), method).toBe("POST");
+    }
+  });
+
   // #441-T02
   it("applies a signed delivery when billing is on, and refuses one signed with another secret", async () => {
     const { db, route, signed } = await startRoute({ billing: "on" });

@@ -8,7 +8,12 @@ import "server-only";
 import { z } from "zod";
 import { formatTimestamp } from "../db/codecs.ts";
 
-const id = z.string().min(1).max(128);
+/**
+ * A Paddle id or event type: letters, digits and `_ . : -`. What is logged and stored from a notification is always this shape, so a
+ * line of the log cannot be split or forged by the content of a body, signed or not.
+ */
+export const PLAIN_IDENTIFIER = /^[A-Za-z0-9_.:-]{1,128}$/;
+const id = z.string().regex(PLAIN_IDENTIFIER);
 
 export const webhookEnvelopeSchema = z.object({
   event_id: id,

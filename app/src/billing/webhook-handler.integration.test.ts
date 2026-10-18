@@ -211,6 +211,32 @@ describe.each(ENGINES)("the billing webhook on $name", (engine) => {
 
     // #441-T02
     it_(
+      "refuses a signed event whose ids are not plain identifiers, so that no log line can be split or forged",
+      async () => {
+        const h = await start();
+
+        const answer = await h.deliverOne(
+          event("subscription.updated", subscriptionData(), {
+            at: T1,
+            id: "evt_1\n[billing] BILLING_WEBHOOK_REJECTED code=forged",
+          }),
+        );
+        const inData = await h.deliverOne(
+          event(
+            "subscription.updated",
+            subscriptionData({ id: "sub_1\nforged" }),
+            { at: T1, id: "evt_plain" },
+          ),
+        );
+
+        expect(answer.status).toBe(400);
+        expect(await inData.json()).toEqual({ outcome: "payload_invalid" });
+        expect(h.logs.join("\n")).not.toContain("forged");
+      },
+    );
+
+    // #441-T02
+    it_(
       "takes its tolerance from the configuration: a delivery an hour old passes a wide window and not the default",
       async () => {
         const narrow = await start();

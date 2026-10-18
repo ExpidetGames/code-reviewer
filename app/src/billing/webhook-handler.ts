@@ -31,7 +31,11 @@ import type { WebhookOutcome } from "./subscription-state.ts";
 import type { ApplyContext, WebhookLogger } from "./webhook-context.ts";
 import { PADDLE_WEBHOOK_EVENTS } from "./webhook-events.ts";
 import { applyPriceEvent } from "./webhook-price.ts";
-import { canonicalTime, webhookEnvelopeSchema } from "./webhook-schemas.ts";
+import {
+  PLAIN_IDENTIFIER,
+  canonicalTime,
+  webhookEnvelopeSchema,
+} from "./webhook-schemas.ts";
 import { applySubscriptionEvent } from "./webhook-subscription.ts";
 import {
   PADDLE_SIGNATURE_TOLERANCE_SECONDS,
@@ -99,9 +103,7 @@ async function applyEvent(context: ApplyContext): Promise<WebhookOutcome> {
 function entityIdOf(data: unknown): string | null {
   if (typeof data !== "object" || data === null || !("id" in data)) return null;
   const id = data.id;
-  return typeof id === "string" && id.length > 0 && id.length <= 128
-    ? id
-    : null;
+  return typeof id === "string" && PLAIN_IDENTIFIER.test(id) ? id : null;
 }
 
 export function createBillingWebhookHandler(
