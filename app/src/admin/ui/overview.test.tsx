@@ -34,6 +34,7 @@ function view(overrides: Partial<AdminSettingsView> = {}): AdminSettingsView {
     planManagementUrl: { value: null, ...never },
     smtp: { value: null, password: "none", ...never },
     operatorLlmKey: { state: "not_configured" },
+    operatorLlmKeys: { openrouter: { state: "not_configured" } },
     modelTiers: NO_TIERS,
     workspaceCount: 1,
     githubConfigured: false,
@@ -252,12 +253,12 @@ describe("the setup card", () => {
     expect(configuredLink("Ways to sign in").getAttribute("href")).toBe(
       "/admin/setup/sign-in",
     );
-    expect(row("LLM key of the instance").textContent).toContain(
+    expect(row("LLM keys of the instance").textContent).toContain(
       "Not configured",
     );
-    expect(configuredLink("LLM key of the instance").getAttribute("href")).toBe(
-      "/admin/llm",
-    );
+    expect(
+      configuredLink("LLM keys of the instance").getAttribute("href"),
+    ).toBe("/admin/llm");
 
     for (const title of [
       "Mail server",
@@ -265,7 +266,7 @@ describe("the setup card", () => {
       "Tenancy",
       "Sign-up rule",
       "Ways to sign in",
-      "LLM key of the instance",
+      "LLM keys of the instance",
     ])
       expect(
         within(row(title)).getByRole("link", { name: `Configure ${title}` }),
@@ -386,17 +387,17 @@ describe("the setup card", () => {
   });
 });
 
-describe("the LLM key of the instance (#276)", () => {
+describe("the LLM keys of the instance (#276, #427)", () => {
   const key = (operatorLlmKey: AdminSettingsView["operatorLlmKey"]) =>
-    view({ operatorLlmKey });
+    view({ operatorLlmKey, operatorLlmKeys: { openrouter: operatorLlmKey } });
 
   // #276-T06
   it("is optional: no key is no warning and no attention notice, because only managed workspaces need it", () => {
     render(<Overview settings={view()} />);
 
-    expect(row("LLM key of the instance").textContent).toContain("Optional");
+    expect(row("LLM keys of the instance").textContent).toContain("Optional");
     expect(
-      within(row("LLM key of the instance")).queryByRole("img", {
+      within(row("LLM keys of the instance")).queryByRole("img", {
         hidden: true,
       }),
     ).toBeNull();
@@ -418,7 +419,7 @@ describe("the LLM key of the instance (#276)", () => {
       />,
     );
 
-    const text = row("LLM key of the instance").textContent ?? "";
+    const text = row("LLM keys of the instance").textContent ?? "";
     expect(text).toContain("Configured");
     expect(text).toContain("wxyz");
   });
@@ -446,11 +447,81 @@ describe("the LLM key of the instance (#276)", () => {
       />,
     );
 
-    expect(row("LLM key of the instance").textContent).toContain(
+    expect(row("LLM keys of the instance").textContent).toContain(
       "cannot be read",
     );
     expect(
       screen.getByRole("link", { name: "LLM key" }).getAttribute("href"),
+    ).toBe("/admin/llm");
+  });
+});
+
+describe("the LLM key of each provider on the overview (#427)", () => {
+  const CONFIGURED = {
+    state: "configured",
+    lastFour: "wxyz",
+    updatedAt: "2026-10-12T08:00:00.000Z",
+    updatedBy: null,
+  } as const;
+  const UNREADABLE = {
+    state: "unreadable",
+    updatedAt: "2026-10-12T08:00:00.000Z",
+    updatedBy: null,
+  } as const;
+  const keys = (operatorLlmKeys: AdminSettingsView["operatorLlmKeys"]) =>
+    view({ operatorLlmKeys });
+
+  // #427-T08
+  it("shows the status of every provider by its name, one after the other", () => {
+    render(
+      <Overview
+        settings={keys({
+          openrouter: CONFIGURED,
+          fakeai: { state: "not_configured" },
+        })}
+      />,
+    );
+
+    const text = row("LLM keys of the instance").textContent ?? "";
+    expect(text).toContain("OpenRouter: Configured (ending in wxyz)");
+    expect(text).toContain("fakeai: Not configured");
+    expect(text.indexOf("OpenRouter")).toBeLessThan(text.indexOf("fakeai"));
+    expect(text).not.toContain("sk-");
+  });
+
+  // #427-T08
+  it("warns when the key of any one provider cannot be read, and names that provider", () => {
+    render(
+      <Overview
+        settings={keys({ openrouter: CONFIGURED, fakeai: UNREADABLE })}
+      />,
+    );
+
+    const text = row("LLM keys of the instance").textContent ?? "";
+    expect(text).toContain("OpenRouter: Configured");
+    expect(text).toContain("fakeai: Saved, cannot be read");
+    expect(text).toContain("until its key is entered again");
+  });
+
+  // #427-T08
+  it("is optional while no provider has a key, and links to the page of the keys", () => {
+    render(
+      <Overview
+        settings={keys({
+          openrouter: { state: "not_configured" },
+          fakeai: { state: "not_configured" },
+        })}
+      />,
+    );
+
+    expect(row("LLM keys of the instance").textContent).toContain("Optional");
+    expect(
+      screen.queryByRole("region", { name: /needs attention/i }),
+    ).toBeNull();
+    expect(
+      within(row("LLM keys of the instance"))
+        .getByRole("link")
+        .getAttribute("href"),
     ).toBe("/admin/llm");
   });
 });

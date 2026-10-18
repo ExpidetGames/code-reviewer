@@ -204,6 +204,48 @@ describe("the operator's key (key mode managed)", () => {
     });
   });
 
+  // #427-T04
+  it("is the key of the provider the job runs on, which is that provider's id in the access", () => {
+    const providers = createProviderRegistry([
+      openrouterDescriptor,
+      createFakeAdapter(),
+    ]);
+
+    const result = resolveWorkspaceLlmAccess(
+      {
+        keyMode: "managed",
+        provider: FAKE_PROVIDER_ID,
+        operatorKey: { state: "key", apiKey: OPERATOR_KEY },
+        defaults: DEFAULTS,
+      },
+      providers,
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      source: "operator",
+      access: { provider: FAKE_PROVIDER_ID, apiKey: OPERATOR_KEY },
+    });
+  });
+
+  // #427-T04
+  it("fails closed with operator_key_missing for a provider that is not registered, whatever key it was handed", () => {
+    for (const provider of ["nobody", "OpenRouter", " openrouter"])
+      expect(
+        resolveWorkspaceLlmAccess({
+          keyMode: "managed",
+          provider,
+          operatorKey: { state: "key", apiKey: OPERATOR_KEY },
+          defaults: DEFAULTS,
+        }),
+      ).toEqual({
+        ok: false,
+        errorCode: "llm_not_configured",
+        reason: "operator_key_missing",
+        issues: [],
+      });
+  });
+
   // #276-T05
   it("never takes the operator's key for a workspace that is not managed, even without a key of its own", () => {
     // `own` has no input for the operator's key at all: the shape makes borrowing impossible.

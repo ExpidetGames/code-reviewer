@@ -73,7 +73,7 @@ describe("the sections of the portal", () => {
       "Integrations",
       "GitHub App",
       "Mail",
-      "LLM key",
+      "LLM keys",
       "Billing",
     ]);
     expect(links.map((link) => link.getAttribute("href"))).toEqual(
@@ -141,7 +141,7 @@ describe("the sections on a narrow screen", () => {
       "Integrations",
       "GitHub App",
       "Mail",
-      "LLM key",
+      "LLM keys",
       "Billing",
     ]);
   });
