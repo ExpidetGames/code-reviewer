@@ -7,7 +7,7 @@
 import "server-only";
 import { createBillingPlanPricesRepository } from "../db/repositories/billing-plan-prices-repository.ts";
 import { paddlePriceSchema } from "./paddle-schemas.ts";
-import { snapshotOf } from "./prices-service.ts";
+import { snapshotOf } from "./price-rules.ts";
 import type { WebhookOutcome } from "./subscription-state.ts";
 import type { ApplyContext } from "./webhook-context.ts";
 

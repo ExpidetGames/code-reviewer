@@ -16,6 +16,7 @@ import {
   hasPostgres,
 } from "../../test-support/postgres-test-database.ts";
 import { createTestDirectory } from "../../test-support/test-database.ts";
+import { migration } from "./20261018180000_create_billing_subscriptions.ts";
 import { migrationProvider } from "./index.ts";
 
 const THIS = "20261018180000_create_billing_subscriptions";
@@ -290,8 +291,8 @@ describe("the billing subscriptions migration", () => {
     it_("drops the four tables again when migrated down", async () => {
       const db = await migrated();
 
-      const all = await migrationProvider.getMigrations();
-      await all[THIS]?.down(db);
+      expect(migration.down).toBeDefined();
+      await migration.down?.(db);
 
       for (const table of [
         "billing_customers",

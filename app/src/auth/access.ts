@@ -49,6 +49,9 @@ export const PUBLIC_PATHS: readonly PublicPath[] = [
   { path: "/api/operator/v1", match: "prefix" },
   // GitHub authenticates a webhook with its signature, not with a session.
   { path: "/api/webhooks", match: "prefix" },
+  // Paddle authenticates a notification with its signature, not with a session (#441). One exact path: nothing else of billing is
+  // open, and the route is the 404 of a missing path while billing is off (src/billing/enabled.ts).
+  { path: "/api/billing/webhook", match: "exact" },
   // The platform's cron (serverless mode, vercel.json) authenticates with CRON_SECRET, not with a session;
   // the route is a 404 on a server (src/cron/). One exact path per job: nothing below /api/internal is open.
   { path: "/api/internal/repository-sync", match: "exact" },

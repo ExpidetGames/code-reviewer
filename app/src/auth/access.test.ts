@@ -24,6 +24,8 @@ describe("which paths are public", () => {
     "/api/operator/v1/workspaces/abc/entitlements",
     "/api/operator/v1/entitlements/default",
     "/api/webhooks/github-app",
+    // #441: Paddle signs its notifications; the signature is the credential, not a session.
+    "/api/billing/webhook",
     // #319-T10: the platform's cron has no session; CRON_SECRET is its credential.
     "/api/internal/repository-sync",
     // #328-T07: the once-a-minute sweep, with the same credential.
@@ -53,6 +55,11 @@ describe("which paths are public", () => {
     "/api/admin/workspaces",
     "/api/internal",
     "/api/internal/anything-new",
+    // #441: only the webhook is open; nothing else of billing, and nothing below it.
+    "/api/billing",
+    "/api/billing/checkout",
+    "/api/billing/webhook/anything",
+    "/api/billing/webhooks",
   ])("requires a session for %s", (pathname) => {
     expect(isPublicPath(pathname)).toBe(false);
   });
@@ -109,6 +116,7 @@ describe("which paths are public", () => {
       { path: "/api/workers", match: "prefix" },
       { path: "/api/operator/v1", match: "prefix" },
       { path: "/api/webhooks", match: "prefix" },
+      { path: "/api/billing/webhook", match: "exact" },
       { path: "/api/internal/repository-sync", match: "exact" },
       { path: "/api/internal/dispatch-sweep", match: "exact" },
     ]);

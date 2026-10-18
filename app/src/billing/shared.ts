@@ -17,6 +17,8 @@ import {
   createBillingPricesService,
   type BillingPricesService,
 } from "./prices-service.ts";
+import { readWebhookConfig } from "./webhook-config.ts";
+import { createBillingWebhookHandler } from "./webhook-handler.ts";
 import {
   createBillingSettingsService,
   type BillingSettingsService,
@@ -52,4 +54,19 @@ export function getBillingSettingsService(): BillingSettingsService {
 /** Whether billing is on right now; billing routes, pages and sweep steps call this before anything else. */
 export function isBillingOnNow(): Promise<boolean> {
   return isBillingOn(getDatabase(), getSecretStore());
+}
+
+/**
+ * The handler of `POST /api/billing/webhook` (#441) on the running server. The route file wraps it in `guardBillingRoute`, so
+ * while billing is off the request is the 404 of a path that does not exist before anything here is reached.
+ */
+export function getBillingWebhookHandler(): (
+  request: Request,
+) => Promise<Response> {
+  const db = getDatabase();
+  const secrets = getSecretStore();
+  return createBillingWebhookHandler({
+    db,
+    config: () => readWebhookConfig(db, secrets),
+  });
 }

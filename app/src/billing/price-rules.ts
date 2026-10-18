@@ -11,6 +11,7 @@
 // found, one from another environment and a yearly price on a version without one (before Paddle is asked, or from its
 // 404); those codes are here so the list is in one place.
 import "server-only";
+import type { PriceSnapshot } from "../db/repositories/billing-plan-prices-repository.ts";
 import type { PaddlePrice } from "./paddle-schemas.ts";
 
 export const PRICE_RULE_ERROR_CODES = [
@@ -188,4 +189,23 @@ export function trialDaysOf(
 ): number | null {
   if (trial === null || trial === undefined) return null;
   return trial.frequency * DAYS_PER[trial.interval];
+}
+
+/** The facts the app caches about a price. */
+export function snapshotOf(price: PaddlePrice): PriceSnapshot {
+  const facts = factsOf(price);
+  return {
+    productId: price.product_id,
+    priceType: facts.priceType,
+    interval: facts.interval,
+    frequency: facts.frequency,
+    currency: facts.currency,
+    amount: facts.amount,
+    taxMode: facts.taxMode,
+    hasOverrides: facts.hasOverrides,
+    trialDays: trialDaysOf(price.trial_period),
+    quantityMinimum: facts.quantityMinimum,
+    quantityMaximum: facts.quantityMaximum,
+    status: facts.status,
+  };
 }
