@@ -25,4 +25,18 @@ describe("the copy of the enabling step", () => {
     expect(none).toMatch(/no workspace/i);
     expect(none).toContain("Free plan");
   });
+
+  // #438-N4
+  it("says that a default entitlements setting of the operator is replaced and is not brought back by switching billing off", () => {
+    for (const ownKeyWorkspaces of [0, 1, 3]) {
+      const notice = enablingNotice({ ownKeyWorkspaces }).join(" ");
+
+      expect(notice).toMatch(
+        /default entitlements[^.]*(already|existing|set)[^.]*replaced/i,
+      );
+      expect(notice).toMatch(/not restored|is not brought back/i);
+      expect(notice).toMatch(/switch(ing)? billing off/i);
+      expect(notice).toMatch(/no default|unlimited/i);
+    }
+  });
 });
