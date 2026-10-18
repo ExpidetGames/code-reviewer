@@ -63,6 +63,30 @@ describe("requesting JSON from the app", () => {
     });
   });
 
+  it("keeps the other fields of a refusal as details, and has none when there are none", async () => {
+    const withDetails = await requestJson(
+      answering(409, { error: "model_change_not_confirmed", projects: 5 }),
+      "PUT",
+      "/api/x",
+      {},
+    );
+    const without = await requestJson(
+      answering(422, { error: "name_invalid" }),
+      "PUT",
+      "/api/x",
+      {},
+    );
+
+    expect(withDetails).toEqual({
+      ok: false,
+      status: 409,
+      code: "model_change_not_confirmed",
+      issues: [],
+      details: { projects: 5 },
+    });
+    expect(without).not.toHaveProperty("details");
+  });
+
   it("keeps the codes the access proxy answers with", async () => {
     const unauthenticated = await requestJson(
       answering(401, { error: "UNAUTHENTICATED" }),

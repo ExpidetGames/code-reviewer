@@ -31,14 +31,19 @@ export type RequestResult<T> =
       /** The route's error code or a transport code; a plain string because the routes own theirs. */
       code: string;
       issues: RequestIssue[];
+      /** The other fields of the answer (a refusal that carries a number, for example); absent when there are none. */
+      details?: Record<string, unknown>;
     };
 
 function failure(
   status: number | null,
   code: string,
   issues: RequestIssue[] = [],
+  details: Record<string, unknown> = {},
 ): RequestResult<never> {
-  return { ok: false, status, code, issues };
+  return Object.keys(details).length === 0
+    ? { ok: false, status, code, issues }
+    : { ok: false, status, code, issues, details };
 }
 
 function readIssues(value: unknown): RequestIssue[] {
@@ -82,10 +87,10 @@ export async function requestJson<T>(
   }
   if (response.ok) return { ok: true, data: parsed as T };
 
-  const { error, issues } = (
+  const { error, issues, ...details } = (
     typeof parsed === "object" && parsed !== null ? parsed : {}
-  ) as { error?: unknown; issues?: unknown };
+  ) as { error?: unknown; issues?: unknown } & Record<string, unknown>;
   if (typeof error !== "string")
     return failure(response.status, "UNEXPECTED_RESPONSE");
-  return failure(response.status, error, readIssues(issues));
+  return failure(response.status, error, readIssues(issues), details);
 }

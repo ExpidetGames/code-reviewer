@@ -7,21 +7,23 @@
 // unique whatever its case, a status moves only from the status the caller saw, and a draft is the only entry deleted.
 //
 // Two reads are written for the privacy of the model. `listMemberEntries` selects only the columns a member may see, so
-// the provider and the model id are not even read. `countProjectsSelecting` answers a number for the operator's
-// confirmation and reads no row of a workspace into the answer.
+// the provider and the model id are not even read. `countProjectsUsing` answers one number per entry for the operator's
+// "used by" and for the confirmation of a change of model, and returns no row, project or workspace.
 import "server-only";
 import { randomUUID } from "node:crypto";
-import { sql, type Kysely, type Selectable } from "kysely";
+import type { Kysely, Selectable } from "kysely";
 import { formatTimestamp, tryDecodeJson } from "../codecs.ts";
 import { errorCode } from "../errors.ts";
 import {
   CATALOG_KINDS,
   isCatalogStatus,
+  type CatalogDefaults,
   type CatalogEntry,
   type CatalogStatus,
 } from "../../model-catalog/entries.ts";
 import type { MemberCatalogEntry } from "../../model-catalog/member.ts";
 import type { ProjectReviewKind } from "../../review-settings/settings.ts";
+import { readEntitlements } from "../../workspaces/entitlements-validation.ts";
 import type { Database, ModelCatalogEntriesTable } from "../schema.ts";
 
 /** The names of the project settings that hold a catalog entry id, one per kind (written by the review settings, #430; ADR 0005, 2.7). A test pins them to `PROJECT_CATALOG_FIELDS`. */
@@ -78,14 +80,27 @@ export type CatalogRepository = {
     updatedBy: string | null,
     expectedUpdatedAt?: string,
   ): Promise<CatalogEntry | undefined>;
+  /**
+   * Puts the entries at the places of their position in `ids` (sort order 0, 1, 2, ...) in one transaction, writing only
+   * the entries that move. False, and nothing written, when `ids` is not exactly the set of entries (one is missing,
+   * unknown or repeated): the caller saw a list that is not the catalog any more.
+   */
+  reorder(ids: readonly string[], updatedBy: string | null): Promise<boolean>;
   /** Deletes the entry when it is a draft; false for any other status and for an id that is not there. */
   deleteDraft(id: string): Promise<boolean>;
   /** What a member may see: the released and the retired entries, with no provider and no model id. */
   listMemberEntries(): Promise<MemberCatalogEntry[]>;
   /** The model id of every entry of every status, once each: the ids that must never reach a member. */
   allModelIds(): Promise<string[]>;
-  /** How many projects, of any workspace, select the entry for a kind. A number only. */
-  countProjectsSelecting(id: string): Promise<number>;
+  /**
+   * How many projects, of any workspace, use each entry: the projects whose settings select it for a kind, and, for a
+   * project in a workspace on the operator's key that has chosen no entry for the kind it runs, the entry of `defaults`
+   * for that kind (ADR 0005, 2.7). A project counts once per entry. One pass over the projects; numbers only, keyed by
+   * entry id (an entry nobody uses is absent).
+   */
+  countProjectsUsing(
+    defaults: CatalogDefaults,
+  ): Promise<ReadonlyMap<string, number>>;
 };
 
 type Row = Selectable<ModelCatalogEntriesTable>;
@@ -145,17 +160,46 @@ function isUniqueViolation(cause: unknown): boolean {
   return code === "SQLITE_CONSTRAINT_UNIQUE" || code === "23505";
 }
 
-/** True when a stored project settings text selects `id` in one of the selection settings. */
-function selects(settings: string, id: string): boolean {
-  const decoded = tryDecodeJson<unknown>(settings);
+/** The setting of a project that names its entry, per kind. */
+const SELECTION_KEY: Record<ProjectReviewKind, string> = {
+  diff: CATALOG_SELECTION_KEYS[0],
+  dynamic: CATALOG_SELECTION_KEYS[1],
+};
+
+/** The settings of a project read as an object; anything else (damaged text, a list) is no settings. */
+function settingsOf(text: string): Record<string, unknown> {
+  const decoded = tryDecodeJson<unknown>(text);
   if (
     !decoded.ok ||
     typeof decoded.value !== "object" ||
     decoded.value === null
   )
-    return false;
-  const value = decoded.value as Record<string, unknown>;
-  return CATALOG_SELECTION_KEYS.some((key) => value[key] === id);
+    return {};
+  return decoded.value as Record<string, unknown>;
+}
+
+/** The entries one project uses: the ones it selects, and the default of the kind it runs when it chose none for it. */
+function entriesUsedBy(
+  settings: Record<string, unknown>,
+  managed: boolean,
+  defaults: CatalogDefaults,
+): Set<string> {
+  const used = new Set<string>();
+  for (const key of CATALOG_SELECTION_KEYS) {
+    const chosen = settings[key];
+    if (typeof chosen === "string") used.add(chosen);
+  }
+  // The kind a project runs is its own setting, Diff until it says otherwise (review-settings/effective.ts).
+  const kind: ProjectReviewKind =
+    settings.reviewKind === "dynamic" ? "dynamic" : "diff";
+  const fallback = defaults[kind];
+  if (
+    managed &&
+    fallback !== null &&
+    typeof settings[SELECTION_KEY[kind]] !== "string"
+  )
+    used.add(fallback);
+  return used;
 }
 
 export function createCatalogRepository(
@@ -277,6 +321,37 @@ export function createCatalogRepository(
       );
     },
 
+    async reorder(ids, updatedBy) {
+      const run = async (trx: Kysely<Database>): Promise<boolean> => {
+        const rows = await trx
+          .selectFrom("model_catalog_entries")
+          .select(["id", "sort_order"])
+          .execute();
+        const current = new Map(rows.map((row) => [row.id, row.sort_order]));
+        if (
+          current.size !== ids.length ||
+          new Set(ids).size !== ids.length ||
+          !ids.every((id) => current.has(id))
+        )
+          return false;
+        const timestamp = formatTimestamp(now());
+        for (const [position, id] of ids.entries()) {
+          if (current.get(id) === position) continue;
+          await trx
+            .updateTable("model_catalog_entries")
+            .set({
+              sort_order: position,
+              updated_by: updatedBy,
+              updated_at: timestamp,
+            })
+            .where("id", "=", id)
+            .execute();
+        }
+        return true;
+      };
+      return db.isTransaction ? run(db) : db.transaction().execute(run);
+    },
+
     async deleteDraft(id) {
       const result = await db
         .deleteFrom("model_catalog_entries")
@@ -314,16 +389,45 @@ export function createCatalogRepository(
       return rows.map((row) => row.model_id);
     },
 
-    async countProjectsSelecting(id) {
-      // The id is opaque text; the filter only narrows the rows (`_` and `%` in `like` are wildcards, which can only
-      // let more rows through), and the settings are read again as JSON so that an id that merely appears in some
-      // other setting does not count.
+    async countProjectsUsing(defaults) {
+      // One pass: the settings of every project with the key mode of its workspace's row. A workspace without a row has
+      // the default of the instance, which is read once. Only the counts leave this function.
       const rows = await db
         .selectFrom("projects")
-        .select("settings")
-        .where(sql<boolean>`settings like ${`%${id}%`}`)
+        .innerJoin("repositories", "repositories.id", "projects.repository_id")
+        .leftJoin(
+          "workspace_entitlements",
+          "workspace_entitlements.workspace_id",
+          "repositories.workspace_id",
+        )
+        .select([
+          "projects.settings as settings",
+          "workspace_entitlements.key_mode as key_mode",
+        ])
         .execute();
-      return rows.filter((row) => selects(row.settings, id)).length;
+      const stored = await db
+        .selectFrom("instance_settings")
+        .select("value")
+        .where("key", "=", "default_entitlements")
+        .executeTakeFirst();
+      const instanceDefault =
+        stored === undefined ? undefined : tryDecodeJson<unknown>(stored.value);
+      const instanceManaged =
+        instanceDefault?.ok === true &&
+        readEntitlements(instanceDefault.value)?.keyMode === "managed";
+
+      const counts = new Map<string, number>();
+      for (const row of rows) {
+        const managed =
+          row.key_mode === null ? instanceManaged : row.key_mode === "managed";
+        for (const id of entriesUsedBy(
+          settingsOf(row.settings),
+          managed,
+          defaults,
+        ))
+          counts.set(id, (counts.get(id) ?? 0) + 1);
+      }
+      return counts;
     },
   };
 }
