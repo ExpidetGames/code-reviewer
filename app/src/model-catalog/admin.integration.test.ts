@@ -6,6 +6,9 @@
 // retired entry stays listed, and changing the model behind a released entry needs a confirmation and writes an audit line.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { startLlmFake } from "../../../fakes/llm/server.ts";
+import { createCatalogRepository } from "../db/repositories/catalog-repository.ts";
+import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
+import { createModelCapabilityChecker } from "../llm/model-capabilities.ts";
 import {
   MISSING_ANSWER_MARKER,
   createAdminHarness,
@@ -17,7 +20,9 @@ import {
   CATALOG_ROUTE_ERROR_CODES,
   CATALOG_ROUTE_ERROR_STATUS,
 } from "./admin-errors.ts";
+import { createCatalogAdminService } from "./admin-service.ts";
 import { CATALOG_ERROR_CODES } from "./errors.ts";
+import { createCatalogService } from "./service.ts";
 
 const BASE = "/api/admin/model-catalog";
 const MEMBER = { email: "member@example.com", password: "k4Pq-v8Zm2Xw" };
@@ -727,6 +732,53 @@ describe("changing the model behind a released entry", () => {
     });
     expect((await portal.catalog.get(entry.id))?.modelId).toBe("acme/quick-1");
     expect(portal.catalogLog).toEqual([]);
+  });
+
+  // #429-T09
+  it("cannot skip the confirmation when the entry is released between the read and the write", async () => {
+    const { portal, llm } = await start();
+    const entry = await createEntry(portal);
+    const repository = createCatalogRepository(portal.db);
+    // The first read of the entry sees the draft; right after it, another admin releases the entry.
+    let released = false;
+    const racing = {
+      ...repository,
+      get: async (id: string) => {
+        const seen = await repository.get(id);
+        if (!released) {
+          released = true;
+          await repository.setStatus(id, "draft", "released", null);
+        }
+        return seen;
+      },
+    };
+    const lines: string[] = [];
+    const admin = createCatalogAdminService({
+      catalog: createCatalogService({
+        catalog: racing,
+        settings: createInstanceSettingsRepository(portal.db),
+        modelCapabilities: createModelCapabilityChecker({
+          baseUrl: () => llm.baseUrl,
+          log: () => undefined,
+          timeoutMs: 1_000,
+        }),
+        logger: { info: (line) => lines.push(line) },
+      }),
+      providers: () => [],
+    });
+
+    const result = await admin.update(portal.adminId, entry.id, {
+      modelId: "acme/better-2",
+    });
+
+    expect(result.ok).toBe(false);
+    expect(released).toBe(true);
+    const stored = await portal.catalog.get(entry.id);
+    expect(stored).toMatchObject({
+      status: "released",
+      modelId: "acme/quick-1",
+    });
+    expect(lines).toEqual([]);
   });
 
   // #429-T09

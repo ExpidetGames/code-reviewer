@@ -28,6 +28,13 @@ import { toMemberEntry, type MemberCatalogEntry } from "./member.ts";
 
 export type Refused = { ok: false; code: CatalogErrorCode; field?: string };
 export type EntryResult = { ok: true; entry: CatalogEntry } | Refused;
+/** The model behind a released entry changes only when the caller confirms it; nothing was written. */
+export type ModelChangeNotConfirmed = {
+  ok: false;
+  code: "model_change_not_confirmed";
+  /** How many projects use the entry, read when the confirmation was decided. */
+  projects: number;
+};
 export type UpdateResult =
   | {
       ok: true;
@@ -35,7 +42,13 @@ export type UpdateResult =
       /** Set when the model or the provider behind a released entry changed: how many projects select it. */
       modelChange: { projects: number } | null;
     }
-  | Refused;
+  | Refused
+  | ModelChangeNotConfirmed;
+/** What the caller of `update` says about the change of a model. */
+export type UpdateOptions = {
+  /** True when the person was told how many projects use the entry. Without it the model behind a released entry stays. */
+  confirmModelChange?: boolean;
+};
 export type DefaultsResult = { ok: true; defaults: CatalogDefaults } | Refused;
 /** What the check of a model found: `verified` is false when the provider could not be asked (a Diff model is accepted then). */
 export type CheckModelResult = { ok: true; verified: boolean } | Refused;
@@ -58,11 +71,17 @@ export type CatalogService = {
    * Changes the given fields of an entry. A change of the model, the provider or the kinds of a released entry is
    * checked again like a release, writes an audit line (the entry, the person, the model before and after, the number
    * of projects) and reports that number. The name is checked against the model it ends up with.
+   *
+   * A change of the model or the provider of a released entry is refused with `model_change_not_confirmed` and the
+   * number of projects, and writes nothing, unless `options.confirmModelChange` is true. The decision is made on the
+   * entry that the write is pinned to (its `updatedAt`), so an entry released in between cannot skip it: the write then
+   * finds the entry changed and ends as `catalog_conflict`.
    */
   update(
     id: string,
     input: unknown,
     updatedBy: string | null,
+    options?: UpdateOptions,
   ): Promise<UpdateResult>;
   /** Draft or retired to released, after the provider's metadata vouches for the model for every kind it serves. */
   release(id: string, updatedBy: string | null): Promise<EntryResult>;
@@ -285,7 +304,7 @@ export function createCatalogService(deps: {
       return "ok" in created ? created : { ok: true, entry: created };
     },
 
-    async update(id, input, updatedBy) {
+    async update(id, input, updatedBy, options = {}) {
       if (!isPlainObject(input)) return refused("request_invalid");
       const entry = await catalog.get(id);
       if (entry === undefined) return refused("CATALOG_ENTRY_UNKNOWN");
@@ -347,6 +366,16 @@ export function createCatalogService(deps: {
       const modelChanged =
         provider !== entry.provider || modelId !== entry.modelId;
       const kindsChanged = !sameKinds(kinds, entry.kinds);
+      if (
+        entry.status === "released" &&
+        modelChanged &&
+        options.confirmModelChange !== true
+      )
+        return {
+          ok: false,
+          code: "model_change_not_confirmed",
+          projects: await catalog.countProjectsSelecting(id),
+        };
       if (entry.status === "released" && (modelChanged || kindsChanged)) {
         const defaults = await storedDefaults();
         for (const kind of CATALOG_KINDS)

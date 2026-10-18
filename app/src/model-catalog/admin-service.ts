@@ -123,19 +123,6 @@ export function createCatalogAdminService({
     };
   }
 
-  /** Whether the request would change the provider or the model of the entry. */
-  function changesModel(
-    entry: CatalogEntry,
-    input: Record<string, unknown>,
-  ): boolean {
-    const provider = input.provider;
-    const modelId = input.modelId;
-    return (
-      (typeof provider === "string" && provider !== entry.provider) ||
-      (typeof modelId === "string" && modelId !== entry.modelId)
-    );
-  }
-
   return {
     view,
 
@@ -153,18 +140,13 @@ export function createCatalogAdminService({
           code: "request_invalid",
           field: "confirmModelChange",
         };
-      const entry = await catalog.get(id);
-      if (
-        confirmModelChange !== true &&
-        entry?.status === "released" &&
-        changesModel(entry, fields)
-      )
-        return {
-          ok: false,
-          code: "model_change_not_confirmed",
-          projects: await catalog.usedByProjects(id),
-        };
-      const result = await catalog.update(id, fields, actorId);
+      // The service decides on the entry it writes: reading the entry here as well would be a second look that a release
+      // in between could contradict.
+      const result = await catalog.update(id, fields, actorId, {
+        confirmModelChange: confirmModelChange === true,
+      });
+      if (!result.ok && result.code === "model_change_not_confirmed")
+        return result;
       return result.ok
         ? changed(result.entry, { modelChange: result.modelChange })
         : failure(result);
