@@ -57,6 +57,15 @@ export type BillingPricesServiceOptions = {
 const PRICE_ID = /^pri_[A-Za-z0-9]{1,60}$/;
 const LINK_KEYS = ["versionNumber", "interval", "paddlePriceId"];
 
+/** Thrown inside the link transaction to undo it: nothing a refused link started (the product binding, the row) stays. */
+class Refused extends Error {
+  readonly refusal: PriceRefusal;
+  constructor(refusal: PriceRefusal) {
+    super(refusal.code);
+    this.refusal = refusal;
+  }
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -210,41 +219,52 @@ export function createBillingPricesService({
         return { ok: false, ...mismatch, field: "paddlePriceId" };
       const snapshot = snapshotOf(price);
 
-      const store = (): Promise<PricesResult> =>
-        db.transaction().execute(async (trx) => {
-          const repos = repositories(trx);
-          // Looked at again inside the transaction: a new version may have been saved while Paddle was asked.
-          const latest = await repos.versions.current(plan.id);
-          if (latest === undefined || latest.number !== versionNumber)
-            return { ok: false, code: "plan_changed" } as const;
-          const bound = await repos.plans.bindProduct(
-            plan.id,
-            price.product_id,
-            env,
-          );
-          if (bound.env !== env)
-            return { ok: false, code: "price_environment_mismatch" } as const;
-          if (bound.productId !== price.product_id)
-            return { ok: false, code: "price_product_mismatch" } as const;
-          const existing = await repos.prices.getByPaddleId(paddlePriceId);
-          if (existing !== undefined && existing.planId !== plan.id)
-            return {
-              ok: false,
-              code: "price_used_by_other_plan",
-              field: "paddlePriceId",
-            } as const;
-          const row =
-            existing === undefined
-              ? await repos.prices.insertLinked({
-                  planId: plan.id,
-                  paddlePriceId,
-                  env,
-                  snapshot,
-                })
-              : await repos.prices.refresh(existing.id, snapshot);
-          await repos.versions.setPriceLink(latest.id, interval, row.id);
-          return { ok: true } as const;
-        });
+      const store = async (): Promise<PricesResult> => {
+        try {
+          return await db.transaction().execute(async (trx) => {
+            const repos = repositories(trx);
+            // Looked at again inside the transaction: a new version may have been saved while Paddle was asked.
+            const latest = await repos.versions.current(plan.id);
+            if (latest === undefined || latest.number !== versionNumber)
+              throw new Refused({ code: "plan_changed" });
+            const bound = await repos.plans.bindProduct(
+              plan.id,
+              price.product_id,
+              env,
+            );
+            if (bound.env !== env)
+              throw new Refused({ code: "price_environment_mismatch" });
+            if (bound.productId !== price.product_id)
+              throw new Refused({ code: "price_product_mismatch" });
+            const existing = await repos.prices.getByPaddleId(paddlePriceId);
+            if (existing !== undefined && existing.planId !== plan.id)
+              throw new Refused({
+                code: "price_used_by_other_plan",
+                field: "paddlePriceId",
+              });
+            const row =
+              existing === undefined
+                ? await repos.prices.insertLinked({
+                    planId: plan.id,
+                    paddlePriceId,
+                    env,
+                    snapshot,
+                  })
+                : await repos.prices.refresh(existing.id, snapshot);
+            // The read above proves nothing on Postgres once another admin commits: the write itself only hits the current version.
+            const linked = await repos.versions.setPriceLink(
+              latest.id,
+              interval,
+              row.id,
+            );
+            if (!linked.ok) throw new Refused({ code: "plan_changed" });
+            return { ok: true } as const;
+          });
+        } catch (error) {
+          if (error instanceof Refused) return { ok: false, ...error.refusal };
+          throw error;
+        }
+      };
       try {
         return await store();
       } catch (error) {

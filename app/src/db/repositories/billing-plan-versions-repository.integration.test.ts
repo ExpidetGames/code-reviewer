@@ -15,6 +15,7 @@ import {
   PlanChangedError,
   createBillingPlansRepository,
 } from "./billing-plans-repository.ts";
+import { createBillingPlanPricesRepository } from "./billing-plan-prices-repository.ts";
 import { createBillingPlanVersionsRepository } from "./billing-plan-versions-repository.ts";
 
 const ENGINES: Array<{
@@ -160,6 +161,45 @@ describe.each(ENGINES)(
         );
 
         expect({ ...(await columns()), role: "current" }).toEqual(before);
+      },
+    );
+
+    // #439-T05 (review of #468, B1): the link is written to the current version only, whatever the caller read before.
+    it_(
+      "does not link a version that a newer version replaced, and keeps the links of that legacy version",
+      async () => {
+        const { db, plan, versions } = await start();
+        const prices = createBillingPlanPricesRepository(db, () => T0);
+        const price = await prices.insertLinked({
+          planId: plan.id,
+          paddlePriceId: "pri_m",
+          env: "sandbox",
+          snapshot: {
+            productId: "pro_1",
+            interval: "month",
+            frequency: 1,
+            currency: "USD",
+            amount: "1234",
+            taxMode: "internal",
+            hasOverrides: false,
+            trialDays: null,
+            status: "active",
+          },
+        });
+        const first = await versions.createNext(plan.id, managed(), null, 0);
+        await versions.createNext(
+          plan.id,
+          managed({ monthlyAmountMinor: 5 }),
+          null,
+          1,
+        );
+
+        const result = await versions.setPriceLink(first.id, "month", price.id);
+
+        expect(result).toEqual({ ok: false, reason: "not_current" });
+        const [second, legacy] = await versions.list(plan.id);
+        expect(legacy).toMatchObject({ role: "legacy", monthlyPriceId: null });
+        expect(second).toMatchObject({ role: "current", monthlyPriceId: null });
       },
     );
 

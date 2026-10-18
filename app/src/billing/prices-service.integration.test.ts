@@ -9,6 +9,10 @@ import { describe, expect, it } from "vitest";
 import type { Database } from "../db/schema.ts";
 import type { PlanView, PlanVersionView } from "../admin/ui/plans-view.ts";
 import { createSecretStore } from "../secrets/store.ts";
+import {
+  afterQueryPlugin,
+  type QueryInfo,
+} from "../test-support/query-hook.ts";
 import { setBillingSwitch } from "../test-support/billing-switch.ts";
 import { clientFor, startTestPaddle } from "../test-support/paddle-fake.ts";
 import {
@@ -86,6 +90,13 @@ const ENGINES: Array<{
 
 async function startOn(open: () => Promise<Kysely<Database>>) {
   const db = await open();
+  // Runs between two statements of the service's transactions (Postgres only, see `query-hook.ts`).
+  let betweenStatements: ((query: QueryInfo) => Promise<void>) | undefined;
+  const serviceDb = db.withPlugin(
+    afterQueryPlugin(
+      (query) => betweenStatements?.(query) ?? Promise.resolve(),
+    ),
+  );
   const admin = await insertUser(db, { id: "admin-1", isInstanceAdmin: true });
   await setBillingSwitch(db, true);
   const fake = await startTestPaddle();
@@ -94,7 +105,7 @@ async function startOn(open: () => Promise<Kysely<Database>>) {
   const plans = createBillingPlansService({ db, now: () => T0 });
   const clients: PaddleClient[] = [];
   const prices = createBillingPricesService({
-    db,
+    db: serviceDb,
     secrets,
     now: () => T0,
     clientFor: () => {
@@ -182,6 +193,10 @@ async function startOn(open: () => Promise<Kysely<Database>>) {
   return {
     db,
     admin,
+    /** `hook` runs after each statement of the service until it is replaced; it works on `db`, a connection of its own. */
+    onStatement: (hook: ((query: QueryInfo) => Promise<void>) | undefined) => {
+      betweenStatements = hook;
+    },
     fake,
     secrets,
     plans,
@@ -208,6 +223,8 @@ describe.each(ENGINES)(
   "linking Paddle prices to a plan version on $name",
   (engine) => {
     const it_ = engine.skip ? it.skip : it;
+    // Needs two connections working at once: the hook of `query-hook.ts` cannot run on SQLite's single connection.
+    const itPg = engine.name === "Postgres" && !engine.skip ? it : it.skip;
     const start = () => startOn(engine.open);
 
     // #439-T01
@@ -544,6 +561,44 @@ describe.each(ENGINES)(
       );
       expect(await t.priceRows()).toEqual([]);
     });
+
+    // #439-T05 (review of #468, B1)
+    itPg(
+      "refuses to link when another admin saves new terms between the check and the write, and rolls everything back",
+      async () => {
+        const t = await start();
+        const monthly = await t.makePrice();
+        let versionReads = 0;
+        t.onStatement(async (query) => {
+          if (
+            query.kind !== "select" ||
+            query.table !== "billing_plan_versions"
+          )
+            return;
+          versionReads += 1;
+          // The first read is the service's own before it asks Paddle, the second is the check inside the link transaction.
+          if (versionReads !== 2) return;
+          t.onStatement(undefined);
+          const saved = await t.plans.saveTerms(t.admin, "team", {
+            basedOnVersion: 1,
+            terms: terms({ limits: { ...LIMITS, diffRunsPerPeriod: 60 } }),
+          });
+          expect(saved.ok, "admin B saved new terms").toBe(true);
+        });
+
+        const result = await t.link("month", monthly.id);
+
+        expect(refused(result).code).toBe("plan_changed");
+        const versions = (await t.view()).versions;
+        expect(versions.map((version) => version.number)).toEqual([2, 1]);
+        expect(versions.map((version) => version.monthlyPrice)).toEqual([
+          null,
+          null,
+        ]);
+        expect(await t.priceRows(), "no price row stays").toEqual([]);
+        expect((await t.view()).paddleProductId).toBeNull();
+      },
+    );
 
     // #439-T06
     it_("refuses a price that is linked to another plan", async () => {

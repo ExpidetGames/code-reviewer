@@ -272,7 +272,7 @@ describe.each(ENGINES)("the billing plan prices on $name", (engine) => {
 
   // #439-T01
   it_(
-    "links a version to a price per slot and reads the links back; a link is set, replaced and cleared",
+    "links a version to a price per slot and reads the links back; a link is set and replaced",
     async () => {
       const { prices, versions, plan, version } = await start();
       const monthly = await prices.insertLinked({
@@ -302,12 +302,11 @@ describe.each(ENGINES)("the billing plan prices on $name", (engine) => {
         yearlyAmountMinor: 12_340,
       });
 
-      await versions.setPriceLink(version.id, "year", null);
       await versions.setPriceLink(version.id, "month", yearly.id);
 
       expect(await versions.current(plan.id)).toMatchObject({
         monthlyPriceId: yearly.id,
-        yearlyPriceId: null,
+        yearlyPriceId: yearly.id,
       });
     },
   );
@@ -315,20 +314,20 @@ describe.each(ENGINES)("the billing plan prices on $name", (engine) => {
   // #439-T05
   it_("lets two versions share one price", async () => {
     const { prices, versions, plan, version } = await start();
-    const next = await versions.createNext(
-      plan.id,
-      { ...TERMS, limits: { ...TERMS.limits, diffRunsPerPeriod: 50 } },
-      null,
-      1,
-    );
     const shared = await prices.insertLinked({
       planId: plan.id,
       paddlePriceId: "pri_m",
       env: "sandbox",
       snapshot: snapshot(),
     });
-
+    // Linked while the version is the current one; a legacy version is never linked any more.
     await versions.setPriceLink(version.id, "month", shared.id);
+    const next = await versions.createNext(
+      plan.id,
+      { ...TERMS, limits: { ...TERMS.limits, diffRunsPerPeriod: 50 } },
+      null,
+      1,
+    );
     await versions.setPriceLink(next.id, "month", shared.id);
 
     const all = await versions.list(plan.id);
@@ -347,7 +346,7 @@ describe.each(ENGINES)("the billing plan prices on $name", (engine) => {
         versions.setPriceLink(version.id, "month", "bpp_nope"),
       ).rejects.toThrow();
       await expect(
-        versions.setPriceLink(version.id, "week" as never, null),
+        versions.setPriceLink(version.id, "week" as never, "bpp_nope"),
       ).rejects.toThrow();
     },
   );

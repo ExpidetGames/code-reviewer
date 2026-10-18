@@ -34,6 +34,9 @@ export type PlanVersionRow = PlanTerms & {
   yearlyPriceId: string | null;
 };
 
+export type PriceLinkChange =
+  { ok: true } | { ok: false; reason: "not_current" };
+
 export type BillingPlanVersionsRepository = {
   /** The versions of one plan, newest first. */
   list(planId: string): Promise<PlanVersionRow[]>;
@@ -53,14 +56,16 @@ export type BillingPlanVersionsRepository = {
     basedOn: number,
   ): Promise<PlanVersionRow>;
   /**
-   * Links the version's slot to a `billing_plan_prices` row, or clears the link with `null` (#439). The one change besides
-   * the role that a version gets after it was saved: it says which Paddle price the slot is sold with, never what it costs.
+   * Links the version's slot to a `billing_plan_prices` row (#439). The one change besides the role that a version gets
+   * after it was saved: it says which Paddle price the slot is sold with, never what it costs. Written to the current
+   * version only, in the statement itself: a version that a newer one replaced meanwhile keeps the prices its subscribers
+   * bought and the answer is `not_current` (the caller's earlier read of the role proves nothing once it is written).
    */
   setPriceLink(
     versionId: string,
     slot: "month" | "year",
-    priceId: string | null,
-  ): Promise<void>;
+    priceId: string,
+  ): Promise<PriceLinkChange>;
 };
 
 type Row = Selectable<BillingPlanVersionsTable>;
@@ -128,7 +133,7 @@ export function createBillingPlanVersionsRepository(
     async setPriceLink(versionId, slot, priceId) {
       if (slot !== "month" && slot !== "year")
         throw new Error("A price slot is month or year.");
-      await db
+      const updated = await db
         .updateTable("billing_plan_versions")
         .set(
           slot === "month"
@@ -136,7 +141,11 @@ export function createBillingPlanVersionsRepository(
             : { yearly_price_id: priceId },
         )
         .where("id", "=", versionId)
-        .execute();
+        .where("role", "=", "current")
+        .executeTakeFirst();
+      return Number(updated.numUpdatedRows) === 1
+        ? { ok: true }
+        : { ok: false, reason: "not_current" };
     },
 
     async current(planId) {
