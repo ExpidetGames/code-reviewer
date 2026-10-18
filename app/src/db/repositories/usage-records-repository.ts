@@ -29,6 +29,11 @@ export type UsageRecord = {
   keyMode: UsageKeyMode;
   /** The managed model tier the run used (#280); null for a run on the workspace's own key. The name, never the model. */
   modelTier: string | null;
+  /** The catalog entry a managed run used (#432), and its name as it was at the claim; null for an own run and old rows. */
+  catalogEntryId: string | null;
+  catalogEntryName: string | null;
+  /** The provider the run was sent to (#432). Operator data: never part of a view a member reads. */
+  llmProvider: string | null;
   state: UsageState;
   /** Millionths of a US dollar; null when unknown. Only a settled record has one. */
   costMicroUsd: number | null;
@@ -95,6 +100,17 @@ export type UsageRecordsRepository = {
    */
   setModelTier(jobId: string, tier: ModelTier): Promise<void>;
   /**
+   * Notes the provider and, for a managed run, the catalog entry (id and name as they are now) a job was given (#432) on a
+   * record that is still `reserved`; any other record is left as it is. Never the model.
+   */
+  setSelection(
+    jobId: string,
+    selection: {
+      provider: string;
+      catalogEntry: { id: string; name: string } | null;
+    },
+  ): Promise<void>;
+  /**
    * Ends the record of a job: `settled` with the cost and tokens, or `void`. Only a `reserved` record
    * changes, so repeating it does nothing. A job without a record (it was claimed before records existed)
    * gets one in its final state, with key mode `own`. Returns whether this call changed or created the record
@@ -140,6 +156,9 @@ export function toUsageRecord(row: Selectable<UsageRecordsTable>): UsageRecord {
     reviewKind: row.review_kind as ProjectReviewKind,
     keyMode: row.key_mode as UsageKeyMode,
     modelTier: row.model_tier,
+    catalogEntryId: row.catalog_entry_id,
+    catalogEntryName: row.catalog_entry_name,
+    llmProvider: row.llm_provider,
     state: row.state as UsageState,
     costMicroUsd: row.cost_micro_usd,
     promptTokens: row.prompt_tokens,
@@ -207,6 +226,20 @@ export function createUsageRecordsRepository(
       await db
         .updateTable("usage_records")
         .set({ model_tier: tier })
+        .where("job_id", "=", jobId)
+        .where("workspace_id", "=", workspaceId)
+        .where("state", "=", "reserved")
+        .execute();
+    },
+
+    async setSelection(jobId, { provider, catalogEntry }) {
+      await db
+        .updateTable("usage_records")
+        .set({
+          llm_provider: provider,
+          catalog_entry_id: catalogEntry?.id ?? null,
+          catalog_entry_name: catalogEntry?.name ?? null,
+        })
         .where("job_id", "=", jobId)
         .where("workspace_id", "=", workspaceId)
         .where("state", "=", "reserved")

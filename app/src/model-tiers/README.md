@@ -1,5 +1,10 @@
 # Managed model tiers
 
+> **Superseded by the model catalog (#432, ADR 0005).** The claim no longer reads the tiers: a job on the operator's key
+> runs on the catalog entry its project selected (`src/model-catalog/README.md`, `src/runner-api/README.md`), and a job
+> without a usable entry fails `managed_model_unavailable`. This document describes the tier code that stays until the
+> migration issue removes it (the operator route, the settings and the old usage rows keep their meaning).
+
 A workspace whose key mode is `managed` reviews on the operator's own key (`src/llm/README.md`, "The operator's own key").
 It does not pick among hundreds of models: it picks a **tier**, `low`, `medium` or `high` (default `medium`), and the
 operator decides which model backs each tier. The operator may change those models at any time without any workspace

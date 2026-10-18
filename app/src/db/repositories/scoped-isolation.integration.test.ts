@@ -870,6 +870,15 @@ const CASES: Case[] = [
     expectAnswer: (answer) => expect(answer).toBeUndefined(),
   },
   {
+    name: "usage.setSelection",
+    run: (a, b) =>
+      a.usage.setSelection(b.job.id, {
+        provider: "openrouter",
+        catalogEntry: { id: "mce_other", name: "Other" },
+      }),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
     name: "usage.settle",
     run: (a, b) =>
       a.usage.settle(b.job.id, {

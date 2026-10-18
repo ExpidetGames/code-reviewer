@@ -7,6 +7,8 @@ import { loadAuthConfig } from "../auth/config.ts";
 import { isGithubSignInConfigured } from "../github-config/shared.ts";
 import { createRateLimitsRepository } from "../db/repositories/rate-limits-repository.ts";
 import { getDatabase } from "../db/startup.ts";
+import { llmApiBaseUrl } from "../llm/endpoint.ts";
+import { createOperatorKeyTestService } from "../llm/operator-key-test.ts";
 import { getSmtpConfigStore } from "../mail/shared.ts";
 import { createTestMailService } from "../mail/test-mail.ts";
 import { getSecretStore } from "../secrets/shared.ts";
@@ -23,6 +25,12 @@ export function getAdminService(): AdminService {
       rateLimits: createRateLimitsRepository(getDatabase()),
       // The address in the test mail is the configured one, never a request header.
       baseUrl: loadAuthConfig(process.env).baseUrl,
+    }),
+    // The Test button of the operator's keys: counters of its own, and the provider's own address (src/llm/endpoint.ts;
+    // the test stack may point it at the fake LLM), never one from a request.
+    operatorKeyTest: createOperatorKeyTestService({
+      rateLimits: createRateLimitsRepository(getDatabase()),
+      baseUrlOf: (provider) => llmApiBaseUrl(process.env, provider).url,
     }),
     // Sign-in with GitHub exists while the GitHub App's user authorization is configured, read from the
     // database on every call.

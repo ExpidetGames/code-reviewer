@@ -52,8 +52,8 @@ export function summarizeLlmAccess(
 export type WorkspaceLlmAssembly = {
   keyServiceFor(workspaceId: string): WorkspaceLlmKeyService;
   /**
-   * The operator's own key (the instance admin saves it; only the admin portal and this assembly use it). It is
-   * the key of a workspace whose key mode is `managed`, and of no other.
+   * The operator's own keys, one for each provider (the instance admin saves them; only the admin portal and this
+   * assembly use them). They are the keys of a workspace whose key mode is `managed`, and of no other.
    */
   operatorKey(): OperatorLlmKeyService;
   /**
@@ -62,14 +62,25 @@ export type WorkspaceLlmAssembly = {
    * until a project can choose); a key of another provider is never used. Nothing of another workspace is read.
    */
   accessFor(workspaceId: string, provider?: string): Promise<LlmAccessResult>;
+  /**
+   * The key a job needs once its provider is chosen (#432, ADR 0005, 2.8): the workspace's own key of `provider`, or the
+   * operator's key of `provider`, as the selection says (`keySource`). Unlike `accessFor` it does not read the
+   * entitlements again, so the key always belongs to the key mode the selection was made for. Nothing of the other key
+   * is read, and nothing of another provider.
+   */
+  keyFor(
+    workspaceId: string,
+    selection: { keyMode: "own" | "managed"; provider: string },
+  ): Promise<LlmAccessResult>;
   summaryFor(
     workspaceId: string,
     provider?: string,
   ): Promise<WorkspaceLlmSummary>;
   /**
    * The LLM keys that are current for this workspace right now, to mask in the result of one of its jobs: its
-   * own key of every provider, and the operator's while the workspace is `managed`. Best effort: a key that cannot
-   * be read is left out.
+   * own key of every provider, and the operator's key of every provider while the workspace is `managed`. Fails
+   * closed: a key that exists but cannot be decrypted is left out (it cannot appear in a result), but a read that
+   * fails throws, so a caller never masks with fewer keys than it should (src/runner-api/known-secrets.ts).
    */
   currentKeysFor(workspaceId: string): Promise<string[]>;
 };
@@ -111,6 +122,7 @@ export function createWorkspaceLlm({
         appSecret: appSecret(),
         ...(now === undefined ? {} : { now }),
       }),
+      providers,
     });
 
   // What the key mode of the workspace's entitlements asks for, and only that: a managed job never reads the
@@ -128,7 +140,8 @@ export function createWorkspaceLlm({
     if (mode === "managed")
       return {
         keyMode: mode,
-        operatorKey: await operatorKey().forJob(),
+        provider,
+        operatorKey: await operatorKey().forJob(provider),
         defaults,
       };
     return {
@@ -149,10 +162,35 @@ export function createWorkspaceLlm({
     );
   }
 
+  async function keyFor(
+    workspaceId: string,
+    { keyMode, provider }: { keyMode: "own" | "managed"; provider: string },
+  ): Promise<LlmAccessResult> {
+    // The model and the context window of the instance; the model of the job is the selection's, not this one.
+    const defaults = readLlmDefaults(env());
+    return resolveWorkspaceLlmAccess(
+      keyMode === "managed"
+        ? {
+            keyMode,
+            provider,
+            operatorKey: await operatorKey().forJob(provider),
+            defaults,
+          }
+        : {
+            keyMode,
+            provider,
+            key: await keyServiceFor(workspaceId).keyFor(provider),
+            defaults,
+          },
+      providers,
+    );
+  }
+
   return {
     keyServiceFor,
     operatorKey,
     accessFor,
+    keyFor,
     async summaryFor(workspaceId, provider) {
       return summarizeLlmAccess(await accessFor(workspaceId, provider));
     },
@@ -167,8 +205,11 @@ export function createWorkspaceLlm({
         await readEffectiveEntitlements(db, workspaceId, now),
       );
       if (mode !== "managed") return keys;
-      const operator = await operatorKey().forJob();
-      if (operator.state === "key") keys.push(operator.apiKey);
+      const operators = operatorKey();
+      for (const id of providers.ids) {
+        const operator = await operators.forJob(id);
+        if (operator.state === "key") keys.push(operator.apiKey);
+      }
       return keys;
     },
   };

@@ -301,8 +301,8 @@ export function toRunDetailView(
   now: Date,
   /** Removes secrets from the log (the second line of defense after the runner and the result check). */
   redact: (text: string) => string = (text) => text,
-  /** Whether the run was on a managed quality level (its usage record names one): its cost is not shown. */
-  onManagedTier = false,
+  /** Whether the run was on the operator's key (its usage record says so): its cost is not shown. */
+  onManagedKey = false,
 ): RunDetailView {
   const stored = readStoredResult(job.result);
   const cleaned = redact(cleanLog(stored.logTail));
@@ -333,19 +333,19 @@ export function toRunDetailView(
       truncated: stored.logTruncated || overlong,
     },
     supersededBy: job.supersededBy,
-    usage: usageView(job, redact, onManagedTier),
-    costHidden: onManagedTier,
+    usage: usageView(job, redact, onManagedKey),
+    costHidden: onManagedKey,
   };
 }
 
 function usageView(
   job: Job,
   redact: (text: string) => string,
-  onManagedTier: boolean,
+  onManagedKey: boolean,
 ): RunUsageView | null {
   const stored = readStoredUsage(job.result);
   const usage =
-    stored !== null && onManagedTier ? { ...stored, costUsd: null } : stored;
+    stored !== null && onManagedKey ? { ...stored, costUsd: null } : stored;
   if (usage === null || usage.model === null) return usage;
   // Redaction can lengthen the name: cut again, after it.
   return {

@@ -19,6 +19,8 @@ export const ADMIN_ERROR_CODES = [
   "rate_limited",
   /** The counters of a limit could not be read, so the request was not served. */
   "unavailable",
+  /** The provider of the address is not a registered one. */
+  "provider_not_found",
   ...SIGN_IN_METHODS_ERROR_CODES,
 ] as const;
 export type AdminErrorCode = (typeof ADMIN_ERROR_CODES)[number];
@@ -31,6 +33,7 @@ export const ADMIN_ERROR_STATUS: Record<AdminErrorCode, number> = {
   too_many_workspaces: 409,
   rate_limited: 429,
   unavailable: 503,
+  provider_not_found: 404,
   at_least_one_method: 422,
   github_not_configured: 409,
   admin_needs_github_identity: 409,

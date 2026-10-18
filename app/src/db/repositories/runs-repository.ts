@@ -24,7 +24,15 @@ import {
  * A job with the `owner/name` of the repository it is about, and whether it ran on a managed quality level (#283: its
  * usage record names one).
  */
-export type StoredRun = { job: Job; project: string; onManagedTier: boolean };
+export type StoredRun = {
+  job: Job;
+  project: string;
+  /**
+   * Whether the run was on the operator's key: its usage record says `managed`, names a catalog entry (#432) or a tier
+   * (#280). The cost of such a run is not shown to a member.
+   */
+  onManagedKey: boolean;
+};
 /** A job as the list shows it: the listed fields only. */
 export type StoredRunRow = { job: RunRowSource; project: string };
 
@@ -133,16 +141,27 @@ export function createRunsRepository(
         )
         .selectAll("jobs")
         .select("repositories.full_name as project")
-        .select("usage_records.model_tier as model_tier")
+        .select([
+          "usage_records.key_mode as key_mode",
+          "usage_records.catalog_entry_id as catalog_entry_id",
+          "usage_records.model_tier as model_tier",
+        ])
         .where("jobs.workspace_id", "=", workspaceId)
         .where("jobs.id", "=", id)
         .executeTakeFirst();
       if (row === undefined) return undefined;
-      const { project, model_tier: modelTier, ...job } = row;
+      const {
+        project,
+        key_mode: keyMode,
+        catalog_entry_id: entryId,
+        model_tier: modelTier,
+        ...job
+      } = row;
       return {
         job: toJob(job),
         project,
-        onManagedTier: modelTier !== null,
+        onManagedKey:
+          keyMode === "managed" || entryId !== null || modelTier !== null,
       };
     },
 

@@ -138,6 +138,8 @@ const ISSUE_COPY: Record<ReviewSettingIssueCode, (field: string) => string> = {
       : "This choice is not made for Diff Review. Choose another.",
   CATALOG_ENTRY_NOT_ALLOWED: () =>
     "Your plan does not include this choice. Choose another or change your plan.",
+  MODEL_PROVIDER_MISMATCH: () =>
+    "The model that applies was chosen for another provider. Set a model for this provider too, or use the provider the model was chosen for.",
   // The user has to be on the operator's key before an entry can be chosen (#430): say so, and nothing about a model.
   CATALOG_ENTRY_OWN_KEY_MODE: () =>
     "This workspace reviews with its own AI key, so the choices of this instance cannot be used. They can be chosen once the AI access comes from this instance.",
