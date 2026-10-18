@@ -30,6 +30,7 @@ from code_reviewer_runner.job import Job, JobError, parse_job
 from code_reviewer_runner.log_capture import LogCapture
 from code_reviewer_runner.redaction import Redactor
 from code_reviewer_runner.result import ErrorCode, JobResult
+from code_reviewer_runner.temperature_patch import TemperaturePatchError
 
 TOKEN = "dummy-installation-token-0123456789"
 API_KEY = "dummy-openrouter-key-0123456789"
@@ -2106,6 +2107,25 @@ def test_everything_patched_in_is_undone_when_a_later_install_fails(
         provider_class.publish_comment,
         pr_reviewer.append_review_state,
     )
+
+
+# #477-T05
+def test_a_temperature_patch_that_cannot_be_applied_fails_the_job_and_names_the_patch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def refused() -> Any:
+        raise TemperaturePatchError("LiteLLMAIHandler._litellm_supports_temperature does not exist")
+
+    monkeypatch.setattr(runner, "apply_temperature_patch", refused)
+    calls = use_double(monkeypatch, lambda: asyncio.sleep(0, result=True))
+
+    result, _ = run()
+
+    assert result.ok is False
+    assert result.error_code is ErrorCode.RUNNER_ERROR
+    assert "cannot patch the temperature handling of PR-Agent" in result.log_tail
+    assert "cannot load PR-Agent" not in result.log_tail
+    assert calls == []
 
 
 def dynamic_job_json(**overrides: Any) -> dict[str, Any]:
