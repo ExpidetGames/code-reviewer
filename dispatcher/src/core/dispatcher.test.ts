@@ -208,36 +208,23 @@ describe("the Dispatcher core", () => {
     expect(recorded.calls).toStrictEqual([]);
   });
 
-  // #331-T01
-  it("asks the launcher for the engine of the job's kind, and for nothing in particular when the job is not known", async () => {
-    const diff = app.enqueue();
-    const dynamic = app.enqueue({ reviewKind: "dynamic" });
-    const { core, launcher } = build();
-
-    await handled(core.handle({ jobId: diff, reviewKind: "diff" }));
-    await handled(core.handle({ jobId: dynamic, reviewKind: "dynamic" }));
-    await handled(core.handle({}));
-
-    expect(launcher.wanted).toStrictEqual(["pr-agent", "opencode", undefined]);
-  });
-
-  // #331-T02
-  it("answers unavailable with the launcher's own retry time while a probe is on its way, and claims nothing", async () => {
+  // #479-T04
+  it("accepts a Dynamic job at once from a Launcher that was never probed: the configured engines and the Launcher decide, nothing waits for a proof", async () => {
     const jobId = app.enqueue({ reviewKind: "dynamic" });
-    const { core, recorded, logger } = build(
-      {},
-      { capabilitiesPendingSeconds: 25 },
-    );
+    const { core, launcher, recorded } = build();
 
-    const result = await core.handle({ jobId, reviewKind: "dynamic" });
+    const result = await handled(core.handle({ jobId, reviewKind: "dynamic" }));
 
-    expect(result).toStrictEqual({
-      outcome: "unavailable",
-      retryAfterSeconds: 25,
-    });
-    expect(recorded.calls).toStrictEqual([]);
-    expect(logger.text()).toContain("capabilities_pending");
-    expect(logger.text()).not.toContain("capabilities_failed");
+    expect(result.outcome).toBe("started");
+    expect(
+      launcher.launches.map((spec) => [spec.jobId, spec.kind]),
+    ).toStrictEqual([[jobId, "dynamic"]]);
+    expect(launcher.probes).toBe(0);
+    const claim = recorded.calls.find((call) => call.url.endsWith("/claim"));
+    expect((claim?.body as { engines: string[] }).engines).toStrictEqual([
+      "pr-agent",
+      "opencode",
+    ]);
   });
 
   // #327-T06

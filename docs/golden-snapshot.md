@@ -104,7 +104,7 @@ instead of snapshotting something nobody tested: update the pin in `dispatcher/s
 checks of spike #317 on the new base). The decision, the proof by the canary, the promotion, the write to Infisical and
 the cleanup are described in `deployment-vercel.md`, section 5.1; the canary (#331) calls `POST /probe`, which runs the
 image's `probe` mode in a fresh VM from the snapshot, and fails unless `opencode` is advertised and the answer names the
-image of this run (`dispatcher/README.md`, "The capability probe" and "The deploy canary"). The list of hosts of
+image of this run (`dispatcher/README.md`, "The canary probe" and "The deploy canary"). The list of hosts of
 earlier versions (`DISPATCHER_CANARY_HOSTS`) is **retired**.
 
 ## Roll back to the previous snapshot

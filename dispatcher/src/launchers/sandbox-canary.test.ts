@@ -6,12 +6,11 @@ import {
   ProbeRunError,
   createCapabilityProbe,
 } from "../probe/capability-probe.ts";
-import { withCapabilityProbe } from "../probe/probed-launcher.ts";
+import { withProbeEndpoint } from "../probe/probe-endpoint.ts";
 import {
   recordingLogger,
   type RecordedLogger,
 } from "../test-support/harness.ts";
-import { CapabilitiesPending } from "../core/types.ts";
 import { ManualClock, settle } from "../test-support/manual-clock.ts";
 import {
   createSandboxCanary,
@@ -323,8 +322,8 @@ describe("the canary VM of the capability probe", () => {
   });
 });
 
-describe("a Sandbox-Launcher behind the capability probe of its canary VM", () => {
-  function behind(stdout: string, options: { ttlMs?: number } = {}) {
+describe("a Sandbox-Launcher with the probe endpoint over its canary VM (#479)", () => {
+  function behind(stdout: string, options: { forceReuseMs?: number } = {}) {
     service.onExec("probe", { stdout });
     const launcher = createSandboxLauncher({
       service,
@@ -333,7 +332,6 @@ describe("a Sandbox-Launcher behind the capability probe of its canary VM", () =
       logger,
       clock,
     });
-    const background: Promise<unknown>[] = [];
     const probe = createCapabilityProbe({
       run: canary(),
       clock,
@@ -341,54 +339,42 @@ describe("a Sandbox-Launcher behind the capability probe of its canary VM", () =
       logger,
       ...options,
     });
-    const probed = withCapabilityProbe({
-      launcher,
-      probe,
-      background: (work) => background.push(work),
-    });
-    return { probed, background };
+    return { probed: withProbeEndpoint({ launcher, probe }) };
   }
-  const settled = (background: Promise<unknown>[]) => Promise.all(background);
+
+  // #479-T04
+  it("advertises opencode to a dispatch without any canary VM: only the deploy canary's POST /probe makes one", async () => {
+    const { probed } = behind(PASSING);
+
+    expect(await probed.capabilities(signal())).toStrictEqual([
+      "pr-agent",
+      "opencode",
+    ]);
+    expect(await probed.capabilities(signal())).toStrictEqual([
+      "pr-agent",
+      "opencode",
+    ]);
+
+    expect(service.creates).toStrictEqual([]);
+  });
 
   // #331-T01
-  it("advertises opencode for a Dynamic job only after a canary VM proved it, and keeps it for the time to live", async () => {
-    const { probed, background } = behind(PASSING);
+  it("proves opencode with a canary VM when the deploy canary asks, and stops the VM", async () => {
+    const { probed } = behind(PASSING);
 
-    await expect(probed.capabilities(signal(), "opencode")).rejects.toThrow();
-    await settled(background);
-    expect(await probed.capabilities(signal(), "opencode")).toStrictEqual([
-      "pr-agent",
-      "opencode",
-    ]);
-    expect(await probed.capabilities(signal(), "opencode")).toStrictEqual([
-      "pr-agent",
-      "opencode",
-    ]);
+    expect(await probed.probe?.(signal())).toMatchObject({
+      status: "passed",
+      engines: ["pr-agent", "opencode"],
+    });
 
     expect(service.creates).toHaveLength(1);
     expect(service.running()).toStrictEqual([]);
   });
 
   // #331-T02
-  it("never creates a canary VM for a Diff job", async () => {
-    const { probed } = behind(PASSING);
+  it("reports a denial of the canary container to the deploy canary", async () => {
+    const { probed } = behind(DENYING);
 
-    expect(await probed.capabilities(signal(), "pr-agent")).toStrictEqual([
-      "pr-agent",
-    ]);
-
-    expect(service.creates).toStrictEqual([]);
-  });
-
-  // #331-T02
-  it("advertises PR-Agent only when the canary container says no", async () => {
-    const { probed, background } = behind(DENYING);
-    await probed.capabilities(signal(), "opencode").catch(() => undefined);
-    await settled(background);
-
-    expect(await probed.capabilities(signal(), "opencode")).toStrictEqual([
-      "pr-agent",
-    ]);
     expect(await probed.probe?.(signal())).toMatchObject({
       status: "denied",
       reasons: ["ipv6_not_disabled"],
@@ -396,54 +382,28 @@ describe("a Sandbox-Launcher behind the capability probe of its canary VM", () =
   });
 
   // #331-T02
-  it("advertises PR-Agent only when the canary VM cannot be created, and probes again after the failure time", async () => {
-    const { probed, background } = behind(PASSING);
+  it("reports a canary VM that cannot be created, and probes again once the reuse time is over", async () => {
+    const { probed } = behind(PASSING);
     service.failNextCreate(new SandboxServiceError("unavailable"));
-    await probed.capabilities(signal(), "opencode").catch(() => undefined);
-    await settled(background);
-    // No verdict: a retry for the App, not "not capable".
-    await expect(
-      probed.capabilities(signal(), "opencode"),
-    ).rejects.toBeInstanceOf(CapabilitiesPending);
-    expect(await probed.capabilities(signal())).toStrictEqual(["pr-agent"]);
 
+    expect(await probed.probe?.(signal())).toMatchObject({
+      status: "failed",
+      engines: ["pr-agent"],
+    });
     await clock.advance(61_000);
-    await probed.capabilities(signal(), "opencode").catch(() => undefined);
-    await settled(background);
 
-    expect(await probed.capabilities(signal(), "opencode")).toStrictEqual([
-      "pr-agent",
-      "opencode",
-    ]);
-    expect(service.creates).toHaveLength(2);
-  });
-
-  // #331-T03
-  it("asks a new canary VM after the hour", async () => {
-    const { probed, background } = behind(PASSING);
-    await probed.capabilities(signal(), "opencode").catch(() => undefined);
-    await settled(background);
-    await clock.advance(59 * 60_000);
-    await probed.capabilities(signal(), "opencode");
-    expect(service.creates).toHaveLength(1);
-
-    await clock.advance(2 * 60_000);
-    await expect(probed.capabilities(signal(), "opencode")).rejects.toThrow();
-    await settled(background);
-
+    expect(await probed.probe?.(signal())).toMatchObject({
+      status: "passed",
+      engines: ["pr-agent", "opencode"],
+    });
     expect(service.creates).toHaveLength(2);
   });
 
   // #331-T06
-  it("runs one canary VM for any number of wake-up calls and a forced probe at once", async () => {
+  it("runs one canary VM for any number of forced probes at once", async () => {
     const { probed } = behind(PASSING);
 
-    const calls = [
-      probed.capabilities(signal(), "opencode").catch(() => undefined),
-      probed.capabilities(signal(), "opencode").catch(() => undefined),
-      probed.probe?.(signal()),
-      probed.probe?.(signal()),
-    ];
+    const calls = [probed.probe?.(signal()), probed.probe?.(signal())];
     await settle();
     await Promise.all(calls);
 

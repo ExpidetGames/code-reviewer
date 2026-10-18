@@ -50,10 +50,19 @@ const SEND_CONCURRENCY = 5;
  * these pauses (at most three more calls), so a hiccup of the Dispatcher does not wait for the sweep.
  */
 export const INLINE_RETRY_DELAYS_MS: readonly number[] = [1_000, 3_000, 8_000];
-/** The longest a request spends on inline retries, pauses and calls together (the function lives 60 seconds). */
-export const INLINE_RETRY_BUDGET_MS = 35_000;
-/** A `Retry-After` longer than this is not waited for inline; the row keeps it for the next sender. */
-export const INLINE_RETRY_MAX_WAIT_MS = 10_000;
+/**
+ * The longest a request spends on inline retries, pauses and calls together (the function lives 60 seconds; the
+ * request that queued the job needs a few of them before this starts). A retry is started only when its pause and its
+ * longest possible call still fit, so the budget is a bound, not a target (#479: it was 35 seconds, too little for the
+ * 20 or 30 seconds a not-ready or busy Dispatcher asks for).
+ */
+export const INLINE_RETRY_BUDGET_MS = 45_000;
+/**
+ * A `Retry-After` longer than this is not waited for inline; the row keeps it, and a slot that frees, a request that
+ * touches the database or the sweep sends the job (`WAITING_DISPATCH_CODES`). 30 seconds covers the `Retry-After` of a
+ * busy Dispatcher (30) and of a Dispatcher that is not ready (20), the two it gives while it is launching (#479).
+ */
+export const INLINE_RETRY_MAX_WAIT_MS = 30_000;
 /**
  * How long a job that was given back may wait for its retry time inside the request that gave it back: the
  * Dispatcher gives a job back with 30 seconds, so that it does not start again in a hot loop (#395).
@@ -78,8 +87,15 @@ export type DispatchLog = {
 };
 
 export type DispatchService = {
-  /** The hook of the job queue. Never rejects. */
-  onEnqueued(result: EnqueueResult): Promise<void>;
+  /**
+   * The hook of the job queue. Never rejects. `receivedAt` (#479) is when the request that enqueued the job began its
+   * hook, on the monotonic clock of the service: the budget of the inline retries is counted from it, so the work the
+   * request did before `after()` ran is part of it. Without it the budget starts with the first call.
+   */
+  onEnqueued(
+    result: EnqueueResult,
+    context?: { receivedAt?: number },
+  ): Promise<void>;
   /**
    * The hook of the sweep: sends what is due. Never rejects. With `minAgeMs` (#395) a job that changed less than that
    * long ago is left to the request that queued it (the repair work of the other requests asks for it).
@@ -308,7 +324,7 @@ export function createDispatchService(options: {
   }
 
   return {
-    async onEnqueued(result) {
+    async onEnqueued(result, context = {}) {
       // A job that is returned because it exists already needs nothing, except the one a person pulled
       // forward (`already_active`): it was waiting behind a retry time and is due now.
       if (result.status === "existing" && result.reason !== "already_active")
@@ -331,7 +347,7 @@ export function createDispatchService(options: {
         if (row === undefined || row.attempts > 0 || row.state !== "pending")
           return;
         if (!due) return;
-        const began = monotonicMs();
+        const began = context.receivedAt ?? monotonicMs();
         const toSend = {
           jobId: job.id,
           reviewKind: job.reviewKind,
@@ -363,7 +379,8 @@ export function createDispatchService(options: {
       // full after all) does not use it, so the next candidate is asked, a batch of the missing number at a time.
       let accepted = 0;
       while (accepted < limit && candidates.length > 0) {
-        if (monotonicMs() >= deadline) break;
+        // A send started now may take the longest a call takes: it must end before the deadline, not start before it.
+        if (monotonicMs() + timeoutMs >= deadline) break;
         const batch = candidates.splice(
           0,
           Math.min(limit - accepted, SEND_CONCURRENCY),
@@ -374,6 +391,16 @@ export function createDispatchService(options: {
         accepted += updates.filter(
           (update) => update !== false && update.lastCode === "accepted",
         ).length;
+        // `busy`, `not ready`, a timeout or a lost connection say something about the Dispatcher, not about the job
+        // that was asked: the other candidates would get the same answer. Only `not_claimable` (its own pull request,
+        // the pool) is per job, and the walk goes on after it (#479).
+        if (
+          updates.some(
+            (update) =>
+              update !== false && TRANSIENT_CODES.includes(update.lastCode),
+          )
+        )
+          break;
       }
       return { sent: accepted };
     },
