@@ -141,6 +141,49 @@ describe("the key of a Dynamic claim", () => {
   });
 });
 
+describe("a Dynamic job whose model id is not valid", () => {
+  // #432-T22: the model is judged by the resolver, the same rule as for a Diff job, so the code is the one of the model
+  // settings (the claim answered dynamic_config_invalid before). The sentence of the Run must read right for a Dynamic
+  // Review. The settings of a project drop a stored id they cannot use, so the id comes from the options source here.
+  it("ends job_llm_options_invalid, creates no credential, and the Run tells a Dynamic Review user to check the Dynamic model", async () => {
+    const h = await startRunnerApiHarness({
+      llmKey: KEY,
+      jobOptions: {
+        optionsFor: async () => ({
+          env: {},
+          dynamic: {
+            model: "bad model name",
+            skill: "Review.",
+            maxFindings: 5,
+          },
+        }),
+      },
+    });
+    const runs = createRunsService({
+      runs: createRunsRepository(h.db, h.workspaceId),
+      now: h.clock.now,
+    });
+    const job = await h.enqueueNew({ reviewKind: "dynamic" });
+
+    expect((await h.claim({ engines: ENGINES })).status).toBe(204);
+
+    expect(h.issuedJobTokens()).toEqual([]);
+    expect(await h.queue.get(job.id)).toMatchObject({
+      reviewKind: "dynamic",
+      status: "failed",
+      errorCode: "job_llm_options_invalid",
+    });
+    const run = (await runs.get(job.id))?.run;
+    expect(run).toMatchObject({
+      status: "failed",
+      errorCode: "job_llm_options_invalid",
+      errorCodeKnown: true,
+    });
+    expect(run?.problem).toMatch(/Dynamic/);
+    expect(run?.problem).not.toContain("bad model name");
+  });
+});
+
 describe("a failed Dynamic review", () => {
   // The codes the Dynamic path reports (contracts/runner-api.v1.json, KnownRunnerErrorCode).
   const FAILURES = [

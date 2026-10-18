@@ -12,6 +12,9 @@ function record(modelTier: string | null): UsageRecord {
     reviewKind: "diff",
     keyMode: "managed",
     modelTier,
+    catalogEntryId: null,
+    catalogEntryName: null,
+    llmProvider: null,
     state: "settled",
     costMicroUsd: 1,
     promptTokens: 1,
@@ -57,5 +60,62 @@ describe("the reason of a usage item", () => {
     expect(
       usageItemView({ ...record(null), settledReason: "no_result" }).reason,
     ).toBe("no_result");
+  });
+});
+
+describe("the catalog entry of a usage item", () => {
+  const withEntry = (): UsageRecord => ({
+    ...record(null),
+    catalogEntryId: "mce_a1",
+    catalogEntryName: "Thorough",
+    llmProvider: "openrouter",
+  });
+
+  // #432-T07
+  it("serves the id and the name of the entry the run used", () => {
+    expect(usageItemView(withEntry())).toMatchObject({
+      catalogEntryId: "mce_a1",
+      catalogEntryName: "Thorough",
+    });
+  });
+
+  // #432-T07
+  it("serves null for a run without an entry, and never the provider or a model", () => {
+    const view = usageItemView(record(null));
+
+    expect(view.catalogEntryId).toBeNull();
+    expect(view.catalogEntryName).toBeNull();
+    expect(Object.keys(usageItemView(withEntry())).sort()).toEqual(
+      [
+        "catalogEntryId",
+        "catalogEntryName",
+        "completionTokens",
+        "costMicroUsd",
+        "id",
+        "jobId",
+        "keyMode",
+        "modelTier",
+        "promptTokens",
+        "reason",
+        "reviewKind",
+        "settledAt",
+        "workspaceId",
+      ].sort(),
+    );
+    expect(JSON.stringify(usageItemView(withEntry()))).not.toContain(
+      "openrouter",
+    );
+  });
+
+  // #432-T07
+  it("serves null for an id or a name that is not the shape of one", () => {
+    const view = usageItemView({
+      ...withEntry(),
+      catalogEntryId: "vendor/some-model",
+      catalogEntryName: "x".repeat(500),
+    });
+
+    expect(view.catalogEntryId).toBeNull();
+    expect(view.catalogEntryName).toBeNull();
   });
 });

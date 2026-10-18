@@ -50,8 +50,6 @@ async function start(
 ): Promise<RunnerApiHarness> {
   const h = await startRunnerApiHarness({
     llmKey: WORKSPACE_KEY,
-    // The job of a managed workspace needs a model for its tier (#280); which one is not what these tests are about.
-    modelTiers: { medium: { diff: "tier/medium-diff" } },
     ...options.harness,
   });
   if (options.operatorKey !== null) {
@@ -407,8 +405,8 @@ describe("the Worker API of a managed workspace", () => {
   });
 });
 
-// The model of a job on the operator's key is the operator's model of the project's tier (#280); it is pinned in
-// runner-api-model-tiers.integration.test.ts, where the pin of the instance default model (#276) used to be.
+// The model of a job on the operator's key is the model of the catalog entry of the project (#432); it is pinned in
+// runner-api-selection.integration.test.ts, where the pin of the instance default model (#276) used to be.
 
 describe("the Worker's fetch after the workspace's standing changed (#276)", () => {
   async function suspendedAfterClaim(keyMode: "own" | "managed") {

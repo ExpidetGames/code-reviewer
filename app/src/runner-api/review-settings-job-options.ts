@@ -31,6 +31,10 @@ export function createReviewSettingsJobOptionsSource(deps: {
           // grant nothing to the read-only agent and must never be promoted into its permissions.
           env: {},
           modelTier: resolved.settings.modelTier,
+          selection: {
+            layers: { project: resolved.modelLayers.dynamic.project },
+            entryId: resolved.dynamic.catalogEntryDynamic,
+          },
           llm: {
             model: resolved.dynamic.dynamicModel,
             maxTokens: resolved.settings.maxTokens,
@@ -47,6 +51,10 @@ export function createReviewSettingsJobOptionsSource(deps: {
       return {
         env,
         modelTier: resolved.settings.modelTier,
+        selection: {
+          layers: resolved.modelLayers.diff,
+          entryId: resolved.dynamic.catalogEntryDiff,
+        },
         llm: { ...llm, fallbackModels },
       };
     },

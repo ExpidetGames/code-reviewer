@@ -5,6 +5,7 @@
 // repository: the extra options of the four PR-Agent tools (`env`) and the model and the token budget
 // of the job.
 import type { Job } from "../jobs/job-types.ts";
+import type { ModelLayer } from "../llm/selection.ts";
 import type { ModelTier } from "../model-tiers/tiers.ts";
 
 export type JobOptions = {
@@ -17,8 +18,19 @@ export type JobOptions = {
    * #280: the model tier of the project's effective settings. It only has an effect for a job that runs on the
    * operator's key (the claim swaps `llm.model` and the Dynamic model for the operator's model of the tier); for any
    * other job it is ignored. Left out: `medium`.
+   * @deprecated The catalog entry (`selection.entryId`) replaces the tier; the claim no longer reads this (#432).
    */
   modelTier?: ModelTier;
+  /**
+   * #432: what the claim chooses provider, model and catalog entry from (`resolveModelSelection`), for the job's pinned
+   * kind. `layers` are the settings that wrote a provider or a model (own key), `entryId` is the catalog entry the project
+   * selected (operator's key). Left out by a source that does not know them: the claim then reads `llm.model` (or
+   * `dynamic.model`) as one project layer for the default provider.
+   */
+  selection?: {
+    layers: { workspace?: ModelLayer; project?: ModelLayer };
+    entryId: string | null;
+  };
   llm?: {
     /** Replaces the model of the LLM access for this job. Null or left out: keep it. */
     model?: string | null;
