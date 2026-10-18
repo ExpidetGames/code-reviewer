@@ -5,6 +5,7 @@
 // 404 of a path that does not exist and the handler is never reached; when it is on, the access proxy lets a request without a
 // session through (the signature is the credential), and a signed delivery changes the state.
 import { NextRequest } from "next/server";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildDeliveries } from "../../../fakes/paddle/webhooks.ts";
@@ -87,6 +88,19 @@ afterEach(async () => {
 });
 
 describe("the billing webhook route file", () => {
+  // #441-T01 (regression found by the build in CI): the app builds with `cacheComponents`, which refuses a route segment config such as
+  // `runtime`. Node is the default runtime, and the handler needs raw text and `node:crypto`, which it has there.
+  it("exports no route segment config, which the build of this app refuses", () => {
+    const source = readFileSync(
+      join(import.meta.dirname, "../../src/app/api/billing/webhook/route.ts"),
+      "utf8",
+    );
+
+    expect(source).not.toMatch(
+      /export\s+const\s+(runtime|dynamic|revalidate|fetchCache|maxDuration|preferredRegion|dynamicParams)\b/,
+    );
+  });
+
   // #441-T01
   it("is the 404 of a path that does not exist while billing was never configured", async () => {
     const { db, route, signed } = await startRoute({ billing: "off" });
