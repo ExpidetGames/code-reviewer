@@ -48,7 +48,7 @@ import type {
   BillingMissingItem,
 } from "./admin-errors.ts";
 import { PaddleClientError, type PaddleClient } from "./paddle-client.ts";
-import { isPublicHttpsUrl } from "./public-url.ts";
+import { isPublicHttpsUrl, normalizedAddress } from "./public-url.ts";
 import {
   clientTokenEnvironmentOf,
   keyEnvironmentOf,
@@ -230,7 +230,9 @@ export function createBillingSettingsService({
     return storedClient(environment).then(checkWith);
   }
 
-  const webhookUrl = `${publicUrl.replace(/\/+$/, "")}${BILLING_WEBHOOK_PATH}`;
+  const webhookUrl = normalizedAddress(
+    `${normalizedAddress(publicUrl)}${BILLING_WEBHOOK_PATH}`,
+  );
 
   /** The destination is stored (or reported) after Paddle has one: the secret goes in, or the destination is named. */
   async function storeDestinationSecret(
@@ -269,7 +271,7 @@ export function createBillingSettingsService({
     const { client } = made;
     try {
       const ours = (await client.listNotificationSettings()).filter(
-        ({ destination }) => destination.replace(/\/+$/, "") === webhookUrl,
+        ({ destination }) => normalizedAddress(destination) === webhookUrl,
       );
       if (recreate) {
         // Touching the settings row first makes a switch-on that checked the secret before now find the row changed,
@@ -439,9 +441,10 @@ export function createBillingSettingsService({
       if (key.state === "undecryptable")
         return { ok: false, error: "api_key_unreadable" };
 
+      const lease = { startedAt: formatTimestamp(new Date()) };
       const claimed = await settingsRepository.claim(
         "billing_destination_lock",
-        { startedAt: formatTimestamp(new Date()) },
+        lease,
         adminId,
         formatTimestamp(new Date(Date.now() - DESTINATION_LEASE_MS)),
       );
@@ -450,7 +453,8 @@ export function createBillingSettingsService({
       try {
         return await makeDestination(adminId, { settings, stored }, recreate);
       } finally {
-        await settingsRepository.remove("billing_destination_lock");
+        // Only the lease this request took: one taken over after it ran out belongs to the other request.
+        await settingsRepository.release("billing_destination_lock", lease);
       }
     },
 

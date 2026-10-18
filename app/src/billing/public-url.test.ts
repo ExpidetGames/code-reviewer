@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { isPublicHttpsUrl } from "./public-url.ts";
+import { isPublicHttpsUrl, normalizedAddress } from "./public-url.ts";
 
 describe("the address Paddle posts its events to", () => {
   // #437-T05
@@ -48,5 +48,24 @@ describe("the address Paddle posts its events to", () => {
     ["https://user:pass@reviews.example.com", "credentials in the address"],
   ])("refuses %s (%s)", (url) => {
     expect(isPublicHttpsUrl(url)).toBe(false);
+  });
+});
+
+describe("the address in the form Paddle's destinations are compared in", () => {
+  // #437-T05
+  it.each([
+    ["https://Reviews.Example.COM/hook", "https://reviews.example.com/hook"],
+    [
+      "https://reviews.example.com:443/hook/",
+      "https://reviews.example.com/hook",
+    ],
+    ["https://reviews.example.com//", "https://reviews.example.com"],
+    [
+      "https://reviews.example.com:8443/base/",
+      "https://reviews.example.com:8443/base",
+    ],
+    ["not a url/", "not a url"],
+  ])("turns %s into %s", (given, expected) => {
+    expect(normalizedAddress(given)).toBe(expected);
   });
 });

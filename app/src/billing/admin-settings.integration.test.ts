@@ -854,6 +854,37 @@ describe("the notification destination, idempotent", () => {
   });
 
   // #437-T05
+  it("leaves the lease of the request that took it over when a create that ran out finishes", async () => {
+    const portal = await createAdminHarness();
+    await saved(portal, { webhookSecret: undefined });
+    const lock = () =>
+      portal.db
+        .selectFrom("instance_settings")
+        .selectAll()
+        .where("key", "=", "billing_destination_lock")
+        .execute();
+    const slow = await serviceOver(portal, {
+      beforeUse: {
+        n: 1,
+        // Another request has taken the lease over while this one was running.
+        run: () =>
+          portal.db
+            .updateTable("instance_settings")
+            .set({ value: JSON.stringify({ startedAt: "taken-over" }) })
+            .where("key", "=", "billing_destination_lock")
+            .execute(),
+      },
+    });
+
+    const result = await slow.createNotificationDestination(portal.adminId);
+
+    expect(result).toEqual({ ok: true });
+    expect(await lock()).toMatchObject([
+      { value: JSON.stringify({ startedAt: "taken-over" }) },
+    ]);
+  });
+
+  // #437-T05
   it("finds the destination again after a lost answer and leaves one", async () => {
     const portal = await createAdminHarness();
     const paddle = await portal.fakePaddle();
@@ -952,6 +983,46 @@ describe("the notification destination, idempotent", () => {
     const stored = await portal.secrets.use("paddle_webhook_secret");
     expect(stored.ok && stored.value.reveal()).toBe(ours.endpoint_secret_key);
   });
+
+  // #437-T05
+  it.each([
+    [
+      "an address with a capital host, the default port and a slash",
+      "HTTPS://Reviews.Example.TEST:443/",
+      WEBHOOK_URL,
+    ],
+    [
+      "a destination Paddle spells with a capital host and the port",
+      BILLING_TEST_PUBLIC_URL,
+      "https://REVIEWS.example.test:443/api/billing/webhook/",
+    ],
+  ])(
+    "finds its destination whatever the spelling of the address: %s",
+    async (_case, publicUrl, listed) => {
+      const portal = await createAdminHarness({ billingPublicUrl: publicUrl });
+      const paddle = await portal.fakePaddle();
+      await saved(portal, { webhookSecret: undefined });
+      const client = createPaddleClient({
+        apiKey: API_KEY,
+        baseUrl: paddle.baseUrl,
+        sleep: () => Promise.resolve(),
+      });
+      const ours = await client.createNotificationSetting({
+        description: "Code Reviewer",
+        destination: listed,
+        subscribed_events: ["subscription.updated"],
+      });
+
+      const response = await post(portal, "/notification-destination");
+
+      expect(response.status).toBe(200);
+      expect(paddle.notificationSettings().map(({ id }) => id)).toEqual([
+        ours.id,
+      ]);
+      const stored = await portal.secrets.use("paddle_webhook_secret");
+      expect(stored.ok && stored.value.reveal()).toBe(ours.endpoint_secret_key);
+    },
+  );
 
   // #437-T05
   it("refuses a destination whose secret it cannot get, tells to delete it or recreate, and recreates it on request", async () => {
@@ -1312,7 +1383,11 @@ describe("one environment for every credential", () => {
         run: () =>
           otherTab.saveSettings(
             portal.adminId,
-            settings({ apiKey: undefined, webhookSecret: undefined, graceDays: 14 }),
+            settings({
+              apiKey: undefined,
+              webhookSecret: undefined,
+              graceDays: 14,
+            }),
           ),
       },
     });

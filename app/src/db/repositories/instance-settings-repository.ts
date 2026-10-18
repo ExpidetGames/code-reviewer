@@ -189,6 +189,14 @@ export type InstanceSettingsRepository = {
     updatedBy: string | null,
     staleBefore: string,
   ): Promise<boolean>;
+  /**
+   * Releases a lease taken with `claim`, only while it still holds `value`, the one this holder claimed with. A holder
+   * whose lease ran out and was taken over leaves the new holder's lease alone. False when it is not (or no longer) held.
+   */
+  release<K extends GuardedSettingKey>(
+    key: K,
+    value: InstanceSettingValues[K],
+  ): Promise<boolean>;
   /** Deletes the setting (it reads as never saved again); false when there was none. */
   remove(key: InstanceSettingKey): Promise<boolean>;
 };
@@ -412,6 +420,15 @@ export function createInstanceSettingsRepository(
         )
         .executeTakeFirst();
       return Number(claimed.numInsertedOrUpdatedRows ?? 0) > 0;
+    },
+
+    async release(key, value) {
+      const result = await db
+        .deleteFrom("instance_settings")
+        .where("key", "=", key)
+        .where("value", "=", encodeJson(value))
+        .executeTakeFirst();
+      return Number(result.numDeletedRows) > 0;
     },
 
     async remove(key) {

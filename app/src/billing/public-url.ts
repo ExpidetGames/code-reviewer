@@ -64,3 +64,16 @@ export function isPublicHttpsUrl(text: string): boolean {
   // A name with one label (`intranet`) is only known on a private network.
   return host.includes(".");
 }
+
+/**
+ * An address in one spelling, to compare two that name the same place: lower-case host, no default port, no trailing
+ * slash, no query or fragment. Text that is no URL is only trimmed of trailing slashes.
+ */
+export function normalizedAddress(text: string): string {
+  try {
+    const url = new URL(text);
+    return `${url.origin}${url.pathname}`.replace(/\/+$/, "");
+  } catch {
+    return text.replace(/\/+$/, "");
+  }
+}
