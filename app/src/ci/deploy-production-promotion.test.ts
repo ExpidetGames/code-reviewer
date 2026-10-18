@@ -88,6 +88,39 @@ describe("the model of the conditions", () => {
     expect(() => run("${{ failure() }}")).toThrow();
     expect(() => run("${{ contains(github.ref, 'main') }}")).toThrow();
   });
+
+  // #480-T07
+  it("ends a job in the run's cancel as cancelled, and every job after it sees cancelled() true", () => {
+    const result = simulate(
+      {
+        on: {},
+        jobs: {
+          first: {},
+          second: { needs: "first" },
+          after: { needs: "second", if: "${{ !cancelled() }}" },
+          cleanup: { needs: "second", if: "${{ always() }}" },
+        },
+      },
+      { cancelling: ["second"] },
+    );
+    expect(result).toEqual({
+      first: "success",
+      second: "cancelled",
+      after: "skipped",
+      cleanup: "success",
+    });
+  });
+
+  // #480-T07
+  it("counts a status function of every kind that switches the implicit success() off", () => {
+    const has = (condition?: string) =>
+      hasStatusFunction(condition === undefined ? {} : { if: condition });
+    expect(has()).toBe(false);
+    expect(has("${{ needs.a.result == 'success' }}")).toBe(false);
+    expect(has("${{ success() }}")).toBe(false);
+    for (const status of ["!cancelled()", "always()", "failure()"])
+      expect(has(`\${{ ${status} }}`), status).toBe(true);
+  });
 });
 
 describe("the production deployment when the golden snapshot is reused", () => {
@@ -168,10 +201,103 @@ describe("what still stops the promotion", () => {
   });
 
   // #480-T04
+  it("does not promote the Dispatcher, write the pair or clean up when promoting the App is cancelled", () => {
+    const result = simulate(workflow, {
+      ...rebuild,
+      cancelling: ["promote-app"],
+    });
+    expect(result["promote-app"]).toBe("cancelled");
+    for (const name of ["promote-dispatcher", "persist", "cleanup"])
+      expect(result[name], name).toBe("skipped");
+  });
+
+  // #480-T04
+  it("promotes nothing when the canary is cancelled", () => {
+    const result = simulate(workflow, { ...reuse, cancelling: ["canary"] });
+    expect(result.canary).toBe("cancelled");
+    for (const name of [...PROMOTIONS, "persist", "cleanup"])
+      expect(result[name], name).toBe("skipped");
+  });
+
+  // #480-T04
   it("records what happened to each project even when it stops", () => {
     for (const [, scenario] of stops)
       expect(simulate(workflow, scenario).record).toBe("success");
   });
+});
+
+describe("the snapshot of a run that did not get live", () => {
+  const BEFORE_THE_PROMOTION = [
+    "stage-app",
+    "stage-dispatcher",
+    "health-app",
+    "canary",
+    "promote-app",
+  ];
+
+  // #480-T06
+  it.each(BEFORE_THE_PROMOTION)(
+    "is discarded after a rebuild when %s fails, because the Dispatcher's promotion never started",
+    (failing) => {
+      const result = simulate(workflow, { ...rebuild, failing: [failing] });
+      expect(result["snapshot-build"]).toBe("success");
+      expect(result["promote-dispatcher"]).toBe("skipped");
+      expect(result.discard).toBe("success");
+    },
+  );
+
+  // #480-T06
+  it("is discarded after a rebuild when the run is cancelled before the Dispatcher's promotion", () => {
+    const result = simulate(workflow, {
+      ...rebuild,
+      cancelling: ["promote-app"],
+    });
+    expect(result["promote-dispatcher"]).toBe("skipped");
+    expect(result.discard).toBe("success");
+  });
+
+  // #480-T06
+  it("is left to the next cleanup when the Dispatcher's promotion fails, because it can still land", () => {
+    const result = simulate(workflow, {
+      ...rebuild,
+      failing: ["promote-dispatcher"],
+    });
+    expect(result["promote-app"]).toBe("success");
+    expect(result["promote-dispatcher"]).toBe("failure");
+    for (const name of ["persist", "cleanup", "discard"])
+      expect(result[name], name).toBe("skipped");
+  });
+
+  // #480-T06
+  it("is left to the next cleanup when the Dispatcher's promotion is cancelled", () => {
+    const result = simulate(workflow, {
+      ...rebuild,
+      cancelling: ["promote-dispatcher"],
+    });
+    expect(result["promote-dispatcher"]).toBe("cancelled");
+    for (const name of ["persist", "cleanup", "discard"])
+      expect(result[name], name).toBe("skipped");
+  });
+
+  // #480-T06
+  it("is not discarded when the build itself fails, because there is nothing built to discard", () => {
+    const result = simulate(workflow, {
+      ...rebuild,
+      failing: ["snapshot-build"],
+    });
+    expect(result["snapshot-build"]).toBe("failure");
+    expect(result.discard).toBe("skipped");
+  });
+
+  // #480-T06
+  it.each([...BEFORE_THE_PROMOTION, "promote-dispatcher", "migrate", "fresh"])(
+    "is never discarded when the snapshot is reused and %s fails",
+    (failing) => {
+      const result = simulate(workflow, { ...reuse, failing: [failing] });
+      expect(result["snapshot-build"]).toBe("skipped");
+      expect(result.discard).toBe("skipped");
+    },
+  );
 });
 
 describe("the conditions of the jobs that follow the snapshot build", () => {

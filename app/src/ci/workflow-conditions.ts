@@ -14,14 +14,16 @@ import { needsOf } from "./workflow-support.ts";
 
 type Value = string | boolean;
 
-export type JobResult = "success" | "failure" | "skipped";
+export type JobResult = "success" | "failure" | "skipped" | "cancelled";
 
 export type Scenario = {
   /** The outputs the jobs report, by job name (`needs.<job>.outputs.<name>`). */
   outputs?: Record<string, Record<string, string>>;
   /** Jobs that fail when they run; every other job that runs succeeds. */
   failing?: string[];
-  /** The run was cancelled. */
+  /** Jobs the run is cancelled in: they end `cancelled`, and `cancelled()` is true for every job after them. */
+  cancelling?: string[];
+  /** The run was cancelled before it started. */
   cancelled?: boolean;
 };
 
@@ -32,7 +34,9 @@ const GITHUB: Record<string, string> = {
 
 const TOKEN =
   /\s*(&&|\|\||==|!=|!|\(|\)|'(?:[^']|'')*'|[a-z]+\(\)|[A-Za-z_][\w.-]*)/y;
-const STATUS_FUNCTIONS = ["cancelled()", "always()"];
+// `success()` is left out on purpose: it is the check every job gets implicitly, so naming it switches nothing off.
+// `failure()` switches it off, and `evaluate` throws on it until a condition of the pipeline needs it modelled.
+const STATUS_FUNCTIONS = ["cancelled()", "always()", "failure()"];
 
 function tokenize(expression: string): string[] {
   const tokens: string[] = [];
@@ -179,6 +183,7 @@ export function simulate(
   scenario: Scenario = {},
 ): Record<string, JobResult> {
   const results: Record<string, JobResult> = {};
+  let runCancelled = scenario.cancelled ?? false;
   const pending = Object.keys(workflow.jobs);
   while (pending.length > 0) {
     const index = pending.findIndex((name) =>
@@ -193,7 +198,7 @@ export function simulate(
         needs.map((need) => [need, results[need] as JobResult]),
       ),
       outputs: scenario.outputs ?? {},
-      cancelled: scenario.cancelled ?? false,
+      cancelled: runCancelled,
     };
     const implicitSuccess = !hasStatusFunction(job);
     const upstreamSucceeded = ancestorsOf(workflow, name).every(
@@ -204,11 +209,12 @@ export function simulate(
         ? true
         : truthy(evaluate(tokenize(strip(String(job.if))), context));
     const runs = (!implicitSuccess || upstreamSucceeded) && condition;
-    results[name] = !runs
-      ? "skipped"
-      : scenario.failing?.includes(name)
-        ? "failure"
-        : "success";
+    if (!runs) results[name] = "skipped";
+    else if (scenario.cancelling?.includes(name)) {
+      results[name] = "cancelled";
+      runCancelled = true;
+    } else
+      results[name] = scenario.failing?.includes(name) ? "failure" : "success";
   }
   return results;
 }

@@ -158,10 +158,12 @@ describe("the production deployment workflow", () => {
       );
     // The promotions need a status function to run when the snapshot job was skipped (#480), so they check every job
     // they need instead, and never run after a failure or a cancel (deploy-production-promotion.test.ts).
-    for (const name of ["promote-app", "promote-dispatcher"])
+    for (const name of ["promote-app", "promote-dispatcher"]) {
+      expect(String(job(name).if), name).toContain("!cancelled()");
       expect(String(job(name).if), name).not.toMatch(
-        /always\(\)|failure\(\)|(?<!!)cancelled\(\)/,
+        /always\(\)|failure\(\)|success\(\)|(?<!!)cancelled\(\)/,
       );
+    }
   });
 
   // #403-T19
