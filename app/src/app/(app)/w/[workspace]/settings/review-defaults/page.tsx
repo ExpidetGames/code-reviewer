@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { Metadata } from "next";
+import { getWorkspaceLlm } from "@/llm/shared";
+import { keyedProvidersFor } from "@/review-settings/ui/keyed-providers";
 import { reviewSettingsServiceFor } from "@/review-settings/shared";
 import { planPageLinkedFor } from "@/usage/shared";
 import {
@@ -26,11 +28,17 @@ export default async function ReviewDefaultsSettingsPage({
     }),
     planPageLinkedFor(workspaceId),
   ]);
+  // Only a workspace on its own key gets the list (and only then are its key statuses read).
+  const keyedProviders = await keyedProvidersFor(
+    data.model,
+    getWorkspaceLlm().keyServiceFor(workspaceId),
+  );
   return (
     <GlobalSettingsPageContent
       workspaceSlug={workspace.slug}
       canEdit={can(role, "manage_review_defaults")}
       showPlan={showPlan}
+      {...(keyedProviders === undefined ? {} : { keyedProviders })}
       data={data}
     />
   );

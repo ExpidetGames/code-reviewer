@@ -12,11 +12,20 @@ import type {
   ReadableSources,
 } from "../service.ts";
 import type { ReviewCostGuard } from "../cost.ts";
-import type { TierAvailability } from "../../model-tiers/tiers.ts";
+import type { CatalogChoices, CatalogSelection } from "../catalog-selection.ts";
 import {
   type ReadableReviewSettings,
   type ReviewSettingsOverrides,
 } from "../settings.ts";
+
+/**
+ * What a project form of a workspace on the operator's key chooses from (#433): per kind the entries it may pick, and
+ * the entry the project has now. Only names, descriptions and ids: the view holds neither a provider nor a model.
+ */
+export type CatalogFormModel = {
+  choices: CatalogChoices;
+  selection: CatalogSelection;
+};
 
 export type SettingsFormModel = {
   mode: "global" | "project";
@@ -31,12 +40,17 @@ export type SettingsFormModel = {
   /** The estimate of a review; null for a workspace on the operator's key, which has no model of its own (#283). */
   cost: ReviewCostGuard | null;
   /**
-   * The workspace reviews on the operator's key (#283): the form offers a quality level instead of the model, the
-   * fallback model and the Dynamic model, and shows no cost estimate. The settings it was built from hold no model.
+   * The workspace reviews on the operator's key (#283): the form offers a choice of the catalog instead of the
+   * provider, the model, the fallback model and the Dynamic model, and shows no cost estimate. The settings it was
+   * built from hold no model.
    */
   managed: boolean;
-  /** For such a workspace, whether each level has a model for each kind of review; null otherwise. */
-  tierAvailability: TierAvailability | null;
+  /**
+   * The entries of the catalog a project of such a workspace chooses from (#433); null for a workspace on its own
+   * key, for the workspace defaults (no workspace-level default entry, decision C3) and for an answer of a server
+   * that does not know the catalog.
+   */
+  catalog: CatalogFormModel | null;
   /** Who saved the global defaults last and when; null for a project or before the first save. */
   lastSaved: { at: string; by: string | null } | null;
   /**
@@ -59,12 +73,19 @@ export function modelFromGlobalView(
     sources: view.sources,
     cost: view.cost,
     managed: view.modelManagedByInstance,
-    tierAvailability: view.tierAvailability,
+    catalog: null,
     lastSaved:
       view.updatedAt === null
         ? null
         : { at: view.updatedAt, by: view.updatedBy },
   };
+}
+
+/** The catalog view of a project; an answer of a server from before #430 carries neither part. */
+function catalogOf(view: ProjectSettingsView): CatalogFormModel | null {
+  const { catalogChoices, catalogSelection } = view;
+  if (!catalogChoices || !catalogSelection) return null;
+  return { choices: catalogChoices, selection: catalogSelection };
 }
 
 export function modelFromProjectView(
@@ -78,7 +99,7 @@ export function modelFromProjectView(
     sources: view.sources,
     cost: view.cost,
     managed: view.modelManagedByInstance,
-    tierAvailability: view.tierAvailability,
+    catalog: catalogOf(view),
     lastSaved: null,
     dynamic: view.dynamic,
   };
@@ -120,7 +141,6 @@ function withManagedFlag<T extends GlobalSettingsView | ProjectSettingsView>(
   return {
     ...view,
     modelManagedByInstance: view.modelManagedByInstance === true,
-    tierAvailability: view.tierAvailability ?? null,
   };
 }
 

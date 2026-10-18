@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 "use client";
-// The "Model" card of the review settings form (#174): the model, the fallback model and the token
-// budget, with the estimated cost of one review at the foot (the cost belongs next to the model it
+// The "Model" card of the review settings form (#174): the provider and the model, the fallback model and the
+// token budget, with the estimated cost of one review at the foot (the cost belongs next to the model it
 // depends on, not at the end of the form). Every field shows where its value comes from and can be
-// taken back to the layer below with "Reset to default".
+// taken back to the layer below with "Reset to default". A workspace on the operator's key sees the catalog
+// choice (or, on the workspace defaults, a note) in place of the provider and the model fields (#283, #433).
 import type { ReactNode } from "react";
-import { QUALITY_HEADING } from "../../copy/model-quality.ts";
-import { DEFAULT_LLM_PROVIDER_LABEL } from "../../llm/providers/index.ts";
+import { MODEL_CHOICE_HEADING } from "../../copy/model-choice.ts";
 import type { ReviewCostGuard } from "../cost.ts";
 import {
   SettingsCard,
@@ -15,11 +15,14 @@ import {
   settingsOrigin,
   type SettingsFieldsetProps,
 } from "./settings-fields.tsx";
+import { ProviderSelect, type ProviderOption } from "./provider-select.tsx";
 import { CostSummary } from "./cost-summary.tsx";
 import { REVIEW_SETTING_LIMITS } from "../settings.ts";
 
 /** The one sentence about the model, the fact people ask about most. */
-export const MODEL_HINT = `The AI model that writes the review. Pick one from the list or type the name of any model ${DEFAULT_LLM_PROVIDER_LABEL} offers. Smaller models cost less per review, larger ones usually review more thoroughly.`;
+export function modelHint(providerLabel: string): string {
+  return `The AI model that writes the review. Pick one from the list or type the name of any model ${providerLabel} offers. Smaller models cost less per review, larger ones usually review more thoroughly.`;
+}
 
 // The settings accept a fallback model, but the app does not send it to the runner yet (lead
 // decision for the MVP, src/review-settings/README.md), so the form says so instead of promising it.
@@ -38,20 +41,25 @@ export function ModelFieldset({
   disabled,
   handlers,
   cost,
+  workspaceSlug,
+  providers,
   datalistId,
-  quality,
+  choice,
 }: SettingsFieldsetProps & {
   /**
-   * The quality choice of a workspace on the operator's key (#283). It takes the place of the model, the fallback
-   * model and the cost estimate; the token budget stays.
+   * The catalog choice of a workspace on the operator's key (#283, #433). It takes the place of the provider, the
+   * model, the fallback model and the cost estimate; the token budget stays.
    */
-  quality?: ReactNode;
+  choice?: ReactNode;
   cost: ReviewCostGuard | null;
-  /** The id of the `<datalist>` of known model names, rendered by the container. */
+  workspaceSlug: string;
+  /** The registered providers, with whether a key is stored for each. */
+  providers: readonly ProviderOption[];
+  /** The id of the `<datalist>` of the known model names of the chosen provider, rendered by the container. */
   datalistId: string;
 }) {
   const origin = (
-    name: "model" | "fallbackModel" | "maxTokens",
+    name: "provider" | "model" | "fallbackModel" | "maxTokens",
     label: string,
   ) =>
     settingsOrigin({
@@ -73,19 +81,32 @@ export function ModelFieldset({
       inputMode="numeric"
     />
   );
-  if (quality !== undefined)
+  if (choice !== undefined)
     return (
-      <SettingsCard title={QUALITY_HEADING} disabled={disabled}>
-        {quality}
+      <SettingsCard title={MODEL_CHOICE_HEADING} disabled={disabled}>
+        {choice}
         {budget}
       </SettingsCard>
     );
+  const providerLabel =
+    providers.find((option) => option.id === state.values.provider)?.label ??
+    state.values.provider;
   return (
     <SettingsCard title="Model" disabled={disabled}>
+      <ProviderSelect
+        workspaceSlug={workspaceSlug}
+        name="provider"
+        label="Provider"
+        value={state.values.provider}
+        options={providers}
+        origin={origin("provider", "Provider")}
+        error={errors.provider}
+        onChange={(value) => handlers.setText("provider", value)}
+      />
       <SettingsTextField
         name="model"
         label="Model"
-        hint={MODEL_HINT}
+        hint={modelHint(providerLabel)}
         error={errors.model}
         origin={origin("model", "Model")}
         value={state.values.model}
