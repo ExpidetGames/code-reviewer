@@ -55,6 +55,7 @@ import { migration as createBillingPlans } from "./20261018120000_create_billing
 import { migration as protectBillingPlanVersions } from "./20261018140000_protect_billing_plan_versions.ts";
 import { migration as createBillingPlanPrices } from "./20261018160000_create_billing_plan_prices.ts";
 import { migration as migrateModelTiersToCatalog } from "./20261018170000_migrate_model_tiers_to_catalog.ts";
+import { migration as createBillingSubscriptions } from "./20261018180000_create_billing_subscriptions.ts";
 
 const migrations: Record<string, Migration> = {
   "0001_create_app_meta": createAppMeta,
@@ -112,6 +113,7 @@ const migrations: Record<string, Migration> = {
   "20261018140000_protect_billing_plan_versions": protectBillingPlanVersions,
   "20261018160000_create_billing_plan_prices": createBillingPlanPrices,
   "20261018170000_migrate_model_tiers_to_catalog": migrateModelTiersToCatalog,
+  "20261018180000_create_billing_subscriptions": createBillingSubscriptions,
 };
 
 export const migrationProvider: MigrationProvider = {

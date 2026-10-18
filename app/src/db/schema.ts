@@ -775,6 +775,83 @@ export interface BillingPlanPricesTable {
   archived_at: string | null;
 }
 
+/**
+ * The Paddle customer a workspace pays with (#441, src/billing/README.md): adopted from `subscription.created`, per workspace and
+ * environment. An id only: no name, email or address of the customer is stored. Workspace scoped.
+ */
+export interface BillingCustomersTable {
+  workspace_id: string;
+  /** `sandbox` or `live`. */
+  paddle_env: string;
+  paddle_customer_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * The state of a workspace's Paddle subscription, pinned to a plan version (#441). Workspace scoped. Ids, states and times only.
+ * At most one row per workspace is not canceled (a partial unique index).
+ */
+export interface BillingSubscriptionsTable {
+  id: string;
+  workspace_id: string;
+  paddle_env: string;
+  paddle_subscription_id: string;
+  paddle_customer_id: string;
+  /** The version the workspace bought (`billing_plan_versions.id`); moves only with a plan change. */
+  plan_version_id: string;
+  /** The Paddle price the subscription is billed with now. */
+  paddle_price_id: string;
+  /** `month` or `year`: the interval of the slot of the version the price is linked to. */
+  billing_interval: string;
+  /** `active`, `trialing`, `past_due`, `paused` or `canceled` (`SUBSCRIPTION_STATUSES`). */
+  status: string;
+  /** When Paddle first showed `past_due` in the current spell; null otherwise. The grace of #442 counts from it. */
+  past_due_since: string | null;
+  started_at: string | null;
+  current_period_start: string | null;
+  current_period_end: string | null;
+  next_billed_at: string | null;
+  canceled_at: string | null;
+  /** `cancel`, `pause` or `resume`; null for none. */
+  scheduled_change_action: string | null;
+  scheduled_change_at: string | null;
+  /** The `occurred_at` of the newest event applied: an older event is ignored. Equal stamps apply. */
+  last_event_occurred_at: string;
+  last_event_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * A Paddle transaction the server created for a workspace to buy a version (#443 writes it, the webhook of #441 reads it). The
+ * only link from a Paddle subscription to a workspace. Workspace scoped.
+ */
+export interface BillingCheckoutsTable {
+  id: string;
+  workspace_id: string;
+  paddle_env: string;
+  transaction_id: string;
+  plan_version_id: string;
+  billing_interval: string;
+  created_at: string;
+}
+
+/**
+ * One delivered Paddle event: the dedupe (`event_id`, never the notification id) and the log of what became of it. Instance level
+ * and without a payload; `entity_id` is the Paddle id of the subscription or price it was about.
+ */
+export interface BillingWebhookEventsTable {
+  event_id: string;
+  paddle_env: string;
+  event_type: string;
+  occurred_at: string;
+  /** `pending` while the transaction that applies it runs; then one of `WEBHOOK_OUTCOMES`. */
+  outcome: string;
+  entity_id: string | null;
+  received_at: string;
+}
+
 export interface Database {
   app_meta: AppMetaTable;
   users: UsersTable;
@@ -807,6 +884,10 @@ export interface Database {
   billing_plans: BillingPlansTable;
   billing_plan_versions: BillingPlanVersionsTable;
   billing_plan_prices: BillingPlanPricesTable;
+  billing_customers: BillingCustomersTable;
+  billing_subscriptions: BillingSubscriptionsTable;
+  billing_checkouts: BillingCheckoutsTable;
+  billing_webhook_events: BillingWebhookEventsTable;
   password_reset_tokens: PasswordResetTokensTable;
   email_verification_tokens: EmailVerificationTokensTable;
   signed_states: SignedStatesTable;
