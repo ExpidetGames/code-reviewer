@@ -122,6 +122,57 @@ describe("reserving a record", () => {
     expect((await t.records.get(job.id))?.modelTier).toMatch(TIER_NAME_PATTERN);
   });
 
+  // #432-T07
+  it("notes the provider and the catalog entry of a reserved record, with the name as it was, and of nothing else", async () => {
+    const t = await setup();
+    const job = await t.newJob();
+    await t.records.reserve(job.id, "managed");
+    expect(await t.records.get(job.id)).toMatchObject({
+      catalogEntryId: null,
+      catalogEntryName: null,
+      llmProvider: null,
+    });
+
+    await t.records.setSelection(job.id, {
+      provider: "openrouter",
+      catalogEntry: { id: "mce_a", name: "Thorough" },
+    });
+    expect(await t.records.get(job.id)).toMatchObject({
+      catalogEntryId: "mce_a",
+      catalogEntryName: "Thorough",
+      llmProvider: "openrouter",
+    });
+
+    await t.records.settle(job.id, SETTLED(5));
+    await t.records.setSelection(job.id, {
+      provider: "other",
+      catalogEntry: { id: "mce_b", name: "Quick" },
+    });
+    expect(await t.records.get(job.id)).toMatchObject({
+      catalogEntryId: "mce_a",
+      catalogEntryName: "Thorough",
+      llmProvider: "openrouter",
+    });
+  });
+
+  // #432-T07
+  it("notes the provider of an own run and no entry", async () => {
+    const t = await setup();
+    const job = await t.newJob();
+    await t.records.reserve(job.id, "own");
+
+    await t.records.setSelection(job.id, {
+      provider: "openrouter",
+      catalogEntry: null,
+    });
+
+    expect(await t.records.get(job.id)).toMatchObject({
+      catalogEntryId: null,
+      catalogEntryName: null,
+      llmProvider: "openrouter",
+    });
+  });
+
   it("refuses a key mode the table does not know", async () => {
     const t = await setup();
     const job = await t.newJob();
