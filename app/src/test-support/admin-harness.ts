@@ -70,7 +70,12 @@ export type AdminHarnessOptions = {
   github?: FakeGithub;
   /** The fake Paddle the billing routes talk to. Default: one is started the first time a billing route is used. */
   paddle?: FakePaddle;
+  /** The public address the notification destination is created with. Default: `BILLING_TEST_PUBLIC_URL`. */
+  billingPublicUrl?: string;
 };
+
+/** A public-looking address for the billing routes: the real rule refuses a loopback or plain http address. */
+export const BILLING_TEST_PUBLIC_URL = "https://reviews.example.test";
 
 /** Short waits, so a test of a mail server that never answers does not take half a minute. */
 export const ADMIN_TEST_SMTP_TIMEOUTS: SmtpTimeouts = {
@@ -201,7 +206,7 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
             baseUrl: fake.baseUrl,
             sleep: () => Promise.resolve(),
           }),
-        publicUrl: ADMIN_TEST_BASE_URL,
+        publicUrl: options.billingPublicUrl ?? BILLING_TEST_PUBLIC_URL,
       });
       const routes = createBillingRouteHandlers({
         access: async () =>
@@ -584,7 +589,7 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
     /** The fake Paddle behind the billing routes (started on first use). */
     fakePaddle: async () => (await billing()).fake,
     /** Whether billing is on, read the way every billing route reads it. */
-    isBillingOn: () => isBillingOn(db),
+    isBillingOn: () => isBillingOn(db, secrets),
     flags,
     /** How many times a request got as far as the synchronization with GitHub. */
     syncCalls,

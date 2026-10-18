@@ -329,9 +329,9 @@ describe("notification settings", () => {
 
     await client.deleteNotificationSetting(first.id);
 
-    expect((await client.listNotificationSettings()).map(({ id }) => id)).toEqual(
-      [second.id],
-    );
+    expect(
+      (await client.listNotificationSettings()).map(({ id }) => id),
+    ).toEqual([second.id]);
     expect(
       (await failureOf(client.deleteNotificationSetting(first.id))).code,
     ).toBe("not_found");

@@ -27,5 +27,5 @@ export function getBillingSettingsService(): BillingSettingsService {
 
 /** Whether billing is on right now; billing routes, pages and sweep steps call this before anything else. */
 export function isBillingOnNow(): Promise<boolean> {
-  return isBillingOn(getDatabase());
+  return isBillingOn(getDatabase(), getSecretStore());
 }

@@ -12,7 +12,9 @@
 //                                                        { "enabled": boolean }   (switching on checks everything)
 //   POST /api/admin/billing/check                        a harmless call to Paddle with the stored key; answers
 //                                                        { "ok": true } or { "ok": false, "error": <code> }
-//   POST /api/admin/billing/notification-destination     creates the destination at Paddle and stores its secret
+//   POST /api/admin/billing/notification-destination     makes sure the destination exists at Paddle (creates it, or
+//                                                        adopts the one for this app's address) and its secret is
+//                                                        stored; { "recreate": true } replaces both
 //
 // These routes configure billing, so they work while billing is off: only the instance admin reaches them. The
 // routes of billing itself (the webhook, checkout) answer the 404 of a missing path while it is off (`enabled.ts`).
@@ -129,7 +131,7 @@ export function createBillingRouteHandlers({
           case "settings":
             return service.saveSettings(who.id, fields.settings);
           case "removeSecret":
-            return service.removeSecret(fields.removeSecret);
+            return service.removeSecret(who.id, fields.removeSecret);
           default:
             return service.setEnabled(who.id, fields.enabled);
         }
@@ -155,8 +157,19 @@ export function createBillingRouteHandlers({
       if (who instanceof Response) return who;
       const body = await readJsonObject(request, BILLING_REQUEST_MAX_BYTES);
       if (!body.ok) return refusal(body.error);
+      const keys = Object.keys(body.value);
+      const { recreate } = body.value;
+      if (
+        keys.some((key) => key !== "recreate") ||
+        (recreate !== undefined && typeof recreate !== "boolean")
+      )
+        return refusal("invalid_input", {
+          issues: [{ field: "", code: "body_invalid" }],
+        });
       const result = await guarded(() =>
-        service.createNotificationDestination(who.id),
+        service.createNotificationDestination(who.id, {
+          recreate: recreate === true,
+        }),
       );
       if (result instanceof Response) return result;
       if (!result.ok) return fromFailure(result);

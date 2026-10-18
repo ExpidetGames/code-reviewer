@@ -200,15 +200,19 @@ export function BillingForm({
     );
   }
 
-  function createDestination() {
+  function createDestination(recreate = false) {
     return run(
-      "destination",
+      recreate ? "recreate" : "destination",
       async () => {
-        const result = await api.createDestination();
+        const result = await api.createDestination(
+          recreate ? { recreate: true } : undefined,
+        );
         return result.ok
           ? {
               kind: "ok",
-              text: "The notification destination was created and its secret saved.",
+              text: recreate
+                ? "The notification destination was replaced and its new secret saved."
+                : "The notification destination is in place and its secret saved.",
             }
           : {
               kind: "failed",
@@ -435,7 +439,9 @@ export function BillingForm({
             The check makes one harmless read at Paddle with the saved API key.
             The notification destination tells Paddle to send its events to this
             app; Paddle’s answer holds the secret that signs them, which is
-            saved for you. Save your changes first.
+            saved for you; one that exists already for this app is taken over.
+            Recreate replaces the destination and the secret, for a destination
+            whose secret cannot be fetched. Save your changes first.
           </p>
           <div className="flex flex-wrap items-center gap-3">
             <Button
@@ -458,6 +464,17 @@ export function BillingForm({
               onClick={() => void createDestination()}
             >
               Create notification destination
+            </Button>
+            <Button
+              variant="secondary"
+              loading={pending === "recreate"}
+              loadingLabel="Recreating the notification destination"
+              disabled={
+                billing.apiKey.state !== "configured" || billing.enabled
+              }
+              onClick={() => void createDestination(true)}
+            >
+              Recreate notification destination
             </Button>
           </div>
           <StatusRegion>

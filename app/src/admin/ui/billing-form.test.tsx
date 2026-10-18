@@ -20,6 +20,7 @@ import type {
   BillingCheckAnswer,
 } from "./billing-api.ts";
 import { BillingForm } from "./billing-form.tsx";
+import { describeBillingFailure } from "./billing-messages.ts";
 import type { BillingView } from "./billing-view.ts";
 
 const navigation = vi.hoisted(() => ({ refresh: vi.fn() }));
@@ -206,6 +207,48 @@ describe("the billing form", () => {
         .getByRole("button", { name: "Create notification destination" })
         .hasAttribute("disabled"),
     ).toBe(true);
+  });
+
+  // #437-T05
+  it("recreates the notification destination on request, and not while billing is on", async () => {
+    const user = userEvent.setup();
+    const first = api();
+    render(<BillingForm billing={READY} notice={NOTICE} api={first.api} />);
+
+    await user.click(
+      screen.getByRole("button", { name: "Recreate notification destination" }),
+    );
+
+    await waitFor(() =>
+      expect(first.destinationMock).toHaveBeenCalledWith({ recreate: true }),
+    );
+    cleanup();
+
+    render(
+      <BillingForm
+        billing={{ ...READY, enabled: true }}
+        notice={NOTICE}
+        api={api().api}
+      />,
+    );
+    expect(
+      screen
+        .getByRole("button", { name: "Recreate notification destination" })
+        .hasAttribute("disabled"),
+    ).toBe(true);
+  });
+
+  // #437-T05
+  it.each([
+    "webhook_url_not_public",
+    "webhook_destination_exists",
+    "webhook_destination_in_progress",
+    "webhook_secret_not_stored",
+    "billing_settings_changed",
+  ])("has its own sentence for %s", (code) => {
+    expect(describeBillingFailure(code)).not.toBe(
+      describeBillingFailure("unknown_code_for_the_test"),
+    );
   });
 
   // #437-T06

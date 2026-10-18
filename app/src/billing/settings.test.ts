@@ -57,9 +57,7 @@ describe("which environment a client-side token belongs to", () => {
         { field: "clientToken", code: "client_token_environment_mismatch" },
       ],
     });
-    expect(
-      parseSettingsInput(input("abcdef0123456789", "sandbox")),
-    ).toEqual({
+    expect(parseSettingsInput(input("abcdef0123456789", "sandbox"))).toEqual({
       ok: false,
       issues: [{ field: "clientToken", code: "client_token_invalid" }],
     });

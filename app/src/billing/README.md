@@ -14,6 +14,7 @@ starts with `isBillingOn` / `guardBillingRoute` (below).
 | `paddle-schemas.ts`                | Our own response schemas (zod): only the fields we read. Unknown fields are dropped, an answer that does not fit is refused.            |
 | `webhook-verify.ts`                | The pure check of the `Paddle-Signature` header.                                                                                        |
 | `settings.ts`                      | The instance setting `billing_settings` and the rules for what may be saved (pure).                                                     |
+| `public-url.ts`                    | Whether an address is one Paddle can reach: https, no credentials, no loopback, private, link-local or local name (pure).               |
 | `settings-service.ts`              | What the admin page reads and changes: settings, the two secrets, the connection check, the notification destination, the switch.       |
 | `admin-http.ts`, `admin-errors.ts` | The handlers of `/api/admin/billing` and their stable error codes.                                                                      |
 | `enabled.ts`                       | `isBillingOn` and `guardBillingRoute`: the first question of every billing route, page and sweep step.                                  |
@@ -36,7 +37,7 @@ const client = createPaddleClient({
   that environment: `createPaddleClient` throws `environment_mismatch` otherwise (a sandbox key against the live
   address, the reverse, or a key of unknown prefix). Any other address (the fake) takes any key.
 - **Endpoints:** products and prices (create, get, list, patch), transactions (create), subscriptions (get, list,
-  patch, preview, cancel), customer portal sessions (create), notification settings (create, get). Wire names
+  patch, preview, cancel), customer portal sessions (create), notification settings (create, get, list, delete). Wire names
   are Paddle's (`snake_case`), so a request body is what the Paddle docs show.
 - **Time limit:** 10 seconds for one request, all of it (`timeoutMs`). No redirect is followed. **Size limit:** a
   body is read in chunks and dropped once it passes 2,000,000 bytes (a larger `content-length` is refused without
@@ -90,8 +91,9 @@ const client = createPaddleClient({
 Billing is on when `billing_settings.enabled` is true **and** the credentials are complete (an API key, a webhook
 secret, the client-side token). Until then it is inert:
 
-- `isBillingOn(db)` reads one instance setting and, only when the switch is on, whether the two secrets exist. It
-  decrypts nothing and calls nobody. **Every later billing route, page and sweep step calls it first.**
+- `isBillingOn(db, secrets)` reads one instance setting and, only when the switch is on, whether the two secrets are
+  stored **and readable**: a secret that cannot be decrypted (another `APP_SECRET`) counts as missing, because billing
+  could neither call Paddle nor verify a webhook. It calls nobody. **Every later billing route, page and sweep step calls it first.**
 - A billing route (the webhook, checkout, the plan page's data) wraps its handler in `guardBillingRoute({ isOn,
 notFound }, handler)`: while billing is off it answers Next.js's own 404 of a path that does not exist, and neither
   the handler nor any billing table nor Paddle is reached.
@@ -116,23 +118,51 @@ Routes (all `Cache-Control: no-store`, errors `{ "error": <code> }`, codes in `a
 - `POST /api/admin/billing/check`: one `GET /products?per_page=1` with the stored key. Answers `{ ok: true }` or
   `{ ok: false, error }` with `api_key_missing`, `api_key_unreadable`, `paddle_key_rejected`, `paddle_rate_limited`,
   `paddle_unreachable` or `paddle_unavailable`.
-- `POST /api/admin/billing/notification-destination`: `POST /notification-settings` with `BETTER_AUTH_URL` plus
-  `/api/billing/webhook` and the handled events (`webhook-events.ts`); the returned `endpoint_secret_key` is stored as the
-  webhook secret and goes into no answer. Refused with `webhook_secret_exists` while one is stored (remove it first), so a
-  second click cannot make a second destination. If the store fails after Paddle created the destination, delete the
-  destination in Paddle or enter its secret by hand.
+- `POST /api/admin/billing/notification-destination`, body `{}` or `{ "recreate": true }`: makes sure the notification
+  destination exists, with `BETTER_AUTH_URL` plus `/api/billing/webhook` and the handled events (`webhook-events.ts`),
+  and that its `endpoint_secret_key` is the stored webhook secret (it goes into no answer). Steps, in order:
+  1. The address must be public: https, no credentials, no loopback, private, link-local or local host, else
+     `webhook_url_not_public` (nothing is sent to Paddle). There is **no opt-out**; a test injects a public-looking
+     address (`BILLING_TEST_PUBLIC_URL` in the admin harness) and talks to the fake Paddle.
+  2. A stored webhook secret refuses it with `webhook_secret_exists` (use `recreate`). Billing on refuses `recreate`
+     with `billing_disable_first`.
+  3. One create at a time: a lease (instance setting `billing_destination_lock`, 60 s, taken over when it ran out)
+     serializes it. A second request meanwhile gets `webhook_destination_in_progress`.
+  4. Paddle is listed first (`GET /notification-settings`; the list carries each destination's `endpoint_secret_key`, as
+     the single GET does). A destination with our address is **adopted** (its secret is stored, nothing is created),
+     which also repairs a lost answer. If Paddle sent no secret for it, or there are several, it is refused with
+     `webhook_destination_exists`: delete it in Paddle, or use `recreate`. Destinations of other addresses are never
+     touched.
+  5. `recreate` deletes every destination of our address, removes the stored secret, then creates one and stores its
+     secret. If it fails half way there is no stored secret (billing cannot be switched on) and a retry creates.
+  6. If the secret could not be stored after Paddle created the destination, the answer is
+     `webhook_secret_not_stored` (503) with the `destinationId`, and a fixed line is logged with the id. A new try
+     adopts that destination, so it is never orphaned.
 
 Rules:
 
-- **Environment and key.** A key with `_sdbx` in it is a sandbox key, `pdl_live_…` a live key, anything else is refused
+- **Environment and key.** `pdl_sdbx_…` is a sandbox key, `pdl_live_…` a live key, anything else is refused
   (`api_key_invalid`). A key of the other environment is refused with `billing_environment_mismatch`, also when the
-  environment is switched under a stored key of the other one (send the new key in the same request).
+  environment is switched under a stored key of the other one (send the new key in the same request). A stored key that
+  cannot be read does not let the environment switch through (`api_key_unreadable`): enter the key again.
+- **One environment for every credential.** The client-side token starts with `test_` (sandbox) or `live_` (live) and
+  is refused for the other environment (`client_token_environment_mismatch`). Switching the environment forgets the
+  stored webhook secret (and so the destination's identity) unless a new secret comes in the same request; create the
+  destination again for the new environment. Switching on re-checks the stored key and the token against the
+  environment (`billing_environment_mismatch`).
+- **Two admins.** Every write of `billing_settings` is conditional on the row as it was read. A request that finds the
+  settings changed meanwhile writes nothing and answers `billing_settings_changed`; reload and retry. Saving never
+  writes `enabled` from an old read. Switching on enables exactly the settings it checked, and removing a secret counts
+  as a change; switching off retries and always wins. Not covered: a key or webhook secret saved in the instant after
+  another tab switched billing on, before the secret write of the save lands, is not checked again (the page offers the
+  connection check at any time).
 - **Enabling** needs a stored, readable API key, a stored webhook secret, a client-side token **and a connection check
   that passes now** (it is made at that moment, not remembered). Otherwise `billing_incomplete` with `missing`, a list of
   `api_key_missing`, `webhook_secret_missing`, `client_token_missing`, `connection_check_failed`. Switching off is always
   possible.
 - **While on**, the environment and the credentials stay: changing the environment or removing a secret is refused with
-  `billing_disable_first`, and the client-side token cannot be emptied. Rotating a key or a secret is allowed.
+  `billing_disable_first`, and the client-side token cannot be emptied. Rotating a key or a secret is allowed; a new
+  API key is checked against Paddle first and is refused (`paddle_key_rejected`, …) without replacing the old one.
 - **The notice** (`enablingNotice`): enabling puts workspaces without a subscription on the Free plan, which is managed;
   the own key is then not used, and the jobs of a workspace that holds a stored own key end `own_key_requires_plan` until
   it buys an `own` plan or deletes the key (ADR 0005, M19). The page shows the count. Until billing writes entitlements of

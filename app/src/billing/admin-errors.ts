@@ -50,6 +50,16 @@ export const BILLING_ERROR_CODES = [
   "billing_disable_first",
   /** A webhook secret is stored already; remove it before a new notification destination is created. */
   "webhook_secret_exists",
+  /** The billing settings changed since this request read them (another tab, another admin); nothing was written. */
+  "billing_settings_changed",
+  /** The public address of this app is not an https address that Paddle can reach (BETTER_AUTH_URL). */
+  "webhook_url_not_public",
+  /** Paddle has a destination for this app's address whose secret cannot be fetched: delete it there, or recreate. */
+  "webhook_destination_exists",
+  /** Another request is creating the notification destination right now. */
+  "webhook_destination_in_progress",
+  /** Paddle created the destination but its secret could not be stored; `destinationId` names it, a retry adopts it. */
+  "webhook_secret_not_stored",
   ...BILLING_CHECK_ERROR_CODES,
 ] as const;
 export type BillingErrorCode = (typeof BILLING_ERROR_CODES)[number];
@@ -64,6 +74,11 @@ export const BILLING_ERROR_STATUS: Record<BillingErrorCode, number> = {
   billing_incomplete: 409,
   billing_disable_first: 409,
   webhook_secret_exists: 409,
+  billing_settings_changed: 409,
+  webhook_url_not_public: 422,
+  webhook_destination_exists: 409,
+  webhook_destination_in_progress: 409,
+  webhook_secret_not_stored: 503,
   api_key_missing: 409,
   api_key_unreadable: 409,
   paddle_key_rejected: 422,
