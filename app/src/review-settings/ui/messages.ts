@@ -106,6 +106,16 @@ const ISSUE_COPY: Record<ReviewSettingIssueCode, (field: string) => string> = {
     `The provider lists no model with this name. Check the spelling, for example ${DEFAULT_DYNAMIC_MODEL}.`,
   MODEL_MANAGED_BY_INSTANCE: () =>
     "This instance provides the AI models for this workspace. Choose a quality level instead.",
+  PROVIDER_UNKNOWN: () => "Choose one of the listed providers.",
+  CATALOG_ENTRY_UNKNOWN: () => "This choice does not exist. Choose another.",
+  CATALOG_ENTRY_NOT_RELEASED: () =>
+    "This choice is not available any more. Choose another.",
+  CATALOG_ENTRY_KIND_MISMATCH: () =>
+    "This choice is not made for this kind of review. Choose another.",
+  CATALOG_ENTRY_NOT_ALLOWED: () =>
+    "Your plan does not include this choice. Choose another or change your plan.",
+  CATALOG_ENTRY_OWN_KEY_MODE: () =>
+    "This workspace uses its own AI key, so the choices of the instance do not apply.",
 };
 
 function hasIssueCopy(code: string): code is ReviewSettingIssueCode {
