@@ -44,6 +44,9 @@ export type PlanRow = PlanMetadata & {
   archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  /** The Paddle product of the plan: set when the first price is linked (#439). */
+  paddleProductId: string | null;
+  paddleProductEnv: "sandbox" | "live" | null;
 };
 
 export type NewPlanRow = {
@@ -77,6 +80,16 @@ export type BillingPlansRepository = {
   ): Promise<PlanRow | undefined>;
   /** Deletes a plan that has no version; false for a plan that has one and for a key that is not there. */
   remove(planKey: string): Promise<boolean>;
+  /**
+   * Binds the plan to a Paddle product if it has none, and answers the product the plan has afterwards: the one given, or
+   * the one that was there first. Not an edit of the display fields: `updated_at` stays, so a form that was open is not
+   * made stale by it (#439).
+   */
+  bindProduct(
+    planId: string,
+    productId: string,
+    env: "sandbox" | "live",
+  ): Promise<{ productId: string; env: "sandbox" | "live" }>;
 };
 
 type Row = Selectable<BillingPlansTable>;
@@ -104,6 +117,11 @@ function toPlan(row: Row): PlanRow {
     archivedAt: row.archived_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    paddleProductId: row.paddle_product_id,
+    paddleProductEnv:
+      row.paddle_product_env === "live" || row.paddle_product_env === "sandbox"
+        ? row.paddle_product_env
+        : null,
   };
 }
 
@@ -274,6 +292,27 @@ export function createBillingPlansRepository(
         )
         .executeTakeFirst();
       return Number(result.numDeletedRows) > 0;
+    },
+
+    async bindProduct(planId, productId, env) {
+      // One conditional write: of two requests that bind at once, the second finds the product set and changes nothing.
+      await db
+        .updateTable("billing_plans")
+        .set({ paddle_product_id: productId, paddle_product_env: env })
+        .where("id", "=", planId)
+        .where("paddle_product_id", "is", null)
+        .execute();
+      const row = await db
+        .selectFrom("billing_plans")
+        .select(["paddle_product_id", "paddle_product_env"])
+        .where("id", "=", planId)
+        .executeTakeFirstOrThrow();
+      if (row.paddle_product_id === null || row.paddle_product_env === null)
+        throw new Error("The plan has no Paddle product.");
+      return {
+        productId: row.paddle_product_id,
+        env: row.paddle_product_env === "live" ? "live" : "sandbox",
+      };
     },
   };
 }

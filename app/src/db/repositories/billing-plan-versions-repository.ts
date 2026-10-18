@@ -29,6 +29,9 @@ export type PlanVersionRow = PlanTerms & {
   role: PlanVersionRole;
   createdAt: string;
   createdBy: string | null;
+  /** The `billing_plan_prices` row each slot is sold with (#439); null until a price is linked. */
+  monthlyPriceId: string | null;
+  yearlyPriceId: string | null;
 };
 
 export type BillingPlanVersionsRepository = {
@@ -49,6 +52,15 @@ export type BillingPlanVersionsRepository = {
     createdBy: string | null,
     basedOn: number,
   ): Promise<PlanVersionRow>;
+  /**
+   * Links the version's slot to a `billing_plan_prices` row, or clears the link with `null` (#439). The one change besides
+   * the role that a version gets after it was saved: it says which Paddle price the slot is sold with, never what it costs.
+   */
+  setPriceLink(
+    versionId: string,
+    slot: "month" | "year",
+    priceId: string | null,
+  ): Promise<void>;
 };
 
 type Row = Selectable<BillingPlanVersionsTable>;
@@ -81,6 +93,8 @@ function toVersion(row: Row): PlanVersionRow {
     yearlyAmountMinor: row.yearly_amount_minor,
     createdAt: row.created_at,
     createdBy: row.created_by,
+    monthlyPriceId: row.monthly_price_id,
+    yearlyPriceId: row.yearly_price_id,
   };
 }
 
@@ -110,6 +124,20 @@ export function createBillingPlanVersionsRepository(
   return {
     list: (planId) => listForPlans([planId]),
     listForPlans,
+
+    async setPriceLink(versionId, slot, priceId) {
+      if (slot !== "month" && slot !== "year")
+        throw new Error("A price slot is month or year.");
+      await db
+        .updateTable("billing_plan_versions")
+        .set(
+          slot === "month"
+            ? { monthly_price_id: priceId }
+            : { yearly_price_id: priceId },
+        )
+        .where("id", "=", versionId)
+        .execute();
+    },
 
     async current(planId) {
       const row = await db

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // The repository of the billing plan versions (#438) on a real SQLite file and, when TEST_DATABASE_URL is set, on a
-// real Postgres. A version is immutable after creation but for its role.
+// real Postgres. A version is immutable after creation but for its role and its two price links.
 import { sql, type Kysely } from "kysely";
 import { describe, expect, it } from "vitest";
 import type { PlanTerms } from "../../admin/ui/plans-view.ts";
@@ -172,6 +172,7 @@ describe.each(ENGINES)(
         "current",
         "list",
         "listForPlans",
+        "setPriceLink",
       ]);
     });
 
