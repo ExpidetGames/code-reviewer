@@ -822,6 +822,60 @@ describe("the model access (#428)", () => {
       expect(await settings.getDefaultEntitlements()).toBeUndefined();
     });
 
+    // #428-T06
+    it.each([
+      [
+        "a damaged list",
+        JSON.stringify({ ...entitlements(), modelAccess: "all" }),
+      ],
+      ["damaged JSON", "{not json"],
+      ["data that fails the validation", '{"planLabel":"x"}'],
+    ])(
+      "refuses a set that leaves the field out over a stored default with %s, and an explicit field repairs it",
+      async (_name, text) => {
+        const { db } = await setup();
+        const settings = createInstanceSettingsRepository(db, () => NOW);
+        await sql`insert into instance_settings (key, value, updated_by, updated_at)
+          values ('default_entitlements', ${text}, null, '2026-10-13T08:00:00.000Z')`.execute(
+          db,
+        );
+
+        await expect(
+          settings.set(
+            "default_entitlements",
+            entitlements({ planLabel: "other" }),
+            null,
+          ),
+        ).rejects.toMatchObject({
+          code: "catalog_entry_invalid",
+          field: "modelAccess",
+        });
+        // Nothing was written: the default still grants no model, and the text is as it was.
+        expect(await settings.getDefaultEntitlements()).toEqual(
+          INVALID_ENTITLEMENTS,
+        );
+        const raw = await sql<{
+          value: string;
+        }>`select value from instance_settings where key = 'default_entitlements'`.execute(
+          db,
+        );
+        expect(raw.rows[0]?.value).toBe(text);
+
+        await settings.set(
+          "default_entitlements",
+          entitlements({
+            planLabel: "other",
+            modelAccess: { catalogEntries: [ID_B] },
+          }),
+          null,
+        );
+        expect(await settings.getDefaultEntitlements()).toMatchObject({
+          planLabel: "other",
+          modelAccess: { catalogEntries: [ID_B] },
+        });
+      },
+    );
+
     // #428-T05
     it("reads a default with a damaged list as invalid", async () => {
       const { db } = await setup();

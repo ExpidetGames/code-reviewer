@@ -304,7 +304,9 @@ Migration `20261017160000_add_workspace_entitlements_model_access` (#428; epic #
 `model_access` to `workspace_entitlements`: JSON `{"catalogEntries":[...]}`, or NULL for every released entry (what every
 earlier row has). Nothing else changes and no existing row is touched; an app of the previous release never names the
 column, so it keeps inserting and reading rows. `put` does not write the column when the entitlements leave
-`modelAccess` out (the upsert's update set omits it), and the default keeps its stored list the same way under the lock.
+`modelAccess` out (the upsert's update set omits it), and the default keeps its stored list the same way under the lock. A write that leaves the field out over a stored
+default that cannot be read is refused (`catalog_entry_invalid`, field `modelAccess`, nothing written): a damaged row
+stays unreadable under such a write, and the default must not widen to every released entry; stating `modelAccess` repairs it.
 The default (`default_entitlements`) holds the field inside its JSON and needs no column.
 
 ### Usage records

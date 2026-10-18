@@ -198,6 +198,7 @@ export function createInstanceSettingsRepository(
 
   function readStoredDefault(text: string): {
     entry: EntitlementsEntry;
+    readable: boolean;
     periodStart: string | undefined;
     modelAccess: ModelAccess | undefined;
   } {
@@ -206,11 +207,13 @@ export function createInstanceSettingsRepository(
     return data === undefined
       ? {
           entry: INVALID_ENTITLEMENTS,
+          readable: false,
           periodStart: undefined,
           modelAccess: undefined,
         }
       : {
           entry: data,
+          readable: true,
           periodStart: data.periodStart,
           modelAccess: data.modelAccess,
         };
@@ -236,7 +239,7 @@ export function createInstanceSettingsRepository(
         .select("value")
         .where("key", "=", key)
         .executeTakeFirst();
-      // An unreadable stored default has no period start to protect: a valid write repairs it.
+      // An unreadable stored default has no period start to protect; a valid write that states `modelAccess` repairs it.
       const storedDefault =
         stored === undefined ? undefined : readStoredDefault(stored.value);
       const refused = checkPeriodStartNotBackwards(
@@ -244,7 +247,16 @@ export function createInstanceSettingsRepository(
         storedDefault?.periodStart,
       );
       if (refused !== undefined) throw new EntitlementsError(refused);
-      // #428: a model access that the write leaves out keeps the stored one (the lock above makes it atomic).
+      // #428: a model access that the write leaves out keeps the stored one (the lock above makes it atomic). When the
+      // stored default is unreadable there is nothing to keep, and "every released entry" is not a safe guess for data
+      // that may have been restrictive: the write is refused, as a workspace row stays unreadable under such a write,
+      // and only a write that states `modelAccess` repairs the default.
+      if (
+        value.modelAccess === undefined &&
+        storedDefault !== undefined &&
+        !storedDefault.readable
+      )
+        throw new EntitlementsError("catalog_entry_invalid", "modelAccess");
       const modelAccess =
         value.modelAccess === undefined
           ? (storedDefault?.modelAccess ?? checked.value.modelAccess)
