@@ -10,9 +10,13 @@ import {
   amountToCreate,
   intentIdOf,
   matchesIntent,
+  matchesProductIntent,
   priceRequestOf,
+  productIntentOf,
+  productRequestOf,
   trialDaysToCreate,
 } from "./price-create-rules.ts";
+import type { PaddleProduct } from "./paddle-schemas.ts";
 
 const PRODUCT = "pro_01fake00000000000000000001";
 
@@ -222,6 +226,51 @@ describe("which Paddle price belongs to an attempt", () => {
         "cri_v1_month_0",
         "team",
       ),
+    ).toBe(false);
+  });
+});
+
+describe("the product of a plan", () => {
+  // #440-T01
+  it("is created with the name of the plan, a software category and the intent of the plan", () => {
+    expect(
+      productRequestOf({ planKey: "team", planId: "bpl_1", name: "Team" }),
+    ).toEqual({
+      name: "Team",
+      tax_category: "saas",
+      type: "standard",
+      custom_data: { cr_plan_key: "team", cr_intent: productIntentOf("bpl_1") },
+    });
+  });
+
+  // #440-T28
+  it("has one intent per plan, plain text", () => {
+    expect(productIntentOf("bpl_1")).toBe(productIntentOf("bpl_1"));
+    expect(productIntentOf("bpl_1")).not.toBe(productIntentOf("bpl_2"));
+    expect(productIntentOf("bpl_1")).toMatch(/^crp_[A-Za-z0-9_]+$/);
+  });
+
+  // #440-T28
+  it("is found again by the intent and the plan key, and only when it is active", () => {
+    const product = (
+      overrides: Partial<PaddleProduct> = {},
+    ): PaddleProduct => ({
+      id: "pro_01fake00000000000000000001",
+      name: "Team",
+      status: "active",
+      custom_data: { cr_plan_key: "team", cr_intent: productIntentOf("bpl_1") },
+      created_at: "2026-10-18T10:00:00.000000Z",
+      updated_at: "2026-10-18T10:00:00.000000Z",
+      ...overrides,
+    });
+    expect(matchesProductIntent(product(), "bpl_1", "team")).toBe(true);
+    expect(matchesProductIntent(product(), "bpl_2", "team")).toBe(false);
+    expect(matchesProductIntent(product(), "bpl_1", "pro")).toBe(false);
+    expect(
+      matchesProductIntent(product({ custom_data: null }), "bpl_1", "team"),
+    ).toBe(false);
+    expect(
+      matchesProductIntent(product({ status: "archived" }), "bpl_1", "team"),
     ).toBe(false);
   });
 });

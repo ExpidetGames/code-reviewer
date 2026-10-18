@@ -5,8 +5,8 @@
 // the rest are the constants of `price-rules.ts`. What Paddle is asked is built here from those and nowhere else, so the
 // price the app creates is the price `checkPrice` accepts. No database, no Paddle.
 import "server-only";
-import type { CreatePriceInput } from "./paddle-client.ts";
-import type { PaddlePrice } from "./paddle-schemas.ts";
+import type { CreatePriceInput, CreateProductInput } from "./paddle-client.ts";
+import type { PaddlePrice, PaddleProduct } from "./paddle-schemas.ts";
 import {
   PRICE_CURRENCY,
   PRICE_TAX_MODE,
@@ -99,4 +99,40 @@ export function matchesIntent(
   const data = price.custom_data;
   if (data === null || data === undefined) return false;
   return data.cr_intent === intentId && data.cr_plan_key === planKey;
+}
+
+/** The name of the attempt to create the Paddle product of a plan: one per plan, written to the product's custom data. */
+export function productIntentOf(planId: string): string {
+  return `crp_${planId}`;
+}
+
+/** The body of `POST /products`: the plan's name, the software category (available on every Paddle account) and the intent. */
+export function productRequestOf(input: {
+  planKey: string;
+  planId: string;
+  name: string;
+}): CreateProductInput {
+  return {
+    name: input.name,
+    tax_category: "saas",
+    type: "standard",
+    custom_data: {
+      cr_plan_key: input.planKey,
+      cr_intent: productIntentOf(input.planId),
+    },
+  };
+}
+
+/** Whether Paddle's product is the one an attempt created for this plan: active, with the plan's intent and key. */
+export function matchesProductIntent(
+  product: PaddleProduct,
+  planId: string,
+  planKey: string,
+): boolean {
+  if (product.status !== "active") return false;
+  const data = product.custom_data;
+  if (data === null || data === undefined) return false;
+  return (
+    data.cr_intent === productIntentOf(planId) && data.cr_plan_key === planKey
+  );
 }
