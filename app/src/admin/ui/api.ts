@@ -43,10 +43,14 @@ export type SettingChange =
   | { planManagementUrl: string | null }
   /** `null` removes the mail server. */
   | { smtp: SmtpChange | null }
-  /** The operator's own LLM key (write-only); `null` removes it. */
-  | { operatorLlmKey: { apiKey: string } | null }
+  /** The operator's own LLM key of one provider (write-only, #427); `null` removes it. */
+  | { operatorLlmKeys: Record<string, { apiKey: string } | null> }
   /** Hides the notice that the import of an existing installation left. */
   | { importNotice: { dismiss: true } };
+
+/** The answer of the Test button of an operator key: it worked, or a class of failure with a safe detail. */
+export type TestLlmKeyAnswer =
+  { ok: true } | { ok: false; error: string; detail: string | null };
 
 export type AdminApi = {
   change(
@@ -54,6 +58,11 @@ export type AdminApi = {
   ): Promise<RequestResult<{ ok: true; settings: AdminSettingsView }>>;
   /** Sends a test mail to the admin's own address with the saved settings. */
   testMail(): Promise<RequestResult<TestMailAnswer>>;
+  /** Checks the typed key of a provider, or the stored one of that provider when `apiKey` is empty (#427). */
+  testLlmKey(input: {
+    provider: string;
+    apiKey: string;
+  }): Promise<RequestResult<TestLlmKeyAnswer>>;
 };
 
 export function createAdminApi(fetchImpl: FetchLike): AdminApi {
@@ -61,6 +70,13 @@ export function createAdminApi(fetchImpl: FetchLike): AdminApi {
     change: (change) =>
       requestJson(fetchImpl, "PUT", "/api/admin/settings", change),
     testMail: () => requestJson(fetchImpl, "POST", "/api/admin/mail/test", {}),
+    testLlmKey: ({ provider, apiKey }) =>
+      requestJson(
+        fetchImpl,
+        "POST",
+        `/api/admin/llm-keys/${encodeURIComponent(provider)}/test`,
+        { apiKey },
+      ),
   };
 }
 

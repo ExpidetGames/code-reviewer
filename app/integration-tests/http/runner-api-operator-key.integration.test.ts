@@ -55,15 +55,13 @@ async function start(
     ...options.harness,
   });
   if (options.operatorKey !== null) {
-    const saved = await h.llm
-      .operatorKey()
-      .save(
-        {
-          provider: DEFAULT_LLM_PROVIDER,
-          apiKey: options.operatorKey ?? OPERATOR_KEY,
-        },
-        null,
-      );
+    const saved = await h.llm.operatorKey().save(
+      {
+        provider: DEFAULT_LLM_PROVIDER,
+        apiKey: options.operatorKey ?? OPERATOR_KEY,
+      },
+      null,
+    );
     expect(saved.ok).toBe(true);
   }
   if (keyMode !== null)
