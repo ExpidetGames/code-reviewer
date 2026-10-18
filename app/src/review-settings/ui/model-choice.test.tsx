@@ -359,10 +359,9 @@ describe("the warning for a provider without a stored key", () => {
 
     const warning = screen.getByText(/No key is stored for OpenRouter yet/);
     expect(warning.textContent).toMatch(/reviews .* fail/i);
-    const link = within(warning.closest("[role]") as HTMLElement).getByRole(
-      "link",
-      { name: "LLM access" },
-    );
+    const link = within(
+      warning.closest("[data-provider-without-key]") as HTMLElement,
+    ).getByRole("link", { name: "LLM access" });
     expect(link.getAttribute("href")).toBe("/w/acme/settings/llm");
   });
 

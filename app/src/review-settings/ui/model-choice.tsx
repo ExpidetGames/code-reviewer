@@ -9,7 +9,7 @@
 // cannot be used, so the choice never changes silently, and a note says its reviews would not start.
 import Link from "next/link";
 import { useId } from "react";
-import { Alert } from "../../components/ui/alert.tsx";
+import { alertVariants } from "../../components/ui/alert.tsx";
 import { Badge } from "../../components/ui/badge.tsx";
 import {
   FieldDescription,
@@ -186,9 +186,15 @@ export function ModelChoice({
         </p>
       ) : null}
       {chosenUnavailable ? (
-        <Alert variant="warning" role="status" data-choice-unavailable="">
-          {MODEL_CHOICE_CHOSEN_UNAVAILABLE}
-        </Alert>
+        // Static text, not a live region: it is true from the moment the page loads.
+        <div
+          className={alertVariants({ variant: "warning" })}
+          data-choice-unavailable=""
+        >
+          <p className="col-start-1 [grid-column:1/-1]">
+            {MODEL_CHOICE_CHOSEN_UNAVAILABLE}
+          </p>
+        </div>
       ) : null}
       {error !== undefined ? (
         <p id={errorId} className="text-sm text-destructive">

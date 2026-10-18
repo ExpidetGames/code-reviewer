@@ -81,7 +81,9 @@ test.describe("the provider and model of a project on its own key", () => {
       .getByRole("alertdialog")
       .getByRole("button", { name: "Switch to Dynamic Review" })
       .click();
-    await expect(page.getByRole("status").first()).toContainText("Saved.");
+    await expect(
+      page.getByRole("status").filter({ hasText: "Saved." }),
+    ).toBeVisible();
 
     await page.reload();
     await expect(
@@ -104,6 +106,8 @@ test.describe("the provider and model of a project on its own key", () => {
       .getByRole("alertdialog")
       .getByRole("button", { name: "Switch to Diff Review" })
       .click();
-    await expect(page.getByRole("status").first()).toContainText("Saved.");
+    await expect(
+      page.getByRole("status").filter({ hasText: "Saved." }),
+    ).toBeVisible();
   });
 });

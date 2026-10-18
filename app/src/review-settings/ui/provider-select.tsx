@@ -7,7 +7,7 @@
 // page where the key is entered. Whether a key is stored comes from the page (`keyedProviders`), never from the key.
 import Link from "next/link";
 import { useId } from "react";
-import { Alert } from "../../components/ui/alert.tsx";
+import { alertVariants } from "../../components/ui/alert.tsx";
 import { FieldLabel } from "../../components/ui/field.tsx";
 import {
   Select,
@@ -105,7 +105,11 @@ export function ProviderSelect({
         </p>
       ) : null}
       {chosen !== undefined && !chosen.hasKey ? (
-        <Alert variant="warning" role="status" data-provider-without-key="">
+        // Static text, not a live region: it is true from the moment the page loads.
+        <div
+          className={alertVariants({ variant: "warning" })}
+          data-provider-without-key=""
+        >
           <p className="col-start-1 [grid-column:1/-1]">
             No key is stored for {chosen.label} yet. Reviews that use it fail
             until a key is added on the{" "}
@@ -117,7 +121,7 @@ export function ProviderSelect({
             </Link>{" "}
             page.
           </p>
-        </Alert>
+        </div>
       ) : null}
     </div>
   );
