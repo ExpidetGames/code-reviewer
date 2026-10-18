@@ -9,7 +9,11 @@ import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import { lookupAdmin } from "@/admin/session";
 import { createPlansRouteHandlers } from "@/billing/plans-http";
-import { getBillingPlansService, isBillingOnNow } from "@/billing/shared";
+import {
+  getBillingPlansService,
+  getBillingPricesService,
+  isBillingOnNow,
+} from "@/billing/shared";
 
 async function handlers() {
   // Needs the request and the database, so it never runs at build time.
@@ -20,6 +24,7 @@ async function handlers() {
     notFound,
     isOn: isBillingOnNow,
     service: getBillingPlansService(),
+    prices: getBillingPricesService(),
   });
 }
 

@@ -32,11 +32,18 @@ import {
   createBillingPlanVersionsRepository,
   type PlanVersionRow,
 } from "../db/repositories/billing-plan-versions-repository.ts";
+import {
+  createBillingPlanPricesRepository,
+  type PaddleEnv,
+  type PriceRow,
+} from "../db/repositories/billing-plan-prices-repository.ts";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
 import { createOwnKeyCountRepository } from "../db/repositories/own-key-count-repository.ts";
 import type { Database } from "../db/schema.ts";
 import type { PlanRefusal } from "./plan-errors.ts";
 import { planEntitlements } from "./plan-entitlements.ts";
+import { versionPrices } from "./price-view.ts";
+import { readBillingSettings } from "./settings.ts";
 import {
   validateNewPlan,
   validatePlanMetadata,
@@ -135,8 +142,21 @@ function startOfMonth(now: Date): string {
   ).toISOString();
 }
 
-function toVersionView(version: PlanVersionRow): PlanVersionView {
+/** What a view needs beyond the rows of the plan: the cached prices its versions link to, and the environment billing is set to. */
+type PriceContext = { prices: ReadonlyMap<string, PriceRow>; env: PaddleEnv };
+
+function toVersionView(
+  version: PlanVersionRow,
+  plan: PlanRow,
+  context: PriceContext,
+): PlanVersionView {
   return {
+    ...versionPrices(
+      version,
+      context.prices,
+      plan.paddleProductId,
+      context.env,
+    ),
     number: version.number,
     role: version.role,
     createdAt: version.createdAt,
@@ -148,7 +168,11 @@ function toVersionView(version: PlanVersionRow): PlanVersionView {
   };
 }
 
-function toPlanView(plan: PlanRow, versions: PlanVersionRow[]): PlanView {
+function toPlanView(
+  plan: PlanRow,
+  versions: PlanVersionRow[],
+  context: PriceContext,
+): PlanView {
   return {
     planKey: plan.planKey,
     kind: plan.kind,
@@ -159,7 +183,8 @@ function toPlanView(plan: PlanRow, versions: PlanVersionRow[]): PlanView {
     popular: plan.popular,
     contactTarget: plan.contactTarget,
     archived: plan.archivedAt !== null,
-    versions: versions.map(toVersionView),
+    paddleProductId: plan.paddleProductId,
+    versions: versions.map((version) => toVersionView(version, plan, context)),
   };
 }
 
@@ -200,13 +225,40 @@ export function createBillingPlansService({
   }
   type Repositories = ReturnType<typeof repositories>;
 
+  /** The linked prices of these versions, and the environment billing is set to (read in the same transaction as the rest). */
+  async function priceContext(
+    executor: Kysely<Database>,
+    versions: readonly PlanVersionRow[],
+  ): Promise<PriceContext> {
+    const ids = new Set<string>();
+    for (const version of versions) {
+      if (version.monthlyPriceId !== null) ids.add(version.monthlyPriceId);
+      if (version.yearlyPriceId !== null) ids.add(version.yearlyPriceId);
+    }
+    const rows = await createBillingPlanPricesRepository(
+      executor,
+      now,
+    ).listByIds([...ids]);
+    const settings = readBillingSettings(
+      await createInstanceSettingsRepository(executor, now).get(
+        "billing_settings",
+      ),
+    );
+    return {
+      prices: new Map(rows.map((row) => [row.id, row])),
+      env: settings.environment,
+    };
+  }
+
   async function viewOf(
+    executor: Kysely<Database>,
     { plans, versions }: Pick<Repositories, "plans" | "versions">,
     planKey: string,
   ): Promise<PlanView> {
     const plan = await plans.get(planKey);
     if (plan === undefined) throw new Error("The plan cannot be read.");
-    return toPlanView(plan, await versions.list(plan.id));
+    const rows = await versions.list(plan.id);
+    return toPlanView(plan, rows, await priceContext(executor, rows));
   }
 
   /**
@@ -257,10 +309,12 @@ export function createBillingPlansService({
       const { plans, versions } = repositories(db);
       const rows = await plans.list();
       const all = await versions.listForPlans(rows.map((plan) => plan.id));
+      const context = await priceContext(db, all);
       const planViews = rows.map((plan) =>
         toPlanView(
           plan,
           all.filter((version) => version.planId === plan.id),
+          context,
         ),
       );
       const entries = await createCatalogRepository(db).list();
@@ -315,7 +369,7 @@ export function createBillingPlansService({
             await repos.versions.createNext(inserted.id, terms, adminId, 0);
           return {
             ok: true as const,
-            plan: await viewOf(repos, planKey),
+            plan: await viewOf(trx, repos, planKey),
             clearedPopular,
           };
         });
@@ -363,7 +417,7 @@ export function createBillingPlansService({
             await writeFreeDefault(repos, adminId);
           return {
             ok: true as const,
-            plan: await viewOf(repos, planKey),
+            plan: await viewOf(trx, repos, planKey),
             clearedPopular: moved.clearedPopular,
           };
         });
@@ -412,7 +466,7 @@ export function createBillingPlansService({
             basedOnVersion,
           );
           if (stored.kind === "free") await writeFreeDefault(repos, adminId);
-          return { ok: true as const, plan: await viewOf(repos, planKey) };
+          return { ok: true as const, plan: await viewOf(trx, repos, planKey) };
         });
       });
     },
@@ -426,9 +480,10 @@ export function createBillingPlansService({
           return { ok: false, code: "free_plan_not_archivable" };
         const changed = await plans.setArchived(planKey, archived, adminId);
         if (changed === undefined) return REFUSE_NOT_FOUND;
+        const rows = await versions.list(changed.id);
         return {
           ok: true as const,
-          plan: toPlanView(changed, await versions.list(changed.id)),
+          plan: toPlanView(changed, rows, await priceContext(db, rows)),
         };
       });
     },

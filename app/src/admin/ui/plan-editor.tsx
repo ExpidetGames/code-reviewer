@@ -9,6 +9,7 @@ import { Button } from "../../components/button.tsx";
 import { Alert, AlertDescription } from "../../components/ui/alert.tsx";
 import type { RequestIssue, RequestResult } from "../../ui/json-request.ts";
 import { MetadataFields, TermsFields } from "./plan-fields.tsx";
+import { PlanPrices } from "./plan-prices.tsx";
 import type { PlanChange, PlansApi, PlansWriteAnswer } from "./plans-api.ts";
 import {
   emptyTermsForm,
@@ -283,6 +284,10 @@ export function PlanEditor({
           )}
         </form>
       )}
+
+      {plan.kind === "paid" && current !== undefined ? (
+        <PlanPrices plan={plan} version={current} api={api} onDone={onDone} />
+      ) : null}
 
       {plan.kind === "free" ? null : (
         <div className="flex flex-wrap gap-3 border-t pt-4">

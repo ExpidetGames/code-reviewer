@@ -31,11 +31,18 @@ export const paddlePriceSchema = z.object({
   product_id: z.string(),
   description: z.string(),
   name: z.string().nullable().optional(),
+  // `standard` prices are catalog prices; `custom` ones are made for a single transaction and hidden from the catalog.
+  type: z.enum(["standard", "custom"]),
   status: z.enum(["active", "archived"]),
   tax_mode: z.enum(["account_setting", "external", "internal", "location"]),
   billing_cycle: cycle.nullable(),
   trial_period: cycle.nullable().optional(),
   unit_price: money,
+  // The limits of the quantity of one item in a transaction; Paddle always sends them (default 1 to 100).
+  quantity: z.object({
+    minimum: z.number().int(),
+    maximum: z.number().int(),
+  }),
   unit_price_overrides: z
     .array(
       z.object({

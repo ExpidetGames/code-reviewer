@@ -14,6 +14,10 @@ import {
   type BillingPlansService,
 } from "./plans-service.ts";
 import {
+  createBillingPricesService,
+  type BillingPricesService,
+} from "./prices-service.ts";
+import {
   createBillingSettingsService,
   type BillingSettingsService,
 } from "./settings-service.ts";
@@ -21,6 +25,16 @@ import {
 /** The plans (#438): the plans page and its data routes, and the Free plan that billing switches on with. */
 export function getBillingPlansService(): BillingPlansService {
   return createBillingPlansService({ db: getDatabase() });
+}
+
+/** The Paddle prices linked to plan versions (#439): reads from Paddle with the stored key, never writes. */
+export function getBillingPricesService(): BillingPricesService {
+  return createBillingPricesService({
+    db: getDatabase(),
+    secrets: getSecretStore(),
+    clientFor: (apiKey, environment) =>
+      createPaddleClient({ apiKey, baseUrl: paddleBaseUrl(environment) }),
+  });
 }
 
 export function getBillingSettingsService(): BillingSettingsService {
