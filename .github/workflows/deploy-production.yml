@@ -23,7 +23,8 @@ name: Deploy production
 #     the pair of this run: the new snapshot is proven by the deployment that will use it.
 #  8. promote-app, promote-dispatcher: `vercel promote`, one job per project, so that a partial promotion is recorded
 #     as it is. Each checks again, right before it acts, that the commit is still the head of main (a re-run of the
-#     failed jobs of an old run skips `fresh`).
+#     failed jobs of an old run skips `fresh`). They run whether the snapshot was rebuilt or reused (snapshot-build
+#     skipped), and only when every job they need succeeded.
 #  9. persist: only after the Dispatcher is live, the pair is written to Infisical /dispatcher (the one write path of
 #     the repository, its own composite action), and Secret Sync carries it to the project's variables for later
 #     deployments. A failure here fails the run: production runs the new pair but the variables are behind. The next
@@ -328,10 +329,14 @@ jobs:
       image_digest: ${{ needs.snapshot-build.outputs.image-digest || needs.snapshot-decide.outputs.image-digest }}
       snapshot_id: ${{ needs.snapshot-build.outputs.snapshot-id || needs.snapshot-decide.outputs.snapshot-id }}
 
+  # The conditions of the two promotions name `!cancelled()` and every job they need, for the same reason as
+  # stage-dispatcher: without a status function GitHub adds an implicit success() that is false when any job up the
+  # chain was skipped, and snapshot-build is skipped on every run that reuses the snapshot (#480). Nothing else may be
+  # skipped or fail: each needed job must have succeeded.
   promote-app:
     name: Promote the App
     needs: [stage-app, stage-dispatcher, health-app, canary]
-    if: ${{ github.repository == 'ExpidetGames/code-reviewer' && github.ref == 'refs/heads/main' }}
+    if: ${{ !cancelled() && github.repository == 'ExpidetGames/code-reviewer' && github.ref == 'refs/heads/main' && needs.stage-app.result == 'success' && needs.stage-dispatcher.result == 'success' && needs.health-app.result == 'success' && needs.canary.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment: production
@@ -372,7 +377,7 @@ jobs:
   promote-dispatcher:
     name: Promote the Dispatcher
     needs: [stage-app, stage-dispatcher, health-app, canary, promote-app]
-    if: ${{ github.repository == 'ExpidetGames/code-reviewer' && github.ref == 'refs/heads/main' }}
+    if: ${{ !cancelled() && github.repository == 'ExpidetGames/code-reviewer' && github.ref == 'refs/heads/main' && needs.stage-app.result == 'success' && needs.stage-dispatcher.result == 'success' && needs.health-app.result == 'success' && needs.canary.result == 'success' && needs.promote-app.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment: production
