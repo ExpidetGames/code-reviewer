@@ -24,10 +24,12 @@
 //   webhook secret unless a new one comes with the switch. A stored key that cannot be read does not let the switch
 //   through (nothing says which environment it belongs to).
 // - The notification destination is created at most once for the address of this app: a lease (`claim`) serializes
-//   the creations, and Paddle is asked first (the list carries each destination's secret, so one that exists is
-//   adopted). A destination that exists with no secret to adopt is refused, with a stable code that says to delete
-//   it at Paddle or to recreate. Recreating replaces the destination and the secret. When Paddle created the
-//   destination but its secret was not stored, the answer names the destination and a retry adopts it.
+//   the creations (released only by the request that took it), and Paddle is asked first (the list is assumed to carry
+//   each destination's secret, so one that exists is adopted; unverified, #448). A destination that exists with no
+//   secret to adopt is refused, with a stable code that says to delete it at Paddle or to recreate. Recreating
+//   replaces the destination and the secret; it first touches the settings row, so it cannot run behind a switch-on.
+//   When Paddle created the destination but its secret was not stored, the answer names the destination and a retry
+//   adopts it.
 import "server-only";
 import type { Kysely } from "kysely";
 import type {

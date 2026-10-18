@@ -127,14 +127,20 @@ Routes (all `Cache-Control: no-store`, errors `{ "error": <code> }`, codes in `a
   2. A stored webhook secret refuses it with `webhook_secret_exists` (use `recreate`). Billing on refuses `recreate`
      with `billing_disable_first`.
   3. One create at a time: a lease (instance setting `billing_destination_lock`, 60 s, taken over when it ran out)
-     serializes it. A second request meanwhile gets `webhook_destination_in_progress`.
-  4. Paddle is listed first (`GET /notification-settings`; the list carries each destination's `endpoint_secret_key`, as
-     the single GET does). A destination with our address is **adopted** (its secret is stored, nothing is created),
-     which also repairs a lost answer. If Paddle sent no secret for it, or there are several, it is refused with
-     `webhook_destination_exists`: delete it in Paddle, or use `recreate`. Destinations of other addresses are never
-     touched.
-  5. `recreate` deletes every destination of our address, removes the stored secret, then creates one and stores its
-     secret. If it fails half way there is no stored secret (billing cannot be switched on) and a retry creates.
+     serializes it, and a request releases only the lease it took (one taken over after it ran out is left alone). A second
+     request meanwhile gets `webhook_destination_in_progress`.
+  4. Paddle is listed first (`GET /notification-settings`). **Unverified assumptions, sandbox check S9 in #448:** that
+     each item of the list carries `endpoint_secret_key` (the single GET does), and that the list is unpaginated. The
+     client follows `meta.pagination.next` when a page says `has_more` (up to 20 pages, then it refuses with
+     `invalid_response`, shown as `paddle_unavailable`), so a destination of ours on a later page is found and not
+     created twice. A destination with our address is **adopted** (its secret is stored, nothing is created), which
+     also repairs a lost answer. The addresses are compared in one spelling (lower-case host, no default port, no
+     trailing slash), also `BETTER_AUTH_URL`. **Fail-safe if the list leaves the secret out:** nothing is adopted and
+     nothing is written; the answer is `webhook_destination_exists` (also when there are several), and `recreate`
+     repairs it, because the create answer carries the secret. Destinations of other addresses are never touched.
+  5. `recreate` first touches the `billing_settings` row (a compare-and-set, so a switch-on racing it makes one of the
+     two answer `billing_settings_changed`), then deletes every destination of our address, removes the stored secret,
+     creates one and stores its secret. If it fails half way there is no stored secret (billing cannot be switched on) and a retry creates.
   6. If the secret could not be stored after Paddle created the destination, the answer is
      `webhook_secret_not_stored` (503) with the `destinationId`, and a fixed line is logged with the id. A new try
      adopts that destination, so it is never orphaned.
@@ -147,7 +153,8 @@ Rules:
   cannot be read does not let the environment switch through (`api_key_unreadable`): enter the key again.
 - **One environment for every credential.** The client-side token starts with `test_` (sandbox) or `live_` (live) and
   is refused for the other environment (`client_token_environment_mismatch`). Switching the environment forgets the
-  stored webhook secret (and so the destination's identity) unless a new secret comes in the same request; create the
+  stored webhook secret (and so the destination's identity), after the guarded write went through, unless a new secret
+  comes in the same request; create the
   destination again for the new environment. Switching on re-checks the stored key and the token against the
   environment (`billing_environment_mismatch`).
 - **Two admins.** Every write of `billing_settings` is conditional on the row as it was read. A request that finds the
