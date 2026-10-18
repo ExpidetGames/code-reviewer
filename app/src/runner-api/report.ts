@@ -39,7 +39,7 @@ export type ReportDeps = {
   knownSecrets: (workspaceId: string) => Promise<readonly string[]>;
   /**
    * The LLM key each job was handed with its claim, which may differ from the current one, and the model of a managed
-   * tier it was handed (#280). Read from the database.
+   * entry it was handed (#280, #432). Read from the database.
    */
   claimedKeys: Pick<ClaimedKeys, "keysOf" | "modelsOf">;
   /**
@@ -206,7 +206,7 @@ export async function finishJob(
   // The key of the claim and the current one: the key may have been rotated while the job ran, and the
   // claim may have been served by another app instance (the key of the claim is in the database).
   //
-  // The model of a managed tier is operator data a workspace must never read (#280): the job may repeat it in its
+  // The model of a managed catalog entry is operator data a workspace must never read (#280): the job may repeat it in its
   // log or its error, and reports it as `usage.model`, which a Runs page shows. The model the job was handed is
   // remembered with its keys, so it is taken out whichever app instance serves the completion and whatever the
   // operator changed since; the tokens and the cost of the usage stay.

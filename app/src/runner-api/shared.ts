@@ -10,6 +10,7 @@ import { createCatalogRepository } from "../db/repositories/catalog-repository.t
 import { createCatalogService } from "../model-catalog/service.ts";
 import { configuredLlmModel } from "../llm/config.ts";
 import { builtInProjectDynamicSettings } from "../review-settings/settings.ts";
+import { managedModelsOf } from "./managed-models.ts";
 import { createUsageRecordsRepository } from "../db/repositories/usage-records-repository.ts";
 import { createJobsRepository } from "../db/repositories/jobs-repository.ts";
 import { createRepositoriesRepository } from "../db/repositories/repositories-repository.ts";
@@ -126,16 +127,12 @@ function sharedDeps(): WorkerApiDeps {
         ? configuredLlmModel(process.env)
         : builtInProjectDynamicSettings().dynamicModel,
     // Whether the job ran on the operator's key, and every model id of the catalog, for masking the result.
-    managedModels: async (job) => {
-      const record = await createUsageRecordsRepository(
-        db,
-        job.workspaceId,
-      ).get(job.id);
-      return record?.keyMode !== "managed" && record?.modelTier == null
-        ? { managed: false, models: [] }
-        : { managed: true, models: await catalog.allCatalogModelIds() };
-    },
-    // #279: the metadata of a job's model (Dynamic, and a managed tier's), read when its claim is built.
+    managedModels: managedModelsOf({
+      usage: (job) =>
+        createUsageRecordsRepository(db, job.workspaceId).get(job.id),
+      catalog,
+    }),
+    // #279: the metadata of a job's model (Dynamic, and a managed entry's), read when its claim is built.
     modelCapabilities,
     claimedKeys: getClaimedKeys(),
     // #395: what happens between two sweeps. Both run after the response and do nothing in poll mode.

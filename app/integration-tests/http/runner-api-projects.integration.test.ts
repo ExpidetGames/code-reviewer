@@ -425,7 +425,6 @@ describe("the contract file and the options the app sends", () => {
       autoReviewOnOpen: true,
       autoReviewOnPush: true,
       allowedCommands: ["review"],
-      modelTier: "medium",
     }).env;
 
     expect(Object.keys(env).length).toBeGreaterThan(0);

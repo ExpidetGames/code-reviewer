@@ -60,7 +60,7 @@ import type {
 import {
   clampMaxTokens,
   UNKNOWN_WINDOW_MAX_TOKENS,
-} from "../model-tiers/tiers.ts";
+} from "../model-catalog/token-budget.ts";
 import type { ClaimedKeys } from "./claimed-keys.ts";
 import type { ClaimGuard } from "./claim-guard.ts";
 import { selectModel, type SelectionDeps } from "./claim-selection.ts";
@@ -105,12 +105,9 @@ export const CLAIM_FAILURE_CODES = [
   "dynamic_config_invalid",
   // #279: the provider's metadata says the model lacks tool calling or a required tool choice.
   "dynamic_model_features_unsupported",
-  // #280: the job runs on the operator's key and the operator configured no model for the project's tier and the
-  // job's review kind. Never a move to another tier or to the instance default model.
-  "managed_tier_unavailable",
   // #432 (ADR 0005, 2.8): the job runs on the operator's key and the catalog entry it selects cannot be used (none
   // selected, unknown, not released, not for this kind, not in the plan, or its provider is not available). Never a move to
-  // another entry. Replaces `managed_tier_unavailable`, which stays for old rows.
+  // another entry.
   "managed_model_unavailable",
   // #432: the provider an own project selected is one the app does not know or the runner did not advertise.
   "llm_provider_unsupported",

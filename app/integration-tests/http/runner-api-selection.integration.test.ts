@@ -23,7 +23,7 @@ import { createProjectsRepository } from "../../src/db/repositories/projects-rep
 import { createUsageRecordsRepository } from "../../src/db/repositories/usage-records-repository.ts";
 import { createWorkspaceEntitlementsRepository } from "../../src/db/repositories/workspace-entitlements-repository.ts";
 import { MAX_PROVIDER_TEXT_CHARS } from "../../src/llm/provider-text.ts";
-import { UNKNOWN_WINDOW_MAX_TOKENS } from "../../src/model-tiers/tiers.ts";
+import { UNKNOWN_WINDOW_MAX_TOKENS } from "../../src/model-catalog/token-budget.ts";
 import { usageItemView } from "../../src/operator-api/usage-views.ts";
 import {
   startRunnerApiHarness,
