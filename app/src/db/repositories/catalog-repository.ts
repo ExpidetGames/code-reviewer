@@ -24,7 +24,7 @@ import type { MemberCatalogEntry } from "../../model-catalog/member.ts";
 import type { ProjectReviewKind } from "../../review-settings/settings.ts";
 import type { Database, ModelCatalogEntriesTable } from "../schema.ts";
 
-/** The names of the project settings that hold a catalog entry id, one per kind (#430 writes them; ADR 0005, 2.7). */
+/** The names of the project settings that hold a catalog entry id, one per kind (written by the review settings, #430; ADR 0005, 2.7). A test pins them to `PROJECT_CATALOG_FIELDS`. */
 export const CATALOG_SELECTION_KEYS = [
   "catalogEntryDiff",
   "catalogEntryDynamic",

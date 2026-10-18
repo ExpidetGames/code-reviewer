@@ -6,6 +6,13 @@
 // values already stored are never checked. The metadata comes from the fake LLM over real HTTP.
 import { describe, expect, it } from "vitest";
 import { startLlmFake } from "../../../fakes/llm/server.ts";
+import { createFakeAdapter } from "../llm/providers/fake-adapter.ts";
+import { openrouterAdapter } from "../llm/providers/openrouter/adapter.ts";
+import { createAdapterRegistry } from "../llm/providers/registry.ts";
+import type {
+  ModelCapabilities,
+  ModelCapabilityResult,
+} from "../llm/providers/types.ts";
 import {
   createModelCapabilityChecker,
   type ModelCapabilityChecker,
@@ -197,5 +204,102 @@ describe("what is not checked", () => {
     expect(view.dynamic.effective.dynamicModel).toBe("vendor/stored-before");
     expect(reset.dynamic.effective.dynamicModel).toBe("vendor/stored-before");
     expect(app.llm.modelRequests()).toEqual([]);
+  });
+});
+
+// #430-T11: the check asks the adapter of the provider the project selected, not the default provider's.
+describe("saving a Dynamic model at a provider the project selected", () => {
+  const CAPABILITIES: ModelCapabilities = {
+    tools: true,
+    toolChoice: true,
+    toolChoiceRequired: true,
+    responseFormat: false,
+    structuredOutputs: false,
+    maxCompletionTokens: null,
+    smallestCompletionTokens: null,
+    contextLength: null,
+    inputUsdPerMtok: null,
+    outputUsdPerMtok: null,
+  };
+  const SUPPORTED: ModelCapabilityResult = {
+    outcome: "supported",
+    capabilities: CAPABILITIES,
+  };
+  const UNSUPPORTED: ModelCapabilityResult = {
+    outcome: "unsupported",
+    capabilities: { ...CAPABILITIES, toolChoice: false },
+  };
+
+  async function setupTwoProviders() {
+    const asked: string[] = [];
+    const registry = createAdapterRegistry([
+      openrouterAdapter,
+      createFakeAdapter({
+        checkModelCapabilities: async ({ modelId }) => {
+          asked.push(modelId);
+          return modelId === "fake-bad" ? UNSUPPORTED : SUPPORTED;
+        },
+      }),
+    ]);
+    const modelCapabilities = createModelCapabilityChecker({
+      adapters: registry,
+      baseUrl: (provider) => registry.get(provider).apiBaseUrl,
+      log: () => undefined,
+    });
+    const app = await setupReviewSettings(undefined, {
+      modelCapabilities,
+      providers: registry,
+    });
+    return { ...app, asked };
+  }
+
+  // #430-T11
+  it("asks the adapter of the selected provider about the model", async () => {
+    const app = await setupTwoProviders();
+
+    const view = await app.service.updateProjectSettings(app.first.id, {
+      dynamicProvider: "fakeai",
+      dynamicModel: "fake-large",
+    });
+
+    expect(app.asked).toEqual(["fake-large"]);
+    expect(view.warnings).toEqual([]);
+    expect(view.dynamic.effective.dynamicProvider).toBe("fakeai");
+  });
+
+  // #430-T11
+  it("refuses a model that the selected provider's adapter reports without tool support", async () => {
+    const app = await setupTwoProviders();
+
+    const error = await refusal(
+      app.service.updateProjectSettings(app.first.id, {
+        dynamicProvider: "fakeai",
+        dynamicModel: "fake-bad",
+      }),
+    );
+
+    expect(error.issues).toEqual([
+      { field: "dynamicModel", code: "DYNAMIC_MODEL_TOOLS_UNSUPPORTED" },
+    ]);
+    expect(await app.projectRows()).toEqual([]);
+  });
+
+  // #430-T11
+  it("asks again at the new provider when only the provider of a stored model changes", async () => {
+    const app = await setupTwoProviders();
+    await app.projects.updateSettingsWith(app.first.id, () => ({
+      dynamicModel: "fake-bad",
+    }));
+
+    const error = await refusal(
+      app.service.updateProjectSettings(app.first.id, {
+        dynamicProvider: "fakeai",
+      }),
+    );
+
+    expect(app.asked).toEqual(["fake-bad"]);
+    expect(error.issues).toEqual([
+      { field: "dynamicModel", code: "DYNAMIC_MODEL_TOOLS_UNSUPPORTED" },
+    ]);
   });
 });

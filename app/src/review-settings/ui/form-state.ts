@@ -27,6 +27,8 @@ import {
 import type { SettingsFormModel } from "./form-model.ts";
 
 export type FormValues = {
+  /** Carried through a save so a stored provider is never dropped; the form has no field for it yet (#430). */
+  provider: string;
   model: string;
   /** Empty means no fallback model. */
   fallbackModel: string;
@@ -56,6 +58,7 @@ export type FormState = {
 function valuesOf(settings: ReadableReviewSettings): FormValues {
   return {
     // Absent for a workspace on the operator's key, whose form has no field for them (#283).
+    provider: settings.provider ?? "",
     model: settings.model ?? "",
     fallbackModel: settings.fallbackModel ?? "",
     extraInstructions: settings.extraInstructions,
@@ -232,9 +235,10 @@ export function previewSettings(
   const checked = validateReviewSettingsPatch(raw);
   if (!checked.ok) return null;
   const merged = { ...model.inherited, ...checked.value };
-  if (merged.model === undefined) return null;
+  if (merged.model === undefined || merged.provider === undefined) return null;
   return {
     ...merged,
+    provider: merged.provider,
     model: merged.model,
     fallbackModel: merged.fallbackModel ?? null,
   };
