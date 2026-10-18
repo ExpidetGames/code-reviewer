@@ -686,6 +686,77 @@ describe("the model of an entry stays on the server", () => {
     ].join("\n");
     expect(everything).not.toContain("entry/default-model");
   });
+
+  // #432-T08
+  it("still hides the model when the sealed row of the job cannot be read", async () => {
+    const h = await start({ keyMode: "managed" });
+    const { job } = await h.claimed();
+    await h.db.updateTable("job_claimed_keys").set({ nonce: "AAAA" }).execute();
+    expect(await h.claimedKeys.modelsOf(job.id)).toEqual([]);
+
+    await h.complete(job.id, job.leaseToken, {
+      logTail: "model entry/default-model answered",
+      usage: usageOf("openrouter/entry/default-model"),
+    });
+
+    const stored = JSON.stringify((await h.queue.get(job.id))?.result);
+    expect(stored).not.toContain("entry/default-model");
+    expect(JSON.parse(stored).usage.model).toBeNull();
+    expect(stored).toContain("[model] answered");
+  });
+
+  // #432-T08
+  it("keeps reporting the model of a run on the workspace's own key, even when it is the model of an entry", async () => {
+    const h = await start({
+      keyMode: "own",
+      project: { model: "entry/default-model" },
+    });
+    expect(h.defaultEntry?.modelId).toBe("entry/default-model");
+    const { job } = await h.claimed();
+
+    await h.complete(job.id, job.leaseToken, {
+      logTail: "model entry/default-model answered",
+      usage: usageOf("openrouter/entry/default-model"),
+    });
+
+    const stored = (await h.queue.get(job.id))?.result as {
+      logTail: string;
+      usage: { model: string };
+    };
+    expect(stored.usage.model).toBe("openrouter/entry/default-model");
+    expect(stored.logTail).toBe("model entry/default-model answered");
+    expect(await h.claimedKeys.modelsOf(job.id)).toEqual([]);
+  });
+});
+
+describe("a managed Dynamic job whose entry's model cannot be used", () => {
+  // #432-T03
+  it("ends dynamic_model_features_unsupported when the model of the entry lacks tool calling, and hands out nothing", async () => {
+    const meta = metadata(() => ({
+      outcome: "unsupported",
+      capabilities: { ...supported().capabilities!, tools: false },
+    }));
+    const h = await start({
+      keyMode: "managed",
+      dynamic: true,
+      harness: { modelCapabilities: meta.checker },
+    });
+    const [job] = await h.snapshotJobs();
+
+    expect((await h.claim(DYNAMIC_CLAIM)).status).toBe(204);
+
+    expect(await h.queue.get(job!.id)).toMatchObject({
+      status: "failed",
+      errorCode: "dynamic_model_features_unsupported",
+    });
+    expect(meta.asked).toEqual([
+      {
+        model: "entry/default-model",
+        options: expect.objectContaining({ provider: DEFAULT_PROVIDER }),
+      },
+    ]);
+    expect(h.issuedJobTokens()).toEqual([]);
+  });
 });
 
 describe("the token budget of a job on the operator's key", () => {
@@ -723,6 +794,52 @@ describe("the token budget of a job on the operator's key", () => {
         },
       },
     ]);
+  });
+
+  // #432-T09
+  it("uses the last window read for the entry's model of that provider when the provider cannot be asked now", async () => {
+    let answer: ModelCapabilityResult = supported(64_000);
+    const known = new Map<string, number>();
+    const lookups: Array<[string, string]> = [];
+    const checker: ModelCapabilityChecker = {
+      check: async (model, options) => {
+        if (answer.outcome === "supported")
+          known.set(`${options?.provider}/${model}`, 64_000);
+        return answer;
+      },
+      lastKnownContextLength: (model, provider) => {
+        lookups.push([model, provider]);
+        return known.get(`${provider}/${model}`) ?? null;
+      },
+    };
+    const h = await start({
+      keyMode: "managed",
+      project: { maxTokens: 150_000 },
+      harness: { modelCapabilities: checker },
+    });
+    expect((await h.claimed()).job.input.llm.maxTokens).toBe(64_000);
+    answer = { outcome: "unverifiable" };
+    await h.enqueueNew({ prNumber: 8 });
+
+    expect((await h.claimed()).job.input.llm.maxTokens).toBe(64_000);
+    expect(lookups).toEqual([["entry/default-model", DEFAULT_PROVIDER]]);
+  });
+
+  // #432-T09
+  it("is cut to the bound when the provider cannot be asked and no window was ever read for the entry's model", async () => {
+    const checker: ModelCapabilityChecker = {
+      check: async () => ({ outcome: "unverifiable" }),
+      lastKnownContextLength: () => null,
+    };
+    const h = await start({
+      keyMode: "managed",
+      project: { maxTokens: 150_000 },
+      harness: { modelCapabilities: checker },
+    });
+
+    expect((await h.claimed()).job.input.llm.maxTokens).toBe(
+      UNKNOWN_WINDOW_MAX_TOKENS,
+    );
   });
 
   // #432-T09

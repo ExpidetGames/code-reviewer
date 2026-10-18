@@ -87,7 +87,7 @@ export function mapRunnerErrorCode(code: string): string {
  * data, it never carries a model, and a short id that also occurs in a repository name would break the link. `hide`
  * is whether the job ran on the operator's key.
  */
-function withoutManagedModel(
+export function withoutManagedModel(
   result: RunnerResult,
   models: readonly string[],
   hide: boolean,
