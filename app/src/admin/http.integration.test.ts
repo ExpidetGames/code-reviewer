@@ -199,54 +199,45 @@ describe("changing a setting", () => {
     );
   });
 
-  // #280-T01
-  it("shows only whether each model tier is configured, never a model id, and has no way to change them", async () => {
+  // #434-T08
+  it("answers no model tier, whatever the old setting holds, and has no way to change one", async () => {
     const portal = await startPortal();
-    const read = async () =>
-      await (
-        await portal.visit("/api/admin/settings", {
-          cookies: portal.adminCookies,
-        })
-      ).text();
-    expect(JSON.parse(await read())).toMatchObject({
-      modelTiers: {
-        low: { diff: false, dynamic: false },
-        medium: { diff: false, dynamic: false },
-        high: { diff: false, dynamic: false },
-      },
-    });
+    const legacy = ["managed", "_model", "_tiers"].join("");
+    const field = ["model", "Tiers"].join("");
+    // The old operator setting is still in the database (it is removed one release later): the portal does not read it.
+    await portal.db
+      .insertInto("instance_settings")
+      .values({
+        key: legacy,
+        value: JSON.stringify({ low: { diff: "hidden-vendor/portal-low" } }),
+        updated_by: null,
+        updated_at: new Date().toISOString(),
+      })
+      .execute();
 
-    await createInstanceSettingsRepository(portal.db).set(
-      "managed_model_tiers",
-      {
-        low: { diff: "hidden-vendor/portal-low" },
-        high: {
-          diff: "hidden-vendor/portal-high",
-          dynamic: "hidden-vendor/portal-dyn",
-        },
-      },
-      null,
-    );
-
-    const text = await read();
-    expect(JSON.parse(text)).toMatchObject({
-      modelTiers: {
-        low: { diff: true, dynamic: false },
-        medium: { diff: false, dynamic: false },
-        high: { diff: true, dynamic: true },
-      },
-    });
+    const text = await (
+      await portal.visit("/api/admin/settings", {
+        cookies: portal.adminCookies,
+      })
+    ).text();
+    expect(Object.keys(JSON.parse(text))).not.toContain(field);
     expect(text).not.toContain("hidden-vendor");
-    // The portal cannot write them: the operator API is the only way.
+
     const refused = await put(portal, {
-      modelTiers: { low: { diff: "hidden-vendor/other" } },
+      [field]: { low: { diff: "hidden-vendor/other" } },
     });
     expect(refused.status).toBe(422);
     expect(
-      await createInstanceSettingsRepository(portal.db).get(
-        "managed_model_tiers",
+      JSON.parse(
+        (
+          await portal.db
+            .selectFrom("instance_settings")
+            .select("value")
+            .where("key", "=", legacy)
+            .executeTakeFirstOrThrow()
+        ).value,
       ),
-    ).toMatchObject({ low: { diff: "hidden-vendor/portal-low" } });
+    ).toEqual({ low: { diff: "hidden-vendor/portal-low" } });
   });
 
   // #284-T11

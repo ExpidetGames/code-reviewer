@@ -9,6 +9,12 @@
 // Nothing here repeats what a runner or a pull request wrote: the texts are fixed, and the code is
 // shown only when it has the plain shape of a code.
 
+/**
+ * Codes that no part of the system produces any more but that stored runs still carry: they keep their sentence and
+ * are no part of the lists a test requires a sentence for.
+ */
+export const HISTORIC_ERROR_CODES = ["managed_tier_unavailable"] as const;
+
 export const ERROR_COPY: Readonly<Record<string, string>> = {
   // The queue
   lease_expired:
@@ -36,8 +42,9 @@ export const ERROR_COPY: Readonly<Record<string, string>> = {
     "This workspace has used up what its plan allows for the current period, so this run did not start and no AI model was used. Reviews start again when the period renews or the limit is raised.",
   entitlements_invalid:
     "The plan settings of this workspace could not be read, so this run did not start and no AI model was used. Ask whoever manages this workspace's plan to check them.",
+  // A code of a job from before the catalog (#434): nothing ends a job with it any more (see HISTORIC_ERROR_CODES).
   managed_tier_unavailable:
-    "The quality level chosen for this project is not available right now, so this run did not start and no AI model was used. A workspace Owner or Admin can choose another level in the review settings of the project. If no level is available, contact whoever runs this instance.",
+    "The quality level chosen for this project was not available when this run was made, so it did not start and no AI model was used. Quality levels have since been replaced by review options, which a workspace Owner or Admin can choose in the review settings of the project.",
 
   managed_model_unavailable:
     "The review option chosen for this project is not available right now, so this run did not start and no AI model was used. A workspace Owner or Admin can choose another option in the review settings of the project. If none is available, contact whoever runs this instance.",

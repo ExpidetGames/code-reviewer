@@ -925,7 +925,6 @@ describe("the operator's own LLM key", () => {
       "/api/operator/v1/workspaces",
       path(h.workspaceId),
       "/api/operator/v1/entitlements/default",
-      "/api/operator/v1/model-tiers",
       "/api/operator/v1/usage",
     ])
       answers.push(await (await h.call("GET", read)).text());

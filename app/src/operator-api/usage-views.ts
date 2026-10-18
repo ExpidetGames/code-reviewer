@@ -2,7 +2,7 @@
 
 // What the operator API says about usage: named fields only, built one by one so that a column added to the table
 // later never reaches the outside by accident. No pull request, repository, branch, title or person is in a
-// record, and the model of a managed run is only ever its tier name or its entry. The shapes are the definitions `UsageItem`
+// record, and the model of a managed run is only ever its entry (or, for a run from before the catalog, its tier name). The shapes are the definitions `UsageItem`
 // and `UsageSummaryResponse` of the contract.
 import { MAX_NAME_CHARS } from "../model-catalog/entries.ts";
 import { ENTRY_ID_PATTERN, TIER_NAME_PATTERN } from "./contract.ts";

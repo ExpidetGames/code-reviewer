@@ -545,14 +545,13 @@ test.describe("a limited workspace on an instance with the operator API on", () 
   });
 
   // #285-T10
-  test("an Owner reads the review defaults without a model field, a quality level or a model name anywhere on the page", async () => {
+  test("an Owner reads the review defaults without a model field, or a model name anywhere on the page", async () => {
     const page = ownerPage();
     await page.goto(`/w/${slugA}/settings/review-defaults`);
     // The workspace holds no default entry (decision C3): the page says the choice is made for each project.
     await expect(
       page.getByText(/chosen for each project, on the settings page/),
     ).toBeVisible();
-    await expect(page.locator('[data-field="modelTier"]')).toHaveCount(0);
     await expect(page.getByRole("radiogroup", { name: "Quality" })).toHaveCount(
       0,
     );

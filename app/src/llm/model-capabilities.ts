@@ -80,7 +80,7 @@ export function checkModelCapabilities({
   fetchImpl?: FetchLike;
   timeoutMs?: number;
   log?: (line: string) => void;
-  /** What the log line names instead of the model id (the claim of a managed job names its tier, #280). */
+  /** What the log line names instead of the model id (the claim of a managed job names its catalog entry, #432). */
   logAs?: string;
 }): Promise<ModelCapabilityResult> {
   return askAdapter(llmProviderAdapters.get(provider), input);
@@ -125,7 +125,7 @@ export type ModelCapabilityCheckOptions<P extends string = LlmProvider> = {
    * does not stall every claim. A settings save leaves it out and always sees the provider as it is now.
    */
   forClaim?: boolean;
-  /** What the log line names instead of the model id; a managed claim names its tier, which a member may know. */
+  /** What the log line names instead of the model id; a managed claim names its entry id, which a member may know. */
   logAs?: string;
   /** The provider the model belongs to; the default provider when left out. */
   provider?: P;

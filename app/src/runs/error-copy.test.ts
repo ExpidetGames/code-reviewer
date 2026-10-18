@@ -15,6 +15,7 @@ import {
   describeCheckoutReason,
   describeErrorCode,
   ERROR_COPY,
+  HISTORIC_ERROR_CODES,
   UNKNOWN_ERROR_COPY,
   UNKNOWN_REASON_COPY,
 } from "./error-copy.ts";
@@ -25,6 +26,7 @@ const ALL_CODES = [
     ...CLAIM_FAILURE_CODES,
     ...CLAIM_RELEASE_REASONS,
     ...RUNNER_ERROR_CODES,
+    ...HISTORIC_ERROR_CODES,
   ]),
 ];
 
@@ -49,14 +51,18 @@ describe("the sentences for error codes", () => {
     }
   });
 
-  // #283: the control exists now, so the copy points at it, still without naming a model.
-  it("tells a person about an unavailable quality level and where to choose another one", () => {
-    const { text } = describeErrorCode("managed_tier_unavailable");
+  // #434-T07: the code no part of the system produces any more, kept for the runs that ended with it.
+  it("keeps the sentence of the removed tier code for old runs, points at the review options that replaced the levels, and the claim cannot end a job with it", () => {
+    const code = "managed_tier_unavailable";
+    const { text, known } = describeErrorCode(code);
 
+    expect(HISTORIC_ERROR_CODES).toEqual([code]);
+    expect(CLAIM_FAILURE_CODES).not.toContain(code);
+    expect(known).toBe(true);
     expect(text).toMatch(/quality level/);
+    expect(text).toMatch(/replaced/);
     expect(text).toMatch(/Owner or Admin/);
     expect(text).toMatch(/review settings/);
-    expect(text).toMatch(/whoever runs this instance/);
     expect(text).not.toMatch(/\bmodel\b(?! was used)/);
   });
 
@@ -71,8 +77,6 @@ describe("the sentences for error codes", () => {
     expect(text).toMatch(/whoever runs this instance/);
     expect(text).toMatch(/no AI model was used/);
     expect(text).not.toMatch(/\bmodel\b(?! was used)/);
-    // The old code keeps its copy for the rows that carry it.
-    expect(describeErrorCode("managed_tier_unavailable").known).toBe(true);
   });
 
   // #432-T19

@@ -43,6 +43,41 @@ definitions (`UsageItem`, `UsagePage`, `UsageSummaryResponse`) carry no reposito
 and a managed tier only by its name; a test pins the exact field list. A reader of the feed keeps the `nextCursor` it is given and treats the
 record `id` as the idempotency key (the definition says so).
 
+### The removal of `/model-tiers` (#434)
+
+Version 1 of the operator API "only grows", and the rule for a breaking change is a version 2 with its own file. #434 removes
+`GET|PUT /api/operator/v1/model-tiers` and its definitions (`ModelTiersWrite`, `ModelTiersResponse`, `ModelTierAnswer`,
+`ModelTierModels`, `ModelId`, the five error codes `model_id_invalid`, `MODEL_UNKNOWN` and `DYNAMIC_MODEL_*`) from
+`operator-api.v1.json` and their examples from `examples/operator-api/`, **without a version 2, a deprecation stage or a
+`410`**. This is the exception that ADR 0005 (decision C1) records, and the reasons are these:
+
+- **The route cannot do anything any more.** Since #432 the claim reads a catalog entry and never the tiers. A `PUT` that is
+  still answered `200` would look like a working configuration and change nothing, which is worse for an operator than a
+  missing path. A deprecation stage would keep that lie for a release.
+- **The one caller is the operator's own tooling**, behind `OPERATOR_API_TOKEN`; there is no published client of this route
+  and no other consumer of the file. The configuration it wrote has been turned into catalog entries by the migration
+  (`app/src/db/migrations/20261018160000_migrate_model_tiers_to_catalog.ts`), so nothing is lost by the removal. Whether an
+  external caller exists is a read-only check of the access log of the production instance, which is the maintainers' to do
+  before the release (a follow-up in the pull request); a caller found there is the trigger for a facade, which this series
+  does not build.
+- **A `410` would need a new error code and a handler to keep**, to tell a caller what the path's absence already says. The
+  answer is the `404 not_found` of any path the API does not have, validated against `ErrorResponse` by a test.
+- The file still grows for a reader that ignores unknown things: `UsageItem.modelTier` **stays, required and nullable**
+  (null for every run since the catalog), so a strict reader of the feed keeps working. Nothing else in the file changed
+  its meaning.
+
+| Caller / peer                                                       | Before #434                                  | After #434                                                                                      |
+| ------------------------------------------------------------------- | -------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Operator tooling that calls `/model-tiers`                          | `200` (since #432 without effect)            | `404 not_found`; set the models as catalog entries in the admin portal                          |
+| Reader of the usage feed (strict or not)                            | `modelTier` present, null for catalog runs   | the same: present, null for every run since #432; old rows keep their tier name                 |
+| Client that branches on `ApiErrorCode`                              | may see the five tier codes                  | never sees them; the codes are out of the enum (a client that lists them still works)           |
+| Runner, Worker, Dispatcher                                          | `RunnerJobInput` as it is                    | unchanged: no runner or Worker contract changes (the model reaches them as `llm.model`, as ever) |
+| App of the previous release next to a new one (rolling deploy)      | reads `managed_model_tiers` and `modelTier`  | the data is still there (the migration only adds), so the old instance keeps working; see the pull request for the window |
+
+The old setting `managed_model_tiers`, the `modelTier` members of the stored settings and the column `usage_records.model_tier`
+stay in the database for one release (a migration only adds; a removal waits one release,
+`docs/deployment-vercel.md`, section 5.6). Their deletion is a later forward-only migration.
+
 ## The hosted deployment contracts (#316, #318)
 
 The App, the Dispatcher (TypeScript) and the Worker (Python) agree on these files; none imports another's source.

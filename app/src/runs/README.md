@@ -71,7 +71,7 @@ calls and the cost, which stays `null` ("Not available") when the runner could n
 Review reports the sum of the charges its provider reported for every call, or `null`; it never
 guesses a price. The detail shows the cost to four decimals, and a positive cost below $0.0001 reads
 "Less than $0.0001", never "$0.0000". The prompt/completion split and the fallback flag stay on the
-server; the list carries no usage. **A run on a managed quality level** (#283; its usage record names a tier) shows
+server; the list carries no usage. **A run on the operator's key** (#283; its usage record says `managed`, names a catalog entry, or, for a row from before the catalog, a tier) shows
 no model and no cost: `usage.costUsd` is `null` and `costHidden` is `true`, and the page has no Cost row, because the
 cost with the tokens would give the price per token and so the model; the tokens and the call count stay. The operator
 reads the cost through the operator API. The log is cleaned (terminal escapes and control characters out)

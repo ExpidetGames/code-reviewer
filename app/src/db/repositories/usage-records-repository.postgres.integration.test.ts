@@ -84,31 +84,6 @@ describePostgres("the usage records on Postgres", () => {
     ).toBe(0);
   });
 
-  // #280-T04
-  it("notes the managed tier of a reserved record only", async () => {
-    const postgres = await createPostgresTestDatabase();
-    const fixture = await createJobQueueFixture({ database: postgres.db });
-    const records = createUsageRecordsRepository(
-      postgres.db,
-      fixture.workspaceId,
-      fixture.clock.now,
-    );
-    const job = await fixture.enqueueNew();
-    await records.reserve(job.id, "managed");
-
-    await records.setModelTier(job.id, "high");
-    expect((await records.get(job.id))?.modelTier).toBe("high");
-
-    await records.settle(job.id, {
-      state: "settled",
-      costMicroUsd: 5,
-      promptTokens: 1,
-      completionTokens: 1,
-    });
-    await records.setModelTier(job.id, "low");
-    expect((await records.get(job.id))?.modelTier).toBe("high");
-  });
-
   // #272-T10
   it("sums the settled managed cost of a record as a number", async () => {
     const postgres = await createPostgresTestDatabase();

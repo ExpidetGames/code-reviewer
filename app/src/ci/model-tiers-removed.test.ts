@@ -82,16 +82,32 @@ const ALLOWED: ReadonlyArray<{ path: string; why: string }> = [
     why: "reads of old usage rows",
   },
   {
-    path: "app/src/db/repositories/usage-records-repository.postgres.integration.test.ts",
-    why: "reads of old usage rows on Postgres",
-  },
-  {
     path: "app/src/db/repositories/runs-repository.ts",
     why: "a run that was written under a tier still shows no cost",
   },
   {
     path: "app/src/runs/runs-service.integration.test.ts",
     why: "the Runs view of an old row",
+  },
+  {
+    path: "app/src/db/migrations/create-model-catalog-entries.integration.test.ts",
+    why: "the test of a shipped migration: it leaves the old operator setting alone",
+  },
+  {
+    path: "app/integration-tests/http/operator-api-model-tiers-removed.integration.test.ts",
+    why: "the removed operator route (its path is the subject of the test)",
+  },
+  {
+    path: "app/integration-tests/http/plan-route-file.integration.test.ts",
+    why: "the plan page of a workspace whose usage rows were written under a tier",
+  },
+  {
+    path: "app/src/copy/model-choice.test.ts",
+    why: "the copy scan still covers the sentence of the code an old run ended with",
+  },
+  {
+    path: "app/src/runs/error-copy.test.ts",
+    why: "the copy of the code an old run ended with",
   },
   {
     path: "app/src/runs/error-copy.ts",
@@ -145,7 +161,9 @@ const ALLOWED: ReadonlyArray<{ path: string; why: string }> = [
 
 function allowed(path: string): boolean {
   return ALLOWED.some((entry) =>
-    entry.path.endsWith("/") ? path.startsWith(entry.path) : path === entry.path,
+    entry.path.endsWith("/")
+      ? path.startsWith(entry.path)
+      : path === entry.path,
   );
 }
 
