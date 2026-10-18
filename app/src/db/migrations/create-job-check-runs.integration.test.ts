@@ -36,7 +36,11 @@ async function rowsOfEveryTable(
       table.name === "model_catalog_entries" ||
       table.name === "billing_plans" ||
       table.name === "billing_plan_versions" ||
-      table.name === "billing_plan_prices"
+      table.name === "billing_plan_prices" ||
+      table.name === "billing_customers" ||
+      table.name === "billing_subscriptions" ||
+      table.name === "billing_checkouts" ||
+      table.name === "billing_webhook_events"
     )
       continue;
     const { rows } =

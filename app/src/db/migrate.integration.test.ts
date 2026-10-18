@@ -104,6 +104,7 @@ describe("the migrations of both epics", () => {
       "20261018140000_protect_billing_plan_versions",
       "20261018160000_create_billing_plan_prices",
       "20261018170000_migrate_model_tiers_to_catalog",
+      "20261018180000_create_billing_subscriptions",
     ]);
   });
 
@@ -146,9 +147,13 @@ describe("starting the database", () => {
       "allowed_login_pins",
       "app_meta",
       "app_settings",
+      "billing_checkouts",
+      "billing_customers",
       "billing_plan_prices",
       "billing_plan_versions",
       "billing_plans",
+      "billing_subscriptions",
+      "billing_webhook_events",
       "email_verification_tokens",
       "installation_link_requests",
       "instance_settings",

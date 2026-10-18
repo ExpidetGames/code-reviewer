@@ -68,6 +68,8 @@ const PUBLIC_ROUTES = [
   "/api/operator/v1/plan-management",
   "/api/operator/v1/handoff/redeem",
   "/api/operator/v1/[...path]",
+  // Paddle signs its notifications; the route is a 404 while billing is off (src/billing/enabled.ts, #441).
+  "/api/billing/webhook",
   // The platform's cron sends CRON_SECRET; the route is a 404 outside serverless mode (src/cron/, #319).
   "/api/internal/repository-sync",
   // The same cron, once a minute: the sweep of a hosted deployment, a 404 outside serverless mode (#328).

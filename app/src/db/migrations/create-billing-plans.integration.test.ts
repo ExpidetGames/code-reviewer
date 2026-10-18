@@ -21,7 +21,13 @@ import {
 const SPLIT = "20261018120000_create_billing_plans";
 const NEW_TABLES = ["billing_plans", "billing_plan_versions"];
 /** A table a later migration adds (#439); it is not part of what this migration made. */
-const LATER_TABLES = ["billing_plan_prices"];
+const LATER_TABLES = [
+  "billing_plan_prices",
+  "billing_customers",
+  "billing_subscriptions",
+  "billing_checkouts",
+  "billing_webhook_events",
+];
 
 /** The migrations the previous release's database ran: everything before the new one. */
 const beforeThisMigration: MigrationProvider = {
