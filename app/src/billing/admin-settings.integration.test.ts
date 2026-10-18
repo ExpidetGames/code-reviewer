@@ -997,6 +997,58 @@ describe("the notification destination, idempotent", () => {
   });
 
   // #437-T05
+  it("does not delete anything when a switch-on that began before has already written", async () => {
+    const portal = await createAdminHarness();
+    const paddle = await portal.fakePaddle();
+    await saved(portal, { webhookSecret: undefined });
+    await post(portal, "/notification-destination");
+    const [destination] = paddle.notificationSettings();
+    const otherTab = await serviceOver(portal);
+    // The recreate has read the settings (billing off) when the other tab switches billing on.
+    const recreating = await serviceOver(portal, {
+      beforeUse: { n: 1, run: () => otherTab.setEnabled(portal.adminId, true) },
+    });
+
+    const result = await recreating.createNotificationDestination(
+      portal.adminId,
+      { recreate: true },
+    );
+
+    expect(result).toEqual({ ok: false, error: "billing_settings_changed" });
+    expect(paddle.notificationSettings()).toEqual([destination]);
+    expect((await portal.secrets.status("paddle_webhook_secret")).state).toBe(
+      "configured",
+    );
+    expect(await portal.isBillingOn()).toBe(true);
+  });
+
+  // #437-T05
+  it("makes a switch-on that checked the secret before the recreate find the settings changed", async () => {
+    const portal = await createAdminHarness();
+    const paddle = await portal.fakePaddle();
+    await saved(portal, { webhookSecret: undefined });
+    await post(portal, "/notification-destination");
+    const recreator = await serviceOver(portal);
+    // The switch-on has found the secret and is about to check the connection when the recreate runs through.
+    const enabling = await serviceOver(portal, {
+      beforeUse: {
+        n: 2,
+        run: () =>
+          recreator.createNotificationDestination(portal.adminId, {
+            recreate: true,
+          }),
+      },
+    });
+
+    const result = await enabling.setEnabled(portal.adminId, true);
+
+    expect(result).toEqual({ ok: false, error: "billing_settings_changed" });
+    expect(await portal.isBillingOn()).toBe(false);
+    expect(await (await get(portal)).json()).toMatchObject({ enabled: false });
+    expect(paddle.notificationSettings()).toHaveLength(1);
+  });
+
+  // #437-T05
   it("refuses a recreate flag that is no boolean", async () => {
     const portal = await createAdminHarness();
     const paddle = await portal.fakePaddle();

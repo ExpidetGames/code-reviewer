@@ -261,10 +261,10 @@ export function createBillingSettingsService({
   /** The body of a creation, with the lease held. */
   async function makeDestination(
     adminId: string,
-    environment: BillingEnvironment,
+    { settings, stored }: { settings: BillingSettings; stored: Stored },
     recreate: boolean,
   ): Promise<BillingResult> {
-    const made = await storedClient(environment);
+    const made = await storedClient(settings.environment);
     if (!made.ok) return made;
     const { client } = made;
     try {
@@ -272,6 +272,13 @@ export function createBillingSettingsService({
         ({ destination }) => destination.replace(/\/+$/, "") === webhookUrl,
       );
       if (recreate) {
+        // Touching the settings row first makes a switch-on that checked the secret before now find the row changed,
+        // and a switch-on that wrote before now stops this: nothing is deleted behind a billing that is on.
+        if (
+          stored !== undefined &&
+          !(await writeIfUnchanged(adminId, stored, settings))
+        )
+          return CHANGED;
         for (const setting of ours)
           await client.deleteNotificationSetting(setting.id);
         // The old secret signs nothing any more; with the new one lost it must not look like a working one.
@@ -418,7 +425,7 @@ export function createBillingSettingsService({
 
     async createNotificationDestination(adminId, options = {}) {
       const recreate = options.recreate === true;
-      const { settings } = await readCurrent();
+      const { settings, stored } = await readCurrent();
       if (!isPublicHttpsUrl(publicUrl))
         return { ok: false, error: "webhook_url_not_public" };
       if (
@@ -443,7 +450,7 @@ export function createBillingSettingsService({
       if (!claimed)
         return { ok: false, error: "webhook_destination_in_progress" };
       try {
-        return await makeDestination(adminId, settings.environment, recreate);
+        return await makeDestination(adminId, { settings, stored }, recreate);
       } finally {
         await settingsRepository.remove("billing_destination_lock");
       }
