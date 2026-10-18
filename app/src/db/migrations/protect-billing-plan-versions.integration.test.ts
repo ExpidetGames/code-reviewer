@@ -30,6 +30,17 @@ const beforeThisMigration: MigrationProvider = {
   },
 };
 
+/** This migration and the ones before it: what the database looked like when it was written (#439 adds columns later). */
+const throughThisMigration: MigrationProvider = {
+  async getMigrations() {
+    return Object.fromEntries(
+      Object.entries(await migrationProvider.getMigrations()).filter(
+        ([name]) => name <= THIS,
+      ),
+    );
+  },
+};
+
 async function seedVersion(db: Kysely<Database>) {
   await sql`insert into billing_plans (id, plan_key, name, description, sort, kind, offered, popular, created_at, updated_at)
     values ('p1', 'team', 'Team', '', 1, 'paid', 1, 0, ${T}, ${T})`.execute(db);
@@ -88,7 +99,7 @@ describe("the migration that protects the plan versions", () => {
           ).rows;
         const before = await read();
 
-        await migrateToLatest(db, migrationProvider);
+        await migrateToLatest(db, throughThisMigration);
 
         expect(await read()).toEqual(before);
         await expect(

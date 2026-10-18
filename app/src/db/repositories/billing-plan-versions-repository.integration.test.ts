@@ -177,7 +177,8 @@ describe.each(ENGINES)(
 
     // The database refuses what the repository merely does not offer (#438, review N6): whoever writes, an app instance
     // of another release or somebody with SQL, a version is never changed beyond `role` and never deleted. `created_by`
-    // is the one other column that moves: the account merge and the deletion of a user rewrite who made a version.
+    // moves too: the account merge and the deletion of a user rewrite who made a version. And so do the two price links
+    // (#439): linking a Paddle price to a slot is the one thing that happens to a version after it was saved.
     const IMMUTABLE_MESSAGE = /billing_plan_versions_immutable/;
 
     // #438-T12
@@ -190,9 +191,18 @@ describe.each(ENGINES)(
           .find((table) => table.name === "billing_plan_versions")
           ?.columns.map((column) => column.name);
         // The mutable ones are named here, so a column that is added later is checked without anybody remembering to.
+        const mutable = [
+          "role",
+          "created_by",
+          "monthly_price_id",
+          "yearly_price_id",
+        ];
         const frozen = (columns ?? []).filter(
-          (column) => column !== "role" && column !== "created_by",
+          (column) => !mutable.includes(column),
         );
+        expect(
+          columns?.filter((column) => mutable.includes(column)).sort(),
+        ).toEqual([...mutable].sort());
         expect(frozen.sort()).toEqual([
           "created_at",
           "id",
@@ -253,6 +263,47 @@ describe.each(ENGINES)(
         expect((await versions.current(plan.id))?.monthlyAmountMinor).toBe(
           1234,
         );
+      },
+    );
+
+    // #439 (review of #462, N6: the every-column test is extended with the two columns this issue adds)
+    it_(
+      "lets the two price links of a version be set and cleared, and refuses to set one together with a frozen column",
+      async () => {
+        const { db, plan, versions } = await start();
+        const version = await versions.createNext(plan.id, managed(), null, 0);
+        await sql`insert into billing_plan_prices
+          (id, plan_id, paddle_price_id, paddle_product_id, paddle_env, interval, frequency, currency, unit_amount_minor, tax_mode, has_overrides, paddle_status, origin, state, snapshot_at, created_at)
+          values ('pr1', ${plan.id}, 'pri_1', 'pro_1', 'sandbox', 'month', 1, 'USD', '1234', 'internal', 0, 'active', 'linked', 'ready', ${T0.toISOString()}, ${T0.toISOString()})`.execute(
+          db,
+        );
+
+        await sql`update billing_plan_versions set monthly_price_id = 'pr1', yearly_price_id = 'pr1' where id = ${version.id}`.execute(
+          db,
+        );
+        await sql`update billing_plan_versions set yearly_price_id = null where id = ${version.id}`.execute(
+          db,
+        );
+        await expect(
+          sql`update billing_plan_versions set yearly_price_id = 'pr1', yearly_amount_minor = 5 where id = ${version.id}`.execute(
+            db,
+          ),
+        ).rejects.toThrow(/billing_plan_versions_immutable/);
+
+        const row = (
+          await sql<{
+            monthly_price_id: string | null;
+            yearly_price_id: string | null;
+            yearly_amount_minor: number;
+          }>`select * from billing_plan_versions where id = ${version.id}`.execute(
+            db,
+          )
+        ).rows[0];
+        expect(row).toMatchObject({
+          monthly_price_id: "pr1",
+          yearly_price_id: null,
+          yearly_amount_minor: 12_340,
+        });
       },
     );
 
