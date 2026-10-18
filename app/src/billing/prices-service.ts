@@ -102,6 +102,8 @@ export function snapshotOf(price: PaddlePrice): PriceSnapshot {
     taxMode: facts.taxMode,
     hasOverrides: facts.hasOverrides,
     trialDays: trialDaysOf(price.trial_period),
+    quantityMinimum: facts.quantityMinimum,
+    quantityMaximum: facts.quantityMaximum,
     status: facts.status,
   };
 }

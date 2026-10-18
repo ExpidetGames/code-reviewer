@@ -62,6 +62,8 @@ function snapshot(overrides: Partial<PriceSnapshot> = {}): PriceSnapshot {
     hasOverrides: false,
     trialDays: null,
     status: "active",
+    quantityMinimum: 1,
+    quantityMaximum: 100,
     ...overrides,
   };
 }
@@ -195,7 +197,13 @@ describe.each(ENGINES)("the billing plan prices on $name", (engine) => {
 
       const refreshed = await prices.refresh(
         stored.id,
-        snapshot({ amount: "9999", status: "archived", trialDays: 7 }),
+        snapshot({
+          amount: "9999",
+          status: "archived",
+          trialDays: 7,
+          quantityMinimum: 2,
+          quantityMaximum: 9,
+        }),
       );
 
       expect(refreshed).toMatchObject({
@@ -206,6 +214,8 @@ describe.each(ENGINES)("the billing plan prices on $name", (engine) => {
         amount: "9999",
         status: "archived",
         trialDays: 7,
+        quantityMinimum: 2,
+        quantityMaximum: 9,
         snapshotAt: new Date(T0.getTime() + 60_000).toISOString(),
         createdAt: stored.createdAt,
       });
@@ -240,6 +250,18 @@ describe.each(ENGINES)("the billing plan prices on $name", (engine) => {
       await expect(
         prices.refresh(big.id, snapshot({ amount: "1.0" })),
       ).rejects.toThrow();
+      // Review of #468, N2: the quantity limits are whole numbers from one up.
+      for (const [quantityMinimum, quantityMaximum] of [
+        [0, 5],
+        [1, 0],
+        [1.5, 3],
+      ] as const)
+        await expect(
+          prices.refresh(
+            big.id,
+            snapshot({ quantityMinimum, quantityMaximum }),
+          ),
+        ).rejects.toThrow();
     },
   );
 

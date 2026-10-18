@@ -26,6 +26,8 @@ export function factsOfRow(row: PriceRow): PriceFacts {
     taxMode: row.taxMode,
     amount: row.amount,
     hasOverrides: row.hasOverrides,
+    quantityMinimum: row.quantityMinimum,
+    quantityMaximum: row.quantityMaximum,
     productId: row.productId,
   };
 }

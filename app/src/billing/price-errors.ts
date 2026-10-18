@@ -63,6 +63,7 @@ const RULE_STATUS: RuleStatus = {
   price_currency_mismatch: 422,
   price_tax_mode_mismatch: 422,
   price_has_overrides: 422,
+  price_quantity_unsupported: 422,
   price_product_mismatch: 422,
   price_environment_mismatch: 422,
   price_yearly_not_entered: 422,

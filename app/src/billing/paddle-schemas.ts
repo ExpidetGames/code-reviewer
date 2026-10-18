@@ -36,6 +36,11 @@ export const paddlePriceSchema = z.object({
   billing_cycle: cycle.nullable(),
   trial_period: cycle.nullable().optional(),
   unit_price: money,
+  // The limits of the quantity of one item in a transaction; Paddle always sends them (default 1 to 100).
+  quantity: z.object({
+    minimum: z.number().int(),
+    maximum: z.number().int(),
+  }),
   unit_price_overrides: z
     .array(
       z.object({

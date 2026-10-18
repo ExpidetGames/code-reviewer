@@ -43,6 +43,7 @@ const PRICE_CODES = [
   "price_currency_mismatch",
   "price_tax_mode_mismatch",
   "price_has_overrides",
+  "price_quantity_unsupported",
   "price_product_mismatch",
   "price_environment_mismatch",
   "price_yearly_not_entered",

@@ -757,6 +757,9 @@ export interface BillingPlanPricesTable {
   has_overrides: number;
   /** The trial in days, as Paddle says it; null for none. */
   trial_days: number | null;
+  /** The limits Paddle puts on the quantity of one item (`quantity.minimum` / `maximum`), whole numbers from one up. */
+  quantity_min: number;
+  quantity_max: number;
   /** `active` or `archived`, as Paddle said at `snapshot_at`; null before the first read. */
   paddle_status: string | null;
   /** `linked` (pasted by the operator, #439) or `created` (by the app, #440). */

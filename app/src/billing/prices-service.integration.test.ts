@@ -65,6 +65,8 @@ function plan(planKey: string, overrides: Record<string, unknown> = {}) {
 }
 
 type PriceInput = Parameters<PaddleClient["createPrice"]>[0] & {
+  /** Paddle's limits for the quantity of a transaction item; the app's client does not send them, the dashboard does. */
+  quantity?: { minimum: number; maximum: number };
   unit_price_overrides?: Array<{
     country_codes: string[];
     unit_price: { amount: string; currency_code: string };
@@ -391,6 +393,58 @@ describe.each(ENGINES)(
           "price_product_mismatch",
         );
         expect(await t.priceRows()).toHaveLength(1);
+      },
+    );
+
+    // #439-T18 (review of #468, N2)
+    it_(
+      "refuses a price that cannot be bought one at a time, and accepts one that can",
+      async () => {
+        const t = await start();
+        const bulk = await t.makePrice({
+          quantity: { minimum: 5, maximum: 10 },
+        });
+        const single = await t.makePrice({
+          quantity: { minimum: 1, maximum: 1 },
+        });
+        const wide = await t.makePrice({
+          quantity: { minimum: 1, maximum: 500 },
+        });
+
+        expect(refused(await t.link("month", bulk.id))).toMatchObject({
+          code: "price_quantity_unsupported",
+          field: "paddlePriceId",
+          entered: "1",
+          paddle: "5 to 10",
+        });
+        expect(await t.priceRows(), "the refusal stored nothing").toEqual([]);
+        expect(await t.link("month", single.id)).toEqual({ ok: true });
+        expect(await t.link("month", wide.id)).toEqual({ ok: true });
+      },
+    );
+
+    // #439-T18 (review of #468, N2)
+    it_(
+      "caches the quantity and shows a drift when it changes at Paddle, until the version is linked to a price that fits",
+      async () => {
+        const t = await start();
+        const monthly = await t.makePrice();
+        expect(await t.link("month", monthly.id)).toEqual({ ok: true });
+        expect((await t.priceRows())[0]).toMatchObject({
+          quantity_min: 1,
+          quantity_max: 100,
+        });
+
+        await t.editAtPaddle(monthly.id, {
+          quantity: { minimum: 2, maximum: 100 },
+        });
+        await t.prices.refresh("team");
+
+        expect((await t.priceRows())[0]).toMatchObject({ quantity_min: 2 });
+        expect(await t.current()).toMatchObject({
+          sellable: false,
+          monthlyPrice: { drift: "price_quantity_unsupported" },
+        });
       },
     );
 

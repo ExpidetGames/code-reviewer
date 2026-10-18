@@ -5,7 +5,7 @@
 // to, and the two links from a version to its monthly and its yearly price.
 //
 // - `billing_plan_prices`: one row per Paddle price the app knows. The facts (interval, currency, amount, tax mode,
-//   status, trial) are what Paddle said at `snapshot_at`; the app never writes them back. `paddle_price_id` is unique, so a
+//   status, trial, quantity limits) are what Paddle said at `snapshot_at`; the app never writes them back. `paddle_price_id` is unique, so a
 //   price belongs to one plan and several versions may share it. The amount is the string of minor units Paddle sent (text,
 //   so a changed price of any size is cached whole). `origin`, `intent_id`, `state` and `last_error_code` are for the issue
 //   that creates prices through the API (#440); a linked price is `linked`, `ready`, without an intent.
@@ -65,6 +65,8 @@ export const migration: Migration = {
         column.notNull().defaultTo(0),
       )
       .addColumn("trial_days", "integer")
+      .addColumn("quantity_min", "integer", (column) => column.notNull())
+      .addColumn("quantity_max", "integer", (column) => column.notNull())
       .addColumn("paddle_status", "text")
       .addColumn("origin", "text", (column) => column.notNull())
       .addColumn("intent_id", "text")
@@ -88,6 +90,10 @@ export const migration: Migration = {
       .addCheckConstraint(
         "billing_plan_prices_overrides_check",
         sql`has_overrides in (0, 1)`,
+      )
+      .addCheckConstraint(
+        "billing_plan_prices_quantity_check",
+        sql`quantity_min >= 1 and quantity_max >= 1`,
       )
       .addCheckConstraint(
         "billing_plan_prices_amount_check",

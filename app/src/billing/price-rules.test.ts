@@ -25,6 +25,8 @@ function facts(overrides: Partial<PriceFacts> = {}): PriceFacts {
     taxMode: "internal",
     amount: "1234",
     hasOverrides: false,
+    quantityMinimum: 1,
+    quantityMaximum: 100,
     productId: "pro_01fake00000000000000000001",
     ...overrides,
   };
@@ -114,6 +116,47 @@ describe("checking a Paddle price against a version's slot", () => {
     });
   });
 
+  // #439-T18 (review of #468, N2)
+  it("accepts a quantity from one up, and refuses one that cannot be bought one at a time", () => {
+    expect(
+      checkPrice(facts({ quantityMinimum: 1, quantityMaximum: 1 }), MONTHLY),
+    ).toBeUndefined();
+    expect(
+      checkPrice(facts({ quantityMinimum: 1, quantityMaximum: 5000 }), MONTHLY),
+    ).toBeUndefined();
+    expect(
+      checkPrice(facts({ quantityMinimum: 5, quantityMaximum: 10 }), MONTHLY),
+    ).toEqual({
+      code: "price_quantity_unsupported",
+      entered: "1",
+      paddle: "5 to 10",
+    });
+    expect(
+      checkPrice(facts({ quantityMinimum: 2, quantityMaximum: 2 }), MONTHLY)
+        ?.code,
+    ).toBe("price_quantity_unsupported");
+    // A maximum below one leaves no quantity at all.
+    expect(
+      checkPrice(facts({ quantityMinimum: 1, quantityMaximum: 0 }), MONTHLY)
+        ?.code,
+    ).toBe("price_quantity_unsupported");
+    expect(
+      checkPrice(facts({ quantityMinimum: 0, quantityMaximum: 3 }), MONTHLY)
+        ?.code,
+    ).toBe("price_quantity_unsupported");
+  });
+
+  // #439-T18 (review of #468, N2): after the overrides, before the product
+  it("checks the quantity after the overrides and before the product", () => {
+    const odd = facts({ quantityMinimum: 5, quantityMaximum: 10 });
+    expect(checkPrice({ ...odd, hasOverrides: true }, MONTHLY)?.code).toBe(
+      "price_has_overrides",
+    );
+    expect(checkPrice({ ...odd, productId: "pro_other" }, MONTHLY)?.code).toBe(
+      "price_quantity_unsupported",
+    );
+  });
+
   // #439-T15
   it("reports one code in the fixed order: interval, currency, tax mode, amount", () => {
     const everythingWrong = facts({
@@ -160,6 +203,7 @@ describe("checking a Paddle price against a version's slot", () => {
         "price_not_found",
         "price_not_recurring",
         "price_product_mismatch",
+        "price_quantity_unsupported",
         "price_tax_mode_mismatch",
         "price_yearly_not_entered",
       ].sort(),
@@ -210,6 +254,7 @@ function paddlePrice(currencyCode: string): PaddlePrice {
     tax_mode: "internal",
     billing_cycle: { interval: "month", frequency: 1 },
     unit_price: { amount: "1234", currency_code: currencyCode },
+    quantity: { minimum: 1, maximum: 100 },
     created_at: "2026-10-18T10:00:00Z",
     updated_at: "2026-10-18T10:00:00Z",
   };
@@ -242,6 +287,21 @@ describe("the currency of a Paddle price", () => {
       code: "price_currency_mismatch",
       entered: "USD",
       paddle: UNKNOWN_CURRENCY,
+    });
+  });
+});
+
+describe("the quantity of a Paddle price", () => {
+  // #439-T18 (review of #468, N2)
+  it("is read from the price", () => {
+    const price = {
+      ...paddlePrice("USD"),
+      quantity: { minimum: 3, maximum: 7 },
+    };
+
+    expect(factsOf(price)).toMatchObject({
+      quantityMinimum: 3,
+      quantityMaximum: 7,
     });
   });
 });

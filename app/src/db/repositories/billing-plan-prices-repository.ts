@@ -31,6 +31,9 @@ export type PriceSnapshot = {
   taxMode: string;
   hasOverrides: boolean;
   trialDays: number | null;
+  /** Paddle's limits for the quantity of one item. */
+  quantityMinimum: number;
+  quantityMaximum: number;
   status: string;
 };
 
@@ -73,6 +76,9 @@ function assertSnapshot(snapshot: PriceSnapshot): void {
   // The table cannot check digits on both engines, so the only writer does.
   if (!MINOR_UNITS.test(snapshot.amount))
     throw new Error("A cached amount is a string of minor units.");
+  for (const limit of [snapshot.quantityMinimum, snapshot.quantityMaximum])
+    if (!Number.isSafeInteger(limit) || limit < 1)
+      throw new Error("A cached quantity limit is a whole number from one.");
 }
 
 function toPrice(row: Row): PriceRow {
@@ -93,6 +99,8 @@ function toPrice(row: Row): PriceRow {
     taxMode: row.tax_mode,
     hasOverrides: decodeBoolean(row.has_overrides),
     trialDays: row.trial_days,
+    quantityMinimum: row.quantity_min,
+    quantityMaximum: row.quantity_max,
     status: row.paddle_status ?? "",
     origin,
     state,
@@ -167,6 +175,8 @@ export function createBillingPlanPricesRepository(
             tax_mode: snapshot.taxMode,
             has_overrides: encodeBoolean(snapshot.hasOverrides),
             trial_days: snapshot.trialDays,
+            quantity_min: snapshot.quantityMinimum,
+            quantity_max: snapshot.quantityMaximum,
             paddle_status: snapshot.status,
             origin: "linked",
             intent_id: null,
@@ -199,6 +209,8 @@ export function createBillingPlanPricesRepository(
           tax_mode: snapshot.taxMode,
           has_overrides: encodeBoolean(snapshot.hasOverrides),
           trial_days: snapshot.trialDays,
+          quantity_min: snapshot.quantityMinimum,
+          quantity_max: snapshot.quantityMaximum,
           paddle_status: snapshot.status,
           snapshot_at: formatTimestamp(now()),
         })

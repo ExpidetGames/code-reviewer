@@ -74,6 +74,8 @@ const FAILURE_COPY: Record<string, string> = {
     "The price is not tax inclusive. Its tax mode must be set to internal at Paddle, not to the account setting.",
   price_has_overrides:
     "The price has country specific prices. Use a price without overrides.",
+  price_quantity_unsupported:
+    "The price has a minimum quantity above one, or a maximum below one. A subscription is bought with a quantity of one: set the minimum to 1 at Paddle.",
   price_product_mismatch:
     "The price belongs to another Paddle product than the one this plan is sold under.",
   price_environment_mismatch:
@@ -127,6 +129,8 @@ export function describePriceDifference(
       return `Paddle renews every ${paddle}, but this slot is for every ${entered}.`;
     case "price_currency_mismatch":
       return `Paddle has the currency ${paddle}, but only ${entered} is supported.`;
+    case "price_quantity_unsupported":
+      return `Paddle allows a quantity of ${paddle} for this price, but a subscription is bought with a quantity of ${entered}: set the minimum to 1 at Paddle.`;
     case "price_tax_mode_mismatch":
       return `Paddle has the tax mode ${paddle}, but it must be ${entered} (tax inclusive).`;
     default:

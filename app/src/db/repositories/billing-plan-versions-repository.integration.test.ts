@@ -54,6 +54,8 @@ function aPrice(db: Kysely<Database>, planId: string, paddlePriceId: string) {
       taxMode: "internal",
       hasOverrides: false,
       trialDays: null,
+      quantityMinimum: 1,
+      quantityMaximum: 100,
       status: "active",
     },
   });

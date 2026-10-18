@@ -7,7 +7,7 @@
 // linked and changed since, a drift badge.
 //
 // The checks run in a fixed order and report one code, so the same price always gets the same answer: not active, not
-// recurring, interval, currency, tax mode, amount, overrides, product. Linking additionally refuses a price that cannot be
+// recurring, interval, currency, tax mode, amount, overrides, quantity, product. Linking additionally refuses a price that cannot be
 // found, one from another environment and a yearly price on a version without one (before Paddle is asked, or from its
 // 404); those codes are here so the list is in one place.
 import "server-only";
@@ -30,6 +30,8 @@ export const PRICE_RULE_ERROR_CODES = [
   "price_tax_mode_mismatch",
   /** The price has country overrides. */
   "price_has_overrides",
+  /** The price cannot be bought with a quantity of one: its minimum is above one or its maximum below one. */
+  "price_quantity_unsupported",
   /** The price belongs to another product than the plan's. */
   "price_product_mismatch",
   /** The price (or the plan's product) is from the other Paddle environment than the configured one. */
@@ -75,6 +77,9 @@ export type PriceFacts = {
   /** Paddle's own string of minor units. */
   amount: string;
   hasOverrides: boolean;
+  /** The limits of the quantity of one item: a subscription is bought with a quantity of one. */
+  quantityMinimum: number;
+  quantityMaximum: number;
   productId: string;
 };
 
@@ -96,6 +101,8 @@ export function factsOf(price: PaddlePrice): PriceFacts {
     taxMode: price.tax_mode,
     amount: price.unit_price.amount,
     hasOverrides: (price.unit_price_overrides ?? []).length > 0,
+    quantityMinimum: price.quantity.minimum,
+    quantityMaximum: price.quantity.maximum,
     productId: price.product_id,
   };
 }
@@ -148,6 +155,13 @@ export function checkPrice(
       paddle: facts.amount,
     };
   if (facts.hasOverrides) return { code: "price_has_overrides" };
+  // Checkout opens a subscription with a quantity of one (ADR 0005): Paddle refuses a transaction below the minimum.
+  if (facts.quantityMinimum !== 1 || facts.quantityMaximum < 1)
+    return {
+      code: "price_quantity_unsupported",
+      entered: "1",
+      paddle: `${facts.quantityMinimum} to ${facts.quantityMaximum}`,
+    };
   if (expected.productId !== null && facts.productId !== expected.productId)
     return { code: "price_product_mismatch" };
   return undefined;
