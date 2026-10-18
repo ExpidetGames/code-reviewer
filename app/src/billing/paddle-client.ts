@@ -240,6 +240,13 @@ export type CreateNotificationSettingInput = {
   include_sensitive_fields?: boolean;
 };
 
+/** The most pages `listNotificationSettings` follows: a list longer than this is refused, not cut. */
+const MAX_LIST_PAGES = 20;
+
+const notificationListSchema = plainListEnvelope(
+  paddleNotificationSettingListItemSchema,
+);
+
 /** One page of a list. Pass `nextAfter` as `after` for the next page; null on the last page. */
 export type PaddlePage<T> = { items: T[]; nextAfter: string | null };
 
@@ -605,17 +612,36 @@ export function createPaddleClient(options: PaddleClientOptions) {
       one("POST", "/notification-settings", paddleNotificationSettingSchema, {
         body: { type: "url", ...input },
       }),
-    /** Every destination of the account (Paddle does not paginate this list); each carries its secret when Paddle sends it. */
+    /**
+     * Every destination of the account, each with its secret when Paddle sends it. The documentation shows no
+     * pagination for this list (unverified, #448): a page that says there are more is followed, and a list that
+     * cannot be read to the end is refused, because a destination of ours on a page not seen would be created twice.
+     */
     listNotificationSettings: async (): Promise<
       PaddleNotificationSettingListItem[]
-    > =>
-      (
-        await request(
+    > => {
+      const settings: PaddleNotificationSettingListItem[] = [];
+      let after: string | null = null;
+      for (let pages = 0; pages < MAX_LIST_PAGES; pages += 1) {
+        const answer = await request(
           "GET",
           "/notification-settings",
-          plainListEnvelope(paddleNotificationSettingListItemSchema),
-        )
-      ).data,
+          notificationListSchema,
+          after === null ? {} : { query: { after } },
+        );
+        settings.push(...answer.data);
+        const pagination = answer.meta?.pagination;
+        if (pagination?.has_more !== true) return settings;
+        after = afterOf(pagination.next);
+        if (after === null)
+          throw new PaddleClientError("invalid_response", {
+            context: "GET /notification-settings",
+          });
+      }
+      throw new PaddleClientError("invalid_response", {
+        context: "GET /notification-settings",
+      });
+    },
     deleteNotificationSetting: async (settingId: string): Promise<void> => {
       await request(
         "DELETE",

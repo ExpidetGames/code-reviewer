@@ -189,9 +189,17 @@ export function listEnvelope<T extends z.ZodType>(item: T) {
   });
 }
 
-/** A list that Paddle does not paginate (the notification destinations). */
+/**
+ * A list that Paddle's documentation shows without pagination (the notification destinations). Whether it paginates
+ * is not verified (#448), so the pagination block is read when it is there.
+ */
 export function plainListEnvelope<T extends z.ZodType>(item: T) {
-  return z.object({ data: z.array(item) });
+  return z.object({
+    data: z.array(item),
+    meta: z
+      .object({ pagination: paddlePaginationSchema.partial().optional() })
+      .optional(),
+  });
 }
 
 /** The answer of a DELETE: 204, no body. */

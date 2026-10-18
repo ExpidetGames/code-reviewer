@@ -336,6 +336,46 @@ describe("notification settings", () => {
       (await failureOf(client.deleteNotificationSetting(first.id))).code,
     ).toBe("not_found");
   });
+
+  // #437-T05
+  it("follows the pages when Paddle paginates the list, and refuses a list it cannot read to the end", async () => {
+    const fake = await startTestPaddle();
+    const client = clientFor(fake);
+    const created = [];
+    for (let n = 0; n < 5; n += 1)
+      created.push(
+        await client.createNotificationSetting(
+          input(`https://other${n}.example.test/hook`),
+        ),
+      );
+    fake.paginateNotificationSettings(2);
+
+    const listed = await client.listNotificationSettings();
+
+    expect(listed.map(({ id }) => id).sort()).toEqual(
+      created.map(({ id }) => id).sort(),
+    );
+    // Three pages, each with the cursor of the page before.
+    expect(
+      fake
+        .requests()
+        .filter(
+          ({ method, path }) =>
+            method === "GET" && path === "/notification-settings",
+        )
+        .map(({ query }) => query["after"] !== undefined),
+    ).toEqual([false, true, true]);
+
+    for (let n = 5; n < 30; n += 1)
+      await client.createNotificationSetting(
+        input(`https://other${n}.example.test/hook`),
+      );
+    fake.paginateNotificationSettings(1);
+
+    expect((await failureOf(client.listNotificationSettings())).code).toBe(
+      "invalid_response",
+    );
+  });
 });
 
 describe("no real network", () => {

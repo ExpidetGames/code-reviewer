@@ -923,6 +923,37 @@ describe("the notification destination, idempotent", () => {
   });
 
   // #437-T05
+  it("finds its destination on a later page of the list and adopts it instead of creating a second one", async () => {
+    const portal = await createAdminHarness();
+    const paddle = await portal.fakePaddle();
+    await saved(portal, { webhookSecret: undefined });
+    const client = createPaddleClient({
+      apiKey: API_KEY,
+      baseUrl: paddle.baseUrl,
+      sleep: () => Promise.resolve(),
+    });
+    for (let n = 0; n < 3; n += 1)
+      await client.createNotificationSetting({
+        description: "Somebody else",
+        destination: `https://elsewhere${n}.example.test/hook`,
+        subscribed_events: ["subscription.updated"],
+      });
+    const ours = await client.createNotificationSetting({
+      description: "Code Reviewer",
+      destination: WEBHOOK_URL,
+      subscribed_events: ["subscription.updated"],
+    });
+    paddle.paginateNotificationSettings(2);
+
+    const response = await post(portal, "/notification-destination");
+
+    expect(response.status).toBe(200);
+    expect(paddle.notificationSettings()).toHaveLength(4);
+    const stored = await portal.secrets.use("paddle_webhook_secret");
+    expect(stored.ok && stored.value.reveal()).toBe(ours.endpoint_secret_key);
+  });
+
+  // #437-T05
   it("refuses a destination whose secret it cannot get, tells to delete it or recreate, and recreates it on request", async () => {
     const portal = await createAdminHarness();
     const paddle = await portal.fakePaddle();
