@@ -14,8 +14,9 @@
 //   B  a workspace on its own key, with an entitlement row of its own that states no limit.
 // The plain counterpart (an instance that never switched any of this on) is e2e/operator/plain-instance.e2e.ts.
 //
-// The case ids are those of #285. The Quality choice (T10) and the plan page's states (T11) are cases of the
-// follow-ups the earlier pull requests of the epic named; they are proven here and nowhere else at this level.
+// The case ids are those of #285. The review defaults without a model (T10) and the plan page's states (T11) are cases
+// of the follow-ups the earlier pull requests of the epic named; they are proven here and nowhere else at this level.
+// The catalog chooser of the project settings is the journey of #433 (T10 of that issue), in the same instance.
 import {
   expect,
   test,
@@ -26,6 +27,7 @@ import {
 } from "@playwright/test";
 import { startLlmFake, type FakeLlm } from "../../../fakes/llm/server.ts";
 import { changeAdminSetting } from "../helpers/admin-api";
+import { seedCatalog } from "../helpers/catalog";
 import { e2eEnv, llmEnv } from "../helpers/e2e-env";
 import {
   addGithubAccount,
@@ -503,41 +505,126 @@ test.describe("a limited workspace on an instance with the operator API on", () 
   });
 
   // #285-T10
-  test("an Owner chooses the High quality level in the review defaults, without a model field or a model name anywhere on the page", async () => {
+  test("an Owner reads the review defaults without a model field, a quality level or a model name anywhere on the page", async () => {
     const page = ownerPage();
     await page.goto(`/w/${slugA}/settings/review-defaults`);
-    const quality = page.locator('[data-field="modelTier"]');
-    await expect(quality).toBeVisible();
-    // Three levels, all available (the operator configured a model for every tier and kind), none of them says
-    // which model it is.
-    for (const level of ["low", "medium", "high"])
-      await expect(quality.locator(`[data-level="${level}"]`)).toBeVisible();
-    await expect(page.getByText("Not available")).toHaveCount(0);
+    // The workspace holds no default entry (decision C3): the page says the choice is made for each project.
+    await expect(
+      page.getByText(/chosen for each project, on the settings page/),
+    ).toBeVisible();
+    await expect(page.locator('[data-field="modelTier"]')).toHaveCount(0);
+    await expect(page.getByRole("radiogroup", { name: "Quality" })).toHaveCount(
+      0,
+    );
     // A workspace on the operator's key has no model field to fill in.
     await expect(page.getByLabel("Model", { exact: true })).toHaveCount(0);
     await expect(page.getByLabel("Fallback model")).toHaveCount(0);
     await expect(page.getByLabel("Dynamic Review model")).toHaveCount(0);
+    await expect(page.getByLabel("Provider", { exact: true })).toHaveCount(0);
     await expectNothingSecret(
       [["the review defaults", await page.content()]],
       "the review defaults",
     );
+  });
 
-    await quality.getByRole("radio", { name: /High/ }).click();
-    await page.getByRole("button", { name: "Save review defaults" }).click();
+  // #433-T10
+  test("an Owner chooses two different catalog entries for Diff and Dynamic Review of a project, and sees no model or provider", async () => {
+    const page = ownerPage();
+    await seedCatalog(e2eEnv.operatorDatabasePath, [
+      {
+        name: "Quick look",
+        description: "Fast passes over small changes.",
+        modelId: "entryproof/m-alpha-z1y2",
+        kinds: ["diff"],
+        sortOrder: 1,
+      },
+      {
+        name: "Thorough",
+        description: "Careful passes over large changes.",
+        modelId: "entryproof/m-beta-z1y2",
+        kinds: ["diff"],
+        sortOrder: 2,
+      },
+      {
+        name: "Explorer",
+        description: "Explores the repository around a change.",
+        modelId: "entryproof/m-gamma-z1y2",
+        kinds: ["dynamic"],
+        sortOrder: 1,
+      },
+      {
+        name: "Detective",
+        description: "Follows every call to the end.",
+        modelId: "entryproof/m-delta-z1y2",
+        kinds: ["dynamic"],
+        sortOrder: 2,
+      },
+    ]);
+    await page.goto(`/w/${slugA}/projects`);
+    await page
+      .getByRole("link", { name: REPO_A.fullName, exact: true })
+      .click();
+    await expect(
+      page.getByRole("heading", { level: 1, name: REPO_A.fullName }),
+    ).toBeVisible();
+
+    const diffChoice = page.locator('[data-field="catalogEntryDiff"]');
+    await expect(diffChoice).toBeVisible();
+    // Name and description of the entries that serve Diff Review, in the order of the catalog, and no Dynamic entry.
+    await expect(diffChoice.locator("[data-entry]")).toHaveCount(2);
+    await expect(diffChoice).toContainText("Quick look");
+    await expect(diffChoice).toContainText("Fast passes over small changes.");
+    await expect(diffChoice).not.toContainText("Explorer");
+    // No model field, no provider and no estimate on the managed form.
+    await expect(page.getByLabel("Model", { exact: true })).toHaveCount(0);
+    await expect(page.getByLabel("Provider", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("Estimated cost")).toHaveCount(0);
+
+    await diffChoice.getByRole("radio", { name: /^Thorough/ }).click();
+    await page.getByRole("radio", { name: "Dynamic Review" }).click();
+    const dynamicChoice = page.locator('[data-field="catalogEntryDynamic"]');
+    await expect(dynamicChoice.locator("[data-entry]")).toHaveCount(2);
+    await dynamicChoice.getByRole("radio", { name: /^Detective/ }).click();
+    await page.getByRole("button", { name: "Save review settings" }).click();
+    await page
+      .getByRole("alertdialog")
+      .getByRole("button", { name: "Switch to Dynamic Review" })
+      .click();
     await expect(
       page.getByRole("status").filter({ hasText: "Saved." }),
     ).toBeVisible();
-    // The choice is stored: a reload shows it. Its effect is the model of the review in T05.
+
+    // Both choices are stored: a reload shows them, one per kind.
     await page.reload();
     await expect(
       page
-        .locator('[data-field="modelTier"]')
-        .getByRole("radio", { name: /High/ }),
+        .locator('[data-field="catalogEntryDynamic"]')
+        .getByRole("radio", { name: /^Detective/ }),
     ).toBeChecked();
+    await page.getByRole("radio", { name: "Diff Review" }).click();
+    await expect(
+      page
+        .locator('[data-field="catalogEntryDiff"]')
+        .getByRole("radio", { name: /^Thorough/ }),
+    ).toBeChecked();
+    // Nothing the operator keeps to itself is in the page: not a model id, not the provider.
+    const html = await page.content();
+    expect(html).not.toContain("entryproof");
+    expect(html).not.toMatch(/openrouter/i);
+
+    // The project goes back to Diff Review for the journeys that follow (confirmed, as every switch is).
+    await page.getByRole("button", { name: "Save review settings" }).click();
+    await page
+      .getByRole("alertdialog")
+      .getByRole("button", { name: "Switch to Diff Review" })
+      .click();
+    await expect(
+      page.getByRole("status").filter({ hasText: "Saved." }),
+    ).toBeVisible();
   });
 
   // #285-T05, #285-T11
-  test("the script moves the start of the period forward and the next push is reviewed, on the model of the chosen level; the plan page follows", async ({
+  test("the script moves the start of the period forward and the next push is reviewed, on the model of the default level; the plan page follows", async ({
     request,
   }) => {
     test.setTimeout(240_000);
@@ -573,11 +660,12 @@ test.describe("a limited workspace on an instance with the operator API on", () 
       runsOf(page, REPO_A.fullName, 3).locator("[data-status]"),
     ).toHaveText([/Succeeded/, /Failed/, /Failed/], RUN_TIMEOUT);
 
-    // The review ran for the High level the Owner chose in T10.
+    // The claim still reads the quality level (the catalog entries reach it with #432): nobody chose one, so the review
+    // ran for the default level.
     const asked = fakeLlm().requests();
     expect(asked).toHaveLength(1);
     expect(asked[0]?.authorization).toBe(`Bearer ${OPERATOR_KEY}`);
-    expect(asked[0]?.model).toContain(TIER_MODELS.high.diff);
+    expect(asked[0]?.model).toContain(TIER_MODELS.medium.diff);
     expect(reviewsOf(await commentsOf(request, REPO_A, 3))).toHaveLength(1);
     await page.goto(`/w/${slugA}/settings/plan`);
     await expect(page.getByText("1 of 2", { exact: true })).toBeVisible();
@@ -923,11 +1011,12 @@ test.describe("a limited workspace on an instance with the operator API on", () 
   test("the usage feed, read again at the end, holds every settled record of the workspace in order, with the level each ran on", async () => {
     test.setTimeout(240_000);
     const records = await pollUsage(script(), workspaceIdA, 4);
+    // The default level for every run: the claim reads the quality level, which nobody changes any more (#433).
     expect(records.map((record) => record.modelTier)).toEqual([
       "medium",
       "medium",
-      "high",
-      "high",
+      "medium",
+      "medium",
     ]);
     expect(
       records.every(
@@ -1122,7 +1211,7 @@ async function renderedViews(
   await take(
     "the review defaults",
     `/w/${slug}/settings/review-defaults`,
-    page.locator('[data-field="modelTier"]'),
+    page.getByLabel("Token budget", { exact: true }),
   );
   return texts;
 }
