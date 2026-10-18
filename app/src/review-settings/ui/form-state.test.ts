@@ -41,7 +41,6 @@ function model(
       autoReviewOnOpen: "built_in",
       autoReviewOnPush: "built_in",
       allowedCommands: "built_in",
-      modelTier: "built_in",
     },
     cost: estimateReviewCost(effective),
     managed: false,
@@ -170,21 +169,6 @@ describe("the provider in the form", () => {
       model: false,
       fallbackModel: false,
     });
-  });
-});
-
-describe("the model tier in the form", () => {
-  // #280-T10
-  it("is carried through a save: a stored tier is sent back, and none is sent when it was never set", () => {
-    const stored = initialFormState(model({ modelTier: "high" }));
-    const unset = initialFormState(model());
-
-    expect(stored.values.modelTier).toBe("high");
-    expect(buildPatch(stored)).toEqual({
-      ok: true,
-      patch: { modelTier: "high" },
-    });
-    expect(buildPatch(unset)).toEqual({ ok: true, patch: {} });
   });
 });
 

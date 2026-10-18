@@ -16,7 +16,7 @@
 //   provider that was down, must be seen at the next try. The memory is keyed by provider and model: the same
 //   name at two providers is two models.
 //
-// The fetch is a parameter. #279 (per-job capabilities) and #280 (managed tiers) reuse the module.
+// The fetch is a parameter. #279 (per-job capabilities) and the catalog (#429, #432: the managed models, formerly the tiers of #280) reuse the module.
 import "server-only";
 import type { LlmProvider } from "./config.ts";
 import { DEFAULT_LLM_PROVIDER } from "./providers/index.ts";
@@ -80,7 +80,7 @@ export function checkModelCapabilities({
   fetchImpl?: FetchLike;
   timeoutMs?: number;
   log?: (line: string) => void;
-  /** What the log line names instead of the model id (the claim of a managed job names its tier, #280). */
+  /** What the log line names instead of the model id (the claim of a managed job names its catalog entry, #432). */
   logAs?: string;
 }): Promise<ModelCapabilityResult> {
   return askAdapter(llmProviderAdapters.get(provider), input);
@@ -125,7 +125,7 @@ export type ModelCapabilityCheckOptions<P extends string = LlmProvider> = {
    * does not stall every claim. A settings save leaves it out and always sees the provider as it is now.
    */
   forClaim?: boolean;
-  /** What the log line names instead of the model id; a managed claim names its tier, which a member may know. */
+  /** What the log line names instead of the model id; a managed claim names its entry id, which a member may know. */
   logAs?: string;
   /** The provider the model belongs to; the default provider when left out. */
   provider?: P;

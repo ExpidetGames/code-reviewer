@@ -42,7 +42,6 @@ const GLOBAL_DATA = {
     ) as Record<ReviewSettingField, "built_in">,
     cost: estimateReviewCost(BUILT_IN),
     modelManagedByInstance: false,
-    tierAvailability: null,
     builtIn: BUILT_IN,
     updatedAt: null,
     updatedBy: null,

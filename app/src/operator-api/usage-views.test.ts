@@ -27,6 +27,7 @@ function record(modelTier: string | null): UsageRecord {
 
 describe("the model tier of a usage item", () => {
   // #278-T04
+  // #434-T11
   it.each(["standard", "deep", "tier-2", "fast_v2", "a"])(
     "serves the tier name %s",
     (tier) => {

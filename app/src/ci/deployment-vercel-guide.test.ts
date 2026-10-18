@@ -1084,6 +1084,34 @@ describe("the deployment pipeline in the guide", () => {
     expect(setup).toMatch(/Retired: the environments/);
   });
 
+  // #434-X7
+  it("tells the operator what the release that removes the managed model tiers asks for", () => {
+    const update = flat(section("### 5.6 Updating the App or the Dispatcher"));
+    const start = update.indexOf(
+      "Release that removes the managed model tiers",
+    );
+    expect(start).toBeGreaterThanOrEqual(0);
+    const note = update.slice(start, start + 6_000);
+
+    // The entries must be listed in the plans, or managed reviews stop.
+    expect(note).toContain(
+      "add the migrated entries to the `modelAccess` list of every plan, the Free plan included once billing is on",
+    );
+    expect(note).toContain("managed reviews stop");
+    expect(note).toContain("`managed_model_unavailable`");
+    // The behaviour that differs from the tiers, said once and plainly.
+    expect(note).toContain("a tier that had no model for a review kind");
+    expect(note).toContain(
+      "created after the release get the instance default",
+    );
+    // The removed route: 401 without a valid token, 404 with one.
+    expect(note).toContain("`401` without a valid token and `404` with one");
+    // A rollback is not safe, and the three changes go back together.
+    expect(note).toContain("A rollback is not safe");
+    expect(note).toContain("#432, #433 and #434 together");
+    expect(note).toContain("reload");
+  });
+
   // #403-T11
   it("names the pipeline's jobs in their order and the rollback workflow", () => {
     const update = section("### 5.6 Updating the App or the Dispatcher");

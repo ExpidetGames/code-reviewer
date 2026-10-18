@@ -361,6 +361,7 @@ describe("the usage of a run on a managed quality level (#283)", () => {
   }
 
   // #283-T07
+  // #434-T11
   it("shows the tokens and calls and no cost, in the data as well as on the page", async () => {
     const { f, finished } = await finishedRun("high");
 

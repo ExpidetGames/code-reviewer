@@ -21,7 +21,7 @@ counting. It measures nothing itself: it stores the `usage.costUsd` that the run
 `id` (a text identifier; the cursor of the page of settled records is `(settled_at, id)`, so the id only has to be unique),
 `workspace_id`, `job_id` (unique), `review_kind` (`diff` or `dynamic`, copied from the job), `key_mode` (`own` when the
 job ran on the workspace's key, `managed` when it ran on the operator's: the `source` of the resolved LLM access),
-`model_tier` (the managed tier the run used, `low`, `medium` or `high`, set at the claim of a job on the operator's key, #280; null for a run on the workspace's own key. The name only, never the model behind it), `state`, `cost_micro_usd` (the reported `costUsd` times one
+`model_tier` (the managed tier of a run from before the catalog, `low`, `medium` or `high`, #280; **nothing writes it since #432** and it is null for every newer run and for a run on the workspace's own key. The name only, never the model behind it; it stays for one release and is removed with the other tier data, #434), `state`, `cost_micro_usd` (the reported `costUsd` times one
 million, rounded half up; null when unknown), `prompt_tokens`, `completion_tokens` (null when unknown; all three are 32 bit integers, a larger number is stored as unknown), `reserved_at`,
 `settled_at`, `settled_reason` (null unless the record was settled without a report of its run: `no_result`). The table checks the states, the key modes, that only a settled record has a time and a measurement,
 and that amounts are not negative.

@@ -17,7 +17,7 @@ is empty.
 
 The table is `model_catalog_entries` (migration `20261017140000_create_model_catalog_entries`, `src/db/README.md`), its
 repository is the instance level `src/db/repositories/catalog-repository.ts`. `../copy/member-copy-scan.ts` is the scan
-for words a member must not read; the copy of the quality levels and the description of an entry are held to the same
+for words a member must not read; the copy of the model choice and the description of an entry are held to the same
 patterns.
 
 ## An entry
@@ -48,7 +48,7 @@ table), `status`, `sortOrder`, who changed it last and when.
 `draft` (being prepared) to `released` (may be chosen) to `retired` (stays for what already uses it) and back to
 `released`. Nothing returns to draft and a draft is never retired (`catalog_transition_invalid`).
 
-- **Release asks the provider's metadata** (`src/llm/model-capabilities.ts`), like the managed tiers do: a Dynamic entry
+- **Release asks the provider's metadata** (`src/llm/model-capabilities.ts`), like the tiers did (#280): a Dynamic entry
   must be `supported` (`DYNAMIC_MODEL_TOOLS_UNSUPPORTED`, `DYNAMIC_MODEL_UNKNOWN`, `DYNAMIC_MODEL_UNVERIFIED`); a Diff
   entry is refused only when the provider does not know the model (`MODEL_UNKNOWN`), an `unverifiable` one is accepted.
   An entry that serves both is held to the stricter rule. Nothing is written on a refusal. Today there is one provider;
@@ -124,7 +124,86 @@ it listed here, and delete for a draft.
 
 ## Not here
 
-The claim and `resolveModelSelection`, the `modelAccess` entitlement and the migration of the old tiers
-(`src/model-tiers/`, which stays untouched; the overview no longer shows them). There is no operator API for
-the catalog (decision C8). The selection settings of a project (the entry per kind, the picker) are in
-`src/review-settings/README.md`.
+The claim and `resolveModelSelection`, and the `modelAccess` entitlement (the admin portal is
+#429, above). There is no operator API for the catalog (decision C8). The selection settings of a project (the entry per
+kind, the picker) are in `src/review-settings/README.md`.
+
+## Migrated from the tiers (#434)
+
+Before the catalog a workspace on the operator's key chose a quality tier, Low, Medium or High (#280, #283), and the
+operator said which model backed each tier and kind (the instance setting `managed_model_tiers`, written through
+`PUT /api/operator/v1/model-tiers`). The tiers are removed in the same series as the catalog (ADR 0005, decision C1); the
+migration `20261018170000_migrate_model_tiers_to_catalog.ts` (its pure part is `db/migrations/model-tiers-to-catalog.ts`)
+moves the data over so that no managed workspace changes model:
+
+- **Entries.** For each tier and kind with a model there is a `released` entry of the default provider. A tier whose Diff
+  and Dynamic model are the same id becomes one entry that serves both kinds, named `Low`, `Medium` or `High`; otherwise
+  there are the entries `<Tier> (Diff)` and `<Tier> (Dynamic)` (a tier with one kind has only that one). The description is
+  the sentence the quality level had (speed and depth, no model, vendor or price). The order is Low, Medium, High. The
+  ids are a function of the slug (`mce_` plus a digest), so a second run finds its entries; a name an operator already
+  uses gets "(migrated)" appended, so the migration never fails on the unique name.
+- **Defaults.** `catalog_defaults` gets the Medium entries for each kind that has no default yet (the tier a project
+  without a choice had); a default the operator set stays.
+- **Selections.** A project's own `modelTier` (the default tier included) becomes `catalogEntryDiff` and
+  `catalogEntryDynamic`; a workspace-level `modelTier` is written into the projects that inherit it, where it differs from
+  the default tier (there is no workspace-level entry). A selection that is already set stays. A kind the tier has no entry
+  for gets none, so the instance default of that kind applies, as it does to any project without a choice. Damaged JSON
+  is skipped and named by id in the log, never by content.
+- **Safe to run.** It only adds. It is idempotent, needs no `APP_SECRET`, decrypts nothing, uses the same SQL on SQLite
+  and Postgres and does nothing when `managed_model_tiers` is missing, empty or holds no readable model (a self-hosted
+  instance on its own key never had one). The projects are read in one query and written in chunks of 500 with one
+  `UPDATE … FROM (VALUES …)` each, so the time does not grow with a statement per project (about 0.2 s for 5,000 and 0.8 s
+  for 20,000 projects on a local Postgres, instead of 2.2 s and 10.3 s). A row is written only if it still holds the text
+  that was read (a settings save that lands between the read and the write is never overwritten) and a row that changed
+  is read again, three times at most; if a project still changed after the third write, the migration fails and rolls
+  everything back, naming the projects (twenty at most), so the deploy is run again instead of the project silently
+  keeping its old tier. A differential test
+  (`integration-tests/http/model-tiers-migration-claim.integration.test.ts`) hands the same (tier, kind) to the new claim
+  and compares the model with the old rule.
+- **What differs from the tiers, on purpose.** (1) A tier that had no model for a review kind used to end that kind's job
+  with `managed_tier_unavailable` (fail closed). The migration makes no entry for it, so a project on that tier gets no
+  selection for the kind and runs it on the instance default entry (the Medium one), the same as a project that chose
+  nothing. The differential test pins this (`tiers that lack a kind`). (2) A workspace-level tier is written into the
+  projects that exist at the migration, because there is no workspace-level entry; a repository activated later starts
+  with settings `{}` and gets the instance default entry, not its workspace's old Low or High. The operator chooses an
+  entry for it in the project's settings, or changes the default. (3) A project of a workspace on its own key is rewritten
+  like any other (the workspace may turn managed later), but its entries are inert while the key is the workspace's own: an
+  own job reads no catalog and no entry (`src/llm/selection.ts`); the claim of such a workspace is the same before and
+  after (`model-tiers-migration-claim.integration.test.ts`, T06).
+- **After the release: the plans' `modelAccess`.** The migrated entries are new, so a `modelAccess` list that was set
+  before (an explicit list, `[]` included) does not contain them. For such a workspace both the entry of a project that had
+  a tier and the default entry are outside the list, and every job ends with `managed_model_unavailable` (the claim fails
+  closed, as #428 intends; a list that is absent allows every released entry). The operator adds the migrated entries to
+  every plan's list, the Free plan included once billing is on (it is created with `[]`), and to every list set by hand.
+  Tests pin both the stop and the way out (`model-tiers-migration-claim.integration.test.ts`, X5).
+- **The old data stays.** `managed_model_tiers`, the `modelTier` members of the stored settings and the column
+  `usage_records.model_tier` are read by nothing (the usage feed and the Runs view still show a run that was written under a
+  tier). A later forward-only migration, one release after, deletes them (`docs/deployment-vercel.md`, 5.6). A save of
+  the settings of a project drops its `modelTier` with the Diff group, which is why the migration copies its meaning first.
+- **Rollback is not safe.** The app of the previous release still finds the old data, so it runs the tiers as before; no
+  migration is undone (Kysely migrations are forward only). Projects whose settings were saved on the new release lost their
+  `modelTier` and run on the default tier on the old release; entries the migration made stay in the catalog and are
+  harmless there. #432, #433 and #434 go back together, and a fix forward is the normal way out. A settings page opened
+  before the release can send the old quality level once: the save is refused with `UNKNOWN_FIELD` and a reload fixes it.
+
+## The token budget of a managed job
+
+The workspace's `maxTokens` stays the workspace's and is cut down to the context window of the entry's model when the
+provider's metadata states one (`token-budget.ts`, `clampMaxTokens`; the same read serves the capabilities of a Dynamic
+job). When a fresh read fails, the window last read for that model (kept a day) is used; when none was ever read, the
+budget is cut to `UNKNOWN_WINDOW_MAX_TOKENS` (100,000, the built-in budget): a managed job's budget is never sent
+unclamped, whatever the workspace saved (up to two million). The instance's `LLM_MAX_TOKENS` belongs to the instance's
+own model and is not used for a managed job. The claim asks as a claim: an answer that is not `supported` is remembered
+45 seconds (`src/llm/README.md`).
+
+## The model never leaves the server
+
+The model id of an entry goes to the instance admin portal and to the runner (it needs it to call the provider), nowhere
+else. Not in the stored settings of any workspace, not in a settings answer or page, not in a plan or usage view, not in the
+usage record, which names the entry and its name at the claim. **Not in the result of a run:** for a job on the operator's
+key `usage.model` is `null` and the ids of every entry, whatever its status, become `[model]` in any text (the place that
+masks credentials, `runner-api/report.ts`, `managedModelsOf` in `runner-api/managed-models.ts`), together with the model the
+job was handed (remembered with its keys, `runner-api/claimed-keys.ts`). The Runs view shows no cost for such a run. The
+runner pins `output_run_details` and `output_relevant_configurations` to `false`, so a published comment names no model.
+Logs name the entry id and the kind, never the model. `integration-tests/http/model-catalog-privacy.integration.test.ts`
+searches every answer a member can read for the ids of the entries.

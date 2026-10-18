@@ -251,46 +251,6 @@ describe("validating review settings", () => {
   });
 });
 
-describe("validating the model tier", () => {
-  // #280-T10
-  it.each(["low", "medium", "high"])("accepts the tier %s", (tier) => {
-    expect(validateReviewSettingsPatch({ modelTier: tier })).toEqual({
-      ok: true,
-      value: { modelTier: tier },
-    });
-  });
-
-  // #280-T10
-  it("refuses anything that is not a tier, with a stable code and without the value", () => {
-    expect(issuesOf({ modelTier: "ultra" })).toEqual([
-      { field: "modelTier", code: "INVALID_FORMAT" },
-    ]);
-    expect(issuesOf({ modelTier: "vendor/some-model" })).toEqual([
-      { field: "modelTier", code: "INVALID_FORMAT" },
-    ]);
-    expect(issuesOf({ modelTier: 2 })).toEqual([
-      { field: "modelTier", code: "INVALID_TYPE" },
-    ]);
-    expect(issuesOf({ modelTier: null })).toEqual([
-      { field: "modelTier", code: "INVALID_TYPE" },
-    ]);
-  });
-
-  it("is a setting of the project and of the global defaults alike", () => {
-    expect(validateProjectSettingsPatch({ modelTier: "low" })).toEqual({
-      ok: true,
-      value: { review: { modelTier: "low" }, dynamic: {} },
-    });
-  });
-
-  it("reads a stored tier and drops one this version does not know", () => {
-    expect(parseStoredOverrides({ modelTier: "high" })).toEqual({
-      modelTier: "high",
-    });
-    expect(parseStoredOverrides({ modelTier: "platinum" })).toEqual({});
-  });
-});
-
 describe("reading stored review settings", () => {
   it("keeps valid fields and drops the ones that are invalid or unknown", () => {
     expect(

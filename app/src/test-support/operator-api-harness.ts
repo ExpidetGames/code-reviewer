@@ -10,8 +10,6 @@ import { createUsageFeedRepository } from "../db/repositories/usage-feed-reposit
 import { createUsageRecordsRepository } from "../db/repositories/usage-records-repository.ts";
 import { createWorkspaceEntitlementsRepository } from "../db/repositories/workspace-entitlements-repository.ts";
 import { createWorkspacesRepository } from "../db/repositories/workspaces-repository.ts";
-import type { ModelCapabilityChecker } from "../llm/model-capabilities.ts";
-import { createModelTiersService } from "../model-tiers/service.ts";
 import { createOperatorApi } from "../operator-api/api.ts";
 import type { OperatorRoute } from "../operator-api/contract.ts";
 import { createTestDatabase } from "./test-database.ts";
@@ -19,25 +17,6 @@ import { createUsageSeeder } from "./usage-seed.ts";
 import { addWorkspace, defaultWorkspaceId } from "./workspaces.ts";
 
 export const TEST_OPERATOR_TOKEN = "test-operator-token-3b8e1d-6a40f2c97e15";
-
-/** A provider that vouches for every model: tool calling and tool choice, a 200k window. */
-const qualifyingModels: ModelCapabilityChecker = {
-  check: async () => ({
-    outcome: "supported",
-    capabilities: {
-      tools: true,
-      toolChoice: true,
-      toolChoiceRequired: true,
-      responseFormat: true,
-      structuredOutputs: true,
-      maxCompletionTokens: 8192,
-      smallestCompletionTokens: 8192,
-      contextLength: 200_000,
-      inputUsdPerMtok: null,
-      outputUsdPerMtok: null,
-    },
-  }),
-};
 
 export class NotFoundMarker extends Error {
   constructor() {
@@ -93,8 +72,6 @@ export function routeOf(path: string): OperatorRoute {
     return { kind: "default-entitlements" };
   if (rest.length === 1 && rest[0] === "plan-management")
     return { kind: "plan-management" };
-  if (rest.length === 1 && rest[0] === "model-tiers")
-    return { kind: "model-tiers" };
   if (rest.length === 2 && rest[0] === "handoff" && rest[1] === "redeem")
     return { kind: "handoff-redeem" };
   return { kind: "unknown" };
@@ -104,8 +81,6 @@ export async function startOperatorApiHarness(
   options: {
     token?: string | undefined;
     now?: Date;
-    /** #280: what the provider's metadata says about a Dynamic model of a tier; default: every model qualifies. */
-    modelCapabilities?: ModelCapabilityChecker;
     /** #438: whether billing is on, which makes the default entitlements billing's to write. Default: off. */
     billingOn?: boolean;
   } = {},
@@ -127,10 +102,6 @@ export async function startOperatorApiHarness(
     usageFeed: createUsageFeedRepository(db),
     usageFor: (id) => createUsageRecordsRepository(db, id, () => now),
     handoffs: createPlanHandoffRedeemRepository(db, () => now),
-    modelTiers: createModelTiersService({
-      settings: createInstanceSettingsRepository(db, () => now),
-      modelCapabilities: options.modelCapabilities ?? qualifyingModels,
-    }),
     now: () => now,
     logger: {
       info: (line) => lines.push(line),

@@ -166,7 +166,7 @@ provider_not_found`.
   which a managed job does not use at all. The model of an entry never reaches a workspace (not the settings, a page, a
   result, a record or a log). An **own** workspace never reads the catalog or `modelAccess` (#432-T06, T16): its
   provider and model come from its settings layers, and the key is its own key **of that provider** (`keyFor`).
-  The old tiers (`modelTier`, `src/model-tiers`) are no longer read by the claim; their removal is the migration issue.
+  The old tiers are gone (#434); the migration turned them into catalog entries (`src/model-catalog/README.md`).
 - **The Worker's fetch asks for the standing again.** A workspace suspended after the claim, or whose entitlements
   became unreadable, gets no key: the job ends with the code of the claim (`runner-api/README.md`). Quotas are not
   counted again.
@@ -304,7 +304,7 @@ saving the same model repeatedly asks once; for a settings save no other outcome
 managed job asks with `forClaim`** (#280): it also remembers an answer that is not `supported` for 45 seconds, so a
 provider outage costs one wait of the 5 second timeout per model, not one per claim and Worker fetch, and the checker
 keeps the last context window it read for a model for a day (`lastKnownContextLength`), which the claim clamps the
-token budget to while the provider cannot be asked (`src/model-tiers/README.md`). The settings save is its first user
+token budget to while the provider cannot be asked (`src/model-catalog/README.md`, "The token budget of a managed job"). The settings save is its first user
 (`src/review-settings/README.md`, "Saving a Dynamic model checks it"); the run-time enforcement is the runner
 proxy's (`dynamic_model_features_unsupported`).
 

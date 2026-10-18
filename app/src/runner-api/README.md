@@ -113,8 +113,8 @@ id (for which a refused job answers `204`, like any job that cannot be claimed).
      and have a provider the runner can run; otherwise the job ends `managed_model_unavailable` (the log names the
      opaque entry id, the kind and the reason, `no_selection`, `missing`, `not_released`, `kind_mismatch`, `not_allowed`
      or `provider_unsupported`; never a model or a provider) with no key and no token made, and never moves to another
-     entry, provider or the instance's model (decision C5). `managed_tier_unavailable` stays in the Runs copy for old
-     rows only.
+     entry, provider or the instance's model (decision C5). `managed_tier_unavailable` is no code of the claim any more; the Runs copy keeps
+     its sentence for old rows only.
    - **The `llmProviders` gate** (contracts/README.md, "Rolling out providers"): a provider other than the default
      goes only to a caller that listed it. A runner's claim names its list in the body (absent means `openrouter`);
      a Worker names it in the `llmProviders=` query of its details call. The claim of a **Dispatcher** names no list the

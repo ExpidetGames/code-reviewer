@@ -9,7 +9,6 @@ import {
   REVIEW_COMMANDS,
   type ReviewCommand,
 } from "../../integrations/types.ts";
-import type { ModelTier } from "../../model-tiers/tiers.ts";
 import {
   REVIEW_SETTING_FIELDS,
   type ReadableReviewSettings,
@@ -40,11 +39,6 @@ export type FormValues = {
   autoReviewOnOpen: boolean;
   autoReviewOnPush: boolean;
   allowedCommands: ReviewCommand[];
-  /**
-   * The quality level of a workspace on the operator's key (#280, #283). Carried through a save of any workspace, so
-   * the level that is stored is never dropped; no control changes it any more, the catalog entry replaced it (#433).
-   */
-  modelTier: ModelTier;
 };
 
 export type FormState = {
@@ -69,7 +63,6 @@ function valuesOf(settings: ReadableReviewSettings): FormValues {
     autoReviewOnOpen: settings.autoReviewOnOpen,
     autoReviewOnPush: settings.autoReviewOnPush,
     allowedCommands: [...settings.allowedCommands],
-    modelTier: settings.modelTier,
   };
 }
 

@@ -11,7 +11,6 @@ import { sql, type Kysely, type Selectable } from "kysely";
 import { formatTimestamp } from "../codecs.ts";
 import type { Database, UsageRecordsTable } from "../schema.ts";
 import type { WorkspaceId } from "../workspace-scope.ts";
-import type { ModelTier } from "../../model-tiers/tiers.ts";
 import type { ProjectReviewKind } from "../../review-settings/settings.ts";
 import type {
   SettledReason,
@@ -27,7 +26,7 @@ export type UsageRecord = {
   jobId: string;
   reviewKind: ProjectReviewKind;
   keyMode: UsageKeyMode;
-  /** The managed model tier the run used (#280); null for a run on the workspace's own key. The name, never the model. */
+  /** The managed model tier of a run from before the catalog (#280, #434); null for every newer run and for an own run. Read only: nothing writes it. The name, never the model. */
   modelTier: string | null;
   /** The catalog entry a managed run used (#432), and its name as it was at the claim; null for an own run and old rows. */
   catalogEntryId: string | null;
@@ -94,11 +93,6 @@ export type UsageRecordsRepository = {
   reserve(jobId: string, keyMode: UsageKeyMode): Promise<void>;
   /** Corrects the key mode of a record that is still `reserved`; any other record is left as it is. */
   setKeyMode(jobId: string, keyMode: UsageKeyMode): Promise<void>;
-  /**
-   * Notes the managed tier a job runs at (#280) on a record that is still `reserved`; any other record is left as it
-   * is. The tier name only: the model behind it is never recorded.
-   */
-  setModelTier(jobId: string, tier: ModelTier): Promise<void>;
   /**
    * Notes the provider and, for a managed run, the catalog entry (id and name as they are now) a job was given (#432) on a
    * record that is still `reserved`; any other record is left as it is. Never the model.
@@ -216,16 +210,6 @@ export function createUsageRecordsRepository(
       await db
         .updateTable("usage_records")
         .set({ key_mode: keyMode })
-        .where("job_id", "=", jobId)
-        .where("workspace_id", "=", workspaceId)
-        .where("state", "=", "reserved")
-        .execute();
-    },
-
-    async setModelTier(jobId, tier) {
-      await db
-        .updateTable("usage_records")
-        .set({ model_tier: tier })
         .where("job_id", "=", jobId)
         .where("workspace_id", "=", workspaceId)
         .where("state", "=", "reserved")

@@ -126,7 +126,7 @@ export function revealLlmAccess(access: LlmAccess): LlmAccess {
 
 const MASK = "[redacted]";
 
-/** What stands in a text where the id of a managed tier's model was (#283). */
+/** What stands in a text where the id of a managed entry's model was (#283). */
 export const MODEL_MASK = "[model]";
 
 // The forms a secret takes in an error text besides the plain one: percent-encoded (in a URL),
@@ -151,8 +151,8 @@ export function maskSecretInText(text: string, ...secrets: string[]): string {
 }
 
 /**
- * Replaces the ids of managed tier models in a text with `[model]` (#283), in the same forms as a secret. The id of a
- * tier's model is operator data a workspace must not read, but it is not a credential: the mask says what was there.
+ * Replaces the ids of managed entry models in a text with `[model]` (#283), in the same forms as a secret. The id of an
+ * entry's model is operator data a workspace must not read, but it is not a credential: the mask says what was there.
  */
 export function maskModelInText(text: string, ...models: string[]): string {
   return replaceForms(text, models, MODEL_MASK);

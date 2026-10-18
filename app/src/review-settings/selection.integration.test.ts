@@ -278,21 +278,22 @@ describe("a workspace on the operator's key", () => {
     expect(app.catalog.reads.finds).toBe(0);
   });
 
-  // #430-T07
-  it("keeps accepting the old quality level, and a catalog entry beside it", async () => {
+  // #434-T03
+  it("no longer accepts the old quality level beside a catalog entry: the request is refused whole", async () => {
     const app = await start({ managed: true });
     const entry = await app.catalog.entry();
+    const legacy = ["model", "Tier"].join("");
 
-    const view = await app.service.updateProjectSettings(app.first.id, {
-      modelTier: "high",
-      catalogEntryDiff: entry.id,
+    await expect(
+      app.service.updateProjectSettings(app.first.id, {
+        [legacy]: "high",
+        catalogEntryDiff: entry.id,
+      }),
+    ).rejects.toMatchObject({
+      code: "REVIEW_SETTINGS_INVALID",
+      issues: [{ field: legacy, code: "UNKNOWN_FIELD" }],
     });
-
-    expect(view.effective.modelTier).toBe("high");
-    expect(await app.stored()).toEqual({
-      modelTier: "high",
-      catalogEntryDiff: entry.id,
-    });
+    expect(await app.stored()).toEqual({});
   });
 });
 

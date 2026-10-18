@@ -709,22 +709,4 @@ describe("the settings form of a workspace on its own key keeps its stored tier 
     expect(screen.queryByRole("radiogroup", { name: "Quality" })).toBeNull();
     expect(document.body.textContent).toContain("Estimated cost");
   });
-
-  // #283-T02
-  it("still sends the stored level of an own-key workspace through a save, without a control for it", async () => {
-    const user = userEvent.setup();
-    const { api, save } = fakeApi();
-    render(
-      <SettingsForm
-        workspaceSlug="acme"
-        initial={projectModel({ modelTier: "high" })}
-        api={api}
-      />,
-    );
-
-    await changeSomething(user);
-    await user.click(screen.getByRole("button", { name: /save/i }));
-
-    expect(save.mock.calls[0]?.[0]).toMatchObject({ modelTier: "high" });
-  });
 });
