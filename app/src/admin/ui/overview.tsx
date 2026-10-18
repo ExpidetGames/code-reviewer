@@ -19,6 +19,7 @@ import {
 } from "../../components/ui/card.tsx";
 import type { GithubConfigView } from "../../github-config/service.ts";
 import { GITHUB_SIGN_IN_NOT_ENABLED } from "../../github-config/ui/messages.ts";
+import { llmProviderDescriptors } from "../../llm/providers/index.ts";
 import { MODEL_TIERS } from "../../model-tiers/tiers.ts";
 import { UNREADABLE_SECRET_CAUSE } from "../../secrets/messages.ts";
 import type { AdminSettingsView } from "../service.ts";
@@ -100,25 +101,30 @@ function operatorKeyRow(settings: AdminSettingsView): {
   summary: string;
   hint?: string;
 } {
-  const key = settings.operatorLlmKey;
-  if (key.state === "unreadable")
+  // One entry for each provider, by its name (#427); a provider with no key is not a problem, only a saved key that
+  // cannot be read is.
+  const keys = Object.entries(settings.operatorLlmKeys);
+  const describe = ([provider, key]: (typeof keys)[number]) => {
+    const label = llmProviderDescriptors.labelOf(provider);
+    if (key.state === "unreadable") return `${label}: Saved, cannot be read`;
+    if (key.state === "not_configured") return `${label}: Not configured`;
+    return key.lastFour === null
+      ? `${label}: Configured`
+      : `${label}: Configured (ending in ${key.lastFour})`;
+  };
+  const summary = keys.map(describe).join("; ");
+  if (keys.some(([, key]) => key.state === "unreadable"))
     return {
       status: "warn",
-      summary: "Saved, cannot be read",
-      hint: "Workspaces that use the key of the instance cannot run reviews until it is entered again.",
+      summary,
+      hint: "Workspaces that use the key of the instance cannot run reviews on that provider until its key is entered again.",
     };
-  if (key.state === "configured")
-    return {
-      status: "ok",
-      summary:
-        key.lastFour === null
-          ? "Configured"
-          : `Configured (ending in ${key.lastFour})`,
-    };
+  if (keys.some(([, key]) => key.state === "configured"))
+    return { status: "ok", summary };
   return {
     status: "ok",
-    summary: "Not configured",
-    hint: "Optional. Only workspaces that use the key of the instance need it.",
+    summary,
+    hint: "Optional. Only workspaces that use the key of the instance need one.",
   };
 }
 
@@ -282,7 +288,7 @@ export function Overview({
               href="/admin/integrations"
             />
             <SetupRow
-              title="LLM key of the instance"
+              title="LLM keys of the instance"
               status={operatorKey.status}
               summary={operatorKey.summary}
               {...(operatorKey.hint === undefined

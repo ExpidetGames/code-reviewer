@@ -125,6 +125,7 @@ const PROTECTED_DATA_ROUTES = [
   "/api/instance-portal/approvals/[id]",
   "/api/instance-portal/settings",
   "/api/instance-portal/mail/test",
+  "/api/instance-portal/llm-keys/[provider]/test",
   "/api/instance-portal/billing",
   "/api/instance-portal/billing/check",
   "/api/instance-portal/billing/notification-destination",

@@ -159,7 +159,7 @@ test.describe("the admin portal", () => {
       "Integrations",
       "GitHub App",
       "Mail",
-      "LLM key",
+      "LLM keys",
       "Billing",
     ]);
     await expect(
@@ -171,7 +171,7 @@ test.describe("the admin portal", () => {
     await expect(setup.getByText("Tenancy")).toBeVisible();
     await expect(setup.getByText("Sign-up rule")).toBeVisible();
     await expect(setup.getByText("Ways to sign in")).toBeVisible();
-    await expect(setup.getByText("LLM key of the instance")).toBeVisible();
+    await expect(setup.getByText("LLM keys of the instance")).toBeVisible();
     // #280: shown with no link, because the operator API sets the models and this portal only says whether they are.
     await expect(setup.getByText("Managed model tiers")).toBeVisible();
     await expect(setup.getByRole("link", { name: /^Configure / })).toHaveCount(
@@ -206,7 +206,7 @@ test.describe("the admin portal", () => {
       "Integrations",
       "GitHub App",
       "Mail",
-      "LLM key",
+      "LLM keys",
       "Billing",
     ]);
     await nav.getByRole("link", { name: "Mail" }).click();

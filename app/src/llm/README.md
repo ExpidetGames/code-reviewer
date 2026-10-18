@@ -59,10 +59,11 @@ since #426 (below, "The keys of a workspace").
    workspace's own key **of the provider the job is for** (the default provider until a project can choose, #426),
    stored encrypted (below), bound to that provider. A key of another provider is never taken. **The operator's key is
    never read** for such a workspace, not even when it has no key of its own: the job then fails with `no_key`.
-2. **`managed`**: the operator's own key (#276, below), source `operator`. The workspace's own stored key is ignored
-   (it stays stored, not deleted) and is **never a fallback**: the entitlement says which key is used. Without a
-   readable operator key the job fails with `llm_not_configured` and the reason `operator_key_missing` or
-   `operator_key_unreadable`.
+2. **`managed`**: the operator's own key **of the provider the job is for** (#276, #427, below), source `operator`. The
+   workspace's own stored key is ignored (it stays stored, not deleted) and is **never a fallback**: the entitlement
+   says which key is used. Without a readable operator key for that provider the job fails with `llm_not_configured`
+   and the reason `operator_key_missing` or `operator_key_unreadable`; the operator's key of another provider is never
+   used instead.
 3. **Entitlements that cannot be read** (`entitlements_invalid`): it is not known whose key applies, so the job fails
    with `llm_not_configured` and the reason `entitlements_invalid`; nothing is chosen. (The claim has refused such a
    job already, #277; this covers the Worker's fetch, which checks again.)
@@ -72,7 +73,7 @@ The reasons of `llm_not_configured` (`LLM_NOT_CONFIGURED_REASONS`): `no_key`, `k
 with the job and drive the copy of the pages; they never hold a value.
 
 The input of the resolver is a union on purpose (`keyMode: "own"` carries the key of the workspace for the job's
-`provider`, `"managed"` carries the operator's, `"unreadable"` carries neither), so a job of a workspace that is not managed has no place to put the
+`provider`, `"managed"` carries the operator's key of the job's `provider`, `"unreadable"` carries neither), so a job of a workspace that is not managed has no place to put the
 operator's key and a managed one has none for the workspace's. `assemble.ts` reads only what the mode names.
 
 There is no step for a key in the environment: a key in `LLM_API_KEY` would be spent by every workspace that has not
@@ -115,22 +116,33 @@ A selection names whose key to load (`keySource`: the workspace's key of `provid
 provider) but holds no key. An own selection has no `entry`; a managed one has no place for the workspace's key (both are
 compile-time, `selection.test.ts`).
 
-## The operator's own key (#276)
+## The operator's own keys (#276, #427)
 
-The instance admin stores **one key of the operator's own** for the workspaces whose key mode is `managed`, in the
-admin portal (**LLM key**, `/admin/llm`; `src/admin/ui/operator-llm-key-form.tsx`). The provider is the default one (`src/llm/providers/`).
+The instance admin stores **one key of the operator's own for each provider** for the workspaces whose key mode is
+`managed`, in the admin portal (**LLM keys**, `/admin/llm`; `src/admin/ui/operator-llm-key-form.tsx`: one card for each
+provider with its status, a write-only field, **Test key** and, while a key is stored, **Remove**). A managed job uses
+the key of its own provider (`forJob(provider)`). The decision is ADR 0005, section 2.5; it extends the addendum of
+`docs/decisions/0001-editions-setup-and-accounts.md`, section 2.8, which described a single key. A key stored before there
+were several providers is the first provider's key and **keeps its name `operator_llm_key`, with no migration**; another
+provider's key is stored under `operator_llm_key.<provider>` (its adapter's `secretNames.operator`).
 
-| File              | Role                                                                                                                                                  |
-| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `operator-key.ts` | `createOperatorLlmKeyService`: `status`, `save`, `remove`, `forJob`, on the encrypted store of the instance (`src/secrets/`, name `operator_llm_key`) |
+| File                   | Role                                                                                                                                                                                                                                                                                                                |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `operator-key.ts`      | `createOperatorLlmKeyService`: `status(provider)`, `statusAll`, `save({ provider, apiKey })`, `remove(provider)`, `forJob(provider)`, on the encrypted store of the instance (`src/secrets/`). The provider is named by its id **exactly** (no trimming, no case folding); an id that is not registered has no slot |
+| `operator-key-test.ts` | `createOperatorKeyTestService`: the Test button. The same call to the provider as the workspace's button (`checkLlmKey`), with **counters of its own** (`operator-llm-key-test:admin:<id>`: 5 in 10 minutes for each admin; `operator-llm-key-test:all`: 60 for the instance), apart from the workspaces'           |
 
 - **Storage.** Table `secrets`, AES-256-GCM with a key derived from `APP_SECRET`, additional authenticated data the
   table and the name. Like the workspace key, **whoever holds the database and `APP_SECRET` can decrypt it**; the form
   says so.
 - **Write-only.** No answer holds the key. The portal's settings carry the status (`configured`, `unreadable`,
-  `not_configured`) and the last four characters of a long key (`GET|PUT /api/admin/settings`, `secrets` and
-  `operatorLlmKey`); an empty field saves nothing (`api_key_required`) and the rules for a key are those of the
-  workspace key (`checkLlmApiKey`).
+  `not_configured`) and the last four characters of a long key (`GET|PUT /api/admin/settings`: `operatorLlmKeys`, a
+  status for each provider by its id, and `secrets`; `operatorLlmKey`, the default provider's status, stays one more
+  release); an empty field saves nothing (`api_key_required`) and the rules for a key are those of the workspace key
+  (`checkLlmApiKey`). The request is `{ "operatorLlmKeys": { "<provider>": { "apiKey" } | null } }`, one provider each,
+  and the old `{ "operatorLlmKey": ... }` is still accepted for the default provider (`admin/operator-key-change.ts`).
+  `POST /api/admin/llm-keys/:provider/test` (`{ apiKey? }`: the typed key, or the stored one of that provider) is
+  rate limited with counters of its own (429, `Retry-After`) and answers a provider that is not registered `404
+provider_not_found`.
 - **Only the instance admin writes it.** It is **not a setting of the operator API** (`src/operator-api/`): whoever holds
   that token must not hold the key, and the API has no dependency that could reach the store. Entitlements that name a
   key are refused as unknown fields.
@@ -160,8 +172,9 @@ admin portal (**LLM key**, `/admin/llm`; `src/admin/ui/operator-llm-key-form.tsx
   not know the key mode: it would run a managed workspace's jobs on the workspace's own key and on the workspace's
   model, record them as `own` (outside the cost limit), and not read the list of remembered keys of a job as keys. Nothing leaks, but the
   operator's rules are not applied until every instance is upgraded.
-- **Masking.** `currentKeysFor` returns the workspace's own key and, **while the workspace is managed**, the operator's
-  current key; the key of the claim comes from `job_claimed_keys`.
+- **Masking.** `currentKeysFor` returns the workspace's own key of every provider and, **while the workspace is
+  managed**, the operator's current key of **every** provider (not only the one the job runs on: a result must not
+  show any of them); the key of the claim comes from `job_claimed_keys`.
 - **The usage record says the key that was used.** The claim reserves the record as `own` and `recordKeyMode` sets it
   from the source of the resolved access (`managed` for `operator`), on both paths. The cost limit of #277 watches the
   records whose key mode is `managed` for a workspace whose entitlements say `managed`; since the key mode of the
@@ -322,8 +335,9 @@ claimed-keys.ts`: one row per job, the sealed text is the list of the keys hande
 `providers/structure.test.ts` (the provider is named only in its adapter), `providers/openrouter/adapter.test.ts` and
 `providers/openrouter/adapter.integration.test.ts` (the adapter against the fake LLM);
 `resolve.test.ts`, `config.test.ts`, `access.test.ts`, `startup.test.ts`, `endpoint.test.ts`, `model-capabilities.test.ts`, `dynamic-capabilities.test.ts` and
-`../instrumentation.test.ts` (unit, no database); `workspace-key.integration.test.ts`, `workspace-keys.integration.test.ts` (one key per provider, with a test-only second provider: the keys apart, the name bound into the ciphertext, an old row), `workspace-keys-access.integration.test.ts` (which provider's key a job takes, the keys to mask), `operator-key.integration.test.ts`,
-`operator-access.integration.test.ts` (whose key a workspace gets, over a real database),
+`../instrumentation.test.ts` (unit, no database); `workspace-key.integration.test.ts`, `workspace-keys.integration.test.ts` (one key per provider, with a test-only second provider: the keys apart, the name bound into the ciphertext, an old row), `workspace-keys-access.integration.test.ts` (which provider's key a job takes, the keys to mask), `operator-key.integration.test.ts` (one key per provider, with a test-only second provider),
+`operator-key-test.integration.test.ts` (the operator's Test button and its own counters),
+`operator-access.integration.test.ts` (whose key a workspace gets, over a real database; a provider without a key is `operator_key_missing`),
 `key-test.integration.test.ts` (real SQLite, the fake LLM over real HTTP); `ui/*.test.tsx`;
 `integration-tests/http/llm-keys-route.integration.test.ts` (the per-provider routes and the alias beside them, the shared limit of the test button, no key in any answer, log or page), `integration-tests/http/llm-key-route.integration.test.ts` (the alias routes, the real route files: roles, isolation, the request,
 the test button, no key in any answer or log; and a managed workspace's settings: no form, the same note for every
@@ -331,6 +345,6 @@ role, the routes still working), `integration-tests/http/runner-api-llm-key.inte
 workspace's own key, no borrowing, no key from the environment, removal, masking across instances),
 `integration-tests/http/runner-api-operator-key.integration.test.ts` (the operator's key on the legacy claim and the
 Worker API: delivered, remembered, masked, never to a Dispatcher, the usage record's key mode),
-`src/admin/operator-llm-key.integration.test.ts` (the portal's save, status and refusals; who may not) and the rows for
+`src/admin/operator-llm-key.integration.test.ts` (the portal's save, status, Test route and refusals; who may not), `src/operator-api/no-operator-keys.test.ts` (the operator API imports nothing that reaches a key) and the rows for
 the routes in `workspace-isolation.integration.test.ts` (and for the provider-qualified secret name in `src/db/repositories/scoped-isolation.integration.test.ts`). Journey: `e2e/settings/llm-key.e2e.ts`, and the
 review with the workspace key in `e2e/jobs/pull-request-to-review.e2e.ts`.
