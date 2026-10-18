@@ -68,6 +68,27 @@ export type PriceLinkView = {
   driftPaddle?: string;
 };
 
+/**
+ * An attempt to create a Paddle price through the app (#440) that no version is sold with: one that is still running
+ * (`pending`), one that failed (`failed`, with its code; the next "Create prices" retries it), or a price that was created but
+ * could not be linked, for example because the plan was saved again meanwhile (`ready` with a Paddle price id: an orphan the
+ * operator can archive). Linked attempts are not listed; their price is on the version.
+ */
+export type PriceAttemptView = {
+  /** `month` or `year`. */
+  interval: string;
+  /** The amount the attempt asked for, minor units as text. */
+  amount: string;
+  trialDays: number | null;
+  state: "pending" | "failed" | "ready";
+  /** The stable code of the last failure; null unless the attempt failed. */
+  errorCode: string | null;
+  /** The price Paddle made for it; null while it has none. */
+  paddlePriceId: string | null;
+  /** When the app last started on it. */
+  attemptedAt: string | null;
+};
+
 export type PlanVersionView = PlanTerms & {
   number: number;
   role: PlanVersionRole;
@@ -91,6 +112,8 @@ export type PlanView = PlanMetadata & {
   paddleProductId: string | null;
   /** Newest first. Empty for a `contact` plan. */
   versions: PlanVersionView[];
+  /** Attempts to create a price that no version is sold with (#440), oldest first. */
+  priceAttempts: PriceAttemptView[];
 };
 
 /** A catalog entry as the instance admin picks it for `modelAccess`: the member-facing name and the admin's own view. */

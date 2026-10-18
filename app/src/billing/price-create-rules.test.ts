@@ -173,7 +173,11 @@ describe("the request that creates a price", () => {
 describe("the name of an attempt", () => {
   // #440-T09
   it("is the same for the same version, slot and trial, and different for any other", () => {
-    const base = { versionId: "bpv_1", interval: "month", trialDays: null };
+    const base: Parameters<typeof intentIdOf>[0] = {
+      versionId: "bpv_1",
+      interval: "month",
+      trialDays: null,
+    };
     expect(intentIdOf(base)).toBe(intentIdOf({ ...base }));
     expect(intentIdOf(base)).not.toBe(
       intentIdOf({ ...base, interval: "year" }),

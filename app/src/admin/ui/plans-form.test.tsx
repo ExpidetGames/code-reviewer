@@ -80,6 +80,7 @@ const FREE: PlanView = {
   contactTarget: null,
   archived: false,
   paddleProductId: null,
+  priceAttempts: [],
   versions: [
     {
       number: 1,
@@ -108,6 +109,7 @@ const TEAM: PlanView = {
   contactTarget: null,
   archived: false,
   paddleProductId: null,
+  priceAttempts: [],
   versions: [
     {
       number: 1,
@@ -148,6 +150,7 @@ const ENTERPRISE: PlanView = {
   contactTarget: "https://example.test/contact",
   archived: false,
   paddleProductId: null,
+  priceAttempts: [],
   versions: [],
 };
 
@@ -829,6 +832,7 @@ function teamWith(
     {
       ...TEAM,
       paddleProductId: "pro_01fake0000000000000000001",
+      priceAttempts: [],
       versions: [{ ...TEAM.versions[0]!, ...prices, ...version }],
     },
   ]);

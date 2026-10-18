@@ -17,6 +17,13 @@
 //                                                 (#439: links a Paddle price to the slot of the current version; the body has
 //                                                 no amount, currency or tax mode, they are the version's and Paddle's)
 //                                               { "refreshPrices": true }   (reads the linked prices again from Paddle)
+//                                               { "createPrices": { versionNumber, trialDays? } }
+//                                                 (#440: creates the Paddle product on first use and the prices of the current
+//                                                 version that have none, from the version's entered amounts; the body has no
+//                                                 amount, currency, interval or tax mode)
+//                                               { "archivePrice": { paddlePriceId } }
+//                                                 (#440: archives a price the current version is not sold with and no live
+//                                                 subscription uses; the only change ever made to an existing price)
 //   DELETE /api/admin/billing/plans/:planKey    deletes a plan that has no version (an Enterprise plan)
 //
 // Order: the admin first (nothing is read before the caller is known: not signed in is 401, signed in but not an admin is
@@ -66,6 +73,8 @@ const CHANGE_KEYS = [
   "archived",
   "priceLink",
   "refreshPrices",
+  "createPrices",
+  "archivePrice",
 ] as const;
 const PLAN_KEY = /^[a-z][a-z0-9-]{1,31}$/;
 
@@ -250,6 +259,14 @@ export function createPlansRouteHandlers({
             case "refreshPrices":
               if (fields.refreshPrices !== true) return undefined;
               return answerPrice(await prices.refresh(planKey));
+            case "createPrices":
+              return answerPrice(
+                await prices.create(who.id, planKey, fields.createPrices),
+              );
+            case "archivePrice":
+              return answerPrice(
+                await prices.archive(who.id, planKey, fields.archivePrice),
+              );
             default:
               if (typeof fields.archived !== "boolean") return undefined;
               return answer(

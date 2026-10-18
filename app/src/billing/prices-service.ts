@@ -5,21 +5,16 @@
 // that price (`GET /prices/{id}`), checks it against the amount the operator entered for the slot (`price-rules.ts`) and, if
 // it is exactly that price, stores what Paddle said. The app never changes a Paddle price and never changes an entered
 // amount to fit one: a mismatch is a refusal with both values, a price that changes later is shown as a drift on a refresh.
-// Only reads reach Paddle from this module; the client it is given has no other path to a price's money fields anyway.
+// Linking and refreshing only read from Paddle; creating a price (`prices-create.ts`, #440) and archiving one
+// (`prices-archive.ts`) are the only writes, and neither can change an amount (the client refuses it). Linking goes through
+// `price-link.ts`, the one place a price becomes the price of a slot, for a price the operator pastes and a price the app made.
 //
 // The plan is bound to its Paddle product by the first price that is linked; every later price must belong to it, and to
 // the environment (sandbox or live) billing is set to. A version is linked only while it is the current one: legacy versions
 // keep the prices their subscribers bought. Billing off: this service is not reached (the routes answer the missing path).
 import "server-only";
 import type { Kysely } from "kysely";
-import {
-  PriceTakenError,
-  createBillingPlanPricesRepository,
-  type PaddleEnv,
-  type PriceSnapshot,
-} from "../db/repositories/billing-plan-prices-repository.ts";
-import { createBillingPlansRepository } from "../db/repositories/billing-plans-repository.ts";
-import { createBillingPlanVersionsRepository } from "../db/repositories/billing-plan-versions-repository.ts";
+import type { PaddleEnv } from "../db/repositories/billing-plan-prices-repository.ts";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
 import type { Database } from "../db/schema.ts";
 import type { SecretStore } from "../secrets/store.ts";
@@ -30,10 +25,18 @@ import {
   type PaddlePrice,
 } from "./paddle-client.ts";
 import type { PriceReadFailure, PriceRefusal } from "./price-errors.ts";
-import { checkPrice, factsOf, trialDaysOf } from "./price-rules.ts";
+import {
+  linkPrice,
+  repositoriesOf,
+  snapshotOf,
+  type PricesResult,
+} from "./price-link.ts";
+import { createPriceArchiver } from "./prices-archive.ts";
+import type { MadeClient, PricesCore } from "./prices-core.ts";
+import { createPriceCreator } from "./prices-create.ts";
 import { readBillingSettings } from "./settings.ts";
 
-export type PricesResult = { ok: true } | ({ ok: false } & PriceRefusal);
+export { snapshotOf, type PricesResult };
 
 export type BillingPricesService = {
   /**
@@ -44,6 +47,22 @@ export type BillingPricesService = {
   link(adminId: string, planKey: string, input: unknown): Promise<PricesResult>;
   /** Reads every price of the plan again from Paddle and replaces the cache; drift shows in the plans view. Reads only. */
   refresh(planKey: string): Promise<PricesResult>;
+  /**
+   * `{ versionNumber, trialDays? }` (#440): creates the Paddle product on first use and a new price for each amount the
+   * current version holds that has no price yet, and links them. The amount, currency, interval and tax mode are the
+   * version's, never the request's. See `prices-create.ts`.
+   */
+  create(
+    adminId: string,
+    planKey: string,
+    input: unknown,
+  ): Promise<PricesResult>;
+  /** `{ paddlePriceId }` (#440): archives a price of the plan that the current version is not sold with and no live subscription uses. */
+  archive(
+    adminId: string,
+    planKey: string,
+    input: unknown,
+  ): Promise<PricesResult>;
 };
 
 export type BillingPricesServiceOptions = {
@@ -56,15 +75,6 @@ export type BillingPricesServiceOptions = {
 
 const PRICE_ID = /^pri_[A-Za-z0-9]{1,60}$/;
 const LINK_KEYS = ["versionNumber", "interval", "paddlePriceId"];
-
-/** Thrown inside the link transaction to undo it: nothing a refused link started (the product binding, the row) stays. */
-class Refused extends Error {
-  readonly refusal: PriceRefusal;
-  constructor(refusal: PriceRefusal) {
-    super(refusal.code);
-    this.refusal = refusal;
-  }
-}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -90,25 +100,6 @@ function paddleRefusal(error: unknown): PriceRefusal {
   }
 }
 
-/** The facts the app caches about a price. */
-export function snapshotOf(price: PaddlePrice): PriceSnapshot {
-  const facts = factsOf(price);
-  return {
-    productId: price.product_id,
-    priceType: facts.priceType,
-    interval: facts.interval,
-    frequency: facts.frequency,
-    currency: facts.currency,
-    amount: facts.amount,
-    taxMode: facts.taxMode,
-    hasOverrides: facts.hasOverrides,
-    trialDays: trialDaysOf(price.trial_period),
-    quantityMinimum: facts.quantityMinimum,
-    quantityMaximum: facts.quantityMaximum,
-    status: facts.status,
-  };
-}
-
 export function createBillingPricesService({
   db,
   secrets,
@@ -120,9 +111,6 @@ export function createBillingPricesService({
       await createInstanceSettingsRepository(db, now).get("billing_settings"),
     ).environment;
   }
-
-  type MadeClient =
-    { ok: true; client: PaddleClient } | { ok: false; refusal: PriceRefusal };
 
   /** A client for the stored key. The key does not leave this function but inside the client. */
   async function storedClient(env: PaddleEnv): Promise<MadeClient> {
@@ -144,15 +132,30 @@ export function createBillingPricesService({
     }
   }
 
-  function repositories(executor: Kysely<Database>) {
-    return {
-      plans: createBillingPlansRepository(executor, now),
-      versions: createBillingPlanVersionsRepository(executor, now),
-      prices: createBillingPlanPricesRepository(executor, now),
-    };
-  }
+  const repositories = (executor: Kysely<Database>) =>
+    repositoriesOf(executor, now);
+
+  const core: PricesCore = {
+    db,
+    now,
+    configuredEnvironment,
+    storedClient,
+    paddleRefusal,
+  };
+  const createPrices = createPriceCreator(core);
+  const archivePrice = createPriceArchiver(core);
 
   return {
+    create(adminId, planKey, input) {
+      void adminId;
+      return createPrices(planKey, input);
+    },
+
+    archive(adminId, planKey, input) {
+      void adminId;
+      return archivePrice(planKey, input);
+    },
+
     async link(adminId, planKey, input) {
       void adminId;
       const body = isRecord(input) ? input : undefined;
@@ -219,75 +222,16 @@ export function createBillingPricesService({
       } catch (error) {
         return { ok: false, ...paddleRefusal(error) };
       }
-      const mismatch = checkPrice(factsOf(price), {
+      return linkPrice(core, {
+        plan,
+        versionNumber,
         interval,
-        amountMinor: entered,
-        productId: plan.paddleProductId,
+        expectedLink,
+        entered,
+        env,
+        paddlePriceId,
+        price,
       });
-      if (mismatch !== undefined)
-        return { ok: false, ...mismatch, field: "paddlePriceId" };
-      const snapshot = snapshotOf(price);
-
-      const store = async (): Promise<PricesResult> => {
-        try {
-          return await db.transaction().execute(async (trx) => {
-            const repos = repositories(trx);
-            // Looked at again inside the transaction: a new version may have been saved while Paddle was asked.
-            const latest = await repos.versions.current(plan.id);
-            if (latest === undefined || latest.number !== versionNumber)
-              throw new Refused({ code: "plan_changed" });
-            const bound = await repos.plans.bindProduct(
-              plan.id,
-              price.product_id,
-              env,
-            );
-            if (bound.env !== env)
-              throw new Refused({ code: "price_environment_mismatch" });
-            if (bound.productId !== price.product_id)
-              throw new Refused({ code: "price_product_mismatch" });
-            const existing = await repos.prices.getByPaddleId(paddlePriceId);
-            if (existing !== undefined && existing.planId !== plan.id)
-              throw new Refused({
-                code: "price_used_by_other_plan",
-                field: "paddlePriceId",
-              });
-            const row =
-              existing === undefined
-                ? await repos.prices.insertLinked({
-                    planId: plan.id,
-                    paddlePriceId,
-                    env,
-                    snapshot,
-                  })
-                : await repos.prices.refresh(existing.id, snapshot);
-            // The read above proves nothing on Postgres once another admin commits: the write itself only hits the current version.
-            const linked = await repos.versions.setPriceLink(
-              latest.id,
-              interval,
-              row.id,
-              expectedLink,
-            );
-            if (!linked.ok)
-              throw new Refused({
-                code:
-                  linked.reason === "link_changed"
-                    ? "price_link_changed"
-                    : "plan_changed",
-              });
-            return { ok: true } as const;
-          });
-        } catch (error) {
-          if (error instanceof Refused) return { ok: false, ...error.refusal };
-          throw error;
-        }
-      };
-      try {
-        return await store();
-      } catch (error) {
-        // Two admins linked the same new price at once: the other row exists now, and the second try refreshes it.
-        if (!(error instanceof PriceTakenError)) throw error;
-        return store();
-      }
     },
 
     async refresh(planKey) {

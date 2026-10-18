@@ -29,6 +29,18 @@ export const PRICE_LINK_ERROR_CODES = [
   "price_link_not_clearable",
   /** Another admin linked another price to this slot meanwhile; reload and decide again. */
   "price_link_changed",
+  /** The amount stored for the slot is not a positive whole number of minor units; nothing is sent to Paddle (#440). */
+  "price_amount_invalid",
+  /** Trial days are whole days, from 1 to a year. */
+  "price_trial_invalid",
+  /** Another request is creating this price, or an attempt that died is not old enough to take over yet. */
+  "price_creation_pending",
+  /** Paddle refused to create the product or the price. */
+  "price_create_rejected",
+  /** The price is the one the current version is sold with: archiving it would end the sale. */
+  "price_in_use",
+  /** A live subscription still uses the price: it stays active at Paddle. */
+  "price_has_subscribers",
   ...BILLING_CHECK_ERROR_CODES,
 ] as const;
 export type PriceLinkErrorCode = (typeof PRICE_LINK_ERROR_CODES)[number];
@@ -50,6 +62,12 @@ export type PriceRefusal = {
     | "price_plan_not_paid"
     | "price_link_not_clearable"
     | "price_link_changed"
+    | "price_amount_invalid"
+    | "price_trial_invalid"
+    | "price_creation_pending"
+    | "price_create_rejected"
+    | "price_in_use"
+    | "price_has_subscribers"
     | "plan_not_found"
     | "plan_archived"
     | "plan_changed";
@@ -86,6 +104,12 @@ export const PRICE_ERROR_STATUS: Record<PriceRefusal["code"], number> = {
   price_plan_not_paid: 422,
   price_link_not_clearable: 422,
   price_link_changed: 409,
+  price_amount_invalid: 422,
+  price_trial_invalid: 422,
+  price_creation_pending: 409,
+  price_create_rejected: 502,
+  price_in_use: 409,
+  price_has_subscribers: 409,
   plan_not_found: 404,
   plan_archived: 409,
   plan_changed: 409,

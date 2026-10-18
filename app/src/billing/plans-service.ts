@@ -17,6 +17,7 @@ import type {
   PlanMetadata,
   PlanTerms,
   PlanView,
+  PriceAttemptView,
   PlanVersionView,
   PlansView,
   PlanWarning,
@@ -143,7 +144,24 @@ function startOfMonth(now: Date): string {
 }
 
 /** What a view needs beyond the rows of the plan: the cached prices its versions link to, and the environment billing is set to. */
-type PriceContext = { prices: ReadonlyMap<string, PriceRow>; env: PaddleEnv };
+type PriceContext = {
+  prices: ReadonlyMap<string, PriceRow>;
+  env: PaddleEnv;
+  /** The prices the app created that no version links, by plan id (#440). */
+  attempts: ReadonlyMap<string, readonly PriceRow[]>;
+};
+
+function toAttemptView(row: PriceRow): PriceAttemptView {
+  return {
+    interval: row.interval,
+    amount: row.amount,
+    trialDays: row.trialDays,
+    state: row.state,
+    errorCode: row.state === "failed" ? row.lastErrorCode : null,
+    paddlePriceId: row.paddlePriceId,
+    attemptedAt: row.attemptedAt,
+  };
+}
 
 function toVersionView(
   version: PlanVersionRow,
@@ -185,6 +203,7 @@ function toPlanView(
     archived: plan.archivedAt !== null,
     paddleProductId: plan.paddleProductId,
     versions: versions.map((version) => toVersionView(version, plan, context)),
+    priceAttempts: (context.attempts.get(plan.id) ?? []).map(toAttemptView),
   };
 }
 
@@ -229,16 +248,18 @@ export function createBillingPlansService({
   async function priceContext(
     executor: Kysely<Database>,
     versions: readonly PlanVersionRow[],
+    planIds: readonly string[],
   ): Promise<PriceContext> {
     const ids = new Set<string>();
     for (const version of versions) {
       if (version.monthlyPriceId !== null) ids.add(version.monthlyPriceId);
       if (version.yearlyPriceId !== null) ids.add(version.yearlyPriceId);
     }
-    const rows = await createBillingPlanPricesRepository(
-      executor,
-      now,
-    ).listByIds([...ids]);
+    const priceRepository = createBillingPlanPricesRepository(executor, now);
+    const rows = await priceRepository.listByIds([...ids]);
+    const attempts = new Map<string, readonly PriceRow[]>();
+    for (const planId of planIds)
+      attempts.set(planId, await priceRepository.listUnlinkedCreated(planId));
     const settings = readBillingSettings(
       await createInstanceSettingsRepository(executor, now).get(
         "billing_settings",
@@ -247,6 +268,7 @@ export function createBillingPlansService({
     return {
       prices: new Map(rows.map((row) => [row.id, row])),
       env: settings.environment,
+      attempts,
     };
   }
 
@@ -258,7 +280,11 @@ export function createBillingPlansService({
     const plan = await plans.get(planKey);
     if (plan === undefined) throw new Error("The plan cannot be read.");
     const rows = await versions.list(plan.id);
-    return toPlanView(plan, rows, await priceContext(executor, rows));
+    return toPlanView(
+      plan,
+      rows,
+      await priceContext(executor, rows, [plan.id]),
+    );
   }
 
   /**
@@ -309,7 +335,11 @@ export function createBillingPlansService({
       const { plans, versions } = repositories(db);
       const rows = await plans.list();
       const all = await versions.listForPlans(rows.map((plan) => plan.id));
-      const context = await priceContext(db, all);
+      const context = await priceContext(
+        db,
+        all,
+        rows.map((plan) => plan.id),
+      );
       const planViews = rows.map((plan) =>
         toPlanView(
           plan,
@@ -483,7 +513,11 @@ export function createBillingPlansService({
         const rows = await versions.list(changed.id);
         return {
           ok: true as const,
-          plan: toPlanView(changed, rows, await priceContext(db, rows)),
+          plan: toPlanView(
+            changed,
+            rows,
+            await priceContext(db, rows, [changed.id]),
+          ),
         };
       });
     },
