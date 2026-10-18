@@ -397,6 +397,14 @@ app of the previous release on the same database is unaffected (it never reads t
   so the statements differ by engine, and a test updates every column to catch one that a later migration adds without extending
   the SQLite trigger). `monthly_amount_minor` and `yearly_amount_minor` are int4 on Postgres: the service refuses a price above
   1,000,000 USD (`PRICE_MAX_MINOR`).
+- `billing_plan_prices` (#439, `src/billing/README.md`, "Linking Paddle prices"): one row per Paddle price the app knows. `plan_id` →
+  `billing_plans.id` `on delete restrict`, `paddle_price_id` and `intent_id` unique (`NULL` allowed), `paddle_product_id`,
+  `paddle_env` `sandbox`/`live`, `interval`, `frequency`, `currency`, `unit_amount_minor` as **text** (Paddle's string of minor units, so
+  any amount a price is changed to is cached whole; the repository checks the digits), `tax_mode`, `has_overrides` 0/1,
+  `trial_days`, `paddle_status`, `origin` `created`/`linked`, `state` `pending`/`ready`/`failed` (a `ready` row has a Paddle id, a status and a
+  snapshot time). Also `billing_plans.paddle_product_id` / `paddle_product_env` and `billing_plan_versions.monthly_price_id` /
+  `yearly_price_id` (→ `billing_plan_prices.id` `on delete restrict`): the two links are mutable (migration
+  `20261018160000_create_billing_plan_prices` replaces the Postgres guard; the SQLite trigger lists the frozen columns and does not name them).
 - The users: `billing_plans.updated_by` and `billing_plan_versions.created_by` are the audit trail of who changed a plan and who
   made a version (`src/billing/README.md`, "Why the two tables reference users"); the user merge moves them.
 
