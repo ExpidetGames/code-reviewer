@@ -32,8 +32,9 @@ from code_reviewer_runner.job_loop.jsonvalues import as_object
 _PROVIDER_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 _MODEL_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/+@-]{0,199}$")
 _UPSTREAM = re.compile(r"^https://[^\s?#@]+$")
-# The SDKs the pinned engine bundles (BUNDLED_PROVIDERS at the pin), an allow-list: the SDK decides which code the engine
-# loads. The same list as `contracts/job-model-entry.v1.json` (a contract test compares them).
+# The SDKs the pinned engine bundles (BUNDLED_PROVIDERS at the pin), an allow-list: the SDK
+# decides which code the engine loads. The same list as `contracts/job-model-entry.v1.json`
+# (a contract test compares them).
 BUNDLED_NPM = (
     "@ai-sdk/amazon-bedrock",
     "@ai-sdk/amazon-bedrock/mantle",
@@ -60,7 +61,7 @@ BUNDLED_NPM = (
     "@ai-sdk/github-copilot",
     "venice-ai-sdk-provider",
 )
-# The names the entry may carry the reasoning of a tool loop in (the contract's `Interleaved.field`).
+# The names the entry may carry the reasoning of a tool loop in (`Interleaved.field`).
 INTERLEAVED_FIELDS = ("reasoning_content", "reasoning_details")
 _FAMILIES = ("openai-chat", "openai-responses", "anthropic-messages", "google")
 _AUTH_HEADERS = ("Authorization", "x-api-key", "x-goog-api-key")
