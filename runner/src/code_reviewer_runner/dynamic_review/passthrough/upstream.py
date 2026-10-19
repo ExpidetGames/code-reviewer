@@ -46,9 +46,12 @@ class UpstreamFailure(StrEnum):
 class UpstreamError(Exception):
     """A call without an answer, or an answer that stopped. The text never names the destination."""
 
-    def __init__(self, kind: UpstreamFailure) -> None:
+    def __init__(self, kind: UpstreamFailure, *, sent: bool = False) -> None:
         super().__init__(kind.value)
         self.kind = kind
+        # Whether the request had been sent: a call that never left may be given back, one that
+        # did may have been billed.
+        self.sent = sent
 
 
 @dataclass(frozen=True)
@@ -159,12 +162,12 @@ class _Response:
         try:
             data = self._response.read1(size)
         except TimeoutError:
-            raise UpstreamError(UpstreamFailure.TIMEOUT) from None
+            raise UpstreamError(UpstreamFailure.TIMEOUT, sent=True) from None
         except (http.client.HTTPException, OSError):
-            raise UpstreamError(UpstreamFailure.CUT) from None
+            raise UpstreamError(UpstreamFailure.CUT, sent=True) from None
         if self._missing is not None:
             if not data and self._missing > 0:
-                raise UpstreamError(UpstreamFailure.CUT)
+                raise UpstreamError(UpstreamFailure.CUT, sent=True)
             self._missing -= len(data)
         return data
 
@@ -197,6 +200,12 @@ class HttpsUpstream:
     def send(self, request: UpstreamRequest, timeout: float) -> UpstreamResponse:
         connection = _PinnedConnection(self._host, timeout, self._resolve, self._connect, self._tls)
         try:
+            # Connecting first, apart from sending, tells a call that never left from one that did.
+            connection.connect()
+        except UpstreamError:
+            connection.close()
+            raise
+        try:
             connection.request(
                 "POST",
                 self._base_path + request.path,
@@ -204,13 +213,10 @@ class HttpsUpstream:
                 headers=dict(request.headers),
             )
             response = connection.getresponse()
-        except UpstreamError:
-            connection.close()
-            raise
         except TimeoutError:
             connection.close()
-            raise UpstreamError(UpstreamFailure.TIMEOUT) from None
+            raise UpstreamError(UpstreamFailure.TIMEOUT, sent=True) from None
         except (http.client.HTTPException, OSError):
             connection.close()
-            raise UpstreamError(UpstreamFailure.UNREACHABLE) from None
+            raise UpstreamError(UpstreamFailure.CUT, sent=True) from None
         return _Response(connection, response)

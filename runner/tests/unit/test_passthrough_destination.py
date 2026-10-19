@@ -229,6 +229,8 @@ def test_a_name_that_resolves_to_a_private_address_later_is_refused_on_that_conn
     with pytest.raises(UpstreamError) as raised:
         fresh.send(request(), 5.0)
     assert raised.value.kind is UpstreamFailure.ADDRESS_REFUSED
+    # Nothing was sent to the key's destination: the call can be given back.
+    assert not raised.value.sent
     assert wire.connected == [("93.184.216.34", 443)]
 
 
@@ -270,3 +272,5 @@ def test_a_connection_that_is_cut_in_the_answer_is_a_cut_not_a_short_answer() ->
     with pytest.raises(UpstreamError) as raised:
         response.read(100)
     assert raised.value.kind is UpstreamFailure.CUT
+    # The request had been sent: the provider may have billed it.
+    assert raised.value.sent
