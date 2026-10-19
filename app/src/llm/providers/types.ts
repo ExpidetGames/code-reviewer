@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// What a provider of LLM access has to bring (docs/decisions/0005-providers-model-catalog-and-paddle-billing.md,
+// What a provider of LLM access has to bring (ADR 0005,
 // section 2.4). Adding a provider means adding one adapter in its own folder and listing it in the registry
 // (`index.ts` for the part the browser may import, `server.ts` for the whole adapter); nothing else in the app
 // names a provider.

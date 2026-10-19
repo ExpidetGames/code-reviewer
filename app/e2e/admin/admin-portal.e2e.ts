@@ -160,7 +160,6 @@ test.describe("the admin portal", () => {
       "GitHub App",
       "Mail",
       "LLM keys",
-      "Billing",
     ]);
     await expect(
       sections.getByRole("link", { name: "Overview" }),
@@ -207,7 +206,6 @@ test.describe("the admin portal", () => {
       "GitHub App",
       "Mail",
       "LLM keys",
-      "Billing",
     ]);
     await nav.getByRole("link", { name: "Mail" }).click();
 

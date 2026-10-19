@@ -81,8 +81,6 @@ export async function startOperatorApiHarness(
   options: {
     token?: string | undefined;
     now?: Date;
-    /** #438: whether billing is on, which makes the default entitlements billing's to write. Default: off. */
-    billingOn?: boolean;
   } = {},
 ) {
   const { db } = await createTestDatabase();
@@ -91,10 +89,8 @@ export async function startOperatorApiHarness(
   const lines: string[] = [];
   const errors: string[] = [];
   const token = "token" in options ? options.token : TEST_OPERATOR_TOKEN;
-  let billingOn = options.billingOn ?? false;
   const api = createOperatorApi({
     token: () => token,
-    billingOn: () => Promise.resolve(billingOn),
     workspaces: createWorkspacesRepository(db),
     entitlementsFor: (id) =>
       createWorkspaceEntitlementsRepository(db, id, () => now),
@@ -155,9 +151,6 @@ export async function startOperatorApiHarness(
       createPlanHandoffTokensRepository(db, id, () => now),
     setNow: (next: Date) => {
       now = next;
-    },
-    setBillingOn: (next: boolean) => {
-      billingOn = next;
     },
     addWorkspace: (slug: string) => addWorkspace(db, slug),
   };

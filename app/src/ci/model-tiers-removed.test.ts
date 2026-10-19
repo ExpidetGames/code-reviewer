@@ -46,6 +46,10 @@ const ALLOWED: ReadonlyArray<{ path: string; why: string }> = [
     why: "the migration that turns the old data into catalog entries",
   },
   {
+    path: "app/src/db/migrations/upgrade-from-main.integration.test.ts",
+    why: "lists the migrations of the upgrade from main, the one that migrated the tiers by its file name",
+  },
+  {
     path: "app/src/db/migrations/model-tiers-to-catalog.ts",
     why: "its pure mapper, with the shape of the old data",
   },

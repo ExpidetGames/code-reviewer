@@ -509,13 +509,6 @@ model is saved in a project's settings, to read whether the model supports tool 
 reach that host, the save still works after a wait of at most 5 seconds and shows a warning that the model
 could not be checked (`src/llm/README.md`, "Model capabilities").
 
-If you switch on **billing** (admin portal, Billing; `app/src/billing/README.md`), the **app** also calls the Paddle API:
-`api.paddle.com` for the Live environment or `sandbox-api.paddle.com` for Sandbox (HTTPS port 443, the API key as the
-bearer token). It does so only when an admin presses the connection check, creates the notification destination or
-switches billing on, and later when billing itself runs. Paddle's own servers call the app in the other direction, at
-`BETTER_AUTH_URL` plus `/api/billing/webhook`, so that address has to be reachable from the internet over HTTPS. While
-billing is off, which is the default, the app never contacts Paddle and the address is not needed.
-
 ### Dynamic Review runner
 
 `compose.coolify.yml` has a third service, `runner-dynamic`, the runner of Dynamic Review

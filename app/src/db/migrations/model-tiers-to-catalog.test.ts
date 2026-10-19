@@ -355,9 +355,9 @@ describe("the tier migration", () => {
   it("is registered and sorts after the newest migration that was merged before it", async () => {
     const names = Object.keys(await migrationProvider.getMigrations());
     expect(names).toContain(KEY);
-    expect(KEY > "20261018160000_create_billing_plan_prices").toBe(true);
-    expect(names.filter((name) => name < KEY)).toContain(
-      "20261018160000_create_billing_plan_prices",
-    );
+    // The newest migration that was merged before it (the billing migrations in between were deleted, #491).
+    const before = "20261018090000_add_usage_record_catalog_entry";
+    expect(KEY > before).toBe(true);
+    expect(names.filter((name) => name < KEY)).toContain(before);
   });
 });

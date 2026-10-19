@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// `model_catalog_entries` (#425, docs/decisions/0005-providers-model-catalog-and-paddle-billing.md, 2.6): the operator's
+// `model_catalog_entries` (#425, ADR 0005, 2.6): the operator's
 // list of the models that workspaces on the operator's key may use (src/model-catalog/README.md). The `name` is free
 // text that members see; `provider` and `model_id` never leave the server. `name_key` is the name folded to lower case
 // and unique, stored so that the uniqueness is the same on SQLite and Postgres without an expression index
