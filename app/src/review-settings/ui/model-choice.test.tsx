@@ -1212,3 +1212,30 @@ describe("resetting a model after Anthropic was chosen", () => {
     ).toBe(BUILT_IN.model);
   });
 });
+
+// A workspace on the operator's key sees no model id and no pick list, with Anthropic registered (#532).
+describe("the pick lists of a workspace on the operator's key", () => {
+  // #532-T10
+  it.each(["diff", "dynamic"] as const)(
+    "shows no suggestion and no model id on the %s card",
+    (kind) => {
+      render(
+        <SettingsForm
+          workspaceSlug="acme"
+          initial={managedModel({ kind })}
+          providers={[openrouterDescriptor, anthropicDescriptor]}
+          dynamicReviewEnabled
+          api={fakeApi().api}
+        />,
+      );
+
+      // The chooser is there, so the test cannot pass on an empty page.
+      expect(
+        screen.getByRole("radiogroup", { name: "Review kind" }),
+      ).toBeTruthy();
+      expect(screen.queryByRole("combobox", { name: /suggested/i })).toBeNull();
+      expect(document.querySelector("datalist")).toBeNull();
+      expect(document.body.innerHTML).not.toMatch(/claude-/i);
+    },
+  );
+});
