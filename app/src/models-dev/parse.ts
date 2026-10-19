@@ -28,7 +28,7 @@ export type ModelsDevStatus = (typeof MODELS_DEV_STATUSES)[number];
 export const MODALITIES = ["text", "audio", "image", "video", "pdf"] as const;
 export type Modality = (typeof MODALITIES)[number];
 
-export type ModelTier = {
+export type PriceTier = {
   /** The tier applies to a prompt above this many tokens. */
   contextOver: number;
   input: string;
@@ -43,7 +43,7 @@ export type ModelCost = {
   output: string;
   cacheRead?: string;
   cacheWrite?: string;
-  tiers?: ModelTier[];
+  tiers?: PriceTier[];
 };
 
 export type Interleaved = true | { field: string };
@@ -177,7 +177,7 @@ function costOf(parsed: z.infer<typeof costSchema>): ModelCost {
     cost.cacheRead = decimal(parsed.cache_read);
   if (parsed.cache_write !== undefined)
     cost.cacheWrite = decimal(parsed.cache_write);
-  const tiers: ModelTier[] = [];
+  const tiers: PriceTier[] = [];
   for (const candidate of (parsed.tiers ?? []).slice(0, MAX_TIERS)) {
     // A tier of a kind we do not know is ignored; it never replaces the base price.
     const tier = tierSchema.safeParse(candidate);
