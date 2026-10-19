@@ -198,7 +198,7 @@ export function AdminRunDetailContent({
               {ADMIN_RUNS_COPY.noTrace}
             </p>
           ) : (
-            <CallTraceTables trace={run.callTrace} showCost />
+            <CallTraceTables trace={run.callTrace} showProviderDetail />
           )}
         </CardContent>
       </Card>

@@ -371,7 +371,15 @@ function traceView(job: Job, onManagedKey: boolean): RunnerCallTrace | null {
   if (trace === null || !onManagedKey) return trace;
   return {
     ...trace,
-    modelCalls: trace.modelCalls.map((call) => ({ ...call, costUsd: null })),
+    // The cost and the cache counts (whether a provider reports cache writes at all, and how many) say which
+    // provider answered: a run on the operator's key shows neither. The ending is the protocol's normalised
+    // label (the stored trace only holds those), so it stays.
+    modelCalls: trace.modelCalls.map((call) => ({
+      ...call,
+      costUsd: null,
+      cacheRead: null,
+      cacheWrite: null,
+    })),
   };
 }
 

@@ -77,11 +77,11 @@ const numeric = "text-right tabular-nums";
 
 export function CallTraceTables({
   trace,
-  showCost,
+  showProviderDetail,
 }: {
   trace: RunnerCallTrace;
-  /** False where the cost of a call may not be shown (a run on a managed quality level). */
-  showCost: boolean;
+  /** False where the cost and the cache counts of a call may not be shown (a run on a managed quality level). */
+  showProviderDetail: boolean;
 }) {
   const columns = CALL_TRACE_COPY.columns;
   const repeats = trace.toolCalls.filter((call) => call.isRepeat).length;
@@ -108,10 +108,18 @@ export function CallTraceTables({
                 <TableHead className={numeric}>{columns.number}</TableHead>
                 <TableHead className={numeric}>{columns.started}</TableHead>
                 <TableHead className={numeric}>{columns.prompt}</TableHead>
-                <TableHead className={numeric}>{columns.cacheRead}</TableHead>
-                <TableHead className={numeric}>{columns.cacheWrite}</TableHead>
+                {showProviderDetail ? (
+                  <>
+                    <TableHead className={numeric}>
+                      {columns.cacheRead}
+                    </TableHead>
+                    <TableHead className={numeric}>
+                      {columns.cacheWrite}
+                    </TableHead>
+                  </>
+                ) : null}
                 <TableHead className={numeric}>{columns.output}</TableHead>
-                {showCost ? (
+                {showProviderDetail ? (
                   <TableHead className={numeric}>{columns.cost}</TableHead>
                 ) : null}
                 <TableHead>{columns.ended}</TableHead>
@@ -126,16 +134,20 @@ export function CallTraceTables({
                   <TableCell className={numeric}>
                     {count(call.promptTokens)}
                   </TableCell>
-                  <TableCell className={numeric}>
-                    {count(call.cacheRead)}
-                  </TableCell>
-                  <TableCell className={numeric}>
-                    {count(call.cacheWrite)}
-                  </TableCell>
+                  {showProviderDetail ? (
+                    <>
+                      <TableCell className={numeric}>
+                        {count(call.cacheRead)}
+                      </TableCell>
+                      <TableCell className={numeric}>
+                        {count(call.cacheWrite)}
+                      </TableCell>
+                    </>
+                  ) : null}
                   <TableCell className={numeric}>
                     {count(call.completionTokens)}
                   </TableCell>
-                  {showCost ? (
+                  {showProviderDetail ? (
                     <TableCell className={numeric}>
                       {cost(call.costUsd)}
                     </TableCell>

@@ -314,7 +314,10 @@ export function RunDetail({
       </FactGroup>
       {run.callTrace === null ? null : (
         <FactGroup title={CALL_TRACE_COPY.title} items={[]}>
-          <CallTraceTables trace={run.callTrace} showCost={!run.costHidden} />
+          <CallTraceTables
+            trace={run.callTrace}
+            showProviderDetail={!run.costHidden}
+          />
         </FactGroup>
       )}
     </div>

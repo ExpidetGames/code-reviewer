@@ -77,7 +77,7 @@ const rowsOf = (table: HTMLElement) =>
 describe("the call trace tables", () => {
   // #541-T09
   it("has a table of the model calls with the tokens, the cache, the output, the cost and why each ended", () => {
-    render(<CallTraceTables trace={trace()} showCost />);
+    render(<CallTraceTables trace={trace()} showProviderDetail />);
 
     const table = screen.getByRole("table", {
       name: CALL_TRACE_COPY.modelCallsTitle,
@@ -125,7 +125,7 @@ describe("the call trace tables", () => {
 
   // #541-T09
   it("has a table of the tool calls with the size of the result and whether the call was a repeat", () => {
-    render(<CallTraceTables trace={trace()} showCost />);
+    render(<CallTraceTables trace={trace()} showProviderDetail />);
 
     const table = screen.getByRole("table", {
       name: CALL_TRACE_COPY.toolCallsTitle,
@@ -140,7 +140,7 @@ describe("the call trace tables", () => {
 
   // #541-T09
   it("counts the repeats", () => {
-    render(<CallTraceTables trace={trace()} showCost />);
+    render(<CallTraceTables trace={trace()} showProviderDetail />);
 
     expect(
       screen.getByText("1 of 4 tool calls repeated an earlier call."),
@@ -150,7 +150,7 @@ describe("the call trace tables", () => {
   // #541-T10
   it("leaves the cost column out where the cost is not shown", () => {
     const { container } = render(
-      <CallTraceTables trace={trace()} showCost={false} />,
+      <CallTraceTables trace={trace()} showProviderDetail={false} />,
     );
 
     const table = screen.getByRole("table", {
@@ -162,6 +162,22 @@ describe("the call trace tables", () => {
         .map((cell) => cell.textContent),
     ).not.toContain("Cost");
     expect(container.textContent).not.toContain("$");
+  });
+
+  // #541-T10: whether a provider reports a cache write at all says which provider it is, so a run on
+  // the operator's key shows no cache columns either.
+  it("leaves the cache columns out as well where the provider detail is not shown", () => {
+    render(<CallTraceTables trace={trace()} showProviderDetail={false} />);
+
+    const table = screen.getByRole("table", {
+      name: CALL_TRACE_COPY.modelCallsTitle,
+    });
+    const headers = within(table)
+      .getAllByRole("columnheader")
+      .map((cell) => cell.textContent);
+    expect(headers).not.toContain(CALL_TRACE_COPY.columns.cacheRead);
+    expect(headers).not.toContain(CALL_TRACE_COPY.columns.cacheWrite);
+    expect(rowsOf(table)[0]).toHaveLength(headers.length);
   });
 
   // #541-T09
@@ -182,7 +198,7 @@ describe("the call trace tables", () => {
             },
           ],
         })}
-        showCost
+        showProviderDetail
       />,
     );
 
@@ -196,7 +212,9 @@ describe("the call trace tables", () => {
 
   // #541-T09
   it("says that the trace was cut when it was", () => {
-    render(<CallTraceTables trace={trace({ truncated: true })} showCost />);
+    render(
+      <CallTraceTables trace={trace({ truncated: true })} showProviderDetail />,
+    );
 
     expect(screen.getByText(CALL_TRACE_COPY.truncated)).toBeTruthy();
   });
@@ -206,7 +224,7 @@ describe("the call trace tables", () => {
     render(
       <CallTraceTables
         trace={trace({ modelCalls: [], toolCalls: [] })}
-        showCost
+        showProviderDetail
       />,
     );
 

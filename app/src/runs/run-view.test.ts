@@ -763,4 +763,47 @@ describe("the call trace of a run", () => {
     expect(detail.callTrace?.modelCalls[0]?.promptTokens).toBe(14600);
     expect(detail.costHidden).toBe(true);
   });
+
+  // #541-T10: whether a provider reports cache writes (and how many) says which provider it is.
+  it("shows no cache counts per call for a run on the operator's key, and the tokens and the normalised ending stay", () => {
+    const run = job({
+      reviewKind: "dynamic",
+      result: stored({
+        ...trace,
+        modelCalls: [{ ...modelCall, cacheRead: 123_457, cacheWrite: 765_431 }],
+      }),
+    });
+
+    const own = toRunDetailView(run, "p", NOW);
+    const managed = toRunDetailView(run, "p", NOW, (text) => text, true);
+
+    expect(own.callTrace?.modelCalls[0]).toMatchObject({
+      cacheRead: 123_457,
+      cacheWrite: 765_431,
+    });
+    expect(managed.callTrace?.modelCalls[0]).toMatchObject({
+      cacheRead: null,
+      cacheWrite: null,
+      promptTokens: 14600,
+      completionTokens: 492,
+      finishReason: "tool_calls",
+    });
+    expect(JSON.stringify(managed)).not.toMatch(/123457|765431/);
+  });
+
+  // #541-T10: the ending is the protocol's normalised label, never a word a provider chose.
+  it("reads no ending that is not a normalised label, also for a run on the operator's key", () => {
+    const run = job({
+      reviewKind: "dynamic",
+      result: stored({
+        ...trace,
+        modelCalls: [{ ...modelCall, finishReason: "end_turn" }],
+      }),
+    });
+
+    const managed = toRunDetailView(run, "p", NOW, (text) => text, true);
+
+    expect(managed.callTrace).toBeNull();
+    expect(JSON.stringify(managed)).not.toContain("end_turn");
+  });
 });

@@ -48,7 +48,8 @@ detail page, below Diagnostics: a table of the model calls (start, prompt, cache
 ended, tools) and one of the tool calls (tool, size of the result, whether it repeated an earlier call), with a note when the
 trace was cut at its 100 entries. It holds numbers and stable names only (`runner-api/call-trace.ts` checks the stored value
 against the contract before it is read, so a row that is not the contract's shows no section). A run on a managed quality
-level shows no cost per call, like it shows no cost for the run (#283). A run without a trace (an older runner, a Diff
+level shows no cost and no cache count per call (and no such columns), like it shows no cost for the run (#283): whether
+a provider reports cache writes says which provider it is. Its ending stays, as the protocol's normalised label. A run without a trace (an older runner, a Diff
 Review) shows no section. It is in the detail only, not in the list, and its copy is `ui/call-trace-messages.ts`.
 
 ## Polling
