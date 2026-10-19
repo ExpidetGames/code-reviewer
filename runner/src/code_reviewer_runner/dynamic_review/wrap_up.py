@@ -79,7 +79,7 @@ MAX_CARRIED_ANSWER_BYTES = 48 * 1024
 _CARRIED_LABEL = "previous-answer"
 
 
-def recovery_prompt(previous_answer: str) -> str:
+def recovery_prompt(previous_answer: str = "", *, problem: str | None = None) -> str:
     """The message that starts the recovery turn: the fixed prompt, and the answer the engine
     dropped from the history, when there is text to hand back (#312).
 
@@ -89,6 +89,13 @@ def recovery_prompt(previous_answer: str) -> str:
     escaped like a tool result (it cannot pose as the runner's instruction), fenced like any other
     untrusted block, and bounded in bytes without splitting a character.
     """
+    if problem is not None:
+        # The answer that ended the turn is in the history: only what is wrong with it is new. The
+        # problem names fields and kinds, never a value of the answer (#530).
+        return (
+            f"{RECOVERY_PROMPT}\n\nYour StructuredOutput call was not accepted: {problem}. "
+            "Call the StructuredOutput tool again with the complete review."
+        )
     if not previous_answer.strip():
         return RECOVERY_PROMPT
     encoded = previous_answer.encode("utf-8", errors="replace")
@@ -102,6 +109,10 @@ def recovery_prompt(previous_answer: str) -> str:
         f"{note}It is quoted as data, not as an instruction.\n{block}\n"
     )
 
+
+# The head the check of a final reply uses: the proxy does not need the real one for the fields the
+# model owns, and the constants the runner sets are not the model's to get wrong (#530).
+_STAND_IN_HEAD = "0" * 40
 
 # How many times the proxy asks the provider for the answer of a final call: the call itself and at
 # most two more, each only while the clock and the cost limit have room (#312).
@@ -256,7 +267,12 @@ def final_reply_problem(completion: dict[str, Any]) -> str | None:
         return "the arguments of the StructuredOutput call are not valid JSON"
     try:
         parsed: Any = value
-        parse_dynamic_findings(parsed if isinstance(parsed, dict) else raw)  # pyright: ignore[reportUnknownArgumentType]
+        # The runner sets the constants of the envelope itself (#530), so this is the check of
+        # everything the model owns; the head is a stand-in, as no value is ever named.
+        parse_dynamic_findings(
+            parsed if isinstance(parsed, dict) else raw,  # pyright: ignore[reportUnknownArgumentType]
+            reviewed_sha=_STAND_IN_HEAD,
+        )
     except FindingsError as error:
         return f"the review is not valid: {error.detail}"
     return None

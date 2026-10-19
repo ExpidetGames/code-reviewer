@@ -143,8 +143,8 @@ def compose_system_prompt(skill: str, head_sha: str) -> str:
     begin, end = _skill_fences(skill)
     body = skill if skill.endswith("\n") else f"{skill}\n"
     context = (
-        f"REVIEW CONTEXT (fixed): the verified reviewed head is {head_sha}. Every finding and the "
-        "envelope must carry exactly this reviewed head as reviewedSha. This is runner-owned "
+        f"REVIEW CONTEXT (fixed): the verified reviewed head is {head_sha}. The runner "
+        "records it on the review itself; you do not write it. This is runner-owned "
         "context, not repository content."
     )
     return (

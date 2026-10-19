@@ -16,6 +16,7 @@ source file imports `"server-only"` (`server-only.test.ts`).
 | `rates-service.ts` | The one writer of the rates: validates, merges into the stored setting under an advisory lock (`db/billing-settings-lock.ts`), keeps the switch as it is. The admin form is #504.                                                                                                                                                                          |
 | `outcome.ts`       | `classifyOutcome`: the end state of a job and its stable codes to `charged`, `minutes_only` or `free`, from an exhaustive table (pure).                                                                                                                                                                                                                    |
 | `pricing.ts`       | `priceRun` and `reserveFor` (pure): the two prices of a run and the hold of a job, in whole micro-USD.                                                                                                                                                                                                                                                     |
+| `journal.ts`       | The vocabulary of the balance journal (#495): the entry types as an `as const` set, the sign of each, the stable error codes, `validateEntry`. The table checks restate the type and sign rules in SQL; `journal.test.ts` fails when they drift apart.                                                                                                     |
 | `minutes.ts`       | Billable minutes (pure, #493): `billableMinutes`, `backstopEnd`, `boundedEnd`, the end sources and `STOP_RETRY_WINDOW_SECONDS`.                                                                                                                                                                                                                            |
 | `wall-clock.ts`    | `createWallClockRecorder`: the measure of a job without a VM, where billing is on (#493). `shared.ts` hands it to the platform after the response.                                                                                                                                                                                                         |
 | `enabled.ts`       | `isBillingOn(db)`: the one reader of the switch. `guardBillingRoute`: the first line of every billing route.                                                                                                                                                                                                                                               |
@@ -70,25 +71,33 @@ there is one interpretation of it. A hold is never clamped here.
 | `minutes_only` | no                                        | yes                  |
 | `free`         | no                                        | no                   |
 
-`classifyOutcome` maps the end of a job to a class. A delivered result and a run that failed on the customer's side of
-the line are `charged` (an unknown cost then leaves only the minutes, which is also how a superseded run without a report
-bills). A run that ended without a result that is not attributable (a result that was not published, a process the loop
-of a runner had to end, `git_auth` and `git_forbidden`, which can be a revoked installation or our own App token) is
-`minutes_only`. An error on our side and a job that never ran are `free`: the launch failed, the VM or the Worker died,
-the lease ran out, the runner shut down, a limit refused the claim, and **every timeout** (the queue's `timeout`, the
-runner's and `llm_timeout`; decision 1: "a timeout caused by us bills nothing"). A queued job superseded before it ran has
-no run and is `free`; a superseded run that began (its usage record says `superseded`) is `charged`. The key, the account,
-the model and the rate limit of the managed key are ours when they fail, and the customer's on their own key. When several
-facts apply (the code, a finer reason, the settled reason of the usage record) the cheapest class for the customer wins. A
-code or a checkout reason the build does not know is `minutes_only`; it never throws.
+The rule is the maintainer's decision of 2026-10-19 (#489, #523): **a run is `free` only when the failure is clearly our
+fault; everything else is `charged` in full (AI and minutes).** `minutes_only` is used for one thing only: a run whose AI
+cost is unknown (`RunEnd.aiCostKnown === false`), because the AI part cannot be priced. No code, reason or settled reason
+maps to it.
 
-**Open question for the maintainer (B2 of the review of #520).** A run that failed after it used the model and delivered
-no result (`command_failed`, `dynamic_budget_exceeded`, `dynamic_policy_violation`, `llm_bad_request`,
-`llm_context_length_exceeded`) is `charged` (AI and minutes) today, as ADR 0006, 2.6 row 2 says. Decision 1 ("a review that
-ends without a result but already incurred AI cost bills the minutes only"), read literally, makes them `minutes_only`.
-The five codes are one group in `outcome.ts` (`AI_COST_FAILURE_CODES`) with one class (`AI_COST_FAILURE_CLASS`), so the
-answer is a one-line change; a test pins the members. The money difference is mostly `dynamic_budget_exceeded`: a run that
-burns its whole cost limit pays up to `limit x A`.
+`classifyOutcome` maps the end of a job to a class.
+
+- `free`, our fault: the launch failed, the VM or the Worker died, the lease ran out, the runner shut down or failed, our
+  infrastructure (the Dispatcher, a runner, the Dynamic engine, the isolation, GitHub's availability and rate limit for our
+  App, a checkout that failed on our transport) was unavailable, and **every timeout** (the queue's `timeout`, the runner's
+  and, on the managed key, `llm_timeout`). The key, the account, the model, the rate limit, an outage and a timeout of the
+  managed key are ours when it fails (`llm_auth`, `llm_quota`, `llm_rate_limit`, `llm_unavailable`, `llm_timeout`, ...) and
+  the customer's on their own key. Also free: `no_capable_runner`, `dynamic_review_disabled` and `entitlements_invalid` (the
+  operator's side; the job never ran).
+- `charged`, everything else: a delivered result; a run that failed, including the `AI_COST_FAILURE_CODES` group
+  (`command_failed`, `dynamic_budget_exceeded`, `dynamic_policy_violation`, `llm_bad_request`,
+  `llm_context_length_exceeded`); a run stopped at a cost or time limit; a run that ended without a result (`no_result`,
+  `review_not_published`, `llm_output_invalid`, a process the loop of a runner had to end); a run cancelled or superseded
+  by a new commit; `git_auth` and `git_forbidden` (a revoked installation or our own App token: not clearly ours); and a
+  code or checkout reason the build does not know. It never throws.
+- A job that **never ran** (superseded or cancelled while queued, or refused at claim by `workspace_suspended` or
+  `quota_exhausted`) is `charged` and prices to **0**: it has 0 billable minutes and no cost, so nothing is billed whatever
+  its class.
+- A run with an **unknown AI cost** that would be `charged` is `minutes_only`; one that is `free` stays free.
+
+When several facts apply (the code, a finer reason, the settled reason of the usage record) the cheapest class for the
+customer wins, so a run that was our error and also left no result is ours.
 
 The table is exhaustive over today's terminal codes: the job end codes, the release reasons, the error codes and checkout
 reasons of the runner contract, the reasons of the loop of a runner and the settled reasons. `outcome.test.ts` fails when
@@ -164,6 +173,72 @@ the deployment files stay as they are for a self-hoster (`no-environment-variabl
 The credentials of a payment provider are encrypted, write-only secrets of the secret store (`src/secrets/`, ADR 0006
 2.14); no name of one is in `SECRET_NAMES` yet. A row of a removed secret name that an old database still holds is not
 read, not listed and not an error.
+
+## The balance journal
+
+One USD balance per workspace (ADR 0006, 2.7; #495), kept in **micro-USD integers**, never a float, as the sum of an
+append-only journal. The repository is `src/db/repositories/billing-journal-repository.ts`, created for one workspace; the
+tables and their triggers are described in `src/db/README.md` ("Billing journal and balances"). Nothing in the job
+lifecycle calls it yet: reserving at claim and settling are #498, crediting from payment events #497, prices #494.
+
+| Type           | Sign | Meaning                                                                    |
+| -------------- | ---- | -------------------------------------------------------------------------- |
+| `top_up`       | +    | A payment arrived (net amount); the key is the payment intent id.          |
+| `start_credit` | +    | The grant for a new workspace.                                             |
+| `reservation`  | -    | The hold taken at claim; the key is the job id. Only `reserve` writes one. |
+| `usage`        | -    | The charge of a finished run, `ai_micro_usd` + `infra_micro_usd`.          |
+| `release`      | +    | The whole hold given back at settlement or when a job is voided.           |
+| `refund`       | -    | A payment was refunded; the key is the refund id.                          |
+| `chargeback`   | -    | A dispute was lost; the key is the dispute id.                             |
+| `correction`   | +/-  | A manual correction, or the reversal of an entry (`reverses_entry_id`).    |
+
+- **Repository.** `append(entry)` for every type but the three of a job's hold (`reservation_required` for a reservation,
+  `job_entry_required` for a `release` or a `usage`: only `reserve`, `release()` and `settle()` write those); `reserve(hold, jobId)`; `reserveUpTo(jobId, maxHold)` (the
+  hold of a claim, see below); `settle(jobId, charge)` (a `release` of the hold and a `usage` of the charge, in one
+  transaction; a charge of zero writes only the release; `created` is true when this call wrote the usage, the release
+  when there is none); `release(jobId)` (a job that never ran); `balance()`; `entries({ cursor, limit })` (newest first,
+  by `seq`, cursor `{ seq }`; the caller clamps `limit`); `verify()`.
+- **Idempotent.** The key is `(workspace, type, ref_key)`: the job id for a job's entries, the provider reference for
+  money from outside. The same key with the same amount returns the entry that exists (`created: false`) and changes
+  nothing; with another amount it is an `idempotency_conflict`. A `usage` is also its parts, its minutes and its kind: a
+  settlement repeated with the same total but other numbers is an `idempotency_conflict` too. A reversal happens once (`already_reversed`), names an
+  entry of the workspace with the opposite amount, and is never of a reservation or a release.
+- **Atomic and race free on both engines.** An entry and the balance change in one transaction (the caller's, when it
+  hands in a transaction). `reserve` and `reserveUpTo` are the conditional writes: they hold at most the balance, so 20 claims of 3
+  against 10 grant exactly 3, on Postgres (one pool, two pools) and on SQLite (one connection, several processes).
+  `settle` and `release` take the lock of the balance row before they read what a job has, so a release and a settlement
+  of one job are decided one after the other: a job whose release committed first, or commits at the same moment, is
+  never charged (`job_already_released`). `append` takes the same lock before it writes, so **every writer is "balance row
+  first"** and none can wait for another's row (a test holds the lock and appends the same key from both sides).
+- **`reserveUpTo(jobId, maxHold)` is the hold of a claim** (#498, decision 5 of #489: hold at most the available balance).
+  Under the lock: a job that has a reservation gets it back unchanged (`created: false`), whatever its amount and the
+  balance are now, so a claim retried after a crash, a top-up or a refund is never a conflict; otherwise the hold is
+  `min(maxHold, balance)`. A balance of exactly zero is refused with `balance_exhausted`, one below zero with
+  `balance_negative` (a hold of 0 is not a hold; the UI copy for `balance_exhausted` is "no balance", for
+  `balance_negative` "overdrawn"). `reserve` stays for a caller that wants an exact hold or a refusal.
+- **The hold of a job: the contract for #498.** A hold lives from the job's first claim to the job's end. **A requeue keeps
+  the hold**: a lost lease, a retry or a second claim of the same job id calls `reserveUpTo` again and gets the same
+  reservation back (`created: false`), and the job later settles against it. **A release happens only when the job ends
+  free** (`release(jobId)`: it never ran, or the class is `free`), and a charged end is `settle`. Keys are per job, not per
+  attempt (`reservation`, `release` and `usage` all use the job id), so a job's hold is taken once, ever. If a caller
+  claims a job whose hold was released already, `reserveUpTo` and `reserve` answer **`reservation_released`**
+  (`ok: false`), not the old reservation: nothing is held, so the retry must not run as if it were paid. #498 decides what
+  that means (it should not happen when a requeue never releases); the journal only refuses to say "held" when it is not.
+- **A negative balance blocks.** A refund, a chargeback or a final charge above the hold may take the balance below zero;
+  every `reserve` and `reserveUpTo` is then refused with `balance_negative`, whatever the amount. A balance that is
+  positive but below the hold is refused by `reserve` with `insufficient_balance`; a balance of exactly zero is refused by
+  `reserveUpTo` with `balance_exhausted` (and by `reserve` with `insufficient_balance`, there is nothing to hold). All
+  come back as the answer (`ok: false`), never as an exception. Credit lifts the block; it never expires.
+- **Stable codes** (`BILLING_JOURNAL_ERROR_CODES`): thrown for a caller's bug or a replay with other numbers
+  (`invalid_entry`, `idempotency_conflict`, `already_reversed`, `reversed_entry_not_found`, `reservation_required`,
+  `job_entry_required`), answered by `reserve`, `reserveUpTo`, `settle` and `release` (`insufficient_balance`,
+  `balance_exhausted`, `balance_negative`, `reservation_released`, `reservation_not_found`, `job_already_released`).
+- **`verify()`** returns the cache and the sum of the journal side by side with the difference of each (cache minus sum) and
+  `consistent`, read in one statement (one snapshot), so traffic that commits meanwhile never shows as drift. The nightly job
+  that runs it is #510's.
+- **Order.** Every entry has a `seq`, the order it was written in (a Postgres identity, the SQLite row id). `entries()`
+  lists by it, so a `release` and its `usage`, written in one millisecond, keep their order. On Postgres a transaction
+  that commits late can land below a `seq` a reader has passed; a cursor reader sees it on its next fresh read.
 
 ## Where billing is not allowed to reach
 

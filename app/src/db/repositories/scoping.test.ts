@@ -20,6 +20,7 @@ import { describe, expect, it } from "vitest";
 /** Repositories of customer data: created for one workspace, every query filters by it. */
 const SCOPED = [
   "app-settings-repository.ts",
+  "billing-journal-repository.ts",
   "installation-link-requests-repository.ts",
   "integrations-repository.ts",
   "invitations-repository.ts",
