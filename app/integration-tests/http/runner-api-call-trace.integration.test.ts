@@ -2,7 +2,7 @@
 
 // The per-call trace of a Dynamic Review (#541) from the runner to the Runs view, through the real runner API
 // over a real SQLite file: it is stored with the result of the job and read back as the page shows it, a job
-// without one reads as none, and one that is not the contract's is refused before anything is stored.
+// without one reads as none, and one that is not the contract's is dropped, the usage and the verdict stay.
 import { describe, expect, it } from "vitest";
 import { createRunsRepository } from "../../src/db/repositories/runs-repository.ts";
 import type { RunnerCallTrace } from "../../src/runner-api/contract.ts";
@@ -76,8 +76,9 @@ describe("the call trace of a completed job", () => {
     expect(snapshot?.run.usage).not.toBeNull();
   });
 
-  // #541-T07, #541-T08
-  it("is refused when it is not the contract's, and the job stays running", async () => {
+  // #541-T07, #541-T08: observability only, so a trace that is not the contract's costs the trace and
+  // nothing else: the usage and the verdict are stored, and the log says that it was dropped.
+  it("is dropped when it is not the contract's, with the usage and the verdict stored and a line in the log", async () => {
     const h = await startRunnerApiHarness();
     const job = await claimedJob(h);
 
@@ -86,12 +87,22 @@ describe("the call trace of a completed job", () => {
         ...goodResult().usage!,
         callTrace: {
           ...trace,
-          toolCalls: [{ ...trace.toolCalls[0], path: "src/a.py" }],
+          toolCalls: [{ ...trace.toolCalls[0], path: "SECRET-PATH" }],
         },
       } as never,
     });
 
-    expect(response.status).toBe(400);
-    expect(await h.queue.get(job.id)).toMatchObject({ status: "running" });
+    expect(response.status).toBe(200);
+    expect(await h.queue.get(job.id)).toMatchObject({ status: "succeeded" });
+    const snapshot = await viewOf(h).get(job.id);
+    expect(snapshot?.run.callTrace).toBeNull();
+    expect(snapshot?.run.usage).toMatchObject({
+      aiCalls: goodResult().usage?.aiCalls,
+    });
+    const lines = h.logLines().filter((line) => line.includes("callTrace"));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain(job.id);
+    expect(lines[0]).toContain("dropped");
+    expect(h.logLines().join("\n")).not.toContain("SECRET-PATH");
   });
 });

@@ -128,8 +128,10 @@ asked for, with counts); per tool call `index`, `name`, `resultBytes` and `isRep
 normalised arguments already ran in this job). **No path, argument, tool result or model text is in it**, and a tool
 name that is none of the engine's is `other`. A runner of an earlier release sends none (an app reads that as "no
 trace"); an app of an earlier release ignores it. Not nullable: a runner leaves it out. The runner checks it against
-this shape before it sends it and leaves out one that does not fit, keeping the usage; the app refuses a result whose
-trace does not fit (`app/src/runner-api/call-trace.ts`), as the schema does. The Runs detail of a workspace and the
+this shape before it sends it and leaves out one that does not fit, keeping the usage; the app checks it the same way
+(`app/src/runner-api/call-trace.ts`) and, being observability, drops a trace that does not fit and keeps the usage and
+the verdict (a log line names the field, never a value; a runner that sends the result of its own accord is never refused
+for it). The Runs detail of a workspace and the
 admin portal's run view show it (`app/src/runs/README.md`, `app/src/admin/README.md`).
 
 ### A superseded run (#396, #397)

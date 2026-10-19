@@ -486,7 +486,10 @@ describe("what the app accepts from a runner", () => {
   it.each(COMPLETES)(
     "judges %s of a complete like the contract",
     (_name, body) => {
-      expect(parseCompleteRequest(body).ok).toBe(
+      // The app accepts the result whole exactly when the contract does. Its one leniency is the call trace
+      // (#541, observability): a malformed one is left out and the rest accepted, which is not "whole".
+      const parsed = parseCompleteRequest(body);
+      expect(parsed.ok && parsed.dropped.length === 0).toBe(
         contract.check("CompleteRequest", body).valid,
       );
     },
@@ -725,7 +728,7 @@ describe("the model capabilities of a Dynamic job", () => {
 });
 
 // #541-T06: the per-call trace of a usage. The hand-written check of the app and the schema give the same
-// verdict on each of these.
+// verdict on each of these (the app then drops a malformed trace instead of refusing the result).
 function callTraceCases(
   result: { usage: object | null },
   token: string,

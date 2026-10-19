@@ -12,6 +12,7 @@ import {
   parseReleaseRequest,
   parseRunnerId,
   parseWorkerLlmProviders,
+  parseWorkerResultRequest,
 } from "./requests.ts";
 
 const TOKEN = "6f1d2c9a-5b3e-4a77-9c0d-8e2f1a4b7c33";
@@ -122,6 +123,7 @@ describe("the complete body", () => {
           usage: null,
         },
       },
+      dropped: [],
     });
   });
 
@@ -509,17 +511,61 @@ describe("the complete body", () => {
         "a negative result size",
         { ...trace, toolCalls: [{ ...toolCall, resultBytes: -1 }] },
       ],
-    ])("refuses %s", (_name, callTrace) => {
-      expect(fieldsOf(withTrace(callTrace))).toContainEqual({
-        field: "result.usage.callTrace",
+    ])("drops %s and keeps the usage", (_name, callTrace) => {
+      const parsed = withTrace(callTrace);
+
+      expect(parsed.ok).toBe(true);
+      if (!parsed.ok) return;
+      expect(parsed.value.result.usage).toMatchObject(GOOD_RESULT.usage);
+      expect(parsed.value.result.usage).not.toHaveProperty("callTrace");
+      expect(parsed.dropped).toEqual(["result.usage.callTrace"]);
+    });
+
+    // #541-T07: the trace is observability. A malformed one costs the trace, never the usage or the verdict.
+    it("still refuses a usage whose own fields are invalid, trace or none", () => {
+      const parsed = parseCompleteRequest({
+        leaseToken: TOKEN,
+        result: {
+          ...GOOD_RESULT,
+          usage: { ...GOOD_RESULT.usage, promptTokens: -1, callTrace: trace },
+        },
+      });
+
+      expect(fieldsOf(parsed)).toContainEqual({
+        field: "result.usage.promptTokens",
         code: "invalid",
       });
     });
 
-    it("never repeats a value of the trace in the refusal", () => {
+    it("says nothing was dropped for a valid trace and for none", () => {
+      const valid = withTrace(trace);
+      const absent = parseCompleteRequest({
+        leaseToken: TOKEN,
+        result: GOOD_RESULT,
+      });
+
+      expect(valid.ok && valid.dropped).toEqual([]);
+      expect(absent.ok && absent.dropped).toEqual([]);
+    });
+
+    it("never repeats a value of the trace in the note of what was dropped", () => {
       const parsed = withTrace({ ...trace, extra: "SECRET-VALUE" });
 
-      expect(JSON.stringify(fieldsOf(parsed))).not.toContain("SECRET-VALUE");
+      expect(JSON.stringify(parsed)).not.toContain("SECRET-VALUE");
+    });
+
+    it("drops the trace of the Worker's result the same way", () => {
+      const parsed = parseWorkerResultRequest({
+        result: {
+          ...GOOD_RESULT,
+          usage: { ...GOOD_RESULT.usage, callTrace: { ...trace, extra: 1 } },
+        },
+      });
+
+      expect(parsed.ok).toBe(true);
+      if (!parsed.ok) return;
+      expect(parsed.value.result.usage).not.toHaveProperty("callTrace");
+      expect(parsed.dropped).toEqual(["result.usage.callTrace"]);
     });
   });
 
