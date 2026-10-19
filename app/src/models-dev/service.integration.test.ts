@@ -314,8 +314,85 @@ describe.each(MODELS_DEV_ENGINES)("the models.dev fetch on $name", (engine) => {
         lastError: "models_dev_guard_unlisted_share",
       });
       expect(t.lines.join("\n")).toMatch(
-        /models_dev_guard_unlisted_share.*unlisted=4.*listed=13/,
+        /models_dev_guard_unlisted_share.*reasons=unlisted_share unlisted=4 listed=13/,
       );
+    },
+  );
+
+  // #548-T04
+  it_(
+    "does not apply a fetch that makes the catalog grow by more than half, and applies it when an admin accepts",
+    async () => {
+      const t = await setup();
+      await t.service.refresh();
+      const before = await t.repository.listModels();
+      t.advance(DAY);
+      const bloated = t.body();
+      const template = bloated.deepseek?.models["deepseek-v4-pro"] ?? {};
+      // 13 models listed, 8 more is 62 %.
+      for (let i = 0; i < 8; i += 1)
+        bloated.deepseek!.models[`filler-${String(i)}`] = {
+          ...template,
+          id: `filler-${String(i)}`,
+          name: `Filler ${String(i)}`,
+        };
+      t.fake.respondWith(bloated);
+
+      const refused = await t.service.refresh();
+
+      expect(refused).toEqual({
+        status: "failed",
+        code: "models_dev_guard_growth",
+      });
+      expect(await t.repository.listModels()).toEqual(before);
+      expect(await t.repository.fetchState()).toMatchObject({
+        lastStatus: "failed",
+        lastError: "models_dev_guard_growth",
+      });
+      expect(t.lines.join("\n")).not.toContain("Filler");
+
+      const accepted = await t.service.refresh({ acceptLargeChange: true });
+
+      expect(accepted).toMatchObject({ status: "applied" });
+      expect(await t.repository.listModels()).toHaveLength(21);
+    },
+  );
+
+  // #548-T04
+  it_(
+    "does not apply a fetch that blocks the address of many providers at once, and applies it when an admin accepts",
+    async () => {
+      const t = await setup();
+      await t.service.refresh();
+      const before = await t.repository.listProviders();
+      t.advance(DAY);
+      const moved = t.body();
+      // 3 of 6 providers state another address.
+      for (const id of ["deepseek", "openrouter", "xai"])
+        moved[id]!.api = `https://api.${id}.moved.example/v1`;
+      t.fake.respondWith(moved);
+
+      const refused = await t.service.refresh();
+
+      expect(refused).toEqual({
+        status: "failed",
+        code: "models_dev_guard_url_changed_share",
+      });
+      expect(await t.repository.listProviders()).toEqual(before);
+
+      const accepted = await t.service.refresh({ acceptLargeChange: true });
+
+      expect(accepted).toMatchObject({ status: "applied" });
+      const states = (await t.repository.listProviders()).filter(
+        (p) => p.url.state === "url_changed",
+      );
+      expect(states.map((p) => p.id).sort()).toEqual([
+        "deepseek",
+        "openrouter",
+        "xai",
+      ]);
+      // Applied or not, an address that changed is never trusted by the fetch.
+      expect(states.every((p) => !isUsable(p.url))).toBe(true);
     },
   );
 
@@ -330,7 +407,7 @@ describe.each(MODELS_DEV_ENGINES)("the models.dev fetch on $name", (engine) => {
     delete poor.openai?.models["gpt-5-mini"];
     t.fake.respondWith(poor);
 
-    const outcome = await t.service.refresh({ acceptLargeRemoval: true });
+    const outcome = await t.service.refresh({ acceptLargeChange: true });
 
     expect(outcome).toMatchObject({ status: "applied" });
     expect(

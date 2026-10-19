@@ -9,7 +9,12 @@ import type {
   ReducedModel,
   ReducedProvider,
 } from "./parse.ts";
-import { UNLISTED_SHARE_LIMIT, planCatalog } from "./plan.ts";
+import {
+  GROWTH_LIMIT,
+  UNLISTED_SHARE_LIMIT,
+  URL_CHANGED_SHARE_LIMIT,
+  planCatalog,
+} from "./plan.ts";
 import type { UrlCheck } from "./upstream-url.ts";
 
 const T1 = new Date("2026-10-19T03:00:00.000Z");
@@ -57,6 +62,7 @@ function parsed(
       modelProviderOverride: 0,
       unsupportedProviders: 0,
       unknownProviders: 0,
+      oversizedProviders: 0,
     },
   };
 }
@@ -304,7 +310,12 @@ describe("the fetch guard", () => {
       now: T2,
     });
 
-    expect(plan.guard).toEqual({ tripped: false, unlisted: 2, listed: 20 });
+    expect(plan.guard).toEqual({
+      tripped: false,
+      reasons: [],
+      unlisted: 2,
+      listed: 20,
+    });
   });
 
   // #548-T04
@@ -316,7 +327,12 @@ describe("the fetch guard", () => {
       now: T2,
     });
 
-    expect(plan.guard).toEqual({ tripped: true, unlisted: 3, listed: 20 });
+    expect(plan.guard).toEqual({
+      tripped: true,
+      reasons: ["unlisted_share"],
+      unlisted: 3,
+      listed: 20,
+    });
   });
 
   // #548-T04
@@ -346,6 +362,7 @@ describe("the fetch guard", () => {
     });
 
     expect(plan.guard.tripped).toBe(true);
+    expect(plan.guard.reasons).toContain("unlisted_share");
   });
 
   // #548-T04
@@ -356,7 +373,12 @@ describe("the fetch guard", () => {
       urlChecks: okUrl(),
       now: T1,
     });
-    expect(first.guard).toEqual({ tripped: false, unlisted: 0, listed: 0 });
+    expect(first.guard).toEqual({
+      tripped: false,
+      reasons: [],
+      unlisted: 0,
+      listed: 0,
+    });
 
     const gone = applied(
       stored,
@@ -373,7 +395,207 @@ describe("the fetch guard", () => {
       urlChecks: okUrl(),
       now: T3,
     });
-    expect(again.guard).toEqual({ tripped: false, unlisted: 0, listed: 18 });
+    expect(again.guard).toEqual({
+      tripped: false,
+      reasons: [],
+      unlisted: 0,
+      listed: 18,
+    });
+  });
+});
+
+describe("the growth guard", () => {
+  const models = (count: number, from = 0) =>
+    Array.from({ length: count }, (_unused, i) =>
+      reducedModel(`m${String(from + i)}`),
+    );
+  const fill = (count: number) =>
+    applied(
+      EMPTY,
+      planCatalog({
+        parsed: parsed(models(count)),
+        stored: EMPTY,
+        urlChecks: okUrl(),
+        now: T1,
+      }).write,
+    );
+  const fetchOf = (stored: Stored, body: ReducedModel[]) =>
+    planCatalog({
+      parsed: parsed(body),
+      stored,
+      urlChecks: okUrl(),
+      now: T2,
+    });
+
+  // #548-T04
+  it("allows a catalog to grow by half and trips on more", () => {
+    expect(GROWTH_LIMIT).toBe(0.5);
+    const stored = fill(20);
+
+    expect(fetchOf(stored, models(30)).guard).toMatchObject({
+      tripped: false,
+      reasons: [],
+    });
+    expect(fetchOf(stored, models(31)).guard).toMatchObject({
+      tripped: true,
+      reasons: ["growth"],
+    });
+  });
+
+  // #548-T04
+  it("counts the net growth: models that vanish in the same fetch make room for new ones", () => {
+    const stored = fill(20);
+
+    // 2 unlisted (a tenth, allowed), 31 + ... new: 18 kept + 12 new = 30 listed, 50 %.
+    const plan = fetchOf(stored, [...models(18, 2), ...models(12, 100)]);
+
+    expect(plan.guard).toMatchObject({ tripped: false, unlisted: 2 });
+  });
+
+  // #548-T04
+  it("counts a model that returns as growth", () => {
+    const stored = fill(20);
+    const gone = applied(stored, fetchOf(stored, models(18, 2)).write);
+
+    // 18 listed before; all 20 back plus 10 new: 30 listed, 67 %.
+    const plan = planCatalog({
+      parsed: parsed([...models(20), ...models(10, 100)]),
+      stored: gone,
+      urlChecks: okUrl(),
+      now: T3,
+    });
+
+    expect(plan.guard.reasons).toEqual(["growth"]);
+  });
+
+  // #548-T04
+  it("never trips on the first fetch into an empty database, however large", () => {
+    const plan = fetchOf(EMPTY, models(500));
+
+    expect(plan.guard).toMatchObject({ tripped: false, reasons: [] });
+  });
+
+  // #548-T04
+  it("trips when the database holds rows and none of them is listed any more", () => {
+    const stored = fill(5);
+    const allGone = applied(
+      stored,
+      planCatalog({
+        parsed: parsed([reducedModel("x")]),
+        stored,
+        urlChecks: okUrl(),
+        now: T2,
+      }).write,
+    );
+    const lonely = {
+      ...allGone,
+      models: allGone.models.map((m) =>
+        m.id === "x" ? { ...m, unlistedAt: T2.toISOString() } : m,
+      ),
+    };
+
+    const plan = planCatalog({
+      parsed: parsed(models(40)),
+      stored: lonely,
+      urlChecks: okUrl(),
+      now: T3,
+    });
+
+    expect(plan.guard.reasons).toContain("growth");
+  });
+
+  // #548-T04
+  it("trips on a provider that was too large to read, whatever else the fetch did", () => {
+    const stored = fill(20);
+    const body = parsed(models(20));
+    body.skipped.oversizedProviders = 1;
+
+    const plan = planCatalog({
+      parsed: body,
+      stored,
+      urlChecks: okUrl(),
+      now: T2,
+    });
+
+    expect(plan.guard).toMatchObject({
+      tripped: true,
+      reasons: ["provider_size"],
+    });
+    expect(plan.summary.oversizedProviders).toBe(1);
+  });
+});
+
+describe("the guard against a mass change of addresses", () => {
+  const providers = (count: number) =>
+    Array.from({ length: count }, (_unused, i) =>
+      reducedProvider(`p${String(i)}`),
+    );
+  const checks = (list: ReducedProvider[], url: (id: string) => string) =>
+    new Map(list.map((p) => [p.id, { ok: true, url: url(p.id) } as UrlCheck]));
+  const modelsOf = (list: ReducedProvider[]) =>
+    list.map((p) => reducedModel("m", {}, p.id));
+  const fill = (list: ReducedProvider[]) =>
+    applied(
+      EMPTY,
+      planCatalog({
+        parsed: parsed(modelsOf(list), list),
+        stored: EMPTY,
+        urlChecks: checks(list, (id) => `https://${id}.example/v1`),
+        now: T1,
+      }).write,
+    );
+  /** The next day: the addresses of the first `moved` providers are different. */
+  const nextDay = (list: ReducedProvider[], stored: Stored, moved: number) =>
+    planCatalog({
+      parsed: parsed(modelsOf(list), list),
+      stored,
+      urlChecks: checks(list, (id) =>
+        list.findIndex((p) => p.id === id) < moved
+          ? `https://${id}.moved.example/v1`
+          : `https://${id}.example/v1`,
+      ),
+      now: T2,
+    });
+
+  // #548-T04
+  it("allows a tenth of the providers to change their address and trips on more", () => {
+    expect(URL_CHANGED_SHARE_LIMIT).toBe(0.1);
+    const list = providers(30);
+    const stored = fill(list);
+
+    const three = nextDay(list, stored, 3);
+    expect(three.guard).toMatchObject({ tripped: false, reasons: [] });
+    expect(three.summary.blockedProviders).toBe(3);
+
+    const four = nextDay(list, stored, 4);
+    expect(four.guard).toMatchObject({
+      tripped: true,
+      reasons: ["url_changed_share"],
+    });
+  });
+
+  // #548-T08
+  it("always lets one or two providers change, however few there are", () => {
+    const list = providers(6);
+    const stored = fill(list);
+
+    expect(nextDay(list, stored, 1).guard.tripped).toBe(false);
+    expect(nextDay(list, stored, 2).guard.tripped).toBe(false);
+    expect(nextDay(list, stored, 3).guard.reasons).toEqual([
+      "url_changed_share",
+    ]);
+  });
+
+  // #548-T08
+  it("does not count a provider that was blocked already", () => {
+    const list = providers(30);
+    const stored = fill(list);
+    const first = nextDay(list, stored, 3);
+    const blocked = applied(stored, first.write);
+
+    const again = nextDay(list, blocked, 3);
+
+    expect(again.guard).toMatchObject({ tripped: false, reasons: [] });
   });
 });
 

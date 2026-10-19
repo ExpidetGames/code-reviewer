@@ -3,8 +3,10 @@
 // Decides what one fetch writes (#548), as a pure function of the parsed body, the stored rows and the verdicts on the
 // providers' addresses. Nothing is deleted: a row that goes away upstream is written again with `unlistedAt` and keeps
 // its last known data; one that returns clears it. Only rows that are new or changed are in the plan, so an unchanged
-// day writes nothing. The guard says whether the plan would unlist an implausibly large share of what is listed; the
-// service then refuses to apply it (the old state stays).
+// day writes nothing. The guard says whether the plan is implausible: it would unlist a large share of what is listed,
+// make the catalog grow by half, block the addresses of many providers at once, or the body held a provider of
+// absurd size; the service then refuses to apply it (the old state stays) unless an admin accepts it.
+import type { GuardReason } from "./errors.ts";
 import type {
   CatalogWrite,
   FetchSummary,
@@ -16,8 +18,25 @@ import { nextUrlState, type UrlCheck } from "./upstream-url.ts";
 
 /** A fetch that would unlist more than this share of the listed models (or of the listed providers) is not applied. */
 export const UNLISTED_SHARE_LIMIT = 0.1;
+/**
+ * A fetch that would make the listed models grow by more than this share is not applied either: the catalog grows by a
+ * few models a week, so half in one fetch is a poisoned or broken body, and it would be a way to fill the tables. The first
+ * fetch into an empty database is exempt.
+ */
+export const GROWTH_LIMIT = 0.5;
+/** A fetch that would block the address of more than this share of the providers at once is not applied ... */
+export const URL_CHANGED_SHARE_LIMIT = 0.1;
+/** ... when that is at least this many providers: one or two moving house is the normal case and must reach the admin. */
+export const URL_CHANGED_MIN_COUNT = 3;
 
-export type Guard = { tripped: boolean; unlisted: number; listed: number };
+export type Guard = {
+  tripped: boolean;
+  /** Why, in a fixed order; empty when the fetch may be applied. */
+  reasons: GuardReason[];
+  /** The models this fetch would unlist, and the models that were listed before it. */
+  unlisted: number;
+  listed: number;
+};
 
 export type CatalogPlan = {
   write: CatalogWrite;
@@ -74,6 +93,7 @@ function planProviders(input: Input, stamp: string) {
   );
   const writes: StoredProvider[] = [];
   let blocked = 0;
+  let newlyBlocked = 0;
   let rejected = 0;
   let added = 0;
   const seen = new Set<string>();
@@ -87,6 +107,8 @@ function planProviders(input: Input, stamp: string) {
     };
     const url = nextUrlState(previous?.url, check);
     if (url.state === "url_changed") blocked += 1;
+    if (url.state === "url_changed" && previous?.url.state !== "url_changed")
+      newlyBlocked += 1;
     if (url.state === "rejected") rejected += 1;
     const sameBlock =
       previous?.url.state === "url_changed" &&
@@ -120,7 +142,15 @@ function planProviders(input: Input, stamp: string) {
     unlisted += 1;
     writes.push({ ...previous, unlistedAt: stamp, updatedAt: stamp });
   }
-  return { writes, blocked, rejected, added, unlisted, listedBefore };
+  return {
+    writes,
+    blocked,
+    newlyBlocked,
+    rejected,
+    added,
+    unlisted,
+    listedBefore,
+  };
 }
 
 function planModels(input: Input, stamp: string) {
@@ -173,23 +203,53 @@ function planModels(input: Input, stamp: string) {
   return { writes, added, changed, returned, unlisted, listedBefore };
 }
 
+function guardOf(
+  input: Input,
+  providers: ReturnType<typeof planProviders>,
+  models: ReturnType<typeof planModels>,
+): Guard {
+  const share = (count: number, whole: number) =>
+    whole === 0 ? 0 : count / whole;
+  const reasons: GuardReason[] = [];
+  if (
+    share(models.unlisted, models.listedBefore) > UNLISTED_SHARE_LIMIT ||
+    share(providers.unlisted, providers.listedBefore) > UNLISTED_SHARE_LIMIT
+  )
+    reasons.push("unlisted_share");
+  const listedAfter =
+    models.listedBefore - models.unlisted + models.added + models.returned;
+  // A database with rows but none listed has nothing to grow from: any listed model afterwards is growth.
+  const grown =
+    input.stored.models.length > 0 &&
+    (models.listedBefore === 0
+      ? listedAfter > 0
+      : (listedAfter - models.listedBefore) / models.listedBefore >
+        GROWTH_LIMIT);
+  if (grown) reasons.push("growth");
+  if (
+    providers.newlyBlocked >= URL_CHANGED_MIN_COUNT &&
+    share(providers.newlyBlocked, input.parsed.providers.length) >
+      URL_CHANGED_SHARE_LIMIT
+  )
+    reasons.push("url_changed_share");
+  if (input.parsed.skipped.oversizedProviders > 0)
+    reasons.push("provider_size");
+  return {
+    tripped: reasons.length > 0,
+    reasons,
+    unlisted: models.unlisted,
+    listed: models.listedBefore,
+  };
+}
+
 export function planCatalog(input: Input): CatalogPlan {
   const stamp = input.now.toISOString();
   const providers = planProviders(input, stamp);
   const models = planModels(input, stamp);
-  const share = (unlisted: number, listed: number) =>
-    listed === 0 ? 0 : unlisted / listed;
   const { skipped } = input.parsed;
   return {
     write: { providers: providers.writes, models: models.writes },
-    guard: {
-      tripped:
-        share(models.unlisted, models.listedBefore) > UNLISTED_SHARE_LIMIT ||
-        share(providers.unlisted, providers.listedBefore) >
-          UNLISTED_SHARE_LIMIT,
-      unlisted: models.unlisted,
-      listed: models.listedBefore,
-    },
+    guard: guardOf(input, providers, models),
     summary: {
       providers: input.parsed.providers.length,
       models: input.parsed.models.length,
@@ -207,6 +267,7 @@ export function planCatalog(input: Input): CatalogPlan {
       skippedModelProviderOverride: skipped.modelProviderOverride,
       unsupportedProviders: skipped.unsupportedProviders,
       unknownProviders: skipped.unknownProviders,
+      oversizedProviders: skipped.oversizedProviders,
     },
   };
 }

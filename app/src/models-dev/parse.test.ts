@@ -5,7 +5,11 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { MAX_NAME_LENGTH, parseModelsDev } from "./parse.ts";
+import {
+  MAX_MODELS_PER_PROVIDER,
+  MAX_NAME_LENGTH,
+  parseModelsDev,
+} from "./parse.ts";
 
 const FIXTURE = JSON.parse(
   readFileSync(
@@ -108,6 +112,7 @@ describe("reading a models.dev body", () => {
       modelProviderOverride: 2,
       unsupportedProviders: 3,
       unknownProviders: 0,
+      oversizedProviders: 0,
     });
   });
 
@@ -388,5 +393,52 @@ describe("what the body says is text, never markup or an unbounded string", () =
 
     expect(result.providers[0]?.api?.length).toBeLessThanOrEqual(2048);
     expect(result.providers[0]?.apiTooLong).toBe(true);
+  });
+});
+
+describe("the size of one provider", () => {
+  const model = (name: string) => ({
+    name,
+    tool_call: true,
+    limit: { context: 1000, output: 100 },
+  });
+  const providerOf = (count: number) => ({
+    name: "DeepSeek",
+    api: "https://api.deepseek.com",
+    models: Object.fromEntries(
+      Array.from({ length: count }, (_unused, i) => [
+        `m${String(i)}`,
+        model(`m${String(i)}`),
+      ]),
+    ),
+  });
+
+  // #548-T02
+  it("reads a provider up to the limit", () => {
+    const result = parse({ deepseek: providerOf(MAX_MODELS_PER_PROVIDER) });
+
+    expect(result.models).toHaveLength(MAX_MODELS_PER_PROVIDER);
+    expect(result.skipped.oversizedProviders).toBe(0);
+  });
+
+  // #548-T02
+  it("does not read a provider above the limit, counts it, and reads the others", () => {
+    const result = parse({
+      deepseek: providerOf(MAX_MODELS_PER_PROVIDER + 1),
+      openai: {
+        name: "OpenAI",
+        models: { "gpt-5.5": model("GPT") },
+      },
+    });
+
+    expect(result.skipped.oversizedProviders).toBe(1);
+    expect(result.providers.map((provider) => provider.id)).toEqual(["openai"]);
+    expect(result.models.map((m) => m.providerId)).toEqual(["openai"]);
+  });
+
+  // #548-T02
+  it("allows more than the largest provider has today, with room to grow", () => {
+    // nano-gpt states 621 models (2026-10-19), 405 with tool calling.
+    expect(MAX_MODELS_PER_PROVIDER).toBeGreaterThanOrEqual(3 * 621);
   });
 });

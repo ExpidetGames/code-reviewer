@@ -18,7 +18,7 @@ import {
 import type { Database } from "../db/schema.ts";
 import { MODELS_DEV_LOCK, tryWithLock } from "../db/try-lock.ts";
 import type { FetchSummary } from "./catalog.ts";
-import type { ModelsDevFetchErrorCode } from "./errors.ts";
+import { GUARD_ERROR_CODES, type ModelsDevFetchErrorCode } from "./errors.ts";
 import { fetchModelsDev, type FetchLike } from "./fetch.ts";
 import { supportedProvider } from "./opencode-providers.ts";
 import { parseModelsDev, type ReducedProvider } from "./parse.ts";
@@ -45,8 +45,8 @@ export type RefreshOutcome =
   | { status: "failed"; code: ModelsDevFetchErrorCode };
 
 export type RefreshOptions = {
-  /** Apply a fetch the guard refused: an admin who has looked at what would be unlisted (#554). */
-  acceptLargeRemoval?: boolean;
+  /** Apply a fetch the guard refused (a large removal, growth, a mass change of addresses): an admin who has looked at it (#554). */
+  acceptLargeChange?: boolean;
 };
 
 export type ModelsDevService = {
@@ -156,18 +156,17 @@ export function createModelsDevService(
         urlChecks,
         now: now(),
       });
-      if (plan.guard.tripped && options.acceptLargeRemoval !== true)
-        return plan;
+      if (plan.guard.tripped && options.acceptLargeChange !== true) return plan;
       await transactional.apply(plan.write, {
         summary: plan.summary,
         at: now(),
       });
       return plan;
     });
-    if (planned.guard.tripped && options.acceptLargeRemoval !== true)
+    if (planned.guard.tripped && options.acceptLargeChange !== true)
       return fail(
-        "models_dev_guard_unlisted_share",
-        `unlisted=${String(planned.guard.unlisted)} listed=${String(planned.guard.listed)}`,
+        GUARD_ERROR_CODES[planned.guard.reasons[0] ?? "unlisted_share"],
+        `reasons=${planned.guard.reasons.join(",")} unlisted=${String(planned.guard.unlisted)} listed=${String(planned.guard.listed)}`,
       );
     const s = planned.summary;
     log.info(

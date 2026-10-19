@@ -13,6 +13,13 @@ export const MAX_NAME_LENGTH = 120;
 /** The longest address kept; a longer one is flagged and judged as invalid by the address check. */
 export const MAX_API_LENGTH = 2048;
 const MAX_FAMILY_LENGTH = 80;
+/**
+ * The most models one provider may state. The largest supported provider has 621 (nano-gpt, 2026-10-19; 405 with tool
+ * calling) and the whole catalog 6,558 models with tool calling, so this is more than three times the largest today and
+ * still small enough that one poisoned provider cannot make a body expensive to read or a table large. A provider above it
+ * is not read (its models are not even parsed) and counted; the guard then refuses the fetch (`plan.ts`).
+ */
+export const MAX_MODELS_PER_PROVIDER = 2000;
 /** The largest limit models.dev states (`99999999` stands for "no limit"). */
 const MAX_LIMIT = 100_000_000;
 /** USD per million tokens; far above any real price, so a typo cannot become a charge. */
@@ -85,6 +92,8 @@ export type SkipCounts = {
   unsupportedProviders: number;
   /** A provider the supported file does not know (models.dev added it after the file was derived). */
   unknownProviders: number;
+  /** A supported provider that states more than `MAX_MODELS_PER_PROVIDER` models; none of its models is read. */
+  oversizedProviders: number;
 };
 
 export type ParsedModelsDev = {
@@ -298,6 +307,7 @@ export function parseModelsDev(body: unknown): ParsedModelsDev | ParseFailure {
     modelProviderOverride: 0,
     unsupportedProviders: 0,
     unknownProviders: 0,
+    oversizedProviders: 0,
   };
   for (const [providerId, candidate] of Object.entries(body)) {
     if (supportedProvider(providerId) === undefined) {
@@ -311,8 +321,13 @@ export function parseModelsDev(body: unknown): ParsedModelsDev | ParseFailure {
       skipped.invalid += 1;
       continue;
     }
+    const entries = Object.entries(provider.data.models);
+    if (entries.length > MAX_MODELS_PER_PROVIDER) {
+      skipped.oversizedProviders += 1;
+      continue;
+    }
     const kept: ReducedModel[] = [];
-    for (const [key, model] of Object.entries(provider.data.models)) {
+    for (const [key, model] of entries) {
       const outcome = modelOf(providerId, key, model);
       if (outcome.kind === "model") kept.push(outcome.model);
       else skipped[outcome.reason] += 1;

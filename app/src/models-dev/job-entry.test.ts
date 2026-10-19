@@ -420,8 +420,10 @@ describe("the closed lists of the entry", () => {
     "x",
     "<script>",
   ])("refuses the interleaved field %s", (field) => {
-    const document = entry();
-    document.model.interleaved = { field };
+    const document = {
+      ...entry(),
+      model: { ...entry().model, interleaved: { field } },
+    };
 
     expect(jobModelEntrySchema.safeParse(document).success).toBe(false);
   });
