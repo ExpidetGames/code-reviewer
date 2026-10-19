@@ -13,7 +13,18 @@ cost of a call would not be exact.
 on as it is. `temperature` and `top_p` follow the flags of the model in the list (a 400 from Opus
 4.7 on), never both, never for a model the list does not know. Thinking is switched off for the
 models that accept it (the chat history of the engine cannot carry thinking blocks back), and the
-history is cached automatically, so a tool loop pays the read price for what it repeats.
+prompt is cached (below), so a tool loop pays the read price for what it repeats.
+
+**What is cached (#539).** Three explicit breakpoints, never more than four and never two on one
+block, all of the provider's default lifetime of five minutes: the end of the static prefix (the
+last system block, which covers the tools in front of it; the last tool when there is no system
+prompt), the end of the latest turn (what the next call reads) and the end of the turn before it of
+the same side (what the previous call wrote, so a read never depends on how far the provider's
+look-back of 20 blocks reaches). The top-level automatic mark is not used: it takes one of the four
+slots and marks the last block a second time. A mark the engine put on a message (the pinned
+OpenCode marks its system message and its last two messages when the model is a Claude) is not
+copied, because the body is built field by field; the marks here come from the structure of the
+request, never from its text.
 
 **What is refused.** A request whose meaning the provider cannot keep is refused with a stable code
 before anything is sent, never downgraded: a forced tool choice for a model that rejects it, content
@@ -35,6 +46,13 @@ from code_reviewer_runner.job_loop.jsonvalues import as_object
 from code_reviewer_runner.result import ErrorCode
 
 ANTHROPIC_VERSION: Final = "2023-06-01"
+# The one breakpoint every mark is made of: the provider's default lifetime of five minutes. Every
+# read renews the entry for free and a tool loop calls the model every few seconds, so it never
+# expires inside a run; a one hour write costs 2x instead of 1.25x and could only pay if the same
+# prefix were read again after more than five minutes, which a conversation is not (#539).
+CACHE_CONTROL: Final = {"type": "ephemeral"}
+# Blocks the provider refuses a breakpoint on.
+_UNMARKABLE_BLOCKS: Final = frozenset({"thinking", "redacted_thinking"})
 
 _FINISH_REASONS: Final = {
     "end_turn": "stop",
@@ -219,6 +237,34 @@ def _tools(raw: object) -> list[dict[str, Any]]:
     return converted
 
 
+def _control() -> dict[str, str]:
+    return dict(CACHE_CONTROL)
+
+
+def _last_markable(turn: dict[str, Any]) -> dict[str, Any] | None:
+    for block in reversed(turn["content"]):
+        if block.get("type") not in _UNMARKABLE_BLOCKS:
+            return block
+    return None
+
+
+def _mark_turns(turns: list[dict[str, Any]]) -> None:
+    """The breakpoints inside the conversation: the end of the latest turn and the end of the
+    turn before it of the same side (the entry the previous call wrote)."""
+    if not turns:
+        return
+    head = turns[-1]
+    candidates = [head]
+    for turn in reversed(turns[:-1]):
+        if turn["role"] == head["role"]:
+            candidates.append(turn)
+            break
+    for turn in candidates:
+        block = _last_markable(turn)
+        if block is not None:
+            block["cache_control"] = _control()
+
+
 def _tool_choice(raw: object, parallel: object, model: ClaudeModel | None) -> dict[str, Any] | None:
     choice: dict[str, Any] | None
     forced = False
@@ -309,11 +355,13 @@ class AnthropicMessagesWire:
             "messages": turns,
         }
         if system:
-            body["system"] = system
+            body["system"] = [{"type": "text", "text": system, "cache_control": _control()}]
         if request.get("tools") is not None:
             tools = _tools(request["tools"])
             if tools:
                 body["tools"] = tools
+                if not system:
+                    tools[-1]["cache_control"] = _control()
                 choice = _tool_choice(
                     request.get("tool_choice"), request.get("parallel_tool_calls"), self._model
                 )
@@ -325,8 +373,7 @@ class AnthropicMessagesWire:
         body.update(_sampling(request, self._model))
         if self._model is not None and self._model.thinking_disabled:
             body["thinking"] = {"type": "disabled"}
-        # Automatic caching of the last block: the history of a tool loop is read from the cache.
-        body["cache_control"] = {"type": "ephemeral"}
+        _mark_turns(turns)
         return body
 
     def decode_response(self, body: bytes) -> bytes:

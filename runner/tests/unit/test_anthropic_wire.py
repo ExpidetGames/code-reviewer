@@ -53,6 +53,25 @@ def encode(model: str = MODEL, **extra: Any) -> dict[str, Any]:
     return wire(model).encode_request(request(model=model, **extra))
 
 
+def unmarked(value: Any) -> Any:
+    """The same structure without its cache breakpoints, which have tests of their own
+    (`test_anthropic_wire_caching.py`): these tests are about the translation."""
+    if isinstance(value, dict):
+        fields: dict[str, Any] = value  # pyright: ignore[reportUnknownVariableType]
+        return {key: unmarked(item) for key, item in fields.items() if key != "cache_control"}
+    if isinstance(value, list):
+        items: list[Any] = value  # pyright: ignore[reportUnknownVariableType]
+        return [unmarked(item) for item in items]
+    return value
+
+
+def system_text(body: dict[str, Any]) -> str:
+    """The text of the system prompt, which is one block (the breakpoint of the static prefix)."""
+    blocks = body["system"]
+    assert len(blocks) == 1 and blocks[0]["type"] == "text"
+    return blocks[0]["text"]
+
+
 def refused(model: str = MODEL, **extra: Any) -> LimitError:
     with pytest.raises(LimitError) as caught:
         encode(model, **extra)
@@ -98,11 +117,17 @@ def test_a_plain_request_becomes_a_message_request_without_streaming_or_thinking
     assert body == {
         "model": MODEL,
         "max_tokens": 4096,
-        "messages": [{"role": "user", "content": [{"type": "text", "text": "review this"}]}],
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    # The head of the conversation is a breakpoint (#539); no top-level mark.
+                    {"type": "text", "text": "review this", "cache_control": {"type": "ephemeral"}}
+                ],
+            }
+        ],
         # The engine's history cannot carry thinking blocks, so the model runs without them.
         "thinking": {"type": "disabled"},
-        # Caching of the growing history of a tool loop (the cost reads the cache tokens).
-        "cache_control": {"type": "ephemeral"},
     }
 
 
@@ -116,7 +141,7 @@ def test_system_and_developer_text_becomes_the_system_prompt() -> None:
         ]
     )
 
-    assert body["system"] == "You are a reviewer.\n\nBe brief."
+    assert system_text(body) == "You are a reviewer.\n\nBe brief."
     assert [m["role"] for m in body["messages"]] == ["user"]
 
 
@@ -148,7 +173,7 @@ def test_a_tool_loop_becomes_tool_use_and_tool_result_blocks_in_the_right_turns(
         tools=[TOOL],
     )
 
-    assert body["messages"] == [
+    assert unmarked(body["messages"]) == [
         {"role": "user", "content": [{"type": "text", "text": "review"}]},
         {
             "role": "assistant",
@@ -190,7 +215,7 @@ def test_an_assistant_turn_without_content_or_calls_is_left_out_and_empty_text_i
         ]
     )
 
-    assert body["messages"] == [
+    assert unmarked(body["messages"]) == [
         {"role": "user", "content": [{"type": "text", "text": "go"}, {"type": "text", "text": "b"}]}
     ]
     assert "thinking out loud" not in json.dumps(body)
@@ -223,8 +248,8 @@ def test_a_text_that_is_only_whitespace_is_never_sent_as_a_block() -> None:
         ]
     )
 
-    assert body["system"] == "rules"
-    assert body["messages"] == [
+    assert system_text(body) == "rules"
+    assert unmarked(body["messages"]) == [
         {"role": "user", "content": [{"type": "text", "text": "go"}]},
         {
             "role": "assistant",
@@ -267,7 +292,7 @@ def test_a_tool_result_without_content_is_sent_without_content() -> None:
         tools=[TOOL],
     )
 
-    assert body["messages"][-1] == {
+    assert unmarked(unmarked(body["messages"])[-1]) == {
         "role": "user",
         "content": [{"type": "tool_result", "tool_use_id": "t1"}],
     }
@@ -280,7 +305,7 @@ def test_the_tools_become_input_schemas_and_the_strict_flag_is_not_carried() -> 
 
     body = encode(tools=[strict, bare])
 
-    assert body["tools"] == [
+    assert unmarked(body["tools"]) == [
         {
             "name": "read",
             "description": "Read a file",
@@ -357,7 +382,7 @@ def test_fields_without_a_counterpart_are_not_sent() -> None:
 def test_nothing_outside_the_translated_fields_reaches_the_provider() -> None:
     body = encode(provider={"order": ["x"]}, metadata={"user_id": "someone"}, user="someone")
 
-    assert set(body) == {"model", "max_tokens", "messages", "thinking", "cache_control"}
+    assert set(body) == {"model", "max_tokens", "messages", "thinking"}
 
 
 # #511-T22
