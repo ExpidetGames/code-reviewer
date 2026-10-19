@@ -405,6 +405,13 @@ def _count_or_zero(value: object) -> int | None:
     return 0 if value is None else _count(value)
 
 
+def _split_total(split: dict[str, Any]) -> int | None:
+    """The tokens written to the cache by the two lifetimes of the split, None when unusable."""
+    five = _count_or_zero(split.get("ephemeral_5m_input_tokens"))
+    hour = _count_or_zero(split.get("ephemeral_1h_input_tokens"))
+    return None if five is None or hour is None else five + hour
+
+
 def _usage(raw: object) -> dict[str, Any] | None:
     """The usage in the shape the proxy and the cost rule read (LiteLLM's names): `prompt_tokens`
     holds the cache tokens. A count that is missing or unusable is left out, so the proxy sees
@@ -416,7 +423,12 @@ def _usage(raw: object) -> dict[str, Any] | None:
     uncached = _count(usage.get("input_tokens"))
     output = _count(usage.get("output_tokens"))
     read = _count_or_zero(usage.get("cache_read_input_tokens"))
+    split = as_object(usage.get("cache_creation"))
     written = _count_or_zero(usage.get("cache_creation_input_tokens"))
+    if usage.get("cache_creation_input_tokens") is None and split is not None:
+        # The documented split (5 minute and 1 hour writes) without the flat count: the split is
+        # the count (#534).
+        written = _split_total(split)
     if uncached is not None and read is not None and written is not None:
         translated["prompt_tokens"] = uncached + read + written
         translated["cache_read_input_tokens"] = read
@@ -425,7 +437,6 @@ def _usage(raw: object) -> dict[str, Any] | None:
         translated["completion_tokens"] = output
     if "prompt_tokens" in translated and output is not None:
         translated["total_tokens"] = translated["prompt_tokens"] + output
-    split = as_object(usage.get("cache_creation"))
     if split is not None:
         translated["prompt_tokens_details"] = {
             "cached_tokens": translated.get("cache_read_input_tokens", 0),
