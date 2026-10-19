@@ -24,6 +24,8 @@ describe("which paths are public", () => {
     "/api/operator/v1/workspaces/abc/entitlements",
     "/api/operator/v1/entitlements/default",
     "/api/webhooks/github-app",
+    // #497: a payment provider signs its webhooks; the route checks the signature itself.
+    "/api/billing/webhook",
     // #319-T10: the platform's cron has no session; CRON_SECRET is its credential.
     "/api/internal/repository-sync",
     // #328-T07: the once-a-minute sweep, with the same credential.
@@ -109,6 +111,7 @@ describe("which paths are public", () => {
       { path: "/api/workers", match: "prefix" },
       { path: "/api/operator/v1", match: "prefix" },
       { path: "/api/webhooks", match: "prefix" },
+      { path: "/api/billing/webhook", match: "exact" },
       { path: "/api/internal/repository-sync", match: "exact" },
       { path: "/api/internal/dispatch-sweep", match: "exact" },
     ]);
