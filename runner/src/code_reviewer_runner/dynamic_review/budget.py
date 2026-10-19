@@ -360,6 +360,12 @@ def reserved_tokens(text: str) -> int:
     return len(text.encode("utf-8", errors="replace"))
 
 
+def _byte_size(text: str | bytes) -> int:
+    """The bytes of a request: the length of the bytes the passthrough proxy relays (#550), the
+    UTF-8 length of the text the legacy proxy builds."""
+    return len(text) if isinstance(text, bytes) else len(text.encode("utf-8", errors="replace"))
+
+
 class BudgetLedger:
     """Reserves and counts everything one Dynamic Review consumes. Fails closed.
 
@@ -524,7 +530,7 @@ class BudgetLedger:
 
     def reserve_call(
         self,
-        request_text: str,
+        request_text: str | bytes,
         *,
         output_tokens: int | None = None,
         can_wrap_up: bool = False,
@@ -540,7 +546,7 @@ class BudgetLedger:
         flight and the cost this call could have must stay within the limit.
         """
         self.check_deadline()
-        size = len(request_text.encode("utf-8", errors="replace"))
+        size = _byte_size(request_text)
         allowance = self.output_tokens if output_tokens is None else output_tokens
         counters = self._counters
         with self._lock:
@@ -586,7 +592,7 @@ class BudgetLedger:
                 text = recovery_text if recovery else wrap_up_text
                 size += len(text.encode("utf-8", errors="replace"))
                 estimate = self._estimate(size)
-                bound += size - len(request_text.encode("utf-8", errors="replace"))
+                bound += size - _byte_size(request_text)
                 cost = self._expected_cost(
                     self._priced_input(size, estimate), allowance, final=True
                 )
@@ -618,7 +624,7 @@ class BudgetLedger:
         )
 
     def try_reserve_final_retry(
-        self, request_text: str, *, output_tokens: int | None = None
+        self, request_text: str | bytes, *, output_tokens: int | None = None
     ) -> Reservation | None:
         """Reserve one more attempt at the final call, or say there is no room for it (#312).
 
@@ -630,7 +636,7 @@ class BudgetLedger:
         none (#540). None means "stop asking"; the last reply is what the engine gets.
         """
         allowance = self.output_tokens if output_tokens is None else output_tokens
-        size = len(request_text.encode("utf-8", errors="replace"))
+        size = _byte_size(request_text)
         counters = self._counters
         with self._lock:
             if not self._final_granted or self.remaining_seconds() <= 0:
@@ -811,6 +817,30 @@ class BudgetLedger:
             # request is the final call, and no normal call is admitted again (see "The bound").
             if counters.cost > self.limits.max_cost_usd and not reservation.final:
                 self._overshot = True
+
+    def settle_unbilled(self, reservation: Reservation) -> None:
+        """Release the reservation of a call the provider refused before it generated anything (#550).
+
+        The engine of the passthrough path retries a refusal (429, 5xx) by itself, so the refusal
+        does not end the run as it does on the legacy path. The call was made and is counted, it
+        cost nothing, and what was held for it is free again.
+        """
+        with self._lock:
+            self._counters.reserved_cost = _SUM.subtract(
+                self._counters.reserved_cost, reservation.cost
+            )
+            self._counters.priced_calls += 1
+
+    def settle_unknown(self, reservation: Reservation) -> None:
+        """Settle a call whose usage was never seen (a cut stream, an error inside a stream, an
+        engine that went away) (#550). It may have been billed, so it is not given back: what was
+        reserved for it becomes spent, and the guard keeps counting it. Like any call without a
+        reported cost it makes the cost of the whole run unknown, never a partial sum.
+        """
+        with self._lock:
+            counters = self._counters
+            counters.reserved_cost = _SUM.subtract(counters.reserved_cost, reservation.cost)
+            counters.cost = _SUM.add(counters.cost, reservation.cost)
 
     def count_tool_call(self, name: str) -> None:
         """Count one tool call the engine reported. Unknown attempts count too. Not a budget."""
