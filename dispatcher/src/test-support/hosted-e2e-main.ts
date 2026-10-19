@@ -15,17 +15,13 @@
 //   E2E_IMAGE_ID          the image id the stand-in reports and the Launcher requires (required)
 //   E2E_CONTROL_DIR       a directory a journey writes to steer this process: `fail-create` holds a number, and the
 //                         next that many VM creations fail like a platform that is down (the file is counted down)
-//                         `break-wait` (a file): from then on the `wait()` of every Worker container started fails like a
-//                         broken log stream, so the Dispatcher never learns how the container ended (`worker_wait_failed`,
-//                         #375): the lease is the only safeguard
 //   E2E_HANDOVER_SECONDS  how long the container runs before the Worker counts as having taken over (default 1)
 //   E2E_*                 everything else with this prefix goes to the stand-in's environment (`docker-worker.sh`)
 //
 // One line of JSON per event on stdout, through the same masker as the deployment's.
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { LocalSandboxService } from "../../../fakes/sandbox/local.ts";
-import { createBackgroundTracker } from "../background.ts";
 import { integer, loadSettings, read } from "../config.ts";
 import { createLogger } from "../core/logger.ts";
 import { systemClock } from "../core/clock.ts";
@@ -34,6 +30,7 @@ import { createSandboxCanary } from "../launchers/sandbox-canary.ts";
 import { createSandboxLauncher } from "../launchers/sandbox.ts";
 import {
   SandboxServiceError,
+  type SandboxFleet,
   type SandboxService,
 } from "../launchers/sandbox-service.ts";
 import { createCapabilityProbe } from "../probe/capability-probe.ts";
@@ -85,7 +82,6 @@ const logger = createLogger(
   (line) => console.log(line),
   [settings.core.token, ...settings.signingKeys.map((key) => key.secret)],
 );
-const background = createBackgroundTracker();
 
 const local = new LocalSandboxService({
   dockerBin: read(env, "E2E_DOCKER_BIN") ?? DEFAULT_DOCKER,
@@ -97,34 +93,14 @@ const local = new LocalSandboxService({
     ),
   ),
 });
-/** True while `<dir>/break-wait` exists: the journey wants Workers whose end the Dispatcher cannot see. */
-function waitIsBroken(): boolean {
-  return (
-    controlDirectory !== undefined &&
-    existsSync(join(controlDirectory, "break-wait"))
-  );
-}
-
-const service: SandboxService = {
+const service: SandboxService & SandboxFleet = {
   async create(options, signal) {
     if (consumeCreateFailure(controlDirectory))
       throw new SandboxServiceError("unavailable");
-    const vm = await local.create(options, signal);
-    return {
-      name: vm.name,
-      exec: (request, execSignal) => vm.exec(request, execSignal),
-      async start(request) {
-        const process = await vm.start(request);
-        if (!waitIsBroken() || request.label !== "docker-run") return process;
-        return {
-          writeStdin: (data) => process.writeStdin(data),
-          closeStdin: () => process.closeStdin(),
-          wait: () => Promise.reject(new Error("the log stream broke")),
-        };
-      },
-    };
+    return local.create(options, signal);
   },
   stop: (name) => local.stop(name),
+  list: (filter) => local.list(filter),
 };
 
 const dynamicEnvironment: Record<string, string> = {};
@@ -142,7 +118,6 @@ const sandbox = createSandboxLauncher({
   imageDigest,
   handoverSeconds,
   logger,
-  background: background.run,
   dynamicEnvironment,
 });
 // The same rule as the deployment (#479): a Dispatcher that serves Dynamic jobs runs no probe on a dispatch; the canary
@@ -172,6 +147,12 @@ const server = await startNodeServer({
   port: integer(env, "E2E_PORT", { min: 1, max: 65535 }),
   hostname: "127.0.0.1",
   logger,
+  // The App's stop call (#487) ends a finished job's VM through this fleet, as the deployment's does through the platform's.
+  reaper: () => ({
+    fleet: service,
+    jobLifetimeSeconds: settings.core.jobTimeoutSeconds + 300,
+    canaryLifetimeSeconds: 450,
+  }),
 });
 console.log(
   JSON.stringify({ level: "info", event: "listening", port: server.port }),
@@ -184,8 +165,6 @@ for (const signal of ["SIGTERM", "SIGINT"] as const)
     stopping = true;
     void (async () => {
       await server.shutdown();
-      await sandbox.idle();
-      await background.drain(30_000);
       await local.stopAll();
       process.exit(0);
     })();

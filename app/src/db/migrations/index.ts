@@ -52,6 +52,7 @@ import { migration as createModelCatalogEntries } from "./20261017140000_create_
 import { migration as addWorkspaceEntitlementsModelAccess } from "./20261017160000_add_workspace_entitlements_model_access.ts";
 import { migration as addUsageRecordCatalogEntry } from "./20261018090000_add_usage_record_catalog_entry.ts";
 import { migration as migrateModelTiersToCatalog } from "./20261018170000_migrate_model_tiers_to_catalog.ts";
+import { migration as createBillingJournal } from "./20261019150000_create_billing_journal.ts";
 
 const migrations: Record<string, Migration> = {
   "0001_create_app_meta": createAppMeta,
@@ -106,6 +107,7 @@ const migrations: Record<string, Migration> = {
     addWorkspaceEntitlementsModelAccess,
   "20261018090000_add_usage_record_catalog_entry": addUsageRecordCatalogEntry,
   "20261018170000_migrate_model_tiers_to_catalog": migrateModelTiersToCatalog,
+  "20261019150000_create_billing_journal": createBillingJournal,
 };
 
 export const migrationProvider: MigrationProvider = {

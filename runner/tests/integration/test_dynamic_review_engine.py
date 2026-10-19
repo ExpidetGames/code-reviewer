@@ -674,8 +674,11 @@ def test_an_engine_without_a_structured_answer_is_a_bad_output_error(tmp_path: P
     assert answer.error.code is ErrorCode.LLM_OUTPUT_INVALID
 
 
-# #197-T13
-def test_an_answer_made_against_another_head_is_a_policy_violation(tmp_path: Path) -> None:
+# #530-T04: the head is the runner's own claim: an answer that names another one is not an error,
+# the runner records the head of the job (the model cannot know a different one).
+def test_an_answer_that_names_another_head_is_published_with_the_head_of_the_job(
+    tmp_path: Path,
+) -> None:
     fixture = Fixture(
         tmp_path,
         {"answer": "structured", "findings": findings(OTHER_SHA), "proxy_calls": 1},
@@ -684,9 +687,11 @@ def test_an_answer_made_against_another_head_is_a_policy_violation(tmp_path: Pat
     with FakeUpstream() as upstream:
         answer = fixture.run(upstream)
 
-    assert not answer.ok
-    assert answer.error is not None
-    assert answer.error.code is ErrorCode.DYNAMIC_POLICY_VIOLATION
+    assert answer.ok, answer.error
+    assert answer.findings is not None
+    assert answer.findings.reviewed_sha == HEAD
+    assert [finding.reviewed_sha for finding in answer.findings.findings] == [HEAD]
+    assert "reviewedSha:wrong_value" in answer.findings.envelope_overrides
 
 
 # #197-T07

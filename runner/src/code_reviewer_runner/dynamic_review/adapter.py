@@ -50,6 +50,7 @@ from urllib.request import Request
 
 from code_reviewer_runner.dynamic_findings import (
     DynamicFindings,
+    EnvelopeError,
     FindingsError,
     parse_dynamic_findings,
 )
@@ -782,11 +783,24 @@ class DynamicEngine:
         it returns; a limit or provider refusal the proxy recorded always wins. Only the engine's
         missing-answer error is recovered (`missing_answer`): another error of the engine is its
         own failure. Whatever fails once the recovery has started says so.
+
+        A turn that returned an answer whose envelope is not the review (a required field missing or
+        mistyped) is recovered the same way, once (#530). An answer the runner's check refuses
+        fails with how the last model calls ended, like a missing answer does.
         """
+        try:
+            return self._turns(client, session_id)
+        except FindingsError as error:
+            raise self._with_call_outcomes(error) from None
+
+    def _turns(self, client: EngineClient, session_id: str) -> EngineAnswer:
         self._send(client, session_id)
         self._raise_recorded_failure()
         if structured_answer(client.last_message) is not None:
-            return self._validate(client)
+            try:
+                return self._validate(client)
+            except EnvelopeError as error:
+                return self._recover_envelope(client, session_id, error)
         ended = turn_end_note(client.last_message)
         first = turn_end_detail(client.last_message)
         if not missing_answer(client.last_message):
@@ -796,20 +810,61 @@ class DynamicEngine:
         if not self.ledger.begin_recovery():
             return self._no_answer(f"the first turn: {first}; no recovery was possible")
         self.recovery = ended
-        try:
-            # The engine drops the answer that ended the turn from the history: hand it back.
-            self._send(client, session_id, prompt=recovery_prompt(answer_text(client.last_message)))
-            self._raise_recorded_failure()
-        except LimitError as error:
-            raise LimitError(error.code, self._during_recovery(error.detail, ended)) from None
-        except EngineError as error:
-            raise EngineError(error.code, self._during_recovery(error.detail, ended)) from None
+        # The engine drops the answer that ended the turn from the history: hand it back.
+        self._recovery_turn(
+            client, session_id, recovery_prompt(answer_text(client.last_message)), ended
+        )
         if structured_answer(client.last_message) is None:
             return self._no_answer(
                 f"after one recovery; the first turn: {first}; "
                 f"the recovery: {turn_end_detail(client.last_message)}"
             )
         return self._validate(client)
+
+    def _recovery_turn(
+        self, client: EngineClient, session_id: str, prompt: str, ended: str
+    ) -> None:
+        try:
+            self._send(client, session_id, prompt=prompt)
+            self._raise_recorded_failure()
+        except LimitError as error:
+            raise LimitError(error.code, self._during_recovery(error.detail, ended)) from None
+        except EngineError as error:
+            raise EngineError(error.code, self._during_recovery(error.detail, ended)) from None
+
+    def _recover_envelope(
+        self, client: EngineClient, session_id: str, problem: EnvelopeError
+    ) -> EngineAnswer:
+        """The turn returned a structured answer that is not the review as a whole (#530).
+
+        The engine does not check the arguments of its return tool, so a missing or mistyped
+        field of the envelope reaches the runner's own check here. It is asked for once more, the
+        same way as a turn with no answer (#309) and inside the same limits, with the concrete
+        problem (field names, never values). A second bad answer fails the run, naming the field
+        and how the last model calls ended.
+        """
+        ended = f"the answer was not valid: {problem.detail}"
+        if not self.ledger.begin_recovery():
+            raise EnvelopeError(problem.code, f"no recovery was possible; {problem.detail}")
+        self.recovery = ended
+        self._recovery_turn(client, session_id, recovery_prompt(problem=problem.detail), ended)
+        if structured_answer(client.last_message) is None:
+            return self._no_answer(
+                f"after one recovery; the first answer was not valid: {problem.detail}; "
+                f"the recovery: {turn_end_detail(client.last_message)}"
+            )
+        try:
+            return self._validate(client)
+        except EnvelopeError as again:
+            raise EnvelopeError(again.code, f"after one recovery; {again.detail}") from None
+
+    def _with_call_outcomes(self, error: FindingsError) -> FindingsError:
+        """The error with how the last model calls ended (sizes and names, no model text)."""
+        calls = self.ledger.recent_call_outcomes
+        if not calls:
+            return error
+        detail = f"{error.detail}; last model calls: " + "; ".join(calls)
+        return type(error)(error.code, detail)
 
     @staticmethod
     def _during_recovery(detail: str, ended: str) -> str:
@@ -911,16 +966,20 @@ class DynamicEngine:
                 ),
             )
         # A finding may only point at a file the verified export really contains.
-        findings = parse_dynamic_findings(raw, exported_paths=self.exported_paths)
+        # The runner sets the constants of the envelope itself (#530): the head is its own claim,
+        # never the model's echo of it.
+        findings = parse_dynamic_findings(
+            raw, exported_paths=self.exported_paths, reviewed_sha=base.head_sha
+        )
+        if findings.envelope_overrides:
+            _log.warning(
+                "the answer did not carry the envelope constants the runner owns: %s",
+                ", ".join(findings.envelope_overrides),
+            )
         if len(findings.findings) > dynamic.limits.max_findings:
             raise LimitError(
                 ErrorCode.DYNAMIC_BUDGET_EXCEEDED,
                 "the answer has more findings than the job allows",
-            )
-        if findings.reviewed_sha != base.head_sha:
-            raise FindingsError(
-                ErrorCode.DYNAMIC_POLICY_VIOLATION,
-                "the answer was made against another reviewed head",
             )
         return EngineAnswer(findings=findings, error=None)
 

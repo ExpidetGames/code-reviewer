@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// The reaper (#364): stops the Sandbox VMs of ours that outlived their purpose. The Launcher stops a job's VM from
-// `waitUntil` work, which lives only as long as the Dispatcher's function; when that ends first, a failed `stop`, a
-// lost `wait` or a restart leave the VM billed until its own timeout. This is the second line, run by the cron route
-// (route.ts). It decides per VM, in this order:
+// The reaper (#364): stops the Sandbox VMs of ours that outlived their purpose. The App's signed stop
+// (`POST /stop`, #487) ends a job's VM when the job ends, and the Launcher stops the VM of a launch that failed before the
+// hand-over; when neither happens (a stop that never arrived or failed, a restart, an App of a previous release) the VM
+// is billed until its own timeout. This is the second line, run by the cron route (route.ts). It decides per VM, in this order:
 //
 //   - not one of ours (vm-shape.ts), or not running: not touched
 //   - younger than two minutes: not touched (a launch in progress, a listing that lags)

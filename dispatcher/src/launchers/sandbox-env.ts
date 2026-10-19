@@ -184,7 +184,7 @@ export function sandboxFromEnvironment(
         settings.core.jobTimeoutSeconds + vmTimeoutMarginSeconds,
       canaryLifetimeSeconds: probeTimeoutSeconds + vmTimeoutMarginSeconds,
     }),
-    launcher({ settings, logger, background }) {
+    launcher({ settings, logger }) {
       if (probeTtlSet)
         logger.warn("deprecated_setting", {
           variable: "DISPATCHER_PROBE_TTL_SECONDS",
@@ -215,7 +215,6 @@ export function sandboxFromEnvironment(
         handoverSeconds,
         vmTimeoutMarginSeconds,
         logger,
-        background,
         dynamicEnvironment: dynamic,
       });
       // A deployment that serves no Dynamic job has nothing to prove: no canary VM is ever made for it.

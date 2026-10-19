@@ -111,6 +111,21 @@ describe("the reaper route against the fake App and the fake Sandbox service", (
     expect(t.logger.text()).not.toContain(CRON_SECRET);
   });
 
+  // #487-T10
+  it("still ends the VM of a finished job when the App never sends the stop call, as an App of the previous release does", async () => {
+    const sandbox = new FakeSandboxService();
+    app.enqueue({ id: JOB_ENDED });
+    app.setJobStatus(JOB_ENDED, "succeeded");
+    const lingering = jobVm(sandbox, JOB_ENDED, 10 * MINUTE);
+    const t = compose(sandbox);
+
+    const response = await t.reap();
+
+    expect(response.status).toBe(200);
+    expect(sandbox.stops).toStrictEqual([lingering]);
+    expect(t.logger.text()).not.toContain("stop_received");
+  });
+
   // #364-T27
   it("falls back to the lifetime when the App cannot be read: a young VM stays, an overdue one goes", async () => {
     const sandbox = new FakeSandboxService();

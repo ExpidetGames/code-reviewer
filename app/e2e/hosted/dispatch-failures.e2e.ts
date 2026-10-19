@@ -19,12 +19,10 @@
 //  - the platform refuses to create a sandbox: every refusal counts as a lost attempt, the Dispatcher gives the job back
 //    and the app announces it again at once, and after three the run fails with `launch_failed` without any Worker having
 //    started;
-//  - a Worker dies in the middle of a review: the Dispatcher sees its container end with an error, gives the job back at
-//    once (no wait for the lease), the app announces it again at once and a second Worker finishes it (#332-T06, #375-T09);
-//  - a Worker that took over and keeps ending with an error: every end gives the job back within seconds and costs an
-//    attempt, and after three the run fails with `worker_exited` (#375-T02);
-//  - a Worker dies and the Dispatcher cannot see its container end (`worker_wait_failed`): nothing is released, the lease
-//    runs out, the sweep requeues the job and a second Worker finishes it (#375-T10).
+//  - a Worker dies in the middle of a review: the Dispatcher holds no supervision after the hand-over (#487), so the lease
+//    runs out, the sweep puts the job back and a second Worker finishes it (#332-T06);
+//  - a Worker that took over and keeps ending with an error: every lost lease costs an attempt, and after three the run
+//    fails with `lease_expired` (#487, replacing #375-T02, which relied on the Dispatcher's supervision).
 import { createServer, type Server } from "node:http";
 import { expect, test, type Page } from "@playwright/test";
 import { startLlmFake, type FakeLlm } from "../../../fakes/llm/server.ts";
@@ -463,49 +461,63 @@ test.describe("what the hosted deployment does when the Dispatcher, the platform
     ).toBeVisible();
   });
 
-  // #375-T02
-  test("a Worker that cannot start: the job is queued again within seconds, not after the lease, and after three the run fails with worker_exited and its copy", async ({
+  // #487-T05
+  test("a Worker that took over and keeps ending with an error: every lost lease costs an attempt, and after three the run fails with lease_expired and its copy", async ({
     page,
     request,
   }) => {
     await startDispatcher();
     theDispatcher().endWorkersWith(2);
-    const startedAt = Date.now();
     const { number } = await openPullRequest(page, request, 24, "8");
     const job = await onlyJobOf(REPOSITORY.fullName, number);
 
-    // The first attempt came with the call the app sent when it queued the job; nobody ran the sweep or moved a clock.
-    await eventually(
-      "the first Worker's end to give the job back",
-      async () => {
-        const state = await onlyJobOf(REPOSITORY.fullName, number);
-        return state.attempts === 1 && state.status === "queued";
-      },
-    );
-    // The lease of a Worker that does not heartbeat is two minutes; the release came with the container's end.
-    expect(Date.now() - startedAt).toBeLessThan(60_000);
-    expect(theDispatcher().workersOf(job.id)).toHaveLength(1);
-
-    // The job was given back with a retry time of 30 seconds and the app announces it again when that has passed (#395):
-    // the second and the third Worker follow, with no sweep and no clock moved.
-    await eventually(
-      "the third Worker to end",
-      async () => {
-        return (
-          (await onlyJobOf(REPOSITORY.fullName, number)).status === "failed"
-        );
-      },
-      150_000,
-    );
+    // The Dispatcher does not watch a Worker after the hand-over: its end is not reported, the job stays running until the
+    // lease (two minutes without a heartbeat) runs out. The clock of the job is moved and the app's own sweep ends the
+    // lease, requeues the job and announces it again, three times.
+    const launches = () =>
+      theDispatcher().output().split(`"event":"launched","jobId":"${job.id}"`)
+        .length - 1;
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      // The launch is over (the Worker took over) before the sweep announces the job again: a Dispatcher that is still
+      // launching answers 429.
+      await eventually(
+        `Worker ${String(attempt)} to start and take over`,
+        async () => {
+          const state = await onlyJobOf(REPOSITORY.fullName, number);
+          return (
+            theDispatcher().workersOf(job.id).length === attempt &&
+            launches() === attempt &&
+            state.status === "running" &&
+            state.attempts === attempt - 1
+          );
+        },
+      );
+      expect(theDispatcher().output()).not.toContain(
+        '"reason":"worker_exited"',
+      );
+      await letTimePass(job.id, 150);
+      await runSweep(request);
+    }
 
     expect(await onlyJobOf(REPOSITORY.fullName, number)).toMatchObject({
       status: "failed",
-      errorCode: "worker_exited",
+      errorCode: "lease_expired",
       attempts: 3,
     });
     expect(theDispatcher().workersOf(job.id)).toHaveLength(3);
-    expect(theDispatcher().output()).toContain('"reason":"worker_exited"');
     expect(fakeLlm().requests()).toHaveLength(0);
+    // The last lapsed lease ended the job for good, so the app told the Dispatcher to stop its VM (#487-T06). The two
+    // lapsed leases before it only sent the job back to the queue, and nothing was stopped for them.
+    await eventually("the app's stop for the failed job", async () => {
+      return theDispatcher()
+        .output()
+        .includes(`"event":"stop_received","jobId":"${job.id}"`);
+    });
+    expect(
+      theDispatcher()
+        .output()
+        .split(`"event":"stop_received","jobId":"${job.id}"`).length - 1,
+    ).toBe(1);
     await page.reload();
     const run = runsOf(page, REPOSITORY.fullName, number);
     await expect(run.locator("[data-status]")).toContainText("Failed");
@@ -517,17 +529,16 @@ test.describe("what the hosted deployment does when the Dispatcher, the platform
     const detail = page
       .locator('[data-slot="run-detail"]')
       .filter({ visible: true });
-    await expect(detail.getByText("worker_exited")).toBeVisible();
+    await expect(detail.getByText("lease_expired")).toBeVisible();
     await expect(
       detail.getByText(
-        "The worker for this run stopped with an error before it reported a result, even after several tries.",
+        "The runner stopped reporting while it worked on this run, and the run ran out of retries.",
       ),
     ).toBeVisible();
   });
 
   // #332-T06
-  // #375-T09
-  test("a Worker dies in the middle of a review: the Dispatcher gives the job back at once, the app announces it again at once and a second Worker finishes it", async ({
+  test("a Worker dies in the middle of a review: its lease runs out, the sweep puts the job back and a second Worker finishes it", async ({
     page,
     request,
   }) => {
@@ -547,15 +558,18 @@ test.describe("what the hosted deployment does when the Dispatcher, the platform
     theDispatcher().killContainer(first);
     fakeLlm().hold(false);
 
-    // The Dispatcher sees the container end (killed: 137) and gives the job back: no wait for the lease, no sweep.
-    await eventually("the job to be given back", async () => {
-      const state = await onlyJobOf(REPOSITORY.fullName, number);
-      return state.status === "queued" && state.attempts === 1;
+    // Nobody watches the container: the job stays running until the lease runs out.
+    expect(await onlyJobOf(REPOSITORY.fullName, number)).toMatchObject({
+      status: "running",
+      attempts: 0,
     });
-    expect(theDispatcher().output()).toContain('"reason":"worker_exited"');
+    expect(theDispatcher().output()).not.toContain('"reason":"worker_exited"');
 
-    // The job was given back with a retry time of 30 seconds and the app announces it again when that has passed (#395),
-    // without a sweep.
+    // Two minutes without a heartbeat: the cron sweep ends the lease and puts the job back.
+    await letTimePass(job.id, 150);
+    const swept = await runSweep(request);
+    expect(swept.expired).toMatchObject({ requeued: 1 });
+
     const run = runsOf(page, REPOSITORY.fullName, number);
     await page.reload();
     await expect(run.locator("[data-status]")).toContainText(
@@ -576,59 +590,5 @@ test.describe("what the hosted deployment does when the Dispatcher, the platform
     expect(comments).toHaveLength(1);
     expect(comments[0]?.revision).toBe(1);
     expect(fakeLlm().requests()).toHaveLength(2);
-  });
-
-  // #375-T10
-  test("a Worker dies and the Dispatcher cannot see its container end: nothing is released, the lease runs out, the sweep puts the job back and a second Worker finishes it", async ({
-    page,
-    request,
-  }) => {
-    await startDispatcher();
-    // The Dispatcher's wait for each container fails like a broken log stream: what became of the Worker is unknown.
-    theDispatcher().breakWaits(true);
-    fakeLlm().hold(true);
-    const { number } = await openPullRequest(page, request, 25, "9");
-    const job = await onlyJobOf(REPOSITORY.fullName, number);
-    await eventually("the first Worker to ask the model", async () => {
-      return fakeLlm().requests().length === 1;
-    });
-    const first = required(
-      theDispatcher().workersOf(job.id)[0],
-      "The first Worker",
-    );
-
-    theDispatcher().killContainer(first);
-    fakeLlm().hold(false);
-    theDispatcher().breakWaits(false);
-
-    // Three failed waits and the Dispatcher gives up knowing: it logs a stable code and leaves the job to its lease.
-    await eventually("the Dispatcher to give up the wait", async () => {
-      return theDispatcher().output().includes("worker_wait_failed");
-    });
-    expect(theDispatcher().output()).not.toContain('"reason":"worker_exited"');
-    expect(await onlyJobOf(REPOSITORY.fullName, number)).toMatchObject({
-      status: "running",
-      attempts: 0,
-    });
-
-    // Two minutes without a heartbeat: the cron sweep ends the lease and puts the job back.
-    await letTimePass(job.id, 150);
-    const swept = await runSweep(request);
-    expect(swept.expired).toMatchObject({ requeued: 1 });
-
-    const run = runsOf(page, REPOSITORY.fullName, number);
-    await page.reload();
-    await expect(run.locator("[data-status]")).toContainText(
-      "Succeeded",
-      RUN_TIMEOUT,
-    );
-    expect(await onlyJobOf(REPOSITORY.fullName, number)).toMatchObject({
-      status: "succeeded",
-      attempts: 1,
-    });
-    expect(theDispatcher().workersOf(job.id)).toHaveLength(2);
-    expect(
-      await getPullRequestComments(request, REPOSITORY.fullName, number),
-    ).toHaveLength(1);
   });
 });

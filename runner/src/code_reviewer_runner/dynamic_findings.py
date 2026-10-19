@@ -39,8 +39,18 @@ class FindingsError(Exception):
         self.detail = detail
 
 
+class EnvelopeError(FindingsError):
+    """The answer as a whole is not the review (a required field of the envelope is missing or has
+    the wrong type, a field the schema does not know): the model can be asked again, which it
+    cannot for one bad finding among good ones (#530)."""
+
+
 def _invalid(detail: str) -> FindingsError:
     return FindingsError(ErrorCode.DYNAMIC_POLICY_VIOLATION, detail)
+
+
+def _envelope_invalid(detail: str) -> EnvelopeError:
+    return EnvelopeError(ErrorCode.DYNAMIC_POLICY_VIOLATION, detail)
 
 
 def location_problem(
@@ -105,6 +115,9 @@ class DynamicFindings:
     # Why the run was wrapped up before it was done (`cost_limit`, `time_limit`, #293). It is set
     # by the runner from its ledger after the answer was validated, never by the model.
     stopped_early: str | None = None
+    # The constants of the envelope the model did not echo, or echoed wrong, and the runner set
+    # itself (#530): `<field>:missing` or `<field>:wrong_value`. Field names only, for the log.
+    envelope_overrides: tuple[str, ...] = ()
 
 
 def _object(value: Any, path: str) -> dict[str, Any]:
@@ -258,15 +271,73 @@ def _valid_findings(
     return tuple(valid), invalid
 
 
+def _constant_note(field: str, document: dict[str, Any], expected: Any) -> str | None:
+    if field not in document:
+        return f"{field}:missing"
+    value = document[field]
+    # JSON Schema's integer type includes integral JSON numbers (1.0), but never booleans.
+    same = value == expected and not isinstance(value, bool) and type(value) in (int, float, str)
+    return None if same else f"{field}:wrong_value"
+
+
+def with_runner_constants(
+    document: dict[str, Any], reviewed_sha: str
+) -> tuple[dict[str, Any], tuple[str, ...]]:
+    """The answer with the constants the runner owns set by the runner, and what it had to set.
+
+    `schemaVersion` and `reviewedSha` (on the envelope and on every finding) are values the runner
+    already knows, so the model is not trusted for them: the pinned engine does not check the
+    arguments of its return tool, and one missing or wrong echo would fail a whole run (#530).
+    Whatever the model wrote is replaced; the notes say per field whether it was missing or a wrong
+    value, and never the value.
+    """
+    notes: list[str] = []
+    for field, expected in (("schemaVersion", 1), ("reviewedSha", reviewed_sha)):
+        note = _constant_note(field, document, expected)
+        if note is not None:
+            notes.append(note)
+    stamped: dict[str, Any] = {**document, "schemaVersion": 1, "reviewedSha": reviewed_sha}
+    findings: Any = document.get("findings")
+    if isinstance(findings, list):
+        entries: list[Any] = findings  # pyright: ignore[reportUnknownVariableType]
+        stamped["findings"] = [
+            {**entry, "reviewedSha": reviewed_sha} if isinstance(entry, dict) else entry
+            for entry in entries
+        ]
+        kinds = {
+            note.partition(":")[2]
+            for entry in entries
+            if isinstance(entry, dict)
+            and (note := _constant_note("reviewedSha", entry, reviewed_sha))  # pyright: ignore[reportUnknownArgumentType]
+        }
+        notes += [f"findings[].reviewedSha:{kind}" for kind in sorted(kinds)]
+    return stamped, tuple(notes)
+
+
+def _required_list(document: dict[str, Any], key: str) -> list[Any]:
+    if key not in document:
+        raise _envelope_invalid(f"{key} is missing")
+    value = document[key]
+    if not isinstance(value, list):
+        raise _envelope_invalid(f"{key} has the wrong type (it must be a list)")
+    return value  # pyright: ignore[reportUnknownVariableType]
+
+
 def parse_dynamic_findings(
     raw: str | dict[str, Any],
     *,
     exported_paths: Collection[str] | None = None,
+    reviewed_sha: str | None = None,
 ) -> DynamicFindings:
     """Parse and validate the findings DTO. Raises `FindingsError`; the envelope is never salvaged.
 
     An invalid finding next to at least one valid one is dropped and counted (`dropped_invalid`,
     #312); a review with findings of which none is valid fails with the first problem.
+
+    `reviewed_sha` is the head the run was made against, which the runner knows: given, the runner
+    sets `schemaVersion` and `reviewedSha` itself (`with_runner_constants`, #530) and the model is
+    not held to them. A problem with the answer as a whole is an `EnvelopeError`. Without it the
+    constants are checked as the contract says, for an output that is already stored or rendered.
 
     `exported_paths` is the set of files the runner prepared; a finding outside it is not a review
     of anything the engine could read, so it is dropped and counted (`dropped_outside_export`)
@@ -279,33 +350,42 @@ def parse_dynamic_findings(
         try:
             value: Any = json.loads(raw)
         except (ValueError, RecursionError):
-            raise _invalid("the findings are not valid JSON") from None
+            raise _envelope_invalid("the findings are not valid JSON") from None
     else:
         value = raw
-    document = _object(value, "the findings")
-    _fields(document, {"schemaVersion", "reviewedSha", "findings", "resolvedIds"}, "")
+    if not isinstance(value, dict):
+        raise _envelope_invalid("the findings must be an object")
+    document: dict[str, Any] = value  # pyright: ignore[reportUnknownVariableType]
+    overrides: tuple[str, ...] = ()
+    if reviewed_sha is not None:
+        document, overrides = with_runner_constants(document, reviewed_sha)
+    try:
+        _fields(document, {"schemaVersion", "reviewedSha", "findings", "resolvedIds"}, "")
+    except FindingsError as error:
+        raise _envelope_invalid(error.detail) from None
     version = document.get("schemaVersion")
     # JSON Schema's integer type includes integral JSON numbers (1.0), but never booleans.
     if isinstance(version, bool) or not isinstance(version, (int, float)) or version != 1:
         raise _invalid("schemaVersion must be 1")
-    reviewed_sha = document.get("reviewedSha")
-    if not isinstance(reviewed_sha, str) or not _SHA.fullmatch(reviewed_sha):
+    stamped_sha = document.get("reviewedSha")
+    if not isinstance(stamped_sha, str) or not _SHA.fullmatch(stamped_sha):
         raise _invalid("reviewedSha must be a 40 character lower-case commit id")
-    findings_value = document.get("findings")
-    if not isinstance(findings_value, list):
-        raise _invalid("findings must be a list")
-    entries: list[Any] = findings_value  # pyright: ignore[reportUnknownVariableType]
+    entries = _required_list(document, "findings")
     if len(entries) > MAX_FINDINGS:
-        raise _invalid(f"findings may hold at most {MAX_FINDINGS} entries")
-    parsed, invalid = _valid_findings(entries, reviewed_sha)
+        raise _envelope_invalid(f"findings may hold at most {MAX_FINDINGS} entries")
+    parsed, invalid = _valid_findings(entries, stamped_sha)
     findings = (
         parsed
         if exported_paths is None
         else tuple(finding for finding in parsed if finding.path in exported_paths)
     )
-    resolved_ids = _ids(document.get("resolvedIds"))
+    ids = _required_list(document, "resolvedIds")
+    try:
+        resolved_ids = _ids(ids)
+    except FindingsError as error:
+        raise _envelope_invalid(error.detail) from None
     return DynamicFindings(
-        reviewed_sha=reviewed_sha,
+        reviewed_sha=stamped_sha,
         findings=findings,
         resolved_ids=resolved_ids,
         dropped_outside_export=len(parsed) - len(findings),
@@ -313,4 +393,5 @@ def parse_dynamic_findings(
         dropped_invalid_reasons=tuple(dict.fromkeys(e.detail for e in invalid))[
             :MAX_DROPPED_REASONS
         ],
+        envelope_overrides=overrides,
     )

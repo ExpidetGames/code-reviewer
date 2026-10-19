@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// The Vercel project settings of the Dispatcher (vercel.json, #329). The supervision that stops a job's VM when its
-// container ends is work held in `waitUntil`, so it lives as long as the function may: `maxDuration` is set here on
-// purpose, as high as a Pro team can, and the region is the one the Sandbox VMs and snapshots are in.
+// The Vercel project settings of the Dispatcher (vercel.json, #329). `maxDuration` is set here on purpose, as high as a
+// Pro team can (it was sized for the supervision of a job's whole life, which the Dispatcher no longer holds, #487; the
+// launch and the stops it starts need far less), and the region is the one the Sandbox VMs and snapshots are in.
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";

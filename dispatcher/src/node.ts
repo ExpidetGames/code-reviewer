@@ -12,6 +12,8 @@ import { createBackgroundTracker } from "./background.ts";
 import { composeDispatcher } from "./compose.ts";
 import type { Launcher, Logger } from "./core/types.ts";
 import { noLauncher } from "./launchers/none.ts";
+import type { ReaperSetup } from "./launchers/sandbox-env.ts";
+import type { Settings } from "./config.ts";
 
 export type NodeServerOptions = {
   env: Readonly<Record<string, string | undefined>>;
@@ -20,6 +22,8 @@ export type NodeServerOptions = {
   port?: number;
   hostname?: string;
   logger?: Logger;
+  /** The platform's fleet (#364, #487): with it the entry serves the reaper's cron route and the App's `POST /stop`. */
+  reaper?: (settings: Settings) => ReaperSetup;
 };
 
 export type NodeServer = {
@@ -37,6 +41,7 @@ export async function startNodeServer(
     launcher: options.launcher,
     background: background.run,
     logger: options.logger,
+    ...(options.reaper === undefined ? {} : { reaper: options.reaper }),
   });
   const port = options.port ?? (Number(options.env.PORT) || 8080);
   const server: ServerType = await new Promise((resolve) => {

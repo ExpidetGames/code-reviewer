@@ -367,9 +367,11 @@ describe("the status of every secret", () => {
       "github_app_private_key",
       "github_app_webhook_secret",
       "operator_llm_key",
+      "operator_llm_key.anthropic",
       "smtp_password",
     ]);
     expect(statuses.map(({ state }) => state)).toEqual([
+      "not_configured",
       "not_configured",
       "not_configured",
       "not_configured",
@@ -407,6 +409,7 @@ describe("the status of every secret", () => {
       "github_app_private_key",
       "github_app_webhook_secret",
       "operator_llm_key",
+      "operator_llm_key.anthropic",
       "smtp_password",
     ]);
     expect(statuses.find(({ name }) => name === "smtp_password")?.state).toBe(

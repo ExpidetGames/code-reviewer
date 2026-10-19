@@ -16,47 +16,11 @@
 //
 // The limits per workspace and for the instance are the same for every provider (src/llm/key-test.ts).
 import { sanitizeServerMessage } from "../../../mail/smtp-failure.ts";
+import { readProviderMessage } from "../provider-message.ts";
 import { KEY_TEST_TIMEOUT_MS, type LlmProviderOperations } from "../types.ts";
-
-const MAX_ANSWER_BYTES = 8 * 1024;
 
 /** The path that tells a key's state without costing anything (no tokens are used). */
 const KEY_INFO_PATH = "/key";
-
-/** The first `error.message` of a JSON answer, or the first line of the text; null if there is nothing. */
-async function providerMessage(response: Response): Promise<string | null> {
-  let text = "";
-  try {
-    const reader = response.body?.getReader();
-    if (reader === undefined) return null;
-    const chunks: Uint8Array[] = [];
-    let size = 0;
-    while (size < MAX_ANSWER_BYTES) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      chunks.push(value);
-      size += value.length;
-    }
-    await reader.cancel().catch(() => undefined);
-    text = Buffer.concat(chunks).subarray(0, MAX_ANSWER_BYTES).toString("utf8");
-  } catch {
-    return null;
-  }
-  try {
-    const parsed: unknown = JSON.parse(text);
-    if (typeof parsed === "object" && parsed !== null) {
-      const error = (parsed as { error?: unknown }).error;
-      if (typeof error === "object" && error !== null) {
-        const message = (error as { message?: unknown }).message;
-        if (typeof message === "string") return message;
-      }
-      if (typeof error === "string") return error;
-    }
-  } catch {
-    // not JSON: use the text
-  }
-  return text;
-}
 
 /**
  * Asks OpenRouter whether `apiKey` is accepted. Never throws; never puts the key (or anything the provider
@@ -90,7 +54,7 @@ export const testKey: LlmProviderOperations["testKey"] = async ({
     await response.body?.cancel().catch(() => undefined);
     return { ok: true };
   }
-  const detail = sanitizeServerMessage(await providerMessage(response), [
+  const detail = sanitizeServerMessage(await readProviderMessage(response), [
     apiKey,
   ]);
   if (response.status === 401 || response.status === 403)

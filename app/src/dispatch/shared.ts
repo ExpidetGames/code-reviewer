@@ -9,6 +9,7 @@ import { getDatabase } from "../db/startup.ts";
 import { DispatchConfigError, loadDispatchConfig } from "./config.ts";
 import { createDispatchHook } from "./hook.ts";
 import { createDispatchService, type DispatchService } from "./service.ts";
+import { createStopService, type StopService } from "./stop.ts";
 
 /**
  * Runs `work` after the response was sent (Next's `after()`, which a serverless platform keeps the function
@@ -53,6 +54,37 @@ export function getDispatchService(
   const config = loadDispatchConfig(env);
   if (config.mode === "poll") return undefined;
   return createDispatchService({ db: getDatabase(), config });
+}
+
+/**
+ * #487: the stop call to the Dispatcher, or undefined while the instance polls (a self-hosted runner and Compose
+ * never get one). Throws `DispatchConfigError` for a bad webhook setup.
+ */
+export function getStopService(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): StopService | undefined {
+  const config = loadDispatchConfig(env);
+  if (config.mode === "poll") return undefined;
+  return createStopService({ db: getDatabase(), config });
+}
+
+/**
+ * #487: the claims of these jobs ended (a result, a failure, a cancel, a lapsed lease, a timeout): the Dispatcher is told
+ * to stop their VMs, after the response, best effort. Never throws and never delays the call that ended the claims.
+ */
+export function stopEndedClaims(
+  jobIds: readonly string[],
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): void {
+  if (jobIds.length === 0) return;
+  try {
+    const service = getStopService(env);
+    if (service !== undefined) runAfterResponse(() => service.stopJobs(jobIds));
+  } catch (error) {
+    // A bad setting turns the stop off like the wake-up (the start check refuses it loudly); anything else is a code.
+    if (!(error instanceof DispatchConfigError))
+      console.error("[dispatch] DISPATCH_STOP_FAILED");
+  }
 }
 
 export { DispatchConfigError };

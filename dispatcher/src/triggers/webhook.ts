@@ -9,85 +9,19 @@
 // refusal of the same kind has the same answer, and no answer or log holds a secret.
 import type { Context, Hono } from "hono";
 import type { HandleResult } from "../core/types.ts";
-import { verifyDispatchSignature, type SigningKey } from "./signature.ts";
 import type { Trigger, TriggerContext } from "./types.ts";
+import {
+  MAX_BODY_BYTES,
+  TOLERANCE_SECONDS,
+  refuse,
+  verifyRequest,
+  type VerifiedRequestOptions,
+} from "./verified-request.ts";
 import { DispatchWebhookSchema } from "./webhook-schema.ts";
 
-/** The body of the call is at most 1 KiB (the contract). */
-export const MAX_BODY_BYTES = 1024;
-export const TOLERANCE_SECONDS = 300;
+export { MAX_BODY_BYTES, TOLERANCE_SECONDS };
 
-export type WebhookTriggerOptions = {
-  /** The key the App signs with now, and the previous one while a rotation is in progress. */
-  keys: readonly SigningKey[];
-  nowSeconds?: () => number;
-  toleranceSeconds?: number;
-};
-
-const REFUSALS = {
-  unauthorized: {
-    status: 401,
-    code: "RUNNER_UNAUTHORIZED",
-    message: "The request could not be verified.",
-  },
-  invalid: {
-    status: 400,
-    code: "RUNNER_REQUEST_INVALID",
-    message: "The request is not valid.",
-  },
-  too_large: {
-    status: 413,
-    code: "RUNNER_BODY_TOO_LARGE",
-    message: "The request body is too large.",
-  },
-} as const;
-
-function refuse(c: Context, kind: keyof typeof REFUSALS): Response {
-  const { status, code, message } = REFUSALS[kind];
-  return c.json({ error: { code, message } }, status);
-}
-
-function isJson(contentType: string | undefined): boolean {
-  if (contentType === undefined) return false;
-  const [type, ...parameters] = contentType
-    .split(";")
-    .map((part) => part.trim().toLowerCase());
-  return (
-    type === "application/json" &&
-    parameters.every((parameter) => parameter === "charset=utf-8")
-  );
-}
-
-/** The body as text, or null when it is longer than `max` bytes (the rest is not read) or not UTF-8. */
-async function readBody(
-  request: Request,
-  max: number,
-): Promise<{ text: string } | "too_large" | "invalid"> {
-  const reader = request.body?.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  while (reader !== undefined) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > max) {
-      await reader.cancel().catch(() => undefined);
-      return "too_large";
-    }
-    chunks.push(value);
-  }
-  const bytes = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  try {
-    return { text: new TextDecoder("utf-8", { fatal: true }).decode(bytes) };
-  } catch {
-    return "invalid";
-  }
-}
+export type WebhookTriggerOptions = VerifiedRequestOptions;
 
 function answer(
   c: Context,
@@ -114,61 +48,24 @@ function answer(
 }
 
 export function webhookTrigger(options: WebhookTriggerOptions): Trigger {
-  const nowSeconds =
-    options.nowSeconds ?? (() => Math.floor(Date.now() / 1000));
-  const tolerance = options.toleranceSeconds ?? TOLERANCE_SECONDS;
-
   return {
     mount(app: Hono, context: TriggerContext) {
       app.post("/dispatch", async (c) => {
-        const request = c.req.raw;
-        if (!isJson(request.headers.get("content-type") ?? undefined))
-          return refuse(c, "invalid");
-        const declared = request.headers.get("content-length");
-        if (
-          declared !== null &&
-          /^\d+$/.test(declared) &&
-          Number(declared) > MAX_BODY_BYTES
-        )
-          return refuse(c, "too_large");
-        const body = await readBody(request, MAX_BODY_BYTES);
-        if (body === "too_large") return refuse(c, "too_large");
-        if (body === "invalid") return refuse(c, "invalid");
-
-        const verdict = verifyDispatchSignature({
-          keys: options.keys,
-          headers: {
-            "x-dispatch-timestamp":
-              request.headers.get("x-dispatch-timestamp") ?? undefined,
-            "x-dispatch-id": request.headers.get("x-dispatch-id") ?? undefined,
-            "x-dispatch-signature":
-              request.headers.get("x-dispatch-signature") ?? undefined,
-            "x-dispatch-key-id":
-              request.headers.get("x-dispatch-key-id") ?? undefined,
-          },
-          rawBody: body.text,
-          nowSeconds: nowSeconds(),
-          toleranceSeconds: tolerance,
+        const verified = await verifyRequest(c, {
+          ...options,
+          logger: context.logger,
+          refusedEvent: "dispatch_refused",
         });
-        if (verdict !== "ok") {
-          context.logger.warn("dispatch_refused", { verdict });
-          return refuse(
-            c,
-            verdict === "malformed" ? "invalid" : "unauthorized",
-          );
-        }
+        if (!verified.ok) return verified.response;
 
         let parsed: unknown;
         try {
-          parsed = JSON.parse(body.text);
+          parsed = JSON.parse(verified.text);
         } catch {
           return refuse(c, "invalid");
         }
         const webhook = DispatchWebhookSchema.safeParse(parsed);
-        if (
-          !webhook.success ||
-          webhook.data.dispatchId !== request.headers.get("x-dispatch-id")
-        ) {
+        if (!webhook.success || webhook.data.dispatchId !== verified.id) {
           context.logger.warn("dispatch_refused", { verdict: "body_invalid" });
           return refuse(c, "invalid");
         }
