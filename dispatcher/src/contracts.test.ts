@@ -8,7 +8,7 @@ import { Ajv2020 } from "ajv/dist/2020.js";
 import { describe, expect, it } from "vitest";
 import { DispatchStopSchema } from "./triggers/stop-schema.ts";
 import { DispatchWebhookSchema } from "./triggers/webhook-schema.ts";
-import { parseSplitClaim } from "./core/app-client.ts";
+import { createAppClient, parseSplitClaim } from "./core/app-client.ts";
 import { readContract } from "./test-support/harness.ts";
 
 const CONTRACTS = join(import.meta.dirname, "..", "..", "contracts");
@@ -54,6 +54,8 @@ describe("the contracts the Dispatcher speaks", () => {
       ["runner-api", "ReleaseResponse", "examples/ReleaseResponse.json"],
       ["runner-api", "VersionResponse", "examples/VersionResponse.json"],
       ["runner-api", "JobStateResponse", "examples/JobStateResponse.json"],
+      ["runner-api", "VmStartRequest", "examples/VmStartRequest.json"],
+      ["runner-api", "VmStartResponse", "examples/VmStartResponse.json"],
     ] as const) {
       const check = validator(file, definition);
       expect(
@@ -71,6 +73,35 @@ describe("the contracts the Dispatcher speaks", () => {
       "DispatchStopIgnored.json",
       "DispatchWebhook.json",
     ]);
+  });
+
+  // #493-T02
+  it("sends a VM start report that is a valid VmStartRequest", async () => {
+    let sent: unknown;
+    const client = createAppClient({
+      appUrl: "https://app.example.test",
+      token: "example-dispatcher-token",
+      poolId: "pool",
+      fetch: (_url, init) => {
+        sent = JSON.parse(String(init?.body));
+        return Promise.resolve(new Response("{}", { status: 200 }));
+      },
+    });
+
+    const result = await client.reportVm(
+      "0b9f6f4e-3c1a-4d9e-8f43-2a7d5e1c9b10",
+      "crj_EXAMPLEexampleEXAMPLEexampleEXAMPLE-0123456",
+      {
+        name: "cr-diff-0b9f6f4e-3c1a-4d9e-8f43-2a7d5e1c9b10-ab12cd34",
+        startedAt: new Date("2026-10-19T10:00:00.250Z"),
+        timeoutSeconds: 2100,
+      },
+    );
+
+    const check = validator("runner-api", "VmStartRequest");
+    expect(result).toBe("recorded");
+    expect(check(sent), JSON.stringify(check.errors)).toBe(true);
+    expect(sent).toStrictEqual(readContract("examples/VmStartRequest.json"));
   });
 
   // #487-T10

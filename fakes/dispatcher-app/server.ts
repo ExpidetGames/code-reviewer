@@ -53,6 +53,7 @@ const SHUTDOWN_CODES = ["runner_shutdown", "launch_failed"];
 export type Route =
   | "claim"
   | "release"
+  | "vm"
   | "version"
   | "job_state"
   | "job"
@@ -61,6 +62,7 @@ export type Route =
 const ROUTES: readonly Route[] = [
   "claim",
   "release",
+  "vm",
   "version",
   "job_state",
   "job",
@@ -124,6 +126,8 @@ export type DispatcherAppFake = {
   /** Sets the status the job state call answers for a job (the App's other statuses than a claim reaches). */
   setJobStatus(jobId: string, status: JobStatus): void;
   results(jobId: string): unknown[];
+  /** #493: the VMs the Dispatcher reported for a job, in order (`VmStartRequest` without the credential). */
+  vms(jobId: string): Array<Record<string, unknown>>;
   requests(): LoggedRequest[];
   reset(): void;
   close(): Promise<void>;
@@ -145,6 +149,8 @@ type JobState = {
   /** The end of the claim of a superseded run; its heartbeats keep it (the App sets it once, at the push). */
   leaseEndsAt: string | null;
   results: Array<Record<string, unknown>>;
+  /** #493: the VMs reported for the job. */
+  vms: Array<Record<string, unknown>>;
 };
 
 type Reply = {
@@ -277,6 +283,7 @@ export async function startDispatcherAppFake(
       supersedeFeature: false,
       leaseEndsAt: null,
       results: [],
+      vms: [],
     });
     return id;
   }
@@ -400,6 +407,34 @@ export async function startDispatcherAppFake(
     return { status: 200, body: { version: 1, job: { id: job.id, status } } };
   }
 
+  /** #493: like the App: the dispatcher token and the credential of the running claim, a closed body, the first report wins. */
+  function handleVm(jobId: string, body: Record<string, unknown>): Reply {
+    const job = jobs.get(jobId);
+    if (job === undefined) return errorReply(404);
+    const known = ["credential", "vmName", "startedAt", "timeoutSeconds"];
+    if (
+      Object.keys(body).some((key) => !known.includes(key)) ||
+      typeof body.vmName !== "string" ||
+      typeof body.startedAt !== "string" ||
+      typeof body.timeoutSeconds !== "number"
+    )
+      return errorReply(400);
+    if (job.credential === null || body.credential !== job.credential)
+      return errorReply(401, "WORKER_CREDENTIAL_INVALID");
+    if (job.status !== "running") return errorReply(409, "RUNNER_JOB_ENDED");
+    const replayed = job.vms.some((vm) => vm.vmName === body.vmName);
+    if (!replayed)
+      job.vms.push({
+        vmName: body.vmName,
+        startedAt: body.startedAt,
+        timeoutSeconds: body.timeoutSeconds,
+      });
+    return {
+      status: 200,
+      body: { version: 1, status: replayed ? "replayed" : "recorded" },
+    };
+  }
+
   function handleJobState(jobId: string): Reply {
     const job = jobs.get(jobId);
     if (job === undefined) return errorReply(404);
@@ -512,7 +547,7 @@ export async function startDispatcherAppFake(
     const path = url.pathname;
     const none = (reply: Reply) => ({ route: null, jobId: null, reply });
     const runnerMatch =
-      /^\/api\/runners\/v1\/(claim|version|jobs\/([^/]+)\/release|jobs\/([^/]+))$/.exec(
+      /^\/api\/runners\/v1\/(claim|version|jobs\/([^/]+)\/(?:release|vm)|jobs\/([^/]+))$/.exec(
         path,
       );
     const workerMatch =
@@ -527,9 +562,11 @@ export async function startDispatcherAppFake(
       const route: Route =
         stateJob !== null
           ? "job_state"
-          : name.startsWith("jobs/")
-            ? "release"
-            : (name as Route);
+          : name.endsWith("/vm")
+            ? "vm"
+            : name.startsWith("jobs/")
+              ? "release"
+              : (name as Route);
       const jobId = stateJob ?? runnerMatch[2] ?? null;
       const expectedMethod =
         route === "version" || route === "job_state" ? "GET" : "POST";
@@ -586,7 +623,9 @@ export async function startDispatcherAppFake(
         reply:
           route === "claim"
             ? handleClaim(body, runnerId)
-            : handleRelease(jobId ?? "", body),
+            : route === "vm"
+              ? handleVm(jobId ?? "", body)
+              : handleRelease(jobId ?? "", body),
       };
     }
 
@@ -761,6 +800,9 @@ export async function startDispatcherAppFake(
     },
     results(jobId) {
       return structuredClone(jobs.get(jobId)?.results ?? []);
+    },
+    vms(jobId) {
+      return structuredClone(jobs.get(jobId)?.vms ?? []);
     },
     requests() {
       return structuredClone(log);
