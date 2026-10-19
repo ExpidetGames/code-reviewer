@@ -24,7 +24,7 @@ import { createBillingJournalRepository } from "../db/repositories/billing-journ
 import { createBillingTopUpIntentsRepository } from "../db/repositories/billing-topup-intents-repository.ts";
 import type { BillingEngine } from "./billing-engines.ts";
 
-export type WebhookRequest = { headers: Headers; rawBody: string };
+export type WebhookRequest = { headers: Headers; rawBody: Uint8Array };
 
 export type AdapterKitSubject = {
   name: string;
@@ -45,6 +45,19 @@ export type AdapterKitSubject = {
       code: BillingWebhookRejectionCode;
     }>;
   };
+  /**
+   * Absent for an adapter that cannot be asked about a top-up. Each case is the answer of `lookupTopUp` to `input`:
+   * a normalized payment event, or null when the provider has nothing (yet).
+   */
+  lookup?: Array<{
+    label: string;
+    input: {
+      intentId: string;
+      checkout: string | null;
+      payment: string | null;
+    };
+    expected: BillingEvent | null;
+  }>;
 };
 
 export function describeAdapterContract(subject: AdapterKitSubject): void {
@@ -77,6 +90,24 @@ export function describeAdapterContract(subject: AdapterKitSubject): void {
       expect(["redirect", "none"]).toContain(started.checkout.kind);
       if (started.checkout.kind === "redirect")
         expect(started.checkout.url).toMatch(/^https:\/\//);
+    });
+
+    // #497-T14
+    it("can be asked about a top-up (for the check-payment action) exactly when it declares fixtures for it", async () => {
+      expect(adapter.lookupTopUp !== undefined).toBe(
+        subject.lookup !== undefined,
+      );
+      for (const { label, input, expected } of subject.lookup ?? []) {
+        const event = await adapter.lookupTopUp?.(input);
+        expect(event, label).toEqual(expected);
+        if (event !== null && event !== undefined) {
+          expect(() => validateBillingEvent(event), label).not.toThrow();
+          expect(
+            ["payment.succeeded", "payment.failed", "payment.expired"],
+            label,
+          ).toContain(event.type);
+        }
+      }
     });
 
     if (subject.webhook === undefined) {
@@ -114,8 +145,30 @@ export function describeAdapterContract(subject: AdapterKitSubject): void {
         expect(result, label).toEqual({ ok: false, code });
         // The answer carries the code only: no body, no header, no secret.
         expect(JSON.stringify(result), label).not.toContain(
-          request.rawBody.slice(0, 20),
+          new TextDecoder().decode(request.rawBody.slice(0, 20)),
         );
+      }
+    });
+
+    // #497-T14
+    it("verifies its webhook over bytes: the signed body with a byte order mark in front, or with bytes that are not UTF-8, is refused by code", async () => {
+      const first = webhook.valid[0];
+      if (first === undefined) throw new Error("no fixture");
+      const withMark = new Uint8Array([
+        0xef,
+        0xbb,
+        0xbf,
+        ...first.request.rawBody,
+      ]);
+      const notUtf8 = new Uint8Array([0x7b, 0xff, 0xfe, 0x7d]);
+      for (const rawBody of [withMark, notUtf8]) {
+        const result = await verify({
+          headers: first.request.headers,
+          rawBody,
+        });
+        expect(result.ok).toBe(false);
+        if (!result.ok)
+          expect(BILLING_WEBHOOK_REJECTION_CODES).toContain(result.code);
       }
     });
 
@@ -194,7 +247,7 @@ export function describeAdapterApplication(
               event: await parse(request),
             });
           const journal = createBillingJournalRepository(db, workspaceId);
-          return { db, adapter, fixtures, apply, journal };
+          return { db, adapter, fixtures, apply, journal, intentId: intent.id };
         }
 
         // #497-T14
@@ -219,6 +272,29 @@ export function describeAdapterApplication(
             ),
           ).toHaveLength(1);
           expect((await journal.verify()).consistent).toBe(true);
+        });
+
+        // #497-T14
+        it("credits a payment found by lookup and the same payment delivered by webhook once", async () => {
+          const { adapter, db, fixtures, apply, journal, intentId } =
+            await prepare();
+          if (adapter.lookupTopUp === undefined) return;
+
+          const found = await adapter.lookupTopUp({
+            intentId,
+            checkout: null,
+            payment: null,
+          });
+          if (found === null) throw new Error("the lookup found nothing");
+          const first = await applyBillingEvent(db, {
+            provider: adapter.id,
+            event: found,
+          });
+          const second = await apply(fixtures.paid);
+
+          expect(first.outcome).toBe("applied");
+          expect(second.outcome).toBe("duplicate_ignored");
+          expect((await journal.balance()).balanceMicroUsd).toBe(amount);
         });
 
         // #497-T14

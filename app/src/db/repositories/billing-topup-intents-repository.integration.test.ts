@@ -126,28 +126,166 @@ function suite(engine: BillingEngine) {
       const paidAfterFailure = await intents.markPaid(failing.id, {
         paymentRef: "pi_f",
         checkoutRef: "cs_f",
+        creditedMicroUsd: 25 * USD,
       });
       expect(paidAfterFailure).toMatchObject({
         changed: true,
         intent: { state: "paid", paymentRef: "pi_f", checkoutRef: "cs_f" },
       });
 
-      const paid = await intents.markPaid(paying.id, { paymentRef: "pi_1" });
+      const paid = await intents.markPaid(paying.id, {
+        paymentRef: "pi_1",
+        creditedMicroUsd: 25 * USD,
+      });
       expect(paid).toMatchObject({
         changed: true,
         intent: { state: "paid", paymentRef: "pi_1" },
       });
       expect(
-        (await intents.markPaid(paying.id, { paymentRef: "pi_1" }))?.changed,
+        (
+          await intents.markPaid(paying.id, {
+            paymentRef: "pi_1",
+            creditedMicroUsd: 25 * USD,
+          })
+        )?.changed,
       ).toBe(false);
       expect(
-        await codeOf(intents.markPaid(paying.id, { paymentRef: "pi_2" })),
+        await codeOf(
+          intents.markPaid(paying.id, {
+            paymentRef: "pi_2",
+            creditedMicroUsd: 25 * USD,
+          }),
+        ),
       ).toBe("ref_conflict");
       expect((await intents.markFailed(paying.id))?.changed).toBe(false);
       expect((await intents.get(paying.id))?.state).toBe("paid");
       expect(
-        await intents.markPaid("missing", { paymentRef: "pi_3" }),
+        await intents.markPaid("missing", {
+          paymentRef: "pi_3",
+          creditedMicroUsd: 25 * USD,
+        }),
       ).toBeUndefined();
+    });
+
+    // #497-T03
+    it("records what the payment credited, and never changes it once paid", async () => {
+      const { db, workspaceId } = await engine.create();
+      const intents = createBillingTopUpIntentsRepository(db, workspaceId);
+      const intent = await intents.create({
+        adapter: "fake",
+        amountMicroUsd: 25 * USD,
+      });
+      expect(intent).toMatchObject({
+        creditedMicroUsd: 0,
+        refundedMicroUsd: 0,
+        disputedMicroUsd: 0,
+      });
+
+      await intents.markPaid(intent.id, {
+        paymentRef: "pi_1",
+        creditedMicroUsd: 20 * USD,
+      });
+      const again = await intents.markPaid(intent.id, {
+        paymentRef: "pi_1",
+        creditedMicroUsd: 25 * USD,
+      });
+
+      expect(again?.changed).toBe(false);
+      expect((await intents.get(intent.id))?.creditedMicroUsd).toBe(20 * USD);
+    });
+
+    // #497-T07
+    it("keeps running totals of what refunds and disputes debited, inside what the payment credited", async () => {
+      const { db, workspaceId } = await engine.create();
+      const intents = createBillingTopUpIntentsRepository(db, workspaceId);
+      const intent = await intents.create({
+        adapter: "fake",
+        amountMicroUsd: 25 * USD,
+      });
+      await intents.markPaid(intent.id, {
+        paymentRef: "pi_1",
+        creditedMicroUsd: 25 * USD,
+      });
+
+      await intents.addDebited(intent.id, "refund", 20 * USD);
+      await intents.addDebited(intent.id, "dispute", 5 * USD);
+      expect(await intents.get(intent.id)).toMatchObject({
+        refundedMicroUsd: 20 * USD,
+        disputedMicroUsd: 5 * USD,
+      });
+      // Together they stay inside the credit, and a total never goes below zero.
+      expect(await codeOf(intents.addDebited(intent.id, "refund", 1))).toBe(
+        "debit_out_of_bounds",
+      );
+      expect(
+        await codeOf(intents.addDebited(intent.id, "dispute", -6 * USD)),
+      ).toBe("debit_out_of_bounds");
+      await intents.addDebited(intent.id, "refund", -20 * USD);
+      expect((await intents.get(intent.id))?.refundedMicroUsd).toBe(0);
+      expect(await intents.addDebited("missing", "refund", 1)).toBeUndefined();
+    });
+
+    // #497-T07
+    it("refuses in the database a total above the credit, so no code path can over-debit", async () => {
+      const { db, workspaceId } = await engine.create();
+      const intents = createBillingTopUpIntentsRepository(db, workspaceId);
+      const intent = await intents.create({
+        adapter: "fake",
+        amountMicroUsd: 25 * USD,
+      });
+      await intents.markPaid(intent.id, {
+        paymentRef: "pi_1",
+        creditedMicroUsd: 25 * USD,
+      });
+
+      await db
+        .updateTable("billing_topup_intents")
+        .set({ refunded_micro_usd: 20 * USD, disputed_micro_usd: 5 * USD })
+        .where("id", "=", intent.id)
+        .execute();
+      await expect(
+        db
+          .updateTable("billing_topup_intents")
+          .set({ refunded_micro_usd: 20 * USD, disputed_micro_usd: 6 * USD })
+          .where("id", "=", intent.id)
+          .execute(),
+      ).rejects.toThrow();
+      await expect(
+        db
+          .updateTable("billing_topup_intents")
+          .set({ refunded_micro_usd: -1 })
+          .where("id", "=", intent.id)
+          .execute(),
+      ).rejects.toThrow();
+    });
+
+    // #497-T03
+    it("expires a pending intent only, and a payment can still pay an expired one", async () => {
+      const { db, workspaceId } = await engine.create();
+      const intents = createBillingTopUpIntentsRepository(db, workspaceId);
+      const pending = await intents.create({
+        adapter: "fake",
+        amountMicroUsd: 25 * USD,
+      });
+      const paid = await intents.create({
+        adapter: "fake",
+        amountMicroUsd: 25 * USD,
+      });
+      await intents.markPaid(paid.id, {
+        paymentRef: "pi_p",
+        creditedMicroUsd: 25 * USD,
+      });
+
+      expect((await intents.markExpired(pending.id))?.changed).toBe(true);
+      expect((await intents.markExpired(pending.id))?.changed).toBe(false);
+      expect((await intents.markExpired(paid.id))?.changed).toBe(false);
+      expect((await intents.get(paid.id))?.state).toBe("paid");
+      expect(await intents.markExpired("missing")).toBeUndefined();
+      const late = await intents.markPaid(pending.id, {
+        paymentRef: "pi_late",
+        creditedMicroUsd: 25 * USD,
+      });
+      expect(late?.intent.state).toBe("paid");
     });
 
     // #497-T03
@@ -162,10 +300,18 @@ function suite(engine: BillingEngine) {
         adapter: "fake",
         amountMicroUsd: 25 * USD,
       });
-      await intents.markPaid(first.id, { paymentRef: "pi_1" });
+      await intents.markPaid(first.id, {
+        paymentRef: "pi_1",
+        creditedMicroUsd: 25 * USD,
+      });
 
       expect(
-        await codeOf(intents.markPaid(second.id, { paymentRef: "pi_1" })),
+        await codeOf(
+          intents.markPaid(second.id, {
+            paymentRef: "pi_1",
+            creditedMicroUsd: 25 * USD,
+          }),
+        ),
       ).toBe("ref_conflict");
       expect((await intents.get(second.id))?.state).toBe("pending");
     });
@@ -286,6 +432,60 @@ function suite(engine: BillingEngine) {
         claimed: false,
         outcome: "applied",
       });
+    });
+
+    // #497-T09
+    it("lists the events flagged for review, oldest first, and leaves the others out", async () => {
+      const { db } = await engine.create();
+      const events = createBillingWebhookEventsRepository(db);
+      const record = async (
+        id: string,
+        outcome: "applied" | "amount_rejected" | "intent_unresolved",
+        review: boolean,
+        receivedAt: string,
+      ) => {
+        await events.claim("fake", id, receivedAt);
+        await events.finish(
+          "fake",
+          id,
+          outcome,
+          { subject: `payment:pi_${id}`, occurredAt: null },
+          review,
+        );
+      };
+      await record(
+        "late",
+        "intent_unresolved",
+        true,
+        "2026-10-19T10:00:00.000Z",
+      );
+      await record("fine", "applied", false, "2026-10-19T09:00:00.000Z");
+      await record(
+        "early",
+        "amount_rejected",
+        true,
+        "2026-10-19T08:00:00.000Z",
+      );
+
+      const open = await events.listOpenReviews({ limit: 10 });
+
+      expect(open).toEqual([
+        {
+          provider: "fake",
+          eventId: "early",
+          outcome: "amount_rejected",
+          subject: "payment:pi_early",
+          receivedAt: "2026-10-19T08:00:00.000Z",
+        },
+        {
+          provider: "fake",
+          eventId: "late",
+          outcome: "intent_unresolved",
+          subject: "payment:pi_late",
+          receivedAt: "2026-10-19T10:00:00.000Z",
+        },
+      ]);
+      expect(await events.listOpenReviews({ limit: 1 })).toHaveLength(1);
     });
 
     // #497-T06

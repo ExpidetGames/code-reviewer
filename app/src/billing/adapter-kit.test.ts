@@ -9,6 +9,7 @@ import {
 import {
   FAKE_WEBHOOK_SECRET,
   createFakeBillingAdapter,
+  fakeBodyBytes,
   fakeWebhookRequest,
   signFakeBody,
   type FakeWireEvent,
@@ -38,7 +39,32 @@ const manual: AdapterKitSubject = {
 
 const fake: AdapterKitSubject = {
   name: "fake",
-  create: () => createFakeBillingAdapter(),
+  create: () =>
+    createFakeBillingAdapter({
+      lookups: (intentId) => (intentId === "intent-1" ? payment : undefined),
+    }),
+  lookup: [
+    {
+      label: "a paid top-up",
+      input: { intentId: "intent-1", checkout: null, payment: null },
+      expected: {
+        type: "payment.succeeded",
+        eventId: "evt_1",
+        occurredAt: T,
+        intentId: "intent-1",
+        payment: "pi_1",
+        checkout: "cs_1",
+        creditable: 25 * USD,
+        gross: 29_750_000,
+        tax: 4_750_000,
+      },
+    },
+    {
+      label: "a top-up the provider does not know",
+      input: { intentId: "intent-unknown", checkout: null, payment: null },
+      expected: null,
+    },
+  ],
   webhook: {
     now: NOW,
     valid: [
@@ -66,6 +92,7 @@ const fake: AdapterKitSubject = {
           payment: "pi_1",
           refund: "re_1",
           amount: 5 * USD,
+          payment_amount: 29_750_000,
           status: "approved",
         }),
         expected: {
@@ -75,6 +102,7 @@ const fake: AdapterKitSubject = {
           payment: "pi_1",
           refund: "re_1",
           amount: 5 * USD,
+          paymentAmount: 29_750_000,
           initiatedBy: "provider",
           status: "approved",
         },
@@ -87,7 +115,8 @@ const fake: AdapterKitSubject = {
           created: T,
           payment: "pi_1",
           dispute: "dp_1",
-          amount: 25 * USD,
+          amount: 29_750_000,
+          payment_amount: 29_750_000,
           status: "lost",
         }),
         expected: {
@@ -96,7 +125,8 @@ const fake: AdapterKitSubject = {
           occurredAt: T,
           payment: "pi_1",
           dispute: "dp_1",
-          amount: 25 * USD,
+          amount: 29_750_000,
+          paymentAmount: 29_750_000,
           status: "lost",
         },
       },
@@ -118,6 +148,24 @@ const fake: AdapterKitSubject = {
         },
       },
       {
+        label: "a checkout that expired",
+        request: fakeWebhookRequest({
+          id: "evt_6",
+          kind: "payment_expired",
+          created: T,
+          intent: "intent-1",
+          checkout: "cs_1",
+        }),
+        expected: {
+          type: "payment.expired",
+          eventId: "evt_6",
+          occurredAt: T,
+          intentId: "intent-1",
+          payment: null,
+          checkout: "cs_1",
+        },
+      },
+      {
         label: "an event of a type nobody uses",
         request: fakeWebhookRequest({ id: "evt_5", kind: "other", created: T }),
         expected: { type: "ignored", eventId: "evt_5", occurredAt: T },
@@ -126,13 +174,16 @@ const fake: AdapterKitSubject = {
     rejected: [
       {
         label: "no signature",
-        request: { rawBody: JSON.stringify(payment), headers: new Headers() },
+        request: {
+          rawBody: fakeBodyBytes(JSON.stringify(payment)),
+          headers: new Headers(),
+        },
         code: "signature_missing",
       },
       {
         label: "an empty signature",
         request: {
-          rawBody: JSON.stringify(payment),
+          rawBody: fakeBodyBytes(JSON.stringify(payment)),
           headers: new Headers({ "x-fake-signature": "" }),
         },
         code: "signature_missing",
@@ -145,7 +196,9 @@ const fake: AdapterKitSubject = {
       {
         label: "an altered body",
         request: {
-          rawBody: JSON.stringify({ ...payment, net: 500 * USD }),
+          rawBody: fakeBodyBytes(
+            JSON.stringify({ ...payment, net: 500 * USD }),
+          ),
           headers: new Headers({
             "x-fake-signature": signFakeBody(JSON.stringify(payment)),
           }),
@@ -155,7 +208,7 @@ const fake: AdapterKitSubject = {
       {
         label: "a signature that is not hex",
         request: {
-          rawBody: JSON.stringify(payment),
+          rawBody: fakeBodyBytes(JSON.stringify(payment)),
           headers: new Headers({ "x-fake-signature": "zz" }),
         },
         code: "signature_invalid",

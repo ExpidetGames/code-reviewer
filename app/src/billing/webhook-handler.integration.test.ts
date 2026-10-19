@@ -16,7 +16,10 @@ import { setBillingSwitch } from "../test-support/billing-switch.ts";
 import { describeQuery } from "../test-support/query-hook.ts";
 import {
   createFakeBillingAdapter,
+  fakeBodyBytes,
+  fakeBodyText,
   fakeWebhookRequest,
+  signFakeBody,
   type FakeWireEvent,
 } from "../test-support/fake-billing-adapter.ts";
 import type { BillingAdapter } from "./adapter.ts";
@@ -101,7 +104,7 @@ function suite(engine: BillingEngine) {
       };
       const post = (
         handler: (request: Request) => Promise<Response>,
-        request: { headers: Headers; rawBody: string },
+        request: { headers: Headers; rawBody: Uint8Array },
       ) =>
         handler(
           new Request("https://app.example.test/api/billing/webhook", {
@@ -180,7 +183,9 @@ function suite(engine: BillingEngine) {
         fakeWebhookRequest(s.payment, "another-secret"),
         {
           headers: good.headers,
-          rawBody: good.rawBody.replace("25000000", "50000000"),
+          rawBody: fakeBodyBytes(
+            fakeBodyText(good.rawBody).replace("25000000", "50000000"),
+          ),
         },
         {
           headers: new Headers({ "x-fake-signature": "not-hex" }),
@@ -373,8 +378,8 @@ function suite(engine: BillingEngine) {
       expect(s.lines.join("\n")).not.toContain(SECRET_BODY_MARKER);
     });
 
-    // #497-T10
-    it("answers 500 when the adapter hands over something that is not an event, and records nothing", async () => {
+    // #497-T09
+    it("answers 200 event_invalid for a signed event that is not a normalized event, records it, and raises a code in the log", async () => {
       const adapter: BillingAdapter = {
         ...createFakeBillingAdapter(),
         verifyAndParseWebhook: () =>
@@ -387,8 +392,8 @@ function suite(engine: BillingEngine) {
               intentId: null,
               payment: "pi_x",
               checkout: null,
-              creditable: 1.5,
-              gross: 2,
+              creditable: 1.5 as never,
+              gross: 2 as never,
               tax: null,
             },
           }),
@@ -396,12 +401,65 @@ function suite(engine: BillingEngine) {
       const s = await setup({ adapter });
 
       const response = await s.post(s.handler, fakeWebhookRequest(s.payment));
+      const repeat = await s.post(s.handler, fakeWebhookRequest(s.payment));
 
-      expect(response.status).toBe(500);
-      expect(s.lines.join("\n")).toContain("event_invalid");
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ outcome: "event_invalid" });
+      expect(repeat.status).toBe(200);
+      expect(s.lines).toContain("error billing_webhook_event_invalid");
       expect(
         await s.db.selectFrom("billing_webhook_events").selectAll().execute(),
-      ).toEqual([]);
+      ).toMatchObject([{ event_id: "evt_x", outcome: "event_invalid" }]);
+    });
+
+    // #497-T09
+    it("logs a paid-but-not-credited outcome at error level with its code, and a benign outcome at info", async () => {
+      const s = await setup();
+
+      await s.post(
+        s.handler,
+        fakeWebhookRequest({
+          ...s.payment,
+          intent: "nobody",
+          checkout: null,
+          payment: "pi_nobody",
+        }),
+      );
+      await s.post(
+        s.handler,
+        fakeWebhookRequest({ id: "evt_2", kind: "other", created: T }),
+      );
+
+      expect(s.lines).toContain(
+        "error billing_webhook_needs_review outcome=intent_unresolved",
+      );
+      expect(s.lines).toContain(
+        "info billing_webhook_applied outcome=ignored_type",
+      );
+      expect(s.lines.join("\n")).not.toContain("pi_nobody");
+    });
+
+    // #497-T02
+    it("hands the adapter the exact bytes of the body: a byte order mark and bytes that are not UTF-8 survive", async () => {
+      const seen: Uint8Array[] = [];
+      const adapter: BillingAdapter = {
+        ...createFakeBillingAdapter(),
+        verifyAndParseWebhook: ({ rawBody }) => {
+          seen.push(rawBody);
+          return Promise.resolve({ ok: false, code: "signature_invalid" });
+        },
+      };
+      const s = await setup({ adapter });
+      const bytes = new Uint8Array([
+        0xef, 0xbb, 0xbf, 0x7b, 0x22, 0xff, 0xfe, 0x22, 0x7d,
+      ]);
+
+      await s.post(s.handler, { headers: new Headers(), rawBody: bytes });
+
+      expect(seen).toHaveLength(1);
+      expect(seen[0]).toBeInstanceOf(Uint8Array);
+      expect([...(seen[0] ?? [])]).toEqual([...bytes]);
+      expect(signFakeBody(bytes)).toMatch(/^[0-9a-f]{64}$/);
     });
 
     // #497-T13

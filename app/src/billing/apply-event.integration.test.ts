@@ -13,7 +13,7 @@ import {
   BILLING_ENGINES,
   type BillingEngine,
 } from "../test-support/billing-engines.ts";
-import { BillingAdapterError, type BillingEvent } from "./adapter.ts";
+import { type BillingEvent } from "./adapter.ts";
 import { applyBillingEvent } from "./apply-event.ts";
 
 const USD = 1_000_000;
@@ -87,6 +87,7 @@ function refund(
     payment: s.payment,
     refund: "re_1",
     amount: 5 * USD,
+    paymentAmount: 25 * USD,
     initiatedBy: "provider",
     status: "approved",
     ...overrides,
@@ -104,6 +105,7 @@ function dispute(
     payment: s.payment,
     dispute: "dp_1",
     amount: 25 * USD,
+    paymentAmount: 25 * USD,
     status: "lost",
     ...overrides,
   };
@@ -710,23 +712,59 @@ function suite(engine: BillingEngine) {
       });
 
       // #497-T09
-      it("refuses an event that is not a normalized event and records nothing", async () => {
+      it("records a signed event that is not a normalized event as event_invalid, flags it for review and does not throw", async () => {
         const s = await seed(engine);
         const event = succeeded(s, { creditable: 1.5 });
 
-        await expect(apply(s, event)).rejects.toMatchObject({
-          code: "event_invalid",
+        const result = await apply(s, event);
+        const repeat = await apply(s, event);
+
+        expect(result).toMatchObject({
+          outcome: "event_invalid",
+          workspaceId: null,
+          needsReview: true,
         });
-        await expect(apply(s, event)).rejects.toBeInstanceOf(
-          BillingAdapterError,
-        );
+        expect(repeat.outcome).toBe("duplicate_ignored");
+        expect(await entries(s)).toEqual([]);
         expect(
-          await createBillingWebhookEventsRepository(s.db).claim(
-            PROVIDER,
-            event.eventId,
-            at(0),
-          ),
-        ).toEqual({ claimed: true });
+          await createBillingWebhookEventsRepository(s.db).listOpenReviews({
+            limit: 10,
+          }),
+        ).toMatchObject([
+          {
+            provider: PROVIDER,
+            eventId: event.eventId,
+            outcome: "event_invalid",
+          },
+        ]);
+      });
+
+      // #497-T09
+      it("answers event_invalid without recording when even the event id is not an id", async () => {
+        const s = await seed(engine);
+
+        const result = await apply(s, succeeded(s, { eventId: "has space" }));
+
+        expect(result).toMatchObject({
+          outcome: "event_invalid",
+          needsReview: true,
+        });
+        expect(
+          await s.db.selectFrom("billing_webhook_events").selectAll().execute(),
+        ).toEqual([]);
+      });
+
+      // #497-T09
+      it("accepts a payment with no tax: zero is a real amount", async () => {
+        const s = await seed(engine);
+
+        const result = await apply(
+          s,
+          succeeded(s, { gross: 25 * USD, tax: 0 as never }),
+        );
+
+        expect(result.outcome).toBe("applied");
+        expect(await balance(s)).toBe(25 * USD);
       });
 
       // #497-T10
@@ -765,6 +803,308 @@ function suite(engine: BillingEngine) {
         expect(await balance(s)).toBe(25 * USD);
       });
 
+      // #497-T07
+      it("debits the net share of a full refund of a taxed payment: 29.75 of a 29.75 payment takes exactly the 25 credited", async () => {
+        const s = await seed(engine);
+        await apply(s, succeeded(s));
+
+        const result = await apply(
+          s,
+          refund(s, { amount: 29_750_000, paymentAmount: 29_750_000 }),
+        );
+
+        expect(result.outcome).toBe("applied");
+        expect(await balance(s)).toBe(0);
+        expect((await entries(s))[0]).toMatchObject({
+          type: "refund",
+          amountMicroUsd: -25 * USD,
+        });
+        expect(await intentOf(s)).toMatchObject({
+          creditedMicroUsd: 25 * USD,
+          refundedMicroUsd: 25 * USD,
+        });
+      });
+
+      // #497-T07
+      it("debits the share of a partial refund, rounded down, whatever the unit of the provider", async () => {
+        const s = await seed(engine);
+        await apply(s, succeeded(s));
+
+        // Half of a 29.75 payment, in micro-USD.
+        await apply(
+          s,
+          refund(s, {
+            refund: "re_half",
+            amount: 14_875_000,
+            paymentAmount: 29_750_000,
+          }),
+        );
+        // 10.00 of 29.75, in cents: 25 000 000 x 1000 / 2975 = 8 403 361.3...
+        await apply(
+          s,
+          refund(s, { refund: "re_cents", amount: 1000, paymentAmount: 2975 }),
+        );
+
+        expect(
+          (await entries(s)).map((entry) => entry.amountMicroUsd).sort(),
+        ).toEqual([-12_500_000, -8_403_361]);
+        expect(await balance(s)).toBe(25 * USD - 12_500_000 - 8_403_361);
+      });
+
+      // #497-T07
+      it("debits the net share of a lost dispute of a taxed payment", async () => {
+        const s = await seed(engine);
+        await apply(s, succeeded(s));
+
+        const result = await apply(
+          s,
+          dispute(s, { amount: 29_750_000, paymentAmount: 29_750_000 }),
+        );
+
+        expect(result.outcome).toBe("applied");
+        expect(await balance(s)).toBe(0);
+        expect(await intentOf(s)).toMatchObject({
+          disputedMicroUsd: 25 * USD,
+        });
+      });
+
+      // #497-T07
+      it("rejects a refund or dispute larger than the payment it names", async () => {
+        const s = await seed(engine);
+        await apply(s, succeeded(s));
+
+        const refunded = await apply(
+          s,
+          refund(s, { amount: 29_750_001, paymentAmount: 29_750_000 }),
+        );
+
+        expect(refunded.outcome).toBe("amount_rejected");
+        expect(await balance(s)).toBe(25 * USD);
+      });
+
+      // #497-T07
+      it("never debits more than the payment credited in total: two refunds of 20 on a 25 payment take 20, not 40", async () => {
+        const s = await seed(engine);
+        await apply(s, succeeded(s));
+
+        const first = await apply(
+          s,
+          refund(s, { refund: "re_a", amount: 20 * USD }),
+        );
+        const second = await apply(
+          s,
+          refund(s, { refund: "re_b", amount: 20 * USD }),
+        );
+
+        expect(first.outcome).toBe("applied");
+        expect(second).toMatchObject({
+          outcome: "amount_rejected",
+          needsReview: true,
+        });
+        expect(await balance(s)).toBe(5 * USD);
+        expect(await intentOf(s)).toMatchObject({ refundedMicroUsd: 20 * USD });
+      });
+
+      // #497-T07
+      it("counts refunds and disputes together: a refund of 25 and a dispute of 25 on a 25 payment take 25", async () => {
+        const s = await seed(engine);
+        await apply(s, succeeded(s));
+
+        const refunded = await apply(s, refund(s, { amount: 25 * USD }));
+        const disputed = await apply(s, dispute(s, { amount: 25 * USD }));
+
+        expect(refunded.outcome).toBe("applied");
+        expect(disputed.outcome).toBe("amount_rejected");
+        expect(await balance(s)).toBe(0);
+        expect(await intentOf(s)).toMatchObject({
+          refundedMicroUsd: 25 * USD,
+          disputedMicroUsd: 0,
+        });
+      });
+
+      // #497-T07
+      it("serializes refunds that arrive at the same moment, so they stay inside the credit together", async () => {
+        const s = await seed(engine);
+        await apply(s, succeeded(s));
+
+        const results = await Promise.all(
+          ["re_a", "re_b", "re_c"].map((id) =>
+            apply(s, refund(s, { refund: id, amount: 20 * USD })),
+          ),
+        );
+
+        expect(
+          results.filter((result) => result.outcome === "applied"),
+        ).toHaveLength(1);
+        expect(await balance(s)).toBe(5 * USD);
+      });
+
+      // #497-T07
+      it("frees room when a refund is rejected or a dispute is won, and counts a refund once as it moves from pending to approved", async () => {
+        const s = await seed(engine);
+        await apply(s, succeeded(s));
+        await apply(
+          s,
+          refund(s, {
+            refund: "re_a",
+            amount: 20 * USD,
+            status: "pending",
+            occurredAt: at(10),
+          }),
+        );
+        const approved = await apply(
+          s,
+          refund(s, {
+            refund: "re_a",
+            amount: 20 * USD,
+            status: "approved",
+            occurredAt: at(11),
+          }),
+        );
+        expect(approved.outcome).toBe("duplicate_ignored");
+        expect(await intentOf(s)).toMatchObject({ refundedMicroUsd: 20 * USD });
+
+        await apply(
+          s,
+          refund(s, {
+            refund: "re_a",
+            amount: 20 * USD,
+            status: "rejected",
+            occurredAt: at(12),
+          }),
+        );
+        expect(await intentOf(s)).toMatchObject({ refundedMicroUsd: 0 });
+        expect(await balance(s)).toBe(25 * USD);
+
+        const next = await apply(
+          s,
+          refund(s, { refund: "re_b", amount: 20 * USD }),
+        );
+        expect(next.outcome).toBe("applied");
+
+        await apply(s, dispute(s, { amount: 5 * USD, occurredAt: at(20) }));
+        expect(await intentOf(s)).toMatchObject({ disputedMicroUsd: 5 * USD });
+        await apply(
+          s,
+          dispute(s, { amount: 5 * USD, status: "won", occurredAt: at(21) }),
+        );
+        expect(await intentOf(s)).toMatchObject({ disputedMicroUsd: 0 });
+        expect(await balance(s)).toBe(5 * USD);
+      });
+
+      // #497-T07
+      it("leaves the totals alone for a rejected refund that was never debited", async () => {
+        const s = await seed(engine);
+        await apply(s, succeeded(s));
+        await apply(s, refund(s, { refund: "re_a", amount: 20 * USD }));
+        await apply(s, refund(s, { refund: "re_b", amount: 20 * USD }));
+
+        const reversal = await apply(
+          s,
+          refund(s, {
+            refund: "re_b",
+            amount: 20 * USD,
+            status: "rejected",
+            occurredAt: at(11),
+          }),
+        );
+
+        expect(reversal.outcome).toBe("nothing_to_reverse");
+        expect(await intentOf(s)).toMatchObject({ refundedMicroUsd: 20 * USD });
+        expect(await balance(s)).toBe(5 * USD);
+      });
+
+      // #497-T09
+      it("flags every paid-but-not-credited outcome for review with a stable code, and nothing that is benign", async () => {
+        const s = await seed(engine);
+        const events = createBillingWebhookEventsRepository(s.db);
+
+        const unknown = succeeded(s, {
+          intentId: null,
+          payment: "pi_nobody",
+          checkout: null,
+        });
+        const tooMuch = succeeded(s, { creditable: 25 * USD + 1 });
+        const unresolved = await apply(s, unknown);
+        const rejected = await apply(s, tooMuch);
+        const paid = await apply(s, succeeded(s));
+        const refundTooEarly = refund(s, { payment: "pi_nobody" });
+        const refundResult = await apply(s, refundTooEarly);
+        const second = await apply(
+          s,
+          succeeded(s, { payment: "pi_second", checkout: "cs_second" }),
+        );
+        const benign = await apply(s, {
+          type: "ignored",
+          eventId: nextId("evt"),
+          occurredAt: at(0),
+        });
+
+        expect(unresolved).toMatchObject({
+          outcome: "intent_unresolved",
+          needsReview: true,
+        });
+        expect(rejected).toMatchObject({
+          outcome: "amount_rejected",
+          needsReview: true,
+        });
+        expect(refundResult).toMatchObject({
+          outcome: "intent_unresolved",
+          needsReview: true,
+        });
+        expect(second).toMatchObject({
+          outcome: "intent_unresolved",
+          needsReview: true,
+        });
+        expect(paid).toMatchObject({ outcome: "applied", needsReview: false });
+        expect(benign).toMatchObject({
+          outcome: "ignored_type",
+          needsReview: false,
+        });
+        const open = await events.listOpenReviews({ limit: 10 });
+        expect(open.map((row) => row.outcome).sort()).toEqual([
+          "amount_rejected",
+          "intent_unresolved",
+          "intent_unresolved",
+          "intent_unresolved",
+        ]);
+        expect(
+          open.find((row) => row.eventId === unknown.eventId),
+        ).toMatchObject({
+          subject: "payment:pi_nobody",
+        });
+        expect(
+          open.find((row) => row.eventId === refundTooEarly.eventId),
+        ).toMatchObject({
+          subject: "refund:re_1",
+        });
+      });
+
+      // #497-T03
+      it("expires a pending intent on an expired payment, leaves a paid one alone, and lets a late payment pay an expired one", async () => {
+        const s = await seed(engine);
+        const expire: BillingEvent = {
+          type: "payment.expired",
+          eventId: nextId("evt"),
+          occurredAt: at(0),
+          intentId: s.intentId,
+          payment: null,
+          checkout: s.checkout,
+        };
+
+        const expired = await apply(s, expire);
+        const again = await apply(s, { ...expire, eventId: nextId("evt") });
+        expect(expired.outcome).toBe("applied");
+        expect(again.outcome).toBe("duplicate_ignored");
+        expect(await intentOf(s)).toMatchObject({ state: "expired" });
+
+        await apply(s, succeeded(s));
+        expect(await intentOf(s)).toMatchObject({ state: "paid" });
+        const late = await apply(s, { ...expire, eventId: nextId("evt") });
+        expect(late.outcome).toBe("duplicate_ignored");
+        expect(await intentOf(s)).toMatchObject({ state: "paid" });
+      });
+
       // #497-T12
       it("stores for an event an id, an outcome and an order, never the event", async () => {
         const s = await seed(engine);
@@ -785,6 +1125,7 @@ function suite(engine: BillingEngine) {
             "outcome",
             "provider",
             "received_at",
+            "review_state",
             "subject",
           ]);
         expect(JSON.stringify(rows)).not.toContain(String(25 * USD));

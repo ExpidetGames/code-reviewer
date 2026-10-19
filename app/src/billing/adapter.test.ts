@@ -5,6 +5,7 @@ import {
   BILLING_ADAPTER_ERROR_CODES,
   BILLING_EVENT_OUTCOMES,
   BILLING_EVENT_TYPES,
+  BILLING_REVIEW_OUTCOMES,
   BILLING_WEBHOOK_REJECTION_CODES,
   BillingAdapterError,
   TOP_UP_MAX_MICRO_USD,
@@ -14,10 +15,12 @@ import {
   createAdapterRegistry,
   isProviderRef,
   isUsdAmount,
+  toUsd,
   validateBillingEvent,
   type BillingAdapter,
   type BillingCapabilities,
   type BillingEvent,
+  type Usd,
 } from "./adapter.ts";
 
 const USD = 1_000_000;
@@ -74,6 +77,7 @@ describe("the code constants", () => {
       BILLING_WEBHOOK_REJECTION_CODES,
       BILLING_EVENT_OUTCOMES,
       BILLING_EVENT_TYPES,
+      BILLING_REVIEW_OUTCOMES,
     ]) {
       expect(new Set(set).size).toBe(set.length);
       for (const code of set)
@@ -90,8 +94,21 @@ describe("the code constants", () => {
         "stale_ignored",
         "intent_unresolved",
         "ignored_type",
+        "event_invalid",
       ]),
     );
+  });
+
+  // #497-T13
+  it("names the outcomes that are paid-but-not-credited, the ones an operator must review", () => {
+    expect(BILLING_REVIEW_OUTCOMES).toEqual([
+      "intent_unresolved",
+      "amount_rejected",
+      "amount_conflict",
+      "event_invalid",
+    ]);
+    for (const outcome of BILLING_REVIEW_OUTCOMES)
+      expect(BILLING_EVENT_OUTCOMES).toContain(outcome);
   });
 });
 
@@ -102,6 +119,20 @@ describe("amounts and references", () => {
     expect(isUsdAmount(25 * USD)).toBe(true);
     for (const bad of [0, -1, 1.5, Number.NaN, Infinity, 2 ** 53, "5", null])
       expect(isUsdAmount(bad), String(bad)).toBe(false);
+  });
+
+  // #497-T13
+  it("brands the amount of the ledger: a plain number is not Usd, and toUsd is the one way in", () => {
+    // @ts-expect-error a plain number is not an amount in micro-USD
+    const plain: Usd = 25 * USD;
+    expect(plain).toBe(25_000_000);
+    expect(toUsd(25 * USD)).toBe(25_000_000);
+    expect(toUsd(0)).toBe(0);
+    for (const bad of [-1, 1.5, Number.NaN, Infinity, 2 ** 53])
+      expect(
+        codeOf(() => toUsd(bad)),
+        String(bad),
+      ).toBe("amount_out_of_range");
   });
 
   // #497-T13
@@ -237,10 +268,18 @@ describe("validating a normalized event", () => {
       },
       {
         ...base,
+        type: "payment.expired",
+        intentId: "intent-1",
+        payment: null,
+        checkout: "cs_1",
+      },
+      {
+        ...base,
         type: "refund.updated",
         payment: "pi_1",
         refund: "re_1",
         amount: 5 * USD,
+        paymentAmount: 30 * USD,
         initiatedBy: "provider",
         status: "approved",
       },
@@ -250,12 +289,69 @@ describe("validating a normalized event", () => {
         payment: "pi_1",
         dispute: "dp_1",
         amount: 25 * USD,
+        paymentAmount: 30 * USD,
         status: "lost",
       },
       { ...base, type: "ignored" },
     ];
     for (const event of events)
       expect(() => validateBillingEvent(event), event.type).not.toThrow();
+  });
+
+  // #497-T13
+  it("accepts a tax of zero, which is the normal case for a buyer who owes none, and nothing below it", () => {
+    expect(() =>
+      validateBillingEvent({ ...succeeded, tax: toUsd(0) }),
+    ).not.toThrow();
+    expect(
+      codeOf(() => validateBillingEvent({ ...succeeded, tax: -1 as Usd })),
+    ).toBe("event_invalid");
+  });
+
+  // #497-T13
+  it("refuses a refund or dispute without a whole payment amount next to its own", () => {
+    const refund = {
+      ...base,
+      type: "refund.updated",
+      payment: "pi_1",
+      refund: "re_1",
+      amount: 5 * USD,
+      paymentAmount: 30 * USD,
+      initiatedBy: "provider",
+      status: "approved",
+    } as const;
+    expect(() => validateBillingEvent(refund)).not.toThrow();
+    for (const paymentAmount of [0, -1, 1.5, Number.NaN, undefined])
+      expect(
+        codeOf(() =>
+          validateBillingEvent({
+            ...refund,
+            paymentAmount: paymentAmount as never,
+          }),
+        ),
+        String(paymentAmount),
+      ).toBe("event_invalid");
+    expect(
+      codeOf(() =>
+        validateBillingEvent({
+          ...base,
+          type: "dispute.updated",
+          payment: "pi_1",
+          dispute: "dp_1",
+          amount: 5 * USD,
+          status: "lost",
+        } as never),
+      ),
+    ).toBe("event_invalid");
+  });
+
+  // #497-T13
+  it("refuses a value that is not an event at all", () => {
+    for (const bad of [null, undefined, "evt", 7, []])
+      expect(
+        codeOf(() => validateBillingEvent(bad as never)),
+        String(bad),
+      ).toBe("event_invalid");
   });
 
   // #497-T13

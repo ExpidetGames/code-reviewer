@@ -46,6 +46,8 @@ export type FakeWireEvent =
       payment: string;
       refund: string;
       amount: number;
+      /** The whole payment, in the same unit as `amount`. */
+      payment_amount: number;
       by?: "seller" | "provider" | "customer";
       status: "pending" | "approved" | "rejected" | "reversed";
     }
@@ -56,22 +58,50 @@ export type FakeWireEvent =
       payment: string;
       dispute: string;
       amount: number;
+      payment_amount: number;
       status: "opened" | "lost" | "won";
+    }
+  | {
+      id: string;
+      kind: "payment_expired";
+      created: string;
+      intent?: string | null;
+      payment?: string | null;
+      checkout?: string | null;
     }
   | { id: string; kind: "other"; created: string };
 
+const encoder = new TextEncoder();
+const strictDecoder = new TextDecoder("utf-8", {
+  fatal: true,
+  ignoreBOM: true,
+});
+
+/** The bytes of a body as a provider sends them. */
+export function fakeBodyBytes(text: string): Uint8Array {
+  return encoder.encode(text);
+}
+
+/** The text of a body, for a test that wants to look at it; throws on bytes that are not UTF-8. */
+export function fakeBodyText(bytes: Uint8Array): string {
+  return strictDecoder.decode(bytes);
+}
+
 export function signFakeBody(
-  rawBody: string,
+  rawBody: string | Uint8Array,
   secret = FAKE_WEBHOOK_SECRET,
 ): string {
   return createHmac("sha256", secret).update(rawBody).digest("hex");
 }
 
 export function fakeWebhookRequest(
-  wire: FakeWireEvent | string,
+  wire: FakeWireEvent | string | Uint8Array,
   secret = FAKE_WEBHOOK_SECRET,
-): { headers: Headers; rawBody: string } {
-  const rawBody = typeof wire === "string" ? wire : JSON.stringify(wire);
+): { headers: Headers; rawBody: Uint8Array } {
+  const rawBody =
+    wire instanceof Uint8Array
+      ? wire
+      : fakeBodyBytes(typeof wire === "string" ? wire : JSON.stringify(wire));
   return {
     rawBody,
     headers: new Headers({
@@ -119,6 +149,7 @@ function toEvent(value: unknown): BillingEvent | undefined {
         payment: wire.payment,
         refund: wire.refund,
         amount: wire.amount,
+        paymentAmount: wire.payment_amount,
         initiatedBy: (wire.by ?? "provider") as
           "seller" | "provider" | "customer",
         status: wire.status,
@@ -130,7 +161,16 @@ function toEvent(value: unknown): BillingEvent | undefined {
         payment: wire.payment,
         dispute: wire.dispute,
         amount: wire.amount,
+        paymentAmount: wire.payment_amount,
         status: wire.status,
+      };
+    case "payment_expired":
+      return {
+        ...common,
+        type: "payment.expired",
+        intentId: (wire.intent ?? null) as string | null,
+        payment: (wire.payment ?? null) as string | null,
+        checkout: (wire.checkout ?? null) as string | null,
       };
     case "other":
       return { ...common, type: "ignored" };
@@ -140,7 +180,12 @@ function toEvent(value: unknown): BillingEvent | undefined {
 }
 
 export function createFakeBillingAdapter(
-  options: { secret?: string; id?: string } = {},
+  options: {
+    secret?: string;
+    id?: string;
+    /** What the fake provider answers when asked about a top-up, by intent id (`lookupTopUp`). */
+    lookups?: (intentId: string) => FakeWireEvent | undefined;
+  } = {},
 ): BillingAdapter {
   const secret = options.secret ?? FAKE_WEBHOOK_SECRET;
   return {
@@ -167,6 +212,12 @@ export function createFakeBillingAdapter(
         session: `cs_fake_${intentId}`,
         payment: null,
       }),
+    lookupTopUp: ({ intentId }) => {
+      const wire = options.lookups?.(intentId);
+      return Promise.resolve(
+        wire === undefined ? null : (toEvent(wire) ?? null),
+      );
+    },
     verifyAndParseWebhook({ headers, rawBody }): Promise<WebhookResult> {
       const given = headers.get(FAKE_SIGNATURE_HEADER);
       if (given === null || given === "")
@@ -182,7 +233,7 @@ export function createFakeBillingAdapter(
 
       let parsed: unknown;
       try {
-        parsed = JSON.parse(rawBody);
+        parsed = JSON.parse(fakeBodyText(rawBody));
       } catch {
         return Promise.resolve({ ok: false, code: "body_invalid" });
       }
