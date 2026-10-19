@@ -207,7 +207,7 @@ class FinalExemptLedger(BudgetLedger):
 
     def reserve_call(
         self,
-        request_text: str,
+        request_text: str | bytes,
         *,
         output_tokens: int | None = None,
         can_wrap_up: bool = False,

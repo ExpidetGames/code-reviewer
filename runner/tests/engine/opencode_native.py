@@ -33,7 +33,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Protocol, cast
 
 from opencode_support import extra_path, opencode_binary, ripgrep_binary
 
@@ -379,13 +379,24 @@ def _assistants(history: Any) -> list[Assistant]:
     return steps
 
 
+class Front(Protocol):
+    """What stands between the engine and a fake provider: the relay of the spike, or the
+    passthrough proxy (#550). The engine only needs its address, and the outcome of a turn lists
+    what it saw."""
+
+    @property
+    def url(self) -> str: ...
+
+    seen: list[Seen]
+
+
 @dataclass
 class Running:
     """A provider of the engine with the fakes behind it."""
 
     provider: Provider
     upstream: ScriptedUpstream
-    relay: KeySwapRelay
+    relay: Front
 
 
 class NativeEngine:

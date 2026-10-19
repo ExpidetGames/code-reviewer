@@ -15,8 +15,8 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from fakes.wire.formats import Family, Turn, answer, error_event, stream
-from passthrough_support import usage_expected
 
 from code_reviewer_runner.dynamic_review.budget import UnitCosts
 from code_reviewer_runner.dynamic_review.passthrough.families import WireFamily
@@ -24,6 +24,7 @@ from code_reviewer_runner.dynamic_review.passthrough.pricing import call_cost
 from code_reviewer_runner.dynamic_review.passthrough.redact import Redactor
 from code_reviewer_runner.dynamic_review.passthrough.sse import SseFramer, read_event
 from code_reviewer_runner.dynamic_review.passthrough.usage import CallUsage, tap_for
+from passthrough_expect import usage_expected
 
 KEY = "sk-real-key-0123456789abcdefABCDEF"
 MODEL = "acme-model-9"

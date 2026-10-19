@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from fakes.wire.formats import (
     FAMILIES,
     Family,
@@ -26,7 +27,6 @@ from fakes.wire.formats import (
     auth_value,
     error_body,
     stream,
-    usage_for,
 )
 
 from code_reviewer_runner.dynamic_review.budget import BudgetLedger, DynamicLimits, UnitCosts
@@ -38,7 +38,6 @@ from code_reviewer_runner.dynamic_review.passthrough.upstream import (
     UpstreamError,
     UpstreamRequest,
 )
-from code_reviewer_runner.dynamic_review.passthrough.usage import CallUsage
 
 REAL_KEY = "sk-real-key-0123456789abcdefABCDEF"
 MODEL = "acme-model-9"
@@ -249,17 +248,6 @@ def rig(
         superseded=superseded,
     )
     return Rig(proxy, ledger, upstream, family, capability, clock)
-
-
-def usage_expected(call: int, family: WireFamily) -> CallUsage:
-    """What the fakes state for `call`, as the runner counts it: the prompt includes the cache."""
-    u = usage_for(call)
-    if family is WireFamily.ANTHROPIC_MESSAGES:
-        writes = u.cache_write_5m + u.cache_write_1h
-        return CallUsage(u.input + u.cache_read + writes, u.output, u.cache_read, writes, None)
-    if family is WireFamily.GOOGLE:
-        return CallUsage(u.input, u.output + u.reasoning, u.cache_read, 0, None)
-    return CallUsage(u.input, u.output, u.cache_read, 0, None)
 
 
 def streamed(family: WireFamily, call: int = 1, **options: Any) -> Scripted:

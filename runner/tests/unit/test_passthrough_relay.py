@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from fakes.wire.formats import error_event, stream
 from passthrough_support import (
     FAKE,
@@ -32,7 +33,6 @@ from passthrough_support import (
     real_key_header,
     rig,
     streamed,
-    usage_expected,
 )
 
 from code_reviewer_runner.dynamic_review.budget import DynamicLimits, UnitCosts
@@ -41,6 +41,7 @@ from code_reviewer_runner.dynamic_review.passthrough.pricing import call_cost
 from code_reviewer_runner.dynamic_review.passthrough.upstream import UpstreamError, UpstreamFailure
 from code_reviewer_runner.dynamic_review.passthrough.usage import CallUsage
 from code_reviewer_runner.result import ErrorCode
+from passthrough_expect import usage_expected
 
 FAMILIES = list(WireFamily)
 
