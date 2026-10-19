@@ -13,6 +13,7 @@ import {
   waitFor,
 } from "../test-support/harness.ts";
 import { createDispatcherCore } from "./dispatcher.ts";
+import { createLogger } from "./logger.ts";
 import { LaunchError, type HandleResult } from "./types.ts";
 
 let app: DispatcherAppFake;
@@ -557,6 +558,232 @@ describe("the Dispatcher core", () => {
 
     expect(launcher.signals[0]?.aborted).toBe(true);
     expect(app.requests().filter((r) => r.route === "release")).toHaveLength(1);
+  });
+});
+
+/**
+ * The release of a job whose launch failed (`launch_failed`): the only path left that gives a job back (#487). Its
+ * answers were first proven through the end of the Worker's container (#375), which the Dispatcher no longer watches.
+ */
+describe("the Dispatcher core when it gives a failed launch back", () => {
+  const launchFails = () =>
+    Promise.reject(new LaunchError("sandbox_create_failed"));
+
+  /** What the Worker does with its credential: deliver its result. */
+  async function deliverResult(jobId: string, credential: string) {
+    const response = await fetch(
+      `${app.url}/api/workers/v1/jobs/${jobId}/result`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${credential}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ result: { ok: true } }),
+      },
+    );
+    expect(response.status).toBe(200);
+  }
+
+  // #375-T03
+  it("treats the release of a job that already delivered its result as a no-op: one call, no retry, the result stands", async () => {
+    const jobId = app.enqueue();
+    const { core, logger } = build(
+      {},
+      {
+        // The Worker delivers a result, then the launch still ends in an error.
+        onLaunch: async (spec) => {
+          await deliverResult(jobId, spec.credential);
+          throw new LaunchError("sandbox_create_failed");
+        },
+      },
+    );
+
+    const result = await core.handle({ jobId, reviewKind: "diff" });
+    if (result.outcome === "started") await drive(result.background);
+
+    expect(releases()).toStrictEqual([
+      { method: "POST", route: "release", jobId, status: 409 },
+    ]);
+    // Expected, so not a warning: a refusal of the claim is one.
+    expect(
+      logger.lines.some((line) => line.startsWith("info release_job_ended")),
+    ).toBe(true);
+    expect(logger.text()).not.toContain("release_not_holder");
+    expect(logger.text()).not.toContain("release_failed");
+    expect(logger.text()).not.toContain('"released"');
+    expect(app.results(jobId)).toHaveLength(1);
+    // The job is finished, not queued: nothing is claimed for it.
+    expect((await core.handle({ jobId, reviewKind: "diff" })).outcome).toBe(
+      "ignored",
+    );
+  });
+
+  // #375-T06 (the Dispatcher's side: a stale credential after a requeue and a new claim)
+  it("does not take the job from a newer claim when its own credential is stale", async () => {
+    const jobId = app.enqueue();
+    let failLaunch: () => void = () => undefined;
+    const first = build(
+      {},
+      {
+        onLaunch: () =>
+          new Promise<void>((_resolve, reject) => {
+            failLaunch = () => reject(new LaunchError("sandbox_create_failed"));
+          }),
+      },
+    );
+    const started = await first.core.handle({ jobId, reviewKind: "diff" });
+    expect(started.outcome).toBe("started");
+    const staleCredential = first.launcher.launches[0]?.credential ?? "";
+    // The first claim ends (the job is given back by someone else), a second claim starts.
+    const given = await fetch(
+      `${app.url}/api/runners/v1/jobs/${jobId}/release`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${DISPATCHER_TOKEN}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          credential: staleCredential,
+          reason: "worker_exited",
+          retryAfterSeconds: 30,
+        }),
+      },
+    );
+    expect(given.status).toBe(200);
+    const second = build();
+    expect(
+      (await handled(second.core.handle({ jobId, reviewKind: "diff" })))
+        .outcome,
+    ).toBe("started");
+    expect(second.launcher.launches[0]?.credential).not.toBe(staleCredential);
+    const before = releases().length;
+
+    // The first launch fails late: its credential is not the claim's any more.
+    failLaunch();
+    if (started.outcome === "started") await drive(started.background);
+
+    expect(releases().slice(before)).toStrictEqual([
+      { method: "POST", route: "release", jobId, status: 401 },
+    ]);
+    expect(
+      first.logger.lines.some((line) =>
+        line.startsWith("warn release_not_holder"),
+      ),
+    ).toBe(true);
+    // The new claim is untouched: the job is still running for it, and nothing is claimed twice.
+    expect(
+      (await second.core.handle({ jobId, reviewKind: "diff" })).outcome,
+    ).toBe("ignored");
+  });
+
+  // #375-T07
+  it("tries the release a bounded number of times, logs release_failed with its reason, and leaves the job to its lease", async () => {
+    const jobId = app.enqueue();
+    app.script("release", [
+      { status: 503 },
+      { status: 503 },
+      { status: 503 },
+      { status: 503 },
+    ]);
+    const { core, logger } = build({}, { onLaunch: launchFails });
+
+    const result = await core.handle({ jobId, reviewKind: "diff" });
+    if (result.outcome === "started") await drive(result.background);
+    await clock.advance(10 * 60 * 1000);
+    await settle();
+
+    expect(releases().map((request) => request.status)).toStrictEqual([
+      503, 503, 503,
+    ]);
+    expect(logger.text()).toContain("release_failed");
+    expect(logger.text()).toContain('"reason":"launch_failed"');
+  });
+
+  // #375-T07
+  it("does not reject when the App cannot be reached", async () => {
+    const jobId = app.enqueue();
+    const { core, logger } = build(
+      {},
+      {
+        onLaunch: async () => {
+          await app.close();
+          throw new LaunchError("sandbox_create_failed");
+        },
+      },
+    );
+
+    const result = await core.handle({ jobId, reviewKind: "diff" });
+    expect(result.outcome).toBe("started");
+    if (result.outcome === "started")
+      await expect(drive(result.background)).resolves.toBeUndefined();
+
+    expect(logger.text()).toContain("release_failed");
+    // Start the next test's app again: afterEach closes it, and a closed server is closed once.
+    app = await startApp();
+  });
+
+  // #375-T08
+  it("never writes the credential or the dispatcher token on any path of the release, through the real masker", async () => {
+    const lines: string[] = [];
+    const logger = createLogger((line) => lines.push(line), [DISPATCHER_TOKEN]);
+    const credentials: string[] = [];
+    const launcher = createFakeLauncher({
+      onLaunch: async (spec) => {
+        credentials.push(spec.credential);
+        // The ended job delivers its result before its launch fails; the others fail at once.
+        if (spec.jobId === ended) await deliverResult(ended, spec.credential);
+        throw new LaunchError("sandbox_create_failed");
+      },
+    });
+    const core = createDispatcherCore({
+      settings: settingsFor(app.url),
+      launcher,
+      clock,
+      logger,
+    });
+    const [released, refused, failing] = [
+      app.enqueue(),
+      app.enqueue(),
+      app.enqueue(),
+    ];
+    const ended = app.enqueue();
+
+    // Every outcome of the release: released, job ended, refused (the claim is gone), a failing App.
+    for (const jobId of [released, ended]) {
+      const result = await core.handle({ jobId, reviewKind: "diff" });
+      if (result.outcome === "started") await drive(result.background);
+    }
+    app.script("release", [{ status: 401 }]);
+    const refusedResult = await core.handle({
+      jobId: refused,
+      reviewKind: "diff",
+    });
+    if (refusedResult.outcome === "started")
+      await drive(refusedResult.background);
+    app.script("release", [{ status: 503 }, { status: 503 }, { status: 503 }]);
+    const failingResult = await core.handle({
+      jobId: failing,
+      reviewKind: "diff",
+    });
+    if (failingResult.outcome === "started")
+      await drive(failingResult.background);
+
+    const everything = lines.join("\n");
+    expect(everything).toContain("launch_failed");
+    for (const event of [
+      '"released"',
+      "release_job_ended",
+      "release_not_holder",
+      "release_failed",
+    ])
+      expect(everything).toContain(event);
+    expect(credentials).toHaveLength(4);
+    for (const credential of credentials)
+      expect(everything).not.toContain(credential);
+    expect(everything).not.toContain(DISPATCHER_TOKEN);
+    expect(everything).not.toMatch(/crj_[A-Za-z0-9_-]{10,}/);
   });
 });
 
