@@ -102,13 +102,6 @@ A refusal is `422` with the stable code of the validation (`plan_label_invalid`,
 `suspended_invalid`, `suspension_code_invalid`, `catalog_entry_invalid`, `entitlements_invalid`), or
 `409 period_start_backwards`.
 
-**`PUT /entitlements/default` while the billing switch is on** (`src/billing/switch.ts`: the switch only, because the API has no way to the secret store) is refused `409 entitlements_default_managed_by_billing` (#438): the billing
-module writes the default from the Free plan (`src/billing/README.md`). The refusal comes after the body is read and before it
-is validated, and the write reads the switch again in its own transaction (a billing that is switched on between the check and
-the write is refused too, and its default is not overwritten); a `GET` and the workspace rows are not affected, and the default is the operator's again when billing is
-switched off (a default billing wrote is removed then). The marker `source` is not a key of the body: it is refused like any key
-the API does not know.
-
 `managedCostLimitMicroUsd` counts the cost of runs on the operator's key, so a non-null value (even `0`) with
 `keyMode: "own"` is refused as `cost_limit_requires_managed_key` (field `managedCostLimitMicroUsd`). Send `null` for it,
 or switch the key mode. An entry of that shape that was stored before this rule keeps working: it reads back as it was
@@ -160,11 +153,10 @@ shows; the API has no catalog route, decision C8 of ADR 0005, so a writer withou
 text; an id that no entry has is accepted and matches nothing). Anything else is `422 catalog_entry_invalid` (`field`:
 `modelAccess` for a value that is not the object or has another key, `modelAccess.catalogEntries` for the list) and
 nothing is stored. It has a meaning for `keyMode: "managed"` only: next to `"own"` it is accepted and kept, not read
-(a workspace on its own key chooses provider and model freely); the plan form of the billing epic is where an `own` plan
-is refused it. Every answer states it (`{ "catalogEntries": null }` for an entry that never set it).
+(a workspace on its own key chooses provider and model freely); a later billing design may refuse it for an `own` plan. Every answer states it (`{ "catalogEntries": null }` for an entry that never set it).
 
 **A write without `modelAccess` keeps the stored value**, as one without `periodStart` keeps the stored start, so a writer
-that does not know the field (the first release of a billing service, a script) cannot clear what an operator granted in
+that does not know the field (a script, an older client) cannot clear what an operator granted in
 the admin portal or a plan wrote. To clear it, send `{ "catalogEntries": null }`; a row that has none starts with every
 released entry. The keep happens in the single statement of the write, so two writers do not race on it. The same holds
 for `PUT /entitlements/default`. The log names the field (`modelAccess`) when it changed, never the ids.
@@ -177,7 +169,7 @@ upgrade window as retry-later, not as a refused plan. (An earlier instance that 
 one ignores the field.) There is no cutover as with `ownKeyCostLimitMicroUsd`, because nothing requires the field.
 
 **Readers during the rollout (response direction).** In `EntitlementsFields` of the contract `modelAccess` is **optional**:
-an instance of an earlier release never sends it, so a client that validates answers strictly (the billing service) must
+an instance of an earlier release never sends it, so a client that validates answers strictly must
 accept an answer without it and read a missing field as `{ "catalogEntries": null }`. An upgraded instance always sends
 it. The write direction is the opposite: the field is optional in a body, but when present it is checked strictly, and an
 earlier instance refuses it (above).
@@ -189,8 +181,7 @@ earlier upsert names its columns and leaves `model_access` alone). So: upgrade a
 `modelAccess`; after a rollback to an earlier release, set it again. A write that leaves `modelAccess` out over a stored
 default that cannot be read is refused with `422 catalog_entry_invalid` (field `modelAccess`): state it to repair the
 default. A list holds each id once; a repeated id is refused with the same code. A workspace row overrides the instance
-default entirely, so the default is a fallback for workspaces without a row, not a ceiling (a billing writer states
-`modelAccess` on every plan write, #442).
+default entirely, so the default is a fallback for workspaces without a row, not a ceiling.
 
 Limits are JSON numbers. A number above 2^53 − 1 loses precision when JSON is parsed, so it can never be stored
 as sent: it is refused as `limit_invalid`, not rounded.

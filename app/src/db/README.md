@@ -379,40 +379,40 @@ set null`): the operator's list of the models that workspaces on the operator's 
   (`catalog-repository.ts`): no workspace owns an entry. A released entry is never hard-deleted. See
   `src/model-catalog/README.md`. The user merge moves `updated_by` (`github-signin/merge.ts`).
 
-### Billing plans and plan versions
+### A database that ran the removed billing migrations
 
-Migration `20261018120000_create_billing_plans` (#438; epic #421). It adds two empty tables and touches no existing row, so an
-app of the previous release on the same database is unaffected (it never reads them):
+Three migrations of an earlier billing design existed on `development` for a few days and are deleted (#491):
+`20261018120000_create_billing_plans`, `20261018140000_protect_billing_plan_versions` and
+`20261018160000_create_billing_plan_prices`. They never reached `main`, so **no production database ran them**, and no
+removal migration exists: a deleted migration is deleted. A fresh database and a database of `main` migrate to latest
+without them (`migrations/upgrade-from-main.integration.test.ts`).
 
-- `billing_plans` (`id`, `plan_key` unique, `name`, `description`, `sort`, `kind` `free`/`paid`/`contact`, `offered`, `popular`,
-  `contact_target`, `archived_at`, `created_at`, `updated_at`, `updated_by` → `users.id` `on delete set null`). Checks: the
-  flags are 0 or 1, `popular` only on a `paid` plan, a contact target only on a `contact` plan. Partial unique indexes: at most one
-  plan with `popular = 1` and at most one `free` plan.
-- `billing_plan_versions` (`id`, `plan_id` → `billing_plans.id` `on delete restrict`, `number` unique per plan, `role`
-  `current`/`legacy` with at most one `current` per plan (partial unique index), `key_mode` `own`/`managed`, `limits` JSON,
-  `model_access` JSON (`NULL` for `own`, a check), `monthly_amount_minor` and `yearly_amount_minor` (positive integers or `NULL`,
-  a yearly price needs a monthly one), `created_at`, `created_by`). Immutable after creation except `role` (and `created_by`, an audit reference that the account merge
-  and the deletion of a user rewrite): migration `20261018140000_protect_billing_plan_versions` adds triggers that refuse a delete
-  and any other update (message `billing_plan_versions_immutable`; the one place of the schema that is not the schema builder,
-  so the statements differ by engine, and a test updates every column to catch one that a later migration adds without extending
-  the SQLite trigger). `monthly_amount_minor` and `yearly_amount_minor` are int4 on Postgres: the service refuses a price above
-  1,000,000 USD (`PRICE_MAX_MINOR`).
-- `billing_plan_prices` (#439, `src/billing/README.md`, "Linking Paddle prices"): one row per Paddle price the app knows. `plan_id` →
-  `billing_plans.id` `on delete restrict`, `paddle_price_id` and `intent_id` unique (`NULL` allowed), `paddle_product_id`,
-  `paddle_env` `sandbox`/`live`, `interval`, `frequency`, `currency`, `unit_amount_minor` as **text** (Paddle's string of minor units, so
-  any amount a price is changed to is cached whole; the repository checks the digits), `tax_mode`, `price_type` `standard`/`custom`, `has_overrides` 0/1,
-  `trial_days`, `quantity_min` / `quantity_max` (Paddle's limits, from 1 up), `paddle_status`, `origin` `created`/`linked`, `state` `pending`/`ready`/`failed` (a `ready` row has a Paddle id, a status and a
-  snapshot time). Also `billing_plans.paddle_product_id` / `paddle_product_env` and `billing_plan_versions.monthly_price_id` /
-  `yearly_price_id` (→ `billing_plan_prices.id` `on delete restrict`): the two links are mutable (migration
-  `20261018160000_create_billing_plan_prices` replaces the Postgres guard; the SQLite trigger lists the frozen columns and does not name them), and a link, once set, is replaced and never cleared (both engines).
-  Triggers guard the identity of a price row (`id`, `plan_id`, `paddle_env`, `origin`, `created_at` never change; `paddle_price_id` is set
-  once), message `billing_plan_prices_immutable`; the SQLite triggers read the stored row by `select` because the workspace migration test
-  looks for the text `_old` in every schema object.
-- The users: `billing_plans.updated_by` and `billing_plan_versions.created_by` are the audit trail of who changed a plan and who
-  made a version (`src/billing/README.md`, "Why the two tables reference users"); the user merge moves them.
+A **local, preview or staging** database that ran `development` in that time has the three migrations recorded without a
+file, and the migrator refuses to start (`previously executed migration ... is missing`, reported as
+`MIGRATION_FAILED`). The fix is a manual maintainer step, never automated, and never against production data:
 
-Both are instance level (`billing-plans-repository.ts`, `billing-plan-versions-repository.ts`): no workspace owns a plan. See
-`src/billing/README.md`.
+1. Look first, read-only: `SELECT name FROM kysely_migration WHERE name LIKE '%billing%';`. No row: nothing to do. Check
+   `SELECT count(*) FROM billing_plans;` too: the tables hold only what an admin typed into the removed plans page.
+2. Back the database up (`src/backup/`), then run, in one transaction:
+
+   ```sql
+   DROP TABLE billing_plan_prices;
+   DROP TABLE billing_plan_versions;
+   DROP TABLE billing_plans;
+   DELETE FROM kysely_migration
+     WHERE name IN (
+       '20261018120000_create_billing_plans',
+       '20261018140000_protect_billing_plan_versions',
+       '20261018160000_create_billing_plan_prices'
+     );
+   ```
+
+   The order matters (prices point at versions, versions at plans). SQLite and Postgres take the same statements.
+
+3. Start the app: the remaining migrations run as usual. The instance setting `billing_settings` of the old shape and a
+   stored default entitlements row with `source: "billing"` read without error and need no change (the extra fields are
+   ignored); the two encrypted rows of `secrets` named after the removed payment provider (`<provider>_api_key`,
+   `<provider>_webhook_secret`) are ignored too and may be deleted by hand.
 
 ## Workspace scoping
 

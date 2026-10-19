@@ -1,7 +1,7 @@
 # Model catalog
 
 The operator's list of the models that workspaces on the operator's key may use (#425, part of epic #420;
-docs/decisions/0005-providers-model-catalog-and-paddle-billing.md, 2.6). An entry has a free **name** that members see
+ADR 0005, 2.6). An entry has a free **name** that members see
 and a provider and a real model id that **only the operator** sees. This folder is the data and the rules, and the
 operator's side of them in the admin portal (#429, below). **The catalog is empty by default, and an empty catalog changes
 nothing** for any workspace, and no self-hoster has to do anything: the section in the admin portal is collapsed while it
@@ -170,11 +170,11 @@ moves the data over so that no managed workspace changes model:
   like any other (the workspace may turn managed later), but its entries are inert while the key is the workspace's own: an
   own job reads no catalog and no entry (`src/llm/selection.ts`); the claim of such a workspace is the same before and
   after (`model-tiers-migration-claim.integration.test.ts`, T06).
-- **After the release: the plans' `modelAccess`.** The migrated entries are new, so a `modelAccess` list that was set
+- **After the release: the `modelAccess` lists.** The migrated entries are new, so a `modelAccess` list that was set
   before (an explicit list, `[]` included) does not contain them. For such a workspace both the entry of a project that had
   a tier and the default entry are outside the list, and every job ends with `managed_model_unavailable` (the claim fails
   closed, as #428 intends; a list that is absent allows every released entry). The operator adds the migrated entries to
-  every plan's list, the Free plan included once billing is on (it is created with `[]`), and to every list set by hand.
+  the list of every workspace and of the default that has an explicit list.
   Tests pin both the stop and the way out (`model-tiers-migration-claim.integration.test.ts`, X5).
 - **The old data stays.** `managed_model_tiers`, the `modelTier` members of the stored settings and the column
   `usage_records.model_tier` are read by nothing (the usage feed and the Runs view still show a run that was written under a

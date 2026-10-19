@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 import { isPublicHttpsUrl, normalizedAddress } from "./public-url.ts";
 
-describe("the address Paddle posts its events to", () => {
+describe("the address Stripe posts its events to", () => {
   // #437-T05
   it.each([
     "https://reviews.example.com",
@@ -51,7 +51,7 @@ describe("the address Paddle posts its events to", () => {
   });
 });
 
-describe("the address in the form Paddle's destinations are compared in", () => {
+describe("the address in the form webhook endpoints are compared in", () => {
   // #437-T05
   it.each([
     ["https://Reviews.Example.COM/hook", "https://reviews.example.com/hook"],

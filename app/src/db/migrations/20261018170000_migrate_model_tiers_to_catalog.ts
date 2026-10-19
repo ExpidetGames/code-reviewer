@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// #434 (epic #420, docs/decisions/0005-providers-model-catalog-and-paddle-billing.md, decision C1): the managed model tiers
+// #434 (epic #420, ADR 0005, decision C1): the managed model tiers
 // become catalog entries, so that nothing changes for a workspace on the operator's key when the tiers are removed.
 //
 // 1. The instance setting `managed_model_tiers` (the model behind each tier and kind) becomes released catalog entries of
