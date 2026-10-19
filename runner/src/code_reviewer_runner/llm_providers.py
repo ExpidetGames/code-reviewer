@@ -28,7 +28,7 @@ from code_reviewer_runner.anthropic_cost import cost_of_usage
 from code_reviewer_runner.anthropic_models import model_for as claude_model
 from code_reviewer_runner.anthropic_wire import AnthropicMessagesWire
 from code_reviewer_runner.dynamic_review.budget import exact_cost
-from code_reviewer_runner.provider_wire import OpenAiChatWire, UpstreamWire
+from code_reviewer_runner.provider_wire import OpenAiChatWire, OpenRouterWire, UpstreamWire
 from code_reviewer_runner.usage_access import usage_field
 
 PROVIDER_ID_PATTERN: Final = re.compile(r"^[a-z][a-z0-9_]{1,31}$")
@@ -167,6 +167,8 @@ OPENROUTER: Final = LlmProviderSpec(
     ),
     no_endpoint_for_parameters=_openrouter_no_endpoint_for_parameters,
     cost_extractor=_openrouter_cost,
+    # The chat protocol, with the breakpoints a Claude behind OpenRouter needs (#539).
+    wire=OpenRouterWire,
 )
 
 # What a Diff run asks a Claude model for. Reasoning tokens count against the output limit, so

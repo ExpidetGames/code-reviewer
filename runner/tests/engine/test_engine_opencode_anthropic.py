@@ -64,7 +64,7 @@ def test_a_review_with_a_model_that_refuses_a_forced_choice_runs_through_the_rea
         # What the real engine asked for was forced (`required`); what the model got was `auto`.
         assert request["tool_choice"] == {"type": "auto"}
         assert request["model"] == model_id
-        assert request["system"].endswith(
+        assert request["system"][-1]["text"].endswith(
             "StructuredOutput tool once with the complete review, "
             "and do not write the review as text."
         )
@@ -112,7 +112,10 @@ def test_a_turn_that_ends_in_prose_with_a_steered_model_gets_the_one_recovery_ca
     assert only_return_tool(recovery)
     assert recovery["tool_choice"] == {"type": "auto"}
     # The instruction is runner text, the last block of the last turn.
-    assert recovery["messages"][-1]["content"][-1] == {"type": "text", "text": RECOVERY_INSTRUCTION}
+    last = recovery["messages"][-1]["content"][-1]
+    assert last["text"] == RECOVERY_INSTRUCTION and last["type"] == "text"
+    # ... and the head of the conversation is a cache breakpoint (#539), a mark and nothing else.
+    assert set(last) == {"type", "text", "cache_control"}
     assert run.ledger.recovered is True
     assert run.ledger.model_calls == 4
 

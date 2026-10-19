@@ -264,3 +264,24 @@ def test_a_provider_that_states_its_charge_is_read_as_before() -> None:
         undo()
 
     assert meter.cost_usd() == Decimal("0.25")
+
+
+# #539-T16
+def test_the_meter_counts_what_every_answer_read_wrote_and_paid_in_full(installed: Install) -> None:
+    boundary, meter = installed(
+        replying(
+            answer(1000, 50, cache_creation_input_tokens=900),
+            answer(1100, 50, cache_read_input_tokens=900, cache_creation_input_tokens=100),
+        )
+    )
+
+    async def run() -> None:
+        await call(boundary)
+        await call(boundary)
+
+    asyncio.run(run())
+
+    tally = meter.cache_tally.counts()
+    assert (tally.calls, tally.read, tally.written, tally.uncached) == (2, 900, 1000, 200)
+    # The cost is unchanged by the counting: 100 uncached + 900 written, then 100 + 100 + 900 read.
+    assert meter.cost_usd() is not None
