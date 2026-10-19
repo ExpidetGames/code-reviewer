@@ -412,7 +412,7 @@ instead of raising it.
 cost (#540), from what the run itself has shown, at the unit costs of the model's description (a model
 without unit costs does not run, see above). The call is refused (`dynamic_budget_exceeded`, before
 the provider sees it) when what is spent, what is reserved for calls in flight and this reservation
-would together pass the limit. After the call the reservation is replaced by the `usage.cost` the
+would together pass the limit; the final call is the exception (see "The bound" below). After the call the reservation is replaced by the `usage.cost` the
 provider reported (the credits it charged, #286). **A call that reports no cost ends the run with
 `dynamic_accounting_failed`**: without it the run cannot be bounded by money, and a missing cost is
 never read as zero. A cost of 0 (a free model) is a cost. A call that failed or was retried keeps
@@ -442,14 +442,43 @@ at about 0.55 USD of a 1.00 USD limit. Now:
   prefix and a review-sized output. The wrap-up test multiplies this call and the final call by
   1.25.
 
-**The bound.** A call is admitted only while `spent + held + its expected cost <= limit`, so the
-spend is within the limit whenever a call starts. The settled total can pass the limit only by the
-last call's real cost minus what was expected of it, hence **by at most one call's real cost**. That
-is the estimate's error (a cache miss, an unusually long answer, a 64 KiB tool result, a dense input
-that has up to 3 times more tokens than the byte estimate), and it is priced correctly from the next
-call on. A non-final call that settles over the limit ends the run (`dynamic_budget_exceeded`); the
-final call that carries the answer is delivered, the one overshoot the limit allows. A price list
-that changed after it was read under-prices the reservation the same way.
+**The bound.** A run must never end without a review because of the cost guard (#540), so there are
+two rules and no failure mode between them:
+
+1. A **normal call** is admitted only while `spent + held + its expected cost <= limit`.
+2. The **final call** (the wrap-up, the recovery and the retries of either) is the last chance of a
+   review. It is admitted whenever `spent + held <= limit`, **even when its expected cost no longer
+   fits**, and it is delivered whatever it costs.
+
+A normal call can still cost more than expected: a cache miss (the entry expired because a tool
+took long, or the prefix changed) re-writes the whole prompt at the write price, an answer can be
+unusually long, a tool result can be 64 KiB, a dense input has up to 3 times more tokens than the
+byte estimate, and a price list can have changed after it was read. If such a call **settles over
+the limit it is delivered, not failed**; it ends the agent phase at once. The next request that can be
+rewritten into a final call (the one that offers the structured-output tool) is the final call,
+admitted by rule 2 although the spend is over the limit (`stoppedEarly` is `cost_limit`). After the
+first overshoot no normal call is admitted again; a request that cannot be a final call (a title
+call, for example) is refused with `dynamic_budget_exceeded`, and so is anything after the final
+call. If the final call returns no structured answer, the retries within the limit are made as
+before (#312, each is a final call too) and, once the spend is over the limit, **one** retry more.
+
+**The settled total is therefore at most the limit, plus the excess of the last normal call (its real
+cost minus its reservation, at most its real cost), plus the cost of the final call.** The final
+call costs at most its input plus `allowance x output price`: it reserves the cap the model's wire
+names (`reserved_output_tokens`, which is the allowance unless the wire says a call rarely uses it
+all) rather than a tool call's output, so the wrap-up decision leaves room for the worst case of a
+review. If the final call answers in prose while the spend is over the limit, the one retry past
+the limit is one final call more. The result reports by how much the limit was passed as
+`usage.limitExceededBy` (USD, absent when it was not, `contracts/runner-api.v1.json`) and the job log
+says it, so the bound can be watched on real runs.
+
+*Serial calls.* The engine's model calls are serial: one agent (`review`), the permission block denies
+every tool but `read`, `grep`, `glob` and `StructuredOutput` (so no subagent runs in parallel), and a
+step waits for its tool results. The ledger still holds the reservation of every call in flight; if
+requests ever overlapped, the bound above would be the sum of the excesses over the calls in flight,
+and a final call is refused when `spent + held` already passes the limit (that case is not the
+exemption's). A failure of an unrelated kind (the provider, the clock, `dynamic_accounting_failed`
+for a call without a cost) still ends the run: the guard does not hide them.
 
 **The input estimate.** Bytes divided by 3 (real text has about 3 to 4 bytes per token), tightened
 to what the provider settled on the previous call when that was denser (only from requests of 4 KiB
@@ -488,8 +517,8 @@ published.
   content of the request): the request becomes the *final call* when a further normal call could
   not be followed by a final one inside the cost limit (what is spent, what is held for calls in
   flight, this call, and a final call after it, with the margin above, #540), or when less wall clock is left than one provider call needs (150 s of the 600 s; a
-  quarter of a shorter deadline). The final call must itself fit the cost limit, else the run ends
-  with `dynamic_budget_exceeded` as before.
+  quarter of a shorter deadline). The final call is admitted whenever the spend is within the cost limit,
+  even when it no longer fits (#540, "The bound"): a refusal here would end the run without a review.
 - **What changes in that call.** The model proxy, which is trusted runner code, rewrites the request
   before it is forwarded: every tool except the engine's `StructuredOutput` return tool is removed,
   `tool_choice` is forced to `required` (with one tool this forces that tool; `required` is the
@@ -567,8 +596,8 @@ sent on every request and forwarded by the proxy (both checked against the real 
 - **One recovery.** When a turn ends without a structured answer, the adapter asks the ledger
   (`begin_recovery`). The ledger says yes only if no final call was granted yet, a model call was
   made, more than the wrap-up's clock reserve is left (150 s of 600 s, a quarter of a shorter
-  deadline: the recovery call writes a whole review) and the estimate of one more call (the last
-  prompt, the model's last answer, a 4 KiB slack, priced like a final call) fits the cost limit. Only
+  deadline: the recovery call writes a whole review) and the spend is within the cost limit (the
+  recovery call is a final call: it is admitted although it no longer fits, #540). Only
   the engine's own missing-answer error (`StructuredOutputError`, or a turn that ended with no error
   at all) is recovered; another error of the engine (`APIError`, an abort, a content filter, ...) is
   its own failure and ends the run as before, with the error name in the detail. The adapter then sends a second message to the same session with the runner's fixed

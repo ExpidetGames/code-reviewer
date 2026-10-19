@@ -13,7 +13,7 @@ spend is within the limit, so the run exceeds it by at most the last call's real
 
 import math
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 
 import pytest
@@ -74,11 +74,14 @@ def exact(prompt_tokens: int) -> str:
     return request_for(prompt_tokens, 3)
 
 
-def make_ledger(prices: UnitCosts, limit: str = "1.00") -> BudgetLedger:
+def make_ledger(
+    prices: UnitCosts, limit: str = "1.00", reserved_output_tokens: int | None = None
+) -> BudgetLedger:
     return BudgetLedger(
         DynamicLimits(max_cost_usd=Decimal(limit)),
         window_tokens=1_000_000,
         output_tokens=ALLOWANCE,
+        reserved_output_tokens=reserved_output_tokens,
         unit_costs=prices,
     )
 
@@ -101,13 +104,14 @@ def run_profile(
     completion: int = 400,
     final_completion: int = 3_000,
     limit: str = "1.00",
+    reserved_output_tokens: int | None = None,
 ) -> Run:
     """A tool loop like the live one: every round re-sends the history plus one more result.
 
     With `cached` the provider reports what it read from the cache (the previous prompt) and what
     it wrote (the growth); without it the whole prompt is billed and reported as plain input.
     """
-    ledger = make_ledger(prices, limit)
+    ledger = make_ledger(prices, limit, reserved_output_tokens)
     total = Decimal(0)
     previous = 0
     last_cost = Decimal(0)
@@ -149,6 +153,17 @@ def test_the_55_call_sonnet_profile_runs_to_just_under_the_limit() -> None:
     assert run.calls > 55
     assert Decimal("0.90") <= run.total <= Decimal("1.00")
     assert run.ledger.usage("m").cost_usd == pytest.approx(float(run.total))
+
+
+# #540-T01, #540-S2: the production ledger has the wire's cap (the allowance for a model that does
+# not always think), so the final call is reserved at its worst case, a review of 8,192 tokens, and
+# the wrap-up comes earlier than with the realistic 4,096. Measured: 0.893 USD.
+def test_the_55_call_profile_with_the_wires_cap_still_uses_most_of_the_limit() -> None:
+    run = run_profile(SONNET, cached=True, reserved_output_tokens=ALLOWANCE)
+
+    assert run.ledger.stopped_early == "cost_limit"
+    assert run.calls > 55
+    assert Decimal("0.88") <= run.total <= Decimal("1.00")
 
 
 # #540-T01
@@ -351,10 +366,31 @@ def test_the_final_call_writes_a_review_so_it_reserves_more_output_than_a_tool_c
 
 
 # #540-T05
-def test_a_final_call_that_does_not_fit_the_limit_is_refused() -> None:
+def test_a_final_call_that_does_not_fit_is_admitted_while_the_spend_is_within_the_limit() -> None:
+    # B1: the wrap-up is the last chance of a review, so it is admitted whenever the spend and what
+    # is in flight are within the limit, although its expected cost no longer fits.
     ledger = make_ledger(UNCACHED, limit="0.04")
     first = ledger.reserve_call(exact(10_000), output_tokens=ALLOWANCE)
     ledger.settle_call(first, prompt_tokens=10_000, completion_tokens=100, cost=Decimal("0.039"))
+
+    final = ledger.reserve_call(exact(10_780), output_tokens=ALLOWANCE, can_wrap_up=True)
+
+    assert final.final is True
+    assert final.cost > Decimal("0.04") - Decimal("0.039")  # it did not fit
+    assert ledger.stopped_early == "cost_limit"
+
+
+# #540-T05
+def test_a_final_call_is_refused_when_what_is_in_flight_already_passes_the_limit() -> None:
+    # Two calls in flight, one settles above its reservation: the spend is within the limit but the
+    # spend and what is still held are not. The exemption is for the one last call of a serial
+    # loop, not for a request that arrives next to a call that is still being answered.
+    ledger = make_ledger(UNCACHED, limit="0.10")
+    first = ledger.reserve_call(exact(10_000), output_tokens=ALLOWANCE)
+    second = ledger.reserve_call(exact(10_000), output_tokens=ALLOWANCE)
+    ledger.settle_call(first, prompt_tokens=10_000, completion_tokens=100, cost=Decimal("0.08"))
+    assert ledger.limit_exceeded_by is None
+    assert second.final is False
 
     with pytest.raises(LimitError) as refused:
         ledger.reserve_call(exact(10_780), output_tokens=ALLOWANCE, can_wrap_up=True)
@@ -374,25 +410,87 @@ def test_the_final_call_is_delivered_even_if_it_costs_more_than_expected() -> No
 
 
 # #540-T05
-def test_a_normal_call_that_settles_over_the_limit_still_fails_closed() -> None:
-    ledger = make_ledger(SONNET, limit="0.12")
-    reservation = ledger.reserve_call(exact(10_000), output_tokens=ALLOWANCE)
+def test_a_normal_call_that_settles_over_the_limit_ends_the_agent_phase() -> None:
+    # B1 (b): the call does not fail the run. The next request is the final call, admitted by the
+    # exemption although the spend is over the limit, and nothing normal follows.
+    ledger = make_ledger(SONNET, limit="0.30")
+    reservation = ledger.reserve_call(exact(10_000), output_tokens=ALLOWANCE, can_wrap_up=True)
+    assert reservation.final is False
+
+    ledger.settle_call(
+        reservation, prompt_tokens=10_000, completion_tokens=100, cost=Decimal("0.31")
+    )
+
+    assert ledger.limit_exceeded_by == Decimal("0.01")
+    final = ledger.reserve_call(exact(10_780), output_tokens=ALLOWANCE, can_wrap_up=True)
+    assert final.final is True
+    assert ledger.stopped_early == "cost_limit"
+    ledger.settle_call(final, prompt_tokens=10_780, completion_tokens=900, cost=Decimal("0.02"))
+    assert ledger.limit_exceeded_by == Decimal("0.03")
+    with pytest.raises(LimitError) as after:
+        ledger.reserve_call(exact(11_000), output_tokens=ALLOWANCE, can_wrap_up=True)
+    assert after.value.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
+
+
+# #540-T05
+def test_after_the_first_overshoot_a_request_that_cannot_be_the_final_call_is_refused() -> None:
+    ledger = make_ledger(SONNET, limit="0.30")
+    reservation = ledger.reserve_call(exact(10_000), output_tokens=ALLOWANCE, can_wrap_up=True)
+    ledger.settle_call(
+        reservation, prompt_tokens=10_000, completion_tokens=100, cost=Decimal("0.31")
+    )
 
     with pytest.raises(LimitError) as refused:
-        ledger.settle_call(
-            reservation, prompt_tokens=10_000, completion_tokens=100, cost=Decimal("0.13")
-        )
+        ledger.reserve_call(exact(10_780), output_tokens=ALLOWANCE, can_wrap_up=False)
     assert refused.value.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
+
+    # The refusal did not use up the final call: the next request that can be rewritten is it.
+    final = ledger.reserve_call(exact(10_780), output_tokens=ALLOWANCE, can_wrap_up=True)
+    assert final.final is True
+
+
+# #540-T05
+def test_a_run_within_the_limit_has_no_excess() -> None:
+    ledger = make_ledger(SONNET, limit="1.00")
+    reservation = ledger.reserve_call(exact(10_000), output_tokens=ALLOWANCE, can_wrap_up=True)
+    ledger.settle_call(
+        reservation, prompt_tokens=10_000, completion_tokens=100, cost=Decimal("0.05")
+    )
+
+    assert ledger.limit_exceeded_by is None
+
+
+# #540-T06
+def test_the_recovery_is_admitted_after_the_agent_phase_overshot_the_limit() -> None:
+    ledger = make_ledger(SONNET, limit="0.30")
+    reservation = ledger.reserve_call(exact(10_000), output_tokens=ALLOWANCE, can_wrap_up=True)
+    ledger.settle_call(
+        reservation, prompt_tokens=10_000, completion_tokens=100, cost=Decimal("0.31")
+    )
+
+    assert ledger.begin_recovery() is True
+    recovery = ledger.reserve_call(exact(10_780), output_tokens=ALLOWANCE, can_wrap_up=True)
+    assert recovery.final is True and recovery.recovery is True
+
+
+# #540-T06
+def test_the_recovery_is_admitted_even_when_one_more_call_no_longer_fits() -> None:
+    ledger = make_ledger(UNCACHED, limit="0.04")
+    first = ledger.reserve_call(exact(10_000), output_tokens=ALLOWANCE)
+    ledger.settle_call(first, prompt_tokens=10_000, completion_tokens=100, cost=Decimal("0.039"))
+
+    assert ledger.begin_recovery() is True
 
 
 # #540-T06
 def test_the_recovery_call_is_priced_with_the_cached_prefix() -> None:
-    # The same two calls, the same 0.0494 spent, the same limit: the recovery call fits when the
-    # previous prompt is read from the cache, and does not when it is priced as plain input.
+    # The same two calls: the recovery call is reserved at the cache-read price of the previous
+    # prompt when the provider reported reads, and at the input price when it did not.
     cached = make_ledger(SONNET, limit="0.10")
     settle_cached_call(cached, 14_600, read=0, write=14_600)
     settle_cached_call(cached, 15_380, read=14_600, write=780)
     assert cached.begin_recovery() is True
+    cached_recovery = cached.reserve_call(exact(16_160), output_tokens=ALLOWANCE, can_wrap_up=True)
 
     plain = make_ledger(UNCACHED, limit="0.10")
     for prompt, cost in ((14_600, "0.0405"), (15_380, "0.0089")):
@@ -400,7 +498,12 @@ def test_the_recovery_call_is_priced_with_the_cached_prefix() -> None:
         plain.settle_call(
             reservation, prompt_tokens=prompt, completion_tokens=400, cost=Decimal(cost)
         )
-    assert plain.begin_recovery() is False
+    assert plain.begin_recovery() is True  # admitted whatever it costs (#540)
+    plain_recovery = plain.reserve_call(exact(16_160), output_tokens=ALLOWANCE, can_wrap_up=True)
+
+    assert cached_recovery.recovery is True and plain_recovery.recovery is True
+    assert cached_recovery.cost < Decimal("0.06")
+    assert plain_recovery.cost > Decimal("0.07")
 
 
 # #540-T06
@@ -437,58 +540,234 @@ def test_the_retry_of_a_final_call_is_priced_with_the_cached_prefix() -> None:
     assert retry.cost < Decimal("0.05")
 
 
-# #540-T07
-@pytest.mark.parametrize("seed", range(40))
-def test_the_run_never_exceeds_the_limit_by_more_than_the_last_calls_cost(seed: int) -> None:
+@dataclass(frozen=True)
+class Profile:
+    """How a simulated run behaves: the prices, whether the provider caches, how often the cache
+    misses, how long the completions are and how much a round adds to the history."""
+
+    prices: UnitCosts
+    miss_rate: float
+    completions: tuple[int, ...]
+    growths: tuple[int, ...]
+    final_completions: tuple[int, ...] = (1_000, 4_000, 8_000)
+    # The share of requests that cannot be rewritten into a final call (a compaction, a title).
+    hidden_rate: float = 0.0
+
+
+STEADY = (300, 800, 800)
+# Now and then a 64 KiB tool result (about 21,000 tokens).
+BIG_RESULTS = (300, 800, 800, 2_000, 21_000)
+PROFILES = {
+    "steady": Profile(SONNET, 0.0, (400,), STEADY),
+    # The review of #542: 15% of the calls miss the cache.
+    "misses-15": Profile(SONNET, 0.15, (100, 400, 400, 2_000, 4_000), BIG_RESULTS),
+    "long-completions-misses-2": Profile(SONNET, 0.02, (2_000, 4_000, 6_000, 8_000), STEADY),
+    "uncached": Profile(UNCACHED, 0.0, (100, 400, 400, 2_000, 4_000), BIG_RESULTS),
+    "hidden-calls": Profile(SONNET, 0.05, (100, 400, 2_000), BIG_RESULTS, hidden_rate=0.1),
+}
+LIMITS = ("0.05", "0.20", "1.00")
+
+
+@dataclass
+class Simulated:
+    """What a simulated run did, call by call."""
+
+    delivered: bool = False
+    total: Decimal = Decimal(0)
+    calls: int = 0
+    final_cost: Decimal = Decimal(0)
+    # The last normal call: what it was reserved at, what it cost and what was spent before it.
+    normal_reserved: Decimal = Decimal(0)
+    normal_cost: Decimal = Decimal(0)
+    spent_after_normal: Decimal = Decimal(0)
+    admissions: list[tuple[Decimal, Decimal]] = field(
+        default_factory=lambda: list[tuple[Decimal, Decimal]]()
+    )
+    normal_after_overshoot: int = 0
+    failure: ErrorCode | None = None
+
+
+def simulate(
+    profile: Profile, limit: Decimal, seed: int, reserved_output_tokens: int | None = None
+) -> Simulated:
+    """One run of a tool loop against the ledger, the way the proxy and the engine drive it.
+
+    The engine asks again after every normal call; a request that cannot be rewritten (a hidden
+    call) that is refused is only that request, the engine goes on. The run is delivered when its
+    final call settled.
+    """
     rng = random.Random(seed)
-    prices = rng.choice([SONNET, UNCACHED])
-    limit = Decimal(rng.choice(["0.05", "0.20", "1.00"]))
-    ledger = make_ledger(prices, str(limit))
-    total = Decimal(0)
+    prices = profile.prices
+    cached = prices.cache_read_usd_per_mtok is not None
+    ledger = make_ledger(prices, str(limit), reserved_output_tokens)
+    run = Simulated()
     previous = 0
     prompt = rng.randint(2_000, 30_000)
     for _ in range(300):
-        prompt += rng.choice([300, 800, 800, 2_000, 21_000])  # now and then a 64 KiB result
+        prompt += rng.choice(profile.growths)
+        hidden = rng.random() < profile.hidden_rate
+        spent_before = run.total
         try:
             reservation = ledger.reserve_call(
-                request_for(prompt), output_tokens=ALLOWANCE, can_wrap_up=True
+                request_for(prompt), output_tokens=ALLOWANCE, can_wrap_up=not hidden
             )
         except LimitError as refused:
             assert refused.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
-            assert total <= limit
-            return
-        miss = prices.cache_read_usd_per_mtok is not None and rng.random() < 0.15
-        read = 0 if miss or prices is UNCACHED else previous
-        write = 0 if prices is UNCACHED else prompt - read
-        completion = rng.choice([100, 400, 400, 2_000, 4_000])
+            if hidden:
+                continue
+            run.failure = refused.code
+            return run
+        miss = cached and rng.random() < profile.miss_rate
+        read = previous if cached and not miss else 0
+        write = prompt - read if cached else 0
         if reservation.final:
-            completion = rng.choice([1_000, 4_000, 8_000])
+            completion = rng.choice(profile.final_completions)
+        else:
+            completion = rng.choice(profile.completions)
         cost = call_cost(
             prices, uncached=prompt - read - write, read=read, write=write, completion=completion
         )
-        spent_before = total
+        if not reservation.final:
+            run.admissions.append((spent_before, reservation.cost))
+            if spent_before > limit:
+                run.normal_after_overshoot += 1
         try:
             ledger.settle_call(
                 reservation,
                 prompt_tokens=prompt,
                 completion_tokens=completion,
                 cost=cost,
-                cache_read_tokens=read if prices is not UNCACHED else None,
-                cache_write_tokens=write if prices is not UNCACHED else None,
+                cache_read_tokens=read if cached else None,
+                cache_write_tokens=write if cached else None,
             )
         except LimitError as failed:
-            assert failed.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
-            assert not reservation.final
-            total += cost
-            assert spent_before <= limit
-            assert total <= limit + cost
-            return
-        total += cost
-        # Admission: the spend was within the limit when this call started.
-        assert spent_before <= limit
-        if reservation.final:
-            assert total <= limit + cost
-            return
-        assert total <= limit
+            run.total += cost
+            run.calls += 1
+            run.failure = failed.code
+            return run
+        run.total += cost
+        run.calls += 1
         previous = prompt
+        if reservation.final:
+            run.delivered = True
+            run.final_cost = cost
+            return run
+        run.normal_reserved, run.normal_cost = reservation.cost, cost
+        run.spent_after_normal = run.total
     raise AssertionError("the run never ended")
+
+
+def check_bound(run: Simulated, limit: Decimal) -> None:
+    """The invariants of "The bound": admission of a normal call, and the total after settlement."""
+    for spent_before, reserved in run.admissions:
+        # A normal call is admitted only when its expected cost fits.
+        assert spent_before + reserved <= limit
+    assert run.normal_after_overshoot == 0
+    # The limit, plus how much more the last normal call cost than was expected of it, plus the
+    # final call.
+    excess = max(Decimal(0), run.normal_cost - run.normal_reserved)
+    assert run.total <= limit + excess + run.final_cost
+
+
+def granted_final(limit: str, spent: str) -> BudgetLedger:
+    """A ledger whose final call (cost-triggered) was granted and settled at `spent` in all."""
+    ledger = make_ledger(UNCACHED, limit=limit)
+    first = ledger.reserve_call(exact(10_000), output_tokens=ALLOWANCE, can_wrap_up=True)
+    assert first.final is False
+    ledger.settle_call(first, prompt_tokens=10_000, completion_tokens=100, cost=Decimal("0.20"))
+    final = ledger.reserve_call(exact(10_780), output_tokens=ALLOWANCE, can_wrap_up=True)
+    assert final.final is True and ledger.stopped_early == "cost_limit"
+    ledger.settle_call(
+        final,
+        prompt_tokens=10_780,
+        completion_tokens=500,
+        cost=Decimal(spent) - Decimal("0.20"),
+    )
+    return ledger
+
+
+# #540-N4
+def test_the_usage_of_a_run_says_by_how_much_it_passed_the_cost_limit() -> None:
+    within = granted_final("0.30", spent="0.25")
+    over = granted_final("0.30", spent="0.31")
+
+    assert within.usage("m").limit_exceeded_by is None
+    assert "limitExceededBy" not in within.usage("m").to_json()
+    assert over.usage("m").limit_exceeded_by == pytest.approx(0.01)
+    assert over.usage("m").to_json()["limitExceededBy"] == pytest.approx(0.01)
+
+
+# #540-S1
+def test_the_retry_of_a_final_call_is_admitted_while_the_spend_is_within_the_limit() -> None:
+    # The cost-triggered final call answered in prose. A retry costs about 0.064 and only 0.05 of
+    # the limit is left, but the spend is within it: the retry is the last chance of a review.
+    ledger = granted_final("0.30", spent="0.25")
+
+    retry = ledger.try_reserve_final_retry(exact(11_500), output_tokens=ALLOWANCE)
+
+    assert retry is not None and retry.final is True
+    assert retry.cost > Decimal("0.30") - Decimal("0.25")
+
+
+# #540-S1
+def test_after_the_overshoot_exactly_one_final_retry_is_admitted() -> None:
+    # The final call itself settled over the limit (0.31 of 0.30): the first retry is still
+    # admitted, a second one is not.
+    ledger = granted_final("0.30", spent="0.31")
+
+    first = ledger.try_reserve_final_retry(exact(11_500), output_tokens=ALLOWANCE)
+    assert first is not None
+    ledger.settle_call(first, prompt_tokens=11_500, completion_tokens=500, cost=Decimal("0.01"))
+
+    assert ledger.try_reserve_final_retry(exact(12_000), output_tokens=ALLOWANCE) is None
+
+
+# #540-S1
+def test_the_final_call_and_one_retry_follow_a_normal_call_that_settled_over_the_limit() -> None:
+    ledger = make_ledger(UNCACHED, limit="0.30")
+    normal = ledger.reserve_call(exact(10_000), output_tokens=ALLOWANCE, can_wrap_up=True)
+    assert normal.final is False
+    ledger.settle_call(normal, prompt_tokens=10_000, completion_tokens=100, cost=Decimal("0.31"))
+    final = ledger.reserve_call(exact(10_780), output_tokens=ALLOWANCE, can_wrap_up=True)
+    ledger.settle_call(final, prompt_tokens=10_780, completion_tokens=500, cost=Decimal("0.01"))
+
+    retry = ledger.try_reserve_final_retry(exact(11_500), output_tokens=ALLOWANCE)
+    assert retry is not None
+    ledger.settle_call(retry, prompt_tokens=11_500, completion_tokens=500, cost=Decimal("0.01"))
+
+    assert ledger.try_reserve_final_retry(exact(12_000), output_tokens=ALLOWANCE) is None
+    assert ledger.limit_exceeded_by == Decimal("0.03")
+
+
+# #540-S2
+def test_the_final_call_reserves_the_wires_cap_when_there_is_one() -> None:
+    clock = [0.0]
+    capped = BudgetLedger(
+        DynamicLimits(max_cost_usd=Decimal(1)),
+        window_tokens=1_000_000,
+        output_tokens=16_384,
+        reserved_output_tokens=8_192,
+        unit_costs=UNCACHED,
+        clock=lambda: clock[0],
+    )
+    clock[0] = 500.0  # inside the clock reserve: this call is the final one
+
+    final = capped.reserve_call(exact(1_000), output_tokens=16_384, can_wrap_up=True)
+
+    assert final.final is True
+    assert final.cost == UNCACHED.of_call(1_000, 8_192)
+
+
+# #540-T07
+@pytest.mark.parametrize("cap", [None, ALLOWANCE])
+@pytest.mark.parametrize("limit", LIMITS)
+@pytest.mark.parametrize("name", PROFILES)
+def test_a_run_always_ends_with_its_final_call_and_stays_within_the_bound(
+    name: str, limit: str, cap: int | None
+) -> None:
+    for seed in range(60):
+        run = simulate(PROFILES[name], Decimal(limit), seed, cap)
+
+        assert run.failure is None, (name, limit, seed, run.failure)
+        assert run.delivered, (name, limit, seed)
+        check_bound(run, Decimal(limit))

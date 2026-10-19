@@ -13,7 +13,18 @@ cost of a call would not be exact.
 on as it is. `temperature` and `top_p` follow the flags of the model in the list (a 400 from Opus
 4.7 on), never both, never for a model the list does not know. Thinking is switched off for the
 models that accept it (the chat history of the engine cannot carry thinking blocks back), and the
-history is cached automatically, so a tool loop pays the read price for what it repeats.
+prompt is cached (below), so a tool loop pays the read price for what it repeats.
+
+**What is cached (#539).** Three explicit breakpoints, never more than four and never two on one
+block, all of the provider's default lifetime of five minutes: the end of the static prefix (the
+last system block, which covers the tools in front of it; the last tool when there is no system
+prompt), the end of the latest turn (what the next call reads) and the end of the turn before it of
+the same side (what the previous call wrote, so a read never depends on how far the provider's
+look-back of 20 blocks reaches). The top-level automatic mark is not used: it takes one of the four
+slots and marks the last block a second time. A mark the engine put on a message (the pinned
+OpenCode marks its system message and its last two messages when the model is a Claude) is not
+copied, because the body is built field by field; the marks here come from the structure of the
+request, never from its text.
 
 **What is steered (#533).** The engine asks for a forced tool choice on every call, because the
 review has to come back through its `StructuredOutput` tool. A model whose flags in the list say
@@ -53,9 +64,12 @@ from code_reviewer_runner.anthropic_thinking import ThinkingStore
 from code_reviewer_runner.dynamic_review.budget import LimitError
 from code_reviewer_runner.dynamic_review.wrap_up import STRUCTURED_OUTPUT_TOOL
 from code_reviewer_runner.job_loop.jsonvalues import as_object
+from code_reviewer_runner.provider_wire import CACHE_CONTROL
 from code_reviewer_runner.result import ErrorCode
 
 ANTHROPIC_VERSION: Final = "2023-06-01"
+# Blocks the provider refuses a breakpoint on.
+_UNMARKABLE_BLOCKS: Final = frozenset({"thinking", "redacted_thinking"})
 # The beta that lets a request say what happens when a thinking block no longer fits the
 # conversation.
 THINKING_BINDING_BETA: Final = "thinking-binding-controls-2026-08-01"
@@ -266,6 +280,40 @@ def _tools(raw: object) -> list[dict[str, Any]]:
     return converted
 
 
+def _control() -> dict[str, str]:
+    return dict(CACHE_CONTROL)
+
+
+def _markable(block: dict[str, Any]) -> bool:
+    """The provider refuses a mark on a thinking block and on a tool result without content (a tool
+    that returned nothing), as it does on an empty text block."""
+    kind = block.get("type")
+    if kind in _UNMARKABLE_BLOCKS:
+        return False
+    return kind != "tool_result" or bool(block.get("content"))
+
+
+def _last_markable(turn: dict[str, Any]) -> dict[str, Any] | None:
+    return next((block for block in reversed(turn["content"]) if _markable(block)), None)
+
+
+def _mark_turns(turns: list[dict[str, Any]]) -> None:
+    """The breakpoints inside the conversation: the end of the latest turn and the end of the
+    turn before it of the same side (the entry the previous call wrote)."""
+    if not turns:
+        return
+    head = turns[-1]
+    candidates = [head]
+    for turn in reversed(turns[:-1]):
+        if turn["role"] == head["role"]:
+            candidates.append(turn)
+            break
+    for turn in candidates:
+        block = _last_markable(turn)
+        if block is not None:
+            block["cache_control"] = _control()
+
+
 def _tool_choice(
     raw: object, parallel: object, *, steered: bool
 ) -> tuple[dict[str, Any] | None, bool]:
@@ -391,7 +439,10 @@ class AnthropicMessagesWire:
                         f"{system}\n\n{STEERING_INSTRUCTION}" if system else STEERING_INSTRUCTION
                     )
         if system:
-            body["system"] = system
+            # The last system block is the breakpoint of the static prefix, tools included (#539).
+            body["system"] = [{"type": "text", "text": system, "cache_control": _control()}]
+        elif body.get("tools"):
+            body["tools"][-1]["cache_control"] = _control()
         stops = _stop_sequences(request.get("stop"))
         if stops:
             body["stop_sequences"] = stops
@@ -405,8 +456,7 @@ class AnthropicMessagesWire:
                 "type": "adaptive",
                 "block_binding": {"prefix_mismatch_behavior": "drop_block"},
             }
-        # Automatic caching of the last block: the history of a tool loop is read from the cache.
-        body["cache_control"] = {"type": "ephemeral"}
+        _mark_turns(turns)
         return body
 
     def reserved_output_tokens(self, allowance: int) -> int:

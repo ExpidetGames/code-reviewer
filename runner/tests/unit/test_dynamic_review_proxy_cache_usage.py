@@ -16,8 +16,8 @@ from typing import Any
 import pytest
 from anthropic_usage import real_anthropic_usage
 
+from code_reviewer_runner.cache_usage import Counts, counts_of
 from code_reviewer_runner.dynamic_review.budget import BudgetLedger, DynamicLimits, UnitCosts
-from code_reviewer_runner.dynamic_review.cache_usage import cache_tokens
 from code_reviewer_runner.dynamic_review.config import new_proxy_capability
 from code_reviewer_runner.dynamic_review.proxy import (
     ModelProxy,
@@ -134,8 +134,8 @@ def test_the_chat_protocol_cache_details_reach_the_ledger() -> None:
 def test_an_answer_without_cache_tokens_settles_without_them() -> None:
     settled = settle_one(OPENROUTER, {"prompt_tokens": 70, "completion_tokens": 5})
 
-    assert settled["cache_read_tokens"] is None
-    assert settled["cache_write_tokens"] is None
+    assert settled["cache_read_tokens"] == 0
+    assert settled["cache_write_tokens"] == 0
 
 
 @pytest.mark.parametrize("bad", [-1, True, "40", 1.5, None, [40]])
@@ -143,11 +143,10 @@ def test_an_answer_without_cache_tokens_settles_without_them() -> None:
 def test_a_value_that_is_not_a_count_is_no_cache_signal(bad: Any) -> None:
     usage = {"prompt_tokens_details": {"cached_tokens": bad, "cache_write_tokens": bad}}
 
-    assert cache_tokens({"cache_read_input_tokens": bad, "cache_creation_input_tokens": bad}) == (
-        None,
-        None,
-    )
-    assert cache_tokens(usage) == (None, None)
+    # The one reader of #539: such a call is counted as paid in full, never as cheaper.
+    anthropic = {"cache_read_input_tokens": bad, "cache_creation_input_tokens": bad}
+    assert counts_of({"prompt_tokens": 70, **anthropic}) == Counts(0, 0, 70)
+    assert counts_of({"prompt_tokens": 70, **usage}) == Counts(0, 0, 70)
 
 
 # #540-T08
@@ -161,16 +160,32 @@ def test_cache_tokens_above_the_prompt_are_no_cache_signal_for_the_ledger() -> N
         },
     )
 
-    # The proxy hands over what it read; the ledger decides it cannot be true (above the prompt) and
-    # prices the next call as plain input.
-    assert settled["cache_read_tokens"] == 900
+    # More cached tokens than the prompt cannot be true: the reader of #539 counts the call as paid
+    # in full, so the ledger prices the next call as plain input.
+    assert settled["cache_read_tokens"] == 0
+    assert settled["cache_write_tokens"] == 0
 
 
 # #540-T08
 def test_the_provider_names_win_over_the_details_when_both_are_there() -> None:
     usage = {
+        "prompt_tokens": 70,
         "cache_read_input_tokens": 30,
         "prompt_tokens_details": {"cached_tokens": 40},
     }
 
-    assert cache_tokens(usage) == (30, None)
+    assert counts_of(usage) == Counts(30, 0, 40)
+
+
+# #540-T08
+def test_litellms_cache_creation_name_in_the_details_is_read_too() -> None:
+    settled = settle_one(
+        OPENROUTER,
+        {
+            "prompt_tokens": 70,
+            "completion_tokens": 5,
+            "prompt_tokens_details": {"cached_tokens": 40, "cache_creation_tokens": 20},
+        },
+    )
+
+    assert (settled["cache_read_tokens"], settled["cache_write_tokens"]) == (40, 20)

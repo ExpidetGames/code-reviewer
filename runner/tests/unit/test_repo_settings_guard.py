@@ -557,3 +557,61 @@ def test_a_repository_file_cannot_change_the_key_or_the_endpoint_of_a_registered
     assert current().get("fakeai.key") == API_KEY
     assert current().get("fakeai.api_base") == fake.default_api_base
     assert current().get("fakeai.surprise") is None
+
+
+CLAUDE_JOB: Job = make_job(
+    llm={"provider": "anthropic", "model": "claude-haiku-5-5", "apiKey": API_KEY},
+)
+INJECTION_POINTS = "litellm.cache_control_injection_points"
+
+
+# #539-T11
+@pytest.mark.parametrize(
+    "file",
+    [
+        "[litellm]\ncache_control_injection_points = []\n",
+        '[litellm]\ncache_control_injection_points = [{ location = "message", role = "user" }]\n',
+        '[litellm]\ncache_control_injection_points = [{ location = "message", index = -1 }]\n',
+        '[litellm]\ncache_control_injection_points = "not a list"\n',
+    ],
+    ids=["cleared", "the user message", "the last message", "not a list"],
+)
+def test_a_repository_file_cannot_change_what_the_runner_caches(scope: Path, file: str) -> None:
+    guard, uninstall = install_repo_settings_guard()
+    try:
+        configured(guard, CLAUDE_JOB)
+        before = copy.deepcopy(current().get(INJECTION_POINTS))
+        assert before == [{"location": "message", "role": "system"}]
+
+        apply_repo_file(scope, file)
+    finally:
+        uninstall()
+
+    assert current().get(INJECTION_POINTS) == before
+
+
+# #539-T11
+def test_a_repository_file_cannot_turn_caching_on_for_a_model_that_has_none(scope: Path) -> None:
+    guard, uninstall = install_repo_settings_guard()
+    try:
+        configured(guard)
+        assert not current().get(INJECTION_POINTS)
+
+        apply_repo_file(
+            scope,
+            "[litellm]\ncache_control_injection_points = "
+            '[{ location = "message", role = "user" }]\n',
+        )
+    finally:
+        uninstall()
+
+    assert not current().get(INJECTION_POINTS)
+
+
+# #539-T11: the reason for the pin; without the guard the file does take it over
+def test_without_the_guard_the_file_would_change_what_is_cached(scope: Path) -> None:
+    configured(RepoSettingsGuard(), CLAUDE_JOB)
+
+    apply_repo_file(scope, "[litellm]\ncache_control_injection_points = []\n")
+
+    assert current().get(INJECTION_POINTS) == []

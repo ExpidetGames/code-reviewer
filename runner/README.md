@@ -357,7 +357,11 @@ input and the boundaries around it (the epic's binding decision). Modules:
   content, the byte caps). Every call is reserved before it is sent (the cost it is expected to have from
   what the run showed: cached prefix, observed output, #540), every tool
   part is counted, and a missing or oversized answer fails closed; a call without `usage.cost` ends
-  the run. The run never passes the limit by more than one call's real cost (`docs/dynamic-review.md`, "The bound").
+  the run. A normal call is admitted only when its expected cost fits; the final call (wrap-up,
+  recovery, retries) is admitted whenever the spend is within the limit, and a normal call that
+  settles over the limit ends the agent phase instead of failing the run, so the cost guard never
+  ends a run without a review. The settled total is at most the limit plus the excess of the last
+  normal call plus the final call's cost (`usage.limitExceededBy` reports it; `docs/dynamic-review.md`, "The bound").
   The input estimate is bytes over 3, tightened by the previous call's real density, and the
   model's window (from its capability descriptor, never the Diff `llm.maxTokens`) is a backstop in
   front of the provider's own limit. Details: `docs/dynamic-review.md`, "Hard limits". Near the cost
@@ -869,8 +873,7 @@ no sampling parameter, and its calls cost an unknown amount.
   one the cost rule reads. The Messages API is used and not Anthropic's OpenAI-compatible endpoint, which
   is documented as not meant for production, ignores `response_format`, `strict` and prompt caching and reports
   no cache tokens. What the wire does: sends `temperature`/`top_p` by the model's flags and never both; sets
-  `thinking: {"type": "disabled"}` where the model accepts it; turns on automatic caching (`cache_control` at
-  the top level) so a tool loop pays the read price for what it repeats; refuses, before anything is reserved
+  `thinking: {"type": "disabled"}` where the model accepts it; marks the prompt for the provider's cache (see "Prompt caching"); refuses, before anything is reserved
   or sent, content that is not text, a response format other than text and a malformed tool call in the
   history (`dynamic_policy_violation`).
 - **Steering instead of forcing (#533).** The engine asks for `tool_choice: required` on every call and the
@@ -930,13 +933,85 @@ no sampling parameter, and its calls cost an unknown amount.
   `test_anthropic_provider.py`, `test_anthropic_wire.py`, `test_anthropic_wire_steering.py`,
   `test_anthropic_strict_fake.py`, `test_dynamic_review_proxy_anthropic.py`,
   `test_dynamic_review_proxy_anthropic_steering.py`, `test_diff_cost_anthropic.py`,
-  `test_temperature_patch_anthropic.py`, `test_pr_agent_config_anthropic.py`;
+  `test_temperature_patch_anthropic.py`, `test_pr_agent_config_anthropic.py`,
+  `test_anthropic_wire_caching.py` (where the breakpoints go), `test_fake_anthropic_cache.py` (the cache
+  rules of the fake);
   `tests/integration/test_dynamic_review_proxy_anthropic_transport.py` (real sockets);
   `tests/engine/test_engine_anthropic.py` (the real PR-Agent and LiteLLM against the fake LLM that speaks the
   Messages API: the temperature of each listed model, the headers, the output, the exact cost) and
   `tests/engine/test_engine_opencode_anthropic.py` (the real pinned OpenCode behind the proxy's Messages wire,
   steered models, thinking blocks and the recovery). The fake enforces Anthropic's 400s
   (the rules module of `fakes/llm/`, by the flags of the contract file).
+
+## Prompt caching (#539)
+
+Caching is on wherever the provider has it, for Diff and for Dynamic. A Dynamic Review is a tool loop
+that sends its whole history with every call (the live run that made it visible: 55 calls, 1,968,171
+prompt tokens, $0.70 where the same tokens uncached cost about $3.94), so the part a call repeats must
+be read from the cache. A cache write costs 1.25x the input price, a read 0.1x (0.05x on Sonnet 5.5 and
+Opus 5.5, 0.025x on Fable 5.1), so a prompt that is read only once is dearer cached than not: that is
+why the diff of a Diff run is never marked.
+
+| Where | What is marked | Done by |
+|---|---|---|
+| Dynamic, Anthropic | three explicit breakpoints in the Messages body: the last system block (it covers the tools in front of it; the last tool when there is no system prompt), the end of the latest turn, and the end of the turn before it of the same side (the entry the previous call wrote). Never more than four, never two on one block, no top-level `cache_control` (it takes a slot and marks the last block again) | `anthropic_wire.py` |
+| Dynamic, OpenRouter, `anthropic/...` | the two forms OpenRouter documents: a `cache_control` on the text of the system message and the top-level `cache_control` (automatic caching of the last block) | `provider_wire.OpenRouterWire` |
+| Dynamic, OpenRouter, any other model | nothing: OpenAI, DeepSeek, Grok, Moonshot, Groq/Kimi, Z.AI and Gemini 2.5 and newer cache by themselves, and a parameter an endpoint does not know next to `provider.require_parameters` would answer "no endpoint found". The prefix stays stable (the runner never reorders or rewrites an earlier turn) and OpenRouter's sticky routing keeps a conversation with the provider that holds its cache | none |
+| Diff, a model whose name says `claude` (Anthropic, or `anthropic/claude-*` on OpenRouter) | `litellm.cache_control_injection_points = [{location: message, role: system}]`: the system message, the instructions of the tool, which the calls of a run and the runs of a workspace within five minutes have in common | `pr_agent_config.py` |
+| Diff, any other model | nothing | none |
+
+**Lifetime: five minutes**, the provider's default, one constant (`provider_wire.CACHE_CONTROL`). Every
+read renews the entry for free and a tool loop calls the model every few seconds (a call is cut off at
+120 s), so it never expires inside a run. A one hour write costs 2x instead of 1.25x; the extra 0.75x
+per written token pays only if the same entry is read again after more than five minutes, at 1.15x less
+per read, which is a 65 % chance of a late read. The prefix of one conversation is never read again
+after its last call, so one hour can only lose. The shared system message could win with more than one
+job per workspace in five to sixty minutes; that is not the case today and the log line below is how
+it would be seen.
+
+**With steering and thinking blocks (#533).** The constant steering instruction is part of the last
+system block, so the static prefix stays byte-stable within a run. A thinking block cannot carry a
+mark: the breakpoint of a turn goes on its last block that is neither thinking nor a tool result
+without content (a tool that returned nothing; the provider refuses a mark there as on an empty
+text block, so the mark moves to the previous block of the turn). The wrap-up call changes
+the tools (and drops the reasoning of the earlier calls with `drop_block`), so it misses the cache by
+design; it is one call. A request without a forced choice has no instruction and non-strict tools, a
+different prefix, and caches on its own.
+
+**The engine marks too.** The pinned OpenCode (1.19.0), when the model id contains `claude` or
+`anthropic`, puts `cache_control` on the system message, on its last two other messages and on the
+tool calls of its history (on the message objects, which the Messages API has no field for: a 400).
+Both wires build or clean their messages and drop every mark of the engine, so the breakpoints of a
+request are the ones the wire placed, each once. `PROXY_FORWARDED_FIELDS` does not list
+`cache_control`, and nothing in a pull request (a diff, a title, a tool result, a repository file)
+chooses a mark, a lifetime or a header: the marks come from the structure of the request. For Diff the
+setting is in the `litellm` section, which a repository's `.pr_agent.toml` cannot change.
+
+**What it saved, and what it did not.** The Anthropic wire sent a top-level `cache_control` before this
+change, so the live run above was already cached. The explicit breakpoints make that deliberate and
+tested: the static prefix is marked on its own, and a read never depends on the provider's look-back of
+20 positions reaching the last write. Through the cache fake a 55-call run reads 96.6 % of its prompt
+from the cache and costs 84.2 % less than the same run without breakpoints
+(`test_dynamic_review_proxy_caching.py`). The new part is OpenRouter (a Claude behind it had the
+engine's undocumented marks only) and Diff (no caching at all).
+
+**Cost stays exact.** A read is priced at the read price, a five minute write at the write price (the
+`cache_creation` split when present, #534), the rest at the input price; every unknown-cost rule of
+#534 holds. OpenRouter's `usage.cost` already carries its discount and is read, never computed.
+
+**Observability.** A job logs one line of counts at its end, in the result's log: `prompt cache: 12
+calls, 54000 input tokens read from the cache, 3200 written to the cache, 800 not cached`
+(`cache_usage.py`; Dynamic: the proxy sees every call, Diff: the cost meter). No text of a prompt, an
+answer or a key, and no price. A usage that states counts that do not fit its prompt is counted as paid
+in full.
+
+**Fakes.** `fakes/llm/anthropic_cache.py` keeps the rules of the docs (at most four breakpoints, the
+model's minimum length, five minute and one hour lifetimes that a read renews, a look-back of 20
+positions, a mark on an empty block, an empty tool result, a thinking block or a message object is
+a 400; a changed `tool_choice` or `thinking` invalidates the cached messages and a changed tool set
+everything after it) and returns the real usage. `fakes/llm/server.ts` has the same rules for the app's and the e2e lanes;
+`tests/engine/fake_llm.py` uses the Python ones (`prompt_cache`), also for the OpenRouter shape
+(`prompt_tokens_details.cached_tokens`, `cache_write_tokens`, a `usage.cost` with the discount).
 
 ## Required parameters on OpenRouter (#270)
 

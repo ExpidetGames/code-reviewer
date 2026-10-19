@@ -197,6 +197,7 @@ def sent(upstream: StrictUpstream, index: int) -> dict[str, Any]:
     return upstream.requests[index][1]
 
 
+# #539-T17
 # #533-T11
 def test_a_steered_tool_loop_with_thinking_runs_through_the_strict_api_and_is_costed_exactly() -> (
     None
@@ -224,7 +225,7 @@ def test_a_steered_tool_loop_with_thinking_runs_through_the_strict_api_and_is_co
     assert third["tool_calls"][0]["function"]["name"] == "StructuredOutput"
     for _, body in upstream.requests:
         assert body["tool_choice"] == {"type": "auto"}
-        assert body["system"].startswith("You review code.\n\n")
+        assert body["system"][0]["text"].startswith("You review code.\n\n")
         assert [tool["name"] for tool in body["tools"]] == ["read", "StructuredOutput"]
         assert "strict" not in body["tools"][0]
         assert body["tools"][1]["strict"] is True

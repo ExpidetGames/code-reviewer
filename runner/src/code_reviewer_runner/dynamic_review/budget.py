@@ -18,12 +18,12 @@ missing or oversized answer fails closed. Nothing here is advisory.
 
 **Cost.** Before a call the ledger reserves what the call is expected to cost (#540), from what the
 run itself has shown. A model without unit costs does not run (`dynamic_config_invalid`, see
-`runner.dynamic_ledger`): a cost that cannot be priced cannot be bounded before it is spent. The
-call is refused when what is spent, what is reserved for calls in flight and this reservation would
-together pass the limit. After the call the reservation is replaced by the `usage.cost` the provider
-reported. A call that reports no cost cannot be bounded by money, so the run stops
-(`dynamic_accounting_failed`): it is never continued without a bound, and a missing cost is never
-read as zero.
+`runner.dynamic_ledger`): a cost that cannot be priced cannot be bounded before it is spent. A
+normal call is refused when what is spent, what is reserved for calls in flight and this
+reservation would together pass the limit; the final call is the exception (see "The bound"). After
+the call the reservation is replaced by the `usage.cost` the provider reported. A call that reports
+no cost cannot be bounded by money, so the run stops (`dynamic_accounting_failed`): it is never
+continued without a bound, and a missing cost is never read as zero.
 
 *What a call is expected to cost.* The prompt is split into the **prefix** the previous call left in
 the provider's cache and the **growth** since. When the previous call reported cache reads and the
@@ -38,14 +38,32 @@ allowance (`max_tokens`) stays the hard cap a completion is held to, but is no l
 call reserves. A call that writes the review (the final call, the recovery, a retry of
 either) reserves at least `FINAL_OUTPUT_FLOOR_TOKENS`.
 
-*The bound.* A call is admitted only while `spent + held + its expected cost <= limit`, so the spend
-is within the limit whenever a call starts. The settled total can therefore pass the limit only by
-the last call's real cost minus what was expected of it, which is at most that call's real cost:
-**the run never exceeds the limit by more than one call's real cost.** A call that costs more than
-expected (a cache miss, an unusually long answer, a 64 KiB tool result) is priced correctly from the
-next call on. A non-final call that settles over the limit still fails closed
-(`dynamic_budget_exceeded`); the final call that carries the answer is delivered, the one overshoot
-the limit allows.
+*The bound.* A run must never end without a review because of the cost guard, so the guard has two
+rules and no failure mode in between.
+
+- A **normal call** is admitted only while `spent + held + its expected cost <= limit`.
+- The **final call** (the wrap-up, the recovery and the retries of either) is the last chance of a
+  review. It is admitted whenever `spent + held <= limit`, even when its expected cost no longer
+  fits, and it is delivered whatever it costs. A normal call that settles **over** the limit (a
+  cache miss, an unusually long answer, a 64 KiB tool result: costs the expectation did not see)
+  is delivered too, but it ends the agent phase at once: the next request that can be rewritten is
+  the final call, admitted by the same exemption although the spend is over the limit, and no
+  normal call is admitted again (a request that cannot be rewritten is refused,
+  `dynamic_budget_exceeded`). If the final call returns no answer, one retry past the limit is
+  still made (the retries within the limit are made as before).
+
+So the settled total is at most **the limit, plus the excess of the last normal call (its real cost
+minus its reservation, at most its real cost), plus the cost of the final call**. The final call
+costs at most its input plus `allowance x output price`: it reserves the cap the model's wire names
+(`reserved_output_tokens`, the allowance by default) when there is one, so the wrap-up decision
+leaves room for the worst case of a review, not for a tool call. When the final call answers
+without a structured answer and the spend is over the limit, the one retry past the limit is a
+final call more. Fail closed is unchanged: a call without a usable cost is
+`dynamic_accounting_failed`. The model calls of the engine are serial (one agent, no subagent tool,
+a step waits for its tool results); if requests ever overlapped, the bound is the sum of these
+excesses over the calls in flight, and the final call is refused when `spent + held` already passes
+the limit. The result reports how far the limit was passed as `usage.limitExceededBy` (USD) and
+the log says it.
 
 **Wrap-up (#293).** The run does not just stop when the limit is near. A call that can be rewritten
 into a final answer (`can_wrap_up`: the model proxy can reduce the request to the structured-output
@@ -56,16 +74,18 @@ after it) * RESERVE_MARGIN > limit`: the final call after it is priced realistic
 next prompt plus the growth the run showed per round (p95, floor `GROWTH_FLOOR_TOKENS`) with the
 cached prefix and a review-sized output, and the margin keeps a normal call that costs a little more
 than expected from taking the room of the final call. The decision is the ledger's alone, from its
-own cost and clock; nothing in the request can start or prevent it. The final call must itself fit
-the cost limit, and it is the last call granted: any other request after it is refused. The ledger
+own cost and clock; nothing in the request can start or prevent it. The final call is admitted
+whenever the spend is within the limit (see "The bound") and is the last call granted: any other
+request after it is refused. The ledger
 remembers why the run stopped early (`stopped_early`) for the result and the summary.
 
 **Recovery (#309).** A turn can end with no structured answer although nothing was used up (the
 model answered in prose, was cut off, or the provider ended a step the engine took for the last).
 The adapter then asks `begin_recovery()` once. It says yes only while no final call was granted,
 a model call was made, the clock has more than the wrap-up's reserve left (one provider call: the
-recovery call writes a whole review) and the estimate of one more call fits the cost limit; the
-next call that can be rewritten is then granted as a final call with the recovery instruction. It is
+recovery call writes a whole review) and the spend is within the cost limit (the recovery call is a
+final call: its expected cost is not asked, see "The bound"); the next call that can be rewritten is
+then granted as a final call with the recovery instruction. It is
 the same last call as the wrap-up's (nothing is granted after it), so a run has at most one of the
 two, and it does not count as stopping early: the review is not cut short by a limit. If it fails,
 the run fails as it did before.
@@ -382,6 +402,10 @@ class BudgetLedger:
         self._final_unanswered = False
         self._recovery_armed = False
         self._recovered = False
+        # A normal call settled over the limit (#540): the agent phase is over, the next request
+        # that can be rewritten is the final call. And whether the retry past the limit was used.
+        self._overshot = False
+        self._retried_past_limit = False
         self._stopped_early: str | None = None
         self._clock = clock
         self._started = clock()
@@ -439,6 +463,16 @@ class BudgetLedger:
             return self._stopped_early
 
     @property
+    def limit_exceeded_by(self) -> Decimal | None:
+        """By how much the settled cost passed the cost limit in USD, None when it did not (#540).
+
+        The run's usage reports it as a fact, so the bound of "The bound" in the module docstring
+        can be watched on real runs."""
+        with self._lock:
+            excess = self._counters.cost - self.limits.max_cost_usd
+            return excess if excess > 0 else None
+
+    @property
     def recovered(self) -> bool:
         """True when the run's final call was the recovery of a turn without an answer (#309)."""
         with self._lock:
@@ -449,9 +483,11 @@ class BudgetLedger:
 
         Not possible: a final call was granted already (its answer was the last chance, whatever
         it was), the recovery was armed before, no model call was made (nothing ended a turn),
-        less than the wrap-up reserve of the clock is left (the call writes a whole review), or one
-        more call, priced as the last call's prompt plus the model's last answer plus a slack, does
-        not fit the cost limit. The call itself is still reserved like any other when it arrives.
+        less than the wrap-up reserve of the clock is left (the call writes a whole review), or the
+        spend and what is in flight already pass the cost limit. The recovery call is a final call:
+        it is admitted whenever the spend is within the limit, even when its expected cost no longer
+        fits, and after a normal call that settled over the limit (#540). The call itself is still
+        reserved when it arrives.
         """
         with self._lock:
             counters = self._counters
@@ -459,11 +495,7 @@ class BudgetLedger:
                 return False
             if counters.model_calls == 0 or self.remaining_seconds() <= self._wrap_up_seconds:
                 return False
-            slack = math.ceil(RECOVERY_REQUEST_SLACK_BYTES / counters.density)
-            input_tokens = counters.last_prompt_tokens + counters.last_completion_tokens + slack
-            held = counters.cost + counters.reserved_cost
-            cost = self._expected_cost(input_tokens, self.output_tokens, final=True)
-            if held + cost > self.limits.max_cost_usd:
+            if not self._final_admissible(counters.cost + counters.reserved_cost):
                 return False
             self._recovery_armed = True
             return True
@@ -537,12 +569,19 @@ class BudgetLedger:
             priced = self._priced_input(size, estimate)
             cost = self._expected_cost(priced, allowance)
             recovery = self._recovery_armed and can_wrap_up
-            reason = (
-                None
-                if not can_wrap_up or recovery
-                else self._wrap_up_reason(held, cost, priced, allowance)
-            )
-            if reason is not None or recovery:
+            if self._overshot and not can_wrap_up:
+                # A normal call settled over the limit: nothing but the final call follows.
+                raise LimitError(ErrorCode.DYNAMIC_BUDGET_EXCEEDED, "the cost limit is used up")
+            if recovery:
+                reason = None
+            elif self._overshot:
+                reason = STOPPED_EARLY_COST
+            elif can_wrap_up:
+                reason = self._wrap_up_reason(held, cost, priced, allowance)
+            else:
+                reason = None
+            final = reason is not None or recovery
+            if final:
                 # The last call of the run: it carries the instruction and nothing else grows.
                 text = recovery_text if recovery else wrap_up_text
                 size += len(text.encode("utf-8", errors="replace"))
@@ -551,9 +590,15 @@ class BudgetLedger:
                 cost = self._expected_cost(
                     self._priced_input(size, estimate), allowance, final=True
                 )
-            if held + cost > self.limits.max_cost_usd:
+            # A normal call is admitted only when its expected cost fits. The final call is the last
+            # chance of a review, so it is admitted whenever the spend and what is in flight are
+            # within the limit, even when its expected cost no longer fits (#540).
+            fits = (
+                self._final_admissible(held) if final else held + cost <= self.limits.max_cost_usd
+            )
+            if not fits:
                 raise LimitError(ErrorCode.DYNAMIC_BUDGET_EXCEEDED, "the cost limit is used up")
-            if reason is not None or recovery:
+            if final:
                 self._final_granted = True
                 if recovery:
                     self._recovery_armed = False
@@ -568,7 +613,7 @@ class BudgetLedger:
             byte_bound=bound,
             request_bytes=size,
             cost=cost,
-            final=reason is not None or recovery,
+            final=final,
             recovery=recovery,
         )
 
@@ -579,9 +624,10 @@ class BudgetLedger:
 
         The final call (wrap-up or recovery) can only return the review. When its reply did not,
         the proxy asks again, but only while the clock and the cost limit have room: the attempt is
-        priced and reserved like any call (the same window check, the cost held, spent and
-        reserved), and nothing here can raise a limit the run does not already have. None means
-        "stop asking"; the last reply is what the engine gets.
+        priced and reserved like any call (the same window check), and it is a final call: admitted
+        whenever the spend and what is in flight are within the cost limit, even when its expected
+        cost no longer fits. Once the spend is over the limit, one retry is still admitted and then
+        none (#540). None means "stop asking"; the last reply is what the engine gets.
         """
         allowance = self.output_tokens if output_tokens is None else output_tokens
         size = len(request_text.encode("utf-8", errors="replace"))
@@ -594,8 +640,10 @@ class BudgetLedger:
             estimate = self._estimate(size)
             bound = max(size, counters.last_prompt_tokens)
             cost = self._expected_cost(self._priced_input(size, estimate), allowance, final=True)
-            if counters.cost + counters.reserved_cost + cost > self.limits.max_cost_usd:
-                return None
+            if counters.cost + counters.reserved_cost > self.limits.max_cost_usd:
+                if self._retried_past_limit:
+                    return None
+                self._retried_past_limit = True
             counters.model_calls += 1
             counters.reserved_cost = _SUM.add(counters.reserved_cost, cost)
         return Reservation(
@@ -606,6 +654,13 @@ class BudgetLedger:
             cost=cost,
             final=True,
         )
+
+    def _final_admissible(self, held: Decimal) -> bool:
+        """Whether a final call (wrap-up, recovery) may start: the spend and what is in flight are
+        within the cost limit, or a normal call settled over it and this is the call that ends the
+        run (#540). Its expected cost is not asked: the final call is delivered whatever it costs.
+        """
+        return self._overshot or held <= self.limits.max_cost_usd
 
     def _estimate(self, size: int) -> int:
         return max(math.ceil(size / self._counters.density), self._counters.last_prompt_tokens)
@@ -637,10 +692,14 @@ class BudgetLedger:
     def _expected_output(self, allowance: int, *, final: bool = False) -> int:
         """The output a call reserves: the p95 of the run's completions with a floor, at most the
         allowance and at most the cap the model's wire names for a reservation (#533). The call
-        that writes the review reserves the larger floor."""
+        that writes the review reserves the larger floor, or, when the wire names a cap, the cap
+        itself: a review can use all of it (the thinking of a model counts), and the final call is
+        the one call that is delivered over the limit, so it is not priced optimistically (#540)."""
+        cap = allowance if self._reserved_cap is None else min(allowance, self._reserved_cap)
+        if final and self._reserved_cap is not None:
+            return cap
         observed = _percentile(self._counters.completions)
         floor = FINAL_OUTPUT_FLOOR_TOKENS if final else OUTPUT_FLOOR_TOKENS
-        cap = allowance if self._reserved_cap is None else min(allowance, self._reserved_cap)
         return min(cap, max(floor, observed))
 
     def _growth_tokens(self) -> int:
@@ -747,11 +806,11 @@ class BudgetLedger:
                 )
             counters.cost = _SUM.add(counters.cost, cost)
             counters.priced_calls += 1
-            # The final call carries the answer: it is delivered even if it cost more than expected,
-            # the one overshoot of the limit (see "The bound" above). Any other call over the limit
-            # ends the run.
+            # The final call carries the answer: it is delivered even if it cost more than expected.
+            # A normal call over the limit is delivered too, but it ends the agent phase: the next
+            # request is the final call, and no normal call is admitted again (see "The bound").
             if counters.cost > self.limits.max_cost_usd and not reservation.final:
-                raise LimitError(ErrorCode.DYNAMIC_BUDGET_EXCEEDED, "the cost limit is used up")
+                self._overshot = True
 
     def count_tool_call(self, name: str) -> None:
         """Count one tool call the engine reported. Unknown attempts count too. Not a budget."""
@@ -840,6 +899,7 @@ class BudgetLedger:
             counters = self._counters
             exact = counters.model_calls > 0 and counters.priced_calls == counters.model_calls
             total = float(counters.cost)
+            excess = float(counters.cost - self.limits.max_cost_usd)
             return Usage(
                 model=model,
                 prompt_tokens=counters.prompt_tokens,
@@ -849,5 +909,6 @@ class BudgetLedger:
                 fallback_used=False,
                 cost_usd=total if exact and math.isfinite(total) else None,
                 stopped_early=self._stopped_early,
+                limit_exceeded_by=excess if exact and 0 < excess < math.inf else None,
                 call_trace=self.trace.to_json(),
             )

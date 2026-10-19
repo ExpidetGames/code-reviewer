@@ -57,6 +57,7 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request
 
+from code_reviewer_runner.cache_usage import CacheTally, counts_of
 from code_reviewer_runner.dynamic_review.audit import ToolAudit
 from code_reviewer_runner.dynamic_review.budget import (
     DEFAULT_WINDOW_TOKENS,
@@ -66,7 +67,6 @@ from code_reviewer_runner.dynamic_review.budget import (
     UnitCosts,
     exact_cost,
 )
-from code_reviewer_runner.dynamic_review.cache_usage import cache_tokens
 from code_reviewer_runner.dynamic_review.call_outcome import describe_call
 from code_reviewer_runner.dynamic_review.call_trace import answer_finish_reason, answer_tool_names
 from code_reviewer_runner.dynamic_review.completion_stream import completion_as_stream
@@ -451,6 +451,8 @@ class ModelProxy:
         self.upstream_model = upstream_model
         self.capabilities = capabilities
         self.audit = ToolAudit(ledger)
+        # How much of the input of the run came from the provider's cache (counts only, #539).
+        self.cache_tally = CacheTally()
         self._post = post
         # The registry entry of the job's provider: the require-parameters field, the matcher for
         # "no endpoint supports them" and the extractor of the stated cost (the runner decides,
@@ -628,6 +630,7 @@ class ModelProxy:
             cache_write_tokens=cache_write,
         )
         self.ledger.note_call_outcome(describe_call(completion, final=reservation.final))
+        self.cache_tally.add(completion.get("usage"))
         return _Attempt(body=response_body, completion=completion)
 
     def _trace_failed_call(self, started_ms: int, reservation: Reservation) -> None:
@@ -781,9 +784,10 @@ class ModelProxy:
     @staticmethod
     def _cache_usage(document: dict[str, Any]) -> tuple[int | None, int | None]:
         """What the provider says it read from and wrote to its cache (#540): the cost guard prices
-        the next call from it. Neither is reported by a provider without a cache."""
-        usage = as_object(document.get("usage"))
-        return (None, None) if usage is None else cache_tokens(usage)
+        the next call from it. The one reader of the cache fields is `cache_usage.counts_of` (#539);
+        a provider without a cache, or a count that cannot be true, reads as no cache use."""
+        counts = counts_of(document.get("usage"))
+        return (None, None) if counts is None else (counts.read, counts.written)
 
     def _cost(self, document: dict[str, Any]) -> Decimal | None:
         """The cost of this call by the rule of the provider, or None when it has none.
