@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // What both entry points share: the settings from the environment, the Webhook-Trigger over the
-// configured keys and a logger that masks every secret of this deployment.
+// configured keys, the stop route and the reaper where there is a platform fleet, and a logger that masks every
+// secret of this deployment.
 import { createDispatcher, type Dispatcher } from "./dispatcher-app.ts";
 import { loadSettings, type Settings } from "./config.ts";
 import { createLogger } from "./core/logger.ts";
@@ -10,6 +11,7 @@ import type { LauncherContext, ReaperSetup } from "./launchers/sandbox-env.ts";
 import { createAppClient } from "./core/app-client.ts";
 import { createReaper } from "./reaper/reaper.ts";
 import { mountReaperRoute } from "./reaper/route.ts";
+import { mountStopRoute } from "./triggers/stop.ts";
 import { webhookTrigger } from "./triggers/webhook.ts";
 
 export type ComposeOptions = {
@@ -90,6 +92,13 @@ export function composeDispatcher(
         canaryLifetimeSeconds: setup.canaryLifetimeSeconds,
       }),
       logger,
+    });
+    // The App's stop call (#487) ends a job's VM with the same fleet and the keys of the wake-up call.
+    mountStopRoute(dispatcher.app, {
+      keys: settings.signingKeys,
+      fleet: setup.fleet,
+      logger,
+      background: options.background,
     });
     // Without it the route refuses everyone and leftover VMs are billed until their own timeout.
     if (settings.cronSecret === undefined)

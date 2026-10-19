@@ -211,6 +211,8 @@ test.describe("an instance without an operator token and without entitlements", 
     await openSettings(page, "/review-defaults");
     await expect(page.getByLabel("Model", { exact: true })).toBeVisible();
     await openSettings(page, "/llm");
-    await expect(page.getByRole("form", { name: "LLM key" })).toBeVisible();
+    await expect(
+      page.getByRole("form", { name: "OpenRouter LLM key" }),
+    ).toBeVisible();
   });
 });

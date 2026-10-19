@@ -2113,7 +2113,7 @@ def test_everything_patched_in_is_undone_when_a_later_install_fails(
 def test_a_temperature_patch_that_cannot_be_applied_fails_the_job_and_names_the_patch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def refused() -> Any:
+    def refused(**_: Any) -> Any:
         raise TemperaturePatchError("LiteLLMAIHandler._litellm_supports_temperature does not exist")
 
     monkeypatch.setattr(runner, "apply_temperature_patch", refused)

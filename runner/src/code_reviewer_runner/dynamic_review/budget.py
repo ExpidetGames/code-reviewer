@@ -540,7 +540,8 @@ class BudgetLedger:
         the output allowance is a violation of the envelope, not a value to add up; a prompt above
         the estimate but within the bound is only an estimate that was too low.
 
-        `cost` is what the provider charged for this call (`exact_cost`). A call without one
+        `cost` is what this call cost: the charge the provider states (`exact_cost`), or the usage
+        priced with the provider's price list (`LlmProviderSpec.cost_extractor`). A call without one
         cannot be bounded by money: the tokens are recorded, then the run is stopped, and it is
         never read as zero.
         """
@@ -655,8 +656,10 @@ class BudgetLedger:
         The cost is the sum of what the provider charged for each call, and only when **every**
         model call the run made has one. A call without a reported cost (the provider omitted it,
         refused the call, or never answered) may still have been charged, so the total is unknown
-        (None) rather than a partial sum that would look exact. Nothing is derived from tokens or a
-        price table. A run that made no call has nothing to report. A total that is not a finite
+        (None) rather than a partial sum that would look exact. The cost of a call is the charge the
+        provider states, or, for a provider that states none, what its usage costs by that
+        provider's own price list (#511): never an estimate, and never LiteLLM's table. A run that
+        made no call has nothing to report. A total that is not a finite
         float (the providers' charges add up beyond the float range) is unknown too: it could not be
         sent as a result.
         """

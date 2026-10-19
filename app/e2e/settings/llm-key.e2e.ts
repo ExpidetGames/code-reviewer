@@ -85,9 +85,9 @@ test.describe("the LLM key of a workspace", () => {
       .filter({ visible: true })
       .click();
     await expect(page).toHaveURL(new RegExp(`/w/${slug}/settings/llm$`));
-    const form = page.getByRole("form", { name: "LLM key" });
+    const form = page.getByRole("form", { name: "OpenRouter LLM key" });
     await expect(form).toBeVisible();
-    await expect(page.getByRole("button", { name: "Test key" })).toBeDisabled();
+    await expect(form.getByRole("button", { name: "Test key" })).toBeDisabled();
 
     // Save: write-only, shown as set with the last four characters.
     await form.getByLabel("API key").fill(KEY);

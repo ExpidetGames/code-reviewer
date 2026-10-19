@@ -8,7 +8,8 @@
     "worker_credential"
   ],
   "llmProviders": [
-    "openrouter"
+    "openrouter",
+    "anthropic"
   ],
   "jobId": "0b9f6f4e-3c1a-4d9e-8f43-2a7d5e1c9b10",
   "maxRunning": 4

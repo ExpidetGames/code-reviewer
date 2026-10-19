@@ -17,7 +17,7 @@ CONTRACTS = Path(__file__).resolve().parents[3] / "contracts" / "dynamic-review"
 # #198-T01: the core identity is part of the output identity; a change of the text must change it.
 def test_the_core_identity_matches_its_text() -> None:
     assert prompt_core.CORE_ID == "dynamic-review-core"
-    assert prompt_core.CORE_VERSION == "1"
+    assert prompt_core.CORE_VERSION == "2"
     expected = hashlib.sha256(prompt_core.CORE_TEXT.encode("utf-8")).hexdigest()
 
     assert expected == prompt_core.CORE_SHA256
@@ -52,7 +52,8 @@ def test_the_output_fields_match_the_contract_schema() -> None:
         schema["$defs"]["Finding"]["required"]
     )
 
-    for name in sorted(names):
+    # `schemaVersion` and `reviewedSha` are set by the runner, so the core says only that (#530).
+    for name in sorted(names - {"schemaVersion", "reviewedSha"}):
         assert name in prompt_core.CORE_TEXT, name
     for priority in schema["$defs"]["Priority"]["enum"]:
         assert priority in prompt_core.CORE_TEXT, priority

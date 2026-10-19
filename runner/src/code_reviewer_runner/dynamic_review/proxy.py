@@ -25,7 +25,11 @@ demands of the model boundary happens here, before a byte reaches the provider o
   for the parameters (404) ends the run with `dynamic_model_features_unsupported`.
 - **Usage is authoritative, and missing usage fails.** The provider's counters settle the
   reservation; an answer without usage, or larger than reserved, stops the run instead of being
-  counted as zero.
+  counted as zero. The cost of a call is what the provider states, or what its usage costs by the
+  provider's price list; a call that cannot be priced stops the run too.
+- **One protocol towards the engine.** The engine always speaks the chat protocol. A provider with
+  a protocol of its own (Anthropic's Messages API, `anthropic_wire.py`) gets a wire that translates
+  the request after the checks and the answer before the accounting; everything else is shared.
 - **Required features are checked, never silently downgraded.** A destination that cannot serve the
   tool choice and structured output the run needs fails with `dynamic_model_features_unsupported`;
   there is no fallback model or provider.
@@ -416,6 +420,9 @@ class ModelProxy:
         # "no endpoint supports them" and the extractor of the stated cost (the runner decides,
         # never the engine).
         self._provider = provider
+        # How this provider is spoken to for the configured model: its endpoint's headers, the
+        # translation of the request and of the answer (the engine speaks the chat protocol).
+        self._wire = provider.wire(upstream_model)
         # True when the destination is the provider itself and its entry has the mechanism.
         self._require_parameters = require_parameters and provider.require_parameters is not None
         # #396: true once a newer push replaced the run. A request in flight finishes (and is
@@ -532,10 +539,7 @@ class ModelProxy:
             status, response_body = self._post(
                 self.upstream_url,
                 forwarded,
-                {
-                    "Authorization": f"Bearer {self.upstream_api_key}",
-                    "Content-Type": "application/json",
-                },
+                self._wire.headers(self.upstream_api_key),
                 self.ledger.limits.max_response_bytes + 1,
             )
         except (OSError, http.client.HTTPException) as error:
@@ -551,6 +555,9 @@ class ModelProxy:
             refusal, code = self._provider_error(status, response_body)
             self.ledger.record_failure(LimitError(code, "the model provider refused the request"))
             return ProxyResponse(status=status, body=refusal)
+        # The answer in the chat shape the rest of the proxy works on (the provider's own, when it
+        # speaks that protocol too); its usage is the provider's, translated.
+        response_body = self._wire.decode_response(response_body)
         completion = self._completion(response_body)
         usage = self._usage(completion)
         if usage == (None, None):
@@ -667,10 +674,11 @@ class ModelProxy:
         # and `\uXXXX` escapes of non-ASCII text would inflate it. A lone surrogate (a JSON escape
         # the engine or the provider can emit when a token splits an emoji) has no UTF-8 form: that
         # one request is escaped as ASCII instead, and those bytes are the ones reserved and sent.
+        body = self._wire.encode_request(forwarded)
         try:
-            return json.dumps(forwarded, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            return json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         except UnicodeEncodeError:
-            return json.dumps(forwarded, ensure_ascii=True, separators=(",", ":")).encode("ascii")
+            return json.dumps(body, ensure_ascii=True, separators=(",", ":")).encode("ascii")
 
     @staticmethod
     def _completion(body: bytes) -> dict[str, Any]:
@@ -701,13 +709,14 @@ class ModelProxy:
         return prompt_tokens, completion_tokens
 
     def _cost(self, document: dict[str, Any]) -> Decimal | None:
-        """The charge the provider reports for this call, or None when it has none.
+        """The cost of this call by the rule of the provider, or None when it has none.
 
-        What the entry of the provider says is the stated charge (OpenRouter: `usage.cost`). It is
-        read, never computed: a call without it simply has no known cost.
+        The entry of the provider says how: the charge it states (OpenRouter: `usage.cost`), read
+        and never computed, or its usage priced with its own list (Anthropic, exact decimals). A
+        call that cannot be priced simply has no known cost, which stops the run.
         """
         usage = as_object(document.get("usage"))
-        return None if usage is None else self._provider.cost_extractor(usage)
+        return None if usage is None else self._provider.cost_extractor(self.upstream_model, usage)
 
     def _provider_error(self, status: int, body: bytes) -> tuple[bytes, ErrorCode]:
         # The provider has no endpoint that supports every parameter of the request (#270): the

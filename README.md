@@ -106,7 +106,7 @@ merges the two accounts. How it works: `app/src/auth/README.md`, `app/src/github
 ### LLM access
 
 Every workspace brings its own LLM key (bring your own key): an Admin or an Owner enters it under
-**Settings, LLM access** of the workspace (provider OpenRouter, a write-only key, a "Test key" button). The key is
+**Settings, LLM access** of the workspace (a provider, OpenRouter or Anthropic, a write-only key, a "Test key" button). The key is
 stored encrypted in the database (with `APP_SECRET`; the operator of the instance holds that key and can technically
 decrypt it), never shown again, never logged, and reviews of a workspace use the key of that workspace only. A
 workspace without a key fails its reviews with `llm_not_configured` and shows "LLM not configured" with a link to
@@ -323,7 +323,7 @@ warning with `trying again` whenever the app cannot be reached or refuses its to
 `RUNNER_JOB_TIMEOUT_SECONDS`, `RUNNER_POLL_INTERVAL_SECONDS` and `RUNNER_ID` are optional settings in
 `.env`. `docker compose stop` (and an update) gives running reviews up to 60 seconds to finish and
 waits for the runner to report the rest (`stop_grace_period: 90s`), so do not stop it with `kill`.
-The runner needs to reach only `api.github.com`, `openrouter.ai` and the app; how to restrict it to
+The runner needs to reach only `api.github.com`, the API of the model provider (`openrouter.ai`, or `api.anthropic.com` for a workspace on the Anthropic provider) and the app; how to restrict it to
 those is in [docs/deployment-coolify.md](docs/deployment-coolify.md), section 9.
 
 `make test-compose` builds both images and runs `docker/smoke/compose.sh` against them with dummy

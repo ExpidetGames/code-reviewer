@@ -135,7 +135,6 @@ describe("the Sandbox-Launcher in local mode", () => {
     expect(cwd?.trim()).toContain(
       service.directories.get(service.created[0] ?? "") ?? "?",
     );
-    await sandbox.idle();
   });
 
   // #329-T02
@@ -154,11 +153,10 @@ describe("the Sandbox-Launcher in local mode", () => {
       for (const text of await recorded(suffix))
         expect(text).not.toContain(CREDENTIAL_A);
     expect((await recorded(".stdin")).join("")).toContain(CREDENTIAL_A);
-    await sandbox.idle();
   });
 
-  // #329-T07
-  it("removes the VM directory and the container when the job ends", async () => {
+  // #329-T07, #487-T01
+  it("removes the VM directory and the container when the VM is stopped by name (the App's stop call does this)", async () => {
     const { launcher: sandbox, local: service } = launcher(2);
 
     await sandbox.launch(
@@ -167,7 +165,9 @@ describe("the Sandbox-Launcher in local mode", () => {
     );
     const dir = service.directories.get(service.created[0] ?? "") ?? "";
     expect(existsSync(dir)).toBe(true);
-    await sandbox.idle();
+    // Nothing in the Launcher ends the VM after the hand-over (#487): the Dispatcher stops it on the App's signal.
+    expect(service.running()).toStrictEqual(service.created);
+    await service.stop(service.created[0] ?? "");
 
     expect(existsSync(dir)).toBe(false);
     expect(service.running()).toStrictEqual([]);
@@ -184,7 +184,7 @@ describe("the Sandbox-Launcher in local mode", () => {
       spec(JOB_A, CREDENTIAL_A),
       new AbortController().signal,
     );
-    await sandbox.idle();
+    await service.stop(service.created[0] ?? "");
     await rm(join(records, "commands.log"), { force: true });
     for (const name of await readdir(records))
       if (name.startsWith("run-")) await rm(join(records, name));
@@ -207,7 +207,6 @@ describe("the Sandbox-Launcher in local mode", () => {
         expect(text).not.toContain(JOB_A);
         expect(text).not.toContain(dirA ?? "?");
       }
-    await sandbox.idle();
   });
 
   // #329-T07
@@ -265,5 +264,38 @@ describe("the Sandbox-Launcher in local mode", () => {
     expect((error as LaunchError).code).toBe("image_mismatch");
     expect(await recorded(".args")).toStrictEqual([]);
     expect(service.running()).toStrictEqual([]);
+  });
+
+  // #487-T09
+  it("lists the VMs it created, with the tags and the status the platform would report, and stops one by name", async () => {
+    const { launcher: sandbox, local: service } = launcher(2);
+    await sandbox.launch(
+      { ...spec(JOB_A, CREDENTIAL_A), kind: "dynamic" },
+      new AbortController().signal,
+    );
+    const name = service.created[0] ?? "";
+
+    const before = await service.list({
+      namePrefix: "cr-dynamic-",
+      tags: { app: "code-reviewer" },
+    });
+    await service.stop(name);
+    const after = await service.list({
+      namePrefix: "cr-dynamic-",
+      tags: { app: "code-reviewer" },
+    });
+
+    expect(before).toMatchObject([
+      {
+        name,
+        status: "running",
+        persistent: false,
+        tags: { app: "code-reviewer", kind: "dynamic", job: JOB_A },
+      },
+    ]);
+    expect(after).toMatchObject([{ name, status: "stopped" }]);
+    expect(
+      await service.list({ namePrefix: "cr-diff-", tags: {} }),
+    ).toStrictEqual([]);
   });
 });

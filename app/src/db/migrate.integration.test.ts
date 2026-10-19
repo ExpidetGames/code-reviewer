@@ -101,6 +101,7 @@ describe("the migrations of both epics", () => {
       "20261017160000_add_workspace_entitlements_model_access",
       "20261018090000_add_usage_record_catalog_entry",
       "20261018170000_migrate_model_tiers_to_catalog",
+      "20261019150000_create_billing_journal",
     ]);
   });
 
@@ -143,6 +144,8 @@ describe("starting the database", () => {
       "allowed_login_pins",
       "app_meta",
       "app_settings",
+      "billing_balances",
+      "billing_journal_entries",
       "email_verification_tokens",
       "installation_link_requests",
       "instance_settings",

@@ -71,7 +71,9 @@ GitHub ──webhook──▶ App ──queues the job, then signed POST /dispat
    checks the image id against `SANDBOX_IMAGE_DIGEST` and runs the hardened Worker container. The App URL, the job id
    and the credential go in on **stdin only**.
 4. The Worker fetches its job from the App (this is where the git token and the model key are minted, for this job
-   only), heartbeats, delivers the result and exits. The Dispatcher stops the VM.
+   only), heartbeats, delivers the result and exits. The Dispatcher does not watch it after the hand-over: when the job ends,
+   **the App** sends the Dispatcher a signed `POST /stop` and the Dispatcher stops the job's VM (section 5.5). The VM itself
+   never gets access to the Dispatcher.
 5. The App's cron sweep (**every 2 hours**) is a safety net for what goes wrong in between: lapsed leases, resends of
    wake-ups that nobody acknowledged, jobs nobody claimed in time, notices that failed, the cleanup. **The normal
    flow never waits for it**: a review is sent when it is queued, a job that waited for a slot is sent when the slot
@@ -463,7 +465,7 @@ A refusal at start names the variable, never its value (`ConfigError`: `required
 | `SANDBOX_SNAPSHOT_ID` | yes | no | The golden snapshot: `snapshotId` of its record. **The deployment pipeline sets it** (section 5.1): the Dispatcher deployment of every run carries the pair it uses as its own run-time variables, and the pipeline writes the pair to Infisical after the promotion. **Unset, the Dispatcher has no Launcher and claims nothing** (every wake-up is answered `200 ignored` with `not_capable`). Set with `SANDBOX_IMAGE_DIGEST` or not at all. |
 | `SANDBOX_IMAGE_DIGEST` | with the snapshot | no | The Worker image id in that snapshot (`imageDigest` of the same record), `sha256:` and 64 hex characters. The Launcher refuses a VM whose image has another id. The pipeline sets the two together, and writes `SANDBOX_SNAPSHOT_COMMIT` (the commit the snapshot was built from; the Dispatcher does not read it) next to them. |
 | `DISPATCHER_ENGINES` | optional | no | `pr-agent`, `opencode` or both (default both). `pr-agent` for a Diff-only deployment: it has no `POST /probe` and no canary VM. A Dynamic job is accepted whenever `opencode` is in this list and the snapshot pair is set: the Dispatcher runs no capability probe on a dispatch (section 9). |
-| `DISPATCHER_JOB_TIMEOUT_SECONDS` | optional | no | How long a Worker may live, 60 to 21600, default **1200**. Keep it plus the launch (at most 300 s) under the function limit of 1800 s, or supervision ends with the function (section 9). |
+| `DISPATCHER_JOB_TIMEOUT_SECONDS` | optional | no | How long a Worker may live, 60 to 21600, default **1200**. The function has to outlive only the launch (at most 300 s): the Dispatcher does not supervise the Worker after the hand-over (#487), so the function limit no longer bounds the job; the VM's own timeout (this plus `SANDBOX_VM_TIMEOUT_MARGIN_SECONDS`) and the reaper (section 5.5) do. |
 | `DISPATCHER_WORKER_CONFIG` | optional | no | JSON `{"diff": {...}, "dynamic": {...}}`: the VM size (`launcher.vcpus`) and the container memory (`container.memory.limit` / `reservation`) per Worker kind. Section 6. A wrong value fails when the function initialises (the variable is named in the log), not at the first job. |
 | `DISPATCHER_POOL_ID` | optional | no | Sent as `X-Runner-Id`; the App counts the running jobs of the pool by it. Default `dispatcher`. |
 | `SANDBOX_HANDOVER_SECONDS` | optional | no | How long the container must run before the Worker counts as having taken over, 1 to 120, default 20. |
@@ -881,7 +883,7 @@ A run's error code is shown on the Runs pages with a fixed sentence. Four belong
 |---|---|---|
 | Runs page | `dispatch_unavailable` | The job waited `RUNNER_DISPATCH_GIVE_UP_SECONDS` (60 minutes by default) without anyone claiming it, no attempt is counted, and the next push or review request runs it again. Look at the **App's** sweep and send logs (`DISPATCH_SEND_FAILED`, `DISPATCH_REJECTED`) and at the Dispatcher's log. Usual causes: `RUNNER_WEBHOOK_URL` or the signing key do not match (`DISPATCH_REJECTED`: a wrong URL or secret looks like this and the App waits 30 minutes between tries), the Dispatcher is down or protected, `SANDBOX_SNAPSHOT_ID` is unset (`not_capable`), the pool is full for longer than the give-up time, or the sweep itself is refused (`CRON_SECRET`). |
 | Runs page | `launch_failed` | The Worker could not be started even after three attempts. The cause is a launch code in the **Dispatcher's** log (line `launch_failed`, field `code`, plus `retryable`): the table in `dispatcher/README.md` ("The Sandbox-Launcher") lists them (`sandbox_auth_failed`, `sandbox_snapshot_missing`, `image_mismatch`, `docker_not_ready`, `worker_exited_early`, ...). |
-| Runs page | `worker_exited` | The Worker was started and took over, but its container ended with an error before it reported a result, three times. The Dispatcher gave the job back as soon as it saw the end, instead of after the two minute lease. The Dispatcher's log has `worker_exited` with the `exitCode` (2: the Worker could not set up, for example a bad image or configuration; 137: killed, usually out of memory: raise the container's memory limit) and `released` with the same `reason`. |
+| Runs page | `worker_exited` | Runs from before #487 only. The Dispatcher used to give a job back with this code when it saw the Worker's container end with an error. It no longer watches the container after the hand-over: a Worker that dies is found by its lease and the run ends `lease_expired` after three lost attempts. |
 | Runs page | `dynamic_engine_unavailable` | A **Dynamic** job was dispatched and a Worker started, but the Worker refused it: its own startup self-check did not prove the container's isolation, so it serves Diff jobs only. No model was called and nothing was written to the pull request. The Worker's log says `Dynamic Review: opencode is not advertised, this runner serves Diff jobs only (<reason>)` and `job ... refused: the Dynamic engine is not advertised`. Since the Dispatcher runs no probe on a dispatch (section 9), this is the signal that the live deployment's container cannot be hardened: run the canary against it (section 4, step 3; Actions, *Dispatcher canary*), read the stable reason (`dynamic-review.md`, "The startup self-check"), fix it and redeploy through the pipeline so that a canary passes before it goes live. Diff jobs are not affected. |
 
 Others you will meet: `no_capable_runner` (a Dynamic job nobody could run for 30 minutes: `DISPATCHER_ENGINES` has no
@@ -910,12 +912,30 @@ URL.
 
 ### 5.5 Stopping VMs that outlived their job (the reaper)
 
-The Dispatcher stops a job's VM from `waitUntil` work, which lives as long as the function. A job longer than the
-function's limit, a restart or a failed stop leave the VM running, idle and billed, until its own timeout (job
-timeout plus `SANDBOX_VM_TIMEOUT_MARGIN_SECONDS`). The **reaper** (#364) is the second line: Vercel's cron calls
+The Dispatcher does not watch a Worker after it handed the job over (#487). When a job's claim ends for good (a result,
+a failure, a cancel, a lease or runtime that ran out and ended the job), **the App** sends the Dispatcher a signed
+`POST /stop` (`RUNNER_WEBHOOK_URL` with `/dispatch` replaced by `/stop`, signed with the same key as the wake-up call; best
+effort, a bounded retry, never in the way of the job), and the Dispatcher stops the VMs tagged with that job. The call is
+answered at once; stopping a VM with a running container takes 20 seconds or more, so the stop runs in the background.
+Nothing needs configuring: the same two variables sign the wake-up and the stop. In the **App's** log a failed stop is
+`[dispatch] DISPATCH_STOP_FAILED job=<id>` (the Dispatcher was down or kept failing), `DISPATCH_STOP_UNSUPPORTED` (a Dispatcher
+of the previous release: no `/stop`, `404`), `DISPATCH_STOP_REJECTED status=<n>` (a wrong URL or secret) or
+`DISPATCH_STOP_URL_INVALID` (`RUNNER_WEBHOOK_URL` does not end in `/dispatch`); in the **Dispatcher's** log `stop_received`,
+`vm_stopped`, `vm_stop_failed`, `stop_replayed`, `stop_list_failed`, `stop_refused`.
+
+A stop that did not arrive or failed, a job that went back to the queue (the next attempt's VM must not be stopped), or an App
+of a previous release leave the VM running, idle and billed, until its own timeout (job timeout plus
+`SANDBOX_VM_TIMEOUT_MARGIN_SECONDS`). For a job that went back to the queue the reaper ends the lost attempt's VM only while
+the retry is not yet `running`; once it is, the VM lives until its own timeout or until the job ends for good, when the stop
+by the job ends every attempt's VM. The **reaper** (#364) is the safety net: Vercel's cron calls
 `GET /api/cron/reap-sandboxes` of the Dispatcher every 5 minutes with `CRON_SECRET`, and it stops the VMs of this
 deployment that outlived their purpose.
 
+- **Deployments that share a Vercel team must not share a dispatch signing key.** A VM is scoped by the tag `app =
+  code-reviewer` and the job's UUID only, with no tag of the deployment, and the stop (like the reaper) works on the team's
+  Sandbox VMs. Two deployments (staging and production) with different signing keys cannot stop each other's VMs: a stop
+  needs a signature and a job UUID that the signing App made. Give every deployment its own `RUNNER_WEBHOOK_SECRET` /
+  `DISPATCHER_SIGNING_SECRET` and its own database; never copy one deployment's key or database snapshot into another.
 - It lists only VMs named `cr-...` with the tag `app = code-reviewer` and checks each again: only a running,
   non-persistent VM of exactly the shape our code creates is ever stopped. The snapshot pipeline's builder and check
   VMs and anything else in the project never match.
@@ -1005,7 +1025,7 @@ promptly is done by the request that causes it, after its response (`after()`), 
 | A wake-up that failed (a 5xx, a timeout, no connection, `429`/`503` with a short `Retry-After`) | The same request repeats it up to three more times (pauses of 1, 3 and 8 seconds, at most 45 seconds in all, counted from the moment the request queued the job, so that 15 of the function's 60 seconds are left for what the request did before and for the database round trips; the routes that queue a job, the webhooks and *Review now* (`/api/w/**`), have those 60 seconds set in `app/vercel.json`). `Retry-After` is honoured if it is 30 seconds or less: the 20 of a Dispatcher that is not ready and the 30 of a busy one both fit (#479). A refusal (`DISPATCH_REJECTED`) is never repeated: an operator has to look |
 | A wake-up answered `429` (busy) or `503` (not ready) with a `Retry-After` the request does not wait for, or that kept failing after the repeats | The row keeps the longer of its back-off and the `Retry-After`, and **a job that ends** wakes it at once: the App asks these jobs along with the ones behind the pool cap (below), whatever time the row says, but never within 9 seconds of the last call. Any other delivery, heartbeat or result sends it when its time has passed (the last row of this table). No timer and no poll is added, so a database that scales to zero stays asleep |
 | A job that waited behind the pool cap or behind the running job of its pull request | When a job ends (the Worker's result, a release), the App sends the waiting jobs, the one of the same pull request first, until as many wake-ups were accepted as the pool cap `RUNNER_DISPATCH_MAX_RUNNING` has free slots (one per freed slot when it is not set); a job that waits only for the running job of its own pull request is not asked |
-| A job given back after a failed launch (`launch_failed`, `worker_exited`) | The release frees its slot first, then sends the job again once its retry time has passed (the Dispatcher gives it back with 30 seconds; the request waits for it if it fits in about 45 seconds, else the next request that touches the database or the sweep sends it) |
+| A job given back after a failed launch (`launch_failed`) | The release frees its slot first, then sends the job again once its retry time has passed (the Dispatcher gives it back with 30 seconds; the request waits for it if it fits in about 45 seconds, else the next request that touches the database or the sweep sends it) |
 | The notice on a refused pull request (#281) | Posted after the response of the claim that refused the job |
 | The lease of a Worker that vanished, and the calls that are due again | The next **delivery** of the GitHub webhook that queued a job (not an unused event or a duplicate), **heartbeat** or **result** of any Worker releases the leases that ran out and sends what is due, after its response, at most once every 30 seconds per function instance, under a lock of its own so that it can never make the cron a no-op. In a quiet system there may be none of these |
 
@@ -1117,8 +1137,8 @@ A self-hosted installation and a hosted one never share a database or a GitHub A
     `GET /api/v1/projects/slug/{slug}`, `PATCH` and `POST /api/v4/secrets/{name}`), with the role of section 2.1, and
     that Secret Sync writes the three snapshot keys as ordinary variables and resolves the reference notation of
     section 2.1 across folders.
-- The **Dispatcher on Vercel**: deploying `dispatcher/`, `waitUntil` supervision for a job's whole life, the 1800 s
-  function limit (a beta limit), the cold-start and the probe behavior, and the OIDC authentication of the Sandbox
+- The **Dispatcher on Vercel**: deploying `dispatcher/`, the platform's `waitUntil` for the launch and the stops, the 1800 s
+  function limit (a beta limit, sized for the supervision #487 removed; lowering it is a follow-up), the cold-start and the probe behavior, and the OIDC authentication of the Sandbox
   SDK from a function. The spike did not deploy a function (its probe T14 was not run). The unit and integration
   tests run against the doubles in `fakes/`.
 - The **mapping of the platform's errors** to launch codes goes by status and by words of the message; the platform's
@@ -1156,13 +1176,12 @@ A self-hosted installation and a hosted one never share a database or a GitHub A
   `managed_model_unavailable`, it does not move to another entry or to `LLM_MODEL`. The models never reach a workspace; a
   Dynamic model has to support tool calls. Create and release the entries and set the defaults before you set a workspace
   to `managed`. The tiers of #280 were turned into catalog entries by #434 and are gone.
-- **A Worker whose end the Dispatcher does not see still holds its slot until its lease lapses** (two minutes after its
-  last heartbeat); only the next request that touches the database or the next sweep (up to 2 hours) then puts the job back, and the pull request shows "Running" meanwhile. A Worker
-  that exits non-zero before it has reported a result is released at once when the Dispatcher sees the container end
-  (`worker_exited`, section 5.3). The lease is still the safeguard where it does not: the wait for the container failed
-  (`worker_wait_failed`: what became of the Worker is unknown, so nothing is released), the Dispatcher's function ended
-  before the container did, and a Launcher that does not supervise the Worker. The attempt is lost either way (three, then
-  `failed`); the delay is the cost.
+- **A Worker that dies still holds its slot until its lease lapses** (two minutes after its last heartbeat): the Dispatcher does
+  not watch a container after the hand-over (#487), so a Worker that exits non-zero before it has reported a result is not
+  released when it ends. Only the next request that touches the database or the next sweep (up to 2 hours) then puts the job
+  back, and the pull request shows "Running" meanwhile. The attempt is lost either way (three, then `failed` with
+  `lease_expired`); the delay is the cost of holding no supervision (before, a container the Dispatcher saw end was released
+  within seconds as `worker_exited`).
 - **Hosted starts within seconds, like self-hosted**: a push is sent when it is queued, with no debounce. What is
   up to 2 hours late is only the repair of abnormal cases (section 5.7).
 - **The deploy canary is the only proof of the Dynamic container's hardening** (#479). The Dispatcher keeps no probe answer
@@ -1178,8 +1197,14 @@ A self-hosted installation and a hosted one never share a database or a GitHub A
   is unrestricted by design, the Vercel firewall is not part of the security boundary, and the platform operator
   can read job secrets by construction (`dispatcher/README.md`). The container's hardening is proven by the deploy canary,
   not assumed: a deployment whose canary does not pass is not promoted.
-- **The 30 minute function limit** is a beta limit of the platform. A job whose time plus its launch outlasts the
-  function loses its supervision: the reaper (or, failing that, the VM timeout) ends the VM, billed meanwhile (section 5.5).
+- **The App's stop is best effort.** If the call does not arrive (the Dispatcher is down, the call failed after its two repeats,
+  the App is on a release without it) the reaper (or, failing that, the VM timeout) ends the VM, billed meanwhile (section 5.5).
+  A job that went back to the queue is not stopped: the VM of a lost attempt whose retry is already running lives until its own
+  timeout or until the job's final stop, because the reaper keeps a VM whose job is running. The Dispatcher's function no longer
+  has to outlive the job.
+- **An accepted wake-up whose answer was lost is not stopped by the App.** The App sends a stop only for a job whose wake-up it saw
+  acknowledged (`job_dispatches.acked_at`). If the Dispatcher accepted the call but the answer never arrived (the 8 s timeout, a
+  lost response), no stop is sent for that job and only the reaper and the VM timeout end its VM.
 - **Retired:** the runner's concept. A runner still means what it did on a server.
 
 ## 10. Follow-ups

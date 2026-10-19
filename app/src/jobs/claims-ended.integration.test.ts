@@ -1,0 +1,318 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// The queue tells its owner which jobs lost their running claim (#487), so that the Dispatcher can be told to stop their
+// VMs: a result, a failure, a cancel, a job given back, a superseded run's report, a lease that ran out (in the expiry
+// call and in the expiry step of a claim) and a runtime past the hard limit. On SQLite and, when TEST_DATABASE_URL is
+// set, on Postgres. The callback runs after the transaction committed, once per call, and never for a call that ended
+// nothing.
+import type { Kysely } from "kysely";
+import { describe, expect, it, vi } from "vitest";
+import type { Database } from "../db/schema.ts";
+import { createJobQueueFixture, sha } from "../test-support/jobs.ts";
+import {
+  createPostgresTestDatabase,
+  hasPostgres,
+} from "../test-support/postgres-test-database.ts";
+
+const SECOND = 1000;
+const MINUTE = 60 * SECOND;
+
+const databases: Array<
+  [string, (() => Promise<Kysely<Database>>) | undefined]
+> = [
+  ["SQLite", undefined],
+  [
+    "Postgres",
+    hasPostgres()
+      ? async () => (await createPostgresTestDatabase({ poolMax: 12 })).db
+      : undefined,
+  ],
+];
+
+const OK = { ok: true, result: {} } as const;
+const FAILED = { ok: false, errorCode: "unknown", result: null } as const;
+
+describe.each(databases)("the claims a call ended on %s", (name, open) => {
+  const run = name === "Postgres" && open === undefined ? it.skip : it;
+
+  async function start(
+    options: Parameters<typeof createJobQueueFixture>[0] = {},
+  ) {
+    const database = await open?.();
+    const ended: string[][] = [];
+    const fixture = await createJobQueueFixture({
+      ...(database === undefined ? {} : { database }),
+      ...options,
+      onClaimsEnded: (jobIds) => ended.push([...jobIds]),
+    });
+    async function running(
+      overrides: Parameters<typeof fixture.enqueue>[0] = {},
+      claim: Parameters<typeof fixture.queue.claimNext>[2] = {},
+    ) {
+      const queued = await fixture.enqueueNew(overrides);
+      const claimed = await fixture.queue.claimNext("pool", undefined, {
+        jobId: queued.id,
+        ...claim,
+      });
+      if (claimed === null) throw new Error("the job was not claimed");
+      return claimed.job;
+    }
+    return { fixture, ended, running };
+  }
+
+  // #487-T06
+  run("names the job whose result was delivered", async () => {
+    const { fixture, ended, running } = await start();
+    const job = await running();
+
+    const result = await fixture.queue.complete(
+      job.id,
+      await fixture.tokenOf(job.id),
+      OK,
+    );
+
+    expect(result.status).toBe("completed");
+    expect(ended).toEqual([[job.id]]);
+  });
+
+  // #487-T06
+  run("names the job that failed", async () => {
+    const { fixture, ended, running } = await start();
+    const job = await running();
+
+    await fixture.queue.complete(job.id, await fixture.tokenOf(job.id), FAILED);
+
+    expect(ended).toEqual([[job.id]]);
+    expect((await fixture.queue.get(job.id))?.status).toBe("failed");
+  });
+
+  // #487-T06
+  run("names the job that was cancelled while it ran", async () => {
+    const { fixture, ended, running } = await start();
+    const job = await running();
+
+    const result = await fixture.queue.cancelClaimed(
+      job.id,
+      await fixture.tokenOf(job.id),
+      "project_deactivated",
+    );
+
+    expect(result.status).toBe("cancelled");
+    expect(ended).toEqual([[job.id]]);
+  });
+
+  // #487-T06
+  run(
+    "names a superseded job when its holder reports, and not when it is superseded",
+    async () => {
+      const { fixture, ended, running } = await start();
+      const old = await running(
+        { headSha: sha("a") },
+        { acceptsSupersede: true },
+      );
+      await fixture.enqueue({ headSha: sha("b") });
+      expect((await fixture.queue.get(old.id))?.status).toBe("superseded");
+      expect(ended).toEqual([]);
+
+      const result = await fixture.queue.complete(
+        old.id,
+        await fixture.tokenOf(old.id),
+        FAILED,
+      );
+
+      expect(result.status).toBe("completed");
+      expect(ended).toEqual([[old.id]]);
+    },
+  );
+
+  // #487-T06
+  run(
+    "names a job given back on its last attempt, and not one that went back to the queue",
+    async () => {
+      const { fixture, ended, running } = await start({
+        limits: { maxAttempts: 2 },
+      });
+      const job = await running();
+
+      expect(
+        (
+          await fixture.queue.release(
+            job.id,
+            await fixture.tokenOf(job.id),
+            "launch_failed",
+          )
+        ).status,
+      ).toBe("requeued");
+      // The next attempt may have its VM already when the Dispatcher is told: a requeued job is not stopped.
+      expect(ended).toEqual([]);
+
+      const again = await fixture.queue.claimNext("pool", undefined, {
+        jobId: job.id,
+      });
+      expect(again?.job.id).toBe(job.id);
+      expect(
+        (
+          await fixture.queue.release(
+            job.id,
+            await fixture.tokenOf(job.id),
+            "launch_failed",
+          )
+        ).status,
+      ).toBe("failed");
+      expect(ended).toEqual([[job.id]]);
+    },
+  );
+
+  // #487-T06
+  run(
+    "names the jobs whose lease ran out and ended them, and not the one that went back to the queue",
+    async () => {
+      const { fixture, ended, running } = await start({
+        limits: { maxAttempts: 2 },
+      });
+      const lastTry = await running({
+        prNumber: 1,
+        prUrl: "https://github.test/acme/widgets/pull/1",
+      });
+      fixture.clock.advance(3 * MINUTE);
+      await fixture.queue.expireStaleJobs();
+      expect((await fixture.queue.get(lastTry.id))?.status).toBe("queued");
+      expect(ended).toEqual([]);
+      await fixture.queue.claimNext("pool", undefined, { jobId: lastTry.id });
+      const fresh = await running({
+        prNumber: 2,
+        prUrl: "https://github.test/acme/widgets/pull/2",
+      });
+      fixture.clock.advance(3 * MINUTE);
+
+      const report = await fixture.queue.expireStaleJobs();
+
+      expect(report).toMatchObject({ requeued: 1, leaseExpired: 1 });
+      expect(ended).toEqual([[lastTry.id]]);
+      expect((await fixture.queue.get(fresh.id))?.status).toBe("queued");
+    },
+  );
+
+  // #487-T06
+  run("names the job whose lapsed lease a claim found", async () => {
+    const { fixture, ended, running } = await start({
+      limits: { maxAttempts: 1 },
+    });
+    const job = await running();
+    fixture.clock.advance(3 * MINUTE);
+
+    const claimed = await fixture.queue.claimNext("other-pool");
+
+    expect(claimed).toBeNull();
+    expect(ended).toEqual([[job.id]]);
+    expect((await fixture.queue.get(job.id))?.errorCode).toBe("lease_expired");
+  });
+
+  // #487-T06
+  run(
+    "names nothing for a lapsed lease of a job that a claim found and handed to a new holder",
+    async () => {
+      const { fixture, ended, running } = await start();
+      const job = await running();
+      fixture.clock.advance(3 * MINUTE);
+
+      const claimed = await fixture.queue.claimNext("other-pool");
+
+      expect(claimed?.job.id).toBe(job.id);
+      expect(ended).toEqual([]);
+    },
+  );
+
+  // #487-T06
+  run(
+    "names the job that ran past the hard limit, found by a heartbeat and by the expiry",
+    async () => {
+      const { fixture, ended, running } = await start();
+      const first = await running({
+        prNumber: 1,
+        prUrl: "https://github.test/acme/widgets/pull/1",
+      });
+      const second = await running({
+        prNumber: 2,
+        prUrl: "https://github.test/acme/widgets/pull/2",
+      });
+      for (let minute = 1; minute <= 25; minute++) {
+        fixture.clock.advance(MINUTE);
+        if (minute < 25) {
+          await fixture.queue.heartbeat(
+            second.id,
+            await fixture.tokenOf(second.id),
+          );
+          await fixture.queue.heartbeat(
+            first.id,
+            await fixture.tokenOf(first.id),
+          );
+        }
+      }
+      expect(ended).toEqual([]);
+
+      await fixture.queue.heartbeat(first.id, await fixture.tokenOf(first.id));
+      expect(ended).toEqual([[first.id]]);
+      expect((await fixture.queue.get(first.id))?.errorCode).toBe("timeout");
+
+      const report = await fixture.queue.expireStaleJobs();
+      expect(report.timedOut).toBe(1);
+      expect(ended).toEqual([[first.id], [second.id]]);
+    },
+  );
+
+  // #487-T06
+  run("names nothing for a call that ended no claim", async () => {
+    const { fixture, ended, running } = await start();
+    const job = await running();
+    const token = await fixture.tokenOf(job.id);
+
+    await fixture.queue.heartbeat(job.id, token);
+    await fixture.queue.complete(job.id, token, OK);
+    ended.length = 0;
+    // The same report again, a stranger's token, a job that waits, and an expiry with nothing to expire.
+    await fixture.queue.complete(job.id, token, OK);
+    await fixture.queue.complete(job.id, "not-the-token", OK);
+    await fixture.queue.cancelClaimed(job.id, token, "project_deactivated");
+    await fixture.queue.release(job.id, token, "runner_shutdown");
+    await fixture.enqueueNew({
+      prNumber: 3,
+      prUrl: "https://github.test/acme/widgets/pull/3",
+    });
+    await fixture.queue.expireStaleJobs();
+
+    expect(ended).toEqual([]);
+  });
+
+  // #487-T07
+  run("does not fail the call when the callback throws", async () => {
+    const database = await open?.();
+    const fixture = await createJobQueueFixture({
+      ...(database === undefined ? {} : { database }),
+      onClaimsEnded: () => {
+        throw new Error("the stop is down");
+      },
+    });
+    const job = await fixture.enqueueNew();
+    await fixture.queue.claimNext("pool", undefined, { jobId: job.id });
+    const errors: string[] = [];
+    const spy = vi.spyOn(console, "error").mockImplementation((line) => {
+      errors.push(String(line));
+    });
+
+    try {
+      const result = await fixture.queue.complete(
+        job.id,
+        await fixture.tokenOf(job.id),
+        OK,
+      );
+
+      expect(result.status).toBe("completed");
+    } finally {
+      spy.mockRestore();
+    }
+    expect((await fixture.queue.get(job.id))?.status).toBe("succeeded");
+    // Logged once by its own stable code, not by the code of another callback, and without the error's text.
+    expect(errors).toEqual(["[queue] claims_ended_callback_failed"]);
+  });
+});

@@ -42,8 +42,22 @@ export type LocalSandboxOptions = {
   environment?: Readonly<Record<string, string>>;
 };
 
+/** What `list` yields; it matches `ListedVm` of the Launcher's port, which this file does not import. */
+export type LocalListedVm = {
+  name: string;
+  createdAtMs: number;
+  status: string;
+  timeoutMs: number;
+  persistent: boolean;
+  tags: Record<string, string>;
+};
+
 type LocalVmState = {
   name: string;
+  createdAtMs: number;
+  timeoutMs: number;
+  persistent: boolean;
+  tags: Record<string, string>;
   dir: string;
   children: Set<ChildProcess>;
   containers: Set<string>;
@@ -82,6 +96,10 @@ export class LocalSandboxService {
     const dir = await mkdtemp(join(base, "cr-sandbox-"));
     const state: LocalVmState = {
       name: options.name,
+      createdAtMs: Date.now(),
+      timeoutMs: options.timeoutMs,
+      persistent: options.persistent,
+      tags: { ...options.tags },
       dir,
       children: new Set(),
       containers: new Set(),
@@ -101,6 +119,34 @@ export class LocalSandboxService {
       await this.dockerQuietly(state, ["rm", "--force", container]);
     for (const child of state.children) child.kill("SIGKILL");
     await rm(state.dir, { recursive: true, force: true });
+  }
+
+  /**
+   * The VMs whose name starts with the prefix and that carry every tag of the filter, like the platform's listing; a
+   * VM that was stopped is still listed, as `stopped`.
+   */
+  list(filter: {
+    namePrefix: string;
+    tags: Readonly<Record<string, string>>;
+  }): Promise<LocalListedVm[]> {
+    return Promise.resolve(
+      [...this.vms.values()]
+        .filter(
+          (state) =>
+            state.name.startsWith(filter.namePrefix) &&
+            Object.entries(filter.tags).every(
+              ([key, value]) => state.tags[key] === value,
+            ),
+        )
+        .map((state) => ({
+          name: state.name,
+          createdAtMs: state.createdAtMs,
+          status: state.stopped ? "stopped" : "running",
+          timeoutMs: state.timeoutMs,
+          persistent: state.persistent,
+          tags: { ...state.tags },
+        })),
+    );
   }
 
   /** Stops every VM that is still up: a suite's `afterEach`, so a failed test leaves nothing behind. */

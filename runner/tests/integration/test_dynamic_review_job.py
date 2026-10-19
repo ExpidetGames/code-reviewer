@@ -913,11 +913,10 @@ def test_a_publication_that_fails_fails_the_job_with_its_own_code_and_links_no_c
 
 # #253-R03
 def test_a_job_whose_engine_fails_writes_nothing_to_the_pull_request(tmp_path: Path) -> None:
-    # An answer about another head is an engine failure (a finding outside the export is not).
+    # An answer whose only finding is invalid is an engine failure (a finding outside the export is
+    # not, and the head is the runner's own, #530).
     document = findings()
-    other = "0" * 40
-    document["reviewedSha"] = other
-    document["findings"][0]["reviewedSha"] = other
+    document["findings"][0]["priority"] = "P9"
     preparer = Preparer(
         tmp_path / "export", {"proxy_calls": 1, "answer": "structured", "findings": document}
     )

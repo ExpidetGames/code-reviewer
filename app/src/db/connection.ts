@@ -33,6 +33,9 @@ function openSqliteDatabase(config: SqliteDatabaseConfig): Kysely<Database> {
     const opened = sqlite;
     retryWhileBusy(config.busyTimeoutMs, () => enableWal(opened));
     sqlite.pragma("foreign_keys = ON");
+    // `insert or replace` deletes the row it conflicts with, and a delete trigger fires for that only with recursive
+    // triggers on. The balance journal refuses deletes by trigger (#495), so a replace must not slip past it.
+    sqlite.pragma("recursive_triggers = ON");
   } catch (cause) {
     sqlite?.close();
     throw new DatabaseError(

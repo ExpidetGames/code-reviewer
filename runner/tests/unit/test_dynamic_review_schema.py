@@ -21,6 +21,15 @@ from code_reviewer_runner.result import ErrorCode
 CONTRACTS = Path(__file__).resolve().parents[3] / "contracts" / "dynamic-review"
 
 
+def as_model_answers(document: dict[str, Any]) -> dict[str, Any]:
+    """An example of the contract as the model returns it: without what the runner sets (#530)."""
+    answer = {k: v for k, v in document.items() if k not in ("schemaVersion", "reviewedSha")}
+    answer["findings"] = [
+        {k: v for k, v in finding.items() if k != "reviewedSha"} for finding in document["findings"]
+    ]
+    return answer
+
+
 def references(node: Any) -> list[str]:
     found: list[str] = []
     if isinstance(node, dict):
@@ -40,7 +49,8 @@ def test_the_engine_schema_is_one_self_contained_object() -> None:
 
     assert schema["type"] == "object"
     assert schema["additionalProperties"] is False
-    assert set(schema["required"]) == {"schemaVersion", "reviewedSha", "findings", "resolvedIds"}
+    # The runner sets `schemaVersion` and `reviewedSha` itself (#530): the model is not asked.
+    assert set(schema["required"]) == {"findings", "resolvedIds"}
     for dropped in ("$defs", "$id", "$schema"):
         assert dropped not in schema
     assert references(schema) == []
@@ -55,7 +65,7 @@ def test_the_engine_schema_accepts_what_the_contract_accepts(example: str) -> No
     document = json.loads((CONTRACTS / example).read_text(encoding="utf-8"))
 
     validator = Draft202012Validator(engine_schema(findings_schema(), 30))
-    validator.validate(document)  # pyright: ignore[reportUnknownMemberType]
+    validator.validate(as_model_answers(document))  # pyright: ignore[reportUnknownMemberType]
 
 
 # #197-T13
@@ -65,7 +75,7 @@ def test_the_engine_schema_still_refuses_what_the_contract_refuses() -> None:
     document["findings"][0]["path"] = "../escape"
     validator = Draft202012Validator(engine_schema(findings_schema(), 30))
 
-    assert len(list(validator.iter_errors(document))) == 2  # pyright: ignore[reportUnknownMemberType]
+    assert len(list(validator.iter_errors(as_model_answers(document)))) == 2  # pyright: ignore[reportUnknownMemberType]
 
 
 # #197-T13

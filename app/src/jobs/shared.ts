@@ -10,7 +10,7 @@ import {
   notifyingJobQueue,
   notifyingRunnerQueue,
 } from "../check-runs/notifying-queues.ts";
-import { dispatchHook } from "../dispatch/shared.ts";
+import { dispatchHook, stopEndedClaims } from "../dispatch/shared.ts";
 import { createJobQueue, type JobQueue } from "./job-queue.ts";
 import { configuredNoCapableRunnerMs } from "./job-limits.ts";
 import { noticeOfRefusal } from "../refusal-notices/shared.ts";
@@ -72,6 +72,9 @@ function createRunnerQueueOfTheServer(): RunnerQueue {
     onUnknownCostSettled: (settlement) => {
       console.warn(unknownCostAlertLine(settlement));
     },
+    // #487: the claim of a job ended (a result, a failure, a cancel, a lapsed lease, a timeout): the Dispatcher that
+    // started it is told to stop its VM, after the response and best effort. Nothing happens while the instance polls.
+    onClaimsEnded: (jobIds) => stopEndedClaims(jobIds),
     // #277: a managed cost limit next to the own key is read by nothing; say so once, with the id of the workspace only.
     onIgnoredCostLimit: (workspaceId) => {
       if (ignoredCostLimitLogged.has(workspaceId)) return;

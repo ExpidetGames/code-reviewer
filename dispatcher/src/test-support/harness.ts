@@ -144,3 +144,58 @@ export async function waitFor(
     await new Promise<void>((resolve) => setTimeout(resolve, 5));
   }
 }
+
+export type StopBody = {
+  version: 1;
+  type: "job.stop";
+  jobId: string;
+  stopId: string;
+  sentAt: string;
+};
+
+export function stopBody(overrides: Partial<StopBody> = {}): StopBody {
+  return {
+    version: 1,
+    type: "job.stop",
+    jobId: "00000000-0000-4000-8000-000000000001",
+    stopId: "7c1e2d44-6b0a-4f5b-9a3e-5d8f2b6c1e07",
+    sentAt: "2026-10-10T12:20:00.000Z",
+    ...overrides,
+  };
+}
+
+/** A signed stop call like the App sends it: the same signing as the wake-up call, `x-dispatch-id` is the stop id. */
+export function signedStopRequest(input: {
+  body?: StopBody;
+  rawBody?: string;
+  secret?: string;
+  keyId?: string;
+  nowSeconds: number;
+  timestamp?: string;
+  headers?: Record<string, string | null>;
+}): Request {
+  const body = input.body ?? stopBody();
+  const rawBody = input.rawBody ?? JSON.stringify(body);
+  const timestamp = input.timestamp ?? String(input.nowSeconds);
+  const headers: Record<string, string | null> = {
+    "content-type": "application/json",
+    "x-dispatch-timestamp": timestamp,
+    "x-dispatch-id": body.stopId,
+    "x-dispatch-key-id": input.keyId ?? KEY_ID,
+    "x-dispatch-signature": signDispatch({
+      secret: input.secret ?? SIGNING_SECRET,
+      timestamp,
+      dispatchId: body.stopId,
+      rawBody,
+    }),
+    ...input.headers,
+  };
+  const clean: Record<string, string> = {};
+  for (const [name, value] of Object.entries(headers))
+    if (value !== null) clean[name] = value;
+  return new Request("http://dispatcher.test/stop", {
+    method: "POST",
+    headers: clean,
+    body: rawBody,
+  });
+}

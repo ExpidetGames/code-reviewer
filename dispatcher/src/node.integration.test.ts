@@ -2,6 +2,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { DispatcherAppFake } from "../../fakes/dispatcher-app/server.ts";
+import { FakeSandboxService } from "../../fakes/sandbox/service.ts";
 import { createFakeLauncher } from "./launchers/fake.ts";
 import { startNodeServer, type NodeServer } from "./node.ts";
 import {
@@ -10,7 +11,9 @@ import {
   SIGNING_SECRET,
   recordingLogger,
   signedRequest,
+  signedStopRequest,
   startApp,
+  stopBody,
   waitFor,
   webhookBody,
 } from "./test-support/harness.ts";
@@ -70,6 +73,43 @@ describe("the Node entry against the fake App", () => {
     expect(health.status).toBe(200);
     expect(response.status).toBe(202);
     expect(launcher.launches[0]).toMatchObject({ jobId, appUrl: fake.url });
+  });
+
+  // #487-T01
+  it("serves /stop over HTTP when the entry is given a fleet, and drains the stop before it shuts down", async () => {
+    const jobId = "0b9f6f4e-3c1a-4d9e-8f43-2a7d5e1c9b10";
+    const sandbox = new FakeSandboxService();
+    const name = `cr-diff-${jobId}-abcd1234`;
+    sandbox.seedVm({
+      name,
+      tags: { app: "code-reviewer", kind: "diff", job: jobId },
+      createdAtMs: Date.now() - 600_000,
+    });
+    server = await startNodeServer({
+      env: environment(),
+      launcher: createFakeLauncher(),
+      port: 0,
+      logger: recordingLogger(),
+      reaper: () => ({
+        fleet: sandbox,
+        jobLifetimeSeconds: 1500,
+        canaryLifetimeSeconds: 450,
+      }),
+    });
+    const call = signedStopRequest({
+      body: stopBody({ jobId }),
+      nowSeconds: Math.floor(Date.now() / 1000),
+    });
+
+    const response = await fetch(`http://127.0.0.1:${server.port}/stop`, {
+      method: "POST",
+      headers: call.headers,
+      body: await call.text(),
+    });
+
+    expect(response.status).toBe(202);
+    await server.shutdown();
+    expect(sandbox.stops).toStrictEqual([name]);
   });
 
   // #327-T11
