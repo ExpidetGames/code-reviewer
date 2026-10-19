@@ -157,6 +157,7 @@ def test_a_model_that_takes_a_forced_choice_and_can_disable_thinking_is_not_stee
     assert body["thinking"] == {"type": "disabled"}
 
 
+# #539-T17
 # #533-T03
 @pytest.mark.parametrize("model", list(MODELS.values()), ids=list(MODELS))
 def test_a_model_is_steered_exactly_when_its_flags_say_so(model: Any) -> None:
@@ -192,6 +193,7 @@ def test_a_model_the_list_does_not_know_is_never_steered_and_gets_no_thinking_se
     assert "strict" not in tool_by_name(body, "StructuredOutput")
 
 
+# #539-T17
 # #533-T04
 def test_the_steering_instruction_is_added_after_the_system_text_and_is_the_same_every_time() -> (
     None

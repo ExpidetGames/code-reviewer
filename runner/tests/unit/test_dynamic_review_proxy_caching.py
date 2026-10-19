@@ -11,6 +11,7 @@ the run costs a fraction of the same run without breakpoints."""
 
 import json
 import sys
+from collections.abc import Callable
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -61,9 +62,14 @@ class CachingClaude:
     """The Claude API with a prompt cache: it asks the tool each time, and answers the usage the
     cache rules give. With `ignore_marks` it behaves as if no request carried a breakpoint."""
 
-    def __init__(self, ignore_marks: bool = False) -> None:
+    def __init__(
+        self,
+        ignore_marks: bool = False,
+        tamper: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+    ) -> None:
         self.cache = PromptCache()
         self.ignore_marks = ignore_marks
+        self.tamper = tamper
         self.bodies: list[dict[str, Any]] = []
         self.usages: list[dict[str, Any]] = []
 
@@ -81,6 +87,8 @@ class CachingClaude:
                 "error": {"type": "invalid_request_error", "message": str(rejected)},
             }
             return 400, json.dumps(error).encode()
+        if self.tamper is not None:
+            usage = self.tamper(usage)
         self.usages.append(usage)
         call_id = f"toolu_{len(self.bodies)}"
         answer = {
@@ -283,6 +291,39 @@ def test_the_uncached_run_is_priced_at_the_input_price() -> None:
         assert usage["cache_creation_input_tokens"] == 0
         assert total - previous == price_of(usage)
         previous = total
+
+
+# #539-T15
+@pytest.mark.parametrize(
+    "tamper",
+    [
+        # The split of the written tokens disagrees with the flat count.
+        lambda usage: {
+            **usage,
+            "cache_creation_input_tokens": usage["cache_creation_input_tokens"] + 1,
+        },
+        lambda usage: {**usage, "a_field_the_price_list_does_not_know": 1},
+        lambda usage: {**usage, "service_tier": "priority"},
+    ],
+    ids=["a split that disagrees with the flat count", "an unknown field", "a priority tier"],
+)
+def test_with_caching_on_a_usage_that_cannot_be_priced_stays_without_a_cost(
+    tamper: Callable[[dict[str, Any]], dict[str, Any]],
+) -> None:
+    upstream = CachingClaude(tamper=tamper)
+    proxy = proxy_for(upstream)
+    body = {"model": MODEL, "messages": history(0, False), "tools": TOOLS, "tool_choice": "auto"}
+    response = proxy.handle(
+        "POST",
+        "/v1/chat/completions",
+        json.dumps(body).encode(),
+        {"Authorization": f"Bearer {CAPABILITY}"},
+    )
+    # The cache did write (the breakpoints are in place), yet nothing is guessed about the price.
+    assert upstream.usages[0]["cache_creation_input_tokens"] > 0
+    assert response.status == 403
+    assert json.loads(response.body)["error"]["code"] == "dynamic_accounting_failed"
+    assert proxy.ledger.usage(MODEL).cost_usd is None
 
 
 # #539-T16

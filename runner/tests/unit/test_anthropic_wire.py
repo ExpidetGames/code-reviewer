@@ -110,6 +110,7 @@ def test_the_endpoint_and_the_headers_are_those_of_the_messages_api() -> None:
     }
 
 
+# #539-T17
 # #511-T21
 def test_a_plain_request_becomes_a_message_request_without_streaming_or_thinking() -> None:
     body = encode()
@@ -131,6 +132,7 @@ def test_a_plain_request_becomes_a_message_request_without_streaming_or_thinking
     }
 
 
+# #539-T17
 # #511-T21
 def test_system_and_developer_text_becomes_the_system_prompt() -> None:
     body = encode(
@@ -145,6 +147,7 @@ def test_system_and_developer_text_becomes_the_system_prompt() -> None:
     assert [m["role"] for m in body["messages"]] == ["user"]
 
 
+# #539-T17
 # #511-T21
 def test_a_tool_loop_becomes_tool_use_and_tool_result_blocks_in_the_right_turns() -> None:
     body = encode(
@@ -199,6 +202,7 @@ def test_a_tool_loop_becomes_tool_use_and_tool_result_blocks_in_the_right_turns(
     ]
 
 
+# #539-T17
 # #511-T21
 def test_an_assistant_turn_without_content_or_calls_is_left_out_and_empty_text_is_never_sent() -> (
     None
@@ -221,6 +225,7 @@ def test_an_assistant_turn_without_content_or_calls_is_left_out_and_empty_text_i
     assert "thinking out loud" not in json.dumps(body)
 
 
+# #539-T17
 # #511-T21: the API answers 400 to a text block of nothing but whitespace, as to an empty one.
 def test_a_text_that_is_only_whitespace_is_never_sent_as_a_block() -> None:
     body = encode(
@@ -271,6 +276,7 @@ def _blank_text_blocks(body: dict[str, Any]) -> list[str]:
     return re.findall(r'"text": "(?:\\[nrt]| )*"', json.dumps(body))
 
 
+# #539-T17
 # #511-T21
 def test_a_tool_result_without_content_is_sent_without_content() -> None:
     body = encode(
@@ -298,6 +304,7 @@ def test_a_tool_result_without_content_is_sent_without_content() -> None:
     }
 
 
+# #539-T17
 # #511-T21
 def test_the_tools_become_input_schemas_and_the_strict_flag_is_not_carried() -> None:
     strict = {"type": "function", "function": {**TOOL["function"], "strict": True}}
@@ -378,6 +385,7 @@ def test_fields_without_a_counterpart_are_not_sent() -> None:
         assert name not in body
 
 
+# #539-T17
 # #511-T21: the body is built from fields; whatever else the caller put in the request is not sent.
 def test_nothing_outside_the_translated_fields_reaches_the_provider() -> None:
     body = encode(provider={"order": ["x"]}, metadata={"user_id": "someone"}, user="someone")

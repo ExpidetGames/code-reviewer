@@ -197,6 +197,7 @@ def sent(upstream: StrictUpstream, index: int) -> dict[str, Any]:
     return upstream.requests[index][1]
 
 
+# #539-T17
 # #533-T11
 def test_a_steered_tool_loop_with_thinking_runs_through_the_strict_api_and_is_costed_exactly() -> (
     None
