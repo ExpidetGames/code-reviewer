@@ -42,7 +42,8 @@ export const JOB_ENTRY_TYPES = ["reservation", "usage", "release"] as const;
 
 /**
  * What a caller of the repository branches on. `invalid_entry`, `idempotency_conflict` and `already_reversed` are
- * thrown (the caller has a bug or a replay with other numbers); the rest come back as the answer of `reserve`,
+ * thrown (the caller has a bug or a replay with other numbers), and so are `reversed_entry_not_found`,
+ * `reservation_required` and `job_entry_required`; the rest come back as the answer of `reserve`, `reserveUpTo`,
  * `settle` and `release`.
  */
 export const BILLING_JOURNAL_ERROR_CODES = [
@@ -51,19 +52,30 @@ export const BILLING_JOURNAL_ERROR_CODES = [
   "already_reversed",
   "reversed_entry_not_found",
   "reservation_required",
+  "job_entry_required",
   "reservation_not_found",
   "job_already_released",
+  "reservation_released",
   "insufficient_balance",
+  "balance_exhausted",
   "balance_negative",
 ] as const;
 
 export type BillingJournalErrorCode =
   (typeof BILLING_JOURNAL_ERROR_CODES)[number];
 
-/** Why `reserve` refuses: the balance is below the hold, or below zero (a refund or chargeback took it there: the workspace is blocked). */
+/**
+ * Why `reserve` and `reserveUpTo` refuse: the balance is below the hold (`insufficient_balance`), exactly zero
+ * (`balance_exhausted`, from `reserveUpTo`: there is nothing to hold), or below zero (`balance_negative`: a refund,
+ * chargeback or final charge took it there, the workspace is blocked), or the job's hold was given back already
+ * (`reservation_released`: the job ended; it is not held again under its id).
+ */
 export type ReserveRefusal = Extract<
   BillingJournalErrorCode,
-  "insufficient_balance" | "balance_negative"
+  | "insufficient_balance"
+  | "balance_exhausted"
+  | "balance_negative"
+  | "reservation_released"
 >;
 
 export class BillingJournalError extends Error {
@@ -96,6 +108,24 @@ export type NewJournalEntry = {
   actorUserId?: string | null | undefined;
   note?: string | null | undefined;
 };
+
+/**
+ * Throws for the types `append` never writes: a `reservation` (only `reserve` takes a hold, conditionally), and a
+ * `release` or a `usage` (only `release()` and `settle()` end a hold; they decide under the lock of the balance row what
+ * the job has, which an appended entry would bypass).
+ */
+export function requireAppendable(entry: NewJournalEntry): void {
+  if (entry.type === "reservation")
+    throw new BillingJournalError(
+      "reservation_required",
+      "a hold is taken with reserve, never appended",
+    );
+  if (entry.type === "release" || entry.type === "usage")
+    throw new BillingJournalError(
+      "job_entry_required",
+      `a ${entry.type} is written by settle or release, never appended`,
+    );
+}
 
 function refuse(message: string): never {
   throw new BillingJournalError("invalid_entry", message);

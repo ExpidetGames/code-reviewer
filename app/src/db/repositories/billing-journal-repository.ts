@@ -15,7 +15,9 @@
 // hold is `min(wanted, balance)`. `settle` and `release` take the same lock before they read what a job has, so a
 // settlement and a release of one job are decided one after the other and a voided job is never charged. Every other
 // entry updates the balance unconditionally: a settlement, a refund, a chargeback or a correction may take it below
-// zero, and a balance of zero or below refuses every `reserveUpTo` (`balance_negative`) and every `reserve`.
+// zero: a balance of exactly zero refuses a `reserveUpTo` with `balance_exhausted`, one below zero with `balance_negative`
+// (and every `reserve`). Every writer takes the balance row's lock before it writes anything, `append` included, so no two
+// of them can wait for each other; `release` and `usage` are written only by `release()` and `settle()`.
 //
 // Entries are listed by `seq`, the order they were written in; `created_at` is a millisecond and not unique.
 //
@@ -27,6 +29,7 @@ import { sql, type Kysely, type Selectable } from "kysely";
 import {
   BillingJournalError,
   refKeyOf,
+  requireAppendable,
   validateEntry,
   type BillingEntryType,
   type NewJournalEntry,
@@ -129,22 +132,26 @@ export type BillingJournalRepository = {
   /**
    * Appends an entry and updates the balance in the same transaction. Idempotent on `(type, key)`: the same key returns
    * the existing entry (`created: false`) and changes nothing; another amount under it throws `idempotency_conflict`.
-   * Throws `invalid_entry` for an entry that breaks a rule, `reservation_required` for a `reservation` (only `reserve`
-   * may take a hold), `reversed_entry_not_found` / `already_reversed` for a bad reversal.
+   * Takes the balance row's lock first, like every writer. Throws `invalid_entry` for an entry that breaks a rule,
+   * `reservation_required` for a `reservation` (only `reserve` may take a hold), `job_entry_required` for a `release` or
+   * a `usage` (only `release()` and `settle()` write them), `reversed_entry_not_found` / `already_reversed` for a bad
+   * reversal.
    */
   append(entry: NewJournalEntry): Promise<AppendResult>;
   /**
    * Takes a hold of `holdMicroUsd` for a job: a `reservation` entry and `balance -= hold, reserved += hold`, only when the
    * balance covers the hold. A refusal writes nothing and says why: `balance_negative` (a refund, chargeback or final
    * charge took it below zero: the workspace is blocked) or `insufficient_balance`. A repeated job returns its
-   * reservation, whatever the balance is now.
+   * reservation, whatever the balance is now, unless that was released already: `reservation_released`.
    */
   reserve(holdMicroUsd: number, jobId: string): Promise<ReserveResult>;
   /**
    * The hold of a claim (#498): at most `maxHoldMicroUsd`, and never more than the balance. Under the same lock as
    * `reserve`: a job that has a reservation gets it back unchanged (`created: false`), whatever its amount is, so a retried
-   * claim after a top-up or a refund is not a conflict; otherwise it holds `min(maxHold, balance)`. A balance of zero or
-   * below refuses with `balance_negative` and writes nothing.
+   * claim after a top-up or a refund is not a conflict; otherwise it holds `min(maxHold, balance)`. A balance of exactly
+   * zero refuses with `balance_exhausted`, one below zero with `balance_negative`, and writes nothing. A job whose
+   * reservation was released (it ended free, or it was settled) is `reservation_released`, not a reservation: nothing is
+   * held, so a retry must not run (#498 decides; a requeue keeps the hold and never releases).
    */
   reserveUpTo(jobId: string, maxHoldMicroUsd: number): Promise<ReserveResult>;
   /**
@@ -465,6 +472,26 @@ export function createBillingJournalRepository(
     return { ok: true, entry: written.entry, created: written.created };
   }
 
+  /**
+   * The answer for a job that has a reservation already: the reservation, unchanged, while it is held. Once it was
+   * released (the job ended free or was settled) nothing is held any more, so it is `reservation_released` and never
+   * `ok`: a retry must not run on a hold that is gone (the contract for #498 is in src/billing/README.md).
+   */
+  async function reservationOf(
+    trx: Kysely<Database>,
+    reservation: JournalEntry,
+    current: JournalBalance | undefined,
+  ): Promise<ReserveResult> {
+    const released = await findEntry(trx, "release", reservation.refKey);
+    if (released !== undefined)
+      return {
+        ok: false,
+        code: "reservation_released",
+        balanceMicroUsd: current?.balanceMicroUsd ?? 0,
+      };
+    return { ok: true, entry: reservation, created: false };
+  }
+
   async function readBalance(): Promise<JournalBalance> {
     const row = await db
       .selectFrom("billing_balances")
@@ -479,13 +506,13 @@ export function createBillingJournalRepository(
 
   return {
     async append(entry) {
-      if (entry.type === "reservation")
-        throw new BillingJournalError(
-          "reservation_required",
-          "a hold is taken with reserve, never appended",
-        );
+      requireAppendable(entry);
       const timestamp = formatTimestamp(now());
-      return inTransaction(db, (trx) => appendIn(trx, entry, timestamp));
+      return inTransaction(db, async (trx) => {
+        // The balance row first, like every other writer: the entry's row is written after the lock, never before it.
+        await lockBalance(trx);
+        return appendIn(trx, entry, timestamp);
+      });
     },
 
     async reserve(holdMicroUsd, jobId) {
@@ -500,7 +527,7 @@ export function createBillingJournalRepository(
               "idempotency_conflict",
               `reservation ${jobId} exists with another amount`,
             );
-          return { ok: true, entry: existing, created: false };
+          return reservationOf(trx, existing, current);
         }
         return takeHold(trx, holdMicroUsd, jobId, current, timestamp);
       });
@@ -513,10 +540,15 @@ export function createBillingJournalRepository(
         const current = await lockBalance(trx);
         const existing = await findEntry(trx, "reservation", jobId);
         if (existing !== undefined)
-          return { ok: true, entry: existing, created: false };
+          return reservationOf(trx, existing, current);
         const balanceMicroUsd = current?.balanceMicroUsd ?? 0;
         if (balanceMicroUsd <= 0)
-          return { ok: false, code: "balance_negative", balanceMicroUsd };
+          return {
+            ok: false,
+            code:
+              balanceMicroUsd < 0 ? "balance_negative" : "balance_exhausted",
+            balanceMicroUsd,
+          };
         return takeHold(
           trx,
           Math.min(maxHoldMicroUsd, balanceMicroUsd),

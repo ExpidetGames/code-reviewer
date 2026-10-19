@@ -9,6 +9,7 @@ import {
   BILLING_JOURNAL_ERROR_CODES,
   BillingJournalError,
   ENTRY_SIGNS,
+  requireAppendable,
   validateEntry,
   type NewJournalEntry,
 } from "./journal.ts";
@@ -109,6 +110,10 @@ describe("the entry types of the journal", () => {
         "idempotency_conflict",
         "already_reversed",
         "reservation_required",
+        "job_entry_required",
+        "reservation_released",
+        "balance_exhausted",
+        "balance_negative",
       ]),
     );
     const error = new BillingJournalError("invalid_entry", "why");
@@ -194,6 +199,62 @@ describe("validating an entry before it is written", () => {
   ] as const)("refuses %s with the code invalid_entry", (_name, entry) => {
     expect(refusal(entry as NewJournalEntry)).toMatchObject({
       code: "invalid_entry",
+    });
+  });
+});
+
+describe("the types a caller may append", () => {
+  function refused(entry: NewJournalEntry): unknown {
+    try {
+      requireAppendable(entry);
+    } catch (error) {
+      return error;
+    }
+    return undefined;
+  }
+
+  // #495-T01
+  it("are all but the three that belong to a job's hold, which only reserve, release and settle write", () => {
+    const entries: Record<
+      (typeof BILLING_ENTRY_TYPES)[number],
+      NewJournalEntry
+    > = {
+      top_up: topUp,
+      start_credit: { ...topUp, type: "start_credit", refKey: "ws-1" },
+      refund: { type: "refund", amountMicroUsd: -5, refKey: "re_1" },
+      chargeback: { type: "chargeback", amountMicroUsd: -5, refKey: "dp_1" },
+      correction: { type: "correction", amountMicroUsd: 7, refKey: "c-1" },
+      reservation: {
+        type: "reservation",
+        amountMicroUsd: -5,
+        jobId: "job-1",
+      },
+      release: { type: "release", amountMicroUsd: 5, jobId: "job-1" },
+      usage: {
+        type: "usage",
+        amountMicroUsd: -300,
+        jobId: "job-1",
+        aiMicroUsd: 100,
+        infraMicroUsd: 200,
+      },
+    };
+
+    const codes = Object.fromEntries(
+      BILLING_ENTRY_TYPES.map((type) => {
+        const error = refused(entries[type]);
+        return [type, error instanceof BillingJournalError ? error.code : null];
+      }),
+    );
+
+    expect(codes).toEqual({
+      top_up: null,
+      start_credit: null,
+      refund: null,
+      chargeback: null,
+      correction: null,
+      reservation: "reservation_required",
+      release: "job_entry_required",
+      usage: "job_entry_required",
     });
   });
 });

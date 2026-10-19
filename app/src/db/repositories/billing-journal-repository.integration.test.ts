@@ -201,44 +201,46 @@ for (const engine of ENGINES) {
     });
 
     // #495-T01
-    it("accepts a release and a usage appended one by one, and refuses to append a reservation (only reserve may take a hold)", async () => {
+    it("refuses to append a reservation, a release or a usage (only reserve, release and settle write them)", async () => {
       const { repo } = await setup(engine);
       await repo.append(topUp(10 * USD));
       await repo.reserve(2 * USD, "job-1");
+      const before = await repo.balance();
 
-      await repo.append({
-        type: "release",
-        amountMicroUsd: 2 * USD,
-        jobId: "job-1",
-      });
-      await repo.append({
-        type: "usage",
-        amountMicroUsd: -USD,
-        jobId: "job-1",
-        aiMicroUsd: 0,
-        infraMicroUsd: USD,
-        minutes: 2,
-        reviewKind: "dynamic",
-      });
+      const refused = [
+        { type: "reservation", amountMicroUsd: -USD, jobId: "job-2" },
+        { type: "release", amountMicroUsd: 2 * USD, jobId: "job-1" },
+        {
+          type: "usage",
+          amountMicroUsd: -USD,
+          jobId: "job-1",
+          aiMicroUsd: 0,
+          infraMicroUsd: USD,
+          minutes: 2,
+          reviewKind: "dynamic",
+        },
+      ] as const;
+      expect(
+        await Promise.all(
+          refused.map((entry) => thrownCode(() => repo.append(entry))),
+        ),
+      ).toEqual([
+        "reservation_required",
+        "job_entry_required",
+        "job_entry_required",
+      ]);
 
+      expect(await repo.balance()).toEqual(before);
+      expect((await repo.entries({ limit: 10 })).entries).toHaveLength(2);
+      // The two ways to write them are still there.
+      expect(await repo.settle("job-1", charge(0, USD))).toMatchObject({
+        ok: true,
+      });
       expect(await repo.balance()).toEqual({
         balanceMicroUsd: 9 * USD,
         reservedMicroUsd: 0,
       });
       await expectConsistent(repo);
-      expect(
-        await thrownCode(() =>
-          repo.append({
-            type: "reservation",
-            amountMicroUsd: -USD,
-            jobId: "job-2",
-          }),
-        ),
-      ).toBe("reservation_required");
-      expect(await repo.balance()).toEqual({
-        balanceMicroUsd: 9 * USD,
-        reservedMicroUsd: 0,
-      });
     });
 
     // #495-T02
@@ -349,9 +351,9 @@ for (const engine of ENGINES) {
         { ...topUp(USD), amountMicroUsd: -USD },
         { type: "refund" as const, amountMicroUsd: USD, refKey: "re_1" },
         {
-          type: "usage" as const,
+          type: "correction" as const,
           amountMicroUsd: -300,
-          jobId: "job-1",
+          refKey: "fix-1",
           aiMicroUsd: 1,
           infraMicroUsd: 1,
         },
@@ -1012,6 +1014,77 @@ for (const engine of ENGINES) {
       await expectConsistent(repo);
     });
 
+    // Every write takes the balance row first (settle, release, reserve, append), so no two of them can wait for each other.
+    // #495-T06
+    it.skipIf(engine.name !== "postgres")(
+      "takes the balance row's lock before an append writes, so it cannot deadlock with a writer that holds the lock",
+      async () => {
+        const { db, workspaceId, repo, repoOf } = await setup(engine);
+        await repo.append(topUp(10 * USD));
+        let appended: Promise<unknown> = Promise.resolve();
+        let outcome: unknown;
+        await db.transaction().execute(async (trx) => {
+          // This transaction holds the balance row, as a settlement does.
+          await sql`select 1 from billing_balances where workspace_id = ${workspaceId} for update`.execute(
+            trx,
+          );
+          appended = repo.append(topUp(USD, "pi_race")).then(
+            (value) => value,
+            (error: unknown) => error,
+          );
+          await untilBlocked(engine, db);
+          // The same key from the lock holder. If the append had written its row before it waited for the lock, this
+          // insert would wait for it and the two would wait for each other: Postgres ends one with a deadlock error.
+          outcome = await repoOf(workspaceId, trx).append(
+            topUp(USD, "pi_race"),
+          );
+        });
+
+        expect(outcome).toMatchObject({ created: true });
+        expect(await appended).toMatchObject({ created: false });
+        expect((await repo.balance()).balanceMicroUsd).toBe(11 * USD);
+        await expectConsistent(repo);
+      },
+    );
+
+    // #495-T06
+    it("lets top-ups, refunds and corrections race with settlements and releases of one workspace without an error", async () => {
+      const { repo } = await setup(engine);
+      await repo.append(topUp(100 * USD));
+      const jobs = Array.from({ length: 16 }, (_, index) => `job-${index}`);
+      for (const jobId of jobs) await repo.reserve(USD, jobId);
+
+      const results = await Promise.allSettled(
+        jobs.flatMap((jobId, index) => [
+          index % 4 === 0
+            ? repo.release(jobId)
+            : repo.settle(jobId, charge(0, 500_000)),
+          repo.append(topUp(USD, `pi_race_${index}`)),
+          index % 2 === 0
+            ? repo.append({
+                type: "refund",
+                amountMicroUsd: -250_000,
+                refKey: `re_race_${index}`,
+              })
+            : repo.append({
+                type: "correction",
+                amountMicroUsd: 125_000,
+                refKey: `fix_race_${index}`,
+              }),
+        ]),
+      );
+
+      expect(results.filter((result) => result.status === "rejected")).toEqual(
+        [],
+      );
+      // 100 + 16 top-ups - 8 refunds of 0.25 + 8 corrections of 0.125 - 12 charges of 0.5.
+      expect(await repo.balance()).toEqual({
+        balanceMicroUsd: 100 * USD + 16 * USD - 2 * USD + USD - 6 * USD,
+        reservedMicroUsd: 0,
+      });
+      await expectConsistent(repo);
+    });
+
     // reserveUpTo: the hold of a claim (#498), capped by the balance under the same lock as reserve.
     // #495-T05
     it("holds the wanted amount when the balance covers it and the whole balance when it does not", async () => {
@@ -1072,19 +1145,19 @@ for (const engine of ENGINES) {
     });
 
     // #495-T08
-    it("refuses a claim with balance_negative when the balance is zero or below, and writes nothing", async () => {
+    it("refuses a claim with balance_exhausted at a balance of zero and balance_negative below it, and writes nothing", async () => {
       const { db, workspaceId, repo } = await setup(engine);
-      // No balance row at all.
+      // No balance row at all: nothing was ever credited.
       expect(await repo.reserveUpTo("job-0", USD)).toEqual({
         ok: false,
-        code: "balance_negative",
+        code: "balance_exhausted",
         balanceMicroUsd: 0,
       });
       await repo.append(topUp(2 * USD));
       await repo.reserveUpTo("job-1", 5 * USD); // takes all of it: the balance is 0
       expect(await repo.reserveUpTo("job-2", USD)).toEqual({
         ok: false,
-        code: "balance_negative",
+        code: "balance_exhausted",
         balanceMicroUsd: 0,
       });
       await repo.append({
@@ -1108,6 +1181,58 @@ for (const engine of ENGINES) {
             .execute()
         ).map((row) => row.ref_key),
       ).toEqual(["job-1"]);
+      await expectConsistent(repo);
+    });
+
+    // A requeued job keeps its hold; only a job that ends free gives it back (src/billing/README.md, for #498).
+    // #495-T02
+    it("answers a claim of a job whose hold was released with reservation_released, and holds nothing", async () => {
+      const { repo } = await setup(engine);
+      await repo.append(topUp(10 * USD));
+      await repo.reserveUpTo("job-1", 3 * USD);
+      await repo.release("job-1"); // the job ended free
+      await repo.reserveUpTo("job-2", 3 * USD);
+      await repo.settle("job-2", charge(0, USD)); // the job was charged
+      const before = await repo.balance();
+      const entriesBefore = (await repo.entries({ limit: 50 })).entries.length;
+
+      for (const jobId of ["job-1", "job-2"]) {
+        expect(await repo.reserveUpTo(jobId, 3 * USD)).toEqual({
+          ok: false,
+          code: "reservation_released",
+          balanceMicroUsd: before.balanceMicroUsd,
+        });
+        expect(await repo.reserve(3 * USD, jobId)).toEqual({
+          ok: false,
+          code: "reservation_released",
+          balanceMicroUsd: before.balanceMicroUsd,
+        });
+      }
+
+      expect(await repo.balance()).toEqual(before);
+      expect((await repo.entries({ limit: 50 })).entries).toHaveLength(
+        entriesBefore,
+      );
+      await expectConsistent(repo);
+    });
+
+    // #495-T02
+    it("lets a job that is claimed again before it ended settle with the hold of its first claim", async () => {
+      const { repo } = await setup(engine);
+      await repo.append(topUp(10 * USD));
+      const first = await repo.reserveUpTo("job-1", 3 * USD);
+      const requeued = await repo.reserveUpTo("job-1", 3 * USD);
+
+      expect(requeued).toMatchObject({ ok: true, created: false });
+      expect(requeued.ok && requeued.entry).toEqual(first.ok && first.entry);
+      expect(await repo.settle("job-1", charge(0, USD))).toMatchObject({
+        ok: true,
+        created: true,
+      });
+      expect(await repo.balance()).toEqual({
+        balanceMicroUsd: 9 * USD,
+        reservedMicroUsd: 0,
+      });
       await expectConsistent(repo);
     });
 
@@ -1148,7 +1273,7 @@ for (const engine of ENGINES) {
       ]);
       expect(
         results.filter(
-          (result) => !result.ok && result.code === "balance_negative",
+          (result) => !result.ok && result.code === "balance_exhausted",
         ),
       ).toHaveLength(16);
       expect(await repo.balance()).toEqual({
@@ -1259,55 +1384,22 @@ for (const engine of ENGINES) {
       await expectConsistent(repo);
     });
 
-    // #495-T03
-    it("refuses an appended usage with the key and the amount of an entry but other parts, minutes or kind", async () => {
-      const { repo } = await setup(engine);
-      await repo.append(topUp(10 * USD));
-      await repo.reserve(2 * USD, "job-1");
-      const usage = {
-        type: "usage" as const,
-        amountMicroUsd: -1_500_000,
-        jobId: "job-1",
-        refKey: "job-1",
-        reviewKind: "diff" as const,
-        minutes: 3,
-        aiMicroUsd: USD,
-        infraMicroUsd: 500_000,
-      };
-      await repo.append(usage);
-
-      for (const other of [
-        { ...usage, aiMicroUsd: 500_000, infraMicroUsd: USD },
-        { ...usage, minutes: 4 },
-        { ...usage, reviewKind: "dynamic" as const },
-      ])
-        expect(await thrownCode(() => repo.append(other))).toBe(
-          "idempotency_conflict",
-        );
-      expect(await repo.append(usage)).toMatchObject({ created: false });
-    });
-
     // #495-T02
-    it("says a settlement is new when it wrote the usage, not when it wrote the release", async () => {
+    it("says a settlement is new when it wrote the usage, and a repeat or a release alone is not", async () => {
       const { repo } = await setup(engine);
       await repo.append(topUp(10 * USD));
       await repo.reserve(2 * USD, "job-1");
-      // The usage was appended by hand; the settlement then writes only the release.
-      await repo.append({
-        type: "usage",
-        amountMicroUsd: -USD,
-        jobId: "job-1",
-        refKey: "job-1",
-        reviewKind: "diff",
-        minutes: 3,
-        aiMicroUsd: 0,
-        infraMicroUsd: USD,
-      });
+      await repo.reserve(2 * USD, "job-2");
 
-      const settled = await repo.settle("job-1", charge(0, USD));
+      const first = await repo.settle("job-1", charge(0, USD));
+      const again = await repo.settle("job-1", charge(0, USD));
+      const free = await repo.settle("job-2", charge(0, 0));
+      const freeAgain = await repo.settle("job-2", charge(0, 0));
 
-      expect(settled).toMatchObject({ ok: true, created: false });
-      expect(settled.ok && settled.release).toBeDefined();
+      expect(first).toMatchObject({ ok: true, created: true });
+      expect(again).toMatchObject({ ok: true, created: false });
+      expect(free).toMatchObject({ ok: true, created: true, usage: null });
+      expect(freeAgain).toMatchObject({ ok: true, created: false });
       expect(await repo.balance()).toEqual({
         balanceMicroUsd: 9 * USD,
         reservedMicroUsd: 0,

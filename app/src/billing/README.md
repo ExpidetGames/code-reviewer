@@ -131,7 +131,8 @@ lifecycle calls it yet: reserving at claim and settling are #498, crediting from
 | `chargeback`   | -    | A dispute was lost; the key is the dispute id.                             |
 | `correction`   | +/-  | A manual correction, or the reversal of an entry (`reverses_entry_id`).    |
 
-- **Repository.** `append(entry)` for every type but a reservation; `reserve(hold, jobId)`; `reserveUpTo(jobId, maxHold)` (the
+- **Repository.** `append(entry)` for every type but the three of a job's hold (`reservation_required` for a reservation,
+  `job_entry_required` for a `release` or a `usage`: only `reserve`, `release()` and `settle()` write those); `reserve(hold, jobId)`; `reserveUpTo(jobId, maxHold)` (the
   hold of a claim, see below); `settle(jobId, charge)` (a `release` of the hold and a `usage` of the charge, in one
   transaction; a charge of zero writes only the release; `created` is true when this call wrote the usage, the release
   when there is none); `release(jobId)` (a job that never ran); `balance()`; `entries({ cursor, limit })` (newest first,
@@ -146,20 +147,31 @@ lifecycle calls it yet: reserving at claim and settling are #498, crediting from
   against 10 grant exactly 3, on Postgres (one pool, two pools) and on SQLite (one connection, several processes).
   `settle` and `release` take the lock of the balance row before they read what a job has, so a release and a settlement
   of one job are decided one after the other: a job whose release committed first, or commits at the same moment, is
-  never charged (`job_already_released`).
+  never charged (`job_already_released`). `append` takes the same lock before it writes, so **every writer is "balance row
+  first"** and none can wait for another's row (a test holds the lock and appends the same key from both sides).
 - **`reserveUpTo(jobId, maxHold)` is the hold of a claim** (#498, decision 5 of #489: hold at most the available balance).
   Under the lock: a job that has a reservation gets it back unchanged (`created: false`), whatever its amount and the
   balance are now, so a claim retried after a crash, a top-up or a refund is never a conflict; otherwise the hold is
-  `min(maxHold, balance)`. A balance of zero or below is refused with `balance_negative` (a hold of 0 is not a hold).
-  `reserve` stays for a caller that wants an exact hold or a refusal.
+  `min(maxHold, balance)`. A balance of exactly zero is refused with `balance_exhausted`, one below zero with
+  `balance_negative` (a hold of 0 is not a hold; the UI copy for `balance_exhausted` is "no balance", for
+  `balance_negative` "overdrawn"). `reserve` stays for a caller that wants an exact hold or a refusal.
+- **The hold of a job: the contract for #498.** A hold lives from the job's first claim to the job's end. **A requeue keeps
+  the hold**: a lost lease, a retry or a second claim of the same job id calls `reserveUpTo` again and gets the same
+  reservation back (`created: false`), and the job later settles against it. **A release happens only when the job ends
+  free** (`release(jobId)`: it never ran, or the class is `free`), and a charged end is `settle`. Keys are per job, not per
+  attempt (`reservation`, `release` and `usage` all use the job id), so a job's hold is taken once, ever. If a caller
+  claims a job whose hold was released already, `reserveUpTo` and `reserve` answer **`reservation_released`**
+  (`ok: false`), not the old reservation: nothing is held, so the retry must not run as if it were paid. #498 decides what
+  that means (it should not happen when a requeue never releases); the journal only refuses to say "held" when it is not.
 - **A negative balance blocks.** A refund, a chargeback or a final charge above the hold may take the balance below zero;
-  every `reserve` is then refused with `balance_negative`, whatever the amount. A balance that is positive but below the
-  hold is refused with `insufficient_balance`. Both come back as the answer of `reserve` (`ok: false`), never as an
-  exception. Credit lifts the block; it never expires.
+  every `reserve` and `reserveUpTo` is then refused with `balance_negative`, whatever the amount. A balance that is
+  positive but below the hold is refused by `reserve` with `insufficient_balance`; a balance of exactly zero is refused by
+  `reserveUpTo` with `balance_exhausted` (and by `reserve` with `insufficient_balance`, there is nothing to hold). All
+  come back as the answer (`ok: false`), never as an exception. Credit lifts the block; it never expires.
 - **Stable codes** (`BILLING_JOURNAL_ERROR_CODES`): thrown for a caller's bug or a replay with other numbers
-  (`invalid_entry`, `idempotency_conflict`, `already_reversed`, `reversed_entry_not_found`, `reservation_required`),
-  answered by `reserve`, `settle` and `release` (`insufficient_balance`, `balance_negative`, `reservation_not_found`,
-  `job_already_released`).
+  (`invalid_entry`, `idempotency_conflict`, `already_reversed`, `reversed_entry_not_found`, `reservation_required`,
+  `job_entry_required`), answered by `reserve`, `reserveUpTo`, `settle` and `release` (`insufficient_balance`,
+  `balance_exhausted`, `balance_negative`, `reservation_released`, `reservation_not_found`, `job_already_released`).
 - **`verify()`** returns the cache and the sum of the journal side by side with the difference of each (cache minus sum) and
   `consistent`, read in one statement (one snapshot), so traffic that commits meanwhile never shows as drift. The nightly job
   that runs it is #510's.

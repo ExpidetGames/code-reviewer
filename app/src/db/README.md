@@ -416,7 +416,9 @@ existing row, so an app of the previous release on the same database is unaffect
 - **Concurrency.** Everything that writes is one transaction and idempotent on the key. `reserve` and `reserveUpTo` take
   the balance row's lock (Postgres `FOR UPDATE`; SQLite's `begin immediate` already serializes writers), answer a
   repeated job from the entry they wrote, and `settle` and `release` take the same lock before they read what the job
-  has, so a settlement never charges a job a concurrent release voided. The hold itself is `UPDATE billing_balances SET balance = balance - :hold, reserved = reserved + :hold WHERE
+  has, so a settlement never charges a job a concurrent release voided. `append` takes it too, before it writes: every
+  writer is "balance row first", so no two can wait for each other (an `append` that wrote first deadlocked with a
+  `settle` on the same key). The hold itself is `UPDATE billing_balances SET balance = balance - :hold, reserved = reserved + :hold WHERE
 workspace_id = :w AND balance >= :hold`; no row changed means the hold is refused and nothing is written. Every other
   entry adds to the balance unconditionally, so the balance goes below zero only through a settlement, refund, chargeback
   or correction. The balance row is updated, then inserted if missing, never upserted: Postgres checks the row it would
