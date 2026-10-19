@@ -6,6 +6,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import { describe, expect, it } from "vitest";
+import { DispatchStopSchema } from "./triggers/stop-schema.ts";
 import { DispatchWebhookSchema } from "./triggers/webhook-schema.ts";
 import { parseSplitClaim } from "./core/app-client.ts";
 import { readContract } from "./test-support/harness.ts";
@@ -65,8 +66,64 @@ describe("the contracts the Dispatcher speaks", () => {
     ).toStrictEqual([
       "DispatchAccepted.json",
       "DispatchIgnored.json",
+      "DispatchStop.json",
+      "DispatchStopAccepted.json",
+      "DispatchStopIgnored.json",
       "DispatchWebhook.json",
     ]);
+  });
+
+  // #487-T10
+  it("has valid examples for the stop call and its two answers", () => {
+    for (const [definition, example] of [
+      ["DispatchStop", "examples/dispatch-webhook/DispatchStop.json"],
+      [
+        "DispatchStopAccepted",
+        "examples/dispatch-webhook/DispatchStopAccepted.json",
+      ],
+      [
+        "DispatchStopIgnored",
+        "examples/dispatch-webhook/DispatchStopIgnored.json",
+      ],
+    ] as const) {
+      const check = validator("dispatch-webhook", definition);
+      expect(
+        check(readContract(example)),
+        `${definition}: ${JSON.stringify(check.errors)}`,
+      ).toBe(true);
+    }
+  });
+
+  // #487-T02, #487-T10
+  it("accepts and refuses the same stop bodies as the schema file", () => {
+    const good = readContract<Record<string, unknown>>(
+      "examples/dispatch-webhook/DispatchStop.json",
+    );
+    const bodies: Array<[string, unknown]> = [
+      ["the example", good],
+      ["an unknown field", { ...good, extra: 1 }],
+      ["a credential field", { ...good, credential: "crj_x" }],
+      ["a kind field", { ...good, reviewKind: "diff" }],
+      ["a missing stop id", { ...good, stopId: undefined }],
+      ["a missing job id", { ...good, jobId: undefined }],
+      ["a wrong version", { ...good, version: 2 }],
+      ["the type of the wake-up call", { ...good, type: "job.ready" }],
+      ["a bad job id", { ...good, jobId: "not-a-uuid" }],
+      [
+        "a job id with a path in it",
+        { ...good, jobId: `${String(good.jobId)}/..` },
+      ],
+      ["a bad stop id", { ...good, stopId: "x" }],
+      ["a bad timestamp", { ...good, sentAt: "yesterday" }],
+      ["an array", []],
+      ["null", null],
+    ];
+    const check = validator("dispatch-webhook", "DispatchStop");
+
+    for (const [name, body] of bodies)
+      expect(DispatchStopSchema.safeParse(body).success, name).toBe(
+        check(body),
+      );
   });
 
   // #327-T02

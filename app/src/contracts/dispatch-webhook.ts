@@ -53,6 +53,42 @@ export interface DispatchIgnored {
   [k: string]: unknown;
 }
 /**
+ * The body of the stop call (#487). Closed, at most 1 KiB, no secret and no repository data. `stopId` is new for every stop of a job and is also the X-Dispatch-Id header; a receiver remembers the ones it handled, so a replay does nothing. The same signing rule as the wake-up call, over this body.
+ */
+export interface DispatchStop {
+  version: 1;
+  type: "job.stop";
+  /**
+   * The id of a job (a UUID).
+   */
+  jobId: string;
+  /**
+   * The id of a job (a UUID).
+   */
+  stopId: string;
+  /**
+   * ISO 8601, UTC.
+   */
+  sentAt: string;
+}
+/**
+ * 202 from the receiver: the stop call is verified and the VMs of the job are being stopped in the background.
+ */
+export interface DispatchStopAccepted {
+  version: 1;
+  status: "stopping";
+  [k: string]: unknown;
+}
+/**
+ * 200 from the receiver: verified, and there is nothing to do. `no_vm`: the job has no VM (it never had one, or it is stopped already). `replayed`: this stopId was handled before.
+ */
+export interface DispatchStopIgnored {
+  version: 1;
+  status: "ignored";
+  reason: "no_vm" | "replayed";
+  [k: string]: unknown;
+}
+/**
  * The file dispatch-signing-vectors.json: signing keys of the example (dummy values), the tolerance, and requests as a receiver sees them with the verdict each must get. A consumer (the app's sender and the Dispatcher's receiver, in TypeScript, and the runner suite in Python) computes the verdict itself and compares. Header names are lower case.
  */
 export interface DispatchSigningVectors {
