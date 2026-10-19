@@ -14,6 +14,7 @@ from starlette_context import request_cycle_context  # pyright: ignore[reportUnk
 from code_reviewer_runner.dynamic_review.budget import exact_cost
 from code_reviewer_runner.job import Job, parse_job
 from code_reviewer_runner.llm_providers import LlmProviderSpec, RequireParameters
+from code_reviewer_runner.usage_access import usage_field
 
 TOKEN = "dummy-installation-token-0123456789"
 API_KEY = "dummy-openrouter-key-0123456789"
@@ -73,5 +74,5 @@ def fake_provider() -> LlmProviderSpec:
             body_value={"strict": True},
         ),
         no_endpoint_for_parameters=lambda text: "nothing can serve" in text,
-        cost_extractor=lambda usage: exact_cost(usage.get("price")),
+        cost_extractor=lambda model, usage: exact_cost(usage_field(usage, "price")),
     )
