@@ -16,7 +16,8 @@
 //     differs from the request that produced it, the request is a 400 unless it asks for
 //     `prefix_mismatch_behavior: "drop_block"` (an account created after 2026-08-31 is enforced).
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 
 export const THINKING_BINDING_BETA = "thinking-binding-controls-2026-08-01";
 
@@ -29,10 +30,20 @@ type Model = {
 /** The status and the body of a request the API refuses. */
 export type Refusal = { status: number; body: Json };
 
-const CONTRACT = new URL(
-  "../../contracts/anthropic-models.v1.json",
-  import.meta.url,
-);
+// Found from the working directory (the app, the Dispatcher or the repository root) and not from this file: the
+// Playwright journeys load the fakes as CommonJS, where `import.meta` does not exist.
+function contractPath(): string {
+  for (
+    let directory = resolve(process.cwd());
+    ;
+    directory = dirname(directory)
+  ) {
+    const candidate = join(directory, "contracts", "anthropic-models.v1.json");
+    if (existsSync(candidate)) return candidate;
+    if (dirname(directory) === directory)
+      throw new Error("contracts/anthropic-models.v1.json was not found.");
+  }
+}
 const THINKING_KINDS = ["thinking", "redacted_thinking"];
 
 export function invalid(message: string): Refusal {
@@ -83,7 +94,7 @@ export class StrictMessagesApi {
   >();
 
   constructor() {
-    const document = JSON.parse(readFileSync(CONTRACT, "utf8")) as {
+    const document = JSON.parse(readFileSync(contractPath(), "utf8")) as {
       models: Model[];
     };
     this.models = new Map(document.models.map((model) => [model.id, model]));
