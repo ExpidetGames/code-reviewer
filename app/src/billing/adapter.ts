@@ -18,12 +18,30 @@ export type BillingCurrency = typeof BILLING_CURRENCY;
 
 const MICRO_USD = 1_000_000;
 
-/** The top-up range of ADR 0006 (P7, D3): code constants. An adapter may narrow it, never widen it. */
-export const TOP_UP_MIN_MICRO_USD = 10 * MICRO_USD;
-export const TOP_UP_MAX_MICRO_USD = 500 * MICRO_USD;
+declare const usdBrand: unique symbol;
 
-/** Money: a positive integer in micro-USD (D1), never a float. */
-export type Usd = number;
+/**
+ * Money of the ledger: a whole number of micro-USD (D1), never a float, never cents. Branded, so that cents, a provider's
+ * amount in another currency and micro-USD cannot be mixed up by the type checker: `toUsd` is the way in. (The `amount`
+ * of a refund or dispute is NOT `Usd`: it is the provider's own unit, see `RefundEvent`.)
+ */
+export type Usd = number & { readonly [usdBrand]: true };
+
+/** A micro-USD amount from a number: a non-negative safe integer or `amount_out_of_range`. */
+export function toUsd(value: number): Usd {
+  if (!Number.isSafeInteger(value) || value < 0)
+    throw new BillingAdapterError(
+      "amount_out_of_range",
+      "an amount is a non-negative whole number of micro-USD",
+    );
+  return value as Usd;
+}
+
+/**
+ * An amount as the provider reports it: a positive whole number in ITS unit (a minor unit of the buyer's currency, tax
+ * included). Only meaningful next to the `paymentAmount` in the same unit; it is never added to a ledger amount.
+ */
+export type ProviderAmount = number;
 
 /** An opaque id at the provider (a payment, a checkout session, a refund, a dispute, a customer). No data. */
 export type ProviderRef = string;
@@ -53,6 +71,10 @@ export class BillingAdapterError extends Error {
     this.code = code;
   }
 }
+
+/** The top-up range of ADR 0006 (P7, D3): code constants. An adapter may narrow it, never widen it. */
+export const TOP_UP_MIN_MICRO_USD = toUsd(10 * MICRO_USD);
+export const TOP_UP_MAX_MICRO_USD = toUsd(500 * MICRO_USD);
 
 /** Why an adapter does not accept a webhook. Only a code leaves the handler; nothing of the request does. */
 export const BILLING_WEBHOOK_REJECTION_CODES = [
@@ -136,16 +158,43 @@ export interface BillingAdapter {
     payment: ProviderRef | null;
   }>;
   /**
-   * Checks the signature of a webhook over the exact bytes of its body and parses it into one normalized event. A body
-   * is data until its signature is verified. Makes no outbound call and touches no database. Absent when the provider
-   * sends no webhooks (the `manual` adapter): the route answers the missing path.
+   * Checks the signature of a webhook over the exact bytes of its body and parses it into ONE normalized event. A body
+   * is data until its signature is verified. `rawBody` is the bytes as received, not decoded text: a signature is a MAC
+   * over bytes, and decoding drops a byte order mark and replaces bytes that are not UTF-8. The adapter decodes the body
+   * itself, after the check. Makes no outbound call and touches no database. Absent when the provider sends no webhooks
+   * (the `manual` adapter): the route answers the missing path.
+   *
+   * One event per delivery: a provider delivery that lists several refunds (or disputes) is mapped to the per-object
+   * event of the provider (Stripe's `refund.created`/`refund.updated`/`refund.failed`, not the `charge.refunded` list),
+   * so each refund arrives under its own event id and refund id. An adapter must not read a CUMULATIVE amount (Stripe's
+   * `amount_refunded` of a charge) as the amount of one refund; the caps of the intent (`apply-event.ts`) are the net
+   * under that mistake, not a licence for it.
    */
   verifyAndParseWebhook?(input: {
     headers: Headers;
-    rawBody: string;
+    rawBody: Uint8Array;
     now: Date;
   }): Promise<WebhookResult>;
+  /**
+   * Asks the provider what became of a top-up and returns it as a normalized payment event (`payment.succeeded`,
+   * `payment.failed` or `payment.expired`), or null when the provider knows nothing of it (yet) or the object is gone
+   * (a `resource_missing` is normal, never an error). It is the one outbound call of the adapter, made in a user's
+   * request (#502's "Check payment"), never in the webhook; the event goes through `applyBillingEvent` like a webhook's,
+   * so a lost webhook, a late one and a click are idempotent together. Absent when the provider cannot be asked (the
+   * `manual` adapter).
+   */
+  lookupTopUp?(input: {
+    intentId: string;
+    checkout: ProviderRef | null;
+    payment: ProviderRef | null;
+  }): Promise<TopUpLookupEvent | null>;
 }
+
+/** What a lookup of a top-up may answer. */
+export type TopUpLookupEvent = Extract<
+  BillingEvent,
+  { type: "payment.succeeded" | "payment.failed" | "payment.expired" }
+>;
 
 export type WebhookResult =
   | { ok: true; event: BillingEvent }
@@ -170,6 +219,15 @@ export type RefundStatus = (typeof REFUND_STATUSES)[number];
 /**
  * `opened` and `lost`: the provider took the money (it does so when a dispute opens), the journal is debited, once.
  * `won`: it comes back, the debit is reversed once.
+ *
+ * What the adapter maps to them (the mapping the Stripe adapter of #502 documents in the same words):
+ *   - `opened`  the dispute is created, or the funds are withdrawn (`charge.dispute.created`, `funds_withdrawn`);
+ *   - `lost`    the dispute is closed and lost (`charge.dispute.closed` with the status `lost`);
+ *   - `won`     the dispute is closed and won, or the funds are reinstated, or the dispute is closed because the charge
+ *               was refunded (`charge.dispute.closed` with `won` or `charge_refunded`, `funds_reinstated`): the
+ *               disputed money comes back, and a refund, if any, is its own event;
+ *   - nothing   an early warning that moves no money (`warning_needs_response`, `warning_under_review`,
+ *               `warning_closed`) and a dispute still under review: the event is `ignored`.
  */
 export const DISPUTE_STATUSES = ["opened", "lost", "won"] as const;
 export type DisputeStatus = (typeof DISPUTE_STATUSES)[number];
@@ -182,9 +240,16 @@ type EventBase = {
 };
 
 /**
- * What an adapter hands to the application. Provider-neutral. Every amount is OUR ledger amount: net of tax (the basis
- * of `creditable`), in micro-USD; the adapter converts. `ignored` is a verified event of a type the adapter does not
- * use: it is recorded and does nothing.
+ * What an adapter hands to the application. Provider-neutral.
+ *
+ *   - A PAYMENT carries OUR ledger amounts: `creditable` is net of tax, in micro-USD (`Usd`); `gross` and `tax` are for
+ *     the record. The adapter converts; the provider's net is the basis of the credit.
+ *   - A REFUND or DISPUTE carries the PROVIDER's amounts, gross, as the provider reports them: `amount` of this refund
+ *     or dispute and `paymentAmount` of the whole payment, both in the SAME unit (cents in the buyer's currency, say; the
+ *     unit never matters). The provider says nothing of the tax split of a refund, so the application takes the net
+ *     share from the ratio under the intent lock (`netShareMicroUsd`): `credited x amount / paymentAmount`.
+ *   - `payment.expired` is the end of a checkout nobody paid (the checkout session expired): the intent leaves `pending`.
+ *   - `ignored` is a verified event of a type the adapter does not use: it is recorded and does nothing.
  */
 export type BillingEvent =
   | (EventBase & {
@@ -196,6 +261,7 @@ export type BillingEvent =
       /** What becomes credit: the net amount. */
       creditable: Usd;
       gross: Usd;
+      /** Zero is a real tax (a buyer who owes none); null is "the provider does not say". */
       tax: Usd | null;
     })
   | (EventBase & {
@@ -205,10 +271,19 @@ export type BillingEvent =
       checkout: ProviderRef | null;
     })
   | (EventBase & {
+      type: "payment.expired";
+      intentId: string | null;
+      payment: ProviderRef | null;
+      checkout: ProviderRef | null;
+    })
+  | (EventBase & {
       type: "refund.updated";
       payment: ProviderRef;
       refund: ProviderRef;
-      amount: Usd;
+      /** THIS refund, gross, in the provider's unit (the same as `paymentAmount`): positive whole number. */
+      amount: ProviderAmount;
+      /** The whole payment it refunds, gross, in the same unit. */
+      paymentAmount: ProviderAmount;
       initiatedBy: RefundInitiator;
       status: RefundStatus;
     })
@@ -216,7 +291,9 @@ export type BillingEvent =
       type: "dispute.updated";
       payment: ProviderRef;
       dispute: ProviderRef;
-      amount: Usd;
+      /** The disputed amount, gross, in the provider's unit (the same as `paymentAmount`). */
+      amount: ProviderAmount;
+      paymentAmount: ProviderAmount;
       status: DisputeStatus;
     })
   | (EventBase & { type: "ignored" });
@@ -224,6 +301,7 @@ export type BillingEvent =
 export const BILLING_EVENT_TYPES = [
   "payment.succeeded",
   "payment.failed",
+  "payment.expired",
   "refund.updated",
   "dispute.updated",
   "ignored",
@@ -247,8 +325,25 @@ export const BILLING_EVENT_OUTCOMES = [
   "amount_rejected",
   /** The reference exists in the journal with another amount; nothing was changed. */
   "amount_conflict",
+  /** A signed event that is not a normalized event (an adapter bug or a provider change). Nothing was changed. */
+  "event_invalid",
 ] as const;
 export type BillingEventOutcome = (typeof BILLING_EVENT_OUTCOMES)[number];
+
+/**
+ * The outcomes of an event that moved money, or claimed to, and changed nothing in the ledger: a buyer may have paid and
+ * got nothing, or been refunded and kept the credit. Each is recorded `review_state = 'open'`, logged at error level and
+ * answered 200 (the provider's retry would not change it). The repair is the operator's: a `manual` grant or correction
+ * (#504), or "Check payment" (#502) when the provider's state is the doubt. Benign outcomes (`duplicate_ignored`,
+ * `stale_ignored`, `nothing_to_reverse`, `ignored_type`) are not in the set.
+ */
+export const BILLING_REVIEW_OUTCOMES = [
+  "intent_unresolved",
+  "amount_rejected",
+  "amount_conflict",
+  "event_invalid",
+] as const satisfies readonly BillingEventOutcome[];
+export type BillingReviewOutcome = (typeof BILLING_REVIEW_OUTCOMES)[number];
 
 const ADAPTER_ID = /^[a-z][a-z0-9_-]{0,31}$/;
 const PROVIDER_REF = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,254}$/;
@@ -256,6 +351,15 @@ const ISO_TIME =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
 
 export function isUsdAmount(value: unknown): value is Usd {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
+/** A tax: zero (a buyer who owes none) or a positive amount. */
+function isTaxAmount(value: unknown): value is Usd {
+  return value === 0 || isUsdAmount(value);
+}
+
+function isProviderAmount(value: unknown): value is ProviderAmount {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 }
 
@@ -361,12 +465,19 @@ function requireAmount(value: unknown, what: string): void {
   if (!isUsdAmount(value)) refuseEvent(`${what} is not a positive integer`);
 }
 
+function requireProviderAmount(value: unknown, what: string): void {
+  if (!isProviderAmount(value))
+    refuseEvent(`${what} is not a positive integer`);
+}
+
 /**
  * Throws `event_invalid` when an adapter hands over something that is not a normalized event: an adapter is code, but
  * what it reads is a provider's data, and nothing past this function trusts an amount, a reference or a status that did
  * not pass it. (A well formed amount can still be refused later against our intent: `amount_rejected`.)
  */
 export function validateBillingEvent(event: BillingEvent): void {
+  if (typeof event !== "object" || event === null || Array.isArray(event))
+    refuseEvent("not an event");
   if (!BILLING_EVENT_TYPES.includes(event.type))
     refuseEvent("unknown event type");
   requireRef(event.eventId, "the event id");
@@ -385,9 +496,11 @@ export function validateBillingEvent(event: BillingEvent): void {
       requireOptionalRef(event.checkout, "the checkout");
       requireAmount(event.creditable, "the creditable amount");
       requireAmount(event.gross, "the gross amount");
-      if (event.tax !== null) requireAmount(event.tax, "the tax");
+      if (event.tax !== null && !isTaxAmount(event.tax))
+        refuseEvent("the tax is not a non-negative integer");
       return;
     case "payment.failed":
+    case "payment.expired":
       requireOptionalRef(event.intentId, "the intent id");
       requireOptionalRef(event.payment, "the payment");
       requireOptionalRef(event.checkout, "the checkout");
@@ -395,7 +508,8 @@ export function validateBillingEvent(event: BillingEvent): void {
     case "refund.updated":
       requireRef(event.payment, "the payment");
       requireRef(event.refund, "the refund");
-      requireAmount(event.amount, "the refund amount");
+      requireProviderAmount(event.amount, "the refund amount");
+      requireProviderAmount(event.paymentAmount, "the payment amount");
       if (!REFUND_INITIATORS.includes(event.initiatedBy))
         refuseEvent("unknown refund initiator");
       if (!REFUND_STATUSES.includes(event.status))
@@ -404,7 +518,8 @@ export function validateBillingEvent(event: BillingEvent): void {
     case "dispute.updated":
       requireRef(event.payment, "the payment");
       requireRef(event.dispute, "the dispute");
-      requireAmount(event.amount, "the dispute amount");
+      requireProviderAmount(event.amount, "the dispute amount");
+      requireProviderAmount(event.paymentAmount, "the payment amount");
       if (!DISPUTE_STATUSES.includes(event.status))
         refuseEvent("unknown dispute status");
       return;

@@ -14,13 +14,19 @@
 //                 a provider field says maps a payment to a workspace. The intent row is locked, so every event about
 //                 one payment (its credit, its refunds, its disputes) is applied one after the other.
 //   3. order      a state of a refund or dispute that is older than the last one applied is `stale_ignored`.
-//   4. bound      a credit is at most the amount WE asked for (and at least the minimum top-up); a refund or dispute is
-//                 at most what the intent credited. Provider amounts are data: they never exceed our own record.
+//   4. bound      a credit is at most the amount WE asked for (and at least the minimum top-up). A refund or dispute
+//                 arrives GROSS, in the provider's unit, with the amount of the whole payment (`netShareMicroUsd`:
+//                 `credited x amount / paymentAmount`, rounded down): the net share is what is debited. The intent
+//                 keeps two running totals, of refunds and of disputes, and together they never exceed what the
+//                 payment credited (a check in the database too). Provider amounts are data: they never exceed our
+//                 own record, whatever the provider repeats or accumulates.
 //   5. write      a `top_up` keyed by the payment (D14: two events for one payment credit once); a `refund` or
 //                 `chargeback` keyed by the refund or dispute, even beyond the unspent balance (it goes negative and
-//                 blocks the workspace); a `correction` that reverses a debit once.
+//                 blocks the workspace); a `correction` that reverses a debit once and gives its room back.
 //
-// The outcome (a code, no payload) is recorded with the event id in the same transaction.
+// The outcome (a code, no payload) is recorded with the event id in the same transaction. An event that moved money (or
+// claimed to) and changed nothing (`BILLING_REVIEW_OUTCOMES`) is recorded for review; a signed event that is not a
+// normalized event is recorded `event_invalid` and answered like any other, so the provider stops redelivering it.
 import "server-only";
 import type { Kysely } from "kysely";
 import { createBillingJournalRepository } from "../db/repositories/billing-journal-repository.ts";
@@ -30,20 +36,25 @@ import { createBillingWebhookEventsRepository } from "../db/repositories/billing
 import { formatTimestamp } from "../db/codecs.ts";
 import type { Database } from "../db/schema.ts";
 import {
+  BILLING_REVIEW_OUTCOMES,
   BillingAdapterError,
   TOP_UP_MIN_MICRO_USD,
   isAdapterId,
+  isProviderRef,
   validateBillingEvent,
   type BillingEvent,
   type BillingEventOutcome,
 } from "./adapter.ts";
 import { BillingJournalError } from "./journal.ts";
+import { netShareMicroUsd } from "./net-share.ts";
 import type { TopUpIntent } from "./topup-intent.ts";
 
 export type ApplyResult = {
   outcome: BillingEventOutcome;
   /** The workspace the event was applied to or resolved to; null when it resolved to none or was a repeat. */
   workspaceId: string | null;
+  /** True when an operator has to look at the event: it moved money (or claimed to) and changed nothing. */
+  needsReview: boolean;
 };
 
 type Handled = { outcome: BillingEventOutcome; workspaceId: string | null };
@@ -66,6 +77,9 @@ function orderOf(event: BillingEvent): {
   subject: string | null;
   occurredAt: string | null;
 } {
+  // A payment has no states to order; its reference is what a review of the event names.
+  if (event.type === "payment.succeeded")
+    return { subject: `payment:${event.payment}`, occurredAt: null };
   if (event.type === "refund.updated")
     return { subject: `refund:${event.refund}`, occurredAt: event.occurredAt };
   if (event.type === "dispute.updated")
@@ -168,23 +182,28 @@ async function paymentSucceeded(
     workspaceId,
     context.now,
   ).markPaid(intent.id, {
+    creditedMicroUsd: event.creditable,
     paymentRef: event.payment,
     ...(event.checkout === null ? {} : { checkoutRef: event.checkout }),
   });
   return { outcome: created ? "applied" : "duplicate_ignored", workspaceId };
 }
 
-async function paymentFailed(
+/** The end of a payment that did not happen: `failed` (it was refused) or `expired` (nobody paid the checkout). */
+async function paymentEnded(
   context: Context,
-  event: Extract<BillingEvent, { type: "payment.failed" }>,
+  event: Extract<BillingEvent, { type: "payment.failed" | "payment.expired" }>,
 ): Promise<Handled> {
   const intent = await resolveIntent(context, event);
   if (intent === undefined) return unresolved;
-  const change = await createBillingTopUpIntentsRepository(
+  const intents = createBillingTopUpIntentsRepository(
     context.trx,
     intent.workspaceId,
     context.now,
-  ).markFailed(intent.id);
+  );
+  const change = await (event.type === "payment.failed"
+    ? intents.markFailed(intent.id)
+    : intents.markExpired(intent.id));
   return {
     outcome: change?.changed === true ? "applied" : "duplicate_ignored",
     workspaceId: intent.workspaceId,
@@ -219,6 +238,7 @@ async function paymentReversal(
 
   const isRefund = event.type === "refund.updated";
   const type = isRefund ? "refund" : "chargeback";
+  const bucket = isRefund ? "refund" : "dispute";
   const ref = isRefund ? event.refund : event.dispute;
   const takesMoney = isRefund
     ? event.status === "pending" || event.status === "approved"
@@ -228,15 +248,43 @@ async function paymentReversal(
     workspaceId,
     context.now,
   );
+  const intents = createBillingTopUpIntentsRepository(
+    context.trx,
+    workspaceId,
+    context.now,
+  );
 
   if (takesMoney) {
-    // Never more than the payment credited, whatever the provider says.
-    if (event.amount > intent.amountMicroUsd)
+    // The net share of what the payment credited, never more than the payment gave: the provider's amounts are gross.
+    const net = netShareMicroUsd({
+      credited: intent.creditedMicroUsd,
+      amount: event.amount,
+      paymentAmount: event.paymentAmount,
+    });
+    if (net === undefined) return { outcome: "amount_rejected", workspaceId };
+
+    // The debit of this refund or dispute exists already (a pending refund that is now approved, an opened dispute that
+    // is now lost): it counts once.
+    const existing = await journal.findByKey(type, ref);
+    if (existing !== undefined)
+      return {
+        outcome:
+          existing.amountMicroUsd === -net
+            ? "duplicate_ignored"
+            : "amount_conflict",
+        workspaceId,
+      };
+
+    // Refunds and disputes of one payment together never debit more than it credited.
+    if (
+      intent.refundedMicroUsd + intent.disputedMicroUsd + net >
+      intent.creditedMicroUsd
+    )
       return { outcome: "amount_rejected", workspaceId };
     try {
       const { created } = await journal.append({
         type,
-        amountMicroUsd: -event.amount,
+        amountMicroUsd: -net,
         refKey: ref,
         provider: context.provider,
         providerRef: ref,
@@ -244,6 +292,7 @@ async function paymentReversal(
           ? `initiated by ${event.initiatedBy}`
           : `dispute ${event.status}`,
       });
+      if (created) await intents.addDebited(intent.id, bucket, net);
       return {
         outcome: created ? "applied" : "duplicate_ignored",
         workspaceId,
@@ -271,6 +320,9 @@ async function paymentReversal(
       providerRef: ref,
       note: `reversal: ${event.status}`,
     });
+    // The room the debit took is free again.
+    if (created)
+      await intents.addDebited(intent.id, bucket, original.amountMicroUsd);
     return { outcome: created ? "applied" : "duplicate_ignored", workspaceId };
   } catch (error) {
     if (
@@ -289,17 +341,70 @@ function handle(context: Context, event: BillingEvent): Promise<Handled> {
     case "payment.succeeded":
       return paymentSucceeded(context, event);
     case "payment.failed":
-      return paymentFailed(context, event);
+    case "payment.expired":
+      return paymentEnded(context, event);
     case "refund.updated":
     case "dispute.updated":
       return paymentReversal(context, event);
   }
 }
 
+/** The events that move money: what is left of one without a change in the ledger is for an operator to review. */
+function movesMoney(event: BillingEvent): boolean {
+  return (
+    event.type === "payment.succeeded" ||
+    event.type === "refund.updated" ||
+    event.type === "dispute.updated"
+  );
+}
+
+const REVIEW_OUTCOMES: readonly BillingEventOutcome[] = BILLING_REVIEW_OUTCOMES;
+
 /**
- * Applies one normalized event in one transaction (or in the caller's, when it hands in a transaction). Throws
- * `event_invalid` for something that is not a normalized event (nothing is recorded); any other error rolls the
- * transaction back, so the event can be delivered again.
+ * A signed event that is not a normalized event: recorded `event_invalid` under its id (when even that is an id) and
+ * answered like any other event. The answer is final and the event is flagged for review: a provider that is told it
+ * failed redelivers the same event for days, which never helps and can get the endpoint disabled.
+ */
+async function recordInvalid(
+  db: Kysely<Database>,
+  provider: string,
+  event: unknown,
+  now: () => Date,
+): Promise<ApplyResult> {
+  const result: ApplyResult = {
+    outcome: "event_invalid",
+    workspaceId: null,
+    needsReview: true,
+  };
+  const eventId =
+    typeof event === "object" && event !== null && "eventId" in event
+      ? event.eventId
+      : undefined;
+  if (!isProviderRef(eventId)) return result;
+  return inTransaction(db, async (trx) => {
+    const events = createBillingWebhookEventsRepository(trx);
+    const claim = await events.claim(provider, eventId, formatTimestamp(now()));
+    if (!claim.claimed)
+      return {
+        outcome: "duplicate_ignored",
+        workspaceId: null,
+        needsReview: false,
+      };
+    await events.finish(
+      provider,
+      eventId,
+      "event_invalid",
+      { subject: null, occurredAt: null },
+      true,
+    );
+    return result;
+  });
+}
+
+/**
+ * Applies one normalized event in one transaction (or in the caller's, when it hands in a transaction). A value that is
+ * not a normalized event is recorded `event_invalid` and returned, not thrown; any other error rolls the transaction
+ * back, so the event can be delivered again.
  */
 export async function applyBillingEvent(
   db: Kysely<Database>,
@@ -311,8 +416,14 @@ export async function applyBillingEvent(
       "adapter_id_invalid",
       "an event comes from an adapter with a valid id",
     );
-  validateBillingEvent(event);
   const now = input.now ?? (() => new Date());
+  try {
+    validateBillingEvent(event);
+  } catch (error) {
+    if (error instanceof BillingAdapterError && error.code === "event_invalid")
+      return recordInvalid(db, provider, event, now);
+    throw error;
+  }
 
   return inTransaction(db, async (trx) => {
     const events = createBillingWebhookEventsRepository(trx);
@@ -322,15 +433,22 @@ export async function applyBillingEvent(
       formatTimestamp(now()),
     );
     if (!claim.claimed)
-      return { outcome: "duplicate_ignored", workspaceId: null };
+      return {
+        outcome: "duplicate_ignored",
+        workspaceId: null,
+        needsReview: false,
+      };
 
     const handled = await handle({ trx, provider, now }, event);
+    const needsReview =
+      movesMoney(event) && REVIEW_OUTCOMES.includes(handled.outcome);
     await events.finish(
       provider,
       event.eventId,
       handled.outcome,
       orderOf(event),
+      needsReview,
     );
-    return handled;
+    return { ...handled, needsReview };
   });
 }

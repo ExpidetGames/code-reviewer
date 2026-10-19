@@ -4,6 +4,10 @@
 // that alone maps a payment to a workspace. States, stable error codes and the shape the rest of the app sees.
 import "server-only";
 
+/** The two running totals of what a payment's credit lost again. */
+export const TOPUP_DEBIT_BUCKETS = ["refund", "dispute"] as const;
+export type TopUpDebitBucket = (typeof TOPUP_DEBIT_BUCKETS)[number];
+
 export const TOPUP_INTENT_STATES = [
   "pending",
   "paid",
@@ -21,6 +25,8 @@ export const TOPUP_INTENT_ERROR_CODES = [
   "ref_invalid",
   /** The intent has another id for that already, or another intent holds the payment. */
   "ref_conflict",
+  /** A running total of refunds or disputes would go below zero or, with the other, above what the payment credited. */
+  "debit_out_of_bounds",
 ] as const;
 export type TopUpIntentErrorCode = (typeof TOPUP_INTENT_ERROR_CODES)[number];
 
@@ -42,6 +48,11 @@ export type TopUpIntent = {
   /** What WE asked for: the ceiling of the credit this intent can ever produce. */
   amountMicroUsd: number;
   state: TopUpIntentState;
+  /** What the payment credited (net), 0 until it is paid: the ceiling of what refunds and disputes can take back. */
+  creditedMicroUsd: number;
+  /** The running totals of what refunds took back and of what disputes did; together at most `creditedMicroUsd`. */
+  refundedMicroUsd: number;
+  disputedMicroUsd: number;
   checkoutRef: string | null;
   paymentRef: string | null;
   createdAt: string;

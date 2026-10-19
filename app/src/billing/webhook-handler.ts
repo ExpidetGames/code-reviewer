@@ -11,7 +11,9 @@
 //   2. verify     `adapter.verifyAndParseWebhook` over the exact bytes: the signature first, the body only after
 //                 it; a body is data until then                                     401 (400 for a signed body the
 //                                                                                   adapter cannot read), empty body
-//   3. apply      `applyBillingEvent`: one transaction, the whole event or nothing   200 and the outcome code
+//   3. apply      `applyBillingEvent`: one transaction, the whole event or nothing   200 and the outcome code (also for
+//                 a signed event that is no normalized event, `event_invalid`, and for a paid-but-not-credited
+//                 outcome: both are recorded for review and logged at error level, since a retry changes nothing)
 //   *  failure    anything that throws                                              500, empty body
 //
 // The answer never carries anything of the request, and the log lines name a code only: no body, no header, no signature,
@@ -49,6 +51,10 @@ export const BILLING_WEBHOOK_LOG_CODES = [
   "billing_webhook_adapter_failed",
   "billing_webhook_failed",
   "billing_webhook_applied",
+  /** A signed event that is not a normalized event: answered 200 and recorded, and the operator must look (error). */
+  "billing_webhook_event_invalid",
+  /** Money moved or was claimed to move and the ledger did not change: a buyer may have paid for nothing (error). */
+  "billing_webhook_needs_review",
 ] as const;
 
 export type BillingWebhookLogger = {
@@ -97,7 +103,7 @@ export function createBillingWebhookHandler(
     try {
       parsed = await adapter.verifyAndParseWebhook({
         headers: request.headers,
-        rawBody: body.text,
+        rawBody: body.bytes,
         now: now(),
       });
     } catch {
@@ -115,7 +121,13 @@ export function createBillingWebhookHandler(
         event: parsed.event,
         now,
       });
-      logger.info(`billing_webhook_applied outcome=${result.outcome}`);
+      // The answer is 200 in every case: a retry would not change what the provider sent. What the operator must see goes
+      // to the error log with a code (and sits in the review list of the event table).
+      if (result.outcome === "event_invalid")
+        logger.error("billing_webhook_event_invalid");
+      else if (result.needsReview)
+        logger.error(`billing_webhook_needs_review outcome=${result.outcome}`);
+      else logger.info(`billing_webhook_applied outcome=${result.outcome}`);
       return Response.json({ outcome: result.outcome });
     } catch (error) {
       logger.error(

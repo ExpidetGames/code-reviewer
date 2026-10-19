@@ -732,6 +732,11 @@ export interface BillingTopupIntentsTable {
   provider_checkout_ref: string | null;
   /** The provider's opaque id of the payment; unique per adapter, and the key of the journal's `top_up`. */
   provider_payment_ref: string | null;
+  /** What the payment credited (net, micro-USD); 0 until paid. */
+  credited_micro_usd: Generated<number>;
+  /** What refunds took back of it, and what disputes did; together never above the credit (a check). */
+  refunded_micro_usd: Generated<number>;
+  disputed_micro_usd: Generated<number>;
   /** ISO 8601 text in UTC. */
   created_at: string;
   updated_at: string;
@@ -746,11 +751,13 @@ export interface BillingWebhookEventsTable {
   event_id: string;
   /** A BillingEventOutcome (src/billing/adapter.ts), or 'processing' inside the transaction that handles the event. */
   outcome: string;
-  /** 'refund:<id>' or 'dispute:<id>' for the events about those objects, else null. */
+  /** 'refund:<id>' or 'dispute:<id>' for the events about those objects, 'payment:<id>' for a payment, else null. */
   subject: string | null;
   /** ISO 8601 text in UTC: when it happened at the provider. */
   occurred_at: string | null;
   received_at: string;
+  /** 'open' for an event an operator must review (BILLING_REVIEW_OUTCOMES), 'resolved' once it was; null otherwise. */
+  review_state: string | null;
 }
 
 export interface Database {

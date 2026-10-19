@@ -17,6 +17,7 @@ import {
 } from "../../billing/adapter.ts";
 import {
   TopUpIntentError,
+  type TopUpDebitBucket,
   type TopUpIntent,
   type TopUpIntentState,
 } from "../../billing/topup-intent.ts";
@@ -34,6 +35,9 @@ export function toTopUpIntent(
     adapter: row.adapter,
     amountMicroUsd: Number(row.amount_micro_usd),
     state: row.state as TopUpIntentState,
+    creditedMicroUsd: Number(row.credited_micro_usd),
+    refundedMicroUsd: Number(row.refunded_micro_usd),
+    disputedMicroUsd: Number(row.disputed_micro_usd),
     checkoutRef: row.provider_checkout_ref,
     paymentRef: row.provider_payment_ref,
     createdAt: row.created_at,
@@ -61,13 +65,32 @@ export type BillingTopUpIntentsRepository = {
     id: string,
     refs: { checkoutRef?: string; paymentRef?: string },
   ): Promise<IntentChange | undefined>;
-  /** `pending`/`failed`/`expired` to `paid`, with the payment id. Repeating it changes nothing. */
+  /**
+   * `pending`/`failed`/`expired` to `paid`, with the payment id and what the payment credited (net, positive). Repeating
+   * it changes nothing, also with another amount: what a payment credited is fixed when it is paid.
+   */
   markPaid(
     id: string,
-    refs: { paymentRef: string; checkoutRef?: string },
+    paid: {
+      paymentRef: string;
+      checkoutRef?: string;
+      creditedMicroUsd: number;
+    },
   ): Promise<IntentChange | undefined>;
   /** `pending` to `failed`. Any other state stays as it is. */
   markFailed(id: string): Promise<IntentChange | undefined>;
+  /** `pending` to `expired` (the checkout ended unpaid). Any other state stays as it is; a late payment still pays it. */
+  markExpired(id: string): Promise<IntentChange | undefined>;
+  /**
+   * Adds `deltaMicroUsd` (negative to give room back) to the running total of what refunds or disputes took back of the
+   * credit. `debit_out_of_bounds` when a total would go below zero or both together above the credit. Call it under the
+   * intent lock, in the transaction that writes the journal entry. Undefined when the workspace has no such intent.
+   */
+  addDebited(
+    id: string,
+    bucket: TopUpDebitBucket,
+    deltaMicroUsd: number,
+  ): Promise<IntentChange | undefined>;
 };
 
 function inTransaction<T>(
@@ -155,12 +178,18 @@ export function createBillingTopUpIntentsRepository(
       state?: TopUpIntentState;
       checkoutRef: string | null;
       paymentRef: string | null;
+      creditedMicroUsd?: number;
+      refundedMicroUsd?: number;
+      disputedMicroUsd?: number;
     },
   ): Promise<TopUpIntent> {
     const row = await trx
       .updateTable("billing_topup_intents")
       .set({
         state: patch.state ?? intent.state,
+        credited_micro_usd: patch.creditedMicroUsd ?? intent.creditedMicroUsd,
+        refunded_micro_usd: patch.refundedMicroUsd ?? intent.refundedMicroUsd,
+        disputed_micro_usd: patch.disputedMicroUsd ?? intent.disputedMicroUsd,
         provider_checkout_ref: patch.checkoutRef,
         provider_payment_ref: patch.paymentRef,
         updated_at: formatTimestamp(now()),
@@ -194,6 +223,9 @@ export function createBillingTopUpIntentsRepository(
           adapter,
           amount_micro_usd: amountMicroUsd,
           state: "pending",
+          credited_micro_usd: 0,
+          refunded_micro_usd: 0,
+          disputed_micro_usd: 0,
           provider_checkout_ref: null,
           provider_payment_ref: null,
           created_at: timestamp,
@@ -232,10 +264,15 @@ export function createBillingTopUpIntentsRepository(
       });
     },
 
-    markPaid(id, refs) {
+    markPaid(id, { creditedMicroUsd, ...refs }) {
       return inTransaction(db, async (trx) => {
         const intent = await find(trx, id, true);
         if (intent === undefined) return undefined;
+        if (!Number.isSafeInteger(creditedMicroUsd) || creditedMicroUsd <= 0)
+          throw new TopUpIntentError(
+            "amount_out_of_range",
+            "a payment credits a positive whole amount",
+          );
         const merged = await mergeRefs(trx, intent, refs);
         if (
           intent.state === "paid" &&
@@ -244,7 +281,62 @@ export function createBillingTopUpIntentsRepository(
         )
           return { intent, changed: false };
         return {
-          intent: await write(trx, intent, { ...merged, state: "paid" }),
+          intent: await write(trx, intent, {
+            ...merged,
+            state: "paid",
+            // Fixed when the payment is paid; a repeat (the same payment again) keeps it.
+            creditedMicroUsd:
+              intent.state === "paid"
+                ? intent.creditedMicroUsd
+                : creditedMicroUsd,
+          }),
+          changed: true,
+        };
+      });
+    },
+
+    markExpired(id) {
+      return inTransaction(db, async (trx) => {
+        const intent = await find(trx, id, true);
+        if (intent === undefined) return undefined;
+        if (intent.state !== "pending") return { intent, changed: false };
+        return {
+          intent: await write(trx, intent, {
+            checkoutRef: intent.checkoutRef,
+            paymentRef: intent.paymentRef,
+            state: "expired",
+          }),
+          changed: true,
+        };
+      });
+    },
+
+    addDebited(id, bucket, deltaMicroUsd) {
+      return inTransaction(db, async (trx) => {
+        const intent = await find(trx, id, true);
+        if (intent === undefined) return undefined;
+        const refunded =
+          intent.refundedMicroUsd + (bucket === "refund" ? deltaMicroUsd : 0);
+        const disputed =
+          intent.disputedMicroUsd + (bucket === "dispute" ? deltaMicroUsd : 0);
+        if (
+          !Number.isSafeInteger(deltaMicroUsd) ||
+          refunded < 0 ||
+          disputed < 0 ||
+          refunded + disputed > intent.creditedMicroUsd
+        )
+          throw new TopUpIntentError(
+            "debit_out_of_bounds",
+            "a total of refunds or disputes leaves the credit of the payment",
+          );
+        if (deltaMicroUsd === 0) return { intent, changed: false };
+        return {
+          intent: await write(trx, intent, {
+            checkoutRef: intent.checkoutRef,
+            paymentRef: intent.paymentRef,
+            refundedMicroUsd: refunded,
+            disputedMicroUsd: disputed,
+          }),
           changed: true,
         };
       });
