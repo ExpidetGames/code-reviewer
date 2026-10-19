@@ -954,7 +954,9 @@ it would be seen.
 
 **With steering and thinking blocks (#533).** The constant steering instruction is part of the last
 system block, so the static prefix stays byte-stable within a run. A thinking block cannot carry a
-mark: the breakpoint of a turn goes on its last block that is not thinking. The wrap-up call changes
+mark: the breakpoint of a turn goes on its last block that is neither thinking nor a tool result
+without content (a tool that returned nothing; the provider refuses a mark there as on an empty
+text block, so the mark moves to the previous block of the turn). The wrap-up call changes
 the tools (and drops the reasoning of the earlier calls with `drop_block`), so it misses the cache by
 design; it is one call. A request without a forced choice has no instruction and non-strict tools, a
 different prefix, and caches on its own.
@@ -988,8 +990,9 @@ in full.
 
 **Fakes.** `fakes/llm/anthropic_cache.py` keeps the rules of the docs (at most four breakpoints, the
 model's minimum length, five minute and one hour lifetimes that a read renews, a look-back of 20
-positions, a mark on an empty block, a thinking block or a message object is a 400) and returns the
-real usage. `fakes/llm/server.ts` has the same rules for the app's and the e2e lanes;
+positions, a mark on an empty block, an empty tool result, a thinking block or a message object is
+a 400; a changed `tool_choice` or `thinking` invalidates the cached messages and a changed tool set
+everything after it) and returns the real usage. `fakes/llm/server.ts` has the same rules for the app's and the e2e lanes;
 `tests/engine/fake_llm.py` uses the Python ones (`prompt_cache`), also for the OpenRouter shape
 (`prompt_tokens_details.cached_tokens`, `cache_write_tokens`, a `usage.cost` with the discount).
 

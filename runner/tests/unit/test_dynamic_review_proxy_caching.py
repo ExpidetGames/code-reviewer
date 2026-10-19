@@ -293,19 +293,27 @@ def test_the_uncached_run_is_priced_at_the_input_price() -> None:
         previous = total
 
 
+def split_disagrees(usage: dict[str, Any]) -> dict[str, Any]:
+    """The split of the written tokens no longer adds up to the flat count."""
+    return {**usage, "cache_creation_input_tokens": usage["cache_creation_input_tokens"] + 1}
+
+
+def unknown_field(usage: dict[str, Any]) -> dict[str, Any]:
+    return {**usage, "a_field_the_price_list_does_not_know": 1}
+
+
+def priority_tier(usage: dict[str, Any]) -> dict[str, Any]:
+    return {**usage, "service_tier": "priority"}
+
+
 # #539-T15
 @pytest.mark.parametrize(
     "tamper",
     [
-        # The split of the written tokens disagrees with the flat count.
-        lambda usage: {
-            **usage,
-            "cache_creation_input_tokens": usage["cache_creation_input_tokens"] + 1,
-        },
-        lambda usage: {**usage, "a_field_the_price_list_does_not_know": 1},
-        lambda usage: {**usage, "service_tier": "priority"},
+        pytest.param(split_disagrees, id="a split that disagrees with the flat count"),
+        pytest.param(unknown_field, id="an unknown field"),
+        pytest.param(priority_tier, id="a priority tier"),
     ],
-    ids=["a split that disagrees with the flat count", "an unknown field", "a priority tier"],
 )
 def test_with_caching_on_a_usage_that_cannot_be_priced_stays_without_a_cost(
     tamper: Callable[[dict[str, Any]], dict[str, Any]],
