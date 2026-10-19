@@ -31,6 +31,10 @@ from code_reviewer_runner.job import RESERVED_OPTIONS, Job
 from code_reviewer_runner.llm_providers import require_provider, with_prefix, without_prefix
 from code_reviewer_runner.platforms import Platform, platform_for
 
+# A value `get_settings().set()` is given: a switch, a number, a text, a list of texts or of
+# records (the injection points of the prompt cache).
+TypedSetting = bool | int | str | list[str] | list[dict[str, str]]
+
 # The Dynaconf setting that decides whether `@format`, `@jinja`, ... are evaluated at all.
 AUTO_CAST_SETTING = "AUTO_CAST_FOR_DYNACONF"
 _INTEGER = re.compile(r"[+-]?[0-9]{1,18}")
@@ -105,14 +109,14 @@ def build_secret_settings(job: Job) -> dict[str, str]:
     }
 
 
-def build_typed_settings(job: Job) -> dict[str, bool | int | str | list[str]]:
+def build_typed_settings(job: Job) -> dict[str, TypedSetting]:
     """Typed overrides, applied with `get_settings().set(key, value)` before the request.
 
     The order matters: the switch that stops Dynaconf from evaluating values comes first, because
     every later `set` of a text goes through its parser.
     """
     provider = require_provider(job.llm.provider)
-    settings: dict[str, bool | int | str | list[str]] = {
+    settings: dict[str, TypedSetting] = {
         AUTO_CAST_SETTING: False,
         "config.publish_output": True,
         # No temporary "Preparing review..." comment that is created and deleted again.
@@ -161,6 +165,16 @@ def build_typed_settings(job: Job) -> dict[str, bool | int | str | list[str]]:
         window = provider.context_window(without_prefix(provider, job.llm.model))
         if window is not None:
             settings["config.custom_model_max_tokens"] = window
+    if "claude" in job.llm.model.lower():
+        # Prompt caching (#539): LiteLLM marks the system message, the instructions of the tool
+        # that the calls of a run and the runs of a workspace within five minutes have in common.
+        # The user message holds the diff, which is unique: caching it would add the write premium
+        # to a prompt that is read once. PR-Agent forwards the setting only for a model whose name
+        # says `claude` (the test here is the same one) and sets no lifetime, so it is the
+        # provider's five minutes. The `litellm` section is pinned against a repository file.
+        settings["litellm.cache_control_injection_points"] = [
+            {"location": "message", "role": "system"}
+        ]
     # What a model is asked to write at most. Reasoning counts against it, and the default of the
     # provider's client can be used up before the review is written.
     output = provider.diff_output_tokens(without_prefix(provider, job.llm.model))
