@@ -21,6 +21,15 @@ a loopback-only smart HTTP upload-pack fake with dummy installation authenticati
 and a blocked-preparation process fixture for runner supervision. Python is checked by the runner's
 ruff/strict pyright. It invokes only local fixed Git commands, never an external remote or model.
 
+`wire/` holds the generic fakes of the four provider wire formats (#546): OpenAI Chat, OpenAI Responses,
+Anthropic Messages and Google's Generative Language API. `formats.py` builds the JSON answer and the
+server-sent events of each from one scripted turn and a usage that differs per call; `upstream.py` is a
+provider that accepts only the real key in the real header on the real path and model (faults of a test's
+choice: a status, a stream cut midway, gzip); `relay.py` is the smallest key swapping passthrough, a
+reference for the proxy of #550. The shapes follow the providers' documentation, they are not captured
+from real providers yet (`docs/spike/544-passthrough.md`, section 7). Python, checked by the runner's
+ruff and strict pyright; no server is started on import.
+
 Rules:
 
 - Dummy values only. No real tokens, keys or private repository data, ever.
