@@ -34,6 +34,7 @@ import { formatUtc } from "../../ui/format-time.ts";
 import {
   CATALOG_FIELD_OF_KIND,
   PROJECT_DYNAMIC_SETTING_FIELDS,
+  PROJECT_REVIEW_KINDS,
   REVIEW_SETTING_FIELDS,
   type ProjectReviewKind,
   type ReviewSettingField,
@@ -41,6 +42,10 @@ import {
 import type { ReviewCostGuard } from "../cost.ts";
 import { estimateReviewCost } from "../cost.ts";
 import { llmProviderDescriptors } from "../../llm/providers/index.ts";
+import {
+  suggestedModelsFor,
+  type SuggestingProvider,
+} from "../../llm/providers/suggested-models.ts";
 import type { LlmProviderDescriptor } from "../../llm/providers/types.ts";
 import {
   browserGlobalSettingsApi,
@@ -201,7 +206,7 @@ export function SettingsForm({
   keyedProviders?: readonly string[];
   /** Only tests pass this: the providers the selects offer, the registry's by default. */
   providers?: ReadonlyArray<
-    Pick<LlmProviderDescriptor, "id" | "label" | "suggestedModels">
+    Pick<LlmProviderDescriptor, "id" | "label"> & SuggestingProvider
   >;
   /** Only tests pass this: a server component cannot hand functions to this client component. */
   api?: SettingsApi;
@@ -220,6 +225,15 @@ export function SettingsForm({
     () => providerOptions(providerDescriptors, keyedProviders),
     [providerDescriptors, keyedProviders],
   );
+  // The models to pick from for a provider and a review kind (none for a provider the form does not know).
+  const suggestionsOf = (providerId: string, reviewKind: ProjectReviewKind) => {
+    const provider = providerDescriptors.find(
+      (entry) => entry.id === providerId,
+    );
+    return provider === undefined
+      ? []
+      : suggestedModelsFor(provider, reviewKind);
+  };
   const formRef = useRef<HTMLFormElement>(null);
   const saveRef = useRef<HTMLButtonElement>(null);
   // Set synchronously, so a confirmation that fires twice cannot start two saves (#200 review).
@@ -516,13 +530,21 @@ export function SettingsForm({
       >
         {model.managed
           ? null
-          : providerDescriptors.map((provider) => (
-              <datalist key={provider.id} id={`${datalistId}-${provider.id}`}>
-                {provider.suggestedModels.map((name) => (
-                  <option key={name} value={name} />
-                ))}
-              </datalist>
-            ))}
+          : providerDescriptors.flatMap((provider) =>
+              (model.mode === "project"
+                ? PROJECT_REVIEW_KINDS
+                : (["diff"] as const)
+              ).map((reviewKind) => (
+                <datalist
+                  key={`${reviewKind}-${provider.id}`}
+                  id={`${datalistId}-${reviewKind}-${provider.id}`}
+                >
+                  {suggestedModelsFor(provider, reviewKind).map((name) => (
+                    <option key={name} value={name} />
+                  ))}
+                </datalist>
+              )),
+            )}
 
         {projectView !== undefined && state.dynamic !== undefined ? (
           <ReviewKindFieldset
@@ -536,7 +558,11 @@ export function SettingsForm({
             handlers={kindHandlers}
             workspaceSlug={workspaceSlug}
             providers={providerChoices}
-            datalistId={`${datalistId}-${state.dynamic.dynamicProvider}`}
+            datalistId={`${datalistId}-dynamic-${state.dynamic.dynamicProvider}`}
+            suggestedModels={suggestionsOf(
+              state.dynamic.dynamicProvider,
+              "dynamic",
+            )}
             choice={model.managed ? choice("dynamic") : undefined}
           />
         ) : null}
@@ -563,7 +589,8 @@ export function SettingsForm({
             cost={cost}
             workspaceSlug={workspaceSlug}
             providers={providerChoices}
-            datalistId={`${datalistId}-${state.values.provider}`}
+            datalistId={`${datalistId}-diff-${state.values.provider}`}
+            suggestedModels={suggestionsOf(state.values.provider, "diff")}
             choice={model.managed ? choice("diff") : undefined}
           />
         ) : null}

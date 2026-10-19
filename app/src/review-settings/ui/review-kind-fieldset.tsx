@@ -69,6 +69,7 @@ export function ReviewKindFieldset({
   workspaceSlug,
   providers,
   datalistId,
+  suggestedModels,
 }: {
   /**
    * The catalog choice of a workspace on the operator's key (#283, #433): it takes the place of the Dynamic provider
@@ -80,6 +81,8 @@ export function ReviewKindFieldset({
   providers: readonly ProviderOption[];
   /** The id of the `<datalist>` of the known model names of the Dynamic provider, rendered by the container. */
   datalistId: string;
+  /** The models of the Dynamic provider that can serve a Dynamic Review, to pick from under the field (#532). */
+  suggestedModels: readonly string[];
   view: ProjectDynamicView;
   values: DynamicFormValues;
   errors: Partial<Record<string, string>>;
@@ -231,6 +234,10 @@ export function ReviewKindFieldset({
                 value={values.dynamicModel}
                 onChange={handlers.setModel}
                 list={datalistId}
+                suggestions={{
+                  label: "Suggested Dynamic Review models",
+                  models: suggestedModels,
+                }}
               />
             </>
           )}

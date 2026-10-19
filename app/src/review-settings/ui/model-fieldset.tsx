@@ -44,6 +44,7 @@ export function ModelFieldset({
   workspaceSlug,
   providers,
   datalistId,
+  suggestedModels,
   choice,
 }: SettingsFieldsetProps & {
   /**
@@ -57,6 +58,8 @@ export function ModelFieldset({
   providers: readonly ProviderOption[];
   /** The id of the `<datalist>` of the known model names of the chosen provider, rendered by the container. */
   datalistId: string;
+  /** The models of the chosen provider to pick from under the model fields (#532). */
+  suggestedModels: readonly string[];
 }) {
   const origin = (
     name: "provider" | "model" | "fallbackModel" | "maxTokens",
@@ -112,6 +115,7 @@ export function ModelFieldset({
         value={state.values.model}
         onChange={(value) => handlers.setText("model", value)}
         list={datalistId}
+        suggestions={{ label: "Suggested models", models: suggestedModels }}
       />
       <SettingsTextField
         name="fallbackModel"
@@ -122,6 +126,10 @@ export function ModelFieldset({
         value={state.values.fallbackModel}
         onChange={(value) => handlers.setText("fallbackModel", value)}
         list={datalistId}
+        suggestions={{
+          label: "Suggested fallback models",
+          models: suggestedModels,
+        }}
         placeholder="None"
       />
       {budget}
