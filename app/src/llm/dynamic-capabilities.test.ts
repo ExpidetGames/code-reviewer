@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   DYNAMIC_LARGE_OUTPUT_ALLOWANCE_TOKENS,
   DYNAMIC_OUTPUT_ALLOWANCE_TOKENS,
+  DYNAMIC_THINKING_OUTPUT_ALLOWANCE_TOKENS,
   LARGE_ALLOWANCE_MAX_OUTPUT_USD_PER_MTOK,
   MAX_CONTEXT_WINDOW_TOKENS,
   dynamicCapabilitiesOf,
@@ -97,6 +98,42 @@ describe("the capability descriptor of a Dynamic job", () => {
       dynamicCapabilitiesOf(metadata({ smallestCompletionTokens: 16_384 }))
         ?.maxOutputTokens,
     ).toBe(16_384);
+  });
+
+  // #533-T20: thinking counts against `max_tokens`, so a model that cannot run without thinking gets room for it
+  // whatever its price; the runner reserves less than this against the cost limit.
+  it("gives a model that always thinks the thinking allowance at any price, and a model that does not the allowance of its price", () => {
+    expect(DYNAMIC_THINKING_OUTPUT_ALLOWANCE_TOKENS).toBeGreaterThan(
+      DYNAMIC_OUTPUT_ALLOWANCE_TOKENS,
+    );
+    for (const outputUsdPerMtok of ["10", "50", null]) {
+      expect(
+        dynamicCapabilitiesOf(
+          metadata({ alwaysThinks: true, outputUsdPerMtok }),
+        )?.maxOutputTokens,
+      ).toBe(DYNAMIC_THINKING_OUTPUT_ALLOWANCE_TOKENS);
+    }
+    for (const alwaysThinks of [false, undefined]) {
+      expect(
+        dynamicCapabilitiesOf(
+          metadata({ alwaysThinks, outputUsdPerMtok: "10" }),
+        )?.maxOutputTokens,
+      ).toBe(DYNAMIC_OUTPUT_ALLOWANCE_TOKENS);
+    }
+  });
+
+  // #533-T20
+  it("never gives a model that always thinks more than the model states or its window allows", () => {
+    expect(
+      dynamicCapabilitiesOf(
+        metadata({ alwaysThinks: true, smallestCompletionTokens: 16_384 }),
+      )?.maxOutputTokens,
+    ).toBe(16_384);
+    expect(
+      dynamicCapabilitiesOf(
+        metadata({ alwaysThinks: true, contextLength: 8000 }),
+      )?.maxOutputTokens,
+    ).toBe(4000);
   });
 
   // #279: structured output goes through tool calling, so it needs tools, not `response_format`.

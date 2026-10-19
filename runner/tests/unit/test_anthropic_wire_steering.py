@@ -25,6 +25,7 @@ from code_reviewer_runner.anthropic_wire import (
     AnthropicMessagesWire,
 )
 from code_reviewer_runner.llm_providers import ANTHROPIC
+from code_reviewer_runner.provider_wire import OpenAiChatWire
 
 THINKING_SONNET = "claude-sonnet-5-5"
 FORCING_SONNET = "claude-sonnet-5"
@@ -604,3 +605,18 @@ def test_a_thinking_count_that_does_not_fit_the_output_is_an_unknown_cost(thinki
     )["usage"]
 
     assert ANTHROPIC.cost_extractor(THINKING_SONNET, usage) is None
+
+
+# #533-T21
+def test_only_a_model_that_always_thinks_reserves_less_output_than_its_allowance() -> None:
+    for model in MODELS.values():
+        wire = AnthropicMessagesWire(model.id)
+        reserved = wire.reserved_output_tokens(32_768)
+        if model.thinking_disabled:
+            assert reserved == 32_768, model.id
+        else:
+            assert 0 < reserved < 32_768, model.id
+        # Never more than the allowance, and the allowance itself when it is the smaller one.
+        assert wire.reserved_output_tokens(1_000) == 1_000, model.id
+    assert OpenAiChatWire().reserved_output_tokens(32_768) == 32_768
+    assert AnthropicMessagesWire("claude-not-in-the-list").reserved_output_tokens(32_768) == 32_768

@@ -272,6 +272,7 @@ class BudgetLedger:
         *,
         window_tokens: int = DEFAULT_WINDOW_TOKENS,
         output_tokens: int = DEFAULT_OUTPUT_TOKENS,
+        reserved_output_tokens: int | None = None,
         unit_costs: UnitCosts,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
@@ -280,6 +281,14 @@ class BudgetLedger:
         self.limits = limits
         self.window_tokens = window_tokens
         self.output_tokens = min(max(output_tokens, 1), window_tokens)
+        # What a call reserves of its output allowance (#533): all of it (None) unless the model's
+        # wire says a call rarely uses the whole allowance. The allowance stays the cap an answer
+        # is held to.
+        self._reserved_output_tokens = (
+            None
+            if reserved_output_tokens is None
+            else min(max(reserved_output_tokens, 1), self.output_tokens)
+        )
         self._unit_costs = unit_costs
         self._wrap_up_seconds = min(
             WRAP_UP_RESERVE_SECONDS, WRAP_UP_RESERVE_FRACTION * limits.deadline_seconds
@@ -363,7 +372,7 @@ class BudgetLedger:
             if counters.model_calls == 0 or self.remaining_seconds() <= self._wrap_up_seconds:
                 return False
             slack = math.ceil(RECOVERY_REQUEST_SLACK_BYTES / counters.density)
-            input_tokens = counters.last_prompt_tokens + self.output_tokens + slack
+            input_tokens = counters.last_prompt_tokens + self._reserved_output() + slack
             held = counters.cost + counters.reserved_cost
             if held + self._call_cost(input_tokens, self.output_tokens) > self.limits.max_cost_usd:
                 return False
@@ -523,7 +532,15 @@ class BudgetLedger:
 
     def _call_cost(self, input_tokens: int, output_tokens: int) -> Decimal:
         """What one call could cost, to reserve: estimate and allowance at the unit costs."""
-        return self._unit_costs.of_call(input_tokens, output_tokens)
+        reserved = self._reserved_output_tokens
+        return self._unit_costs.of_call(
+            input_tokens, output_tokens if reserved is None else min(output_tokens, reserved)
+        )
+
+    def _reserved_output(self) -> int:
+        """The output a call reserves at its most: the realistic part when there is one."""
+        reserved = self._reserved_output_tokens
+        return self.output_tokens if reserved is None else reserved
 
     def settle_call(
         self,

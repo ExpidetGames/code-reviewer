@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { dynamicCapabilitiesOf } from "../../dynamic-capabilities.ts";
+import {
+  DYNAMIC_THINKING_OUTPUT_ALLOWANCE_TOKENS,
+  dynamicCapabilitiesOf,
+} from "../../dynamic-capabilities.ts";
 import { llmProviderAdapters } from "../server.ts";
 import { ANTHROPIC_MODELS } from "./models.ts";
 
@@ -164,5 +167,32 @@ describe("the Anthropic adapter", () => {
     expect(dynamicCapabilitiesOf(small.capabilities)).toMatchObject({
       contextWindowTokens: 200_000,
     });
+  });
+
+  // #533-T20: the list says which models always think; those get room for the thinking, derived from the flag.
+  it("gives the descriptor of every model that always thinks the thinking allowance, within the model's own maximum", async () => {
+    for (const model of ANTHROPIC_MODELS) {
+      const checked = await adapter.checkModelCapabilities({
+        baseUrl: "http://unreachable.invalid",
+        modelId: model.id,
+      });
+      if (checked.outcome !== "supported") throw new Error(model.id);
+      const alwaysThinks = !model.supports.thinkingDisabled;
+      expect(checked.capabilities.alwaysThinks, model.id).toBe(alwaysThinks);
+      const allowance = dynamicCapabilitiesOf(
+        checked.capabilities,
+      )?.maxOutputTokens;
+      if (alwaysThinks)
+        expect(allowance, model.id).toBe(
+          Math.min(
+            DYNAMIC_THINKING_OUTPUT_ALLOWANCE_TOKENS,
+            model.maxOutputTokens,
+          ),
+        );
+      else
+        expect(allowance, model.id).toBeLessThanOrEqual(
+          DYNAMIC_THINKING_OUTPUT_ALLOWANCE_TOKENS,
+        );
+    }
   });
 });

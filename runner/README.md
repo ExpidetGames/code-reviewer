@@ -894,8 +894,21 @@ no sampling parameter, and its calls cost an unknown amount.
   and a thinking block is bound to the conversation that produced it, so without this an account created after
   2026-08-31 would answer 400; with it that call loses its reasoning and nothing more. Thinking tokens are a
   part of `usage.output_tokens`, priced with them once: `output_tokens_details.thinking_tokens` travels with the
-  usage and the cost rule only checks that it fits the output (#534; a count above it is an unknown cost). Not
-  proven against the real API, only against the fakes.
+  usage and the cost rule only checks that it fits the output (#534; a count above it is an unknown cost).
+  Not proven against the real API, only against the fakes; that an omitted block is a 400 is an assumption of
+  the fake (the documentation does not state the status code for it).
+- **Output allowance with thinking (#533).** Thinking counts against `max_tokens`, a hard cap on thinking and
+  answer together, so a thinking model can use up 8192 and cut its `StructuredOutput` call off. The job's
+  descriptor gives a model that cannot run without thinking 32768 (`app/src/llm/dynamic-capabilities.ts`; the
+  models state 128000; Anthropic's "Cost control" section names raising `max_tokens` before lowering
+  `effort`, which is only soft guidance and, changed within a run, invalidates the prompt cache). The cost
+  limit does not reserve all of it: `reserved_output_tokens` of the wire (`THINKING_RESERVED_OUTPUT_TOKENS`,
+  8192, what every call reserved before) is what a call holds back, so the larger allowance does not make the
+  guard stop a run earlier (reserving 32768 at Opus 5.5's 20 USD per million tokens would be 0.66 USD per call,
+  and the 1 USD default would wrap every run up at its first call; Fable's price is higher still). The answer
+  is still held to the whole allowance, and a call that really uses more than it reserved passes the limit
+  by at most that excess; the run then ends (`settle_call`). The first smoke run must show how much thinking a
+  review takes.
 - **Errors.** The envelope `{"type":"error","error":{"type","message"}}` goes through the same table as
   every provider: 400 "prompt is too long" is `llm_context_length_exceeded`, 401/403 `llm_auth`, 404
   `model_unknown`, 429 `llm_rate_limit`, 5xx and 529 (overloaded) `llm_unavailable`. What the provider

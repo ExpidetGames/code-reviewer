@@ -36,6 +36,11 @@ export const checkModelCapabilities: LlmProviderOperations["checkModelCapabiliti
       contextLength: model.contextWindowTokens,
       inputUsdPerMtok: decimal(top.input),
       outputUsdPerMtok: decimal(top.output),
+      // Thinking counts against `max_tokens` ("a hard cap on total output for the request, thinking and response text
+      // combined"; "a `max_tokens` sized for a response with no thinking is often too small once Claude starts
+      // thinking", `build-with-claude/thinking-steering-and-cost`, "Cost control", read on 2026-10-19), so the
+      // descriptor gives these models a larger output allowance (src/llm/dynamic-capabilities.ts).
+      alwaysThinks: !model.supports.thinkingDisabled,
     };
     return Promise.resolve({
       outcome: dynamic ? ("supported" as const) : ("unsupported" as const),

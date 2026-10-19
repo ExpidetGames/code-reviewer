@@ -24,6 +24,7 @@ from code_reviewer_runner.dynamic_review.proxy import (
     ModelProxy,
     ProxyResponse,
     capabilities_from_config,
+    with_reserved_output,
 )
 from code_reviewer_runner.llm_providers import ANTHROPIC
 
@@ -89,8 +90,13 @@ class StrictUpstream:
         if refusal is not None:
             return refusal[0], json.dumps(refusal[1]).encode("utf-8")
         answer = self.answers.pop(0) if len(self.answers) > 1 else self.answers[0]
+        answer = self.shape(request, answer)
         self.api.record(request, answer)
         return 200, json.dumps(answer).encode("utf-8")
+
+    def shape(self, request: dict[str, Any], answer: dict[str, Any]) -> dict[str, Any]:
+        """What the model makes of the scripted answer; the base class gives it as it is."""
+        return answer
 
 
 def message(content: list[dict[str, Any]], stop_reason: str, **usage: Any) -> dict[str, Any]:
@@ -124,10 +130,10 @@ def proxy(upstream: StrictUpstream, ledger: BudgetLedger | None = None) -> Model
     )
 
 
-def engine_request(*history: dict[str, Any]) -> dict[str, Any]:
+def engine_request(*history: dict[str, Any], model: str = MODEL) -> dict[str, Any]:
     """What the pinned engine sends: `required` on every call, whatever the turn."""
     return {
-        "model": MODEL,
+        "model": model,
         "messages": [
             {"role": "system", "content": "You review code."},
             {"role": "user", "content": "review this change"},
@@ -297,3 +303,120 @@ def test_the_wrap_up_after_thinking_turns_changes_the_tool_set_and_the_strict_ap
     assert wrap_up["thinking"]["block_binding"]["prefix_mismatch_behavior"] == "drop_block"
     assert upstream.requests[1][0]["anthropic-beta"] == "thinking-binding-controls-2026-08-01"
     assert wrap_up["messages"][1]["content"][:2] == [THINK, REDACTED]
+
+
+class ThinkingUpstream(StrictUpstream):
+    """A strict upstream whose model thinks first: the thinking and the answer together count
+    against `max_tokens`, and a call that needs more is cut off with `stop_reason: max_tokens` and
+    the tool call it had started, which has no arguments (a hard cap of the real API)."""
+
+    def __init__(self, thinking_tokens: int, answer_tokens: int, *answers: dict[str, Any]) -> None:
+        super().__init__(*answers)
+        self.thinking_tokens = thinking_tokens
+        self.answer_tokens = answer_tokens
+        self.truncated = 0
+
+    def shape(self, request: dict[str, Any], answer: dict[str, Any]) -> dict[str, Any]:
+        needed = self.thinking_tokens + self.answer_tokens
+        usage: dict[str, Any] = {"input_tokens": 10, "output_tokens": needed}
+        if needed <= request["max_tokens"]:
+            details = {"thinking_tokens": self.thinking_tokens}
+            return {**answer, "usage": {**usage, "output_tokens_details": details}}
+        self.truncated += 1
+        calls: list[dict[str, Any]] = [
+            block for block in answer["content"] if block["type"] == "tool_use"
+        ]
+        cut: list[dict[str, Any]] = [THINK, *({**call, "input": {}} for call in calls)]
+        usage = {"input_tokens": 10, "output_tokens": request["max_tokens"]}
+        return {**answer, "content": cut, "stop_reason": "max_tokens", "usage": usage}
+
+
+OPUS = "claude-opus-5-5"
+# Opus 5.5: $4 in and $20 out per million tokens.
+OPUS_COSTS = UnitCosts(input_usd_per_mtok=Decimal(4), output_usd_per_mtok=Decimal(20))
+
+
+def thinking_proxy(upstream: StrictUpstream, allowance: int) -> ModelProxy:
+    """A proxy for Opus 5.5 as a job runs it: the descriptor gives `allowance` and the ledger is
+    built by the runner's rule (`with_reserved_output`)."""
+    capabilities = with_reserved_output(
+        capabilities_from_config(
+            json.dumps(
+                {
+                    "tool_choice_required": True,
+                    "structured_output": True,
+                    "max_output_tokens": allowance,
+                }
+            )
+        ),
+        ANTHROPIC.wire(OPUS),
+    )
+    ledger = BudgetLedger(
+        DynamicLimits(),
+        output_tokens=capabilities.max_output_tokens,
+        reserved_output_tokens=capabilities.reserved_output_tokens,
+        unit_costs=OPUS_COSTS,
+    )
+    return ModelProxy(
+        ledger=ledger,
+        base_path="/v1",
+        model=OPUS,
+        upstream_url=URL,
+        upstream_api_key=KEY,
+        upstream_model=OPUS,
+        capabilities=capabilities,
+        capability=CAPABILITY,
+        post=upstream,
+        provider=ANTHROPIC,
+    )
+
+
+# #533-T22
+def test_a_model_that_spends_most_of_the_allowance_on_thinking_still_gets_a_complete_answer() -> (
+    None
+):
+    answer = message([THINK, tool_use("toolu_1", "StructuredOutput", **REVIEW)], "tool_use")
+    # 28000 tokens of thinking and 2000 of review: more than the old allowance of 8192 by far.
+    upstream = ThinkingUpstream(28_000, 2_000, answer)
+    subject = thinking_proxy(upstream, 32_768)
+
+    reply = completion(post(subject, engine_request(model=OPUS)))
+
+    assert upstream.truncated == 0
+    assert sent(upstream, 0)["max_tokens"] == 32_768
+    assert reply["tool_calls"][0]["function"]["name"] == "StructuredOutput"
+    assert json.loads(reply["tool_calls"][0]["function"]["arguments"]) == REVIEW
+    # The reservation of a first call was the realistic part of the allowance, so the call was an
+    # ordinary one and the run was not wrapped up; the cost is the usage's, thinking priced once.
+    assert subject.ledger.stopped_early is None
+    usage = subject.ledger.usage(OPUS)
+    assert usage.cost_usd is not None
+    assert Decimal(repr(usage.cost_usd)) == (Decimal(10 * 4) + Decimal(30_000 * 20)) / 1_000_000
+
+
+# #533-T22
+def test_the_same_thinking_exhausts_the_old_allowance_and_cuts_the_answer_off() -> None:
+    answer = message([THINK, tool_use("toolu_1", "StructuredOutput", **REVIEW)], "tool_use")
+    upstream = ThinkingUpstream(28_000, 2_000, answer)
+    subject = thinking_proxy(upstream, 8_192)
+
+    reply = completion(post(subject, engine_request(model=OPUS)))
+
+    assert upstream.truncated >= 1
+    assert sent(upstream, 0)["max_tokens"] == 8_192
+    assert json.loads(reply["tool_calls"][0]["function"]["arguments"]) != REVIEW
+
+
+# #533-T21
+def test_the_runner_reserves_a_realistic_output_for_a_model_that_always_thinks() -> None:
+    thinking = with_reserved_output(
+        capabilities_from_config(CAPABILITIES.replace("8192", "32768")), ANTHROPIC.wire(OPUS)
+    )
+    plain = with_reserved_output(
+        capabilities_from_config(CAPABILITIES.replace("8192", "32768")),
+        ANTHROPIC.wire("claude-haiku-5-5"),
+    )
+
+    assert thinking.max_output_tokens == 32_768
+    assert thinking.reserved_output_tokens == 8_192
+    assert plain.reserved_output_tokens == 32_768

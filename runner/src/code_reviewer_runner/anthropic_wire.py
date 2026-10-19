@@ -59,6 +59,15 @@ ANTHROPIC_VERSION: Final = "2023-06-01"
 # The beta that lets a request say what happens when a thinking block no longer fits the
 # conversation.
 THINKING_BINDING_BETA: Final = "thinking-binding-controls-2026-08-01"
+# What a call of a model that always thinks reserves against the cost limit, whatever output
+# allowance it may use (#533). Thinking counts against `max_tokens`, a hard cap ("thinking and
+# response text combined"), so the job gives such a model a large allowance (32768,
+# `app/src/llm/dynamic-capabilities.ts`). Reserving all of it at the output price (up to 50 USD
+# per million tokens) would make the 1 USD default limit stop a run at its first call. 8192 is
+# what every call reserved before the larger allowance. A call that uses more is still capped by
+# the allowance and costed from its usage: the limit can be passed by that one call and no
+# further, and the run ends after it (`BudgetLedger.settle_call`).
+THINKING_RESERVED_OUTPUT_TOKENS: Final = 8_192
 # Added to the system text of a request whose forced tool choice was asked for as `auto`. Constant
 # runner text without a tag: it is the same on every request of a run (the cache keeps working), and
 # the repository cannot imitate what carries no marker to copy.
@@ -399,6 +408,11 @@ class AnthropicMessagesWire:
         # Automatic caching of the last block: the history of a tool loop is read from the cache.
         body["cache_control"] = {"type": "ephemeral"}
         return body
+
+    def reserved_output_tokens(self, allowance: int) -> int:
+        if not self._always_thinks:
+            return allowance
+        return min(allowance, THINKING_RESERVED_OUTPUT_TOKENS)
 
     def decode_response(self, body: bytes) -> bytes:
         try:
