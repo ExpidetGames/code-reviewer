@@ -2,7 +2,9 @@
 
 """Pins down how the output of a job process becomes the result sent to the app."""
 
+import dataclasses
 import json
+import logging
 from decimal import Decimal
 from typing import Any
 
@@ -26,7 +28,7 @@ from code_reviewer_runner.job_loop.reporting import (
     result_from_outcome,
 )
 from code_reviewer_runner.redaction import Redactor
-from code_reviewer_runner.result import JobResult, ReviewFindings
+from code_reviewer_runner.result import ErrorCode, JobResult, ReviewFindings, Usage
 
 REDACTOR = Redactor([TOKEN, API_KEY])
 
@@ -456,3 +458,193 @@ def test_a_shrunk_result_and_the_bare_verdict_keep_the_findings() -> None:
 # #517-T04: a failure has none to keep.
 def test_the_bare_verdict_of_a_result_without_findings_has_none() -> None:
     assert "findings" not in minimal(reported(outcome()))
+
+
+def _usage(**overrides: Any) -> dict[str, Any]:
+    usage: dict[str, Any] = {
+        "model": "vendor/model",
+        "promptTokens": 9,
+        "completionTokens": 1,
+        "totalTokens": 10,
+        "aiCalls": 2,
+        "fallbackUsed": False,
+        "costUsd": 0.0035,
+    }
+    usage.update(overrides)
+    return usage
+
+
+# #517-B1: the app never approves a review that was wrapped up at its limit, but only when the
+# reported usage says so; a usage that loses `stoppedEarly` turns that guard off.
+@pytest.mark.parametrize("reason", ["cost_limit", "time_limit"])
+def test_the_stopped_early_reason_of_a_run_reaches_the_reported_usage(reason: str) -> None:
+    printed = JobResult(
+        ok=True,
+        duration_ms=1200,
+        comment_url="https://github.com/octo/repo/pull/7#c1",
+        error_code=None,
+        log_tail="review published",
+        usage=Usage("vendor/model", 9, 1, 10, 2, False, 0.0035, stopped_early=reason),
+        findings=ReviewFindings(open=0, by_severity={"P0": 0, "P1": 0, "P2": 0, "P3": 0}),
+    ).to_json()
+
+    result = reported(outcome(stdout=(json.dumps(printed) + "\n").encode()))
+
+    assert result["usage"]["stoppedEarly"] == reason
+
+
+# #517-B1: a run that was not stopped says nothing, and an explicit null is the same as absent.
+@pytest.mark.parametrize("usage", [_usage(), _usage(stoppedEarly=None)])
+def test_a_run_that_was_not_stopped_early_reports_no_stopped_early(usage: dict[str, Any]) -> None:
+    assert "stoppedEarly" not in reported(outcome(stdout=result_line(usage=usage)))["usage"]
+
+
+# #517-B1: fail closed. The app refuses a usage whose `stoppedEarly` is not one of the contract's
+# reasons, so it is never passed on as it is and never turned into "not stopped": the whole usage
+# is left out, and a result with no usage has no model work behind it, so the app never approves it.
+@pytest.mark.parametrize("value", ["budget", "", "COST_LIMIT", 1, True, ["cost_limit"], {}])
+def test_a_malformed_stopped_early_leaves_the_whole_usage_out(value: Any) -> None:
+    result = reported(outcome(stdout=result_line(usage=_usage(stoppedEarly=value))))
+
+    assert result["usage"] is None
+    assert result["ok"] is True
+
+
+# #517-B1: a failed run with such a usage was at the model, like any usage nobody can read.
+def test_a_failed_result_with_a_malformed_stopped_early_counts_as_an_unreadable_usage() -> None:
+    result = reported(
+        outcome(
+            exit_code=1,
+            stdout=result_line(ok=False, errorCode="timeout", usage=_usage(stoppedEarly="budget")),
+        )
+    )
+
+    assert result["usage"] is None
+    assert result["errorReason"] == "unreadable_usage"
+
+
+# #517-B1: the bare verdict of a success has no usage, so it never approves either.
+def test_the_bare_verdict_of_a_stopped_early_success_has_no_usage_to_approve_from() -> None:
+    result = reported(outcome(stdout=result_line(usage=_usage(stoppedEarly="cost_limit"))))
+
+    assert minimal(result)["usage"] is None
+
+
+_LOGGER = "code_reviewer_runner.loop.reporting"
+
+
+# #517-L1: a dropped value is logged once with a stable code and never with its content.
+@pytest.mark.parametrize(
+    ("line", "code"),
+    [
+        ({"findings": {"open": "SECRET-CONTENT", "bySeverity": None}}, "RESULT_FINDINGS_INVALID"),
+        ({"findings": "SECRET-CONTENT"}, "RESULT_FINDINGS_INVALID"),
+        ({"usage": _usage(stoppedEarly="SECRET-CONTENT")}, "RESULT_STOPPED_EARLY_INVALID"),
+    ],
+)
+def test_a_dropped_malformed_value_is_logged_once_by_code_without_its_content(
+    caplog: pytest.LogCaptureFixture, line: dict[str, Any], code: str
+) -> None:
+    with caplog.at_level(logging.INFO, logger=_LOGGER):
+        reported(outcome(stdout=result_line(**line)))
+
+    records = [record for record in caplog.records if record.name == _LOGGER]
+    assert [record.getMessage() for record in records] == [code]
+
+
+# #517-L1: well-formed, absent and (for findings) intentionally dropped values log nothing.
+def test_values_that_are_fine_or_dropped_on_purpose_are_not_logged(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    findings = {"open": 1, "bySeverity": None}
+    with caplog.at_level(logging.INFO, logger=_LOGGER):
+        reported(
+            outcome(stdout=result_line(findings=findings, usage=_usage(stoppedEarly="cost_limit")))
+        )
+        reported(outcome(stdout=result_line()))
+        reported(
+            outcome(
+                exit_code=1, stdout=result_line(ok=False, errorCode="timeout", findings=findings)
+            )
+        )
+
+    assert [record for record in caplog.records if record.name == _LOGGER] == []
+
+
+def _paths(document: Any, prefix: str = "") -> dict[str, Any]:
+    """Every leaf of a JSON document by its dotted path (a count per severity is a leaf)."""
+    if not isinstance(document, dict):
+        return {prefix: document}
+    leaves: dict[str, Any] = {}
+    members: dict[str, Any] = document  # type: ignore[assignment]  # a JSON object has str keys
+    for key, value in members.items():
+        leaves.update(_paths(value, f"{prefix}.{key}" if prefix else key))
+    return leaves
+
+
+# What the job loop leaves out of what `JobResult.to_json` prints, with the reason. A field that is
+# not here must reach the app: adding one to `JobResult` fails the parity tests below until it is
+# either passed on by `_sanitize` or listed here with the reason it is not.
+INTENTIONAL_DROPS: dict[str, str] = {
+    "errorReason": "a success never has a finer failure name; the loop names failures itself",
+}
+
+
+def _populated(ok: bool) -> JobResult:
+    result = JobResult(
+        ok=ok,
+        duration_ms=1200,
+        comment_url="https://github.com/octo/repo/pull/7#c1" if ok else None,
+        error_code=None if ok else ErrorCode.TIMEOUT,
+        log_tail="review published",
+        log_truncated=True,
+        usage=Usage("vendor/model", 9, 1, 10, 2, True, 0.0035, stopped_early="cost_limit"),
+        error_reason="no_result_from_process",
+        findings=ReviewFindings(
+            open=3, by_severity={"P0": 0, "P1": 1, "P2": 1, "P3": 1}, incomplete=True
+        )
+        if ok
+        else None,
+    )
+    # The fixture must set every field, or the parity would not cover a field added later. What a
+    # success has no value for (an error code) and a failure has none for (a link, findings) is the
+    # one exception (and `ok`, which is False for a failure).
+    unset = {"error_code"} if ok else {"ok", "comment_url", "findings"}
+    parts: list[Any] = [result, result.usage, result.findings or result]
+    for part in parts:
+        for field in dataclasses.fields(part):
+            if field.name not in unset:
+                assert getattr(part, field.name) not in (None, False, ""), field.name
+    return result
+
+
+# #517-B1: the parity of the printed result and the reported one, for a success.
+def test_every_field_a_successful_job_result_prints_reaches_the_reported_result() -> None:
+    printed = _populated(ok=True).to_json()
+
+    result = reported(outcome(stdout=(json.dumps(printed) + "\n").encode()))
+
+    expected = {
+        path: value for path, value in _paths(printed).items() if path not in INTENTIONAL_DROPS
+    }
+    assert {path: _paths(result).get(path, "MISSING") for path in expected} == expected
+    assert sorted(set(_paths(printed)) - set(_paths(result))) == sorted(INTENTIONAL_DROPS)
+
+
+# #517-B1: the same for a failure, which keeps its usage and its finer name.
+def test_every_field_a_failed_job_result_prints_reaches_the_reported_result() -> None:
+    printed = _populated(ok=False).to_json()
+
+    result = reported(outcome(exit_code=1, stdout=(json.dumps(printed) + "\n").encode()))
+
+    assert {path: _paths(result).get(path, "MISSING") for path in _paths(printed)} == _paths(
+        printed
+    )
+
+
+# The allow-list is not a place to forget things in: each entry is a field that is really printed.
+def test_every_intentional_drop_is_a_field_a_job_result_can_print() -> None:
+    printed = _paths(_populated(ok=True).to_json())
+
+    assert set(INTENTIONAL_DROPS) <= set(printed)
+    assert all(INTENTIONAL_DROPS.values())

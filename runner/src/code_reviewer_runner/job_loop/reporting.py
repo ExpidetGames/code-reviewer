@@ -11,9 +11,11 @@ result is shrunk before it is sent, never after a 413.
 """
 
 import json
+import logging
 import math
 import re
 from collections.abc import Mapping
+from enum import StrEnum
 from typing import Any, Protocol
 
 from code_reviewer_runner.job_loop.jsonvalues import as_object
@@ -44,7 +46,25 @@ _COMMENT_URL = re.compile(r"https?://\S+")
 _ESCAPE_SEQUENCE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
 _CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 
+# Why a wrapped-up run stopped: the values of `RunnerUsage.stoppedEarly` in the runner API
+# contract. The app never approves a review that carries one.
+STOPPED_EARLY_REASONS = ("cost_limit", "time_limit")
+
 Result = dict[str, Any]
+
+_log = logging.getLogger("code_reviewer_runner.loop.reporting")
+
+
+class DroppedValue(StrEnum):
+    """The stable codes of the log line for a malformed value of a result line that was dropped."""
+
+    FINDINGS_INVALID = "RESULT_FINDINGS_INVALID"
+    STOPPED_EARLY_INVALID = "RESULT_STOPPED_EARLY_INVALID"
+
+
+def _log_dropped(code: DroppedValue) -> None:
+    # The code only: what a job process printed is untrusted and may hold anything.
+    _log.warning("%s", code.value)
 
 
 class TextRedactor(Protocol):
@@ -136,6 +156,13 @@ def _usage(value: object) -> dict[str, Any] | None:
         and math.isfinite(cost)
         and cost >= 0
     )
+    # What the app decides `APPROVE` from: it never approves a review that stopped early, and it
+    # refuses a reason that is none of the contract's. A usage that does not say it fails closed:
+    # left out whole, the app sees no model work behind the run and never approves.
+    stopped = usage.get("stoppedEarly")
+    if stopped is not None and not (isinstance(stopped, str) and stopped in STOPPED_EARLY_REASONS):
+        _log_dropped(DroppedValue.STOPPED_EARLY_INVALID)
+        return None
     if (
         any(number is None for number in numbers)
         or not isinstance(fallback, bool)
@@ -143,7 +170,7 @@ def _usage(value: object) -> dict[str, Any] | None:
         or not cost_ok
     ):
         return None
-    return {
+    document: dict[str, Any] = {
         "model": model,
         "promptTokens": numbers[0],
         "completionTokens": numbers[1],
@@ -152,6 +179,9 @@ def _usage(value: object) -> dict[str, Any] | None:
         "fallbackUsed": fallback,
         "costUsd": cost,
     }
+    if stopped is not None:
+        document["stoppedEarly"] = stopped
+    return document
 
 
 def _finding_count(value: object) -> bool:
@@ -214,8 +244,11 @@ def _sanitize(line: Mapping[str, Any], redactor: TextRedactor, measured_ms: int)
         "logTruncated": line.get("logTruncated") is True,
         "usage": _usage(line.get("usage")),
     }
-    if ok and (findings := _findings(line.get("findings"))) is not None:
-        result["findings"] = findings
+    if ok and (sent := line.get("findings")) is not None:
+        if (findings := _findings(sent)) is None:
+            _log_dropped(DroppedValue.FINDINGS_INVALID)
+        else:
+            result["findings"] = findings
     reason: Any = line.get("errorReason")
     if not ok and isinstance(reason, str) and _ERROR_REASON.fullmatch(reason):
         result["errorReason"] = reason
