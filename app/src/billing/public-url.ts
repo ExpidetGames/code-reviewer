@@ -6,7 +6,7 @@
 // one that points at a staging host). Pure: no name is resolved, so a public name that resolves to a private address
 // is not caught here (Stripe is the one that connects).
 import "server-only";
-import { isIPv4 } from "node:net";
+import { isIPv4, isIPv6 } from "node:net";
 
 /** The four numbers of a dotted IPv4 address (the URL parser has normalized every other form to this one). */
 function ipv4Parts(host: string): number[] | null {
@@ -43,6 +43,21 @@ function ipv6IsPublic(host: string): boolean {
   if ((first & 0xffc0) === 0xfe80) return false;
   if ((first & 0xff00) === 0xff00) return false;
   return true;
+}
+
+/**
+ * Whether a resolved address (`93.184.216.34`, `::1`, `::ffff:7f00:1`, no brackets) is one the internet can reach: not
+ * loopback, private, link-local, unique-local, multicast or reserved. Text that is no IP address is not public.
+ */
+export function isPublicAddress(address: string): boolean {
+  if (isIPv4(address)) return ipv4IsPublic(address.split(".").map(Number));
+  if (!isIPv6(address)) return false;
+  try {
+    // The URL parser writes an IPv6 address in the canonical form that `ipv6IsPublic` reads.
+    return ipv6IsPublic(new URL(`https://[${address}]/`).hostname);
+  } catch {
+    return false;
+  }
 }
 
 export function isPublicHttpsUrl(text: string): boolean {
