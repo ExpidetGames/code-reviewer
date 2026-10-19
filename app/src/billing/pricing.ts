@@ -108,22 +108,22 @@ function priceOf(aiMicroUsd: number, infraMicroUsd: number): RunPrice {
  * and whose cost is known, else 0. The infrastructure price is the started minutes times B of the review kind, unless the
  * class is `free`. Each is rounded once, alone. There is no minimum: a run that costs nothing charges nothing.
  *
- * The facts of a `free` run are not looked at (a run that costs nothing needs no valid number). Anything else with a fact
- * that is not a whole, non-negative number, or rates that are not valid, or an amount above the safe integer range,
- * throws a `PricingError`: the caller decides what a run that cannot be priced does.
+ * The facts of a `free` run are not looked at (a run that costs nothing needs no valid number), and the cost is looked at
+ * only when it is used (the managed key, class `charged`, cost known). Anything else with a fact that is not a whole,
+ * non-negative number, or rates that are not valid, or an amount above the safe integer range, throws a `PricingError`:
+ * the caller decides what a run that cannot be priced does.
  */
 export function priceRun(input: PriceRunInput): RunPrice {
   if (input.outcomeClass === "free") return NOTHING;
   const rates = checkedRates(input.rates);
   const minutes = wholeNumber(input.billableMinutes);
-  const cost =
-    input.costMicroUsd === null ? null : wholeNumber(input.costMicroUsd);
+  // The cost is read only when it is used: a bad cost field cannot block the minutes of a run that charges no AI.
   const withAi =
     input.keyMode === "managed" &&
     input.outcomeClass === "charged" &&
-    cost !== null;
+    input.costMicroUsd !== null;
   return priceOf(
-    withAi ? aiAmount(cost, rates.factorA) : 0,
+    withAi ? aiAmount(wholeNumber(input.costMicroUsd), rates.factorA) : 0,
     infraAmount(minutes, rates.minuteRateMicroUsd[input.reviewKind]),
   );
 }
@@ -140,8 +140,11 @@ export type ReserveInput = {
 
 /**
  * The hold of a job (ADR 0006, D6): the longest the VM lives times B, plus for the managed key `round(AI budget x A)`,
- * where the AI budget is the job's cost limit for Dynamic and the admin's reserve for Diff. A hold is not a price:
- * settlement charges what the run really cost, even above it.
+ * where the AI budget is the job's cost limit for Dynamic and the admin's reserve for Diff (both real model cost, before
+ * A). A hold is not a price: settlement charges what the run really cost, even above it.
+ *
+ * This is the **full** hold. Decision 5 of #489 (reserve at most the available balance; the final charge may take the
+ * balance slightly negative) is applied by the caller, #498, for example `min(hold, available)`; not here.
  */
 export function reserveFor(input: ReserveInput): RunPrice {
   const rates = checkedRates(input.rates);

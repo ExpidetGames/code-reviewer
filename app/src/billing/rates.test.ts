@@ -3,7 +3,6 @@
 import { describe, expect, it } from "vitest";
 import {
   BILLING_RATE_ERROR_CODES,
-  DEFAULT_DIFF_AI_RESERVE_MICRO_USD,
   DIFF_AI_RESERVE_MAX_MICRO_USD,
   FACTOR_A_MAX,
   FACTOR_A_MIN,
@@ -183,16 +182,14 @@ describe("whether the rates are complete", () => {
   });
 
   // #494-T11
-  it("takes the default reserve when none is stored, and never a default for A or B", () => {
-    const withoutReserve = {
-      factorA: complete.factorA,
-      minuteRateMicroUsd: complete.minuteRateMicroUsd,
-    };
-    expect(billingRatesOf(withoutReserve)).toStrictEqual({
-      ...complete,
-      diffAiReserveMicroUsd: DEFAULT_DIFF_AI_RESERVE_MICRO_USD,
-    });
+  it("has no default for A, for a B or for the Diff AI reserve", () => {
     expect(billingRatesOf({})).toBeNull();
+    expect(
+      billingRatesOf({
+        factorA: complete.factorA,
+        minuteRateMicroUsd: complete.minuteRateMicroUsd,
+      }),
+    ).toBeNull();
   });
 
   // #494-T11
@@ -207,6 +204,7 @@ describe("whether the rates are complete", () => {
       { ...complete, minuteRateMicroUsd: { diff: 10_000 } },
     ],
     ["no rates", { factorA: 12_000 }],
+    ["no Diff AI reserve", { ...complete, diffAiReserveMicroUsd: undefined }],
     ["nothing", {}],
   ])(
     "is incomplete with %s: billing cannot be switched on",
@@ -218,6 +216,13 @@ describe("whether the rates are complete", () => {
       });
     },
   );
+
+  // #494-T11
+  it("accepts a reserve of 0 as set: an operator who holds no AI for a Diff review", () => {
+    expect(
+      canSwitchBillingOn({ ...complete, diffAiReserveMicroUsd: 0 }),
+    ).toStrictEqual({ ok: true });
+  });
 
   // #494-T11
   it("accepts a rate of 0 as set: an operator who does not charge for a kind", () => {

@@ -230,6 +230,22 @@ describe("the limits of the arithmetic", () => {
 
   // #494-T12
   it.each([
+    ["a minutes-only run", { outcomeClass: "minutes_only" }],
+    ["a run on the workspace's own key", { keyMode: "own" }],
+  ] as Array<[string, Partial<RunFacts>]>)(
+    "does not look at a cost it does not use: %s",
+    (_name, facts) => {
+      for (const costMicroUsd of [Number.NaN, -1, 1.5, 2 ** 53])
+        expect(run({ ...facts, costMicroUsd })).toStrictEqual({
+          aiMicroUsd: 0,
+          infraMicroUsd: 30_000,
+          totalMicroUsd: 30_000,
+        });
+    },
+  );
+
+  // #494-T12
+  it.each([
     ["a negative cost", { costMicroUsd: -1 }],
     ["a fractional cost", { costMicroUsd: 1.5 }],
     ["a cost that is not a number", { costMicroUsd: Number.NaN }],
