@@ -14,7 +14,9 @@ have one. A call that cannot be priced exactly has **no** cost (`None`), never z
   tokens), so a usage of nothing is a usage that was left out, which LiteLLM fills with zeros;
 - a call that carries a charge the table does not know: a tier other than the standard one, the fast
   mode, an inference region other than the default one, a server tool such as web search, or
-  per-iteration usage.
+  per-iteration usage, or any other field of the usage that holds something and that the standard
+  token fields do not name. Both checks deny by default: what Anthropic adds later is an unknown
+  cost until this table learns it.
 
 The usage is read in the shape LiteLLM gives it and the Dynamic proxy translates Anthropic's answer
 into (`prompt_tokens` holds the cache tokens, which are also named on their own), as a mapping or as
@@ -22,8 +24,9 @@ an object. A cache write without a split is priced as a five minute write, the l
 requests use.
 """
 
+from collections.abc import Mapping
 from decimal import Context, Decimal
-from typing import Final
+from typing import Any, Final
 
 from code_reviewer_runner.anthropic_models import ClaudeModel, Prices, model_for
 from code_reviewer_runner.usage_access import usage_field
@@ -35,6 +38,26 @@ _PER_MILLION: Final = Decimal(1_000_000)
 _MAX_TOKENS: Final = 10**9
 _STANDARD_TIERS: Final = (None, "standard")
 _STANDARD_REGIONS: Final = (None, "", "global", "not_available")
+# Every field of a usage the cost rule reads, checks on its own or deliberately ignores (a charge
+# some layer states itself is never trusted, see `_IGNORED_FIELDS`); any other that holds something
+# is a charge the table does not know.
+_IGNORED_FIELDS: Final = frozenset({"cost", "total_cost", "response_cost"})
+_KNOWN_FIELDS: Final = _IGNORED_FIELDS | frozenset(
+    {
+        "prompt_tokens",
+        "completion_tokens",
+        "total_tokens",
+        "cache_read_input_tokens",
+        "cache_creation_input_tokens",
+        "prompt_tokens_details",
+        "completion_tokens_details",
+        "service_tier",
+        "speed",
+        "inference_geo",
+        "server_tool_use",
+        "iterations",
+    }
+)
 
 
 def _count(value: object, *, default: int | None = None) -> int | None:
@@ -48,6 +71,35 @@ def _count(value: object, *, default: int | None = None) -> int | None:
     return value
 
 
+def _holds_something(value: object) -> bool:
+    """Whether a field states a use: not None, zero, false or empty."""
+    return value is not None and value != 0 and value != "" and value != [] and value != {}
+
+
+def _fields(usage: Any) -> Mapping[str, Any]:
+    """The fields of a usage, as a mapping, whether it is one or an object (LiteLLM's `Usage`)."""
+    if isinstance(usage, Mapping):
+        return usage  # pyright: ignore[reportUnknownVariableType]
+    dump = getattr(usage, "model_dump", None)
+    if callable(dump):
+        dumped: Any = dump()
+        if isinstance(dumped, Mapping):
+            return dumped  # pyright: ignore[reportUnknownVariableType]
+    attributes: object = getattr(usage, "__dict__", None)
+    return attributes if isinstance(attributes, dict) else {}  # pyright: ignore[reportUnknownVariableType]
+
+
+def _uses_server_tools(usage: object) -> bool:
+    """Any entry of `server_tool_use` that is not a zero: the table prices none of them. A value
+    that is not a record of counts cannot be read, so it counts as a use."""
+    server_tools: object = usage_field(usage, "server_tool_use")
+    if server_tools is None:
+        return False
+    if not isinstance(server_tools, Mapping) and not hasattr(server_tools, "__dict__"):
+        return True
+    return any(_holds_something(value) for value in _fields(server_tools).values())
+
+
 def _has_unpriced_charge(usage: object) -> bool:
     if usage_field(usage, "service_tier") not in _STANDARD_TIERS:
         return True
@@ -55,12 +107,13 @@ def _has_unpriced_charge(usage: object) -> bool:
         return True
     if usage_field(usage, "inference_geo") not in _STANDARD_REGIONS:
         return True
-    server_tools = usage_field(usage, "server_tool_use")
-    if server_tools is not None:
-        for name in ("web_search_requests", "web_fetch_requests", "tool_search_requests"):
-            requests = usage_field(server_tools, name)
-            if requests is not None and requests != 0:
-                return True
+    if _uses_server_tools(usage):
+        return True
+    if any(
+        name not in _KNOWN_FIELDS and _holds_something(value)
+        for name, value in _fields(usage).items()
+    ):
+        return True
     iterations = usage_field(usage, "iterations")
     return iterations is not None and bool(iterations)
 

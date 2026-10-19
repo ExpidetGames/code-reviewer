@@ -231,11 +231,64 @@ def test_a_cache_write_split_that_does_not_add_up_has_no_cost() -> None:
         {"inference_geo": "us"},
         {"inference_geo": "somewhere"},
         {"server_tool_use": {"web_search_requests": 1}},
+        {"server_tool_use": {"code_execution_requests": 3}},
+        {"server_tool_use": {"an_unheard_of_tool_requests": 1}},
+        {"server_tool_use": {"web_search_requests": 0, "code_execution_requests": 2}},
+        {"server_tool_use": {"web_search_requests": None, "mystery": "yes"}},
         {"iterations": [{"input_tokens": 1, "output_tokens": 1}]},
     ],
 )
 def test_a_call_with_a_surcharge_the_table_does_not_know_has_no_cost(extra: dict[str, Any]) -> None:
     assert cost_of_usage("claude-sonnet-5", usage(1000, 500, **extra)) is None
+
+
+# #511-T16: server tools are denied by default; a tool Anthropic adds later is never priced as free.
+def test_an_unknown_server_tool_key_is_an_unknown_cost_not_a_standard_price() -> None:
+    standard = usage(1000, 500)
+
+    assert cost_of_usage("claude-sonnet-5", standard) == Decimal("0.007")
+    unknown_tool = usage(1000, 500, server_tool_use={"code_execution_requests": 3})
+    assert cost_of_usage("claude-sonnet-5", unknown_tool) is None
+
+
+# #511-T16: so is every field of the usage the list of standard token fields does not name.
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"code_execution_tokens": 7},
+        {"a_new_charge": {"units": 1}},
+        {"another_new_charge": "yes"},
+    ],
+)
+def test_a_usage_key_outside_the_standard_token_fields_has_no_cost(extra: dict[str, Any]) -> None:
+    assert cost_of_usage("claude-sonnet-5", usage(1000, 500, **extra)) is None
+    holder = SimpleNamespace(**usage(1000, 500, **extra))
+    assert cost_of_usage("claude-sonnet-5", holder) is None
+
+
+# #511-T16: the check must not turn away what LiteLLM itself makes of a plain Claude answer.
+def test_the_usage_litellm_builds_from_a_plain_answer_is_priced() -> None:
+    from litellm.llms.anthropic.chat.transformation import AnthropicConfig
+
+    answer = {
+        "input_tokens": 1000,
+        "output_tokens": 500,
+        "cache_read_input_tokens": 0,
+        "cache_creation_input_tokens": 0,
+        "server_tool_use": {"web_search_requests": 0},
+        "service_tier": "standard",
+        "inference_geo": "global",
+    }
+    built = AnthropicConfig().calculate_usage(answer, None)  # pyright: ignore[reportUnknownMemberType]
+
+    assert cost_of_usage("claude-sonnet-5", built) == Decimal("0.007")
+
+
+# #511-T16: an unknown key that holds nothing (None, zero, empty) charges nothing.
+def test_an_unknown_usage_key_that_holds_nothing_changes_nothing() -> None:
+    quiet = usage(1000, 500, total_tokens=1500, brand_new=None, other=0, empty={}, none_at_all=[])
+
+    assert cost_of_usage("claude-sonnet-5", quiet) == Decimal("0.007")
 
 
 # #511-T16
@@ -249,7 +302,9 @@ def test_a_call_with_a_surcharge_the_table_does_not_know_has_no_cost(extra: dict
         {"inference_geo": "not_available"},
         {"inference_geo": None},
         {"server_tool_use": None},
+        {"server_tool_use": {}},
         {"server_tool_use": {"web_search_requests": 0}},
+        {"server_tool_use": {"web_search_requests": 0, "web_fetch_requests": 0}},
         {"iterations": None},
         {"iterations": []},
     ],
