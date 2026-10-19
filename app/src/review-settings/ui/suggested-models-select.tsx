@@ -18,7 +18,7 @@ export function SuggestedModelsSelect({
   models,
   onPick,
 }: {
-  /** The accessible name of the list, for example "Suggested models". */
+  /** The visible placeholder and the accessible name of the list: one text, so the name contains what is seen. */
   label: string;
   models: readonly string[];
   onPick: (model: string) => void;
@@ -28,7 +28,7 @@ export function SuggestedModelsSelect({
     // Always empty: it is a menu of values to put into the field, not a second place that holds the value.
     <Select value="" onValueChange={onPick}>
       <SelectTrigger aria-label={label} className="w-full">
-        <SelectValue placeholder="Pick a suggested model" />
+        <SelectValue placeholder={label} />
       </SelectTrigger>
       <SelectContent>
         {models.map((model) => (

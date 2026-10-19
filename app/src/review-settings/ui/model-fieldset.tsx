@@ -18,6 +18,7 @@ import {
 import { ProviderSelect, type ProviderOption } from "./provider-select.tsx";
 import { CostSummary } from "./cost-summary.tsx";
 import { REVIEW_SETTING_LIMITS } from "../settings.ts";
+import { SUGGESTED_MODEL_PICK } from "./messages.ts";
 
 /** The one sentence about the model, the fact people ask about most. */
 export function modelHint(providerLabel: string): string {
@@ -115,7 +116,10 @@ export function ModelFieldset({
         value={state.values.model}
         onChange={(value) => handlers.setText("model", value)}
         list={datalistId}
-        suggestions={{ label: "Suggested models", models: suggestedModels }}
+        suggestions={{
+          label: SUGGESTED_MODEL_PICK.model,
+          models: suggestedModels,
+        }}
       />
       <SettingsTextField
         name="fallbackModel"
@@ -127,7 +131,7 @@ export function ModelFieldset({
         onChange={(value) => handlers.setText("fallbackModel", value)}
         list={datalistId}
         suggestions={{
-          label: "Suggested fallback models",
+          label: SUGGESTED_MODEL_PICK.fallbackModel,
           models: suggestedModels,
         }}
         placeholder="None"

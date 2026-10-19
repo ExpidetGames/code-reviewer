@@ -72,6 +72,7 @@ import {
   initialFormState,
   previewSettings,
   resetField,
+  resetModelTo,
   setBoolean,
   setCommand,
   setProvider,
@@ -206,7 +207,8 @@ export function SettingsForm({
   keyedProviders?: readonly string[];
   /** Only tests pass this: the providers the selects offer, the registry's by default. */
   providers?: ReadonlyArray<
-    Pick<LlmProviderDescriptor, "id" | "label"> & SuggestingProvider
+    Pick<LlmProviderDescriptor, "id" | "label" | "defaultModels"> &
+      SuggestingProvider
   >;
   /** Only tests pass this: a server component cannot hand functions to this client component. */
   api?: SettingsApi;
@@ -234,6 +236,15 @@ export function SettingsForm({
       ? []
       : suggestedModelsFor(provider, reviewKind);
   };
+  // The default model of a provider for a review kind, where the layer below holds the model of another provider:
+  // "Reset to default" and the hint of the default must never name that one (#532).
+  const providerDefaultModel = (
+    providerId: string,
+    reviewKind: ProjectReviewKind,
+  ) =>
+    providerDescriptors.find((entry) => entry.id === providerId)?.defaultModels[
+      reviewKind
+    ];
   const formRef = useRef<HTMLFormElement>(null);
   const saveRef = useRef<HTMLButtonElement>(null);
   // Set synchronously, so a confirmation that fires twice cannot start two saves (#200 review).
@@ -469,12 +480,29 @@ export function SettingsForm({
       edit(setBoolean(state, name, value), name),
     setCommand: (command, allowed) =>
       edit(setCommand(state, command, allowed), "allowedCommands"),
-    reset: (name: ReviewSettingField) =>
-      edit(resetField(state, name, model), name),
+    reset: (name: ReviewSettingField) => {
+      const ownDefault =
+        name === "model" && state.values.provider !== model.inherited.provider
+          ? providerDefaultModel(state.values.provider, "diff")
+          : undefined;
+      edit(
+        ownDefault === undefined
+          ? resetField(state, name, model)
+          : resetModelTo(state, ownDefault),
+        name,
+      );
+    },
   };
   const shippedSkill = projectView?.defaults.reviewSkill ?? "";
-  const defaultModel = projectView?.defaults.dynamicModel ?? "";
   const defaultProvider = projectView?.defaults.dynamicProvider ?? "";
+  // The default model goes with the provider: the built-in one only while the built-in provider is chosen (#532).
+  const chosenDynamicProvider = state.dynamic?.dynamicProvider ?? "";
+  const defaultModel =
+    chosenDynamicProvider === defaultProvider
+      ? (projectView?.defaults.dynamicModel ?? "")
+      : (providerDefaultModel(chosenDynamicProvider, "dynamic") ??
+        projectView?.defaults.dynamicModel ??
+        "");
   const kindHandlers: ReviewKindHandlers = {
     setKind: (next) => edit(setReviewKind(state, next), "reviewKind"),
     setModel: (text) => edit(setDynamicModel(state, text), "dynamicModel"),
@@ -487,7 +515,7 @@ export function SettingsForm({
       edit(
         setDynamicModel(
           setDynamicProvider(state, defaultProvider),
-          defaultModel,
+          projectView?.defaults.dynamicModel ?? "",
         ),
         "dynamicProvider",
       ),
@@ -563,6 +591,7 @@ export function SettingsForm({
               state.dynamic.dynamicProvider,
               "dynamic",
             )}
+            defaultModel={defaultModel}
             choice={model.managed ? choice("dynamic") : undefined}
           />
         ) : null}
