@@ -406,6 +406,9 @@ file, and the migrator refuses to start (`previously executed migration ... is m
        '20261018140000_protect_billing_plan_versions',
        '20261018160000_create_billing_plan_prices'
      );
+   DELETE FROM instance_settings WHERE key = 'billing_settings';
+   DELETE FROM instance_settings
+     WHERE key = 'default_entitlements' AND value LIKE '%"source":"billing"%';
    ```
 
    The order matters: a version points at its prices (`monthly_price_id`, `yearly_price_id`) and the prices and the
@@ -418,6 +421,18 @@ file, and the migrator refuses to start (`previously executed migration ... is m
    ```sql postgres
    DROP FUNCTION IF EXISTS billing_plan_versions_guard(), billing_plan_prices_guard();
    ```
+
+   The two `DELETE FROM instance_settings` statements leave nothing behind that changes behaviour, which is why they are part of the reset and
+   not optional:
+
+   - `billing_settings` of the old shape can say `enabled: true` (with an environment, a client token and grace days).
+     The code still reads that as on, and the billing routes of a later issue would run on a database with no payment
+     adapter and no rates. The row goes, and billing is off ("never configured") until someone switches it on.
+   - A `default_entitlements` row with `"source":"billing"` is the Free plan that billing wrote, not a choice of the
+     operator. Left in place it would silently become the operator's default for every workspace without its own
+     limits (its limits and `modelAccess` included). The rule: a default that carries the marker goes, and the instance
+     has no default again until the operator saves one (operator API `PUT /api/operator/v1/entitlements/default`). A
+     default without the marker was saved by an operator and stays.
 
 3. Start the app: the remaining migrations run as usual. The two encrypted rows of `secrets` named after the removed
    payment provider (`<provider>_api_key`, `<provider>_webhook_secret`) are ignored and may be deleted by hand.

@@ -12,6 +12,8 @@ import { readFileSync } from "node:fs";
 import { sql, type Kysely } from "kysely";
 import type { MigrationProvider } from "kysely/migration";
 import { describe, expect, it } from "vitest";
+import { isBillingOn } from "../../billing/enabled.ts";
+import { createInstanceSettingsRepository } from "../repositories/instance-settings-repository.ts";
 import {
   createPostgresTestDatabase,
   hasPostgres,
@@ -489,6 +491,63 @@ describe.each(engines)("the migrations on $name", ({ open }) => {
       expect(await recorded(db)).toEqual(
         Object.keys(await migrationProvider.getMigrations()).sort(),
       );
+    },
+  );
+
+  // #491-T04
+  it("switch billing off for good with the documented reset, whatever the removed design stored", async () => {
+    const db = await open();
+    await migrateToLatest(db);
+    await createRemovedSchema(db, false);
+    // A setting of the old shape that said on: without the reset, the first billing route of a later issue would
+    // find billing on, with no adapter and no rates.
+    await sql`insert into instance_settings (key, value, updated_by, updated_at)
+      values ('billing_settings', '{"enabled":true,"environment":"sandbox","clientToken":"t","graceDays":7}', null, ${T})`.execute(
+      db,
+    );
+    expect(await isBillingOn(db)).toBe(true);
+
+    await runDocumentedReset(db);
+
+    expect(await isBillingOn(db)).toBe(false);
+  });
+
+  // #491-T04
+  it.each([
+    ["billing wrote (source billing)", { source: "billing" }, undefined],
+    ["an operator saved", {}, { planLabel: "Free" }],
+  ])(
+    "treat the default entitlements that %s as the documented reset says",
+    async (_name, marker, expected) => {
+      const db = await open();
+      await migrateToLatest(db);
+      await createRemovedSchema(db, false);
+      await sql`insert into instance_settings (key, value, updated_by, updated_at)
+        values ('default_entitlements', ${JSON.stringify({
+          planLabel: "Free",
+          keyMode: "managed",
+          limits: {
+            diffRunsPerPeriod: 5,
+            dynamicRunsPerPeriod: 0,
+            managedCostLimitMicroUsd: null,
+            ownKeyCostLimitMicroUsd: null,
+          },
+          suspended: false,
+          suspensionCode: null,
+          periodStart: "2026-10-01T00:00:00.000Z",
+          modelAccess: { catalogEntries: null },
+          ...marker,
+        })}, null, ${T})`.execute(db);
+
+      await runDocumentedReset(db);
+
+      // The Free plan that billing wrote must not become the operator's default by surviving the reset; a default an
+      // operator saved (no marker) is theirs and stays.
+      const settings = createInstanceSettingsRepository(db);
+      if (expected === undefined)
+        expect(await settings.getDefaultEntitlements()).toBeUndefined();
+      else
+        expect(await settings.getDefaultEntitlements()).toMatchObject(expected);
     },
   );
 });
