@@ -73,9 +73,9 @@ def marks(body: dict[str, Any]) -> list[str]:
             found.append(f"messages.{index}")
         content = message.get("content")
         if isinstance(content, list):
-            parts: list[dict[str, Any]] = content  # pyright: ignore[reportUnknownVariableType]
+            parts: list[Any] = content  # pyright: ignore[reportUnknownVariableType]
             for position, part in enumerate(parts):
-                if "cache_control" in part:
+                if isinstance(part, dict) and "cache_control" in part:
                     found.append(f"messages.{index}.{position}")
     for index, tool in enumerate(body.get("tools", [])):
         if "cache_control" in tool or "cache_control" in tool["function"]:
@@ -153,6 +153,45 @@ def test_a_mark_the_engine_put_on_a_tool_call_of_the_history_is_dropped(model: s
     body = encode(model, history)
     assert "cache_control" not in body["messages"][2]["tool_calls"][0]
     assert body["messages"][2]["tool_calls"][0]["function"] == calls[0]["function"]
+
+
+# #539-T12
+@pytest.mark.parametrize("model", [*ANTHROPIC_MODELS, *SELF_CACHING_MODELS])
+def test_a_mark_on_the_function_of_a_tool_call_is_dropped(model: str) -> None:
+    history = messages()
+    calls: list[dict[str, Any]] = history[2]["tool_calls"]
+    function = {**calls[0]["function"], "cache_control": MARK}
+    history[2] = {**history[2], "tool_calls": [{**calls[0], "function": function}]}
+    body = encode(model, history)
+    assert "cache_control" not in body["messages"][2]["tool_calls"][0]["function"]
+    assert "cache_control" not in json.dumps(body["messages"][2])
+
+
+# #539-T12
+@pytest.mark.parametrize("model", [*ANTHROPIC_MODELS, *SELF_CACHING_MODELS])
+def test_a_malformed_part_does_not_keep_the_marks_of_the_other_parts(model: str) -> None:
+    history = messages()
+    history[1] = {
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "one", "cache_control": MARK},
+            "not a part",
+            None,
+            {"type": "text", "text": "two", "cache_control": MARK},
+        ],
+    }
+    calls: list[dict[str, Any]] = history[2]["tool_calls"]
+    history[2] = {**history[2], "tool_calls": ["not a call", {**calls[0], "cache_control": MARK}]}
+    body = encode(model, history)
+    assert body["messages"][1]["content"] == [
+        {"type": "text", "text": "one"},
+        "not a part",
+        None,
+        {"type": "text", "text": "two"},
+    ]
+    assert body["messages"][2]["tool_calls"] == ["not a call", calls[0]]
+    for found in marks(body):
+        assert found in ("messages.0.0", "top-level")
 
 
 # #539-T12

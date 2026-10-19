@@ -17,6 +17,7 @@ the model id says `claude`, and a request that carried those next to the wire's 
 prefix twice (and a fifth breakpoint is a 400 at Anthropic).
 """
 
+from collections.abc import Callable
 from typing import Any, Final, Protocol
 
 from code_reviewer_runner.job_loop.jsonvalues import as_object
@@ -83,24 +84,34 @@ def _plain(entry: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in entry.items() if key != "cache_control"}
 
 
-def _parts(content: object) -> list[dict[str, Any]] | None:
-    if not isinstance(content, list):
+def _plain_all(
+    items: object, clean: Callable[[dict[str, Any]], dict[str, Any]]
+) -> list[Any] | None:
+    """The list with `clean` applied to every object in it; anything else in it passes unchanged,
+    so one malformed entry never keeps the marks of the others."""
+    if not isinstance(items, list):
         return None
-    parts: list[Any] = content  # pyright: ignore[reportUnknownVariableType]
-    if not all(isinstance(part, dict) for part in parts):
-        return None
-    return [_plain(part) for part in parts]  # pyright: ignore[reportUnknownVariableType]
+    entries: list[Any] = items  # pyright: ignore[reportUnknownVariableType]
+    return [clean(entry) if isinstance(entry, dict) else entry for entry in entries]  # pyright: ignore[reportUnknownVariableType, reportUnknownArgumentType]
+
+
+def _clean_call(call: dict[str, Any]) -> dict[str, Any]:
+    cleaned = _plain(call)
+    function: Any = cleaned.get("function")
+    if isinstance(function, dict):
+        cleaned["function"] = _plain(function)  # pyright: ignore[reportUnknownArgumentType]
+    return cleaned
 
 
 def _clean_message(message: Any) -> Any:
     if not isinstance(message, dict):
         return message
     cleaned = _plain(message)  # pyright: ignore[reportUnknownArgumentType]
-    parts = _parts(cleaned.get("content"))
+    parts = _plain_all(cleaned.get("content"), _plain)
     if parts is not None:
         cleaned["content"] = parts
     # The engine marks the tool calls of an assistant message as well.
-    calls = _parts(cleaned.get("tool_calls"))
+    calls = _plain_all(cleaned.get("tool_calls"), _clean_call)
     if calls is not None:
         cleaned["tool_calls"] = calls
     return cleaned
@@ -130,10 +141,12 @@ def _mark_static_prefix(messages: list[Any]) -> None:
     if isinstance(content, str) and content.strip():
         last["content"] = [{"type": "text", "text": content, "cache_control": dict(CACHE_CONTROL)}]
         return
-    parts = _parts(content)
-    if parts and parts[-1].get("type") == "text" and str(parts[-1].get("text", "")).strip():
-        parts[-1]["cache_control"] = dict(CACHE_CONTROL)
-        last["content"] = parts
+    if not isinstance(content, list) or not content:
+        return
+    parts: list[Any] = content  # pyright: ignore[reportUnknownVariableType]
+    final = as_object(parts[-1])
+    if final is not None and final.get("type") == "text" and str(final.get("text", "")).strip():
+        final["cache_control"] = dict(CACHE_CONTROL)
 
 
 class OpenRouterWire(OpenAiChatWire):

@@ -11,7 +11,7 @@ and the usage it reports is the real shape (`input_tokens`, `cache_creation_inpu
 
 - at most four breakpoints (a top-level `cache_control` takes one: it marks the last cacheable
   block); more is a 400. A mark on an empty text block, an empty tool result or a thinking block is
-  a 400, a `ttl` other than `5m` and `1h` is a 400, and a 1 hour entry after a 5 minute one is a 400;
+  a 400, a `ttl` other than `5m` and `1h` is a 400, and so is a 1 hour entry after a 5 minute one;
 - a mark where the API has no field for it is a 400 as well (`Extra inputs are not permitted`):
   the engine's own message-level marks must never reach the provider;
 - a change of `tool_choice` or `thinking` invalidates the cached messages but not the tools and

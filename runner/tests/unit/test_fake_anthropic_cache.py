@@ -236,7 +236,14 @@ def test_the_top_level_mark_on_a_marked_last_block_with_the_same_ttl_adds_nothin
             lambda: request(
                 [block("task")],
                 [{"type": "tool_use", "id": "t1", "name": "read", "input": {}}],
-                [{"type": "tool_result", "tool_use_id": "t1", "content": "", "cache_control": MARK}],
+                [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "t1",
+                        "content": "",
+                        "cache_control": MARK,
+                    }
+                ],
             ),
             id="a tool result with an empty string",
         ),
@@ -244,7 +251,14 @@ def test_the_top_level_mark_on_a_marked_last_block_with_the_same_ttl_adds_nothin
             lambda: request(
                 [block("task")],
                 [{"type": "tool_use", "id": "t1", "name": "read", "input": {}}],
-                [{"type": "tool_result", "tool_use_id": "t1", "content": [], "cache_control": MARK}],
+                [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "t1",
+                        "content": [],
+                        "cache_control": MARK,
+                    }
+                ],
             ),
             id="a tool result with no blocks",
         ),
@@ -325,9 +339,7 @@ def stable_prefix(**extra: Any) -> dict[str, Any]:
     "changed",
     [
         pytest.param({"tool_choice": {"type": "none"}}, id="tool_choice"),
-        pytest.param(
-            {"thinking": {"type": "enabled", "budget_tokens": 2048}}, id="thinking"
-        ),
+        pytest.param({"thinking": {"type": "enabled", "budget_tokens": 2048}}, id="thinking"),
     ],
 )
 def test_a_changed_tool_choice_or_thinking_invalidates_the_messages_but_not_the_system(
@@ -336,7 +348,9 @@ def test_a_changed_tool_choice_or_thinking_invalidates_the_messages_but_not_the_
     settings: dict[str, Any] = {"tool_choice": {"type": "auto"}, "thinking": {"type": "disabled"}}
     # What the system breakpoint covers: the tools and the system prompt.
     system_only = request(
-        [block("task")], tools=[tool("read"), tool("grep")], system=[block("system", cache_control=MARK)]
+        [block("task")],
+        tools=[tool("read"), tool("grep")],
+        system=[block("system", cache_control=MARK)],
     )
     covered = run(PromptCache(Clock()), {**system_only, **settings})["cache_creation_input_tokens"]
 
