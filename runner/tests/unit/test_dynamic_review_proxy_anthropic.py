@@ -14,6 +14,7 @@ from decimal import Decimal
 from typing import Any
 
 import pytest
+from anthropic_usage import real_anthropic_usage
 
 from code_reviewer_runner.anthropic_models import MODELS
 from code_reviewer_runner.dynamic_review.budget import BudgetLedger, DynamicLimits, UnitCosts
@@ -80,7 +81,8 @@ def message(
         "model": MODEL,
         "content": content if content is not None else [{"type": "text", "text": "ok"}],
         "stop_reason": stop_reason,
-        "usage": {"input_tokens": 10, "output_tokens": 5, **usage},
+        # Every field the real API returns (#534), not only the token counts.
+        "usage": real_anthropic_usage(**{"input_tokens": 10, "output_tokens": 5, **usage}),
     }
 
 
@@ -206,6 +208,7 @@ def test_every_call_of_a_tool_loop_is_settled_with_its_exact_cost() -> None:
             output_tokens=700,
             cache_read_input_tokens=12_000,
             cache_creation_input_tokens=1000,
+            cache_creation={"ephemeral_5m_input_tokens": 1000, "ephemeral_1h_input_tokens": 0},
         ),
     )
     subject = proxy(upstream)

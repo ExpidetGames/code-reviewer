@@ -72,7 +72,11 @@ describe("the guards of the admin portal", () => {
       /billing/i.test(concretePath(route)),
     );
 
-    expect(billing.map(({ route }) => concretePath(route))).toEqual([]);
+    // #497: the provider-facing webhook is the one billing route so far. It is public by design (the signature is its
+    // credential, src/auth/access.ts) and not part of the portal; every page and portal data route is still to come.
+    expect(billing.map(({ route }) => concretePath(route))).toEqual([
+      "/api/billing/webhook",
+    ]);
   });
 
   // #429-T08

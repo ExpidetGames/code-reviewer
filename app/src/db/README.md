@@ -427,6 +427,29 @@ workspace_id = :w AND balance >= :hold`; no row changed means the hold is refuse
   `DELETE`, so a workspace with a journal entry can never be deleted. No code deletes a workspace today. Whoever builds
   workspace deletion has to decide (retention and erasure on request against an immutable ledger) before it can work.
 
+### Top-up intents and provider events
+
+Migration `20261019170000_create_billing_topup_intents` (#497; epic #489, ADR 0006, 2.12 and 2.13). It adds two empty
+tables and touches no existing row:
+
+- `billing_topup_intents` (`id` primary key; `workspace_id` → `workspaces.id`; `adapter`; `amount_micro_usd`, what WE asked
+  for, a check `> 0`; `state`, a check of `pending`/`paid`/`failed`/`expired`; `provider_checkout_ref` and
+  `provider_payment_ref`, opaque provider ids, null until known; `credited_micro_usd`, what the payment credited (net), 0
+  until paid, and `refunded_micro_usd` and `disputed_micro_usd`, the running totals of what refunds and disputes took
+  back of it, with a check that neither is negative and that together they never exceed the credit; `created_at`,
+  `updated_at`). Unique per adapter on each
+  of the two refs (NULLs do not collide), so one payment or checkout belongs to one intent. Written before any checkout
+  exists; the only way a payment reaches a workspace. **Workspace scoped**
+  (`billing-topup-intents-repository.ts`); `billing-topup-intent-directory-repository.ts` finds an intent from an event
+  before the workspace is known (read only, instance level, listed in `scoping.test.ts`).
+- `billing_webhook_events` (primary key `(provider, event_id)`; `outcome`; `subject` and `occurred_at`, which order the
+  states of one refund or dispute, or name the payment of a payment event; `received_at`; `review_state`, `open` for an
+  event an operator must review (a payment nobody could credit, a refund that could not be debited, a signed event that
+  is no event) and `resolved` once it was, null otherwise). The first idempotency layer: an id, an outcome and an order, **no
+  payload, no amount, no name**, so it is instance level (`billing-webhook-events-repository.ts`). Not pruned yet.
+
+The amount column is `integer` on SQLite and `bigint` on Postgres, like the journal. See `src/billing/README.md`.
+
 ### A database that ran the removed billing migrations
 
 Three migrations of an earlier billing design existed on `development` for a few days and are deleted (#491):

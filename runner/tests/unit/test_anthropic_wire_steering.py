@@ -13,6 +13,7 @@ carry them, so the wire keeps them, per tool call."""
 
 import json
 from copy import deepcopy
+from decimal import Decimal
 from typing import Any
 
 import pytest
@@ -23,6 +24,7 @@ from code_reviewer_runner.anthropic_wire import (
     THINKING_BINDING_BETA,
     AnthropicMessagesWire,
 )
+from code_reviewer_runner.llm_providers import ANTHROPIC
 
 THINKING_SONNET = "claude-sonnet-5-5"
 FORCING_SONNET = "claude-sonnet-5"
@@ -564,22 +566,41 @@ def test_a_model_the_list_does_not_know_gets_neither_the_thinking_setting_nor_th
     assert "anthropic-beta" not in wire.headers("dummy-key")
 
 
-# #533-T09
-def test_the_thinking_count_is_a_part_of_the_output_tokens_and_reaches_the_cost_rule_as_such() -> (
-    None
-):
+# #533-T09: the breakdown of the output tokens (#534) is a part of them, billed as a whole: it
+# travels with the usage as it is and the cost rule prices the call once, by `output_tokens`.
+def test_the_thinking_tokens_are_a_part_of_the_output_tokens_and_priced_once() -> None:
     wire = AnthropicMessagesWire(THINKING_SONNET)
 
     usage = json.loads(
         wire.decode_response(
             answer(
                 [{"type": "text", "text": "done"}],
-                output_tokens=900,
-                output_tokens_details={"thinking_tokens": 600},
+                input_tokens=10_000,
+                output_tokens=3000,
+                output_tokens_details={"thinking_tokens": 2400},
             )
         )
     )["usage"]
 
-    assert usage["completion_tokens"] == 900
-    assert usage["completion_tokens_details"] == {"reasoning_tokens": 600}
-    assert "output_tokens_details" not in usage
+    assert usage["completion_tokens"] == 3000
+    assert usage["output_tokens_details"] == {"thinking_tokens": 2400}
+    # Sonnet 5.5: $2 in and $10 out per million tokens: 10000 x 2 + 3000 x 10.
+    assert ANTHROPIC.cost_extractor(THINKING_SONNET, usage) == Decimal("0.05")
+
+
+# #533-T10
+@pytest.mark.parametrize("thinking", [3001, -1, 2.5, True, "600"])
+def test_a_thinking_count_that_does_not_fit_the_output_is_an_unknown_cost(thinking: Any) -> None:
+    wire = AnthropicMessagesWire(THINKING_SONNET)
+
+    usage = json.loads(
+        wire.decode_response(
+            answer(
+                [{"type": "text", "text": "done"}],
+                output_tokens=3000,
+                output_tokens_details={"thinking_tokens": thinking},
+            )
+        )
+    )["usage"]
+
+    assert ANTHROPIC.cost_extractor(THINKING_SONNET, usage) is None

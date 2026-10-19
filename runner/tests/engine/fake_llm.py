@@ -5,8 +5,9 @@ loopback only).
 
 The Anthropic provider (#511) reaches the same fake through LiteLLM's real Anthropic code path:
 `ANTHROPIC_API_BASE` is the fake's address without `/v1`, and the request is
-`POST /api/v1/messages` with the key in `x-api-key`. The answer is a message with a usage of input
-and output tokens (`anthropic_usage`) and no charge, as the Claude API states none.
+`POST /api/v1/messages` with the key in `x-api-key`. The answer is a message with the usage the
+real API reports (`anthropic_usage`, every field of `Message.usage`, #534) and no charge, as the
+Claude API states none.
 
 A Messages request is checked by the strict rules of the Claude API
 (`fakes/llm/anthropic_rules.py`, #533): what the real API answers with a 400, the fake answers
@@ -48,6 +49,9 @@ from fakes.llm.anthropic_rules import StrictMessagesApi
 # A held request ends by itself after this long, so a broken test cannot leave a thread behind.
 _HOLD_LIMIT_SECONDS = 120.0
 _POLL_SECONDS = 0.05
+_REAL_USAGE = (
+    Path(__file__).resolve().parents[3] / "fakes" / "fixtures" / "anthropic-message-usage.json"
+)
 
 
 @dataclass
@@ -124,10 +128,8 @@ class FakeLlm:
     by_model: dict[str, Reply] = field(default_factory=lambda: {})
     # The charge of an answer in USD, stated in `usage.cost` like OpenRouter; None leaves it out.
     cost: float | None = 0.00042
-    # What an Anthropic answer reports as its usage (#511); cache fields can be added.
-    anthropic_usage: dict[str, Any] = field(
-        default_factory=lambda: {"input_tokens": 100, "output_tokens": 50}
-    )
+    # What an Anthropic answer reports as its usage (#511): the shape the real API returns (#534).
+    anthropic_usage: dict[str, Any] = field(default_factory=lambda: real_anthropic_usage(100, 50))
     # Error messages quote the key that arrived, like a provider that says "Incorrect API key".
     echo_key_in_errors: bool = False
     requests: list[LlmRequest] = field(default_factory=lambda: [])
@@ -301,6 +303,20 @@ def completion(model: str, content: str, cost: float | None = None) -> dict[str,
         ],
         "usage": usage,
     }
+
+
+def real_anthropic_usage(
+    input_tokens: int = 100, output_tokens: int = 50, **fields: Any
+) -> dict[str, Any]:
+    """The `usage` of a real Messages API answer with every field it carries (#534), from the
+    fixture the other fakes and the unit tests share (`fakes/fixtures/anthropic-message-usage.json`,
+    the shape of `Message.usage` in the API reference). `fields` replace or add to them.
+
+    The first real Dynamic run failed on `output_tokens_details`, which a fake that only reports
+    the token counts never showed."""
+    usage: dict[str, Any] = json.loads(_REAL_USAGE.read_text(encoding="utf-8"))
+    usage.update(input_tokens=input_tokens, output_tokens=output_tokens, **fields)
+    return usage
 
 
 def anthropic_message(model: str, content: str, usage: dict[str, Any]) -> dict[str, Any]:

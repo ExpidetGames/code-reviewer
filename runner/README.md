@@ -893,14 +893,14 @@ no sampling parameter, and its calls cost an unknown amount.
   `thinking-binding-controls-2026-08-01`: the proxy's own final call (wrap-up, recovery) changes the tool set,
   and a thinking block is bound to the conversation that produced it, so without this an account created after
   2026-08-31 would answer 400; with it that call loses its reasoning and nothing more. Thinking tokens are a
-  part of `usage.output_tokens`, priced with them once; the wire reports `output_tokens_details.thinking_tokens`
-  as `completion_tokens_details.reasoning_tokens` and the cost rule only checks that it fits the output (a count
-  above it is an unknown cost). Not proven against the real API, only against the fakes.
+  part of `usage.output_tokens`, priced with them once: `output_tokens_details.thinking_tokens` travels with the
+  usage and the cost rule only checks that it fits the output (#534; a count above it is an unknown cost). Not
+  proven against the real API, only against the fakes.
 - **Errors.** The envelope `{"type":"error","error":{"type","message"}}` goes through the same table as
   every provider: 400 "prompt is too long" is `llm_context_length_exceeded`, 401/403 `llm_auth`, 404
   `model_unknown`, 429 `llm_rate_limit`, 5xx and 529 (overloaded) `llm_unavailable`. What the provider
   says never reaches the engine.
-- **Tests.** `tests/unit/test_anthropic_models.py`, `test_anthropic_cost.py`, `test_anthropic_cost_thinking.py`,
+- **Tests.** `tests/unit/test_anthropic_models.py`, `test_anthropic_cost.py`,
   `test_anthropic_provider.py`, `test_anthropic_wire.py`, `test_anthropic_wire_steering.py`,
   `test_anthropic_strict_fake.py`, `test_dynamic_review_proxy_anthropic.py`,
   `test_dynamic_review_proxy_anthropic_steering.py`, `test_diff_cost_anthropic.py`,

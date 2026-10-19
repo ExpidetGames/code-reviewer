@@ -38,8 +38,8 @@ tool call that is not valid.
 `usage` whose counts the provider's cost rule reads: `prompt_tokens` holds the cache tokens, which
 are also named on their own, and what changes a price (tier, speed, region, server tools) is
 passed on so the rule can refuse to price what it does not know. Thinking blocks never reach the
-engine; the thinking tokens, a part of the output tokens, are reported as such
-(`completion_tokens_details`).
+engine; the thinking tokens are a part of the output tokens, which are billed as a whole (#534):
+the breakdown travels with the usage and the cost rule checks it.
 """
 
 import json
@@ -86,7 +86,6 @@ _TRANSLATED_FIELDS: Final = (
     "cache_read_input_tokens",
     "cache_creation_input_tokens",
     "cache_creation",
-    "output_tokens_details",
 )
 _SYSTEM_ROLES: Final = ("system", "developer")
 
@@ -499,22 +498,11 @@ def _count_or_zero(value: object) -> int | None:
     return 0 if value is None else _count(value)
 
 
-def _thinking_breakdown(raw: object) -> dict[str, Any] | None:
-    """The thinking tokens of an answer in LiteLLM's name for them, a part of the output tokens
-    (#533).
-
-    Only a breakdown that holds nothing but the thinking count is translated; anything else the
-    details state is passed on as it is, so that the cost rule refuses to price a charge it does not
-    know. The count itself is passed on as it came: the cost rule checks that it fits the output."""
-    details = as_object(raw)
-    if details is None:
-        return None
-    others = {name: value for name, value in details.items() if name != "thinking_tokens"}
-    if any(value not in (None, 0, "", [], {}) for value in others.values()):
-        return {"output_tokens_details": details}
-    if "thinking_tokens" not in details:
-        return None
-    return {"completion_tokens_details": {"reasoning_tokens": details["thinking_tokens"]}}
+def _split_total(split: dict[str, Any]) -> int | None:
+    """The tokens written to the cache by the two lifetimes of the split, None when unusable."""
+    five = _count_or_zero(split.get("ephemeral_5m_input_tokens"))
+    hour = _count_or_zero(split.get("ephemeral_1h_input_tokens"))
+    return None if five is None or hour is None else five + hour
 
 
 def _usage(raw: object) -> dict[str, Any] | None:
@@ -528,7 +516,12 @@ def _usage(raw: object) -> dict[str, Any] | None:
     uncached = _count(usage.get("input_tokens"))
     output = _count(usage.get("output_tokens"))
     read = _count_or_zero(usage.get("cache_read_input_tokens"))
+    split = as_object(usage.get("cache_creation"))
     written = _count_or_zero(usage.get("cache_creation_input_tokens"))
+    if usage.get("cache_creation_input_tokens") is None and split is not None:
+        # The documented split (5 minute and 1 hour writes) without the flat count: the split is
+        # the count (#534).
+        written = _split_total(split)
     if uncached is not None and read is not None and written is not None:
         translated["prompt_tokens"] = uncached + read + written
         translated["cache_read_input_tokens"] = read
@@ -537,10 +530,6 @@ def _usage(raw: object) -> dict[str, Any] | None:
         translated["completion_tokens"] = output
     if "prompt_tokens" in translated and output is not None:
         translated["total_tokens"] = translated["prompt_tokens"] + output
-    thinking = _thinking_breakdown(usage.get("output_tokens_details"))
-    if thinking is not None:
-        translated.update(thinking)
-    split = as_object(usage.get("cache_creation"))
     if split is not None:
         translated["prompt_tokens_details"] = {
             "cached_tokens": translated.get("cache_read_input_tokens", 0),
