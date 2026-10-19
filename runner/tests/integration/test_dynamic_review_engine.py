@@ -476,8 +476,10 @@ def test_the_message_list_defect_of_the_pinned_server_cannot_fail_or_blind_a_run
     assert not any(entry.get("messages_requested") for entry in fixture.traces())
 
 
-# #290-T08
-def test_a_second_call_that_would_cross_the_cost_limit_is_refused_before_the_provider(
+# #290-T08, changed by #540 (B1): the second call would end above the limit, so it is not refused:
+# it is the final call of the wrap-up, which the cost guard always admits while the spend is within
+# the limit. The run ends with its review, stopped early, and a third call never leaves the proxy.
+def test_a_second_call_that_would_cross_the_cost_limit_is_the_final_call(
     tmp_path: Path,
 ) -> None:
     fixture = Fixture(
@@ -487,8 +489,8 @@ def test_a_second_call_that_would_cross_the_cost_limit_is_refused_before_the_pro
     )
 
     # The first call is a normal call (it and a final call after it are reserved at about 0.077
-    # USD) and settles at 0.065; the second would reserve about 0.0164 more (4,096 output tokens),
-    # end above the limit and never leaves the proxy.
+    # USD) and settles at 0.065; the second would reserve about 0.0164 more (4,096 output tokens)
+    # and end above the limit: it is the final call.
     with FakeUpstream(
         [
             asks(tool_call("c1", "read", {"filePath": "src/api/handler.ts"})),
@@ -497,13 +499,16 @@ def test_a_second_call_that_would_cross_the_cost_limit_is_refused_before_the_pro
         usage={"prompt_tokens": 1, "completion_tokens": 10, "cost": 0.065},
     ) as upstream:
         answer = fixture.run(upstream)
-    assert not answer.ok
-    assert answer.error is not None
-    assert answer.error.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
-    assert len(upstream.requests) == 1
-    assert fixture.ledger.model_calls == 1
+    assert fixture.ledger.stopped_early == "cost_limit"
+    assert len(upstream.requests) == 2
+    assert fixture.ledger.model_calls == 2
+    assert [tool["function"]["name"] for tool in upstream.requests[1][1]["tools"]] == [
+        "StructuredOutput"
+    ]
+    assert fixture.ledger.limit_exceeded_by is not None
     answers = next(e["proxy_answers"] for e in fixture.traces() if "proxy_answers" in e)
-    assert answers == [200, 403]
+    assert answers == [200, 200]
+    assert answer.ok, answer.error
 
 
 # #290-T09
