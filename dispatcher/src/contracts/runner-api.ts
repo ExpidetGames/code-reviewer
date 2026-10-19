@@ -34,7 +34,7 @@ export type LlmProviderId = string;
 /**
  * #424: the providers this release of the contract knows. The registry of the runner (llm_providers.py) and the one of the app (app/src/llm/providers) each list exactly these, and tests compare the three. A provider is added here with the change that adds its adapter.
  */
-export type KnownLlmProvider = "openrouter";
+export type KnownLlmProvider = "openrouter" | "anthropic";
 /**
  * The claim features this version of the contract defines (`features` in ClaimRequest). A reader ignores a feature name it does not know. `dynamic_capabilities` (#279): the runner reads `dynamic.capabilities`. `worker_credential` (#318): the caller is a Dispatcher and wants the split answer; the job input and its secrets reach only the Worker, with the per-job credential. `supersede` (#396): the runner understands `job.superseded` in a heartbeat answer and stops gracefully (it finishes the model requests in flight, sends no more, publishes nothing, reports its result and usage). The app supersedes a running job only when the claim named it. A Worker names it in the `features` of its details request.
  */

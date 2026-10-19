@@ -19,9 +19,13 @@ describe("the names of the secrets", () => {
       "github_app_private_key",
       "github_app_webhook_secret",
       "operator_llm_key",
+      "operator_llm_key.anthropic",
       "smtp_password",
     ]);
-    expect([...WORKSPACE_SECRET_NAMES]).toEqual(["llm_api_key"]);
+    expect([...WORKSPACE_SECRET_NAMES]).toEqual([
+      "llm_api_key",
+      "llm_api_key.anthropic",
+    ]);
   });
 
   // #491-T07

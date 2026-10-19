@@ -209,7 +209,7 @@ value), set Literal.
 | `RUNNER_TOKEN` | yes | `openssl rand -hex 32` | At least 32 characters. Secret shared by the app and the runner; both read this one variable. |
 | `OPERATOR_API_TOKEN` | optional | `openssl rand -hex 32` | Secret. Switches on the operator API (`/api/operator/v1`), with which an external service reads the workspaces and sets their limits, key mode and suspension ([`app/src/operator-api/README.md`](../app/src/operator-api/README.md), format in [`contracts/operator-api.v1.json`](../contracts/operator-api.v1.json)). Leave it empty and the API does not exist (its paths answer 404). At least 32 characters, no white space, different from `RUNNER_TOKEN`, `APP_SECRET` and `BETTER_AUTH_SECRET`: the same value as any of them stops the start, a weak one keeps the API off and the log says so (never the value). |
 | `LLM_API_KEY` | optional | The OpenRouter API key | Legacy, secret. Every workspace enters its own key in the UI (Settings, LLM access). The update imports this one **once** into the default workspace (encrypted) and does not read it afterwards. Without a key, reviews of a workspace fail with `llm_not_configured`: enter one before the first review. |
-| `LLM_PROVIDER` | optional | `openrouter` | The only provider for now; this is the default. |
+| `LLM_PROVIDER` | optional | `openrouter` or `anthropic` | Legacy, imported once like `LLM_API_KEY`; `openrouter` is the default. |
 | `LLM_MODEL` | optional | An OpenRouter model name | Default `anthropic/claude-haiku-5.5`. The review settings in the UI can choose another model per project. The update also copies a model that differs from the default into the review defaults of the default workspace, so removing this variable later does not change the model. |
 | `LLM_MAX_TOKENS` | optional | Context window of a model PR-Agent does not know | Leave empty for known models. |
 | `DATABASE_BUSY_TIMEOUT_MS` | optional | A number of milliseconds | How long a database write waits for a lock. Empty: 5000. |
@@ -484,7 +484,7 @@ The app filters what it can (for example image links a comment once carried with
 runner), but the network is the second line: **the runner needs to reach only three things**,
 
 - `api.github.com`, HTTPS port 443 (GitHub's API; GitHub Enterprise Server would be its own host),
-- `openrouter.ai`, HTTPS port 443 (the models),
+- `openrouter.ai` and, for a workspace that brings an Anthropic key (or an operator that sets one), `api.anthropic.com`, HTTPS port 443 (the models),
 - the `app` container on the Docker network, `app:3000` (the runner API),
 
 plus DNS. The Compose files do not enforce this, because Docker has no switch for it and the allowed

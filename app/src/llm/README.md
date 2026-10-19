@@ -43,12 +43,45 @@ What moved behind the adapter, with the module that stays and does the part that
 | `llm_api_key`, `operator_llm_key`            | `secretNames`. **They never change**: the ciphertext is bound to the name, so a stored key would stop decrypting (ADR 0005, 2.5). An operator name must differ from the fixed secret names (`secretNamesOf`, `src/secrets/names.ts`) |
 | `OPERATOR_KEY_PROVIDER`, `?? "openrouter"`   | `DEFAULT_LLM_PROVIDER`                                                                                                                                                                                                               |
 
-`costReporting` is `provider_reported` when the provider says what a call cost (every cost limit relies on that) or
-`none`. Nothing reads `none` yet; the policy for such a provider comes with the first one (ADR 0005, 2.4).
+`costReporting` says how the cost of a call is known (every cost limit and the billing rely on it):
+`provider_reported` when the provider states the charge of every answer (OpenRouter), `computed_from_usage` when it
+states token counts only and the runner prices them with the adapter's price list (Anthropic, below) and `none`.
+Nothing reads the value for a decision: the runner decides per provider (`runner/README.md`, "LLM providers").
 
-Not part of the seam yet (the next issues): the runner side (`llm.provider` is still the enum of one value in the
-contracts), the choice of the provider per project and the model catalog. A workspace has **one key per provider**
-since #426 (below, "The keys of a workspace").
+The providers today are **OpenRouter** (the default, first in the list) and **Anthropic**. A workspace has **one key per
+provider** since #426 (below, "The keys of a workspace").
+
+### Anthropic (Claude API, direct; #511)
+
+`providers/anthropic/` is the adapter for the Claude API, the provider the managed key buys its tokens from.
+
+| File              | Role                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `models.ts`       | **The model list**: fixed and curated, defined in code (the catalog decision of 2026-10-18). Per model: id, display name, context window, max output, the flags `temperature`, `topP`, `tools`, `forcedToolChoice`, `thinkingDisabled`, the review kinds, the prices per MTok (input, output, cache read, cache write 5 minutes and 1 hour, and the higher tier of Haiku 5.5), Anthropic's retirement commitment. The source URLs and the day it was read are in the comment on top |
+| `descriptor.ts`   | The descriptor, derived from the list: `checkModelId` is membership of the list (no alias, no prefix, no case folding), `suggestedModels` is the list, `priceOf` the list price for the cost guard                                                                                                                                                                                                                                                                                  |
+| `capabilities.ts` | `checkModelCapabilities` is answered from the list, without a request: `supported` for a model a Dynamic Review can use, `unsupported` for one that is listed but cannot, `unknown_model` for any other id                                                                                                                                                                                                                                                                          |
+| `key-test.ts`     | `testKey`: `GET /v1/models?limit=1` (free) with `x-api-key` and `anthropic-version`; the same failure classes and cleaning as every adapter                                                                                                                                                                                                                                                                                                                                         |
+| `adapter.ts`      | The descriptor and the two operations                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+
+- **The list is closed.** Whoever brings the key, only a listed model can be chosen. `contracts/anthropic-models.v1.json`
+  is the single record: the runner keeps its own typed copy to price calls (`anthropic_models.py`) and tests compare the
+  three. To update after Anthropic changes its lineup: read the models, pricing and deprecations pages, change
+  `models.ts`, the contract file and the runner's copy together, change `ANTHROPIC_MODELS_AS_OF`, run the tests.
+- **Defaults.** Diff: `claude-haiku-5-5`. Dynamic: `claude-sonnet-5` (the reason is in `models.ts`).
+- **Review kinds.** A Dynamic Review needs tools, a forced tool choice (the engine returns its findings through a forced
+  `StructuredOutput` call) and `thinking: disabled` (the engine's history cannot carry thinking blocks). Fable 5.1,
+  Opus 5.5 and Sonnet 5.5 answer a forced tool choice with a 400 and Fable 5 cannot switch thinking off, so those four
+  are **Diff only**; the claim of a Dynamic job on one of them fails with `dynamic_model_features_unsupported`.
+- **Sampling.** `temperature` and `top_p` are a 400 from Opus 4.7 on. The flags of the list decide what a request may
+  carry, in the runner too; nothing is guessed from a name.
+- **Cost.** Anthropic returns token counts and no charge. The runner computes the cost of every call from the counts and
+  the list prices, exactly (`runner/README.md`, "Anthropic"); a model that is not listed, or an answer that cannot be
+  priced, is an unknown cost, which billing charges nothing for.
+- **Egress.** The app asks `api.anthropic.com` (HTTPS 443) for the key test only; the runner sends the model calls.
+- **Retirement.** `retiresNotBefore` records Anthropic's commitment. `claude-opus-4-5-20251101` (not before 2026-11-24)
+  and `claude-haiku-4-5-20251001` (not before 2026-10-15, the day has passed and the model is still listed as active)
+  are close to it; a model Anthropic deprecates is removed from the list in the same change that removes it from the
+  contract file and the runner.
 
 ## Which key a job gets
 
@@ -246,7 +279,7 @@ model), so the model survives the removal of the variable.
 
 | Variable         | Meaning                                                                                                                                                                                                                                               |
 | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `LLM_PROVIDER`   | `openrouter` (the only provider for now). Not case sensitive.                                                                                                                                                                                         |
+| `LLM_PROVIDER`   | A provider of the registry: `openrouter` (the default) or `anthropic`. Not case sensitive.                                                                                                                                                            |
 | `LLM_API_KEY`    | Surrounding whitespace and a trailing line break are ignored; whitespace inside, control characters or over 4096 characters make it invalid.                                                                                                          |
 | `LLM_MODEL`      | The OpenRouter name of the model reviews use unless the review settings choose another, without an `openrouter/` prefix (the runner adds it). Default `anthropic/claude-haiku-5.5` (`DEFAULT_LLM_MODEL`, the recommendation of the model comparison). |
 | `LLM_MAX_TOKENS` | The context window of a model PR-Agent does not know (1000 to 10000000); `contextWindowTokens` in the code. Unset lets PR-Agent decide. It is **not** the token budget of a review: that is a review setting and replaces this value in a job.        |
@@ -335,7 +368,11 @@ claimed-keys.ts`: one row per job, the sealed text is the list of the keys hande
 
 `providers/registry.test.ts` (validation, with a fake second adapter that exists only in tests: `providers/fake-adapter.ts`),
 `providers/structure.test.ts` (the provider is named only in its adapter), `providers/openrouter/adapter.test.ts` and
-`providers/openrouter/adapter.integration.test.ts` (the adapter against the fake LLM);
+`providers/openrouter/adapter.integration.test.ts` (the adapter against the fake LLM),
+`providers/anthropic/models.test.ts` (the model list: the models on offer, the contract file, prices and flags),
+`providers/anthropic/adapter.test.ts` and `providers/anthropic/adapter.integration.test.ts` (the adapter, its key test against
+the fake LLM), `integration-tests/http/runner-api-anthropic.integration.test.ts` (the claim of a job on this provider, on the
+workspace's key and on the operator's);
 `resolve.test.ts`, `config.test.ts`, `access.test.ts`, `startup.test.ts`, `endpoint.test.ts`, `model-capabilities.test.ts`, `dynamic-capabilities.test.ts` and
 `../instrumentation.test.ts` (unit, no database); `workspace-key.integration.test.ts`, `workspace-keys.integration.test.ts` (one key per provider, with a test-only second provider: the keys apart, the name bound into the ciphertext, an old row), `workspace-keys-access.integration.test.ts` (which provider's key a job takes, the keys to mask), `operator-key.integration.test.ts` (one key per provider, with a test-only second provider),
 `operator-key-test.integration.test.ts` (the operator's Test button and its own counters),

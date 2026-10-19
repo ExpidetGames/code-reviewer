@@ -28,7 +28,7 @@ import re
 from collections.abc import Callable, Mapping
 
 from code_reviewer_runner.job import RESERVED_OPTIONS, Job
-from code_reviewer_runner.llm_providers import require_provider, with_prefix
+from code_reviewer_runner.llm_providers import require_provider, with_prefix, without_prefix
 from code_reviewer_runner.platforms import Platform, platform_for
 
 # The Dynaconf setting that decides whether `@format`, `@jinja`, ... are evaluated at all.
@@ -87,7 +87,9 @@ def build_environment(job: Job, parent: Mapping[str, str]) -> dict[str, str]:
             "CONFIG__MODEL": pinned_model,
             "CONFIG__MODEL_WEAK": pinned_model,
             "CONFIG__MODEL_REASONING": pinned_model,
-            provider.api_base_variable: job.llm.base_url or provider.default_api_base,
+            provider.api_base_variable: provider.litellm_api_base(
+                job.llm.base_url or provider.default_api_base
+            ),
             "LITELLM_LOCAL_MODEL_COST_MAP": "True",
             "LITELLM_LOG": "ERROR",
         }
@@ -153,6 +155,17 @@ def build_typed_settings(job: Job) -> dict[str, bool | int | str | list[str]]:
         # second (default 32000), so both have to follow the job.
         settings["config.custom_model_max_tokens"] = job.llm.max_tokens
         settings["config.max_model_tokens"] = job.llm.max_tokens
+    else:
+        # No budget in the job: a model PR-Agent does not know still has the window of the
+        # provider's list (the default clamp of 32000 stays).
+        window = provider.context_window(without_prefix(provider, job.llm.model))
+        if window is not None:
+            settings["config.custom_model_max_tokens"] = window
+    # What a model is asked to write at most. Reasoning counts against it, and the default of the
+    # provider's client can be used up before the review is written.
+    output = provider.diff_output_tokens(without_prefix(provider, job.llm.model))
+    if output is not None:
+        settings["config.max_output_tokens"] = output
     return settings
 
 

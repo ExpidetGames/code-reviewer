@@ -1,0 +1,327 @@
+{
+  "$comment": "Single record of the Anthropic (Claude API) model list: the app (app/src/llm/providers/anthropic/models.ts) and the runner (runner/src/code_reviewer_runner/anthropic_models.py) each keep a typed copy and a test compares both with this file. Prices are USD per million tokens as decimal strings (public list prices of Anthropic).",
+  "version": 1,
+  "provider": "anthropic",
+  "asOf": "2026-10-19",
+  "sources": [
+    "https://platform.claude.com/docs/en/about-claude/models/overview",
+    "https://platform.claude.com/docs/en/about-claude/pricing",
+    "https://platform.claude.com/docs/en/about-claude/model-deprecations",
+    "https://platform.claude.com/docs/en/build-with-claude/thinking",
+    "https://platform.claude.com/docs/en/agents-and-tools/tool-use/define-tools"
+  ],
+  "defaultModels": {
+    "diff": "claude-haiku-5-5",
+    "dynamic": "claude-sonnet-5"
+  },
+  "models": [
+    {
+      "id": "claude-fable-5-1",
+      "displayName": "Claude Fable 5.1",
+      "contextWindowTokens": 1000000,
+      "maxOutputTokens": 128000,
+      "retiresNotBefore": "2027-09-01",
+      "supports": {
+        "temperature": false,
+        "topP": false,
+        "tools": true,
+        "forcedToolChoice": false,
+        "thinkingDisabled": false
+      },
+      "reviewKinds": ["diff"],
+      "pricesUsdPerMTok": {
+        "input": "10",
+        "output": "50",
+        "cacheRead": "0.25",
+        "cacheWrite5m": "12.50",
+        "cacheWrite1h": "20"
+      },
+      "longPrompt": null
+    },
+    {
+      "id": "claude-opus-5-5",
+      "displayName": "Claude Opus 5.5",
+      "contextWindowTokens": 1000000,
+      "maxOutputTokens": 128000,
+      "retiresNotBefore": "2027-09-22",
+      "supports": {
+        "temperature": false,
+        "topP": false,
+        "tools": true,
+        "forcedToolChoice": false,
+        "thinkingDisabled": false
+      },
+      "reviewKinds": ["diff"],
+      "pricesUsdPerMTok": {
+        "input": "4",
+        "output": "20",
+        "cacheRead": "0.20",
+        "cacheWrite5m": "5",
+        "cacheWrite1h": "8"
+      },
+      "longPrompt": null
+    },
+    {
+      "id": "claude-sonnet-5-5",
+      "displayName": "Claude Sonnet 5.5",
+      "contextWindowTokens": 1000000,
+      "maxOutputTokens": 128000,
+      "retiresNotBefore": "2027-09-28",
+      "supports": {
+        "temperature": false,
+        "topP": false,
+        "tools": true,
+        "forcedToolChoice": false,
+        "thinkingDisabled": false
+      },
+      "reviewKinds": ["diff"],
+      "pricesUsdPerMTok": {
+        "input": "2",
+        "output": "10",
+        "cacheRead": "0.10",
+        "cacheWrite5m": "2.50",
+        "cacheWrite1h": "4"
+      },
+      "longPrompt": null
+    },
+    {
+      "id": "claude-haiku-5-5",
+      "displayName": "Claude Haiku 5.5",
+      "contextWindowTokens": 1000000,
+      "maxOutputTokens": 128000,
+      "retiresNotBefore": "2027-10-07",
+      "supports": {
+        "temperature": false,
+        "topP": false,
+        "tools": true,
+        "forcedToolChoice": true,
+        "thinkingDisabled": true
+      },
+      "reviewKinds": ["diff", "dynamic"],
+      "pricesUsdPerMTok": {
+        "input": "0.10",
+        "output": "0.50",
+        "cacheRead": "0.01",
+        "cacheWrite5m": "0.125",
+        "cacheWrite1h": "0.20"
+      },
+      "longPrompt": {
+        "overInputTokens": 100000,
+        "pricesUsdPerMTok": {
+          "input": "0.50",
+          "output": "2.50",
+          "cacheRead": "0.05",
+          "cacheWrite5m": "0.625",
+          "cacheWrite1h": "1"
+        }
+      }
+    },
+    {
+      "id": "claude-fable-5",
+      "displayName": "Claude Fable 5",
+      "contextWindowTokens": 1000000,
+      "maxOutputTokens": 128000,
+      "retiresNotBefore": "2027-06-09",
+      "supports": {
+        "temperature": false,
+        "topP": false,
+        "tools": true,
+        "forcedToolChoice": true,
+        "thinkingDisabled": false
+      },
+      "reviewKinds": ["diff"],
+      "pricesUsdPerMTok": {
+        "input": "10",
+        "output": "50",
+        "cacheRead": "1",
+        "cacheWrite5m": "12.50",
+        "cacheWrite1h": "20"
+      },
+      "longPrompt": null
+    },
+    {
+      "id": "claude-opus-5",
+      "displayName": "Claude Opus 5",
+      "contextWindowTokens": 1000000,
+      "maxOutputTokens": 128000,
+      "retiresNotBefore": "2027-07-24",
+      "supports": {
+        "temperature": false,
+        "topP": false,
+        "tools": true,
+        "forcedToolChoice": true,
+        "thinkingDisabled": true
+      },
+      "reviewKinds": ["diff", "dynamic"],
+      "pricesUsdPerMTok": {
+        "input": "5",
+        "output": "25",
+        "cacheRead": "0.50",
+        "cacheWrite5m": "6.25",
+        "cacheWrite1h": "10"
+      },
+      "longPrompt": null
+    },
+    {
+      "id": "claude-opus-4-8",
+      "displayName": "Claude Opus 4.8",
+      "contextWindowTokens": 1000000,
+      "maxOutputTokens": 128000,
+      "retiresNotBefore": "2027-05-28",
+      "supports": {
+        "temperature": false,
+        "topP": false,
+        "tools": true,
+        "forcedToolChoice": true,
+        "thinkingDisabled": true
+      },
+      "reviewKinds": ["diff", "dynamic"],
+      "pricesUsdPerMTok": {
+        "input": "5",
+        "output": "25",
+        "cacheRead": "0.50",
+        "cacheWrite5m": "6.25",
+        "cacheWrite1h": "10"
+      },
+      "longPrompt": null
+    },
+    {
+      "id": "claude-opus-4-7",
+      "displayName": "Claude Opus 4.7",
+      "contextWindowTokens": 1000000,
+      "maxOutputTokens": 128000,
+      "retiresNotBefore": "2027-04-16",
+      "supports": {
+        "temperature": false,
+        "topP": false,
+        "tools": true,
+        "forcedToolChoice": true,
+        "thinkingDisabled": true
+      },
+      "reviewKinds": ["diff", "dynamic"],
+      "pricesUsdPerMTok": {
+        "input": "5",
+        "output": "25",
+        "cacheRead": "0.50",
+        "cacheWrite5m": "6.25",
+        "cacheWrite1h": "10"
+      },
+      "longPrompt": null
+    },
+    {
+      "id": "claude-opus-4-6",
+      "displayName": "Claude Opus 4.6",
+      "contextWindowTokens": 1000000,
+      "maxOutputTokens": 128000,
+      "retiresNotBefore": "2027-02-05",
+      "supports": {
+        "temperature": true,
+        "topP": true,
+        "tools": true,
+        "forcedToolChoice": true,
+        "thinkingDisabled": true
+      },
+      "reviewKinds": ["diff", "dynamic"],
+      "pricesUsdPerMTok": {
+        "input": "5",
+        "output": "25",
+        "cacheRead": "0.50",
+        "cacheWrite5m": "6.25",
+        "cacheWrite1h": "10"
+      },
+      "longPrompt": null
+    },
+    {
+      "id": "claude-opus-4-5-20251101",
+      "displayName": "Claude Opus 4.5",
+      "contextWindowTokens": 200000,
+      "maxOutputTokens": 64000,
+      "retiresNotBefore": "2026-11-24",
+      "supports": {
+        "temperature": true,
+        "topP": true,
+        "tools": true,
+        "forcedToolChoice": true,
+        "thinkingDisabled": true
+      },
+      "reviewKinds": ["diff", "dynamic"],
+      "pricesUsdPerMTok": {
+        "input": "5",
+        "output": "25",
+        "cacheRead": "0.50",
+        "cacheWrite5m": "6.25",
+        "cacheWrite1h": "10"
+      },
+      "longPrompt": null
+    },
+    {
+      "id": "claude-sonnet-5",
+      "displayName": "Claude Sonnet 5",
+      "contextWindowTokens": 1000000,
+      "maxOutputTokens": 128000,
+      "retiresNotBefore": "2027-06-30",
+      "supports": {
+        "temperature": false,
+        "topP": false,
+        "tools": true,
+        "forcedToolChoice": true,
+        "thinkingDisabled": true
+      },
+      "reviewKinds": ["diff", "dynamic"],
+      "pricesUsdPerMTok": {
+        "input": "2",
+        "output": "10",
+        "cacheRead": "0.20",
+        "cacheWrite5m": "2.50",
+        "cacheWrite1h": "4"
+      },
+      "longPrompt": null
+    },
+    {
+      "id": "claude-sonnet-4-6",
+      "displayName": "Claude Sonnet 4.6",
+      "contextWindowTokens": 1000000,
+      "maxOutputTokens": 128000,
+      "retiresNotBefore": "2027-02-17",
+      "supports": {
+        "temperature": true,
+        "topP": true,
+        "tools": true,
+        "forcedToolChoice": true,
+        "thinkingDisabled": true
+      },
+      "reviewKinds": ["diff", "dynamic"],
+      "pricesUsdPerMTok": {
+        "input": "3",
+        "output": "15",
+        "cacheRead": "0.30",
+        "cacheWrite5m": "3.75",
+        "cacheWrite1h": "6"
+      },
+      "longPrompt": null
+    },
+    {
+      "id": "claude-haiku-4-5-20251001",
+      "displayName": "Claude Haiku 4.5",
+      "contextWindowTokens": 200000,
+      "maxOutputTokens": 64000,
+      "retiresNotBefore": "2026-10-15",
+      "supports": {
+        "temperature": true,
+        "topP": true,
+        "tools": true,
+        "forcedToolChoice": true,
+        "thinkingDisabled": true
+      },
+      "reviewKinds": ["diff", "dynamic"],
+      "pricesUsdPerMTok": {
+        "input": "1",
+        "output": "5",
+        "cacheRead": "0.10",
+        "cacheWrite5m": "1.25",
+        "cacheWrite1h": "2"
+      },
+      "longPrompt": null
+    }
+  ]
+}
