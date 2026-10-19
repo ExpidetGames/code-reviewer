@@ -450,6 +450,14 @@ tables and touches no existing row:
 
 The amount column is `integer` on SQLite and `bigint` on Postgres, like the journal. See `src/billing/README.md`.
 
+### The newest jobs of the instance
+
+Migration `20261019183000_add_jobs_created_at_index` (#541). It adds the index `jobs_created_at_id` on `jobs (created_at,
+id)` and touches no column and no row, so the release that is still running is not affected while it runs. The runs page
+of the instance admin (`job-directory-repository.ts`) lists the newest jobs of every workspace in that order; without the
+index each call sorts every job of the instance. `job-directory-repository.integration.test.ts` reads the query plan on
+SQLite.
+
 ### A database that ran the removed billing migrations
 
 Three migrations of an earlier billing design existed on `development` for a few days and are deleted (#491):

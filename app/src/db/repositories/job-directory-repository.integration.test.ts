@@ -3,6 +3,7 @@
 // The jobs of every workspace for the instance admin (#541), against a real SQLite file: two workspaces,
 // a list across both with the names of the workspace and the repository, one job by its id, and nothing
 // for an id nobody has.
+import { sql } from "kysely";
 import { describe, expect, it } from "vitest";
 import { createRunsFixture } from "../../test-support/runs.ts";
 import {
@@ -94,6 +95,24 @@ describe("the job directory of the instance admin", () => {
 
     expect(runs).toHaveLength(1);
     expect(hasMore).toBe(true);
+  });
+
+  // #541-T09: the list orders every job of the instance by creation time; without an index on it every
+  // call of the page would sort them all.
+  it("reads the newest jobs of the instance from an index, without sorting them all", async () => {
+    const f = await createRunsFixture();
+    await f.waiting();
+
+    const plan = await sql<{ detail: string }>`
+      explain query plan
+      select jobs.id from jobs
+      inner join repositories on repositories.id = jobs.repository_id
+      inner join workspaces on workspaces.id = jobs.workspace_id
+      order by jobs.created_at desc, jobs.id desc limit 101`.execute(f.db);
+
+    const detail = plan.rows.map((row) => row.detail).join("\n");
+    expect(detail).toContain("jobs_created_at_id");
+    expect(detail).not.toContain("TEMP B-TREE");
   });
 
   // #541-T09
