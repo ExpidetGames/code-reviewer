@@ -21,7 +21,8 @@ have one. A call that cannot be priced exactly has **no** cost (`None`), never z
 The usage is read in the shape LiteLLM gives it and the Dynamic proxy translates Anthropic's answer
 into (`prompt_tokens` holds the cache tokens, which are also named on their own), as a mapping or as
 an object. A cache write without a split is priced as a five minute write, the lifetime the runner's
-requests use.
+requests use. The thinking tokens of a model that thinks (#533) are a part of the output tokens and
+priced with them, once; their count is only checked to fit the output.
 """
 
 from collections.abc import Mapping
@@ -144,6 +145,8 @@ def _tokens(usage: object) -> _Tokens | None:
     uncached = prompt - read - written
     if uncached < 0 or prompt + output == 0:
         return None
+    if not _thinking_fits(usage, output):
+        return None
     write_5m, write_1h = written, 0
     details = usage_field(
         usage_field(usage, "prompt_tokens_details"), "cache_creation_token_details"
@@ -155,6 +158,16 @@ def _tokens(usage: object) -> _Tokens | None:
             return None
         write_5m, write_1h = split_5m, split_1h
     return _Tokens(uncached, output, read, write_5m, write_1h)
+
+
+def _thinking_fits(usage: object, output: int) -> bool:
+    """The thinking tokens are a part of the output tokens, priced with them and never added (#533);
+    a count that is no whole number, or is more than the output, is not a count to price by."""
+    reasoning = usage_field(usage_field(usage, "completion_tokens_details"), "reasoning_tokens")
+    if reasoning is None:
+        return True
+    count = _count(reasoning)
+    return count is not None and count <= output
 
 
 def _prices_for(model: ClaudeModel, tokens: _Tokens) -> Prices:
