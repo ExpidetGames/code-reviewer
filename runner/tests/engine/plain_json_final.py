@@ -18,6 +18,7 @@ extractor never looks at reasoning, tool results, `info.structured` or an earlie
 """
 
 import json
+import re
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, cast
@@ -27,8 +28,12 @@ from code_reviewer_runner.dynamic_review.tagescape import escape_text
 # The most findings a repair asks for after a cut-off answer: the output limit was the problem, so
 # the second try is shorter (the same figure as the recovery instruction of #309).
 CUT_OFF_MAX_FINDINGS = 10
-_FENCE_OPEN = "```"
-_FENCES = ("```json", "```JSON", "```Json", "```")
+# One fence around the whole text. The opening line holds nothing but an optional language tag
+# (`\n` or `\r\n` ends it), the closing fence starts a line of its own.
+_FENCED = re.compile(r"```(?P<tag>[^\r\n`]*)\r?\n(?P<body>.*?)\r?\n[ \t]*```", re.DOTALL)
+_FENCE_MARK = "```"
+# What a nesting that exhausts the parser is called in the repair message (no text of the model).
+NESTED_TOO_DEEPLY = "the JSON is nested too deeply"
 
 
 class Problem(StrEnum):
@@ -97,16 +102,13 @@ def _loads(text: str) -> object:
 
 def _unfenced(text: str) -> str:
     """The text inside one fence that wraps the whole message, or the text itself."""
-    if not text.startswith(_FENCE_OPEN) or not text.endswith(_FENCE_OPEN):
+    fenced = _FENCED.fullmatch(text)
+    if fenced is None or _FENCE_MARK in fenced["body"]:
         return text
-    opening = next((fence for fence in _FENCES if text.startswith(fence)), None)
-    if opening is None or len(text) < len(opening) + len(_FENCE_OPEN):
+    tag = fenced["tag"].strip()
+    if tag and not re.fullmatch(r"json", tag, re.IGNORECASE):
         return text
-    inner = text[len(opening) : -len(_FENCE_OPEN)]
-    # The opening line holds nothing but the language tag; the closing fence is on its own line.
-    if not inner.startswith(("\n", " ", "\t")) or _FENCE_OPEN in inner:
-        return text
-    return inner.strip()
+    return fenced["body"].strip()
 
 
 def _holds_a_review_object(text: str) -> bool:
@@ -118,7 +120,7 @@ def _holds_a_review_object(text: str) -> bool:
     while start != -1:
         try:
             value, end = decoder.raw_decode(text, start)
-        except ValueError:
+        except (ValueError, RecursionError):
             start = text.find("{", start + 1)
             continue
         if isinstance(value, dict) and "findings" in cast("dict[str, Any]", value):
@@ -131,7 +133,7 @@ def _object_with_trailing_text(text: str) -> bool:
     """True when the text starts with a complete JSON object and holds more after it."""
     try:
         _, end = json.JSONDecoder(parse_constant=_reject_constant).raw_decode(text)
-    except ValueError:
+    except (ValueError, RecursionError):
         return False
     return end < len(text)
 
@@ -148,9 +150,11 @@ def extract_final_json(message: dict[str, Any]) -> Extraction:
     candidate = _unfenced(text)
     try:
         value = _loads(candidate)
-    except ValueError as error:
+    except (ValueError, RecursionError) as error:
         if cut:
             return Extraction(None, Problem.CUT_OFF)
+        if isinstance(error, RecursionError):
+            return Extraction(None, Problem.INVALID_JSON, NESTED_TOO_DEEPLY)
         if candidate.startswith("{"):
             if _object_with_trailing_text(candidate):
                 return Extraction(None, Problem.TEXT_AROUND_JSON)
@@ -163,7 +167,7 @@ def extract_final_json(message: dict[str, Any]) -> Extraction:
     return Extraction(cast("dict[str, Any]", value))
 
 
-def _parser_detail(error: ValueError) -> str:
+def _parser_detail(error: Exception) -> str:
     if isinstance(error, json.JSONDecodeError):
         return f"{error.msg} at position {error.pos}"
     return "not valid JSON"

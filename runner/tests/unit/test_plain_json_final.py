@@ -19,6 +19,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "engine"))
 from plain_json_final import (
     FINISH_NOW_INSTRUCTION,
+    NESTED_TOO_DEEPLY,
     Problem,
     extract_final_json,
     final_answer_line,
@@ -51,9 +52,22 @@ def message(
         f"```json\n{REVIEW_TEXT}\n```",
         f"```\n{REVIEW_TEXT}\n```",
         f"```JSON  \n{REVIEW_TEXT}\n```\n",
+        f"```jSoN\n{REVIEW_TEXT}\n```",
+        f"```json\r\n{REVIEW_TEXT}\r\n```\r\n",
+        f"```\r\n{REVIEW_TEXT}\r\n```",
         json.dumps(REVIEW, indent=2),
     ],
-    ids=["bare", "padded", "json-fence", "plain-fence", "fence-upper-case", "pretty"],
+    ids=[
+        "bare",
+        "padded",
+        "json-fence",
+        "plain-fence",
+        "fence-upper-case",
+        "fence-mixed-case",
+        "fence-crlf",
+        "plain-fence-crlf",
+        "pretty",
+    ],
 )
 def test_the_whole_message_as_one_json_object_is_the_answer(text: str) -> None:
     extraction = extract_final_json(message(text))
@@ -81,6 +95,12 @@ def test_the_whole_message_as_one_json_object_is_the_answer(text: str) -> None:
         ),
         ('Here: {\'findings\': [{"id": "f-1"}]}', Problem.NO_JSON_OBJECT),
         (f"The function f() {{return 1}} is fine.\n{REVIEW_TEXT}", Problem.TEXT_AROUND_JSON),
+        (f"```json\n{REVIEW_TEXT}```", Problem.TEXT_AROUND_JSON),
+        (f"```json{REVIEW_TEXT}\n```", Problem.TEXT_AROUND_JSON),
+        (f"```python\n{REVIEW_TEXT}\n```", Problem.TEXT_AROUND_JSON),
+        ("[" * 100_000, Problem.INVALID_JSON),
+        ('{"resolvedIds": [], "findings": ' + "[" * 100_000, Problem.INVALID_JSON),
+        ('Here: {"findings": ' + "[" * 100_000, Problem.NO_JSON_OBJECT),
         ('{"findings": [], // none\n "resolvedIds": []}', Problem.INVALID_JSON),
         ('{"findings": [], "resolvedIds": []', Problem.INVALID_JSON),
         ('{"findings": [], "resolvedIds": [], "confidence": NaN}', Problem.INVALID_JSON),
@@ -102,6 +122,12 @@ def test_the_whole_message_as_one_json_object_is_the_answer(text: str) -> None:
         "single-quotes-with-a-finding-inside",
         "prose-before-single-quotes",
         "braces-before-the-object",
+        "closing-fence-on-the-object-line",
+        "object-on-the-opening-fence-line",
+        "fence-with-another-language",
+        "deeply-nested-array",
+        "deeply-nested-object",
+        "deeply-nested-after-prose",
         "comment",
         "unterminated",
         "nan",
@@ -126,6 +152,16 @@ def test_invalid_json_names_the_parser_position_and_never_the_text() -> None:
 
     assert extraction.problem is Problem.INVALID_JSON
     assert extraction.detail == "Expecting value at position 32"
+
+
+# #547-T06: a hostile nesting depth ends in the parser's recursion limit; the extractor names it
+# with a fixed text instead of letting `RecursionError` out of the run.
+def test_a_nesting_that_exhausts_the_parser_is_invalid_json_with_a_fixed_text() -> None:
+    extraction = extract_final_json(message("[" * 100_000))
+
+    assert extraction.document is None
+    assert extraction.problem is Problem.INVALID_JSON
+    assert extraction.detail == "the JSON is nested too deeply"
 
 
 # #547-T05: the output limit cut the answer, or ate it before the first character of text.
@@ -182,6 +218,27 @@ def test_a_repair_message_is_runner_text_that_names_only_the_class(problem: Prob
     assert "written by the review runner, not by the repository or the pull request" in text
     assert "one JSON object and nothing else" in text
     assert "StructuredOutput" not in text
+
+
+# #547-T06: what each class says to the model (the engine tests prove the mechanics once; the
+# wording of every class is proven here).
+@pytest.mark.parametrize(
+    ("problem", "detail", "named"),
+    [
+        (Problem.NO_TEXT, "", "it had no text"),
+        (Problem.REASONING_ONLY, "", "it had reasoning but no text"),
+        (Problem.CUT_OFF, "", "cut off at the output limit"),
+        (Problem.NO_JSON_OBJECT, "", "did not contain a JSON object"),
+        (Problem.TEXT_AROUND_JSON, "", "text next to the JSON object, or more than one object"),
+        (Problem.INVALID_JSON, "Expecting value at position 3", "not valid (Expecting value at"),
+        (Problem.INVALID_JSON, NESTED_TOO_DEEPLY, "not valid (the JSON is nested too deeply)"),
+        (Problem.NOT_AN_OBJECT, "", "not a list or a single value"),
+        (Problem.ENVELOPE_INVALID, "findings is missing", "not valid: findings is missing"),
+        (Problem.TOO_MANY_FINDINGS, "", "at most 5 findings"),
+    ],
+)
+def test_every_class_is_named_in_its_own_words(problem: Problem, detail: str, named: str) -> None:
+    assert named in repair_message(problem, detail, 5)
 
 
 def test_the_repair_message_carries_the_validator_text_and_the_bound_where_they_apply() -> None:

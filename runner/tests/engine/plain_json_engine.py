@@ -11,13 +11,19 @@ changes in the adapter: the same start, session, watch loop, limits and clean-up
   validated by `parse_dynamic_findings` with the runner setting `schemaVersion` and `reviewedSha`;
 - an answer that is not the review gets exactly one repair message in the same session;
 - a cost or time limit that is near is announced to the model by one more user message sent while
-  the turn runs (`prompt_async`), not by rewriting a request. The ledger stays the hard limit.
+  the turn runs (`prompt_async`), not by rewriting a request. The ledger stays the hard limit;
+- a model that ignores that message does not end the run without a review: when the ledger refuses
+  the next call at the cost limit, the adapter aborts the turn, sends one "answer now as JSON"
+  message and the ledger admits that one call past the limit (`FinalExemptLedger`, a stand-in for
+  the final-call exemption of #542). The repair is always admitted the same way.
 
 Test support, not production code: nothing in `src/` imports it.
 """
 
 import json
 import threading
+from collections.abc import Callable
+from dataclasses import replace
 from decimal import Decimal
 from typing import Any
 
@@ -46,6 +52,7 @@ from code_reviewer_runner.dynamic_review.adapter import (
     EngineTimeout,
     turn_end_note,
 )
+from code_reviewer_runner.dynamic_review.budget import BudgetLedger, LimitError, Reservation
 from code_reviewer_runner.dynamic_review.config import PROXY_PROVIDER_ID
 from code_reviewer_runner.dynamic_review.prompts import compose_user_prompt
 from code_reviewer_runner.job_loop.jsonvalues import as_object
@@ -162,6 +169,97 @@ class PlainJsonClient(EngineClient):
         return False
 
 
+# What the ledger says when a call does not fit the cost limit (reserve and settle alike).
+COST_LIMIT_DETAIL = "the cost limit is used up"
+# A cost limit no run reaches: the exempt call is checked against it instead of the real limit.
+_NO_COST_LIMIT = Decimal(1_000_000)
+
+
+class FinalExemptLedger(BudgetLedger):
+    """The ledger with the policy of #540/#542 as far as the spike needs it (a stand-in).
+
+    A run never ends without a review because of the cost guard. A call that does not fit the cost
+    limit is refused as before, but it is not the run's failure: `refused_at_limit` says so and the
+    adapter asks for the answer. `arm_exempt()` admits the next call whatever the limit says, and
+    its settlement is not an error either: that one call is the overshoot, bounded by the limit
+    plus the excess of the last normal call plus this call. #552 takes the real thing from #542;
+    nothing here is production code.
+    """
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.refused_at_limit = False
+        self.exempt_calls = 0
+        self._exempt_armed = False
+        self._exempt_reservation: Reservation | None = None
+
+    def arm_exempt(self) -> None:
+        """Admit the next call past the cost limit (the final answer, or its one repair)."""
+        self._exempt_armed = True
+
+    def record_failure(self, error: LimitError) -> None:
+        if error.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED and error.detail == COST_LIMIT_DETAIL:
+            self.refused_at_limit = True
+            return
+        super().record_failure(error)
+
+    def reserve_call(
+        self,
+        request_text: str,
+        *,
+        output_tokens: int | None = None,
+        can_wrap_up: bool = False,
+        wrap_up_text: str = "",
+        recovery_text: str = "",
+    ) -> Reservation:
+        if not self._exempt_armed:
+            return super().reserve_call(
+                request_text,
+                output_tokens=output_tokens,
+                can_wrap_up=can_wrap_up,
+                wrap_up_text=wrap_up_text,
+                recovery_text=recovery_text,
+            )
+        self._exempt_armed = False
+        reservation = self._without_cost_limit(
+            lambda: super(FinalExemptLedger, self).reserve_call(
+                request_text, output_tokens=output_tokens
+            )
+        )
+        self.exempt_calls += 1
+        self._exempt_reservation = reservation
+        return reservation
+
+    def settle_call(
+        self,
+        reservation: Reservation,
+        *,
+        prompt_tokens: int | None,
+        completion_tokens: int | None,
+        cost: Decimal | None = None,
+    ) -> None:
+        def settle() -> None:
+            super(FinalExemptLedger, self).settle_call(
+                reservation,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                cost=cost,
+            )
+
+        if reservation is self._exempt_reservation:
+            self._without_cost_limit(settle)
+            return
+        settle()
+
+    def _without_cost_limit[T](self, action: Callable[[], T]) -> T:
+        limits = self.limits
+        self.limits = replace(limits, max_cost_usd=_NO_COST_LIMIT)
+        try:
+            return action()
+        finally:
+            self.limits = limits
+
+
 class _Verdict:
     """The message that ended a turn is not the review: the class and what to tell the model."""
 
@@ -170,6 +268,10 @@ class _Verdict:
         self.detail = detail
 
 
+# NOTE: this subclass reaches into the private internals of `DynamicEngine`: the `_turns`, `_send`
+# and `_raise_recorded_failure` methods, the `_transport` it hands to the client and the attributes
+# `job`, `ledger`, `inputs` and `exported_paths`. A change to those in `adapter.py` breaks it, on
+# purpose loudly (pyright and the engine tests); #552 replaces the subclass with the real change.
 class PlainJsonEngine(DynamicEngine):
     """A Dynamic Review that ends as JSON text. See the module docstring."""
 
@@ -195,6 +297,8 @@ class PlainJsonEngine(DynamicEngine):
         self.wrap_up_stored = False
         # The class of the first answer when it was repaired.
         self.repaired: Problem | None = None
+        # What went wrong in the watch thread; re-raised in the caller's thread after the join.
+        self._announce_error: Exception | None = None
 
     def start(self) -> EngineClient:
         client = super().start()
@@ -205,6 +309,7 @@ class PlainJsonEngine(DynamicEngine):
     def _turns(self, client: EngineClient, session_id: str) -> EngineAnswer:
         assert isinstance(client, PlainJsonClient)
         self._send(client, session_id)
+        self._answer_now_if_refused(client, session_id)
         self._raise_recorded_failure()
         failed = self._engine_error(client)
         if failed is not None:
@@ -217,6 +322,8 @@ class PlainJsonEngine(DynamicEngine):
         repair = repair_message(first.problem, first.detail, max_findings)
         if self.forbid_tools_on_repair:
             client.tools = {"read": False, "grep": False, "glob": False}
+        # The repair is always admitted, whatever the cost limit says.
+        self._exempt_ledger.arm_exempt()
         self._send(client, session_id, prompt=repair)
         self._raise_recorded_failure()
         failed = self._engine_error(client)
@@ -229,6 +336,23 @@ class PlainJsonEngine(DynamicEngine):
         if second.problem is Problem.ENVELOPE_INVALID:
             raise EnvelopeError(ErrorCode.DYNAMIC_POLICY_VIOLATION, f"{note}; {second.detail}")
         return self._no_answer(note)
+
+    @property
+    def _exempt_ledger(self) -> FinalExemptLedger:
+        assert isinstance(self.ledger, FinalExemptLedger)
+        return self.ledger
+
+    def _answer_now_if_refused(self, client: PlainJsonClient, session_id: str) -> None:
+        """The ledger refused a call at the cost limit (a model that ignored the announcement):
+        abort the turn, send one "answer now as JSON" message and let the ledger admit that call
+        past the limit, so the run still ends with a review. A tool call in that turn is refused
+        again (the exemption is one call) and is not repaired here; that case is #552's."""
+        ledger = self._exempt_ledger
+        if not ledger.refused_at_limit:
+            return
+        client.abort(session_id)
+        ledger.arm_exempt()
+        self._send(client, session_id, prompt=FINISH_NOW_INSTRUCTION)
 
     def _max_findings(self) -> int:
         dynamic = self.job.dynamic
@@ -278,6 +402,8 @@ class PlainJsonEngine(DynamicEngine):
             stop.set()
             watch.join(timeout=5.0)
             client.tools = None
+        if self._announce_error is not None:
+            raise self._announce_error
 
     def _soft_limit(self) -> str | None:
         if self.soft_seconds is not None and self.ledger.remaining_seconds() <= self.soft_seconds:
@@ -292,7 +418,17 @@ class PlainJsonEngine(DynamicEngine):
         return None
 
     def _announce(self, client: PlainJsonClient, session_id: str, stop: threading.Event) -> None:
-        """Once per run: when a limit is near, add the finish-now message to the running turn."""
+        """Once per run: when a limit is near, add the finish-now message to the running turn.
+        An exception is kept and re-raised by `_send` after the join, not lost in the thread."""
+        try:
+            self._announce_when_near(client, session_id, stop)
+        except Exception as error:  # re-raised in the caller's thread, after the join
+            self._announce_error = error
+            self.announced.set()
+
+    def _announce_when_near(
+        self, client: PlainJsonClient, session_id: str, stop: threading.Event
+    ) -> None:
         dynamic = self.job.dynamic
         assert dynamic is not None
         while not stop.wait(STEER_INTERVAL_SECONDS):
