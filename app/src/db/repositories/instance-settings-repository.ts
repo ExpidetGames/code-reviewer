@@ -102,8 +102,9 @@ export type InstanceSettingValues = {
    */
   catalog_defaults: CatalogDefaults;
   /**
-   * The billing module's settings (src/billing/, ADR 0006): today the `enabled` switch. A value of an older shape reads
-   * with the fields it no longer has ignored (`readBillingSettings`). No row: billing was never configured, which is off
+   * The billing module's settings (src/billing/, ADR 0006): the `enabled` switch and the rates (A, B per kind, the Diff AI
+   * reserve; written by `rates-service.ts` only). A value of an older shape reads with the fields it no longer has ignored,
+   * and a damaged rate reads as not set (`readBillingSettings`). No row: billing was never configured, which is off
    * and inert (`isBillingOn`).
    */
   billing_settings: BillingSettings;
