@@ -385,12 +385,14 @@ def test_nothing_outside_the_translated_fields_reaches_the_provider() -> None:
     assert set(body) == {"model", "max_tokens", "messages", "thinking"}
 
 
-# #511-T22
-def test_a_forced_tool_choice_for_a_model_that_rejects_it_is_refused_not_downgraded() -> None:
+# #511-T22 #533-T01: the refusal of the first version became a steering: the model that rejects a
+# forced choice is asked for `auto` with a strict return tool and an instruction
+# (`test_anthropic_wire_steering.py`), and what is sent is never the choice it answers with a 400.
+def test_a_forced_tool_choice_for_a_model_that_rejects_it_is_never_sent_as_forced() -> None:
     for model in ("claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-1"):
         for choice in ("required", {"type": "function", "function": {"name": "StructuredOutput"}}):
-            error = refused(model, tools=[STRUCTURED], tool_choice=choice)
-            assert error.code is ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED
+            body = encode(model, tools=[STRUCTURED], tool_choice=choice)
+            assert body["tool_choice"] == {"type": "auto"}
 
     # `auto` and `none` are fine for them.
     assert encode("claude-sonnet-5-5", tools=[TOOL], tool_choice="auto")["tool_choice"] == {
@@ -555,7 +557,8 @@ def test_thinking_is_switched_off_exactly_where_the_model_accepts_it(model: Any)
     if model.thinking_disabled:
         assert body["thinking"] == {"type": "disabled"}
     else:
-        assert "thinking" not in body
+        # #533-T08: always on; the request only names what happens to a block that no longer fits.
+        assert body["thinking"]["type"] == "adaptive"
 
 
 def message(

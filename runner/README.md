@@ -867,25 +867,64 @@ no sampling parameter, and its calls cost an unknown amount.
   one the cost rule reads. The Messages API is used and not Anthropic's OpenAI-compatible endpoint, which
   is documented as not meant for production, ignores `response_format`, `strict` and prompt caching and reports
   no cache tokens. What the wire does: sends `temperature`/`top_p` by the model's flags and never both; sets
-  `thinking: {"type": "disabled"}` where the model accepts it (the engine's history cannot carry
-  thinking blocks); marks the prompt for the provider's cache (see "Prompt caching"); refuses, before anything is reserved or sent, a forced tool
-  choice for a model that rejects it (`dynamic_model_features_unsupported`), content that is not text,
-  a response format other than text and a malformed tool call in the history
-  (`dynamic_policy_violation`). Thinking blocks of an answer are dropped. The engine's final call
-  forces `StructuredOutput`, so Fable 5.1, Opus 5.5, Sonnet 5.5 (forced tool use is a 400) and Fable 5
-  (thinking cannot be switched off) are Diff only; the app refuses a Dynamic job on them.
+  `thinking: {"type": "disabled"}` where the model accepts it; marks the prompt for the provider's cache (see "Prompt caching"); refuses, before anything is reserved
+  or sent, content that is not text, a response format other than text and a malformed tool call in the
+  history (`dynamic_policy_violation`).
+- **Steering instead of forcing (#533).** The engine asks for `tool_choice: required` on every call and the
+  review has to come back through its `StructuredOutput` tool. Fable 5.1, Opus 5.5 and Sonnet 5.5 answer a
+  forced tool choice with a 400, and Fable 5 (like those three) cannot switch thinking off, which a forced
+  call would suppress. The wire decides from the flags of the list (`forced_tool_choice`, `thinking_disabled`),
+  never from the id: a model without the one or the other is **steered**. A forced choice goes out as
+  `tool_choice: auto` (with `disable_parallel_tool_use` when the request asks for it), the return tool is marked
+  `strict: true` with its schema reduced to what the strict mode takes (`anthropic_schema.py`: no `pattern`,
+  `minLength`, `maxItems` and the like, each limit moved into the field's description; a schema that cannot be
+  reduced safely goes out without `strict`), and a constant instruction ends the system text
+  (`STEERING_INSTRUCTION`; no tag, the same on every request of a run, so the cache stays valid). What the
+  answer is worth is decided as before: the final call is checked by `final_reply_problem` and asked again
+  (`FINAL_ATTEMPTS`), a normal turn that ends without the tool gets the one recovery turn (#309), both bounded
+  by the cost and time ledger. Every model of the list can serve a Dynamic Review.
+- **Thinking blocks (#533).** A model that cannot run without thinking must get its `thinking` and
+  `redacted_thinking` blocks back with every tool result. The engine's chat history cannot hold them, so the
+  wire keeps them per tool call (`anthropic_thinking.py`, an id is unique per call; a turn without a tool call
+  by its text) and puts them back, unchanged and in the order the model had them, into the assistant turn that
+  carries the same tool calls on the next request. The engine never sees them. Such a request also names
+  `thinking: {type: "adaptive", block_binding: {prefix_mismatch_behavior: "drop_block"}}` with the beta header
+  `thinking-binding-controls-2026-08-01`: the proxy's own final call (wrap-up, recovery) changes the tool set,
+  and a thinking block is bound to the conversation that produced it, so without this an account created after
+  2026-08-31 would answer 400; with it that call loses its reasoning and nothing more. Thinking tokens are a
+  part of `usage.output_tokens`, priced with them once: `output_tokens_details.thinking_tokens` travels with the
+  usage and the cost rule only checks that it fits the output (#534; a count above it is an unknown cost).
+  Not proven against the real API, only against the fakes; that an omitted block is a 400 is an assumption of
+  the fake (the documentation does not state the status code for it).
+- **Output allowance with thinking (#533).** Thinking counts against `max_tokens`, a hard cap on thinking and
+  answer together, so a thinking model can use up 8192 and cut its `StructuredOutput` call off. The job's
+  descriptor gives a model that cannot run without thinking 32768 (`app/src/llm/dynamic-capabilities.ts`; the
+  models state 128000; Anthropic's "Cost control" section names raising `max_tokens` before lowering
+  `effort`, which is only soft guidance and, changed within a run, invalidates the prompt cache). The cost
+  limit does not reserve all of it: `reserved_output_tokens` of the wire (`THINKING_RESERVED_OUTPUT_TOKENS`,
+  8192, what every call reserved before) is what a call holds back, so the larger allowance does not make the
+  guard stop a run earlier (reserving 32768 at Opus 5.5's 20 USD per million tokens would be 0.66 USD per call,
+  and the 1 USD default would wrap every run up at its first call; Fable's price is higher still). The answer
+  is still held to the whole allowance, and a call that really uses more than it reserved passes the limit
+  by at most that excess; the run then ends (`settle_call`). The first smoke run must show how much thinking a
+  review takes.
 - **Errors.** The envelope `{"type":"error","error":{"type","message"}}` goes through the same table as
   every provider: 400 "prompt is too long" is `llm_context_length_exceeded`, 401/403 `llm_auth`, 404
   `model_unknown`, 429 `llm_rate_limit`, 5xx and 529 (overloaded) `llm_unavailable`. What the provider
   says never reaches the engine.
-- **Tests.** `tests/unit/test_anthropic_models.py`, `test_anthropic_cost.py`, `test_anthropic_provider.py`,
-  `test_anthropic_wire.py`, `test_dynamic_review_proxy_anthropic.py`, `test_diff_cost_anthropic.py`,
+- **Tests.** `tests/unit/test_anthropic_models.py`, `test_anthropic_cost.py`,
+  `test_anthropic_provider.py`, `test_anthropic_wire.py`, `test_anthropic_wire_steering.py`,
+  `test_anthropic_strict_fake.py`, `test_dynamic_review_proxy_anthropic.py`,
+  `test_dynamic_review_proxy_anthropic_steering.py`, `test_diff_cost_anthropic.py`,
   `test_temperature_patch_anthropic.py`, `test_pr_agent_config_anthropic.py`,
   `test_anthropic_wire_caching.py` (where the breakpoints go), `test_fake_anthropic_cache.py` (the cache
   rules of the fake);
   `tests/integration/test_dynamic_review_proxy_anthropic_transport.py` (real sockets);
   `tests/engine/test_engine_anthropic.py` (the real PR-Agent and LiteLLM against the fake LLM that speaks the
-  Messages API: the temperature of each listed model, the headers, the output, the exact cost).
+  Messages API: the temperature of each listed model, the headers, the output, the exact cost) and
+  `tests/engine/test_engine_opencode_anthropic.py` (the real pinned OpenCode behind the proxy's Messages wire,
+  steered models, thinking blocks and the recovery). The fake enforces Anthropic's 400s
+  (the rules module of `fakes/llm/`, by the flags of the contract file).
 
 ## Prompt caching (#539)
 

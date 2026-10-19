@@ -67,11 +67,14 @@ provider** since #426 (below, "The keys of a workspace").
   is the single record: the runner keeps its own typed copy to price calls (`anthropic_models.py`) and tests compare the
   three. To update after Anthropic changes its lineup: read the models, pricing and deprecations pages, change
   `models.ts`, the contract file and the runner's copy together, change `ANTHROPIC_MODELS_AS_OF`, run the tests.
-- **Defaults.** Diff: `claude-haiku-5-5`. Dynamic: `claude-sonnet-5` (the reason is in `models.ts`).
-- **Review kinds.** A Dynamic Review needs tools, a forced tool choice (the engine returns its findings through a forced
-  `StructuredOutput` call) and `thinking: disabled` (the engine's history cannot carry thinking blocks). Fable 5.1,
-  Opus 5.5 and Sonnet 5.5 answer a forced tool choice with a 400 and Fable 5 cannot switch thinking off, so those four
-  are **Diff only**; the claim of a Dynamic job on one of them fails with `dynamic_model_features_unsupported`.
+- **Defaults.** Diff: `claude-haiku-5-5`. Dynamic: `claude-sonnet-5-5` (the reason is in `models.ts`; it was Sonnet 5 until #533).
+- **Review kinds.** Every model of the list serves Diff and Dynamic. A Dynamic Review needs tools and an answer through
+  the engine's `StructuredOutput` tool; the engine forces that call and its history cannot carry thinking blocks. Fable 5.1,
+  Opus 5.5 and Sonnet 5.5 answer a forced tool choice with a 400 and Fable 5 (like those three) cannot switch thinking
+  off, so the runner's wire steers them (#533): `tool_choice: auto`, a strict return tool, an instruction, and the
+  thinking blocks given back per tool call (`runner/README.md`, "Anthropic"). Until then they were Diff only and a claim
+  of a Dynamic job on one of them failed with `dynamic_model_features_unsupported`. The flags `forcedToolChoice` and
+  `thinkingDisabled` are what the runner reads; `checkModelCapabilities` answers `supported` for all of them.
 - **Sampling.** `temperature` and `top_p` are a 400 from Opus 4.7 on. The flags of the list decide what a request may
   carry, in the runner too; nothing is guessed from a name.
 - **Cost.** Anthropic returns token counts and no charge. The runner computes the cost of every call from the counts and

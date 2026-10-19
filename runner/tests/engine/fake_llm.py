@@ -16,6 +16,10 @@ and `cache_write_tokens` with a `usage.cost` that carries the discount for the O
 request the API would refuse (more than four breakpoints, a mark on a message object) is answered
 with the 400.
 
+A Messages request is checked by the strict rules of the Claude API
+(`fakes/llm/anthropic_rules.py`, #533): what the real API answers with a 400, the fake answers
+with a 400.
+
 PR-Agent talks to it through LiteLLM's real OpenRouter code path: `OPENROUTER__API_BASE` points at
 `http://127.0.0.1:<port>/api/v1`, and the request is `POST /api/v1/chat/completions` with the key in
 the `Authorization` header. The fake records every request (headers and body, so a test can read the
@@ -48,6 +52,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from fakes.llm.anthropic_cache import CacheRequestRejected, PromptCache
+from fakes.llm.anthropic_rules import StrictMessagesApi
 
 # A held request ends by itself after this long, so a broken test cannot leave a thread behind.
 _HOLD_LIMIT_SECONDS = 120.0
@@ -148,6 +153,7 @@ class FakeLlm:
     release: threading.Event = field(default_factory=threading.Event)
 
     def __post_init__(self) -> None:
+        self._strict = StrictMessagesApi()
         self._lock = threading.Lock()
         self._changed = threading.Condition(self._lock)
         self._server: ThreadingHTTPServer | None = None
@@ -237,6 +243,14 @@ class FakeLlm:
             self.requests.append(request)
             self._changed.notify_all()
             reply = self._reply_for(request)
+        if request.is_messages and reply.status == 200:
+            # What the Claude API refuses with a 400 (#533), by the flags of the model in the list.
+            refusal = self._strict.check(
+                {name.lower(): value for name, value in handler.headers.items()}, body
+            )
+            if refusal is not None:
+                self._send(handler, refusal[0], refusal[1])
+                return
         if reply.hold and not self._hold(handler):
             return
         if reply.status != 200:

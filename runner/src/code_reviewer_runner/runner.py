@@ -66,6 +66,7 @@ from code_reviewer_runner.dynamic_review.proxy import (
     DynamicCapabilities,
     ModelProxy,
     capabilities_for_job,
+    with_reserved_output,
 )
 from code_reviewer_runner.dynamic_review.publish import (
     STATE_RESET_CODE,
@@ -474,6 +475,7 @@ def dynamic_ledger(
         limits,
         window_tokens=capabilities.context_window_tokens,
         output_tokens=capabilities.max_output_tokens,
+        reserved_output_tokens=capabilities.reserved_output_tokens,
         unit_costs=capabilities.unit_costs,
     )
 
@@ -644,6 +646,10 @@ def _run_dynamic_job(
     try:
         capabilities = capabilities_for_job(
             environment.get(DYNAMIC_CAPABILITIES_VARIABLE), job.llm.model, dynamic.capabilities
+        )
+        # What a call reserves of its output allowance is the model's wire's to say (#533).
+        capabilities = with_reserved_output(
+            capabilities, require_provider(job.llm.provider).wire(job.llm.model)
         )
     except LimitError as error:
         return _failure(error.code, error.detail, started, capture)

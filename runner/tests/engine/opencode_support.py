@@ -24,6 +24,9 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from fakes.llm.anthropic_rules import StrictMessagesApi
+
 from code_reviewer_runner.dynamic_review import findings_schema
 from code_reviewer_runner.dynamic_review.adapter import DynamicEngine, EngineAnswer
 from code_reviewer_runner.dynamic_review.audit import ToolAudit
@@ -157,8 +160,12 @@ class ScriptedModel:
                     model.on_request(len(model.requests))
                 if model.hold:
                     model._released.wait(model.hold)
-                payload = json.dumps(model.answer(body)).encode()
-                self.send_response(model.status)
+                refusal = model.refuse(
+                    {name.lower(): value for name, value in self.headers.items()}, body
+                )
+                status = model.status if refusal is None else refusal[0]
+                payload = json.dumps(model.answer(body) if refusal is None else refusal[1]).encode()
+                self.send_response(status)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(payload)))
                 self.end_headers()
@@ -171,10 +178,20 @@ class ScriptedModel:
         self._server.daemon_threads = True
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
 
-    def answer(self, body: dict[str, Any]) -> dict[str, Any]:
+    def refuse(
+        self, headers: dict[str, str], body: dict[str, Any]
+    ) -> tuple[int, dict[str, Any]] | None:
+        """The error a stricter provider answers instead of the script (None: the script
+        answers)."""
+        return None
+
+    def tool_names(self, body: dict[str, Any]) -> set[str]:
         offered: list[dict[str, Any]] = body.get("tools") or []
-        names = {tool["function"]["name"] for tool in offered}
-        if not offered:
+        return {tool["function"]["name"] for tool in offered}
+
+    def answer(self, body: dict[str, Any]) -> dict[str, Any]:
+        names = self.tool_names(body)
+        if not names:
             message: dict[str, Any] = {"role": "assistant", "content": "ok"}
         elif names == {"StructuredOutput"} and self.final is not None:
             # The only tool left is the return tool (the runner's wrap-up): a model answers with it.
@@ -250,12 +267,12 @@ class ScriptedClaude(ScriptedModel):
     usages: list[dict[str, Any]] = field(default_factory=lambda: [])
     rejected: list[str] = field(default_factory=lambda: [])
 
-    def answer(self, body: dict[str, Any]) -> dict[str, Any]:
+    def tool_names(self, body: dict[str, Any]) -> set[str]:
         offered: list[dict[str, Any]] = body.get("tools") or []
-        asked: dict[str, Any] = {
-            "tools": [{"function": {"name": tool["name"]}} for tool in offered]
-        }
-        completion = super().answer(asked)
+        return {tool["name"] for tool in offered}
+
+    def answer(self, body: dict[str, Any]) -> dict[str, Any]:
+        completion = super().answer(body)
         choice = completion["choices"][0]
         message: dict[str, Any] = choice["message"]
         try:
@@ -291,6 +308,78 @@ class ScriptedClaude(ScriptedModel):
             "stop_reason": "tool_use" if message.get("tool_calls") else "end_turn",
             "usage": usage,
         }
+
+
+@dataclass
+class ScriptedMessagesModel(ScriptedModel):
+    """The same script behind the Claude Messages API, as the strict fake knows it (#533).
+
+    The steps and the final answer are written as for any other model (chat shaped); the requests
+    are Messages requests, refused with Anthropic's 400s (`StrictMessagesApi`: a forced tool
+    choice, thinking blocks that do not come back, a changed conversation), and the answers are
+    Messages answers: a signed thinking block ahead of whatever the model says or asks, and a
+    usage that counts the thinking among the output tokens.
+    """
+
+    think: bool = True
+    api: StrictMessagesApi = field(default_factory=StrictMessagesApi)
+
+    def refuse(
+        self, headers: dict[str, str], body: dict[str, Any]
+    ) -> tuple[int, dict[str, Any]] | None:
+        return self.api.check(headers, body)
+
+    def tool_names(self, body: dict[str, Any]) -> set[str]:
+        offered: list[dict[str, Any]] = body.get("tools") or []
+        return {tool["name"] for tool in offered}
+
+    def answer(self, body: dict[str, Any]) -> dict[str, Any]:
+        completion = super().answer(body)
+        choice = completion["choices"][0]
+        message: dict[str, Any] = choice["message"]
+        calls: list[dict[str, Any]] = message.get("tool_calls") or []
+        content: list[dict[str, Any]] = []
+        if self.think and self.tool_names(body):
+            content.append(
+                {"type": "thinking", "thinking": "", "signature": f"sig-{len(self.requests)}"}
+            )
+        if message.get("content"):
+            content.append({"type": "text", "text": message["content"]})
+        for call in calls:
+            try:
+                arguments: Any = json.loads(call["function"]["arguments"])
+            except ValueError:
+                arguments = {}  # a call cut off at the output allowance
+            content.append(
+                {
+                    "type": "tool_use",
+                    "id": call["id"],
+                    "name": call["function"]["name"],
+                    "input": arguments,
+                }
+            )
+        stop_reason = (
+            "max_tokens"
+            if choice["finish_reason"] == "length"
+            else "tool_use"
+            if calls
+            else "end_turn"
+        )
+        usage: dict[str, Any] = {"input_tokens": 50, "output_tokens": 10}
+        if self.think:
+            usage["output_tokens_details"] = {"thinking_tokens": 4}
+        answer: dict[str, Any] = {
+            "id": "msg_scripted",
+            "type": "message",
+            "role": "assistant",
+            "model": body["model"],
+            "content": content,
+            "stop_reason": stop_reason,
+            "stop_sequence": None,
+            "usage": usage,
+        }
+        self.api.record(body, answer)
+        return answer
 
 
 def dynamic_job(head_sha: str, model: str = DEFAULT_MODEL, provider: str = "openrouter") -> Job:

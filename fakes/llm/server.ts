@@ -34,6 +34,7 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { CacheRequestRejected, PromptCache } from "./anthropic-cache.ts";
+import { StrictMessagesApi } from "./anthropic-rules.ts";
 import { defaultReplies, type PromptKind } from "./canned.ts";
 
 export type FakeLlmRequest = {
@@ -64,6 +65,11 @@ export type AgentScript = {
   steps: AgentToolCall[][];
   /** The structured answer (Dynamic findings, schema version 1) given through `StructuredOutput`. */
   final: Record<string, unknown>;
+  /**
+   * The Messages API only (#533): every answer that asks for tools opens with a signed `thinking` block, as a model
+   * that always thinks does, and the next request has to give it back (the fake answers a 400 when it does not).
+   */
+  thinking?: boolean;
 };
 
 /** One endpoint (provider) of a model in the metadata answer. */
@@ -99,6 +105,8 @@ export type FakeMessagesUsage = {
     ephemeral_5m_input_tokens: number;
     ephemeral_1h_input_tokens: number;
   };
+  /** The thinking tokens, a part of `output_tokens` (not an addition to it). */
+  output_tokens_details?: { thinking_tokens: number };
 };
 
 export type FakeLlm = {
@@ -131,6 +139,11 @@ export type FakeLlm = {
    * than four breakpoints, a mark on a message object) answered with its 400. Off by default and by `reset()`.
    */
   enablePromptCache(on: boolean): void;
+  /**
+   * The next `POST /messages` that is accepted answers with this message verbatim (thinking blocks and all), in
+   * the order queued, once each; the request is checked as always (#533).
+   */
+  queueMessagesAnswer(answer: Record<string, unknown>): void;
   /** Registers a model for the metadata endpoint; its endpoints list what the test says they support. */
   setModel(id: string, endpoints: FakeModelEndpoint[]): void;
   /** Every metadata request received (path and `Authorization` header, empty when none), in order. */
@@ -322,18 +335,25 @@ function messagesToolUse(
   id: string,
   calls: AgentToolCall[],
   usage: FakeMessagesUsage,
+  thinking = false,
 ) {
   return {
     id: "msg_fake_agent",
     type: "message",
     role: "assistant",
     model,
-    content: calls.map((call, position) => ({
-      type: "tool_use",
-      id: `${id}_${String(position)}`,
-      name: call.name,
-      input: call.arguments,
-    })),
+    content: [
+      // A model that always thinks opens with a signed block (summaries are off: the text is empty).
+      ...(thinking
+        ? [{ type: "thinking", thinking: "", signature: `sig_${id}` }]
+        : []),
+      ...calls.map((call, position) => ({
+        type: "tool_use",
+        id: `${id}_${String(position)}`,
+        name: call.name,
+        input: call.arguments,
+      })),
+    ],
     stop_reason: "tool_use",
     stop_sequence: null,
     usage,
@@ -401,6 +421,9 @@ export async function startLlmFake(
   let messageLog: FakeMessagesRequest[] = [];
   let messagesUsage: FakeMessagesUsage = DEFAULT_MESSAGES_USAGE;
   let promptCache: PromptCache | null = null;
+  // What the Claude API refuses with a 400, and the thinking blocks it issued (#533).
+  let strictApi = new StrictMessagesApi();
+  let queuedAnswers: Array<Record<string, unknown>> = [];
   let holding = false;
   let held: Array<() => void> = [];
   const release = () => {
@@ -485,6 +508,22 @@ export async function startLlmFake(
                 quoteKey ? `${error.message}: ${apiKey}` : error.message,
               ),
             );
+          // What the Claude API refuses with a 400 (#533): a forced tool choice or `thinking: disabled` where the
+          // model's flags say no, thinking blocks that do not come back as issued, a changed conversation.
+          const refusal = strictApi.check(
+            Object.fromEntries(
+              Object.entries(request.headers).map(([name, value]) => [
+                name,
+                Array.isArray(value) ? value.join(",") : String(value ?? ""),
+              ]),
+            ),
+            parsed,
+          );
+          if (refusal !== null) return send(refusal.status, refusal.body);
+          const accept = (answer: Record<string, unknown>) => {
+            strictApi.record(parsed, answer);
+            return send(200, answer);
+          };
           let usage: FakeMessagesUsage = messagesUsage;
           if (promptCache !== null) {
             try {
@@ -495,6 +534,8 @@ export async function startLlmFake(
               throw failure;
             }
           }
+          const queued = queuedAnswers.shift();
+          if (queued !== undefined) return accept(queued);
           const tools = anthropicToolNames(parsed.tools);
           if (agent !== null && tools.length > 0) {
             const index = agentRequests;
@@ -502,13 +543,17 @@ export async function startLlmFake(
             const calls = agent.steps[index] ?? [
               { name: "StructuredOutput", arguments: agent.final },
             ];
-            return send(
-              200,
-              messagesToolUse(model, `toolu_${String(index)}`, calls, usage),
+            return accept(
+              messagesToolUse(
+                model,
+                `toolu_${String(index)}`,
+                calls,
+                usage,
+                agent.thinking === true,
+              ),
             );
           }
-          if (agent !== null)
-            return send(200, messagesText(model, "ok", usage));
+          if (agent !== null) return accept(messagesText(model, "ok", usage));
           log.push({
             path: request.url ?? "",
             authorization: `x-api-key ${apiKey}`,
@@ -519,7 +564,7 @@ export async function startLlmFake(
             toolResults: {},
             provider: null,
           });
-          return send(200, messagesText(model, replies.review, usage));
+          return accept(messagesText(model, replies.review, usage));
         };
         if (holding) held.push(answerMessages);
         else answerMessages();
@@ -696,6 +741,9 @@ export async function startLlmFake(
     setMessagesUsage(usage) {
       messagesUsage = usage;
     },
+    queueMessagesAnswer(answer) {
+      queuedAnswers.push(answer);
+    },
     scriptAgent(script) {
       agent = script;
       agentRequests = 0;
@@ -724,6 +772,8 @@ export async function startLlmFake(
       anthropicChecks = [];
       messageLog = [];
       messagesUsage = DEFAULT_MESSAGES_USAGE;
+      strictApi = new StrictMessagesApi();
+      queuedAnswers = [];
     },
     async close() {
       await new Promise<void>((resolve, reject) => {

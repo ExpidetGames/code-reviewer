@@ -43,8 +43,7 @@ export const anthropicDescriptor = {
   // The list is closed: only a model of `models.ts` can be chosen, whoever brings the key.
   checkModelId: isAnthropicModelId,
   suggestedModels: ANTHROPIC_MODELS.map((model) => model.id),
-  // A Dynamic Review needs a forced tool choice and `thinking: disabled`; a save and the claim refuse the models that
-  // lack them, so a form must not offer those (#532).
+  // A save and the claim refuse the models whose `reviewKinds` lack the kind, so a form must not offer those (#532).
   dynamicSuggestedModels: anthropicModelIdsFor("dynamic"),
   priceOf,
   defaultModels: ANTHROPIC_DEFAULT_MODELS,

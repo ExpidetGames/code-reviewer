@@ -48,6 +48,16 @@ class UpstreamWire(Protocol):
         """The OpenAI chat completion (JSON bytes) for the provider's answer to a 200."""
         ...
 
+    def reserved_output_tokens(self, allowance: int) -> int:
+        """The output the cost limit reserves per call, at most the `allowance` the call may use.
+
+        The allowance is the hard cap sent as `max_tokens`, and an answer above it fails the run.
+        The reservation is what the ledger holds back before the call; a provider whose calls
+        rarely use the whole allowance (thinking raises it, #533) reserves less, so a larger
+        allowance does not make the cost guard stop a run earlier.
+        """
+        ...
+
 
 class OpenAiChatWire:
     """A provider that speaks the protocol of the engine: nothing is translated."""
@@ -63,6 +73,9 @@ class OpenAiChatWire:
 
     def decode_response(self, body: bytes) -> bytes:
         return body
+
+    def reserved_output_tokens(self, allowance: int) -> int:
+        return allowance
 
 
 def _plain(entry: dict[str, Any]) -> dict[str, Any]:
