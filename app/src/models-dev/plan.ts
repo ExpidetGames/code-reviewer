@@ -95,7 +95,7 @@ function contentOf(model: ReducedModel): string {
 
 /**
  * The address the committed provider file records as the default of a provider's SDK (`contracts/opencode-providers.v1.json`,
- * ten providers such as openai and anthropic), in the one spelling addresses are compared in. It is trusted from the start:
+ * ten providers such as openai and google), in the one spelling addresses are compared in. It is trusted from the start:
  * the file is ours and is reviewed with the pin, so an address models.dev states instead is a change that waits for an
  * admin, not a first sight that is trusted.
  */

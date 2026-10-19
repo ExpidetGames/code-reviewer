@@ -37,6 +37,8 @@ const PROVIDERS = [
         "a comment that names PR-Agent's own key variable (the runner side of the provider, the next issue)",
       "app/src/ci/opencode-providers/derive.ts":
         "the table of the SDKs the pinned engine bundles, by package name (`@openrouter/ai-sdk-provider`), from which the supported-provider file is derived (#548)",
+      "app/src/models-dev/wire.ts":
+        "the list of the SDKs the pinned engine bundles (`BUNDLED_NPM`), by package name (`@openrouter/ai-sdk-provider`): an allow-list for the job entry (#548)",
     } as Readonly<Record<string, string>>,
   },
   {
