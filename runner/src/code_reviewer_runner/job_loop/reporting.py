@@ -181,6 +181,16 @@ def _usage(value: object) -> dict[str, Any] | None:
     }
     if stopped is not None:
         document["stoppedEarly"] = stopped
+    # By how much the run passed its cost limit (#540): a fact, so a malformed value is left out
+    # and the rest of the usage is still reported.
+    excess = usage.get("limitExceededBy")
+    if (
+        isinstance(excess, (int, float))
+        and not isinstance(excess, bool)
+        and math.isfinite(excess)
+        and excess > 0
+    ):
+        document["limitExceededBy"] = excess
     return document
 
 

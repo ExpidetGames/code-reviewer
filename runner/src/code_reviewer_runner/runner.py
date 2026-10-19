@@ -828,6 +828,10 @@ def _run_dynamic_job(
         summary += f"; {STATE_RESET_CODE}"
     if findings.stopped_early is not None:
         summary += f"; stopped early ({findings.stopped_early})"
+    excess = ledger.limit_exceeded_by
+    if excess is not None:
+        # The one overshoot the cost guard allows (#540), in USD, so the bound can be watched.
+        summary += f"; cost limit exceeded by {excess.normalize():f} USD"
     if recovery_note is not None:
         # A turn ended without an answer and one more turn returned it (#309): a complete review,
         # not a limit, so it is in the log and not in the comment.

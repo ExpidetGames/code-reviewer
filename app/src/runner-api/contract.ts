@@ -424,6 +424,8 @@ export type RunnerUsage = {
   costUsd: number | null;
   /** Why a Dynamic Review was wrapped up before it was done (#293); null for a complete run. */
   stoppedEarly: StoppedEarly | null;
+  /** #540: by how much, in US dollars, the cost passed the operator's cost limit; absent when it did not. */
+  limitExceededBy?: number;
 };
 
 /** The reasons a Dynamic Review stops early: its cost limit or its time limit. */

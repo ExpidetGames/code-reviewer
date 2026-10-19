@@ -445,6 +445,13 @@ function parseUsage(
     (typeof stoppedEarly === "string" &&
       (STOPPED_EARLY_REASONS as readonly string[]).includes(stoppedEarly));
   if (!stoppedOk) check.fail(`${prefix}stoppedEarly`, "invalid");
+  const limitExceededBy = value.limitExceededBy;
+  const excessOk =
+    limitExceededBy === undefined ||
+    (typeof limitExceededBy === "number" &&
+      limitExceededBy > 0 &&
+      Number.isFinite(limitExceededBy));
+  if (!excessOk) check.fail(`${prefix}limitExceededBy`, "invalid");
   if (
     check.fields.length > before ||
     model === undefined ||
@@ -454,7 +461,8 @@ function parseUsage(
     aiCalls === undefined ||
     typeof fallbackUsed !== "boolean" ||
     !costOk ||
-    !stoppedOk
+    !stoppedOk ||
+    !excessOk
   )
     return undefined;
   return {
@@ -466,6 +474,9 @@ function parseUsage(
     fallbackUsed,
     costUsd: costUsd as number | null,
     stoppedEarly: stoppedEarly as StoppedEarly | null,
+    ...(limitExceededBy === undefined
+      ? {}
+      : { limitExceededBy: limitExceededBy as number }),
   };
 }
 

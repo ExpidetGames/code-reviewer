@@ -244,6 +244,34 @@ def test_a_run_at_its_cost_limit_is_wrapped_up_published_and_marked(tmp_path: Pa
     assert result.usage.to_json()["stoppedEarly"] == "cost_limit"
 
 
+# #540-N4: the final call of the wrap-up costs more than the limit (it is delivered anyway); the
+# usage and the log say by how much.
+def test_a_run_whose_final_call_passes_the_cost_limit_reports_the_excess(tmp_path: Path) -> None:
+    script = {"proxy_calls": 1, "answer": "structured", "findings": findings(), "results": {}}
+    preparer = Preparer(tmp_path / "export", script)
+    publisher = RecordingPublisher()
+    charged = {"prompt_tokens": 11, "completion_tokens": 7, "cost": 0.05}
+
+    with FakeUpstream(
+        [asks(tool_call("c1", "StructuredOutput", findings()))], usage=charged
+    ) as upstream:
+        result = runner.run_dynamic_job(
+            job_for(f"{upstream.url}/v1"),
+            None,
+            0.0,
+            {**environment(), runner.DYNAMIC_MAX_COST_VARIABLE: "0.02"},
+            engines=ALL_ENGINES,
+            prepare=preparer,
+            publish=publisher,
+        )
+
+    assert result.ok, result.log_tail
+    assert result.usage is not None
+    assert result.usage.limit_exceeded_by == pytest.approx(0.03)
+    assert result.usage.to_json()["limitExceededBy"] == pytest.approx(0.03)
+    assert "cost limit exceeded by 0.03 USD" in result.log_tail
+
+
 # #309-T01, #309-T08
 def test_a_turn_without_an_answer_is_recovered_published_and_marked_in_the_log(
     tmp_path: Path,
