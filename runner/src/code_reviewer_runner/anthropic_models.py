@@ -66,9 +66,11 @@ class ClaudeModel:
     temperature: bool
     top_p: bool
     tools: bool
-    # `tool_choice` `any` or a named tool is accepted (a 400 on Fable 5.1, Opus 5.5 and Sonnet 5.5).
+    # `tool_choice` `any` or a named tool is accepted (a 400 on Fable 5.1, Opus 5.5 and Sonnet
+    # 5.5, which the Dynamic wire steers with `auto`, #533).
     forced_tool_choice: bool
-    # `thinking: {"type": "disabled"}` is accepted at the model's default effort.
+    # `thinking: {"type": "disabled"}` is accepted at the model's default effort. A model without
+    # it always thinks: the Dynamic wire steers it and carries its thinking blocks (#533).
     thinking_disabled: bool
     review_kinds: tuple[str, ...]
     prices: Prices
@@ -89,7 +91,7 @@ MODELS: Final[dict[str, ClaudeModel]] = {
             tools=True,
             forced_tool_choice=False,
             thinking_disabled=False,
-            review_kinds=("diff",),
+            review_kinds=("diff", "dynamic"),
             prices=prices("10", "50", "0.25", "12.50", "20"),
             long_prompt=None,
         ),
@@ -104,7 +106,7 @@ MODELS: Final[dict[str, ClaudeModel]] = {
             tools=True,
             forced_tool_choice=False,
             thinking_disabled=False,
-            review_kinds=("diff",),
+            review_kinds=("diff", "dynamic"),
             prices=prices("4", "20", "0.20", "5", "8"),
             long_prompt=None,
         ),
@@ -119,7 +121,7 @@ MODELS: Final[dict[str, ClaudeModel]] = {
             tools=True,
             forced_tool_choice=False,
             thinking_disabled=False,
-            review_kinds=("diff",),
+            review_kinds=("diff", "dynamic"),
             prices=prices("2", "10", "0.10", "2.50", "4"),
             long_prompt=None,
         ),
@@ -151,7 +153,7 @@ MODELS: Final[dict[str, ClaudeModel]] = {
             tools=True,
             forced_tool_choice=True,
             thinking_disabled=False,
-            review_kinds=("diff",),
+            review_kinds=("diff", "dynamic"),
             prices=prices("10", "50", "1", "12.50", "20"),
             long_prompt=None,
         ),
@@ -278,7 +280,7 @@ MODELS: Final[dict[str, ClaudeModel]] = {
     )
 }
 
-DEFAULT_MODELS: Final = {"diff": "claude-haiku-5-5", "dynamic": "claude-sonnet-5"}
+DEFAULT_MODELS: Final = {"diff": "claude-haiku-5-5", "dynamic": "claude-sonnet-5-5"}
 
 
 def model_for(model_id: str) -> ClaudeModel | None:

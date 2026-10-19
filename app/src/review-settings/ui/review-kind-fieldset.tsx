@@ -26,6 +26,7 @@ import {
   SettingsTextField,
   type SettingsOrigin,
 } from "./settings-fields.tsx";
+import { SUGGESTED_MODEL_PICK } from "./messages.ts";
 import { SkillEditor } from "./skill-editor.tsx";
 
 const KIND_HINTS: Record<ProjectReviewKind, string> = {
@@ -69,6 +70,8 @@ export function ReviewKindFieldset({
   workspaceSlug,
   providers,
   datalistId,
+  suggestedModels,
+  defaultModel,
 }: {
   /**
    * The catalog choice of a workspace on the operator's key (#283, #433): it takes the place of the Dynamic provider
@@ -80,6 +83,10 @@ export function ReviewKindFieldset({
   providers: readonly ProviderOption[];
   /** The id of the `<datalist>` of the known model names of the Dynamic provider, rendered by the container. */
   datalistId: string;
+  /** The models of the Dynamic provider that can serve a Dynamic Review, to pick from under the field (#532). */
+  suggestedModels: readonly string[];
+  /** The default Dynamic model of the chosen provider: what "Reset to default" puts back, and the hint names. */
+  defaultModel: string;
   view: ProjectDynamicView;
   values: DynamicFormValues;
   errors: Partial<Record<string, string>>;
@@ -103,9 +110,7 @@ export function ReviewKindFieldset({
         ? "Set for this project"
         : "Built-in value",
     resetLabel:
-      values.dynamicModel.trim() === view.defaults.dynamicModel
-        ? null
-        : RESET_LABEL,
+      values.dynamicModel.trim() === defaultModel ? null : RESET_LABEL,
     resetAriaLabel: "Reset to default for Dynamic Review model",
     onReset: handlers.resetModel,
   };
@@ -225,12 +230,16 @@ export function ReviewKindFieldset({
               <SettingsTextField
                 name="dynamicModel"
                 label="Dynamic Review model"
-                hint={`The model the agent uses. Type the name of any model your provider serves; the default is ${view.defaults.dynamicModel ?? ""}.`}
+                hint={`The model the agent uses. Type the name of any model your provider serves; the default is ${defaultModel}.`}
                 error={errors.dynamicModel}
                 origin={modelOrigin}
                 value={values.dynamicModel}
                 onChange={handlers.setModel}
                 list={datalistId}
+                suggestions={{
+                  label: SUGGESTED_MODEL_PICK.dynamicModel,
+                  models: suggestedModels,
+                }}
               />
             </>
           )}

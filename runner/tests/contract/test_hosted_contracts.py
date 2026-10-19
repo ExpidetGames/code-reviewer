@@ -90,6 +90,8 @@ def test_every_example_is_valid_against_its_schema(file: str, definition: str) -
         "ReleaseResponse",
         "VersionResponse",
         "JobStateResponse",
+        "VmStartRequest",
+        "VmStartResponse",
     ],
 )
 def test_the_new_runner_api_examples_are_valid(definition: str) -> None:

@@ -34,6 +34,7 @@ from typing import Any, TextIO
 from loguru import logger
 
 from code_reviewer_runner import __version__
+from code_reviewer_runner.cache_usage import CacheTally
 from code_reviewer_runner.capabilities import (
     ENGINE_DYNAMIC,
     OPENCODE_COMMAND_VARIABLE,
@@ -65,6 +66,8 @@ from code_reviewer_runner.dynamic_review.proxy import (
     DynamicCapabilities,
     ModelProxy,
     capabilities_for_job,
+    with_cache_unit_costs,
+    with_reserved_output,
 )
 from code_reviewer_runner.dynamic_review.publish import (
     STATE_RESET_CODE,
@@ -137,9 +140,17 @@ from code_reviewer_runner.usage_probe import UsageProbe
 
 PROGRAM_NAME = "code-reviewer-run-job"
 _ERROR_LEVEL = 40
+_INFO_LEVEL = 20
 TIMEOUT_VARIABLE = "RUNNER_JOB_TIMEOUT_SECONDS"
 # How long the watchdog waits after the soft timeout before it ends a command that does not react.
 HARD_TIMEOUT_GRACE_SECONDS = 3.0
+
+
+def _log_cache_use(capture: LogCapture | None, tally: CacheTally) -> None:
+    """One line of counts: how much of the input of the job the provider's cache served (#539)."""
+    line = tally.describe()
+    if capture is not None and line is not None:
+        capture.add(_INFO_LEVEL, "INFO", line)
 
 
 def _elapsed_ms(started: float) -> int:
@@ -292,6 +303,7 @@ def _run_diff_job(
             # provider that states none, what its usage costs by the price list (#511).
             meter, undo_meter = install_cost_meter(superseded=superseded, provider=provider)
             patches.callback(undo_meter)
+            patches.callback(lambda: _log_cache_use(capture, meter.cache_tally))
             if meter_slot is not None:
                 meter_slot.meter = meter
         except IdentityPatchError as error:
@@ -464,6 +476,7 @@ def dynamic_ledger(
         limits,
         window_tokens=capabilities.context_window_tokens,
         output_tokens=capabilities.max_output_tokens,
+        reserved_output_tokens=capabilities.reserved_output_tokens,
         unit_costs=capabilities.unit_costs,
     )
 
@@ -635,6 +648,11 @@ def _run_dynamic_job(
         capabilities = capabilities_for_job(
             environment.get(DYNAMIC_CAPABILITIES_VARIABLE), job.llm.model, dynamic.capabilities
         )
+        # The cache is priced from the provider's own list (#540), never from the job.
+        provider = require_provider(job.llm.provider)
+        capabilities = with_cache_unit_costs(capabilities, provider.cache_unit_costs(job.llm.model))
+        # The most a call reserves of its output allowance is the model's wire's to say (#533).
+        capabilities = with_reserved_output(capabilities, provider.wire(job.llm.model))
     except LimitError as error:
         return _failure(error.code, error.detail, started, capture)
 
@@ -686,6 +704,8 @@ def _run_dynamic_job(
     # Without an injected preparer this is the root supervisor: the export is prepared and sealed
     # for the dedicated engine user, and the engine is launched as that user (#197). A process
     # that is not the supervisor is refused there; the engine never runs unconfined.
+    # One line of counts on how much of the input the provider's cache served (#539).
+    cache_line: str | None = None
     prepare = prepare or production_preparer(
         environment, cancelled=lambda: ledger.remaining_seconds() <= 0
     )
@@ -734,6 +754,7 @@ def _run_dynamic_job(
                 # A request the engine had in flight when the run ended is waited for if the run was
                 # superseded: its answer is measured, so the cost is known instead of lost (#396).
                 server.stop(drain_seconds=SUPERSEDED_DRAIN_SECONDS if superseded.is_set() else 0.0)
+                cache_line = proxy.cache_tally.describe()
     except CheckoutError as error:
         return _failure(
             error.code,
@@ -747,7 +768,14 @@ def _run_dynamic_job(
 
     if answer.error is not None:
         detail = answer.error.detail + (f" [{turn_note}]" if turn_note else "")
-        return _failure(answer.error.code, detail, started, capture, usage=usage_probe.usage())
+        return _failure(
+            answer.error.code,
+            detail,
+            started,
+            capture,
+            usage=usage_probe.usage(),
+            facts=[cache_line] if cache_line else [],
+        )
     assert answer.findings is not None
     # The summary is written by this supervisor, never by the engine, and only for a run whose
     # findings passed every check above: any earlier failure leaves the previous comment untouched.
@@ -800,6 +828,10 @@ def _run_dynamic_job(
         summary += f"; {STATE_RESET_CODE}"
     if findings.stopped_early is not None:
         summary += f"; stopped early ({findings.stopped_early})"
+    excess = ledger.limit_exceeded_by
+    if excess is not None:
+        # The one overshoot the cost guard allows (#540), in USD, so the bound can be watched.
+        summary += f"; cost limit exceeded by {excess.normalize():f} USD"
     if recovery_note is not None:
         # A turn ended without an answer and one more turn returned it (#309): a complete review,
         # not a limit, so it is in the log and not in the comment.
@@ -807,6 +839,8 @@ def _run_dynamic_job(
     if turn_note:
         summary += f"; {turn_note}"
     summary += f"\ncheckout: {content.metrics.describe()}"
+    if cache_line:
+        summary += f"\n{cache_line}"
     return JobResult(
         ok=True,
         duration_ms=_elapsed_ms(started),

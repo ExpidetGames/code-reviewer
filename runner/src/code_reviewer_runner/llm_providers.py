@@ -28,7 +28,7 @@ from code_reviewer_runner.anthropic_cost import cost_of_usage
 from code_reviewer_runner.anthropic_models import model_for as claude_model
 from code_reviewer_runner.anthropic_wire import AnthropicMessagesWire
 from code_reviewer_runner.dynamic_review.budget import exact_cost
-from code_reviewer_runner.provider_wire import OpenAiChatWire, UpstreamWire
+from code_reviewer_runner.provider_wire import OpenAiChatWire, OpenRouterWire, UpstreamWire
 from code_reviewer_runner.usage_access import usage_field
 
 PROVIDER_ID_PATTERN: Final = re.compile(r"^[a-z][a-z0-9_]{1,31}$")
@@ -87,6 +87,10 @@ def _no_limit(model: str) -> int | None:
     return None
 
 
+def _no_cache_unit_costs(model: str) -> tuple[Decimal, Decimal] | None:
+    return None
+
+
 def _openai_chat_wire(model: str) -> UpstreamWire:
     return OpenAiChatWire()
 
@@ -122,6 +126,11 @@ class LlmProviderSpec:
     context_window: Callable[[str], int | None] = _no_limit
     # How the Dynamic proxy speaks to the provider for `model`.
     wire: Callable[[str], UpstreamWire] = _openai_chat_wire
+    # What a million tokens read from and written to the provider's cache cost for `model` (USD,
+    # read then write), from the provider's own list; None when the runner has none (#540). The
+    # cost guard of the Dynamic ledger prices the prompt of a call with them; the cost of a call
+    # stays the charge or the exact price of its usage.
+    cache_unit_costs: Callable[[str], tuple[Decimal, Decimal] | None] = _no_cache_unit_costs
 
     @property
     def settings_section(self) -> str:
@@ -167,6 +176,8 @@ OPENROUTER: Final = LlmProviderSpec(
     ),
     no_endpoint_for_parameters=_openrouter_no_endpoint_for_parameters,
     cost_extractor=_openrouter_cost,
+    # The chat protocol, with the breakpoints a Claude behind OpenRouter needs (#539).
+    wire=OpenRouterWire,
 )
 
 # What a Diff run asks a Claude model for. Reasoning tokens count against the output limit, so
@@ -199,6 +210,13 @@ def _anthropic_context_window(model: str) -> int | None:
     return None if entry is None else entry.context_window_tokens
 
 
+def _anthropic_cache_unit_costs(model: str) -> tuple[Decimal, Decimal] | None:
+    """A cache write without a split is a five minute write, the lifetime the runner's requests use
+    (`anthropic_cost.py`)."""
+    entry = claude_model(model)
+    return None if entry is None else (entry.prices.cache_read, entry.prices.cache_write_5m)
+
+
 def _anthropic_cost(model: str, usage: object) -> Decimal | None:
     """Anthropic states token counts and no charge: the cost is computed from them and the price
     list of the model. Whatever else the answer says about a charge is not read."""
@@ -222,6 +240,7 @@ ANTHROPIC: Final = LlmProviderSpec(
     context_window=_anthropic_context_window,
     # The Messages API, not the OpenAI-compatible endpoint (not for production, no cache tokens).
     wire=AnthropicMessagesWire,
+    cache_unit_costs=_anthropic_cache_unit_costs,
 )
 
 # A plain dict, so a test can register a second provider for the duration of one test.

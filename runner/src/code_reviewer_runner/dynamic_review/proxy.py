@@ -50,13 +50,14 @@ import http.client
 import json
 import threading
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request
 
+from code_reviewer_runner.cache_usage import CacheTally, counts_of
 from code_reviewer_runner.dynamic_review.audit import ToolAudit
 from code_reviewer_runner.dynamic_review.budget import (
     DEFAULT_WINDOW_TOKENS,
@@ -67,6 +68,7 @@ from code_reviewer_runner.dynamic_review.budget import (
     exact_cost,
 )
 from code_reviewer_runner.dynamic_review.call_outcome import describe_call
+from code_reviewer_runner.dynamic_review.call_trace import answer_finish_reason, answer_tool_names
 from code_reviewer_runner.dynamic_review.completion_stream import completion_as_stream
 from code_reviewer_runner.dynamic_review.config import PROXY_CAPABILITY_BYTES, PROXY_PROVIDER_ID
 from code_reviewer_runner.dynamic_review.net import no_redirect_opener
@@ -85,6 +87,7 @@ from code_reviewer_runner.error_mapping import is_context_length_exceeded, llm_s
 from code_reviewer_runner.job import JobCapabilities
 from code_reviewer_runner.job_loop.jsonvalues import as_object
 from code_reviewer_runner.llm_providers import PROXY_FORWARDED_FIELDS, LlmProviderSpec
+from code_reviewer_runner.provider_wire import UpstreamWire
 from code_reviewer_runner.result import ErrorCode
 
 # The protocol the run requires (`wrap_up.py` names the tool and the choice). The pinned OpenCode
@@ -131,6 +134,9 @@ class DynamicCapabilities:
     context_window_tokens: int = DEFAULT_WINDOW_TOKENS
     # What a call reserves before it is sent. Optional: without it a call reserves a floor.
     unit_costs: UnitCosts | None = None
+    # What a call reserves of `max_output_tokens` against the cost limit (#533); None reserves
+    # all of it. Set from the model's wire (`with_reserved_output`), never from the job.
+    reserved_output_tokens: int | None = None
 
     def check_required(self) -> None:
         if not self.tool_choice_required:
@@ -182,6 +188,36 @@ DEFAULT_MODEL_CAPABILITIES = DynamicCapabilities(
         input_usd_per_mtok=Decimal("0.02016"), output_usd_per_mtok=Decimal("0.891")
     ),
 )
+
+
+def with_cache_unit_costs(
+    capabilities: DynamicCapabilities, cache_costs: tuple[Decimal, Decimal] | None
+) -> DynamicCapabilities:
+    """The capabilities with the cache prices of the provider's own list (#540): what a million
+    tokens read from and written to its cache cost. They only size a reservation. The descriptor of
+    a job never names them; a provider without a list (None) leaves the prompt priced as input."""
+    unit_costs = capabilities.unit_costs
+    if cache_costs is None or unit_costs is None:
+        return capabilities
+    return replace(
+        capabilities,
+        unit_costs=replace(
+            unit_costs,
+            cache_read_usd_per_mtok=cache_costs[0],
+            cache_write_usd_per_mtok=cache_costs[1],
+        ),
+    )
+
+
+def with_reserved_output(
+    capabilities: DynamicCapabilities, wire: UpstreamWire
+) -> DynamicCapabilities:
+    """The capabilities with the most a call of this model reserves of its output, as its wire says
+    (#533). What a call really reserves is the output the run has shown, up to this cap (#540)."""
+    return replace(
+        capabilities,
+        reserved_output_tokens=wire.reserved_output_tokens(capabilities.max_output_tokens),
+    )
 
 
 def capabilities_from_config(raw: str | None, model: str | None = None) -> DynamicCapabilities:
@@ -415,6 +451,8 @@ class ModelProxy:
         self.upstream_model = upstream_model
         self.capabilities = capabilities
         self.audit = ToolAudit(ledger)
+        # How much of the input of the run came from the provider's cache (counts only, #539).
+        self.cache_tally = CacheTally()
         self._post = post
         # The registry entry of the job's provider: the require-parameters field, the matcher for
         # "no endpoint supports them" and the extractor of the stated cost (the runner decides,
@@ -535,6 +573,7 @@ class ModelProxy:
     def _attempt(self, forwarded: bytes, reservation: Reservation) -> "_Attempt | ProxyResponse":
         """One request to the provider, reserved before and settled after: its answer, or the
         response that ends the run (a provider refusal, a transport failure)."""
+        started_ms = int(self.ledger.elapsed_seconds() * 1000)
         try:
             status, response_body = self._post(
                 self.upstream_url,
@@ -547,9 +586,16 @@ class ModelProxy:
             # provider error it ends the run with a stable code of its own; the reservation stays
             # spent and the engine gets a 5xx that is no budget refusal. The exception text is
             # never passed on: it can carry the destination.
+            self._trace_failed_call(started_ms, reservation)
             return self._transport_failure(error)
-        self.ledger.check_response_bytes(len(response_body))
+        try:
+            self.ledger.check_response_bytes(len(response_body))
+        except LimitError:
+            # The call was made and may have been billed whatever its answer was: it is traced.
+            self._trace_failed_call(started_ms, reservation)
+            raise
         if status != 200:
+            self._trace_failed_call(started_ms, reservation)
             # The run ends with the provider's stable code; no partial success is claimed and no
             # counter is invented for a refused call (the reservation stays spent).
             refusal, code = self._provider_error(status, response_body)
@@ -561,19 +607,57 @@ class ModelProxy:
         completion = self._completion(response_body)
         usage = self._usage(completion)
         if usage == (None, None):
+            self._trace_failed_call(
+                started_ms, reservation, finish_reason=answer_finish_reason(completion)
+            )
             raise LimitError(
                 ErrorCode.DYNAMIC_ACCOUNTING_FAILED, "the provider did not report usage"
             )
         # The provider is authoritative: its counters replace the reservation. A counter above the
         # reservation is not added up, it fails the run.
+        cache_read, cache_write = self._cache_usage(completion)
+        cost = self._cost(completion)
+        # Noted before the settlement: a call the ledger then stops the run for is in the trace too.
+        self.ledger.trace.model_call(
+            t_ms=started_ms,
+            prompt_tokens=usage[0],
+            cache_read=cache_read,
+            cache_write=cache_write,
+            completion_tokens=usage[1],
+            cost=cost,
+            finish_reason=answer_finish_reason(completion),
+            final=reservation.final,
+            tool_names=answer_tool_names(completion),
+        )
         self.ledger.settle_call(
             reservation,
             prompt_tokens=usage[0],
             completion_tokens=usage[1],
-            cost=self._cost(completion),
+            cost=cost,
+            cache_read_tokens=cache_read,
+            cache_write_tokens=cache_write,
         )
         self.ledger.note_call_outcome(describe_call(completion, final=reservation.final))
+        self.cache_tally.add(completion.get("usage"))
         return _Attempt(body=response_body, completion=completion)
+
+    def _trace_failed_call(
+        self, started_ms: int, reservation: Reservation, *, finish_reason: str | None = None
+    ) -> None:
+        """A call that ended the run without a usable answer (refused, never answered, too large, or
+        answered without usage) was reserved and may have been billed: it is in the trace with
+        nothing known about it but what the answer said about its ending. No tool of it ever ran."""
+        self.ledger.trace.model_call(
+            t_ms=started_ms,
+            prompt_tokens=None,
+            cache_read=None,
+            cache_write=None,
+            completion_tokens=None,
+            cost=None,
+            finish_reason=finish_reason,
+            final=reservation.final,
+            tool_names=[],
+        )
 
     def _enforce_answer(
         self, attempt: "_Attempt", request: dict[str, Any]
@@ -707,6 +791,14 @@ class ModelProxy:
             completion if isinstance(completion, int) and not isinstance(completion, bool) else None
         )
         return prompt_tokens, completion_tokens
+
+    @staticmethod
+    def _cache_usage(document: dict[str, Any]) -> tuple[int | None, int | None]:
+        """What the provider says it read from and wrote to its cache (#540): the cost guard prices
+        the next call from it. The one reader of the cache fields is `cache_usage.counts_of` (#539);
+        a provider without a cache, or a count that cannot be true, reads as no cache use."""
+        counts = counts_of(document.get("usage"))
+        return (None, None) if counts is None else (counts.read, counts.written)
 
     def _cost(self, document: dict[str, Any]) -> Decimal | None:
         """The cost of this call by the rule of the provider, or None when it has none.

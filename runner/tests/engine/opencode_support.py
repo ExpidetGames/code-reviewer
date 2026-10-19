@@ -24,6 +24,9 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from fakes.llm.anthropic_rules import StrictMessagesApi
+
 from code_reviewer_runner.dynamic_review import findings_schema
 from code_reviewer_runner.dynamic_review.adapter import DynamicEngine, EngineAnswer
 from code_reviewer_runner.dynamic_review.audit import ToolAudit
@@ -32,10 +35,18 @@ from code_reviewer_runner.dynamic_review.checkout import PreparedContent
 from code_reviewer_runner.dynamic_review.config import new_proxy_capability
 from code_reviewer_runner.dynamic_review.inputs import review_inputs
 from code_reviewer_runner.dynamic_review.prompts import compose_system_prompt
-from code_reviewer_runner.dynamic_review.proxy import ModelProxy, capabilities_from_config
+from code_reviewer_runner.dynamic_review.proxy import (
+    ModelProxy,
+    ProxyResponse,
+    capabilities_from_config,
+)
 from code_reviewer_runner.job import Job, parse_job
 from code_reviewer_runner.job_loop.jsonvalues import as_object
-from code_reviewer_runner.llm_providers import OPENROUTER
+from code_reviewer_runner.llm_providers import OPENROUTER, LlmProviderSpec
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from fake_llm import real_anthropic_usage
+from fakes.llm.anthropic_cache import CacheRequestRejected, PromptCache
 
 RUNNER = Path(__file__).resolve().parents[2]
 API_KEY = "dummy-openrouter-key-0123456789"
@@ -53,6 +64,8 @@ CAPABILITIES = json.dumps(
 EXTRA_PATH_VARIABLE = "OPENCODE_TEST_PATH"
 BINARY_VARIABLE = "OPENCODE_BIN"
 
+
+DEFAULT_MODEL = "deepseek/deepseek-v4.1-flash"
 
 # 1 USD per million input tokens, 4 USD per million output tokens: a call has a price.
 UNIT_COSTS = UnitCosts(input_usd_per_mtok=Decimal(1), output_usd_per_mtok=Decimal(4))
@@ -147,8 +160,12 @@ class ScriptedModel:
                     model.on_request(len(model.requests))
                 if model.hold:
                     model._released.wait(model.hold)
-                payload = json.dumps(model.answer(body)).encode()
-                self.send_response(model.status)
+                refusal = model.refuse(
+                    {name.lower(): value for name, value in self.headers.items()}, body
+                )
+                status = model.status if refusal is None else refusal[0]
+                payload = json.dumps(model.answer(body) if refusal is None else refusal[1]).encode()
+                self.send_response(status)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(payload)))
                 self.end_headers()
@@ -161,10 +178,20 @@ class ScriptedModel:
         self._server.daemon_threads = True
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
 
-    def answer(self, body: dict[str, Any]) -> dict[str, Any]:
+    def refuse(
+        self, headers: dict[str, str], body: dict[str, Any]
+    ) -> tuple[int, dict[str, Any]] | None:
+        """The error a stricter provider answers instead of the script (None: the script
+        answers)."""
+        return None
+
+    def tool_names(self, body: dict[str, Any]) -> set[str]:
         offered: list[dict[str, Any]] = body.get("tools") or []
-        names = {tool["function"]["name"] for tool in offered}
-        if not offered:
+        return {tool["function"]["name"] for tool in offered}
+
+    def answer(self, body: dict[str, Any]) -> dict[str, Any]:
+        names = self.tool_names(body)
+        if not names:
             message: dict[str, Any] = {"role": "assistant", "content": "ok"}
         elif names == {"StructuredOutput"} and self.final is not None:
             # The only tool left is the return tool (the runner's wrap-up): a model answers with it.
@@ -226,7 +253,136 @@ class ScriptedModel:
         return {tool["function"]["name"] for tool in first["tools"]}
 
 
-def dynamic_job(head_sha: str) -> Job:
+@dataclass
+class ScriptedClaude(ScriptedModel):
+    """The same scripted model behind the Claude Messages API, with the prompt cache of the docs.
+
+    A request is the Messages body the runner's wire built (`POST /v1/messages`); the steps are the
+    ones of `ScriptedModel`, answered as `tool_use` blocks, and the usage of every answer is what
+    the cache rules give that request (`fakes/llm/anthropic_cache.py`), in the real shape. A request
+    the API would answer with a 400 is answered with one and noted in `rejected`.
+    """
+
+    cache: PromptCache = field(default_factory=PromptCache)
+    usages: list[dict[str, Any]] = field(default_factory=lambda: [])
+    rejected: list[str] = field(default_factory=lambda: [])
+
+    def tool_names(self, body: dict[str, Any]) -> set[str]:
+        offered: list[dict[str, Any]] = body.get("tools") or []
+        return {tool["name"] for tool in offered}
+
+    def answer(self, body: dict[str, Any]) -> dict[str, Any]:
+        completion = super().answer(body)
+        choice = completion["choices"][0]
+        message: dict[str, Any] = choice["message"]
+        try:
+            usage = self.cache.usage(body, real_anthropic_usage(output_tokens=10))
+        except CacheRequestRejected as error:
+            self.rejected.append(str(error))
+            self.status = 400
+            return {
+                "type": "error",
+                "error": {"type": "invalid_request_error", "message": str(error)},
+            }
+        self.usages.append(usage)
+        blocks: list[dict[str, Any]] = []
+        if message.get("content"):
+            blocks.append({"type": "text", "text": message["content"]})
+        calls: list[dict[str, Any]] = message.get("tool_calls") or []
+        for call in calls:
+            function: dict[str, Any] = call["function"]
+            blocks.append(
+                {
+                    "type": "tool_use",
+                    "id": call["id"],
+                    "name": function["name"],
+                    "input": json.loads(function["arguments"]),
+                }
+            )
+        return {
+            "id": "msg_test",
+            "type": "message",
+            "role": "assistant",
+            "model": body.get("model"),
+            "content": blocks,
+            "stop_reason": "tool_use" if message.get("tool_calls") else "end_turn",
+            "usage": usage,
+        }
+
+
+@dataclass
+class ScriptedMessagesModel(ScriptedModel):
+    """The same script behind the Claude Messages API, as the strict fake knows it (#533).
+
+    The steps and the final answer are written as for any other model (chat shaped); the requests
+    are Messages requests, refused with Anthropic's 400s (`StrictMessagesApi`: a forced tool
+    choice, thinking blocks that do not come back, a changed conversation), and the answers are
+    Messages answers: a signed thinking block ahead of whatever the model says or asks, and a
+    usage that counts the thinking among the output tokens.
+    """
+
+    think: bool = True
+    api: StrictMessagesApi = field(default_factory=StrictMessagesApi)
+
+    def refuse(
+        self, headers: dict[str, str], body: dict[str, Any]
+    ) -> tuple[int, dict[str, Any]] | None:
+        return self.api.check(headers, body)
+
+    def tool_names(self, body: dict[str, Any]) -> set[str]:
+        offered: list[dict[str, Any]] = body.get("tools") or []
+        return {tool["name"] for tool in offered}
+
+    def answer(self, body: dict[str, Any]) -> dict[str, Any]:
+        completion = super().answer(body)
+        choice = completion["choices"][0]
+        message: dict[str, Any] = choice["message"]
+        calls: list[dict[str, Any]] = message.get("tool_calls") or []
+        content: list[dict[str, Any]] = []
+        if self.think and self.tool_names(body):
+            content.append(
+                {"type": "thinking", "thinking": "", "signature": f"sig-{len(self.requests)}"}
+            )
+        if message.get("content"):
+            content.append({"type": "text", "text": message["content"]})
+        for call in calls:
+            try:
+                arguments: Any = json.loads(call["function"]["arguments"])
+            except ValueError:
+                arguments = {}  # a call cut off at the output allowance
+            content.append(
+                {
+                    "type": "tool_use",
+                    "id": call["id"],
+                    "name": call["function"]["name"],
+                    "input": arguments,
+                }
+            )
+        stop_reason = (
+            "max_tokens"
+            if choice["finish_reason"] == "length"
+            else "tool_use"
+            if calls
+            else "end_turn"
+        )
+        usage: dict[str, Any] = {"input_tokens": 50, "output_tokens": 10}
+        if self.think:
+            usage["output_tokens_details"] = {"thinking_tokens": 4}
+        answer: dict[str, Any] = {
+            "id": "msg_scripted",
+            "type": "message",
+            "role": "assistant",
+            "model": body["model"],
+            "content": content,
+            "stop_reason": stop_reason,
+            "stop_sequence": None,
+            "usage": usage,
+        }
+        self.api.record(body, answer)
+        return answer
+
+
+def dynamic_job(head_sha: str, model: str = DEFAULT_MODEL, provider: str = "openrouter") -> Job:
     return parse_job(
         json.dumps(
             {
@@ -234,7 +390,7 @@ def dynamic_job(head_sha: str) -> Job:
                 "command": "review",
                 "reviewKind": "dynamic",
                 "dynamic": {
-                    "model": "deepseek/deepseek-v4.1-flash",
+                    "model": model,
                     "skill": "SKILL_TEXT_FROM_THE_PROJECT: look for real bugs.",
                     "limits": {"maxFindings": 5},
                 },
@@ -252,8 +408,8 @@ def dynamic_job(head_sha: str) -> Job:
                     "botLogin": "code-reviewer[bot]",
                 },
                 "llm": {
-                    "provider": "openrouter",
-                    "model": "deepseek/deepseek-v4.1-flash",
+                    "provider": provider,
+                    "model": model,
                     "apiKey": API_KEY,
                 },
             }
@@ -312,6 +468,7 @@ class Run:
     proxy: ModelProxy
     capability: str
     engine_sent: dict[str, str] = field(default_factory=lambda: {})
+    engine: DynamicEngine | None = None
 
 
 def run_engine(
@@ -323,36 +480,57 @@ def run_engine(
     export: Path | None = None,
     files: frozenset[str] | None = None,
     clock: Callable[[], float] | None = None,
+    provider: LlmProviderSpec = OPENROUTER,
+    model_id: str = DEFAULT_MODEL,
+    engine_requests: list[dict[str, Any]] | None = None,
+    engine_factory: Callable[..., DynamicEngine] = DynamicEngine,
+    ledger_factory: Callable[..., BudgetLedger] = BudgetLedger,
 ) -> Run:
     """Run the real engine over a prepared export against the scripted model, through the proxy.
 
     `export` overrides the directory the engine is pointed at (the control run uses a raw tree).
+    `provider` and `model_id` choose the provider behind the proxy (the scripted model must speak
+    its protocol); `engine_requests`, when given, collects the requests the engine sent the proxy.
+    `engine_factory` builds the engine from the same keyword arguments (the plain-JSON spike #547
+    passes a subclass), `ledger_factory` the same for the ledger (the spike's stand-in for the
+    final-call exemption of #542).
     """
-    ledger = BudgetLedger(
+    ledger = ledger_factory(
         limits or DynamicLimits(), unit_costs=UNIT_COSTS, clock=clock or time.monotonic
     )
     capability = new_proxy_capability()
     proxy = ModelProxy(
         ledger=ledger,
         base_path="/v1",
-        model="deepseek/deepseek-v4.1-flash",
-        upstream_url=f"{model.url}/v1/chat/completions",
+        model=model_id,
+        upstream_url=provider.wire(model_id).url(f"{model.url}/v1"),
         upstream_api_key=API_KEY,
-        upstream_model="deepseek/deepseek-v4.1-flash",
+        upstream_model=model_id,
         capabilities=capabilities_from_config(CAPABILITIES),
         capability=capability,
-        provider=OPENROUTER,
+        provider=provider,
     )
+    if engine_requests is not None:
+        handled = proxy.handle
+
+        def recording(
+            method: str, path: str, body: bytes, headers: Mapping[str, str]
+        ) -> ProxyResponse:
+            if method == "POST":
+                engine_requests.append(json.loads(body))
+            return handled(method, path, body, headers)
+
+        proxy.handle = recording
     audit = RecordingAudit(ledger)
     proxy.audit = audit
     directory = export or content.export
     proxy.audit.set_export_root(str(directory))
-    job = dynamic_job(content.head_sha)
+    job = dynamic_job(content.head_sha, model_id, provider.id)
     dynamic = job.dynamic
     assert dynamic is not None
     server = proxy.serve("127.0.0.1").start()
     try:
-        engine = DynamicEngine(
+        engine = engine_factory(
             job,
             ledger=ledger,
             command=[str(opencode_binary())],
@@ -377,4 +555,5 @@ def run_engine(
         proxy=proxy,
         capability=capability,
         engine_sent=audit.engine_sent,
+        engine=engine,
     )

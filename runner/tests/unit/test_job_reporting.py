@@ -493,6 +493,40 @@ def test_the_stopped_early_reason_of_a_run_reaches_the_reported_usage(reason: st
     assert result["usage"]["stoppedEarly"] == reason
 
 
+# #540-N4: by how much a run passed its cost limit is a fact of the usage, optional and additive.
+def test_the_excess_over_the_cost_limit_reaches_the_reported_usage() -> None:
+    printed = JobResult(
+        ok=True,
+        duration_ms=1200,
+        comment_url="https://github.com/octo/repo/pull/7#c1",
+        error_code=None,
+        log_tail="review published",
+        usage=Usage("vendor/model", 9, 1, 10, 2, False, 1.0123, limit_exceeded_by=0.0123),
+        findings=ReviewFindings(open=0, by_severity={"P0": 0, "P1": 0, "P2": 0, "P3": 0}),
+    ).to_json()
+
+    result = reported(outcome(stdout=(json.dumps(printed) + "\n").encode()))
+
+    assert result["usage"]["limitExceededBy"] == 0.0123
+
+
+# #540-N4
+@pytest.mark.parametrize("usage", [_usage(), _usage(limitExceededBy=None)])
+def test_a_run_within_its_limit_reports_no_excess(usage: dict[str, Any]) -> None:
+    assert "limitExceededBy" not in reported(outcome(stdout=result_line(usage=usage)))["usage"]
+
+
+# #540-N4: the fact is dropped when it is malformed, the rest of the usage is still reported (the
+# app never approves on it, and the tokens and the cost of the run are not lost).
+@pytest.mark.parametrize("value", [-0.5, "0.01", True, [0.01], {}, float("nan"), float("inf")])
+def test_a_malformed_excess_is_left_out_and_the_usage_is_kept(value: Any) -> None:
+    result = reported(outcome(stdout=result_line(usage=_usage(limitExceededBy=value))))
+
+    assert result["usage"] is not None
+    assert "limitExceededBy" not in result["usage"]
+    assert result["usage"]["costUsd"] == 0.0035
+
+
 # #517-B1: a run that was not stopped says nothing, and an explicit null is the same as absent.
 @pytest.mark.parametrize("usage", [_usage(), _usage(stoppedEarly=None)])
 def test_a_run_that_was_not_stopped_early_reports_no_stopped_early(usage: dict[str, Any]) -> None:
@@ -598,7 +632,18 @@ def _populated(ok: bool) -> JobResult:
         error_code=None if ok else ErrorCode.TIMEOUT,
         log_tail="review published",
         log_truncated=True,
-        usage=Usage("vendor/model", 9, 1, 10, 2, True, 0.0035, stopped_early="cost_limit"),
+        usage=Usage(
+            "vendor/model",
+            9,
+            1,
+            10,
+            2,
+            True,
+            0.0035,
+            stopped_early="cost_limit",
+            limit_exceeded_by=0.0123,
+            call_trace=_trace(),
+        ),
         error_reason="no_result_from_process",
         findings=ReviewFindings(
             open=3, by_severity={"P0": 0, "P1": 1, "P2": 1, "P3": 1}, incomplete=True
@@ -648,3 +693,214 @@ def test_every_intentional_drop_is_a_field_a_job_result_can_print() -> None:
 
     assert set(INTENTIONAL_DROPS) <= set(printed)
     assert all(INTENTIONAL_DROPS.values())
+
+
+# -- the per-call trace (#541) -------------------------------------------------------------------
+
+
+def _model_call(index: int = 0, **overrides: Any) -> dict[str, Any]:
+    call: dict[str, Any] = {
+        "index": index,
+        "tMs": 1200,
+        "promptTokens": 14600,
+        "cacheRead": 0,
+        "cacheWrite": 14600,
+        "completionTokens": 492,
+        "costUsd": 0.0342,
+        "finishReason": "tool_calls",
+        "final": False,
+        "tools": [{"name": "read", "count": 2}],
+    }
+    call.update(overrides)
+    return call
+
+
+def _trace(**overrides: Any) -> dict[str, Any]:
+    trace: dict[str, Any] = {
+        "truncated": False,
+        "modelCalls": [_model_call()],
+        "toolCalls": [{"index": 0, "name": "read", "resultBytes": 812, "isRepeat": False}],
+    }
+    trace.update(overrides)
+    return trace
+
+
+# #541-T06
+def test_the_call_trace_of_a_run_reaches_the_reported_usage_unchanged() -> None:
+    trace = _trace()
+
+    result = reported(outcome(stdout=result_line(usage=_usage(callTrace=trace))))
+
+    assert result["usage"]["callTrace"] == trace
+
+
+# #541-T06
+def test_a_usage_without_a_trace_stays_without_one() -> None:
+    assert "callTrace" not in reported(outcome(stdout=result_line(usage=_usage())))["usage"]
+    explicit = reported(outcome(stdout=result_line(usage=_usage(callTrace=None))))
+    assert "callTrace" not in explicit["usage"]
+
+
+# #541-T06: the trace is observability. One the app would refuse is left out and nothing else is:
+# the usage, the cost and the verdict of the run are never lost for it.
+@pytest.mark.parametrize(
+    "trace",
+    [
+        "SECRET-CONTENT",
+        _trace(extra="SECRET-CONTENT"),
+        _trace(truncated="no"),
+        _trace(modelCalls=[_model_call(finishReason="SECRET-CONTENT")]),
+        _trace(modelCalls=[_model_call(tools=[{"name": "SECRET-CONTENT", "count": 1}])]),
+        _trace(modelCalls=[_model_call(promptTokens=-1)]),
+        _trace(modelCalls=[_model_call(path="/SECRET-CONTENT")]),
+        _trace(toolCalls=[{"index": 0, "name": "read", "resultBytes": 1, "isRepeat": "yes"}]),
+        _trace(toolCalls=[{"index": 0, "name": "read", "resultBytes": 1}]),
+        _trace(modelCalls=[_model_call(i) for i in range(101)]),
+    ],
+)
+def test_a_malformed_trace_is_left_out_and_the_rest_of_the_usage_stays(trace: Any) -> None:
+    result = reported(outcome(stdout=result_line(usage=_usage(callTrace=trace))))
+
+    assert result["ok"] is True
+    assert result["usage"] is not None
+    assert "callTrace" not in result["usage"]
+    assert result["usage"]["costUsd"] == 0.0035
+    assert "SECRET-CONTENT" not in json.dumps(result)
+
+
+# #541-T06
+def test_a_dropped_trace_is_logged_once_by_code_without_its_content(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level(logging.INFO, logger=_LOGGER):
+        reported(outcome(stdout=result_line(usage=_usage(callTrace="SECRET-CONTENT"))))
+
+    records = [record for record in caplog.records if record.name == _LOGGER]
+    assert [record.getMessage() for record in records] == ["RESULT_CALL_TRACE_INVALID"]
+
+
+def _full_trace(**call: Any) -> dict[str, Any]:
+    return _trace(
+        truncated=True,
+        modelCalls=[_model_call(index, **call) for index in range(100)],
+        toolCalls=[
+            {"index": index, "name": "grep", "resultBytes": 65536, "isRepeat": True}
+            for index in range(100)
+        ],
+    )
+
+
+def _printed_with(trace: dict[str, Any]) -> bytes:
+    printed = JobResult(
+        ok=True,
+        duration_ms=1200,
+        comment_url=None,
+        error_code=None,
+        log_tail="x" * MAX_LOG_TAIL_CHARS,
+        usage=Usage("vendor/model", 9, 1, 10, 2, False, 0.0035, call_trace=trace),
+    ).to_json()
+    return (json.dumps(printed) + "\n").encode()
+
+
+# #541-T04, #541-T06: a full trace of a realistic run leaves the result inside the request bound.
+def test_a_full_trace_stays_in_the_result_inside_the_request_bound() -> None:
+    trace = _full_trace(promptTokens=123_456, cacheRead=120_000, cacheWrite=3_456)
+
+    result = fit_request(reported(outcome(stdout=_printed_with(trace))))
+
+    assert result["usage"]["callTrace"] == trace
+    assert len(json.dumps(result)) <= MAX_REQUEST_BYTES
+    assert result["logTail"] == "x" * MAX_LOG_TAIL_CHARS
+
+
+# #541-T04, #541-T06: the biggest trace the contract allows (every field at its largest, every
+# tool on every call) does not fit next to the log: the trace goes, the usage and the log stay.
+def test_the_biggest_trace_the_contract_allows_is_dropped_before_anything_else() -> None:
+    names = ("read", "grep", "glob", "StructuredOutput", "other")
+    trace = _full_trace(
+        tMs=604_800_000,
+        promptTokens=999_999_999,
+        cacheRead=999_999_999,
+        cacheWrite=999_999_999,
+        completionTokens=999_999_999,
+        costUsd=0.123456789012,
+        finishReason="content_filter",
+        tools=[{"name": name, "count": 1000} for name in names],
+    )
+    printed = reported(outcome(stdout=_printed_with(trace)))
+    printed["errorMessage"] = "e" * 2000  # a result that also carries a message, as a failure does
+    assert printed["usage"]["callTrace"] == trace
+    assert len(json.dumps({**printed, "logTail": ""})) > MAX_REQUEST_BYTES
+
+    result = fit_request(printed)
+
+    assert len(json.dumps(result)) <= MAX_REQUEST_BYTES
+    assert "callTrace" not in result["usage"]
+    assert result["usage"]["costUsd"] == 0.0035
+    assert result["logTail"] == "x" * MAX_LOG_TAIL_CHARS
+
+
+# #541-T06: a body that is too large loses the trace first, the log only after it: the log is what
+# the Runs view shows for a failure and the trace is observability (docs/dynamic-review.md).
+def test_a_body_that_is_too_large_loses_the_trace_before_any_of_the_log() -> None:
+    names = ("read", "grep", "glob", "StructuredOutput")
+    trace = _full_trace(
+        tMs=604_800_000,
+        promptTokens=99_999,
+        cacheRead=99_999,
+        cacheWrite=9_999,
+        completionTokens=9_999,
+        costUsd=0.123456,
+        finishReason="content_filter",
+        tools=[{"name": name, "count": 10} for name in names],
+    )
+    assert 38_000 < len(json.dumps(trace)) < 44_000
+    printed = reported(outcome(stdout=_printed_with(trace)))
+    printed["logTail"] = "l" * 8_192
+    assert len(json.dumps({**printed, "logTail": ""})) < MAX_REQUEST_BYTES
+    assert len(json.dumps(printed)) > MAX_REQUEST_BYTES
+
+    result = fit_request(printed)
+
+    assert len(json.dumps(result)) <= MAX_REQUEST_BYTES
+    assert "callTrace" not in result["usage"]
+    assert result["usage"]["costUsd"] == 0.0035
+    assert result["logTail"] == "l" * 8_192
+    assert result["logTruncated"] is printed["logTruncated"]
+
+
+# #541-T06: a body that fits keeps its trace, whatever the log.
+def test_a_body_that_fits_keeps_its_trace() -> None:
+    trace = _full_trace()
+    printed = reported(outcome(stdout=_printed_with(trace)))
+    assert len(json.dumps(printed)) <= MAX_REQUEST_BYTES
+
+    assert fit_request(printed)["usage"]["callTrace"] == trace
+
+
+# #541-T06: the bare verdict (the fallback when the app refuses the full result) has no trace: it
+# is the part of the result that can be dropped, and the verdict, code and usage stay.
+def test_the_bare_verdict_has_no_trace() -> None:
+    failed = reported(outcome(exit_code=1, stdout=_failed_with_usage()))
+    failed["usage"] = {**failed["usage"], "callTrace": _trace()}
+
+    assert "callTrace" not in minimal(failed)["usage"]
+    assert minimal(failed)["usage"]["costUsd"] == 0.0035
+    assert (
+        minimal(reported(outcome(stdout=result_line(usage=_usage(callTrace=_trace())))))["usage"]
+        is None
+    )
+
+
+# #541-T06: shrinking the log terminates for a log of one character (it did not halve to nothing).
+def test_a_log_of_one_character_does_not_stall_the_fit() -> None:
+    result = {
+        "ok": True,
+        "logTail": "x",
+        "errorMessage": "y" * (MAX_REQUEST_BYTES + 10),
+        "usage": None,
+    }
+
+    fitted = fit_request(result)
+
+    assert fitted["logTail"] == ""

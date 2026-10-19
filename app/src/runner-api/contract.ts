@@ -77,6 +77,7 @@ export const APP_FEATURES = [
   "claim_by_job_id",
   "pool_cap",
   "release",
+  "vm_lifecycle",
 ] as const;
 export type AppFeature = (typeof APP_FEATURES)[number];
 
@@ -104,6 +105,32 @@ export const RELEASE_RETRY_AFTER_RANGE = { min: 1, max: 86_400 } as const;
 export type ReleaseResponse = {
   version: typeof RUNNER_API_VERSION;
   job: { id: string; status: "queued" | "failed" };
+};
+
+/**
+ * #493: the body of `POST /api/runners/v1/jobs/{id}/vm` (`VmStartRequest`): the Dispatcher says that it created the VM of
+ * the claim. Closed. The per-job credential proves the claim; `startedAt` is the Dispatcher's clock (the App keeps it
+ * between the claim and its own clock); `timeoutSeconds` is the VM's own timeout, the platform's backstop.
+ */
+export type VmStartRequest = {
+  credential: string;
+  vmName: string;
+  startedAt: string;
+  timeoutSeconds: number;
+};
+
+/** #493: the name of a VM (`VmName`): the platform's, as the Dispatcher stops it. */
+export const VM_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+/** #493: `startedAt` is ISO 8601 in UTC with the `Z`, milliseconds optional (`VmStartRequest.startedAt`). */
+export const VM_STARTED_AT_PATTERN =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/;
+/** #493: the range of `VmStartRequest.timeoutSeconds`. */
+export const VM_TIMEOUT_SECONDS_RANGE = { min: 60, max: 86_400 } as const;
+
+/** #493: 200 from the report (`VmStartResponse`). `replayed`: the VM was known; nothing changed. */
+export type VmStartResponse = {
+  version: typeof RUNNER_API_VERSION;
+  status: "recorded" | "replayed";
 };
 
 /**
@@ -397,6 +424,64 @@ export type RunnerUsage = {
   costUsd: number | null;
   /** Why a Dynamic Review was wrapped up before it was done (#293); null for a complete run. */
   stoppedEarly: StoppedEarly | null;
+  /** #540: by how much, in US dollars, the cost passed the operator's cost limit; absent when it did not. */
+  limitExceededBy?: number;
+  /** What each call was, without content (#541). Absent for a runner that sends none and for a Diff Review. */
+  callTrace?: RunnerCallTrace;
+};
+
+/** The engine's tools as the trace names them; every other tool a model called is `other` (#541). */
+export const TRACE_TOOL_NAMES = [
+  "read",
+  "grep",
+  "glob",
+  "StructuredOutput",
+  "other",
+] as const;
+export type TraceToolName = (typeof TRACE_TOOL_NAMES)[number];
+/** Why a model call ended, as the trace names it; null when the provider said nothing. */
+export const TRACE_FINISH_REASONS = [
+  "stop",
+  "tool_calls",
+  "length",
+  "content_filter",
+  "other",
+] as const;
+export type TraceFinishReason = (typeof TRACE_FINISH_REASONS)[number];
+/** At most this many model calls and this many tool calls are kept in a trace (the first ones). */
+export const MAX_TRACE_ENTRIES = 100;
+
+/** One model call of the trace (#541). A count is null when the provider reported none. */
+export type RunnerModelCallTrace = {
+  index: number;
+  /** Milliseconds from the start of the run to the start of the call. */
+  tMs: number;
+  promptTokens: number | null;
+  cacheRead: number | null;
+  cacheWrite: number | null;
+  completionTokens: number | null;
+  costUsd: number | null;
+  finishReason: TraceFinishReason | null;
+  /** The call the run was wrapped up with. */
+  final: boolean;
+  tools: { name: TraceToolName; count: number }[];
+};
+
+/** One tool call of the trace (#541). The arguments are never sent. */
+export type RunnerToolCallTrace = {
+  index: number;
+  name: TraceToolName;
+  /** The size of the result the model was shown; null when it never was. */
+  resultBytes: number | null;
+  /** The same tool with the same normalised arguments already ran in this job. */
+  isRepeat: boolean;
+};
+
+/** #541: what each call of a Dynamic Review was, as numbers and stable names; no path, argument or content. */
+export type RunnerCallTrace = {
+  truncated: boolean;
+  modelCalls: RunnerModelCallTrace[];
+  toolCalls: RunnerToolCallTrace[];
 };
 
 /** The reasons a Dynamic Review stops early: its cost limit or its time limit. */

@@ -143,7 +143,7 @@ def test_the_imitation_in_the_history_of_the_recovery_call_stays_escaped_text() 
 # #309-T07
 def test_a_final_call_that_answered_in_prose_makes_a_further_request_an_output_error() -> None:
     upstream = Upstream()  # answers 200 with text and no tool call
-    ledger = BudgetLedger(DynamicLimits(max_cost_usd=Decimal("0.05")), unit_costs=UNIT_COSTS)
+    ledger = BudgetLedger(DynamicLimits(max_cost_usd=Decimal("0.025")), unit_costs=UNIT_COSTS)
     subject = proxy(upstream, ledger=ledger)
     assert post(subject, loop_request()).status == 200
     assert ledger.stopped_early == "cost_limit"
@@ -172,7 +172,7 @@ def test_a_recovery_call_that_answered_in_prose_makes_a_further_request_an_outpu
 # #309-T07
 def test_a_final_call_that_returned_the_answer_keeps_the_budget_refusal() -> None:
     upstream = Upstream(body=answer_with_structured_output())
-    ledger = BudgetLedger(DynamicLimits(max_cost_usd=Decimal("0.05")), unit_costs=UNIT_COSTS)
+    ledger = BudgetLedger(DynamicLimits(max_cost_usd=Decimal("0.025")), unit_costs=UNIT_COSTS)
     subject = proxy(upstream, ledger=ledger)
     assert post(subject, loop_request()).status == 200
 

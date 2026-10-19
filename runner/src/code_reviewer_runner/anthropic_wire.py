@@ -13,28 +13,83 @@ cost of a call would not be exact.
 on as it is. `temperature` and `top_p` follow the flags of the model in the list (a 400 from Opus
 4.7 on), never both, never for a model the list does not know. Thinking is switched off for the
 models that accept it (the chat history of the engine cannot carry thinking blocks back), and the
-history is cached automatically, so a tool loop pays the read price for what it repeats.
+prompt is cached (below), so a tool loop pays the read price for what it repeats.
+
+**What is cached (#539).** Three explicit breakpoints, never more than four and never two on one
+block, all of the provider's default lifetime of five minutes: the end of the static prefix (the
+last system block, which covers the tools in front of it; the last tool when there is no system
+prompt), the end of the latest turn (what the next call reads) and the end of the turn before it of
+the same side (what the previous call wrote, so a read never depends on how far the provider's
+look-back of 20 blocks reaches). The top-level automatic mark is not used: it takes one of the four
+slots and marks the last block a second time. A mark the engine put on a message (the pinned
+OpenCode marks its system message and its last two messages when the model is a Claude) is not
+copied, because the body is built field by field; the marks here come from the structure of the
+request, never from its text.
+
+**What is steered (#533).** The engine asks for a forced tool choice on every call, because the
+review has to come back through its `StructuredOutput` tool. A model whose flags in the list say
+that it refuses a forced choice (Fable 5.1, Opus 5.5, Sonnet 5.5), or that cannot run without
+thinking (those and Fable 5, which a forced call would keep from thinking), is asked for the same
+thing differently: `tool_choice: auto`, the return tool marked `strict` with a schema the strict
+mode accepts, and a constant instruction at the end of the system text. What the answer is worth
+is still decided by the runner's validation and its recovery turn (#309), exactly as for a model
+that is forced.
+
+**What is carried (#533).** A model that cannot run without thinking gets its `thinking` and
+`redacted_thinking` blocks back with every tool result, which the engine's chat history cannot
+hold, so the wire keeps them per tool call (`anthropic_thinking.py`). Such a request names
+`drop_block` for the binding of thinking to the conversation, so that a call that changes the tool
+set (the wrap-up) loses the reasoning of that call and nothing more.
 
 **What is refused.** A request whose meaning the provider cannot keep is refused with a stable code
-before anything is sent, never downgraded: a forced tool choice for a model that rejects it, content
-that is not text, a structured response format, a tool call that is not valid.
+before anything is sent, never downgraded: content that is not text, a structured response format, a
+tool call that is not valid.
 
 **What comes back.** Text, tool calls with their arguments as JSON text, the finish reason, and a
 `usage` whose counts the provider's cost rule reads: `prompt_tokens` holds the cache tokens, which
-are also named on their own, and what changes a price (tier, speed, region, server tools) is passed
-on so the rule can refuse to price what it does not know. Thinking blocks never reach the engine.
+are also named on their own, and what changes a price (tier, speed, region, server tools) is
+passed on so the rule can refuse to price what it does not know. Thinking blocks never reach the
+engine; the thinking tokens are a part of the output tokens, which are billed as a whole (#534):
+the breakdown travels with the usage and the cost rule checks it.
 """
 
 import json
 import math
+from collections.abc import Callable
 from typing import Any, Final
 
 from code_reviewer_runner.anthropic_models import ClaudeModel, model_for
+from code_reviewer_runner.anthropic_schema import strict_input_schema
+from code_reviewer_runner.anthropic_thinking import ThinkingStore
 from code_reviewer_runner.dynamic_review.budget import LimitError
+from code_reviewer_runner.dynamic_review.wrap_up import STRUCTURED_OUTPUT_TOOL
 from code_reviewer_runner.job_loop.jsonvalues import as_object
+from code_reviewer_runner.provider_wire import CACHE_CONTROL
 from code_reviewer_runner.result import ErrorCode
 
 ANTHROPIC_VERSION: Final = "2023-06-01"
+# Blocks the provider refuses a breakpoint on.
+_UNMARKABLE_BLOCKS: Final = frozenset({"thinking", "redacted_thinking"})
+# The beta that lets a request say what happens when a thinking block no longer fits the
+# conversation.
+THINKING_BINDING_BETA: Final = "thinking-binding-controls-2026-08-01"
+# What a call of a model that always thinks reserves against the cost limit, whatever output
+# allowance it may use (#533). Thinking counts against `max_tokens`, a hard cap ("thinking and
+# response text combined"), so the job gives such a model a large allowance (32768,
+# `app/src/llm/dynamic-capabilities.ts`). Reserving all of it at the output price (up to 50 USD
+# per million tokens) would make the 1 USD default limit stop a run at its first call. 8192 is
+# what every call reserved before the larger allowance. A call that uses more is still capped by
+# the allowance and costed from its usage: the limit can be passed by that one call and no
+# further, and the run ends after it (`BudgetLedger.settle_call`).
+THINKING_RESERVED_OUTPUT_TOKENS: Final = 8_192
+# Added to the system text of a request whose forced tool choice was asked for as `auto`. Constant
+# runner text without a tag: it is the same on every request of a run (the cache keeps working), and
+# the repository cannot imitate what carries no marker to copy.
+STEERING_INSTRUCTION: Final = (
+    "Answer every turn of this review by calling a tool; never reply with plain text alone. When "
+    "the review is complete, return it by calling the StructuredOutput tool once with the complete "
+    "review, and do not write the review as text."
+)
 
 _FINISH_REASONS: Final = {
     "end_turn": "stop",
@@ -134,11 +189,15 @@ def _tool_use_blocks(raw: object) -> list[dict[str, Any]]:
     return blocks
 
 
-def _convert_messages(raw: object) -> tuple[str, list[dict[str, Any]]]:
+def _convert_messages(
+    raw: object, restore: Callable[[list[dict[str, Any]]], list[dict[str, Any]]]
+) -> tuple[str, list[dict[str, Any]]]:
     """The system prompt and the alternating turns of a chat history.
 
     A run of tool messages becomes the tool results of one user turn, in order and before any text
     that follows them (the API wants the results first); same-role neighbours join one turn.
+    `restore` puts the thinking blocks of an assistant turn back (#533); it is the identity where
+    there are none.
     """
     if not isinstance(raw, list) or not raw:
         raise _policy("the request has no messages")
@@ -168,10 +227,12 @@ def _convert_messages(raw: object) -> tuple[str, list[dict[str, Any]]]:
             # without thinking blocks, and text of that kind is not part of the answer.
             add(
                 "assistant",
-                [
-                    *_text_blocks(message.get("content")),
-                    *_tool_use_blocks(message.get("tool_calls")),
-                ],
+                restore(
+                    [
+                        *_text_blocks(message.get("content")),
+                        *_tool_use_blocks(message.get("tool_calls")),
+                    ]
+                ),
             )
         elif role == "tool":
             call_id = message.get("tool_call_id")
@@ -219,7 +280,48 @@ def _tools(raw: object) -> list[dict[str, Any]]:
     return converted
 
 
-def _tool_choice(raw: object, parallel: object, model: ClaudeModel | None) -> dict[str, Any] | None:
+def _control() -> dict[str, str]:
+    return dict(CACHE_CONTROL)
+
+
+def _markable(block: dict[str, Any]) -> bool:
+    """The provider refuses a mark on a thinking block and on a tool result without content (a tool
+    that returned nothing), as it does on an empty text block."""
+    kind = block.get("type")
+    if kind in _UNMARKABLE_BLOCKS:
+        return False
+    return kind != "tool_result" or bool(block.get("content"))
+
+
+def _last_markable(turn: dict[str, Any]) -> dict[str, Any] | None:
+    return next((block for block in reversed(turn["content"]) if _markable(block)), None)
+
+
+def _mark_turns(turns: list[dict[str, Any]]) -> None:
+    """The breakpoints inside the conversation: the end of the latest turn and the end of the
+    turn before it of the same side (the entry the previous call wrote)."""
+    if not turns:
+        return
+    head = turns[-1]
+    candidates = [head]
+    for turn in reversed(turns[:-1]):
+        if turn["role"] == head["role"]:
+            candidates.append(turn)
+            break
+    for turn in candidates:
+        block = _last_markable(turn)
+        if block is not None:
+            block["cache_control"] = _control()
+
+
+def _tool_choice(
+    raw: object, parallel: object, *, steered: bool
+) -> tuple[dict[str, Any] | None, bool]:
+    """The tool choice of the Messages API, and whether a forced choice was asked for as `auto`.
+
+    A forced choice (`required`, a named tool) goes out as it is, except for a steered model (#533):
+    that one is asked for `auto`, and the wire adds the instruction and the strict return tool.
+    """
     choice: dict[str, Any] | None
     forced = False
     if raw is None:
@@ -242,12 +344,12 @@ def _tool_choice(raw: object, parallel: object, model: ClaudeModel | None) -> di
         ):
             raise _policy("the tool choice is not one the provider knows")
         choice, forced = {"type": "tool", "name": name}, True
-    if forced and model is not None and not model.forced_tool_choice:
-        # Not a downgrade to `auto`: the run needs the tool called (the findings come through it).
-        raise _unsupported("the model does not take a forced tool choice")
+    steer = forced and steered
+    if steer:
+        choice = {"type": "auto"}
     if choice is not None and parallel is False and choice["type"] != "none":
         choice["disable_parallel_tool_use"] = True
-    return choice
+    return choice, steer
 
 
 def _stop_sequences(raw: object) -> list[str]:
@@ -282,16 +384,29 @@ class AnthropicMessagesWire:
 
     def __init__(self, model_id: str) -> None:
         self._model = model_for(model_id)
+        model = self._model
+        # Decided by the flags of the list, never by the id (a model of no list is neither).
+        self._always_thinks = model is not None and not model.thinking_disabled
+        self._steered = model is not None and (
+            not model.forced_tool_choice or not model.thinking_disabled
+        )
+        self._thinking = ThinkingStore()
 
     def url(self, base: str) -> str:
         return f"{base.rstrip('/')}/messages"
 
     def headers(self, api_key: str) -> dict[str, str]:
-        return {
+        headers = {
             "x-api-key": api_key,
             "anthropic-version": ANTHROPIC_VERSION,
             "Content-Type": "application/json",
         }
+        if self._always_thinks:
+            headers["anthropic-beta"] = THINKING_BINDING_BETA
+        return headers
+
+    def _restore(self, blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return self._thinking.restore(blocks) if self._always_thinks else blocks
 
     def encode_request(self, request: dict[str, Any]) -> dict[str, Any]:
         max_tokens = request.get("max_tokens")
@@ -302,32 +417,52 @@ class AnthropicMessagesWire:
             raise _unsupported(
                 "the provider has no response format; the run answers through a tool"
             )
-        system, turns = _convert_messages(request.get("messages"))
+        system, turns = _convert_messages(request.get("messages"), self._restore)
         body: dict[str, Any] = {
             "model": request.get("model"),
             "max_tokens": max_tokens,
             "messages": turns,
         }
-        if system:
-            body["system"] = system
         if request.get("tools") is not None:
             tools = _tools(request["tools"])
             if tools:
-                body["tools"] = tools
-                choice = _tool_choice(
-                    request.get("tool_choice"), request.get("parallel_tool_calls"), self._model
+                choice, steer = _tool_choice(
+                    request.get("tool_choice"),
+                    request.get("parallel_tool_calls"),
+                    steered=self._steered,
                 )
+                body["tools"] = _strict_return_tool(tools) if steer else tools
                 if choice is not None:
                     body["tool_choice"] = choice
+                if steer:
+                    system = (
+                        f"{system}\n\n{STEERING_INSTRUCTION}" if system else STEERING_INSTRUCTION
+                    )
+        if system:
+            # The last system block is the breakpoint of the static prefix, tools included (#539).
+            body["system"] = [{"type": "text", "text": system, "cache_control": _control()}]
+        elif body.get("tools"):
+            body["tools"][-1]["cache_control"] = _control()
         stops = _stop_sequences(request.get("stop"))
         if stops:
             body["stop_sequences"] = stops
         body.update(_sampling(request, self._model))
         if self._model is not None and self._model.thinking_disabled:
             body["thinking"] = {"type": "disabled"}
-        # Automatic caching of the last block: the history of a tool loop is read from the cache.
-        body["cache_control"] = {"type": "ephemeral"}
+        elif self._always_thinks:
+            # Always on; what the request names is only what happens to a block that no longer
+            # fits the conversation (the wrap-up changes the tool set): it is dropped, not a 400.
+            body["thinking"] = {
+                "type": "adaptive",
+                "block_binding": {"prefix_mismatch_behavior": "drop_block"},
+            }
+        _mark_turns(turns)
         return body
+
+    def reserved_output_tokens(self, allowance: int) -> int:
+        if not self._always_thinks:
+            return allowance
+        return min(allowance, THINKING_RESERVED_OUTPUT_TOKENS)
 
     def decode_response(self, body: bytes) -> bytes:
         try:
@@ -338,6 +473,8 @@ class AnthropicMessagesWire:
         if document is None or document.get("type") != "message":
             raise _invalid_answer("the provider answer is not a message")
         text, calls = _read_content(document.get("content"))
+        if self._always_thinks:
+            self._thinking.remember(_blocks_of(document.get("content")))
         stop_reason = document.get("stop_reason")
         finish = (
             _FINISH_REASONS.get(stop_reason, "stop") if isinstance(stop_reason, str) else "stop"
@@ -359,6 +496,26 @@ class AnthropicMessagesWire:
         if usage is not None:
             completion["usage"] = usage
         return json.dumps(completion, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+
+
+def _strict_return_tool(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The tools with the return tool marked `strict` and its schema reduced to what the strict mode
+    accepts; a schema that cannot be reduced safely leaves the tool as it is."""
+    result: list[dict[str, Any]] = []
+    for tool in tools:
+        reduced = (
+            strict_input_schema(tool["input_schema"])
+            if tool["name"] == STRUCTURED_OUTPUT_TOOL
+            else None
+        )
+        result.append({**tool, "input_schema": reduced, "strict": True} if reduced else tool)
+    return result
+
+
+def _blocks_of(raw: object) -> list[dict[str, Any]]:
+    entries: list[Any] = raw if isinstance(raw, list) else []  # pyright: ignore[reportUnknownVariableType]
+    blocks = (as_object(entry) for entry in entries)
+    return [block for block in blocks if block is not None]
 
 
 def _read_content(raw: object) -> tuple[str | None, list[dict[str, Any]]]:

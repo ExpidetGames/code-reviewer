@@ -67,6 +67,7 @@ describe("the sections of the portal", () => {
     expect(links.map((link) => link.textContent)).toEqual([
       "Overview",
       "Approvals",
+      "Runs",
       "Instance",
       "Sign-up",
       "Sign-in",
@@ -142,6 +143,7 @@ describe("the sections on a narrow screen", () => {
     ).toEqual([
       "Overview",
       "Approvals",
+      "Runs",
       "Instance",
       "Sign-up",
       "Sign-in",

@@ -32,6 +32,7 @@ import { describeError } from "./logger.ts";
 import {
   finishJob,
   heartbeatAnswer,
+  logDropped,
   RUNNER_SHUTDOWN_CODE,
   type ReportDeps,
 } from "./report.ts";
@@ -170,6 +171,7 @@ export function createWorkerApi(deps: WorkerApiDeps): WorkerApi {
             fields: parsed.fields,
           });
         if (endedByApp(who.job)) return ended();
+        logDropped(deps, `worker result job=${jobId}`, parsed.dropped);
         return await finishJob(deps, {
           job: who.job,
           leaseToken: who.leaseToken,

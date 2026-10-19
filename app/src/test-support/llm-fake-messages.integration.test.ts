@@ -4,6 +4,7 @@
 // `x-api-key`, the version header, answers in the Messages shape with a usage of input, output and cache
 // tokens, tool calls as `tool_use` blocks, errors in the error envelope. The runner's Diff and Dynamic paths
 // and the Anthropic adapter rely on it, so a wrong fake fails here first.
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { startLlmFake } from "../../../fakes/llm/server.ts";
 import { cleanUpAfterTest } from "./test-database.ts";
@@ -33,6 +34,26 @@ async function messages(
     json: (await response.json()) as Record<string, unknown>,
   };
 }
+
+type RuleCase = {
+  id: string;
+  steps: Array<{
+    headers: Record<string, string>;
+    body: Record<string, unknown>;
+    answer?: Record<string, unknown>;
+    status: number;
+  }>;
+};
+
+// The table the Python fake answers too (runner/tests/unit/test_anthropic_strict_fake.py).
+const RULE_CASES = (
+  JSON.parse(
+    readFileSync(
+      new URL("../../../fakes/llm/anthropic-rule-cases.json", import.meta.url),
+      "utf8",
+    ),
+  ) as { cases: RuleCase[] }
+).cases;
 
 const REQUEST = {
   model: "claude-haiku-5-5",
@@ -166,5 +187,92 @@ describe("the fake LLM as the Anthropic Messages API", () => {
       "",
     ]);
     expect(fake.keyChecks()).toEqual([]);
+  });
+
+  // #533-T14
+  it.each(RULE_CASES.map((rule) => [rule.id, rule] as const))(
+    "answers the status of the real API: %s",
+    async (_id, rule) => {
+      const fake = await setup();
+
+      for (const step of rule.steps) {
+        if (step.answer !== undefined) fake.queueMessagesAnswer(step.answer);
+        const { status, json } = await messages(
+          fake.baseUrl,
+          step.body,
+          step.headers,
+        );
+
+        expect(status, JSON.stringify(json)).toBe(step.status);
+        if (status === 400)
+          expect(json).toMatchObject({
+            type: "error",
+            error: { type: "invalid_request_error" },
+          });
+      }
+    },
+  );
+
+  // #533-T14
+  it("answers a scripted agent of a model that thinks with signed thinking blocks, and wants them back", async () => {
+    const fake = await setup();
+    fake.scriptAgent({
+      steps: [[{ name: "read", arguments: { path: "a.py" } }]],
+      final: { findings: [] },
+      thinking: true,
+    });
+    const tools = [
+      { name: "read", input_schema: { type: "object" } },
+      { name: "StructuredOutput", input_schema: { type: "object" } },
+    ];
+    const request = { ...REQUEST, model: "claude-sonnet-5-5", tools };
+
+    const first = await messages(fake.baseUrl, request);
+    const blocks = first.json.content as Array<{ type: string; id?: string }>;
+    expect(blocks.map((block) => block.type)).toEqual(["thinking", "tool_use"]);
+    const callId = blocks[1]?.id;
+    const next = (assistant: unknown[]) => ({
+      ...request,
+      messages: [
+        { role: "user", content: "the diff" },
+        { role: "assistant", content: assistant },
+        {
+          role: "user",
+          content: [{ type: "tool_result", tool_use_id: callId, content: "x" }],
+        },
+      ],
+    });
+
+    const dropped = await messages(
+      fake.baseUrl,
+      next([blocks[1] as unknown as Record<string, unknown>]),
+    );
+    const replayed = await messages(fake.baseUrl, next(blocks));
+
+    expect(dropped.status).toBe(400);
+    expect(replayed.status).toBe(200);
+    expect(
+      (replayed.json.content as Array<{ type: string }>).map(
+        (block) => block.type,
+      ),
+    ).toEqual(["thinking", "tool_use"]);
+  });
+
+  // #533-T14
+  it("reports the thinking tokens inside the output tokens when the script says so", async () => {
+    const fake = await setup();
+    fake.setMessagesUsage({
+      input_tokens: 10,
+      output_tokens: 90,
+      output_tokens_details: { thinking_tokens: 60 },
+    });
+
+    const { json } = await messages(fake.baseUrl, REQUEST);
+
+    expect(json.usage).toEqual({
+      input_tokens: 10,
+      output_tokens: 90,
+      output_tokens_details: { thinking_tokens: 60 },
+    });
   });
 });

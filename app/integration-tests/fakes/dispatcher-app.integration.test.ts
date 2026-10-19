@@ -465,6 +465,44 @@ describe("the fake App", () => {
     expect(second.job?.job.credential).not.toBe(job?.job.credential);
   });
 
+  // #493-T02
+  it("takes the VM start report of the claim, once, with answers valid under the contract", async () => {
+    const fake = await start();
+    fake.enqueue({ id: JOB });
+    const { job } = await claim(fake);
+    const body = {
+      credential: job?.job.credential,
+      vmName: "cr-diff-one",
+      startedAt: "2026-10-19T10:00:00.250Z",
+      timeoutSeconds: 2100,
+    };
+    const path = `/api/runners/v1/jobs/${JOB}/vm`;
+
+    const first = await dispatcherCall(fake, "POST", path, body);
+    const again = await dispatcherCall(fake, "POST", path, body);
+    const stranger = await dispatcherCall(fake, "POST", path, {
+      ...body,
+      credential: `crj_${"A".repeat(43)}`,
+    });
+    const extra = await dispatcherCall(fake, "POST", path, {
+      ...body,
+      more: 1,
+    });
+
+    expect(first.status).toBe(200);
+    valid(runner, "VmStartResponse", await first.json());
+    expect(await again.json()).toMatchObject({ status: "replayed" });
+    expect(stranger.status).toBe(401);
+    expect(extra.status).toBe(400);
+    expect(fake.vms(JOB)).toStrictEqual([
+      {
+        vmName: "cr-diff-one",
+        startedAt: "2026-10-19T10:00:00.250Z",
+        timeoutSeconds: 2100,
+      },
+    ]);
+  });
+
   // #324-T11
   it("serves version to a Worker with its job credential and its job id, and to nobody else", async () => {
     const fake = await start();

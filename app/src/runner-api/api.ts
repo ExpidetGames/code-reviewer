@@ -30,6 +30,7 @@ import {
 } from "./contract.ts";
 import { handleJobState, type JobStateDeps } from "./job-state.ts";
 import { handleRelease, type ReleaseDeps } from "./release.ts";
+import { handleVmStart, type VmStartDeps } from "./vm.ts";
 import { describeError } from "./logger.ts";
 import { parseClaimRequest, parseJobId, parseRunnerId } from "./requests.ts";
 import { handleComplete, handleHeartbeat, type ReportDeps } from "./report.ts";
@@ -39,6 +40,7 @@ import { bearerTokenOf, tokensMatch } from "./token-auth.ts";
 export type RunnerApiDeps = ClaimDeps &
   ReportDeps &
   ReleaseDeps &
+  VmStartDeps &
   JobStateDeps & {
     /** #322: the build of the app, reported by the version call. */
     appVersion: string;
@@ -52,6 +54,8 @@ export type RunnerApi = {
   complete(request: Request, jobId: string): Promise<Response>;
   /** #322: a Dispatcher gives a claimed job back. */
   release(request: Request, jobId: string): Promise<Response>;
+  /** #493: a Dispatcher reports that it created the VM of a claim. */
+  vmStart(request: Request, jobId: string): Promise<Response>;
   /** #322: what this app is and can do. */
   version(request: Request): Promise<Response>;
   /** #364: the status of a job, for a Dispatcher that looks for the VMs of jobs that ended. */
@@ -173,6 +177,22 @@ export function createRunnerApi(deps: RunnerApiDeps): RunnerApi {
         return await handleRelease(deps, jobId, who.runnerId, body.value);
       } catch (error) {
         return unexpected("release", error);
+      }
+    },
+
+    async vmStart(request, jobId) {
+      try {
+        const who = identify(request);
+        if (!who.ok) return who.response;
+        if (!parseJobId(jobId))
+          return errorResponse(400, "RUNNER_REQUEST_INVALID", {
+            fields: [{ field: "jobId", code: "invalid" }],
+          });
+        const body = await readJsonBody(request);
+        if (!body.ok) return body.response;
+        return await handleVmStart(deps, jobId, who.runnerId, body.value);
+      } catch (error) {
+        return unexpected("vm start", error);
       }
     },
 

@@ -165,6 +165,11 @@ export type RunnerJobInput = {
   env: JobEnv;
 };
 /**
+ * The engine's tools; every other name a model called is `other`.
+ */
+export type RunnerTraceToolName =
+  "read" | "grep" | "glob" | "StructuredOutput" | "other";
+/**
  * What the runner prints when a job ends (the output of code-reviewer-run-job), plus an optional errorMessage. The runner has redacted secrets from logTail; the app removes anything that still looks like one before it stores the result.
  */
 export type RunnerResult = {
@@ -203,10 +208,14 @@ export type RunnerResult = {
  */
 export type KnownReleaseReason = "launch_failed" | "worker_exited";
 /**
- * The features an app lists in VersionResponse.features. A reader ignores a name it does not know and refuses to run against an app that lacks one it needs. `worker_api`: /api/workers/v1 exists. `claim_by_job_id`: ClaimRequest.jobId is honoured. `pool_cap`: ClaimRequest.maxRunning is honoured. `release`: the release call exists.
+ * #493: the name of a Sandbox VM, as the platform and the Dispatcher know it (unique per launch: `cr-<kind>-<job id>-<random>`). Free text of the Dispatcher's own naming; the app uses it only as a key and never as a command.
+ */
+export type VmName = string;
+/**
+ * The features an app lists in VersionResponse.features. A reader ignores a name it does not know and refuses to run against an app that lacks one it needs. `worker_api`: /api/workers/v1 exists. `claim_by_job_id`: ClaimRequest.jobId is honoured. `pool_cap`: ClaimRequest.maxRunning is honoured. `release`: the release call exists. `vm_lifecycle` (#493): POST /api/runners/v1/jobs/{id}/vm exists (the Dispatcher reports the VM it created, for the billable minutes); a Dispatcher sends that call only to an app that lists the feature.
  */
 export type KnownAppFeature =
-  "worker_api" | "claim_by_job_id" | "pool_cap" | "release";
+  "worker_api" | "claim_by_job_id" | "pool_cap" | "release" | "vm_lifecycle";
 /**
  * Every error of the API has one of these codes. 401 RUNNER_UNAUTHORIZED, 400 RUNNER_ID_INVALID / RUNNER_REQUEST_INVALID, 404 RUNNER_JOB_NOT_FOUND, 409 RUNNER_LEASE_LOST / RUNNER_RESULT_CONFLICT, 413 RUNNER_BODY_TOO_LARGE, 503 RUNNER_GIT_ACCESS_UNAVAILABLE (with Retry-After), 500 RUNNER_INTERNAL_ERROR. #318 adds 401 WORKER_CREDENTIAL_INVALID (a Worker route got a credential that is not the job's: wrong job, unknown, expired or from an earlier claim; also the fourth call of the details route in one claim, whose three calls are spent: the Worker has nothing left to fetch and stops, the claim itself is not lost) and 409 RUNNER_JOB_ENDED (the app ended the job, for example after a permanent access failure at fetch; the Worker stops).
  */
@@ -835,7 +844,144 @@ export interface RunnerUsage {
    * Why a Dynamic Review was wrapped up before it was done: the model was asked for its answer right away because the run reached its cost limit or its time limit. Absent or null for a complete run; the review it produced is published and says it may be incomplete.
    */
   stoppedEarly?: "cost_limit" | "time_limit" | null;
+  /**
+   * #540: by how much, in US dollars, the cost of a Dynamic Review passed the operator's cost limit. The review is delivered nevertheless: the last normal call may cost more than expected and the final call that carries the answer is always made (the documented bound: the limit plus the excess of the last normal call plus the final call). Absent when the cost stayed within the limit or is not known.
+   */
+  limitExceededBy?: number;
+  callTrace?: RunnerCallTrace;
   [k: string]: unknown;
+}
+/**
+ * #541: what each model call and each tool call of a Dynamic Review was, as numbers and stable names (RunnerCallTrace). Optional and additive: a runner of an earlier release sends none, and an app of an earlier release ignores it. Observability only; nothing in the run reads it.
+ */
+export interface RunnerCallTrace {
+  truncated: boolean;
+  /**
+   * @maxItems 100
+   */
+  modelCalls: RunnerModelCallTrace[];
+  /**
+   * @maxItems 100
+   */
+  toolCalls: RunnerToolCallTrace[];
+}
+/**
+ * One model call. A count is null when the provider reported none (a refused call, a provider without cache tokens); it is never a guess. tMs is the time since the run started when the call began.
+ */
+export interface RunnerModelCallTrace {
+  index: number;
+  tMs: number;
+  promptTokens: number | null;
+  cacheRead: number | null;
+  cacheWrite: number | null;
+  completionTokens: number | null;
+  costUsd: number | null;
+  finishReason:
+    "stop" | "tool_calls" | "length" | "content_filter" | "other" | null;
+  /**
+   * True for the call the run was wrapped up with (the wrap-up or the recovery).
+   */
+  final: boolean;
+  /**
+   * The tools the answer asked for, each name once with its count.
+   *
+   * @maxItems 5
+   */
+  tools:
+    | []
+    | [
+        {
+          name: RunnerTraceToolName;
+          count: number;
+        },
+      ]
+    | [
+        {
+          name: RunnerTraceToolName;
+          count: number;
+        },
+        {
+          name: RunnerTraceToolName;
+          count: number;
+        },
+      ]
+    | [
+        {
+          name: RunnerTraceToolName;
+          count: number;
+        },
+        {
+          name: RunnerTraceToolName;
+          count: number;
+        },
+        {
+          name: RunnerTraceToolName;
+          count: number;
+        },
+      ]
+    | [
+        {
+          name: RunnerTraceToolName;
+          count: number;
+        },
+        {
+          name: RunnerTraceToolName;
+          count: number;
+        },
+        {
+          name: RunnerTraceToolName;
+          count: number;
+        },
+        {
+          name: RunnerTraceToolName;
+          count: number;
+        },
+      ]
+    | [
+        {
+          name: RunnerTraceToolName;
+          count: number;
+        },
+        {
+          name: RunnerTraceToolName;
+          count: number;
+        },
+        {
+          name: RunnerTraceToolName;
+          count: number;
+        },
+        {
+          name: RunnerTraceToolName;
+          count: number;
+        },
+        {
+          name: RunnerTraceToolName;
+          count: number;
+        },
+      ];
+}
+/**
+ * One tool call. isRepeat is true when the same tool with the same normalised arguments already ran in this job; the arguments themselves are never sent. resultBytes is the size of the result the model was shown, null when it never was.
+ */
+export interface RunnerToolCallTrace {
+  index: number;
+  name: RunnerTraceToolName;
+  resultBytes: number | null;
+  isRepeat: boolean;
+}
+/**
+ * #541: the per-call trace of a Dynamic Review, without content. Sizes, counts, times, the cost and stable names only: no path, no argument, no tool result and no model text is ever in it. At most 100 model calls and 100 tool calls are kept (the first ones); truncated says that more happened. Tool names are the engine's own; any other name is `other`.
+ */
+export interface RunnerCallTrace1 {
+  truncated: boolean;
+  /**
+   * @maxItems 100
+   */
+  modelCalls: RunnerModelCallTrace[];
+  /**
+   * @maxItems 100
+   */
+  toolCalls: RunnerToolCallTrace[];
 }
 /**
  * #405: what a successful review left open on the pull request. `open` counts the findings that are open AFTER the run (a Dynamic Review carries the findings of earlier runs over, PR-Agent keeps a record of active ones), not the ones the run found. `bySeverity` is the count per priority of a Dynamic Review, of the findings its summary lists (so `open` may exceed the sum when lower priority findings did not fit); null for a Diff Review, whose findings have no severity.
@@ -917,6 +1063,26 @@ export interface ReleaseResponse {
     status: "queued" | "failed";
     [k: string]: unknown;
   };
+  [k: string]: unknown;
+}
+/**
+ * #493: POST /api/runners/v1/jobs/{id}/vm, with the dispatcher credential (RUNNER_TOKEN) in Authorization and the job credential in the body, like the release. The Dispatcher says that it created the VM of the claim, right after `Sandbox.create` returned. Closed: an unknown field is refused. The first report of a VM wins and a repeat changes nothing. `startedAt` is the Dispatcher's clock; the app keeps it between the claim and its own clock. `timeoutSeconds` is the VM's own timeout, the platform's backstop for a VM that nobody stops. Only a job whose running claim the credential holds is accepted: a report after the claim ended is 409 RUNNER_JOB_ENDED, a credential that is not the claim's is 401. It only measures; it sets no price and never has to succeed for a launch to go on.
+ */
+export interface VmStartRequest {
+  credential: WorkerCredential;
+  vmName: VmName;
+  /**
+   * ISO 8601 in UTC with the `Z`; milliseconds optional.
+   */
+  startedAt: string;
+  timeoutSeconds: number;
+}
+/**
+ * #493: 200 from the report. `recorded`: the VM is stored. `replayed`: the VM was known; nothing changed.
+ */
+export interface VmStartResponse {
+  version: 1;
+  status: "recorded" | "replayed";
   [k: string]: unknown;
 }
 /**

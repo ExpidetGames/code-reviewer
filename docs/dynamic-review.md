@@ -313,9 +313,11 @@ reservation needs, over the endpoints that can serve the run (those that list `t
 highest prices. The output allowance is at most 32,768 tokens for a model whose highest output price is
 4 USD per million tokens or less (the app's `DYNAMIC_LARGE_OUTPUT_ALLOWANCE_TOKENS`, and the allowance
 of the built-in default model), and 8,192 for a dearer or unpriced one; a larger limit of the model is
-not an invitation, since the allowance is reserved against the cost limit on every call (about 0.13
-USD at the price bound). Why (#309): a review of up to 30 findings plus the reasoning tokens, which
-count against `max_tokens`, does not fit 8,192, and a turn cut off there ends without an answer. The
+not an invitation, since the cost limit reserves the output the run has shown, never more than the
+allowance (#540, see "How the cost is bounded"). Why (#309): a review of up to 30 findings plus the reasoning tokens, which
+count against `max_tokens`, does not fit 8,192, and a turn cut off there ends without an answer. A model
+that cannot run without thinking (the Claude models of #533) gets 32,768 at any price, and the runner reserves
+at most 8,192 of it against the cost limit (`runner/README.md`, "Output allowance with thinking"). The
 source for the default model: OpenRouter's `/api/v1/models/deepseek/deepseek-v4.1-flash/endpoints`,
 read on 2026-10-14, where the model's top provider states `max_completion_tokens` 943718 and the
 smallest endpoint limit is 131072, so 32,768 is below every limit; the smallest limit of the endpoints
@@ -406,29 +408,84 @@ Removed in #290: 30 model calls, 120,000 total tokens, 200 tool calls and 100 di
 of the technical limits blocks a normal review of a medium repository, report it with evidence
 instead of raising it.
 
-**How the cost is bounded.** Before every call the ledger reserves what the call could cost: the
-input estimate and the output allowance at the unit costs of the model's description (a model
-without unit costs does not run, see above). The call is refused (`dynamic_budget_exceeded`, before the provider sees it) when
-what is spent, what is reserved for calls in flight and this reservation would together pass the
-limit. After the call the reservation is replaced by the `usage.cost` the provider reported (the
-credits it charged, #286). **A call that reports no cost ends the run with
+**How the cost is bounded.** Before every call the ledger reserves what the call is **expected** to
+cost (#540), from what the run itself has shown, at the unit costs of the model's description (a model
+without unit costs does not run, see above). The call is refused (`dynamic_budget_exceeded`, before
+the provider sees it) when what is spent, what is reserved for calls in flight and this reservation
+would together pass the limit; the final call is the exception (see "The bound" below). After the call the reservation is replaced by the `usage.cost` the
+provider reported (the credits it charged, #286). **A call that reports no cost ends the run with
 `dynamic_accounting_failed`**: without it the run cannot be bounded by money, and a missing cost is
-never read as zero. A cost of 0 (a free model) is a cost. What can still end above the limit
-is the estimate's error: the input estimate can be up to 3 times too low for dense input (base64,
-minified code), and a price list that changed after it was read under-prices the reservation; both
-are paid for one call at most, and the next call is refused. The output cannot exceed its allowance
-(the proxy sets `max_tokens`). A call that failed or was retried keeps its reservation (it may
-still have been billed), so many provider retries can use up the limit without spending. With
-OpenRouter's bring-your-own-key routing `usage.cost` may exclude the upstream provider's charge.
-Repository and pull request input never set any of this.
+never read as zero. A cost of 0 (a free model) is a cost. A call that failed or was retried keeps
+its reservation (it may still have been billed), so many provider retries can use up the limit
+without spending. With OpenRouter's bring-your-own-key routing `usage.cost` may exclude the upstream
+provider's charge. Repository and pull request input never set any of this.
 
-**The input estimate.** Bytes divided by 3 (real text has about 3 to 4 bytes per token; the old
-estimate of one token per byte was 3 to 4 times too high, which refused a request of about 92 KB
-against a 100,000-token window), tightened to what the provider settled on the previous call when
-that was denser (only from requests of 4 KiB up), and never below the last settled prompt. The
-margin: every call also reserves its whole output allowance at the output cost, though most calls
-use a small part of it. The provider's reported usage replaces the estimate after the call. It is
-accepted up to the proven byte bound (a token is never fewer than one byte); above that it is an
+*The expected cost of a call.* Before #540 the guard priced the whole prompt at the uncached input
+price, reserved the full output allowance and, for the final call, 128 KiB of extra history: about
+16 times what a Sonnet 5 tool loop cost per call, so a 55-call run that cost 0.70 USD was wrapped up
+at about 0.55 USD of a 1.00 USD limit. Now:
+
+- **Prompt.** The part of the prompt the previous call left in the provider's cache (its reported
+  cache reads plus writes) is priced at the cache-read price when that call reported cache reads;
+  the rest (the growth since, taken from the bytes the request added over the observed density) at
+  the cache-write price while the cache is in use, else at the input price. The cache prices come
+  from the runner's own list of the provider (Anthropic's), never from the job or the repository.
+  A provider that reports no cache tokens, or has no such list (an OpenRouter model), is priced at
+  the uncached input price throughout.
+- **Output.** The p95 of the run's own completions so far (nearest rank), not below 1,024 tokens
+  (4,096 for the call that writes the review: the final call, the recovery and a retry of either),
+  and not above the allowance or the cap the model's wire names (8,192 for a model that cannot run
+  without thinking, #533). The allowance itself (`max_tokens`) stays the hard cap: an answer above
+  it is `dynamic_accounting_failed`.
+- **The final call after a normal call** (the wrap-up test, below) is priced the same way: the next
+  prompt plus one round of growth (the p95 of the rounds seen, at least 4,096 tokens), with the cached
+  prefix and a review-sized output. The wrap-up test multiplies this call and the final call by
+  1.25.
+
+**The bound.** A run must never end without a review because of the cost guard (#540), so there are
+two rules and no failure mode between them:
+
+1. A **normal call** is admitted only while `spent + held + its expected cost <= limit`.
+2. The **final call** (the wrap-up, the recovery and the retries of either) is the last chance of a
+   review. It is admitted whenever `spent + held <= limit`, **even when its expected cost no longer
+   fits**, and it is delivered whatever it costs.
+
+A normal call can still cost more than expected: a cache miss (the entry expired because a tool
+took long, or the prefix changed) re-writes the whole prompt at the write price, an answer can be
+unusually long, a tool result can be 64 KiB, a dense input has up to 3 times more tokens than the
+byte estimate, and a price list can have changed after it was read. If such a call **settles over
+the limit it is delivered, not failed**; it ends the agent phase at once. The next request that can be
+rewritten into a final call (the one that offers the structured-output tool) is the final call,
+admitted by rule 2 although the spend is over the limit (`stoppedEarly` is `cost_limit`). After the
+first overshoot no normal call is admitted again; a request that cannot be a final call (a title
+call, for example) is refused with `dynamic_budget_exceeded`, and so is anything after the final
+call. If the final call returns no structured answer, the retries within the limit are made as
+before (#312, each is a final call too) and, once the spend is over the limit, **one** retry more.
+
+**The settled total is therefore at most the limit, plus the excess of the last normal call (its real
+cost minus its reservation, at most its real cost), plus the cost of the final call.** The final
+call costs at most its input plus `allowance x output price`: it reserves the cap the model's wire
+names (`reserved_output_tokens`, which is the allowance unless the wire says a call rarely uses it
+all) rather than a tool call's output, so the wrap-up decision leaves room for the worst case of a
+review. If the final call answers in prose while the spend is over the limit, the one retry past
+the limit is one final call more. The result reports by how much the limit was passed as
+`usage.limitExceededBy` (USD, absent when it was not, `contracts/runner-api.v1.json`) and the job log
+says it, so the bound can be watched on real runs.
+
+*Serial calls.* The engine's model calls are serial: one agent (`review`), the permission block denies
+every tool but `read`, `grep`, `glob` and `StructuredOutput` (so no subagent runs in parallel), and a
+step waits for its tool results. The ledger still holds the reservation of every call in flight; if
+requests ever overlapped, the bound above would be the sum of the excesses over the calls in flight,
+and a final call is refused when `spent + held` already passes the limit (that case is not the
+exemption's). A failure of an unrelated kind (the provider, the clock, `dynamic_accounting_failed`
+for a call without a cost) still ends the run: the guard does not hide them.
+
+**The input estimate.** Bytes divided by 3 (real text has about 3 to 4 bytes per token), tightened
+to what the provider settled on the previous call when that was denser (only from requests of 4 KiB
+up), and never below the last settled prompt. It is the conservative estimate that sizes the window
+backstop and the byte bound; the price of a reservation uses the last settled prompt plus the added
+bytes over the same density. The provider's reported usage replaces the estimate after the call. It
+is accepted up to the proven byte bound (a token is never fewer than one byte); above that it is an
 accounting failure (`dynamic_accounting_failed`).
 
 **The window is a backstop.** The window of a run is the model's, from its description
@@ -459,10 +516,9 @@ published.
 - **When.** The ledger decides, per model request, from its own cost and clock (never from the
   content of the request): the request becomes the *final call* when a further normal call could
   not be followed by a final one inside the cost limit (what is spent, what is held for calls in
-  flight, this call, and a final call after it whose history may have grown by two tool results,
-  128 KiB), or when less wall clock is left than one provider call needs (150 s of the 600 s; a
-  quarter of a shorter deadline). The final call must itself fit the cost limit, else the run ends
-  with `dynamic_budget_exceeded` as before.
+  flight, this call, and a final call after it, with the margin above, #540), or when less wall clock is left than one provider call needs (150 s of the 600 s; a
+  quarter of a shorter deadline). The final call is admitted whenever the spend is within the cost limit,
+  even when it no longer fits (#540, "The bound"): a refusal here would end the run without a review.
 - **What changes in that call.** The model proxy, which is trusted runner code, rewrites the request
   before it is forwarded: every tool except the engine's `StructuredOutput` return tool is removed,
   `tool_choice` is forced to `required` (with one tool this forces that tool; `required` is the
@@ -540,8 +596,8 @@ sent on every request and forwarded by the proxy (both checked against the real 
 - **One recovery.** When a turn ends without a structured answer, the adapter asks the ledger
   (`begin_recovery`). The ledger says yes only if no final call was granted yet, a model call was
   made, more than the wrap-up's clock reserve is left (150 s of 600 s, a quarter of a shorter
-  deadline: the recovery call writes a whole review) and the estimate of one more call (the last
-  prompt, one output allowance for the model's last answer, a 4 KiB slack) fits the cost limit. Only
+  deadline: the recovery call writes a whole review) and the spend is within the cost limit (the
+  recovery call is a final call: it is admitted although it no longer fits, #540). Only
   the engine's own missing-answer error (`StructuredOutputError`, or a turn that ended with no error
   at all) is recovered; another error of the engine (`APIError`, an abort, a content filter, ...) is
   its own failure and ends the run as before, with the error name in the detail. The adapter then sends a second message to the same session with the runner's fixed
@@ -620,6 +676,32 @@ sent on every request and forwarded by the proxy (both checked against the real 
   pinned engine and the fakes accept that; if a provider behind OpenRouter rejects it (400, shown as
   `llm_bad_request`), the fallback is to keep the original tool definitions in that call and rely on
   `tool_choice`.
+
+## The call trace: what each call was, without content (#541)
+
+A run that stops at its cost limit or costs more than expected has to be explainable afterwards, and the totals of its
+usage do not say what 55 calls did. The runner therefore records a **trace** and sends it in `usage.callTrace` of the result
+(`contracts/runner-api.v1.json`, `RunnerCallTrace`, additive and optional):
+
+- **Per model call:** `index`, `tMs` (milliseconds since the run started, at the start of the call), `promptTokens`,
+  `cacheRead`, `cacheWrite`, `completionTokens`, `costUsd`, `finishReason`, `final` (the wrap-up or recovery call) and
+  the tools the answer asked for with counts. A call the provider refused, never answered, answered without usage or with more
+  bytes than the protocol allows is in it with `null`s (a finish reason too, where the answer had none).
+- **Per tool call:** the tool, `resultBytes` (what the model was shown) and `isRepeat` (the same tool with the same
+  normalised arguments, a path spelled absolute or relative being one file, already ran in this job).
+- **Never content:** no path, no argument, no tool result, no model text. A tool name that is none of the engine's
+  (`read`, `grep`, `glob`, `StructuredOutput`) is stored as `other`; a finish reason outside the protocol's too. Whether a
+  call repeats an earlier one is decided from a digest in memory that is never written out. The trace does not steer
+  the run: nothing reads it back, and the agent is not told about it.
+- **Bounded:** the first 100 model calls and the first 100 tool calls; `truncated` says that more happened. A full trace
+  is about 30 KB, inside the 48 KiB body the runner sends; when the whole body is too large the runner drops the trace
+  first, and only then shortens the log. The bare verdict it falls back to when the app refuses a result has no trace.
+  The app drops a trace that is not the contract's and keeps the usage and the verdict (observability, never a reason to
+  lose a result).
+- **Shown** in the Runs detail of a workspace (the cost and the cache columns only where the run's provider may be known, so
+  not for a managed quality level: whether a provider reports cache writes says which one it is) and in the instance admin's run view (`/admin/runs`, `/admin/runs/<id>`: the newest runs of every
+  workspace, and one run with its facts, usage and the two tables). A run from a runner that sends no trace shows no
+  section in the workspace and a note in the admin view.
 
 ## Context window and compaction
 

@@ -19,7 +19,12 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import type { Kysely } from "kysely";
 import { createJobDispatchesRepository } from "../db/repositories/job-dispatches-repository.ts";
+import {
+  createJobVmRunsRepository,
+  type JobVmRunsRepository,
+} from "../db/repositories/job-vm-runs-repository.ts";
 import type { Database } from "../db/schema.ts";
+import { VM_NAME_PATTERN } from "../runner-api/contract.ts";
 import type { WebhookDispatchConfig } from "./config.ts";
 import { buildStopRequest } from "./request.ts";
 import { parseRetryAfter, type DispatchFetch } from "./send.ts";
@@ -32,12 +37,18 @@ export const STOP_RETRY_DELAYS_MS: readonly number[] = [1_000, 3_000];
 const STOP_RETRY_AFTER_CAP_MS = 5_000;
 /** How many jobs are stopped at once when a sweep ends many. */
 const STOP_CONCURRENCY = 5;
+/** #493: how much of an answer is read for the names of the VMs it is stopping; the contract's answer is far smaller. */
+const ANSWER_MAX_BYTES = 4096;
+/** #493: how many VM names an answer may carry (`DispatchStopAccepted.vms`). */
+const ANSWER_MAX_VMS = 16;
 
 export const STOP_RESULT_CODES = [
   "DISPATCH_STOP_FAILED",
   "DISPATCH_STOP_UNSUPPORTED",
   "DISPATCH_STOP_REJECTED",
   "DISPATCH_STOP_URL_INVALID",
+  /** #493: the stop worked, but the end of its VMs could not be stored; the backstop covers them. */
+  "DISPATCH_VM_END_FAILED",
 ] as const;
 export type StopResultCode = (typeof STOP_RESULT_CODES)[number];
 
@@ -62,7 +73,8 @@ export function stopUrlOf(dispatchUrl: string): string | null {
 }
 
 type StopAnswer =
-  | { kind: "done" }
+  /** `vms`: the VMs the Dispatcher named as stopping (#493); empty when it named none or the answer is not the contract's. */
+  | { kind: "done"; vms: string[] }
   | { kind: "transient"; retryAfterMs: number | null }
   | { kind: "unsupported" }
   | { kind: "rejected"; status: number }
@@ -72,6 +84,40 @@ export type StopLog = {
   /** A stop that failed, with its stable code. One line per job. */
   warn(line: string): void;
 };
+
+/**
+ * #493: the names of the VMs in the Dispatcher's answer (`DispatchStopAccepted.vms`). Bounded reading; anything that is not
+ * a short list of well-formed names is no names at all. The body is data of another system: it is never logged.
+ */
+async function namedVms(response: Response): Promise<string[]> {
+  try {
+    const reader = response.body?.getReader();
+    if (reader === undefined) return [];
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    for (;;) {
+      const part = await reader.read();
+      if (part.done) break;
+      size += part.value.byteLength;
+      if (size > ANSWER_MAX_BYTES) {
+        void reader.cancel().catch(() => undefined);
+        return [];
+      }
+      chunks.push(part.value);
+    }
+    const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    if (typeof parsed !== "object" || parsed === null) return [];
+    const vms = (parsed as { vms?: unknown }).vms;
+    if (!Array.isArray(vms) || vms.length > ANSWER_MAX_VMS) return [];
+    return vms.every(
+      (name) => typeof name === "string" && VM_NAME_PATTERN.test(name),
+    )
+      ? (vms as string[])
+      : [];
+  } catch {
+    return [];
+  }
+}
 
 export type StopService = {
   /** Stops the VMs of these jobs, best effort. Never rejects. */
@@ -90,6 +136,8 @@ export function createStopService(options: {
   /** Waits (default: a timer); tests pass a fake. */
   sleep?: (ms: number) => Promise<void>;
   log?: StopLog;
+  /** #493: where the end of a VM is stored; the VM runs of a job's workspace. */
+  vmRuns?: (workspaceId: string) => JobVmRunsRepository;
 }): StopService {
   const now = options.now ?? (() => new Date());
   const newId = options.newId ?? randomUUID;
@@ -102,6 +150,10 @@ export function createStopService(options: {
   const log: StopLog = options.log ?? { warn: (line) => console.warn(line) };
   const { config } = options;
   const dispatches = createJobDispatchesRepository(options.db, now);
+  const vmRuns =
+    options.vmRuns ??
+    ((workspaceId: string) =>
+      createJobVmRunsRepository(options.db, workspaceId, now));
   const url = stopUrlOf(config.url);
 
   /** One call, whose answer is reduced to what decides the next step. The body of the answer is never read. */
@@ -126,9 +178,13 @@ export function createStopService(options: {
         cache: "no-store",
         signal,
       });
-      void response.body?.cancel().catch(() => undefined);
       const { status } = response;
-      if (status === 200 || status === 202) return { kind: "done" };
+      if (status === 200 || status === 202)
+        return {
+          kind: "done",
+          vms: status === 202 ? await namedVms(response) : [],
+        };
+      void response.body?.cancel().catch(() => undefined);
       if (status === 404) return { kind: "unsupported" };
       if (status === 429 || status === 503) {
         const seconds = parseRetryAfter(
@@ -153,6 +209,25 @@ export function createStopService(options: {
     );
   }
 
+  /**
+   * #493: the answer named the VMs it is stopping, so the App's clock now is the end of their billable minutes. Nothing
+   * that goes wrong here reaches the job; a VM whose end is not stored ends at the bounded backstop.
+   */
+  async function recordEnd(
+    jobId: string,
+    names: readonly string[],
+  ): Promise<void> {
+    if (names.length === 0) return;
+    const at = now();
+    try {
+      const workspaceId = await dispatches.workspaceOf(jobId);
+      if (workspaceId === undefined) return;
+      await vmRuns(workspaceId).confirmStopped(jobId, names, at);
+    } catch {
+      fail(jobId, "DISPATCH_VM_END_FAILED");
+    }
+  }
+
   async function stopOne(jobId: string): Promise<void> {
     const row = await dispatches.get(jobId);
     // No Dispatcher acknowledged this job: a self-hosted runner's job, or one that was never dispatched.
@@ -170,7 +245,7 @@ export function createStopService(options: {
     }
     switch (answer.kind) {
       case "done":
-        return;
+        return recordEnd(jobId, answer.vms);
       case "unsupported":
         return fail(jobId, "DISPATCH_STOP_UNSUPPORTED", 404);
       case "rejected":

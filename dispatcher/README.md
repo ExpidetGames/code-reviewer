@@ -67,9 +67,10 @@ and holds only the App's address and the job credential, and nothing in it can c
 - **Tag-scoped.** `jobId` is a strict UUID (it becomes a tag filter, never part of a command). The route lists the VMs
   tagged `{app, kind, job}` for that job and stops those, nothing else (`src/stop/job-stopper.ts`); a VM of another job, a
   canary or a foreign VM is never touched. No VM means `200 {"status":"ignored","reason":"no_vm"}`: a stop is idempotent.
-- **Answers.** `202 {"status":"stopping"}` when VMs are being stopped in the background (`waitUntil` on the platform, the
+- **Answers.** `202 {"status":"stopping","vms":[...]}` when VMs are being stopped in the background (`waitUntil` on the platform, the
   tracker of the Node entry): stopping a VM with a running container takes 20 seconds or more, and the App does not wait for
-  it. `503` with `Retry-After` when the platform could not be asked; the App repeats it. A stop that fails later is logged
+  it. `vms` (#493) names the VMs, so the App can take the moment of the answer as the end of their billable minutes; it is
+  additive and optional for the reader. `503` with `Retry-After` when the platform could not be asked; the App repeats it. A stop that fails later is logged
   (`vm_stop_failed`, the job and the VM name) and left to the reaper.
 - **Log events.** `stop_received` (`jobId`, `vms`), `vm_stopped`, `vm_stop_failed`, `stop_replayed`, `stop_list_failed`
   (`code`), `stop_refused` (`verdict` only). No key, signature or platform text.
@@ -81,6 +82,24 @@ team must use different dispatch signing keys (and databases), or one's valid st
 A job that goes back to the queue is **not** stopped by the App (the next attempt's VM could already exist when the call
 arrives). The VM of a lost attempt lives until its own timeout or until the job ends for good, when the stop by the job also
 ends it; the reaper ends it earlier only while the retry is not yet `running` (it keeps a VM whose job is `running`).
+
+## The report of the VM (#493)
+
+The App measures the minutes of a VM (`app/src/billing/README.md`, "Billable minutes") and only the Dispatcher knows when a VM
+is created. Right after `Sandbox.create` returned, the Sandbox-Launcher calls `spec.onVmCreated({ name, startedAt,
+timeoutSeconds })` (the platform's name, the Dispatcher's clock and the VM's own timeout); the core then sends `POST
+/api/runners/v1/jobs/:id/vm` with the dispatcher token and the job credential it holds during the launch (`VmStartRequest`,
+`contracts/README.md`). Nothing about the VM reaches the Worker, and the VM gets no new endpoint.
+
+- **Only to an App that lists `vm_lifecycle`** in its version answer (not a required feature: an older App is still served, and
+  nothing is sent to it).
+- **Best effort, in the background.** The callback returns at once and never throws; the core sends the report while the launch
+  goes on and waits for it only at the very end of the launch phase. Up to three tries (pauses of 1 and 3 seconds) for what may
+  pass (no answer, `429`, `5xx`); no repeat for a refusal (the claim ended, an old credential). A report that did not work
+  logs `vm_report_failed` with the job id and nothing else (never the credential, the URL or the App's text), and **never fails or
+  delays a launch, a heartbeat or a job transition**: the App then measures the VM by the backstop of its own, or counts
+  0 minutes when it got no report at all.
+- A Launcher that creates no VM (the Docker-Launcher, the fake) never calls the callback.
 
 ## What the core does
 

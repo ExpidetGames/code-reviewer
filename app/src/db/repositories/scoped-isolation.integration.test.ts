@@ -26,9 +26,11 @@ import { createRepositoriesRepository } from "./repositories-repository.ts";
 import { createRunsRepository } from "./runs-repository.ts";
 import { createPlanHandoffTokensRepository } from "./plan-handoff-tokens-repository.ts";
 import { createJobCheckRunsRepository } from "./job-check-runs-repository.ts";
+import { createJobVmRunsRepository } from "./job-vm-runs-repository.ts";
 import { createRefusalNoticesRepository } from "./refusal-notices-repository.ts";
 import { createUsageRecordsRepository } from "./usage-records-repository.ts";
 import { createBillingJournalRepository } from "./billing-journal-repository.ts";
+import { createBillingTopUpIntentsRepository } from "./billing-topup-intents-repository.ts";
 
 const SHA = "b".repeat(40);
 const FAILED_SHA = "c".repeat(40);
@@ -49,8 +51,10 @@ function reposOf(db: Kysely<Database>, workspaceId: string) {
     usage: createUsageRecordsRepository(db, workspaceId),
     notices: createRefusalNoticesRepository(db, workspaceId),
     jobChecks: createJobCheckRunsRepository(db, workspaceId),
+    vmRuns: createJobVmRunsRepository(db, workspaceId),
     planHandoff: createPlanHandoffTokensRepository(db, workspaceId),
     billing: createBillingJournalRepository(db, workspaceId),
+    topUpIntents: createBillingTopUpIntentsRepository(db, workspaceId),
   };
 }
 type Repos = ReturnType<typeof reposOf>;
@@ -140,9 +144,27 @@ async function seed(
         delivery_id: null,
         status: "failed",
         error_code: "timeout",
+        claimed_at: "2026-10-10T23:50:00.000Z",
         created_at: "2026-10-11T00:00:00.000Z",
         updated_at: "2026-10-11T00:00:00.000Z",
         finished_at: "2026-10-11T00:00:00.000Z",
+      })
+      .execute();
+    // The VM of that job's claim (#493): A must neither see, end, measure nor add to it.
+    await db
+      .insertInto("job_vm_runs")
+      .values({
+        job_id: `failed-${tag}`,
+        vm_name: `vm-${tag}`,
+        workspace_id: workspaceId,
+        attempt: 1,
+        claimed_at: "2026-10-10T23:50:00.000Z",
+        started_at: "2026-10-10T23:51:00.000Z",
+        reported_at: "2026-10-10T23:51:01.000Z",
+        vm_timeout_seconds: 2100,
+        billable: 1,
+        created_at: "2026-10-10T23:51:01.000Z",
+        updated_at: "2026-10-10T23:51:01.000Z",
       })
       .execute();
   }
@@ -271,7 +293,17 @@ async function seed(
     refKey: `pi-${tag}`,
   });
   await repos.billing.reserve(1_000_000, `held-${tag}`);
+  // The top-up intents (#497): one with a payment, so the other workspace has an intent to reach for.
+  const topUpIntent = await repos.topUpIntents.create({
+    adapter: "fake",
+    amountMicroUsd: 25_000_000,
+  });
+  await repos.topUpIntents.attachRefs(topUpIntent.id, {
+    checkoutRef: `cs-${tag}`,
+    paymentRef: `pi-intent-${tag}`,
+  });
   return {
+    topUpIntentId: topUpIntent.id,
     workspaceId,
     userId: `user-${tag}`,
     journalEntryId: topUp.entry.id,
@@ -338,6 +370,12 @@ async function rowsOf(db: Kysely<Database>, workspaceId: string) {
       .where("workspace_id", "=", workspaceId)
       .orderBy("job_id")
       .execute(),
+    jobVmRuns: await db
+      .selectFrom("job_vm_runs")
+      .selectAll()
+      .where("workspace_id", "=", workspaceId)
+      .orderBy("vm_name")
+      .execute(),
     refusalNotices: await db
       .selectFrom("refusal_notices")
       .selectAll()
@@ -371,6 +409,12 @@ async function rowsOf(db: Kysely<Database>, workspaceId: string) {
       .selectFrom("billing_balances")
       .selectAll()
       .where("workspace_id", "=", workspaceId)
+      .execute(),
+    billingTopUpIntents: await db
+      .selectFrom("billing_topup_intents")
+      .selectAll()
+      .where("workspace_id", "=", workspaceId)
+      .orderBy("id")
       .execute(),
     appSettings: await db
       .selectFrom("app_settings")
@@ -1052,6 +1096,45 @@ const CASES: Case[] = [
     run: (a, b) => a.jobChecks.drop(b.job.id, "X"),
     expectAnswer: (answer) => expect(answer).toBeUndefined(),
   },
+  // VM runs (#493-T11): B's job is not one of A's, so A neither sees, starts, ends, measures nor adds to its VM runs
+  {
+    name: "vmRuns.list",
+    run: (a) => a.vmRuns.list("failed-b"),
+    expectAnswer: (answer) => expect(answer).toEqual([]),
+  },
+  {
+    name: "vmRuns.recordStart",
+    run: (a, b) =>
+      a.vmRuns.recordStart({
+        jobId: b.job.id,
+        vmName: "hijacked",
+        claimedAt: "2026-10-10T23:50:00.000Z",
+        attempt: 1,
+        startedAt: new Date("2026-10-10T23:51:00.000Z"),
+        vmTimeoutSeconds: 2100,
+      }),
+    expectAnswer: (answer) => expect(answer).toBe("refused"),
+  },
+  {
+    name: "vmRuns.confirmStopped",
+    run: (a) =>
+      a.vmRuns.confirmStopped(
+        "failed-b",
+        ["vm-b"],
+        new Date("2026-10-11T00:00:30.000Z"),
+      ),
+    expectAnswer: (answer) => expect(answer).toBe(0),
+  },
+  {
+    name: "vmRuns.recordWallClock",
+    run: (a) => a.vmRuns.recordWallClock("failed-b"),
+    expectAnswer: (answer) => expect(answer).toBe("not_measurable"),
+  },
+  {
+    name: "vmRuns.measure",
+    run: (a) => a.vmRuns.measure("failed-b"),
+    expectAnswer: (answer) => expect(answer).toEqual({ state: "not_ended" }),
+  },
   // handoff tokens: making one under A for B's Owner revokes nothing of B's
   {
     name: "planHandoff.issue",
@@ -1157,6 +1240,67 @@ const CASES: Case[] = [
     run: (a) => a.billing.verify(),
     expectAnswer: (answer) =>
       expect(answer).toMatchObject({ consistent: true, differenceMicroUsd: 0 }),
+  },
+  // the journal lookup by key (#497): B's entry is not there for A
+  {
+    name: "billing.findByKey",
+    run: (a) => a.billing.findByKey("top_up", "pi-b"),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  // the top-up intents (#497): A sees only its own; B's intent is not there for A, and what A creates lands in A
+  {
+    name: "topUpIntents.get",
+    run: (a, b) => a.topUpIntents.get(b.topUpIntentId),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
+    name: "topUpIntents.list",
+    run: (a) => a.topUpIntents.list({ limit: 50 }),
+    expectAnswer: (answer, a) => {
+      const intents = answer as Array<{ workspaceId: string }>;
+      expect(intents).toHaveLength(1);
+      expect(intents[0]?.workspaceId).toBe(a.workspaceId);
+    },
+  },
+  {
+    name: "topUpIntents.create",
+    run: (a) =>
+      a.topUpIntents.create({ adapter: "fake", amountMicroUsd: 10_000_000 }),
+    expectAnswer: (answer, a) =>
+      expect(answer).toMatchObject({
+        workspaceId: a.workspaceId,
+        state: "pending",
+      }),
+  },
+  {
+    name: "topUpIntents.attachRefs",
+    run: (a, b) =>
+      a.topUpIntents.attachRefs(b.topUpIntentId, { paymentRef: "pi-stolen" }),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
+    name: "topUpIntents.markPaid",
+    run: (a, b) =>
+      a.topUpIntents.markPaid(b.topUpIntentId, {
+        paymentRef: "pi-intent-b",
+        creditedMicroUsd: 25_000_000,
+      }),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
+    name: "topUpIntents.markExpired",
+    run: (a, b) => a.topUpIntents.markExpired(b.topUpIntentId),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
+    name: "topUpIntents.addDebited",
+    run: (a, b) => a.topUpIntents.addDebited(b.topUpIntentId, "refund", 1),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
+    name: "topUpIntents.markFailed",
+    run: (a, b) => a.topUpIntents.markFailed(b.topUpIntentId),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
   },
   // runs
   {

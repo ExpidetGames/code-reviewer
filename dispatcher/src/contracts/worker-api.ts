@@ -445,7 +445,178 @@ export interface RunnerUsage {
    * Why a Dynamic Review was wrapped up before it was done: the model was asked for its answer right away because the run reached its cost limit or its time limit. Absent or null for a complete run; the review it produced is published and says it may be incomplete.
    */
   stoppedEarly?: "cost_limit" | "time_limit" | null;
+  /**
+   * #540: by how much, in US dollars, the cost of a Dynamic Review passed the operator's cost limit. The review is delivered nevertheless: the last normal call may cost more than expected and the final call that carries the answer is always made (the documented bound: the limit plus the excess of the last normal call plus the final call). Absent when the cost stayed within the limit or is not known.
+   */
+  limitExceededBy?: number;
+  callTrace?: RunnerCallTrace;
   [k: string]: unknown;
+}
+/**
+ * #541: what each model call and each tool call of a Dynamic Review was, as numbers and stable names (RunnerCallTrace). Optional and additive: a runner of an earlier release sends none, and an app of an earlier release ignores it. Observability only; nothing in the run reads it.
+ */
+export interface RunnerCallTrace {
+  truncated: boolean;
+  /**
+   * @maxItems 100
+   */
+  modelCalls: RunnerModelCallTrace[];
+  /**
+   * @maxItems 100
+   */
+  toolCalls: RunnerToolCallTrace[];
+}
+/**
+ * One model call. A count is null when the provider reported none (a refused call, a provider without cache tokens); it is never a guess. tMs is the time since the run started when the call began.
+ */
+export interface RunnerModelCallTrace {
+  index: number;
+  tMs: number;
+  promptTokens: number | null;
+  cacheRead: number | null;
+  cacheWrite: number | null;
+  completionTokens: number | null;
+  costUsd: number | null;
+  finishReason:
+    "stop" | "tool_calls" | "length" | "content_filter" | "other" | null;
+  /**
+   * True for the call the run was wrapped up with (the wrap-up or the recovery).
+   */
+  final: boolean;
+  /**
+   * The tools the answer asked for, each name once with its count.
+   *
+   * @maxItems 5
+   */
+  tools:
+    | []
+    | [
+        {
+          /**
+           * The engine's tools; every other name a model called is `other`.
+           */
+          name: "read" | "grep" | "glob" | "StructuredOutput" | "other";
+          count: number;
+        },
+      ]
+    | [
+        {
+          /**
+           * The engine's tools; every other name a model called is `other`.
+           */
+          name: "read" | "grep" | "glob" | "StructuredOutput" | "other";
+          count: number;
+        },
+        {
+          /**
+           * The engine's tools; every other name a model called is `other`.
+           */
+          name: "read" | "grep" | "glob" | "StructuredOutput" | "other";
+          count: number;
+        },
+      ]
+    | [
+        {
+          /**
+           * The engine's tools; every other name a model called is `other`.
+           */
+          name: "read" | "grep" | "glob" | "StructuredOutput" | "other";
+          count: number;
+        },
+        {
+          /**
+           * The engine's tools; every other name a model called is `other`.
+           */
+          name: "read" | "grep" | "glob" | "StructuredOutput" | "other";
+          count: number;
+        },
+        {
+          /**
+           * The engine's tools; every other name a model called is `other`.
+           */
+          name: "read" | "grep" | "glob" | "StructuredOutput" | "other";
+          count: number;
+        },
+      ]
+    | [
+        {
+          /**
+           * The engine's tools; every other name a model called is `other`.
+           */
+          name: "read" | "grep" | "glob" | "StructuredOutput" | "other";
+          count: number;
+        },
+        {
+          /**
+           * The engine's tools; every other name a model called is `other`.
+           */
+          name: "read" | "grep" | "glob" | "StructuredOutput" | "other";
+          count: number;
+        },
+        {
+          /**
+           * The engine's tools; every other name a model called is `other`.
+           */
+          name: "read" | "grep" | "glob" | "StructuredOutput" | "other";
+          count: number;
+        },
+        {
+          /**
+           * The engine's tools; every other name a model called is `other`.
+           */
+          name: "read" | "grep" | "glob" | "StructuredOutput" | "other";
+          count: number;
+        },
+      ]
+    | [
+        {
+          /**
+           * The engine's tools; every other name a model called is `other`.
+           */
+          name: "read" | "grep" | "glob" | "StructuredOutput" | "other";
+          count: number;
+        },
+        {
+          /**
+           * The engine's tools; every other name a model called is `other`.
+           */
+          name: "read" | "grep" | "glob" | "StructuredOutput" | "other";
+          count: number;
+        },
+        {
+          /**
+           * The engine's tools; every other name a model called is `other`.
+           */
+          name: "read" | "grep" | "glob" | "StructuredOutput" | "other";
+          count: number;
+        },
+        {
+          /**
+           * The engine's tools; every other name a model called is `other`.
+           */
+          name: "read" | "grep" | "glob" | "StructuredOutput" | "other";
+          count: number;
+        },
+        {
+          /**
+           * The engine's tools; every other name a model called is `other`.
+           */
+          name: "read" | "grep" | "glob" | "StructuredOutput" | "other";
+          count: number;
+        },
+      ];
+}
+/**
+ * One tool call. isRepeat is true when the same tool with the same normalised arguments already ran in this job; the arguments themselves are never sent. resultBytes is the size of the result the model was shown, null when it never was.
+ */
+export interface RunnerToolCallTrace {
+  index: number;
+  /**
+   * The engine's tools; every other name a model called is `other`.
+   */
+  name: "read" | "grep" | "glob" | "StructuredOutput" | "other";
+  resultBytes: number | null;
+  isRepeat: boolean;
 }
 /**
  * 200 for a result and for the repetition of the same result (alreadyCompleted: true); a different result for a finished job is 409 RUNNER_RESULT_CONFLICT. After the job reached a final state only a repeat of the same result is accepted.
