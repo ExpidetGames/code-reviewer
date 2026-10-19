@@ -3,8 +3,8 @@
 """The four wire families of the passthrough proxy (#550) and what is allowed for each.
 
 A family is what the pinned engine's bundled SDK speaks to a provider (spike #546, section 4):
-OpenAI Chat (and every OpenAI-compatible provider), OpenAI Responses, Anthropic Messages and Google's
-Generative Language API. For each there is exactly one request the engine may make: one method,
+OpenAI Chat (and every OpenAI-compatible provider), OpenAI Responses, Anthropic Messages and
+Google's Generative Language API. For each there is exactly one request the engine may make: one method,
 one path (Google: with the job's model in it), one query, the key in one header and a closed set of
 other headers. The engine always streams; no `GET` is needed.
 
