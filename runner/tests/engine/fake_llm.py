@@ -9,6 +9,13 @@ The Anthropic provider (#511) reaches the same fake through LiteLLM's real Anthr
 real API reports (`anthropic_usage`, every field of `Message.usage`, #534) and no charge, as the
 Claude API states none.
 
+With `prompt_cache` set both protocols keep the cache rules of the docs
+(`fakes/llm/anthropic_cache.py`, #539). The usage of an answer is what the request earns from the
+cache: cache tokens in the real shape of the Messages API, or `prompt_tokens_details.cached_tokens`
+and `cache_write_tokens` with a `usage.cost` that carries the discount for the OpenRouter shape. A
+request the API would refuse (more than four breakpoints, a mark on a message object) is answered
+with the 400.
+
 PR-Agent talks to it through LiteLLM's real OpenRouter code path: `OPENROUTER__API_BASE` points at
 `http://127.0.0.1:<port>/api/v1`, and the request is `POST /api/v1/chat/completions` with the key in
 the `Authorization` header. The fake records every request (headers and body, so a test can read the
@@ -31,12 +38,16 @@ about review quality.
 
 import json
 import select
+import sys
 import threading
 import time
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from fakes.llm.anthropic_cache import CacheRequestRejected, PromptCache
 
 # A held request ends by itself after this long, so a broken test cannot leave a thread behind.
 _HOLD_LIMIT_SECONDS = 120.0
@@ -122,6 +133,13 @@ class FakeLlm:
     cost: float | None = 0.00042
     # What an Anthropic answer reports as its usage (#511): the shape the real API returns (#534).
     anthropic_usage: dict[str, Any] = field(default_factory=lambda: real_anthropic_usage(100, 50))
+    # The cache of the provider (#539); None: every answer reports the fixed usage above.
+    prompt_cache: PromptCache | None = None
+    # USD per million tokens of an input and of an output, for the charge of an OpenRouter answer
+    # when `prompt_cache` is set: a read costs 0.1x the input price, a write 1.25x.
+    cache_prices: tuple[float, float] = (3.0, 15.0)
+    # What the cache refused with a 400, as the provider worded it.
+    refused: list[str] = field(default_factory=lambda: [])
     # Error messages quote the key that arrived, like a provider that says "Incorrect API key".
     echo_key_in_errors: bool = False
     requests: list[LlmRequest] = field(default_factory=lambda: [])
@@ -232,12 +250,50 @@ class FakeLlm:
                 return
             self._send(handler, reply.status, {"error": {"message": message, "code": reply.status}})
             return
+        try:
+            usage = self._cached_usage(request)
+        except CacheRequestRejected as rejected:
+            self.refused.append(str(rejected))
+            self._send_refusal(handler, request, str(rejected))
+            return
         if request.is_messages:
             self._send(
-                handler, 200, anthropic_message(request.model, reply.content, self.anthropic_usage)
+                handler,
+                200,
+                anthropic_message(request.model, reply.content, usage or self.anthropic_usage),
             )
             return
-        self._send(handler, 200, completion(request.model, reply.content, self.cost))
+        self._send(handler, 200, completion(request.model, reply.content, self.cost, usage))
+
+    def _cached_usage(self, request: LlmRequest) -> dict[str, Any] | None:
+        """The usage of an answer from the prompt cache, None when the fake has none."""
+        if self.prompt_cache is None:
+            return None
+        if request.is_messages:
+            return self.prompt_cache.usage(request.body, self.anthropic_usage)
+        counted = self.prompt_cache.usage(
+            chat_as_messages(request.body), real_anthropic_usage(0, 50), minimum=1024
+        )
+        read, written = counted["cache_read_input_tokens"], counted["cache_creation_input_tokens"]
+        fresh = counted["input_tokens"]
+        price_in, price_out = self.cache_prices
+        charge = ((fresh + 0.1 * read + 1.25 * written) * price_in + 50 * price_out) / 1_000_000
+        return {
+            "prompt_tokens": fresh + read + written,
+            "completion_tokens": 50,
+            "total_tokens": fresh + read + written + 50,
+            "prompt_tokens_details": {"cached_tokens": read, "cache_write_tokens": written},
+            "cost": charge,
+        }
+
+    def _send_refusal(
+        self, handler: BaseHTTPRequestHandler, request: LlmRequest, text: str
+    ) -> None:
+        if request.is_messages:
+            error = {"type": "error", "error": {"type": "invalid_request_error", "message": text}}
+            self._send(handler, 400, error)
+            return
+        self._send(handler, 400, {"error": {"message": text, "code": 400}})
 
     def _hold(self, handler: BaseHTTPRequestHandler) -> bool:
         """Wait until released or hung up. Returns True if the request should still be answered."""
@@ -266,12 +322,20 @@ class FakeLlm:
             return
 
 
-def completion(model: str, content: str, cost: float | None = None) -> dict[str, Any]:
+def completion(
+    model: str,
+    content: str,
+    cost: float | None = None,
+    stated_usage: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """A non-streaming chat completion in the OpenAI wire format. `cost` is the charge the provider
-    states in `usage.cost` (OpenRouter does), left out when None."""
+    states in `usage.cost` (OpenRouter does), left out when None; `stated_usage`, when given, is
+    the whole usage (with its own charge)."""
     usage: dict[str, Any] = {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150}
     if cost is not None:
         usage["cost"] = cost
+    if stated_usage is not None:
+        usage = stated_usage
     return {
         "id": "chatcmpl-fake",
         "object": "chat.completion",
@@ -320,3 +384,27 @@ def classify(request: LlmRequest) -> str:
     """Which prompt a request holds. `/review` is the only tool (#203), so everything is a review
     (a new canned answer for another kind of prompt is added here when a tool returns)."""
     return "review"
+
+
+def chat_as_messages(body: dict[str, Any]) -> dict[str, Any]:
+    """An OpenAI-shaped request as the cache sees it: the same blocks in the same order, a mark on a
+    part or at the top level kept, a mark on a message object left out (OpenRouter takes the
+    message and ignores what it does not know; a test reads the recorded body for such a mark)."""
+    messages: list[dict[str, Any]] = []
+    for raw in body.get("messages", []):
+        content: Any = raw.get("content")
+        parts: list[Any] = (
+            [{"type": "text", "text": content}] if isinstance(content, str) else list(content or [])
+        )
+        extra = {
+            key: value
+            for key, value in raw.items()
+            if key not in ("role", "content", "cache_control")
+        }
+        if extra:
+            parts.append({"type": "text", "text": json.dumps(extra, sort_keys=True)})
+        messages.append({"role": raw.get("role", "user"), "content": parts})
+    shaped: dict[str, Any] = {"model": body.get("model", ""), "messages": messages}
+    if "cache_control" in body:
+        shaped["cache_control"] = body["cache_control"]
+    return shaped

@@ -53,6 +53,7 @@ from functools import wraps
 from importlib import import_module
 from typing import Any
 
+from code_reviewer_runner.cache_usage import CacheTally
 from code_reviewer_runner.dynamic_review.budget import exact_cost
 from code_reviewer_runner.llm_providers import LlmProviderSpec, without_prefix
 from code_reviewer_runner.supersede import PROCESS_SIGNAL, SupersededError, SupersedeSignal
@@ -162,6 +163,8 @@ class DiffCostMeter:
         self._unpriced = 0
         # Requests whose end is not known: in flight, cancelled, or a stream not read to its end.
         self._open = 0
+        # How much of the input of the run came from the provider's cache (counts only, #539).
+        self.cache_tally = CacheTally()
 
     def cost_usd(self) -> Decimal | None:
         """The exact sum of the charges of all calls; None unless every call is accounted for.
@@ -200,6 +203,7 @@ class DiffCostMeter:
     def answered(self, usage: Any, model: str = "") -> None:
         """The request to `model` got an answer with this usage (None when it has none)."""
         charge = self._charge_of(model, usage)
+        self.cache_tally.add(usage)
         with self._lock:
             self._open -= 1
             if charge is None:

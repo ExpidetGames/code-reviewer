@@ -283,3 +283,32 @@ def test_the_uncached_run_is_priced_at_the_input_price() -> None:
         assert usage["cache_creation_input_tokens"] == 0
         assert total - previous == price_of(usage)
         previous = total
+
+
+# #539-T16
+def test_the_proxy_counts_what_every_call_read_wrote_and_paid_in_full() -> None:
+    upstream = CachingClaude()
+    proxy = proxy_for(upstream)
+    for turns in range(9):
+        body = {
+            "model": MODEL,
+            "messages": history(turns, False),
+            "tools": TOOLS,
+            "tool_choice": "auto",
+        }
+        response = proxy.handle(
+            "POST",
+            "/v1/chat/completions",
+            json.dumps(body).encode(),
+            {"Authorization": f"Bearer {CAPABILITY}"},
+        )
+        assert response.status == 200
+
+    tally = proxy.cache_tally.counts()
+    assert tally.calls == 9
+    assert tally.read == sum(u["cache_read_input_tokens"] for u in upstream.usages) > 0
+    assert tally.written == sum(u["cache_creation_input_tokens"] for u in upstream.usages)
+    assert tally.uncached == sum(u["input_tokens"] for u in upstream.usages)
+    line = proxy.cache_tally.describe()
+    assert line is not None and "prompt cache: 9 calls" in line
+    assert "x" * 50 not in line and SYSTEM[:20] not in line

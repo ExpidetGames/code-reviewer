@@ -219,11 +219,16 @@ class PromptCache:
         self._entries: dict[str, float] = {}
 
     def usage(
-        self, body: dict[str, Any], base_usage: dict[str, Any], model: str | None = None
+        self,
+        body: dict[str, Any],
+        base_usage: dict[str, Any],
+        model: str | None = None,
+        minimum: int | None = None,
     ) -> dict[str, Any]:
         """`base_usage` (the real shape of `Message.usage`) with the counts of this request.
 
-        `base_usage["input_tokens"]` is ignored: the prompt is counted from the request.
+        `base_usage["input_tokens"]` is ignored: the prompt is counted from the request. `minimum`
+        replaces the model's minimum cacheable length (a model behind a router has another name).
         Raises `CacheRequestRejected` for a request the API would answer with a 400.
         """
         blocks = _blocks(body)
@@ -240,7 +245,11 @@ class PromptCache:
             total += block.tokens
             sums.append(total)
         usage = dict(base_usage)
-        floor = minimum_tokens(str(model if model is not None else body.get("model", "")))
+        floor = (
+            minimum
+            if minimum is not None
+            else minimum_tokens(str(model if model is not None else body.get("model", "")))
+        )
         usage.update(
             input_tokens=total,
             cache_creation_input_tokens=0,
