@@ -379,6 +379,44 @@ set null`): the operator's list of the models that workspaces on the operator's 
   (`catalog-repository.ts`): no workspace owns an entry. A released entry is never hard-deleted. See
   `src/model-catalog/README.md`. The user merge moves `updated_by` (`github-signin/merge.ts`).
 
+### Billing journal and balances
+
+Migration `20261019150000_create_billing_journal` (#495; epic #489, ADR 0006, 2.7). It adds two empty tables and touches no
+existing row, so an app of the previous release on the same database is unaffected (it never reads them):
+
+- `billing_journal_entries` (`id` primary key; `workspace_id` → `workspaces.id`; `type`, one of `top_up`, `start_credit`,
+  `reservation`, `usage`, `release`, `refund`, `chargeback`, `correction`; `amount_micro_usd`, a signed integer; `ref_key`, the job
+  id or the provider reference; `job_id`, `review_kind`, `minutes`; `ai_micro_usd` and `infra_micro_usd` of a `usage`;
+  `reverses_entry_id` → the same table; `provider`, `provider_ref`, `actor_user_id`, `note`; `created_at`). **Append-only.**
+  Checks: the type; the sign per type (`top_up`, `start_credit`, `release` positive; `reservation`, `usage`, `refund`,
+  `chargeback` negative; `correction` non-zero either way); a `usage` carries both parts and they add up to its amount, no
+  other type has parts; only a `correction` reverses; a `reservation`, `usage` or `release` has its job. Unique:
+  `(workspace_id, type, ref_key)` (D14, the idempotency key) and `reverses_entry_id` (an entry is reversed once).
+  `job_id` and `actor_user_id` have **no foreign key** on purpose: the account merge and the deletion of a user rewrite
+  their references, and a journal that is never updated must not be blocked by, or rewritten with, a row that goes.
+- `billing_balances` (`workspace_id` primary key → `workspaces.id`, `balance_micro_usd`, `reserved_micro_usd` with a check
+  `>= 0`, `updated_at`): the cache of the journal, one row per workspace, created by the first entry. `balance` is the sum of
+  all entries (a reservation is a debit, so it already excludes held money); `reserved` is the open reservations.
+  The repository (`billing-journal-repository.ts`, scoped) updates it in the transaction of every entry; `verify()` compares
+  it with the journal.
+- **Immutability.** Triggers refuse an `UPDATE` and a `DELETE` of an entry for every writer: on Postgres a function
+  (`billing_journal_entries_guard`) and a row trigger for update and delete plus a statement trigger for `TRUNCATE`; on
+  SQLite one trigger each for update and delete. Every refusal carries `billing_journal_entries_immutable`. A mistake is a
+  new `correction` entry. SQLite fires a delete trigger for `insert or replace` only with recursive triggers on, so
+  `openDatabase` turns that pragma on (`connection.ts`). The down migration drops the guard function on Postgres, which a
+  table drop leaves behind (the same note as the removed billing migrations below).
+- **Money is an integer** in micro-USD, never a float and never a 32 bit column (it would stop at about USD 2,147):
+  `integer` on SQLite, which is 64 bit already, so the "text and integer columns only" convention holds there, and
+  `bigint` on Postgres. Postgres returns a `bigint` as text, so the repository converts every amount with `Number`
+  (exact up to 2^53).
+- **Concurrency.** Everything that writes is one transaction and idempotent on the key. `reserve` takes the balance row's
+  lock (Postgres `FOR UPDATE`; SQLite's `begin immediate` already serializes writers), answers a repeated job from the
+  entry it wrote, and runs `UPDATE billing_balances SET balance = balance - :hold, reserved = reserved + :hold WHERE
+workspace_id = :w AND balance >= :hold`; no row changed means the hold is refused and nothing is written. Every other
+  entry adds to the balance unconditionally, so the balance goes below zero only through a settlement, refund, chargeback
+  or correction. The balance row is updated, then inserted if missing, never upserted: Postgres checks the row it would
+  insert (`reserved >= 0`) before it looks for a conflict. See `src/billing/README.md`.
+
 ### A database that ran the removed billing migrations
 
 Three migrations of an earlier billing design existed on `development` for a few days and are deleted (#491):
