@@ -225,6 +225,30 @@ def test_the_top_level_mark_on_a_marked_last_block_with_the_same_ttl_adds_nothin
             id="a thinking block",
         ),
         pytest.param(
+            lambda: request(
+                [block("task")],
+                [{"type": "tool_use", "id": "t1", "name": "read", "input": {}}],
+                [{"type": "tool_result", "tool_use_id": "t1", "cache_control": MARK}],
+            ),
+            id="a tool result without content",
+        ),
+        pytest.param(
+            lambda: request(
+                [block("task")],
+                [{"type": "tool_use", "id": "t1", "name": "read", "input": {}}],
+                [{"type": "tool_result", "tool_use_id": "t1", "content": "", "cache_control": MARK}],
+            ),
+            id="a tool result with an empty string",
+        ),
+        pytest.param(
+            lambda: request(
+                [block("task")],
+                [{"type": "tool_use", "id": "t1", "name": "read", "input": {}}],
+                [{"type": "tool_result", "tool_use_id": "t1", "content": [], "cache_control": MARK}],
+            ),
+            id="a tool result with no blocks",
+        ),
+        pytest.param(
             lambda: request([block("task", cache_control={"type": "ephemeral", "ttl": "2h"})]),
             id="an unknown ttl",
         ),
@@ -280,3 +304,60 @@ def test_a_run_of_tool_results_counts_as_one_position_for_the_look_back() -> Non
         [*results[:-1], {**results[-1], "cache_control": MARK}],
     )
     assert run(cache, body)["cache_read_input_tokens"] > 0
+
+
+def tool(name: str, **extra: Any) -> dict[str, Any]:
+    return {"name": name, "input_schema": {"type": "object"}, **extra}
+
+
+def stable_prefix(**extra: Any) -> dict[str, Any]:
+    """Tools, a marked system prompt and a marked first turn: a second request can reuse each."""
+    return request(
+        [block("task", cache_control=MARK)],
+        tools=[tool("read"), tool("grep")],
+        system=[block("system", cache_control=MARK)],
+        **extra,
+    )
+
+
+# #539-T06
+@pytest.mark.parametrize(
+    "changed",
+    [
+        pytest.param({"tool_choice": {"type": "none"}}, id="tool_choice"),
+        pytest.param(
+            {"thinking": {"type": "enabled", "budget_tokens": 2048}}, id="thinking"
+        ),
+    ],
+)
+def test_a_changed_tool_choice_or_thinking_invalidates_the_messages_but_not_the_system(
+    changed: dict[str, Any],
+) -> None:
+    settings: dict[str, Any] = {"tool_choice": {"type": "auto"}, "thinking": {"type": "disabled"}}
+    # What the system breakpoint covers: the tools and the system prompt.
+    system_only = request(
+        [block("task")], tools=[tool("read"), tool("grep")], system=[block("system", cache_control=MARK)]
+    )
+    covered = run(PromptCache(Clock()), {**system_only, **settings})["cache_creation_input_tokens"]
+
+    cache = PromptCache(Clock())
+    first = run(cache, stable_prefix(**settings))
+    assert first["cache_creation_input_tokens"] > covered
+    same = run(cache, stable_prefix(**settings))
+    assert same["cache_read_input_tokens"] == first["cache_creation_input_tokens"]
+
+    other = run(cache, stable_prefix(**{**settings, **changed}))
+    assert other["cache_read_input_tokens"] == covered
+    assert other["cache_creation_input_tokens"] == first["cache_creation_input_tokens"] - covered
+
+
+# #539-T06
+def test_a_changed_tool_set_invalidates_everything() -> None:
+    cache = PromptCache(Clock())
+    first = run(cache, stable_prefix())
+    assert first["cache_creation_input_tokens"] > 0
+    body = stable_prefix()
+    body["tools"] = [tool("read"), tool("grep"), tool("write")]
+    other = run(cache, body)
+    assert other["cache_read_input_tokens"] == 0
+    assert other["cache_creation_input_tokens"] > 0

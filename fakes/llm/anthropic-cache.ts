@@ -6,9 +6,11 @@
 // - the prefix of a request (`tools`, then `system`, then `messages`, block by block) is cached up to every block that
 //   carries `cache_control`; the next request that starts with the same blocks reads it;
 // - at most four breakpoints (a top-level `cache_control` takes one: it marks the last cacheable block); more is a 400.
-//   A mark on an empty text block or a thinking block is a 400, a `ttl` other than `5m` and `1h` is a 400, a 1 hour
+//   A mark on an empty text block, an empty tool result or a thinking block is a 400, a `ttl` other than `5m` and `1h` is a 400, a 1 hour
 //   entry after a 5 minute one is a 400, and so is a mark on a message object (`Extra inputs are not permitted`):
 //   the engine's own marks must never reach the provider;
+// - a change of `tool_choice` or `thinking` invalidates the cached messages but not the tools and the system prompt; a
+//   change of the tool set (or of the system prompt) invalidates what follows it, which is the prefix chain itself;
 // - a prefix shorter than the model's minimum is not cached, and no error is said;
 // - an entry lives 5 minutes (or 1 hour) from the start of the request that wrote or read it;
 // - a breakpoint looks for an entry at most 20 positions back (itself the first); a run of consecutive `tool_use`
@@ -96,13 +98,20 @@ function block(role: string, content: Json, control: Control | null): Block {
   return { role, content, control, text, tokens: Math.ceil(text.length / 4) };
 }
 
+function isEmpty(value: unknown): boolean {
+  return (
+    value === undefined ||
+    value === null ||
+    value === "" ||
+    (Array.isArray(value) && value.length === 0)
+  );
+}
+
 function markable(entry: Block): boolean {
-  if (
-    typeof entry.content.type === "string" &&
-    UNMARKABLE.has(entry.content.type)
-  )
-    return false;
-  return !(entry.content.type === "text" && !entry.content.text);
+  const kind = entry.content.type;
+  if (typeof kind === "string" && UNMARKABLE.has(kind)) return false;
+  if (kind === "tool_result") return !isEmpty(entry.content.content);
+  return !(kind === "text" && !entry.content.text);
 }
 
 function blocksOf(body: Json): Block[] {
@@ -192,7 +201,7 @@ function breakpointsOf(body: Json, blocks: Block[]): Map<number, Control> {
     if (!markable(entry)) {
       const kind = String(entry.content.type);
       throw new CacheRequestRejected(
-        kind === "text"
+        kind === "text" || kind === "tool_result"
           ? "cache_control cannot be set for empty text blocks"
           : `cache_control cannot be set on a ${kind} block`,
       );
@@ -265,7 +274,19 @@ export class PromptCache {
     const sums: number[] = [];
     let previous = "";
     let total = 0;
+    const settings = canonical({
+      tool_choice: body.tool_choice ?? null,
+      thinking: body.thinking ?? null,
+    });
+    let inMessages = false;
     for (const entry of blocks) {
+      if (!inMessages && entry.role !== "tools" && entry.role !== "system") {
+        // Where the messages begin, the settings that apply to them join the prefix.
+        inMessages = true;
+        previous = createHash("sha256")
+          .update(previous + settings)
+          .digest("hex");
+      }
       previous = createHash("sha256")
         .update(previous + entry.text)
         .digest("hex");

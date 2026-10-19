@@ -247,6 +247,47 @@ describe("the prompt cache of the fake LLM", () => {
         request([[{ type: "thinking", thinking: "t", cache_control: MARK }]]),
     ],
     [
+      "a tool result without content",
+      () =>
+        request([
+          [block("task")],
+          [{ type: "tool_use", id: "t1", name: "read", input: {} }],
+          [{ type: "tool_result", tool_use_id: "t1", cache_control: MARK }],
+        ]),
+    ],
+    [
+      "a tool result with an empty string",
+      () =>
+        request([
+          [block("task")],
+          [{ type: "tool_use", id: "t1", name: "read", input: {} }],
+          [
+            {
+              type: "tool_result",
+              tool_use_id: "t1",
+              content: "",
+              cache_control: MARK,
+            },
+          ],
+        ]),
+    ],
+    [
+      "a tool result with no blocks",
+      () =>
+        request([
+          [block("task")],
+          [{ type: "tool_use", id: "t1", name: "read", input: {} }],
+          [
+            {
+              type: "tool_result",
+              tool_use_id: "t1",
+              content: [],
+              cache_control: MARK,
+            },
+          ],
+        ]),
+    ],
+    [
       "an unknown ttl",
       () =>
         request([
@@ -292,6 +333,69 @@ describe("the prompt cache of the fake LLM", () => {
     expect(
       new PromptCache(clock().read).usage(body, 50).cache_creation_input_tokens,
     ).toBeGreaterThan(0);
+  });
+});
+
+function tool(name: string) {
+  return { name, input_schema: { type: "object" } };
+}
+
+function stablePrefix(extra: Record<string, unknown> = {}) {
+  return request([[block("task", 6000, { cache_control: MARK })]], {
+    tools: [tool("read"), tool("grep")],
+    system: [block("system", 6000, { cache_control: MARK })],
+    ...extra,
+  });
+}
+
+describe("what invalidates the cached prefix in the fake LLM", () => {
+  const settings = {
+    tool_choice: { type: "auto" },
+    thinking: { type: "disabled" },
+  };
+  const changes: Array<[string, Record<string, unknown>]> = [
+    ["tool_choice", { tool_choice: { type: "none" } }],
+    ["thinking", { thinking: { type: "enabled", budget_tokens: 2048 } }],
+  ];
+
+  it.each(changes)(
+    "a changed %s invalidates the messages but not the system",
+    (_name, changed) => {
+      // What the system breakpoint covers: the tools and the system prompt.
+      const covered = new PromptCache(clock().read).usage(
+        {
+          ...request([[block("task")]], {
+            tools: [tool("read"), tool("grep")],
+            system: [block("system", 6000, { cache_control: MARK })],
+          }),
+          ...settings,
+        },
+        50,
+      ).cache_creation_input_tokens;
+      const cache = new PromptCache(clock().read);
+      const first = cache.usage(stablePrefix(settings), 50);
+      expect(first.cache_creation_input_tokens).toBeGreaterThan(covered);
+      const same = cache.usage(stablePrefix(settings), 50);
+      expect(same.cache_read_input_tokens).toBe(
+        first.cache_creation_input_tokens,
+      );
+      const other = cache.usage(stablePrefix({ ...settings, ...changed }), 50);
+      expect(other.cache_read_input_tokens).toBe(covered);
+      expect(other.cache_creation_input_tokens).toBe(
+        first.cache_creation_input_tokens - covered,
+      );
+    },
+  );
+
+  it("a changed tool set invalidates everything", () => {
+    const cache = new PromptCache(clock().read);
+    cache.usage(stablePrefix(), 50);
+    const other = cache.usage(
+      stablePrefix({ tools: [tool("read"), tool("grep"), tool("write")] }),
+      50,
+    );
+    expect(other.cache_read_input_tokens).toBe(0);
+    expect(other.cache_creation_input_tokens).toBeGreaterThan(0);
   });
 });
 

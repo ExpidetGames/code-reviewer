@@ -10,10 +10,13 @@ and the usage it reports is the real shape (`input_tokens`, `cache_creation_inpu
 `cache_read_input_tokens` and the `cache_creation` split, #534):
 
 - at most four breakpoints (a top-level `cache_control` takes one: it marks the last cacheable
-  block); more is a 400. A mark on an empty text block or a thinking block is a 400, a `ttl` other
-  than `5m` and `1h` is a 400, and a 1 hour entry after a 5 minute one is a 400;
+  block); more is a 400. A mark on an empty text block, an empty tool result or a thinking block is
+  a 400, a `ttl` other than `5m` and `1h` is a 400, and a 1 hour entry after a 5 minute one is a 400;
 - a mark where the API has no field for it is a 400 as well (`Extra inputs are not permitted`):
   the engine's own message-level marks must never reach the provider;
+- a change of `tool_choice` or `thinking` invalidates the cached messages but not the tools and
+  the system prompt; a change of the tool set (or of the system prompt) invalidates what follows it,
+  which is the prefix chain itself;
 - a prefix shorter than the model's minimum is not cached and no error is said;
 - an entry lives 5 minutes (or 1 hour) from the start of the request that wrote or read it;
 - a breakpoint looks for an entry at most 20 positions back (itself the first); a run of
@@ -82,9 +85,12 @@ class _Block:
 
     @property
     def markable(self) -> bool:
-        if self.content.get("type") in _UNMARKABLE:
+        kind = self.content.get("type")
+        if kind in _UNMARKABLE:
             return False
-        return not (self.content.get("type") == "text" and not str(self.content.get("text", "")))
+        if kind == "tool_result":
+            return bool(self.content.get("content"))
+        return not (kind == "text" and not str(self.content.get("text", "")))
 
 
 def _object(value: object) -> dict[str, Any] | None:
@@ -152,6 +158,15 @@ def _blocks(body: dict[str, Any]) -> list[_Block]:
     return blocks
 
 
+def _settings_text(body: dict[str, Any]) -> str:
+    """What a request says about tool use and thinking: the cached messages depend on it."""
+    return json.dumps(
+        {"tool_choice": body.get("tool_choice"), "thinking": body.get("thinking")},
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
 def _positions(blocks: list[_Block]) -> list[int]:
     """The position of every block for the look-back: a run of consecutive `tool_use` blocks is one
     position, and so is a run of `tool_result` blocks."""
@@ -183,7 +198,7 @@ def _breakpoints(body: dict[str, Any], blocks: list[_Block]) -> dict[int, dict[s
         if not blocks[index].markable:
             raise CacheRequestRejected(
                 "cache_control cannot be set for empty text blocks"
-                if kind == "text"
+                if kind in ("text", "tool_result")
                 else f"cache_control cannot be set on a {kind} block"
             )
     if "cache_control" in body:
@@ -239,7 +254,13 @@ class PromptCache:
         previous = ""
         total = 0
         sums: list[int] = []
+        settings = _settings_text(body)
+        in_messages = False
         for block in blocks:
+            if not in_messages and block.role not in ("tools", "system"):
+                # Where the messages begin, the settings that apply to them join the prefix.
+                in_messages = True
+                previous = hashlib.sha256((previous + settings).encode()).hexdigest()
             previous = hashlib.sha256((previous + block.text).encode()).hexdigest()
             keys.append(previous)
             total += block.tokens
