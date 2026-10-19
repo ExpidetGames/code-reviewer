@@ -148,18 +148,21 @@ describe("the Anthropic model list", () => {
   });
 
   // #511-T05
-  it("offers Dynamic only to models that take a forced tool choice and can run without thinking", () => {
+  // #533-T16: the four models that were Diff only (a forced tool choice is a 400, or thinking cannot be switched
+  // off) are steered by the runner's wire, so what the list says is that every model with tools takes both kinds.
+  it("offers Diff and Dynamic to every model that has tools", () => {
     for (const model of ANTHROPIC_MODELS) {
-      const dynamic =
-        model.supports.tools &&
-        model.supports.forcedToolChoice &&
-        model.supports.thinkingDisabled;
-      expect(model.reviewKinds.includes("dynamic"), model.id).toBe(dynamic);
-      expect(model.reviewKinds.includes("diff"), model.id).toBe(true);
+      expect(model.supports.tools, model.id).toBe(true);
+      expect(model.reviewKinds, model.id).toEqual(["diff", "dynamic"]);
     }
+  });
+
+  // #533-T16
+  it("keeps the flags that make the runner steer a model: no forced tool choice, or no way to disable thinking", () => {
     expect(
       ANTHROPIC_MODELS.filter(
-        (model) => !model.reviewKinds.includes("dynamic"),
+        (model) =>
+          !model.supports.forcedToolChoice || !model.supports.thinkingDisabled,
       ).map((model) => model.id),
     ).toEqual([
       "claude-fable-5-1",

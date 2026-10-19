@@ -44,10 +44,11 @@ describe("the Anthropic adapter", () => {
   });
 
   // #511-T01
-  it("keeps the defaults of the decision: Haiku 5.5 for a Diff Review, Sonnet 5 for a Dynamic Review", () => {
+  // #533-T16: the Dynamic default moved from Sonnet 5 to Sonnet 5.5 when the runner learned to steer it.
+  it("keeps the defaults of the decision: Haiku 5.5 for a Diff Review, Sonnet 5.5 for a Dynamic Review", () => {
     expect(adapter.defaultModels).toEqual({
       diff: "claude-haiku-5-5",
-      dynamic: "claude-sonnet-5",
+      dynamic: "claude-sonnet-5-5",
     });
   });
 
@@ -112,8 +113,9 @@ describe("the Anthropic adapter", () => {
         }),
         modelId,
       ).toMatchObject({
-        outcome: "unsupported",
-        capabilities: { tools: true, toolChoiceRequired: false },
+        // #533-T17: the runner steers these, so a Dynamic Review is possible on them.
+        outcome: "supported",
+        capabilities: { tools: true, toolChoiceRequired: true },
       });
     expect(
       await adapter.checkModelCapabilities({

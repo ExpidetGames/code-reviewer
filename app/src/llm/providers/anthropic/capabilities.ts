@@ -5,9 +5,11 @@
 // be spoofed, and it is the same on every call.
 //
 // `supported` means what it means for every provider (src/llm/model-capabilities.ts): the model can serve a
-// Dynamic Review, which needs tools, a forced tool choice and a way to run without thinking blocks. A model that
-// is in the list but cannot (Fable 5.1, Opus 5.5, Sonnet 5.5, Fable 5) is `unsupported`; a Diff Review does
-// not ask. An id that is not in the list is `unknown_model`, never a request.
+// Dynamic Review, which needs tools and an answer through the return tool. A model that takes no forced tool choice
+// or always thinks (Fable 5.1, Opus 5.5, Sonnet 5.5, Fable 5) is supported too: the runner's wire steers it (#533),
+// so `toolChoiceRequired` here says the run can get its answer through the tool, not that the API is asked to force
+// it. A model of the list without that is `unsupported`; a Diff Review does not ask. An id that is not in the list is
+// `unknown_model`, never a request.
 import type { LlmProviderOperations, ModelCapabilities } from "../types.ts";
 import { anthropicModel } from "./models.ts";
 
