@@ -6,7 +6,7 @@
 // set, on Postgres. The callback runs after the transaction committed, once per call, and never for a call that ended
 // nothing.
 import type { Kysely } from "kysely";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Database } from "../db/schema.ts";
 import { createJobQueueFixture, sha } from "../test-support/jobs.ts";
 import {
@@ -295,14 +295,24 @@ describe.each(databases)("the claims a call ended on %s", (name, open) => {
     });
     const job = await fixture.enqueueNew();
     await fixture.queue.claimNext("pool", undefined, { jobId: job.id });
+    const errors: string[] = [];
+    const spy = vi.spyOn(console, "error").mockImplementation((line) => {
+      errors.push(String(line));
+    });
 
-    const result = await fixture.queue.complete(
-      job.id,
-      await fixture.tokenOf(job.id),
-      OK,
-    );
+    try {
+      const result = await fixture.queue.complete(
+        job.id,
+        await fixture.tokenOf(job.id),
+        OK,
+      );
 
-    expect(result.status).toBe("completed");
+      expect(result.status).toBe("completed");
+    } finally {
+      spy.mockRestore();
+    }
     expect((await fixture.queue.get(job.id))?.status).toBe("succeeded");
+    // Logged once by its own stable code, not by the code of another callback, and without the error's text.
+    expect(errors).toEqual(["[queue] claims_ended_callback_failed"]);
   });
 });

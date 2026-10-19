@@ -106,7 +106,8 @@ export type RunnerJobsRepositoryOptions = {
    * attempt, a heartbeat past the hard limit, and the leases and runtimes that ran out and ended the job (in
    * `expireStaleJobs` and in the expiry step of a claim). The running server tells the Dispatcher to stop those jobs'
    * VMs. A job that went back to the queue is **not** named: the Dispatcher stops by job, and the next attempt's VM may
-   * exist by the time the call arrives; the reaper and the VM's own timeout end the VM of the lost attempt. Same rules as
+   * exist by the time the call arrives; the VM of the lost attempt lives until its own timeout or the job's final stop (the reaper
+   * ends it earlier only while the retry is not `running`). Same rules as
    * `onRefused`: a callback that throws is logged and ignored, and a repository that joined a caller's transaction calls
    * it never (it cannot see the commit).
    */
@@ -132,12 +133,12 @@ function refusedJob(errorCode: string, current: Date) {
   } as const;
 }
 
-/** Runs a log callback of the claim; one that throws is reported by its stable code, without its message. */
-function notify(callback: () => void): void {
+/** Runs a callback of the queue; one that throws is reported by the given stable code, without its message. */
+function notify(code: string, callback: () => void): void {
   try {
     callback();
   } catch {
-    console.error("[queue] claim_refusal_log_failed");
+    console.error(`[queue] ${code}`);
   }
 }
 
@@ -330,9 +331,13 @@ export function createRunnerJobsRepository(
     );
     if (db.isTransaction) return result;
     for (const settlement of unknownCost)
-      notify(() => options.onUnknownCostSettled?.(settlement));
+      notify("unknown_cost_callback_failed", () =>
+        options.onUnknownCostSettled?.(settlement),
+      );
     if (endedClaims.length > 0)
-      notify(() => options.onClaimsEnded?.(endedClaims));
+      notify("claims_ended_callback_failed", () =>
+        options.onClaimsEnded?.(endedClaims),
+      );
     return result;
   }
 
@@ -834,9 +839,11 @@ export function createRunnerJobsRepository(
       );
       // After the commit, and never able to fail it: a claimed job is already running under its lease.
       for (const refusal of refusals)
-        notify(() => options.onRefused?.(refusal));
+        notify("claim_refusal_log_failed", () => options.onRefused?.(refusal));
       for (const workspaceId of ignoredCostLimits)
-        notify(() => options.onIgnoredCostLimit?.(workspaceId));
+        notify("ignored_cost_limit_callback_failed", () =>
+          options.onIgnoredCostLimit?.(workspaceId),
+        );
       return claimed;
     },
 
