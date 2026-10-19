@@ -54,6 +54,7 @@ import { migration as addUsageRecordCatalogEntry } from "./20261018090000_add_us
 import { migration as migrateModelTiersToCatalog } from "./20261018170000_migrate_model_tiers_to_catalog.ts";
 import { migration as createBillingJournal } from "./20261019150000_create_billing_journal.ts";
 import { migration as createJobVmRuns } from "./20261019160000_create_job_vm_runs.ts";
+import { migration as createBillingTopupIntents } from "./20261019170000_create_billing_topup_intents.ts";
 
 const migrations: Record<string, Migration> = {
   "0001_create_app_meta": createAppMeta,
@@ -110,6 +111,7 @@ const migrations: Record<string, Migration> = {
   "20261018170000_migrate_model_tiers_to_catalog": migrateModelTiersToCatalog,
   "20261019150000_create_billing_journal": createBillingJournal,
   "20261019160000_create_job_vm_runs": createJobVmRuns,
+  "20261019170000_create_billing_topup_intents": createBillingTopupIntents,
 };
 
 export const migrationProvider: MigrationProvider = {

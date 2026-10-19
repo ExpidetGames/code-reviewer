@@ -49,6 +49,9 @@ export const PUBLIC_PATHS: readonly PublicPath[] = [
   { path: "/api/operator/v1", match: "prefix" },
   // GitHub authenticates a webhook with its signature, not with a session.
   { path: "/api/webhooks", match: "prefix" },
+  // A payment provider authenticates its webhook with a signature that the active billing adapter checks (#497), not
+  // with a session. One exact path; it answers 404 as a missing path while billing is off.
+  { path: "/api/billing/webhook", match: "exact" },
   // The platform's cron (serverless mode, vercel.json) authenticates with CRON_SECRET, not with a session;
   // the route is a 404 on a server (src/cron/). One exact path per job: nothing below /api/internal is open.
   { path: "/api/internal/repository-sync", match: "exact" },

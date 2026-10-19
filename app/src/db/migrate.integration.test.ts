@@ -103,6 +103,7 @@ describe("the migrations of both epics", () => {
       "20261018170000_migrate_model_tiers_to_catalog",
       "20261019150000_create_billing_journal",
       "20261019160000_create_job_vm_runs",
+      "20261019170000_create_billing_topup_intents",
     ]);
   });
 
@@ -147,6 +148,8 @@ describe("starting the database", () => {
       "app_settings",
       "billing_balances",
       "billing_journal_entries",
+      "billing_topup_intents",
+      "billing_webhook_events",
       "email_verification_tokens",
       "installation_link_requests",
       "instance_settings",
