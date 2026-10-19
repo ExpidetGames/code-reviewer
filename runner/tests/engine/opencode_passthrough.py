@@ -6,8 +6,8 @@ the production `PassthroughProxy`, with the strict generic fakes of `fakes/wire`
 It is `opencode_native.native_engine` with the key swapping relay of the spike replaced by the
 proxy the runner ships: the engine holds a random per-job capability, the proxy swaps in the real
 key and counts in a ledger of its own, and the strict fake accepts nothing but the real key under
-the real header. Only the last hop is a double (`LoopbackUpstream`: plain http on loopback instead of the
-pinned https connection). Nothing here talks beyond loopback.
+the real header. Only the last hop is a double (`LoopbackUpstream`: plain http on loopback instead
+of the pinned https connection). Nothing here talks beyond loopback.
 """
 
 import shutil
