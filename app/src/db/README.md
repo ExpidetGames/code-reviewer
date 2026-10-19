@@ -393,11 +393,12 @@ file, and the migrator refuses to start (`previously executed migration ... is m
 
 1. Look first, read-only: `SELECT name FROM kysely_migration WHERE name LIKE '%billing%';`. No row: nothing to do. Check
    `SELECT count(*) FROM billing_plans;` too: the tables hold only what an admin typed into the removed plans page.
-2. Back the database up (`src/backup/`), then run, in one transaction:
+2. Back the database up (`src/backup/`), then run, in one transaction (the tests run these very statements,
+   `migrations/upgrade-from-main.integration.test.ts`):
 
    ```sql
-   DROP TABLE billing_plan_prices;
    DROP TABLE billing_plan_versions;
+   DROP TABLE billing_plan_prices;
    DROP TABLE billing_plans;
    DELETE FROM kysely_migration
      WHERE name IN (
@@ -407,12 +408,19 @@ file, and the migrator refuses to start (`previously executed migration ... is m
      );
    ```
 
-   The order matters (prices point at versions, versions at plans). SQLite and Postgres take the same statements.
+   The order matters: a version points at its prices (`monthly_price_id`, `yearly_price_id`) and the prices and the
+   versions point at the plans, so versions go first. SQLite and Postgres take these statements as they are; dropping a
+   table drops its triggers on both.
 
-3. Start the app: the remaining migrations run as usual. The instance setting `billing_settings` of the old shape and a
-   stored default entitlements row with `source: "billing"` read without error and need no change (the extra fields are
-   ignored); the two encrypted rows of `secrets` named after the removed payment provider (`<provider>_api_key`,
-   `<provider>_webhook_secret`) are ignored too and may be deleted by hand.
+   **Postgres only**, in the same transaction: a table drop does not drop the two trigger functions the migrations
+   created, and they would stay in the schema. SQLite has no functions, and its triggers went with the tables.
+
+   ```sql postgres
+   DROP FUNCTION IF EXISTS billing_plan_versions_guard(), billing_plan_prices_guard();
+   ```
+
+3. Start the app: the remaining migrations run as usual. The two encrypted rows of `secrets` named after the removed
+   payment provider (`<provider>_api_key`, `<provider>_webhook_secret`) are ignored and may be deleted by hand.
 
 ## Workspace scoping
 
