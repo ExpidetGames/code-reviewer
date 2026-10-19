@@ -24,10 +24,15 @@ export function SuggestedModelsSelect({
   onPick: (model: string) => void;
 }) {
   if (models.length === 0) return null;
+  // Always empty: it is a menu of values to put into the field, not a second place that holds the value.
+  // `contain: inline-size` keeps the text from setting the width of the card (a fieldset is as wide as its widest
+  // content), so a long text wraps on a narrow window instead of scrolling the page sideways.
   return (
-    // Always empty: it is a menu of values to put into the field, not a second place that holds the value.
     <Select value="" onValueChange={onPick}>
-      <SelectTrigger aria-label={label} className="w-full">
+      <SelectTrigger
+        aria-label={label}
+        className="w-full min-w-0 text-left whitespace-normal [contain:inline-size] data-[size=default]:h-auto data-[size=default]:min-h-9"
+      >
         <SelectValue placeholder={label} />
       </SelectTrigger>
       <SelectContent>
