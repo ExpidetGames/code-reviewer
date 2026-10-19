@@ -465,7 +465,7 @@ describe.each(databases)("the VM runs of a job on %s", (name, open) => {
       await t.queue.cancelClaimed(
         job.id,
         claimed?.leaseToken as string,
-        "launch_failed",
+        "project_deactivated",
       );
 
       expect(await t.runs.list(job.id)).toStrictEqual([]);

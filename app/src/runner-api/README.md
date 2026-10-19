@@ -14,6 +14,7 @@ checks and the redaction with the runner API and is described in "The Worker API
 | `POST /api/runners/v1/jobs/:id/heartbeat` | `200`                          | Extends the lease (2 minutes; runners beat every 30 seconds)           |
 | `POST /api/runners/v1/jobs/:id/complete`  | `200`                          | Stores the result and finishes the job                                 |
 | `POST /api/runners/v1/jobs/:id/release`   | `200`                          | A Dispatcher gives a claimed job back (#322, "The Dispatcher's calls") |
+| `POST /api/runners/v1/jobs/:id/vm`        | `200`                          | A Dispatcher reports the VM it created for a claim (#493)              |
 | `GET /api/runners/v1/version`             | `200`                          | The app's version and features (#322)                                  |
 
 | File                               | Role                                                                                                                                                                                                                                                                  |
@@ -21,6 +22,7 @@ checks and the redaction with the runner API and is described in "The Worker API
 | `api.ts`                           | `createRunnerApi(deps)`: the order of the checks and the three entry points                                                                                                                                                                                           |
 | `claim.ts`                         | The claim: `checkJob` (guard, LLM access, settings, pull request) and `buildJobInput` (the credentials and the job input, the one place that makes a secret of a job), the response. A claim with the feature `worker_credential` runs the first only                 |
 | `release.ts`                       | The Dispatcher's release (#322): `handleRelease`                                                                                                                                                                                                                      |
+| `vm.ts`                            | The Dispatcher's report of the VM it created (#493): `handleVmStart`                                                                                                                                                                                                  |
 | `app-version.ts`                   | `APP_VERSION`, the `version` of `app/package.json`, for the version call                                                                                                                                                                                              |
 | `report.ts`                        | Heartbeat and complete (`finishJob`, shared with the Worker API's result)                                                                                                                                                                                             |
 | `worker-api.ts`, `worker-fetch.ts` | The Worker API (#320): `createWorkerApi(deps)` (credential check, details, heartbeat, result) and the details call that mints the secrets                                                                                                                             |
@@ -346,8 +348,19 @@ Worker. It cannot count what runs, so the app counts for it. Three additions, al
   this answer too, and its result stands: the release of a Worker that delivered its result and then exited with an
   error is a no-op). A repeated release of a job that
   was queued again is `401` (the claim is gone). The credential is never logged or returned.
+- **VM start (#493).** `POST /api/runners/v1/jobs/:id/vm` with `{ credential, vmName, startedAt, timeoutSeconds }`
+  (`VmStartRequest`, closed): the dispatcher credential in `Authorization`, the job credential in the body, like the release, so the
+  Worker (which holds only the second) cannot call it. The Dispatcher says that it created the VM of the claim, right after
+  `Sandbox.create` returned; `startedAt` is its clock (the App keeps it between the claim and its own clock), `timeoutSeconds` the
+  VM's own timeout (60 to 86,400). The first report of a VM wins: `200 { status: "recorded" }`, a repeat `200 { status:
+"replayed" }` and nothing changes. `400` for a body that does not fit (an unknown field, a bad name, time or timeout; the
+  refusal names fields, never values); `401 WORKER_CREDENTIAL_INVALID` for a credential that is not a claim of the job;
+  `404` for an unknown job; `409 RUNNER_JOB_ENDED` when the claim ended or is not the running one (nothing is stored; the
+  backstop covers that VM). The credential is never logged. It only measures (`billing/README.md`, "Billable minutes"); a
+  Dispatcher sends it best effort and a failure never touches a launch or a job. Advertised as the feature `vm_lifecycle`: a
+  Dispatcher sends nothing to an App that does not list it.
 - **Version.** `GET /api/runners/v1/version` answers `{ version: 1, appVersion, features }` with
-  `features` from `APP_FEATURES` (`worker_api`, `claim_by_job_id`, `pool_cap`, `release`). It takes the
+  `features` from `APP_FEATURES` (`worker_api`, `claim_by_job_id`, `pool_cap`, `release`, `vm_lifecycle`). It takes the
   dispatcher credential; a Worker may also call it with its credential **and** `?jobId=<its job>` (the
   credential must be the running claim of that job, a primary key lookup), to check the app before it
   fetches its job. The answer holds nothing of any job.

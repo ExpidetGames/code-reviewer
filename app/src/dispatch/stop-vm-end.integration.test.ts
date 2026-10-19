@@ -26,11 +26,15 @@ const CURRENT = {
   kid: "k2",
   secret: "example-dispatch-secret-current-00000000",
 };
+const PREVIOUS = {
+  kid: "k1",
+  secret: "example-dispatch-secret-previous-0000000",
+};
 const webhookConfig: WebhookDispatchConfig = {
   mode: "webhook",
   url: "https://dispatcher.example.test/dispatch",
   currentKey: CURRENT,
-  previousKey: null,
+  previousKey: PREVIOUS,
 };
 const VM = "cr-diff-job-ab12cd34";
 
@@ -228,6 +232,24 @@ describe.each(databases)("the end of a VM on %s", (name, open) => {
 
     expect(await t.runs.measure(id)).toMatchObject({
       run: { endSource: "app_stop_confirmed" },
+    });
+  });
+  // #493-T12
+  it("measures 0 minutes for a job whose Dispatcher reported no VM (a Dispatcher of the previous release), and nothing breaks", async () => {
+    const t = await setup();
+    const id = await t.endedJobWithVm();
+    await t.fixture.db.deleteFrom("job_vm_runs").execute();
+    t.receiver.reply({ status: 404 });
+
+    await t.service.stopJobs([id]);
+
+    expect(t.warnings).toEqual([
+      `[dispatch] DISPATCH_STOP_UNSUPPORTED job=${id} status=404`,
+    ]);
+    expect(await t.runs.measure(id)).toStrictEqual({
+      state: "measured",
+      minutes: 0,
+      run: null,
     });
   });
 });

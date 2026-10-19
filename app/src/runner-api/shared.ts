@@ -136,8 +136,6 @@ function sharedDeps(): WorkerApiDeps {
     // #279: the metadata of a job's model (Dynamic, and a managed entry's), read when its claim is built.
     modelCapabilities,
     claimedKeys: getClaimedKeys(),
-    // #493: where a Dispatcher says it created the VM of a claim; scoped to the job's own workspace.
-    vmRuns: (workspaceId) => createJobVmRunsRepository(db, workspaceId),
     // #395: what happens between two sweeps. Both run after the response and do nothing in poll mode.
     jobEnded,
     activity: () => touched(),
@@ -157,6 +155,10 @@ function sharedDeps(): WorkerApiDeps {
 export function getRunnerApi(): RunnerApi {
   return createRunnerApi({
     ...sharedDeps(),
+    // #493: where a Dispatcher says it created the VM of a claim; scoped to the job's own workspace. The Worker API has
+    // no such call.
+    vmRuns: (workspaceId) =>
+      createJobVmRunsRepository(getDatabase(), workspaceId),
     runnerToken: () => configuredRunnerToken(process.env),
     appVersion: APP_VERSION,
   });

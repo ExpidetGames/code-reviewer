@@ -418,8 +418,6 @@ export async function startRunnerApiHarness(
         ? {}
         : { modelCapabilities: options.modelCapabilities }),
       claimedKeys,
-      vmRuns: (workspaceId) =>
-        createJobVmRunsRepository(fixture.db, workspaceId, fixture.clock.now),
       ...(options.hooks ?? {}),
       now: fixture.clock.now,
       logger,
@@ -433,6 +431,8 @@ export async function startRunnerApiHarness(
     };
     const api = createRunnerApi({
       ...apiDeps,
+      vmRuns: (workspaceId) =>
+        createJobVmRunsRepository(fixture.db, workspaceId, fixture.clock.now),
       runnerToken: () => configuredRunnerToken(env),
       appVersion: TEST_APP_VERSION,
     });
