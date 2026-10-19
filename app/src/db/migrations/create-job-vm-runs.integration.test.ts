@@ -33,6 +33,9 @@ async function rowsOfEveryTable(
     if (
       table.name === "job_vm_runs" ||
       table.name === "billing_topup_intents" ||
+      table.name === "models_dev_providers" ||
+      table.name === "models_dev_models" ||
+      table.name === "models_dev_fetch_state" ||
       table.name === "billing_webhook_events"
     )
       continue;

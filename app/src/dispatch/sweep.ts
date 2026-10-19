@@ -18,6 +18,9 @@
 //  6. `checks`: the check runs and review verdicts of jobs whose GitHub state is behind (#405): jobs the steps above
 //     ended or requeued, jobs no request named, syncs whose retry is due. At most one batch, within a time budget.
 //  7. `cleanup`: the hourly cleanup a long-lived server runs on a timer, once when the hour has changed.
+//  8. `models_dev`: the daily fetch of the models.dev catalog (#548), when the last one is more than a day old. Last, so
+//     that a slow answer from the internet never delays the steps that move jobs. A fetch that fails records its own
+//     failure (`models_dev_fetch_state`) and is not a failed step; a step fails only when the fetch itself threw.
 //
 // A step that fails is logged by its name and does not stop the others; the next run tries again. Nothing a
 // database or an answer said is ever logged: a connection string can be in it.
@@ -27,6 +30,7 @@ import type { JobDispatchesRepository } from "../db/repositories/job-dispatches-
 import type { ExpiryReport } from "../db/repositories/runner-jobs-repository.ts";
 import type { RunnerQueue } from "../jobs/runner-queue.ts";
 import type { CleanupResult } from "../maintenance/cleanup.ts";
+import type { RefreshOutcome } from "../models-dev/service.ts";
 import { DEFAULT_SEND_LIMIT, type DispatchService } from "./service.ts";
 
 /** How long a stopped dispatch rests before the Dispatcher is asked about it again. */
@@ -46,6 +50,7 @@ export const SWEEP_STEPS = [
   "notices",
   "checks",
   "cleanup",
+  "models_dev",
 ] as const;
 export type SweepStep = (typeof SWEEP_STEPS)[number];
 
@@ -66,6 +71,8 @@ export type SweepReport = {
   /** How many jobs had their check run or review verdict synced with GitHub (#405). */
   checksSynced: number;
   cleanedUp: boolean;
+  /** What the daily models.dev fetch did (#548); null when this sweep has no fetch. */
+  modelsDev: RefreshOutcome["status"] | null;
   /** The steps that failed in this run. */
   failedSteps: SweepStep[];
 };
@@ -89,6 +96,8 @@ export type SweepDependencies = {
   checks?: {
     reconcileDue(options?: { budgetMs?: number }): Promise<{ synced: number }>;
   };
+  /** #548: the daily fetch of the models.dev catalog. Left out, none is made. */
+  modelsDev?: { refreshIfDue(): Promise<RefreshOutcome> };
   settings: SweepSettings;
   log?: SweepLog;
 };
@@ -108,6 +117,7 @@ export function createDispatchSweep(deps: SweepDependencies): DispatchSweep {
       noticesTried: 0,
       checksSynced: 0,
       cleanedUp: false,
+      modelsDev: null,
       failedSteps: [],
     };
     const step = async (name: SweepStep, work: () => Promise<void>) => {
@@ -167,6 +177,11 @@ export function createDispatchSweep(deps: SweepDependencies): DispatchSweep {
       await deps.meta.set(CLEANUP_HOUR_KEY, String(hour));
       report.cleanedUp = true;
     });
+    const modelsDev = deps.modelsDev;
+    if (modelsDev !== undefined)
+      await step("models_dev", async () => {
+        report.modelsDev = (await modelsDev.refreshIfDue()).status;
+      });
 
     const expired = report.expired;
     const changed =

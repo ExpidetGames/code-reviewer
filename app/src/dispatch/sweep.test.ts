@@ -5,6 +5,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ExpiryReport } from "../db/repositories/runner-jobs-repository.ts";
 import type { CleanupResult } from "../maintenance/cleanup.ts";
+import type { RefreshOutcome } from "../models-dev/service.ts";
 import { createDispatchSweep, type SweepSettings } from "./sweep.ts";
 
 const expiry = {
@@ -45,6 +46,10 @@ function setup(options: { settings?: SweepSettings; poll?: boolean } = {}) {
       },
     ),
     cleanup: vi.fn<() => Promise<CleanupResult>>(async () => cleaned),
+    refreshIfDue: vi.fn<() => Promise<RefreshOutcome>>(async () => ({
+      status: "skipped",
+      reason: "not_due",
+    })),
     retryDue: vi.fn<() => Promise<{ tried: number }>>(async () => ({
       tried: 0,
     })),
@@ -69,6 +74,7 @@ function setup(options: { settings?: SweepSettings; poll?: boolean } = {}) {
     cleanup: mocks.cleanup,
     notices: { retryDue: mocks.retryDue },
     checks: { reconcileDue: mocks.reconcileDue },
+    modelsDev: { refreshIfDue: mocks.refreshIfDue },
     settings: options.settings ?? { giveUpMs: 3_600_000, maxRunning: null },
     log: { info: mocks.info, error: mocks.error },
   });
@@ -180,6 +186,76 @@ describe("the check runs in a run of the sweep (#405)", () => {
     });
 
     expect((await bare.run()).checksSynced).toBe(0);
+  });
+});
+
+describe("the daily models.dev fetch in a run of the sweep (#548)", () => {
+  // #548-T03
+  it("asks the fetch whether it is due, after the steps that move jobs, and reports what it did", async () => {
+    const t = setup();
+    const order: string[] = [];
+    t.reconcileDue.mockImplementationOnce(async () => {
+      order.push("checks");
+      return { synced: 0 };
+    });
+    t.refreshIfDue.mockImplementationOnce(async () => {
+      order.push("models_dev");
+      return { status: "applied", summary: { models: 3 } };
+    });
+    t.cleanup.mockImplementationOnce(async () => {
+      order.push("cleanup");
+      return cleaned;
+    });
+
+    const report = await t.sweep.run();
+
+    expect(order).toEqual(["checks", "cleanup", "models_dev"]);
+    expect(report.modelsDev).toBe("applied");
+    expect(report.failedSteps).toEqual([]);
+  });
+
+  // #548-T04
+  it("does not count a fetch that failed as a failed sweep: the fetch records its own failure", async () => {
+    const t = setup();
+    t.refreshIfDue.mockResolvedValueOnce({ status: "failed", code: "models_dev_http_status" });
+
+    const report = await t.sweep.run();
+
+    expect(report.modelsDev).toBe("failed");
+    expect(report.failedSteps).toEqual([]);
+  });
+
+  // #548-T13
+  it("reports a fetch that is switched off or not due as skipped", async () => {
+    const t = setup();
+
+    expect((await t.sweep.run()).modelsDev).toBe("skipped");
+  });
+
+  // #548-T04
+  it("names a fetch that threw, without what it said, and has done the other steps before", async () => {
+    const t = setup();
+    t.refreshIfDue.mockRejectedValueOnce(new Error("postgres://u:hunter2@db/app"));
+
+    const report = await t.sweep.run();
+
+    expect(report.failedSteps).toEqual(["models_dev"]);
+    expect(t.cleanup).toHaveBeenCalledOnce();
+    expect(JSON.stringify(t.error.mock.calls)).not.toContain("hunter2");
+  });
+
+  it("works without a fetch, as a sweep that was made before the catalog", async () => {
+    const t = setup();
+    const bare = createDispatchSweep({
+      queue: { expireStaleJobs: t.expireStaleJobs, failUndispatched: t.failUndispatched, countRunning: t.countRunning },
+      dispatches: { reviveStopped: t.reviveStopped },
+      meta: { get: t.get, set: t.set },
+      cleanup: t.cleanup,
+      settings: { giveUpMs: null, maxRunning: null },
+      log: { info: t.info, error: t.error },
+    });
+
+    expect((await bare.run()).modelsDev).toBeNull();
   });
 });
 

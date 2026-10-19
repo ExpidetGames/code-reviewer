@@ -102,7 +102,9 @@ describe("the models.dev catalog migration", () => {
 
     await expect(insert("trusted", null)).rejects.toThrow();
     await expect(insert("approved", "https://a.example/v1")).rejects.toThrow();
-    await expect(insert("trusted", "https://a.example/v1")).resolves.toBeDefined();
+    await expect(
+      insert("trusted", "https://a.example/v1"),
+    ).resolves.toBeDefined();
     await expect(insert("rejected", null)).resolves.toBeDefined();
     await db.destroy();
   });

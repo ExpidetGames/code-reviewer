@@ -70,6 +70,11 @@ export async function register(): Promise<void> {
   const { startCheckReconcilerOnStart } =
     await import("./check-runs/startup.ts");
   startCheckReconcilerOnStart();
+  // The models.dev catalog is fetched once a day, asked for at the start and every hour (production only, and not when
+  // MODELS_DEV_FETCH=off). A failed fetch keeps the rows it has.
+  const { startModelsDevRefreshOnStart } =
+    await import("./models-dev/startup.ts");
+  startModelsDevRefreshOnStart();
   // Last: the daily backup timer (production only). It needs nothing from the app's own connection,
   // and a problem with it never stops the app from serving.
   startBackupSchedulerOnStart();
