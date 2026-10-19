@@ -9,6 +9,7 @@ import { APP_FEATURES } from "../../src/runner-api/contract.ts";
 import {
   parseClaimRequest,
   parseReleaseRequest,
+  parseVmStartRequest,
 } from "../../src/runner-api/requests.ts";
 import {
   createContractValidator,
@@ -124,7 +125,111 @@ describe("the release body", () => {
   });
 });
 
+describe("the VM start body", () => {
+  const good = {
+    credential: CREDENTIAL,
+    vmName: "cr-diff-0b9f6f4e-3c1a-4d9e-8f43-2a7d5e1c9b10-ab12cd34",
+    startedAt: "2026-10-19T10:00:00.250Z",
+    timeoutSeconds: 2100,
+  };
+
+  // #493-T03
+  it("is judged like the contract", () => {
+    const cases: Array<[string, unknown]> = [
+      ["a full body", good],
+      [
+        "a start without milliseconds",
+        { ...good, startedAt: "2026-10-19T10:00:00Z" },
+      ],
+      [
+        "a start with an offset",
+        { ...good, startedAt: "2026-10-19T10:00:00+02:00" },
+      ],
+      ["a start without the Z", { ...good, startedAt: "2026-10-19T10:00:00" }],
+      ["a start that is text", { ...good, startedAt: "yesterday" }],
+      ["an unknown field", { ...good, more: 1 }],
+      ["no credential", { ...good, credential: undefined }],
+      ["no VM name", { ...good, vmName: undefined }],
+      ["no start", { ...good, startedAt: undefined }],
+      ["no timeout", { ...good, timeoutSeconds: undefined }],
+      [
+        "a VM name of 128 characters",
+        { ...good, vmName: `a${"b".repeat(127)}` },
+      ],
+      [
+        "a VM name of 129 characters",
+        { ...good, vmName: `a${"b".repeat(128)}` },
+      ],
+      ["a VM name with a space", { ...good, vmName: "a b" }],
+      ["a VM name that starts with a dot", { ...good, vmName: ".a" }],
+      ["the lowest timeout", { ...good, timeoutSeconds: 60 }],
+      ["a timeout below it", { ...good, timeoutSeconds: 59 }],
+      ["the highest timeout", { ...good, timeoutSeconds: 86_400 }],
+      ["a timeout above it", { ...good, timeoutSeconds: 86_401 }],
+      ["a timeout that is no integer", { ...good, timeoutSeconds: 60.5 }],
+      [
+        "a lease token as the credential",
+        { ...good, credential: "lease-token-1234567" },
+      ],
+      ["null", null],
+      ["an array", []],
+    ];
+
+    for (const [name, body] of cases)
+      expect({ name, ok: parseVmStartRequest(body).ok }).toStrictEqual({
+        name,
+        ok: contract.check("VmStartRequest", body).valid,
+      });
+  });
+
+  // #493-T03
+  it("is read from the example of the file", () => {
+    const examples = new Map(
+      readExamples().map((e) => [e.definition, e.document]),
+    );
+
+    expect(parseVmStartRequest(examples.get("VmStartRequest")).ok).toBe(true);
+    expectValid("VmStartResponse", examples.get("VmStartResponse"));
+  });
+});
+
 describe("the real answers", () => {
+  // #493-T02
+  it("of the VM start report are valid VmStartResponse documents, and so are its errors", async () => {
+    const h = await startRunnerApiHarness();
+    const job = await h.enqueueNew();
+    const credential = (await h.claimedSplit({ jobId: job.id })).job.credential;
+    const body = {
+      credential,
+      vmName: "cr-diff-one",
+      startedAt: h.clock.now().toISOString(),
+      timeoutSeconds: 2100,
+    };
+
+    const recorded = await h.vmStart(job.id, body);
+    const replayed = await h.vmStart(job.id, body);
+    const stranger = await h.vmStart(job.id, {
+      ...body,
+      credential: CREDENTIAL,
+    });
+    const invalid = await h.vmStart(job.id, { ...body, more: 1 });
+    const missing = await h.vmStart(crypto.randomUUID(), body);
+    await h.complete(job.id, await h.tokenOf(job.id));
+    const ended = await h.vmStart(job.id, { ...body, vmName: "cr-diff-two" });
+
+    expectValid("VmStartResponse", await recorded.json());
+    expectValid("VmStartResponse", await replayed.json());
+    for (const [response, status] of [
+      [stranger, 401],
+      [invalid, 400],
+      [missing, 404],
+      [ended, 409],
+    ] as const) {
+      expect(response.status).toBe(status);
+      expectValid("ErrorResponse", await response.json());
+    }
+  });
+
   // #322-T07
   it("of the release are valid ReleaseResponse documents, and so are its errors", async () => {
     const h = await startRunnerApiHarness({ limits: { maxAttempts: 2 } });

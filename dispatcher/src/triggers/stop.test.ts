@@ -75,9 +75,13 @@ describe("POST /stop", () => {
     );
 
     expect(response.status).toBe(202);
-    expect(await response.json()).toStrictEqual(
-      readContract("examples/dispatch-webhook/DispatchStopAccepted.json"),
-    );
+    // #493-T06: the answer names the VMs it is stopping, so the App can take its own clock as their end.
+    expect(await response.json()).toStrictEqual({
+      ...(readContract(
+        "examples/dispatch-webhook/DispatchStopAccepted.json",
+      ) as object),
+      vms: [diff, dynamic].sort(),
+    });
     await background.drain(1000);
     expect([...sandbox.stops].sort()).toStrictEqual([diff, dynamic].sort());
     expect(sandbox.stops).not.toContain(other);

@@ -44,12 +44,16 @@ const PUBLIC_ROUTES = [
   "/invitation",
   // GitHub signs its deliveries; the route checks the signature itself (src/webhooks/README.md).
   "/api/webhooks/github-app",
+  // A payment provider signs its webhooks; the route asks the active adapter to check the signature (#497).
+  "/api/billing/webhook",
   // The runner sends its own shared token (src/runner-api/README.md).
   "/api/runners/v1/claim",
   "/api/runners/v1/jobs/[id]/heartbeat",
   "/api/runners/v1/jobs/[id]/complete",
   // A Dispatcher gives a job back and reads the version with the same token (#322).
   "/api/runners/v1/jobs/[id]/release",
+  // A Dispatcher reports the VM it created with the same token and the job credential in the body (#493).
+  "/api/runners/v1/jobs/[id]/vm",
   "/api/runners/v1/version",
   // A Dispatcher reads the status of a job with the same token (#364).
   "/api/runners/v1/jobs/[id]",
