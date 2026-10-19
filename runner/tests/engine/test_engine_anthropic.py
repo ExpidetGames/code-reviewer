@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 from fake_github import FakeGithub
-from fake_llm import FakeLlm, Reply
+from fake_llm import FakeLlm, Reply, real_anthropic_usage
 from harness import Engine
 
 from code_reviewer_runner.anthropic_models import MODELS
@@ -90,17 +90,34 @@ def test_the_cost_is_worked_out_from_the_usage_of_every_answer(
     assert usage["totalTokens"] == 15_000 * len(llm.requests)
 
 
+# #534-T02
+def test_the_usage_a_real_answer_carries_is_priced_exactly(
+    engine: Engine, github: FakeGithub, llm: FakeLlm
+) -> None:
+    """Every field the Messages API returns (the first real run failed on a field of them)."""
+    llm.anthropic_usage = real_anthropic_usage(12_000, 3000)
+
+    result = engine.run(job=anthropic_job(engine, "claude-haiku-5-5")).result
+
+    assert result["ok"] is True
+    usage = result["usage"]
+    assert usage["aiCalls"] == len(llm.requests) >= 1
+    # Haiku 5.5: $0.10 in and $0.50 out per million tokens: 0.0012 + 0.0015 = 0.0027 a call.
+    assert Decimal(repr(usage["costUsd"])) == Decimal("0.0027") * len(llm.requests)
+    assert usage["totalTokens"] == 15_000 * len(llm.requests)
+
+
 # #511-T17
 def test_cache_tokens_of_an_answer_are_priced_at_their_own_prices(
     engine: Engine, github: FakeGithub, llm: FakeLlm
 ) -> None:
-    llm.anthropic_usage = {
-        "input_tokens": 10_000,
-        "output_tokens": 3000,
-        "cache_read_input_tokens": 20_000,
-        "cache_creation_input_tokens": 5000,
-        "cache_creation": {"ephemeral_5m_input_tokens": 3000, "ephemeral_1h_input_tokens": 2000},
-    }
+    llm.anthropic_usage = real_anthropic_usage(
+        10_000,
+        3000,
+        cache_read_input_tokens=20_000,
+        cache_creation_input_tokens=5000,
+        cache_creation={"ephemeral_5m_input_tokens": 3000, "ephemeral_1h_input_tokens": 2000},
+    )
 
     result = engine.run(job=anthropic_job(engine, "claude-sonnet-4-6")).result
 

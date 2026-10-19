@@ -16,7 +16,9 @@ have one. A call that cannot be priced exactly has **no** cost (`None`), never z
   mode, an inference region other than the default one, a server tool such as web search, or
   per-iteration usage, or any other field of the usage that holds something and that the standard
   token fields do not name. Both checks deny by default: what Anthropic adds later is an unknown
-  cost until this table learns it.
+  cost until this table learns it. The one field that is known to be harmless is
+  `output_tokens_details` (a breakdown of the output tokens, which are billed as a whole, #534);
+  the name of the field that made a cost unknown is logged, never its value.
 
 The usage is read in the shape LiteLLM gives it and the Dynamic proxy translates Anthropic's answer
 into (`prompt_tokens` holds the cache tokens, which are also named on their own), as a mapping or as
@@ -24,6 +26,7 @@ an object. A cache write without a split is priced as a five minute write, the l
 requests use.
 """
 
+import logging
 from collections.abc import Mapping
 from decimal import Context, Decimal
 from typing import Any, Final
@@ -36,6 +39,7 @@ _EXACT: Final = Context(prec=80)
 _PER_MILLION: Final = Decimal(1_000_000)
 # A single call never nears this; a count above it is not a count anybody can trust.
 _MAX_TOKENS: Final = 10**9
+_log = logging.getLogger(__name__)
 _STANDARD_TIERS: Final = (None, "standard")
 _STANDARD_REGIONS: Final = (None, "", "global", "not_available")
 # Every field of a usage the cost rule reads, checks on its own or deliberately ignores (a charge
@@ -51,6 +55,9 @@ _KNOWN_FIELDS: Final = _IGNORED_FIELDS | frozenset(
         "cache_creation_input_tokens",
         "prompt_tokens_details",
         "completion_tokens_details",
+        # A read-only breakdown of `output_tokens`, which stays the billed total (#534); checked on
+        # its own by `_output_breakdown_is_benign`.
+        "output_tokens_details",
         "service_tier",
         "speed",
         "inference_geo",
@@ -100,22 +107,44 @@ def _uses_server_tools(usage: object) -> bool:
     return any(_holds_something(value) for value in _fields(server_tools).values())
 
 
-def _has_unpriced_charge(usage: object) -> bool:
+def _output_breakdown_is_benign(usage: object) -> bool:
+    """`output_tokens_details` only splits `output_tokens` (which already holds every token billed)
+    into categories, so its `thinking_tokens` change no price. Anything else in it, or a count above
+    the output, is not a breakdown this table knows."""
+    details: object = usage_field(usage, "output_tokens_details")
+    if details is None:
+        return True
+    if not isinstance(details, Mapping) and not hasattr(details, "__dict__"):
+        return False
+    output = _count(usage_field(usage, "completion_tokens"))
+    for name, value in _fields(details).items():
+        if name != "thinking_tokens":
+            if _holds_something(value):
+                return False
+            continue
+        thinking = _count(value, default=0)
+        if thinking is None or output is None or thinking > output:
+            return False
+    return True
+
+
+def _unpriced_field(usage: object) -> str | None:
+    """The name of the first field that makes the call unpriceable (never a value), or None."""
     if usage_field(usage, "service_tier") not in _STANDARD_TIERS:
-        return True
+        return "service_tier"
     if usage_field(usage, "speed") not in _STANDARD_TIERS:
-        return True
+        return "speed"
     if usage_field(usage, "inference_geo") not in _STANDARD_REGIONS:
-        return True
+        return "inference_geo"
     if _uses_server_tools(usage):
-        return True
-    if any(
-        name not in _KNOWN_FIELDS and _holds_something(value)
-        for name, value in _fields(usage).items()
-    ):
-        return True
+        return "server_tool_use"
+    if not _output_breakdown_is_benign(usage):
+        return "output_tokens_details"
+    for name, value in _fields(usage).items():
+        if name not in _KNOWN_FIELDS and _holds_something(value):
+            return name
     iterations = usage_field(usage, "iterations")
-    return iterations is not None and bool(iterations)
+    return "iterations" if iterations is not None and bool(iterations) else None
 
 
 class _Tokens:
@@ -170,7 +199,13 @@ def cost_of_usage(model_id: str, usage: object) -> Decimal | None:
     `model_id` is the bare Claude API id (no routing prefix).
     """
     model = model_for(model_id)
-    if model is None or usage is None or _has_unpriced_charge(usage):
+    if model is None or usage is None:
+        return None
+    unpriced = _unpriced_field(usage)
+    if unpriced is not None:
+        # The name of the field only, never its value: this is how the next unknown field of the
+        # API is found (#534).
+        _log.warning("the cost of an Anthropic call is unknown: usage field %s", unpriced)
         return None
     tokens = _tokens(usage)
     if tokens is None:
