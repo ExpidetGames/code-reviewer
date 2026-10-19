@@ -11,6 +11,7 @@ for a provider's 404, `model_unknown`.
 
 from typing import Any, Final
 
+from code_reviewer_runner.job_loop.jsonvalues import as_object
 from code_reviewer_runner.result import ErrorCode
 
 MODEL_NOT_FOUND: Final = ErrorCode.MODEL_UNKNOWN
@@ -19,7 +20,7 @@ MODEL_NOT_FOUND: Final = ErrorCode.MODEL_UNKNOWN
 def model_not_found_for_turn(http_status: int, error: Any, *, upstream_calls: int) -> bool:
     """Whether a turn that the engine answered with this status and error body failed because the
     model is unknown: a 500 `UnknownError` and no call to the provider during the turn."""
-    if http_status != 500 or upstream_calls != 0 or not isinstance(error, dict):
+    if http_status != 500 or upstream_calls != 0:
         return False
-    name: Any = error.get("name")  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
-    return name == "UnknownError"
+    body = as_object(error)
+    return body is not None and body.get("name") == "UnknownError"
