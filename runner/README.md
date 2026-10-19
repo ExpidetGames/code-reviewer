@@ -910,8 +910,9 @@ no sampling parameter, and its calls cost an unknown amount.
   text; a tool that is none of the engine's is `other`, a finish reason outside the protocol's is `other`, and a repeat
   is decided from a digest of the normalised arguments that is never written out. At most 100 entries of each kind are
   kept (`truncated` says more happened). The job loop passes the trace on only when it is exactly the contract's
-  shape (`RESULT_CALL_TRACE_INVALID` in the log otherwise, the usage stays) and `fit_request` drops it before it shrinks
-  the log when the body is too large. Nothing in the run reads it back.
+  shape (`RESULT_CALL_TRACE_INVALID` in the log otherwise, the usage stays) and `fit_request` drops it, whole, before it shrinks
+  the log when the body is too large (and `minimal()` has none). A call that ended the run without a usable answer (no
+  usage, an answer over the byte bound) is in it with `null`s. Nothing in the run reads it back.
 - **Output allowance with thinking (#533).** Thinking counts against `max_tokens`, a hard cap on thinking and
   answer together, so a thinking model can use up 8192 and cut its `StructuredOutput` call off. The job's
   descriptor gives a model that cannot run without thinking 32768 (`app/src/llm/dynamic-capabilities.ts`; the

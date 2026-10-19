@@ -305,20 +305,26 @@ def result_from_outcome(
     )
 
 
-def fit_request(result: Result) -> Result:
-    """Shrink the log tail until the `complete` body is small enough; never loses the verdict.
+def _without_trace(result: Mapping[str, Any]) -> Result:
+    """The result without `usage.callTrace` (#541): the part that is given up first."""
+    usage = as_object(result.get("usage"))
+    if usage is None or "callTrace" not in usage:
+        return dict(result)
+    return {
+        **result,
+        "usage": {name: value for name, value in usage.items() if name != "callTrace"},
+    }
 
-    The per-call trace (#541) goes first when the body is too large even without the log: it is
-    observability, and the usage and the log are what the app needs.
+
+def fit_request(result: Result) -> Result:
+    """Shrink the `complete` body until it is small enough; never loses the verdict.
+
+    The per-call trace (#541) goes first, whole: it is observability, and the usage and the log are
+    what the app needs. Only when the body is still too large does the log tail lose its older half.
     """
     current = dict(result)
-    usage = as_object(current.get("usage"))
-    if (
-        usage is not None
-        and "callTrace" in usage
-        and len(json.dumps({**current, "logTail": ""})) > MAX_REQUEST_BYTES
-    ):
-        current["usage"] = {name: value for name, value in usage.items() if name != "callTrace"}
+    if len(json.dumps(current)) > MAX_REQUEST_BYTES:
+        current = dict(_without_trace(current))
     while len(json.dumps(current)) > MAX_REQUEST_BYTES:
         tail = current["logTail"]
         if not tail:
@@ -354,7 +360,7 @@ def minimal(result: Mapping[str, Any], *, keep_usage: bool = True) -> Result:
         if "findings" in result:
             verdict["findings"] = result["findings"]
         return verdict
-    verdict["usage"] = result.get("usage") if keep_usage else None
+    verdict["usage"] = _without_trace(result).get("usage") if keep_usage else None
     verdict["logTail"] = f"{result['errorCode']}" + (f" [{reason}]" if reason else "")
     if reason:
         verdict["errorReason"] = reason

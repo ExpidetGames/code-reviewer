@@ -588,7 +588,12 @@ class ModelProxy:
             # never passed on: it can carry the destination.
             self._trace_failed_call(started_ms, reservation)
             return self._transport_failure(error)
-        self.ledger.check_response_bytes(len(response_body))
+        try:
+            self.ledger.check_response_bytes(len(response_body))
+        except LimitError:
+            # The call was made and may have been billed whatever its answer was: it is traced.
+            self._trace_failed_call(started_ms, reservation)
+            raise
         if status != 200:
             self._trace_failed_call(started_ms, reservation)
             # The run ends with the provider's stable code; no partial success is claimed and no
@@ -602,6 +607,9 @@ class ModelProxy:
         completion = self._completion(response_body)
         usage = self._usage(completion)
         if usage == (None, None):
+            self._trace_failed_call(
+                started_ms, reservation, finish_reason=answer_finish_reason(completion)
+            )
             raise LimitError(
                 ErrorCode.DYNAMIC_ACCOUNTING_FAILED, "the provider did not report usage"
             )
@@ -633,9 +641,12 @@ class ModelProxy:
         self.cache_tally.add(completion.get("usage"))
         return _Attempt(body=response_body, completion=completion)
 
-    def _trace_failed_call(self, started_ms: int, reservation: Reservation) -> None:
-        """A call that got no answer (refused, or never answered) was reserved and may have been
-        billed: it is in the trace with nothing known about it."""
+    def _trace_failed_call(
+        self, started_ms: int, reservation: Reservation, *, finish_reason: str | None = None
+    ) -> None:
+        """A call that ended the run without a usable answer (refused, never answered, too large, or
+        answered without usage) was reserved and may have been billed: it is in the trace with
+        nothing known about it but what the answer said about its ending. No tool of it ever ran."""
         self.ledger.trace.model_call(
             t_ms=started_ms,
             prompt_tokens=None,
@@ -643,7 +654,7 @@ class ModelProxy:
             cache_write=None,
             completion_tokens=None,
             cost=None,
-            finish_reason=None,
+            finish_reason=finish_reason,
             final=reservation.final,
             tool_names=[],
         )

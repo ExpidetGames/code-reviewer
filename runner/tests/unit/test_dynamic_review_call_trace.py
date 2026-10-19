@@ -474,3 +474,73 @@ def test_a_call_the_provider_refused_is_in_the_trace_with_nothing_known_about_it
     assert entry["promptTokens"] is None and entry["costUsd"] is None
     assert entry["finishReason"] is None and entry["tools"] == []
     assert "SECRETTEXT" not in json.dumps(ledger.usage(None).to_json())
+
+
+def upstream_answering(answer: dict[str, Any]) -> Any:
+    def upstream(url: str, body: bytes, headers: dict[str, str], limit: int) -> tuple[int, bytes]:
+        return 200, json.dumps(answer).encode("utf-8")
+
+    return upstream
+
+
+def answer_through(ledger: BudgetLedger, upstream: Any) -> None:
+    """One model request through a proxy whose provider is `upstream`; the answer is ignored."""
+    capability = new_proxy_capability()
+    proxy = ModelProxy(
+        ledger=ledger,
+        base_path="/v1",
+        model="deepseek/deepseek-v4.1-flash",
+        upstream_url="https://provider.invalid/v1/chat/completions",
+        upstream_api_key="dummy-key-0123456789",
+        upstream_model="deepseek/deepseek-v4.1-flash",
+        capabilities=capabilities_from_config(
+            json.dumps(
+                {"tool_choice_required": True, "structured_output": True, "max_output_tokens": 4096}
+            )
+        ),
+        capability=capability,
+        post=upstream,
+        provider=OPENROUTER,
+    )
+    request: dict[str, Any] = {
+        "model": "deepseek/deepseek-v4.1-flash",
+        "messages": [{"role": "user", "content": "review"}],
+        "tools": [{"type": "function", "function": {"name": "StructuredOutput", "parameters": {}}}],
+    }
+    proxy.handle(
+        "POST",
+        "/v1/chat/completions",
+        json.dumps(request).encode("utf-8"),
+        {"Authorization": f"Bearer {capability}"},
+    )
+
+
+# #541-T05: a call that ends the run because the provider reported no usage
+# (DYNAMIC_ACCOUNTING_FAILED) was made and may have been billed: it is in the trace, with nulls
+# where nothing is known.
+def test_a_call_that_ends_the_run_for_a_missing_usage_is_in_the_trace_with_nulls() -> None:
+    ledger = BudgetLedger(DynamicLimits(), unit_costs=UNIT_COSTS)
+    answer = completion(tool_call("c1", "read", filePath=SECRET_PATH))
+    del answer["usage"]
+
+    answer_through(ledger, upstream_answering(answer))
+
+    (entry,) = trace_json(ledger.trace)["modelCalls"]
+    assert entry["index"] == 0
+    assert entry["promptTokens"] is None and entry["completionTokens"] is None
+    assert entry["cacheRead"] is None and entry["cacheWrite"] is None
+    assert entry["costUsd"] is None and entry["tools"] == []
+    assert entry["finishReason"] == "tool_calls"
+    assert SECRET_PATH not in json.dumps(ledger.usage(None).to_json())
+
+
+# #541-T05: the same for an answer that is larger than the protocol allows.
+def test_a_call_whose_answer_is_over_the_byte_bound_is_in_the_trace_with_nulls() -> None:
+    ledger = BudgetLedger(DynamicLimits(max_response_bytes=100), unit_costs=UNIT_COSTS)
+    answer = completion(tool_call("c1", "read", filePath=SECRET_PATH))
+
+    answer_through(ledger, upstream_answering(answer))
+
+    (entry,) = trace_json(ledger.trace)["modelCalls"]
+    assert entry["promptTokens"] is None and entry["costUsd"] is None
+    assert entry["finishReason"] is None and entry["tools"] == []

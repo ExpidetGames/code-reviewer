@@ -840,6 +840,58 @@ def test_the_biggest_trace_the_contract_allows_is_dropped_before_anything_else()
     assert result["logTail"] == "x" * MAX_LOG_TAIL_CHARS
 
 
+# #541-T06: a body that is too large loses the trace first, the log only after it: the log is what
+# the Runs view shows for a failure and the trace is observability (docs/dynamic-review.md).
+def test_a_body_that_is_too_large_loses_the_trace_before_any_of_the_log() -> None:
+    names = ("read", "grep", "glob", "StructuredOutput")
+    trace = _full_trace(
+        tMs=604_800_000,
+        promptTokens=99_999,
+        cacheRead=99_999,
+        cacheWrite=9_999,
+        completionTokens=9_999,
+        costUsd=0.123456,
+        finishReason="content_filter",
+        tools=[{"name": name, "count": 10} for name in names],
+    )
+    assert 38_000 < len(json.dumps(trace)) < 44_000
+    printed = reported(outcome(stdout=_printed_with(trace)))
+    printed["logTail"] = "l" * 8_192
+    assert len(json.dumps({**printed, "logTail": ""})) < MAX_REQUEST_BYTES
+    assert len(json.dumps(printed)) > MAX_REQUEST_BYTES
+
+    result = fit_request(printed)
+
+    assert len(json.dumps(result)) <= MAX_REQUEST_BYTES
+    assert "callTrace" not in result["usage"]
+    assert result["usage"]["costUsd"] == 0.0035
+    assert result["logTail"] == "l" * 8_192
+    assert result["logTruncated"] is printed["logTruncated"]
+
+
+# #541-T06: a body that fits keeps its trace, whatever the log.
+def test_a_body_that_fits_keeps_its_trace() -> None:
+    trace = _full_trace()
+    printed = reported(outcome(stdout=_printed_with(trace)))
+    assert len(json.dumps(printed)) <= MAX_REQUEST_BYTES
+
+    assert fit_request(printed)["usage"]["callTrace"] == trace
+
+
+# #541-T06: the bare verdict (the fallback when the app refuses the full result) has no trace: it
+# is the part of the result that can be dropped, and the verdict, code and usage stay.
+def test_the_bare_verdict_has_no_trace() -> None:
+    failed = reported(outcome(exit_code=1, stdout=_failed_with_usage()))
+    failed["usage"] = {**failed["usage"], "callTrace": _trace()}
+
+    assert "callTrace" not in minimal(failed)["usage"]
+    assert minimal(failed)["usage"]["costUsd"] == 0.0035
+    assert (
+        minimal(reported(outcome(stdout=result_line(usage=_usage(callTrace=_trace())))))["usage"]
+        is None
+    )
+
+
 # #541-T06: shrinking the log terminates for a log of one character (it did not halve to nothing).
 def test_a_log_of_one_character_does_not_stall_the_fit() -> None:
     result = {
