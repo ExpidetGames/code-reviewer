@@ -267,6 +267,14 @@ export class FakeSandboxService {
     });
   }
 
+  /** How many `wait()` calls are still pending on any process: a caller that watches a container holds one. */
+  pendingWaits(): number {
+    return this.processes.reduce(
+      (count, process) => count + process.pendingWaits.size,
+      0,
+    );
+  }
+
   /** The VMs that were created and not stopped. */
   running(): string[] {
     return [...this.vms.values()]

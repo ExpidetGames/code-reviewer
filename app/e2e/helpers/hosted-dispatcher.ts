@@ -77,11 +77,6 @@ export type HostedDispatcher = {
    * that took over and died); `null` lets them run again. Not the probe's container.
    */
   endWorkersWith(exitCode: number | null): void;
-  /**
-   * From now on the Dispatcher cannot see how a Worker container ends (its `wait()` fails like a broken log stream,
-   * `worker_wait_failed`): it releases nothing and the lease is the only safeguard. `false` ends it for later containers.
-   */
-  breakWaits(on: boolean): void;
   /** Ends the whole tree of a container at once, like a container that is killed. */
   killContainer(container: Container): void;
   /** SIGTERM, then SIGKILL. Everything the process started is stopped with it. */
@@ -134,7 +129,6 @@ export async function startHostedDispatcher(options: {
   rmSync(gate, { force: true });
   const exitFile = absolute(`${hostedEnv.controlDirectory}/exit-workers`);
   rmSync(exitFile, { force: true });
-  rmSync(absolute(`${hostedEnv.controlDirectory}/break-wait`), { force: true });
 
   const environment: Record<string, string> = {
     PATH: process.env.PATH ?? "",
@@ -259,11 +253,6 @@ export async function startHostedDispatcher(options: {
     holdWorkers(on) {
       if (on) writeFileSync(gate, "");
       else rmSync(gate, { force: true });
-    },
-    breakWaits(on) {
-      const file = absolute(`${hostedEnv.controlDirectory}/break-wait`);
-      if (on) writeFileSync(file, "");
-      else rmSync(file, { force: true });
     },
     endWorkersWith(exitCode) {
       if (exitCode === null) rmSync(exitFile, { force: true });

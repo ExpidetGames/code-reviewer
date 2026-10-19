@@ -5,7 +5,10 @@
 // HMAC-SHA-256 of `v1:{timestamp}:{dispatchId}:{rawBody}`, keyed with the secret of the key id.
 import "server-only";
 import { createHmac } from "node:crypto";
-import type { DispatchWebhook } from "../contracts/dispatch-webhook.ts";
+import type {
+  DispatchStop,
+  DispatchWebhook,
+} from "../contracts/dispatch-webhook.ts";
 import type { DispatchKey } from "./config.ts";
 
 /** The header the platform's deployment protection accepts a bypass token in. */
@@ -65,6 +68,46 @@ export function buildDispatchRequest(
         secret: input.key.secret,
         timestamp,
         dispatchId: input.dispatchId,
+        rawBody: body,
+      }),
+      ...(input.bypassToken === undefined
+        ? {}
+        : { [BYPASS_HEADER]: input.bypassToken }),
+    },
+  };
+}
+
+export type StopRequestInput = {
+  key: DispatchKey;
+  bypassToken?: string;
+  jobId: string;
+  /** New for every stop of a job and also the `x-dispatch-id` header: the receiver remembers it (replay protection). */
+  stopId: string;
+  now: Date;
+};
+
+/** The stop call (#487): the same signing rule as the wake-up call, over the closed `DispatchStop` body. */
+export function buildStopRequest(input: StopRequestInput): DispatchRequest {
+  const payload: DispatchStop = {
+    version: 1,
+    type: "job.stop",
+    jobId: input.jobId,
+    stopId: input.stopId,
+    sentAt: input.now.toISOString(),
+  };
+  const body = JSON.stringify(payload);
+  const timestamp = String(Math.floor(input.now.getTime() / 1000));
+  return {
+    body,
+    headers: {
+      "content-type": "application/json",
+      "x-dispatch-timestamp": timestamp,
+      "x-dispatch-id": input.stopId,
+      "x-dispatch-key-id": input.key.kid,
+      "x-dispatch-signature": signDispatch({
+        secret: input.key.secret,
+        timestamp,
+        dispatchId: input.stopId,
         rawBody: body,
       }),
       ...(input.bypassToken === undefined

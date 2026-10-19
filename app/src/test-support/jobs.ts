@@ -73,6 +73,8 @@ export function createTestQueue(
     onRefused?: RunnerJobsRepositoryOptions["onRefused"];
     /** #361: called for every record that settled without a known cost, after the transaction committed. */
     onUnknownCostSettled?: RunnerJobsRepositoryOptions["onUnknownCostSettled"];
+    /** #487: called with the jobs whose running claim a call ended, after the transaction committed. */
+    onClaimsEnded?: RunnerJobsRepositoryOptions["onClaimsEnded"];
   } = {},
 ): TestQueue {
   return {
@@ -142,6 +144,8 @@ export async function createJobQueueFixture(
     onRefused?: RunnerJobsRepositoryOptions["onRefused"];
     /** #361: called for every record that settled without a known cost, after the transaction committed. */
     onUnknownCostSettled?: RunnerJobsRepositoryOptions["onUnknownCostSettled"];
+    /** #487: called with the jobs whose running claim a call ended, after the transaction committed. */
+    onClaimsEnded?: RunnerJobsRepositoryOptions["onClaimsEnded"];
   } = {},
 ): Promise<JobQueueFixture> {
   const created = options.database
@@ -200,6 +204,9 @@ export async function createJobQueueFixture(
     ...(options.onUnknownCostSettled === undefined
       ? {}
       : { onUnknownCostSettled: options.onUnknownCostSettled }),
+    ...(options.onClaimsEnded === undefined
+      ? {}
+      : { onClaimsEnded: options.onClaimsEnded }),
     dynamicReviewEnabled:
       options.dynamicReview === true ? allowDynamicReview : undefined,
   });

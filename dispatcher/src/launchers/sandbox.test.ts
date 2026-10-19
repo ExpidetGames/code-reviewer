@@ -3,7 +3,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { FakeSandboxService } from "../../../fakes/sandbox/service.ts";
 import { createDispatcherCore } from "../core/dispatcher.ts";
-import { LaunchError, type LaunchSpec } from "../core/types.ts";
+import { LaunchError, type LaunchSpec, type Launcher } from "../core/types.ts";
 import {
   DISPATCHER_TOKEN,
   recordingLogger,
@@ -24,7 +24,6 @@ import {
   minimumVmTimeoutMargin,
   VM_TIMEOUT_MARGIN_SECONDS,
   createSandboxLauncher,
-  type SandboxLauncher,
   type SandboxLauncherOptions,
 } from "./sandbox.ts";
 import {
@@ -42,26 +41,21 @@ const JOB_ID = "00000000-0000-4000-8000-000000000001";
 let service: FakeSandboxService;
 let clock: ManualClock;
 let logger: RecordedLogger;
-let background: Promise<unknown>[];
 
 beforeEach(() => {
   service = new FakeSandboxService();
   service.onExec("image-id", { stdout: `${IMAGE_ID}\n` });
   clock = new ManualClock();
   logger = recordingLogger();
-  background = [];
 });
 
-function build(
-  overrides: Partial<SandboxLauncherOptions> = {},
-): SandboxLauncher {
+function build(overrides: Partial<SandboxLauncherOptions> = {}): Launcher {
   return createSandboxLauncher({
     service,
     snapshotId: SNAPSHOT_ID,
     imageDigest: IMAGE_ID,
     logger,
     clock,
-    background: (work) => background.push(work),
     ...overrides,
   });
 }
@@ -80,7 +74,7 @@ function spec(overrides: Partial<LaunchSpec> = {}): LaunchSpec {
 
 /** Starts a launch, lets the clock run through the hand-over wait and returns how it ended. */
 async function launch(
-  launcher: SandboxLauncher,
+  launcher: Launcher,
   launchSpec: LaunchSpec = spec(),
   signal: AbortSignal = new AbortController().signal,
 ): Promise<{ ok: true } | { ok: false; error: unknown }> {
@@ -203,7 +197,7 @@ describe("the Sandbox-Launcher", () => {
 
     await launch(launcher);
     service.exitProcess(service.creates[0]?.name ?? "", 0);
-    await launcher.idle();
+    await settle();
 
     const name = service.creates[0]?.name ?? "";
     expect(service.stdinOf(name)).toContain(CREDENTIAL);
@@ -367,38 +361,56 @@ describe("the Sandbox-Launcher", () => {
   });
 
   // #329-T07
-  it("stops the VM when the container ends and sets the VM timeout as the backstop", async () => {
-    const launcher = build();
-    await launch(launcher);
-    const name = service.creates[0]?.name ?? "";
+  it("sets the VM timeout as the backstop", async () => {
+    await launch(build());
 
     expect(service.creates[0]?.timeoutMs).toBe(
       (1200 + VM_TIMEOUT_MARGIN_SECONDS) * 1000,
     );
     expect(VM_TIMEOUT_MARGIN_SECONDS).toBe(300);
-    expect(service.stops).toStrictEqual([]);
-    expect(background).toHaveLength(1);
-
-    service.exitProcess(name, 0);
-    await launcher.idle();
-
-    expect(service.stops).toStrictEqual([name]);
-    expect(service.running()).toStrictEqual([]);
   });
 
-  // #329-T07
-  it("also tears the VM down when the container ends with an error, and reports a failing stop by code only", async () => {
+  // #487-T04
+  it("holds nothing after the hand-over: no pending wait, no background work, no stop, and no way to ask for either", async () => {
+    const launcher = build();
+
+    const result = await launch(launcher);
+
+    expect(result).toStrictEqual({ ok: true });
+    // The wait that told the hand-over from an early end is over: nobody watches the container any more.
+    expect(service.pendingWaits()).toBe(0);
+    expect(service.stops).toStrictEqual([]);
+    expect("idle" in launcher).toBe(false);
+  });
+
+  // #487-T04
+  it("does nothing when the container ends after the hand-over: the VM is stopped by the App's stop call, not by the Launcher", async () => {
     const launcher = build();
     await launch(launcher);
     const name = service.creates[0]?.name ?? "";
-    service.failStops(new Error("platform text with 98765"));
 
-    service.exitProcess(name, 1);
-    await launcher.idle();
+    service.exitProcess(name, 2);
+    await settle();
+    await clock.advance(120_000);
 
-    expect(service.stops).toStrictEqual([name]);
-    expect(logger.text()).toContain("sandbox_stop_failed");
-    expect(logger.text()).not.toContain("98765");
+    expect(service.stops).toStrictEqual([]);
+    expect(service.running()).toStrictEqual([name]);
+    expect(logger.text()).not.toContain("worker_exited");
+    expect(logger.text()).not.toContain("worker_wait_failed");
+  });
+
+  // #487-T04
+  it("does not ask for the container's end again when a wait breaks after the hand-over", async () => {
+    const launcher = build();
+    await launch(launcher);
+    const name = service.creates[0]?.name ?? "";
+
+    service.dropWaits(name, new Error("the log stream broke"));
+    await settle();
+    await clock.advance(120_000);
+
+    expect(service.pendingWaits()).toBe(0);
+    expect(service.stops).toStrictEqual([]);
   });
 
   // #329-T07
@@ -419,8 +431,7 @@ describe("the Sandbox-Launcher", () => {
     service.exitProcess(service.creates[0]?.name ?? "", 0);
 
     await expect(ended).resolves.toBeUndefined();
-    await launcher.idle();
-    expect(service.stops).toHaveLength(1);
+    expect(service.stops).toStrictEqual([]);
   });
 
   // #329-T07
@@ -438,7 +449,6 @@ describe("the Sandbox-Launcher", () => {
     expect(error).toBeInstanceOf(LaunchError);
     expect(error.code).toBe("worker_exited_early");
     expect(error.retryable).toBe(true);
-    await launcher.idle();
     expect(service.stops).toStrictEqual([service.creates[0]?.name]);
   });
 
@@ -642,57 +652,16 @@ describe("the Sandbox-Launcher", () => {
 });
 
 describe("findings of the review of #354", () => {
-  // #329-R01
-  it("retries a wait that failed after the hand-over and stops the VM only when the exit is confirmed", async () => {
-    const launcher = build();
-    await launch(launcher);
-    const name = service.creates[0]?.name ?? "";
-
-    service.dropWaits(name, new Error("the log stream broke"));
-    await settle();
-    await clock.advance(60_000);
-
-    expect(service.stops).toStrictEqual([]);
-    expect(service.running()).toStrictEqual([name]);
-
-    service.exitProcess(name, 0);
-    await launcher.idle();
-
-    expect(service.stops).toStrictEqual([name]);
-    expect(logger.text()).not.toContain("log stream");
-  });
-
-  // #329-R01
-  it("leaves a healthy VM to its timeout when the wait keeps failing, and logs a stable code", async () => {
-    const launcher = build();
-    await launch(launcher);
-    const name = service.creates[0]?.name ?? "";
-
-    service.failWaits(10, new Error("the log stream broke 4711"));
-    service.dropWaits(name, new Error("the log stream broke 4711"));
-    const idle = launcher.idle();
-    await settle();
-    await clock.advance(120_000);
-    await idle;
-
-    expect(service.stops).toStrictEqual([]);
-    expect(service.running()).toStrictEqual([name]);
-    expect(logger.text()).toContain("worker_wait_failed");
-    expect(logger.text()).toContain('"attempts":3');
-    expect(logger.text()).not.toContain("4711");
-  });
-
   // #329-R02
   it("stops the VM by the name the platform returned, not the one it was asked for", async () => {
     service.renameCreatedVms((name) => `${name}-normalised`);
-    const launcher = build();
-    await launch(launcher);
+    service.onExec("image-id", { stdout: `${OTHER_IMAGE_ID}\n` });
+
+    const error = failure(await launch(build()));
+
     const requested = service.creates[0]?.name ?? "";
     const returned = `${requested}-normalised`;
-
-    service.exitProcess(returned, 0);
-    await launcher.idle();
-
+    expect(error.code).toBe("image_mismatch");
     expect(service.stops).toStrictEqual([returned]);
     expect(service.running()).toStrictEqual([]);
     expect(logger.text()).toContain("sandbox_name_mismatch");
@@ -795,119 +764,6 @@ describe("findings of the review of #354", () => {
   );
 });
 
-/** What the Launcher tells the core when the Worker's container ends after the hand-over (#375). */
-describe("the Sandbox-Launcher and the end of a Worker that took over", () => {
-  /** A launched job whose spec brings a recording `onWorkerExit`. */
-  async function handedOver(report: (exitCode: number) => Promise<void>) {
-    const launcher = build();
-    const calls: number[] = [];
-    const result = await launch(
-      launcher,
-      spec({
-        onWorkerExit: (exitCode) => {
-          calls.push(exitCode);
-          return report(exitCode);
-        },
-      }),
-    );
-    expect(result).toStrictEqual({ ok: true });
-    return { launcher, calls, name: service.creates[0]?.name ?? "" };
-  }
-
-  // #375-T01
-  it("tells the core the exit code when the container ends with an error after the hand-over, and stops the VM", async () => {
-    const { launcher, calls, name } = await handedOver(() => Promise.resolve());
-
-    service.exitProcess(name, 2);
-    await launcher.idle();
-
-    expect(calls).toStrictEqual([2]);
-    expect(service.stops).toStrictEqual([name]);
-    expect(logger.text()).toContain('"exitCode":2');
-    expect(logger.text()).not.toContain(CREDENTIAL);
-  });
-
-  // #375-T04
-  it("tells the core nothing when the container ends with 0, and still stops the VM", async () => {
-    const { launcher, calls, name } = await handedOver(() => Promise.resolve());
-
-    service.exitProcess(name, 0);
-    await launcher.idle();
-
-    expect(calls).toStrictEqual([]);
-    expect(service.stops).toStrictEqual([name]);
-  });
-
-  // #375-T05
-  it("tells the core nothing and leaves the VM alone when the wait for the container fails", async () => {
-    const { launcher, calls, name } = await handedOver(() => Promise.resolve());
-
-    service.failWaits(10, new Error("the log stream broke"));
-    service.dropWaits(name, new Error("the log stream broke"));
-    const idle = launcher.idle();
-    await settle();
-    await clock.advance(120_000);
-    await idle;
-
-    expect(calls).toStrictEqual([]);
-    expect(service.stops).toStrictEqual([]);
-    expect(service.running()).toStrictEqual([name]);
-    expect(logger.text()).toContain("worker_wait_failed");
-  });
-
-  // #375-T05
-  it("does not tell the core of a container that ended with an error before the hand-over: the launch fails instead", async () => {
-    const launcher = build();
-    const calls: number[] = [];
-    const ended = launcher
-      .launch(
-        spec({
-          onWorkerExit: (exitCode) => {
-            calls.push(exitCode);
-            return Promise.resolve();
-          },
-        }),
-        new AbortController().signal,
-      )
-      .then(
-        () => undefined,
-        (error: unknown) => error,
-      );
-    await settle();
-    service.exitProcess(service.creates[0]?.name ?? "", 2);
-
-    expect(((await ended) as LaunchError).code).toBe("worker_exited_early");
-    await launcher.idle();
-    // The core releases that job with launch_failed once; a second release for the same end would count twice.
-    expect(calls).toStrictEqual([]);
-  });
-
-  // #375-T07
-  it("stops the VM even when the core's answer fails or never comes", async () => {
-    const failing = await handedOver(() =>
-      Promise.reject(new Error(`boom ${CREDENTIAL}`)),
-    );
-    service.exitProcess(failing.name, 137);
-    await failing.launcher.idle();
-    expect(service.stops).toStrictEqual([failing.name]);
-    expect(logger.text()).toContain("worker_exit_report_failed");
-    expect(logger.text()).not.toContain(CREDENTIAL);
-  });
-
-  // #375-T07
-  it("does not hold the VM back while the core is still talking to the App", async () => {
-    const { calls, name } = await handedOver(
-      () => new Promise(() => undefined),
-    );
-
-    service.exitProcess(name, 2);
-    await settle();
-
-    expect(calls).toStrictEqual([2]);
-    expect(service.stops).toStrictEqual([name]);
-  });
-});
-
 describe("the Sandbox-Launcher in the Dispatcher core", () => {
   // #329-T12
   it("makes the core release the job with launch_failed and count the attempt when the platform refuses", async () => {
@@ -953,8 +809,8 @@ describe("the Sandbox-Launcher in the Dispatcher core", () => {
     }
   });
 
-  // #375-T01
-  it("makes the core release the job with worker_exited at once when the Worker's container ends with 2 after the hand-over", async () => {
+  // #487-T04
+  it("lets the core's launch end at the hand-over and release nothing when the container ends with 2 afterwards", async () => {
     const app = await startApp();
     try {
       const jobId = app.enqueue();
@@ -972,31 +828,21 @@ describe("the Sandbox-Launcher in the Dispatcher core", () => {
       const result = await started;
       expect(result.outcome).toBe("started");
       if (result.outcome !== "started") return;
+      // The launch resolves: nothing is left pending behind it.
       await result.background;
-      // The Worker took over and the core is done with the launch: nothing released yet.
+      expect(service.pendingWaits()).toBe(0);
+
+      service.exitProcess(service.creates[0]?.name ?? "", 2);
+      await settle();
+      await clock.advance(60_000);
+
       expect(
         app.requests().filter((request) => request.route === "release"),
       ).toStrictEqual([]);
-
-      service.exitProcess(service.creates[0]?.name ?? "", 2);
-      // The App answered, and the core has logged what it did with the answer.
-      await waitFor(
-        () => logger.text().includes('"reason":"worker_exited"'),
-        "the release",
-      );
-
-      expect(
-        app.requests().filter((request) => request.route === "release"),
-      ).toStrictEqual([
-        { method: "POST", route: "release", jobId, status: 200 },
-      ]);
-      expect(logger.text()).toContain('"reason":"worker_exited"');
+      expect(service.stops).toStrictEqual([]);
+      expect(logger.text()).not.toContain("worker_exited");
       expect(logger.text()).not.toContain(DISPATCHER_TOKEN);
       expect(logger.text()).not.toContain(CREDENTIAL);
-      // The job is queued again for the next claim.
-      expect((await core.handle({ jobId, reviewKind: "diff" })).outcome).toBe(
-        "started",
-      );
     } finally {
       await app.close();
     }

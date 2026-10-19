@@ -91,6 +91,9 @@ describe("the examples", () => {
     expect(names("examples/dispatch-webhook")).toStrictEqual([
       "DispatchAccepted",
       "DispatchIgnored",
+      "DispatchStop",
+      "DispatchStopAccepted",
+      "DispatchStopIgnored",
       "DispatchWebhook",
     ]);
     expect(names("examples/worker-container")).toStrictEqual([
@@ -183,6 +186,80 @@ describe("the dispatch webhook", () => {
     const body = example("examples/dispatch-webhook", "DispatchWebhook");
 
     expect(JSON.stringify(body).length).toBeLessThan(1024);
+  });
+});
+
+describe("the stop call of the dispatch webhook", () => {
+  // #487-T10
+  it.each(["DispatchStop", "DispatchStopAccepted", "DispatchStopIgnored"])(
+    "has a valid example of %s",
+    (definition) => {
+      expectValid(
+        webhook,
+        definition,
+        example("examples/dispatch-webhook", definition),
+      );
+    },
+  );
+
+  // #487-T02
+  it.each([
+    ["an unknown field", { extra: "value" }],
+    ["a secret", { secret: "example-secret" }],
+    ["a credential", { credential: "crj_EXAMPLE" }],
+    ["a review kind", { reviewKind: "dynamic" }],
+    ["a repository name", { repository: "acme/widgets" }],
+  ])("is closed: refuses %s", (_name, addition) => {
+    expectInvalid(webhook, "DispatchStop", {
+      ...example("examples/dispatch-webhook", "DispatchStop"),
+      ...addition,
+    });
+  });
+
+  // #487-T02
+  it.each(["version", "type", "jobId", "stopId", "sentAt"])(
+    "requires %s",
+    (field) => {
+      const body = example("examples/dispatch-webhook", "DispatchStop");
+      delete body[field];
+
+      expectInvalid(webhook, "DispatchStop", body);
+    },
+  );
+
+  // #487-T02
+  it("allows only the stop type and version, and ids of the form of a job id", () => {
+    const body = example("examples/dispatch-webhook", "DispatchStop");
+
+    expectInvalid(webhook, "DispatchStop", { ...body, version: 2 });
+    expectInvalid(webhook, "DispatchStop", { ...body, type: "job.ready" });
+    expectInvalid(webhook, "DispatchStop", { ...body, jobId: "../etc" });
+    expectInvalid(webhook, "DispatchStop", { ...body, stopId: "x" });
+  });
+
+  // #487-T10
+  it("stays under 1 KiB, and the wake-up call is unchanged by it", () => {
+    expect(
+      JSON.stringify(example("examples/dispatch-webhook", "DispatchStop"))
+        .length,
+    ).toBeLessThan(1024);
+    expectValid(
+      webhook,
+      "DispatchWebhook",
+      example("examples/dispatch-webhook", "DispatchWebhook"),
+    );
+  });
+
+  // #487-T10
+  it("is an addition that a Dispatcher of the previous release answers with 404, which the wake-up never sees", () => {
+    // The wake-up call is `job.ready` and nothing else: a previous-release Dispatcher refuses any other type, so the
+    // two calls cannot be mistaken for each other whichever side is older.
+    expectInvalid(webhook, "DispatchWebhook", {
+      ...example("examples/dispatch-webhook", "DispatchStop"),
+      reviewKind: "diff",
+      attempt: 1,
+      dispatchId: "7c1e2d44-6b0a-4f5b-9a3e-5d8f2b6c1e07",
+    });
   });
 });
 

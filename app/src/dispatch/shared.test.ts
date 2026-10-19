@@ -6,7 +6,7 @@ const after = vi.hoisted(() => vi.fn());
 vi.mock("next/server", () => ({ after }));
 vi.mock("../db/startup.ts", () => ({ getDatabase: () => ({}) }));
 
-import { runAfterResponse } from "./shared.ts";
+import { runAfterResponse, stopEndedClaims } from "./shared.ts";
 
 beforeEach(() => {
   after.mockReset();
@@ -42,5 +42,47 @@ describe("running the dispatch after the response", () => {
 
     await Promise.resolve();
     expect(work).toHaveBeenCalledOnce();
+  });
+});
+
+const WEBHOOK_ENV = {
+  RUNNER_DISPATCH: "webhook",
+  RUNNER_WEBHOOK_URL: "https://dispatcher.example.test/dispatch",
+  RUNNER_WEBHOOK_SECRET: "example-dispatch-secret-current-00000000",
+};
+
+describe("stopping the VMs of the claims that ended", () => {
+  // #487-T08
+  it("does nothing while the instance polls, as a self-hosted runner or a Compose stack does", () => {
+    stopEndedClaims(["job-1"], {});
+    stopEndedClaims(["job-1"], { RUNNER_DISPATCH: "poll" });
+
+    expect(after).not.toHaveBeenCalled();
+  });
+
+  // #487-T06
+  it("hands the stop to after() in webhook mode, and does not start it", () => {
+    stopEndedClaims(["job-1", "job-2"], WEBHOOK_ENV);
+
+    expect(after).toHaveBeenCalledOnce();
+  });
+
+  // #487-T06
+  it("does nothing for an empty list", () => {
+    stopEndedClaims([], WEBHOOK_ENV);
+
+    expect(after).not.toHaveBeenCalled();
+  });
+
+  // #487-T07
+  it("never throws for a bad webhook setting and sends nothing", () => {
+    expect(() =>
+      stopEndedClaims(["job-1"], {
+        RUNNER_DISPATCH: "webhook",
+        RUNNER_WEBHOOK_URL: "not a url",
+      }),
+    ).not.toThrow();
+
+    expect(after).not.toHaveBeenCalled();
   });
 });

@@ -662,7 +662,7 @@ describe("the hosted deployment guide as a procedure", () => {
     expect(guide).not.toContain(DEBOUNCE_VARIABLE);
     // Leases do not stop expiring without the cron: every claim expires the lapsed ones, so it is late, not never.
     expect(read("app/src/db/repositories/runner-jobs-repository.ts")).toMatch(
-      /async claimNext[\s\S]{0,400}await expire\(trx, current(, \w+)?\)/,
+      /async claimNext[\s\S]{0,500}await expire\(trx, current(, \w+)*\)/,
     );
     expect(
       flat(
@@ -690,11 +690,12 @@ describe("the hosted deployment guide as a procedure", () => {
     expect(limits).toContain("`E2E_DATABASE_URL`");
     expect(guide).not.toMatch(/#332[^\n]*pending/i);
     expect(guide).not.toMatch(/pending[^\n]*#332/i);
-    // #375: a Worker that exits with an error is released at once; the lease stays the safeguard where the end is not seen.
+    // #487: the Dispatcher holds no supervision after the hand-over, so the lease is what finds a Worker that died.
     expect(limits).toContain(
-      "A Worker whose end the Dispatcher does not see still holds its slot until its lease lapses",
+      "A Worker that dies still holds its slot until its lease lapses",
     );
-    expect(limits).toContain("`worker_wait_failed`");
+    expect(limits).toContain("`lease_expired`");
+    expect(limits).not.toContain("`worker_wait_failed`");
     expect(limits).not.toContain("follow-up #375");
     expect(section("## 10. Follow-ups")).not.toContain("- #375:");
     expect(limits).toContain("on **your** Postgres provider");
