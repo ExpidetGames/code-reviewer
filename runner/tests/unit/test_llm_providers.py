@@ -48,7 +48,7 @@ def test_an_id_that_is_not_registered_has_no_entry(name: str) -> None:
 # #424-T07
 def test_every_registered_id_has_the_form_the_contract_allows() -> None:
     assert PROVIDER_ID_PATTERN.pattern == "^[a-z][a-z0-9_]{1,31}$"
-    assert registered_provider_ids() == ("openrouter",)
+    assert registered_provider_ids() == ("openrouter", "anthropic")
     for name in registered_provider_ids():
         assert PROVIDER_ID_PATTERN.fullmatch(name)
     assert PROVIDER_ID_PATTERN.fullmatch(fake_provider().id)
@@ -62,7 +62,7 @@ def test_a_provider_added_to_the_registry_is_found_and_advertised(
     monkeypatch.setitem(llm_providers.PROVIDERS, fake.id, fake)
 
     assert provider_for("fakeai") is fake
-    assert registered_provider_ids() == ("openrouter", "fakeai")
+    assert registered_provider_ids() == ("openrouter", "anthropic", "fakeai")
 
 
 # #424-T04
@@ -86,10 +86,11 @@ def test_the_openrouter_matcher_knows_no_endpoint_supports_the_parameters() -> N
 
 # #424-T04
 def test_the_openrouter_cost_extractor_reads_the_stated_usage_cost_only() -> None:
-    assert OPENROUTER.cost_extractor({"cost": 0.25, "total_tokens": 3}) == Decimal("0.25")
-    assert OPENROUTER.cost_extractor({"cost": "0.25"}) is None
-    assert OPENROUTER.cost_extractor({"cost": -1}) is None
-    assert OPENROUTER.cost_extractor({"total_tokens": 3}) is None
+    model = "vendor/model"
+    assert OPENROUTER.cost_extractor(model, {"cost": 0.25, "total_tokens": 3}) == Decimal("0.25")
+    assert OPENROUTER.cost_extractor(model, {"cost": "0.25"}) is None
+    assert OPENROUTER.cost_extractor(model, {"cost": -1}) is None
+    assert OPENROUTER.cost_extractor(model, {"total_tokens": 3}) is None
 
 
 # #424-T03: the section is derived from the key setting, so the base setting must live in it too.

@@ -281,15 +281,16 @@ def _run_diff_job(
 
             litellm.suppress_debug_info = True
             patches.callback(apply_identity_patch(job.git.bot_login))
-            # No temperature for a Claude model that does not take it (#477).
-            patches.callback(apply_temperature_patch())
+            provider = require_provider(job.llm.provider)
+            # No temperature for a model that does not take it (#477): by the version of its name,
+            # or by the flag of the provider's own list.
+            patches.callback(apply_temperature_patch(provider=provider))
             if job.llm.require_parameters:
                 # Every request carries the provider's require-parameters field (#270).
-                patches.callback(
-                    apply_require_parameters_patch(provider=require_provider(job.llm.provider))
-                )
-            # The cost of the run is what the provider states for every answer (#274).
-            meter, undo_meter = install_cost_meter(superseded=superseded)
+                patches.callback(apply_require_parameters_patch(provider=provider))
+            # The cost of the run is what the provider states for every answer (#274), or, for a
+            # provider that states none, what its usage costs by the price list (#511).
+            meter, undo_meter = install_cost_meter(superseded=superseded, provider=provider)
             patches.callback(undo_meter)
             if meter_slot is not None:
                 meter_slot.meter = meter
@@ -669,7 +670,7 @@ def _run_dynamic_job(
             ledger=ledger,
             base_path="/v1",
             model=dynamic.model,
-            upstream_url=f"{upstream}/chat/completions",
+            upstream_url=provider.wire(job.llm.model).url(upstream),
             upstream_api_key=job.llm.api_key,
             upstream_model=job.llm.model,
             capabilities=capabilities,

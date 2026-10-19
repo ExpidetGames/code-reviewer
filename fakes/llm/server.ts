@@ -19,7 +19,14 @@
 //   keys that arrived are recorded apart (`keyChecks`), so a test can see which key a check carried;
 // - `GET <api base>/models/{author}/{slug}/endpoints`, the public model metadata behind the app's check of a
 //   Dynamic model (#269): the endpoints of the models a test registered with `setModel` (the request
-//   parameters each lists), 404 for any other model. The requests are recorded apart (`modelRequests`).
+//   parameters each lists), 404 for any other model. The requests are recorded apart (`modelRequests`);
+// - the Anthropic Messages API (#511), at the same address (`<api base>` is `.../api/v1`, the path the
+//   Anthropic adapter and the runner derive from it): `GET <api base>/models`, the free call behind the key test
+//   (the key arrives in `x-api-key`; `acceptKeys` and `failWith` apply to it as well, and every check is recorded
+//   in `anthropicKeyChecks`), and `POST <api base>/messages`, answered in the Messages shape with a usage of
+//   input, output and cache tokens (a canned review, or the scripted agent as `tool_use` blocks). The requests
+//   (headers and parsed body) are recorded in `messageRequests`, so a test can see exactly which parameters
+//   reached the provider;
 //
 // The replies are canned (`canned.ts`). They satisfy the output contract of the review tool and
 // say nothing about review quality. The engine suite of the runner has its own Python twin of this
@@ -71,6 +78,28 @@ export type FakeModelEndpoint = {
 
 export type FakeLlmError = { status: number; message: string };
 
+/** One request to the Anthropic Messages API as the fake saw it. */
+export type FakeMessagesRequest = {
+  /** The `x-api-key` header, empty when absent. */
+  apiKey: string;
+  /** The `anthropic-version` header, empty when absent. */
+  version: string;
+  /** The parsed body; an unreadable body is an empty object. */
+  body: Record<string, unknown>;
+};
+
+/** The usage the fake reports for a Messages answer (Anthropic's names). */
+export type FakeMessagesUsage = {
+  input_tokens: number;
+  output_tokens: number;
+  cache_creation_input_tokens?: number;
+  cache_read_input_tokens?: number;
+  cache_creation?: {
+    ephemeral_5m_input_tokens: number;
+    ephemeral_1h_input_tokens: number;
+  };
+};
+
 export type FakeLlm = {
   /** What a job gets as `llm.baseUrl`: `http://127.0.0.1:<port>/api/v1`. */
   baseUrl: string;
@@ -88,6 +117,12 @@ export type FakeLlm = {
   keyChecks(): string[];
   /** Answers like the model of a Dynamic Review (see `AgentScript`); null is the canned reply again. */
   scriptAgent(script: AgentScript | null): void;
+  /** The `x-api-key` and `anthropic-version` of every `GET /models` received, in order (the Anthropic key test). */
+  anthropicKeyChecks(): Array<{ apiKey: string; version: string }>;
+  /** Every `POST /messages` received, in order. */
+  messageRequests(): FakeMessagesRequest[];
+  /** The usage the next Messages answers report (default: 100 input tokens, 50 output tokens, no cache). */
+  setMessagesUsage(usage: FakeMessagesUsage): void;
   /** Registers a model for the metadata endpoint; its endpoints list what the test says they support. */
   setModel(id: string, endpoints: FakeModelEndpoint[]): void;
   /** Every metadata request received (path and `Authorization` header, empty when none), in order. */
@@ -212,6 +247,92 @@ function toolCompletion(model: string, id: string, calls: AgentToolCall[]) {
   };
 }
 
+const DEFAULT_MESSAGES_USAGE: FakeMessagesUsage = {
+  input_tokens: 100,
+  output_tokens: 50,
+};
+
+/** An Anthropic Messages answer with text. */
+function messagesText(model: string, text: string, usage: FakeMessagesUsage) {
+  return {
+    id: "msg_fake",
+    type: "message",
+    role: "assistant",
+    model,
+    content: [{ type: "text", text }],
+    stop_reason: "end_turn",
+    stop_sequence: null,
+    usage,
+  };
+}
+
+/** An Anthropic Messages answer that asks for tool calls. */
+function messagesToolUse(
+  model: string,
+  id: string,
+  calls: AgentToolCall[],
+  usage: FakeMessagesUsage,
+) {
+  return {
+    id: "msg_fake_agent",
+    type: "message",
+    role: "assistant",
+    model,
+    content: calls.map((call, position) => ({
+      type: "tool_use",
+      id: `${id}_${String(position)}`,
+      name: call.name,
+      input: call.arguments,
+    })),
+    stop_reason: "tool_use",
+    stop_sequence: null,
+    usage,
+  };
+}
+
+/** The error shape of the Messages API. */
+function messagesError(status: number, message: string) {
+  const type =
+    status === 401
+      ? "authentication_error"
+      : status === 403
+        ? "permission_error"
+        : status === 404
+          ? "not_found_error"
+          : status === 429
+            ? "rate_limit_error"
+            : status === 529
+              ? "overloaded_error"
+              : status >= 500
+                ? "api_error"
+                : "invalid_request_error";
+  return { type: "error", error: { type, message } };
+}
+
+function anthropicToolNames(tools: unknown): string[] {
+  if (!Array.isArray(tools)) return [];
+  return (tools as Array<{ name?: unknown }>).flatMap((tool) =>
+    typeof tool.name === "string" ? [tool.name] : [],
+  );
+}
+
+function anthropicPrompt(body: Record<string, unknown>): string {
+  const parts: string[] = [];
+  const system = body.system;
+  if (typeof system === "string") parts.push(system);
+  if (Array.isArray(system))
+    for (const block of system as Array<{ text?: unknown }>)
+      if (typeof block.text === "string") parts.push(block.text);
+  if (Array.isArray(body.messages))
+    for (const message of body.messages as Array<{ content?: unknown }>) {
+      if (typeof message.content === "string") parts.push(message.content);
+      else if (Array.isArray(message.content))
+        for (const block of message.content as Array<{ text?: unknown }>)
+          if (typeof block.text === "string") parts.push(block.text);
+    }
+  return parts.join("\n");
+}
+
 export async function startLlmFake(
   options: { host?: string; port?: number } = {},
 ): Promise<FakeLlm> {
@@ -226,6 +347,9 @@ export async function startLlmFake(
   let agentRequests = 0;
   let models = new Map<string, FakeModelEndpoint[]>();
   let modelLog: Array<{ path: string; authorization: string }> = [];
+  let anthropicChecks: Array<{ apiKey: string; version: string }> = [];
+  let messageLog: FakeMessagesRequest[] = [];
+  let messagesUsage: FakeMessagesUsage = DEFAULT_MESSAGES_USAGE;
   let holding = false;
   let held: Array<() => void> = [];
   const release = () => {
@@ -242,10 +366,110 @@ export async function startLlmFake(
         response.writeHead(status, { "content-type": "application/json" });
         response.end(JSON.stringify(body));
       };
-      if (
-        request.method === "GET" &&
-        (request.url ?? "").split("?")[0]?.endsWith("/key")
-      ) {
+      const path = (request.url ?? "").split("?")[0] ?? "";
+      if (request.method === "GET" && path.endsWith("/models")) {
+        // The Anthropic key test: the free list of models, the key in `x-api-key`.
+        const apiKey = String(request.headers["x-api-key"] ?? "");
+        const version = String(request.headers["anthropic-version"] ?? "");
+        anthropicChecks.push({ apiKey, version });
+        if (error !== null)
+          return send(
+            error.status,
+            messagesError(
+              error.status,
+              quoteKey ? `${error.message}: ${apiKey}` : error.message,
+            ),
+          );
+        if (apiKey === "" || (accepted !== null && !accepted.includes(apiKey)))
+          return send(
+            401,
+            messagesError(
+              401,
+              quoteKey && apiKey !== ""
+                ? `invalid x-api-key: ${apiKey}`
+                : "invalid x-api-key",
+            ),
+          );
+        return send(200, {
+          data: [],
+          first_id: null,
+          last_id: null,
+          has_more: false,
+        });
+      }
+      if (request.method === "POST" && path.endsWith("/messages")) {
+        let parsed: Record<string, unknown> = {};
+        try {
+          const value: unknown = JSON.parse(
+            Buffer.concat(chunks).toString("utf8"),
+          );
+          if (
+            typeof value === "object" &&
+            value !== null &&
+            !Array.isArray(value)
+          )
+            parsed = value as Record<string, unknown>;
+        } catch {
+          // an unreadable body is answered like an empty one
+        }
+        const apiKey = String(request.headers["x-api-key"] ?? "");
+        messageLog.push({
+          apiKey,
+          version: String(request.headers["anthropic-version"] ?? ""),
+          body: parsed,
+        });
+        const model = typeof parsed.model === "string" ? parsed.model : "";
+        const answerMessages = () => {
+          if (response.destroyed) return;
+          if (apiKey === "")
+            return send(
+              401,
+              messagesError(401, "x-api-key header is required"),
+            );
+          if (error !== null)
+            return send(
+              error.status,
+              messagesError(
+                error.status,
+                quoteKey ? `${error.message}: ${apiKey}` : error.message,
+              ),
+            );
+          const tools = anthropicToolNames(parsed.tools);
+          if (agent !== null && tools.length > 0) {
+            const index = agentRequests;
+            agentRequests += 1;
+            const calls = agent.steps[index] ?? [
+              { name: "StructuredOutput", arguments: agent.final },
+            ];
+            return send(
+              200,
+              messagesToolUse(
+                model,
+                `toolu_${String(index)}`,
+                calls,
+                messagesUsage,
+              ),
+            );
+          }
+          if (agent !== null)
+            return send(200, messagesText(model, "ok", messagesUsage));
+          log.push({
+            path: request.url ?? "",
+            authorization: `x-api-key ${apiKey}`,
+            model,
+            kind: "review",
+            prompt: anthropicPrompt(parsed),
+            tools,
+            toolResults: {},
+            provider: null,
+          });
+          return send(200, messagesText(model, replies.review, messagesUsage));
+        };
+        if (holding) held.push(answerMessages);
+        else answerMessages();
+        return;
+      }
+      if (request.method === "GET" && path.endsWith("/key")) {
         const authorization = request.headers.authorization ?? "";
         const key = authorization.split(" ").at(-1) ?? "";
         keyChecks.push(authorization);
@@ -379,6 +603,11 @@ export async function startLlmFake(
       models.set(id, endpoints);
     },
     modelRequests: () => [...modelLog],
+    anthropicKeyChecks: () => [...anthropicChecks],
+    messageRequests: () => [...messageLog],
+    setMessagesUsage(usage) {
+      messagesUsage = usage;
+    },
     scriptAgent(script) {
       agent = script;
       agentRequests = 0;
@@ -400,6 +629,9 @@ export async function startLlmFake(
       keyChecks = [];
       models = new Map();
       modelLog = [];
+      anthropicChecks = [];
+      messageLog = [];
+      messagesUsage = DEFAULT_MESSAGES_USAGE;
     },
     async close() {
       await new Promise<void>((resolve, reject) => {

@@ -239,7 +239,9 @@ test.describe("the project list and the settings pages", () => {
       .filter({ visible: true })
       .click();
     await expect(page).toHaveURL(/\/w\/default\/settings\/llm$/);
-    await expect(page.getByRole("form", { name: "LLM key" })).toBeVisible();
+    await expect(
+      page.getByRole("form", { name: "OpenRouter LLM key" }),
+    ).toBeVisible();
     await expect(page.getByText(/LLM_API_KEY|GITHUB_APP/)).toHaveCount(0);
 
     // The instance admin no longer reads about a missing server variable: the key is the workspace's.

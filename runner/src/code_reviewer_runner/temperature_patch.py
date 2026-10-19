@@ -18,6 +18,11 @@ decides by version instead: the one place that asks whether a model takes `tempe
 `LiteLLMAIHandler._litellm_supports_temperature`, answers no for a Claude model from 4.7 on, for a
 GPT model from 6 on and for the `latest` aliases of both, and leaves every other answer to PR-Agent.
 
+For a provider that knows its models (`LlmProviderSpec.supports_temperature`, the Anthropic list
+of #511) the decision is the provider's flag for the model, never the name: the rules above are
+not consulted, a model the provider does not list gets none, and PR-Agent's own answer can still
+say no. A provider without an opinion keeps the rules above.
+
 The patch reaches into a private method, so it is tied to the version it was written and tested for
 (`identity_patch.check_pr_agent_version` runs before it, and the signature of the method is
 checked here). Any other shape is refused instead of being patched blindly.
@@ -28,6 +33,8 @@ import re
 from collections.abc import Callable
 from importlib import import_module
 from typing import Any
+
+from code_reviewer_runner.llm_providers import LlmProviderSpec, without_prefix
 
 _HANDLER_MODULE = "pr_agent.algo.ai_handlers.litellm_ai_handler"
 _METHOD = "_litellm_supports_temperature"
@@ -75,8 +82,12 @@ def withholds_temperature(model: str) -> bool:
     return _ALIAS.search(normalized) is not None
 
 
-def apply_temperature_patch(handler_class: type[Any] | None = None) -> Callable[[], None]:
+def apply_temperature_patch(
+    handler_class: type[Any] | None = None, *, provider: LlmProviderSpec | None = None
+) -> Callable[[], None]:
     """Wrap PR-Agent's temperature probe. Returns a function that undoes the patch.
+
+    `provider` is the provider of the job. Without one the rules of the model name decide.
 
     Everything the patch relies on is checked first, and a failed check changes nothing. Applying
     the patch twice does not wrap it twice.
@@ -94,7 +105,14 @@ def apply_temperature_patch(handler_class: type[Any] | None = None) -> Callable[
         )
 
     def supports_temperature(model: str, custom_llm_provider: str | None = None) -> bool:
-        if withholds_temperature(model):
+        opinion = (
+            None
+            if provider is None
+            else provider.supports_temperature(without_prefix(provider, model))
+        )
+        if opinion is False:
+            return False
+        if opinion is None and withholds_temperature(model):
             return False
         return bool(original(model, custom_llm_provider))
 

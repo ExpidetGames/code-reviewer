@@ -7,8 +7,15 @@ PR-Agent prices a call itself: from the charge in the answer when it finds one, 
 LiteLLM's price table, which can be missing, stale or different from what the provider charged. Its
 sum also covers only the calls it accepted. A Diff run on the operator's key is billed from its
 cost, so the runner measures it the way the Dynamic Review does (#267): the charge of a call is the
-`usage.cost` the provider states in its answer, nothing is derived from tokens or a price table,
-and the sum is all or nothing.
+`usage.cost` the provider states in its answer, never LiteLLM's table, and the sum is all or
+nothing.
+
+**A provider that states no charge** (Anthropic returns token counts only) is priced by its own rule
+(`LlmProviderSpec.cost_extractor`, #511): the model the request named, the counts of the answer and
+the price list of the provider, in exact decimals. A call that cannot be priced that way (a model
+that is not in the list, no usable counts, a surcharge the list does not know) is an unpriced call,
+exactly like an answer without a stated charge, so the cost is unknown and never zero. Without a
+provider the charge is read from `usage.cost`, as above.
 
 Every request PR-Agent makes goes through one function, `acompletion` of its LiteLLM handler. It is
 wrapped here, which sees every answer that comes back, also one that PR-Agent throws away afterwards
@@ -47,7 +54,9 @@ from importlib import import_module
 from typing import Any
 
 from code_reviewer_runner.dynamic_review.budget import exact_cost
+from code_reviewer_runner.llm_providers import LlmProviderSpec, without_prefix
 from code_reviewer_runner.supersede import PROCESS_SIGNAL, SupersededError, SupersedeSignal
+from code_reviewer_runner.usage_access import usage_field
 
 _HANDLER_MODULE = "pr_agent.algo.ai_handlers.litellm_ai_handler"
 _FUNCTION = "acompletion"
@@ -70,13 +79,14 @@ class CostMeterError(Exception):
     """PR-Agent does not have the function the meter was written for."""
 
 
-def _field(source: Any, name: str) -> Any:
-    if isinstance(source, dict):
-        return source.get(name)
-    return getattr(source, name, None)
+_field = usage_field
+
+# What a call is priced with: the model the request named and the usage of its answer. The meter
+# asks it for every answer; None means the call cannot be priced.
+ChargeOf = Callable[[str, Any], Decimal | None]
 
 
-def _stated_charge(usage: Any) -> Decimal | None:
+def _stated_charge(model: str, usage: Any) -> Decimal | None:
     """What the provider says the call cost: `usage.cost`, never `response_cost` (LiteLLM's own).
 
     A charge above the sanity ceiling is no cost anybody can trust: the call is unpriced.
@@ -86,6 +96,20 @@ def _stated_charge(usage: Any) -> Decimal | None:
     charge = exact_cost(_field(usage, "cost"))
     if charge is None or charge > MAX_CALL_COST_USD:
         return None
+    return charge
+
+
+def charge_by(provider: LlmProviderSpec) -> ChargeOf:
+    """The pricing rule of a provider, with the same sanity ceiling as a stated charge."""
+
+    def charge(model: str, usage: Any) -> Decimal | None:
+        if usage is None or not model:
+            return None
+        priced = provider.cost_extractor(without_prefix(provider, model), usage)
+        if priced is None or priced > MAX_CALL_COST_USD:
+            return None
+        return priced
+
     return charge
 
 
@@ -130,7 +154,8 @@ def _chunk_usage(chunk: Any) -> Any:
 class DiffCostMeter:
     """What the provider charged for the model calls of one Diff run. One instance per run."""
 
-    def __init__(self) -> None:
+    def __init__(self, charge_of: ChargeOf = _stated_charge) -> None:
+        self._charge_of = charge_of
         self._lock = threading.Lock()
         self._total = Decimal(0)
         self._priced = 0
@@ -172,9 +197,9 @@ class DiffCostMeter:
         with self._lock:
             self._open += 1
 
-    def answered(self, usage: Any) -> None:
-        """The request got an answer with this usage (None when it has none)."""
-        charge = _stated_charge(usage)
+    def answered(self, usage: Any, model: str = "") -> None:
+        """The request to `model` got an answer with this usage (None when it has none)."""
+        charge = self._charge_of(model, usage)
         with self._lock:
             self._open -= 1
             if charge is None:
@@ -189,7 +214,7 @@ class DiffCostMeter:
             self._open -= 1
 
 
-def _watched(meter: DiffCostMeter, stream: Any) -> AsyncIterator[Any]:
+def _watched(meter: DiffCostMeter, stream: Any, model: str) -> AsyncIterator[Any]:
     """The chunks of `stream` unchanged; the call is accounted when the last one was read."""
 
     async def chunks() -> AsyncIterator[Any]:
@@ -200,7 +225,7 @@ def _watched(meter: DiffCostMeter, stream: Any) -> AsyncIterator[Any]:
                 usage = found
             yield chunk
         # Reached only when the stream was read to its end: otherwise the request stays open.
-        meter.answered(usage)
+        meter.answered(usage, model)
 
     return chunks()
 
@@ -208,11 +233,16 @@ def _watched(meter: DiffCostMeter, stream: Any) -> AsyncIterator[Any]:
 def install_cost_meter(
     module: Any | None = None,
     superseded: SupersedeSignal = PROCESS_SIGNAL,
+    *,
+    provider: LlmProviderSpec | None = None,
 ) -> tuple[DiffCostMeter, Callable[[], None]]:
     """Wrap PR-Agent's `acompletion`. Returns the meter and a function that undoes the wrapping.
 
     Everything the wrapper relies on is checked first, and a failed check changes nothing.
     Installing twice does not wrap twice.
+
+    `provider` is the provider of the job: it decides what a call cost. Without one the charge is
+    the `usage.cost` of the answer.
 
     Once the run is superseded (#396) a new request is refused with `SupersededError` before
     anything is sent
@@ -227,7 +257,7 @@ def install_cost_meter(
     if not inspect.iscoroutinefunction(original):
         raise CostMeterError(f"{_HANDLER_MODULE}.{_FUNCTION} is not a coroutine function")
 
-    meter = DiffCostMeter()
+    meter = DiffCostMeter(_stated_charge if provider is None else charge_by(provider))
 
     @wraps(original)
     async def metered(*args: Any, **kwargs: Any) -> Any:
@@ -244,9 +274,11 @@ def install_cost_meter(
                 meter.refused()
             # Any other end leaves the request open: it may have been billed.
             raise
+        model = kwargs.get("model")
+        model = model if isinstance(model, str) else ""
         if _is_stream(response):
-            return _watched(meter, response)
-        meter.answered(_field(response, "usage"))
+            return _watched(meter, response, model)
+        meter.answered(_field(response, "usage"), model)
         return response
 
     setattr(metered, _ORIGINAL_ATTRIBUTE, original)

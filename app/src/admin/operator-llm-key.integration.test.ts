@@ -324,7 +324,10 @@ describe("the operator's keys per provider", () => {
       lastFour: "wxyz",
     });
     expect(status.operatorLlmKey).toEqual(status.operatorLlmKeys[OPENROUTER]);
-    expect(Object.keys(status.operatorLlmKeys)).toEqual([OPENROUTER]);
+    expect(Object.keys(status.operatorLlmKeys)).toEqual([
+      OPENROUTER,
+      "anthropic",
+    ]);
   });
 
   // #427-T01

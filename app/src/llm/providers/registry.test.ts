@@ -25,9 +25,14 @@ function codeOf(build: () => unknown): string | undefined {
 describe("the provider registry", () => {
   // #423-T02
   it("lists exactly the providers the app supported before the registry", () => {
-    expect([...LLM_PROVIDERS]).toEqual(["openrouter"]);
-    expect([...llmProviderDescriptors.ids]).toEqual(["openrouter"]);
-    expect([...llmProviderAdapters.ids]).toEqual(["openrouter"]);
+    // #511-T07: the second real provider is listed after the first, which stays the default.
+    expect([...LLM_PROVIDERS]).toEqual(["openrouter", "anthropic"]);
+    expect([...llmProviderDescriptors.ids]).toEqual([
+      "openrouter",
+      "anthropic",
+    ]);
+    expect([...llmProviderAdapters.ids]).toEqual(["openrouter", "anthropic"]);
+    expect(llmProviderDescriptors.defaultProvider.id).toBe("openrouter");
   });
 
   // #423-T02
@@ -181,7 +186,11 @@ describe("the provider registry", () => {
       createFakeAdapter(),
     ]);
 
-    expect([...registry.ids]).toEqual(["openrouter", FAKE_PROVIDER_ID]);
+    expect([...registry.ids]).toEqual([
+      "openrouter",
+      "anthropic",
+      FAKE_PROVIDER_ID,
+    ]);
     expect(registry.defaultProvider.id).toBe("openrouter");
     expect(registry.find(" FakeAI ")?.id).toBe(FAKE_PROVIDER_ID);
     expect(registry.find("unknown")).toBeUndefined();
@@ -190,10 +199,12 @@ describe("the provider registry", () => {
     expect(registry.get(FAKE_PROVIDER_ID).label).toBe("FakeAI");
     expect(registry.operatorSecretNames).toEqual([
       "operator_llm_key",
+      "operator_llm_key.anthropic",
       `operator_llm_key.${FAKE_PROVIDER_ID}`,
     ]);
     expect(registry.workspaceSecretNames).toEqual([
       "llm_api_key",
+      "llm_api_key.anthropic",
       `llm_api_key.${FAKE_PROVIDER_ID}`,
     ]);
   });
