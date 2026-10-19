@@ -74,7 +74,7 @@ describe.each(ENGINES)("the billing rates on $name", (engine) => {
 
   // #494-T10
   it_(
-    "stores what it validated, and the rates are complete once A and both rates are there",
+    "stores what it validated, and the rates are complete once A, both rates and the Diff AI reserve are there",
     async () => {
       const db = await engine.open();
       const service = createBillingRatesService(db);
@@ -90,16 +90,23 @@ describe.each(ENGINES)("the billing rates on $name", (engine) => {
       expect(
         await service.update({ minuteRateMicroUsd: { dynamic: 25_000 } }, null),
       ).toMatchObject({ ok: true });
+      // The reserve has no default: A and both B alone are not enough.
+      expect(await service.rates()).toBeNull();
+      expect(canSwitchBillingOn(await service.settings())).toStrictEqual({
+        ok: false,
+        code: "billing_rates_incomplete",
+      });
+      expect(
+        await service.update({ diffAiReserveMicroUsd: 300_000 }, null),
+      ).toMatchObject({ ok: true });
 
       expect(await service.settings()).toStrictEqual({
         enabled: false,
-        factorA: 12_000,
-        minuteRateMicroUsd: { diff: 10_000, dynamic: 25_000 },
+        ...COMPLETE,
       });
-      expect((await service.rates())?.factorA).toBe(12_000);
-      expect((await service.rates())?.minuteRateMicroUsd).toStrictEqual({
-        diff: 10_000,
-        dynamic: 25_000,
+      expect(await service.rates()).toStrictEqual(COMPLETE);
+      expect(canSwitchBillingOn(await service.settings())).toStrictEqual({
+        ok: true,
       });
     },
   );
@@ -219,6 +226,38 @@ describe.each(ENGINES)("the billing rates on $name", (engine) => {
       code: "billing_rates_incomplete",
     });
   });
+
+  // #494-T11
+  it_("reads stored text that is no JSON at all as not set", async () => {
+    const db = await engine.open();
+    await db
+      .insertInto("instance_settings")
+      .values({
+        key: "billing_settings",
+        value: "{not json",
+        updated_by: null,
+        updated_at: "2026-10-19T00:00:00.000Z",
+      })
+      .execute();
+    const service = createBillingRatesService(db);
+
+    expect(await service.rates()).toBeNull();
+    expect(await service.settings()).toStrictEqual({ enabled: false });
+  });
+
+  // #494-T11
+  it_(
+    "lets a database error through: rates that cannot be read are not rates that are not set",
+    async () => {
+      const db = await engine.open();
+      const service = createBillingRatesService(db);
+      await service.update(COMPLETE, null);
+      await db.destroy();
+
+      await expect(service.rates()).rejects.toThrow();
+      await expect(service.settings()).rejects.toThrow();
+    },
+  );
 
   // #494-T11
   it_("repairs a damaged stored value with the next valid write", async () => {

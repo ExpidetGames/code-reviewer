@@ -37,6 +37,11 @@ export type BillingRatesService = {
   update(change: unknown, updatedBy: string | null): Promise<UpdateRatesResult>;
 };
 
+/** The error `decodeJson` throws for stored text that is no JSON (its cause is the parser's `SyntaxError`). */
+function isUndecodableText(error: unknown): boolean {
+  return error instanceof Error && error.cause instanceof SyntaxError;
+}
+
 async function readStored(db: Kysely<Database>): Promise<BillingSettings> {
   try {
     const stored =
@@ -44,8 +49,10 @@ async function readStored(db: Kysely<Database>): Promise<BillingSettings> {
         "billing_settings",
       );
     return readBillingSettings(stored?.value);
-  } catch {
-    // Text that is no JSON at all is damaged data like any other: not set.
+  } catch (error) {
+    // Text that is no JSON at all is damaged data like any other: not set. Anything else (a lost connection, a busy
+    // database) is not a statement about the rates and goes on, so a caller can retry or fail as infrastructure.
+    if (!isUndecodableText(error)) throw error;
     return readBillingSettings(undefined);
   }
 }
