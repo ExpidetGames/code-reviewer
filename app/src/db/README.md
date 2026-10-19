@@ -384,7 +384,9 @@ set null`): the operator's list of the models that workspaces on the operator's 
 Migration `20261019150000_create_billing_journal` (#495; epic #489, ADR 0006, 2.7). It adds two empty tables and touches no
 existing row, so an app of the previous release on the same database is unaffected (it never reads them):
 
-- `billing_journal_entries` (`id` primary key; `workspace_id` → `workspaces.id`; `type`, one of `top_up`, `start_credit`,
+- `billing_journal_entries` (`seq` primary key, the order entries were written in: a Postgres identity, the SQLite row id
+  (an `integer primary key`, which only grows because nothing is ever deleted; not `autoincrement`, see the convention
+  below); `id` text, unique; `workspace_id` → `workspaces.id`; `type`, one of `top_up`, `start_credit`,
   `reservation`, `usage`, `release`, `refund`, `chargeback`, `correction`; `amount_micro_usd`, a signed integer; `ref_key`, the job
   id or the provider reference; `job_id`, `review_kind`, `minutes`; `ai_micro_usd` and `infra_micro_usd` of a `usage`;
   `reverses_entry_id` → the same table; `provider`, `provider_ref`, `actor_user_id`, `note`; `created_at`). **Append-only.**
@@ -399,23 +401,29 @@ existing row, so an app of the previous release on the same database is unaffect
   all entries (a reservation is a debit, so it already excludes held money); `reserved` is the open reservations.
   The repository (`billing-journal-repository.ts`, scoped) updates it in the transaction of every entry; `verify()` compares
   it with the journal.
-- **Immutability.** Triggers refuse an `UPDATE` and a `DELETE` of an entry for every writer: on Postgres a function
+- **Immutability.** Triggers refuse an `UPDATE` and a `DELETE` of an entry on every connection: on Postgres a function
   (`billing_journal_entries_guard`) and a row trigger for update and delete plus a statement trigger for `TRUNCATE`; on
   SQLite one trigger each for update and delete. Every refusal carries `billing_journal_entries_immutable`. A mistake is a
-  new `correction` entry. SQLite fires a delete trigger for `insert or replace` only with recursive triggers on, so
-  `openDatabase` turns that pragma on (`connection.ts`). The down migration drops the guard function on Postgres, which a
+  new `correction` entry. SQLite fires a delete trigger for `insert or replace` only with recursive triggers on, and
+  that is a **per-connection** pragma: `openDatabase` turns it on (`connection.ts`), but the tools that open the file
+  themselves (`admin-cli`, `backup`, `restore`, the legacy import) and the `sqlite3` shell do not, so on those an
+  `insert or replace` could still overwrite an entry. No code does that; update and delete are refused everywhere. The down migration drops the guard function on Postgres, which a
   table drop leaves behind (the same note as the removed billing migrations below).
 - **Money is an integer** in micro-USD, never a float and never a 32 bit column (it would stop at about USD 2,147):
   `integer` on SQLite, which is 64 bit already, so the "text and integer columns only" convention holds there, and
   `bigint` on Postgres. Postgres returns a `bigint` as text, so the repository converts every amount with `Number`
   (exact up to 2^53).
-- **Concurrency.** Everything that writes is one transaction and idempotent on the key. `reserve` takes the balance row's
-  lock (Postgres `FOR UPDATE`; SQLite's `begin immediate` already serializes writers), answers a repeated job from the
-  entry it wrote, and runs `UPDATE billing_balances SET balance = balance - :hold, reserved = reserved + :hold WHERE
+- **Concurrency.** Everything that writes is one transaction and idempotent on the key. `reserve` and `reserveUpTo` take
+  the balance row's lock (Postgres `FOR UPDATE`; SQLite's `begin immediate` already serializes writers), answer a
+  repeated job from the entry they wrote, and `settle` and `release` take the same lock before they read what the job
+  has, so a settlement never charges a job a concurrent release voided. The hold itself is `UPDATE billing_balances SET balance = balance - :hold, reserved = reserved + :hold WHERE
 workspace_id = :w AND balance >= :hold`; no row changed means the hold is refused and nothing is written. Every other
   entry adds to the balance unconditionally, so the balance goes below zero only through a settlement, refund, chargeback
   or correction. The balance row is updated, then inserted if missing, never upserted: Postgres checks the row it would
   insert (`reserved >= 0`) before it looks for a conflict. See `src/billing/README.md`.
+- **Open question: deleting a workspace.** `workspace_id` is a plain foreign key (no cascade) and the journal refuses
+  `DELETE`, so a workspace with a journal entry can never be deleted. No code deletes a workspace today. Whoever builds
+  workspace deletion has to decide (retention and erasure on request against an immutable ledger) before it can work.
 
 ### A database that ran the removed billing migrations
 

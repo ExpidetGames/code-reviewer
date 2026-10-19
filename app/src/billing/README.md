@@ -16,7 +16,7 @@ source file imports `"server-only"` (`server-only.test.ts`).
 | `rates-service.ts` | The one writer of the rates: validates, merges into the stored setting under an advisory lock (`db/billing-settings-lock.ts`), keeps the switch as it is. The admin form is #504.                                                                                                                                                                          |
 | `outcome.ts`       | `classifyOutcome`: the end state of a job and its stable codes to `charged`, `minutes_only` or `free`, from an exhaustive table (pure).                                                                                                                                                                                                                    |
 | `pricing.ts`       | `priceRun` and `reserveFor` (pure): the two prices of a run and the hold of a job, in whole micro-USD.                                                                                                                                                                                                                                                     |
-| `journal.ts`       | The vocabulary of the balance journal (#495): the entry types as an `as const` set, the sign of each, the stable error codes, `validateEntry`. The table checks restate the type and sign rules in SQL; `journal.test.ts` fails when they drift apart. |
+| `journal.ts`       | The vocabulary of the balance journal (#495): the entry types as an `as const` set, the sign of each, the stable error codes, `validateEntry`. The table checks restate the type and sign rules in SQL; `journal.test.ts` fails when they drift apart.                                                                                                     |
 | `enabled.ts`       | `isBillingOn(db)`: the one reader of the switch. `guardBillingRoute`: the first line of every billing route.                                                                                                                                                                                                                                               |
 | `public-url.ts`    | Whether an address can be reached from the internet (https, no credentials, no loopback, private, link-local or local name; pure), and the one spelling addresses are compared in. A Stripe webhook endpoint needs it.                                                                                                                                     |
 
@@ -131,17 +131,27 @@ lifecycle calls it yet: reserving at claim and settling are #498, crediting from
 | `chargeback`   | -    | A dispute was lost; the key is the dispute id.                             |
 | `correction`   | +/-  | A manual correction, or the reversal of an entry (`reverses_entry_id`).    |
 
-- **Repository.** `append(entry)` for every type but a reservation; `reserve(hold, jobId)`; `settle(jobId, charge)` (a
-  `release` of the hold and a `usage` of the charge, in one transaction; a charge of zero writes only the release);
-  `release(jobId)` (a job that never ran); `balance()`; `entries({ cursor, limit })` (newest first, `(created_at, id)`
-  cursor); `verify()`.
+- **Repository.** `append(entry)` for every type but a reservation; `reserve(hold, jobId)`; `reserveUpTo(jobId, maxHold)` (the
+  hold of a claim, see below); `settle(jobId, charge)` (a `release` of the hold and a `usage` of the charge, in one
+  transaction; a charge of zero writes only the release; `created` is true when this call wrote the usage, the release
+  when there is none); `release(jobId)` (a job that never ran); `balance()`; `entries({ cursor, limit })` (newest first,
+  by `seq`, cursor `{ seq }`; the caller clamps `limit`); `verify()`.
 - **Idempotent.** The key is `(workspace, type, ref_key)`: the job id for a job's entries, the provider reference for
   money from outside. The same key with the same amount returns the entry that exists (`created: false`) and changes
-  nothing; with another amount it is an `idempotency_conflict`. A reversal happens once (`already_reversed`), names an
+  nothing; with another amount it is an `idempotency_conflict`. A `usage` is also its parts, its minutes and its kind: a
+  settlement repeated with the same total but other numbers is an `idempotency_conflict` too. A reversal happens once (`already_reversed`), names an
   entry of the workspace with the opposite amount, and is never of a reservation or a release.
 - **Atomic and race free on both engines.** An entry and the balance change in one transaction (the caller's, when it
-  hands in a transaction). `reserve` is the only conditional write: it holds at most the balance, so 20 claims of 3 against
-  10 grant exactly 3, on Postgres (one pool, two pools) and on SQLite (one connection, several processes).
+  hands in a transaction). `reserve` and `reserveUpTo` are the conditional writes: they hold at most the balance, so 20 claims of 3
+  against 10 grant exactly 3, on Postgres (one pool, two pools) and on SQLite (one connection, several processes).
+  `settle` and `release` take the lock of the balance row before they read what a job has, so a release and a settlement
+  of one job are decided one after the other: a job whose release committed first, or commits at the same moment, is
+  never charged (`job_already_released`).
+- **`reserveUpTo(jobId, maxHold)` is the hold of a claim** (#498, decision 5 of #489: hold at most the available balance).
+  Under the lock: a job that has a reservation gets it back unchanged (`created: false`), whatever its amount and the
+  balance are now, so a claim retried after a crash, a top-up or a refund is never a conflict; otherwise the hold is
+  `min(maxHold, balance)`. A balance of zero or below is refused with `balance_negative` (a hold of 0 is not a hold).
+  `reserve` stays for a caller that wants an exact hold or a refusal.
 - **A negative balance blocks.** A refund, a chargeback or a final charge above the hold may take the balance below zero;
   every `reserve` is then refused with `balance_negative`, whatever the amount. A balance that is positive but below the
   hold is refused with `insufficient_balance`. Both come back as the answer of `reserve` (`ok: false`), never as an
@@ -151,8 +161,11 @@ lifecycle calls it yet: reserving at claim and settling are #498, crediting from
   answered by `reserve`, `settle` and `release` (`insufficient_balance`, `balance_negative`, `reservation_not_found`,
   `job_already_released`).
 - **`verify()`** returns the cache and the sum of the journal side by side with the difference of each (cache minus sum) and
-  `consistent`. The nightly job that runs it is #510's. The entries of one millisecond are ordered by id, so two entries
-  written in the same transaction (a `release` and its `usage`) have no meaningful order among themselves.
+  `consistent`, read in one statement (one snapshot), so traffic that commits meanwhile never shows as drift. The nightly job
+  that runs it is #510's.
+- **Order.** Every entry has a `seq`, the order it was written in (a Postgres identity, the SQLite row id). `entries()`
+  lists by it, so a `release` and its `usage`, written in one millisecond, keep their order. On Postgres a transaction
+  that commits late can land below a `seq` a reader has passed; a cursor reader sees it on its next fresh read.
 
 ## Where billing is not allowed to reach
 
