@@ -6,7 +6,7 @@ import { startLlmFake } from "../../../../../fakes/llm/server.ts";
 import { cleanUpAfterTest } from "../../../test-support/test-database.ts";
 import { llmProviderAdapters } from "../server.ts";
 
-const KEY = "sk-ant-api03-dummy-0123456789abcdef0123456789abcdef";
+const KEY = "dummy-anthropic-api03-dummy-0123456789abcdef0123456789abcdef";
 const adapter = llmProviderAdapters.get("anthropic");
 
 async function setup() {

@@ -18,7 +18,7 @@ from code_reviewer_runner.pr_agent_config import (
 )
 
 TOKEN = "dummy-installation-token-0123456789"
-KEY = "sk-ant-dummy-0123456789abcdef"
+KEY = "dummy-anthropic-dummy-0123456789abcdef"
 
 
 def make_job(model: str = "claude-haiku-5-5", **llm: Any) -> Job:

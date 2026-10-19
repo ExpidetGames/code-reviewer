@@ -26,7 +26,7 @@ from code_reviewer_runner.dynamic_review.proxy import (
 from code_reviewer_runner.llm_providers import ANTHROPIC
 from code_reviewer_runner.result import ErrorCode
 
-KEY = "sk-ant-api03-workspace-key-0123456789"
+KEY = "dummy-anthropic-api03-workspace-key-0123456789"
 CAPABILITY = new_proxy_capability()
 MODEL = "claude-sonnet-5"
 URL = "https://api.anthropic.com/v1/messages"

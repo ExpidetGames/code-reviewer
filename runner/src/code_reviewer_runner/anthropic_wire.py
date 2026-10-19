@@ -387,6 +387,11 @@ def _count(value: object) -> int | None:
     return value
 
 
+def _count_or_zero(value: object) -> int | None:
+    """A count that may be absent (null or missing is zero); None when it is there and unusable."""
+    return 0 if value is None else _count(value)
+
+
 def _usage(raw: object) -> dict[str, Any] | None:
     """The usage in the shape the proxy and the cost rule read (LiteLLM's names): `prompt_tokens`
     holds the cache tokens. A count that is missing or unusable is left out, so the proxy sees
@@ -397,16 +402,8 @@ def _usage(raw: object) -> dict[str, Any] | None:
     translated: dict[str, Any] = {}
     uncached = _count(usage.get("input_tokens"))
     output = _count(usage.get("output_tokens"))
-    read = (
-        _count(usage.get("cache_read_input_tokens"))
-        if usage.get("cache_read_input_tokens") is not None
-        else 0
-    )
-    written = (
-        _count(usage.get("cache_creation_input_tokens"))
-        if usage.get("cache_creation_input_tokens") is not None
-        else 0
-    )
+    read = _count_or_zero(usage.get("cache_read_input_tokens"))
+    written = _count_or_zero(usage.get("cache_creation_input_tokens"))
     if uncached is not None and read is not None and written is not None:
         translated["prompt_tokens"] = uncached + read + written
         translated["cache_read_input_tokens"] = read

@@ -18,7 +18,7 @@ from harness import Engine
 
 from code_reviewer_runner.anthropic_models import MODELS
 
-KEY = "sk-ant-api03-dummy-engine-key-0123456789"
+KEY = "dummy-anthropic-api03-dummy-engine-key-0123456789"
 
 
 def anthropic_job(engine: Engine, model: str) -> dict[str, Any]:

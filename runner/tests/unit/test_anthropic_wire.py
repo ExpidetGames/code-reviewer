@@ -82,9 +82,9 @@ def test_the_endpoint_and_the_headers_are_those_of_the_messages_api() -> None:
 
     assert w.url("https://api.anthropic.com/v1") == "https://api.anthropic.com/v1/messages"
     assert w.url("http://127.0.0.1:4010/api/v1") == "http://127.0.0.1:4010/api/v1/messages"
-    headers = w.headers("sk-ant-key")
+    headers = w.headers("dummy-anthropic-key")
     assert headers == {
-        "x-api-key": "sk-ant-key",
+        "x-api-key": "dummy-anthropic-key",
         "anthropic-version": "2023-06-01",
         "Content-Type": "application/json",
     }

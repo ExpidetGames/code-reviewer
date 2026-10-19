@@ -21,7 +21,7 @@ from code_reviewer_runner.dynamic_review.proxy import ModelProxy, capabilities_f
 from code_reviewer_runner.llm_providers import ANTHROPIC
 from code_reviewer_runner.result import ErrorCode
 
-KEY = "sk-ant-api03-workspace-key-0123456789"
+KEY = "dummy-anthropic-api03-workspace-key-0123456789"
 MODEL = "claude-sonnet-5"
 UNIT_COSTS = UnitCosts(input_usd_per_mtok=Decimal(2), output_usd_per_mtok=Decimal(10))
 CAPABILITIES = json.dumps(
