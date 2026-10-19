@@ -80,7 +80,9 @@ describe("no lane reaches models.dev", () => {
   it("every webServer of a Playwright config that starts the app gets the shared environment or its own switch", () => {
     // `playwright.config.ts` spreads `appEnv` into its apps; every `next start` there must do so, or it carries its own.
     const text = read("app/playwright.config.ts");
-    const servers = text.split(/\n\s*\{\n\s*(?:\/\/[^\n]*\n\s*)*command:/).slice(1);
+    const servers = text
+      .split(/\n\s*\{\n\s*(?:\/\/[^\n]*\n\s*)*command:/)
+      .slice(1);
     const apps = servers.filter((server) => /pnpm start/.test(server));
     expect(apps.length).toBeGreaterThan(0);
     for (const server of apps)
