@@ -138,7 +138,7 @@ function carriesUsage(result: unknown): boolean {
  * The reasons the loop of a runner gives (`errorReason`) when it ends a job process that held the job and left no
  * usable result: killed, no result line, past the hard timeout, or a usage it could not read.
  */
-const NO_RESULT_ERROR_REASONS: readonly string[] = [
+export const NO_RESULT_ERROR_REASONS: readonly string[] = [
   "no_result_from_process",
   "unreadable_usage",
 ];
