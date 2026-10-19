@@ -497,14 +497,15 @@ def test_an_explicit_status_in_the_entry_overrides_the_deprecated_status_of_the_
 # -- one engine that knows many providers ------------------------------------------------------
 
 
-def _reasoning_pair(family: Family, provider: str) -> Provider:
-    """A plain main model and, next to it, one that says it reasons (listed, never asked)."""
+def _reasoning_pair(family: Family, provider: str, *, asked: bool = False) -> Provider:
+    """A plain main model and one that says it reasons (listed; asked too if `asked`)."""
     return Provider(
         family,
         id=provider,
         model=f"{provider}-9",
         steps=1,
-        others={f"{provider}-think": REASONING_ENTRY},
+        served=(f"{provider}-think-9", f"{provider}-flat") if asked else (),
+        others={f"{provider}-think-9": REASONING_ENTRY, f"{provider}-flat": {}},
     )
 
 
@@ -518,6 +519,7 @@ def multi_providers() -> list[Provider]:
             model="acme-status-9",
             entry={"status": "beta"},
             steps=1,
+            served=("acme-think",),
             others={
                 "acme-alpha-9": {"status": "alpha"},
                 "acme-dep-9": {"status": "deprecated"},
@@ -544,7 +546,7 @@ def multi_providers() -> list[Provider]:
             pinned=True,
         ),
         _reasoning_pair("responses", "acme-resp"),
-        _reasoning_pair("messages", "acme-claude"),
+        _reasoning_pair("messages", "acme-claude", asked=True),
         _reasoning_pair("google", "acme-gemini"),
         # A provider the snapshot has, a model it lacks, no SDK named (the snapshot's SDK is used).
         Provider(
@@ -556,7 +558,15 @@ def multi_providers() -> list[Provider]:
             steps=1,
             others={"claude-sonnet-5-5": {}},
         ),
-        Provider("responses", id="openai", model="gpt-spike-9", npm=False, steps=1),
+        Provider(
+            "responses",
+            id="openai",
+            model="gpt-spike-9",
+            npm=False,
+            steps=1,
+            served=("gpt-spike-think",),
+            others={"gpt-spike-think": REASONING_ENTRY},
+        ),
         Provider("google", id="google", model="gemini-spike-9", npm=False, steps=1),
         # The providers a managed catalog would use, and the caching rule: marks follow the model
         # id (`claude` in it), not the provider id.
@@ -604,6 +614,7 @@ def multi(tmp_path_factory: pytest.TempPathFactory) -> Multi:
     asks = [
         _ask(providers["acme-status"]),
         _ask(providers["acme-status"], "acme-dep-9"),
+        _ask(providers["acme-status"], "acme-think"),
         _ask(providers["acme-empty"]),
         Step("unknown-model", "acme-empty", "no-such-model"),
         Step("unknown-provider", "no-such-provider", "acme-empty-9"),
@@ -614,8 +625,11 @@ def multi(tmp_path_factory: pytest.TempPathFactory) -> Multi:
         _ask(providers["acme-pinned"], "acme-pinned-10"),
         _ask(providers["acme-pinned"]),
         _ask(providers["acme-claude"]),
+        _ask(providers["acme-claude"], "acme-claude-think-9"),
+        _ask(providers["acme-claude"], "acme-claude-flat"),
         _ask(providers["anthropic"]),
         _ask(providers["openai"]),
+        _ask(providers["openai"], "gpt-spike-think"),
         _ask(providers["google"]),
         _ask(providers["deepseek"]),
         _ask(providers["deepseek"], "claude-ds-9"),
@@ -782,7 +796,7 @@ def test_a_session_without_a_title_makes_one_extra_streamed_call_without_tools(
 def test_reasoning_variants_are_derived_for_a_model_that_says_it_reasons(
     multi: Multi, provider: str, family: Family
 ) -> None:
-    assert list(multi.listed[provider][f"{provider}-think"]["variants"]) == VARIANTS[family]
+    assert list(multi.listed[provider][f"{provider}-think-9"]["variants"]) == VARIANTS[family]
 
 
 # #546-T08
@@ -799,16 +813,43 @@ def test_a_model_without_the_reasoning_flag_has_no_variants(multi: Multi, provid
 
 
 # #546-T08
-def test_an_anthropic_model_that_does_not_reason_is_still_sent_adaptive_thinking(
+def test_the_reasoning_flag_of_an_entry_changes_the_request_for_responses_and_google_only(
     multi: Multi,
 ) -> None:
-    run = multi.run("acme-claude", "acme-claude-9")
+    # A wrong flag in a generated entry is not harmless: Responses then asks for the encrypted
+    # reasoning back, and Gemini (the loop above) is asked to think at a high level.
+    plain = multi.run("openai", "gpt-spike-9").bodies()[0]
+    thinking = multi.run("openai", "gpt-spike-think").bodies()[0]
+    assert "include" not in plain
+    assert thinking["include"] == ["reasoning.encrypted_content"]
+
+    gemini = multi.run("google", "gemini-spike-9").bodies()[0]
+    assert "thinkingConfig" not in gemini["generationConfig"]
+
+    for provider, plain_model, think_model in (
+        ("acme-status", "acme-status-9", "acme-think"),
+        ("acme-claude", "acme-claude-9", "acme-claude-think-9"),
+    ):
+        first = multi.run(provider, plain_model).bodies()[0]
+        second = multi.run(provider, think_model).bodies()[0]
+        assert set(first) == set(second), (provider, sorted(first), sorted(second))
+        assert first.get("thinking") == second.get("thinking")
+
+
+# #546-T08
+def test_adaptive_thinking_follows_the_model_id_and_not_the_reasoning_flag_of_the_entry(
+    multi: Multi,
+) -> None:
+    # `acme-claude-9` says it does not reason and is sent adaptive thinking all the same; a model
+    # id without a Claude version is sent none, whatever the flag says.
+    plain = multi.run("acme-claude", "acme-claude-9")
 
     assert multi.listed["acme-claude"]["acme-claude-9"]["capabilities"]["reasoning"] is False
-    assert run.http_status == 200
-    for body in run.bodies():
+    assert plain.http_status == 200
+    for body in plain.bodies():
         assert body["thinking"]["type"] == "adaptive"
         assert body["max_tokens"] == 8192
+    assert "thinking" not in multi.run("acme-claude", "acme-claude-flat").bodies()[0]
 
 
 # #546-T08
