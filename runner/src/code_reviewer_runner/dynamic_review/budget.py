@@ -819,7 +819,8 @@ class BudgetLedger:
                 self._overshot = True
 
     def settle_unbilled(self, reservation: Reservation) -> None:
-        """Release the reservation of a call the provider refused before it generated anything (#550).
+        """Release the reservation of a call the provider refused before it generated anything
+        (#550).
 
         The engine of the passthrough path retries a refusal (429, 5xx) by itself, so the refusal
         does not end the run as it does on the legacy path. The call was made and is counted, it
