@@ -33,7 +33,8 @@ async function rowsOfEveryTable(
   for (const table of await db.introspection.getTables()) {
     if (
       table.name === "job_check_runs" ||
-      table.name === "model_catalog_entries"
+      table.name === "model_catalog_entries" ||
+      table.name === "job_vm_runs"
     )
       continue;
     const { rows } =

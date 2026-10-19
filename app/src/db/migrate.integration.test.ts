@@ -101,6 +101,7 @@ describe("the migrations of both epics", () => {
       "20261017160000_add_workspace_entitlements_model_access",
       "20261018090000_add_usage_record_catalog_entry",
       "20261018170000_migrate_model_tiers_to_catalog",
+      "20261019160000_create_job_vm_runs",
     ]);
   });
 
@@ -152,6 +153,7 @@ describe("starting the database", () => {
       "job_claimed_keys",
       "job_comments",
       "job_dispatches",
+      "job_vm_runs",
       "jobs",
       "kysely_migration",
       "kysely_migration_lock",
