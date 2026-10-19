@@ -22,10 +22,10 @@ Every refusal is a stable `RefusalCode`, and the `ErrorCode` the run records for
 import hmac
 import json
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any, Final
+from typing import Any, Final, Protocol
 
 from code_reviewer_runner.dynamic_review.passthrough.families import (
     ALLOWED_ANTHROPIC_BETAS,
@@ -116,6 +116,36 @@ _MAX_HEADER_VALUE = 1024
 _GOOGLE_MODEL_PATH = re.compile(r"/v1beta/models/([^:/?#]+):streamGenerateContent")
 # OpenRouter's own routing: it would let the request name other models or buy plugins.
 _CHAT_FORBIDDEN_FIELDS: Final = frozenset({"models", "route", "plugins", "transforms"})
+
+
+class NativeEntry(Protocol):
+    """What the proxy reads of the per-job model entry (`contracts/job-model-entry.v1.json`, #548:
+    `job_model_entry.JobModelEntry` has these fields)."""
+
+    @property
+    def family(self) -> str: ...
+
+    @property
+    def model_id(self) -> str: ...
+
+    @property
+    def model(self) -> Mapping[str, Any]: ...
+
+
+def target_from_entry(entry: NativeEntry) -> PassthroughTarget:
+    """The target of a job from its entry. The allowance is what the engine will send, not the
+    catalog's `limit.output`. Raises `ValueError` for an entry the proxy cannot serve."""
+    try:
+        family = WireFamily(entry.family)
+    except ValueError:
+        raise ValueError("the entry names a wire family the proxy does not know") from None
+    limit = entry.model.get("limit")
+    output = limit.get("output") if isinstance(limit, Mapping) else None  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    if isinstance(output, bool) or not isinstance(output, int):
+        raise ValueError("the entry has no output limit")
+    return PassthroughTarget(
+        family=family, model=entry.model_id, output_allowance=output_allowance(output)
+    )
 
 
 def _not_allowed() -> Refused:

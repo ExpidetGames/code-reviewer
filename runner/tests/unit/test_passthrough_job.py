@@ -8,6 +8,7 @@ shapes used here are the example of that contract.
 """
 
 import json
+from dataclasses import dataclass
 from typing import Any
 
 import pytest
@@ -20,6 +21,7 @@ from code_reviewer_runner.dynamic_review.config import (
 from code_reviewer_runner.dynamic_review.passthrough.admission import (
     ENGINE_OUTPUT_CAP,
     output_allowance,
+    target_from_entry,
 )
 from code_reviewer_runner.dynamic_review.passthrough.engine_errors import (
     MODEL_NOT_FOUND,
@@ -135,3 +137,27 @@ def test_a_model_the_provider_has_retired_has_the_code_model_unknown() -> None:
     assert not model_not_found_for_turn(200, unknown, upstream_calls=0)
     assert not model_not_found_for_turn(500, {"name": "ConfigInvalidError"}, upstream_calls=0)
     assert not model_not_found_for_turn(500, "text", upstream_calls=0)
+
+
+@dataclass(frozen=True)
+class EntryLike:
+    """The fields of the reader of #548 (`job_model_entry.JobModelEntry`) the proxy needs."""
+
+    family: str
+    model_id: str
+    upstream_base_url: str
+    model: dict[str, Any]
+
+
+# #550-T13
+def test_the_target_of_a_job_is_read_from_its_model_entry() -> None:
+    entry = EntryLike("openai-chat", "deepseek-v4-pro", UPSTREAM, MODEL)
+    target = target_from_entry(entry)
+    assert target.family is WireFamily.OPENAI_CHAT
+    assert target.model == "deepseek-v4-pro"
+    # The engine asks for 32000 of the 384000 the catalog states.
+    assert target.output_allowance == 32_000
+    with pytest.raises(ValueError, match="family"):
+        target_from_entry(EntryLike("openai-completions", "m", UPSTREAM, MODEL))
+    with pytest.raises(ValueError, match="limit"):
+        target_from_entry(EntryLike("google", "m", UPSTREAM, {"name": "x"}))
