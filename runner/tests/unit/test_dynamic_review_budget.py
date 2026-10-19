@@ -360,15 +360,19 @@ def test_in_flight_reservations_and_settled_cost_are_summed() -> None:
     subject.reserve_call("a", output_tokens=1_000)  # fits again
 
 
-# #290-T08
-def test_a_settled_cost_over_the_limit_ends_the_run() -> None:
+# #290-T08, changed by #540 (B1): the call that settles over the limit is delivered, and it ends
+# the agent phase instead of failing the run; the run still ends and nothing normal follows.
+def test_a_settled_cost_over_the_limit_ends_the_agent_phase() -> None:
     subject = ledger(max_cost_usd=Decimal("0.5"))
     reservation = subject.reserve_call("a", output_tokens=1)
 
+    subject.settle_call(reservation, prompt_tokens=1, completion_tokens=1, cost=Decimal("0.51"))
+
     with pytest.raises(LimitError) as refused:
-        subject.settle_call(reservation, prompt_tokens=1, completion_tokens=1, cost=Decimal("0.51"))
+        subject.reserve_call("a", output_tokens=1)
     assert refused.value.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
     assert refused.value.detail == "the cost limit is used up"
+    assert subject.reserve_call("a", output_tokens=1, can_wrap_up=True).final is True
 
 
 # #290-T09
@@ -496,12 +500,24 @@ def test_the_final_call_is_reserved_with_the_instruction_it_carries() -> None:
     assert final.cost == UNIT_COSTS.of_call(1100, 100)
 
 
-# #293-T01
-def test_the_final_call_must_itself_fit_the_cost_limit() -> None:
+# #293-T01, changed by #540 (B1): the final call is the last chance of a review, so it is admitted
+# although it does not fit, while nothing is spent or in flight beyond the limit.
+def test_the_final_call_is_admitted_although_it_does_not_fit_the_cost_limit() -> None:
+    subject = ledger(max_cost_usd=Decimal("0.001"))  # the call costs 0.0014
+
+    final = subject.reserve_call("x" * 3000, output_tokens=100, can_wrap_up=True)
+
+    assert final.final is True and final.cost > Decimal("0.001")
+    assert subject.model_calls == 1
+    assert subject.stopped_early == "cost_limit"
+
+
+# #293-T01: a normal call still has to fit.
+def test_a_normal_call_must_itself_fit_the_cost_limit() -> None:
     subject = ledger(max_cost_usd=Decimal("0.001"))  # the call costs 0.0014
 
     with pytest.raises(LimitError) as refused:
-        subject.reserve_call("x" * 3000, output_tokens=100, can_wrap_up=True)
+        subject.reserve_call("x" * 3000, output_tokens=100)
     assert refused.value.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
     assert refused.value.detail == "the cost limit is used up"
     assert subject.model_calls == 0
@@ -614,11 +630,9 @@ def test_there_is_at_most_one_recovery() -> None:
     assert subject.begin_recovery() is False  # used
 
 
-# #309-T05: the cost guard alone. The first call is a normal call (a final call would have fit after
-# it), so only the cost of one more call can refuse the recovery. One more call is priced at the
-# last prompt (900 tokens) + the output allowance (100) + a 4 KiB slack at 1 / 4 USD per million:
-# about 0.0027 USD.
-def test_there_is_no_recovery_when_the_cost_for_it_does_not_fit() -> None:
+# #309-T05, changed by #540 (B1): the recovery call is a final call, so it is admitted whenever the
+# spend is within the limit, also when one more call no longer fits (about 0.0027 USD here).
+def test_there_is_a_recovery_although_the_cost_for_it_does_not_fit() -> None:
     subject = BudgetLedger(
         DynamicLimits(max_cost_usd=Decimal("0.05")), output_tokens=100, unit_costs=UNIT_COSTS
     )
@@ -626,13 +640,24 @@ def test_there_is_no_recovery_when_the_cost_for_it_does_not_fit() -> None:
     assert first.final is False
     subject.settle_call(first, prompt_tokens=900, completion_tokens=50, cost=Decimal("0.0480"))
 
-    assert subject.begin_recovery() is False  # 0.0480 + about 0.0027 is over 0.05
-    # Nothing was armed: the next call is a plain one.
-    nothing = subject.reserve_call("a", output_tokens=1, can_wrap_up=True, recovery_text="r")
-    assert nothing.recovery is False and subject.recovered is False
+    assert subject.begin_recovery() is True  # 0.0480 + about 0.0027 is over 0.05
 
 
-# #309-T05: the same ledger a little cheaper may recover, so the test above is about the cost.
+# #309-T05: nothing is armed when what is in flight already passes the limit.
+def test_there_is_no_recovery_when_what_is_in_flight_passes_the_cost_limit() -> None:
+    subject = BudgetLedger(
+        DynamicLimits(max_cost_usd=Decimal("0.05")), output_tokens=100, unit_costs=UNIT_COSTS
+    )
+    first = subject.reserve_call("x" * 3000, output_tokens=100)
+    second = subject.reserve_call("x" * 3000, output_tokens=100)
+    subject.settle_call(first, prompt_tokens=900, completion_tokens=50, cost=Decimal("0.0495"))
+    assert second.final is False
+
+    assert subject.begin_recovery() is False  # 0.0495 spent + 0.0014 held is over 0.05
+    assert subject.recovered is False
+
+
+# #309-T05: the same ledger a little cheaper may recover as well.
 def test_the_recovery_is_allowed_when_the_cost_for_it_just_fits() -> None:
     subject = BudgetLedger(
         DynamicLimits(max_cost_usd=Decimal("0.05")), output_tokens=100, unit_costs=UNIT_COSTS
@@ -738,16 +763,20 @@ def test_after_the_recovery_call_no_other_call_is_granted() -> None:
         assert refused.value.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
 
 
-# #309-T05
-def test_the_recovery_call_is_reserved_like_any_call_and_refused_over_the_cost_limit() -> None:
+# #309-T05, changed by #540 (B1): the recovery call is reserved like any call (the window is still
+# checked) but it is a final call, admitted whatever its expected cost, while the spend is within
+# the limit.
+def test_the_recovery_call_is_admitted_over_the_cost_limit_it_was_expected_to_fit() -> None:
     subject = ledger(max_cost_usd=Decimal("0.05"))
     after_one_call(subject, cost="0.0001")
     assert subject.begin_recovery()  # the estimate of the call fits
 
-    with pytest.raises(LimitError) as refused:
-        subject.reserve_call("x" * 300000, output_tokens=100, can_wrap_up=True, recovery_text="r")
-    assert refused.value.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
-    assert subject.recovered is False
+    recovery = subject.reserve_call(
+        "x" * 300000, output_tokens=100, can_wrap_up=True, recovery_text="r"
+    )
+
+    assert recovery.recovery is True and recovery.cost > Decimal("0.05")
+    assert subject.recovered is True
 
 
 # #309-T07

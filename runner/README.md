@@ -357,7 +357,11 @@ input and the boundaries around it (the epic's binding decision). Modules:
   content, the byte caps). Every call is reserved before it is sent (the cost it is expected to have from
   what the run showed: cached prefix, observed output, #540), every tool
   part is counted, and a missing or oversized answer fails closed; a call without `usage.cost` ends
-  the run. The run never passes the limit by more than one call's real cost (`docs/dynamic-review.md`, "The bound").
+  the run. A normal call is admitted only when its expected cost fits; the final call (wrap-up,
+  recovery, retries) is admitted whenever the spend is within the limit, and a normal call that
+  settles over the limit ends the agent phase instead of failing the run, so the cost guard never
+  ends a run without a review. The settled total is at most the limit plus the excess of the last
+  normal call plus the final call's cost (`usage.limitExceededBy` reports it; `docs/dynamic-review.md`, "The bound").
   The input estimate is bytes over 3, tightened by the previous call's real density, and the
   model's window (from its capability descriptor, never the Diff `llm.maxTokens`) is a backstop in
   front of the provider's own limit. Details: `docs/dynamic-review.md`, "Hard limits". Near the cost

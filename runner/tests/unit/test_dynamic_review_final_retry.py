@@ -219,8 +219,10 @@ def test_every_retry_is_accounted_like_a_model_call() -> None:
     assert subject.ledger.usage("m").ai_calls == before + FINAL_ATTEMPTS
 
 
-# #312-T06: no retry when the cost limit has no room for it; the first reply is what is returned.
-def test_no_retry_is_made_when_the_cost_limit_has_no_room() -> None:
+# #312-T06, changed by #540 (S1): a retry of the final call is a final call too. It is made while
+# the spend is within the cost limit, although the call no longer fits: it is the last chance of a
+# review.
+def test_a_retry_is_made_while_the_spend_is_within_the_limit_although_it_does_not_fit() -> None:
     # One call reserves about 0.0164 USD; the final call is charged 0.07 of the 0.08 limit.
     ledger = BudgetLedger(
         DynamicLimits(max_cost_usd=Decimal("0.08")), output_tokens=4096, unit_costs=UNIT_COSTS
@@ -233,7 +235,27 @@ def test_no_retry_is_made_when_the_cost_limit_has_no_room() -> None:
     response = post(subject, loop_request())
 
     assert response.status == 200
-    assert len(upstream.requests) == 2
+    # 0.0701 is within 0.08, so the first retry is made; it brings the spend over the limit and
+    # the second one is the one retry past it.
+    assert len(upstream.requests) == 1 + 1 + (FINAL_ATTEMPTS - 1)
+    assert ledger.failure is None
+
+
+# #312-T06, #540 (S1): once the spend is over the limit, one retry is still made and then none.
+def test_after_the_final_call_passed_the_limit_one_retry_is_made_and_no_more() -> None:
+    ledger = BudgetLedger(
+        DynamicLimits(max_cost_usd=Decimal("0.08")), output_tokens=4096, unit_costs=UNIT_COSTS
+    )
+    upstream = Sequence(answer_with_usage(cost=0.0001), completion_with(content="x", cost=0.09))
+    subject = proxy(upstream, ledger=ledger)
+    assert post(subject, loop_request()).status == 200
+    assert ledger.begin_recovery()
+
+    response = post(subject, loop_request())
+
+    assert response.status == 200
+    assert len(upstream.requests) == 1 + 1 + 1  # the normal call, the final call, one retry
+    assert ledger.limit_exceeded_by is not None
     assert ledger.failure is None
 
 

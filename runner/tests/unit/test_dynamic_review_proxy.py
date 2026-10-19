@@ -517,11 +517,11 @@ def test_a_provider_status_with_no_rule_is_a_bad_request(status: int) -> None:
     assert subject.ledger.failure.code is ErrorCode.LLM_BAD_REQUEST
 
 
-# #290-T08
-def test_a_call_that_would_cross_the_cost_limit_is_refused_before_the_provider_sees_it() -> None:
+# #290-T08, changed by #540 (B1): the second call does not fit the limit, so it is not refused, it
+# is the final call of the wrap-up (the spend is within the limit); what follows it is refused
+# before the provider sees it.
+def test_a_call_that_would_cross_the_cost_limit_is_the_final_call_and_nothing_follows() -> None:
     # Each call reserves its 4,096 output tokens at 4 USD per million: about 0.0164 USD.
-    # The first call is the final call of the wrap-up; it returns the answer, so the refusal of the
-    # second is the cost limit's.
     upstream = Upstream(body=answer_with_structured_output(prompt=100, completion=50, cost=0.04))
     subject = proxy(
         upstream,
@@ -531,11 +531,14 @@ def test_a_call_that_would_cross_the_cost_limit_is_refused_before_the_provider_s
     assert post(subject, request_body()).status == 200
     second = post(subject, request_body())
 
-    # 0.04 spent + 0.0164 for the second call is over 0.05, with nothing in flight.
-    assert second.status == 403
-    assert error_code(second) == ErrorCode.DYNAMIC_BUDGET_EXCEEDED.value
-    assert len(upstream.requests) == 1
-    assert subject.ledger.model_calls == 1
+    # 0.04 spent + 0.0164 for the second call is over 0.05, with nothing in flight: the final call.
+    assert second.status == 200
+    assert subject.ledger.stopped_early == "cost_limit"
+    third = post(subject, request_body())
+    assert third.status == 403
+    assert error_code(third) == ErrorCode.DYNAMIC_BUDGET_EXCEEDED.value
+    assert len(upstream.requests) == 2
+    assert subject.ledger.model_calls == 2
     assert subject.ledger.failure is not None
 
 
