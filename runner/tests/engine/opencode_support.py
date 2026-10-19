@@ -468,6 +468,7 @@ class Run:
     proxy: ModelProxy
     capability: str
     engine_sent: dict[str, str] = field(default_factory=lambda: {})
+    engine: DynamicEngine | None = None
 
 
 def run_engine(
@@ -482,14 +483,19 @@ def run_engine(
     provider: LlmProviderSpec = OPENROUTER,
     model_id: str = DEFAULT_MODEL,
     engine_requests: list[dict[str, Any]] | None = None,
+    engine_factory: Callable[..., DynamicEngine] = DynamicEngine,
+    ledger_factory: Callable[..., BudgetLedger] = BudgetLedger,
 ) -> Run:
     """Run the real engine over a prepared export against the scripted model, through the proxy.
 
     `export` overrides the directory the engine is pointed at (the control run uses a raw tree).
     `provider` and `model_id` choose the provider behind the proxy (the scripted model must speak
     its protocol); `engine_requests`, when given, collects the requests the engine sent the proxy.
+    `engine_factory` builds the engine from the same keyword arguments (the plain-JSON spike #547
+    passes a subclass), `ledger_factory` the same for the ledger (the spike's stand-in for the
+    final-call exemption of #542).
     """
-    ledger = BudgetLedger(
+    ledger = ledger_factory(
         limits or DynamicLimits(), unit_costs=UNIT_COSTS, clock=clock or time.monotonic
     )
     capability = new_proxy_capability()
@@ -524,7 +530,7 @@ def run_engine(
     assert dynamic is not None
     server = proxy.serve("127.0.0.1").start()
     try:
-        engine = DynamicEngine(
+        engine = engine_factory(
             job,
             ledger=ledger,
             command=[str(opencode_binary())],
@@ -549,4 +555,5 @@ def run_engine(
         proxy=proxy,
         capability=capability,
         engine_sent=audit.engine_sent,
+        engine=engine,
     )
