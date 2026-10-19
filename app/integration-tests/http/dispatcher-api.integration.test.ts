@@ -686,6 +686,7 @@ describe("the version call", () => {
       "claim_by_job_id",
       "pool_cap",
       "release",
+      "vm_lifecycle",
       "worker_api",
     ]);
   });

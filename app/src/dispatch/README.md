@@ -220,12 +220,12 @@ goes to the address of the wake-up (`RUNNER_WEBHOOK_URL`) with its last path seg
 **Never in the way.** The job's transition has committed before anything is sent; the call runs in `after()` and nothing
 awaits it, throws from it or is changed by it. A failure is best effort:
 
-| Answer                                                                 | What the App does                                                                                                                                                                                                                                  |
-| ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `202`, `200` (`stopping`, `no_vm`, `replayed`)                         | done                                                                                                                                                                                                                                               |
-| `429`, `503`, other `5xx`, a timeout (5 seconds a call), no connection | repeated after 1 s and 3 s (`STOP_RETRY_DELAYS_MS`; the longer of the pause and `Retry-After`, cut to 5 s), the **same `stopId`** every time, so a stop that arrived twice is a replay the receiver ignores; then logged as `DISPATCH_STOP_FAILED` |
-| `404`                                                                  | a Dispatcher of the previous release has no `/stop`: logged once as `DISPATCH_STOP_UNSUPPORTED`, not repeated; the reaper ends the VM as before                                                                                                    |
-| any other status (`401`, `400`, `413`, a redirect)                     | logged as `DISPATCH_STOP_REJECTED` with the status (a wrong URL or secret looks like this), not repeated                                                                                                                                           |
+| Answer                                                                 | What the App does                                                                                                                                                                                                                                                                                            |
+| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `202`, `200` (`stopping`, `no_vm`, `replayed`)                         | done. A `202` that names the VMs (`vms`, #493; a bounded read of the body, anything that is not a short list of well-formed names counts as none) ends those VMs at the App's clock (`app_stop_confirmed`, "Billable minutes" in `billing/README.md`); the other answers name none, and the backstop applies |
+| `429`, `503`, other `5xx`, a timeout (5 seconds a call), no connection | repeated after 1 s and 3 s (`STOP_RETRY_DELAYS_MS`; the longer of the pause and `Retry-After`, cut to 5 s), the **same `stopId`** every time, so a stop that arrived twice is a replay the receiver ignores; then logged as `DISPATCH_STOP_FAILED`                                                           |
+| `404`                                                                  | a Dispatcher of the previous release has no `/stop`: logged once as `DISPATCH_STOP_UNSUPPORTED`, not repeated; the reaper ends the VM as before                                                                                                                                                              |
+| any other status (`401`, `400`, `413`, a redirect)                     | logged as `DISPATCH_STOP_REJECTED` with the status (a wrong URL or secret looks like this), not repeated                                                                                                                                                                                                     |
 
 One line per job and call, `[dispatch] <CODE> job=<id> [status=<n>]`, never the URL, a key, a header or the text of an answer or
 an error. At most about 25 seconds a job (two pauses of up to 5 seconds and three calls of 5 seconds), five jobs at a time.
@@ -241,7 +241,8 @@ never signs with it.
 ## Logs
 
 A failed stop logs `[dispatch] DISPATCH_STOP_FAILED`, `DISPATCH_STOP_UNSUPPORTED`, `DISPATCH_STOP_REJECTED` or
-`DISPATCH_STOP_URL_INVALID` (`STOP_RESULT_CODES`, "Stopping the VM when a job ends").
+`DISPATCH_STOP_URL_INVALID` (`STOP_RESULT_CODES`, "Stopping the VM when a job ends"); a stop that worked but whose VM end could
+not be stored logs `DISPATCH_VM_END_FAILED` (#493).
 A failed send logs `[dispatch] DISPATCH_SEND_FAILED job=<id> code=<name> status=<n|none> failures=<n> retry_at=<time>`;
 an answer an operator has to look at logs `DISPATCH_REJECTED`; a failure inside the dispatch logs `DISPATCH_FAILED`
 with the database error code. Never the URL, the key, the key id, a signature, a header or the text of an error.

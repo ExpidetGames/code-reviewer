@@ -115,6 +115,8 @@ export type SandboxLauncherOptions = {
   capabilities?: (signal: AbortSignal) => Promise<readonly Engine[]>;
   /** The unique part of a VM name; random unless a test brings its own. */
   newSuffix?: () => string;
+  /** The clock of the start the App is told about (#493); the system clock unless a test brings its own. */
+  now?: () => Date;
   /**
    * The operator's Dynamic configuration, given to the container of a Dynamic job only (#331):
    * `RUNNER_DYNAMIC_CAPABILITIES` and `RUNNER_DYNAMIC_MAX_COST_USD`, as the self-hosted `runner-dynamic` service has
@@ -347,10 +349,22 @@ export function createSandboxLauncher(
       const requested = `cr-${slug(spec.kind, 8)}-${slug(spec.jobId, 36)}-${(options.newSuffix ?? randomSuffix)()}`;
 
       const vm = await createVm(plan, spec, requested, signal);
+      const createdAt = (options.now ?? (() => new Date()))();
       // The platform's own name is the one that stops the VM; a normalised name must not make a stop a no-op.
       const name = vm.name;
       if (name !== requested)
         logger.warn("sandbox_name_mismatch", { jobId: spec.jobId });
+      // #493: the core tells the App that the VM exists (its billable minutes start here). It returns at once and the
+      // launch does not depend on it: a callback that throws is ignored.
+      try {
+        spec.onVmCreated?.({
+          name,
+          startedAt: createdAt,
+          timeoutSeconds: spec.timeoutSeconds + vmTimeoutMarginSeconds,
+        });
+      } catch {
+        // Only that it failed.
+      }
       const host = new SandboxDockerHost({
         vm,
         clock,

@@ -16,6 +16,9 @@ export const REQUIRED_APP_FEATURES = [
   "release",
 ] as const;
 
+/** #493: the feature of the App that has the call by which the Dispatcher reports the VM it created. */
+export const VM_LIFECYCLE_FEATURE = "vm_lifecycle";
+
 export type ClaimedJob = {
   id: string;
   credential: string;
@@ -64,6 +67,11 @@ export type JobStateResult =
   | { kind: "unreadable" };
 
 export type HeartbeatResult = "ok" | "lease_lost" | "failed";
+/**
+ * #493: what the App said to the report of a VM. `recorded`: stored or already known. `transient`: worth repeating (no
+ * answer, 429, 5xx). `refused`: the App will not take it (the claim ended, a wrong credential, an old App): not repeated.
+ */
+export type VmReportResult = "recorded" | "transient" | "refused";
 /**
  * `ended`: 409, the job is over for this claim (it has its result, or was cancelled): expected after a Worker that
  * delivered its result and then exited with an error, and a no-op. `not_holder`: 401 or 404, the credential is not
@@ -177,7 +185,8 @@ export function createAppClient(options: AppClientOptions) {
   return {
     /** Does the App have what the split needs? An App without the version route is a previous release. */
     async checkVersion(): Promise<
-      { ok: true } | { ok: false; code: AppFailure; retryAfterSeconds?: number }
+      | { ok: true; features: readonly string[] }
+      | { ok: false; code: AppFailure; retryAfterSeconds?: number }
     > {
       const response = await send("/api/runners/v1/version", {
         method: "GET",
@@ -201,7 +210,7 @@ export function createAppClient(options: AppClientOptions) {
         (feature) => !parsed.data.features.includes(feature),
       );
       return missing.length === 0
-        ? { ok: true }
+        ? { ok: true, features: parsed.data.features }
         : { ok: false, code: "app_too_old" };
     },
 
@@ -267,6 +276,35 @@ export function createAppClient(options: AppClientOptions) {
       // The credential is no longer the job's, the lease is gone or the App ended the job: nothing to keep alive.
       if ([401, 404, 409].includes(response.status)) return "lease_lost";
       return "failed";
+    },
+
+    /**
+     * #493: tells the App that this VM was created for the claim the credential holds (`VmStartRequest`). The answer is
+     * reduced to what decides a repeat; its body is never read.
+     */
+    async reportVm(
+      jobId: string,
+      credential: string,
+      vm: { name: string; startedAt: Date; timeoutSeconds: number },
+    ): Promise<VmReportResult> {
+      const response = await send(
+        `/api/runners/v1/jobs/${encodeURIComponent(jobId)}/vm`,
+        {
+          method: "POST",
+          bearer: options.token,
+          body: {
+            credential,
+            vmName: vm.name,
+            startedAt: vm.startedAt.toISOString(),
+            timeoutSeconds: vm.timeoutSeconds,
+          },
+        },
+      );
+      if (response === null) return "transient";
+      void response.body?.cancel().catch(() => undefined);
+      if (response.status === 200) return "recorded";
+      if (response.status === 429 || response.status >= 500) return "transient";
+      return "refused";
     },
 
     async release(

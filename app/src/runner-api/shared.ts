@@ -13,6 +13,7 @@ import { builtInProjectDynamicSettings } from "../review-settings/settings.ts";
 import { managedModelsOf } from "./managed-models.ts";
 import { createUsageRecordsRepository } from "../db/repositories/usage-records-repository.ts";
 import { createJobsRepository } from "../db/repositories/jobs-repository.ts";
+import { createJobVmRunsRepository } from "../db/repositories/job-vm-runs-repository.ts";
 import { createRepositoriesRepository } from "../db/repositories/repositories-repository.ts";
 import { getDatabase } from "../db/startup.ts";
 import { integrationRegistry } from "../integrations/registry.ts";
@@ -154,6 +155,10 @@ function sharedDeps(): WorkerApiDeps {
 export function getRunnerApi(): RunnerApi {
   return createRunnerApi({
     ...sharedDeps(),
+    // #493: where a Dispatcher says it created the VM of a claim; scoped to the job's own workspace. The Worker API has
+    // no such call.
+    vmRuns: (workspaceId) =>
+      createJobVmRunsRepository(getDatabase(), workspaceId),
     runnerToken: () => configuredRunnerToken(process.env),
     appVersion: APP_VERSION,
   });

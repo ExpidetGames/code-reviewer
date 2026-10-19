@@ -52,6 +52,8 @@ const PUBLIC_ROUTES = [
   "/api/runners/v1/jobs/[id]/complete",
   // A Dispatcher gives a job back and reads the version with the same token (#322).
   "/api/runners/v1/jobs/[id]/release",
+  // A Dispatcher reports the VM it created with the same token and the job credential in the body (#493).
+  "/api/runners/v1/jobs/[id]/vm",
   "/api/runners/v1/version",
   // A Dispatcher reads the status of a job with the same token (#364).
   "/api/runners/v1/jobs/[id]",

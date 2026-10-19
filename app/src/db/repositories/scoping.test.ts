@@ -26,6 +26,7 @@ const SCOPED = [
   "integrations-repository.ts",
   "invitations-repository.ts",
   "job-check-runs-repository.ts",
+  "job-vm-runs-repository.ts",
   "jobs-repository.ts",
   "plan-handoff-tokens-repository.ts",
   "projects-repository.ts",
