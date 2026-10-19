@@ -123,6 +123,15 @@ identity linked to the acting admin (`github-identity.ts`: a row in `accounts`),
 - The managed model tiers (#280) are gone (#434): which model backs a workspace's reviews is a catalog entry (`src/model-catalog/README.md`), and `readSettings` has no `modelTiers` any more, the overview no "Managed model tiers" row; its row is "Model catalog" (#429: `modelCatalog`, released entries per kind and whether the kind has a default, counts only), which links to `/admin/llm`. A request that carries `modelTiers` is refused as an unknown field. The old operator setting `managed_model_tiers` stays in the database, unread, until a later migration removes it; the portal does not read it.
 - The mail form saves the SMTP password through `PUT /api/admin/settings` (`{ "smtp": { ..., "password": "..." } }`); an empty or missing password keeps the stored one only while host, port, user and security are unchanged (otherwise `password_required_for_new_server`), `clearPassword` removes it, and the answer, the settings read back and every log line say only that one is set (`configured`), cannot be read (`unreadable`) or is missing (`none`). The GitHub App (private key, webhook secret, client secret) uses the store the same way: `src/github-config/README.md`.
 
+## The run view (#541)
+
+`/admin/runs` lists the newest runs of every workspace (workspace, project and pull request, review kind, status, time,
+duration, error code) and `/admin/runs/<id>` shows one: its facts, what it consumed (model, tokens, cost in full, why it
+stopped early) and the two tables of the call trace (`app/src/runs/ui/call-trace.tsx`, `contracts/README.md`). The operator
+pays for the runs, so the cost is shown; the log of a run and the question of an `/ask` never reach this view. It reads
+through `db/repositories/job-directory-repository.ts`, an instance level repository that only reads (`src/db/README.md`,
+"Workspace scoping"); the pages ask `requireAdmin()` first like every page of the portal.
+
 ## A lost admin password
 
 `docker compose exec app admin reset-password <email>` (`src/admin-cli/`, the image puts the short name

@@ -8,8 +8,10 @@
 // rendered as text; the one link made from stored data is checked here.
 import { maskProvidersInText } from "../llm/provider-mask.ts";
 import type { JsonValue, StoredReviewCommand } from "../integrations/types.ts";
+import { checkCallTrace } from "../runner-api/call-trace.ts";
 import {
   STOPPED_EARLY_REASONS,
+  type RunnerCallTrace,
   type StoppedEarly,
 } from "../runner-api/contract.ts";
 import type { JobStatus } from "../jobs/job-status.ts";
@@ -87,6 +89,12 @@ export type RunDetailView = RunRowView & {
   supersededBy: string | null;
   /** The usage the runner reported, or null (a run that never reached a model, or an older result). */
   usage: RunUsageView | null;
+  /**
+   * What each model call and tool call of a Dynamic Review was (#541), without content: numbers and stable names.
+   * Null for a run without one (an older runner, a Diff Review, a run that made no call). On a managed quality
+   * level the cost of a call is null, like the cost of the run.
+   */
+  callTrace: RunnerCallTrace | null;
   /**
    * The run was on a managed quality level (#283): its cost is not shown (`usage.costUsd` is null). With the tokens it
    * would give a price per token, which tells the model; the operator reads the cost through the operator API.
@@ -220,6 +228,22 @@ export function readStoredUsage(result: JsonValue | null): RunUsageView | null {
 }
 
 /**
+ * The per-call trace of a stored result (#541), or null when the result has none or what it holds is not the
+ * contract's shape (the same check the runner API applies when it is stored). It holds only numbers and stable
+ * names, so there is nothing to clean.
+ */
+export function readStoredCallTrace(
+  result: JsonValue | null,
+): RunnerCallTrace | null {
+  if (typeof result !== "object" || result === null || Array.isArray(result))
+    return null;
+  const usage = result.usage;
+  if (typeof usage !== "object" || usage === null || Array.isArray(usage))
+    return null;
+  return checkCallTrace(usage.callTrace) ?? null;
+}
+
+/**
  * Failed runs whose review is on the pull request all the same: the runner shortened it to fit
  * GitHub's comment limit and reports it as a failure, with the link to the comment it posted.
  */
@@ -337,7 +361,17 @@ export function toRunDetailView(
     },
     supersededBy: job.supersededBy,
     usage: usageView(job, redact, onManagedKey),
+    callTrace: traceView(job, onManagedKey),
     costHidden: onManagedKey,
+  };
+}
+
+function traceView(job: Job, onManagedKey: boolean): RunnerCallTrace | null {
+  const trace = readStoredCallTrace(job.result);
+  if (trace === null || !onManagedKey) return trace;
+  return {
+    ...trace,
+    modelCalls: trace.modelCalls.map((call) => ({ ...call, costUsd: null })),
   };
 }
 

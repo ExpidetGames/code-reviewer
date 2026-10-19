@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
+import type { JsonValue } from "../integrations/types.ts";
 import type { Job } from "../jobs/job-types.ts";
 import {
   cleanLog,
   MAX_LOG_CHARS,
+  readStoredCallTrace,
   readStoredResult,
   readStoredUsage,
   safeGithubUrl,
@@ -672,5 +674,93 @@ describe("the detail of a run", () => {
 
     expect(view.args).toBe("What does it do?");
     expect(view.supersededBy).toBe("next-job");
+  });
+});
+
+// #541-T09, #541-T10
+describe("the call trace of a run", () => {
+  const modelCall = {
+    index: 0,
+    tMs: 1200,
+    promptTokens: 14600,
+    cacheRead: 0,
+    cacheWrite: 14600,
+    completionTokens: 492,
+    costUsd: 0.0342,
+    finishReason: "tool_calls",
+    final: false,
+    tools: [{ name: "read", count: 2 }],
+  };
+  const trace = {
+    truncated: false,
+    modelCalls: [modelCall, { ...modelCall, index: 1, costUsd: 0.01 }],
+    toolCalls: [{ index: 0, name: "read", resultBytes: 812, isRepeat: false }],
+  };
+  const usage = {
+    model: "vendor/dynamic-model",
+    totalTokens: 12900,
+    aiCalls: 2,
+    costUsd: 0.04,
+    stoppedEarly: null,
+  };
+  const stored = (callTrace: unknown): JsonValue =>
+    ({
+      ok: true,
+      commentUrl: null,
+      logTail: "",
+      usage: { ...usage, callTrace },
+    }) as JsonValue;
+
+  it("is read from the stored result as it is", () => {
+    expect(readStoredCallTrace(stored(trace))).toStrictEqual(trace);
+  });
+
+  it.each([
+    ["no result", null],
+    ["a result without usage", { ok: true }],
+    ["a usage without a trace", { ok: true, usage }],
+    ["a trace that is null", stored(null)],
+    ["a trace that is a string", stored("trace")],
+    ["a trace with an unknown key", stored({ ...trace, extra: 1 })],
+    [
+      "a trace with an entry of the wrong shape",
+      stored({ ...trace, toolCalls: [{ index: 0, name: "read" }] }),
+    ],
+    [
+      "a trace with a path in a call",
+      stored({
+        ...trace,
+        toolCalls: [{ ...trace.toolCalls[0], path: "src/a.py" }],
+      }),
+    ],
+    ["a result of the wrong type", "result"],
+  ])("is no trace for %s", (_name, result) => {
+    expect(readStoredCallTrace(result as never)).toBeNull();
+  });
+
+  it("is in the detail of a run and not in the row of the list", () => {
+    const run = job({ reviewKind: "dynamic", result: stored(trace) });
+
+    expect(toRunDetailView(run, "p", NOW).callTrace).toStrictEqual(trace);
+    expect(toRunRowView(run, "p", NOW)).not.toHaveProperty("callTrace");
+  });
+
+  it("is null in the detail of a run without one", () => {
+    const run = job({ reviewKind: "dynamic", result: { ok: true } });
+
+    expect(toRunDetailView(run, "p", NOW).callTrace).toBeNull();
+  });
+
+  it("shows no cost per call for a run on the operator's key", () => {
+    const run = job({ reviewKind: "dynamic", result: stored(trace) });
+
+    const detail = toRunDetailView(run, "p", NOW, (text) => text, true);
+
+    expect(detail.callTrace?.modelCalls.map((call) => call.costUsd)).toEqual([
+      null,
+      null,
+    ]);
+    expect(detail.callTrace?.modelCalls[0]?.promptTokens).toBe(14600);
+    expect(detail.costHidden).toBe(true);
   });
 });

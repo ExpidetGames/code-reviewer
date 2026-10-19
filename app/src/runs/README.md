@@ -43,6 +43,14 @@ badge, since Diff Review is the default. The codes a Dynamic project's run can e
 (`dynamic_review_disabled`, `no_capable_runner`, `dispatch_unavailable` (#328: no Worker was started within the give-up time of a hosted deployment), the three refusals for the plan of the workspace (#277: `workspace_suspended`, `quota_exhausted`, `entitlements_invalid`; their sentences say a run did not start and no model was used, and carry no number) and the Dynamic failure codes) are translated in
 `error-copy.ts` like every other code; a test requires a sentence for each.
 
+The **call trace** of a Dynamic Review (#541, `usage.callTrace` of the runner API) is a "Call trace" section of the
+detail page, below Diagnostics: a table of the model calls (start, prompt, cache read and write, output, cost, why the call
+ended, tools) and one of the tool calls (tool, size of the result, whether it repeated an earlier call), with a note when the
+trace was cut at its 100 entries. It holds numbers and stable names only (`runner-api/call-trace.ts` checks the stored value
+against the contract before it is read, so a row that is not the contract's shows no section). A run on a managed quality
+level shows no cost per call, like it shows no cost for the run (#283). A run without a trace (an older runner, a Diff
+Review) shows no section. It is in the detail only, not in the list, and its copy is `ui/call-trace-messages.ts`.
+
 ## Polling
 
 The server renders the first snapshot; the browser then asks for newer ones (`useLiveSnapshot` in

@@ -12,6 +12,7 @@ import {
   screen,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { RunnerCallTrace } from "../../runner-api/contract.ts";
 import type { RequestResult } from "../../ui/json-request.ts";
 import { RUN_STATUS_PRESENTATION } from "../run-status.ts";
 import type { RunDetailSnapshot, RunDetailView } from "../run-view.ts";
@@ -56,6 +57,7 @@ function detail(overrides: Partial<RunDetailView> = {}): RunDetailView {
     log: { text: "reviewed 3 files", truncated: false },
     supersededBy: null,
     usage: null,
+    callTrace: null,
     ...overrides,
   };
 }
@@ -714,5 +716,79 @@ describe("polling the detail page", () => {
     ).toContain("This run no longer exists.");
     await pass(600_000);
     expect(api.detail).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("the call trace of a run", () => {
+  const callTrace: RunnerCallTrace = {
+    truncated: false,
+    modelCalls: [
+      {
+        index: 0,
+        tMs: 1200,
+        promptTokens: 14_600,
+        cacheRead: 0,
+        cacheWrite: 14_600,
+        completionTokens: 492,
+        costUsd: 0.0342,
+        finishReason: "stop",
+        final: false,
+        tools: [],
+      },
+    ],
+    toolCalls: [{ index: 0, name: "read", resultBytes: 100, isRepeat: false }],
+  };
+
+  // #541-T10
+  it("is shown in its own section of the detail page", () => {
+    render(
+      <RunDetail
+        workspaceSlug="acme"
+        initial={snap(detail({ reviewKind: "dynamic", callTrace }))}
+        api={apiAnswering([])}
+      />,
+    );
+
+    expect(screen.getByRole("region", { name: "Call trace" })).toBeTruthy();
+    expect(screen.getAllByRole("table")).toHaveLength(2);
+    expect(screen.getByText("$0.0342")).toBeTruthy();
+  });
+
+  // #541-T10
+  it("leaves out the cost of a call for a run on a managed quality level", () => {
+    const { container } = render(
+      <RunDetail
+        workspaceSlug="acme"
+        initial={snap(
+          detail({
+            reviewKind: "dynamic",
+            costHidden: true,
+            callTrace: {
+              ...callTrace,
+              modelCalls: [{ ...callTrace.modelCalls[0], costUsd: null }],
+            },
+          }),
+        )}
+        api={apiAnswering([])}
+      />,
+    );
+
+    expect(screen.getAllByRole("table")).toHaveLength(2);
+    expect(container.textContent).not.toContain("Cost");
+    expect(container.textContent).not.toContain("$");
+  });
+
+  // #541-T10
+  it("is not there for a run without a trace (an older runner, a Diff Review), and nothing fails", () => {
+    render(
+      <RunDetail
+        workspaceSlug="acme"
+        initial={snap(detail({ callTrace: null }))}
+        api={apiAnswering([])}
+      />,
+    );
+
+    expect(screen.queryByRole("region", { name: "Call trace" })).toBeNull();
+    expect(screen.queryByRole("table")).toBeNull();
   });
 });

@@ -37,6 +37,7 @@ import {
   VM_TIMEOUT_SECONDS_RANGE,
 } from "./contract.ts";
 import { WORKER_CREDENTIAL_PATTERN } from "../jobs/worker-credential.ts";
+import { checkCallTrace } from "./call-trace.ts";
 
 export type Parsed<T> =
   { ok: true; value: T } | { ok: false; fields: FieldError[] };
@@ -445,6 +446,11 @@ function parseUsage(
     (typeof stoppedEarly === "string" &&
       (STOPPED_EARLY_REASONS as readonly string[]).includes(stoppedEarly));
   if (!stoppedOk) check.fail(`${prefix}stoppedEarly`, "invalid");
+  // The per-call trace (#541) is optional, and not nullable: an old runner leaves it out.
+  const callTrace =
+    value.callTrace === undefined ? undefined : checkCallTrace(value.callTrace);
+  const traceOk = value.callTrace === undefined || callTrace !== undefined;
+  if (!traceOk) check.fail(`${prefix}callTrace`, "invalid");
   if (
     check.fields.length > before ||
     model === undefined ||
@@ -454,7 +460,8 @@ function parseUsage(
     aiCalls === undefined ||
     typeof fallbackUsed !== "boolean" ||
     !costOk ||
-    !stoppedOk
+    !stoppedOk ||
+    !traceOk
   )
     return undefined;
   return {
@@ -466,6 +473,7 @@ function parseUsage(
     fallbackUsed,
     costUsd: costUsd as number | null,
     stoppedEarly: stoppedEarly as StoppedEarly | null,
+    ...(callTrace === undefined ? {} : { callTrace }),
   };
 }
 

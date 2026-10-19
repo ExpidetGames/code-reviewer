@@ -471,6 +471,7 @@ describe("what the app accepts from a runner", () => {
       "unknown fields in the result",
       { leaseToken: TOKEN, result: { ...result, extra: 1 } },
     ],
+    ...callTraceCases(result, TOKEN),
   ];
 
   it.each(HEARTBEATS)(
@@ -722,3 +723,128 @@ describe("the model capabilities of a Dynamic job", () => {
     expectValid("ClaimResponse", claim);
   });
 });
+
+// #541-T06: the per-call trace of a usage. The hand-written check of the app and the schema give the same
+// verdict on each of these.
+function callTraceCases(
+  result: { usage: object | null },
+  token: string,
+): [string, unknown][] {
+  const modelCall = {
+    index: 0,
+    tMs: 1200,
+    promptTokens: 14600,
+    cacheRead: 0,
+    cacheWrite: 14600,
+    completionTokens: 492,
+    costUsd: 0.0342,
+    finishReason: "tool_calls",
+    final: false,
+    tools: [{ name: "read", count: 2 }],
+  };
+  const toolCall = {
+    index: 0,
+    name: "read",
+    resultBytes: 812,
+    isRepeat: false,
+  };
+  const trace = {
+    truncated: false,
+    modelCalls: [modelCall],
+    toolCalls: [toolCall],
+  };
+  const body = (callTrace: unknown): unknown => ({
+    leaseToken: token,
+    result: { ...result, usage: { ...(result.usage ?? {}), callTrace } },
+  });
+  const many = <T>(item: T, count: number): T[] =>
+    Array.from({ length: count }, () => item);
+  return [
+    ["a usage with a call trace", body(trace)],
+    ["a usage with a null call trace", body(null)],
+    [
+      "a call trace of nulls",
+      body({
+        truncated: true,
+        modelCalls: [
+          {
+            ...modelCall,
+            promptTokens: null,
+            cacheRead: null,
+            cacheWrite: null,
+            completionTokens: null,
+            costUsd: null,
+            finishReason: null,
+            tools: [],
+          },
+        ],
+        toolCalls: [{ ...toolCall, resultBytes: null }],
+      }),
+    ],
+    [
+      "an empty call trace",
+      body({ truncated: false, modelCalls: [], toolCalls: [] }),
+    ],
+    ["a call trace that is not an object", body("trace")],
+    ["a call trace with an unknown key", body({ ...trace, extra: 1 })],
+    ["a call trace without a key", body({ truncated: false, modelCalls: [] })],
+    [
+      "a call trace with 100 model calls",
+      body({ ...trace, modelCalls: many(modelCall, 100) }),
+    ],
+    [
+      "a call trace with 101 model calls",
+      body({ ...trace, modelCalls: many(modelCall, 101) }),
+    ],
+    [
+      "a call trace with 101 tool calls",
+      body({ ...trace, toolCalls: many(toolCall, 101) }),
+    ],
+    [
+      "a model call with an extra key",
+      body({ ...trace, modelCalls: [{ ...modelCall, path: "src/a.py" }] }),
+    ],
+    [
+      "a model call with a negative count",
+      body({ ...trace, modelCalls: [{ ...modelCall, promptTokens: -1 }] }),
+    ],
+    [
+      "a model call with a fractional count",
+      body({ ...trace, modelCalls: [{ ...modelCall, cacheRead: 1.5 }] }),
+    ],
+    [
+      "a model call with a negative cost",
+      body({ ...trace, modelCalls: [{ ...modelCall, costUsd: -1 }] }),
+    ],
+    [
+      "a model call with an unknown finish reason",
+      body({ ...trace, modelCalls: [{ ...modelCall, finishReason: "boom" }] }),
+    ],
+    [
+      "a model call with an unknown tool",
+      body({
+        ...trace,
+        modelCalls: [{ ...modelCall, tools: [{ name: "bash", count: 1 }] }],
+      }),
+    ],
+    [
+      "a model call with a tool count of zero",
+      body({
+        ...trace,
+        modelCalls: [{ ...modelCall, tools: [{ name: "read", count: 0 }] }],
+      }),
+    ],
+    [
+      "a tool call with an unknown name",
+      body({ ...trace, toolCalls: [{ ...toolCall, name: "webfetch" }] }),
+    ],
+    [
+      "a tool call with an argument",
+      body({ ...trace, toolCalls: [{ ...toolCall, arguments: {} }] }),
+    ],
+    [
+      "a tool call with a flag that is not a boolean",
+      body({ ...trace, toolCalls: [{ ...toolCall, isRepeat: "no" }] }),
+    ],
+  ];
+}
