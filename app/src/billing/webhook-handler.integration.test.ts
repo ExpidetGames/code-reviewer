@@ -110,7 +110,7 @@ function suite(engine: BillingEngine) {
           new Request("https://app.example.test/api/billing/webhook", {
             method: "POST",
             headers: request.headers,
-            body: request.rawBody,
+            body: request.rawBody.slice(),
           }),
         );
       return {

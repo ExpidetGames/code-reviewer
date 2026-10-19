@@ -11,6 +11,8 @@ import {
   TOP_UP_MIN_MICRO_USD,
   type BillingAdapter,
   type BillingEvent,
+  type TopUpLookupEvent,
+  type Usd,
   type WebhookResult,
 } from "../billing/adapter.ts";
 
@@ -114,6 +116,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function isLookupEvent(event: BillingEvent): event is TopUpLookupEvent {
+  return (
+    event.type === "payment.succeeded" ||
+    event.type === "payment.failed" ||
+    event.type === "payment.expired"
+  );
+}
+
 /** Maps the fake wire body to our event. Returns undefined for a body that is not one. */
 function toEvent(value: unknown): BillingEvent | undefined {
   if (!isRecord(value)) return undefined;
@@ -130,9 +140,9 @@ function toEvent(value: unknown): BillingEvent | undefined {
         intentId: (wire.intent ?? null) as string | null,
         payment: wire.payment,
         checkout: (wire.checkout ?? null) as string | null,
-        creditable: wire.net,
-        gross: wire.gross,
-        tax: (wire.tax ?? null) as number | null,
+        creditable: wire.net as Usd,
+        gross: wire.gross as Usd,
+        tax: (wire.tax ?? null) as Usd | null,
       };
     case "payment_failed":
       return {
@@ -214,8 +224,9 @@ export function createFakeBillingAdapter(
       }),
     lookupTopUp: ({ intentId }) => {
       const wire = options.lookups?.(intentId);
+      const event = wire === undefined ? undefined : toEvent(wire);
       return Promise.resolve(
-        wire === undefined ? null : (toEvent(wire) ?? null),
+        event !== undefined && isLookupEvent(event) ? event : null,
       );
     },
     verifyAndParseWebhook({ headers, rawBody }): Promise<WebhookResult> {

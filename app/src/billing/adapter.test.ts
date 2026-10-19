@@ -29,8 +29,8 @@ const CAPABILITIES: BillingCapabilities = {
   merchantOfRecord: true,
   customAmount: true,
   partialRefund: true,
-  minTopUp: 10 * USD,
-  maxTopUp: 500 * USD,
+  minTopUp: toUsd(10 * USD),
+  maxTopUp: toUsd(500 * USD),
   currencies: ["usd"],
   providerMayRefund: { windowDays: 60 },
   requiresBillingProfile: true,
@@ -161,17 +161,17 @@ describe("the capabilities of an adapter", () => {
     expect(() =>
       assertValidCapabilities("a", {
         ...CAPABILITIES,
-        minTopUp: 20 * USD,
-        maxTopUp: 100 * USD,
+        minTopUp: toUsd(20 * USD),
+        maxTopUp: toUsd(100 * USD),
       }),
     ).not.toThrow();
 
     const widened: Array<Partial<BillingCapabilities>> = [
-      { minTopUp: 5 * USD },
-      { maxTopUp: 501 * USD },
-      { minTopUp: 100 * USD, maxTopUp: 50 * USD },
-      { minTopUp: 10.5 * USD + 0.5 },
-      { maxTopUp: Number.NaN },
+      { minTopUp: toUsd(5 * USD) },
+      { maxTopUp: toUsd(501 * USD) },
+      { minTopUp: toUsd(100 * USD), maxTopUp: toUsd(50 * USD) },
+      { minTopUp: (10.5 * USD + 0.5) as Usd },
+      { maxTopUp: Number.NaN as Usd },
       { currencies: [] },
       { currencies: ["eur"] as never },
       { providerMayRefund: { windowDays: 0 } },
@@ -201,7 +201,11 @@ describe("the capabilities of an adapter", () => {
         codeOf(() => assertTopUpAmount(CAPABILITIES, bad)),
         String(bad),
       ).toBe("amount_out_of_range");
-    const narrow = { ...CAPABILITIES, minTopUp: 20 * USD, maxTopUp: 30 * USD };
+    const narrow = {
+      ...CAPABILITIES,
+      minTopUp: toUsd(20 * USD),
+      maxTopUp: toUsd(30 * USD),
+    };
     expect(codeOf(() => assertTopUpAmount(narrow, 19 * USD))).toBe(
       "amount_out_of_range",
     );
@@ -231,7 +235,7 @@ describe("the registry", () => {
     expect(
       codeOf(() =>
         createAdapterRegistry([
-          adapterWith("wide", { ...CAPABILITIES, maxTopUp: 1000 * USD }),
+          adapterWith("wide", { ...CAPABILITIES, maxTopUp: toUsd(1000 * USD) }),
         ]),
       ),
     ).toBe("capabilities_invalid");
@@ -249,9 +253,9 @@ describe("validating a normalized event", () => {
     intentId: "intent-1",
     payment: "pi_1",
     checkout: "cs_1",
-    creditable: 25 * USD,
-    gross: 30 * USD,
-    tax: 5 * USD,
+    creditable: toUsd(25 * USD),
+    gross: toUsd(30 * USD),
+    tax: toUsd(5 * USD),
   };
 
   // #497-T13
@@ -359,11 +363,11 @@ describe("validating a normalized event", () => {
     const bad: Array<
       Partial<Extract<BillingEvent, { type: "payment.succeeded" }>>
     > = [
-      { creditable: 0 },
-      { creditable: -1 },
-      { creditable: 1.5 },
-      { gross: Number.NaN },
-      { tax: -1 },
+      { creditable: 0 as Usd },
+      { creditable: -1 as Usd },
+      { creditable: 1.5 as Usd },
+      { gross: Number.NaN as Usd },
+      { tax: -1 as Usd },
       { payment: "has space" },
       { payment: "" },
       { eventId: "" },
@@ -387,6 +391,7 @@ describe("validating a normalized event", () => {
           payment: "pi_1",
           dispute: "dp_1",
           amount: 1,
+          paymentAmount: 1,
           status: "under_review" as never,
         }),
       ),

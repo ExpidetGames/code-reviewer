@@ -1216,7 +1216,20 @@ const CASES: Case[] = [
   {
     name: "topUpIntents.markPaid",
     run: (a, b) =>
-      a.topUpIntents.markPaid(b.topUpIntentId, { paymentRef: "pi-intent-b" }),
+      a.topUpIntents.markPaid(b.topUpIntentId, {
+        paymentRef: "pi-intent-b",
+        creditedMicroUsd: 25_000_000,
+      }),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
+    name: "topUpIntents.markExpired",
+    run: (a, b) => a.topUpIntents.markExpired(b.topUpIntentId),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
+    name: "topUpIntents.addDebited",
+    run: (a, b) => a.topUpIntents.addDebited(b.topUpIntentId, "refund", 1),
     expectAnswer: (answer) => expect(answer).toBeUndefined(),
   },
   {

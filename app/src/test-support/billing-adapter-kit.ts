@@ -14,6 +14,7 @@ import {
   assertValidCapabilities,
   createAdapterRegistry,
   isAdapterId,
+  toUsd,
   validateBillingEvent,
   type BillingAdapter,
   type BillingEvent,
@@ -84,7 +85,7 @@ export function describeAdapterContract(subject: AdapterKitSubject): void {
       const started = await adapter.createTopUpCheckout({
         customer: null,
         intentId: "intent-kit",
-        amount: 25_000_000,
+        amount: toUsd(25_000_000),
         returnUrl: "https://app.example.test/billing",
       });
       expect(["redirect", "none"]).toContain(started.checkout.kind);

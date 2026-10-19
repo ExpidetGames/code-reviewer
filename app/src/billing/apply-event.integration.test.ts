@@ -13,7 +13,7 @@ import {
   BILLING_ENGINES,
   type BillingEngine,
 } from "../test-support/billing-engines.ts";
-import { type BillingEvent } from "./adapter.ts";
+import { toUsd, type BillingEvent } from "./adapter.ts";
 import { applyBillingEvent } from "./apply-event.ts";
 
 const USD = 1_000_000;
@@ -69,9 +69,9 @@ function succeeded(
     intentId: s.intentId,
     payment: s.payment,
     checkout: s.checkout,
-    creditable: 25 * USD,
-    gross: 29_750_000,
-    tax: 4_750_000,
+    creditable: toUsd(25 * USD),
+    gross: toUsd(29_750_000),
+    tax: toUsd(4_750_000),
     ...overrides,
   };
 }
@@ -188,7 +188,11 @@ function suite(engine: BillingEngine) {
 
         await apply(
           s,
-          succeeded(s, { creditable: 20 * USD, gross: 25 * USD, tax: 5 * USD }),
+          succeeded(s, {
+            creditable: toUsd(20 * USD),
+            gross: toUsd(25 * USD),
+            tax: toUsd(5 * USD),
+          }),
         );
 
         expect(await balance(s)).toBe(20 * USD);
@@ -199,7 +203,10 @@ function suite(engine: BillingEngine) {
         const s = await seed(engine);
 
         for (const creditable of [25 * USD + 1, 400 * USD, 9 * USD]) {
-          const result = await apply(s, succeeded(s, { creditable }));
+          const result = await apply(
+            s,
+            succeeded(s, { creditable: toUsd(creditable) }),
+          );
           expect(result.outcome, String(creditable)).toBe("amount_rejected");
         }
 
@@ -273,6 +280,7 @@ function suite(engine: BillingEngine) {
         expect(unknown).toEqual({
           outcome: "intent_unresolved",
           workspaceId: null,
+          needsReview: true,
         });
         expect(nothing.outcome).toBe("intent_unresolved");
         expect(otherAdapter.outcome).toBe("intent_unresolved");
@@ -355,7 +363,10 @@ function suite(engine: BillingEngine) {
         const s = await seed(engine);
         await apply(s, succeeded(s));
 
-        const again = await apply(s, succeeded(s, { creditable: 20 * USD }));
+        const again = await apply(
+          s,
+          succeeded(s, { creditable: toUsd(20 * USD) }),
+        );
 
         expect(again.outcome).toBe("amount_conflict");
         expect(await balance(s)).toBe(25 * USD);
@@ -714,7 +725,7 @@ function suite(engine: BillingEngine) {
       // #497-T09
       it("records a signed event that is not a normalized event as event_invalid, flags it for review and does not throw", async () => {
         const s = await seed(engine);
-        const event = succeeded(s, { creditable: 1.5 });
+        const event = succeeded(s, { creditable: 1.5 as never });
 
         const result = await apply(s, event);
         const repeat = await apply(s, event);
@@ -760,7 +771,7 @@ function suite(engine: BillingEngine) {
 
         const result = await apply(
           s,
-          succeeded(s, { gross: 25 * USD, tax: 0 as never }),
+          succeeded(s, { gross: toUsd(25 * USD), tax: toUsd(0) }),
         );
 
         expect(result.outcome).toBe("applied");
@@ -846,7 +857,10 @@ function suite(engine: BillingEngine) {
         );
 
         expect(
-          (await entries(s)).map((entry) => entry.amountMicroUsd).sort(),
+          (await entries(s))
+            .filter((entry) => entry.type === "refund")
+            .map((entry) => entry.amountMicroUsd)
+            .sort(),
         ).toEqual([-12_500_000, -8_403_361]);
         expect(await balance(s)).toBe(25 * USD - 12_500_000 - 8_403_361);
       });
@@ -1024,7 +1038,7 @@ function suite(engine: BillingEngine) {
           payment: "pi_nobody",
           checkout: null,
         });
-        const tooMuch = succeeded(s, { creditable: 25 * USD + 1 });
+        const tooMuch = succeeded(s, { creditable: toUsd(25 * USD + 1) });
         const unresolved = await apply(s, unknown);
         const rejected = await apply(s, tooMuch);
         const paid = await apply(s, succeeded(s));

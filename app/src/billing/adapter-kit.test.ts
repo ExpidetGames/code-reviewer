@@ -14,6 +14,7 @@ import {
   signFakeBody,
   type FakeWireEvent,
 } from "../test-support/fake-billing-adapter.ts";
+import { toUsd } from "./adapter.ts";
 import { manualAdapter } from "./manual-adapter.ts";
 
 const NOW = new Date("2026-10-19T08:00:00.000Z");
@@ -54,9 +55,9 @@ const fake: AdapterKitSubject = {
         intentId: "intent-1",
         payment: "pi_1",
         checkout: "cs_1",
-        creditable: 25 * USD,
-        gross: 29_750_000,
-        tax: 4_750_000,
+        creditable: toUsd(25 * USD),
+        gross: toUsd(29_750_000),
+        tax: toUsd(4_750_000),
       },
     },
     {
@@ -78,9 +79,9 @@ const fake: AdapterKitSubject = {
           intentId: "intent-1",
           payment: "pi_1",
           checkout: "cs_1",
-          creditable: 25 * USD,
-          gross: 29_750_000,
-          tax: 4_750_000,
+          creditable: toUsd(25 * USD),
+          gross: toUsd(29_750_000),
+          tax: toUsd(4_750_000),
         },
       },
       {
