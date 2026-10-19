@@ -886,6 +886,9 @@ def test_the_openrouter_provider_of_the_snapshot_asks_for_its_usage_in_its_own_w
     for body in run.bodies():
         assert body["usage"] == {"include": True}
         assert "stream_options" not in body
+    # No attribution headers (`HTTP-Referer`, `X-Title`) either: the closed set of Chat.
+    for seen in run.seen:
+        assert set(seen.headers) == COMMON_HEADERS | FAMILY_HEADERS["chat"]
     assert run.assistants[0].tokens["input"] > 0
 
 
