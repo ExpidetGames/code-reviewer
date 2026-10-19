@@ -16,6 +16,8 @@ import {
   SETTLED_REASONS,
 } from "../usage/usage-records.ts";
 import {
+  AI_COST_FAILURE_CLASS,
+  AI_COST_FAILURE_CODES,
   CHECKOUT_REASON_CLASSES,
   ERROR_CODE_CLASSES,
   OURS_ON_MANAGED_KEY,
@@ -126,6 +128,10 @@ describe("the class of a run's end", () => {
     ["invalid_job", "free"],
     ["git_unavailable", "free"],
     ["llm_unavailable", "free"],
+    // The maintainer's decision 1: "a timeout caused by us bills nothing". The queue's `timeout` and the runner's both
+    // land in `jobs.error_code`; a 20-minute stall is never the size of the pull request (the review of #520, B1).
+    ["timeout", "free"],
+    ["llm_timeout", "free"],
   ] as Array<[string, OutcomeClass]>)(
     "bills nothing for %s, an error on our side",
     (code, expected) => {
@@ -135,11 +141,12 @@ describe("the class of a run's end", () => {
 
   // #494-T04
   it.each([
-    ["timeout", "minutes_only"],
     ["review_not_published", "minutes_only"],
     ["llm_output_invalid", "minutes_only"],
-    ["llm_timeout", "minutes_only"],
     ["unknown", "minutes_only"],
+    // The Git access can be the customer's revoked installation or our own App token: not attributable.
+    ["git_auth", "minutes_only"],
+    ["git_forbidden", "minutes_only"],
   ] as Array<[string, OutcomeClass]>)(
     "bills the minutes only for %s, a run that ended without a result",
     (code, expected) => {
@@ -154,6 +161,7 @@ describe("the class of a run's end", () => {
     "dynamic_config_invalid",
     "checkout_incomplete",
     "pr_not_found",
+    "git_unprocessable",
     "llm_context_length_exceeded",
     "review_text_truncated",
     "command_failed",
@@ -194,7 +202,7 @@ describe("the class of a run's end", () => {
   });
 
   // #494-T06
-  it.each(["llm_auth", "llm_quota", "model_unknown"])(
+  it.each(["llm_auth", "llm_quota", "model_unknown", "llm_rate_limit"])(
     "makes %s ours on the managed key and the customer's on their own",
     (code) => {
       expect(classifyOutcome(failed(code, { keyMode: "managed" }))).toBe(
@@ -205,7 +213,7 @@ describe("the class of a run's end", () => {
   );
 
   // #494-T07
-  it("bills a superseded run: the table gives it AI and minutes", () => {
+  it("bills a superseded run that began: the table gives it AI and minutes", () => {
     expect(
       classifyOutcome({
         status: "superseded",
@@ -218,9 +226,30 @@ describe("the class of a run's end", () => {
       classifyOutcome({
         status: "superseded",
         errorCode: null,
+        settledReason: "superseded",
         keyMode: "own",
       }),
     ).toBe("charged");
+  });
+
+  // #494-T07
+  it("bills nothing for a queued job superseded before it ran: no run began", () => {
+    for (const keyMode of ["managed", "own"] as const)
+      expect(
+        classifyOutcome({
+          status: "superseded",
+          errorCode: null,
+          keyMode,
+        }),
+      ).toBe("free");
+    expect(
+      classifyOutcome({
+        status: "superseded",
+        errorCode: null,
+        settledReason: null,
+        keyMode: "managed",
+      }),
+    ).toBe("free");
   });
 
   // #494-T04
@@ -236,6 +265,18 @@ describe("the class of a run's end", () => {
     expect(
       classifyOutcome(failed("command_failed", { settledReason: "no_result" })),
     ).toBe("minutes_only");
+  });
+
+  // #494-T04
+  it("keeps a timeout free whatever else is known: the cheapest class wins", () => {
+    expect(
+      classifyOutcome(
+        failed("timeout", {
+          errorReason: "no_result_from_process",
+          settledReason: "no_result",
+        }),
+      ),
+    ).toBe("free");
   });
 
   // #494-T04
@@ -275,11 +316,17 @@ describe("the class of a run's end", () => {
       "minutes_only",
     );
     expect(classifyOutcome(failed(null))).toBe("minutes_only");
+  });
+
+  // #494-T08
+  it("falls back to the minutes only for a checkout reason it does not know, like a code", () => {
     expect(
       classifyOutcome(
         failed("checkout_incomplete", { errorReason: "a_new_reason" }),
       ),
-    ).toBe("charged");
+    ).toBe("minutes_only");
+    // No reason at all leaves the class of the code.
+    expect(classifyOutcome(failed("checkout_incomplete"))).toBe("charged");
   });
 
   // #494-T08
@@ -287,5 +334,32 @@ describe("the class of a run's end", () => {
     expect(
       classifyOutcome(failed("command_failed", { errorReason: "transport" })),
     ).toBe("charged");
+  });
+});
+
+describe("the failures that incurred AI cost", () => {
+  // The open question of the review of #520 (B2): whether a run that failed after it used the model is billed AI and
+  // minutes (ADR 0006, 2.6 row 2, today) or the minutes only (the maintainer's decision 1 read literally). The answer is
+  // one line: the class constant. This test pins who is in the group, so a member does not join or leave unnoticed.
+  // #494-T01
+  it("names the group, in one place", () => {
+    expect([...AI_COST_FAILURE_CODES].sort()).toStrictEqual([
+      "command_failed",
+      "dynamic_budget_exceeded",
+      "dynamic_policy_violation",
+      "llm_bad_request",
+      "llm_context_length_exceeded",
+    ]);
+  });
+
+  // #494-T01
+  it("gives every member the class of the group, on both keys", () => {
+    for (const code of AI_COST_FAILURE_CODES) {
+      expect(ERROR_CODE_CLASSES[code], code).toBe(AI_COST_FAILURE_CLASS);
+      for (const keyMode of ["managed", "own"] as const)
+        expect(classifyOutcome(failed(code, { keyMode })), code).toBe(
+          AI_COST_FAILURE_CLASS,
+        );
+    }
   });
 });

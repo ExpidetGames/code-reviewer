@@ -22,6 +22,23 @@ import type { KeyMode } from "../workspaces/entitlements.ts";
 export const OUTCOME_CLASSES = ["charged", "minutes_only", "free"] as const;
 export type OutcomeClass = (typeof OUTCOME_CLASSES)[number];
 
+/**
+ * The class of a run that failed after it used the model, with no result delivered. OPEN QUESTION for the maintainer
+ * (the review of #520, B2): ADR 0006, 2.6 row 2 bills it AI and minutes (`charged`, today); decision 1 of 2026-10-19 ("a
+ * review that ends without a result but already incurred AI cost bills the minutes only"), read literally, makes it
+ * `minutes_only`. The answer is this one line.
+ */
+export const AI_COST_FAILURE_CLASS = "charged" as const;
+
+/** The codes that get `AI_COST_FAILURE_CLASS`: the model was used, the run ended without a result of the review. */
+export const AI_COST_FAILURE_CODES = [
+  "command_failed",
+  "dynamic_budget_exceeded",
+  "dynamic_policy_violation",
+  "llm_bad_request",
+  "llm_context_length_exceeded",
+] as const;
+
 /** The codes that arrive through the release call of a Dispatcher (`KnownReleaseReason` in the contract). */
 type ReleaseReason = "launch_failed" | "worker_exited";
 
@@ -32,8 +49,9 @@ type ReleaseReason = "launch_failed" | "worker_exited";
 export const ERROR_CODE_CLASSES = {
   // The queue's own codes. A job that ended before it ran, or was refused at claim, is void.
   lease_expired: "free",
-  // The hard limit ran out: ours or the run's, nobody can say. The maintainer decided: the minutes, not the AI.
-  timeout: "minutes_only",
+  // A timeout caused by us bills nothing (decision 1). The queue ends a job 25 minutes after the claim, the runner at 20;
+  // Dynamic stops at 600 s on its own and Diff clips the diff, so a stall is never the size of the pull request.
+  timeout: "free",
   project_deactivated: "free",
   pull_request_closed: "free",
   pull_request_draft: "free",
@@ -56,32 +74,33 @@ export const ERROR_CODE_CLASSES = {
   runner_error: "free",
   runner_shutdown: "free",
   lease_lost: "free",
-  // PR-Agent ran and handled a failure itself; the model was used.
-  command_failed: "charged",
+  // PR-Agent ran and handled a failure itself; the model was used (`AI_COST_FAILURE_CODES`).
+  command_failed: AI_COST_FAILURE_CLASS,
   // The model worked, but nothing reached the pull request or nothing could be made of its answer: no result.
   review_not_published: "minutes_only",
   llm_output_invalid: "minutes_only",
-  llm_timeout: "minutes_only",
   unknown: "minutes_only",
   // A review that was delivered, cut to GitHub's size limit.
   review_state_truncated: "charged",
   review_text_truncated: "charged",
-  // The pull request or the access to it is the customer's side of the line.
+  // The pull request is the customer's side of the line. The Git access is not attributable: a revoked installation is the
+  // customer's, our own App token is ours.
   pr_not_found: "charged",
-  git_auth: "charged",
-  git_forbidden: "charged",
+  git_auth: "minutes_only",
+  git_forbidden: "minutes_only",
   git_unprocessable: "charged",
   // GitHub's availability and our own use of it are not the customer's.
   git_rate_limit: "free",
   git_unavailable: "free",
   git_provider_init: "free",
   // The model provider: an outage or a limit of capacity is ours; what the request or the customer's pull request
-  // caused is the customer's. The key, the account and the model are ours when the managed key is used
-  // (`OURS_ON_MANAGED_KEY`), the customer's on their own key.
-  llm_rate_limit: "free",
+  // caused is the customer's. The key, the account, the model and the rate limit of the key are ours when the managed key
+  // is used (`OURS_ON_MANAGED_KEY`), the customer's on their own key. A timeout of a call is the provider's: ours.
+  llm_rate_limit: "charged",
   llm_unavailable: "free",
-  llm_bad_request: "charged",
-  llm_context_length_exceeded: "charged",
+  llm_timeout: "free",
+  llm_bad_request: AI_COST_FAILURE_CLASS,
+  llm_context_length_exceeded: AI_COST_FAILURE_CLASS,
   llm_auth: "charged",
   llm_quota: "charged",
   model_unknown: "charged",
@@ -91,8 +110,8 @@ export const ERROR_CODE_CLASSES = {
   dynamic_isolation_self_check_failed: "free",
   dynamic_accounting_failed: "free",
   dynamic_config_invalid: "charged",
-  dynamic_policy_violation: "charged",
-  dynamic_budget_exceeded: "charged",
+  dynamic_policy_violation: AI_COST_FAILURE_CLASS,
+  dynamic_budget_exceeded: AI_COST_FAILURE_CLASS,
   dynamic_model_features_unsupported: "charged",
   checkout_incomplete: "charged",
   // Replaced by a newer push; it reported what it used. Not a failure of the job.
@@ -105,6 +124,7 @@ export type ClassifiedCode = keyof typeof ERROR_CODE_CLASSES;
 
 /** Codes that are an error on our side when the run used the operator's key, and the customer's on their own key. */
 export const OURS_ON_MANAGED_KEY: readonly ClassifiedCode[] = [
+  "llm_rate_limit",
   "llm_auth",
   "llm_quota",
   "model_unknown",
@@ -197,23 +217,33 @@ function classOfCode(code: string | null, keyMode: KeyMode): OutcomeClass {
   return known;
 }
 
+/** A job replaced by a newer push: it has a run only when its usage record was marked (or settled) as superseded. */
+function classOfSuperseded(end: RunEnd): OutcomeClass {
+  return end.settledReason === "superseded" ? "charged" : "free";
+}
+
 /**
  * The class of a run's end. A delivered result is charged and a cancelled job is void. Otherwise the code of a failure,
  * the finer reason and the settled reason each give a class, and the cheapest for the customer wins (a run that was our
- * error and also left no result is ours). A superseded run starts as charged: what it reported is billed, and an unknown
- * cost leaves only the minutes (the price of a run, `priceRun`). Never throws: a code or reason it does not know is
- * treated as not attributable (`minutes_only`) or ignored.
+ * error and also left no result is ours). A superseded run that began (its usage record says `superseded`) starts as
+ * charged: what it reported is billed, and an unknown cost leaves only the minutes (the price of a run, `priceRun`). A
+ * queued job superseded before it ran has no run and is free. Never throws: a code or reason it does not know is treated
+ * as not attributable (`minutes_only`).
  */
 export function classifyOutcome(end: RunEnd): OutcomeClass {
   if (end.status === "succeeded") return "charged";
   if (end.status === "cancelled") return "free";
   let outcome: OutcomeClass =
     end.status === "superseded" && end.errorCode === null
-      ? "charged"
+      ? classOfSuperseded(end)
       : classOfCode(end.errorCode, end.keyMode);
   if (end.errorCode === "checkout_incomplete") {
+    // A reason this build does not know (a newer runner) is not attributable, like an unknown code. No reason at all
+    // leaves the class of the code.
     const refined = lookup(CHECKOUT_REASON_CLASSES, end.errorReason);
     if (refined !== undefined) outcome = cheaper(outcome, refined);
+    else if (end.errorReason !== null && end.errorReason !== undefined)
+      outcome = cheaper(outcome, "minutes_only");
   }
   const loop = lookup(RESULT_REASON_CLASSES, end.errorReason);
   if (loop !== undefined) outcome = cheaper(outcome, loop);
