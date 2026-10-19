@@ -17,7 +17,8 @@ import type { EntitlementsData } from "../../src/workspaces/entitlements.ts";
 
 const OPENROUTER_KEY = "plain-openrouter-key-0001-aaaaaaaa";
 const ANTHROPIC_KEY = "dummy-anthropic-plain-workspace-key-0002-bbbbbbbbbbbb";
-const OPERATOR_ANTHROPIC_KEY = "dummy-anthropic-plain-operator-key-0003-cccccccccc";
+const OPERATOR_ANTHROPIC_KEY =
+  "dummy-anthropic-plain-operator-key-0003-cccccccccc";
 const OPERATOR_OPENROUTER_KEY = "plain-operator-openrouter-0004-dddddd";
 const BOTH = ["openrouter", "anthropic"];
 const DYNAMIC_CLAIM = {

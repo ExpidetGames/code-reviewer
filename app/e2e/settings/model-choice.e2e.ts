@@ -56,14 +56,17 @@ test.describe("the provider and model of a project on its own key", () => {
   }) => {
     await openProject(page);
 
-    // The Diff pair: the provider select next to the model, with the registered provider to pick.
+    // The Diff pair: the provider select next to the model, with the registered providers to pick.
     const provider = page.getByRole("combobox", {
       name: "Provider",
       exact: true,
     });
     await expect(provider).toContainText("OpenRouter");
     await provider.click();
-    await expect(page.getByRole("option")).toHaveCount(1);
+    await expect(page.getByRole("option")).toHaveCount(2);
+    await expect(
+      page.getByRole("option", { name: /^Anthropic/ }),
+    ).toBeVisible();
     await page.getByRole("option", { name: /^OpenRouter/ }).click();
     await page.getByLabel("Model", { exact: true }).fill(DIFF_MODEL);
 
