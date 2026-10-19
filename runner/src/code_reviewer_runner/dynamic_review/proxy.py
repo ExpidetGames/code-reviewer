@@ -709,10 +709,11 @@ class ModelProxy:
         return prompt_tokens, completion_tokens
 
     def _cost(self, document: dict[str, Any]) -> Decimal | None:
-        """The charge the provider reports for this call, or None when it has none.
+        """The cost of this call by the rule of the provider, or None when it has none.
 
-        What the entry of the provider says is the stated charge (OpenRouter: `usage.cost`). It is
-        read, never computed: a call without it simply has no known cost.
+        The entry of the provider says how: the charge it states (OpenRouter: `usage.cost`), read
+        and never computed, or its usage priced with its own list (Anthropic, exact decimals). A
+        call that cannot be priced simply has no known cost, which stops the run.
         """
         usage = as_object(document.get("usage"))
         return None if usage is None else self._provider.cost_extractor(self.upstream_model, usage)

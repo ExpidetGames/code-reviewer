@@ -142,7 +142,7 @@ def test_the_client_speaks_the_worker_api_with_the_credential_in_the_authorizati
     # The details call names what this Worker reads, so the app sends optional fields to it.
     assert "features=dynamic_capabilities,supersede" in recorder.calls[0]["path"]
     # #424-T08: and the providers of the registry; an app from before ignores the parameter.
-    assert "llmProviders=openrouter" in recorder.calls[0]["path"]
+    assert "llmProviders=openrouter,anthropic" in recorder.calls[0]["path"]
     query = parse_qs(urlsplit(str(recorder.calls[0]["path"])).query)
     assert valid("WorkerJobDetailsRequest", {name: values[0] for name, values in query.items()})
     assert valid("WorkerHeartbeatRequest", recorder.calls[1]["body"])
