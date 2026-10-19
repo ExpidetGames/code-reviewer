@@ -27,6 +27,9 @@ MAX_COMMENT_URL_CHARS = 2048
 MAX_DURATION_MS = 604_800_000
 # The app refuses a body over 65,536 bytes; stay well under it (the lease token is in the body too).
 MAX_REQUEST_BYTES = 48 * 1024
+# The most findings the app accepts in a count (`MAX_FINDING_COUNT`, runner API contract).
+MAX_FINDING_COUNT = 100_000
+_FINDING_PRIORITIES = ("P0", "P1", "P2", "P3")
 RUNNER_SHUTDOWN = "runner_shutdown"
 # The finer names (`errorReason`) of the failures the loop makes itself for a job process that held
 # the job (#273). The model may have been used and nobody can say how much, so the app counts the
@@ -151,6 +154,41 @@ def _usage(value: object) -> dict[str, Any] | None:
     }
 
 
+def _finding_count(value: object) -> bool:
+    return (
+        isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= MAX_FINDING_COUNT
+    )
+
+
+def _findings(value: object) -> dict[str, Any] | None:
+    """The findings a successful review left open (#405), checked against the contract.
+
+    The app decides the review verdict from them, so they are passed on exactly or not at all: a
+    shape the app would refuse (and with it the whole result) is left out, and the app then submits
+    no verdict, as for a runner that does not say.
+    """
+    findings = as_object(value)
+    if findings is None or not set(findings) <= {"open", "bySeverity", "incomplete"}:
+        return None
+    if not _finding_count(findings.get("open")) or "bySeverity" not in findings:
+        return None
+    severities = findings["bySeverity"]
+    if severities is not None:
+        counts = as_object(severities)
+        if counts is None or set(counts) != set(_FINDING_PRIORITIES):
+            return None
+        if not all(_finding_count(count) for count in counts.values()):
+            return None
+        severities = {priority: counts[priority] for priority in _FINDING_PRIORITIES}
+    document: dict[str, Any] = {"open": findings["open"], "bySeverity": severities}
+    incomplete = findings.get("incomplete")
+    if incomplete is not None and not isinstance(incomplete, bool):
+        return None
+    if incomplete is True:
+        document["incomplete"] = True
+    return document
+
+
 def _sanitize(line: Mapping[str, Any], redactor: TextRedactor, measured_ms: int) -> Result:
     ok = line["ok"] is True
     code: Any = line.get("errorCode")
@@ -176,6 +214,8 @@ def _sanitize(line: Mapping[str, Any], redactor: TextRedactor, measured_ms: int)
         "logTruncated": line.get("logTruncated") is True,
         "usage": _usage(line.get("usage")),
     }
+    if ok and (findings := _findings(line.get("findings"))) is not None:
+        result["findings"] = findings
     reason: Any = line.get("errorReason")
     if not ok and isinstance(reason, str) and _ERROR_REASON.fullmatch(reason):
         result["errorReason"] = reason
@@ -245,6 +285,9 @@ def minimal(result: Mapping[str, Any], *, keep_usage: bool = True) -> Result:
         "usage": None,
     }
     if result["ok"]:
+        # What the app decides the review verdict from is part of the verdict of a success (#517).
+        if "findings" in result:
+            verdict["findings"] = result["findings"]
         return verdict
     verdict["usage"] = result.get("usage") if keep_usage else None
     verdict["logTail"] = f"{result['errorCode']}" + (f" [{reason}]" if reason else "")

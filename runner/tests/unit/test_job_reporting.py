@@ -26,6 +26,7 @@ from code_reviewer_runner.job_loop.reporting import (
     result_from_outcome,
 )
 from code_reviewer_runner.redaction import Redactor
+from code_reviewer_runner.result import JobResult, ReviewFindings
 
 REDACTOR = Redactor([TOKEN, API_KEY])
 
@@ -348,3 +349,110 @@ def test_a_successful_result_with_an_unreadable_usage_gets_no_reason() -> None:
     assert "errorReason" not in reported(
         outcome(stdout=result_line(usage={"promptTokens": "many"}))
     )
+
+
+_SEVERITIES = {"P0": 0, "P1": 0, "P2": 0, "P3": 3}
+
+
+# #517-T01: the findings a review left open are what the app decides the verdict from; the job loop
+# must hand on what the runner printed, for a Dynamic review, a Diff review and an incomplete one.
+@pytest.mark.parametrize(
+    "findings",
+    [
+        {"open": 3, "bySeverity": _SEVERITIES},
+        {"open": 2, "bySeverity": None},
+        {"open": 0, "bySeverity": {"P0": 0, "P1": 0, "P2": 0, "P3": 0}},
+        {"open": 1, "bySeverity": None, "incomplete": True},
+    ],
+)
+def test_the_findings_of_a_successful_review_are_passed_on_unchanged(
+    findings: dict[str, Any],
+) -> None:
+    result = reported(outcome(stdout=result_line(findings=findings)))
+
+    assert result["findings"] == findings
+
+
+# #517-T01: the line the job process prints is built by `JobResult`, not by the test.
+def test_the_findings_a_job_result_prints_reach_the_reported_result() -> None:
+    printed = JobResult(
+        ok=True,
+        duration_ms=1200,
+        comment_url="https://github.com/octo/repo/pull/7#c1",
+        error_code=None,
+        log_tail="review published",
+        findings=ReviewFindings(open=3, by_severity=_SEVERITIES),
+    ).to_json()
+
+    result = reported(outcome(stdout=(json.dumps(printed) + "\n").encode()))
+
+    assert result["findings"] == {"open": 3, "bySeverity": _SEVERITIES}
+
+
+# #517-T01: a result that says nothing about findings says nothing to the app either.
+def test_a_result_without_findings_reports_none() -> None:
+    assert "findings" not in reported(outcome())
+    assert "findings" not in reported(outcome(stdout=result_line(findings=None)))
+
+
+# #517-T02
+@pytest.mark.parametrize(
+    "findings",
+    [
+        "3",
+        [3],
+        {"open": "3", "bySeverity": None},
+        {"open": True, "bySeverity": None},
+        {"open": -1, "bySeverity": None},
+        {"open": 1.5, "bySeverity": None},
+        {"open": 100_001, "bySeverity": None},
+        {"bySeverity": None},
+        {"open": 1},
+        {"open": 1, "bySeverity": {"P0": 1}},
+        {"open": 1, "bySeverity": {"P0": 1, "P1": 0, "P2": 0, "P3": 0, "P4": 0}},
+        {"open": 1, "bySeverity": {"P0": -1, "P1": 0, "P2": 0, "P3": 0}},
+        {"open": 1, "bySeverity": {"P0": "1", "P1": 0, "P2": 0, "P3": 0}},
+        {"open": 1, "bySeverity": None, "incomplete": "yes"},
+        {"open": 1, "bySeverity": None, "verdict": "approve"},
+    ],
+)
+def test_findings_that_do_not_have_the_contract_shape_are_left_out(findings: Any) -> None:
+    result = reported(outcome(stdout=result_line(findings=findings)))
+
+    assert "findings" not in result
+    assert result["ok"] is True
+    assert result["commentUrl"] == "https://github.com/octo/repo/pull/7#c1"
+
+
+# #517-T03: only a review that succeeded says which findings are open.
+def test_a_failed_result_never_carries_findings() -> None:
+    result = reported(
+        outcome(
+            exit_code=1,
+            stdout=result_line(
+                ok=False,
+                errorCode="timeout",
+                commentUrl=None,
+                findings={"open": 1, "bySeverity": None},
+            ),
+        )
+    )
+
+    assert result["ok"] is False
+    assert "findings" not in result
+
+
+# #517-T04: neither a shrunk log nor the bare verdict loses what the verdict depends on.
+def test_a_shrunk_result_and_the_bare_verdict_keep_the_findings() -> None:
+    findings = {"open": 3, "bySeverity": _SEVERITIES}
+    big = reported(outcome(stdout=result_line(findings=findings)))
+    big["logTail"] = "é" * 40_000
+
+    assert fit_request(big)["findings"] == findings
+    assert minimal(big)["findings"] == findings
+    assert minimal(big, keep_usage=False)["findings"] == findings
+
+
+# #517-T04: a failure has none to keep.
+def test_the_bare_verdict_of_a_result_without_findings_has_none() -> None:
+    assert "findings" not in minimal(reported(outcome()))
