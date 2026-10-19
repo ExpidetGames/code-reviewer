@@ -41,6 +41,8 @@ const appEnv = {
   RUNNER_TOKEN: e2eEnv.runnerToken,
   // Without this flag the server refuses the two overrides above.
   ALLOW_TEST_GITHUB_ENDPOINTS: "true",
+  // A production server fetches the models.dev catalog on its own (#548); no test reaches the internet.
+  MODELS_DEV_FETCH: "off",
 };
 
 export default defineConfig({
