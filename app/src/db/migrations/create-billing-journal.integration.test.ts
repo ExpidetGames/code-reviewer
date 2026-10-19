@@ -163,6 +163,26 @@ for (const engine of ENGINES) {
       });
 
       // #495-T04
+      it.skipIf(engine.name !== "postgres")(
+        "refuses a truncate of the journal, plain and through a cascade from the workspaces",
+        async () => {
+          const { db, workspaceId } = await engine.create();
+          await insert(db, workspaceId, { id: "kept" });
+
+          for (const statement of [
+            sql`truncate billing_journal_entries`,
+            sql`truncate billing_journal_entries cascade`,
+            sql`truncate workspaces cascade`,
+          ])
+            await expect(statement.execute(db)).rejects.toThrow(
+              /billing_journal_entries_immutable/,
+            );
+
+          expect(await count(db)).toBe(1);
+        },
+      );
+
+      // #495-T04
       it("refuses an upsert that would rewrite an entry", async () => {
         const { db, workspaceId } = await engine.create();
         await insert(db, workspaceId, { id: "kept", ref_key: "pi_1" });

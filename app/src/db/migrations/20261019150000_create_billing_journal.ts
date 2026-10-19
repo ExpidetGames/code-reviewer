@@ -17,11 +17,14 @@
 // correction, or a job entry without its job. Written out because a check cannot take bound values; the lists are the
 // same as BILLING_ENTRY_TYPES and ENTRY_SIGNS in src/billing/journal.ts (journal.test.ts fails when they drift apart).
 //
-// Triggers make the journal append-only on both engines, for every writer, whichever release of the app or SQL it is: an
-// update or a delete of an entry is refused (the pattern of the earlier plan-version guard). A mistake is a new
-// `correction` entry. Triggers are not part of the schema builder, so the statements differ by engine. Postgres also
-// refuses TRUNCATE; SQLite has no TRUNCATE. `billing_balances` stays writable: it is a cache that `verify()` compares
-// with the journal.
+// Triggers make the journal append-only on both engines, whichever release of the app or SQL tool writes: an update or a
+// delete of an entry is refused (the pattern of the earlier plan-version guard). A mistake is a new `correction` entry.
+// Triggers are not part of the schema builder, so the statements differ by engine. Postgres also refuses TRUNCATE, plain
+// or through a cascade; SQLite has no TRUNCATE. One gap is a connection setting, not a trigger: SQLite fires a delete
+// trigger for `insert or replace` only on a connection with `recursive_triggers` on. `openDatabase` sets it; the tools
+// that open the file themselves (the admin CLI, backup and restore, the legacy import) and the `sqlite3` shell do not, so
+// on those an `insert or replace` could still overwrite an entry. No code does that. `billing_balances` stays writable: it
+// is a cache that `verify()` compares with the journal.
 import { sql } from "kysely";
 import type { Migration } from "kysely/migration";
 import { databaseDriver } from "../driver.ts";
@@ -32,10 +35,21 @@ const MESSAGE = "billing_journal_entries_immutable";
 export const migration: Migration = {
   async up(db) {
     // The same value on both engines; the schema parity test reads `bigint` and `integer` as one kind.
-    const money = databaseDriver(db) === "postgres" ? "bigint" : "integer";
+    const postgres = databaseDriver(db) === "postgres";
+    const money = postgres ? "bigint" : "integer";
     await db.schema
       .createTable("billing_journal_entries")
-      .addColumn("id", "text", (column) => column.primaryKey().notNull())
+      // The order entries were written in, which `created_at` (a millisecond, written by the app) is not: a release and its
+      // usage share one. An identity on Postgres; on SQLite an `integer primary key`, the row id, which hands out the
+      // highest plus one and so only ever grows because no entry is ever deleted (the delete trigger). Not `autoincrement`:
+      // the convention of this schema avoids it (migrate.integration.test.ts). The primary key on both engines, so the two
+      // schemas have the same one. A reader that pages orders by it.
+      .addColumn("seq", postgres ? "bigint" : "integer", (column) =>
+        postgres
+          ? column.primaryKey().generatedAlwaysAsIdentity()
+          : column.primaryKey(),
+      )
+      .addColumn("id", "text", (column) => column.notNull().unique())
       .addColumn("workspace_id", "text", (column) =>
         column.notNull().references("workspaces.id"),
       )
@@ -104,7 +118,7 @@ export const migration: Migration = {
     await db.schema
       .createIndex("billing_journal_entries_page")
       .on("billing_journal_entries")
-      .columns(["workspace_id", "created_at", "id"])
+      .columns(["workspace_id", "seq"])
       .execute();
 
     await db.schema
@@ -128,7 +142,7 @@ export const migration: Migration = {
       )
       .execute();
 
-    if (databaseDriver(db) === "postgres") {
+    if (postgres) {
       await sql
         .raw(
           `create function billing_journal_entries_guard() returns trigger language plpgsql as $$

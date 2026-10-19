@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { ColumnType } from "kysely";
+import type { ColumnType, Generated } from "kysely";
 
 // Row types of every table, the single place Kysely learns the schema from. Add a table here in the
 // same change as the migration that creates it. Column conventions: see README.md in this folder.
@@ -680,6 +680,8 @@ export interface ModelCatalogEntriesTable {
  * the repository converts them with `Number`; the type is the application's.
  */
 export interface BillingJournalEntriesTable {
+  /** The order entries were written in (identity / autoincrement): the primary key, never set by the app. */
+  seq: Generated<number>;
   id: string;
   workspace_id: string;
   /** A BillingEntryType (BILLING_ENTRY_TYPES). */
