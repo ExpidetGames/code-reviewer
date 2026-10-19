@@ -105,6 +105,13 @@ def encode(model: str, **extra: Any) -> dict[str, Any]:
     return AnthropicMessagesWire(model).encode_request(request(model, **extra))
 
 
+def system_text(body: dict[str, Any]) -> str:
+    """The text of the system prompt: one block, the breakpoint of the static prefix (#539)."""
+    blocks = body.get("system", [])
+    assert len(blocks) <= 1
+    return "".join(block["text"] for block in blocks)
+
+
 def tool_by_name(body: dict[str, Any], name: str) -> dict[str, Any]:
     return next(tool for tool in body["tools"] if tool["name"] == name)
 
@@ -150,6 +157,7 @@ def test_a_model_that_takes_a_forced_choice_and_can_disable_thinking_is_not_stee
     assert body["thinking"] == {"type": "disabled"}
 
 
+# #539-T17
 # #533-T03
 @pytest.mark.parametrize("model", list(MODELS.values()), ids=list(MODELS))
 def test_a_model_is_steered_exactly_when_its_flags_say_so(model: Any) -> None:
@@ -157,7 +165,7 @@ def test_a_model_is_steered_exactly_when_its_flags_say_so(model: Any) -> None:
 
     assert (body["tool_choice"] == {"type": "auto"}) is steered(model.id)
     assert ("strict" in tool_by_name(body, "StructuredOutput")) is steered(model.id)
-    assert (STEERING_INSTRUCTION in body.get("system", "")) is steered(model.id)
+    assert (STEERING_INSTRUCTION in system_text(body)) is steered(model.id)
 
 
 # #533-T03
@@ -185,6 +193,7 @@ def test_a_model_the_list_does_not_know_is_never_steered_and_gets_no_thinking_se
     assert "strict" not in tool_by_name(body, "StructuredOutput")
 
 
+# #539-T17
 # #533-T04
 def test_the_steering_instruction_is_added_after_the_system_text_and_is_the_same_every_time() -> (
     None
@@ -206,9 +215,9 @@ def test_the_steering_instruction_is_added_after_the_system_text_and_is_the_same
         ],
     )
 
-    assert first["system"] == f"You are a reviewer.\n\n{STEERING_INSTRUCTION}"
+    assert system_text(first) == f"You are a reviewer.\n\n{STEERING_INSTRUCTION}"
     assert second["system"] == first["system"]
-    assert encode(THINKING_SONNET)["system"] == STEERING_INSTRUCTION
+    assert system_text(encode(THINKING_SONNET)) == STEERING_INSTRUCTION
 
 
 # #533-T04

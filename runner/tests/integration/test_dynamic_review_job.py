@@ -1281,3 +1281,42 @@ def test_a_dynamic_run_after_a_slow_start_is_ended_by_the_time_that_is_left(
     assert result.error_code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
     assert result.error_reason is None  # the run's own result, not the watchdog's unknown outcome
     assert time.monotonic() - began < 15.0
+
+
+# #539-T16
+def test_a_dynamic_job_logs_how_much_of_its_input_came_from_the_cache_in_counts_only(
+    tmp_path: Path,
+) -> None:
+    preparer = Preparer(tmp_path / "export", structured_script())
+    usage = {
+        "prompt_tokens": 10,
+        "completion_tokens": 7,
+        "cost": 0.0002,
+        "prompt_tokens_details": {"cached_tokens": 6, "cache_write_tokens": 2},
+    }
+    upstream = FakeUpstream(
+        [
+            asks(tool_call("c1", "read", {"filePath": "src/api/handler.ts"})),
+            asks(tool_call("c2", "StructuredOutput", query_findings())),
+        ],
+        usage=usage,
+    )
+
+    with upstream:
+        result = runner.run_dynamic_job(
+            job_for(f"{upstream.url}/v1"),
+            None,
+            0.0,
+            environment(),
+            engines=ALL_ENGINES,
+            prepare=preparer,
+            publish=RecordingPublisher(preparer),
+        )
+
+    assert result.ok, result.log_tail
+    calls = len(upstream.requests)
+    line = (
+        f"prompt cache: {calls} calls, {6 * calls} input tokens read from the cache, "
+        f"{2 * calls} written to the cache, {2 * calls} not cached"
+    )
+    assert line in result.log_tail

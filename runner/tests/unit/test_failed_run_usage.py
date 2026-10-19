@@ -21,6 +21,7 @@ import pytest
 from test_dynamic_review_run import CAPABILITIES, dynamic_document, dynamic_job
 
 from code_reviewer_runner import runner
+from code_reviewer_runner.cache_usage import CacheTally
 from code_reviewer_runner.capabilities import ALL_ENGINES
 from code_reviewer_runner.dynamic_findings import DynamicFindings
 from code_reviewer_runner.dynamic_review.adapter import EngineAnswer, EngineError
@@ -91,6 +92,7 @@ class FakeProxy:
 
     def __init__(self, **options: Any) -> None:
         self.audit = FakeAudit()
+        self.cache_tally = CacheTally()
 
     def serve(self, host: str, port: int) -> FakeServer:
         return FakeServer()

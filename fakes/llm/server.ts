@@ -33,6 +33,7 @@
 // fake (runner/tests/engine/fake_llm.py). Dummy values only; state is in memory.
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { CacheRequestRejected, PromptCache } from "./anthropic-cache.ts";
 import { StrictMessagesApi } from "./anthropic-rules.ts";
 import { defaultReplies, type PromptKind } from "./canned.ts";
 
@@ -132,6 +133,13 @@ export type FakeLlm = {
   /** The usage the next Messages answers report (default: 100 input tokens, 50 output tokens, no cache). */
   setMessagesUsage(usage: FakeMessagesUsage): void;
   /**
+   * While on, every answer reports the usage its request earns from a prompt cache that keeps the rules of the
+   * Claude docs (`anthropic-cache.ts`, #539): cache tokens in the Messages shape, or `cached_tokens` and
+   * `cache_write_tokens` with a discounted `usage.cost` in the chat shape, and a request the API would refuse (more
+   * than four breakpoints, a mark on a message object) answered with its 400. Off by default and by `reset()`.
+   */
+  enablePromptCache(on: boolean): void;
+  /**
    * The next `POST /messages` that is accepted answers with this message verbatim (thinking blocks and all), in
    * the order queued, once each; the request is checked as always (#533).
    */
@@ -201,7 +209,17 @@ export function classify(system: string): PromptKind {
   return "review";
 }
 
-function completion(model: string, content: string) {
+/** The usage of a chat answer, fixed unless the prompt cache gave it. */
+type ChatUsage = Record<string, unknown>;
+
+const FIXED_CHAT_USAGE: ChatUsage = {
+  prompt_tokens: 100,
+  completion_tokens: 50,
+  total_tokens: 150,
+  cost: 0.0001,
+};
+
+function completion(model: string, content: string, usage?: ChatUsage) {
   return {
     id: "chatcmpl-fake",
     object: "chat.completion",
@@ -214,12 +232,7 @@ function completion(model: string, content: string) {
         finish_reason: "stop",
       },
     ],
-    usage: {
-      prompt_tokens: 100,
-      completion_tokens: 50,
-      total_tokens: 150,
-      cost: 0.0001,
-    },
+    usage: usage ?? FIXED_CHAT_USAGE,
   };
 }
 
@@ -227,7 +240,12 @@ function completion(model: string, content: string) {
  * A completion that asks for tool calls, with the fixed token counts a journey can check and the
  * `usage.cost` OpenRouter reports with every answer (a Dynamic run without it stops, #290).
  */
-function toolCompletion(model: string, id: string, calls: AgentToolCall[]) {
+function toolCompletion(
+  model: string,
+  id: string,
+  calls: AgentToolCall[],
+  usage?: ChatUsage,
+) {
   return {
     id: "chatcmpl-fake-agent",
     object: "chat.completion",
@@ -251,7 +269,7 @@ function toolCompletion(model: string, id: string, calls: AgentToolCall[]) {
         finish_reason: "tool_calls",
       },
     ],
-    usage: {
+    usage: usage ?? {
       prompt_tokens: 100,
       completion_tokens: 20,
       total_tokens: 120,
@@ -259,6 +277,38 @@ function toolCompletion(model: string, id: string, calls: AgentToolCall[]) {
     },
   };
 }
+
+/** A chat request as the cache sees it: the same blocks, a mark on a part or at the top level kept, one on a message object left out. */
+function chatAsMessages(
+  body: Record<string, unknown>,
+): Record<string, unknown> {
+  const messages = (Array.isArray(body.messages) ? body.messages : []).map(
+    (raw: Record<string, unknown>) => {
+      const content = raw.content;
+      const parts: unknown[] =
+        typeof content === "string"
+          ? [{ type: "text", text: content }]
+          : Array.isArray(content)
+            ? [...(content as unknown[])]
+            : [];
+      const {
+        role,
+        content: _content,
+        cache_control: _control,
+        ...extra
+      } = raw;
+      if (Object.keys(extra).length > 0)
+        parts.push({ type: "text", text: JSON.stringify(extra) });
+      return { role: typeof role === "string" ? role : "user", content: parts };
+    },
+  );
+  const shaped: Record<string, unknown> = { model: body.model, messages };
+  if ("cache_control" in body) shaped.cache_control = body.cache_control;
+  return shaped;
+}
+
+/** USD per million tokens of an input and an output for the charge of a chat answer from the cache. */
+const CACHE_PRICES = { input: 3, output: 15 };
 
 const DEFAULT_MESSAGES_USAGE: FakeMessagesUsage = {
   input_tokens: 100,
@@ -370,6 +420,7 @@ export async function startLlmFake(
   let anthropicChecks: Array<{ apiKey: string; version: string }> = [];
   let messageLog: FakeMessagesRequest[] = [];
   let messagesUsage: FakeMessagesUsage = DEFAULT_MESSAGES_USAGE;
+  let promptCache: PromptCache | null = null;
   // What the Claude API refuses with a 400, and the thinking blocks it issued (#533).
   let strictApi = new StrictMessagesApi();
   let queuedAnswers: Array<Record<string, unknown>> = [];
@@ -473,6 +524,16 @@ export async function startLlmFake(
             strictApi.record(parsed, answer);
             return send(200, answer);
           };
+          let usage: FakeMessagesUsage = messagesUsage;
+          if (promptCache !== null) {
+            try {
+              usage = promptCache.usage(parsed, messagesUsage.output_tokens);
+            } catch (failure) {
+              if (failure instanceof CacheRequestRejected)
+                return send(400, messagesError(400, failure.message));
+              throw failure;
+            }
+          }
           const queued = queuedAnswers.shift();
           if (queued !== undefined) return accept(queued);
           const tools = anthropicToolNames(parsed.tools);
@@ -487,13 +548,12 @@ export async function startLlmFake(
                 model,
                 `toolu_${String(index)}`,
                 calls,
-                messagesUsage,
+                usage,
                 agent.thinking === true,
               ),
             );
           }
-          if (agent !== null)
-            return accept(messagesText(model, "ok", messagesUsage));
+          if (agent !== null) return accept(messagesText(model, "ok", usage));
           log.push({
             path: request.url ?? "",
             authorization: `x-api-key ${apiKey}`,
@@ -504,7 +564,7 @@ export async function startLlmFake(
             toolResults: {},
             provider: null,
           });
-          return accept(messagesText(model, replies.review, messagesUsage));
+          return accept(messagesText(model, replies.review, usage));
         };
         if (holding) held.push(answerMessages);
         else answerMessages();
@@ -590,6 +650,38 @@ export async function startLlmFake(
       const answer = () => {
         // The client hung up while the request was held: nobody to answer.
         if (response.destroyed) return;
+        let chatUsage: ChatUsage | undefined;
+        if (promptCache !== null && error === null) {
+          try {
+            const counted = promptCache.usage(
+              chatAsMessages(body as Record<string, unknown>),
+              50,
+              { minimum: 1024 },
+            );
+            const fresh = counted.input_tokens;
+            const read = counted.cache_read_input_tokens;
+            const written = counted.cache_creation_input_tokens;
+            chatUsage = {
+              prompt_tokens: fresh + read + written,
+              completion_tokens: 50,
+              total_tokens: fresh + read + written + 50,
+              prompt_tokens_details: {
+                cached_tokens: read,
+                cache_write_tokens: written,
+              },
+              cost:
+                ((fresh + 0.1 * read + 1.25 * written) * CACHE_PRICES.input +
+                  50 * CACHE_PRICES.output) /
+                1_000_000,
+            };
+          } catch (failure) {
+            if (failure instanceof CacheRequestRejected)
+              return send(400, {
+                error: { message: failure.message, code: 400 },
+              });
+            throw failure;
+          }
+        }
         if (error !== null) {
           const message = quoteKey
             ? `Incorrect API key provided: ${authorization.split(" ").at(-1) ?? ""}`
@@ -600,7 +692,7 @@ export async function startLlmFake(
         }
         if (agent !== null) {
           if (toolNames((body as { tools?: unknown }).tools).length === 0)
-            return send(200, completion(model, "ok"));
+            return send(200, completion(model, "ok", chatUsage));
           const index = agentRequests;
           agentRequests += 1;
           const calls = agent.steps[index] ?? [
@@ -608,10 +700,10 @@ export async function startLlmFake(
           ];
           return send(
             200,
-            toolCompletion(model, `call_${String(index)}`, calls),
+            toolCompletion(model, `call_${String(index)}`, calls, chatUsage),
           );
         }
-        send(200, completion(model, replies[kind]));
+        send(200, completion(model, replies[kind], chatUsage));
       };
       if (holding) held.push(answer);
       else answer();
@@ -660,8 +752,12 @@ export async function startLlmFake(
       holding = on;
       if (!on) release();
     },
+    enablePromptCache(on) {
+      promptCache = on ? new PromptCache() : null;
+    },
     reset() {
       holding = false;
+      promptCache = null;
       release();
       agent = null;
       agentRequests = 0;

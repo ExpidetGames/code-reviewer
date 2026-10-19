@@ -57,6 +57,7 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request
 
+from code_reviewer_runner.cache_usage import CacheTally
 from code_reviewer_runner.dynamic_review.audit import ToolAudit
 from code_reviewer_runner.dynamic_review.budget import (
     DEFAULT_WINDOW_TOKENS,
@@ -450,6 +451,8 @@ class ModelProxy:
         self.upstream_model = upstream_model
         self.capabilities = capabilities
         self.audit = ToolAudit(ledger)
+        # How much of the input of the run came from the provider's cache (counts only, #539).
+        self.cache_tally = CacheTally()
         self._post = post
         # The registry entry of the job's provider: the require-parameters field, the matcher for
         # "no endpoint supports them" and the extractor of the stated cost (the runner decides,
@@ -611,6 +614,7 @@ class ModelProxy:
             cache_write_tokens=cache_write,
         )
         self.ledger.note_call_outcome(describe_call(completion, final=reservation.final))
+        self.cache_tally.add(completion.get("usage"))
         return _Attempt(body=response_body, completion=completion)
 
     def _enforce_answer(

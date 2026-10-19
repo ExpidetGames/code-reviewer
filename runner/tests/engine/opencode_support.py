@@ -35,10 +35,18 @@ from code_reviewer_runner.dynamic_review.checkout import PreparedContent
 from code_reviewer_runner.dynamic_review.config import new_proxy_capability
 from code_reviewer_runner.dynamic_review.inputs import review_inputs
 from code_reviewer_runner.dynamic_review.prompts import compose_system_prompt
-from code_reviewer_runner.dynamic_review.proxy import ModelProxy, capabilities_from_config
+from code_reviewer_runner.dynamic_review.proxy import (
+    ModelProxy,
+    ProxyResponse,
+    capabilities_from_config,
+)
 from code_reviewer_runner.job import Job, parse_job
 from code_reviewer_runner.job_loop.jsonvalues import as_object
 from code_reviewer_runner.llm_providers import OPENROUTER, LlmProviderSpec
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from fake_llm import real_anthropic_usage
+from fakes.llm.anthropic_cache import CacheRequestRejected, PromptCache
 
 RUNNER = Path(__file__).resolve().parents[2]
 API_KEY = "dummy-openrouter-key-0123456789"
@@ -56,6 +64,8 @@ CAPABILITIES = json.dumps(
 EXTRA_PATH_VARIABLE = "OPENCODE_TEST_PATH"
 BINARY_VARIABLE = "OPENCODE_BIN"
 
+
+DEFAULT_MODEL = "deepseek/deepseek-v4.1-flash"
 
 # 1 USD per million input tokens, 4 USD per million output tokens: a call has a price.
 UNIT_COSTS = UnitCosts(input_usd_per_mtok=Decimal(1), output_usd_per_mtok=Decimal(4))
@@ -244,6 +254,63 @@ class ScriptedModel:
 
 
 @dataclass
+class ScriptedClaude(ScriptedModel):
+    """The same scripted model behind the Claude Messages API, with the prompt cache of the docs.
+
+    A request is the Messages body the runner's wire built (`POST /v1/messages`); the steps are the
+    ones of `ScriptedModel`, answered as `tool_use` blocks, and the usage of every answer is what
+    the cache rules give that request (`fakes/llm/anthropic_cache.py`), in the real shape. A request
+    the API would answer with a 400 is answered with one and noted in `rejected`.
+    """
+
+    cache: PromptCache = field(default_factory=PromptCache)
+    usages: list[dict[str, Any]] = field(default_factory=lambda: [])
+    rejected: list[str] = field(default_factory=lambda: [])
+
+    def tool_names(self, body: dict[str, Any]) -> set[str]:
+        offered: list[dict[str, Any]] = body.get("tools") or []
+        return {tool["name"] for tool in offered}
+
+    def answer(self, body: dict[str, Any]) -> dict[str, Any]:
+        completion = super().answer(body)
+        choice = completion["choices"][0]
+        message: dict[str, Any] = choice["message"]
+        try:
+            usage = self.cache.usage(body, real_anthropic_usage(output_tokens=10))
+        except CacheRequestRejected as error:
+            self.rejected.append(str(error))
+            self.status = 400
+            return {
+                "type": "error",
+                "error": {"type": "invalid_request_error", "message": str(error)},
+            }
+        self.usages.append(usage)
+        blocks: list[dict[str, Any]] = []
+        if message.get("content"):
+            blocks.append({"type": "text", "text": message["content"]})
+        calls: list[dict[str, Any]] = message.get("tool_calls") or []
+        for call in calls:
+            function: dict[str, Any] = call["function"]
+            blocks.append(
+                {
+                    "type": "tool_use",
+                    "id": call["id"],
+                    "name": function["name"],
+                    "input": json.loads(function["arguments"]),
+                }
+            )
+        return {
+            "id": "msg_test",
+            "type": "message",
+            "role": "assistant",
+            "model": body.get("model"),
+            "content": blocks,
+            "stop_reason": "tool_use" if message.get("tool_calls") else "end_turn",
+            "usage": usage,
+        }
+
+
+@dataclass
 class ScriptedMessagesModel(ScriptedModel):
     """The same script behind the Claude Messages API, as the strict fake knows it (#533).
 
@@ -315,9 +382,7 @@ class ScriptedMessagesModel(ScriptedModel):
         return answer
 
 
-def dynamic_job(
-    head_sha: str, model: str = "deepseek/deepseek-v4.1-flash", provider: str = "openrouter"
-) -> Job:
+def dynamic_job(head_sha: str, model: str = DEFAULT_MODEL, provider: str = "openrouter") -> Job:
     return parse_job(
         json.dumps(
             {
@@ -415,11 +480,14 @@ def run_engine(
     files: frozenset[str] | None = None,
     clock: Callable[[], float] | None = None,
     provider: LlmProviderSpec = OPENROUTER,
-    model_id: str = "deepseek/deepseek-v4.1-flash",
+    model_id: str = DEFAULT_MODEL,
+    engine_requests: list[dict[str, Any]] | None = None,
 ) -> Run:
     """Run the real engine over a prepared export against the scripted model, through the proxy.
 
     `export` overrides the directory the engine is pointed at (the control run uses a raw tree).
+    `provider` and `model_id` choose the provider behind the proxy (the scripted model must speak
+    its protocol); `engine_requests`, when given, collects the requests the engine sent the proxy.
     """
     ledger = BudgetLedger(
         limits or DynamicLimits(), unit_costs=UNIT_COSTS, clock=clock or time.monotonic
@@ -436,6 +504,17 @@ def run_engine(
         capability=capability,
         provider=provider,
     )
+    if engine_requests is not None:
+        handled = proxy.handle
+
+        def recording(
+            method: str, path: str, body: bytes, headers: Mapping[str, str]
+        ) -> ProxyResponse:
+            if method == "POST":
+                engine_requests.append(json.loads(body))
+            return handled(method, path, body, headers)
+
+        proxy.handle = recording
     audit = RecordingAudit(ledger)
     proxy.audit = audit
     directory = export or content.export
