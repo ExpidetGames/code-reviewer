@@ -131,7 +131,7 @@ describe("the fake LLM", () => {
   it("answers a path that is no chat completion with 404", async () => {
     const llm = await setup();
 
-    const response = await fetch(`${llm.baseUrl}/models`);
+    const response = await fetch(`${llm.baseUrl}/embeddings`);
 
     expect(response.status).toBe(404);
     expect(llm.requests()).toEqual([]);

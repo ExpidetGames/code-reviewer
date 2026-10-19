@@ -238,7 +238,7 @@ describe("creating, checking and releasing an entry", () => {
     expect(await catalogOf(portal)).toMatchObject({
       entries: [],
       defaults: { diff: null, dynamic: null },
-      providers: [{ id: "openrouter" }],
+      providers: [{ id: "openrouter" }, { id: "anthropic" }],
     });
 
     const created = await call(portal, "POST", "", SMALL);

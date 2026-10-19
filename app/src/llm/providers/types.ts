@@ -26,10 +26,20 @@ export type ModelPrice = {
 };
 
 /**
- * Whether the provider says what a call cost. Cost limits rely on it: a provider that reports none leaves the
- * cost of every run unknown (the policy for that comes with the first such provider).
+ * How the cost of a call is known. Cost limits and billing rely on it.
+ *
+ * - `provider_reported`: the provider states the charge of every answer (a `usage.cost` in the answer); it is read, never
+ *   derived.
+ * - `computed_from_usage`: the provider states token counts only. The runner prices them with the
+ *   adapter's own price list and the cost of a call is exact for a listed model; a model that is not listed, or an
+ *   answer without usable counts, is an unknown cost, never zero.
+ * - `none`: nothing is known; the cost of every run is unknown.
  */
-export const COST_REPORTING_VALUES = ["provider_reported", "none"] as const;
+export const COST_REPORTING_VALUES = [
+  "provider_reported",
+  "computed_from_usage",
+  "none",
+] as const;
 export type CostReporting = (typeof COST_REPORTING_VALUES)[number];
 
 /** How long a key test waits for the provider. */
