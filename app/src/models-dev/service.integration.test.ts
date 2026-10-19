@@ -11,6 +11,7 @@ import {
 } from "../../../fakes/models-dev/server.ts";
 import { createModelsDevRepository } from "../db/repositories/models-dev-repository.ts";
 import { MODELS_DEV_ENGINES } from "../test-support/models-dev-engines.ts";
+import type { FetchLike } from "./fetch.ts";
 import type { ModelsDevSettings } from "./settings.ts";
 import { createModelsDevService } from "./service.ts";
 import { isUsable, type HostResolver } from "./upstream-url.ts";
@@ -39,6 +40,14 @@ describe.each(MODELS_DEV_ENGINES)("the models.dev fetch on $name", (engine) => {
       settings?: Partial<ModelsDevSettings>;
       timeoutMs?: number;
       maxBytes?: number;
+      deadlineMs?: number;
+      writeReserveMs?: number;
+      lookupConcurrency?: number;
+      clock?: () => number;
+      /** Wraps the real fetch; gets the repository so that a test can look at the database while a fetch is made. */
+      fetchWith?: (
+        repository: ReturnType<typeof createModelsDevRepository>,
+      ) => FetchLike;
     } = {},
   ) {
     const fake = await startModelsDevFake();
@@ -61,6 +70,19 @@ describe.each(MODELS_DEV_ENGINES)("the models.dev fetch on $name", (engine) => {
         ? {}
         : { timeoutMs: options.timeoutMs }),
       ...(options.maxBytes === undefined ? {} : { maxBytes: options.maxBytes }),
+      ...(options.deadlineMs === undefined
+        ? {}
+        : { deadlineMs: options.deadlineMs }),
+      ...(options.writeReserveMs === undefined
+        ? {}
+        : { writeReserveMs: options.writeReserveMs }),
+      ...(options.lookupConcurrency === undefined
+        ? {}
+        : { lookupConcurrency: options.lookupConcurrency }),
+      ...(options.clock === undefined ? {} : { clock: options.clock }),
+      ...(options.fetchWith === undefined
+        ? {}
+        : { fetchImpl: options.fetchWith(repository) }),
       now: () => now,
       log: {
         info: (line) => lines.push(line),
@@ -607,6 +629,207 @@ describe.each(MODELS_DEV_ENGINES)("the models.dev fetch on $name", (engine) => {
         "skipped",
       ]);
       expect(t.fake.requests).toBe(1);
+    },
+  );
+
+  // #548-T04
+  it_(
+    "records the attempt before the fetch starts, so that a run that is killed is not repeated at once",
+    async () => {
+      let seen: unknown;
+      const t = await setup({
+        fetchWith: (repository) => async (url, init) => {
+          seen = await repository.fetchState();
+          return fetch(url, init);
+        },
+      });
+
+      await t.service.refresh();
+
+      expect(seen).toMatchObject({
+        lastAttemptAt: T1.toISOString(),
+        lastSuccessAt: null,
+      });
+    },
+  );
+
+  // #548-T04
+  it_(
+    "waits an hour after an attempt that never ended before it tries again",
+    async () => {
+      const t = await setup();
+      await t.service.refresh();
+      t.advance(25 * HOUR);
+      // A run that started and was killed by the platform: only its start is on record.
+      await t.repository.recordAttempt(new Date(T1.getTime() + 25 * HOUR));
+
+      expect(await t.service.refreshIfDue()).toEqual({
+        status: "skipped",
+        reason: "not_due",
+      });
+      t.advance(30 * 60 * 1000);
+      expect(await t.service.refreshIfDue()).toEqual({
+        status: "skipped",
+        reason: "not_due",
+      });
+      t.advance(31 * 60 * 1000);
+      expect(await t.service.refreshIfDue()).toMatchObject({
+        status: "applied",
+      });
+    },
+  );
+
+  // #548-T04
+  it_(
+    "gives the lookups the time that is left after the fetch, minus what the write needs, and leaves the rest undecided",
+    async () => {
+      let tick = 0;
+      const t = await setup({
+        deadlineMs: 10_000,
+        writeReserveMs: 2_000,
+        lookupConcurrency: 1,
+        clock: () => tick,
+        resolveHost: async () => {
+          tick += 3_000;
+          return ["93.184.216.34"];
+        },
+      });
+
+      const outcome = await t.service.refresh();
+
+      // Three lookups end at 9 s; the 8 s the lookups may use are over, so the other three providers are not looked up.
+      expect(outcome).toMatchObject({
+        status: "applied",
+        summary: { lookupsSkipped: 3, rejectedProviders: 3 },
+      });
+      const providers = await t.repository.listProviders();
+      expect(providers.filter((p) => isUsable(p.url))).toHaveLength(3);
+      expect(
+        providers.filter((p) => p.url.problem === "unresolvable"),
+      ).toHaveLength(3);
+      expect((await t.repository.listModels()).length).toBe(13);
+    },
+  );
+
+  // #548-T04
+  it_(
+    "fails a run that has no time left for the write, and leaves the rows as they were",
+    async () => {
+      let tick = 0;
+      const t = await setup({
+        deadlineMs: 10_000,
+        writeReserveMs: 0,
+        lookupConcurrency: 1,
+        clock: () => tick,
+        resolveHost: async () => {
+          tick += 20_000;
+          return ["93.184.216.34"];
+        },
+      });
+
+      const outcome = await t.service.refresh();
+
+      expect(outcome).toEqual({
+        status: "failed",
+        code: "models_dev_timeout",
+      });
+      expect(await t.repository.listModels()).toEqual([]);
+      expect(await t.repository.fetchState()).toMatchObject({
+        lastStatus: "failed",
+        lastError: "models_dev_timeout",
+      });
+    },
+  );
+
+  // #548-T04
+  it_(
+    "does not let the fetch take more than the time that is left",
+    async () => {
+      const t = await setup({ deadlineMs: 300, writeReserveMs: 0 });
+      t.fake.hang();
+      const started = Date.now();
+
+      const outcome = await t.service.refresh();
+
+      expect(outcome).toEqual({
+        status: "failed",
+        code: "models_dev_unreachable",
+      });
+      expect(Date.now() - started).toBeLessThan(5_000);
+    },
+  );
+
+  // #548-T04
+  it_(
+    "retries a name that did not resolve on first sight at the next sweep, not after a day",
+    async () => {
+      let failing = true;
+      const t = await setup({
+        resolveHost: async () => {
+          if (failing) throw new Error("EAI_AGAIN");
+          return ["93.184.216.34"];
+        },
+      });
+
+      const first = await t.service.refreshIfDue();
+
+      expect(first).toMatchObject({
+        status: "applied",
+        summary: { rejectedProviders: 6, retryProviders: 6 },
+      });
+      expect(
+        (await t.repository.listProviders()).every(
+          (p) => p.url.state === "rejected" && p.url.problem === "unresolvable",
+        ),
+      ).toBe(true);
+      t.advance(30 * 60 * 1000);
+      expect(await t.service.refreshIfDue()).toEqual({
+        status: "skipped",
+        reason: "not_due",
+      });
+
+      failing = false;
+      t.advance(31 * 60 * 1000);
+      const second = await t.service.refreshIfDue();
+
+      expect(second).toMatchObject({
+        status: "applied",
+        summary: { retryProviders: 0 },
+      });
+      expect(
+        (await t.repository.listProviders()).every((p) => isUsable(p.url)),
+      ).toBe(true);
+      t.advance(2 * HOUR);
+      expect(await t.service.refreshIfDue()).toEqual({
+        status: "skipped",
+        reason: "not_due",
+      });
+    },
+  );
+
+  // #548-T04
+  it_(
+    "stops retrying a name that has not resolved for a day, and leaves it to the daily fetch",
+    async () => {
+      const t = await setup({
+        resolveHost: async () => {
+          throw new Error("ENOTFOUND");
+        },
+      });
+      await t.service.refreshIfDue();
+
+      t.advance(25 * HOUR);
+      const later = await t.service.refreshIfDue();
+
+      expect(later).toMatchObject({
+        status: "applied",
+        summary: { retryProviders: 0 },
+      });
+      t.advance(2 * HOUR);
+      expect(await t.service.refreshIfDue()).toEqual({
+        status: "skipped",
+        reason: "not_due",
+      });
     },
   );
 

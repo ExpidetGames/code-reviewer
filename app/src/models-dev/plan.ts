@@ -29,6 +29,13 @@ export const URL_CHANGED_SHARE_LIMIT = 0.1;
 /** ... when that is at least this many providers: one or two moving house is the normal case and must reach the admin. */
 export const URL_CHANGED_MIN_COUNT = 3;
 
+/**
+ * A name that did not resolve when a provider was first seen is tried again at the next sweep, for this long after the
+ * provider appeared: a transient failure of the resolver must not leave a provider rejected for a day, and a name that
+ * never resolves must not make every sweep fetch the whole catalog.
+ */
+export const RETRY_WINDOW_MS = 24 * 60 * 60 * 1000;
+
 export type Guard = {
   tripped: boolean;
   /** Why, in a fixed order; empty when the fetch may be applied. */
@@ -95,6 +102,7 @@ function planProviders(input: Input, stamp: string) {
   let blocked = 0;
   let newlyBlocked = 0;
   let rejected = 0;
+  let retry = 0;
   let added = 0;
   const seen = new Set<string>();
   for (const provider of parsed.providers) {
@@ -128,6 +136,12 @@ function planProviders(input: Input, stamp: string) {
       updatedAt: stamp,
     };
     if (previous === undefined) added += 1;
+    if (
+      url.state === "rejected" &&
+      url.problem === "unresolvable" &&
+      input.now.getTime() - Date.parse(next.firstSeenAt) < RETRY_WINDOW_MS
+    )
+      retry += 1;
     const same =
       previous !== undefined &&
       canonical({ ...previous, updatedAt: null }) ===
@@ -147,6 +161,7 @@ function planProviders(input: Input, stamp: string) {
     blocked,
     newlyBlocked,
     rejected,
+    retry,
     added,
     unlisted,
     listedBefore,
@@ -261,6 +276,7 @@ export function planCatalog(input: Input): CatalogPlan {
       unlistedProviders: providers.unlisted,
       blockedProviders: providers.blocked,
       rejectedProviders: providers.rejected,
+      retryProviders: providers.retry,
       skippedInvalid: skipped.invalid,
       skippedNoToolCalling: skipped.noToolCalling,
       skippedNotLanguageModel: skipped.notLanguageModel,

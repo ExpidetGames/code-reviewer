@@ -22,6 +22,10 @@ export const MODELS_DEV_FETCH_ERROR_CODES = [
   "models_dev_guard_url_changed_share",
   /** The body holds a provider with more models than any provider has; that provider is not read. */
   "models_dev_guard_provider_size",
+  /** The time of the run (one deadline for the fetch, the lookups and the write) was used up before the write; nothing was written. */
+  "models_dev_timeout",
+  /** A run began and its end was never recorded (the platform stopped it): only the start of the attempt is known. */
+  "models_dev_interrupted",
   /** The fetch ran into an error of our own (the database, most likely). */
   "models_dev_internal",
 ] as const;
@@ -42,3 +46,11 @@ export const GUARD_ERROR_CODES = {
   provider_size: "models_dev_guard_provider_size",
 } as const satisfies Record<string, ModelsDevFetchErrorCode>;
 export type GuardReason = keyof typeof GUARD_ERROR_CODES;
+
+/** Thrown by the write when the caller's time is up between two batches; the transaction is rolled back. */
+export class ModelsDevDeadlineError extends Error {
+  readonly code = "models_dev_timeout" as const;
+  constructor() {
+    super("The time for the models.dev write is used up.");
+  }
+}

@@ -5,6 +5,7 @@
 import { describe, expect, it } from "vitest";
 import type { StoredModel, StoredProvider } from "../../models-dev/catalog.ts";
 import { MODELS_DEV_ENGINES } from "../../test-support/models-dev-engines.ts";
+import { ModelsDevDeadlineError } from "../../models-dev/errors.ts";
 import { createModelsDevRepository } from "./models-dev-repository.ts";
 
 const T1 = new Date("2026-10-19T03:00:00.000Z");
@@ -239,5 +240,64 @@ describe.each(MODELS_DEV_ENGINES)(
 
       expect(await repository.listModels()).toHaveLength(450);
     });
+    // #548-T04
+    it_(
+      "records the start of an attempt first: a new row is a failure that was interrupted, an old one keeps how it ended",
+      async () => {
+        const { repository } = await setup();
+
+        await repository.recordAttempt(T1);
+
+        expect(await repository.fetchState()).toEqual({
+          lastAttemptAt: T1.toISOString(),
+          lastSuccessAt: null,
+          lastStatus: "failed",
+          lastError: "models_dev_interrupted",
+          lastSummary: null,
+        });
+
+        const summary = { providers: 1, models: 1 };
+        await repository.recordSuccess(summary, T1);
+        await repository.recordAttempt(T2);
+
+        expect(await repository.fetchState()).toEqual({
+          lastAttemptAt: T2.toISOString(),
+          lastSuccessAt: T1.toISOString(),
+          lastStatus: "ok",
+          lastError: null,
+          lastSummary: summary,
+        });
+      },
+    );
+
+    // #548-T04
+    it_(
+      "writes nothing when the caller says between two batches that the time is up",
+      async () => {
+        const { repository } = await setup();
+        const models = Array.from({ length: 450 }, (_unused, index) =>
+          model({ id: `model-${String(index)}` }),
+        );
+        let batches = 0;
+
+        await expect(
+          repository.apply(
+            { providers: [provider()], models },
+            { summary: { models: 450 }, at: T1 },
+            {
+              shouldStop: () => {
+                batches += 1;
+                return batches > 2;
+              },
+            },
+          ),
+        ).rejects.toBeInstanceOf(ModelsDevDeadlineError);
+
+        expect(batches).toBeGreaterThan(2);
+        expect(await repository.listModels()).toEqual([]);
+        expect(await repository.listProviders()).toEqual([]);
+        expect(await repository.fetchState()).toBeUndefined();
+      },
+    );
   },
 );

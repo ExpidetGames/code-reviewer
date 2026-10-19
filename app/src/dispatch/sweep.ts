@@ -40,7 +40,13 @@ export const STOPPED_REVIVE_MS = 10 * 60 * 1000;
 export const CLEANUP_HOUR_KEY = "maintenance.sweep_cleanup_hour";
 const HOUR_MS = 60 * 60 * 1000;
 /** The sweep runs in an internal route (five minutes), so the check runs may have most of a minute (#405). */
-const CHECKS_BUDGET_MS = 40_000;
+export const CHECKS_BUDGET_MS = 40_000;
+/**
+ * The deadline of the models.dev run: the fetch, the lookups and the write together (#548). The route has 300 seconds; the
+ * check runs take 40 of them at most, the other steps are single queries and calls with limits of their own, and this
+ * leaves the rest as headroom. A run that needs longer fails with `models_dev_timeout`, writes nothing and is tried again.
+ */
+export const MODELS_DEV_BUDGET_MS = 90_000;
 
 export const SWEEP_STEPS = [
   "expire",
@@ -97,7 +103,9 @@ export type SweepDependencies = {
     reconcileDue(options?: { budgetMs?: number }): Promise<{ synced: number }>;
   };
   /** #548: the daily fetch of the models.dev catalog. Left out, none is made. */
-  modelsDev?: { refreshIfDue(): Promise<RefreshOutcome> };
+  modelsDev?: {
+    refreshIfDue(options?: { deadlineMs?: number }): Promise<RefreshOutcome>;
+  };
   settings: SweepSettings;
   log?: SweepLog;
 };
@@ -180,7 +188,9 @@ export function createDispatchSweep(deps: SweepDependencies): DispatchSweep {
     const modelsDev = deps.modelsDev;
     if (modelsDev !== undefined)
       await step("models_dev", async () => {
-        report.modelsDev = (await modelsDev.refreshIfDue()).status;
+        report.modelsDev = (
+          await modelsDev.refreshIfDue({ deadlineMs: MODELS_DEV_BUDGET_MS })
+        ).status;
       });
 
     const expired = report.expired;

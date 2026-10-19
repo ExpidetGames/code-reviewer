@@ -23,6 +23,7 @@ import type {
 } from "../../models-dev/catalog.ts";
 import {
   isModelsDevFetchErrorCode,
+  ModelsDevDeadlineError,
   type ModelsDevFetchErrorCode,
 } from "../../models-dev/errors.ts";
 import {
@@ -66,7 +67,17 @@ export type ModelsDevRepository = {
   apply(
     write: CatalogWrite,
     success?: { summary: FetchSummary; at: Date },
+    options?: {
+      /** Asked before every batch; when it says stop, the transaction is rolled back and `ModelsDevDeadlineError` thrown. */
+      shouldStop?: () => boolean;
+    },
   ): Promise<void>;
+  /**
+   * Records that an attempt begins, before anything is fetched: a run the platform stops (a serverless function at its
+   * limit) leaves no other trace, and without this the next sweep would try again at once. A new state row reads as a
+   * failure that was interrupted; an existing one keeps how its last run ended and only moves `last_attempt_at`.
+   */
+  recordAttempt(at: Date): Promise<void>;
   /** Records a fetch that changed nothing, with its stable code; the last success and the catalog stay. */
   recordFailure(code: ModelsDevFetchErrorCode, at: Date): Promise<void>;
   recordSuccess(summary: FetchSummary, at: Date): Promise<void>;
@@ -283,10 +294,15 @@ export function createModelsDevRepository(
       };
     },
 
-    async apply(write, done) {
+    async apply(write, done, options) {
       const run = async (trx: Kysely<Database>) => {
+        const stopIfAsked = () => {
+          if (options?.shouldStop?.() === true)
+            throw new ModelsDevDeadlineError();
+        };
         // Providers first: a model refers to its provider.
-        for (const batch of chunks(write.providers.map(providerRow)))
+        for (const batch of chunks(write.providers.map(providerRow))) {
+          stopIfAsked();
           await trx
             .insertInto("models_dev_providers")
             .values(batch)
@@ -303,7 +319,9 @@ export function createModelsDevRepository(
               })),
             )
             .execute();
-        for (const batch of chunks(write.models.map(modelRow)))
+        }
+        for (const batch of chunks(write.models.map(modelRow))) {
+          stopIfAsked();
           await trx
             .insertInto("models_dev_models")
             .values(batch)
@@ -329,10 +347,30 @@ export function createModelsDevRepository(
                 })),
             )
             .execute();
+        }
+        stopIfAsked();
         if (done !== undefined) await success(trx, done.summary, done.at);
       };
       if (db.isTransaction) await run(db);
       else await db.transaction().execute(run);
+    },
+
+    async recordAttempt(at) {
+      const stamp = formatTimestamp(at);
+      await db
+        .insertInto("models_dev_fetch_state")
+        .values({
+          id: STATE_ID,
+          last_attempt_at: stamp,
+          last_success_at: null,
+          last_status: "failed",
+          last_error: "models_dev_interrupted",
+          last_summary: null,
+        })
+        .onConflict((conflict) =>
+          conflict.column("id").doUpdateSet({ last_attempt_at: stamp }),
+        )
+        .execute();
     },
 
     async recordFailure(code, at) {

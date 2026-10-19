@@ -687,4 +687,62 @@ describe("the address of a provider across fetches", () => {
     });
     expect(plan.summary).toMatchObject({ rejectedProviders: 1 });
   });
+
+  // #548-T07
+  it("asks for another try soon when the name of a new provider did not resolve, and for a limited time", () => {
+    const unresolvable = new Map<string, UrlCheck>([
+      ["deepseek", { ok: false, problem: "unresolvable", seen: URL_A }],
+    ]);
+    const first = planCatalog({
+      parsed: parsed([reducedModel("a")]),
+      stored: EMPTY,
+      urlChecks: unresolvable,
+      now: T1,
+    });
+    expect(first.summary).toMatchObject({
+      rejectedProviders: 1,
+      retryProviders: 1,
+    });
+
+    const stored = applied(EMPTY, first.write);
+    const nextDay = planCatalog({
+      parsed: parsed([reducedModel("a")]),
+      stored,
+      urlChecks: unresolvable,
+      now: new Date(T1.getTime() + 25 * 60 * 60 * 1000),
+    });
+    expect(nextDay.summary).toMatchObject({
+      rejectedProviders: 1,
+      retryProviders: 0,
+    });
+  });
+
+  // #548-T07
+  it("does not ask for a retry for an address that is bad, or for a trusted one that did not resolve today", () => {
+    const refused = planCatalog({
+      parsed: parsed([reducedModel("a")]),
+      stored: EMPTY,
+      urlChecks: new Map<string, UrlCheck>([
+        ["deepseek", { ok: false, problem: "not_https", seen: "http://x" }],
+      ]),
+      now: T1,
+    });
+    expect(refused.summary.retryProviders).toBe(0);
+
+    const trusted = planCatalog({
+      parsed: parsed([reducedModel("a")]),
+      stored: EMPTY,
+      urlChecks: okUrl(),
+      now: T1,
+    });
+    const later = planCatalog({
+      parsed: parsed([reducedModel("a")]),
+      stored: applied(EMPTY, trusted.write),
+      urlChecks: new Map<string, UrlCheck>([
+        ["deepseek", { ok: false, problem: "unresolvable", seen: URL_A }],
+      ]),
+      now: T2,
+    });
+    expect(later.summary.retryProviders).toBe(0);
+  });
 });

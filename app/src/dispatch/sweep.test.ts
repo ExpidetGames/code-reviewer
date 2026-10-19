@@ -2,11 +2,17 @@
 
 // What one run of the sweep does when parts of it fail (#328): every step is tried, the ones that failed are named,
 // and nothing a failure said reaches the log. The steps against a real database are in sweep.integration.test.ts.
+import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import type { ExpiryReport } from "../db/repositories/runner-jobs-repository.ts";
 import type { CleanupResult } from "../maintenance/cleanup.ts";
 import type { RefreshOutcome } from "../models-dev/service.ts";
-import { createDispatchSweep, type SweepSettings } from "./sweep.ts";
+import {
+  CHECKS_BUDGET_MS,
+  MODELS_DEV_BUDGET_MS,
+  createDispatchSweep,
+  type SweepSettings,
+} from "./sweep.ts";
 
 const expiry = {
   requeued: 0,
@@ -212,6 +218,29 @@ describe("the daily models.dev fetch in a run of the sweep (#548)", () => {
     expect(order).toEqual(["checks", "cleanup", "models_dev"]);
     expect(report.modelsDev).toBe("applied");
     expect(report.failedSteps).toEqual([]);
+  });
+
+  // #548-T04
+  it("gives the fetch one deadline that leaves the function limit of the route room for the other steps", async () => {
+    const t = setup();
+
+    await t.sweep.run();
+
+    expect(t.refreshIfDue).toHaveBeenCalledWith({
+      deadlineMs: MODELS_DEV_BUDGET_MS,
+    });
+    const config = JSON.parse(
+      readFileSync(new URL("../../vercel.json", import.meta.url), "utf8"),
+    ) as { functions: Record<string, { maxDuration: number }> };
+    const limitMs =
+      (config.functions["src/app/api/internal/**/route.ts"]?.maxDuration ?? 0) *
+      1000;
+    expect(limitMs).toBe(300_000);
+    // The fetch and the check runs, which both have a budget, together take at most half of the limit; the steps
+    // before them (single queries and calls with time limits of their own) have the rest.
+    expect(MODELS_DEV_BUDGET_MS + CHECKS_BUDGET_MS).toBeLessThanOrEqual(
+      limitMs / 2,
+    );
   });
 
   // #548-T04
