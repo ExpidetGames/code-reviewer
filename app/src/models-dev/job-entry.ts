@@ -15,7 +15,12 @@ import type { StoredModel, StoredProvider } from "./catalog.ts";
 import { supportedProvider } from "./opencode-providers.ts";
 import { MODALITIES } from "./parse.ts";
 import { isUsable, UPSTREAM_BASE_URL } from "./upstream-url.ts";
-import { AUTH_HEADERS, WIRE_FAMILIES } from "./wire.ts";
+import {
+  AUTH_HEADERS,
+  BUNDLED_NPM,
+  INTERLEAVED_FIELDS,
+  WIRE_FAMILIES,
+} from "./wire.ts";
 
 export const JOB_ENTRY_REFUSAL_CODES = [
   /** The provider is not in the supported file (excluded, runtime-install, or models.dev added it since). */
@@ -49,15 +54,17 @@ const modelSchema = z.strictObject({
   interleaved: z
     .union([
       z.literal(true),
-      z.strictObject({ field: z.string().regex(/^[a-z][a-z_]{0,39}$/) }),
+      z.strictObject({ field: z.enum(INTERLEAVED_FIELDS) }),
     ])
     .optional(),
 });
 
-const entrySchema = z.strictObject({
+/** The entry as the contract describes it; exported so that a test can hold a document against the rules directly. */
+export const jobModelEntrySchema = z.strictObject({
   version: z.literal(1),
   providerId: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/),
-  npm: z.string().min(1).max(100),
+  // An allow-list: the SDK decides which code the engine loads.
+  npm: z.enum(BUNDLED_NPM),
   family: z.enum(WIRE_FAMILIES),
   authHeader: z.enum(AUTH_HEADERS),
   upstreamBaseUrl: z.string().max(2048).regex(UPSTREAM_BASE_URL),
@@ -65,7 +72,7 @@ const entrySchema = z.strictObject({
   model: modelSchema,
 });
 
-export type JobModelEntry = z.infer<typeof entrySchema>;
+export type JobModelEntry = z.infer<typeof jobModelEntrySchema>;
 
 export type JobEntryResult =
   { ok: true; entry: JobModelEntry } | { ok: false; code: JobEntryRefusalCode };
@@ -84,7 +91,7 @@ export function buildJobModelEntry(
   if (supported === undefined) return refuse("provider_unsupported");
   if (!isUsable(provider.url) || provider.url.trustedUrl === null)
     return refuse("provider_url_blocked");
-  const parsed = entrySchema.safeParse({
+  const parsed = jobModelEntrySchema.safeParse({
     version: 1,
     providerId: provider.id,
     npm: supported.npm,

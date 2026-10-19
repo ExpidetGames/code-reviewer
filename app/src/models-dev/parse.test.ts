@@ -144,6 +144,35 @@ describe("reading a models.dev body", () => {
   });
 
   // #548-T01
+  it.each([
+    [{ field: "reasoning_content" }, { field: "reasoning_content" }],
+    [{ field: "reasoning_details" }, { field: "reasoning_details" }],
+    ["reasoning_content", { field: "reasoning_content" }],
+    [true, true],
+    // The pinned engine hands the reasoning back in any name it is given; only the two names models.dev uses are kept.
+    [{ field: "reasoning_text" }, null],
+    [{ field: "reasoning" }, null],
+    [{ field: "reasoning_summary" }, null],
+    [{ field: "<script>" }, null],
+    [{ field: "" }, null],
+    ["x", null],
+    [false, null],
+  ])("keeps the interleaved field %j as %j", (interleaved, expected) => {
+    const deepseek = structuredClone(FIXTURE.deepseek);
+    const upstream = deepseek?.models["deepseek-v4-pro"] as Record<
+      string,
+      unknown
+    >;
+    upstream.interleaved = interleaved;
+
+    const model = parse({ ...FIXTURE, deepseek }).models.find(
+      (candidate) => candidate.id === "deepseek-v4-pro",
+    );
+
+    expect(model?.interleaved).toEqual(expected);
+  });
+
+  // #548-T01
   it("stores prices as the exact decimal strings of USD per million tokens, tiers included", () => {
     const haiku = parse(FIXTURE).models.find(
       (model) => model.id === "claude-haiku-5-5",

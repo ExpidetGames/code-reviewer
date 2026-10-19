@@ -7,6 +7,7 @@
 // never kept (the pinned OpenCode does not enforce the flag, so the catalog must, #546). Pure: no network, no database.
 import { z } from "zod";
 import { excludedReason, supportedProvider } from "./opencode-providers.ts";
+import { INTERLEAVED_FIELDS, type InterleavedField } from "./wire.ts";
 
 export const MAX_NAME_LENGTH = 120;
 /** The longest address kept; a longer one is flagged and judged as invalid by the address check. */
@@ -46,7 +47,7 @@ export type ModelCost = {
   tiers?: PriceTier[];
 };
 
-export type Interleaved = true | { field: string };
+export type Interleaved = true | { field: InterleavedField };
 
 export type ReducedModel = {
   providerId: string;
@@ -204,8 +205,6 @@ function modalitiesOf(values: unknown[] | undefined): Modality[] {
   return MODALITIES.filter((modality) => values?.includes(modality) === true);
 }
 
-const FIELD = /^[a-z][a-z_]{0,39}$/;
-
 function interleavedOf(value: unknown): Interleaved | null {
   if (value === true) return true;
   const field =
@@ -214,7 +213,10 @@ function interleavedOf(value: unknown): Interleaved | null {
       : typeof value === "object" && value !== null && "field" in value
         ? (value as { field: unknown }).field
         : undefined;
-  return typeof field === "string" && FIELD.test(field) ? { field } : null;
+  // Only the names the pinned engine is known to hand the reasoning back in (wire.ts); another name is dropped.
+  return INTERLEAVED_FIELDS.find((known) => known === field) === undefined
+    ? null
+    : { field: field as InterleavedField };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

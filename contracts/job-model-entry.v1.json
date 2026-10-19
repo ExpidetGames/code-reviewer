@@ -18,7 +18,12 @@
     "WireFamily": {
       "description": "The wire format the pinned engine speaks to the provider's SDK: it decides the path the proxy allows and how the usage is read.",
       "type": "string",
-      "enum": ["openai-chat", "openai-responses", "anthropic-messages", "google"]
+      "enum": [
+        "openai-chat",
+        "openai-responses",
+        "anthropic-messages",
+        "google"
+      ]
     },
     "AuthHeader": {
       "description": "The header the SDK of the family sends the key in; the proxy swaps the dummy key for the real one in this header.",
@@ -41,7 +46,7 @@
       }
     },
     "Interleaved": {
-      "description": "Where the model carries its reasoning in a tool loop, so the engine hands it back (`true`, or the field).",
+      "description": "Where the model carries its reasoning in a tool loop, so the engine hands it back (`true`, or the field). The field is one of the two names models.dev states and the pinned engine names (src/models-dev/wire.ts); the engine copies the text into whatever name it is given, so the list is closed here.",
       "oneOf": [
         { "const": true },
         {
@@ -49,7 +54,10 @@
           "additionalProperties": false,
           "required": ["field"],
           "properties": {
-            "field": { "type": "string", "pattern": "^[a-z][a-z_]{0,39}$" }
+            "field": {
+              "type": "string",
+              "enum": ["reasoning_content", "reasoning_details"]
+            }
           }
         }
       ]
@@ -58,7 +66,15 @@
       "description": "The entry for `provider.<providerId>.models.<modelId>`. `status` is normalised: the pinned engine drops a model whose status is `deprecated` or `alpha`, so those are written as `active` (the warning is shown in our own screens, from the catalog) and `beta` runs as it is. `tool_call` is always true: the catalog stores no other model, and the engine does not enforce the flag. No price: the engine's own cost is not used (the ledger reads the raw usage of the provider).",
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "status", "tool_call", "reasoning", "temperature", "limit", "modalities"],
+      "required": [
+        "name",
+        "status",
+        "tool_call",
+        "reasoning",
+        "temperature",
+        "limit",
+        "modalities"
+      ],
       "properties": {
         "name": { "type": "string", "minLength": 1, "maxLength": 120 },
         "status": { "type": "string", "enum": ["active", "beta"] },
@@ -89,15 +105,48 @@
     "JobModelEntry": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["version", "providerId", "npm", "family", "authHeader", "upstreamBaseUrl", "modelId", "model"],
+      "required": [
+        "version",
+        "providerId",
+        "npm",
+        "family",
+        "authHeader",
+        "upstreamBaseUrl",
+        "modelId",
+        "model"
+      ],
       "properties": {
         "version": { "const": 1 },
         "providerId": { "$ref": "#/$defs/ProviderId" },
         "npm": {
-          "description": "The bundled SDK of the pinned engine. Always set: without it the engine treats a provider it does not know as OpenAI-compatible and speaks Chat to it, whatever the provider is (spike #546).",
+          "description": "The bundled SDK of the pinned engine (BUNDLED_PROVIDERS at the pin), an allow-list: the SDK decides which code the engine loads, and any other name would be installed at run time. Always set: without it the engine treats a provider it does not know as OpenAI-compatible and speaks Chat to it, whatever the provider is (spike #546).",
           "type": "string",
-          "minLength": 1,
-          "maxLength": 100
+          "enum": [
+            "@ai-sdk/amazon-bedrock",
+            "@ai-sdk/amazon-bedrock/mantle",
+            "@ai-sdk/anthropic",
+            "@ai-sdk/azure",
+            "@ai-sdk/google",
+            "@ai-sdk/google-vertex",
+            "@ai-sdk/google-vertex/anthropic",
+            "@ai-sdk/openai",
+            "@ai-sdk/openai-compatible",
+            "@openrouter/ai-sdk-provider",
+            "@ai-sdk/xai",
+            "@ai-sdk/mistral",
+            "@ai-sdk/groq",
+            "@ai-sdk/deepinfra",
+            "@ai-sdk/cerebras",
+            "@ai-sdk/cohere",
+            "@ai-sdk/gateway",
+            "@ai-sdk/togetherai",
+            "@ai-sdk/perplexity",
+            "@ai-sdk/vercel",
+            "@ai-sdk/alibaba",
+            "gitlab-ai-provider",
+            "@ai-sdk/github-copilot",
+            "venice-ai-sdk-provider"
+          ]
         },
         "family": { "$ref": "#/$defs/WireFamily" },
         "authHeader": { "$ref": "#/$defs/AuthHeader" },

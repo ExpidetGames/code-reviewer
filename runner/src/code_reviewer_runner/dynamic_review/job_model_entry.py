@@ -32,7 +32,36 @@ from code_reviewer_runner.job_loop.jsonvalues import as_object
 _PROVIDER_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 _MODEL_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/+@-]{0,199}$")
 _UPSTREAM = re.compile(r"^https://[^\s?#@]+$")
-_FIELD = re.compile(r"^[a-z][a-z_]{0,39}$")
+# The SDKs the pinned engine bundles (BUNDLED_PROVIDERS at the pin), an allow-list: the SDK decides which code the engine
+# loads. The same list as `contracts/job-model-entry.v1.json` (a contract test compares them).
+BUNDLED_NPM = (
+    "@ai-sdk/amazon-bedrock",
+    "@ai-sdk/amazon-bedrock/mantle",
+    "@ai-sdk/anthropic",
+    "@ai-sdk/azure",
+    "@ai-sdk/google",
+    "@ai-sdk/google-vertex",
+    "@ai-sdk/google-vertex/anthropic",
+    "@ai-sdk/openai",
+    "@ai-sdk/openai-compatible",
+    "@openrouter/ai-sdk-provider",
+    "@ai-sdk/xai",
+    "@ai-sdk/mistral",
+    "@ai-sdk/groq",
+    "@ai-sdk/deepinfra",
+    "@ai-sdk/cerebras",
+    "@ai-sdk/cohere",
+    "@ai-sdk/gateway",
+    "@ai-sdk/togetherai",
+    "@ai-sdk/perplexity",
+    "@ai-sdk/vercel",
+    "@ai-sdk/alibaba",
+    "gitlab-ai-provider",
+    "@ai-sdk/github-copilot",
+    "venice-ai-sdk-provider",
+)
+# The names the entry may carry the reasoning of a tool loop in (the contract's `Interleaved.field`).
+INTERLEAVED_FIELDS = ("reasoning_content", "reasoning_details")
 _FAMILIES = ("openai-chat", "openai-responses", "anthropic-messages", "google")
 _AUTH_HEADERS = ("Authorization", "x-api-key", "x-goog-api-key")
 _MODALITIES = ("text", "audio", "image", "video", "pdf")
@@ -145,7 +174,7 @@ def _checked_model(value: Any) -> dict[str, Any]:
         field = as_object(interleaved)
         if interleaved is True:
             checked["interleaved"] = True
-        elif field is not None and set(field) == {"field"} and _text(field["field"], _FIELD, 40):
+        elif field is not None and set(field) == {"field"} and field["field"] in INTERLEAVED_FIELDS:
             checked["interleaved"] = {"field": field["field"]}
         else:
             raise _invalid()
@@ -161,7 +190,7 @@ def parse_job_model_entry(document: Any) -> JobModelEntry:
     if isinstance(version, bool) or version != 1:
         raise _invalid()
     npm = entry["npm"]
-    if not isinstance(npm, str) or not 1 <= len(npm) <= 100:
+    if not isinstance(npm, str) or npm not in BUNDLED_NPM:
         raise _invalid()
     if (
         not _text(entry["providerId"], _PROVIDER_ID, 64)

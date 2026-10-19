@@ -15,37 +15,13 @@
 // TypeScript-only runtime syntax.
 import {
   AUTH_HEADER_OF_FAMILY,
+  BUNDLED_NPM,
   type ExclusionReason,
   type WireFamily,
 } from "../../models-dev/wire.ts";
 
 /** The SDKs the pinned OpenCode bundles (`BUNDLED_PROVIDERS`); any other `npm` is installed at run time. */
-const BUNDLED_NPM: ReadonlySet<string> = new Set([
-  "@ai-sdk/amazon-bedrock",
-  "@ai-sdk/amazon-bedrock/mantle",
-  "@ai-sdk/anthropic",
-  "@ai-sdk/azure",
-  "@ai-sdk/google",
-  "@ai-sdk/google-vertex",
-  "@ai-sdk/google-vertex/anthropic",
-  "@ai-sdk/openai",
-  "@ai-sdk/openai-compatible",
-  "@openrouter/ai-sdk-provider",
-  "@ai-sdk/xai",
-  "@ai-sdk/mistral",
-  "@ai-sdk/groq",
-  "@ai-sdk/deepinfra",
-  "@ai-sdk/cerebras",
-  "@ai-sdk/cohere",
-  "@ai-sdk/gateway",
-  "@ai-sdk/togetherai",
-  "@ai-sdk/perplexity",
-  "@ai-sdk/vercel",
-  "@ai-sdk/alibaba",
-  "gitlab-ai-provider",
-  "@ai-sdk/github-copilot",
-  "venice-ai-sdk-provider",
-]);
+const BUNDLED_NPM_SET: ReadonlySet<string> = new Set(BUNDLED_NPM);
 
 /** Providers left out by decision (#544, decision 6), whatever their SDK. */
 const EXCLUDED_BY_ID: Readonly<Record<string, ExclusionReason>> = {
@@ -128,7 +104,7 @@ function entryOf(id: string, candidate: Candidate): ProviderEntry {
   const npm = typeof candidate.npm === "string" ? candidate.npm : "";
   const api = typeof candidate.api === "string" ? candidate.api : undefined;
   if (api?.includes("${") === true) return { excluded: "templated_base_url" };
-  if (!BUNDLED_NPM.has(npm)) return { excluded: "runtime_install" };
+  if (!BUNDLED_NPM_SET.has(npm)) return { excluded: "runtime_install" };
   const family = FAMILY_OF_ID[id] ?? FAMILY_OF_NPM[npm];
   if (family === undefined) return { excluded: "wire_not_supported" };
   const defaultBaseUrl = DEFAULT_BASE_URL_OF_NPM[npm];

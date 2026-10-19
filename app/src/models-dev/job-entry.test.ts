@@ -7,10 +7,15 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createContractValidator } from "../test-support/runner-contract.ts";
 import type { StoredModel, StoredProvider } from "./catalog.ts";
-import { JOB_ENTRY_REFUSAL_CODES, buildJobModelEntry } from "./job-entry.ts";
+import {
+  JOB_ENTRY_REFUSAL_CODES,
+  buildJobModelEntry,
+  jobModelEntrySchema,
+} from "./job-entry.ts";
 import { parseModelsDev } from "./parse.ts";
 import { planCatalog } from "./plan.ts";
 import type { UrlCheck } from "./upstream-url.ts";
+import { BUNDLED_NPM, INTERLEAVED_FIELDS } from "./wire.ts";
 
 const contract = createContractValidator("job-model-entry.v1.json");
 const NOW = new Date("2026-10-19T03:00:00.000Z");
@@ -333,4 +338,91 @@ describe("refusing a provider or a model that must not reach a job", () => {
       });
     },
   );
+});
+
+describe("the closed lists of the entry", () => {
+  const entry = () => {
+    const built = build("deepseek", "deepseek-v4-pro");
+    if (!built.ok) throw new Error(built.code);
+    return structuredClone(built.entry);
+  };
+
+  // #548-T10
+  it("takes the SDKs the pinned OpenCode bundles", () => {
+    for (const npm of BUNDLED_NPM)
+      expect(jobModelEntrySchema.safeParse({ ...entry(), npm }).success).toBe(
+        true,
+      );
+  });
+
+  // #548-T10
+  it.each([
+    "left-pad",
+    "@evil/ai-sdk-provider",
+    "@ai-sdk/not-a-sdk",
+    "../../etc/passwd",
+    "@ai-sdk/openai ",
+    "git+https://evil.example/x.git",
+    "file:/tmp/x",
+  ])(
+    "refuses the SDK %s, which the engine would install at run time",
+    (npm) => {
+      expect(jobModelEntrySchema.safeParse({ ...entry(), npm }).success).toBe(
+        false,
+      );
+    },
+  );
+
+  // #548-T10
+  it("names the same fields the contract does", () => {
+    const schema = JSON.parse(
+      readFileSync(
+        join(
+          import.meta.dirname,
+          "..",
+          "..",
+          "..",
+          "contracts",
+          "job-model-entry.v1.json",
+        ),
+        "utf8",
+      ),
+    ) as {
+      $defs: {
+        JobModelEntry: { properties: { npm: { enum: string[] } } };
+        Interleaved: {
+          oneOf: { properties?: { field: { enum: string[] } } }[];
+        };
+      };
+    };
+
+    expect(schema.$defs.JobModelEntry.properties.npm.enum).toEqual([
+      ...BUNDLED_NPM,
+    ]);
+    expect(schema.$defs.Interleaved.oneOf[1]?.properties?.field.enum).toEqual([
+      ...INTERLEAVED_FIELDS,
+    ]);
+  });
+
+  // #548-T10
+  it.each(INTERLEAVED_FIELDS)("takes the interleaved field %s", (field) => {
+    const document = entry();
+    document.model.interleaved = { field };
+
+    expect(jobModelEntrySchema.safeParse(document).success).toBe(true);
+  });
+
+  // #548-T10
+  it.each([
+    "reasoning_text",
+    "reasoning",
+    "reasoning_summary",
+    "x",
+    "<script>",
+  ])("refuses the interleaved field %s", (field) => {
+    const document = entry();
+    document.model.interleaved = { field };
+
+    expect(jobModelEntrySchema.safeParse(document).success).toBe(false);
+  });
 });

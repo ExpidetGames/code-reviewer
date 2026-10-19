@@ -5,6 +5,7 @@
 // set, an upstream address that is https) are in the file. The runner checks the same example in
 // runner/tests/contract/test_job_model_entry_contract.py.
 import { describe, expect, it } from "vitest";
+import { BUNDLED_NPM, INTERLEAVED_FIELDS } from "../../src/models-dev/wire.ts";
 import {
   createContractValidator,
   readExamples,
@@ -80,6 +81,15 @@ describe("the job model entry contract", () => {
       (d: Record<string, unknown>) => (d.modelId = "bad id"),
     ],
     ["another version", (d: Record<string, unknown>) => (d.version = 2)],
+    [
+      "an SDK the engine does not bundle",
+      (d: Record<string, unknown>) => (d.npm = "left-pad"),
+    ],
+    [
+      "an SDK given as an address",
+      (d: Record<string, unknown>) =>
+        (d.npm = "git+https://evil.example/x.git"),
+    ],
   ])("refuses %s", (_name, change) => {
     const document = example();
     change(document);
@@ -123,9 +133,30 @@ describe("the job model entry contract", () => {
       "an interleaved field that is not a name",
       (m: Record<string, unknown>) => (m.interleaved = { field: "<script>" }),
     ],
+    [
+      "an interleaved field the engine is not known to hand back (reasoning_text)",
+      (m: Record<string, unknown>) =>
+        (m.interleaved = { field: "reasoning_text" }),
+    ],
   ])("refuses a model with %s", (_name, change) => {
     expect(accepts(withModel(change))).toBe(false);
   });
+
+  // #548-T10
+  it.each([...BUNDLED_NPM])("accepts the bundled SDK %s", (npm) => {
+    const document = example();
+    document.npm = npm;
+
+    expect(accepts(document)).toBe(true);
+  });
+
+  // #548-T10
+  it.each([...INTERLEAVED_FIELDS])(
+    "accepts the interleaved field %s",
+    (field) => {
+      expect(accepts(withModel((m) => (m.interleaved = { field })))).toBe(true);
+    },
+  );
 
   // #548-T10
   it("accepts beta, an input limit and `interleaved: true`", () => {

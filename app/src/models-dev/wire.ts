@@ -48,3 +48,52 @@ export const EXCLUSION_REASONS = [
   "templated_base_url",
 ] as const;
 export type ExclusionReason = (typeof EXCLUSION_REASONS)[number];
+
+/**
+ * The SDKs the pinned OpenCode bundles (`BUNDLED_PROVIDERS` in `packages/opencode/src/provider/provider.ts` at the pin);
+ * any other `npm` is installed at run time, which a worker VM cannot do. The derivation of the supported file reads
+ * this list, and the entry of a job may name nothing else (`job-entry.ts`, `contracts/job-model-entry.v1.json`,
+ * `runner/.../job_model_entry.py`): the SDK decides which code the engine loads, so it is an allow-list, not a pattern.
+ * A pin bump is the moment to read it again.
+ */
+export const BUNDLED_NPM = [
+  "@ai-sdk/amazon-bedrock",
+  "@ai-sdk/amazon-bedrock/mantle",
+  "@ai-sdk/anthropic",
+  "@ai-sdk/azure",
+  "@ai-sdk/google",
+  "@ai-sdk/google-vertex",
+  "@ai-sdk/google-vertex/anthropic",
+  "@ai-sdk/openai",
+  "@ai-sdk/openai-compatible",
+  "@openrouter/ai-sdk-provider",
+  "@ai-sdk/xai",
+  "@ai-sdk/mistral",
+  "@ai-sdk/groq",
+  "@ai-sdk/deepinfra",
+  "@ai-sdk/cerebras",
+  "@ai-sdk/cohere",
+  "@ai-sdk/gateway",
+  "@ai-sdk/togetherai",
+  "@ai-sdk/perplexity",
+  "@ai-sdk/vercel",
+  "@ai-sdk/alibaba",
+  "gitlab-ai-provider",
+  "@ai-sdk/github-copilot",
+  "venice-ai-sdk-provider",
+] as const;
+export type BundledNpm = (typeof BUNDLED_NPM)[number];
+
+/**
+ * The names under which a model carries its reasoning in a tool loop, as far as the pinned engine hands it back. The
+ * engine (`provider/transform.ts` at the pin) copies the reasoning text into the field it is given, whatever the name; the
+ * two here are the ones models.dev states for the models of the supported providers (2026-10-19: `reasoning_content` for
+ * about 1,200, `reasoning_details` for about 100) and the ones the engine's own comment names. Any other name is dropped
+ * when the catalog is read: the model then runs without handing its reasoning back, which is the engine's default. The
+ * engine's schema also lists `reasoning` and `reasoning_text`; no model states them, so they are not offered.
+ */
+export const INTERLEAVED_FIELDS = [
+  "reasoning_content",
+  "reasoning_details",
+] as const;
+export type InterleavedField = (typeof INTERLEAVED_FIELDS)[number];

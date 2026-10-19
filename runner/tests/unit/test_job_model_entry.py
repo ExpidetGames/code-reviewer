@@ -18,6 +18,8 @@ from typing import Any
 import pytest
 
 from code_reviewer_runner.dynamic_review.job_model_entry import (
+    BUNDLED_NPM,
+    INTERLEAVED_FIELDS,
     JobModelEntryError,
     native_model_reference,
     native_provider_config,
@@ -91,6 +93,13 @@ def test_a_valid_entry_is_read() -> None:
         doc(model={"reasoning": "yes"}),
         doc(model={"modalities": {"input": ["text", "smell"], "output": ["text"]}}),
         doc(model={"interleaved": {"field": "<script>"}}),
+        doc(model={"interleaved": {"field": "reasoning_text"}}),
+        doc(model={"interleaved": {"field": "reasoning"}}),
+        doc(top={"npm": "left-pad"}),
+        doc(top={"npm": "@ai-sdk/not-a-sdk"}),
+        doc(top={"npm": "git+https://evil.example/x.git"}),
+        doc(top={"npm": "../../etc/passwd"}),
+        doc(top={"npm": "@ai-sdk/openai "}),
     ],
 )
 # #548-T10
@@ -203,3 +212,17 @@ def test_the_engine_is_only_ever_pointed_at_loopback(base_url: str) -> None:
         native_provider_config(entry, base_url=base_url, api_key=DUMMY)
 
     assert raised.value.code == "job_model_proxy_not_loopback"
+
+
+@pytest.mark.parametrize("npm", BUNDLED_NPM)
+# #548-T10
+def test_every_bundled_sdk_is_read(npm: str) -> None:
+    assert parse_job_model_entry(doc(top={"npm": npm})).npm == npm
+
+
+@pytest.mark.parametrize("field", INTERLEAVED_FIELDS)
+# #548-T10
+def test_the_interleaved_fields_of_the_engine_are_read(field: str) -> None:
+    entry = parse_job_model_entry(doc(model={"interleaved": {"field": field}}))
+
+    assert entry.model["interleaved"] == {"field": field}

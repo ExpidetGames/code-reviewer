@@ -10,7 +10,7 @@ import {
   excludedReason,
   supportedProvider,
 } from "./opencode-providers.ts";
-import { AUTH_HEADER_OF_FAMILY } from "./wire.ts";
+import { AUTH_HEADER_OF_FAMILY, BUNDLED_NPM } from "./wire.ts";
 
 const REPOSITORY = join(import.meta.dirname, "..", "..", "..");
 const contractText = readFileSync(
@@ -66,6 +66,17 @@ describe("the supported-provider file", () => {
     expect(entries.length).toBeGreaterThan(100);
     for (const entry of entries)
       expect(entry.authHeader).toBe(AUTH_HEADER_OF_FAMILY[entry.family]);
+  });
+
+  // #548-T05
+  it("offers only SDKs the pinned OpenCode bundles", () => {
+    const sdks = new Set(
+      Object.values(OPENCODE_PROVIDERS.providers).flatMap((entry) =>
+        "npm" in entry ? [entry.npm] : [],
+      ),
+    );
+    expect(sdks.size).toBeGreaterThan(5);
+    for (const sdk of sdks) expect(BUNDLED_NPM).toContain(sdk);
   });
 
   // #548-T06
