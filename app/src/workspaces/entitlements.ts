@@ -23,6 +23,13 @@ export const LIMIT_NAMES = [
 export type LimitName = (typeof LIMIT_NAMES)[number];
 export type EntitlementLimits = Record<LimitName, number | null>;
 
+/**
+ * Which catalog entries a workspace on the operator's key may use (#428, ADR 0005, 2.9): the ids of the entries, `[]` for
+ * none, `null` for every released entry. It has a meaning for the key mode `managed` only; next to `own` it is kept,
+ * and nothing reads it.
+ */
+export type ModelAccess = { catalogEntries: string[] | null };
+
 /** The fields of a workspace row and of the instance default (`default_entitlements`) alike. */
 export type EntitlementsData = {
   /** A label for display and audit; the code never branches on it. */
@@ -34,6 +41,11 @@ export type EntitlementsData = {
   suspended: boolean;
   /** A short lowercase code that says why; null unless suspended. */
   suspensionCode: string | null;
+  /**
+   * Absent means every released entry, like `{ catalogEntries: null }`. A stored entry always carries it once read
+   * (`readEntitlements`); the type lets a writer that does not know the field leave it out.
+   */
+  modelAccess?: ModelAccess;
 };
 
 /** Where an answer came from: the row of the workspace or the default of the instance. */
@@ -84,6 +96,16 @@ function limited(
     periodStart: entry.periodStart,
     suspended: entry.suspended,
     suspensionCode: entry.suspensionCode,
+    ...(entry.modelAccess === undefined
+      ? {}
+      : {
+          modelAccess: {
+            catalogEntries:
+              entry.modelAccess.catalogEntries === null
+                ? null
+                : [...entry.modelAccess.catalogEntries],
+          },
+        }),
   };
 }
 
@@ -103,4 +125,23 @@ export function resolveEntitlements(
   if (defaultEntitlements !== undefined)
     return limited("default", defaultEntitlements);
   return { kind: "unlimited" };
+}
+
+/**
+ * Whether the entitlements let a workspace use a catalog entry: the one question the claim and the picker ask (#428), so
+ * they cannot answer it differently. No entitlements, `null` and an absent field allow every entry, a list allows the
+ * entries on it, `[]` allows none, and an id on the list that no entry has matches nothing. Unreadable entitlements
+ * allow nothing: damaged data does not grant a model.
+ *
+ * It answers about the list only. That an entry is released and serves the kind is for the caller to check, and so is
+ * the key mode: a workspace on its own key reads no catalog, so its caller never asks (#432).
+ */
+export function entryAllowed(
+  entitlements: ResolvedEntitlements,
+  entry: { id: string },
+): boolean {
+  if (entitlements.kind === "unlimited") return true;
+  if (entitlements.kind === "invalid") return false;
+  const listed = entitlements.modelAccess?.catalogEntries ?? null;
+  return listed === null || listed.includes(entry.id);
 }

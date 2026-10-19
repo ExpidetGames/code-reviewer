@@ -606,9 +606,11 @@ describe("the hosted deployment guide as a procedure", () => {
     expect(keys).toContain("Upgrade every App instance first");
     expect(keys).toContain("`llm_not_configured`");
     expect(keys).toContain("`operator_key_missing`");
-    // #280: the model of a managed workspace is the operator's per tier, not the instance default.
-    expect(keys).toContain("PUT /api/operator/v1/model-tiers");
-    expect(keys).toContain("`managed_tier_unavailable`");
+    // #432: the model of a managed workspace is a catalog entry's, not the instance default; the tiers go away with #434.
+    expect(keys).toContain("`managed_model_unavailable`");
+    expect(keys).toContain("catalog");
+    expect(keys).toContain("#434");
+    expect(keys).not.toContain("is yours, per tier");
     expect(flat(keys)).toContain(
       "`LLM_MODEL` and `LLM_MAX_TOKENS` are not used",
     );
@@ -1101,6 +1103,34 @@ describe("the deployment pipeline in the guide", () => {
       expect(everything, name).not.toContain(name);
     }
     expect(setup).toMatch(/Retired: the environments/);
+  });
+
+  // #434-X7
+  it("tells the operator what the release that removes the managed model tiers asks for", () => {
+    const update = flat(section("### 5.6 Updating the App or the Dispatcher"));
+    const start = update.indexOf(
+      "Release that removes the managed model tiers",
+    );
+    expect(start).toBeGreaterThanOrEqual(0);
+    const note = update.slice(start, start + 6_000);
+
+    // The entries must be listed in the lists set by hand, or managed reviews stop.
+    expect(note).toContain(
+      "add the migrated entries to every `modelAccess` list you set on a workspace or on the instance default by hand",
+    );
+    expect(note).toContain("managed reviews stop");
+    expect(note).toContain("`managed_model_unavailable`");
+    // The behaviour that differs from the tiers, said once and plainly.
+    expect(note).toContain("a tier that had no model for a review kind");
+    expect(note).toContain(
+      "created after the release get the instance default",
+    );
+    // The removed route: 401 without a valid token, 404 with one.
+    expect(note).toContain("`401` without a valid token and `404` with one");
+    // A rollback is not safe, and the three changes go back together.
+    expect(note).toContain("A rollback is not safe");
+    expect(note).toContain("#432, #433 and #434 together");
+    expect(note).toContain("reload");
   });
 
   // #403-T11

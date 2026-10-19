@@ -76,6 +76,8 @@ describe("the entitlements repository of a workspace", () => {
 
     expect(await repository.get()).toEqual({
       ...entitlements(),
+      // #428: a stored row always reads with the model access, every released entry when it states none.
+      modelAccess: { catalogEntries: null },
       updatedBy: "u1",
       updatedAt: "2026-10-14T12:00:00.000Z",
     });
@@ -447,7 +449,10 @@ describe("the default entitlements of the instance", () => {
       db,
     );
 
-    expect(await settings.getDefaultEntitlements()).toEqual(entitlements());
+    expect(await settings.getDefaultEntitlements()).toEqual({
+      ...entitlements(),
+      modelAccess: { catalogEntries: null },
+    });
   });
 
   // #271-T04
@@ -480,7 +485,10 @@ describe("the default entitlements of the instance", () => {
       ),
     ).rejects.toMatchObject({ code: "period_start_backwards" });
 
-    expect(await settings.getDefaultEntitlements()).toEqual(entitlements());
+    expect(await settings.getDefaultEntitlements()).toEqual({
+      ...entitlements(),
+      modelAccess: { catalogEntries: null },
+    });
   });
 
   // #275-T07
@@ -518,5 +526,368 @@ describe("the default entitlements of the instance", () => {
     );
 
     expect(stored).toMatchObject({ periodStart: "2026-09-01T00:00:00.000Z" });
+  });
+});
+
+describe("the model access (#428)", () => {
+  const ID_A = "mce_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const ID_B = "mce_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+  async function columnOf(
+    db: Awaited<ReturnType<typeof setup>>["db"],
+    workspaceId: string,
+  ) {
+    return (
+      await db
+        .selectFrom("workspace_entitlements")
+        .select("model_access")
+        .where("workspace_id", "=", workspaceId)
+        .executeTakeFirstOrThrow()
+    ).model_access;
+  }
+
+  async function insertRaw(
+    db: Awaited<ReturnType<typeof setup>>["db"],
+    workspaceId: string,
+    modelAccess: string | null,
+  ) {
+    await db
+      .insertInto("workspace_entitlements")
+      .values({
+        workspace_id: workspaceId,
+        plan_label: "team",
+        key_mode: "managed",
+        limits: JSON.stringify(entitlements().limits),
+        period_start: "2026-10-01T00:00:00.000Z",
+        suspended: 0,
+        suspension_code: null,
+        model_access: modelAccess,
+        updated_at: "2026-10-13T08:00:00.000Z",
+        updated_by: null,
+      })
+      .execute();
+  }
+
+  // #428-T05
+  it("reads a row without the field, a row of before #428, as every released entry", async () => {
+    const { db, workspaceId, repository } = await setup();
+    await insertRaw(db, workspaceId, null);
+
+    const stored = await repository.get();
+
+    expect(stored).toMatchObject({ modelAccess: { catalogEntries: null } });
+    expect(stored).not.toHaveProperty("invalid");
+    expect(resolveEntitlements(stored, undefined)).toMatchObject({
+      kind: "limited",
+      modelAccess: { catalogEntries: null },
+    });
+  });
+
+  // #428-T05
+  it("stores nothing in the column when the entitlements say nothing, and a list as JSON text", async () => {
+    const { db, workspaceId, repository } = await setup();
+
+    await repository.put(entitlements(), null);
+    expect(await columnOf(db, workspaceId)).toBeNull();
+
+    await repository.put(
+      entitlements({ modelAccess: { catalogEntries: [ID_A, ID_B] } }),
+      null,
+    );
+    expect(await columnOf(db, workspaceId)).toBe(
+      JSON.stringify({ catalogEntries: [ID_A, ID_B] }),
+    );
+    expect(await repository.get()).toMatchObject({
+      modelAccess: { catalogEntries: [ID_A, ID_B] },
+    });
+  });
+
+  // #428-T05
+  it("keeps the difference between none (an empty list) and every released entry (null)", async () => {
+    const { db, workspaceId, repository } = await setup();
+
+    await repository.put(
+      entitlements({ modelAccess: { catalogEntries: [] } }),
+      null,
+    );
+    expect(await columnOf(db, workspaceId)).toBe('{"catalogEntries":[]}');
+    expect(await repository.get()).toMatchObject({
+      modelAccess: { catalogEntries: [] },
+    });
+
+    await repository.put(
+      entitlements({ modelAccess: { catalogEntries: null } }),
+      null,
+    );
+    expect(await columnOf(db, workspaceId)).toBeNull();
+    expect(await repository.get()).toMatchObject({
+      modelAccess: { catalogEntries: null },
+    });
+  });
+
+  // #428-T06
+  it("keeps the stored model access when a put leaves it out, and clears it only when told to", async () => {
+    const { db, workspaceId, repository } = await setup();
+    await repository.put(
+      entitlements({ modelAccess: { catalogEntries: [ID_A] } }),
+      null,
+    );
+
+    const kept = await repository.put(
+      entitlements({ planLabel: "other" }),
+      null,
+    );
+
+    expect(kept).toMatchObject({
+      planLabel: "other",
+      modelAccess: { catalogEntries: [ID_A] },
+    });
+    expect(await columnOf(db, workspaceId)).toBe(
+      JSON.stringify({ catalogEntries: [ID_A] }),
+    );
+    const cleared = await repository.put(
+      entitlements({ modelAccess: { catalogEntries: null } }),
+      null,
+    );
+    expect(cleared).toMatchObject({ modelAccess: { catalogEntries: null } });
+  });
+
+  // #428-T06
+  it("starts a new row with every released entry when the put leaves the field out", async () => {
+    const { repository } = await setup();
+
+    expect(await repository.put(entitlements(), null)).toMatchObject({
+      modelAccess: { catalogEntries: null },
+    });
+  });
+
+  // #428-T03
+  it.each([
+    ["a string", "all"],
+    ["ids of a bad shape", { catalogEntries: ["not an id"] }],
+    [
+      "more than 100 ids",
+      {
+        catalogEntries: Array.from(
+          { length: 101 },
+          (_unused, index) => `mce_${String(index)}`,
+        ),
+      },
+    ],
+  ])("refuses %s and stores nothing", async (_name, modelAccess) => {
+    const { repository } = await setup();
+
+    await expect(
+      repository.put(
+        entitlements({
+          modelAccess: modelAccess as EntitlementsData["modelAccess"],
+        }),
+        null,
+      ),
+    ).rejects.toMatchObject({
+      name: "EntitlementsError",
+      code: "catalog_entry_invalid",
+    });
+    expect(await repository.get()).toBeUndefined();
+  });
+
+  // #428-T10
+  it("stores and returns a list next to the own key unchanged", async () => {
+    const { db, workspaceId, repository } = await setup();
+
+    await repository.put(
+      entitlements({
+        keyMode: "own",
+        limits: { ...entitlements().limits, managedCostLimitMicroUsd: null },
+        modelAccess: { catalogEntries: [ID_A] },
+      }),
+      null,
+    );
+
+    expect(await repository.get()).toMatchObject({
+      keyMode: "own",
+      modelAccess: { catalogEntries: [ID_A] },
+    });
+    expect(await columnOf(db, workspaceId)).toBe(
+      JSON.stringify({ catalogEntries: [ID_A] }),
+    );
+  });
+
+  // #428-T05
+  it.each([
+    ["damaged JSON", "{not json"],
+    ["JSON that is not an object", '"all"'],
+    ["an object without the list", "{}"],
+    ["ids of a bad shape", '{"catalogEntries":[1]}'],
+  ])(
+    "reads a column with %s as invalid: damaged data grants no model",
+    async (_name, text) => {
+      const { db, workspaceId, repository } = await setup();
+      await insertRaw(db, workspaceId, text);
+
+      const stored = await repository.get();
+
+      expect(stored).toMatchObject({ invalid: true });
+      expect(resolveEntitlements(stored, undefined)).toMatchObject({
+        kind: "invalid",
+        code: "entitlements_invalid",
+      });
+    },
+  );
+
+  describe("in the default of the instance", () => {
+    // #428-T05
+    it("reads a default stored without the field as every released entry", async () => {
+      const { db } = await setup();
+      const settings = createInstanceSettingsRepository(db, () => NOW);
+      await sql`insert into instance_settings (key, value, updated_by, updated_at)
+        values ('default_entitlements', ${JSON.stringify(entitlements())}, null, '2026-10-13T08:00:00.000Z')`.execute(
+        db,
+      );
+
+      expect(await settings.getDefaultEntitlements()).toEqual({
+        ...entitlements(),
+        modelAccess: { catalogEntries: null },
+      });
+    });
+
+    // #428-T04
+    it("stores a list and applies it to a workspace without a row", async () => {
+      const { db, repository } = await setup();
+      const settings = createInstanceSettingsRepository(db, () => NOW);
+
+      await settings.set(
+        "default_entitlements",
+        entitlements({ modelAccess: { catalogEntries: [ID_B] } }),
+        null,
+      );
+
+      expect(
+        resolveEntitlements(
+          await repository.get(),
+          await settings.getDefaultEntitlements(),
+        ),
+      ).toMatchObject({
+        source: "default",
+        modelAccess: { catalogEntries: [ID_B] },
+      });
+    });
+
+    // #428-T06
+    it("keeps the stored list when a set leaves it out, and clears it only when told to", async () => {
+      const { db } = await setup();
+      const settings = createInstanceSettingsRepository(db, () => NOW);
+      await settings.set(
+        "default_entitlements",
+        entitlements({ modelAccess: { catalogEntries: [ID_B] } }),
+        null,
+      );
+
+      await settings.set(
+        "default_entitlements",
+        entitlements({ planLabel: "other" }),
+        null,
+      );
+      expect(await settings.getDefaultEntitlements()).toMatchObject({
+        planLabel: "other",
+        modelAccess: { catalogEntries: [ID_B] },
+      });
+
+      await settings.set(
+        "default_entitlements",
+        entitlements({ modelAccess: { catalogEntries: null } }),
+        null,
+      );
+      expect(await settings.getDefaultEntitlements()).toMatchObject({
+        modelAccess: { catalogEntries: null },
+      });
+    });
+
+    // #428-T03
+    it("refuses an invalid list and stores nothing", async () => {
+      const { db } = await setup();
+      const settings = createInstanceSettingsRepository(db, () => NOW);
+
+      await expect(
+        settings.set(
+          "default_entitlements",
+          entitlements({
+            modelAccess: {
+              catalogEntries: "all",
+            } as unknown as EntitlementsData["modelAccess"],
+          }),
+          null,
+        ),
+      ).rejects.toMatchObject({ code: "catalog_entry_invalid" });
+      expect(await settings.getDefaultEntitlements()).toBeUndefined();
+    });
+
+    // #428-T06
+    it.each([
+      [
+        "a damaged list",
+        JSON.stringify({ ...entitlements(), modelAccess: "all" }),
+      ],
+      ["damaged JSON", "{not json"],
+      ["data that fails the validation", '{"planLabel":"x"}'],
+    ])(
+      "refuses a set that leaves the field out over a stored default with %s, and an explicit field repairs it",
+      async (_name, text) => {
+        const { db } = await setup();
+        const settings = createInstanceSettingsRepository(db, () => NOW);
+        await sql`insert into instance_settings (key, value, updated_by, updated_at)
+          values ('default_entitlements', ${text}, null, '2026-10-13T08:00:00.000Z')`.execute(
+          db,
+        );
+
+        await expect(
+          settings.set(
+            "default_entitlements",
+            entitlements({ planLabel: "other" }),
+            null,
+          ),
+        ).rejects.toMatchObject({
+          code: "catalog_entry_invalid",
+          field: "modelAccess",
+        });
+        // Nothing was written: the default still grants no model, and the text is as it was.
+        expect(await settings.getDefaultEntitlements()).toEqual(
+          INVALID_ENTITLEMENTS,
+        );
+        const raw = await sql<{
+          value: string;
+        }>`select value from instance_settings where key = 'default_entitlements'`.execute(
+          db,
+        );
+        expect(raw.rows[0]?.value).toBe(text);
+
+        await settings.set(
+          "default_entitlements",
+          entitlements({
+            planLabel: "other",
+            modelAccess: { catalogEntries: [ID_B] },
+          }),
+          null,
+        );
+        expect(await settings.getDefaultEntitlements()).toMatchObject({
+          planLabel: "other",
+          modelAccess: { catalogEntries: [ID_B] },
+        });
+      },
+    );
+
+    // #428-T05
+    it("reads a default with a damaged list as invalid", async () => {
+      const { db } = await setup();
+      const settings = createInstanceSettingsRepository(db, () => NOW);
+      await sql`insert into instance_settings (key, value, updated_by, updated_at)
+        values ('default_entitlements', ${JSON.stringify({ ...entitlements(), modelAccess: "all" })}, null, '2026-10-13T08:00:00.000Z')`.execute(
+        db,
+      );
+
+      expect(await settings.getDefaultEntitlements()).toEqual(
+        INVALID_ENTITLEMENTS,
+      );
+    });
   });
 });

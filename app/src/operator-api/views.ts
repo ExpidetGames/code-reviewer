@@ -10,7 +10,9 @@ import type {
   ResolvedEntitlements,
 } from "../workspaces/entitlements.ts";
 
-export function fieldsOf(data: EntitlementsData): EntitlementsData {
+export function fieldsOf(
+  data: Omit<EntitlementsData, "source">,
+): Required<Omit<EntitlementsData, "source">> {
   return {
     planLabel: data.planLabel,
     keyMode: data.keyMode,
@@ -23,6 +25,10 @@ export function fieldsOf(data: EntitlementsData): EntitlementsData {
     periodStart: data.periodStart,
     suspended: data.suspended,
     suspensionCode: data.suspensionCode,
+    // #428: always stated, every released entry (null) when the entry says nothing.
+    modelAccess: {
+      catalogEntries: data.modelAccess?.catalogEntries ?? null,
+    },
   };
 }
 
@@ -72,5 +78,9 @@ export function changedFieldNames(
   >)
     if (!readable || before.limits[name] !== after.limits[name])
       names.push(`limits.${name}`);
+  // #428: a first write that states nothing about it is not a change of it (the log stays as it was).
+  const was = readable ? (before.modelAccess?.catalogEntries ?? null) : null;
+  const now = after.modelAccess?.catalogEntries ?? null;
+  if (JSON.stringify(was) !== JSON.stringify(now)) names.push("modelAccess");
   return names;
 }

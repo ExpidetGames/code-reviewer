@@ -90,6 +90,8 @@ export function describeAdminIssue(issue: RequestIssue): string {
       return "Enter the API key. There is nothing to save.";
     case "api_key_invalid":
       return describeLlmKeyIssue(issue.code);
+    case "api_key_unreadable":
+      return "The saved key cannot be read. Enter the key in the field to test it, or save it again.";
     case "url_not_https":
       return "The address must start with https://. Plain http is not accepted.";
     case "url_has_credentials":

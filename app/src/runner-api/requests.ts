@@ -14,6 +14,8 @@ import type {
   FieldErrorCode,
   HeartbeatRequest,
   ReleaseRequest,
+  FindingPriority,
+  ReviewFindings,
   RunnerResult,
   RunnerUsage,
   WorkerResultRequest,
@@ -21,6 +23,11 @@ import type {
 import {
   CLAIM_ENGINES,
   CLAIM_FEATURES,
+  DEFAULT_LLM_PROVIDERS,
+  FINDING_PRIORITIES,
+  LLM_PROVIDER_ID_PATTERN,
+  MAX_FINDING_COUNT,
+  MAX_LLM_PROVIDERS,
   MAX_RUNNING_RANGE,
   RELEASE_RETRY_AFTER_RANGE,
   STOPPED_EARLY_REASONS,
@@ -171,6 +178,7 @@ export function parseClaimRequest(body: unknown): Parsed<ClaimRequest> {
     if (check.fields.length === 0) engines = accepted;
   }
   const features = parseFeatures(check, body.features);
+  const llmProviders = parseLlmProviders(check, body.llmProviders);
   const jobId = parseClaimJobId(check, body.jobId);
   const maxRunning = parseMaxRunning(check, body.maxRunning);
   if (check.fields.length > 0) return { ok: false, fields: check.fields };
@@ -179,6 +187,7 @@ export function parseClaimRequest(body: unknown): Parsed<ClaimRequest> {
     value: {
       ...(engines === undefined ? {} : { engines }),
       ...(features === undefined ? {} : { features }),
+      ...(llmProviders === undefined ? {} : { llmProviders }),
       ...(jobId === undefined ? {} : { jobId }),
       ...(maxRunning === undefined ? {} : { maxRunning }),
     },
@@ -226,6 +235,55 @@ function parseFeatures(
   )
     return check.fail("features", "invalid");
   return CLAIM_FEATURES.filter((known) => raw.includes(known));
+}
+
+/**
+ * #424: the LLM providers a runner can run. A list of slugs of the contract's form, at least one, no
+ * duplicate, at most `MAX_LLM_PROVIDERS`; refused like the contract refuses it. A slug this app has no
+ * adapter for is kept (a newer runner may know more than this app); deciding what to do with it is
+ * the claim's business.
+ */
+function parseLlmProviders(check: Checker, raw: unknown): string[] | undefined {
+  if (raw === undefined) return undefined;
+  if (
+    !Array.isArray(raw) ||
+    raw.length === 0 ||
+    raw.length > MAX_LLM_PROVIDERS ||
+    !raw.every(
+      (entry) =>
+        typeof entry === "string" && LLM_PROVIDER_ID_PATTERN.test(entry),
+    ) ||
+    new Set(raw).size !== raw.length
+  )
+    return check.fail("llmProviders", "invalid");
+  return [...(raw as string[])];
+}
+
+/**
+ * #424: the providers a caller can run: what it advertised, or `DEFAULT_LLM_PROVIDERS`, which is all a
+ * previous-release caller can run.
+ */
+export function callerLlmProviders(
+  advertised: readonly string[] | undefined,
+): readonly string[] {
+  return advertised ?? DEFAULT_LLM_PROVIDERS;
+}
+
+/**
+ * #424: the providers named in the `llmProviders` query parameter of the Worker's details call, a comma
+ * separated list. Names that are no slugs are ignored (like unknown features), so a malformed value
+ * never fails the call; `undefined` means the Worker named none, which `callerLlmProviders` reads as the default of an unlisted caller.
+ */
+export function parseWorkerLlmProviders(
+  raw: string | null,
+): string[] | undefined {
+  if (raw === null) return undefined;
+  const names = raw
+    .split(",")
+    .map((name) => name.trim())
+    .filter((name) => LLM_PROVIDER_ID_PATTERN.test(name));
+  const unique = [...new Set(names)].slice(0, MAX_LLM_PROVIDERS);
+  return unique.length === 0 ? undefined : unique;
 }
 
 /**
@@ -348,6 +406,53 @@ function parseUsage(
   };
 }
 
+/** The findings of a successful review (#405): null or absent is "not said", the same as for a runner that never sent it. */
+function parseFindings(
+  check: Checker,
+  value: unknown,
+): ReviewFindings | null | undefined {
+  if (value === undefined || value === null) return null;
+  if (!isRecord(value)) return check.fail("result.findings", "invalid");
+  const before = check.fields.length;
+  const prefix = "result.findings.";
+  for (const key of Object.keys(value))
+    if (key !== "open" && key !== "bySeverity" && key !== "incomplete")
+      check.fail(`${prefix}${key}`, "invalid");
+  const open = check.integer(value, "open", `${prefix}open`, MAX_FINDING_COUNT);
+  const counts = value.bySeverity;
+  let bySeverity: ReviewFindings["bySeverity"] | undefined;
+  if (counts === undefined) check.fail(`${prefix}bySeverity`, "required");
+  else if (counts === null) bySeverity = null;
+  else if (!isRecord(counts)) check.fail(`${prefix}bySeverity`, "invalid");
+  else {
+    const read: Partial<Record<FindingPriority, number>> = {};
+    for (const key of Object.keys(counts))
+      if (!(FINDING_PRIORITIES as readonly string[]).includes(key))
+        check.fail(`${prefix}bySeverity.${key}`, "invalid");
+    for (const priority of FINDING_PRIORITIES) {
+      const count = check.integer(
+        counts,
+        priority,
+        `${prefix}bySeverity.${priority}`,
+        MAX_FINDING_COUNT,
+      );
+      if (count !== undefined) read[priority] = count;
+    }
+    if (FINDING_PRIORITIES.every((priority) => read[priority] !== undefined))
+      bySeverity = read as Record<FindingPriority, number>;
+  }
+  const incomplete = value.incomplete;
+  if (incomplete !== undefined && typeof incomplete !== "boolean")
+    check.fail(`${prefix}incomplete`, "invalid");
+  if (
+    check.fields.length > before ||
+    open === undefined ||
+    bySeverity === undefined
+  )
+    return undefined;
+  return { open, bySeverity, ...(incomplete === true ? { incomplete } : {}) };
+}
+
 function parseResult(check: Checker, value: unknown): RunnerResult | undefined {
   if (!isRecord(value)) return check.fail("result", "invalid");
   const before = check.fields.length;
@@ -405,6 +510,7 @@ function parseResult(check: Checker, value: unknown): RunnerResult | undefined {
   if (logTruncated !== undefined && typeof logTruncated !== "boolean")
     check.fail("result.logTruncated", "invalid");
   const usage = parseUsage(check, value.usage);
+  const findings = parseFindings(check, value.findings);
 
   if (
     check.fields.length > before ||
@@ -414,6 +520,7 @@ function parseResult(check: Checker, value: unknown): RunnerResult | undefined {
     errorMessage === undefined ||
     commentUrl === undefined ||
     usage === undefined ||
+    findings === undefined ||
     (errorCode !== null && typeof errorCode !== "string")
   )
     return undefined;
@@ -427,6 +534,7 @@ function parseResult(check: Checker, value: unknown): RunnerResult | undefined {
     logTail,
     logTruncated: logTruncated === true,
     usage,
+    ...(findings === null ? {} : { findings }),
   };
 }
 

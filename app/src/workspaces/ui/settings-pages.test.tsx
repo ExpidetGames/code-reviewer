@@ -32,12 +32,6 @@ import { GeneralSettingsPageContent } from "./general-settings-page.tsx";
 
 afterEach(cleanup);
 
-const ALL_TIERS = {
-  low: { diff: true, dynamic: true },
-  medium: { diff: true, dynamic: true },
-  high: { diff: true, dynamic: true },
-};
-
 const BUILT_IN = builtInReviewSettings("anthropic/claude-haiku-5.5");
 const GLOBAL_DATA = {
   model: modelFromGlobalView({
@@ -48,7 +42,6 @@ const GLOBAL_DATA = {
     ) as Record<ReviewSettingField, "built_in">,
     cost: estimateReviewCost(BUILT_IN),
     modelManagedByInstance: false,
-    tierAvailability: null,
     builtIn: BUILT_IN,
     updatedAt: null,
     updatedBy: null,
@@ -95,7 +88,9 @@ const renders = [
       <LlmSettingsPageContent
         workspaceSlug="acme"
         canManage
-        keyStatus={{ state: "not_configured" }}
+        keyStatuses={[
+          { provider: "openrouter", status: { state: "not_configured" } },
+        ]}
         summary={{ configured: false, reason: "no_key" }}
       />
     ),
@@ -108,7 +103,7 @@ const renders = [
       <AdvancedSettingsPageContent
         workspaceSlug="acme"
         canManageKey
-        keyConfigured
+        keys={[{ provider: "openrouter", configured: true }]}
         canResetDefaults
       />
     ),
@@ -137,8 +132,8 @@ describe("the workspace settings sub-pages", () => {
 });
 
 describe("the review defaults of a workspace that uses the instance's key (#283)", () => {
-  // #283-T01
-  it("shows the Quality choice instead of the model fields, and no model name", () => {
+  // #433-T02
+  it("shows a note about the choice per project instead of the model fields, and no model name", () => {
     const readable = withoutModelFields(BUILT_IN);
     render(
       <GlobalSettingsPageContent
@@ -150,13 +145,13 @@ describe("the review defaults of a workspace that uses the instance's key (#283)
             effective: readable,
             cost: null,
             managed: true,
-            tierAvailability: ALL_TIERS,
           },
         }}
       />,
     );
 
-    expect(screen.getByRole("radiogroup", { name: "Quality" })).toBeTruthy();
+    expect(screen.queryByRole("radiogroup", { name: "Quality" })).toBeNull();
+    expect(screen.getByText(/chosen for each project/)).toBeTruthy();
     expect(screen.queryByLabelText("Model")).toBeNull();
     expect(screen.queryByLabelText("Fallback model")).toBeNull();
     expect(document.body.innerHTML).not.toContain(BUILT_IN.model);

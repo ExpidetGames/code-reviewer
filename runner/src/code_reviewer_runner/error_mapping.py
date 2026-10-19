@@ -15,6 +15,7 @@ import re
 from collections.abc import Sequence
 from typing import Any
 
+from code_reviewer_runner.llm_providers import PROVIDERS
 from code_reviewer_runner.result import ErrorCode
 
 _MAX_CHAIN = 12
@@ -141,6 +142,12 @@ def _github_error(error: BaseException, status: int) -> ErrorCode | None:
     return _GITHUB_STATUS.get(status)
 
 
+def _no_endpoint_for_parameters(text: str) -> bool:
+    """True when a provider says in its own words that no endpoint takes the request's parameters
+    (OpenRouter's 404 after `provider.require_parameters`, #270, #477)."""
+    return any(provider.no_endpoint_for_parameters(text) for provider in PROVIDERS.values())
+
+
 def _from_type(error: BaseException) -> ErrorCode | None:
     classes = _classes(error)
     names = {name for _, name in classes}
@@ -155,6 +162,8 @@ def _from_type(error: BaseException) -> ErrorCode | None:
     if "requests" in modules and "RequestException" in names:
         return ErrorCode.GIT_UNAVAILABLE
     if modules & {"openai", "litellm"}:
+        if status_code == 404 and _no_endpoint_for_parameters(str(error)):
+            return ErrorCode.LLM_PARAMETERS_UNSUPPORTED
         llm_code = llm_status_code(status_code) if isinstance(status_code, int) else None
         if llm_code is not None:
             return llm_code

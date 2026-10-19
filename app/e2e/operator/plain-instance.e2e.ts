@@ -148,7 +148,6 @@ test.describe("an instance without an operator token and without entitlements", 
       ["PUT", "/api/operator/v1/entitlements/default"],
       ["GET", "/api/operator/v1/usage"],
       ["GET", "/api/operator/v1/usage/unknown-cost"],
-      ["GET", "/api/operator/v1/model-tiers"],
       ["GET", "/api/operator/v1/plan-management"],
       ["POST", "/api/operator/v1/handoff/redeem"],
     ] as const) {
@@ -208,9 +207,8 @@ test.describe("an instance without an operator token and without entitlements", 
     });
     expect(handoff.status()).toBe(404);
 
-    // The workspace is still asked for a model and a key, and no quality level replaces them.
+    // The workspace is still asked for a model and a key.
     await openSettings(page, "/review-defaults");
-    await expect(page.locator('[data-field="modelTier"]')).toHaveCount(0);
     await expect(page.getByLabel("Model", { exact: true })).toBeVisible();
     await openSettings(page, "/llm");
     await expect(page.getByRole("form", { name: "LLM key" })).toBeVisible();

@@ -151,11 +151,13 @@ const ENTRIES: Entry[] = [
     minRole: MINIMUM_ROLE.change_project_settings,
     path: (ids) => `/repositories/${ids.repositoryId}/project/settings`,
     // #194-T04: a project-only save (kind, Dynamic model, skill) goes through the same role and
-    // isolation policy as any other settings save.
+    // isolation policy as any other settings save. #430-T10: so does a save of the providers.
     body: () => ({
       settings: {
         maxFindings: 3,
+        provider: "openrouter",
         reviewKind: "dynamic",
+        dynamicProvider: "openrouter",
         dynamicModel: "vendor/dynamic-model",
         reviewSkill: "Review this pull request dynamically.",
       },
@@ -207,7 +209,8 @@ const ENTRIES: Entry[] = [
     method: "PUT",
     minRole: MINIMUM_ROLE.manage_review_defaults,
     path: () => "/review-settings",
-    body: () => ({ settings: { maxFindings: 3 } }),
+    // #430-T10: the workspace default provider is a write of the workspace in the address like any other.
+    body: () => ({ settings: { maxFindings: 3, provider: "openrouter" } }),
     params: () => ({}),
     file: "review-settings/route.ts",
     takesNoIds: true,
@@ -256,6 +259,50 @@ const ENTRIES: Entry[] = [
     body: () => ({}),
     params: () => ({}),
     file: "llm-key/test/route.ts",
+    takesNoIds: true,
+  },
+  {
+    // #426-T10: the key of one provider, beside the alias above.
+    name: "GET llm-keys/[provider]",
+    route: "/api/w/[workspace]/llm-keys/[provider]",
+    method: "GET",
+    minRole: MINIMUM_ROLE.view,
+    path: () => "/llm-keys/openrouter",
+    params: () => ({ provider: "openrouter" }),
+    file: "llm-keys/[provider]/route.ts",
+    takesNoIds: true,
+  },
+  {
+    name: "PUT llm-keys/[provider]",
+    route: "/api/w/[workspace]/llm-keys/[provider]",
+    method: "PUT",
+    minRole: MINIMUM_ROLE.manage_llm_key,
+    path: () => "/llm-keys/openrouter",
+    body: () => ({ apiKey: "sk-or-v1-key-written-by-the-isolation-test" }),
+    params: () => ({ provider: "openrouter" }),
+    file: "llm-keys/[provider]/route.ts",
+    takesNoIds: true,
+  },
+  {
+    name: "DELETE llm-keys/[provider]",
+    route: "/api/w/[workspace]/llm-keys/[provider]",
+    method: "DELETE",
+    minRole: MINIMUM_ROLE.manage_llm_key,
+    path: () => "/llm-keys/openrouter",
+    params: () => ({ provider: "openrouter" }),
+    file: "llm-keys/[provider]/route.ts",
+    takesNoIds: true,
+  },
+  {
+    name: "POST llm-keys/[provider]/test",
+    route: "/api/w/[workspace]/llm-keys/[provider]/test",
+    method: "POST",
+    minRole: MINIMUM_ROLE.manage_llm_key,
+    path: () => "/llm-keys/openrouter/test",
+    // No key in the body and none stored for the person's own workspace: nothing is sent anywhere.
+    body: () => ({}),
+    params: () => ({ provider: "openrouter" }),
+    file: "llm-keys/[provider]/test/route.ts",
     takesNoIds: true,
   },
   {

@@ -33,7 +33,10 @@ export type RunnerJobInput = {
     botLogin: string;
   };
   llm: {
-    provider: "openrouter";
+    /**
+     * #424: the slug of an LLM provider, checked against the registry of the runner (`runner/src/code_reviewer_runner/llm_providers.py`), which refuses one it has none for with invalid_job. The app sends a provider only to a caller that advertised it in `llmProviders`; this release knows KnownLlmProvider.
+     */
+    provider: string;
     model: string;
     apiKey: string;
     baseUrl?: string;
@@ -81,12 +84,24 @@ export type RunnerResult = {
   logTail: string;
   logTruncated?: boolean;
   /**
+   * #405: the findings left open on the pull request by a successful review, which the app turns into the review verdict it submits. Absent (or null) where the runner cannot say, and on every failure: the app then submits no verdict. Additive: a runner that does not send it, or an app that does not read it, keeps working.
+   */
+  findings?: ReviewFindings | null;
+  /**
    * What the run used. A failed result carries it too, whenever the run made at least one model call before it failed (a timeout at the end, an answer the validator refuses, a publish error): the app counts such a run exactly like a successful one. A run that failed before its first model call reports null. The cost follows the same rule as for a successful run: exact, or null when any call is unpriced; the token counters are reported either way.
    */
   usage?: RunnerUsage | null;
   [k: string]: unknown;
 };
 
+/**
+ * #424: the query string of GET /api/workers/v1/jobs/{id}, as an object of its parameters. Both are optional comma separated lists: `features` (the names of KnownClaimFeature, unknown names are ignored) and `llmProviders` (slugs of LlmProviderId: the LLM providers the Worker can run; absent means `openrouter`). The app ignores the list today (the claim issue of epic #420 will use it); it still always sends `openrouter`.
+ */
+export interface WorkerJobDetailsRequest {
+  features?: string;
+  llmProviders?: string;
+  [k: string]: unknown;
+}
 /**
  * 200 from GET /api/workers/v1/jobs/{id}: the job, with the git token and the model key minted at this call. Cache-Control is always no-store. The credential is not repeated here and there is no lease token: the credential is the proof of the claim.
  */
@@ -398,6 +413,22 @@ export interface WorkerHeartbeatResponse {
 export interface WorkerResultRequest {
   result: RunnerResult;
   [k: string]: unknown;
+}
+/**
+ * #405: what a successful review left open on the pull request. `open` counts the findings that are open AFTER the run (a Dynamic Review carries the findings of earlier runs over, PR-Agent keeps a record of active ones), not the ones the run found. `bySeverity` is the count per priority of a Dynamic Review, of the findings its summary lists (so `open` may exceed the sum when lower priority findings did not fit); null for a Diff Review, whose findings have no severity.
+ */
+export interface ReviewFindings {
+  open: number;
+  /**
+   * True when the review did not cover everything it was asked to: a finding its validation dropped, a chunk that failed, files left out for the token budget. `open` may then miss a blocker, so the app never approves on it. Absent means complete.
+   */
+  incomplete?: boolean;
+  bySeverity: {
+    P0: number;
+    P1: number;
+    P2: number;
+    P3: number;
+  } | null;
 }
 export interface RunnerUsage {
   model: string | null;

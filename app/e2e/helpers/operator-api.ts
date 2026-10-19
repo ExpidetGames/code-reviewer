@@ -32,18 +32,16 @@ export type UsageItem = {
   jobId: string;
   reviewKind: "diff" | "dynamic";
   keyMode: "own" | "managed";
+  /** From before the catalog (#434): null for every run since. */
   modelTier: string | null;
+  catalogEntryId: string | null;
+  catalogEntryName: string | null;
   costMicroUsd: number | null;
   promptTokens: number | null;
   completionTokens: number | null;
   settledAt: string;
   reason: string | null;
 };
-
-export type ModelTiers = Record<
-  "low" | "medium" | "high",
-  { diff?: string | null; dynamic?: string | null }
->;
 
 /** What an answer of the API was: the status, the parsed JSON (null when there is no body) and the raw text. */
 export type OperatorAnswer<T = Record<string, unknown>> = {
@@ -127,7 +125,6 @@ export async function operatorClient(
       ok("PUT", `/workspaces/${workspaceId}/entitlements`, entitlements),
     getEntitlements: (workspaceId: string) =>
       ok("GET", `/workspaces/${workspaceId}/entitlements`),
-    putModelTiers: (tiers: ModelTiers) => ok("PUT", "/model-tiers", { tiers }),
     putPlanManagement: (url: string) => ok("PUT", "/plan-management", { url }),
     redeemHandoff: (token: string) =>
       call<{
@@ -144,6 +141,20 @@ export async function operatorClient(
         `/workspaces/${workspaceId}/usage?limit=200`,
       );
       return body.items;
+    },
+    /** The three reads of the usage feed that are not one workspace's list: every workspace, a period, unknown cost. */
+    async usageReads(workspaceId: string): Promise<OperatorAnswer[]> {
+      return [
+        await call("GET", "/usage?limit=200"),
+        await call(
+          "GET",
+          `/workspaces/${workspaceId}/usage/summary?from=2020-01-01T00:00:00.000Z&to=2100-01-01T00:00:00.000Z`,
+        ),
+        await call(
+          "GET",
+          "/usage/unknown-cost?from=2020-01-01T00:00:00.000Z&to=2100-01-01T00:00:00.000Z",
+        ),
+      ];
     },
     async dispose() {
       await context.dispose();

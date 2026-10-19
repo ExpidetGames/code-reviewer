@@ -96,6 +96,11 @@ describe("the migrations of both epics", () => {
       "20261016120000_create_plan_handoff_tokens",
       "20261016140000_add_job_accepts_supersede",
       "20261016140100_widen_usage_record_settled_reason",
+      "20261017100000_create_job_check_runs",
+      "20261017140000_create_model_catalog_entries",
+      "20261017160000_add_workspace_entitlements_model_access",
+      "20261018090000_add_usage_record_catalog_entry",
+      "20261018170000_migrate_model_tiers_to_catalog",
     ]);
   });
 
@@ -143,12 +148,14 @@ describe("starting the database", () => {
       "instance_settings",
       "integrations",
       "invitations",
+      "job_check_runs",
       "job_claimed_keys",
       "job_comments",
       "job_dispatches",
       "jobs",
       "kysely_migration",
       "kysely_migration_lock",
+      "model_catalog_entries",
       "password_reset_tokens",
       "plan_handoff_tokens",
       "projects",

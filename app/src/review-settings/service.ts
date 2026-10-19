@@ -27,23 +27,38 @@ import {
   type EffectiveReviewSettings,
   type SettingSource,
 } from "./effective.ts";
+import type { LlmProvider } from "../llm/config.ts";
+import { modelProviderMismatch, type ModelLayer } from "../llm/selection.ts";
 import type { ModelCapabilityChecker } from "../llm/model-capabilities.ts";
+import { llmProviderDescriptors } from "../llm/providers/index.ts";
+import {
+  catalogChoices,
+  refusalOfChoice,
+  type CatalogChoices,
+  type CatalogSelection,
+  type CatalogSelectionSource,
+} from "./catalog-selection.ts";
+import {
+  dynamicModelToCheck,
+  type DynamicModelCheck,
+} from "./dynamic-check.ts";
 import { ReviewSettingsError } from "./errors.ts";
 import type { ReviewSettingsHooks } from "./hooks.ts";
 import { noopReviewSettingsHooks } from "./hooks.ts";
 import {
-  configuredTiers,
-  type TierAvailability,
-} from "../model-tiers/tiers.ts";
-import {
   builtInProjectDynamicSettings,
+  CATALOG_FIELD_OF_KIND,
   MODEL_SETTING_FIELDS,
+  PROJECT_CATALOG_FIELDS,
   PROJECT_DYNAMIC_LIMITS,
+  PROJECT_REVIEW_KINDS,
   withoutModelFields,
+  type ProjectCatalogField,
   type ProjectDynamicOverrides,
   type ProjectDynamicPatch,
   type ProjectDynamicSettingField,
   type ProjectDynamicSettings,
+  type ReviewVerdictMode,
   type ProjectReviewKind,
   type ReadableReviewSettings,
   type ReviewSettingField,
@@ -56,6 +71,7 @@ import {
   validateProjectSettingsPatch,
   validateReviewSettingsPatch,
   type ProjectSettingsPatch,
+  type ProviderLookup,
   type ReviewSettingIssue,
   type ReviewSettingWarning,
 } from "./validate.ts";
@@ -89,14 +105,9 @@ type ViewBase = {
   cost: ReviewCostGuard | null;
   /**
    * The models of this workspace's reviews are the operator's (its key mode is `managed`): the workspace chooses a
-   * quality level (`modelTier`) and the view carries no model field, no Dynamic model and no cost (#283).
+   * catalog entry per project and the view carries no model field, no Dynamic model and no cost (#283, #433).
    */
   modelManagedByInstance: boolean;
-  /**
-   * For such a workspace, whether each level has a model for each kind of review: yes or no, never which model.
-   * `null` for every other workspace.
-   */
-  tierAvailability: TierAvailability | null;
 };
 
 export type GlobalSettingsView = ViewBase & {
@@ -118,6 +129,13 @@ export type ProjectSettingsView = ViewBase & {
   inherited: ReadableReviewSettings;
   /** The project-only review kind, Dynamic model and skill (#194). */
   dynamic: ProjectDynamicView;
+  /**
+   * For a workspace on the operator's key (#430): the entries it may pick from per kind, with an id, a name, a
+   * description, whether each can be chosen and why not. Never a provider or a model. `null` on its own key.
+   */
+  catalogChoices: CatalogChoices | null;
+  /** The entry the project selects per kind (`null`: none, the instance default applies), or `null` on its own key. */
+  catalogSelection: CatalogSelection | null;
 };
 
 /**
@@ -126,20 +144,32 @@ export type ProjectSettingsView = ViewBase & {
  * override.
  */
 export type ProjectDynamicView = {
-  /** The project-only fields this project sets. */
-  overrides: ProjectDynamicOverrides;
+  /**
+   * The project-only fields this project sets. The catalog entries are not here: they are `catalogSelection` of the
+   * project view, and only for a workspace on the operator's key (#430).
+   */
+  overrides: Omit<ProjectDynamicOverrides, ProjectCatalogField>;
   /** The kind, Dynamic model and skill a review would use. */
   effective: {
     reviewKind: ProjectReviewKind;
     /** Absent for a workspace on the operator's key (#283). */
     dynamicModel?: string;
+    /** The provider of the Dynamic model; absent for a workspace on the operator's key (#430). */
+    dynamicProvider?: LlmProvider;
     /** The text a Dynamic review uses: the project's override, else the shipped default. */
     reviewSkill: string;
+    /** What a finished review does on its pull request besides the check run (#405). */
+    reviewVerdict: ReviewVerdictMode;
   };
   /** Where each effective value comes from (there is no global layer for these fields). */
-  sources: Partial<Record<"dynamicModel", "built_in" | "project">> &
+  sources: Partial<
+    Record<"dynamicModel" | "dynamicProvider", "built_in" | "project">
+  > &
     Record<
-      Exclude<ProjectDynamicSettingField, "dynamicModel">,
+      Exclude<
+        ProjectDynamicSettingField,
+        "dynamicModel" | "dynamicProvider" | ProjectCatalogField
+      >,
       "built_in" | "project"
     >;
   /** What applies when the project sets nothing. */
@@ -147,7 +177,10 @@ export type ProjectDynamicView = {
     reviewKind: ProjectReviewKind;
     /** Absent for a workspace on the operator's key (#283). */
     dynamicModel?: string;
+    /** Absent for a workspace on the operator's key (#430). */
+    dynamicProvider?: LlmProvider;
     reviewSkill: string;
+    reviewVerdict: ReviewVerdictMode;
   };
   /** Whether the effective skill is the shipped default (the project sets no override). */
   reviewSkillIsDefault: boolean;
@@ -207,9 +240,21 @@ export type ReviewSettingsService = {
   ): Promise<ResolvedProjectSettings | undefined>;
 };
 
+/**
+ * The layers a model is resolved from for each kind (#432): what the workspace default and the project wrote, apart,
+ * with a field no layer set left out. The claim of a workspace on its own key hands them to `resolveModelSelection`,
+ * which pairs a model with the provider it was set for; the merged settings cannot say that.
+ */
+export type ResolvedModelLayers = {
+  diff: { workspace: ModelLayer; project: ModelLayer };
+  /** The Dynamic model and provider are project-only fields (#194): there is no workspace layer. */
+  dynamic: { project: ModelLayer };
+};
+
 /** The Diff settings of a project plus its project-only kind, model and skill (#194). */
 export type ResolvedProjectSettings = EffectiveReviewSettings & {
   dynamic: EffectiveProjectDynamic;
+  modelLayers: ResolvedModelLayers;
 };
 
 function notFound(): ReviewSettingsError {
@@ -219,15 +264,86 @@ function notFound(): ReviewSettingsError {
   );
 }
 
-/** The model fields a layer holds, to carry through a save that cannot set them (#283). */
+/** The provider and model a Diff layer wrote; a field it left out is not in the result. */
+function diffLayerOf(layer: ReviewSettingsOverrides): ModelLayer {
+  return {
+    ...(layer.provider === undefined ? {} : { provider: layer.provider }),
+    ...(layer.model === undefined ? {} : { model: layer.model }),
+  };
+}
+
+/** The provider and model of the project's Dynamic settings; a field it left out is not in the result. */
+function dynamicLayerOf(layer: ProjectDynamicOverrides): ModelLayer {
+  return {
+    ...(layer.dynamicProvider == null
+      ? {}
+      : { provider: layer.dynamicProvider }),
+    ...(layer.dynamicModel == null ? {} : { model: layer.dynamicModel }),
+  };
+}
+
+/** The model fields (and the provider they belong to) a layer holds, to carry through a save that cannot set them (#283, #430). */
 function modelFieldsOf(
   layer: ReviewSettingsOverrides,
 ): ReviewSettingsOverrides {
   const kept: ReviewSettingsOverrides = {};
+  if (layer.provider !== undefined) kept.provider = layer.provider;
   if (layer.model !== undefined) kept.model = layer.model;
   if (layer.fallbackModel !== undefined)
     kept.fallbackModel = layer.fallbackModel;
   return kept;
+}
+
+/** The Dynamic model and provider a project holds, to carry through a save or a reset that cannot set them (#283, #430). */
+function dynamicModelFieldsOf(
+  layer: ProjectDynamicOverrides,
+): ProjectDynamicOverrides {
+  const kept: ProjectDynamicOverrides = {};
+  if (layer.dynamicModel !== undefined) kept.dynamicModel = layer.dynamicModel;
+  if (layer.dynamicProvider !== undefined)
+    kept.dynamicProvider = layer.dynamicProvider;
+  return kept;
+}
+
+/** The catalog entries a project holds, to carry through a reset of a workspace on its own key (#430). */
+function catalogFieldsOf(layer: ProjectDynamicOverrides): ProjectSettings {
+  const kept: ProjectSettings = {};
+  for (const field of PROJECT_CATALOG_FIELDS) {
+    const entry = layer[field];
+    if (typeof entry === "string") kept[field] = entry;
+  }
+  return kept;
+}
+
+function withoutCatalogFields<
+  T extends Partial<Record<ProjectCatalogField, unknown>>,
+>(layer: T): Omit<T, ProjectCatalogField> {
+  const copy = { ...layer };
+  for (const field of PROJECT_CATALOG_FIELDS) delete copy[field];
+  return copy;
+}
+
+/**
+ * A workspace on its own key never reads the catalog, so it may not select an entry (#430-T06): the write is refused
+ * rather than stored unchecked. Judged on the names the request carries, before any value is looked at; `null`
+ * clears a selection stored earlier and needs no catalog.
+ */
+function refuseCatalogEntries(input: unknown): void {
+  if (typeof input !== "object" || input === null || Array.isArray(input))
+    return;
+  const issues: ReviewSettingIssue[] = Object.entries(input)
+    .filter(
+      ([name, value]) =>
+        (PROJECT_CATALOG_FIELDS as readonly string[]).includes(name) &&
+        value !== null,
+    )
+    .map(([field]) => ({ field, code: "CATALOG_ENTRY_OWN_KEY_MODE" }));
+  if (issues.length > 0)
+    throw new ReviewSettingsError(
+      "REVIEW_SETTINGS_INVALID",
+      "Some settings are not valid.",
+      issues,
+    );
 }
 
 /**
@@ -249,8 +365,36 @@ function refuseModelFields(input: unknown, fields: readonly string[]): void {
     );
 }
 
-function checked(input: unknown): ReviewSettingsOverrides {
-  const result = validateReviewSettingsPatch(input);
+/**
+ * The pairing of a model with a provider of another layer (a workspace model next to a project provider) is refused when
+ * it is saved, with the rule of the claim (#432). `field` is the field the user changed.
+ */
+function refuseModelProviderMismatch(
+  field: "provider" | "model",
+  workspace: ReviewSettingsOverrides,
+  project: ReviewSettingsOverrides,
+  defaultProvider: string,
+): void {
+  if (
+    !modelProviderMismatch(
+      diffLayerOf(workspace),
+      diffLayerOf(project),
+      defaultProvider,
+    )
+  )
+    return;
+  throw new ReviewSettingsError(
+    "REVIEW_SETTINGS_INVALID",
+    "Some settings are not valid.",
+    [{ field, code: "MODEL_PROVIDER_MISMATCH" }],
+  );
+}
+
+function checked(
+  input: unknown,
+  providers: ProviderLookup,
+): ReviewSettingsOverrides {
+  const result = validateReviewSettingsPatch(input, providers);
   if (!result.ok)
     throw new ReviewSettingsError(
       "REVIEW_SETTINGS_INVALID",
@@ -261,8 +405,11 @@ function checked(input: unknown): ReviewSettingsOverrides {
 }
 
 /** Validates the Diff and project-only fields of a project save (#194). */
-function checkedProject(input: unknown): ProjectSettingsPatch {
-  const result = validateProjectSettingsPatch(input);
+function checkedProject(
+  input: unknown,
+  providers: ProviderLookup,
+): ProjectSettingsPatch {
+  const result = validateProjectSettingsPatch(input, providers);
   if (!result.ok)
     throw new ReviewSettingsError(
       "REVIEW_SETTINGS_INVALID",
@@ -287,6 +434,7 @@ function checkedProject(input: unknown): ProjectSettingsPatch {
 function mergeProjectSettings(
   current: ProjectSettings,
   patch: ProjectSettingsPatch,
+  providers: ProviderLookup,
 ): ProjectSettings {
   const hasDiffFields = Object.keys(patch.review).length > 0;
   const hasProjectFields = Object.keys(patch.dynamic).length > 0;
@@ -294,10 +442,10 @@ function mergeProjectSettings(
   // else replaces it, including an empty request (every Diff override cleared).
   const review =
     hasProjectFields && !hasDiffFields
-      ? parseStoredOverrides(current)
+      ? parseStoredOverrides(current, providers)
       : patch.review;
 
-  const storedDynamic = parseStoredProjectDynamicOverrides(current);
+  const storedDynamic = parseStoredProjectDynamicOverrides(current, providers);
   const dynamic: ProjectDynamicPatch = {
     ...storedDynamic,
     ...patch.dynamic,
@@ -310,8 +458,18 @@ function mergeProjectSettings(
     if (dynamic.dynamicModel === null) delete next.dynamicModel;
     else next.dynamicModel = dynamic.dynamicModel;
   }
+  // A `null` provider or catalog entry is an explicit "follow the default again" (#430).
+  if (dynamic.dynamicProvider !== undefined && dynamic.dynamicProvider !== null)
+    next.dynamicProvider = dynamic.dynamicProvider;
+  for (const field of PROJECT_CATALOG_FIELDS) {
+    const entry = dynamic[field];
+    if (typeof entry === "string") next[field] = entry;
+  }
   if (dynamic.reviewSkill !== undefined && dynamic.reviewSkill !== null)
     next.reviewSkill = dynamic.reviewSkill;
+  // A `null` verdict mode is an explicit "follow the default again" (#405).
+  if (dynamic.reviewVerdict !== undefined && dynamic.reviewVerdict !== null)
+    next.reviewVerdict = dynamic.reviewVerdict;
   return next;
 }
 
@@ -363,15 +521,17 @@ export function createReviewSettingsService(deps: {
   /**
    * Whether the models of this workspace's reviews are the operator's, not its own (its key mode is `managed`, #280).
    * Then the workspace does not know the model, so its token budget is not checked against the context window of
-   * the stored model, which does not apply (the claim clamps the budget to the window of the tier's model). Default:
+   * the stored model, which does not apply (the claim clamps the budget to the window of the entry's model). Default:
    * never.
    */
   operatorsModels?: () => Promise<boolean>;
   /**
-   * Whether each quality level has a model for each kind of review, for the quality choice of a workspace on the
-   * operator's key (#283). Only that: never which model. Default: nothing is configured.
+   * The model catalog as far as a project's selection needs it (#430): what the picker lists, whether an entry may be
+   * chosen. Only read for a workspace on the operator's key. Default: an empty catalog.
    */
-  tierAvailability?: () => Promise<TierAvailability>;
+  catalog?: CatalogSelectionSource;
+  /** Where a provider id is looked up; the registry of the app unless a test brings a second provider. */
+  providers?: ProviderLookup;
 }): ReviewSettingsService {
   const { appSettings, projects } = deps;
   const dynamicDefaults =
@@ -379,13 +539,22 @@ export function createReviewSettingsService(deps: {
   const defaultSkill = deps.defaultSkill ?? readDefaultReviewSkill;
   const hooks = deps.hooks ?? noopReviewSettingsHooks;
   const operatorsModels = deps.operatorsModels ?? (async () => false);
-  const tierAvailability =
-    deps.tierAvailability ?? (async () => configuredTiers({}));
+  const providers = deps.providers ?? llmProviderDescriptors;
+  // Without a catalog nothing can be chosen: every id is unknown and the picker is empty.
+  const catalog: CatalogSelectionSource = deps.catalog ?? {
+    entries: async () => [],
+    find: async () => undefined,
+    allowed: async () => false,
+  };
+  const parseReview = (stored: unknown) =>
+    parseStoredOverrides(stored, providers);
+  const parseDynamic = (stored: unknown) =>
+    parseStoredProjectDynamicOverrides(stored, providers);
 
   async function readGlobal() {
     const stored = await appSettings.get(REVIEW_DEFAULTS_KEY);
     return {
-      overrides: parseStoredOverrides(stored?.value),
+      overrides: parseReview(stored?.value),
       updatedAt: stored?.updatedAt ?? null,
       updatedBy: stored?.updatedBy ?? null,
     };
@@ -393,7 +562,16 @@ export function createReviewSettingsService(deps: {
 
   /** The effective review kind of a stored settings object (Diff Review when none is set). */
   function kindOf(settings: ProjectSettings): ProjectReviewKind {
-    return parseStoredProjectDynamicOverrides(settings).reviewKind ?? "diff";
+    return parseDynamic(settings).reviewKind ?? "diff";
+  }
+
+  /** The entry a stored project settings object selects per kind, `null` for none. */
+  function catalogSelectionOf(stored: unknown): CatalogSelection {
+    const overrides = parseDynamic(stored);
+    const selection = {} as CatalogSelection;
+    for (const kind of PROJECT_REVIEW_KINDS)
+      selection[kind] = overrides[CATALOG_FIELD_OF_KIND[kind]] ?? null;
+    return selection;
   }
 
   async function viewOf(
@@ -409,7 +587,6 @@ export function createReviewSettingsService(deps: {
         sources: withoutModelFields(effective.sources),
         cost: null,
         modelManagedByInstance: true,
-        tierAvailability: await tierAvailability(),
       };
     return {
       overrides,
@@ -417,7 +594,6 @@ export function createReviewSettingsService(deps: {
       sources: effective.sources,
       cost: estimateReviewCost(effective.settings),
       modelManagedByInstance: false,
-      tierAvailability: null,
     };
   }
 
@@ -428,24 +604,29 @@ export function createReviewSettingsService(deps: {
   ): ProjectDynamicView {
     const defaults = dynamicDefaults();
     const shipped = defaultSkill();
-    const overrides = parseStoredProjectDynamicOverrides(project?.settings);
+    const overrides = parseDynamic(project?.settings);
     const effective = resolveProjectDynamicSettings({
       builtIn: defaults,
       project: overrides,
       defaultSkill: shipped.text,
     });
     const view: ProjectDynamicView = {
-      overrides,
+      // The catalog entries are shown as the catalog view of the project, and only to a workspace that uses them.
+      overrides: withoutCatalogFields(overrides),
       effective: {
         reviewKind: effective.reviewKind,
         dynamicModel: effective.dynamicModel,
+        dynamicProvider: effective.dynamicProvider,
         reviewSkill: effective.reviewSkill,
+        reviewVerdict: effective.reviewVerdict,
       },
-      sources: effective.sources,
+      sources: withoutCatalogFields(effective.sources),
       defaults: {
         reviewKind: defaults.reviewKind,
         dynamicModel: defaults.dynamicModel,
+        dynamicProvider: defaults.dynamicProvider,
         reviewSkill: shipped.text,
+        reviewVerdict: defaults.reviewVerdict,
       },
       reviewSkillIsDefault: effective.reviewSkillIsDefault,
       defaultSkill: {
@@ -458,15 +639,17 @@ export function createReviewSettingsService(deps: {
       },
     };
     if (!managed) return view;
-    // The Dynamic model is the operator's as well (#283).
+    // The Dynamic model and its provider are the operator's as well (#283, #430).
     const storedOverrides = { ...view.overrides };
     const shownEffective = { ...view.effective };
     const shownDefaults = { ...view.defaults };
     const shownSources = { ...view.sources };
-    delete storedOverrides.dynamicModel;
-    delete shownEffective.dynamicModel;
-    delete shownDefaults.dynamicModel;
-    delete shownSources.dynamicModel;
+    for (const field of ["dynamicModel", "dynamicProvider"] as const) {
+      delete storedOverrides[field];
+      delete shownEffective[field];
+      delete shownDefaults[field];
+      delete shownSources[field];
+    }
     return {
       ...view,
       overrides: storedOverrides,
@@ -499,7 +682,7 @@ export function createReviewSettingsService(deps: {
   ): Promise<ProjectSettingsView> {
     const builtIn = deps.builtIn();
     const global = (await readGlobal()).overrides;
-    const overrides = parseStoredOverrides(project?.settings);
+    const overrides = parseReview(project?.settings);
     const effective = resolveReviewSettings({
       builtIn,
       global,
@@ -507,6 +690,8 @@ export function createReviewSettingsService(deps: {
     });
     const managed = await operatorsModels();
     const inherited = resolveReviewSettings({ builtIn, global }).settings;
+    // The catalog is read for a workspace on the operator's key only (#430-T06).
+    const selection = catalogSelectionOf(project?.settings);
     return {
       ...(await viewOf(effective, overrides)),
       repositoryId,
@@ -514,6 +699,8 @@ export function createReviewSettingsService(deps: {
       active: project?.active ?? false,
       inherited: managed ? withoutModelFields(inherited) : inherited,
       dynamic: dynamicView(project, managed),
+      catalogChoices: managed ? await catalogChoices(catalog, selection) : null,
+      catalogSelection: managed ? selection : null,
     };
   }
 
@@ -528,16 +715,18 @@ export function createReviewSettingsService(deps: {
   }
 
   /**
-   * Asks the provider whether the Dynamic model of a save supports tool calling. Only a model that this
-   * request sets is asked about: a cleared model (`null`), a request without one and a value that is already
-   * stored are left alone (#269-T09).
+   * Asks the provider whether the Dynamic model of a save supports tool calling, through the adapter of the provider
+   * the project selected (#430). Only a model that this request sets, or whose provider it changes, is asked about: a
+   * cleared model (`null`), a request without either and a value that is already stored are left alone (#269-T09).
    */
   async function checkDynamicModel(
-    model: string | null | undefined,
+    target: DynamicModelCheck | null,
   ): Promise<ReviewSettingWarning[]> {
-    if (typeof model !== "string" || deps.modelCapabilities === undefined)
-      return [];
-    const result = await deps.modelCapabilities.check(model);
+    if (target === null || deps.modelCapabilities === undefined) return [];
+    // The provider was validated against the registry (or comes from storage that was).
+    const result = await deps.modelCapabilities.check(target.model, {
+      provider: target.provider as LlmProvider,
+    });
     switch (result.outcome) {
       case "supported":
         return [];
@@ -561,24 +750,77 @@ export function createReviewSettingsService(deps: {
     }
   }
 
+  /**
+   * A workspace on the operator's key selects an entry of the catalog per kind (#430-T07): it must exist, be released,
+   * serve the kind and be allowed by the plan. Every refused kind is named. `null` (clear) needs no check.
+   */
+  async function refuseUnfitEntries(patch: ProjectDynamicPatch): Promise<void> {
+    const issues: ReviewSettingIssue[] = [];
+    for (const kind of PROJECT_REVIEW_KINDS) {
+      const field = CATALOG_FIELD_OF_KIND[kind];
+      const id = patch[field];
+      if (typeof id !== "string") continue;
+      const code = await refusalOfChoice(catalog, kind, id);
+      if (code !== null) issues.push({ field, code });
+    }
+    if (issues.length > 0)
+      throw new ReviewSettingsError(
+        "REVIEW_SETTINGS_INVALID",
+        "Some settings are not valid.",
+        issues,
+      );
+  }
+
+  /**
+   * A change of the workspace default may not newly pair the model it holds with a project's provider of another
+   * provider (#432). A project that already had the pairing is not blamed again: the claim still fails its job closed, and
+   * this save must not stay impossible for it.
+   */
+  async function refuseGlobalChangeBreakingProjects(
+    before: ReviewSettingsOverrides,
+    after: ReviewSettingsOverrides,
+  ): Promise<void> {
+    for (const entry of await projects.list()) {
+      if (entry.project === null) continue;
+      const project = parseReview(entry.project.settings);
+      const wasMismatched = modelProviderMismatch(
+        diffLayerOf(before),
+        diffLayerOf(project),
+        providers.defaultProvider.id,
+      );
+      if (wasMismatched) continue;
+      refuseModelProviderMismatch(
+        "model",
+        after,
+        project,
+        providers.defaultProvider.id,
+      );
+    }
+  }
+
   return {
     getGlobalSettings: globalView,
 
     async updateGlobalSettings(input, actor) {
       const managed = await operatorsModels();
       if (managed) refuseModelFields(input, MODEL_SETTING_FIELDS);
-      const requested = checked(input);
+      const requested = checked(input, providers);
       // The models a workspace saved on its own key stay stored (it can go back to it); a save that cannot set them
       // does not drop them.
       const overrides = managed
         ? { ...requested, ...modelFieldsOf((await readGlobal()).overrides) }
         : requested;
-      if (!managed)
+      if (!managed) {
         refuseBudgetAboveContext(
           overrides,
           resolveReviewSettings({ builtIn: deps.builtIn(), global: overrides })
             .settings,
         );
+        await refuseGlobalChangeBreakingProjects(
+          (await readGlobal()).overrides,
+          overrides,
+        );
+      }
       await appSettings.set(REVIEW_DEFAULTS_KEY, overrides, actor);
       return globalView();
     },
@@ -590,9 +832,21 @@ export function createReviewSettingsService(deps: {
     async updateProjectSettings(repositoryId, input) {
       const managed = await operatorsModels();
       if (managed)
-        refuseModelFields(input, [...MODEL_SETTING_FIELDS, "dynamicModel"]);
-      const patch = checkedProject(input);
-      const warnings = await checkDynamicModel(patch.dynamic.dynamicModel);
+        refuseModelFields(input, [
+          ...MODEL_SETTING_FIELDS,
+          "dynamicModel",
+          "dynamicProvider",
+        ]);
+      else refuseCatalogEntries(input);
+      const patch = checkedProject(input, providers);
+      if (managed) await refuseUnfitEntries(patch.dynamic);
+      const warnings = await checkDynamicModel(
+        dynamicModelToCheck(
+          patch.dynamic,
+          parseDynamic((await projects.get(repositoryId))?.settings),
+          providers.defaultProvider.id,
+        ),
+      );
       if (!managed)
         refuseBudgetAboveContext(
           patch.review,
@@ -602,15 +856,32 @@ export function createReviewSettingsService(deps: {
             project: patch.review,
           }).settings,
         );
+      const workspaceLayer = managed ? {} : (await readGlobal()).overrides;
       let previousKind: ProjectReviewKind = "diff";
       let kindChanged = false;
       const project = await projects.updateSettingsWith(
         repositoryId,
         (current) => {
-          const merged = mergeProjectSettings(current, patch);
+          const merged = mergeProjectSettings(current, patch, providers);
+          // Own key mode only: a managed workspace selects an entry, not a provider and a model. A pairing the project
+          // already had is not blamed again, as for a change of the workspace default.
+          if (
+            !managed &&
+            !modelProviderMismatch(
+              diffLayerOf(workspaceLayer),
+              diffLayerOf(parseReview(current)),
+              providers.defaultProvider.id,
+            )
+          )
+            refuseModelProviderMismatch(
+              "provider",
+              workspaceLayer,
+              parseReview(merged),
+              providers.defaultProvider.id,
+            );
           // The models saved on the workspace's own key stay stored (see the global defaults).
           const next = managed
-            ? { ...merged, ...modelFieldsOf(parseStoredOverrides(current)) }
+            ? { ...merged, ...modelFieldsOf(parseReview(current)) }
             : merged;
           previousKind = kindOf(current);
           kindChanged = previousKind !== kindOf(next);
@@ -646,15 +917,14 @@ export function createReviewSettingsService(deps: {
         repositoryId,
         (current) => {
           previousKind = kindOf(current);
-          // The models saved on the workspace's own key stay stored, as they do through a save (#283).
-          if (!managed) return {};
-          const kept: ProjectSettings = modelFieldsOf(
-            parseStoredOverrides(current),
-          );
-          const storedModel =
-            parseStoredProjectDynamicOverrides(current).dynamicModel;
-          if (storedModel !== undefined) kept.dynamicModel = storedModel;
-          return kept;
+          // What the other key mode stored stays stored, as it does through a save (#283, #430): the models and
+          // providers of the workspace's own key while it is on the operator's key, and the other way round the
+          // catalog entries it chose then.
+          if (!managed) return catalogFieldsOf(parseDynamic(current));
+          return {
+            ...modelFieldsOf(parseReview(current)),
+            ...dynamicModelFieldsOf(parseDynamic(current)),
+          };
         },
         async (updated, executor) => {
           const nextKind = kindOf(updated.settings);
@@ -677,17 +947,32 @@ export function createReviewSettingsService(deps: {
     async resolveForRepository(repositoryId) {
       const project = await projects.get(repositoryId);
       if (project === undefined) return undefined;
+      const globalOverrides = (await readGlobal()).overrides;
+      const projectOverrides = parseReview(project.settings);
+      const projectDynamic = parseDynamic(project.settings);
       const review = resolveReviewSettings({
         builtIn: deps.builtIn(),
-        global: (await readGlobal()).overrides,
-        project: parseStoredOverrides(project.settings),
+        global: globalOverrides,
+        project: projectOverrides,
       });
       const dynamic = resolveProjectDynamicSettings({
         builtIn: dynamicDefaults(),
-        project: parseStoredProjectDynamicOverrides(project.settings),
+        project: projectDynamic,
         defaultSkill: defaultSkill().text,
       });
-      return { ...review, dynamic };
+      return {
+        ...review,
+        dynamic,
+        modelLayers: {
+          diff: {
+            workspace: diffLayerOf(globalOverrides),
+            project: diffLayerOf(projectOverrides),
+          },
+          dynamic: {
+            project: dynamicLayerOf(projectDynamic),
+          },
+        },
+      };
     },
   };
 }

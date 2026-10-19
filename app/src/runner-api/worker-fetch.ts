@@ -30,7 +30,11 @@ import {
 } from "./contract.ts";
 import { standingRefusal } from "../usage/enforce-entitlements.ts";
 import { describeError } from "./logger.ts";
-import { parseWorkerFeatures } from "./requests.ts";
+import {
+  callerLlmProviders,
+  parseWorkerFeatures,
+  parseWorkerLlmProviders,
+} from "./requests.ts";
 import {
   errorResponse,
   jsonResponse,
@@ -83,9 +87,14 @@ export async function handleFetch(
       await endJob(deps, claimed, ORIGIN, standing);
       return errorResponse(409, "RUNNER_JOB_ENDED");
     }
+    // #424, #432: the providers this Worker can run, from its own details call. The Dispatcher's claim cannot say, so
+    // the decision is made here; a Worker that names none can run the default provider only.
     const checked = await checkJob(deps, job, {
       engines: null,
       classifyReadFailures: true,
+      runnerProviders: callerLlmProviders(
+        parseWorkerLlmProviders(url.searchParams.get("llmProviders")),
+      ),
     });
     const outcome =
       checked.kind === "checked"
@@ -118,8 +127,8 @@ export async function handleFetch(
     // Before the key leaves with the response: if it cannot be remembered, the job is given back (below)
     // and the Worker does not have the key.
     await deps.claimedKeys.remember(job.id, outcome.input.llm.apiKey);
-    if (outcome.tierModel !== null)
-      await deps.claimedKeys.rememberModel(job.id, outcome.tierModel);
+    if (outcome.entryModel !== null)
+      await deps.claimedKeys.rememberModel(job.id, outcome.entryModel);
     const current = await deps.queue.get(job.id);
     if (current?.leaseExpiresAt == null)
       throw new Error(`Job ${job.id} has no lease expiry at fetch.`);

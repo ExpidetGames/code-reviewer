@@ -300,6 +300,15 @@ existing row:
 - No row and no default means unlimited, as before. Only `resolveEntitlements` (`src/workspaces/entitlements.ts`)
   interprets the data; see `src/workspaces/README.md`, "Entitlements".
 
+Migration `20261017160000_add_workspace_entitlements_model_access` (#428; epic #420) adds one nullable text column
+`model_access` to `workspace_entitlements`: JSON `{"catalogEntries":[...]}`, or NULL for every released entry (what every
+earlier row has). Nothing else changes and no existing row is touched; an app of the previous release never names the
+column, so it keeps inserting and reading rows. `put` does not write the column when the entitlements leave
+`modelAccess` out (the upsert's update set omits it), and the default keeps its stored list the same way under the lock. A write that leaves the field out over a stored
+default that cannot be read is refused (`catalog_entry_invalid`, field `modelAccess`, nothing written): a damaged row
+stays unreadable under such a write, and the default must not widen to every released entry; stating `modelAccess` repairs it.
+The default (`default_entitlements`) holds the field inside its JSON and needs no column.
+
 ### Usage records
 
 Migration `20261014150000_create_usage_records` (#272; epic #268). It adds an empty table and touches no existing row:
@@ -357,6 +366,77 @@ row, so an app of the previous release on the same database is unaffected (it ne
   Rows are removed a day after they expired (`src/maintenance/cleanup.ts`); the table is listed in the user merge
   (`github-signin/merge.ts`, ends with the retired user). See `src/plan-handoff/README.md`.
 
+### Model catalog entries
+
+Migration `20261017140000_create_model_catalog_entries` (#425; epic #420). It adds an empty table and touches no existing
+row, so an app of the previous release on the same database is unaffected (it never reads the table):
+
+- `model_catalog_entries` (`id` primary key, opaque `mce_…`; `name` and `name_key`, the name folded to lower case with a
+  unique index, so two names never differ only in case and no expression index is needed; `description`; `provider` and
+  `model_id`, operator only; `serves_diff` and `serves_dynamic`, 0 or 1 with a check that at least one is 1; `status`
+  `draft`/`released`/`retired` (a check); `sort_order`; `created_at`, `updated_at`; `updated_by` → `users.id` `on delete
+set null`): the operator's list of the models that workspaces on the operator's key may use. Instance level
+  (`catalog-repository.ts`): no workspace owns an entry. A released entry is never hard-deleted. See
+  `src/model-catalog/README.md`. The user merge moves `updated_by` (`github-signin/merge.ts`).
+
+### A database that ran the removed billing migrations
+
+Three migrations of an earlier billing design existed on `development` for a few days and are deleted (#491):
+`20261018120000_create_billing_plans`, `20261018140000_protect_billing_plan_versions` and
+`20261018160000_create_billing_plan_prices`. They never reached `main`, so **no production database ran them**, and no
+removal migration exists: a deleted migration is deleted. A fresh database and a database of `main` migrate to latest
+without them (`migrations/upgrade-from-main.integration.test.ts`).
+
+A **local, preview or staging** database that ran `development` in that time has the three migrations recorded without a
+file, and the migrator refuses to start (`previously executed migration ... is missing`, reported as
+`MIGRATION_FAILED`). The fix is a manual maintainer step, never automated, and never against production data:
+
+1. Look first, read-only: `SELECT name FROM kysely_migration WHERE name LIKE '%billing%';`. No row: nothing to do. Check
+   `SELECT count(*) FROM billing_plans;` too: the tables hold only what an admin typed into the removed plans page.
+2. Back the database up (`src/backup/`), then run, in one transaction (the tests run these very statements,
+   `migrations/upgrade-from-main.integration.test.ts`):
+
+   ```sql
+   DROP TABLE billing_plan_versions;
+   DROP TABLE billing_plan_prices;
+   DROP TABLE billing_plans;
+   DELETE FROM kysely_migration
+     WHERE name IN (
+       '20261018120000_create_billing_plans',
+       '20261018140000_protect_billing_plan_versions',
+       '20261018160000_create_billing_plan_prices'
+     );
+   DELETE FROM instance_settings WHERE key = 'billing_settings';
+   DELETE FROM instance_settings
+     WHERE key = 'default_entitlements' AND value LIKE '%"source":"billing"%';
+   ```
+
+   The order matters: a version points at its prices (`monthly_price_id`, `yearly_price_id`) and the prices and the
+   versions point at the plans, so versions go first. SQLite and Postgres take these statements as they are; dropping a
+   table drops its triggers on both.
+
+   **Postgres only**, in the same transaction: a table drop does not drop the two trigger functions the migrations
+   created, and they would stay in the schema. SQLite has no functions, and its triggers went with the tables.
+
+   ```sql postgres
+   DROP FUNCTION IF EXISTS billing_plan_versions_guard(), billing_plan_prices_guard();
+   ```
+
+   The two `DELETE FROM instance_settings` statements leave nothing behind that changes behaviour, which is why they are part of the reset and
+   not optional:
+
+   - `billing_settings` of the old shape can say `enabled: true` (with an environment, a client token and grace days).
+     The code still reads that as on, and the billing routes of a later issue would run on a database with no payment
+     adapter and no rates. The row goes, and billing is off ("never configured") until someone switches it on.
+   - A `default_entitlements` row with `"source":"billing"` is the Free plan that billing wrote, not a choice of the
+     operator. Left in place it would silently become the operator's default for every workspace without its own
+     limits (its limits and `modelAccess` included). The rule: a default that carries the marker goes, and the instance
+     has no default again until the operator saves one (operator API `PUT /api/operator/v1/entitlements/default`). A
+     default without the marker was saved by an operator and stays.
+
+3. Start the app: the remaining migrations run as usual. The two encrypted rows of `secrets` named after the removed
+   payment provider (`<provider>_api_key`, `<provider>_webhook_secret`) are ignored and may be deleted by hand.
+
 ## Workspace scoping
 
 Every repository that reads or writes customer data is created for one workspace:
@@ -375,15 +455,16 @@ workspace is simply not there: fetching, changing or deleting it behaves like a 
 
 Not scoped, each for a reason (the list is in `scoping.test.ts`):
 
-| Module                                                               | Why                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `app-meta`, `allowed-login-pins`, `webhook-deliveries`, `workspaces` | Not customer data (facts about the installation, the sign-in allow list, delivery ids, the owners themselves)                                                                                                                                                                                                                                                                                                                    |
-| `integration-directory-repository.ts`                                | Reads integrations of any workspace. A webhook names an installation before anybody knows the workspace, and the synchronization walks every connection. It only reads, and the answer carries `workspaceId`; everything done next goes through scoped repositories                                                                                                                                                              |
-| `usage-feed-repository.ts`                                           | The settled usage records of every workspace in one ordered feed, and the grouped count of runs that settled without a cost per workspace and key mode (#385), for the operator API (#278): the operator serves many workspaces from one token. It only reads (never a `reserved` or `void` record), and every record and count carries `workspaceId`; the reads of one workspace go through the scoped usage records repository |
-| `runner-jobs-repository.ts`                                          | The lease side of the job queue (claim, heartbeat, complete, release, expiry). Runners serve the whole instance with one token, so a claim hands out the oldest due job of any workspace; every change is fenced by the lease token, and the job it returns carries `workspaceId`                                                                                                                                                |
-| `claim-admission.ts`                                                 | The check of the entitlements of a job the claim just took (#277), inside the claim transaction of the lease side of the queue, for whichever workspace the job is in. It reads, through repositories created for that job's workspace (the instance default and the workspace row it locks are not customer data), and decides; the ending of a refused job is the lease side's own statement                                   |
-| `plan-handoff-redeem-repository.ts`                                  | The redemption of a handoff token by the external plan page through the operator API (#284). The caller holds only the token, so there is no workspace to scope to before it is looked up by its hash; it never lists, and the answer names the workspace the token was made for. Making a token is the scoped plan handoff tokens repository; the clean-up only deletes expired rows                                            |
-| `refusal-notices-sweep.ts`                                           | The notices of refused reviews that are due to be posted again (#281), for the cron sweep that serves the whole instance. It only reads the `pending` rows whose wait is over, and every answer carries `workspaceId`; the record itself goes through the scoped refusal notices repository                                                                                                                                      |
+| Module                                                               | Why                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `app-meta`, `allowed-login-pins`, `webhook-deliveries`, `workspaces` | Not customer data (facts about the installation, the sign-in allow list, delivery ids, the owners themselves)                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `integration-directory-repository.ts`                                | Reads integrations of any workspace. A webhook names an installation before anybody knows the workspace, and the synchronization walks every connection. It only reads, and the answer carries `workspaceId`; everything done next goes through scoped repositories                                                                                                                                                                                                                                                              |
+| `usage-feed-repository.ts`                                           | The settled usage records of every workspace in one ordered feed, and the grouped count of runs that settled without a cost per workspace and key mode (#385), for the operator API (#278): the operator serves many workspaces from one token. It only reads (never a `reserved` or `void` record), and every record and count carries `workspaceId`; the reads of one workspace go through the scoped usage records repository                                                                                                 |
+| `runner-jobs-repository.ts`                                          | The lease side of the job queue (claim, heartbeat, complete, release, expiry). Runners serve the whole instance with one token, so a claim hands out the oldest due job of any workspace; every change is fenced by the lease token, and the job it returns carries `workspaceId`                                                                                                                                                                                                                                                |
+| `claim-admission.ts`                                                 | The check of the entitlements of a job the claim just took (#277), inside the claim transaction of the lease side of the queue, for whichever workspace the job is in. It reads, through repositories created for that job's workspace (the instance default and the workspace row it locks are not customer data), and decides; the ending of a refused job is the lease side's own statement                                                                                                                                   |
+| `plan-handoff-redeem-repository.ts`                                  | The redemption of a handoff token by the external plan page through the operator API (#284). The caller holds only the token, so there is no workspace to scope to before it is looked up by its hash; it never lists, and the answer names the workspace the token was made for. Making a token is the scoped plan handoff tokens repository; the clean-up only deletes expired rows                                                                                                                                            |
+| `refusal-notices-sweep.ts`                                           | The notices of refused reviews that are due to be posted again (#281), for the cron sweep that serves the whole instance. It only reads the `pending` rows whose wait is over, and every answer carries `workspaceId`; the record itself goes through the scoped refusal notices repository                                                                                                                                                                                                                                      |
+| `catalog-repository.ts`                                              | The operator's model catalog (#425): instance configuration, not customer data; no workspace owns an entry. Its one read across workspaces is `countProjectsUsing`, one number per entry of how many projects use it (those that select it, and in a workspace on the operator's key those that fall back to it as the instance default; for the operator's "used by" and the confirmation when the model behind it changes); it returns no row, project or workspace. The member view selects only the columns a member may see |
 
 A signed-in user works in the workspace named by the address (`/w/<slug>`) and only in one they are a member
 of (`src/workspaces/README.md`); the repositories of members and invitations below follow the same rule,

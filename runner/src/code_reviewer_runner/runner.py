@@ -97,6 +97,7 @@ from code_reviewer_runner.lease_check import (
     LeaseState,
     lease_check_from_environment,
 )
+from code_reviewer_runner.llm_providers import require_provider
 from code_reviewer_runner.log_capture import (
     MAX_TAIL_BYTES,
     LogCapture,
@@ -111,7 +112,13 @@ from code_reviewer_runner.require_parameters_patch import (
     RequireParametersPatchError,
     apply_require_parameters_patch,
 )
-from code_reviewer_runner.result import NO_RESULT_REASON, ErrorCode, JobResult, Usage
+from code_reviewer_runner.result import (
+    NO_RESULT_REASON,
+    ErrorCode,
+    JobResult,
+    ReviewFindings,
+    Usage,
+)
 from code_reviewer_runner.review_state_watch import (
     ReviewStateWatch,
     WatchError,
@@ -277,8 +284,10 @@ def _run_diff_job(
             # No temperature for a Claude model that does not take it (#477).
             patches.callback(apply_temperature_patch())
             if job.llm.require_parameters:
-                # Every OpenRouter request carries `provider.require_parameters` (#270).
-                patches.callback(apply_require_parameters_patch())
+                # Every request carries the provider's require-parameters field (#270).
+                patches.callback(
+                    apply_require_parameters_patch(provider=require_provider(job.llm.provider))
+                )
             # The cost of the run is what the provider states for every answer (#274).
             meter, undo_meter = install_cost_meter(superseded=superseded)
             patches.callback(undo_meter)
@@ -417,6 +426,7 @@ def _run_diff_job(
         log_truncated=log_truncated,
         usage=reported,
         error_reason=None if ok else _unreported_use(reported, meter),
+        findings=_diff_findings(ok, job.command, watch),
     )
 
 
@@ -650,7 +660,8 @@ def _run_dynamic_job(
         return _failure(error.code, error.detail, started, capture)
     # From here on every failure says what the model calls so far cost (nothing before the first).
     usage_probe.watch(lambda: ledger.usage(job.llm.model))
-    upstream = job.llm.base_url or "https://openrouter.ai/api/v1"
+    provider = require_provider(job.llm.provider)
+    upstream = job.llm.base_url or provider.default_api_base
     # One unguessable capability per job: the proxy demands it, the engine config carries it.
     capability = new_proxy_capability()
     try:
@@ -664,6 +675,7 @@ def _run_dynamic_job(
             capabilities=capabilities,
             capability=capability,
             require_parameters=job.llm.require_parameters,
+            provider=provider,
             # Once superseded (#396) the proxy refuses every new request; one in flight finishes.
             superseded=superseded.is_set,
         )
@@ -797,6 +809,23 @@ def _run_dynamic_job(
         error_code=None,
         log_tail=summary,
         usage=ledger.usage(job.llm.model),
+        findings=published.findings,
+    )
+
+
+def _diff_findings(ok: bool, command: Command, watch: ReviewStateWatch) -> ReviewFindings | None:
+    """The findings PR-Agent holds as active after a successful review, for the verdict (#405).
+
+    PR-Agent gives its findings no severity, so there is a count and no breakdown. None when the run
+    failed or the review tool wrote no record: the app then submits no verdict.
+    """
+    if not ok or command is not Command.REVIEW or watch.active_findings is None:
+        return None
+    return ReviewFindings(
+        open=watch.active_findings,
+        by_severity=None,
+        # A failed chunk or a file left out may hide a finding: zero active is then not "none".
+        incomplete=watch.coverage_complete is not True,
     )
 
 

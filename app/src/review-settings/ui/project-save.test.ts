@@ -23,7 +23,9 @@ import {
 import {
   editSkill,
   resetSkill,
+  setCatalogEntry,
   setDynamicModel,
+  setDynamicProvider,
   setReviewKind,
   setSkillText,
   skillByteLength,
@@ -43,18 +45,26 @@ function dynamicView(
     effective: {
       reviewKind: kind,
       dynamicModel: overrides.dynamicModel ?? DEFAULT_DYNAMIC_MODEL,
+      dynamicProvider: overrides.dynamicProvider ?? "openrouter",
       reviewSkill: skill,
+      reviewVerdict: overrides.reviewVerdict ?? "blocking",
     },
     sources: {
       reviewKind: overrides.reviewKind === undefined ? "built_in" : "project",
       dynamicModel:
         overrides.dynamicModel === undefined ? "built_in" : "project",
+      dynamicProvider:
+        overrides.dynamicProvider === undefined ? "built_in" : "project",
       reviewSkill: overrides.reviewSkill === undefined ? "built_in" : "project",
+      reviewVerdict:
+        overrides.reviewVerdict === undefined ? "built_in" : "project",
     },
     defaults: {
       reviewKind: "diff",
       dynamicModel: DEFAULT_DYNAMIC_MODEL,
+      dynamicProvider: "openrouter",
       reviewSkill: SHIPPED,
+      reviewVerdict: "blocking",
     },
     reviewSkillIsDefault: overrides.reviewSkill === undefined,
     defaultSkill: {
@@ -84,7 +94,7 @@ function model(
     ) as SettingsFormModel["sources"],
     cost: estimateReviewCost(effective),
     managed: false,
-    tierAvailability: null,
+    catalog: null,
     lastSaved: null,
     dynamic,
   };
@@ -373,5 +383,162 @@ describe("taking the answer of a partial save", () => {
     expect(next.values.maxFindings).toBe("5");
     expect(next.overridden.maxFindings).toBe(false);
     expect(next.dynamic?.reviewKind).toBe("dynamic");
+  });
+});
+
+/** The form model of a managed workspace: the entry chosen per kind comes with the catalog view. */
+function managedModel(
+  selection: { diff: string | null; dynamic: string | null } = {
+    diff: null,
+    dynamic: null,
+  },
+  overrides: SettingsFormModel["overrides"] = {},
+): SettingsFormModel {
+  return {
+    ...model(overrides),
+    managed: true,
+    cost: null,
+    catalog: { choices: { diff: [], dynamic: [] }, selection },
+  };
+}
+
+describe("a project save of a workspace on the operator's key", () => {
+  // #433-T05
+  it("sends only the entry that was chosen, as a project-only field", () => {
+    const m = managedModel();
+    const state = setCatalogEntry(initialFormState(m), "diff", "ent-1");
+
+    expect(plan(m, state).steps).toEqual([
+      { cards: ["kind"], body: { catalogEntryDiff: "ent-1" } },
+    ]);
+  });
+
+  // #433-T05
+  it("sends both entries and the kind in one request, without a Diff group that was not changed", () => {
+    const m = managedModel();
+    let state = setCatalogEntry(initialFormState(m), "diff", "ent-1");
+    state = setCatalogEntry(state, "dynamic", "ent-2");
+    state = setReviewKind(state, "dynamic");
+
+    expect(plan(m, state).steps).toEqual([
+      {
+        cards: ["kind"],
+        body: {
+          reviewKind: "dynamic",
+          catalogEntryDiff: "ent-1",
+          catalogEntryDynamic: "ent-2",
+        },
+      },
+    ]);
+  });
+
+  // #433-T05
+  it("sends nothing when the entries were chosen and then put back to what is stored", () => {
+    const m = managedModel({ diff: "ent-1", dynamic: null });
+    let state = setCatalogEntry(initialFormState(m), "diff", "ent-3");
+    state = setCatalogEntry(state, "diff", "ent-1");
+
+    expect(plan(m, state).steps).toEqual([]);
+  });
+
+  // #433-T05
+  it("clears an entry with null when the person takes the choice back", () => {
+    const m = managedModel({ diff: "ent-1", dynamic: "ent-2" });
+    const state = setCatalogEntry(initialFormState(m), "dynamic", null);
+
+    expect(plan(m, state).steps).toEqual([
+      { cards: ["kind"], body: { catalogEntryDynamic: null } },
+    ]);
+  });
+
+  // #433-T05
+  it("sends the Diff group and the entry together when both changed", () => {
+    const m = managedModel();
+    let state = setText(initialFormState(m), "maxFindings", "12");
+    state = setCatalogEntry(state, "diff", "ent-1");
+
+    expect(plan(m, state).steps).toEqual([
+      {
+        cards: ["diff", "kind"],
+        body: { maxFindings: 12, catalogEntryDiff: "ent-1" },
+      },
+    ]);
+  });
+
+  // #433-T05
+  it("never sends a model or a provider, whatever the model of the form carries", () => {
+    const m = {
+      ...managedModel(),
+      effective: {
+        ...BUILT_IN,
+        model: "sentinel-vendor/secret-model-9",
+        provider: "openrouter",
+      },
+    } satisfies SettingsFormModel;
+    let state = setCatalogEntry(initialFormState(m), "diff", "ent-1");
+    state = setReviewKind(state, "dynamic");
+
+    const body = JSON.stringify(plan(m, state).steps);
+
+    expect(body).not.toMatch(/model|provider|fallback/i);
+  });
+});
+
+describe("a project save of a workspace on its own key", () => {
+  // #433-T05
+  it("never sends an entry, whatever the state holds", () => {
+    const m = model();
+    let state = initialFormState(m);
+    state = setCatalogEntry(state, "diff", "ent-1");
+    state = setReviewKind(state, "dynamic");
+
+    expect(plan(m, state).steps).toEqual([
+      { cards: ["kind"], body: { reviewKind: "dynamic" } },
+    ]);
+  });
+
+  // #433-T05
+  it("checks the Dynamic provider the person chose with the validator of the server", () => {
+    const m = model();
+    // A different provider clears the model, so the person names one for it too.
+    const state = setDynamicModel(
+      setDynamicProvider(initialFormState(m), "no-such-provider"),
+      "vendor/other-model",
+    );
+
+    expect(planProjectSave(m, state)).toEqual({
+      ok: false,
+      issues: [{ field: "dynamicProvider", code: "PROVIDER_UNKNOWN" }],
+    });
+  });
+
+  // #433-T05
+  it("sends nothing for a Dynamic provider that was not touched", () => {
+    const m = model();
+
+    expect(
+      plan(m, setDynamicProvider(initialFormState(m), "openrouter")).steps,
+    ).toEqual([]);
+  });
+
+  // #433-T05
+  it("sends the Diff provider with the Diff group once the person set it", () => {
+    const m = model();
+    const state = setText(initialFormState(m), "provider", "openrouter");
+
+    expect(plan(m, state).steps).toEqual([
+      { cards: ["diff"], body: { provider: "openrouter" } },
+    ]);
+  });
+
+  // #433-T05
+  it("checks the Diff provider with the validator of the server", () => {
+    const m = model();
+    const state = setText(initialFormState(m), "provider", "no-such-provider");
+
+    expect(planProjectSave(m, state)).toEqual({
+      ok: false,
+      issues: [{ field: "provider", code: "PROVIDER_UNKNOWN" }],
+    });
   });
 });

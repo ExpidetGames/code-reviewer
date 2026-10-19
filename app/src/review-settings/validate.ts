@@ -4,11 +4,14 @@
 // no environment. Every problem is reported as `{ field, code }` with a stable code; the message a
 // person reads is the UI's business, and a value is never echoed back.
 import { REVIEW_COMMANDS, type ReviewCommand } from "../integrations/types.ts";
-import { MODEL_NAME_PATTERN } from "../llm/config.ts";
-import { isModelTier, type ModelTier } from "../model-tiers/tiers.ts";
+import type { LlmProvider } from "../llm/config.ts";
+import { llmProviderDescriptors } from "../llm/providers/index.ts";
 import {
+  PROJECT_CATALOG_FIELDS,
   PROJECT_DYNAMIC_LIMITS,
   PROJECT_DYNAMIC_SETTING_FIELDS,
+  REVIEW_VERDICT_MODES,
+  type ReviewVerdictMode,
   PROJECT_REVIEW_KINDS,
   REVIEW_SETTING_FIELDS,
   REVIEW_SETTING_LIMITS,
@@ -53,6 +56,31 @@ export const REVIEW_SETTING_ISSUE_CODES = [
    * whose models are the operator's (#283). Never reported by the validation itself.
    */
   "MODEL_MANAGED_BY_INSTANCE",
+  /** The provider is not one of the registry (#430). */
+  "PROVIDER_UNKNOWN",
+  /**
+   * The catalog entry checks of a project save in a workspace on the operator's key (#430). Never reported by the
+   * validation itself: they need the catalog. There is no such entry.
+   */
+  "CATALOG_ENTRY_UNKNOWN",
+  /** The entry is a draft or retired: only a released entry may be chosen. */
+  "CATALOG_ENTRY_NOT_RELEASED",
+  /** The entry does not serve the review kind of the setting (a Diff-only entry for Dynamic). */
+  "CATALOG_ENTRY_KIND_MISMATCH",
+  /** The workspace's plan does not allow the entry (`modelAccess`). */
+  "CATALOG_ENTRY_NOT_ALLOWED",
+  /**
+   * The workspace uses its own key, which never reads the catalog: a catalog entry is refused rather than stored
+   * unchecked (#430).
+   */
+  "CATALOG_ENTRY_OWN_KEY_MODE",
+  /**
+   * A provider and a model of different layers do not belong together: a project sets another provider while the
+   * workspace default holds a model of the first (or the workspace default changes under such a project). The claim fails
+   * such a job closed; the save refuses it so the user does not find out only when a job fails (#432). Own key mode only.
+   * Never reported by the validation itself.
+   */
+  "MODEL_PROVIDER_MISMATCH",
 ] as const;
 export type ReviewSettingIssueCode =
   (typeof REVIEW_SETTING_ISSUE_CODES)[number];
@@ -92,18 +120,90 @@ const fail = (code: ReviewSettingIssueCode): FieldResult<never> => ({
   code,
 });
 
-function modelName(value: unknown): FieldResult<string> {
+/**
+ * Where a provider id is looked up: the registry of the app, or one a test builds with a second provider. `find` is
+ * trimmed and case-insensitive (`ProviderRegistry.find`).
+ */
+export type ProviderLookup = {
+  readonly defaultProvider: { readonly id: string };
+  find(
+    raw: unknown,
+  ): { readonly id: string; checkModelId(id: string): boolean } | undefined;
+};
+
+/** What the checks of one request need: the lookup, and the model-id rule of the provider of each model. */
+type CheckContext = {
+  providers: ProviderLookup;
+  /** The rule of the provider of `model` and `fallbackModel`. */
+  diffModelRule: (id: string) => boolean;
+  /** The rule of the provider of `dynamicModel`. */
+  dynamicModelRule: (id: string) => boolean;
+};
+
+/**
+ * The rule a model is held to is the one of the provider the same input names (`provider` for the Diff models,
+ * `dynamicProvider` for the Dynamic one), else the default provider's: a model is only meaningful at its provider.
+ */
+function contextFor(input: unknown, providers: ProviderLookup): CheckContext {
+  const named = (field: "provider" | "dynamicProvider") => {
+    const raw = isPlainObject(input) ? input[field] : undefined;
+    const found = typeof raw === "string" ? providers.find(raw) : undefined;
+    const provider = found ?? providers.find(providers.defaultProvider.id);
+    return (id: string) => provider?.checkModelId(id) ?? false;
+  };
+  return {
+    providers,
+    diffModelRule: named("provider"),
+    dynamicModelRule: named("dynamicProvider"),
+  };
+}
+
+function modelName(
+  value: unknown,
+  rule: (id: string) => boolean,
+): FieldResult<string> {
   if (typeof value !== "string") return fail("INVALID_TYPE");
   const name = value.trim();
   if (name === "") return fail("EMPTY");
-  if (!MODEL_NAME_PATTERN.test(name)) return fail("INVALID_FORMAT");
+  if (!rule(name)) return fail("INVALID_FORMAT");
   return ok(name);
 }
 
-function fallbackModel(value: unknown): FieldResult<string | null> {
+function fallbackModel(
+  value: unknown,
+  context: CheckContext,
+): FieldResult<string | null> {
   if (value === null) return ok(null);
   if (typeof value === "string" && value.trim() === "") return ok(null);
-  return modelName(value);
+  return modelName(value, context.diffModelRule);
+}
+
+/** A provider of the registry, stored by its id; a spelling with other case or spaces is normalized. */
+function providerId(
+  value: unknown,
+  context: CheckContext,
+): FieldResult<LlmProvider> {
+  if (typeof value !== "string") return fail("INVALID_TYPE");
+  if (value.trim() === "") return fail("EMPTY");
+  const found = context.providers.find(value);
+  // The registry's ids are the values of `LlmProvider`; a test registry with another provider is cast the same way.
+  return found === undefined
+    ? fail("PROVIDER_UNKNOWN")
+    : ok(found.id as LlmProvider);
+}
+
+/** The most characters of a catalog entry id; the ids of the catalog are 36 (`mce_` and 32 hex digits). */
+const CATALOG_ENTRY_ID_MAX_CHARS = 64;
+const CATALOG_ENTRY_ID_SHAPE = /^[A-Za-z0-9_-]+$/;
+
+/** The id of a catalog entry, or `null` to clear the selection. Its existence is the service's check (#430). */
+function catalogEntryId(value: unknown): FieldResult<string | null> {
+  if (value === null) return ok(null);
+  if (typeof value !== "string") return fail("INVALID_TYPE");
+  if (value.trim() === "") return fail("EMPTY");
+  if (value.length > CATALOG_ENTRY_ID_MAX_CHARS) return fail("TOO_LONG");
+  if (!CATALOG_ENTRY_ID_SHAPE.test(value)) return fail("INVALID_FORMAT");
+  return ok(value);
 }
 
 // Tab and line breaks are fine in free text; every other control character (a NUL cannot even be
@@ -152,16 +252,14 @@ function commands(value: unknown): FieldResult<ReviewCommand[]> {
   return ok(REVIEW_COMMANDS.filter((command) => seen.has(command)));
 }
 
-/** A tier name; anything else (a model id, a made-up level) is refused without being echoed. */
-function modelTier(value: unknown): FieldResult<ModelTier> {
-  if (typeof value !== "string") return fail("INVALID_TYPE");
-  return isModelTier(value) ? ok(value) : fail("INVALID_FORMAT");
-}
-
 const FIELD_CHECKS: {
-  [K in ReviewSettingField]: (value: unknown) => FieldResult<ReviewSettings[K]>;
+  [K in ReviewSettingField]: (
+    value: unknown,
+    context: CheckContext,
+  ) => FieldResult<ReviewSettings[K]>;
 } = {
-  model: modelName,
+  provider: providerId,
+  model: (value, context) => modelName(value, context.diffModelRule),
   fallbackModel,
   extraInstructions: instructions,
   maxFindings: integerBetween(
@@ -177,7 +275,6 @@ const FIELD_CHECKS: {
   autoReviewOnOpen: bool,
   autoReviewOnPush: bool,
   allowedCommands: commands,
-  modelTier,
 };
 
 export type ValidationResult =
@@ -189,6 +286,14 @@ export type ValidationResult =
 function reviewKind(value: unknown): FieldResult<ProjectReviewKind> {
   if (typeof value !== "string") return fail("INVALID_TYPE");
   const known = PROJECT_REVIEW_KINDS.find((kind) => kind === value);
+  return known === undefined ? fail("INVALID_FORMAT") : ok(known);
+}
+
+/** The verdict mode of a project (#405): one of the known modes, or `null` to clear the override. */
+function reviewVerdict(value: unknown): FieldResult<ReviewVerdictMode | null> {
+  if (value === null) return ok(null);
+  if (typeof value !== "string") return fail("INVALID_TYPE");
+  const known = REVIEW_VERDICT_MODES.find((mode) => mode === value);
   return known === undefined ? fail("INVALID_FORMAT") : ok(known);
 }
 
@@ -210,20 +315,37 @@ function reviewSkill(value: unknown): FieldResult<string | null> {
 }
 
 /** The Dynamic model of a project save: like the Diff model, or `null` to clear the override (#200). */
-function dynamicModelValue(value: unknown): FieldResult<string | null> {
+function dynamicModelValue(
+  value: unknown,
+  context: CheckContext,
+): FieldResult<string | null> {
   if (value === null) return ok(null);
-  return modelName(value);
+  return modelName(value, context.dynamicModelRule);
+}
+
+/** The Dynamic provider of a project save, or `null` to clear the override so the default provider applies (#430). */
+function dynamicProviderValue(
+  value: unknown,
+  context: CheckContext,
+): FieldResult<LlmProvider | null> {
+  if (value === null) return ok(null);
+  return providerId(value, context);
 }
 
 const DYNAMIC_FIELD_CHECKS: {
   [K in ProjectDynamicSettingField]: (
     value: unknown,
+    context: CheckContext,
   ) => FieldResult<ProjectDynamicPatch[K]>;
 } = {
-  reviewKind,
+  reviewKind: (value) => reviewKind(value),
   // The same rule as the Diff model: the identifier is kept literally, no provider rewrite (#194-T08).
   dynamicModel: dynamicModelValue,
-  reviewSkill,
+  dynamicProvider: dynamicProviderValue,
+  catalogEntryDiff: catalogEntryId,
+  catalogEntryDynamic: catalogEntryId,
+  reviewSkill: (value) => reviewSkill(value),
+  reviewVerdict: (value) => reviewVerdict(value),
 };
 
 export type ProjectSettingsPatch = {
@@ -245,8 +367,9 @@ function checkDynamicField<K extends ProjectDynamicSettingField>(
   target: ProjectDynamicPatch,
   field: K,
   raw: unknown,
+  context: CheckContext,
 ): ReviewSettingIssue | undefined {
-  const result = DYNAMIC_FIELD_CHECKS[field](raw);
+  const result = DYNAMIC_FIELD_CHECKS[field](raw, context);
   if (!result.ok) return { field, code: result.code };
   target[field] = result.value as ProjectDynamicPatch[K];
   return undefined;
@@ -259,15 +382,17 @@ function checkDynamicField<K extends ProjectDynamicSettingField>(
  */
 export function validateProjectSettingsPatch(
   input: unknown,
+  providers: ProviderLookup = llmProviderDescriptors,
 ): ProjectValidationResult {
   if (!isPlainObject(input))
     return { ok: false, issues: [{ field: "settings", code: "INVALID_TYPE" }] };
+  const context = contextFor(input, providers);
   const review: ReviewSettingsOverrides = {};
   const dynamic: ProjectDynamicPatch = {};
   const issues: ReviewSettingIssue[] = [];
   for (const [name, raw] of Object.entries(input)) {
     if (isProjectDynamicField(name)) {
-      const issue = checkDynamicField(dynamic, name, raw);
+      const issue = checkDynamicField(dynamic, name, raw, context);
       if (issue !== undefined) issues.push(issue);
       continue;
     }
@@ -278,7 +403,7 @@ export function validateProjectSettingsPatch(
       });
       continue;
     }
-    const issue = checkField(review, name, raw);
+    const issue = checkField(review, name, raw, context);
     if (issue !== undefined) issues.push(issue);
   }
   return issues.length > 0
@@ -293,12 +418,14 @@ export function validateProjectSettingsPatch(
  */
 export function parseStoredProjectDynamicOverrides(
   stored: unknown,
+  providers: ProviderLookup = llmProviderDescriptors,
 ): ProjectDynamicOverrides {
   const value: ProjectDynamicPatch = {};
   if (!isPlainObject(stored)) return {};
+  const context = contextFor(stored, providers);
   for (const field of PROJECT_DYNAMIC_SETTING_FIELDS) {
     if (!Object.hasOwn(stored, field)) continue;
-    checkDynamicField(value, field, stored[field]);
+    checkDynamicField(value, field, stored[field], context);
   }
   // A stored null (or blank) skill or model is "no override", not an override of `null`.
   const overrides: ProjectDynamicOverrides = {};
@@ -307,6 +434,14 @@ export function parseStoredProjectDynamicOverrides(
     overrides.dynamicModel = value.dynamicModel;
   if (typeof value.reviewSkill === "string")
     overrides.reviewSkill = value.reviewSkill;
+  if (typeof value.reviewVerdict === "string")
+    overrides.reviewVerdict = value.reviewVerdict;
+  if (typeof value.dynamicProvider === "string")
+    overrides.dynamicProvider = value.dynamicProvider;
+  for (const field of PROJECT_CATALOG_FIELDS) {
+    const entry = value[field];
+    if (typeof entry === "string") overrides[field] = entry;
+  }
   return overrides;
 }
 
@@ -333,8 +468,9 @@ function checkField<K extends ReviewSettingField>(
   target: ReviewSettingsOverrides,
   field: K,
   raw: unknown,
+  context: CheckContext,
 ): ReviewSettingIssue | undefined {
-  const result = FIELD_CHECKS[field](raw);
+  const result = FIELD_CHECKS[field](raw, context);
   if (!result.ok) return { field, code: result.code };
   setField(target, field, result.value as ReviewSettings[K]);
   return undefined;
@@ -346,9 +482,13 @@ function checkField<K extends ReviewSettingField>(
  * every problem, so a form can mark all of them at once. The value is a new object holding only
  * checked, normalized fields.
  */
-export function validateReviewSettingsPatch(input: unknown): ValidationResult {
+export function validateReviewSettingsPatch(
+  input: unknown,
+  providers: ProviderLookup = llmProviderDescriptors,
+): ValidationResult {
   if (!isPlainObject(input))
     return { ok: false, issues: [{ field: "settings", code: "INVALID_TYPE" }] };
+  const context = contextFor(input, providers);
   const value: ReviewSettingsOverrides = {};
   const issues: ReviewSettingIssue[] = [];
   for (const [name, raw] of Object.entries(input)) {
@@ -360,7 +500,7 @@ export function validateReviewSettingsPatch(input: unknown): ValidationResult {
       });
       continue;
     }
-    const issue = checkField(value, name, raw);
+    const issue = checkField(value, name, raw, context);
     if (issue !== undefined) issues.push(issue);
   }
   return issues.length > 0 ? { ok: false, issues } : { ok: true, value };
@@ -376,9 +516,13 @@ export function validateReviewSettingsPatch(input: unknown): ValidationResult {
  * explicit "no commands" must never fall back to enabling `/review`), and a list whose removed
  * entries leave nothing becomes `[]`. A missing field still inherits.
  */
-export function parseStoredOverrides(stored: unknown): ReviewSettingsOverrides {
+export function parseStoredOverrides(
+  stored: unknown,
+  providers: ProviderLookup = llmProviderDescriptors,
+): ReviewSettingsOverrides {
   const value: ReviewSettingsOverrides = {};
   if (!isPlainObject(stored)) return value;
+  const context = contextFor(stored, providers);
   for (const field of REVIEW_SETTING_FIELDS) {
     if (!Object.hasOwn(stored, field)) continue;
     if (field === "allowedCommands") {
@@ -386,7 +530,7 @@ export function parseStoredOverrides(stored: unknown): ReviewSettingsOverrides {
       if (normalized !== undefined) value.allowedCommands = normalized;
       continue;
     }
-    checkField(value, field, stored[field]);
+    checkField(value, field, stored[field], context);
   }
   return value;
 }

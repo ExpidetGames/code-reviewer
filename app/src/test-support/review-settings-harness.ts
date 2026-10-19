@@ -6,6 +6,8 @@ import { createAppSettingsRepository } from "../db/repositories/app-settings-rep
 import { createIntegrationsRepository } from "../db/repositories/integrations-repository.ts";
 import { createProjectsRepository } from "../db/repositories/projects-repository.ts";
 import { createRepositoriesRepository } from "../db/repositories/repositories-repository.ts";
+import { createCatalogRepository } from "../db/repositories/catalog-repository.ts";
+import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
 import type { Database } from "../db/schema.ts";
 import type { Kysely } from "kysely";
 import { createTestDatabase } from "./test-database.ts";
@@ -15,21 +17,13 @@ import { builtInReviewSettings } from "../review-settings/settings.ts";
 import { readDefaultReviewSkill } from "../review-settings/default-skill.ts";
 import type { ModelCapabilityChecker } from "../llm/model-capabilities.ts";
 import type { ReviewSettingsHooks } from "../review-settings/hooks.ts";
-import type { TierAvailability } from "../model-tiers/tiers.ts";
-
-/** No tier has a model for any kind. */
-export const NO_TIERS_CONFIGURED: TierAvailability = {
-  low: { diff: false, dynamic: false },
-  medium: { diff: false, dynamic: false },
-  high: { diff: false, dynamic: false },
-};
-
-/** Every tier has a model for both kinds. */
-export const ALL_TIERS_CONFIGURED: TierAvailability = {
-  low: { diff: true, dynamic: true },
-  medium: { diff: true, dynamic: true },
-  high: { diff: true, dynamic: true },
-};
+import {
+  catalogSelectionFrom,
+  type CatalogSelectionSource,
+} from "../review-settings/catalog-selection.ts";
+import type { ProjectReviewKind } from "../review-settings/settings.ts";
+import { createCatalogService } from "../model-catalog/service.ts";
+import type { ProviderLookup } from "../review-settings/validate.ts";
 
 export const TEST_MODEL = "deepseek/deepseek-v3.2";
 
@@ -70,8 +64,10 @@ export async function setupReviewSettings(
     modelCapabilities?: ModelCapabilityChecker;
     /** #280: whether the workspace's models are the operator's (its key mode is `managed`); default false. */
     operatorsModels?: boolean;
-    /** #283: which tiers have a model for which kind of review; default none (a managed workspace sees all as unavailable). */
-    tierAvailability?: TierAvailability;
+    /** #430: the catalog a managed workspace selects from; default an empty one. */
+    catalog?: CatalogSelectionSource;
+    /** #430: a registry with a second provider; default the registry of the app. */
+    providers?: ProviderLookup;
   } = {},
 ) {
   const database = db ?? (await createTestDatabase()).db;
@@ -81,16 +77,17 @@ export async function setupReviewSettings(
   const appSettings = createAppSettingsRepository(database, workspaceId);
   let model = TEST_MODEL;
   let operatorsModels = options.operatorsModels === true;
-  let tierAvailability: TierAvailability =
-    options.tierAvailability ?? NO_TIERS_CONFIGURED;
   const service = createReviewSettingsService({
     appSettings,
     projects,
     builtIn: () => builtInReviewSettings(model),
     defaultSkill: () => TEST_DEFAULT_SKILL,
     operatorsModels: async () => operatorsModels,
-    tierAvailability: async () => tierAvailability,
     ...(options.hooks === undefined ? {} : { hooks: options.hooks }),
+    ...(options.catalog === undefined ? {} : { catalog: options.catalog }),
+    ...(options.providers === undefined
+      ? {}
+      : { providers: options.providers }),
     ...(options.modelCapabilities === undefined
       ? {}
       : { modelCapabilities: options.modelCapabilities }),
@@ -110,11 +107,101 @@ export async function setupReviewSettings(
     setOperatorsModels(next: boolean) {
       operatorsModels = next;
     },
-    setTierAvailability(next: TierAvailability) {
-      tierAvailability = next;
-    },
     appSettingRows: () =>
       database.selectFrom("app_settings").selectAll().execute(),
     projectRows: () => database.selectFrom("projects").selectAll().execute(),
+  };
+}
+
+/**
+ * #430: a real catalog on the test database for the selection of a managed workspace. Entries are made through the
+ * catalog service (every model is vouched for by the metadata check), and a test says which ones the plan allows.
+ * `reads` counts the questions the review settings put to the catalog, so a test can pin that an own-key workspace
+ * asks none; `finds` counts the lookups of one entry by id (the check of a choice).
+ */
+export function createCatalogFixture(db: Kysely<Database>) {
+  const service = createCatalogService({
+    catalog: createCatalogRepository(db),
+    settings: createInstanceSettingsRepository(db),
+    modelCapabilities: {
+      check: async () => ({
+        outcome: "supported" as const,
+        capabilities: {
+          tools: true,
+          toolChoice: true,
+          toolChoiceRequired: true,
+          responseFormat: true,
+          structuredOutputs: true,
+          maxCompletionTokens: 8192,
+          smallestCompletionTokens: 8192,
+          contextLength: 200_000,
+          inputUsdPerMtok: null,
+          outputUsdPerMtok: null,
+        },
+      }),
+    },
+    logger: { info: () => undefined },
+  });
+  const notAllowed = new Set<string>();
+  const reads = { count: 0, finds: 0 };
+  const inner = catalogSelectionFrom(
+    service,
+    async (id) => !notAllowed.has(id),
+  );
+  const source: CatalogSelectionSource = {
+    entries: async () => {
+      reads.count += 1;
+      return inner.entries();
+    },
+    find: async (id) => {
+      reads.count += 1;
+      reads.finds += 1;
+      return inner.find(id);
+    },
+    allowed: async (id) => {
+      reads.count += 1;
+      return inner.allowed(id);
+    },
+  };
+  let counter = 0;
+
+  return {
+    service,
+    source,
+    reads,
+    /** The plan no longer allows this entry (`modelAccess`). */
+    forbid(id: string) {
+      notAllowed.add(id);
+    },
+    /** A new entry in the given status; the model id is a sentinel a test can search for. */
+    async entry(
+      options: {
+        name?: string;
+        kinds?: ProjectReviewKind[];
+        status?: "draft" | "released" | "retired";
+        modelId?: string;
+      } = {},
+    ) {
+      counter += 1;
+      const created = await service.create(
+        {
+          name: options.name ?? `Choice ${String(counter)}`,
+          description: `A choice number ${String(counter)}.`,
+          provider: "openrouter",
+          modelId: options.modelId ?? `sentinel/entry-model-${String(counter)}`,
+          kinds: options.kinds ?? ["diff", "dynamic"],
+        },
+        null,
+      );
+      if (!created.ok) throw new Error(`create refused: ${created.code}`);
+      const status = options.status ?? "released";
+      if (status === "draft") return created.entry;
+      const released = await service.release(created.entry.id, null);
+      if (!released.ok) throw new Error(`release refused: ${released.code}`);
+      if (status === "released") return released.entry;
+      const retired = await service.retire(created.entry.id, null);
+      if (!retired.ok) throw new Error(`retire refused: ${retired.code}`);
+      return retired.entry;
+    },
   };
 }

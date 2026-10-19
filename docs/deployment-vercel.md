@@ -432,7 +432,7 @@ every secret: at least 32 characters, no white space or control characters.
 | `RUNNER_DISPATCH_MAX_RUNNING` | **set it** | no | The pool cap the App keeps to when it sends wake-ups for jobs that waited for a slot, 1 to 1000. **Must equal the Dispatcher's `DISPATCHER_MAX_RUNNING`.** Unset, the App still works (the claim enforces the Dispatcher's cap) but a freed slot wakes one waiting job at a time and the sweep wakes the Dispatcher for jobs it cannot take. |
 | `RUNNER_DISPATCH_GIVE_UP_SECONDS` | optional | no | A job that waited this long without a claim fails with `dispatch_unavailable`, when the next sweep looks at it (**up to 2 hours later than the time itself**). 60 to 604800, default **3600** in webhook mode, off in poll mode, `0` turns it off. It is also the longest a job may queue while the pool is full: set it above the queue you accept. |
 | `OPERATOR_API_TOKEN` | optional | **yes** | Switches on the operator API (`/api/operator/v1`: workspaces, entitlements and limits, usage). Unset, the API does not exist (404). At least 32 characters, different from `RUNNER_TOKEN` and `APP_SECRET`. |
-| `LLM_MODEL`, `LLM_MAX_TOKENS` | optional | no | The instance's model and context window. For workspaces on their own key they are only the defaults a review setting can override. A **`managed` workspace** (section 3.5) does not use them: the models of its reviews are the ones you set per tier through the operator API (`PUT /api/operator/v1/model-tiers`, section 3.5), and its token budget is cut to the window of that model. `LLM_MODEL` is an OpenRouter name, default `anthropic/claude-haiku-5.5`; a model for Dynamic jobs must be tool-capable (`dynamic-review.md`, "The model"). The LLM key is **not** an environment variable. |
+| `LLM_MODEL`, `LLM_MAX_TOKENS` | optional | no | The instance's model and context window. For workspaces on their own key they are only the defaults a review setting can override. A **`managed` workspace** (section 3.5) does not use them: the models of its reviews are the catalog entries its projects select (else the instance default entry of the kind; section 3.5), and its token budget is cut to the window of that entry's model. `LLM_MODEL` is an OpenRouter name, default `anthropic/claude-haiku-5.5`; a model for Dynamic jobs must be tool-capable (`dynamic-review.md`, "The model"). The LLM key is **not** an environment variable. |
 
 Not set in the project, on purpose:
 
@@ -557,21 +557,21 @@ valuable key in `/ci`: it can deploy to production, which is why the environment
   (an old instance reads the limit and ignores it), **then** switch the writer (your billing service) to send
   `ownKeyCostLimitMicroUsd` in every body, `null` where there is no limit. A `422` during the rollout window means the
   writer reached an instance of the other release: treat it as retry-later, not as a refused plan.
-- **The model is yours, per tier,** while a job runs on the operator's key (#280): the workspace chooses a tier (`low`,
-  `medium` or `high`, `medium` unless it chose another) and the model of that tier for the kind of review (Diff or
-  Dynamic) is the one you set with `PUT /api/operator/v1/model-tiers` (`{ "tiers": { "low": { "diff": "…",
-  "dynamic": "…" }, … } }`; a Dynamic model must support tool calls, which the call checks, and one it cannot verify is
-  refused). `LLM_MODEL` and `LLM_MAX_TOKENS` are not used, and the workspace's `model` and Dynamic model review settings
-  have no effect (they apply again if the workspace goes back to `own`). The workspace's review settings show one
-  **Quality** choice (Low, Medium, High, described by speed and depth only) in place of the model fields, and mark a
-  level without a model for the project's kind as "Not available" without saying why; their routes refuse a model
-  field with `MODEL_MANAGED_BY_INSTANCE`. A tier without a model for a kind fails the job
-  with `managed_tier_unavailable`; it never moves to another tier. The workspace's token budget is cut to the context
-  window of the tier's model when OpenRouter states one (the last window read when it cannot be asked, else 100,000
-  tokens: it is never sent unclamped); a Diff model that OpenRouter does not list is refused too. The model ids are visible to you and the runner only: not to a
-  workspace, not in the admin portal (it shows whether a tier is configured), not in a result (`[model]` stands where a result
-  repeated one), a record or a log. Save
-  the tiers before you set a workspace to `managed`, and roll the new App out completely first.
+- **The model is yours, through the catalog,** while a job runs on the operator's key (#432): the project selects an entry
+  of your model catalog (a name members see; the provider and model behind it only you see), else the instance default
+  entry of the kind (Diff or Dynamic) is used. At claim the resolver takes the entry's model and your key of the entry's
+  provider; a Dynamic model must support tool calls (checked when the entry is released). `LLM_MODEL` and
+  `LLM_MAX_TOKENS` are not used, and the workspace's `model` and Dynamic model review settings have no effect (they apply
+  again if the workspace goes back to `own`); their routes refuse a model field with `MODEL_MANAGED_BY_INSTANCE`. An entry
+  that is missing, retired, of the wrong kind or outside the plan's `modelAccess`, or an entry of a provider the runner
+  did not advertise, fails the job with `managed_model_unavailable`; it never moves to another entry or to `LLM_MODEL`.
+  The workspace's token budget is cut to the context window of the entry's model when the provider states one (the last
+  window read when it cannot be asked, else 100,000 tokens: it is never sent unclamped). The model ids are visible to you
+  and the runner only: not to a workspace, not in a result (`[model]` stands where a result repeated one), a record or a
+  log. The quality tiers of #280 are gone (#434): the migration turned the models you had configured for Low, Medium and High into
+  released catalog entries of the same names and made the Medium ones the defaults, and `PUT /api/operator/v1/model-tiers` is
+  answered `404`. The old setting stays in the database, unread, for one release. Create and release the entries and set the defaults before you set a workspace to
+  `managed`, and roll the new App out completely first (`app/src/model-catalog/README.md`).
   The workspace's Settings, LLM access page shows a note instead of a key form.
 - **No usable operator key** (none saved, or one that cannot be decrypted, for example after a changed `APP_SECRET`):
   every job of a managed workspace fails with **`llm_not_configured`**, and the log names `operator_key_missing` or
@@ -887,8 +887,8 @@ A run's error code is shown on the Runs pages with a fixed sentence. Four belong
 Others you will meet: `no_capable_runner` (a Dynamic job nobody could run for 30 minutes: `DISPATCHER_ENGINES` has no
 `opencode`, or no Dispatcher is configured for it), `dynamic_review_disabled` (the gate is off), `lease_expired` (the Worker
 stopped reporting), `quota_exhausted`, `workspace_suspended` and `entitlements_invalid` (the workspace's limits, set
-through the operator API), `managed_tier_unavailable` (the workspace is `managed` and its tier has no model for the kind
-of review: save one with `PUT /api/operator/v1/model-tiers`), `llm_not_configured` (the workspace has no LLM key, or it is `managed` and the operator has no usable key: section 3.5). The wake-up call's answers (`202`,
+through the operator API), `managed_model_unavailable` (the workspace is `managed` and its project selects no usable catalog entry for the kind
+of review, and no instance default entry applies), `llm_not_configured` (the workspace has no LLM key, or it is `managed` and the operator has no usable key: section 3.5). The wake-up call's answers (`202`,
 `200 ignored` with `not_claimable` or `not_capable`, `429`, `503`) and the App's back-off are in
 `app/src/dispatch/README.md`, "What an answer means".
 
@@ -939,6 +939,10 @@ and reports `status`, `createdAt`, `timeout` and `tags` as the SDK types say, an
 minutes. The reaper checks every VM itself, so it does not depend on the platform's filter.
 
 ### 5.6 Updating the App or the Dispatcher
+
+> **Release with check runs and review verdicts (#405).** The App needs the *Checks* permission accepted on each installation, and every existing project starts to submit a review verdict after the update (`Review verdict` `off` keeps a project as it was): [Updating to the release with check runs and review verdicts](../README.md#updating-to-the-release-with-check-runs-and-review-verdicts). The check runs of a hosted deployment are repaired by the sweep every two hours and by the requests that touch the database; no timer runs.
+
+> **Release that removes the managed model tiers (#434, with #432 and #433).** The migration `20261018170000_migrate_model_tiers_to_catalog` runs in the `migrate` job and only adds: it turns the models you configured for Low, Medium and High into released catalog entries (`Low`, `Medium`, `High`, or `<Tier> (Diff)` and `<Tier> (Dynamic)` when a tier used two models), makes the Medium entries the instance defaults, and points every project that had a quality level at its entry, so no workspace on your key changes model. **Do this after the release, or managed reviews stop:** add the migrated entries to every `modelAccess` list you set on a workspace or on the instance default by hand. A workspace whose list does not contain the entry of its project, or the default entry of the kind, has its jobs ended with `managed_model_unavailable`; a list that is absent allows every released entry and needs nothing. Then check the entries (names, `released`, the Medium defaults) in the admin portal. Three behaviours differ from the tiers, on purpose: a tier that had no model for a review kind used to end the job with `managed_tier_unavailable`, and now the project runs that kind on the instance default entry (the Medium one); repositories activated or projects created after the release get the instance default, not the old tier of their workspace (a workspace-level tier was written into the projects that existed, and there is no workspace-level entry); and the stored tier of a project of a workspace on its own key is rewritten too, but nothing reads it while the workspace uses its own key. `/api/operator/v1/model-tiers` is gone: it answers `401` without a valid token and `404` with one (and the plain `404` of the platform while the operator API is off): update an external script that calls it before the release. A settings page opened before the release can still send the old quality level; that save is refused with `UNKNOWN_FIELD` and a reload fixes it. The old tier data stays in the database, unread, and is removed one release later. Instances on their own key see no change. A rollback is not safe: the previous release still finds the old tier data and runs the tiers as before, but a project whose settings were saved on the new release has lost its tier and runs on the default tier there, and the entries stay in the catalog. Roll #432, #433 and #434 together, and treat a fix forward as the normal way out (`app/src/model-catalog/README.md`, "Migrated from the tiers"). On a self-hosted instance, which migrates at start, going back to the previous image fails at startup, because migrations are forward only and the old image does not know this one: restore the database backup taken before the upgrade, or stay on the new image. On Vercel the `migrate` job is separate, so the previous deployment still starts. If the migration fails with `model tiers: N projects (…) changed while the migration wrote them`, a project was saved by a running instance (typically one of the previous release) three times in a row while the migration ran: nothing was applied (the whole migration is rolled back, and the message names the projects, at most 20), so run the deploy again; it is safe to repeat, and stopping the instances of the previous release first makes it certain.
 
 A release is a pull request from `development` into `main`. **Merging it is the whole release**: it starts *Deploy
 production* (`.github/workflows/deploy-production.yml`; you can also start it by hand on `main`), and nothing else is
@@ -1147,11 +1151,11 @@ A self-hosted installation and a hosted one never share a database or a GitHub A
   reading logs. Limits and the key mode are set through the operator API; the
   operator's own key (section 3.5) is saved by the instance admin only, and a workspace set to `managed` before every App
   instance runs the release that knows the key mode is served by the wrong key and outside the limit.
-- **A managed workspace has no model of its own**: it chooses a tier (`low`, `medium`, `high`) and the models behind the
-  tiers are yours, set through the operator API (`PUT /api/operator/v1/model-tiers`, one model per tier and review kind;
-  `app/src/model-tiers/README.md`). A tier without a model for a kind fails the job with `managed_tier_unavailable`, it
-  does not move to another tier or to `LLM_MODEL`. The models never reach a workspace; a Dynamic model has to support tool
-  calls (checked when you save it). Save the tiers before you set a workspace to `managed`.
+- **A managed workspace has no model of its own**: its projects select entries of your model catalog, or the instance
+  default entry of the kind applies (`app/src/model-catalog/README.md`). An unusable entry fails the job with
+  `managed_model_unavailable`, it does not move to another entry or to `LLM_MODEL`. The models never reach a workspace; a
+  Dynamic model has to support tool calls. Create and release the entries and set the defaults before you set a workspace
+  to `managed`. The tiers of #280 were turned into catalog entries by #434 and are gone.
 - **A Worker whose end the Dispatcher does not see still holds its slot until its lease lapses** (two minutes after its
   last heartbeat); only the next request that touches the database or the next sweep (up to 2 hours) then puts the job back, and the pull request shows "Running" meanwhile. A Worker
   that exits non-zero before it has reported a result is released at once when the Dispatcher sees the container end

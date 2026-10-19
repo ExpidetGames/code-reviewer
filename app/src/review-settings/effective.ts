@@ -2,6 +2,7 @@
 
 // Puts the layers together: built-in values, global defaults, project overrides. Pure.
 import type { ReviewCommand } from "../integrations/types.ts";
+import type { LlmProvider } from "../llm/config.ts";
 import {
   REVIEW_SETTING_FIELDS,
   type ProjectDynamicOverrides,
@@ -10,6 +11,7 @@ import {
   type ReviewSettingField,
   type ReviewSettings,
   type ReviewSettingsOverrides,
+  type ReviewVerdictMode,
 } from "./settings.ts";
 
 /** Where the value of a field comes from. */
@@ -65,10 +67,17 @@ export type ProjectDynamicSource = "built_in" | "project";
 export type EffectiveProjectDynamic = {
   reviewKind: ProjectReviewKind;
   dynamicModel: string;
+  /** The provider of `dynamicModel`; the default provider unless the project chose one (#430). */
+  dynamicProvider: LlmProvider;
+  /** The catalog entry the project selects per kind, or null for none (#430). */
+  catalogEntryDiff: string | null;
+  catalogEntryDynamic: string | null;
   /** The skill text a Dynamic review uses: the project's override, else the shipped default. */
   reviewSkill: string;
   /** Whether `reviewSkill` is the shipped default (the project sets no override). */
   reviewSkillIsDefault: boolean;
+  /** What a finished review does on its pull request besides the check run (#405). */
+  reviewVerdict: ReviewVerdictMode;
   sources: Record<ProjectDynamicSettingField, ProjectDynamicSource>;
 };
 
@@ -82,7 +91,11 @@ export function resolveProjectDynamicSettings(layers: {
   builtIn: {
     reviewKind: ProjectReviewKind;
     dynamicModel: string;
+    dynamicProvider: LlmProvider;
+    catalogEntryDiff: string | null;
+    catalogEntryDynamic: string | null;
     reviewSkill: string | null;
+    reviewVerdict: ReviewVerdictMode;
   };
   project?: ProjectDynamicOverrides;
   defaultSkill: string;
@@ -98,7 +111,14 @@ export function resolveProjectDynamicSettings(layers: {
     ProjectDynamicSettingField,
     ProjectDynamicSource
   >;
-  for (const field of ["reviewKind", "dynamicModel"] as const)
+  for (const field of [
+    "reviewKind",
+    "dynamicModel",
+    "dynamicProvider",
+    "catalogEntryDiff",
+    "catalogEntryDynamic",
+    "reviewVerdict",
+  ] as const)
     sources[field] = has(field) ? "project" : "built_in";
   // A null (or empty, already normalized to null) override means "no override" and resolves to the
   // shipped default, never to another project's skill.
@@ -107,8 +127,13 @@ export function resolveProjectDynamicSettings(layers: {
   return {
     reviewKind: project?.reviewKind ?? builtIn.reviewKind,
     dynamicModel: project?.dynamicModel ?? builtIn.dynamicModel,
+    dynamicProvider: project?.dynamicProvider ?? builtIn.dynamicProvider,
+    catalogEntryDiff: project?.catalogEntryDiff ?? builtIn.catalogEntryDiff,
+    catalogEntryDynamic:
+      project?.catalogEntryDynamic ?? builtIn.catalogEntryDynamic,
     reviewSkill: reviewSkillOverride ?? layers.defaultSkill,
     reviewSkillIsDefault,
+    reviewVerdict: project?.reviewVerdict ?? builtIn.reviewVerdict,
     sources,
   };
 }

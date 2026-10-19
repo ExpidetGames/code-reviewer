@@ -9,7 +9,6 @@ import {
   REVIEW_COMMANDS,
   type ReviewCommand,
 } from "../../integrations/types.ts";
-import type { ModelTier } from "../../model-tiers/tiers.ts";
 import {
   REVIEW_SETTING_FIELDS,
   type ReadableReviewSettings,
@@ -27,6 +26,8 @@ import {
 import type { SettingsFormModel } from "./form-model.ts";
 
 export type FormValues = {
+  /** The provider of `model` (#430, #433); empty for a workspace on the operator's key, which has no field for it. */
+  provider: string;
   model: string;
   /** Empty means no fallback model. */
   fallbackModel: string;
@@ -38,11 +39,6 @@ export type FormValues = {
   autoReviewOnOpen: boolean;
   autoReviewOnPush: boolean;
   allowedCommands: ReviewCommand[];
-  /**
-   * The quality level of a workspace on the operator's key (#280, #283). Carried through a save of any workspace, so
-   * the level that is stored is never dropped; only the quality choice changes it.
-   */
-  modelTier: ModelTier;
 };
 
 export type FormState = {
@@ -56,6 +52,7 @@ export type FormState = {
 function valuesOf(settings: ReadableReviewSettings): FormValues {
   return {
     // Absent for a workspace on the operator's key, whose form has no field for them (#283).
+    provider: settings.provider ?? "",
     model: settings.model ?? "",
     fallbackModel: settings.fallbackModel ?? "",
     extraInstructions: settings.extraInstructions,
@@ -66,7 +63,6 @@ function valuesOf(settings: ReadableReviewSettings): FormValues {
     autoReviewOnOpen: settings.autoReviewOnOpen,
     autoReviewOnPush: settings.autoReviewOnPush,
     allowedCommands: [...settings.allowedCommands],
-    modelTier: settings.modelTier,
   };
 }
 
@@ -79,12 +75,22 @@ export function initialFormState(model: SettingsFormModel): FormState {
     overridden,
     ...(model.dynamic === undefined
       ? {}
-      : { dynamic: initialDynamicValues(model.dynamic) }),
+      : {
+          dynamic: initialDynamicValues(
+            model.dynamic,
+            model.catalog?.selection ?? null,
+          ),
+        }),
   };
 }
 
 export type TextField =
-  "model" | "fallbackModel" | "extraInstructions" | "maxFindings" | "maxTokens";
+  | "provider"
+  | "model"
+  | "fallbackModel"
+  | "extraInstructions"
+  | "maxFindings"
+  | "maxTokens";
 export type BooleanField =
   | "largePrChunking"
   | "inlineKeyIssues"
@@ -103,12 +109,23 @@ export function setText(
   };
 }
 
-/** The quality level a workspace on the operator's key chose (#283). */
-export function setModelTier(state: FormState, tier: ModelTier): FormState {
+/**
+ * Chooses the provider of the Diff models. A model exists only at its provider, so a different provider clears the
+ * model and the fallback model typed for the old one: the person names them again (the suggestions switch with the
+ * provider). Choosing the provider that is already chosen changes nothing.
+ */
+export function setProvider(state: FormState, provider: string): FormState {
+  if (provider === state.values.provider) return state;
   return {
     ...state,
-    values: { ...state.values, modelTier: tier },
-    overridden: { ...state.overridden, modelTier: true },
+    values: { ...state.values, provider, model: "", fallbackModel: "" },
+    overridden: {
+      ...state.overridden,
+      provider: true,
+      model: true,
+      fallbackModel:
+        state.overridden.fallbackModel || state.values.fallbackModel !== "",
+    },
   };
 }
 
@@ -150,11 +167,16 @@ export function resetField(
   model: SettingsFormModel,
 ): FormState {
   const inherited = valuesOf(model.inherited);
-  return {
-    ...state,
-    values: { ...state.values, [field]: inherited[field] },
-    overridden: { ...state.overridden, [field]: false },
-  };
+  // The models belong to the provider (see `setProvider`): they go back to the inherited ones together with it.
+  const fields: readonly ReviewSettingField[] =
+    field === "provider" ? ["provider", "model", "fallbackModel"] : [field];
+  const values = { ...state.values };
+  const overridden = { ...state.overridden };
+  for (const each of fields) {
+    Object.assign(values, { [each]: inherited[each] });
+    overridden[each] = false;
+  }
+  return { ...state, values, overridden };
 }
 
 const WHOLE_NUMBER = /^[+-]?\d+$/;
@@ -232,9 +254,10 @@ export function previewSettings(
   const checked = validateReviewSettingsPatch(raw);
   if (!checked.ok) return null;
   const merged = { ...model.inherited, ...checked.value };
-  if (merged.model === undefined) return null;
+  if (merged.model === undefined || merged.provider === undefined) return null;
   return {
     ...merged,
+    provider: merged.provider,
     model: merged.model,
     fallbackModel: merged.fallbackModel ?? null,
   };

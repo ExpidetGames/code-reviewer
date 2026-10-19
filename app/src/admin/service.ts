@@ -18,10 +18,18 @@ import type {
 } from "../mail/smtp-config.ts";
 import type { SmtpSettings } from "../mail/smtp-settings.ts";
 import type { TestMailResult, TestMailService } from "../mail/test-mail.ts";
+import { checkLlmApiKey, type LlmProvider } from "../llm/config.ts";
 import {
   createOperatorLlmKeyService,
   type OperatorLlmKeyStatus,
 } from "../llm/operator-key.ts";
+import type { OperatorKeyTestService } from "../llm/operator-key-test.ts";
+import {
+  DEFAULT_LLM_PROVIDER,
+  llmProviderDescriptors,
+} from "../llm/providers/index.ts";
+import type { LlmKeyTestResult } from "../llm/key-test.ts";
+import type { ProviderLookup } from "../llm/workspace-key.ts";
 import type { SecretStatus, SecretStore } from "../secrets/store.ts";
 import type { SetupIssue } from "../setup/errors.ts";
 import { parseSignUpRule } from "../setup/input.ts";
@@ -35,10 +43,11 @@ import {
   readImportNotice,
   type ImportNotice,
 } from "../legacy-import/notice.ts";
-import { configuredTiers, readStoredTiers } from "../model-tiers/tiers.ts";
+import type { CatalogSummary } from "../model-catalog/service.ts";
 import { savePlanManagementUrl } from "../plan-handoff/settings.ts";
 import { checkPlanManagementUrl } from "../plan-handoff/url.ts";
 import { githubIdentityLinked } from "./github-identity.ts";
+import { parseOperatorKeyChange } from "./operator-key-change.ts";
 import {
   checkSignInMethods,
   effectiveSignInMethods,
@@ -93,15 +102,20 @@ export type AdminSettingsView = {
    */
   smtp: SettingView<SmtpSettings | null> & { password: SmtpPasswordState };
   /**
-   * The operator's own LLM key (#276): whether it is configured, cannot be read, or is missing, and the last
-   * four characters of a long key. Never the key.
+   * The operator's own LLM key of each provider (#276, #427), by the provider's id, in the order of the registry:
+   * whether it is configured, cannot be read, or is missing, and the last four characters of a long key. Never a key.
+   */
+  operatorLlmKeys: Record<string, OperatorLlmKeyStatus>;
+  /**
+   * The state of the key of the default provider, as before there were several providers. Kept for one more
+   * release for whoever reads it; `operatorLlmKeys` is the field to use.
    */
   operatorLlmKey: OperatorLlmKeyStatus;
   /**
-   * #280: whether each managed model tier has a model, per kind of review, and nothing else. The ids are operator
-   * data that this portal never shows, and it has no way to change them (only the operator API writes them).
+   * #429: how many catalog entries are released for each kind and whether the kind has a default: numbers and nothing
+   * else, so the overview shows no name, provider or model.
    */
-  modelTiers: ReturnType<typeof configuredTiers>;
+  modelCatalog: CatalogSummary;
   workspaceCount: number;
   githubConfigured: boolean;
   mailConfigured: boolean;
@@ -163,11 +177,31 @@ export type AdminService = {
    * key (write-only), or null to remove it.
    */
   changeOperatorLlmKey(actorId: string, change: unknown): Promise<ChangeResult>;
+  /**
+   * `change` is the request's `operatorLlmKeys` value as received: `{ <provider>: { apiKey } | null }`, the key of
+   * one provider to save (write-only) or to remove. The keys of the other providers are not touched.
+   */
+  changeOperatorLlmKeys(
+    actorId: string,
+    change: unknown,
+  ): Promise<ChangeResult>;
+  /**
+   * The Test button of one provider's key: `apiKey` is the request's value as received (empty or missing: the
+   * stored key of that provider). The provider is a registered id, which the route has settled. Limited per admin and
+   * for the instance, with counters of its own; counters that cannot be read throw.
+   */
+  testOperatorLlmKey(
+    actorId: string,
+    input: { provider: string; apiKey: unknown },
+  ): Promise<OperatorKeyTestAnswer>;
   /** Sends the test mail to the acting admin's own address. */
   sendTestMail(actor: { id: string; email: string }): Promise<TestMailResult>;
   /** Hides the notice of the import. A notice that is not there is not an error. */
   dismissImportNotice(actorId: string): Promise<ChangeResult>;
 };
+
+/** What the Test button answers: the class of the result, or the issue with the typed key. */
+export type OperatorKeyTestAnswer = LlmKeyTestResult | InvalidInput;
 
 export type AdminServiceOptions = {
   db: Kysely<Database>;
@@ -183,6 +217,12 @@ export type AdminServiceOptions = {
   smtp: SmtpConfigStore;
   /** The test mail button (src/mail/test-mail.ts). */
   testMail: TestMailService;
+  /** The Test button of the operator's keys (src/llm/operator-key-test.ts). */
+  operatorKeyTest: OperatorKeyTestService;
+  /** The numbers of the model catalog for the overview (src/model-catalog/service.ts, #429). */
+  catalogSummary: () => Promise<CatalogSummary>;
+  /** The providers the app supports; a test passes its own. */
+  providers?: ProviderLookup;
   now?: () => Date;
 };
 
@@ -211,12 +251,39 @@ export function createAdminService({
   secrets,
   smtp,
   testMail,
+  operatorKeyTest,
+  catalogSummary,
+  providers = llmProviderDescriptors,
   githubConfigured,
   mailConfigured,
   now = () => new Date(),
 }: AdminServiceOptions): AdminService {
   const settings = createInstanceSettingsRepository(db, now);
-  const operatorKey = createOperatorLlmKeyService({ store: secrets });
+  const operatorKey = createOperatorLlmKeyService({
+    store: secrets,
+    providers,
+  });
+
+  async function changeOperatorKey(
+    actorId: string,
+    setting: "operatorLlmKey" | "operatorLlmKeys",
+    value: unknown,
+  ): Promise<ChangeResult> {
+    const parsed = parseOperatorKeyChange(setting, value, providers);
+    if (!parsed.ok)
+      return { ok: false, error: "invalid_input", issues: parsed.issues };
+    if (parsed.change === null) {
+      await operatorKey.remove(parsed.provider);
+      return { ok: true };
+    }
+    const saved = await operatorKey.save(
+      { provider: parsed.provider, apiKey: parsed.change.apiKey },
+      actorId,
+    );
+    if (!saved.ok)
+      return { ok: false, error: "invalid_input", issues: saved.issues };
+    return { ok: true };
+  }
 
   async function emailsOf(ids: string[]): Promise<Map<string, string>> {
     if (ids.length === 0) return new Map();
@@ -230,6 +297,7 @@ export function createAdminService({
 
   return {
     async readSettings() {
+      const operatorStatuses = await operatorKey.statusAll();
       const keys: ReadableSettingKey[] = [
         "tenancy",
         "sign_up_rule",
@@ -321,10 +389,13 @@ export function createAdminService({
           ),
           password: mailServer.password,
         },
-        operatorLlmKey: await operatorKey.status(),
-        modelTiers: configuredTiers(
-          readStoredTiers(await settings.get("managed_model_tiers")),
+        operatorLlmKeys: Object.fromEntries(
+          operatorStatuses.map(({ provider, status }) => [provider, status]),
         ),
+        operatorLlmKey: operatorStatuses.find(
+          ({ provider }) => provider === DEFAULT_LLM_PROVIDER,
+        )?.status ?? { state: "not_configured" },
+        modelCatalog: await catalogSummary(),
         workspaceCount: Number(count.count),
         githubConfigured: github,
         mailConfigured: mail,
@@ -412,23 +483,57 @@ export function createAdminService({
       return smtp.save(actorId, value);
     },
 
-    async changeOperatorLlmKey(actorId, change) {
-      if (change === null) {
-        await operatorKey.remove();
-        return { ok: true };
+    changeOperatorLlmKey: (actorId, change) =>
+      changeOperatorKey(actorId, "operatorLlmKey", change),
+
+    changeOperatorLlmKeys: (actorId, change) =>
+      changeOperatorKey(actorId, "operatorLlmKeys", change),
+
+    async testOperatorLlmKey(actorId, input) {
+      // A key typed into the field is checked as it is (and forgotten); with an empty field the stored key of this
+      // provider is.
+      const { apiKey: typedValue } = input;
+      const typed =
+        typedValue !== undefined &&
+        typedValue !== null &&
+        !(typeof typedValue === "string" && typedValue.trim() === "");
+      let apiKey: string;
+      if (typed) {
+        const checked =
+          typeof typedValue === "string"
+            ? checkLlmApiKey(typedValue)
+            : { ok: false as const };
+        if (!checked.ok)
+          return {
+            ok: false,
+            error: "invalid_input",
+            issues: [{ field: "apiKey", code: "api_key_invalid" }],
+          };
+        apiKey = checked.key;
+      } else {
+        const stored = await operatorKey.forJob(input.provider);
+        if (stored.state !== "key")
+          return {
+            ok: false,
+            error: "invalid_input",
+            issues: [
+              {
+                field: "apiKey",
+                // A key that is there but cannot be read is not a missing key: the admin must enter it again.
+                code:
+                  stored.state === "unreadable"
+                    ? "api_key_unreadable"
+                    : "api_key_required",
+              },
+            ],
+          };
+        apiKey = stored.apiKey;
       }
-      if (!isObject(change))
-        return {
-          ok: false,
-          error: "invalid_input",
-          issues: [
-            { field: "operatorLlmKey", code: "operator_llm_key_invalid" },
-          ],
-        };
-      const saved = await operatorKey.save({ apiKey: change.apiKey }, actorId);
-      if (!saved.ok)
-        return { ok: false, error: "invalid_input", issues: saved.issues };
-      return { ok: true };
+      return operatorKeyTest.test({
+        adminId: actorId,
+        provider: input.provider as LlmProvider,
+        apiKey,
+      });
     },
 
     sendTestMail: (actor) => testMail.send(actor),

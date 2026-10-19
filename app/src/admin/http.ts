@@ -22,11 +22,19 @@
 //                             { "operatorLlmKey": { "apiKey": "..." } | null }   the operator's own LLM key, used by
 //                             the workspaces whose key mode is `managed` (#276; src/llm/operator-key.ts). Write-only:
 //                             the answers carry its status and the last four characters, never the key; null
-//                             removes it. Only an instance admin gets here, and the operator API has no such call
+//                             removes it. Only an instance admin gets here, and the operator API has no such call.
+//                             The old shape, for the default provider, accepted for one more release
+//                             { "operatorLlmKeys": { "<provider>": { "apiKey": "..." } | null } }   the operator's key of
+//                             one provider (#427): the provider is a registered id, exactly; the other providers' keys
+//                             are not touched. The settings answer carries `operatorLlmKeys: { <provider>: status }`
 //                             { "importNotice": { "dismiss": true } }   hides the notice that the import of an
 //                             existing installation left (src/legacy-import/)
 //   POST /api/admin/mail/test sends a test mail to the admin's own address with the saved settings;
 //                             answers { "ok": true } or { "ok": false, "error": <class>, "detail" }
+//   POST /api/admin/llm-keys/:provider/test  { apiKey? }  asks the provider whether the operator's key is accepted: the
+//                             typed key, or the stored one of that provider when the field is empty (#427); limited
+//                             per admin and for the instance with counters of its own; answers { "ok": true },
+//                             { "ok": false, "error": <class>, "detail" } or a refusal (`provider_not_found` is 404)
 //   POST /api/admin/integrations/sync  reads the installations and repositories from GitHub now (every
 //                             connection of the instance, which is why it is not a workspace route);
 //                             answers { "added": number, "errors": [...] } (src/integrations/sync/http.ts)
@@ -39,6 +47,7 @@ import type { SessionUser } from "../auth/access-policy.ts";
 import { isCrossSite, isJsonRequest } from "../http/request-checks.ts";
 import { createSyncRouteHandler } from "../integrations/sync/http.ts";
 import type { IntegrationSyncService } from "../integrations/sync/service.ts";
+import { llmProviderDescriptors } from "../llm/providers/index.ts";
 import { readLimitedBody } from "../webhooks/limited-body.ts";
 import type { AdminAccess } from "./access.ts";
 import { ADMIN_ERROR_STATUS, type AdminErrorCode } from "./errors.ts";
@@ -64,6 +73,8 @@ export type AdminRouteHandlers = {
   getSettings(request: Request): Promise<Response>;
   putSettings(request: Request): Promise<Response>;
   testMail(request: Request): Promise<Response>;
+  /** `provider` is the segment of the address as it came: only a registered id, exactly, is served. */
+  testLlmKey(request: Request, provider: string): Promise<Response>;
   syncIntegrations(request: Request): Promise<Response>;
 };
 
@@ -113,6 +124,7 @@ const SETTING_KEYS = [
   "planManagementUrl",
   "smtp",
   "operatorLlmKey",
+  "operatorLlmKeys",
   "importNotice",
 ] as const;
 
@@ -187,6 +199,11 @@ export function createAdminRouteHandlers({
             return service.changeSmtp(who.id, fields.smtp);
           case "operatorLlmKey":
             return service.changeOperatorLlmKey(who.id, fields.operatorLlmKey);
+          case "operatorLlmKeys":
+            return service.changeOperatorLlmKeys(
+              who.id,
+              fields.operatorLlmKeys,
+            );
           case "importNotice": {
             const change = fields.importNotice;
             if (
@@ -259,6 +276,43 @@ export function createAdminRouteHandlers({
         { ok: false, error: result.error, detail: result.detail },
         { headers: NO_STORE },
       );
+    },
+
+    async testLlmKey(request, raw) {
+      const who = await admin();
+      if (who instanceof Response) return who;
+      // The provider of the address is a registry id exactly, never a name that is merely close to one.
+      if (!(llmProviderDescriptors.find(raw)?.id === raw))
+        return refusal("provider_not_found");
+      if (isCrossSite(request)) return refusal("cross_site_request");
+      const body = await readBody(request);
+      if (!body.ok) return refusal(body.error);
+      const value = body.value;
+      if (typeof value !== "object" || value === null || Array.isArray(value))
+        return refusal("invalid_input", {
+          issues: [{ field: "", code: "body_invalid" }],
+        });
+
+      let result: Awaited<ReturnType<AdminService["testOperatorLlmKey"]>>;
+      try {
+        result = await service.testOperatorLlmKey(who.id, {
+          provider: raw,
+          apiKey: (value as Record<string, unknown>).apiKey,
+        });
+      } catch {
+        // The counters (or the database) could not be read: nothing is sent to the provider without a limit.
+        console.error(
+          "[admin] LLM_KEY_TEST_UNAVAILABLE: the request was not served.",
+        );
+        return refusal("unavailable");
+      }
+      if (result.ok) return Response.json({ ok: true }, { headers: NO_STORE });
+      if (result.error === "invalid_input")
+        return refusal("invalid_input", { issues: result.issues });
+      if (result.error === "rate_limited")
+        return refusal("rate_limited", {}, result.retryAfterSeconds);
+      // The provider's answer is the result of the check, not an error of this route.
+      return Response.json(result, { headers: NO_STORE });
     },
 
     async syncIntegrations(request) {

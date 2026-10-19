@@ -16,6 +16,7 @@ from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from jsonschema import Draft202012Validator
@@ -140,6 +141,10 @@ def test_the_client_speaks_the_worker_api_with_the_credential_in_the_authorizati
     assert CREDENTIAL not in json.dumps([[call["path"], call["body"]] for call in recorder.calls])
     # The details call names what this Worker reads, so the app sends optional fields to it.
     assert "features=dynamic_capabilities,supersede" in recorder.calls[0]["path"]
+    # #424-T08: and the providers of the registry; an app from before ignores the parameter.
+    assert "llmProviders=openrouter" in recorder.calls[0]["path"]
+    query = parse_qs(urlsplit(str(recorder.calls[0]["path"])).query)
+    assert valid("WorkerJobDetailsRequest", {name: values[0] for name, values in query.items()})
     assert valid("WorkerHeartbeatRequest", recorder.calls[1]["body"])
     assert valid("WorkerResultRequest", recorder.calls[2]["body"])
     assert job.id == job_id and job.input == example("WorkerJobDetailsResponse")["job"]["input"]

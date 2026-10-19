@@ -50,7 +50,11 @@ function api() {
   );
   return {
     change,
-    api: { change, testMail: vi.fn() } satisfies AdminApi,
+    api: {
+      change,
+      testMail: vi.fn(),
+      testLlmKey: vi.fn(),
+    } satisfies AdminApi,
   };
 }
 

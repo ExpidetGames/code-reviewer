@@ -26,8 +26,6 @@ import type {
 import type { UsageFeedRepository } from "../db/repositories/usage-feed-repository.ts";
 import type { UsageRecordsRepository } from "../db/repositories/usage-records-repository.ts";
 import type { WorkspacesRepository } from "../db/repositories/workspaces-repository.ts";
-import type { ModelTiersService } from "../model-tiers/service.ts";
-import { MODEL_TIERS, tiersView } from "../model-tiers/tiers.ts";
 import {
   readPlanManagementUrl,
   savePlanManagementUrl,
@@ -83,8 +81,6 @@ export type OperatorApiDeps = {
   usageFor: (workspaceId: string) => UsageRecordsRepository;
   /** The redemption of the handoff tokens of the "Manage plan" button (#284). */
   handoffs: PlanHandoffRedeemRepository;
-  /** Which model backs each managed tier (#280): the only way in or out of that configuration. */
-  modelTiers: ModelTiersService;
   /** How old a settlement must be before it is served; default `USAGE_SAFETY_LAG_MS`. Validated when the API is made. */
   usageSafetyLagMs?: number;
   now: () => Date;
@@ -367,47 +363,11 @@ export function createOperatorApi(deps: OperatorApiDeps): OperatorApi {
     return planManagementAnswer();
   }
 
-  async function modelTiersAnswer(): Promise<Response> {
-    return jsonResponse(200, {
-      tiers: tiersView(await deps.modelTiers.read()),
-    });
-  }
-
-  /**
-   * `GET|PUT /model-tiers` (#280): which model backs each tier. The log line names the tiers that have a model and the
-   * result, never an id. A refusal of the request is 400, one of the models is 422.
-   */
-  async function modelTiers(request: Request): Promise<Response> {
-    if (request.method === "GET") return modelTiersAnswer();
-    const body = await readJson(request);
-    if (!body.ok) return body.response;
-    const saved = await deps.modelTiers.save(body.value, null);
-    if (!saved.ok) {
-      deps.logger.info(`[operator-api] put model-tiers result=${saved.code}`);
-      return errorResponse(
-        saved.code === "request_invalid" ? 400 : 422,
-        saved.code,
-        {
-          ...(saved.field === undefined ? {} : { field: saved.field }),
-        },
-      );
-    }
-    const configured = MODEL_TIERS.filter(
-      (tier) => saved.tiers[tier] !== undefined,
-    );
-    deps.logger.info(
-      `[operator-api] put model-tiers tiers=${configured.length === 0 ? "-" : configured.join(",")} result=ok`,
-    );
-    return modelTiersAnswer();
-  }
-
   async function work(
     request: Request,
     route: OperatorRoute,
   ): Promise<Response> {
     switch (route.kind) {
-      case "model-tiers":
-        return modelTiers(request);
       case "handoff-redeem":
         return redeemHandoff(request);
       case "plan-management":

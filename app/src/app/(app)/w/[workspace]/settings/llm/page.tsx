@@ -36,8 +36,8 @@ async function LlmSettingsContent({
   canManage: boolean;
 }) {
   const llm = getWorkspaceLlm();
-  const [keyStatus, summary, showPlan] = await Promise.all([
-    llm.keyServiceFor(workspaceId).status(),
+  const [keyStatuses, summary, showPlan] = await Promise.all([
+    llm.keyServiceFor(workspaceId).statusAll(),
     llm.summaryFor(workspaceId),
     planPageLinkedFor(workspaceId),
   ]);
@@ -45,7 +45,7 @@ async function LlmSettingsContent({
     <LlmSettingsPageContent
       workspaceSlug={workspaceSlug}
       canManage={canManage}
-      keyStatus={keyStatus}
+      keyStatuses={keyStatuses}
       summary={summary}
       showPlan={showPlan}
     />

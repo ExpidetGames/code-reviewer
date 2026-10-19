@@ -3,7 +3,7 @@
 // The cost guard: what a review is expected to cost with a model, and whether that is above the
 // limit the customer set. It only advises (the UI shows a warning); it never blocks a setting.
 //
-// The estimate is deliberately simple: the price of the model (`model-pricing.ts`) times a typical
+// The estimate is deliberately simple: the price of the model (the provider's adapter, src/llm/providers/) times a typical
 // review. A typical review sends `TYPICAL_PROMPT_TOKENS` to the model and gets
 // `TYPICAL_COMPLETION_TOKENS` back, in one call. That is the size of a large pull request: the model
 // comparison (three sample pull requests, prompts of 3k, 8k to 12k and 31k to 45k tokens, replies of
@@ -16,7 +16,11 @@
 //
 // `upperUsd` is what the review can cost at most with the model: the whole budget as the prompt, and
 // as many calls as the chunking of large pull requests allows. It is shown, never used to warn.
-import { MODEL_PRICES, type ModelPrice } from "./model-pricing.ts";
+import { llmProviderDescriptors } from "../llm/providers/index.ts";
+import type {
+  LlmProviderDescriptor,
+  ModelPrice,
+} from "../llm/providers/types.ts";
 import type { ReviewSettings } from "./settings.ts";
 
 /** The customer's limit: at most this many USD per review on average. Above it the UI warns. */
@@ -31,7 +35,16 @@ export const UPPER_COMPLETION_TOKENS = 8_000;
 export type CostSettings = Pick<
   ReviewSettings,
   "model" | "fallbackModel" | "maxTokens" | "largePrChunking"
->;
+> & {
+  /** The provider of the models (#433); absent: the default provider's price table. */
+  provider?: string | undefined;
+};
+
+/** What the estimate reads of the registry: the provider a setting names, else the default one. */
+export type CostProviders = {
+  find(raw: unknown): Pick<LlmProviderDescriptor, "priceOf"> | undefined;
+  defaultProvider: Pick<LlmProviderDescriptor, "priceOf">;
+};
 
 export type ModelCostEstimate =
   | {
@@ -74,19 +87,29 @@ function roundUsd(value: number): number {
   return Math.round(value * 1_000_000) / 1_000_000;
 }
 
+/**
+ * The price from `prices` when a table is given (tests), otherwise from the adapter of the provider the settings
+ * name, else from the default provider's.
+ */
 function priceOf(
   model: string,
-  prices: Readonly<Record<string, ModelPrice>>,
+  prices: Readonly<Record<string, ModelPrice>> | undefined,
+  provider?: string,
+  providers: CostProviders = llmProviderDescriptors,
 ): ModelPrice | undefined {
-  return Object.hasOwn(prices, model) ? prices[model] : undefined;
+  if (prices !== undefined)
+    return Object.hasOwn(prices, model) ? prices[model] : undefined;
+  const adapter = providers.find(provider) ?? providers.defaultProvider;
+  return adapter.priceOf(model) ?? undefined;
 }
 
 function estimate(
   model: string,
   settings: CostSettings,
-  prices: Readonly<Record<string, ModelPrice>>,
+  prices: Readonly<Record<string, ModelPrice>> | undefined,
+  providers: CostProviders | undefined,
 ): ModelCostEstimate {
-  const price = priceOf(model, prices);
+  const price = priceOf(model, prices, settings.provider, providers);
   if (price === undefined) return { status: "unknown_model", model };
   const cost = (promptTokens: number, completionTokens: number) =>
     (promptTokens * price.inputPerMillion +
@@ -119,12 +142,15 @@ function estimate(
  * never listed.
  */
 export function modelsExceedingContext(
-  settings: Pick<ReviewSettings, "model" | "fallbackModel" | "maxTokens">,
-  prices: Readonly<Record<string, ModelPrice>> = MODEL_PRICES,
+  settings: Pick<ReviewSettings, "model" | "fallbackModel" | "maxTokens"> & {
+    provider?: string | undefined;
+  },
+  prices?: Readonly<Record<string, ModelPrice>>,
+  providers?: CostProviders,
 ): Array<"model" | "fallbackModel"> {
   const exceeds = (model: string | null): boolean => {
     if (model === null) return false;
-    const price = priceOf(model, prices);
+    const price = priceOf(model, prices, settings.provider, providers);
     return (
       price !== undefined &&
       settings.maxTokens * price.inputTokenFactor > price.contextTokens
@@ -138,13 +164,14 @@ export function modelsExceedingContext(
 
 export function estimateReviewCost(
   settings: CostSettings,
-  prices: Readonly<Record<string, ModelPrice>> = MODEL_PRICES,
+  prices?: Readonly<Record<string, ModelPrice>>,
+  providers?: CostProviders,
 ): ReviewCostGuard {
-  const primary = estimate(settings.model, settings, prices);
+  const primary = estimate(settings.model, settings, prices, providers);
   const fallback =
     settings.fallbackModel === null
       ? null
-      : estimate(settings.fallbackModel, settings, prices);
+      : estimate(settings.fallbackModel, settings, prices, providers);
   const warnings: CostWarning[] = [];
   for (const [which, entry] of [
     ["primary", primary],
@@ -162,8 +189,8 @@ export function estimateReviewCost(
     fallback,
     warnings,
     warn: warnings.length > 0,
-    exceedsContext: modelsExceedingContext(settings, prices).map((field) =>
-      field === "model" ? "primary" : "fallback",
+    exceedsContext: modelsExceedingContext(settings, prices, providers).map(
+      (field) => (field === "model" ? "primary" : "fallback"),
     ),
   };
 }

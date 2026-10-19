@@ -15,9 +15,9 @@
 // (src/maintenance/cleanup.ts). A key is not forgotten when its job completes: a repeated completion is compared
 // on the stored form and must be masked the same way.
 //
-// #280: next to the keys it remembers the **models** a job was handed on the operator's managed tiers (`models` in the
-// same sealed text). The id of a tier's model is operator data that a workspace must never read, and the runner's
-// result may repeat it (the model it reports, a log line); the operator can change a tier at any time, so the model
+// #280: next to the keys it remembers the **models** a job was handed on the operator's key (the catalog entries) (`models` in the
+// same sealed text). The id of an entry's model is operator data that a workspace must never read, and the runner's
+// result may repeat it (the model it reports, a log line); the operator can change an entry at any time, so the model
 // the job really got is kept to mask it in the result, whichever app instance serves the completion. An app instance
 // of the previous release reads `keys` and ignores `models`.
 //
@@ -44,11 +44,11 @@ export type ClaimedKeys = {
   /** The keys handed out for the job, oldest first (empty if unknown or unreadable). */
   keysOf(jobId: string): Promise<string[]>;
   /**
-   * Remembers the model of a managed tier that `jobId` was handed (#280), next to those handed out for it before
+   * Remembers the model of a managed entry that `jobId` was handed (#280), next to those handed out for it before
    * (at most `CLAIMED_KEYS_PER_JOB`, a model already remembered takes no new place).
    */
   rememberModel(jobId: string, model: string): Promise<void>;
-  /** The tier models handed out for the job, oldest first (empty if none, unknown or unreadable). */
+  /** The entry models handed out for the job, oldest first (empty if none, unknown or unreadable). */
   modelsOf(jobId: string): Promise<string[]>;
 };
 

@@ -9,7 +9,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from support import fake_provider
 
+from code_reviewer_runner import llm_providers
 from code_reviewer_runner.job import RESERVED_OPTIONS, Command, JobError, parse_job
 from code_reviewer_runner.result import ErrorCode
 
@@ -121,12 +123,44 @@ def test_an_unknown_top_level_field_is_an_invalid_job() -> None:
     assert "surprise" in error.detail
 
 
-def test_only_the_github_provider_and_the_openrouter_llm_are_supported() -> None:
+def test_only_the_github_provider_and_a_registered_llm_provider_are_supported() -> None:
     gitlab = valid_job(git={**valid_job()["git"], "provider": "gitlab"})
     openai = valid_job(llm={**valid_job()["llm"], "provider": "openai"})
 
     assert refusal(json.dumps(gitlab)).code is ErrorCode.INVALID_JOB
     assert refusal(json.dumps(openai)).code is ErrorCode.INVALID_JOB
+
+
+# #424-T03
+@pytest.mark.parametrize(
+    "provider",
+    ["openai", "OpenRouter", "fakeai", "", "a" * 33, "open router", None, 7, ["openrouter"]],
+)
+def test_a_job_with_an_unregistered_llm_provider_is_an_invalid_job(provider: Any) -> None:
+    job = valid_job(llm={**valid_job()["llm"], "provider": provider})
+
+    error = refusal(json.dumps(job))
+
+    assert error.code is ErrorCode.INVALID_JOB
+    assert "llm.provider" in error.detail
+    assert API_KEY not in error.detail
+
+
+# #424-T03
+def test_a_provider_that_the_registry_gains_is_accepted_and_kept_on_the_job(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = fake_provider()
+    monkeypatch.setitem(llm_providers.PROVIDERS, fake.id, fake)
+
+    job = parse(valid_job(llm={**valid_job()["llm"], "provider": "fakeai"}))
+
+    assert job.llm.provider == "fakeai"
+
+
+# #424-T04
+def test_a_job_without_a_registry_change_keeps_openrouter_as_its_provider() -> None:
+    assert parse(valid_job()).llm.provider == "openrouter"
 
 
 # CR-10-T06
@@ -154,6 +188,7 @@ def test_a_previous_release_review_payload_is_accepted_and_its_legacy_fields_are
     job = parse(job_input)
 
     assert job.command is Command.REVIEW
+    assert job.llm.provider == "openrouter"  # #424-T04
     # Only the review tool's options are kept; the removed tools' options are dropped.
     assert job.env == {
         "PR_REVIEWER__EXTRA_INSTRUCTIONS": "Follow the repository rules.",

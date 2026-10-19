@@ -9,6 +9,7 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { within } from "@testing-library/react";
 
 const navigation = vi.hoisted(() => ({ refresh: vi.fn() }));
 vi.mock("next/navigation", () => ({
@@ -16,7 +17,10 @@ vi.mock("next/navigation", () => ({
 }));
 
 import type { WorkspaceLlmSummary } from "../assemble.ts";
-import type { WorkspaceLlmKeyStatus } from "../workspace-key.ts";
+import type {
+  ProviderKeyStatus,
+  WorkspaceLlmKeyStatus,
+} from "../workspace-key.ts";
 import type { LlmKeyApi } from "./api.ts";
 import { LlmAccessNotice } from "./llm-access-notice.tsx";
 import { LlmAccessSection } from "./llm-access-section.tsx";
@@ -56,15 +60,26 @@ function fakeApi(overrides: Partial<LlmKeyApi> = {}): LlmKeyApi {
   };
 }
 
+/** The state of the key of the one provider the app ships with, as the section takes it. */
+const only = (status: WorkspaceLlmKeyStatus): ProviderKeyStatus[] => [
+  { provider: "openrouter", status },
+];
+
 function section(
-  props: Partial<Parameters<typeof LlmAccessSection>[0]> = {},
+  {
+    keyStatus = NONE,
+    ...props
+  }: Partial<Parameters<typeof LlmAccessSection>[0]> & {
+    /** Shorthand for the state of the key of the only provider. */
+    keyStatus?: WorkspaceLlmKeyStatus;
+  } = {},
   api: LlmKeyApi = fakeApi(),
 ) {
   return render(
     <LlmAccessSection
       workspaceSlug="acme"
       canManage
-      keyStatus={NONE}
+      keyStatuses={only(keyStatus)}
       summary={MISSING}
       api={api}
       {...props}
@@ -109,7 +124,7 @@ describe("the LLM access section for an Admin or an Owner", () => {
       <LlmAccessSection
         workspaceSlug="acme"
         canManage
-        keyStatus={CONFIGURED}
+        keyStatuses={only(CONFIGURED)}
         summary={WORKS}
         api={api}
       />,
@@ -527,5 +542,99 @@ describe("a workspace whose LLM access is provided by the instance (#276)", () =
     );
 
     expect(container.textContent).toBe("");
+  });
+});
+
+// A second provider that exists only in tests: its id is not in the app's registry, so the card is named by it.
+const SECOND_CONFIGURED: WorkspaceLlmKeyStatus = {
+  state: "configured",
+  provider: "fakeai",
+  lastFour: "wxyz",
+  updatedAt: "2026-10-12T08:00:00.000Z",
+  updatedBy: "admin-1",
+};
+const TWO_PROVIDERS: ProviderKeyStatus[] = [
+  { provider: "openrouter", status: CONFIGURED },
+  { provider: "fakeai", status: SECOND_CONFIGURED },
+];
+
+describe("one card per provider (#426)", () => {
+  // #426-T07
+  it("shows a card with its own key form for every provider, each with the state of its own key", () => {
+    section({ keyStatuses: TWO_PROVIDERS, summary: WORKS });
+
+    const openrouter = screen.getByRole("region", { name: "OpenRouter" });
+    const second = screen.getByRole("region", { name: "fakeai" });
+    expect(screen.getAllByRole("form")).toHaveLength(2);
+    expect(within(openrouter).getByLabelText("API key")).toBeTruthy();
+    expect(within(second).getByLabelText("API key")).toBeTruthy();
+    expect(openrouter.textContent).toMatch(/ends in cdef/);
+    expect(openrouter.textContent).not.toMatch(/wxyz/);
+    expect(second.textContent).toMatch(/ends in wxyz/);
+    expect(second.textContent).not.toMatch(/cdef/);
+  });
+
+  // #426-T07
+  it("saves and tests the key of the card it was typed into, for that provider only", async () => {
+    const user = userEvent.setup();
+    const api = fakeApi();
+    section({ keyStatuses: TWO_PROVIDERS, summary: WORKS }, api);
+    const second = screen.getByRole("region", { name: "fakeai" });
+
+    await user.type(within(second).getByLabelText("API key"), KEY);
+    await user.click(within(second).getByRole("button", { name: "Test key" }));
+    await user.click(within(second).getByRole("button", { name: "Save key" }));
+
+    await waitFor(() =>
+      expect(api.save).toHaveBeenCalledWith({
+        provider: "fakeai",
+        apiKey: KEY,
+      }),
+    );
+    expect(api.test).toHaveBeenCalledWith({ provider: "fakeai", apiKey: KEY });
+    expect(api.save).toHaveBeenCalledTimes(1);
+    expect(api.test).toHaveBeenCalledTimes(1);
+    const first = screen.getByRole("region", { name: "OpenRouter" });
+    expect(
+      (within(first).getByLabelText("API key") as HTMLInputElement).value,
+    ).toBe("");
+  });
+
+  // #426-T07
+  it("tells a Member the state of every provider's key and gives no form", () => {
+    const { container } = section({
+      canManage: false,
+      keyStatuses: [
+        { provider: "openrouter", status: { state: "configured" } as never },
+        { provider: "fakeai", status: NONE },
+      ],
+      summary: WORKS,
+    });
+
+    expect(container.querySelector("form")).toBeNull();
+    expect(screen.queryByLabelText("API key")).toBeNull();
+    expect(container.textContent).toContain("OpenRouter: a key is saved");
+    expect(container.textContent).toContain("fakeai: no key is saved");
+    expect(container.textContent).not.toMatch(/cdef|wxyz/);
+  });
+
+  // #426-T07
+  it("shows the note that access is provided by this instance instead of the cards, whatever the keys of the workspace", () => {
+    for (const canManage of [true, false]) {
+      const { container, unmount } = section({
+        canManage,
+        keyStatuses: TWO_PROVIDERS,
+        summary: { configured: true, source: "operator" },
+      });
+
+      expect(container.textContent).toContain(
+        "LLM access for this workspace is provided by this instance.",
+      );
+      expect(screen.queryAllByRole("form")).toHaveLength(0);
+      expect(screen.queryByRole("region", { name: "OpenRouter" })).toBeNull();
+      expect(screen.queryByRole("region", { name: "fakeai" })).toBeNull();
+      expect(container.textContent).not.toMatch(/cdef|wxyz|fakeai/);
+      unmount();
+    }
   });
 });

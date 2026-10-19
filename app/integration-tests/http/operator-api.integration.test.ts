@@ -6,6 +6,11 @@
 // operator-api-route-files.integration.test.ts.
 import { describe, expect, it } from "vitest";
 import { createSecretStore } from "../../src/secrets/store.ts";
+import { DEFAULT_LLM_PROVIDER } from "../../src/llm/providers/index.ts";
+import { createFakeAdapter } from "../../src/llm/providers/fake-adapter.ts";
+import { openrouterDescriptor } from "../../src/llm/providers/openrouter/descriptor.ts";
+import { createProviderRegistry } from "../../src/llm/providers/registry.ts";
+import type { SecretName } from "../../src/secrets/names.ts";
 import {
   NotFoundMarker,
   startOperatorApiHarness,
@@ -565,7 +570,11 @@ describe("the default entitlements", () => {
 
     expect(before).toEqual({ version: 1, default: null });
     expect(put.status).toBe(200);
-    expect(after).toEqual({ version: 1, default: ENTITLEMENTS });
+    // #428: the answer always carries the model access, every released entry when none was stated.
+    expect(after).toEqual({
+      version: 1,
+      default: { ...ENTITLEMENTS, modelAccess: { catalogEntries: null } },
+    });
     expect(await json(put)).toEqual(after);
   });
 
@@ -868,6 +877,84 @@ describe("the operator's own LLM key", () => {
     expect(h.lines.join("\n")).not.toContain(KEY);
   });
 
+  // #427-T03
+  it("has no call for the key of any provider either, and no answer holds the key of either provider: whoever holds the API token can neither read nor write one", async () => {
+    const h = await startOperatorApiHarness();
+    const secrets = createSecretStore({
+      db: h.db,
+      appSecret: "operator-api-test-app-secret-0123456789-01",
+    });
+    // Two providers, each with a key of its own under the name its adapter gives it. The second one exists only in
+    // this test registry, so a leak that is written for "the" provider (the first one) is not enough to pass.
+    const registry = createProviderRegistry([
+      openrouterDescriptor,
+      createFakeAdapter(),
+    ]);
+    const sentinels = registry.providers.map((provider) => ({
+      id: provider.id,
+      name: provider.secretNames.operator,
+      key: `${KEY}-${provider.id}`,
+    }));
+    for (const { name, key } of sentinels)
+      await secrets.save(name as SecretName, key, {
+        updatedBy: null,
+        showLastFour: true,
+      });
+    const answers: string[] = [];
+
+    // A tripwire only: the router answers 404 for every path it does not know, so this fails if someone adds a call
+    // for a key. The proof that no key leaves the API is the reading below and `no-operator-keys.test.ts`.
+    for (const path of [
+      "/api/operator/v1/llm-keys",
+      ...registry.ids.flatMap((id) => [
+        `/api/operator/v1/llm-keys/${id}`,
+        `/api/operator/v1/llm-keys/${id}/test`,
+      ]),
+    ])
+      for (const method of ["GET", "PUT", "POST", "DELETE"]) {
+        const response = await h.call(method, path, {
+          body:
+            method === "PUT" || method === "POST" ? { apiKey: KEY } : undefined,
+        });
+        expect(response.status, `${method} ${path}`).toBe(404);
+        answers.push(await response.text());
+      }
+
+    // The proof: every answer the API gives with both keys stored holds neither key.
+    for (const read of [
+      "/api/operator/v1/workspaces",
+      path(h.workspaceId),
+      "/api/operator/v1/entitlements/default",
+      "/api/operator/v1/usage",
+    ])
+      answers.push(await (await h.call("GET", read)).text());
+    expect(answers.length).toBeGreaterThan(5);
+    for (const { key, name } of sentinels) {
+      expect(answers.join("\n")).not.toContain(key);
+      expect(answers.join("\n")).not.toContain(name);
+    }
+    expect(h.lines.join("\n")).not.toContain(KEY);
+  });
+
+  // #427-T03
+  it("cannot set the key of a provider through the entitlements either: nothing is stored", async () => {
+    const h = await startOperatorApiHarness();
+
+    for (const extra of [
+      { operatorLlmKeys: { [DEFAULT_LLM_PROVIDER]: { apiKey: KEY } } },
+      { llmKeys: { [DEFAULT_LLM_PROVIDER]: KEY } },
+    ]) {
+      const response = await h.call("PUT", path(h.workspaceId), {
+        body: { ...ENTITLEMENTS, ...extra },
+      });
+      expect(response.status).toBe(422);
+      expect(await response.text()).not.toContain(KEY);
+    }
+    expect(await h.db.selectFrom("secrets").select("name").execute()).toEqual(
+      [],
+    );
+  });
+
   // #276-T07
   it("cannot be set through the entitlements either: a field that is no entitlement is refused", async () => {
     const h = await startOperatorApiHarness();
@@ -886,5 +973,283 @@ describe("the operator's own LLM key", () => {
     expect(await h.db.selectFrom("secrets").select("name").execute()).toEqual(
       [],
     );
+  });
+});
+
+describe("the model access (#428)", () => {
+  const path = (id: string) => `/api/operator/v1/workspaces/${id}/entitlements`;
+  const DEFAULT_PATH = "/api/operator/v1/entitlements/default";
+  const ID_A = "mce_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const ID_B = "mce_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+  const { periodStart: _omitted, ...WITHOUT_START } = ENTITLEMENTS;
+  void _omitted;
+
+  async function stored(
+    h: Awaited<ReturnType<typeof startOperatorApiHarness>>,
+  ) {
+    return json(await h.call("GET", path(h.workspaceId)));
+  }
+
+  // #428-T02
+  it("answers a write with a model access and no credential like any other write, and stores nothing", async () => {
+    const h = await startOperatorApiHarness();
+
+    for (const target of [path(h.workspaceId), DEFAULT_PATH]) {
+      const response = await h.call("PUT", target, {
+        token: null,
+        body: { ...ENTITLEMENTS, modelAccess: { catalogEntries: [ID_A] } },
+      });
+
+      expect(response.status).toBe(401);
+      expect(await json(response)).toEqual({
+        version: 1,
+        error: "unauthorized",
+      });
+    }
+    expect(
+      await h.db.selectFrom("workspace_entitlements").selectAll().execute(),
+    ).toEqual([]);
+    expect(
+      await h.db.selectFrom("instance_settings").selectAll().execute(),
+    ).toEqual([]);
+  });
+
+  // #428-T02
+  it("is not there at all while the API is off", async () => {
+    const h = await startOperatorApiHarness({ token: undefined });
+
+    await expect(
+      h.call("PUT", path(h.workspaceId), {
+        body: { ...ENTITLEMENTS, modelAccess: { catalogEntries: [ID_A] } },
+      }),
+    ).rejects.toBeInstanceOf(NotFoundMarker);
+  });
+
+  // #428-T06
+  it("stores a list, reads it back as stored and effective, and says every released entry when none was stated", async () => {
+    const h = await startOperatorApiHarness();
+
+    const put = await h.call("PUT", path(h.workspaceId), {
+      body: { ...ENTITLEMENTS, modelAccess: { catalogEntries: [ID_A, ID_B] } },
+    });
+
+    expect(put.status).toBe(200);
+    expect(await stored(h)).toMatchObject({
+      stored: { modelAccess: { catalogEntries: [ID_A, ID_B] } },
+      effective: { modelAccess: { catalogEntries: [ID_A, ID_B] } },
+    });
+    const plain = await startOperatorApiHarness();
+    await plain.call("PUT", path(plain.workspaceId), { body: ENTITLEMENTS });
+    expect(await stored(plain)).toMatchObject({
+      stored: { modelAccess: { catalogEntries: null } },
+      effective: { modelAccess: { catalogEntries: null } },
+    });
+  });
+
+  // #428-T06
+  it("keeps the stored list when a write leaves the field out, like the period start", async () => {
+    const h = await startOperatorApiHarness();
+    await h.call("PUT", path(h.workspaceId), {
+      body: { ...ENTITLEMENTS, modelAccess: { catalogEntries: [ID_A] } },
+    });
+
+    const response = await h.call("PUT", path(h.workspaceId), {
+      body: { ...WITHOUT_START, suspended: true, suspensionCode: "unpaid" },
+    });
+
+    expect(response.status).toBe(200);
+    expect(await json(response)).toMatchObject({
+      stored: {
+        suspended: true,
+        modelAccess: { catalogEntries: [ID_A] },
+      },
+    });
+  });
+
+  // #428-T06
+  it("clears the list only when the write says null, and stores none for an empty list", async () => {
+    const h = await startOperatorApiHarness();
+    await h.call("PUT", path(h.workspaceId), {
+      body: { ...ENTITLEMENTS, modelAccess: { catalogEntries: [ID_A] } },
+    });
+
+    await h.call("PUT", path(h.workspaceId), {
+      body: { ...ENTITLEMENTS, modelAccess: { catalogEntries: [] } },
+    });
+    expect(await stored(h)).toMatchObject({
+      stored: { modelAccess: { catalogEntries: [] } },
+    });
+    await h.call("PUT", path(h.workspaceId), {
+      body: { ...ENTITLEMENTS, modelAccess: { catalogEntries: null } },
+    });
+    expect(await stored(h)).toMatchObject({
+      stored: { modelAccess: { catalogEntries: null } },
+    });
+  });
+
+  // #428-T06
+  it("does the same for the default of the instance", async () => {
+    const h = await startOperatorApiHarness();
+    await h.call("PUT", DEFAULT_PATH, {
+      body: { ...ENTITLEMENTS, modelAccess: { catalogEntries: [ID_B] } },
+    });
+
+    const kept = await h.call("PUT", DEFAULT_PATH, {
+      body: { ...WITHOUT_START, planLabel: "renamed" },
+    });
+    expect(await json(kept)).toMatchObject({
+      default: {
+        planLabel: "renamed",
+        modelAccess: { catalogEntries: [ID_B] },
+      },
+    });
+    const cleared = await h.call("PUT", DEFAULT_PATH, {
+      body: { ...WITHOUT_START, modelAccess: { catalogEntries: null } },
+    });
+    expect(await json(cleared)).toMatchObject({
+      default: { modelAccess: { catalogEntries: null } },
+    });
+  });
+
+  // #428-T03
+  it.each([
+    ["a string", "all", "modelAccess"],
+    ["null", null, "modelAccess"],
+    ["a list instead of the object", [ID_A], "modelAccess"],
+    [
+      "a key it does not know",
+      { catalogEntries: null, extra: 1 },
+      "modelAccess",
+    ],
+    ["no list", {}, "modelAccess.catalogEntries"],
+    [
+      "a list that is not an array",
+      { catalogEntries: ID_A },
+      "modelAccess.catalogEntries",
+    ],
+    [
+      "a number as an id",
+      { catalogEntries: [1] },
+      "modelAccess.catalogEntries",
+    ],
+    [
+      "an id of a bad shape",
+      { catalogEntries: ["gpt-5"] },
+      "modelAccess.catalogEntries",
+    ],
+    [
+      "more than 100 ids",
+      {
+        catalogEntries: Array.from(
+          { length: 101 },
+          (_unused, index) => `mce_${String(index)}`,
+        ),
+      },
+      "modelAccess.catalogEntries",
+    ],
+  ])(
+    "refuses %s with 422 catalog_entry_invalid and stores nothing",
+    async (_name, modelAccess, field) => {
+      const h = await startOperatorApiHarness();
+
+      for (const target of [path(h.workspaceId), DEFAULT_PATH]) {
+        const response = await h.call("PUT", target, {
+          body: { ...ENTITLEMENTS, modelAccess },
+        });
+
+        expect(response.status).toBe(422);
+        expect(await json(response)).toEqual({
+          version: 1,
+          error: "catalog_entry_invalid",
+          field,
+        });
+      }
+      expect(
+        await h.db.selectFrom("workspace_entitlements").selectAll().execute(),
+      ).toEqual([]);
+      expect(
+        await h.db.selectFrom("instance_settings").selectAll().execute(),
+      ).toEqual([]);
+    },
+  );
+
+  // #428-T03
+  it("accepts exactly 100 ids and ids that no entry has", async () => {
+    const h = await startOperatorApiHarness();
+    const ids = Array.from(
+      { length: 100 },
+      (_unused, index) => `mce_${String(index).padStart(32, "0")}`,
+    );
+
+    const response = await h.call("PUT", path(h.workspaceId), {
+      body: { ...ENTITLEMENTS, modelAccess: { catalogEntries: ids } },
+    });
+
+    expect(response.status).toBe(200);
+  });
+
+  // #428-T10
+  it("stores and returns a list next to the own key unchanged", async () => {
+    const h = await startOperatorApiHarness();
+    const own = {
+      ...ENTITLEMENTS,
+      keyMode: "own",
+      limits: { ...ENTITLEMENTS.limits, managedCostLimitMicroUsd: null },
+      modelAccess: { catalogEntries: [ID_A] },
+    };
+
+    const put = await h.call("PUT", path(h.workspaceId), { body: own });
+
+    expect(put.status).toBe(200);
+    expect(await stored(h)).toMatchObject({
+      stored: { keyMode: "own", modelAccess: { catalogEntries: [ID_A] } },
+      effective: {
+        kind: "limited",
+        keyMode: "own",
+        modelAccess: { catalogEntries: [ID_A] },
+      },
+    });
+    // Switching back to the operator's key finds the list again.
+    await h.call("PUT", path(h.workspaceId), {
+      body: { ...WITHOUT_START, keyMode: "managed" },
+    });
+    expect(await stored(h)).toMatchObject({
+      stored: { keyMode: "managed", modelAccess: { catalogEntries: [ID_A] } },
+    });
+  });
+
+  // #428-T05
+  it("reads a row stored before the field existed as every released entry", async () => {
+    const h = await startOperatorApiHarness();
+    await h.call("PUT", path(h.workspaceId), { body: ENTITLEMENTS });
+    await h.db
+      .updateTable("workspace_entitlements")
+      .set({ model_access: null })
+      .execute();
+
+    expect(await stored(h)).toMatchObject({
+      stored: { modelAccess: { catalogEntries: null } },
+      effective: { kind: "limited" },
+    });
+  });
+
+  // #428-T06
+  it("logs the name of the field when it changed and never an id", async () => {
+    const h = await startOperatorApiHarness();
+    await h.call("PUT", path(h.workspaceId), { body: ENTITLEMENTS });
+    await h.call("PUT", path(h.workspaceId), {
+      body: { ...ENTITLEMENTS, modelAccess: { catalogEntries: [ID_A] } },
+    });
+    await h.call("PUT", path(h.workspaceId), {
+      body: { ...ENTITLEMENTS, modelAccess: { catalogEntries: [ID_A] } },
+    });
+
+    expect(h.lines.at(1)).toBe(
+      `[operator-api] put workspace=${h.workspaceId} fields=modelAccess result=ok`,
+    );
+    expect(h.lines.at(2)).toBe(
+      `[operator-api] put workspace=${h.workspaceId} fields=- result=ok`,
+    );
+    expect(h.lines.join("\n")).not.toContain(ID_A);
   });
 });

@@ -11,7 +11,9 @@ from typing import Any
 
 from starlette_context import request_cycle_context  # pyright: ignore[reportUnknownVariableType]
 
+from code_reviewer_runner.dynamic_review.budget import exact_cost
 from code_reviewer_runner.job import Job, parse_job
+from code_reviewer_runner.llm_providers import LlmProviderSpec, RequireParameters
 
 TOKEN = "dummy-installation-token-0123456789"
 API_KEY = "dummy-openrouter-key-0123456789"
@@ -54,3 +56,22 @@ def request_scope() -> Generator[Any]:
 
 def pr_agent_module(name: str) -> Any:  # Any: PR-Agent ships no type information
     return importlib.import_module(name)
+
+
+def fake_provider() -> LlmProviderSpec:
+    """A second provider that shares nothing with OpenRouter, to prove the seam (#424)."""
+    return LlmProviderSpec(
+        id="fakeai",
+        litellm_prefix="fakeai/",
+        default_api_base="https://fakeai.invalid/v1",
+        key_setting="fakeai.key",
+        api_base_setting="fakeai.api_base",
+        api_base_variable="FAKEAI__API_BASE",
+        require_parameters=RequireParameters(
+            request_controls_method="apply_fakeai_request_controls",
+            body_field="routing",
+            body_value={"strict": True},
+        ),
+        no_endpoint_for_parameters=lambda text: "nothing can serve" in text,
+        cost_extractor=lambda usage: exact_cost(usage.get("price")),
+    )

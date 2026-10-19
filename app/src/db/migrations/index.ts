@@ -39,6 +39,7 @@ import { migration as addJobReviewKind } from "./20261013090000_add_job_review_k
 import { migration as fixDynamicDefaultModel } from "./20261014090000_fix_dynamic_default_model.ts";
 import { migration as createWorkspaceEntitlements } from "./20261014120000_create_workspace_entitlements.ts";
 import { migration as createUsageRecords } from "./20261014150000_create_usage_records.ts";
+import { migration as createJobCheckRuns } from "./20261017100000_create_job_check_runs.ts";
 import { migration as addJobAcceptsSupersede } from "./20261016140000_add_job_accepts_supersede.ts";
 import { migration as widenUsageRecordSettledReason } from "./20261016140100_widen_usage_record_settled_reason.ts";
 import { migration as addJobWorkerFetches } from "./20261015100000_add_job_worker_fetches.ts";
@@ -47,6 +48,10 @@ import { migration as createJobDispatches } from "./20261015120000_create_job_di
 import { migration as addUsageRecordSettledReason } from "./20261015200000_add_usage_record_settled_reason.ts";
 import { migration as createRefusalNotices } from "./20261016090000_create_refusal_notices.ts";
 import { migration as createPlanHandoffTokens } from "./20261016120000_create_plan_handoff_tokens.ts";
+import { migration as createModelCatalogEntries } from "./20261017140000_create_model_catalog_entries.ts";
+import { migration as addWorkspaceEntitlementsModelAccess } from "./20261017160000_add_workspace_entitlements_model_access.ts";
+import { migration as addUsageRecordCatalogEntry } from "./20261018090000_add_usage_record_catalog_entry.ts";
+import { migration as migrateModelTiersToCatalog } from "./20261018170000_migrate_model_tiers_to_catalog.ts";
 
 const migrations: Record<string, Migration> = {
   "0001_create_app_meta": createAppMeta,
@@ -95,6 +100,12 @@ const migrations: Record<string, Migration> = {
   "20261016140000_add_job_accepts_supersede": addJobAcceptsSupersede,
   "20261016140100_widen_usage_record_settled_reason":
     widenUsageRecordSettledReason,
+  "20261017100000_create_job_check_runs": createJobCheckRuns,
+  "20261017140000_create_model_catalog_entries": createModelCatalogEntries,
+  "20261017160000_add_workspace_entitlements_model_access":
+    addWorkspaceEntitlementsModelAccess,
+  "20261018090000_add_usage_record_catalog_entry": addUsageRecordCatalogEntry,
+  "20261018170000_migrate_model_tiers_to_catalog": migrateModelTiersToCatalog,
 };
 
 export const migrationProvider: MigrationProvider = {

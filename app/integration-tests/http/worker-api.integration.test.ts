@@ -293,6 +293,39 @@ describe("the claim with the feature worker_credential", () => {
 });
 
 describe("the details of a job", () => {
+  // #424-T08: the route does not use the list yet (it is #432's claim and fetch resolver), so this pins
+  // only what must hold for every shape of it: the call is not refused and the job is unchanged. That a
+  // newer Worker's list is read is asserted by `parseWorkerLlmProviders` (requests.test.ts) and by the
+  // runner sending it (test_runner_api_client.py); #432 adds the assertion on the route.
+  it.each([
+    ["without the providers", undefined],
+    ["with the provider of a previous-release Worker", "openrouter"],
+    [
+      "with a provider this app has no adapter for",
+      "openrouter,a_future_provider",
+    ],
+    ["with a malformed list", "OpenRouter,,x"],
+  ])(
+    "answers the details request %s with the same job: OpenRouter",
+    async (_name, providers) => {
+      const h = await startRunnerApiHarness();
+      const job = await h.enqueueNew();
+      const claim = await h.claimedSplit();
+
+      const response = await h.worker.details(
+        job.id,
+        claim.job.credential,
+        "dynamic_capabilities",
+        undefined,
+        providers,
+      );
+
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body.job.input.llm.provider).toBe("openrouter");
+    },
+  );
+
   // #320-T17
   it("mints the git token and reveals the model key at fetch, and remembers the key then", async () => {
     const h = await startRunnerApiHarness();

@@ -13,12 +13,6 @@ import { Overview } from "./overview.tsx";
 
 afterEach(cleanup);
 
-const NO_TIERS: AdminSettingsView["modelTiers"] = {
-  low: { diff: false, dynamic: false },
-  medium: { diff: false, dynamic: false },
-  high: { diff: false, dynamic: false },
-};
-
 function view(overrides: Partial<AdminSettingsView> = {}): AdminSettingsView {
   const never = { updatedBy: null, updatedAt: null };
   return {
@@ -34,7 +28,11 @@ function view(overrides: Partial<AdminSettingsView> = {}): AdminSettingsView {
     planManagementUrl: { value: null, ...never },
     smtp: { value: null, password: "none", ...never },
     operatorLlmKey: { state: "not_configured" },
-    modelTiers: NO_TIERS,
+    operatorLlmKeys: { openrouter: { state: "not_configured" } },
+    modelCatalog: {
+      diff: { released: 0, hasDefault: false },
+      dynamic: { released: 0, hasDefault: false },
+    },
     workspaceCount: 1,
     githubConfigured: false,
     mailConfigured: false,
@@ -252,12 +250,12 @@ describe("the setup card", () => {
     expect(configuredLink("Ways to sign in").getAttribute("href")).toBe(
       "/admin/setup/sign-in",
     );
-    expect(row("LLM key of the instance").textContent).toContain(
+    expect(row("LLM keys of the instance").textContent).toContain(
       "Not configured",
     );
-    expect(configuredLink("LLM key of the instance").getAttribute("href")).toBe(
-      "/admin/llm",
-    );
+    expect(
+      configuredLink("LLM keys of the instance").getAttribute("href"),
+    ).toBe("/admin/llm");
 
     for (const title of [
       "Mail server",
@@ -265,7 +263,7 @@ describe("the setup card", () => {
       "Tenancy",
       "Sign-up rule",
       "Ways to sign in",
-      "LLM key of the instance",
+      "LLM keys of the instance",
     ])
       expect(
         within(row(title)).getByRole("link", { name: `Configure ${title}` }),
@@ -386,17 +384,17 @@ describe("the setup card", () => {
   });
 });
 
-describe("the LLM key of the instance (#276)", () => {
+describe("the LLM keys of the instance (#276, #427)", () => {
   const key = (operatorLlmKey: AdminSettingsView["operatorLlmKey"]) =>
-    view({ operatorLlmKey });
+    view({ operatorLlmKey, operatorLlmKeys: { openrouter: operatorLlmKey } });
 
   // #276-T06
   it("is optional: no key is no warning and no attention notice, because only managed workspaces need it", () => {
     render(<Overview settings={view()} />);
 
-    expect(row("LLM key of the instance").textContent).toContain("Optional");
+    expect(row("LLM keys of the instance").textContent).toContain("Optional");
     expect(
-      within(row("LLM key of the instance")).queryByRole("img", {
+      within(row("LLM keys of the instance")).queryByRole("img", {
         hidden: true,
       }),
     ).toBeNull();
@@ -418,7 +416,7 @@ describe("the LLM key of the instance (#276)", () => {
       />,
     );
 
-    const text = row("LLM key of the instance").textContent ?? "";
+    const text = row("LLM keys of the instance").textContent ?? "";
     expect(text).toContain("Configured");
     expect(text).toContain("wxyz");
   });
@@ -446,7 +444,7 @@ describe("the LLM key of the instance (#276)", () => {
       />,
     );
 
-    expect(row("LLM key of the instance").textContent).toContain(
+    expect(row("LLM keys of the instance").textContent).toContain(
       "cannot be read",
     );
     expect(
@@ -455,40 +453,139 @@ describe("the LLM key of the instance (#276)", () => {
   });
 });
 
-describe("the model tiers (#280)", () => {
-  const tiers = (modelTiers: AdminSettingsView["modelTiers"]) =>
-    view({ modelTiers });
+describe("the LLM key of each provider on the overview (#427)", () => {
+  const CONFIGURED = {
+    state: "configured",
+    lastFour: "wxyz",
+    updatedAt: "2026-10-12T08:00:00.000Z",
+    updatedBy: null,
+  } as const;
+  const UNREADABLE = {
+    state: "unreadable",
+    updatedAt: "2026-10-12T08:00:00.000Z",
+    updatedBy: null,
+  } as const;
+  const keys = (operatorLlmKeys: AdminSettingsView["operatorLlmKeys"]) =>
+    view({ operatorLlmKeys });
 
-  // #280-T01
-  it("shows a row that says which tiers are configured, without a form: the operator API sets them", () => {
+  // #427-T08
+  it("shows the status of every provider by its name, one after the other", () => {
     render(
       <Overview
-        settings={tiers({
-          low: { diff: true, dynamic: false },
-          medium: { diff: false, dynamic: false },
-          high: { diff: true, dynamic: true },
+        settings={keys({
+          openrouter: CONFIGURED,
+          fakeai: { state: "not_configured" },
         })}
       />,
     );
 
-    const text = row("Managed model tiers").textContent ?? "";
-    expect(text).toContain("Low: Diff only");
-    expect(text).toContain("Medium: not configured");
-    expect(text).toContain("High: Diff and Dynamic");
-    expect(text).toContain("operator API");
-    // Nothing to follow: there is no page that sets them.
-    expect(within(row("Managed model tiers")).queryByRole("link")).toBeNull();
+    const text = row("LLM keys of the instance").textContent ?? "";
+    expect(text).toContain("OpenRouter: Configured (ending in wxyz)");
+    expect(text).toContain("fakeai: Not configured");
+    expect(text.indexOf("OpenRouter")).toBeLessThan(text.indexOf("fakeai"));
+    expect(text).not.toContain("sk-");
   });
 
-  // #280-T01
-  it("is optional: no tier is no warning and no attention notice", () => {
+  // #427-T08
+  it("warns when the key of any one provider cannot be read, and names that provider", () => {
+    render(
+      <Overview
+        settings={keys({ openrouter: CONFIGURED, fakeai: UNREADABLE })}
+      />,
+    );
+
+    const text = row("LLM keys of the instance").textContent ?? "";
+    expect(text).toContain("OpenRouter: Configured");
+    expect(text).toContain("fakeai: Saved, cannot be read");
+    expect(text).toContain("until its key is entered again");
+  });
+
+  // #427-T08
+  it("is optional while no provider has a key, and links to the page of the keys", () => {
+    render(
+      <Overview
+        settings={keys({
+          openrouter: { state: "not_configured" },
+          fakeai: { state: "not_configured" },
+        })}
+      />,
+    );
+
+    expect(row("LLM keys of the instance").textContent).toContain("Optional");
+    expect(
+      screen.queryByRole("region", { name: /needs attention/i }),
+    ).toBeNull();
+    expect(
+      within(row("LLM keys of the instance"))
+        .getByRole("link")
+        .getAttribute("href"),
+    ).toBe("/admin/llm");
+  });
+});
+
+describe("the model catalog (#429)", () => {
+  const catalog = (modelCatalog: AdminSettingsView["modelCatalog"]) =>
+    view({ modelCatalog });
+
+  // #429-T06
+  it("shows how many entries are released for each kind and whether the kind has a default, in place of the tiers", () => {
+    render(
+      <Overview
+        settings={catalog({
+          diff: { released: 2, hasDefault: true },
+          dynamic: { released: 0, hasDefault: false },
+        })}
+      />,
+    );
+
+    const text = row("Model catalog").textContent ?? "";
+    expect(text).toContain("Diff: 2 released, default set");
+    expect(text).toContain("Dynamic: none released, no default");
+    expect(screen.queryByText("Managed model tiers")).toBeNull();
+  });
+
+  // #429-T06
+  it("shows counts and no name, provider or model: the view has nothing else to show", () => {
+    const settings = catalog({
+      diff: { released: 1, hasDefault: false },
+      dynamic: { released: 1, hasDefault: true },
+    });
+    render(<Overview settings={settings} />);
+
+    expect(Object.keys(settings.modelCatalog).sort()).toEqual([
+      "diff",
+      "dynamic",
+    ]);
+    for (const kind of Object.values(settings.modelCatalog))
+      expect(Object.keys(kind).sort()).toEqual(["hasDefault", "released"]);
+    expect(row("Model catalog").textContent).not.toMatch(/mce_|\//);
+  });
+
+  // #429-T06
+  it("links to the LLM page, where the catalog is managed", () => {
     render(<Overview settings={view()} />);
 
-    expect(row("Managed model tiers").textContent).toContain(
-      "Low: not configured",
+    expect(
+      within(row("Model catalog")).getByRole("link").getAttribute("href"),
+    ).toBe("/admin/llm");
+  });
+
+  // #429-T06
+  it("is optional: an empty catalog is no warning and no attention notice", () => {
+    render(<Overview settings={view()} />);
+
+    expect(row("Model catalog").textContent).toContain(
+      "Diff: none released, no default",
     );
     expect(
       screen.queryByRole("region", { name: /needs attention/i }),
     ).toBeNull();
+  });
+
+  // #434-X2
+  it("has no row for the managed model tiers any more: a model is a catalog entry", () => {
+    render(<Overview settings={view()} />);
+
+    expect(screen.queryByText("Managed model tiers")).toBeNull();
   });
 });

@@ -13,10 +13,14 @@ const mocks = vi.hoisted(() => ({
     expireStaleJobs: vi.fn(() => Promise.resolve({})),
   },
   lockKeys: [] as unknown[],
+  checks: { reconcileDue: vi.fn(() => Promise.resolve({ synced: 0 })) },
 }));
 
 vi.mock("../db/startup.ts", () => ({ getDatabase: () => ({}) }));
 vi.mock("../jobs/shared.ts", () => ({ getRunnerQueue: () => mocks.queue }));
+vi.mock("../check-runs/shared.ts", () => ({
+  getCheckRunService: () => mocks.checks,
+}));
 vi.mock("../db/try-lock.ts", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../db/try-lock.ts")>()),
   tryWithLock: async (
@@ -61,6 +65,7 @@ beforeEach(() => {
   mocks.lockKeys.length = 0;
   mocks.queue.countRunning.mockClear();
   mocks.queue.expireStaleJobs.mockClear();
+  mocks.checks.reconcileDue.mockClear();
   mocks.service = undefined;
 });
 
@@ -106,6 +111,8 @@ describe("what runs between two sweeps", () => {
 
     expect(mocks.queue.expireStaleJobs).toHaveBeenCalledTimes(1);
     expect(service.sendDue).toHaveBeenCalledTimes(1);
+    // #405: the check runs of the jobs that lapse released follow in the same run.
+    expect(mocks.checks.reconcileDue).toHaveBeenCalledTimes(1);
     expect(mocks.lockKeys).toEqual([OPPORTUNISTIC_LOCK]);
   });
 

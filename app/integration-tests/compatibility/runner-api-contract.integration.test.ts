@@ -7,7 +7,9 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { REVIEW_COMMANDS } from "../../src/integrations/types.ts";
+import { LLM_PROVIDERS } from "../../src/llm/config.ts";
 import {
+  LLM_PROVIDER_ID_PATTERN,
   RUNNER_API_ERROR_CODES,
   RUNNER_ENV_KEY_PATTERN,
   RUNNER_API_VERSION,
@@ -66,6 +68,46 @@ describe("the contract file", () => {
       [...(listed ?? [])].sort(),
     );
   });
+
+  // #424-T07
+  it("lists the providers of the app's registry as the providers it knows", () => {
+    const defs = readContract().$defs;
+
+    expect([...LLM_PROVIDERS].sort()).toStrictEqual(
+      [...(defs.KnownLlmProvider?.enum ?? [])].sort(),
+    );
+    expect(defs.LlmProviderId?.pattern).toBe(LLM_PROVIDER_ID_PATTERN.source);
+    for (const provider of LLM_PROVIDERS)
+      expect(provider).toMatch(LLM_PROVIDER_ID_PATTERN);
+  });
+
+  // #424-T01: `llm.provider` of a job is a slug, so the form decides in the contract and the
+  // registry of the side that reads the job decides the rest.
+  it.each([
+    ["openrouter", true],
+    ["a_future_provider", true],
+    ["ab", true],
+    ["a".repeat(32), true],
+    ["a".repeat(33), false],
+    ["a", false],
+    ["OpenRouter", false],
+    ["1abc", false],
+    ["open-router", false],
+    ["", false],
+  ])(
+    "judges the provider %j of a job like the slug form: %s",
+    (provider, ok) => {
+      const claim = structuredClone(
+        readExamples().find((e) => e.definition === "ClaimResponse")?.document,
+      ) as {
+        job: { input: { llm: { provider: unknown } } };
+      };
+      claim.job.input.llm.provider = provider;
+
+      expect(contract.check("ClaimResponse", claim).valid).toBe(ok);
+      expect(LLM_PROVIDER_ID_PATTERN.test(provider)).toBe(ok);
+    },
+  );
 
   it("allows the commands the app can queue", () => {
     const listed = readContract().$defs.Command?.enum;
@@ -385,6 +427,35 @@ describe("what the app accepts from a runner", () => {
         result: { ...result, usage: { ...result.usage, stoppedEarly } },
       },
     ]),
+    // #405-T30: the findings a successful review left open, in the schema and in the parser.
+    ...[
+      { open: 3, bySeverity: { P0: 1, P1: 0, P2: 2, P3: 0 } },
+      { open: 2, bySeverity: null },
+      { open: 0, bySeverity: { P0: 0, P1: 0, P2: 0, P3: 0 } },
+      { open: 0, bySeverity: null, incomplete: true },
+      { open: 1, bySeverity: null, incomplete: false },
+      null,
+    ].map((findings): [string, unknown] => [
+      `findings ${JSON.stringify(findings)}`,
+      { leaseToken: TOKEN, result: { ...result, findings } },
+    ]),
+    ...[
+      { open: -1, bySeverity: null },
+      { open: 1.5, bySeverity: null },
+      { open: 1 },
+      { bySeverity: null },
+      { open: 1, bySeverity: { P0: 1, P1: 0, P2: 0 } },
+      { open: 1, bySeverity: { P0: 1, P1: 0, P2: 0, P3: 0, P4: 0 } },
+      { open: 1, bySeverity: { P0: -1, P1: 0, P2: 0, P3: 0 } },
+      { open: 1, bySeverity: null, extra: true },
+      { open: 1, bySeverity: null, incomplete: "yes" },
+      { open: 1000001, bySeverity: null },
+      "none",
+      [],
+    ].map((findings): [string, unknown] => [
+      `findings that are not valid: ${JSON.stringify(findings)}`,
+      { leaseToken: TOKEN, result: { ...result, findings } },
+    ]),
     [
       "usage with a negative token count",
       {
@@ -521,6 +592,28 @@ describe("what the app accepts from a runner", () => {
       ["a feature that is no name", { features: [1] }],
       ["a feature with a bad name", { features: ["Bad Name"] }],
       ["too many features", { features: Array(17).fill("some_feature") }],
+      // #424-T01, #424-T02
+      [
+        "the provider of a previous-release runner",
+        { llmProviders: ["openrouter"] },
+      ],
+      ["two providers", { llmProviders: ["openrouter", "a_future_provider"] }],
+      ["an empty provider list", { llmProviders: [] }],
+      ["providers as text", { llmProviders: "openrouter" }],
+      ["an uppercase provider", { llmProviders: ["OpenRouter"] }],
+      ["a too short provider", { llmProviders: ["a"] }],
+      ["a too long provider", { llmProviders: ["a".repeat(33)] }],
+      ["a duplicated provider", { llmProviders: ["openrouter", "openrouter"] }],
+      ["a provider that is no text", { llmProviders: [1] }],
+      [
+        "too many providers",
+        {
+          llmProviders: Array.from(
+            { length: 17 },
+            (_, index) => `provider_${index}`,
+          ),
+        },
+      ],
       // #322-T12
       [
         "a job id and a cap",

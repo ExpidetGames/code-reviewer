@@ -5,7 +5,6 @@
 // scoped-isolation.integration.test.ts; the claim and the completion that drive the records are in
 // integration-tests/http/runner-api-usage.integration.test.ts.
 import { sql } from "kysely";
-import { TIER_NAME_PATTERN } from "../../operator-api/contract.ts";
 import { describe, expect, it } from "vitest";
 import { createJobQueueFixture } from "../../test-support/jobs.ts";
 import { createUsageRecordsRepository } from "./usage-records-repository.ts";
@@ -96,30 +95,55 @@ describe("reserving a record", () => {
     expect((await t.records.get(job.id))?.keyMode).toBe("managed");
   });
 
-  // #280-T04
-  it("notes the tier of a reserved record, and of nothing else", async () => {
+  // #432-T07
+  it("notes the provider and the catalog entry of a reserved record, with the name as it was, and of nothing else", async () => {
     const t = await setup();
     const job = await t.newJob();
     await t.records.reserve(job.id, "managed");
-    expect((await t.records.get(job.id))?.modelTier).toBeNull();
+    expect(await t.records.get(job.id)).toMatchObject({
+      catalogEntryId: null,
+      catalogEntryName: null,
+      llmProvider: null,
+    });
 
-    await t.records.setModelTier(job.id, "high");
-    expect((await t.records.get(job.id))?.modelTier).toBe("high");
+    await t.records.setSelection(job.id, {
+      provider: "openrouter",
+      catalogEntry: { id: "mce_a", name: "Thorough" },
+    });
+    expect(await t.records.get(job.id)).toMatchObject({
+      catalogEntryId: "mce_a",
+      catalogEntryName: "Thorough",
+      llmProvider: "openrouter",
+    });
 
     await t.records.settle(job.id, SETTLED(5));
-    await t.records.setModelTier(job.id, "low");
-    expect((await t.records.get(job.id))?.modelTier).toBe("high");
+    await t.records.setSelection(job.id, {
+      provider: "other",
+      catalogEntry: { id: "mce_b", name: "Quick" },
+    });
+    expect(await t.records.get(job.id)).toMatchObject({
+      catalogEntryId: "mce_a",
+      catalogEntryName: "Thorough",
+      llmProvider: "openrouter",
+    });
   });
 
-  // #280-T04
-  it("keeps the tier within the name the operator API shows", async () => {
+  // #432-T07
+  it("notes the provider of an own run and no entry", async () => {
     const t = await setup();
     const job = await t.newJob();
-    await t.records.reserve(job.id, "managed");
+    await t.records.reserve(job.id, "own");
 
-    await t.records.setModelTier(job.id, "medium");
+    await t.records.setSelection(job.id, {
+      provider: "openrouter",
+      catalogEntry: null,
+    });
 
-    expect((await t.records.get(job.id))?.modelTier).toMatch(TIER_NAME_PATTERN);
+    expect(await t.records.get(job.id)).toMatchObject({
+      catalogEntryId: null,
+      catalogEntryName: null,
+      llmProvider: "openrouter",
+    });
   });
 
   it("refuses a key mode the table does not know", async () => {

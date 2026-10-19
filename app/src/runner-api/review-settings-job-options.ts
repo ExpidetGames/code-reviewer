@@ -30,7 +30,10 @@ export function createReviewSettingsJobOptionsSource(deps: {
           // A Dynamic job gets the project's model and skill, and **no** PR-Agent env: those options
           // grant nothing to the read-only agent and must never be promoted into its permissions.
           env: {},
-          modelTier: resolved.settings.modelTier,
+          selection: {
+            layers: { project: resolved.modelLayers.dynamic.project },
+            entryId: resolved.dynamic.catalogEntryDynamic,
+          },
           llm: {
             model: resolved.dynamic.dynamicModel,
             maxTokens: resolved.settings.maxTokens,
@@ -46,7 +49,10 @@ export function createReviewSettingsJobOptionsSource(deps: {
       const { llm, env, fallbackModels } = toRunnerSettings(resolved.settings);
       return {
         env,
-        modelTier: resolved.settings.modelTier,
+        selection: {
+          layers: resolved.modelLayers.diff,
+          entryId: resolved.dynamic.catalogEntryDiff,
+        },
         llm: { ...llm, fallbackModels },
       };
     },
