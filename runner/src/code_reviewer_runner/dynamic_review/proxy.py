@@ -57,7 +57,7 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request
 
-from code_reviewer_runner.cache_usage import CacheTally
+from code_reviewer_runner.cache_usage import CacheTally, counts_of
 from code_reviewer_runner.dynamic_review.audit import ToolAudit
 from code_reviewer_runner.dynamic_review.budget import (
     DEFAULT_WINDOW_TOKENS,
@@ -189,10 +189,30 @@ DEFAULT_MODEL_CAPABILITIES = DynamicCapabilities(
 )
 
 
+def with_cache_unit_costs(
+    capabilities: DynamicCapabilities, cache_costs: tuple[Decimal, Decimal] | None
+) -> DynamicCapabilities:
+    """The capabilities with the cache prices of the provider's own list (#540): what a million
+    tokens read from and written to its cache cost. They only size a reservation. The descriptor of
+    a job never names them; a provider without a list (None) leaves the prompt priced as input."""
+    unit_costs = capabilities.unit_costs
+    if cache_costs is None or unit_costs is None:
+        return capabilities
+    return replace(
+        capabilities,
+        unit_costs=replace(
+            unit_costs,
+            cache_read_usd_per_mtok=cache_costs[0],
+            cache_write_usd_per_mtok=cache_costs[1],
+        ),
+    )
+
+
 def with_reserved_output(
     capabilities: DynamicCapabilities, wire: UpstreamWire
 ) -> DynamicCapabilities:
-    """The capabilities with the output a call of this model reserves, as its wire says (#533)."""
+    """The capabilities with the most a call of this model reserves of its output, as its wire says
+    (#533). What a call really reserves is the output the run has shown, up to this cap (#540)."""
     return replace(
         capabilities,
         reserved_output_tokens=wire.reserved_output_tokens(capabilities.max_output_tokens),
@@ -583,11 +603,14 @@ class ModelProxy:
             )
         # The provider is authoritative: its counters replace the reservation. A counter above the
         # reservation is not added up, it fails the run.
+        cache_read, cache_write = self._cache_usage(completion)
         self.ledger.settle_call(
             reservation,
             prompt_tokens=usage[0],
             completion_tokens=usage[1],
             cost=self._cost(completion),
+            cache_read_tokens=cache_read,
+            cache_write_tokens=cache_write,
         )
         self.ledger.note_call_outcome(describe_call(completion, final=reservation.final))
         self.cache_tally.add(completion.get("usage"))
@@ -725,6 +748,14 @@ class ModelProxy:
             completion if isinstance(completion, int) and not isinstance(completion, bool) else None
         )
         return prompt_tokens, completion_tokens
+
+    @staticmethod
+    def _cache_usage(document: dict[str, Any]) -> tuple[int | None, int | None]:
+        """What the provider says it read from and wrote to its cache (#540): the cost guard prices
+        the next call from it. The one reader of the cache fields is `cache_usage.counts_of` (#539);
+        a provider without a cache, or a count that cannot be true, reads as no cache use."""
+        counts = counts_of(document.get("usage"))
+        return (None, None) if counts is None else (counts.read, counts.written)
 
     def _cost(self, document: dict[str, Any]) -> Decimal | None:
         """The cost of this call by the rule of the provider, or None when it has none.

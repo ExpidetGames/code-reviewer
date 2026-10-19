@@ -242,6 +242,20 @@ def test_the_usage_of_a_stopped_early_review_is_valid_and_a_complete_one_has_no_
     assert not _accepts("CompleteRequest", complete)
 
 
+# #540-N4: by how much a run passed its cost limit is an optional number of dollars.
+def test_the_excess_over_the_cost_limit_is_an_optional_non_negative_number() -> None:
+    from code_reviewer_runner.result import Usage
+
+    complete = _example("CompleteRequest")
+    usage = Usage("vendor/model", 1, 1, 2, 1, False, 1.01, limit_exceeded_by=0.01).to_json()
+    assert usage["limitExceededBy"] == 0.01
+    complete["result"]["usage"] = usage
+    assert _accepts("CompleteRequest", complete)
+    for bad in (-0.01, "0.01", True, None):
+        complete["result"]["usage"] = {**usage, "limitExceededBy": bad}
+        assert not _accepts("CompleteRequest", complete), bad
+
+
 def test_every_error_of_the_api_has_a_stable_code_and_a_message() -> None:
     error = _example("ErrorResponse")
     assert _accepts("ErrorResponse", error)

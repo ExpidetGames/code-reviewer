@@ -261,9 +261,10 @@ def test_a_final_call_that_answers_in_prose_is_asked_again_and_the_review_is_tak
         message([THINK, {"type": "text", "text": "Here is my review: no findings."}], "end_turn"),
         message([THINK, tool_use("toolu_9", "StructuredOutput", **REVIEW)], "tool_use"),
     )
-    # The limit leaves room for one call: the first call is the final one.
+    # The limit leaves room for one call (a final call reserves 4,096 output tokens, #540): the
+    # first call is the final one.
     subject = proxy(
-        upstream, BudgetLedger(DynamicLimits(max_cost_usd=Decimal("0.1")), unit_costs=UNIT_COSTS)
+        upstream, BudgetLedger(DynamicLimits(max_cost_usd=Decimal("0.07")), unit_costs=UNIT_COSTS)
     )
 
     reply = completion(post(subject, engine_request()))

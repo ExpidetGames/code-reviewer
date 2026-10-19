@@ -66,6 +66,7 @@ from code_reviewer_runner.dynamic_review.proxy import (
     DynamicCapabilities,
     ModelProxy,
     capabilities_for_job,
+    with_cache_unit_costs,
     with_reserved_output,
 )
 from code_reviewer_runner.dynamic_review.publish import (
@@ -647,10 +648,11 @@ def _run_dynamic_job(
         capabilities = capabilities_for_job(
             environment.get(DYNAMIC_CAPABILITIES_VARIABLE), job.llm.model, dynamic.capabilities
         )
-        # What a call reserves of its output allowance is the model's wire's to say (#533).
-        capabilities = with_reserved_output(
-            capabilities, require_provider(job.llm.provider).wire(job.llm.model)
-        )
+        # The cache is priced from the provider's own list (#540), never from the job.
+        provider = require_provider(job.llm.provider)
+        capabilities = with_cache_unit_costs(capabilities, provider.cache_unit_costs(job.llm.model))
+        # The most a call reserves of its output allowance is the model's wire's to say (#533).
+        capabilities = with_reserved_output(capabilities, provider.wire(job.llm.model))
     except LimitError as error:
         return _failure(error.code, error.detail, started, capture)
 
@@ -826,6 +828,10 @@ def _run_dynamic_job(
         summary += f"; {STATE_RESET_CODE}"
     if findings.stopped_early is not None:
         summary += f"; stopped early ({findings.stopped_early})"
+    excess = ledger.limit_exceeded_by
+    if excess is not None:
+        # The one overshoot the cost guard allows (#540), in USD, so the bound can be watched.
+        summary += f"; cost limit exceeded by {excess.normalize():f} USD"
     if recovery_note is not None:
         # A turn ended without an answer and one more turn returned it (#309): a complete review,
         # not a limit, so it is in the log and not in the comment.
