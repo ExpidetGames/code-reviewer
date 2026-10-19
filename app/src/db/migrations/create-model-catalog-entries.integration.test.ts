@@ -43,7 +43,9 @@ async function rowsOfEveryTable(
     if (
       table.name === "model_catalog_entries" ||
       table.name === "billing_journal_entries" ||
-      table.name === "billing_balances"
+      table.name === "billing_balances" ||
+      table.name === "billing_topup_intents" ||
+      table.name === "billing_webhook_events"
     )
       continue;
     const { rows } =
