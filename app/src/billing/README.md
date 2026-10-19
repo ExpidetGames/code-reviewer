@@ -200,7 +200,16 @@ interface BillingAdapter {
     session: ProviderRef | null;
     payment: ProviderRef | null;
   }>;
-  verifyAndParseWebhook?(i: { headers; rawBody; now }): Promise<WebhookResult>; // absent: no webhook
+  verifyAndParseWebhook?(i: {
+    headers;
+    rawBody: Uint8Array;
+    now;
+  }): Promise<WebhookResult>; // absent: no webhook
+  lookupTopUp?(i: {
+    intentId;
+    checkout;
+    payment;
+  }): Promise<TopUpLookupEvent | null>; // absent: cannot be asked
 }
 ```
 
@@ -211,22 +220,45 @@ interface BillingAdapter {
   code constants are the currency USD and the top-up range **10 to 500 USD**; an adapter may **narrow** the range and
   never widen it (`assertValidCapabilities` fails the registry at startup; `assertTopUpAmount` checks an amount before a
   checkout is created).
-- **Money is `Usd`**: a positive integer in micro-USD. `ProviderRef` is an opaque id (`isProviderRef`: letters, digits and
+- **Money is `Usd`**: a whole number of micro-USD, a branded type (`toUsd(n)` is the way in), so cents or another
+  currency cannot be mixed in by accident. A refund's or dispute's `amount` is NOT `Usd`: it is a `ProviderAmount`, see
+  below. `ProviderRef` is an opaque id (`isProviderRef`: letters, digits and
   `_ . : -`, at most 255): no card, address, tax id or email is ever stored or carried.
-- **The events.** `payment.succeeded` (`creditable` is the net amount that becomes credit; `gross`, `tax`),
-  `payment.failed`, `refund.updated` (`status` `pending`/`approved`/`rejected`/`reversed`, `initiatedBy`), `dispute.updated`
-  (`opened`/`lost`/`won`, with the dispute id) and `ignored` (a verified event of a type the adapter does not use). Every
-  amount is OUR ledger amount, net of tax: the adapter converts cents and subtracts what is not ours.
-  `validateBillingEvent` refuses an event with a non-integer amount, an id that is not an opaque id, a time that is not
-  ISO 8601 or an unknown status, so nothing past it trusts a provider's number.
+- **The events.** `payment.succeeded` (`creditable` is the net amount that becomes credit; `gross`; `tax`, where `0` is a
+  real tax and `null` is "not said"), `payment.failed`, `payment.expired` (the checkout ended unpaid: the only way an
+  intent becomes `expired`), `refund.updated` (`status` `pending`/`approved`/`rejected`/`reversed`, `initiatedBy`),
+  `dispute.updated` (`opened`/`lost`/`won`, with the dispute id) and `ignored` (a verified event of a type the adapter
+  does not use). `validateBillingEvent` refuses an event with a non-integer amount, an id that is not an opaque id, a
+  time that is not ISO 8601 or an unknown status, so nothing past it trusts a provider's number.
+- **Payments are net, refunds and disputes are gross.** A payment carries OUR amounts (`creditable`, net of tax, in
+  micro-USD). A refund or dispute carries the PROVIDER's: `amount` of this refund or dispute and `paymentAmount` of the
+  whole payment, both gross, in the SAME unit (cents in the buyer's currency, say; the unit never matters), because the
+  provider says nothing of the tax split of a refund. The application computes the net share under the intent lock:
+  `floor(credited x amount / paymentAmount)` in whole numbers (`net-share.ts`). The whole payment takes exactly what it
+  credited (a full refund of 29.75 on a 25.00 credit debits 25.00), and rounding down means the shares of one payment
+  never add up to more than its credit.
+- **One refund per event.** A delivery carries one event. A provider delivery that lists several refunds (Stripe's
+  `charge.refunded`) is not mapped; the adapter maps the per-refund events instead (`refund.created`, `refund.updated`,
+  `refund.failed`), each under its own event id and refund id. An adapter must not read a cumulative amount (Stripe's
+  `amount_refunded` of a charge) as the amount of one refund; the caps below stop the damage, not the mistake.
+- **Disputes** map to three statuses (the Stripe adapter of #502 uses these words): `opened` is `charge.dispute.created`
+  or `funds_withdrawn` (the provider takes the money when a dispute opens); `lost` is `charge.dispute.closed` with the
+  status `lost`; `won` is `charge.dispute.closed` with `won` or `charge_refunded`, or `funds_reinstated` (the money comes
+  back; a refund, if any, is its own event). Early warnings (`warning_*`) and a dispute still under review move no money:
+  the event is `ignored`.
+- **Asking the provider.** `lookupTopUp` returns what became of a top-up as a `payment.succeeded`, `payment.failed` or
+  `payment.expired` event, or `null` (unknown yet, or the object is gone). It is the one outbound call of an adapter,
+  made in a user's request (#502's "Check payment"), never in the webhook; its event goes through `applyBillingEvent`,
+  so a lost webhook, a late one and a click are idempotent together.
 - **`WebhookResult`** is `{ ok: true, event }` or `{ ok: false, code }` with a code of
   `BILLING_WEBHOOK_REJECTION_CODES` (`signature_missing`, `signature_invalid`, `signature_expired`, `body_invalid`) and
-  nothing else: no body, no header, no secret. An adapter checks the signature over the exact bytes before it reads the
-  body, makes no outbound call and touches no database.
+  nothing else: no body, no header, no secret. An adapter gets the body as the bytes that were received (`Uint8Array`,
+  never decoded text: a byte order mark or a byte that is not UTF-8 would change what a signature covers), checks the
+  signature over them before it reads the body, decodes it itself, makes no outbound call and touches no database.
 
 **How to add an adapter.** Implement `BillingAdapter`, add it to `getBillingAdapterRegistry()` in `shared.ts`, and run the
 shared kit on it: `describeAdapterContract` (parses its fixtures into the normalized events, refuses bad signatures with a
-code, no outbound call) and, when it has a webhook, `describeAdapterApplication` (applies what it parsed on every
+code, no outbound call, and `lookupTopUp` when it has one) and, when it has a webhook, `describeAdapterApplication` (applies what it parsed on every
 engine; the same event twice, the same payment under another event id and the wrong order leave the state of one correct
 delivery). Both live in `src/test-support/billing-adapter-kit.ts`; the fake adapter in `fake-billing-adapter.ts` is the
 model, and `adapter-kit.test.ts` / `adapter-kit.integration.test.ts` show the call. The active adapter is the `adapter`
@@ -238,7 +270,9 @@ sets it is #504.
 `billing_topup_intents` (workspace-scoped repository `billing-topup-intents-repository.ts`) is the row the application
 writes **before any checkout is created**. It holds the adapter, the amount WE asked for, a state (`pending`, `paid`,
 `failed`, `expired`) and the provider's opaque ids of the checkout and the payment once known (unique per adapter,
-recorded once, never changed). It is the only thing that maps a payment to a workspace. To find an intent from an event,
+recorded once, never changed). Once paid it also holds what the payment **credited** (net, fixed at that moment) and two
+running totals, of what **refunds** and of what **disputes** took back of it; together they never exceed the credit (a
+database check as well as the code). It is the only thing that maps a payment to a workspace. To find an intent from an event,
 before the workspace is known, `billing-topup-intent-directory-repository.ts` (read only, instance level) looks it up by
 payment, checkout or intent id, only for the adapter that made it.
 
@@ -247,25 +281,46 @@ payment, checkout or intent id, only for the adapter that made it.
 `applyBillingEvent(db, { provider, event })` runs **one database transaction per event**:
 
 1. **Claim** the event id in `billing_webhook_events` (id, outcome, order; no payload). A repeat is `duplicate_ignored`.
-   Only `intent_unresolved` lets the same event id be handled again, because the top-up may be known on redelivery.
+   Only `intent_unresolved` lets the same event id be handled again, if it is delivered again. The route answers 200
+   for it, so a provider does NOT redeliver on its own: a refund that arrives before its payment is recorded for review
+   (below), and "Check payment" (#502) or the operator repairs it.
 2. **Resolve** the intent: by the payment, then the checkout, then our own intent id recorded in the event, and every
    other field must agree. An event that names another intent than the payment belongs to, or another payment than the
    one recorded, resolves to nothing: `intent_unresolved`, no change, answered 200. The intent row is locked (Postgres
    `FOR UPDATE`, SQLite one writer), so every event about one payment is applied one after the other.
 3. **Order**: a refund or dispute state older than the last one applied is `stale_ignored`.
-4. **Bound**: a credit is at least 10 USD and at most the amount of the intent; a refund or dispute is at most what the
-   intent credited. Otherwise `amount_rejected` and nothing is written.
+4. **Bound**: a credit is at least 10 USD and at most the amount of the intent. A refund or dispute is turned into its
+   net share (see above); it is `amount_rejected` when it is larger than its payment, and when it would take the
+   refunds and disputes of that payment **together** above what the payment credited (two refunds of 20 on a 25 credit
+   take 20, then the second is rejected; a refund of 25 and a dispute of 25 take 25). A debit adds to its total, a
+   reversal (a rejected or reversed refund, a won dispute) subtracts what it gave back. Nothing is written for a
+   rejected amount. This is a deliberate limit: a provider can really lose money twice on one charge (a refund and a lost
+   dispute), and that case lands in review (below) instead of silently debiting more than the payment gave.
 5. **Write**: `payment.succeeded` is a `top_up` keyed by the **payment** (D14: two events for one payment credit once, and
    the same payment with another amount is `amount_conflict`) and the intent becomes `paid`; `payment.failed` marks a
-   pending intent `failed`; `refund.updated` `pending`/`approved` is a `refund` and a dispute `opened`/`lost` a
+   pending intent `failed`, `payment.expired` a pending intent `expired` (a late payment still pays either);
+   `refund.updated` `pending`/`approved` is a `refund` and a dispute `opened`/`lost` a
    `chargeback`, keyed by the refund or dispute and written **even beyond the unspent balance** (it goes negative and the
    claim refuses the workspace with `balance_negative`); `rejected`/`reversed` and `won` write a `correction` that reverses
    the debit once (`nothing_to_reverse` when there is none yet). A dispute is debited when it opens, because that is when
    the provider takes the money, and when it is lost, whichever is seen first: one `chargeback`.
 6. The outcome (`BILLING_EVENT_OUTCOMES`) is recorded with the event id in the same transaction.
 
-Not handled here: cumulative refunds over one payment are bounded per event, not in total; rows of
-`billing_webhook_events` are never pruned (they are a few bytes each; the journal key is the second idempotency layer, so
+**Paid but not credited, and the other outcomes an operator must see.** `intent_unresolved`, `amount_rejected`,
+`amount_conflict` (`BILLING_REVIEW_OUTCOMES`) of an event that moves money (a payment, a refund, a dispute), and
+`event_invalid`, mean a buyer may have paid and got nothing (an unknown intent, a second payment of an intent that is
+paid, an amount above what we asked, a payment that changes the amount of a credit) or been refunded and kept the credit
+(a refund before its payment, or beyond the caps). Each is recorded with `review_state = 'open'` and the subject it was
+about (`payment:<id>`, `refund:<id>`, `dispute:<id>`; `listOpenReviews` reads them for the admin page of #504), logged
+at error level with its code (`billing_webhook_needs_review outcome=...`), and answered 200: the provider's retry would
+not change it. The repair is the operator's: a `manual` grant or correction, or "Check payment" (#502) when the provider's
+state is the doubt. A signed event that is not a normalized event (an adapter bug, a provider change) is recorded
+`event_invalid` under its event id, answered 200 like the rest (a 500 would be retried for days and can disable the
+endpoint) and logged `billing_webhook_event_invalid`; if even its id is no id it is answered but cannot be recorded.
+
+Not handled here: a refund that returns to a debit after a reversal (`approved`, `rejected`, `approved` again) stays
+reversed, because a refund's journal key is used once; the order of two states of a refund inside one second follows the
+provider's clock (`>` on its timestamp); rows of `billing_webhook_events` are never pruned (they are a few bytes each; the journal key is the second idempotency layer, so
 a prune after the provider's retry window is safe and left to a follow-up).
 
 ## The webhook route
@@ -275,7 +330,9 @@ and is the same for every provider. Order: guard (billing off, or the active ada
 that does not exist, before the body is read and before any billing table is touched), a raw body limited to 256 KiB (413),
 `adapter.verifyAndParseWebhook` over the exact bytes (401 for a missing, wrong, altered or old signature and 400 for a signed
 body the adapter cannot read, both with an **empty body**), then `applyBillingEvent` (200 and `{ "outcome": "<code>" }`).
-Anything that throws is 500 with an empty body and nothing applied; the provider redelivers. The log names a code only
+The adapter gets the body as bytes (`body.bytes`). Anything that throws is 500 with an empty body and nothing applied; the
+provider redelivers. A signed event that is no event, and a paid-but-not-credited outcome, are not thrown: they are
+answered 200 and recorded for review (see above). The log names a code only
 (`billing_webhook_rejected code=signature_invalid`): never a body, header, signature, id, amount or error message.
 **There is no outbound call in the handler** (`webhook-handler.test.ts` pins it), so the route answers within a few
 seconds whatever the provider does.
