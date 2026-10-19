@@ -68,25 +68,33 @@ there is one interpretation of it. A hold is never clamped here.
 | `minutes_only` | no                                        | yes                  |
 | `free`         | no                                        | no                   |
 
-`classifyOutcome` maps the end of a job to a class. A delivered result and a run that failed on the customer's side of
-the line are `charged` (an unknown cost then leaves only the minutes, which is also how a superseded run without a report
-bills). A run that ended without a result that is not attributable (a result that was not published, a process the loop
-of a runner had to end, `git_auth` and `git_forbidden`, which can be a revoked installation or our own App token) is
-`minutes_only`. An error on our side and a job that never ran are `free`: the launch failed, the VM or the Worker died,
-the lease ran out, the runner shut down, a limit refused the claim, and **every timeout** (the queue's `timeout`, the
-runner's and `llm_timeout`; decision 1: "a timeout caused by us bills nothing"). A queued job superseded before it ran has
-no run and is `free`; a superseded run that began (its usage record says `superseded`) is `charged`. The key, the account,
-the model and the rate limit of the managed key are ours when they fail, and the customer's on their own key. When several
-facts apply (the code, a finer reason, the settled reason of the usage record) the cheapest class for the customer wins. A
-code or a checkout reason the build does not know is `minutes_only`; it never throws.
+The rule is the maintainer's decision of 2026-10-19 (#489, #523): **a run is `free` only when the failure is clearly our
+fault; everything else is `charged` in full (AI and minutes).** `minutes_only` is used for one thing only: a run whose AI
+cost is unknown (`RunEnd.aiCostKnown === false`), because the AI part cannot be priced. No code, reason or settled reason
+maps to it.
 
-**Open question for the maintainer (B2 of the review of #520).** A run that failed after it used the model and delivered
-no result (`command_failed`, `dynamic_budget_exceeded`, `dynamic_policy_violation`, `llm_bad_request`,
-`llm_context_length_exceeded`) is `charged` (AI and minutes) today, as ADR 0006, 2.6 row 2 says. Decision 1 ("a review that
-ends without a result but already incurred AI cost bills the minutes only"), read literally, makes them `minutes_only`.
-The five codes are one group in `outcome.ts` (`AI_COST_FAILURE_CODES`) with one class (`AI_COST_FAILURE_CLASS`), so the
-answer is a one-line change; a test pins the members. The money difference is mostly `dynamic_budget_exceeded`: a run that
-burns its whole cost limit pays up to `limit x A`.
+`classifyOutcome` maps the end of a job to a class.
+
+- `free`, our fault: the launch failed, the VM or the Worker died, the lease ran out, the runner shut down or failed, our
+  infrastructure (the Dispatcher, a runner, the Dynamic engine, the isolation, GitHub's availability and rate limit for our
+  App, a checkout that failed on our transport) was unavailable, and **every timeout** (the queue's `timeout`, the runner's
+  and, on the managed key, `llm_timeout`). The key, the account, the model, the rate limit, an outage and a timeout of the
+  managed key are ours when it fails (`llm_auth`, `llm_quota`, `llm_rate_limit`, `llm_unavailable`, `llm_timeout`, ...) and
+  the customer's on their own key. Also free: `no_capable_runner`, `dynamic_review_disabled` and `entitlements_invalid` (the
+  operator's side; the job never ran).
+- `charged`, everything else: a delivered result; a run that failed, including the `AI_COST_FAILURE_CODES` group
+  (`command_failed`, `dynamic_budget_exceeded`, `dynamic_policy_violation`, `llm_bad_request`,
+  `llm_context_length_exceeded`); a run stopped at a cost or time limit; a run that ended without a result (`no_result`,
+  `review_not_published`, `llm_output_invalid`, a process the loop of a runner had to end); a run cancelled or superseded
+  by a new commit; `git_auth` and `git_forbidden` (a revoked installation or our own App token: not clearly ours); and a
+  code or checkout reason the build does not know. It never throws.
+- A job that **never ran** (superseded or cancelled while queued, or refused at claim by `workspace_suspended` or
+  `quota_exhausted`) is `charged` and prices to **0**: it has 0 billable minutes and no cost, so nothing is billed whatever
+  its class.
+- A run with an **unknown AI cost** that would be `charged` is `minutes_only`; one that is `free` stays free.
+
+When several facts apply (the code, a finer reason, the settled reason of the usage record) the cheapest class for the
+customer wins, so a run that was our error and also left no result is ours.
 
 The table is exhaustive over today's terminal codes: the job end codes, the release reasons, the error codes and checkout
 reasons of the runner contract, the reasons of the loop of a runner and the settled reasons. `outcome.test.ts` fails when
