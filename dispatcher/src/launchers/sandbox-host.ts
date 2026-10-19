@@ -10,7 +10,9 @@
 //              not a file on the VM.
 //   handover   settles once the Worker has taken over (see `handover` below)
 //
-// A pending launch that is aborted kills the container by name; stopping the VM is the launcher's job.
+// A pending launch that is aborted kills the container by name; stopping the VM is the launcher's job. Nothing
+// watches the container after the hand-over (#487): the wait that tells the hand-over from an early end is ended
+// then, and the VM is stopped by the App's signal (`POST /stop`), with the reaper and the VM timeout behind it.
 import { LaunchError, type Clock, type Logger } from "../core/types.ts";
 import type {
   ContainerHost,
@@ -44,10 +46,7 @@ export type SandboxDockerHostOptions = {
 export const WAIT_ATTEMPTS = 3;
 const WAIT_RETRY_DELAYS_MS = [2_000, 5_000] as const;
 
-/**
- * `wait()` kept failing: what became of the container is unknown. After the hand-over the VM is then left alone
- * (the Worker may well be reviewing) and its timeout is the backstop.
- */
+/** `wait()` kept failing before the hand-over: whether the container started is unknown, so the launch fails. */
 export class WorkerWaitError extends Error {
   readonly code = "worker_wait_failed";
   readonly attempts: number;
@@ -155,9 +154,14 @@ export class SandboxDockerHost implements ContainerHost {
     // Watches the caller's signal only until the hand-over: the core never aborts a launch that succeeded, and a
     // Worker that has taken over is not tied to it.
     const pending = new AbortController();
-    const forward = () => pending.abort();
+    // Ends the wait for the container: on an abort of the launch, and at the hand-over, when nobody watches it any more.
+    const watch = new AbortController();
+    const forward = () => {
+      pending.abort();
+      watch.abort();
+    };
     invocation.signal?.addEventListener("abort", forward, { once: true });
-    if (invocation.signal?.aborted) pending.abort();
+    if (invocation.signal?.aborted) forward();
     const name = containerNameOf(invocation.args);
 
     try {
@@ -173,7 +177,7 @@ export class SandboxDockerHost implements ContainerHost {
       await worker.writeStdin(invocation.stdin);
       await worker.closeStdin();
 
-      const exited = this.#wait(worker, pending.signal);
+      const exited = this.#wait(worker, watch.signal);
       exited.catch(() => undefined);
       const first = await Promise.race([
         exited.then((result) => ({ ended: result })),
@@ -194,9 +198,12 @@ export class SandboxDockerHost implements ContainerHost {
         });
       this.#handedOver();
       invocation.signal?.removeEventListener("abort", forward);
-      return await exited;
+      // The Worker owns the job from here. Nobody waits for its container: no `wait()` stays open.
+      watch.abort();
+      return { exitCode: first.ended?.exitCode ?? null };
     } catch (error) {
       invocation.signal?.removeEventListener("abort", forward);
+      watch.abort();
       const failure = this.#asLaunchError(error, pending.signal);
       this.fail(failure);
       throw failure;
@@ -206,20 +213,20 @@ export class SandboxDockerHost implements ContainerHost {
   /** `wait()` asked again a bounded number of times: a broken log stream is not the end of the container. */
   async #wait(
     worker: { wait(signal?: AbortSignal): Promise<{ exitCode: number }> },
-    pending: AbortSignal,
+    watch: AbortSignal,
   ): Promise<{ exitCode: number }> {
     for (let attempt = 1; ; attempt += 1) {
       try {
-        return await worker.wait();
+        return await worker.wait(watch);
       } catch (error) {
-        // An abort before the hand-over is the launch's own end, not a failed wait.
-        if (!this.#settled && (pending.aborted || isAbort(error))) throw error;
+        // An abort is the end of the watch (the launch's own end, or the hand-over), not a failed wait.
+        if (watch.aborted || isAbort(error)) throw error;
         if (attempt >= WAIT_ATTEMPTS) throw new WorkerWaitError(attempt);
         await this.#options.clock.sleep(
           WAIT_RETRY_DELAYS_MS[attempt - 1] ?? 5_000,
-          this.#settled ? undefined : pending,
+          watch,
         );
-        if (!this.#settled && pending.aborted) throw error;
+        if (watch.aborted) throw error;
       }
     }
   }

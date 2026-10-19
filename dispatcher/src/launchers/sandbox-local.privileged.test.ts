@@ -113,10 +113,7 @@ function build(bin: string) {
   return { core, launcher, logger };
 }
 
-async function runJob(
-  core: ReturnType<typeof build>["core"],
-  launcher: ReturnType<typeof build>["launcher"],
-): Promise<string> {
+async function runJob(core: ReturnType<typeof build>["core"]): Promise<string> {
   const jobId = app.enqueue({ reviewKind: "diff" });
   const handled = await core.handle({ jobId, reviewKind: "diff" });
   expect(handled.outcome).toBe("started");
@@ -126,7 +123,8 @@ async function runJob(
     "the Worker's result",
     WORKER_RESULT_TIMEOUT_MS,
   );
-  await launcher.idle();
+  // Nothing in the Launcher ends the VM after the hand-over (#487): the App's stop call does, here the test.
+  await service?.stopAll();
   return jobId;
 }
 
@@ -134,9 +132,9 @@ describe("the Sandbox-Launcher in local mode with a real Docker daemon", () => {
   // #329-T09
   it("runs the Worker container with the rendered flags and the Worker delivers a result to the fake App", async () => {
     const { bin, log } = await loggingDocker();
-    const { core, launcher, logger } = build(bin);
+    const { core, logger } = build(bin);
 
-    const jobId = await runJob(core, launcher);
+    const jobId = await runJob(core);
 
     const used = await readFile(log, "utf8");
     for (const flag of [
@@ -157,16 +155,16 @@ describe("the Sandbox-Launcher in local mode with a real Docker daemon", () => {
   // #329-T10
   it("leaves nothing of job A for job B: no container, no VM directory", async () => {
     const { bin } = await loggingDocker();
-    const { core, launcher } = build(bin);
+    const { core } = build(bin);
 
-    const jobA = await runJob(core, launcher);
+    const jobA = await runJob(core);
     const directoryA = [...(service?.directories.values() ?? [])][0] ?? "";
     expect(
       docker("ps", "--all", "--quiet", "--filter", `name=${jobA}`).trim(),
     ).toBe("");
     expect(existsSync(directoryA)).toBe(false);
 
-    const jobB = await runJob(core, launcher);
+    const jobB = await runJob(core);
     expect(jobB).not.toBe(jobA);
     expect(
       docker(

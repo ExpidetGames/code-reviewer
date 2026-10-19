@@ -10,8 +10,9 @@
 //   2. vm-prepare.sh as root (cgroup fix, dockerd), then the image in the VM must be the configured id
 //   3. `docker run --interactive` with the rendered flags; the start document goes through stdin only
 //   4. resolve once the Worker has taken over (sandbox-host.ts); the core heartbeats until then
-//   5. when the container ends, stop the VM by name. If nothing does, the VM timeout ends it. An end with a non-zero
-//      exit code is also told to the core (`spec.onWorkerExit`), which gives the job back at once (#375).
+// After the hand-over the Launcher holds nothing (#487): no wait for the container, no supervision in `waitUntil`, no
+// stop. The Worker owns the lease; the App tells the Dispatcher when the job's claim ends (`POST /stop`), and the
+// reaper and the VM timeout are the safety nets.
 // Every failure before the hand-over stops the VM by name and ends in a `LaunchError` with a stable code. A VM is
 // never reused. The port to the platform is sandbox-service.ts; `vercel-sandbox.ts` is the one file that knows
 // the SDK.
@@ -36,7 +37,7 @@ import {
   SANDBOX_LAUNCHER_ADDITIONS,
   WORKER_CONTAINER_SPEC,
 } from "./container-spec.ts";
-import { SandboxDockerHost, WorkerWaitError } from "./sandbox-host.ts";
+import { SandboxDockerHost } from "./sandbox-host.ts";
 import {
   SandboxServiceError,
   type SandboxFailureKind,
@@ -102,8 +103,6 @@ export type SandboxLauncherOptions = {
   imageDigest: string;
   logger: Logger;
   clock?: Clock;
-  /** Hands the supervision after the hand-over to the platform (`waitUntil`) so it is not cut off. */
-  background?: (work: Promise<unknown>) => void;
   imageReference?: string;
   handoverSeconds?: number;
   /** Seconds added to the job's timeout for the VM's own; at least `minimumVmTimeoutMargin(handoverSeconds)`. */
@@ -122,11 +121,6 @@ export type SandboxLauncherOptions = {
    * them. Non-secret; names of the container spec's allow-list.
    */
   dynamicEnvironment?: Readonly<Record<string, string>>;
-};
-
-export type SandboxLauncher = Launcher & {
-  /** Resolves when the supervision of every hand-over so far is over (the VMs it watched are stopped). */
-  idle(): Promise<void>;
 };
 
 export type Plan = {
@@ -261,7 +255,7 @@ function isAbort(error: unknown): boolean {
 
 export function createSandboxLauncher(
   options: SandboxLauncherOptions,
-): SandboxLauncher {
+): Launcher {
   const { service, logger } = options;
   const clock = options.clock ?? systemClock;
   const handoverSeconds = options.handoverSeconds ?? SANDBOX_HANDOVER_SECONDS;
@@ -271,7 +265,6 @@ export function createSandboxLauncher(
     throw new Error(
       `vmTimeoutMarginSeconds must be at least ${minimumVmTimeoutMargin(handoverSeconds)}`,
     );
-  const supervised = new Set<Promise<void>>();
 
   async function stopQuietly(name: string, jobId: string): Promise<void> {
     try {
@@ -317,52 +310,6 @@ export function createSandboxLauncher(
         retryable: known?.retryable ?? false,
       });
     }
-  }
-
-  /** Tells the core that the Worker ended with an error. Never rejects: what the core does is its own logging. */
-  async function notifyExit(
-    jobId: string,
-    onWorkerExit: LaunchSpec["onWorkerExit"],
-    exitCode: number,
-  ): Promise<void> {
-    if (exitCode === 0 || onWorkerExit === undefined) return;
-    try {
-      await onWorkerExit(exitCode);
-    } catch {
-      // The core never rejects; a Launcher must not depend on that, and the lease ends the job anyway.
-      logger.warn("worker_exit_report_failed", { jobId });
-    }
-  }
-
-  /** Supervision keeps the job id and the core's callback, not the spec: the credential stays the core's. */
-  function supervise(
-    name: string,
-    jobId: string,
-    onWorkerExit: LaunchSpec["onWorkerExit"],
-    running: Promise<{ exitCode: number }>,
-  ): void {
-    const work = running.then(
-      async (result) => {
-        logger.info("worker_exited", { jobId, exitCode: result.exitCode });
-        // Only a confirmed exit stops the VM, and the VM does not wait for the App: both at once.
-        await Promise.all([
-          stopQuietly(name, jobId),
-          notifyExit(jobId, onWorkerExit, result.exitCode),
-        ]);
-      },
-      (error: unknown) => {
-        // The container's fate is unknown (the log stream or the network broke): it may be reviewing. The VM is
-        // left to its timeout, the backstop, rather than killed under a healthy Worker.
-        logger.warn("worker_wait_failed", {
-          jobId,
-          sandbox: name,
-          attempts: error instanceof WorkerWaitError ? error.attempts : 0,
-        });
-      },
-    );
-    supervised.add(work);
-    void work.finally(() => supervised.delete(work));
-    options.background?.(work);
   }
 
   /** Every failure before the hand-over: stop the VM by name and end in a `LaunchError` with a stable code. */
@@ -439,17 +386,12 @@ export function createSandboxLauncher(
         );
         running.catch((error: unknown) => host.fail(error));
         await host.handover;
-        supervise(name, spec.jobId, spec.onWorkerExit, running);
       } catch (error) {
         throw await failLaunch(name, spec, signal, error, {
           code: "worker_start_failed",
           retryable: true,
         });
       }
-    },
-
-    async idle() {
-      while (supervised.size > 0) await Promise.all([...supervised]);
     },
   };
 }
