@@ -61,9 +61,13 @@ export function startModelsDevRefreshOnStart({
   if (env.NODE_ENV !== "production") return null;
   const settings = loadModelsDevSettings(env);
   for (const warning of settings.warnings)
-    console.warn(`[models-dev] ${warning}: MODELS_DEV_URL is not an http or https address without credentials; the default is used.`);
+    console.warn(
+      `[models-dev] ${warning}: MODELS_DEV_URL is not an http or https address without credentials; the default is used.`,
+    );
   if (!settings.enabled) {
-    console.info("[models-dev] MODELS_DEV_FETCH is off: the catalog is not fetched.");
+    console.info(
+      "[models-dev] MODELS_DEV_FETCH is off: the catalog is not fetched.",
+    );
     return null;
   }
   return startModelsDevRefresh(options);

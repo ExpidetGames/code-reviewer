@@ -183,8 +183,12 @@ cause) and does not stop the others; the answer is then `500` with `failedSteps`
    rows of jobs that finished a week ago**) runs **once when the hour has changed**. The hour of the last
    successful run is kept in `app_meta` (`maintenance.sweep_cleanup_hour`), so every instance sees the same one; a run
    that failed is tried again by the next run. On a server (Docker, Coolify) the timer stays as it was.
+7. **`models_dev`** (#548): the daily read of the models.dev catalog (`src/models-dev/README.md`) when the last success is more
+   than 23 hours old and the last failure more than an hour old; it is last so that a slow answer from the internet never
+   delays the steps above. A fetch that fails records its own failure (`models_dev_fetch_state`) and keeps the rows it has;
+   that is not a failed step. Nothing happens with `MODELS_DEV_FETCH=off`.
 
-The answer is `{"status":"ok","expired":{...},"givenUp":n,"revived":n,"sent":n,"noticesTried":n,"cleanedUp":bool}`; a line
+The answer is `{"status":"ok","expired":{...},"givenUp":n,"revived":n,"sent":n,"noticesTried":n,"cleanedUp":bool,"modelsDev":"applied"|"skipped"|"failed"|null}`; a line
 `[sweep] requeued=.. lease_expired=.. timed_out=.. given_up=.. revived=.. sent=..` is logged for a run that did
 something. Nothing a database or a Dispatcher said reaches a log or an answer.
 

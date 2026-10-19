@@ -11,7 +11,10 @@
 // (src/models-dev/startup.ts) both call `refreshIfDue`; an admin's "fetch now" (#554) calls `refresh`.
 import "server-only";
 import type { Kysely } from "kysely";
-import { createModelsDevRepository, type ModelsDevRepository } from "../db/repositories/models-dev-repository.ts";
+import {
+  createModelsDevRepository,
+  type ModelsDevRepository,
+} from "../db/repositories/models-dev-repository.ts";
 import type { Database } from "../db/schema.ts";
 import { MODELS_DEV_LOCK, tryWithLock } from "../db/try-lock.ts";
 import type { FetchSummary } from "./catalog.ts";
@@ -20,11 +23,13 @@ import { fetchModelsDev, type FetchLike } from "./fetch.ts";
 import { supportedProvider } from "./opencode-providers.ts";
 import { parseModelsDev, type ReducedProvider } from "./parse.ts";
 import { planCatalog } from "./plan.ts";
+import { loadModelsDevSettings, type ModelsDevSettings } from "./settings.ts";
 import {
-  loadModelsDevSettings,
-  type ModelsDevSettings,
-} from "./settings.ts";
-import { checkUpstreamUrl, dnsResolver, type HostResolver, type UrlCheck } from "./upstream-url.ts";
+  checkUpstreamUrl,
+  dnsResolver,
+  type HostResolver,
+  type UrlCheck,
+} from "./upstream-url.ts";
 
 const HOUR_MS = 60 * 60 * 1000;
 /** A successful fetch is due again after this long: a tick every two hours then comes about once a day. */
@@ -75,11 +80,15 @@ async function mapLimited<T, R>(
     for (let index = next++; index < items.length; index = next++)
       results[index] = await work(items[index] as T);
   };
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, worker),
+  );
   return results;
 }
 
-export function createModelsDevService(deps: ModelsDevServiceDependencies): ModelsDevService {
+export function createModelsDevService(
+  deps: ModelsDevServiceDependencies,
+): ModelsDevService {
   const repository = deps.repository ?? createModelsDevRepository(deps.db);
   const settings = deps.settings ?? (() => loadModelsDevSettings(process.env));
   const resolveHost = deps.resolveHost ?? dnsResolver;
@@ -87,24 +96,38 @@ export function createModelsDevService(deps: ModelsDevServiceDependencies): Mode
   const log = deps.log ?? console;
 
   async function urlChecksOf(providers: readonly ReducedProvider[]) {
-    const checked = await mapLimited(providers, LOOKUP_CONCURRENCY, async (provider) => {
-      // The address models.dev states, else the default of the provider's SDK that the supported file records.
-      const candidate = provider.api ?? supportedProvider(provider.id)?.defaultBaseUrl ?? null;
-      const check: UrlCheck = provider.apiTooLong
-        ? { ok: false, problem: "too_long", seen: candidate }
-        : await checkUpstreamUrl(candidate, resolveHost);
-      return [provider.id, check] as const;
-    });
+    const checked = await mapLimited(
+      providers,
+      LOOKUP_CONCURRENCY,
+      async (provider) => {
+        // The address models.dev states, else the default of the provider's SDK that the supported file records.
+        const candidate =
+          provider.api ??
+          supportedProvider(provider.id)?.defaultBaseUrl ??
+          null;
+        const check: UrlCheck = provider.apiTooLong
+          ? { ok: false, problem: "too_long", seen: candidate }
+          : await checkUpstreamUrl(candidate, resolveHost);
+        return [provider.id, check] as const;
+      },
+    );
     return new Map(checked);
   }
 
-  async function fail(code: ModelsDevFetchErrorCode, detail = ""): Promise<RefreshOutcome> {
+  async function fail(
+    code: ModelsDevFetchErrorCode,
+    detail = "",
+  ): Promise<RefreshOutcome> {
     try {
       await repository.recordFailure(code, now());
     } catch {
-      log.error("[models-dev] MODELS_DEV_STATE_NOT_RECORDED: the failure could not be written.");
+      log.error(
+        "[models-dev] MODELS_DEV_STATE_NOT_RECORDED: the failure could not be written.",
+      );
     }
-    log.error(`[models-dev] MODELS_DEV_FETCH_FAILED code=${code}${detail === "" ? "" : ` ${detail}`}; the catalog is unchanged.`);
+    log.error(
+      `[models-dev] MODELS_DEV_FETCH_FAILED code=${code}${detail === "" ? "" : ` ${detail}`}; the catalog is unchanged.`,
+    );
     return { status: "failed", code };
   }
 
@@ -141,15 +164,25 @@ export function createModelsDevService(deps: ModelsDevServiceDependencies): Mode
     return { status: "applied", summary: plan.summary };
   }
 
-  async function run(options: RefreshOptions, onlyIfDue: boolean): Promise<RefreshOutcome> {
+  async function run(
+    options: RefreshOptions,
+    onlyIfDue: boolean,
+  ): Promise<RefreshOutcome> {
     if (!settings().enabled) return { status: "skipped", reason: "fetch_off" };
     try {
-      const locked = await tryWithLock(deps.db, MODELS_DEV_LOCK, async (): Promise<RefreshOutcome> => {
-        // Looked at again under the lock: another instance may have fetched while this one waited for its turn.
-        if (onlyIfDue && !(await isDue())) return { status: "skipped", reason: "not_due" };
-        return work(options);
-      });
-      return locked.acquired ? locked.value : { status: "skipped", reason: "already_running" };
+      const locked = await tryWithLock(
+        deps.db,
+        MODELS_DEV_LOCK,
+        async (): Promise<RefreshOutcome> => {
+          // Looked at again under the lock: another instance may have fetched while this one waited for its turn.
+          if (onlyIfDue && !(await isDue()))
+            return { status: "skipped", reason: "not_due" };
+          return work(options);
+        },
+      );
+      return locked.acquired
+        ? locked.value
+        : { status: "skipped", reason: "already_running" };
     } catch {
       return fail("models_dev_internal");
     }
@@ -159,11 +192,19 @@ export function createModelsDevService(deps: ModelsDevServiceDependencies): Mode
     const state = await repository.fetchState();
     if (state === undefined || state.lastSuccessAt === null) {
       // Never succeeded: a failure is retried after an hour, a first run is due at once.
-      return state?.lastAttemptAt == null || now().getTime() - Date.parse(state.lastAttemptAt) >= RETRY_AFTER_FAILURE_MS;
+      return (
+        state?.lastAttemptAt == null ||
+        now().getTime() - Date.parse(state.lastAttemptAt) >=
+          RETRY_AFTER_FAILURE_MS
+      );
     }
     const current = now().getTime();
-    if (current - Date.parse(state.lastSuccessAt) < FETCH_INTERVAL_MS) return false;
-    return state.lastAttemptAt === null || current - Date.parse(state.lastAttemptAt) >= RETRY_AFTER_FAILURE_MS;
+    if (current - Date.parse(state.lastSuccessAt) < FETCH_INTERVAL_MS)
+      return false;
+    return (
+      state.lastAttemptAt === null ||
+      current - Date.parse(state.lastAttemptAt) >= RETRY_AFTER_FAILURE_MS
+    );
   }
 
   return {

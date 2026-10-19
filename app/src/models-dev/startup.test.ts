@@ -26,7 +26,8 @@ function fixture(refresh: () => Promise<RefreshOutcome>) {
     stopped,
   };
 }
-const skipped = (): Promise<RefreshOutcome> => Promise.resolve({ status: "skipped", reason: "not_due" });
+const skipped = (): Promise<RefreshOutcome> =>
+  Promise.resolve({ status: "skipped", reason: "not_due" });
 
 describe("the models.dev fetch of a long-lived server", () => {
   // #548-T03
@@ -34,11 +35,18 @@ describe("the models.dev fetch of a long-lived server", () => {
     const f = fixture(skipped);
 
     startModelsDevRefresh(f);
-    await vi.waitFor(() => expect(f.service.refreshIfDue).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() =>
+      expect(f.service.refreshIfDue).toHaveBeenCalledTimes(1),
+    );
     f.tick();
-    await vi.waitFor(() => expect(f.service.refreshIfDue).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() =>
+      expect(f.service.refreshIfDue).toHaveBeenCalledTimes(2),
+    );
 
-    expect(f.setTimer).toHaveBeenCalledWith(expect.any(Function), MODELS_DEV_TICK_MS);
+    expect(f.setTimer).toHaveBeenCalledWith(
+      expect.any(Function),
+      MODELS_DEV_TICK_MS,
+    );
     expect(MODELS_DEV_TICK_MS).toBe(60 * 60 * 1000);
   });
 
@@ -53,27 +61,37 @@ describe("the models.dev fetch of a long-lived server", () => {
     );
 
     startModelsDevRefresh(f);
-    await vi.waitFor(() => expect(f.service.refreshIfDue).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() =>
+      expect(f.service.refreshIfDue).toHaveBeenCalledTimes(1),
+    );
     f.tick();
     f.tick();
     expect(f.service.refreshIfDue).toHaveBeenCalledTimes(1);
     finish();
     await vi.waitFor(() => undefined);
     f.tick();
-    await vi.waitFor(() => expect(f.service.refreshIfDue).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() =>
+      expect(f.service.refreshIfDue).toHaveBeenCalledTimes(2),
+    );
   });
 
   // #548-T04
   it("logs a run that threw by a code, tries again at the next tick and never stops", async () => {
-    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const f = fixture(() => Promise.reject(new Error("postgres://u:hunter2@db/app")));
+    const error = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    const f = fixture(() =>
+      Promise.reject(new Error("postgres://u:hunter2@db/app")),
+    );
 
     startModelsDevRefresh(f);
     await vi.waitFor(() => expect(error).toHaveBeenCalledTimes(1));
     f.tick();
     await vi.waitFor(() => expect(error).toHaveBeenCalledTimes(2));
 
-    expect(String(error.mock.calls[0]?.[0])).toContain("MODELS_DEV_REFRESH_FAILED");
+    expect(String(error.mock.calls[0]?.[0])).toContain(
+      "MODELS_DEV_REFRESH_FAILED",
+    );
     expect(JSON.stringify(error.mock.calls)).not.toContain("hunter2");
   });
 
@@ -89,10 +107,16 @@ describe("the models.dev fetch of a long-lived server", () => {
   it("runs in production only", () => {
     const f = fixture(skipped);
 
-    expect(startModelsDevRefreshOnStart({ env: { NODE_ENV: "development" }, ...f })).toBeNull();
-    expect(startModelsDevRefreshOnStart({ env: { NODE_ENV: "test" }, ...f })).toBeNull();
+    expect(
+      startModelsDevRefreshOnStart({ env: { NODE_ENV: "development" }, ...f }),
+    ).toBeNull();
+    expect(
+      startModelsDevRefreshOnStart({ env: { NODE_ENV: "test" }, ...f }),
+    ).toBeNull();
     expect(f.setTimer).not.toHaveBeenCalled();
-    expect(startModelsDevRefreshOnStart({ env: { NODE_ENV: "production" }, ...f })).not.toBeNull();
+    expect(
+      startModelsDevRefreshOnStart({ env: { NODE_ENV: "production" }, ...f }),
+    ).not.toBeNull();
     expect(f.setTimer).toHaveBeenCalledOnce();
   });
 

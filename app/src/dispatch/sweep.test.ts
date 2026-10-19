@@ -217,7 +217,10 @@ describe("the daily models.dev fetch in a run of the sweep (#548)", () => {
   // #548-T04
   it("does not count a fetch that failed as a failed sweep: the fetch records its own failure", async () => {
     const t = setup();
-    t.refreshIfDue.mockResolvedValueOnce({ status: "failed", code: "models_dev_http_status" });
+    t.refreshIfDue.mockResolvedValueOnce({
+      status: "failed",
+      code: "models_dev_http_status",
+    });
 
     const report = await t.sweep.run();
 
@@ -235,7 +238,9 @@ describe("the daily models.dev fetch in a run of the sweep (#548)", () => {
   // #548-T04
   it("names a fetch that threw, without what it said, and has done the other steps before", async () => {
     const t = setup();
-    t.refreshIfDue.mockRejectedValueOnce(new Error("postgres://u:hunter2@db/app"));
+    t.refreshIfDue.mockRejectedValueOnce(
+      new Error("postgres://u:hunter2@db/app"),
+    );
 
     const report = await t.sweep.run();
 
@@ -247,7 +252,11 @@ describe("the daily models.dev fetch in a run of the sweep (#548)", () => {
   it("works without a fetch, as a sweep that was made before the catalog", async () => {
     const t = setup();
     const bare = createDispatchSweep({
-      queue: { expireStaleJobs: t.expireStaleJobs, failUndispatched: t.failUndispatched, countRunning: t.countRunning },
+      queue: {
+        expireStaleJobs: t.expireStaleJobs,
+        failUndispatched: t.failUndispatched,
+        countRunning: t.countRunning,
+      },
       dispatches: { reviveStopped: t.reviveStopped },
       meta: { get: t.get, set: t.set },
       cleanup: t.cleanup,

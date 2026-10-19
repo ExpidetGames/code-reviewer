@@ -47,7 +47,10 @@ const modelSchema = z.strictObject({
     output: z.array(z.enum(MODALITIES)),
   }),
   interleaved: z
-    .union([z.literal(true), z.strictObject({ field: z.string().regex(/^[a-z][a-z_]{0,39}$/) })])
+    .union([
+      z.literal(true),
+      z.strictObject({ field: z.string().regex(/^[a-z][a-z_]{0,39}$/) }),
+    ])
     .optional(),
 });
 
@@ -57,7 +60,10 @@ const entrySchema = z.strictObject({
   npm: z.string().min(1).max(100),
   family: z.enum(WIRE_FAMILIES),
   authHeader: z.enum(AUTH_HEADERS),
-  upstreamBaseUrl: z.string().max(2048).regex(/^https:\/\/[^\s?#@]+$/),
+  upstreamBaseUrl: z
+    .string()
+    .max(2048)
+    .regex(/^https:\/\/[^\s?#@]+$/),
   modelId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:/+@-]{0,199}$/),
   model: modelSchema,
 });
@@ -65,16 +71,22 @@ const entrySchema = z.strictObject({
 export type JobModelEntry = z.infer<typeof entrySchema>;
 
 export type JobEntryResult =
-  | { ok: true; entry: JobModelEntry }
-  | { ok: false; code: JobEntryRefusalCode };
+  { ok: true; entry: JobModelEntry } | { ok: false; code: JobEntryRefusalCode };
 
-const refuse = (code: JobEntryRefusalCode): JobEntryResult => ({ ok: false, code });
+const refuse = (code: JobEntryRefusalCode): JobEntryResult => ({
+  ok: false,
+  code,
+});
 
-export function buildJobModelEntry(provider: StoredProvider, model: StoredModel): JobEntryResult {
+export function buildJobModelEntry(
+  provider: StoredProvider,
+  model: StoredModel,
+): JobEntryResult {
   if (model.providerId !== provider.id) return refuse("model_not_of_provider");
   const supported = supportedProvider(provider.id);
   if (supported === undefined) return refuse("provider_unsupported");
-  if (!isUsable(provider.url) || provider.url.trustedUrl === null) return refuse("provider_url_blocked");
+  if (!isUsable(provider.url) || provider.url.trustedUrl === null)
+    return refuse("provider_url_blocked");
   const parsed = entrySchema.safeParse({
     version: 1,
     providerId: provider.id,
@@ -94,11 +106,15 @@ export function buildJobModelEntry(provider: StoredProvider, model: StoredModel)
       limit: {
         context: model.limit.context,
         output: model.limit.output,
-        ...(model.limit.input === undefined ? {} : { input: model.limit.input }),
+        ...(model.limit.input === undefined
+          ? {}
+          : { input: model.limit.input }),
       },
       modalities: model.modalities,
       ...(model.interleaved === null ? {} : { interleaved: model.interleaved }),
     },
   });
-  return parsed.success ? { ok: true, entry: parsed.data } : refuse("entry_invalid");
+  return parsed.success
+    ? { ok: true, entry: parsed.data }
+    : refuse("entry_invalid");
 }

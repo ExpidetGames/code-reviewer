@@ -170,7 +170,8 @@ function modelRow(model: StoredModel): ModelRow {
     upstream_status: model.status,
     cost: model.cost === null ? null : encodeJson(model.cost),
     upstream_updated: model.lastUpdated,
-    interleaved: model.interleaved === null ? null : encodeJson(model.interleaved),
+    interleaved:
+      model.interleaved === null ? null : encodeJson(model.interleaved),
     first_seen_at: model.firstSeenAt,
     unlisted_at: model.unlistedAt,
     updated_at: model.updatedAt,
@@ -307,23 +308,25 @@ export function createModelsDevRepository(
             .insertInto("models_dev_models")
             .values(batch)
             .onConflict((conflict) =>
-              conflict.columns(["provider_id", "model_id"]).doUpdateSet((eb) => ({
-                name: eb.ref("excluded.name"),
-                family: eb.ref("excluded.family"),
-                context_limit: eb.ref("excluded.context_limit"),
-                output_limit: eb.ref("excluded.output_limit"),
-                input_limit: eb.ref("excluded.input_limit"),
-                reasoning: eb.ref("excluded.reasoning"),
-                temperature: eb.ref("excluded.temperature"),
-                attachment: eb.ref("excluded.attachment"),
-                modalities: eb.ref("excluded.modalities"),
-                upstream_status: eb.ref("excluded.upstream_status"),
-                cost: eb.ref("excluded.cost"),
-                upstream_updated: eb.ref("excluded.upstream_updated"),
-                interleaved: eb.ref("excluded.interleaved"),
-                unlisted_at: eb.ref("excluded.unlisted_at"),
-                updated_at: eb.ref("excluded.updated_at"),
-              })),
+              conflict
+                .columns(["provider_id", "model_id"])
+                .doUpdateSet((eb) => ({
+                  name: eb.ref("excluded.name"),
+                  family: eb.ref("excluded.family"),
+                  context_limit: eb.ref("excluded.context_limit"),
+                  output_limit: eb.ref("excluded.output_limit"),
+                  input_limit: eb.ref("excluded.input_limit"),
+                  reasoning: eb.ref("excluded.reasoning"),
+                  temperature: eb.ref("excluded.temperature"),
+                  attachment: eb.ref("excluded.attachment"),
+                  modalities: eb.ref("excluded.modalities"),
+                  upstream_status: eb.ref("excluded.upstream_status"),
+                  cost: eb.ref("excluded.cost"),
+                  upstream_updated: eb.ref("excluded.upstream_updated"),
+                  interleaved: eb.ref("excluded.interleaved"),
+                  unlisted_at: eb.ref("excluded.unlisted_at"),
+                  updated_at: eb.ref("excluded.updated_at"),
+                })),
             )
             .execute();
         if (done !== undefined) await success(trx, done.summary, done.at);

@@ -5,7 +5,12 @@
 // its last known data; one that returns clears it. Only rows that are new or changed are in the plan, so an unchanged
 // day writes nothing. The guard says whether the plan would unlist an implausibly large share of what is listed; the
 // service then refuses to apply it (the old state stays).
-import type { CatalogWrite, FetchSummary, StoredModel, StoredProvider } from "./catalog.ts";
+import type {
+  CatalogWrite,
+  FetchSummary,
+  StoredModel,
+  StoredProvider,
+} from "./catalog.ts";
 import type { ParsedModelsDev, ReducedModel } from "./parse.ts";
 import { nextUrlState, type UrlCheck } from "./upstream-url.ts";
 
@@ -22,7 +27,10 @@ export type CatalogPlan = {
 
 type Input = {
   parsed: ParsedModelsDev;
-  stored: { providers: readonly StoredProvider[]; models: readonly StoredModel[] };
+  stored: {
+    providers: readonly StoredProvider[];
+    models: readonly StoredModel[];
+  };
   /** The verdict on the address of each provider in `parsed`, by provider id. */
   urlChecks: ReadonlyMap<string, UrlCheck>;
   now: Date;
@@ -61,7 +69,9 @@ const key = (providerId: string, id: string) => `${providerId}\u0000${id}`;
 
 function planProviders(input: Input, stamp: string) {
   const { parsed, stored, urlChecks } = input;
-  const before = new Map(stored.providers.map((provider) => [provider.id, provider]));
+  const before = new Map(
+    stored.providers.map((provider) => [provider.id, provider]),
+  );
   const writes: StoredProvider[] = [];
   let blocked = 0;
   let rejected = 0;
@@ -70,16 +80,27 @@ function planProviders(input: Input, stamp: string) {
   for (const provider of parsed.providers) {
     seen.add(provider.id);
     const previous = before.get(provider.id);
-    const check = urlChecks.get(provider.id) ?? { ok: false as const, problem: "missing" as const, seen: null };
+    const check = urlChecks.get(provider.id) ?? {
+      ok: false as const,
+      problem: "missing" as const,
+      seen: null,
+    };
     const url = nextUrlState(previous?.url, check);
     if (url.state === "url_changed") blocked += 1;
     if (url.state === "rejected") rejected += 1;
-    const sameBlock = previous?.url.state === "url_changed" && previous.url.pendingUrl === url.pendingUrl;
+    const sameBlock =
+      previous?.url.state === "url_changed" &&
+      previous.url.pendingUrl === url.pendingUrl;
     const next: StoredProvider = {
       id: provider.id,
       name: provider.name,
       url,
-      urlChangedAt: url.state !== "url_changed" ? null : sameBlock ? previous.urlChangedAt : stamp,
+      urlChangedAt:
+        url.state !== "url_changed"
+          ? null
+          : sameBlock
+            ? previous.urlChangedAt
+            : stamp,
       firstSeenAt: previous?.firstSeenAt ?? stamp,
       unlistedAt: null,
       updatedAt: stamp,
@@ -87,7 +108,8 @@ function planProviders(input: Input, stamp: string) {
     if (previous === undefined) added += 1;
     const same =
       previous !== undefined &&
-      canonical({ ...previous, updatedAt: null }) === canonical({ ...next, updatedAt: null });
+      canonical({ ...previous, updatedAt: null }) ===
+        canonical({ ...next, updatedAt: null });
     if (!same) writes.push(next);
   }
   let unlisted = 0;
@@ -103,7 +125,9 @@ function planProviders(input: Input, stamp: string) {
 
 function planModels(input: Input, stamp: string) {
   const { parsed, stored } = input;
-  const before = new Map(stored.models.map((model) => [key(model.providerId, model.id), model]));
+  const before = new Map(
+    stored.models.map((model) => [key(model.providerId, model.id), model]),
+  );
   const writes: StoredModel[] = [];
   let added = 0;
   let changed = 0;
@@ -115,20 +139,34 @@ function planModels(input: Input, stamp: string) {
     const previous = before.get(id);
     if (previous === undefined) {
       added += 1;
-      writes.push({ ...model, firstSeenAt: stamp, unlistedAt: null, updatedAt: stamp });
+      writes.push({
+        ...model,
+        firstSeenAt: stamp,
+        unlistedAt: null,
+        updatedAt: stamp,
+      });
       continue;
     }
     const sameContent = contentOf(previous) === contentOf(model);
     if (sameContent && previous.unlistedAt === null) continue;
     if (previous.unlistedAt !== null) returned += 1;
     else changed += 1;
-    writes.push({ ...model, firstSeenAt: previous.firstSeenAt, unlistedAt: null, updatedAt: stamp });
+    writes.push({
+      ...model,
+      firstSeenAt: previous.firstSeenAt,
+      unlistedAt: null,
+      updatedAt: stamp,
+    });
   }
   let unlisted = 0;
   let listedBefore = 0;
   for (const previous of stored.models) {
     if (previous.unlistedAt === null) listedBefore += 1;
-    if (seen.has(key(previous.providerId, previous.id)) || previous.unlistedAt !== null) continue;
+    if (
+      seen.has(key(previous.providerId, previous.id)) ||
+      previous.unlistedAt !== null
+    )
+      continue;
     unlisted += 1;
     writes.push({ ...previous, unlistedAt: stamp, updatedAt: stamp });
   }
@@ -139,14 +177,16 @@ export function planCatalog(input: Input): CatalogPlan {
   const stamp = input.now.toISOString();
   const providers = planProviders(input, stamp);
   const models = planModels(input, stamp);
-  const share = (unlisted: number, listed: number) => (listed === 0 ? 0 : unlisted / listed);
+  const share = (unlisted: number, listed: number) =>
+    listed === 0 ? 0 : unlisted / listed;
   const { skipped } = input.parsed;
   return {
     write: { providers: providers.writes, models: models.writes },
     guard: {
       tripped:
         share(models.unlisted, models.listedBefore) > UNLISTED_SHARE_LIMIT ||
-        share(providers.unlisted, providers.listedBefore) > UNLISTED_SHARE_LIMIT,
+        share(providers.unlisted, providers.listedBefore) >
+          UNLISTED_SHARE_LIMIT,
       unlisted: models.unlisted,
       listed: models.listedBefore,
     },

@@ -50,151 +50,194 @@ function model(overrides: Partial<StoredModel> = {}): StoredModel {
   };
 }
 
-describe.each(MODELS_DEV_ENGINES)("the models.dev catalog on $name", (engine) => {
-  const it_ = engine.skip ? it.skip : it;
+describe.each(MODELS_DEV_ENGINES)(
+  "the models.dev catalog on $name",
+  (engine) => {
+    const it_ = engine.skip ? it.skip : it;
 
-  async function setup() {
-    const { db } = await engine.create();
-    return { db, repository: createModelsDevRepository(db) };
-  }
+    async function setup() {
+      const { db } = await engine.create();
+      return { db, repository: createModelsDevRepository(db) };
+    }
 
-  // #548-T03
-  it_("gives back exactly what it was given, prices, modalities and optional fields included", async () => {
-    const { repository } = await setup();
-    const withTiers = model({
-      id: "tiered",
-      status: "deprecated",
-      limit: { context: 200000, output: 8192, input: 190000 },
-      cost: {
-        input: "1",
-        output: "5",
-        tiers: [{ contextOver: 100000, input: "2", output: "10" }],
+    // #548-T03
+    it_(
+      "gives back exactly what it was given, prices, modalities and optional fields included",
+      async () => {
+        const { repository } = await setup();
+        const withTiers = model({
+          id: "tiered",
+          status: "deprecated",
+          limit: { context: 200000, output: 8192, input: 190000 },
+          cost: {
+            input: "1",
+            output: "5",
+            tiers: [{ contextOver: 100000, input: "2", output: "10" }],
+          },
+          interleaved: true,
+          family: null,
+          lastUpdated: null,
+        });
+        const unpriced = model({
+          id: "unpriced",
+          cost: null,
+          interleaved: null,
+        });
+
+        await repository.apply({
+          providers: [provider()],
+          models: [model(), withTiers, unpriced],
+        });
+
+        expect(await repository.listProviders()).toEqual([provider()]);
+        expect((await repository.listModels()).map((m) => m.id).sort()).toEqual(
+          ["deepseek-v4-pro", "tiered", "unpriced"],
+        );
+        expect(await repository.getModel("deepseek", "tiered")).toEqual(
+          withTiers,
+        );
+        expect(await repository.getModel("deepseek", "unpriced")).toEqual(
+          unpriced,
+        );
+        expect(await repository.getModel("deepseek", "nobody")).toBeUndefined();
+        expect(await repository.getProvider("nobody")).toBeUndefined();
       },
-      interleaved: true,
-      family: null,
-      lastUpdated: null,
-    });
-    const unpriced = model({ id: "unpriced", cost: null, interleaved: null });
+    );
 
-    await repository.apply({
-      providers: [provider()],
-      models: [model(), withTiers, unpriced],
-    });
+    // #548-T03
+    it_(
+      "updates a row on a second write and keeps the day it was first seen",
+      async () => {
+        const { repository } = await setup();
+        await repository.apply({ providers: [provider()], models: [model()] });
 
-    expect(await repository.listProviders()).toEqual([provider()]);
-    expect((await repository.listModels()).map((m) => m.id).sort()).toEqual([
-      "deepseek-v4-pro",
-      "tiered",
-      "unpriced",
-    ]);
-    expect(await repository.getModel("deepseek", "tiered")).toEqual(withTiers);
-    expect(await repository.getModel("deepseek", "unpriced")).toEqual(unpriced);
-    expect(await repository.getModel("deepseek", "nobody")).toBeUndefined();
-    expect(await repository.getProvider("nobody")).toBeUndefined();
-  });
+        await repository.apply({
+          providers: [
+            provider({ name: "DeepSeek AI", updatedAt: T2.toISOString() }),
+          ],
+          models: [
+            model({
+              cost: { input: "0.5", output: "1.1" },
+              firstSeenAt: T2.toISOString(),
+              updatedAt: T2.toISOString(),
+            }),
+          ],
+        });
 
-  // #548-T03
-  it_("updates a row on a second write and keeps the day it was first seen", async () => {
-    const { repository } = await setup();
-    await repository.apply({ providers: [provider()], models: [model()] });
-
-    await repository.apply({
-      providers: [provider({ name: "DeepSeek AI", updatedAt: T2.toISOString() })],
-      models: [
-        model({
-          cost: { input: "0.5", output: "1.1" },
-          firstSeenAt: T2.toISOString(),
-          updatedAt: T2.toISOString(),
-        }),
-      ],
-    });
-
-    const stored = await repository.getModel("deepseek", "deepseek-v4-pro");
-    expect(stored?.cost).toEqual({ input: "0.5", output: "1.1" });
-    expect(stored?.firstSeenAt).toBe(T1.toISOString());
-    expect(stored?.updatedAt).toBe(T2.toISOString());
-    const stored2 = await repository.getProvider("deepseek");
-    expect(stored2?.name).toBe("DeepSeek AI");
-    expect(stored2?.firstSeenAt).toBe(T1.toISOString());
-  });
-
-  // #548-T03
-  it_("marks a row unlisted and clears it again, with the last known entry kept in between", async () => {
-    const { repository } = await setup();
-    await repository.apply({ providers: [provider()], models: [model()] });
-
-    await repository.apply({
-      providers: [],
-      models: [model({ unlistedAt: T2.toISOString(), updatedAt: T2.toISOString() })],
-    });
-    const gone = await repository.getModel("deepseek", "deepseek-v4-pro");
-    expect(gone?.unlistedAt).toBe(T2.toISOString());
-    expect(gone?.cost).toEqual({ input: "0.6", output: "1.2", cacheRead: "0.06" });
-
-    await repository.apply({ providers: [], models: [model({ updatedAt: T2.toISOString() })] });
-    expect((await repository.getModel("deepseek", "deepseek-v4-pro"))?.unlistedAt).toBeNull();
-  });
-
-  // #548-T08
-  it_("keeps the trusted address and the one that waits apart", async () => {
-    const { repository } = await setup();
-    const blocked = provider({
-      url: {
-        state: "url_changed",
-        trustedUrl: "https://api.deepseek.com",
-        pendingUrl: "https://elsewhere.example/v1",
-        problem: null,
+        const stored = await repository.getModel("deepseek", "deepseek-v4-pro");
+        expect(stored?.cost).toEqual({ input: "0.5", output: "1.1" });
+        expect(stored?.firstSeenAt).toBe(T1.toISOString());
+        expect(stored?.updatedAt).toBe(T2.toISOString());
+        const stored2 = await repository.getProvider("deepseek");
+        expect(stored2?.name).toBe("DeepSeek AI");
+        expect(stored2?.firstSeenAt).toBe(T1.toISOString());
       },
-      urlChangedAt: T2.toISOString(),
+    );
+
+    // #548-T03
+    it_(
+      "marks a row unlisted and clears it again, with the last known entry kept in between",
+      async () => {
+        const { repository } = await setup();
+        await repository.apply({ providers: [provider()], models: [model()] });
+
+        await repository.apply({
+          providers: [],
+          models: [
+            model({
+              unlistedAt: T2.toISOString(),
+              updatedAt: T2.toISOString(),
+            }),
+          ],
+        });
+        const gone = await repository.getModel("deepseek", "deepseek-v4-pro");
+        expect(gone?.unlistedAt).toBe(T2.toISOString());
+        expect(gone?.cost).toEqual({
+          input: "0.6",
+          output: "1.2",
+          cacheRead: "0.06",
+        });
+
+        await repository.apply({
+          providers: [],
+          models: [model({ updatedAt: T2.toISOString() })],
+        });
+        expect(
+          (await repository.getModel("deepseek", "deepseek-v4-pro"))
+            ?.unlistedAt,
+        ).toBeNull();
+      },
+    );
+
+    // #548-T08
+    it_("keeps the trusted address and the one that waits apart", async () => {
+      const { repository } = await setup();
+      const blocked = provider({
+        url: {
+          state: "url_changed",
+          trustedUrl: "https://api.deepseek.com",
+          pendingUrl: "https://elsewhere.example/v1",
+          problem: null,
+        },
+        urlChangedAt: T2.toISOString(),
+      });
+
+      await repository.apply({ providers: [provider()], models: [] });
+      await repository.apply({ providers: [blocked], models: [] });
+
+      expect(await repository.getProvider("deepseek")).toEqual(blocked);
     });
 
-    await repository.apply({ providers: [provider()], models: [] });
-    await repository.apply({ providers: [blocked], models: [] });
+    // #548-T04
+    it_(
+      "records a failure in one row without touching the catalog, and a success after it",
+      async () => {
+        const { repository } = await setup();
+        await repository.apply({ providers: [provider()], models: [model()] });
+        expect(await repository.fetchState()).toBeUndefined();
 
-    expect(await repository.getProvider("deepseek")).toEqual(blocked);
-  });
+        await repository.recordFailure("models_dev_http_status", T1);
+        await repository.recordFailure("models_dev_unreachable", T2);
 
-  // #548-T04
-  it_("records a failure in one row without touching the catalog, and a success after it", async () => {
-    const { repository } = await setup();
-    await repository.apply({ providers: [provider()], models: [model()] });
-    expect(await repository.fetchState()).toBeUndefined();
+        expect(await repository.fetchState()).toEqual({
+          lastAttemptAt: T2.toISOString(),
+          lastSuccessAt: null,
+          lastStatus: "failed",
+          lastError: "models_dev_unreachable",
+          lastSummary: null,
+        });
+        expect(await repository.listModels()).toHaveLength(1);
 
-    await repository.recordFailure("models_dev_http_status", T1);
-    await repository.recordFailure("models_dev_unreachable", T2);
+        const summary = { providers: 1, models: 1 };
+        await repository.recordSuccess(summary, T2);
+        expect(await repository.fetchState()).toEqual({
+          lastAttemptAt: T2.toISOString(),
+          lastSuccessAt: T2.toISOString(),
+          lastStatus: "ok",
+          lastError: null,
+          lastSummary: summary,
+        });
 
-    expect(await repository.fetchState()).toEqual({
-      lastAttemptAt: T2.toISOString(),
-      lastSuccessAt: null,
-      lastStatus: "failed",
-      lastError: "models_dev_unreachable",
-      lastSummary: null,
+        await repository.recordFailure(
+          "models_dev_invalid_body",
+          new Date(T2.getTime() + 1000),
+        );
+        const after = await repository.fetchState();
+        expect(after?.lastSuccessAt).toBe(T2.toISOString());
+        expect(after?.lastError).toBe("models_dev_invalid_body");
+      },
+    );
+
+    // #548-T03
+    it_("writes many rows at once", async () => {
+      const { repository } = await setup();
+      const models = Array.from({ length: 450 }, (_unused, index) =>
+        model({ id: `model-${String(index)}` }),
+      );
+
+      await repository.apply({ providers: [provider()], models });
+
+      expect(await repository.listModels()).toHaveLength(450);
     });
-    expect(await repository.listModels()).toHaveLength(1);
-
-    const summary = { providers: 1, models: 1 };
-    await repository.recordSuccess(summary, T2);
-    expect(await repository.fetchState()).toEqual({
-      lastAttemptAt: T2.toISOString(),
-      lastSuccessAt: T2.toISOString(),
-      lastStatus: "ok",
-      lastError: null,
-      lastSummary: summary,
-    });
-
-    await repository.recordFailure("models_dev_invalid_body", new Date(T2.getTime() + 1000));
-    const after = await repository.fetchState();
-    expect(after?.lastSuccessAt).toBe(T2.toISOString());
-    expect(after?.lastError).toBe("models_dev_invalid_body");
-  });
-
-  // #548-T03
-  it_("writes many rows at once", async () => {
-    const { repository } = await setup();
-    const models = Array.from({ length: 450 }, (_unused, index) => model({ id: `model-${String(index)}` }));
-
-    await repository.apply({ providers: [provider()], models });
-
-    expect(await repository.listModels()).toHaveLength(450);
-  });
-});
+  },
+);

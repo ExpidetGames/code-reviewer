@@ -711,7 +711,7 @@ export interface ModelCatalogEntriesTable {
  * disappears upstream gets `unlisted_at`. Every text is untrusted data, length-capped before it is stored.
  */
 export interface ModelsDevProvidersTable {
-  /** The id models.dev uses and the supported-provider file lists (`deepseek`, `anthropic`). */
+  /** The id models.dev uses and the supported-provider file lists (`deepseek`, `openai`). */
   provider_id: string;
   name: string;
   /** `trusted`, `url_changed` or `rejected` (`URL_STATES`): the trust on first use of the address. */

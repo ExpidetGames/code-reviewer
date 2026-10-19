@@ -14,8 +14,7 @@ export const FETCH_TIMEOUT_MS = 60_000;
 export type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
 
 export type FetchResult =
-  | { ok: true; body: unknown }
-  | { ok: false; code: ModelsDevFetchErrorCode };
+  { ok: true; body: unknown } | { ok: false; code: ModelsDevFetchErrorCode };
 
 type Options = {
   url: string;

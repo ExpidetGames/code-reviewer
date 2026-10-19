@@ -4,8 +4,8 @@
 // the catalog rows, not from code per provider: the descriptor (id, name, wire family, key header, address), the model
 // list and a best-effort key test. It is the data half of what the registry of `src/llm/providers/` asks of an adapter;
 // putting it into that registry is a step for the workspace picker (#555), because the registry's ids and secret names are
-// slugs (`^[a-z][a-z0-9_]{1,31}$`) and these providers' ids are models.dev's (with hyphens). OpenRouter and Anthropic keep
-// their own adapters until #556.
+// slugs (`^[a-z][a-z0-9_]{1,31}$`) and these providers' ids are models.dev's (with hyphens). The two hand-written
+// adapters keep their place until #556.
 //
 // The key test is a cheap authenticated read: the provider's model list. "Not verified" is an answer, not a failure,
 // because not every provider has one. It goes to the trusted address of the provider only, never follows a redirect (that
@@ -19,11 +19,7 @@ import { isUsable } from "./upstream-url.ts";
 import type { AuthHeader, WireFamily } from "./wire.ts";
 
 export type GenericKeyOutcome =
-  | "accepted"
-  | "rejected"
-  | "not_verified"
-  | "unreachable"
-  | "provider_error";
+  "accepted" | "rejected" | "not_verified" | "unreachable" | "provider_error";
 
 export type GenericKeyCheck = { outcome: GenericKeyOutcome };
 
@@ -62,7 +58,11 @@ export type GenericAdapterResult =
   | { ok: true; adapter: GenericProviderAdapter }
   | { ok: false; code: "provider_unsupported" | "provider_url_blocked" };
 
-function headersOf(family: WireFamily, header: AuthHeader, apiKey: string): Record<string, string> {
+function headersOf(
+  family: WireFamily,
+  header: AuthHeader,
+  apiKey: string,
+): Record<string, string> {
   const base: Record<string, string> = { accept: "application/json" };
   if (header === "Authorization") base.authorization = `Bearer ${apiKey}`;
   else base[header] = apiKey;
@@ -84,9 +84,11 @@ export function createGenericAdapter(
   models: readonly StoredModel[],
 ): GenericAdapterResult {
   const supported = supportedProvider(provider.id);
-  if (supported === undefined) return { ok: false, code: "provider_unsupported" };
+  if (supported === undefined)
+    return { ok: false, code: "provider_unsupported" };
   const baseUrl = provider.url.trustedUrl;
-  if (!isUsable(provider.url) || baseUrl === null) return { ok: false, code: "provider_url_blocked" };
+  if (!isUsable(provider.url) || baseUrl === null)
+    return { ok: false, code: "provider_url_blocked" };
   const own = models.filter((model) => model.providerId === provider.id);
   const byId = new Map(own.map((model) => [model.id, model]));
   return {
@@ -118,7 +120,11 @@ export function createGenericAdapter(
           inputTokenFactor: 1,
         };
       },
-      async testKey({ apiKey, fetchImpl = fetch, timeoutMs = KEY_TEST_TIMEOUT_MS }) {
+      async testKey({
+        apiKey,
+        fetchImpl = fetch,
+        timeoutMs = KEY_TEST_TIMEOUT_MS,
+      }) {
         try {
           const response = await fetchImpl(`${baseUrl}/models`, {
             method: "GET",
