@@ -111,9 +111,8 @@ describe("every terminal code has an outcome class", () => {
 });
 
 describe("the class of a run's end", () => {
-  // The initial split follows ADR 0006, 2.6; the maintainer decided 2026-10-19 (#489) that a run which ends without a
-  // result but already incurred AI cost bills its minutes only.
-  // #494-T06
+  // The maintainer decided 2026-10-19 (#489, #523): free only when the failure is clearly our fault.
+  // #523-T12
   it.each([
     ["launch_failed", "free"],
     ["worker_exited", "free"],
@@ -139,20 +138,18 @@ describe("the class of a run's end", () => {
     },
   );
 
-  // #494-T04
+  // #523-T01
+  // #523-T02
   it.each([
-    ["review_not_published", "minutes_only"],
-    ["llm_output_invalid", "minutes_only"],
-    ["unknown", "minutes_only"],
-    // The Git access can be the customer's revoked installation or our own App token: not attributable.
-    ["git_auth", "minutes_only"],
-    ["git_forbidden", "minutes_only"],
-  ] as Array<[string, OutcomeClass]>)(
-    "bills the minutes only for %s, a run that ended without a result",
-    (code, expected) => {
-      expect(classifyOutcome(failed(code))).toBe(expected);
-    },
-  );
+    "review_not_published",
+    "llm_output_invalid",
+    "unknown",
+    // The Git access can be the customer's revoked installation or our own App token: not clearly ours, so charged.
+    "git_auth",
+    "git_forbidden",
+  ])("bills AI and minutes for %s, not clearly our fault", (code) => {
+    expect(classifyOutcome(failed(code))).toBe("charged");
+  });
 
   // #494-T01
   it.each([
@@ -166,7 +163,7 @@ describe("the class of a run's end", () => {
     "review_text_truncated",
     "command_failed",
     "superseded",
-  ])("bills AI and minutes for %s, the customer's side of the line", (code) => {
+  ])("bills AI and minutes for %s", (code) => {
     expect(classifyOutcome(failed(code))).toBe("charged");
   });
 
@@ -177,32 +174,62 @@ describe("the class of a run's end", () => {
     ).toBe("charged");
   });
 
-  // #494-T06
+  // #523-T06
   it.each([
     "project_deactivated",
     "pull_request_closed",
     "pull_request_draft",
     "review_kind_changed",
-    "no_capable_runner",
     "command_removed",
-  ])("bills nothing for a job cancelled with %s", (code) => {
+  ])(
+    "bills a job cancelled with %s in full (nothing when it never ran)",
+    (code) => {
+      expect(
+        classifyOutcome({
+          status: "cancelled",
+          errorCode: code,
+          keyMode: "own",
+        }),
+      ).toBe("charged");
+    },
+  );
+
+  // #523-T12
+  it("bills nothing for a job cancelled because no runner could take it: our side", () => {
     expect(
-      classifyOutcome({ status: "cancelled", errorCode: code, keyMode: "own" }),
+      classifyOutcome({
+        status: "cancelled",
+        errorCode: "no_capable_runner",
+        keyMode: "own",
+      }),
     ).toBe("free");
   });
 
-  // #494-T06
-  it.each([
-    "workspace_suspended",
-    "quota_exhausted",
-    "entitlements_invalid",
-    "dynamic_review_disabled",
-  ])("bills nothing for a job refused at claim with %s", (code) => {
-    expect(classifyOutcome(failed(code))).toBe("free");
-  });
+  // #523-T07
+  it.each(["workspace_suspended", "quota_exhausted"])(
+    "bills a job refused at claim with %s in full: it never ran, so it costs nothing",
+    (code) => {
+      expect(classifyOutcome(failed(code))).toBe("charged");
+    },
+  );
 
-  // #494-T06
-  it.each(["llm_auth", "llm_quota", "model_unknown", "llm_rate_limit"])(
+  // #523-T12
+  it.each(["entitlements_invalid", "dynamic_review_disabled"])(
+    "bills nothing for a job refused at claim with %s, our configuration",
+    (code) => {
+      expect(classifyOutcome(failed(code))).toBe("free");
+    },
+  );
+
+  // #523-T08
+  it.each([
+    "llm_auth",
+    "llm_quota",
+    "model_unknown",
+    "llm_rate_limit",
+    "llm_unavailable",
+    "llm_timeout",
+  ])(
     "makes %s ours on the managed key and the customer's on their own",
     (code) => {
       expect(classifyOutcome(failed(code, { keyMode: "managed" }))).toBe(
@@ -232,8 +259,8 @@ describe("the class of a run's end", () => {
     ).toBe("charged");
   });
 
-  // #494-T07
-  it("bills nothing for a queued job superseded before it ran: no run began", () => {
+  // #523-T10
+  it("bills a queued job superseded before it ran in full, which is nothing: no run began", () => {
     for (const keyMode of ["managed", "own"] as const)
       expect(
         classifyOutcome({
@@ -241,7 +268,7 @@ describe("the class of a run's end", () => {
           errorCode: null,
           keyMode,
         }),
-      ).toBe("free");
+      ).toBe("charged");
     expect(
       classifyOutcome({
         status: "superseded",
@@ -249,11 +276,11 @@ describe("the class of a run's end", () => {
         settledReason: null,
         keyMode: "managed",
       }),
-    ).toBe("free");
+    ).toBe("charged");
   });
 
-  // #494-T04
-  it("bills the minutes only for a run settled without a result", () => {
+  // #523-T05
+  it("bills a run settled without a result in full, unless the failure is ours", () => {
     expect(
       classifyOutcome({
         status: "failed",
@@ -264,7 +291,7 @@ describe("the class of a run's end", () => {
     ).toBe("free");
     expect(
       classifyOutcome(failed("command_failed", { settledReason: "no_result" })),
-    ).toBe("minutes_only");
+    ).toBe("charged");
   });
 
   // #494-T04
@@ -279,13 +306,13 @@ describe("the class of a run's end", () => {
     ).toBe("free");
   });
 
-  // #494-T04
+  // #523-T05
   it("takes the reason of the loop into account: a process that left no usable result", () => {
     expect(
       classifyOutcome(
         failed("command_failed", { errorReason: "no_result_from_process" }),
       ),
-    ).toBe("minutes_only");
+    ).toBe("charged");
     expect(
       classifyOutcome(
         failed("runner_error", { errorReason: "unreadable_usage" }),
@@ -298,6 +325,8 @@ describe("the class of a run's end", () => {
     ["invalid_request", "free"],
     ["transport", "free"],
     ["isolation", "free"],
+    // A checkout that was stopped (a cancelled or superseded run) is billed like the run.
+    ["cancelled", "charged"],
     ["ref_missing", "charged"],
     ["diff_too_large", "charged"],
     ["path_invalid", "charged"],
@@ -310,21 +339,19 @@ describe("the class of a run's end", () => {
     },
   );
 
-  // #494-T08
-  it("falls back to the minutes only for a code it does not know, and never throws", () => {
-    expect(classifyOutcome(failed("a_code_of_a_newer_runner"))).toBe(
-      "minutes_only",
-    );
-    expect(classifyOutcome(failed(null))).toBe("minutes_only");
+  // #523-T03
+  it("charges a code it does not know in full, and never throws", () => {
+    expect(classifyOutcome(failed("a_code_of_a_newer_runner"))).toBe("charged");
+    expect(classifyOutcome(failed(null))).toBe("charged");
   });
 
-  // #494-T08
-  it("falls back to the minutes only for a checkout reason it does not know, like a code", () => {
+  // #523-T04
+  it("charges a checkout reason it does not know in full, like a code", () => {
     expect(
       classifyOutcome(
         failed("checkout_incomplete", { errorReason: "a_new_reason" }),
       ),
-    ).toBe("minutes_only");
+    ).toBe("charged");
     // No reason at all leaves the class of the code.
     expect(classifyOutcome(failed("checkout_incomplete"))).toBe("charged");
   });
@@ -337,11 +364,57 @@ describe("the class of a run's end", () => {
   });
 });
 
+describe("a run whose AI cost is unknown", () => {
+  // #523-T11
+  it("is charged the minutes only: the AI part cannot be priced", () => {
+    expect(
+      classifyOutcome({
+        status: "succeeded",
+        errorCode: null,
+        keyMode: "managed",
+        aiCostKnown: false,
+      }),
+    ).toBe("minutes_only");
+    expect(
+      classifyOutcome(failed("command_failed", { aiCostKnown: false })),
+    ).toBe("minutes_only");
+    expect(classifyOutcome(failed("a_new_code", { aiCostKnown: false }))).toBe(
+      "minutes_only",
+    );
+  });
+
+  // #523-T11
+  it("stays free when the failure is ours, and charged when the cost is known or not stated", () => {
+    expect(classifyOutcome(failed("timeout", { aiCostKnown: false }))).toBe(
+      "free",
+    );
+    expect(classifyOutcome(failed("llm_auth", { aiCostKnown: false }))).toBe(
+      "free",
+    );
+    expect(
+      classifyOutcome(failed("command_failed", { aiCostKnown: true })),
+    ).toBe("charged");
+    expect(classifyOutcome(failed("command_failed"))).toBe("charged");
+  });
+
+  // #523-T14
+  it("is the only way to the minutes only: no table entry gives that class", () => {
+    const tables = [
+      ERROR_CODE_CLASSES,
+      CHECKOUT_REASON_CLASSES,
+      RESULT_REASON_CLASSES,
+      SETTLED_REASON_CLASSES,
+    ];
+    for (const table of tables)
+      for (const [name, outcome] of Object.entries(table))
+        expect(outcome, name).not.toBe("minutes_only");
+  });
+});
+
 describe("the failures that incurred AI cost", () => {
-  // The open question of the review of #520 (B2): whether a run that failed after it used the model is billed AI and
-  // minutes (ADR 0006, 2.6 row 2, today) or the minutes only (the maintainer's decision 1 read literally). The answer is
-  // one line: the class constant. This test pins who is in the group, so a member does not join or leave unnoticed.
-  // #494-T01
+  // They stay charged (AI and minutes), by the decision of 2026-10-19 (#489). This test pins who is in the group, so a
+  // member does not join or leave unnoticed.
+  // #523-T13
   it("names the group, in one place", () => {
     expect([...AI_COST_FAILURE_CODES].sort()).toStrictEqual([
       "command_failed",
@@ -352,7 +425,7 @@ describe("the failures that incurred AI cost", () => {
     ]);
   });
 
-  // #494-T01
+  // #523-T13
   it("gives every member the class of the group, on both keys", () => {
     for (const code of AI_COST_FAILURE_CODES) {
       expect(ERROR_CODE_CLASSES[code], code).toBe(AI_COST_FAILURE_CLASS);
