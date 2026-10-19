@@ -85,6 +85,8 @@ GOOD: list[dict[str, Any]] = [
     _model(interleaved={"field": "reasoning_content"}),
     _model(interleaved={"field": "reasoning_details"}),
     *[_with(npm=npm) for npm in BUNDLED_NPM],
+    # A name is counted in code points: 120 characters outside the basic plane are 240 UTF-16 units.
+    _model(name="\U0001F600" * 120),
 ]
 BAD: list[dict[str, Any]] = [
     _with(apiKey="sk-live-1"),
@@ -110,6 +112,7 @@ BAD: list[dict[str, Any]] = [
     _with(npm="left-pad"),
     _with(npm="git+https://evil.example/x.git"),
     _with(npm="@ai-sdk/openai "),
+    _model(name="\U0001F600" * 121),
     _without_model_key("limit"),
     _without_model_key("status"),
 ]

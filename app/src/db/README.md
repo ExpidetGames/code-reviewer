@@ -395,9 +395,14 @@ workspace, and **nothing in it is ever deleted**.
   `modalities` as JSON, `upstream_status` (`deprecated` is a warning), `cost` as JSON with decimal strings (USD per million
   tokens, tiers included), `upstream_updated`, `interleaved` as JSON; `first_seen_at`, `unlisted_at`, `updated_at`).
 - `models_dev_fetch_state` (one row, `id = 'models.dev'` by a check): `last_attempt_at`, `last_success_at`, `last_status`
-  `ok` / `failed`, `last_error` (a stable code of `MODELS_DEV_FETCH_ERROR_CODES`) and `last_summary` as JSON.
+  `ok` / `failed`, `last_error` (a stable code of `MODELS_DEV_FETCH_ERROR_CODES`) and `last_summary` as JSON. A run writes
+  `last_attempt_at` before it starts (`recordAttempt`; a row made that way reads `failed` / `models_dev_interrupted` until
+  the run ends), so a run the platform stops is not repeated at once.
 
-Every text in the first two tables is untrusted data from models.dev, length-capped and one line before it is stored.
+Every text in the first two tables is untrusted data from models.dev, length-capped and one line before it is stored. A fetch
+reads the provider rows `FOR UPDATE` on Postgres (`listProviders({ forUpdate: true })`) inside the transaction that writes
+them, so a guarded update of one provider by an admin (#554) is not written over; on SQLite every transaction begins
+`begin immediate`.
 
 ### Billing journal and balances
 

@@ -431,3 +431,38 @@ describe("the closed lists of the entry", () => {
     expect(jobModelEntrySchema.safeParse(document).success).toBe(false);
   });
 });
+
+describe("the length of a name", () => {
+  const rowWithName = (name: string) =>
+    build("deepseek", "deepseek-v4-pro", undefined, (m) => ({ ...m, name }));
+
+  // #548-T14
+  it("counts a name by code points, as the catalog cut it, the contract and the runner count it", () => {
+    // 120 characters outside the basic plane: 240 UTF-16 units.
+    const name = "\u{1F600}".repeat(120);
+    expect(name.length).toBe(240);
+
+    const built = rowWithName(name);
+
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    expect(built.entry.model.name).toBe(name);
+    expect(contract.check("JobModelEntry", built.entry)).toEqual({
+      valid: true,
+      errors: "",
+    });
+  });
+
+  // #548-T14
+  it("refuses a name of 121 code points, however it is spelled", () => {
+    expect(rowWithName("\u{1F600}".repeat(121))).toEqual({
+      ok: false,
+      code: "entry_invalid",
+    });
+    expect(rowWithName("a".repeat(121))).toEqual({
+      ok: false,
+      code: "entry_invalid",
+    });
+    expect(rowWithName("a".repeat(120)).ok).toBe(true);
+  });
+});

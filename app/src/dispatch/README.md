@@ -186,7 +186,9 @@ cause) and does not stop the others; the answer is then `500` with `failedSteps`
 7. **`models_dev`** (#548): the daily read of the models.dev catalog (`src/models-dev/README.md`) when the last success is more
    than 23 hours old and the last failure more than an hour old; it is last so that a slow answer from the internet never
    delays the steps above. A fetch that fails records its own failure (`models_dev_fetch_state`) and keeps the rows it has;
-   that is not a failed step. Nothing happens with `MODELS_DEV_FETCH=off`.
+   that is not a failed step. The whole step (fetch, lookups and write) has one deadline of `MODELS_DEV_BUDGET_MS` (90 s;
+   the route runs 300 s, the check runs take 40 s of it); a step that cannot finish writes nothing and fails with
+   `models_dev_timeout`. The attempt is recorded before it starts. Nothing happens with `MODELS_DEV_FETCH=off`.
 
 The answer is `{"status":"ok","expired":{...},"givenUp":n,"revived":n,"sent":n,"noticesTried":n,"cleanedUp":bool,"modelsDev":"applied"|"skipped"|"failed"|null}`; a line
 `[sweep] requeued=.. lease_expired=.. timed_out=.. given_up=.. revived=.. sent=..` is logged for a run that did

@@ -42,6 +42,11 @@ export type GenericAdapterModel = {
   unlisted: boolean;
   /** models.dev marks it `deprecated`: shown as a warning. */
   deprecated: boolean;
+  /**
+   * models.dev marks it `alpha` (not stable, may change or go): shown as a warning like `deprecated`. The job entry still
+   * runs it, as `active`, because the pinned engine would drop an alpha model.
+   */
+  alpha: boolean;
 };
 
 export type GenericProviderAdapter = {
@@ -124,6 +129,7 @@ export function createGenericAdapter(
         reasoning: model.reasoning,
         unlisted: model.unlistedAt !== null,
         deprecated: model.status === "deprecated",
+        alpha: model.status === "alpha",
       })),
       checkModelId: (id) => byId.has(id),
       priceOf(id) {

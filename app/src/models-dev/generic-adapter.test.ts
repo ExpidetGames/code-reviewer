@@ -133,6 +133,34 @@ describe("the generic adapter", () => {
   });
 
   // #548-T09
+  it("marks an alpha model as a warning like a deprecated one: kept, listed, and the entry still runs it", () => {
+    const r = rows();
+    const models = r
+      .models("deepseek")
+      .map((m) =>
+        m.id === "deepseek-v4-pro" ? { ...m, status: "alpha" as const } : m,
+      );
+
+    const result = createGenericAdapter(r.provider("deepseek"), models);
+    if (!result.ok) throw new Error(result.code);
+
+    const byId = (id: string) => result.adapter.models.find((m) => m.id === id);
+    expect(byId("deepseek-v4-pro")).toMatchObject({
+      alpha: true,
+      deprecated: false,
+      unlisted: false,
+    });
+    expect(byId("deepseek-v4-flash")).toMatchObject({
+      alpha: false,
+      deprecated: true,
+    });
+    expect(byId("deepseek-flash")).toMatchObject({
+      alpha: false,
+      deprecated: false,
+    });
+  });
+
+  // #548-T09
   it("checks a model id as a catalog model of this provider, and prices it from the catalog or says it does not know", () => {
     const adapter = adapterOf("deepseek");
 

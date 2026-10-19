@@ -41,6 +41,7 @@ const limitSchema = z.strictObject({
 });
 
 const modelSchema = z.strictObject({
+  // Zod 4 counts code points here, as the catalog's cut, the contract and the runner do (pinned by job-entry.test.ts).
   name: z.string().min(1).max(120),
   status: z.enum(["active", "beta"]),
   tool_call: z.literal(true),

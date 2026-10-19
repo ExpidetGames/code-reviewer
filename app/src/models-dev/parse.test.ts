@@ -210,6 +210,16 @@ describe("reading a models.dev body", () => {
   });
 
   // #548-T01
+  it.each(["alpha", "beta", "deprecated", "active"] as const)(
+    "stores the status %s as it is stated",
+    (status) => {
+      const model = parse(bodyWith({ m: goodModel({ status }) })).models[0];
+
+      expect(model?.status).toBe(status);
+    },
+  );
+
+  // #548-T01
   it("ignores fields it does not know, at every level", () => {
     const body = bodyWith(
       { m: goodModel({ brand_new_field: { deep: [1, 2] } }) },

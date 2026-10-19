@@ -249,6 +249,18 @@ describe("the repositories and workspace scoping", () => {
     expect(factories.map((fn) => fn.name)).toEqual(["createCatalogRepository"]);
   });
 
+  // #548-T12
+  it("classifies the models.dev catalog repository as instance level, with an exported factory that takes no workspace", () => {
+    expect(INSTANCE_LEVEL).toContain("models-dev-repository.ts");
+    expect(SCOPED).not.toContain("models-dev-repository.ts");
+    const factories = exportedFunctions("models-dev-repository.ts").filter(
+      touchesTheDatabase,
+    );
+    expect(factories.map((fn) => fn.name)).toEqual([
+      "createModelsDevRepository",
+    ]);
+  });
+
   it("keeps the instance level modules from taking a workspace, so the two groups stay apart", () => {
     for (const file of INSTANCE_LEVEL)
       for (const fn of exportedFunctions(file))
