@@ -91,6 +91,7 @@ describe.each(MODELS_DEV_ENGINES)("the models.dev fetch on $name", (engine) => {
     });
     return {
       fake,
+      db,
       repository,
       service,
       lines,
@@ -506,7 +507,10 @@ describe.each(MODELS_DEV_ENGINES)("the models.dev fetch on $name", (engine) => {
     [
       "a name that resolves to loopback",
       "https://api.deepseek.com",
-      async () => ["127.0.0.1"],
+      // Only this name: a resolver that answers loopback for every name would block most providers at once, which the
+      // guard refuses (a mass change of addresses).
+      async (host: string) =>
+        host === "api.deepseek.com" ? ["127.0.0.1"] : ["93.184.216.34"],
       "private_address",
     ],
   ] as const)(
@@ -524,6 +528,28 @@ describe.each(MODELS_DEV_ENGINES)("the models.dev fetch on $name", (engine) => {
         state: "rejected",
         trustedUrl: null,
         problem,
+      });
+      expect(isUsable(provider!.url)).toBe(false);
+    },
+  );
+
+  // #548-T08
+  it_(
+    "blocks an address models.dev states for a provider the committed file has a default for, instead of trusting it on first sight",
+    async () => {
+      const t = await setup();
+      const body = t.body();
+      body.openai!.api = "https://evil.example/v1";
+      t.fake.respondWith(body);
+
+      await t.service.refresh();
+
+      const provider = await t.repository.getProvider("openai");
+      expect(provider?.url).toEqual({
+        state: "url_changed",
+        trustedUrl: "https://api.openai.com/v1",
+        pendingUrl: "https://evil.example/v1",
+        problem: null,
       });
       expect(isUsable(provider!.url)).toBe(false);
     },
@@ -698,15 +724,16 @@ describe.each(MODELS_DEV_ENGINES)("the models.dev fetch on $name", (engine) => {
       const outcome = await t.service.refresh();
 
       // Three lookups end at 9 s; the 8 s the lookups may use are over, so the other three providers are not looked up.
+      // Google and xai have an address in the committed file, so they are trusted all the same; openrouter has none.
       expect(outcome).toMatchObject({
         status: "applied",
-        summary: { lookupsSkipped: 3, rejectedProviders: 3 },
+        summary: { lookupsSkipped: 3, rejectedProviders: 1 },
       });
       const providers = await t.repository.listProviders();
-      expect(providers.filter((p) => isUsable(p.url))).toHaveLength(3);
+      expect(providers.filter((p) => isUsable(p.url))).toHaveLength(5);
       expect(
         providers.filter((p) => p.url.problem === "unresolvable"),
-      ).toHaveLength(3);
+      ).toHaveLength(1);
       expect((await t.repository.listModels()).length).toBe(13);
     },
   );
@@ -775,12 +802,16 @@ describe.each(MODELS_DEV_ENGINES)("the models.dev fetch on $name", (engine) => {
 
       expect(first).toMatchObject({
         status: "applied",
-        summary: { rejectedProviders: 6, retryProviders: 6 },
+        // Four providers have an address in the committed file and are trusted at once; deepseek and openrouter wait.
+        summary: { rejectedProviders: 2, retryProviders: 2 },
       });
       expect(
-        (await t.repository.listProviders()).every(
-          (p) => p.url.state === "rejected" && p.url.problem === "unresolvable",
-        ),
+        (await t.repository.listProviders())
+          .filter((p) => !isUsable(p.url))
+          .every(
+            (p) =>
+              p.url.state === "rejected" && p.url.problem === "unresolvable",
+          ),
       ).toBe(true);
       t.advance(30 * 60 * 1000);
       expect(await t.service.refreshIfDue()).toEqual({
@@ -829,6 +860,64 @@ describe.each(MODELS_DEV_ENGINES)("the models.dev fetch on $name", (engine) => {
       expect(await t.service.refreshIfDue()).toEqual({
         status: "skipped",
         reason: "not_due",
+      });
+    },
+  );
+
+  // #548-T08
+  it_(
+    "does not write over an admin's confirmation that is made while a fetch is planning",
+    async () => {
+      const t = await setup();
+      await t.service.refresh();
+      t.advance(DAY);
+      const moved = t.body();
+      moved.deepseek!.api = "https://api.deepseek.moved.example/v1";
+      t.fake.respondWith(moved);
+      await t.service.refresh();
+      expect((await t.repository.getProvider("deepseek"))?.url.state).toBe(
+        "url_changed",
+      );
+
+      // Another day: the same address, but the provider's name changed, so the fetch writes the row. An admin's
+      // confirmation (#554: a guarded update of the one row) is in its transaction when the fetch reads the rows.
+      t.advance(DAY);
+      (moved.deepseek as { name?: string }).name = "DeepSeek AI";
+      t.fake.respondWith(moved);
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => (release = resolve));
+      let updated!: () => void;
+      const hasUpdated = new Promise<void>((resolve) => (updated = resolve));
+      const confirmation = t.db.transaction().execute(async (trx) => {
+        await trx
+          .updateTable("models_dev_providers")
+          .set({
+            url_state: "trusted",
+            trusted_url: "https://api.deepseek.moved.example/v1",
+            pending_url: null,
+            url_changed_at: null,
+          })
+          .where("provider_id", "=", "deepseek")
+          .where("pending_url", "=", "https://api.deepseek.moved.example/v1")
+          .execute();
+        updated();
+        await gate;
+      });
+      await hasUpdated;
+      const fetch = t.service.refresh();
+      // The fetch gets as far as reading the rows; with a lock it waits there, without one it plans on what it saw.
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      release();
+      await confirmation;
+      const outcome = await fetch;
+
+      expect(outcome).toMatchObject({ status: "applied" });
+      const stored = await t.repository.getProvider("deepseek");
+      expect(stored?.name).toBe("DeepSeek AI");
+      expect(stored?.url).toMatchObject({
+        state: "trusted",
+        trustedUrl: "https://api.deepseek.moved.example/v1",
+        pendingUrl: null,
       });
     },
   );

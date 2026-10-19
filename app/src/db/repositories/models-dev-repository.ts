@@ -39,6 +39,7 @@ import {
   type UrlProblem,
   type UrlState,
 } from "../../models-dev/upstream-url.ts";
+import { databaseDriver } from "../driver.ts";
 import type {
   Database,
   ModelsDevModelsTable,
@@ -50,8 +51,15 @@ const STATE_ID = "models.dev";
 const BATCH = 100;
 
 export type ModelsDevRepository = {
-  /** Every provider, listed or not. */
-  listProviders(): Promise<StoredProvider[]>;
+  /**
+   * Every provider, listed or not. `forUpdate` locks the rows until the transaction ends on Postgres (`FOR UPDATE`; no
+   * effect outside a transaction), so that a write made by someone else in between, an admin's confirmation of a changed
+   * address (#554), waits and is not written over by a plan made on the old rows. On SQLite every transaction begins with
+   * `begin immediate` (src/db/dialect.ts), so a second writer waits for the whole transaction anyway and the option does
+   * nothing. A confirmation is a guarded update of the one row (`... where provider_id = ? and pending_url = ?`), made in
+   * its own transaction; it needs no other lock.
+   */
+  listProviders(options?: { forUpdate?: boolean }): Promise<StoredProvider[]>;
   /** Every model, listed or not. */
   listModels(): Promise<StoredModel[]>;
   getProvider(id: string): Promise<StoredProvider | undefined>;
@@ -237,12 +245,14 @@ export function createModelsDevRepository(
   }
 
   return {
-    async listProviders() {
-      const rows = await db
+    async listProviders(options) {
+      let query = db
         .selectFrom("models_dev_providers")
         .selectAll()
-        .orderBy("provider_id")
-        .execute();
+        .orderBy("provider_id");
+      if (options?.forUpdate === true && databaseDriver(db) === "postgres")
+        query = query.forUpdate();
+      const rows = await query.execute();
       return rows.map(providerOf);
     },
 

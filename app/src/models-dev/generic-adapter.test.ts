@@ -9,6 +9,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { StoredModel, StoredProvider } from "./catalog.ts";
 import { createGenericAdapter } from "./generic-adapter.ts";
 import { parseModelsDev } from "./parse.ts";
+import { supportedProvider } from "./opencode-providers.ts";
 import { planCatalog } from "./plan.ts";
 
 const NOW = new Date("2026-10-19T03:00:00.000Z");
@@ -28,6 +29,13 @@ const body = JSON.parse(
   ),
 ) as unknown;
 
+/** The address the check passes: the default the committed file records, else one made up for the provider. */
+function addressOf(id: string): string {
+  return (
+    supportedProvider(id)?.defaultBaseUrl ?? `https://api.${id}.example/v1`
+  );
+}
+
 function rows() {
   const parsed = parseModelsDev(body);
   if (!parsed.ok) throw new Error("fixture");
@@ -37,7 +45,7 @@ function rows() {
     urlChecks: new Map(
       parsed.providers.map((p) => [
         p.id,
-        { ok: true as const, url: `https://api.${p.id}.example/v1` },
+        { ok: true as const, url: addressOf(p.id) },
       ]),
     ),
     now: NOW,
@@ -175,17 +183,17 @@ describe("the key test of the generic adapter", () => {
     ],
     [
       "openai",
-      "https://api.openai.example/v1/models",
+      "https://api.openai.com/v1/models",
       { authorization: "Bearer sk-test" },
     ],
     [
       "anthropic",
-      "https://api.anthropic.example/v1/models",
+      "https://api.anthropic.com/v1/models",
       { "x-api-key": "sk-test", "anthropic-version": "2023-06-01" },
     ],
     [
       "google",
-      "https://api.google.example/v1/models",
+      "https://generativelanguage.googleapis.com/v1beta/models",
       { "x-goog-api-key": "sk-test" },
     ],
   ])(

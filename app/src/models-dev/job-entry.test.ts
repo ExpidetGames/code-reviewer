@@ -12,6 +12,7 @@ import {
   buildJobModelEntry,
   jobModelEntrySchema,
 } from "./job-entry.ts";
+import { supportedProvider } from "./opencode-providers.ts";
 import { parseModelsDev } from "./parse.ts";
 import { planCatalog } from "./plan.ts";
 import type { UrlCheck } from "./upstream-url.ts";
@@ -40,7 +41,9 @@ const body = JSON.parse(
 function stored(
   check: (id: string) => UrlCheck = (id) => ({
     ok: true,
-    url: `https://api.${id}.example/v1`,
+    // The default the committed file records where there is one (it is the trusted address from the start).
+    url:
+      supportedProvider(id)?.defaultBaseUrl ?? `https://api.${id}.example/v1`,
   }),
 ) {
   const parsed = parseModelsDev(body);

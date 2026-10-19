@@ -14,7 +14,9 @@ import type {
   StoredProvider,
 } from "./catalog.ts";
 import type { ParsedModelsDev, ReducedModel } from "./parse.ts";
-import { nextUrlState, type UrlCheck } from "./upstream-url.ts";
+import { normalizedAddress } from "../billing/public-url.ts";
+import { supportedProvider } from "./opencode-providers.ts";
+import { nextUrlState, type UrlCheck, type UrlRecord } from "./upstream-url.ts";
 
 /** A fetch that would unlist more than this share of the listed models (or of the listed providers) is not applied. */
 export const UNLISTED_SHARE_LIMIT = 0.1;
@@ -91,6 +93,24 @@ function contentOf(model: ReducedModel): string {
   });
 }
 
+/**
+ * The address the committed provider file records as the default of a provider's SDK (`contracts/opencode-providers.v1.json`,
+ * ten providers such as openai and anthropic), in the one spelling addresses are compared in. It is trusted from the start:
+ * the file is ours and is reviewed with the pin, so an address models.dev states instead is a change that waits for an
+ * admin, not a first sight that is trusted.
+ */
+function seededUrl(providerId: string): UrlRecord | undefined {
+  const url = supportedProvider(providerId)?.defaultBaseUrl;
+  return url === undefined
+    ? undefined
+    : {
+        state: "trusted",
+        trustedUrl: normalizedAddress(url),
+        pendingUrl: null,
+        problem: null,
+      };
+}
+
 const key = (providerId: string, id: string) => `${providerId}\u0000${id}`;
 
 function planProviders(input: Input, stamp: string) {
@@ -113,7 +133,12 @@ function planProviders(input: Input, stamp: string) {
       problem: "missing" as const,
       seen: null,
     };
-    const url = nextUrlState(previous?.url, check);
+    // A stored trusted address is what stays trusted; otherwise the committed default of the provider, if there is one.
+    const known =
+      previous?.url.trustedUrl == null
+        ? (seededUrl(provider.id) ?? previous?.url)
+        : previous.url;
+    const url = nextUrlState(known, check);
     if (url.state === "url_changed") blocked += 1;
     if (url.state === "url_changed" && previous?.url.state !== "url_changed")
       newlyBlocked += 1;

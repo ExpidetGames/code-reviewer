@@ -299,5 +299,65 @@ describe.each(MODELS_DEV_ENGINES)(
         expect(await repository.fetchState()).toBeUndefined();
       },
     );
+    // #548-T08
+    it_(
+      "holds the provider rows it read against a write from another connection until the transaction ends",
+      async () => {
+        const { db, repository } = await setup();
+        const blocked = provider({
+          url: {
+            state: "url_changed",
+            trustedUrl: "https://api.deepseek.com",
+            pendingUrl: "https://elsewhere.example/v1",
+            problem: null,
+          },
+          urlChangedAt: T1.toISOString(),
+        });
+        await repository.apply({ providers: [blocked], models: [] });
+        let locked!: () => void;
+        const hasLocked = new Promise<void>((resolve) => (locked = resolve));
+        let release!: () => void;
+        const gate = new Promise<void>((resolve) => (release = resolve));
+        const fetchRun = db.transaction().execute(async (trx) => {
+          await createModelsDevRepository(trx).listProviders({
+            forUpdate: true,
+          });
+          locked();
+          await gate;
+        });
+        let confirmed = false;
+        let confirmation: Promise<void> = Promise.resolve();
+        try {
+          await hasLocked;
+
+          // The confirmation of #554: a guarded update of the one row, from its own connection.
+          confirmation = db
+            .updateTable("models_dev_providers")
+            .set({
+              url_state: "trusted",
+              trusted_url: "https://elsewhere.example/v1",
+              pending_url: null,
+              url_changed_at: null,
+            })
+            .where("provider_id", "=", "deepseek")
+            .where("pending_url", "=", "https://elsewhere.example/v1")
+            .execute()
+            .then(() => {
+              confirmed = true;
+            });
+          await new Promise((resolve) => setTimeout(resolve, 250));
+
+          expect(confirmed).toBe(false);
+        } finally {
+          release();
+        }
+        await fetchRun;
+        await confirmation;
+        expect(confirmed).toBe(true);
+        expect((await repository.getProvider("deepseek"))?.url.state).toBe(
+          "trusted",
+        );
+      },
+    );
   },
 );

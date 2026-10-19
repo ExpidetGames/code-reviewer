@@ -216,8 +216,11 @@ export function createModelsDevService(
       deadline - (deps.writeReserveMs ?? WRITE_RESERVE_MS),
     );
     if (remaining() <= 0) return fail("models_dev_timeout");
-    // What is stored is read, planned against and written in one transaction, so that a change made to a provider in
-    // between (an admin's confirmation, #554) is seen by the plan and not written over.
+    // What is stored is read, planned against and written in one transaction. A transaction alone does not keep a change
+    // made to a provider in between (an admin's confirmation, #554) from being written over: on Postgres (read committed)
+    // the plan would be made on rows that have changed since. So the provider rows are read `FOR UPDATE`: a confirmation
+    // made meanwhile waits for this transaction and is applied after it (its guard, `pending_url = ?`, is judged on what
+    // this fetch wrote), one made before is seen by the plan. SQLite serialises writers by `begin immediate`.
     let planned: Awaited<ReturnType<typeof applyPlan>>;
     try {
       planned = await applyPlan(parsed, urlChecks, cut, options, remaining);
@@ -249,7 +252,7 @@ export function createModelsDevService(
       const plan = planCatalog({
         parsed,
         stored: {
-          providers: await transactional.listProviders(),
+          providers: await transactional.listProviders({ forUpdate: true }),
           models: await transactional.listModels(),
         },
         urlChecks,

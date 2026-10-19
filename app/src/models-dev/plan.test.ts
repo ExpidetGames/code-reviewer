@@ -746,3 +746,132 @@ describe("the address of a provider across fetches", () => {
     expect(later.summary.retryProviders).toBe(0);
   });
 });
+
+describe("the address the committed provider file states seeds trust", () => {
+  // openai: the file records https://api.openai.com/v1 as the default of its SDK.
+  const SEED = "https://api.openai.com/v1";
+  const openai = (api: string | null): ReducedProvider => ({
+    id: "openai",
+    name: "OpenAI",
+    api,
+    apiTooLong: false,
+  });
+  const plan = (check: UrlCheck, stored: Stored = EMPTY, now = T1) =>
+    planCatalog({
+      parsed: parsed(
+        [reducedModel("gpt", {}, "openai")],
+        [openai("https://elsewhere.example/v1")],
+      ),
+      stored,
+      urlChecks: new Map([["openai", check]]),
+      now,
+    });
+
+  // #548-T08
+  it("blocks a different address on first sight instead of trusting it", () => {
+    const first = plan({ ok: true, url: "https://elsewhere.example/v1" });
+
+    expect(first.write.providers[0]?.url).toEqual({
+      state: "url_changed",
+      trustedUrl: SEED,
+      pendingUrl: "https://elsewhere.example/v1",
+      problem: null,
+    });
+    expect(first.summary).toMatchObject({ blockedProviders: 1 });
+  });
+
+  // #548-T08
+  it("trusts the address when models.dev states the same one", () => {
+    const first = plan({ ok: true, url: SEED });
+
+    expect(first.write.providers[0]?.url).toEqual({
+      state: "trusted",
+      trustedUrl: SEED,
+      pendingUrl: null,
+      problem: null,
+    });
+  });
+
+  // #548-T07
+  it("blocks an address that is refused on first sight, and keeps the seed as the trusted one", () => {
+    const first = plan({
+      ok: false,
+      problem: "not_https",
+      seen: "http://api.openai.com/v1",
+    });
+
+    expect(first.write.providers[0]?.url).toEqual({
+      state: "url_changed",
+      trustedUrl: SEED,
+      pendingUrl: "http://api.openai.com/v1",
+      problem: "not_https",
+    });
+  });
+
+  // #548-T07
+  it("does not reject a provider whose name did not resolve: the seed is trusted already", () => {
+    const first = plan({ ok: false, problem: "unresolvable", seen: SEED });
+
+    expect(first.write.providers[0]?.url).toMatchObject({
+      state: "trusted",
+      trustedUrl: SEED,
+    });
+    expect(first.summary).toMatchObject({
+      rejectedProviders: 0,
+      retryProviders: 0,
+    });
+  });
+
+  // #548-T08
+  it("seeds a provider that was rejected before it had a seed, and leaves a stored trusted address alone", () => {
+    const rejected = plan({ ok: false, problem: "private_address", seen: "x" });
+    const stored = applied(EMPTY, rejected.write);
+    const again = plan({ ok: true, url: SEED }, stored, T2);
+    expect(again.write.providers[0]?.url).toMatchObject({
+      state: "trusted",
+      trustedUrl: SEED,
+    });
+
+    // A trusted address that is not the seed (stored by an earlier release) is what stays trusted.
+    const earlier: Stored = {
+      providers: [
+        {
+          id: "openai",
+          name: "OpenAI",
+          url: {
+            state: "trusted",
+            trustedUrl: "https://gateway.example/v1",
+            pendingUrl: null,
+            problem: null,
+          },
+          urlChangedAt: null,
+          firstSeenAt: T1.toISOString(),
+          unlistedAt: null,
+          updatedAt: T1.toISOString(),
+        },
+      ],
+      models: [],
+    };
+    const next = plan({ ok: true, url: SEED }, earlier, T2);
+    expect(next.write.providers[0]?.url).toMatchObject({
+      state: "url_changed",
+      trustedUrl: "https://gateway.example/v1",
+      pendingUrl: SEED,
+    });
+  });
+
+  // #548-T08
+  it("still trusts the first address of a provider the file gives no default for", () => {
+    const first = planCatalog({
+      parsed: parsed([reducedModel("a")]),
+      stored: EMPTY,
+      urlChecks: new Map([["deepseek", { ok: true, url: URL_A }]]),
+      now: T1,
+    });
+
+    expect(first.write.providers[0]?.url).toMatchObject({
+      state: "trusted",
+      trustedUrl: URL_A,
+    });
+  });
+});
