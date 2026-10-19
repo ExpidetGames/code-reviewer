@@ -199,12 +199,9 @@ function costOf(parsed: z.infer<typeof costSchema>): ModelCost {
   return cost;
 }
 
+/** The modalities it knows, once each, in the order of `MODALITIES` (the order the stored row reads back in). */
 function modalitiesOf(values: unknown[] | undefined): Modality[] {
-  const known = new Set<Modality>();
-  for (const value of values ?? [])
-    for (const modality of MODALITIES)
-      if (value === modality) known.add(modality);
-  return [...known];
+  return MODALITIES.filter((modality) => values?.includes(modality) === true);
 }
 
 const FIELD = /^[a-z][a-z_]{0,39}$/;

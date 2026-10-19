@@ -1,0 +1,266 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// What one fetch writes (#548): new rows, changed rows, rows that disappear (unlisted, never deleted) and rows that
+// return, the trust on first use of each provider's address, and the guard against a fetch that would unlist too much.
+import { describe, expect, it } from "vitest";
+import type { StoredModel, StoredProvider } from "./catalog.ts";
+import type { ParsedModelsDev, ReducedModel, ReducedProvider } from "./parse.ts";
+import { UNLISTED_SHARE_LIMIT, planCatalog } from "./plan.ts";
+import type { UrlCheck } from "./upstream-url.ts";
+
+const T1 = new Date("2026-10-19T03:00:00.000Z");
+const T2 = new Date("2026-10-20T03:00:00.000Z");
+const T3 = new Date("2026-10-21T03:00:00.000Z");
+const URL_A = "https://api.deepseek.com";
+
+function reducedProvider(id = "deepseek"): ReducedProvider {
+  return { id, name: id, api: URL_A, apiTooLong: false };
+}
+function reducedModel(id: string, overrides: Partial<ReducedModel> = {}, providerId = "deepseek"): ReducedModel {
+  return {
+    providerId,
+    id,
+    name: id,
+    family: null,
+    limit: { context: 1000, output: 100 },
+    reasoning: false,
+    temperature: true,
+    attachment: false,
+    modalities: { input: ["text"], output: ["text"] },
+    status: null,
+    cost: { input: "1", output: "2" },
+    lastUpdated: null,
+    interleaved: null,
+    ...overrides,
+  };
+}
+function parsed(models: ReducedModel[], providers: ReducedProvider[] = [reducedProvider()]): ParsedModelsDev {
+  return {
+    ok: true,
+    providers,
+    models,
+    skipped: { invalid: 0, noToolCalling: 0, notLanguageModel: 0, modelProviderOverride: 0, unsupportedProviders: 0, unknownProviders: 0 },
+  };
+}
+const okUrl = (): ReadonlyMap<string, UrlCheck> => new Map([["deepseek", { ok: true, url: URL_A }]]);
+
+type Stored = { providers: StoredProvider[]; models: StoredModel[] };
+/** What the repository would hold after applying a plan, to feed the next one. */
+function applied(before: Stored, write: ReturnType<typeof planCatalog>["write"]): Stored {
+  const providers = new Map(before.providers.map((p) => [p.id, p]));
+  for (const p of write.providers) providers.set(p.id, p);
+  const models = new Map(before.models.map((m) => [`${m.providerId}/${m.id}`, m]));
+  for (const m of write.models) models.set(`${m.providerId}/${m.id}`, m);
+  return { providers: [...providers.values()], models: [...models.values()] };
+}
+const EMPTY: Stored = { providers: [], models: [] };
+const ids = (models: StoredModel[]) => models.map((m) => m.id).sort();
+
+describe("planning what a fetch writes", () => {
+  // #548-T03
+  it("writes every provider and model of a first fetch, seen now", () => {
+    const plan = planCatalog({
+      parsed: parsed([reducedModel("a"), reducedModel("b")]),
+      stored: EMPTY,
+      urlChecks: okUrl(),
+      now: T1,
+    });
+
+    expect(ids(plan.write.models)).toEqual(["a", "b"]);
+    expect(plan.write.models.every((m) => m.firstSeenAt === T1.toISOString() && m.unlistedAt === null)).toBe(true);
+    expect(plan.write.providers).toEqual([
+      expect.objectContaining({
+        id: "deepseek",
+        firstSeenAt: T1.toISOString(),
+        url: { state: "trusted", trustedUrl: URL_A, pendingUrl: null, problem: null },
+      }),
+    ]);
+    expect(plan.summary).toMatchObject({ providers: 1, models: 2, newModels: 2, changedModels: 0, unlistedModels: 0, returnedModels: 0 });
+  });
+
+  // #548-T03
+  it("writes nothing when nothing changed", () => {
+    const first = planCatalog({ parsed: parsed([reducedModel("a")]), stored: EMPTY, urlChecks: okUrl(), now: T1 });
+    const stored = applied(EMPTY, first.write);
+
+    const second = planCatalog({ parsed: parsed([reducedModel("a")]), stored, urlChecks: okUrl(), now: T2 });
+
+    expect(second.write).toEqual({ providers: [], models: [] });
+    expect(second.summary).toMatchObject({ newModels: 0, changedModels: 0 });
+  });
+
+  // #548-T03
+  it("updates a model whose price changed, and keeps the day it was first seen", () => {
+    const first = planCatalog({ parsed: parsed([reducedModel("a"), reducedModel("b")]), stored: EMPTY, urlChecks: okUrl(), now: T1 });
+    const stored = applied(EMPTY, first.write);
+
+    const second = planCatalog({
+      parsed: parsed([reducedModel("a", { cost: { input: "1", output: "3" } }), reducedModel("b")]),
+      stored,
+      urlChecks: okUrl(),
+      now: T2,
+    });
+
+    expect(second.write.models).toEqual([
+      expect.objectContaining({
+        id: "a",
+        cost: { input: "1", output: "3" },
+        firstSeenAt: T1.toISOString(),
+        updatedAt: T2.toISOString(),
+      }),
+    ]);
+    expect(second.summary).toMatchObject({ changedModels: 1, newModels: 0 });
+  });
+
+  // #548-T03
+  it("marks a model that vanished as unlisted with the date, keeps its last known entry, and clears it when it returns", () => {
+    const models = [reducedModel("a"), ...Array.from({ length: 19 }, (_unused, i) => reducedModel(`m${String(i)}`))];
+    const first = planCatalog({ parsed: parsed(models), stored: EMPTY, urlChecks: okUrl(), now: T1 });
+    const stored1 = applied(EMPTY, first.write);
+
+    const vanished = planCatalog({ parsed: parsed(models.slice(1)), stored: stored1, urlChecks: okUrl(), now: T2 });
+    expect(vanished.write.models).toEqual([
+      expect.objectContaining({ id: "a", unlistedAt: T2.toISOString(), cost: { input: "1", output: "2" }, limit: { context: 1000, output: 100 } }),
+    ]);
+    expect(vanished.summary).toMatchObject({ unlistedModels: 1 });
+    const stored2 = applied(stored1, vanished.write);
+
+    const stillGone = planCatalog({ parsed: parsed(models.slice(1)), stored: stored2, urlChecks: okUrl(), now: T3 });
+    expect(stillGone.write.models).toEqual([]);
+
+    const returned = planCatalog({ parsed: parsed(models), stored: stored2, urlChecks: okUrl(), now: T3 });
+    expect(returned.write.models).toEqual([
+      expect.objectContaining({ id: "a", unlistedAt: null, firstSeenAt: T1.toISOString(), updatedAt: T3.toISOString() }),
+    ]);
+    expect(returned.summary).toMatchObject({ returnedModels: 1 });
+  });
+
+  // #548-T03
+  it("unlists the models of a provider that is gone, and the provider", () => {
+    const first = planCatalog({ parsed: parsed([reducedModel("a")]), stored: EMPTY, urlChecks: okUrl(), now: T1 });
+    const stored = applied(EMPTY, first.write);
+    const other = parsed([reducedModel("x", {}, "openai")], [reducedProvider("openai")]);
+
+    const plan = planCatalog({
+      parsed: other,
+      stored,
+      urlChecks: new Map([["openai", { ok: true, url: "https://api.openai.com/v1" }]]),
+      now: T2,
+    });
+
+    expect(plan.write.providers.find((p) => p.id === "deepseek")?.unlistedAt).toBe(T2.toISOString());
+    expect(plan.write.models.find((m) => m.id === "a")?.unlistedAt).toBe(T2.toISOString());
+    expect(plan.write.providers.find((p) => p.id === "openai")?.unlistedAt).toBeNull();
+  });
+
+  // #548-T03
+  it("keeps a deprecated status as the status of the model, and the model", () => {
+    const plan = planCatalog({
+      parsed: parsed([reducedModel("old", { status: "deprecated" })]),
+      stored: EMPTY,
+      urlChecks: okUrl(),
+      now: T1,
+    });
+
+    expect(plan.write.models[0]).toMatchObject({ id: "old", status: "deprecated", unlistedAt: null });
+  });
+});
+
+describe("the fetch guard", () => {
+  const twenty = Array.from({ length: 20 }, (_unused, i) => reducedModel(`m${String(i)}`));
+  const stored = applied(EMPTY, planCatalog({ parsed: parsed(twenty), stored: EMPTY, urlChecks: okUrl(), now: T1 }).write);
+
+  // #548-T04
+  it("allows a fetch that unlists up to a tenth of the listed models", () => {
+    expect(UNLISTED_SHARE_LIMIT).toBe(0.1);
+
+    const plan = planCatalog({ parsed: parsed(twenty.slice(2)), stored, urlChecks: okUrl(), now: T2 });
+
+    expect(plan.guard).toEqual({ tripped: false, unlisted: 2, listed: 20 });
+  });
+
+  // #548-T04
+  it("trips on a fetch that would unlist more than a tenth", () => {
+    const plan = planCatalog({ parsed: parsed(twenty.slice(3)), stored, urlChecks: okUrl(), now: T2 });
+
+    expect(plan.guard).toEqual({ tripped: true, unlisted: 3, listed: 20 });
+  });
+
+  // #548-T04
+  it("trips on a fetch that would unlist a tenth of the providers", () => {
+    const providers = Array.from({ length: 10 }, (_unused, i) => reducedProvider(`p${String(i)}`));
+    const models = providers.map((p) => reducedModel("m", {}, p.id));
+    const checks = new Map(providers.map((p) => [p.id, { ok: true, url: URL_A } as UrlCheck]));
+    const big = applied(EMPTY, planCatalog({ parsed: parsed(models, providers), stored: EMPTY, urlChecks: checks, now: T1 }).write);
+
+    const plan = planCatalog({ parsed: parsed(models.slice(2), providers.slice(2)), stored: big, urlChecks: checks, now: T2 });
+
+    expect(plan.guard.tripped).toBe(true);
+  });
+
+  // #548-T04
+  it("does not count a model that was already unlisted, and never trips on a first fetch", () => {
+    const first = planCatalog({ parsed: parsed(twenty), stored: EMPTY, urlChecks: okUrl(), now: T1 });
+    expect(first.guard).toEqual({ tripped: false, unlisted: 0, listed: 0 });
+
+    const gone = applied(stored, planCatalog({ parsed: parsed(twenty.slice(2)), stored, urlChecks: okUrl(), now: T2 }).write);
+    const again = planCatalog({ parsed: parsed(twenty.slice(2)), stored: gone, urlChecks: okUrl(), now: T3 });
+    expect(again.guard).toEqual({ tripped: false, unlisted: 0, listed: 18 });
+  });
+});
+
+describe("the address of a provider across fetches", () => {
+  // #548-T08
+  it("blocks the provider when the address changes, and keeps the trusted one", () => {
+    const first = planCatalog({ parsed: parsed([reducedModel("a")]), stored: EMPTY, urlChecks: okUrl(), now: T1 });
+    const stored = applied(EMPTY, first.write);
+
+    const second = planCatalog({
+      parsed: parsed([reducedModel("a")]),
+      stored,
+      urlChecks: new Map([["deepseek", { ok: true, url: "https://elsewhere.example/v1" }]]),
+      now: T2,
+    });
+
+    expect(second.write.providers).toEqual([
+      expect.objectContaining({
+        url: { state: "url_changed", trustedUrl: URL_A, pendingUrl: "https://elsewhere.example/v1", problem: null },
+        urlChangedAt: T2.toISOString(),
+      }),
+    ]);
+    expect(second.summary).toMatchObject({ blockedProviders: 1 });
+    // The models are stored as before: the block is on the provider, not on its rows.
+    expect(second.write.models).toEqual([]);
+  });
+
+  // #548-T08
+  it("dates the block from its first day, not from the day it was seen again", () => {
+    const first = planCatalog({ parsed: parsed([reducedModel("a")]), stored: EMPTY, urlChecks: okUrl(), now: T1 });
+    const changedChecks = new Map<string, UrlCheck>([["deepseek", { ok: true, url: "https://elsewhere.example/v1" }]]);
+    const second = planCatalog({ parsed: parsed([reducedModel("a")]), stored: applied(EMPTY, first.write), urlChecks: changedChecks, now: T2 });
+    const stored = applied(applied(EMPTY, first.write), second.write);
+
+    const third = planCatalog({ parsed: parsed([reducedModel("a")]), stored, urlChecks: changedChecks, now: T3 });
+
+    expect(third.write.providers).toEqual([]);
+    expect(stored.providers[0]?.urlChangedAt).toBe(T2.toISOString());
+  });
+
+  // #548-T07
+  it("does not trust an address that is refused on its first sight, and still lists the models for the admin", () => {
+    const plan = planCatalog({
+      parsed: parsed([reducedModel("a")]),
+      stored: EMPTY,
+      urlChecks: new Map([["deepseek", { ok: false, problem: "not_https", seen: "http://api.deepseek.com" }]]),
+      now: T1,
+    });
+
+    expect(plan.write.providers[0]?.url).toEqual({
+      state: "rejected",
+      trustedUrl: null,
+      pendingUrl: "http://api.deepseek.com",
+      problem: "not_https",
+    });
+    expect(plan.summary).toMatchObject({ rejectedProviders: 1 });
+  });
+});
