@@ -939,3 +939,23 @@ def test_a_root_loop_drops_diff_jobs_to_the_job_user_and_keeps_dynamic_jobs_as_t
         await harness.stop()
 
     run(scenario)
+
+
+# #517-T05: a job process that ends: its findings are in the body that completes the job, and stay
+# in it when the app refuses the full result and the bare verdict is sent.
+def test_the_findings_of_a_review_are_in_the_body_that_completes_the_job() -> None:
+    async def scenario() -> None:
+        harness = Harness()
+        harness.api.claims = [make_claim(1)]
+        harness.api.complete_errors = [ApiRejected("bad", 400, "RUNNER_REQUEST_INVALID")]
+        await harness.start()
+        findings = {"open": 3, "bySeverity": {"P0": 0, "P1": 0, "P2": 0, "P3": 3}}
+        only(harness.launcher.processes).finish(outcome(stdout=result_line(findings=findings)))
+        await settle()
+
+        assert len(harness.api.completions) == 2
+        assert harness.api.completions[0][2]["findings"] == findings
+        assert harness.api.completions[1][2]["findings"] == findings
+        await harness.stop()
+
+    run(scenario)
