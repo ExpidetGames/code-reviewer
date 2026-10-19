@@ -21,11 +21,12 @@ from plain_json_final import (
     FINISH_NOW_INSTRUCTION,
     Problem,
     extract_final_json,
+    final_answer_line,
     repair_message,
     visible_text,
 )
 
-REVIEW = {"resolvedIds": [], "findings": []}
+REVIEW: dict[str, Any] = {"resolvedIds": [], "findings": []}
 REVIEW_TEXT = json.dumps(REVIEW)
 
 
@@ -74,6 +75,12 @@ def test_the_whole_message_as_one_json_object_is_the_answer(text: str) -> None:
         ("The function f() {return 1} looks fine.", Problem.NO_JSON_OBJECT),
         ('{"findings": [], "resolvedIds": [],}', Problem.INVALID_JSON),
         ("{'findings': [], 'resolvedIds': []}", Problem.INVALID_JSON),
+        (
+            '{"resolvedIds": [], \'findings\': [{"id": "f-1"}]}',
+            Problem.INVALID_JSON,
+        ),
+        ('Here: {\'findings\': [{"id": "f-1"}]}', Problem.NO_JSON_OBJECT),
+        (f"The function f() {{return 1}} is fine.\n{REVIEW_TEXT}", Problem.TEXT_AROUND_JSON),
         ('{"findings": [], // none\n "resolvedIds": []}', Problem.INVALID_JSON),
         ('{"findings": [], "resolvedIds": []', Problem.INVALID_JSON),
         ('{"findings": [], "resolvedIds": [], "confidence": NaN}', Problem.INVALID_JSON),
@@ -92,6 +99,9 @@ def test_the_whole_message_as_one_json_object_is_the_answer(text: str) -> None:
         "braces-in-prose",
         "trailing-comma",
         "single-quotes",
+        "single-quotes-with-a-finding-inside",
+        "prose-before-single-quotes",
+        "braces-before-the-object",
         "comment",
         "unterminated",
         "nan",
@@ -191,3 +201,12 @@ def test_the_finish_now_instruction_is_the_runner_tag_with_one_plain_ask() -> No
     assert "Do not call any more tools" in FINISH_NOW_INSTRUCTION
     assert "one JSON object and nothing else" in FINISH_NOW_INSTRUCTION
     assert "StructuredOutput" not in FINISH_NOW_INSTRUCTION
+
+
+# #547-T01: the core is untouched; the job's bound is the one thing its line has to carry.
+def test_the_final_answer_line_carries_the_bound_of_the_job_and_nothing_untrusted() -> None:
+    line = final_answer_line(7)
+
+    assert "one JSON object and nothing else" in line
+    assert "at most 7 findings" in line
+    assert "\n" not in line and "StructuredOutput" not in line

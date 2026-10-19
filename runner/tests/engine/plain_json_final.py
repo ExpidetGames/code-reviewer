@@ -109,21 +109,31 @@ def _unfenced(text: str) -> str:
     return inner.strip()
 
 
-def _holds_an_object(text: str) -> bool:
-    """True when some `{` in the text starts a complete JSON object. Naming only: this never
-    produces an answer, it tells text around an object from text with none."""
+def _holds_a_review_object(text: str) -> bool:
+    """True when some `{` in the text starts a complete JSON object with a `findings` key. Naming
+    only: this never produces an answer, it tells text around an object from text with none. An
+    object inside a broken one (a finding inside a review with single quotes) is not a review."""
     decoder = json.JSONDecoder(parse_constant=_reject_constant)
     start = text.find("{")
     while start != -1:
         try:
-            value, _ = decoder.raw_decode(text, start)
+            value, end = decoder.raw_decode(text, start)
         except ValueError:
             start = text.find("{", start + 1)
             continue
-        if isinstance(value, dict):
+        if isinstance(value, dict) and "findings" in cast("dict[str, Any]", value):
             return True
-        start = text.find("{", start + 1)
+        start = text.find("{", end)
     return False
+
+
+def _object_with_trailing_text(text: str) -> bool:
+    """True when the text starts with a complete JSON object and holds more after it."""
+    try:
+        _, end = json.JSONDecoder(parse_constant=_reject_constant).raw_decode(text)
+    except ValueError:
+        return False
+    return end < len(text)
 
 
 def extract_final_json(message: dict[str, Any]) -> Extraction:
@@ -141,10 +151,12 @@ def extract_final_json(message: dict[str, Any]) -> Extraction:
     except ValueError as error:
         if cut:
             return Extraction(None, Problem.CUT_OFF)
-        if _holds_an_object(candidate):
-            return Extraction(None, Problem.TEXT_AROUND_JSON)
         if candidate.startswith("{"):
+            if _object_with_trailing_text(candidate):
+                return Extraction(None, Problem.TEXT_AROUND_JSON)
             return Extraction(None, Problem.INVALID_JSON, _parser_detail(error))
+        if _holds_a_review_object(candidate):
+            return Extraction(None, Problem.TEXT_AROUND_JSON)
         return Extraction(None, Problem.NO_JSON_OBJECT)
     if not isinstance(value, dict):
         return Extraction(None, Problem.NOT_AN_OBJECT)
@@ -155,6 +167,19 @@ def _parser_detail(error: ValueError) -> str:
     if isinstance(error, json.JSONDecodeError):
         return f"{error.msg} at position {error.pos}"
     return "not valid JSON"
+
+
+def final_answer_line(max_findings: int) -> str:
+    """The one runner line at the end of the first user message (outside every untrusted block).
+
+    The core prompt already asks for one JSON object and nothing else (`OUTPUT (fixed)`), so the
+    core does not change. What the core cannot say is the bound of this job: the engine schema
+    that carried it (`maxItems`) is gone, so the line does.
+    """
+    return (
+        "FINAL ANSWER (fixed): when you have examined enough, your last message is the review as "
+        f"one JSON object and nothing else, with at most {max_findings} findings."
+    )
 
 
 FINISH_NOW_INSTRUCTION = (
