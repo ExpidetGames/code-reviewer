@@ -102,6 +102,54 @@ function valuesOf(args: readonly string[], flag: string): string[] {
 }
 
 describe("the Sandbox-Launcher", () => {
+  // #493-T05
+  it("tells the core about the VM right after the create returned, with the name of the platform and the VM's own timeout", async () => {
+    const created: Array<{
+      name: string;
+      startedAt: Date;
+      timeoutSeconds: number;
+    }> = [];
+    const launcher = build({ now: () => new Date("2026-10-19T10:00:00.000Z") });
+
+    const result = await launch(
+      launcher,
+      spec({ onVmCreated: (vm) => created.push(vm) }),
+    );
+
+    expect(result).toStrictEqual({ ok: true });
+    expect(created).toStrictEqual([
+      {
+        name: service.creates[0]?.name,
+        startedAt: new Date("2026-10-19T10:00:00.000Z"),
+        timeoutSeconds: 1200 + VM_TIMEOUT_MARGIN_SECONDS,
+      },
+    ]);
+    // Before anything else is done to the VM.
+    expect(service.events[0]).toBe(`create:${created[0]?.name}`);
+  });
+
+  // #493-T05
+  it("does not tell the core about a VM whose create failed, and a callback that throws changes nothing", async () => {
+    const created: unknown[] = [];
+    service.failNextCreate(new SandboxServiceError("unavailable"));
+    const failed = await launch(
+      build(),
+      spec({ onVmCreated: (vm) => created.push(vm) }),
+    );
+    expect(failed.ok).toBe(false);
+    expect(created).toStrictEqual([]);
+
+    const result = await launch(
+      build(),
+      spec({
+        onVmCreated: () => {
+          throw new Error("boom");
+        },
+      }),
+    );
+    expect(result).toStrictEqual({ ok: true });
+  });
+
   // #329-T01
   it("creates a VM from the golden snapshot, prepares the host, runs the container and delivers the start document on stdin", async () => {
     const launcher = build();

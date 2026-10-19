@@ -77,6 +77,7 @@ export const APP_FEATURES = [
   "claim_by_job_id",
   "pool_cap",
   "release",
+  "vm_lifecycle",
 ] as const;
 export type AppFeature = (typeof APP_FEATURES)[number];
 
@@ -104,6 +105,32 @@ export const RELEASE_RETRY_AFTER_RANGE = { min: 1, max: 86_400 } as const;
 export type ReleaseResponse = {
   version: typeof RUNNER_API_VERSION;
   job: { id: string; status: "queued" | "failed" };
+};
+
+/**
+ * #493: the body of `POST /api/runners/v1/jobs/{id}/vm` (`VmStartRequest`): the Dispatcher says that it created the VM of
+ * the claim. Closed. The per-job credential proves the claim; `startedAt` is the Dispatcher's clock (the App keeps it
+ * between the claim and its own clock); `timeoutSeconds` is the VM's own timeout, the platform's backstop.
+ */
+export type VmStartRequest = {
+  credential: string;
+  vmName: string;
+  startedAt: string;
+  timeoutSeconds: number;
+};
+
+/** #493: the name of a VM (`VmName`): the platform's, as the Dispatcher stops it. */
+export const VM_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+/** #493: `startedAt` is ISO 8601 in UTC with the `Z`, milliseconds optional (`VmStartRequest.startedAt`). */
+export const VM_STARTED_AT_PATTERN =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/;
+/** #493: the range of `VmStartRequest.timeoutSeconds`. */
+export const VM_TIMEOUT_SECONDS_RANGE = { min: 60, max: 86_400 } as const;
+
+/** #493: 200 from the report (`VmStartResponse`). `replayed`: the VM was known; nothing changed. */
+export type VmStartResponse = {
+  version: typeof RUNNER_API_VERSION;
+  status: "recorded" | "replayed";
 };
 
 /**

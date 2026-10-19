@@ -77,12 +77,17 @@
       }
     },
     "DispatchStopAccepted": {
-      "description": "202 from the receiver: the stop call is verified and the VMs of the job are being stopped in the background.",
+      "description": "202 from the receiver: the stop call is verified and the VMs of the job are being stopped in the background. `vms` (#493, optional) names them, so that the app can take the moment of this answer as the end of each VM's billable minutes; a receiver of the earlier release leaves it out, and the sender then falls back to the bounded estimate (contracts/README.md, \"Rolling out the billable minutes\").",
       "type": "object",
       "required": ["version", "status"],
       "properties": {
         "version": { "const": 1 },
-        "status": { "const": "stopping" }
+        "status": { "const": "stopping" },
+        "vms": {
+          "type": "array",
+          "maxItems": 16,
+          "items": { "$ref": "runner-api.v1.json#/$defs/VmName" }
+        }
       }
     },
     "DispatchStopIgnored": {

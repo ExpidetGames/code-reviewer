@@ -41,6 +41,9 @@ BODIES = (
     "VersionResponse",
     # #364: the job state a Dispatcher reads to find the VMs of jobs that ended.
     "JobStateResponse",
+    # #493: the Dispatcher reports the VM it created (billable minutes).
+    "VmStartRequest",
+    "VmStartResponse",
 )
 
 Document = dict[str, Any]

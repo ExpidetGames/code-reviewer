@@ -72,11 +72,132 @@ export interface DispatchStop {
   sentAt: string;
 }
 /**
- * 202 from the receiver: the stop call is verified and the VMs of the job are being stopped in the background.
+ * 202 from the receiver: the stop call is verified and the VMs of the job are being stopped in the background. `vms` (#493, optional) names them, so that the app can take the moment of this answer as the end of each VM's billable minutes; a receiver of the earlier release leaves it out, and the sender then falls back to the bounded estimate (contracts/README.md, "Rolling out the billable minutes").
  */
 export interface DispatchStopAccepted {
   version: 1;
   status: "stopping";
+  /**
+   * @maxItems 16
+   *
+   * Items: #493: the name of a Sandbox VM, as the platform and the Dispatcher know it (unique per launch: `cr-<kind>-<job id>-<random>`). Free text of the Dispatcher's own naming; the app uses it only as a key and never as a command.
+   */
+  vms?:
+    | []
+    | [string]
+    | [string, string]
+    | [string, string, string]
+    | [string, string, string, string]
+    | [string, string, string, string, string]
+    | [string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string, string, string]
+    | [
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+      ]
+    | [
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+      ]
+    | [
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+      ]
+    | [
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+      ]
+    | [
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+      ]
+    | [
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+      ]
+    | [
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+      ];
   [k: string]: unknown;
 }
 /**

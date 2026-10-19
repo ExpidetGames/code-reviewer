@@ -28,6 +28,16 @@ export type LaunchConfig = {
   launcher?: Record<string, string | number | boolean>;
 };
 
+/**
+ * A VM a Launcher created for a job (#493): its name (the platform's, as it is stopped), the moment `create` returned and
+ * the VM's own timeout, the platform's backstop. What the App needs to measure the VM's minutes.
+ */
+export type CreatedVm = {
+  name: string;
+  startedAt: Date;
+  timeoutSeconds: number;
+};
+
 /** Everything a Launcher needs to start the Worker of one job. The credential is a secret: never log it. */
 export type LaunchSpec = {
   appUrl: string;
@@ -37,6 +47,12 @@ export type LaunchSpec = {
   /** How long the Worker may live, from the start. */
   timeoutSeconds: number;
   config: LaunchConfig;
+  /**
+   * #493: a Launcher that creates a VM calls this right after the create returned. The core reports the VM to the App,
+   * best effort and in the background; the call returns at once and never throws, and nothing it does can fail the
+   * launch. A Launcher that creates no VM never calls it.
+   */
+  onVmCreated?: (vm: CreatedVm) => void;
 };
 
 /**

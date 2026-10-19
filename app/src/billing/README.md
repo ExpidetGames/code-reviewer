@@ -17,6 +17,8 @@ source file imports `"server-only"` (`server-only.test.ts`).
 | `outcome.ts`       | `classifyOutcome`: the end state of a job and its stable codes to `charged`, `minutes_only` or `free`, from an exhaustive table (pure).                                                                                                                                                                                                                    |
 | `pricing.ts`       | `priceRun` and `reserveFor` (pure): the two prices of a run and the hold of a job, in whole micro-USD.                                                                                                                                                                                                                                                     |
 | `journal.ts`       | The vocabulary of the balance journal (#495): the entry types as an `as const` set, the sign of each, the stable error codes, `validateEntry`. The table checks restate the type and sign rules in SQL; `journal.test.ts` fails when they drift apart.                                                                                                     |
+| `minutes.ts`       | Billable minutes (pure, #493): `billableMinutes`, `backstopEnd`, `boundedEnd`, the end sources and `STOP_RETRY_WINDOW_SECONDS`.                                                                                                                                                                                                                            |
+| `wall-clock.ts`    | `createWallClockRecorder`: the measure of a job without a VM, where billing is on (#493). `shared.ts` hands it to the platform after the response.                                                                                                                                                                                                         |
 | `enabled.ts`       | `isBillingOn(db)`: the one reader of the switch. `guardBillingRoute`: the first line of every billing route.                                                                                                                                                                                                                                               |
 | `public-url.ts`    | Whether an address can be reached from the internet (https, no credentials, no loopback, private, link-local or local name; pure), and the one spelling addresses are compared in. A Stripe webhook endpoint needs it.                                                                                                                                     |
 
@@ -100,6 +102,57 @@ customer wins, so a run that was our error and also left no result is ours.
 The table is exhaustive over today's terminal codes: the job end codes, the release reasons, the error codes and checkout
 reasons of the runner contract, the reasons of the loop of a runner and the settled reasons. `outcome.test.ts` fails when
 one of those lists gains a code with no class, so adding a code means deciding who pays for it.
+
+## Billable minutes (#493)
+
+The infrastructure price is `billable minutes x B` (ADR 0006, 2.4 and 2.11); this part **only measures**. It sets no price
+and writes no journal entry, and #498 reads it when it settles. The table is `job_vm_runs` (workspace-scoped:
+`db/repositories/job-vm-runs-repository.ts`): one row per VM the Dispatcher reported, with the raw timestamps for audit
+(`started_at`, `reported_at`, `ended_at`), where the end came from (`end_source`), the VM's own timeout, the claim it was
+started for and the whole minutes (`billable_minutes`, an integer). `measure(jobId)` is the one answer #498 needs:
+`{ state: "not_ended" }` while the job runs, else `{ state: "measured", minutes, run }`, where `run` is the run that counts
+(null and 0 minutes when no VM or Worker ever ran for the final claim).
+
+**Started minutes.** `ceil((end - start) / 60 s)`, at least 1 once a VM exists, 0 when none does (`minutes.ts`; a test pins 0 s,
+1 s, 59 s, 60 s, 61 s and 3,600 s). The price takes this integer as `billableMinutes` (#494).
+
+**Where the start is recorded.** The Dispatcher creates the VM and is the only party that knows when. It tells the App right
+after `Sandbox.create` returned, with `POST /api/runners/v1/jobs/:id/vm` (`vm_lifecycle`; `runner-api/README.md`). The report
+is the Dispatcher's dispatcher token plus the job credential it holds during the launch (the VM and the Worker cannot call it),
+a closed body, idempotent (the first report of a VM wins) and accepted only while that credential holds the running claim.
+`started_at` is the Dispatcher's clock **kept between the claim and the moment the report arrived**: a skewed or wrong clock can
+shorten or lengthen a VM by at most the launch, never by hours. A report that does not arrive (the call failed, an old
+Dispatcher) leaves no row and the job measures 0 minutes: deploy the Dispatcher before billing is switched on.
+
+**Where the end is recorded.** The reaper does not tell the App, and the VM timeout is only the platform's backstop, so neither
+can be the source. The source is **the answer to the App's own stop call (#487)**: the Dispatcher's `202` now names the VMs it
+is stopping (`vms`), and the App's clock at that moment is the end (`app_stop_confirmed`). The answer comes before the
+platform has finished stopping a VM with a running container (20 seconds or more), so the measure is that much shorter than
+the platform's own bill, in the customer's favour; a report of the finished stop is a follow-up. When no answer names the VM
+(the stop call failed after its retries, a Dispatcher of the previous release answered `404`, the answer was `no_vm` or a
+replay, the App went down) `measure` applies the **backstop**: `min(job end + 60 s, start + the VM's timeout)`
+(`timeout_backstop`). Why: a VM that is still up after the job ended and our stop had its window is up because our stop did not
+work, and that is our error; billing it up to the VM's timeout (35 minutes for a Diff job) would charge the customer for it.
+The VM's timeout is the hard cap, so a missing teardown can never make a bill unbounded. A confirmation that arrives after a
+backstop was applied replaces it (it is better evidence), bounded by the same cap; nothing else ever changes an end.
+
+**Several VMs for one job.** Every VM is stored. The one that counts is **the VM of the claim that produced the final outcome**
+(`billable`): a job claimed again after a lost attempt (a failed launch, a lapsed lease) gets a new claim, and the VMs of
+earlier claims are our fault ("an error on our side is free") and are never billed, even if the final claim never created a VM
+(then the job measures 0 minutes). A second VM reported for the same claim is kept but does not count. The claim is identified by
+`jobs.claimed_at`, which a job keeps after it ends and which every claim sets anew; the attempt number alone is not reliable
+(`complete` and `timeout` do not count a lost attempt, a failed release does).
+
+**No VM: self-hosted and Compose.** There is none to measure. Where billing is on (`isBillingOn`), the job's wall clock on a
+runner (the claim of the settled attempt to its end) is recorded with `end_source = job_wall_clock` when its claim ends
+(`wall-clock.ts`, through the queue's `onClaimsEnded`); with billing off nothing is read or written. A job a Dispatcher
+acknowledged is left to its VM. An operator who does not want to charge for it sets B to 0. VM rows themselves are stored
+whether or not billing is on: it is one insert per hosted job, it reads no billing table, and it means a billing switch has
+history.
+
+**Edge: a superseded run that drains.** Its job is final when the push replaced it, while its Worker finishes a few model
+requests; its VM ends with the claim, which the stop call reports, so a confirmed end is right. Only the backstop (no
+confirmation) counts from the job's `finished_at`.
 
 ## The switch
 

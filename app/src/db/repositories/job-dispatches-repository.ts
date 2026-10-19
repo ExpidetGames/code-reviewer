@@ -65,6 +65,8 @@ export type DueDispatchJob = {
 
 export type JobDispatchesRepository = {
   get(jobId: string): Promise<DispatchRow | undefined>;
+  /** #493: the workspace of a job, for the instance level code that goes on to a scoped repository; undefined if none. */
+  workspaceOf(jobId: string): Promise<string | undefined>;
   /** Makes the row for a job, unless there is one. Returns whether this call made it. */
   create(jobId: string, nextDispatchAt: Date): Promise<boolean>;
   /**
@@ -137,6 +139,15 @@ export function createJobDispatchesRepository(
   now: () => Date = () => new Date(),
 ): JobDispatchesRepository {
   return {
+    async workspaceOf(jobId) {
+      const row = await db
+        .selectFrom("jobs")
+        .select("workspace_id")
+        .where("id", "=", jobId)
+        .executeTakeFirst();
+      return row?.workspace_id;
+    },
+
     async get(jobId) {
       const row = await db
         .selectFrom("job_dispatches")
