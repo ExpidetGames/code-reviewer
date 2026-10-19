@@ -227,7 +227,7 @@ its access attempts. It proves the permission mechanism here in the development 
 on CI's host; the final-image checks are the image smoke test (below, #202). No Docker or OpenCode
 executable is needed for this suite. All fake threads, helpers and owned job directories are joined/removed.
 
-Engine suite (`runner/tests/engine/`, `uv run pytest -m engine`, about 5 minutes, `make test-engine`):
+Engine suite (`runner/tests/engine/`, `uv run pytest -m engine`, `make test-engine`; the CI job takes about 18 minutes (18.5 on 2026-10-19), of which the native provider file (#546) is about one minute locally, it was 3.7 minutes before it was consolidated):
 
 - The OpenCode half (#197, `test_engine_opencode.py` and `opencode_support.py`) needs the pinned
   executable and a trusted `rg`. `runner/scripts/fetch_opencode.py` downloads the release named by
