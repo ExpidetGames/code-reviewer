@@ -11,8 +11,9 @@
 //   - a stop id that was handled is answered 200 `replayed` and nothing is done;
 //   - the VMs of the job are looked up (`findJobVms`): none is 200 `no_vm`, a platform that cannot be asked is 503 with
 //     `Retry-After` and the id is forgotten, so the same call can be repeated;
-//   - the stops go to the platform's background work (`waitUntil`) and the answer is 202 at once: stopping a VM with a
-//     running container takes 20 seconds or more. A stop that fails is logged with a stable code and left to the reaper.
+//   - the stops go to the platform's background work (`waitUntil`) and the answer is 202 at once, naming the VMs (`vms`,
+//     #493): stopping a VM with a running container takes 20 seconds or more. A stop that fails is logged with a stable
+//     code and left to the reaper.
 import type { Hono } from "hono";
 import type { Logger } from "../core/types.ts";
 import type { SandboxFleet } from "../launchers/sandbox-service.ts";
@@ -96,6 +97,10 @@ export function mountStopRoute(app: Hono, options: StopRouteOptions): void {
     if (names.length === 0)
       return c.json({ version: 1, status: "ignored", reason: "no_vm" });
     options.background(stopAll(jobId, names));
-    return c.json({ version: 1, status: "stopping" }, 202);
+    // #493: the names let the App take its own clock at this answer as the end of each VM's billable minutes.
+    return c.json(
+      { version: 1, status: "stopping", vms: [...names].sort() },
+      202,
+    );
   });
 }

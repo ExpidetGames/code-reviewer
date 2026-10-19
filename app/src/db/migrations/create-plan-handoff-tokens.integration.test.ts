@@ -35,7 +35,8 @@ async function rowsOfEveryTable(
       table.name === "job_check_runs" ||
       table.name === "model_catalog_entries" ||
       table.name === "billing_journal_entries" ||
-      table.name === "billing_balances"
+      table.name === "billing_balances" ||
+      table.name === "job_vm_runs"
     )
       continue;
     const { rows } =

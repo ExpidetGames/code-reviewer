@@ -203,10 +203,14 @@ export type RunnerResult = {
  */
 export type KnownReleaseReason = "launch_failed" | "worker_exited";
 /**
- * The features an app lists in VersionResponse.features. A reader ignores a name it does not know and refuses to run against an app that lacks one it needs. `worker_api`: /api/workers/v1 exists. `claim_by_job_id`: ClaimRequest.jobId is honoured. `pool_cap`: ClaimRequest.maxRunning is honoured. `release`: the release call exists.
+ * #493: the name of a Sandbox VM, as the platform and the Dispatcher know it (unique per launch: `cr-<kind>-<job id>-<random>`). Free text of the Dispatcher's own naming; the app uses it only as a key and never as a command.
+ */
+export type VmName = string;
+/**
+ * The features an app lists in VersionResponse.features. A reader ignores a name it does not know and refuses to run against an app that lacks one it needs. `worker_api`: /api/workers/v1 exists. `claim_by_job_id`: ClaimRequest.jobId is honoured. `pool_cap`: ClaimRequest.maxRunning is honoured. `release`: the release call exists. `vm_lifecycle` (#493): POST /api/runners/v1/jobs/{id}/vm exists (the Dispatcher reports the VM it created, for the billable minutes); a Dispatcher sends that call only to an app that lists the feature.
  */
 export type KnownAppFeature =
-  "worker_api" | "claim_by_job_id" | "pool_cap" | "release";
+  "worker_api" | "claim_by_job_id" | "pool_cap" | "release" | "vm_lifecycle";
 /**
  * Every error of the API has one of these codes. 401 RUNNER_UNAUTHORIZED, 400 RUNNER_ID_INVALID / RUNNER_REQUEST_INVALID, 404 RUNNER_JOB_NOT_FOUND, 409 RUNNER_LEASE_LOST / RUNNER_RESULT_CONFLICT, 413 RUNNER_BODY_TOO_LARGE, 503 RUNNER_GIT_ACCESS_UNAVAILABLE (with Retry-After), 500 RUNNER_INTERNAL_ERROR. #318 adds 401 WORKER_CREDENTIAL_INVALID (a Worker route got a credential that is not the job's: wrong job, unknown, expired or from an earlier claim; also the fourth call of the details route in one claim, whose three calls are spent: the Worker has nothing left to fetch and stops, the claim itself is not lost) and 409 RUNNER_JOB_ENDED (the app ended the job, for example after a permanent access failure at fetch; the Worker stops).
  */
@@ -917,6 +921,26 @@ export interface ReleaseResponse {
     status: "queued" | "failed";
     [k: string]: unknown;
   };
+  [k: string]: unknown;
+}
+/**
+ * #493: POST /api/runners/v1/jobs/{id}/vm, with the dispatcher credential (RUNNER_TOKEN) in Authorization and the job credential in the body, like the release. The Dispatcher says that it created the VM of the claim, right after `Sandbox.create` returned. Closed: an unknown field is refused. The first report of a VM wins and a repeat changes nothing. `startedAt` is the Dispatcher's clock; the app keeps it between the claim and its own clock. `timeoutSeconds` is the VM's own timeout, the platform's backstop for a VM that nobody stops. Only a job whose running claim the credential holds is accepted: a report after the claim ended is 409 RUNNER_JOB_ENDED, a credential that is not the claim's is 401. It only measures; it sets no price and never has to succeed for a launch to go on.
+ */
+export interface VmStartRequest {
+  credential: WorkerCredential;
+  vmName: VmName;
+  /**
+   * ISO 8601 in UTC with the `Z`; milliseconds optional.
+   */
+  startedAt: string;
+  timeoutSeconds: number;
+}
+/**
+ * #493: 200 from the report. `recorded`: the VM is stored. `replayed`: the VM was known; nothing changed.
+ */
+export interface VmStartResponse {
+  version: 1;
+  status: "recorded" | "replayed";
   [k: string]: unknown;
 }
 /**

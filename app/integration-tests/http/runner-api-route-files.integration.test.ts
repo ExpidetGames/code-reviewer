@@ -237,7 +237,13 @@ describe("the runner API route files", () => {
     expect(version.headers.get("cache-control")).toBe("no-store");
     expect(await version.json()).toMatchObject({
       version: 1,
-      features: ["worker_api", "claim_by_job_id", "pool_cap", "release"],
+      features: [
+        "worker_api",
+        "claim_by_job_id",
+        "pool_cap",
+        "release",
+        "vm_lifecycle",
+      ],
     });
     const anonymous = await routes.version.GET(
       new Request("https://app.test/api/runners/v1/version"),

@@ -26,6 +26,7 @@ import { createRepositoriesRepository } from "./repositories-repository.ts";
 import { createRunsRepository } from "./runs-repository.ts";
 import { createPlanHandoffTokensRepository } from "./plan-handoff-tokens-repository.ts";
 import { createJobCheckRunsRepository } from "./job-check-runs-repository.ts";
+import { createJobVmRunsRepository } from "./job-vm-runs-repository.ts";
 import { createRefusalNoticesRepository } from "./refusal-notices-repository.ts";
 import { createUsageRecordsRepository } from "./usage-records-repository.ts";
 import { createBillingJournalRepository } from "./billing-journal-repository.ts";
@@ -49,6 +50,7 @@ function reposOf(db: Kysely<Database>, workspaceId: string) {
     usage: createUsageRecordsRepository(db, workspaceId),
     notices: createRefusalNoticesRepository(db, workspaceId),
     jobChecks: createJobCheckRunsRepository(db, workspaceId),
+    vmRuns: createJobVmRunsRepository(db, workspaceId),
     planHandoff: createPlanHandoffTokensRepository(db, workspaceId),
     billing: createBillingJournalRepository(db, workspaceId),
   };
@@ -140,9 +142,27 @@ async function seed(
         delivery_id: null,
         status: "failed",
         error_code: "timeout",
+        claimed_at: "2026-10-10T23:50:00.000Z",
         created_at: "2026-10-11T00:00:00.000Z",
         updated_at: "2026-10-11T00:00:00.000Z",
         finished_at: "2026-10-11T00:00:00.000Z",
+      })
+      .execute();
+    // The VM of that job's claim (#493): A must neither see, end, measure nor add to it.
+    await db
+      .insertInto("job_vm_runs")
+      .values({
+        job_id: `failed-${tag}`,
+        vm_name: `vm-${tag}`,
+        workspace_id: workspaceId,
+        attempt: 1,
+        claimed_at: "2026-10-10T23:50:00.000Z",
+        started_at: "2026-10-10T23:51:00.000Z",
+        reported_at: "2026-10-10T23:51:01.000Z",
+        vm_timeout_seconds: 2100,
+        billable: 1,
+        created_at: "2026-10-10T23:51:01.000Z",
+        updated_at: "2026-10-10T23:51:01.000Z",
       })
       .execute();
   }
@@ -337,6 +357,12 @@ async function rowsOf(db: Kysely<Database>, workspaceId: string) {
       .selectAll()
       .where("workspace_id", "=", workspaceId)
       .orderBy("job_id")
+      .execute(),
+    jobVmRuns: await db
+      .selectFrom("job_vm_runs")
+      .selectAll()
+      .where("workspace_id", "=", workspaceId)
+      .orderBy("vm_name")
       .execute(),
     refusalNotices: await db
       .selectFrom("refusal_notices")
@@ -1051,6 +1077,45 @@ const CASES: Case[] = [
     name: "jobChecks.drop",
     run: (a, b) => a.jobChecks.drop(b.job.id, "X"),
     expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  // VM runs (#493-T11): B's job is not one of A's, so A neither sees, starts, ends, measures nor adds to its VM runs
+  {
+    name: "vmRuns.list",
+    run: (a) => a.vmRuns.list("failed-b"),
+    expectAnswer: (answer) => expect(answer).toEqual([]),
+  },
+  {
+    name: "vmRuns.recordStart",
+    run: (a, b) =>
+      a.vmRuns.recordStart({
+        jobId: b.job.id,
+        vmName: "hijacked",
+        claimedAt: "2026-10-10T23:50:00.000Z",
+        attempt: 1,
+        startedAt: new Date("2026-10-10T23:51:00.000Z"),
+        vmTimeoutSeconds: 2100,
+      }),
+    expectAnswer: (answer) => expect(answer).toBe("refused"),
+  },
+  {
+    name: "vmRuns.confirmStopped",
+    run: (a) =>
+      a.vmRuns.confirmStopped(
+        "failed-b",
+        ["vm-b"],
+        new Date("2026-10-11T00:00:30.000Z"),
+      ),
+    expectAnswer: (answer) => expect(answer).toBe(0),
+  },
+  {
+    name: "vmRuns.recordWallClock",
+    run: (a) => a.vmRuns.recordWallClock("failed-b"),
+    expectAnswer: (answer) => expect(answer).toBe("not_measurable"),
+  },
+  {
+    name: "vmRuns.measure",
+    run: (a) => a.vmRuns.measure("failed-b"),
+    expectAnswer: (answer) => expect(answer).toEqual({ state: "not_ended" }),
   },
   // handoff tokens: making one under A for B's Owner revokes nothing of B's
   {

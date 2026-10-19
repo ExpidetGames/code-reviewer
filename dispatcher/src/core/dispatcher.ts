@@ -17,12 +17,14 @@ import {
   type AppFailure,
   type ClaimedJob,
   type ReleaseReason,
+  VM_LIFECYCLE_FEATURE,
 } from "./app-client.ts";
 import { systemClock } from "./clock.ts";
 import {
   ENGINE_BY_KIND,
   type Clock,
   type CoreSettings,
+  type CreatedVm,
   type DispatcherCore,
   type Engine,
   type HandleResult,
@@ -42,6 +44,8 @@ const RELEASE_ATTEMPTS = 3;
 /** The App's answer to the version question is remembered this long. */
 const VERSION_TTL_MS = 10 * 60 * 1000;
 const MIN_HEARTBEAT_SECONDS = 5;
+/** #493: the pauses before the repeats of a report of the VM that the App could not take (three tries). */
+const VM_REPORT_RETRY_MS: readonly number[] = [1000, 3000];
 
 export type CoreDependencies = {
   settings: CoreSettings;
@@ -81,6 +85,8 @@ export function createDispatcherCore(deps: CoreDependencies): DispatcherCore {
   /** Launches in progress (claimed or being claimed): the local share of the cap. */
   let launching = 0;
   let versionOkUntil = 0;
+  /** #493: whether the App, as of the last version answer, takes the report of a VM. */
+  let appTakesVmReports = false;
 
   async function engines(hint: JobHint): Promise<EnginesAnswer> {
     let offered: readonly Engine[];
@@ -110,8 +116,10 @@ export function createDispatcherCore(deps: CoreDependencies): DispatcherCore {
   > {
     if (now() < versionOkUntil) return { ok: true };
     const checked = await app.checkVersion();
-    if (checked.ok) versionOkUntil = now() + VERSION_TTL_MS;
-    return checked;
+    if (!checked.ok) return checked;
+    versionOkUntil = now() + VERSION_TTL_MS;
+    appTakesVmReports = checked.features.includes(VM_LIFECYCLE_FEATURE);
+    return { ok: true };
   }
 
   async function handle(hint: JobHint): Promise<HandleResult> {
@@ -225,8 +233,15 @@ export function createDispatcherCore(deps: CoreDependencies): DispatcherCore {
         if (!phaseDone.signal.aborted) stopFor("deadline");
       });
 
+    // #493: the reports of the VM the Launcher created, in the background; awaited at the very end only.
+    const reports: Promise<void>[] = [];
+    const onVmCreated = (vm: CreatedVm) => {
+      if (!appTakesVmReports) return;
+      reports.push(reportVm(job, vm));
+    };
+
     try {
-      await launchWith(job, guard);
+      await launchWith(job, guard, onVmCreated);
       logger.info("launched", {
         jobId: job.id,
         kind: job.reviewKind,
@@ -247,10 +262,36 @@ export function createDispatcherCore(deps: CoreDependencies): DispatcherCore {
       phaseDone.abort();
       shutdown.signal.removeEventListener("abort", onShutdown);
       launching -= 1;
+      // The platform keeps the function alive for the work of the launch: do not end it before the reports are made.
+      await Promise.allSettled(reports);
     }
   }
 
-  async function launchWith(job: ClaimedJob, guard: Abort): Promise<void> {
+  /**
+   * #493: tells the App that the VM exists. Best effort: a bounded repeat for what may pass (no answer, a busy or failing
+   * App), none for a refusal, one log line with a stable code when it did not work, and nothing here ever throws or
+   * touches the job.
+   */
+  async function reportVm(job: ClaimedJob, vm: CreatedVm): Promise<void> {
+    try {
+      for (let attempt = 0; ; attempt += 1) {
+        const result = await app.reportVm(job.id, job.credential, vm);
+        if (result === "recorded") return;
+        const pause = VM_REPORT_RETRY_MS[attempt];
+        if (result === "refused" || pause === undefined) break;
+        await clock.sleep(pause);
+      }
+    } catch {
+      // Only that it failed.
+    }
+    logger.warn("vm_report_failed", { jobId: job.id });
+  }
+
+  async function launchWith(
+    job: ClaimedJob,
+    guard: Abort,
+    onVmCreated: (vm: CreatedVm) => void,
+  ): Promise<void> {
     const aborted = new Promise<never>((_resolve, reject) => {
       const fail = () => reject(new AbortedError(guard.why() ?? "aborted"));
       if (guard.signal.aborted) fail();
@@ -265,6 +306,7 @@ export function createDispatcherCore(deps: CoreDependencies): DispatcherCore {
         kind: job.reviewKind,
         timeoutSeconds: settings.jobTimeoutSeconds,
         config: settings.workerConfig[job.reviewKind],
+        onVmCreated,
       },
       guard.signal,
     );

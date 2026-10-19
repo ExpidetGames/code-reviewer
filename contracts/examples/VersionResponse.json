@@ -5,6 +5,7 @@
     "worker_api",
     "claim_by_job_id",
     "pool_cap",
-    "release"
+    "release",
+    "vm_lifecycle"
   ]
 }
