@@ -427,6 +427,37 @@ workspace_id = :w AND balance >= :hold`; no row changed means the hold is refuse
   `DELETE`, so a workspace with a journal entry can never be deleted. No code deletes a workspace today. Whoever builds
   workspace deletion has to decide (retention and erasure on request against an immutable ledger) before it can work.
 
+### Top-up intents and provider events
+
+Migration `20261019170000_create_billing_topup_intents` (#497; epic #489, ADR 0006, 2.12 and 2.13). It adds two empty
+tables and touches no existing row:
+
+- `billing_topup_intents` (`id` primary key; `workspace_id` → `workspaces.id`; `adapter`; `amount_micro_usd`, what WE asked
+  for, a check `> 0`; `state`, a check of `pending`/`paid`/`failed`/`expired`; `provider_checkout_ref` and
+  `provider_payment_ref`, opaque provider ids, null until known; `credited_micro_usd`, what the payment credited (net), 0
+  until paid, and `refunded_micro_usd` and `disputed_micro_usd`, the running totals of what refunds and disputes took
+  back of it, with a check that neither is negative and that together they never exceed the credit; `created_at`,
+  `updated_at`). Unique per adapter on each
+  of the two refs (NULLs do not collide), so one payment or checkout belongs to one intent. Written before any checkout
+  exists; the only way a payment reaches a workspace. **Workspace scoped**
+  (`billing-topup-intents-repository.ts`); `billing-topup-intent-directory-repository.ts` finds an intent from an event
+  before the workspace is known (read only, instance level, listed in `scoping.test.ts`).
+- `billing_webhook_events` (primary key `(provider, event_id)`; `outcome`; `subject` and `occurred_at`, which order the
+  states of one refund or dispute, or name the payment of a payment event; `received_at`; `review_state`, `open` for an
+  event an operator must review (a payment nobody could credit, a refund that could not be debited, a signed event that
+  is no event) and `resolved` once it was, null otherwise). The first idempotency layer: an id, an outcome and an order, **no
+  payload, no amount, no name**, so it is instance level (`billing-webhook-events-repository.ts`). Not pruned yet.
+
+The amount column is `integer` on SQLite and `bigint` on Postgres, like the journal. See `src/billing/README.md`.
+
+### The newest jobs of the instance
+
+Migration `20261019183000_add_jobs_created_at_index` (#541). It adds the index `jobs_created_at_id` on `jobs (created_at,
+id)` and touches no column and no row, so the release that is still running is not affected while it runs. The runs page
+of the instance admin (`job-directory-repository.ts`) lists the newest jobs of every workspace in that order; without the
+index each call sorts every job of the instance. `job-directory-repository.integration.test.ts` reads the query plan on
+SQLite.
+
 ### A database that ran the removed billing migrations
 
 Three migrations of an earlier billing design existed on `development` for a few days and are deleted (#491):
@@ -508,6 +539,7 @@ Not scoped, each for a reason (the list is in `scoping.test.ts`):
 | `app-meta`, `allowed-login-pins`, `webhook-deliveries`, `workspaces` | Not customer data (facts about the installation, the sign-in allow list, delivery ids, the owners themselves)                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `integration-directory-repository.ts`                                | Reads integrations of any workspace. A webhook names an installation before anybody knows the workspace, and the synchronization walks every connection. It only reads, and the answer carries `workspaceId`; everything done next goes through scoped repositories                                                                                                                                                                                                                                                              |
 | `usage-feed-repository.ts`                                           | The settled usage records of every workspace in one ordered feed, and the grouped count of runs that settled without a cost per workspace and key mode (#385), for the operator API (#278): the operator serves many workspaces from one token. It only reads (never a `reserved` or `void` record), and every record and count carries `workspaceId`; the reads of one workspace go through the scoped usage records repository                                                                                                 |
+| `job-directory-repository.ts`                                        | The jobs of every workspace for the instance admin's job view (#541): the operator looks at a run by its id without being a member of its workspace, to see what a run did. It only reads (a page of the newest jobs without their results, and one job by its id), and every answer names its workspace; the only callers are the pages of the admin portal behind the admin guard. What a member sees of a run goes through the scoped runs repository                                                                         |
 | `runner-jobs-repository.ts`                                          | The lease side of the job queue (claim, heartbeat, complete, release, expiry). Runners serve the whole instance with one token, so a claim hands out the oldest due job of any workspace; every change is fenced by the lease token, and the job it returns carries `workspaceId`                                                                                                                                                                                                                                                |
 | `claim-admission.ts`                                                 | The check of the entitlements of a job the claim just took (#277), inside the claim transaction of the lease side of the queue, for whichever workspace the job is in. It reads, through repositories created for that job's workspace (the instance default and the workspace row it locks are not customer data), and decides; the ending of a refused job is the lease side's own statement                                                                                                                                   |
 | `plan-handoff-redeem-repository.ts`                                  | The redemption of a handoff token by the external plan page through the operator API (#284). The caller holds only the token, so there is no workspace to scope to before it is looked up by its hash; it never lists, and the answer names the workspace the token was made for. Making a token is the scoped plan handoff tokens repository; the clean-up only deletes expired rows                                                                                                                                            |

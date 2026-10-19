@@ -417,8 +417,99 @@
         "stoppedEarly": {
           "description": "Why a Dynamic Review was wrapped up before it was done: the model was asked for its answer right away because the run reached its cost limit or its time limit. Absent or null for a complete run; the review it produced is published and says it may be incomplete.",
           "enum": ["cost_limit", "time_limit", null]
+        },
+        "limitExceededBy": {
+          "description": "#540: by how much, in US dollars, the cost of a Dynamic Review passed the operator's cost limit. The review is delivered nevertheless: the last normal call may cost more than expected and the final call that carries the answer is always made (the documented bound: the limit plus the excess of the last normal call plus the final call). Absent when the cost stayed within the limit or is not known.",
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "callTrace": {
+          "description": "#541: what each model call and each tool call of a Dynamic Review was, as numbers and stable names (RunnerCallTrace). Optional and additive: a runner of an earlier release sends none, and an app of an earlier release ignores it. Observability only; nothing in the run reads it.",
+          "$ref": "#/$defs/RunnerCallTrace"
         }
       }
+    },
+    "RunnerCallTrace": {
+      "description": "#541: the per-call trace of a Dynamic Review, without content. Sizes, counts, times, the cost and stable names only: no path, no argument, no tool result and no model text is ever in it. At most 100 model calls and 100 tool calls are kept (the first ones); truncated says that more happened. Tool names are the engine's own; any other name is `other`.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["truncated", "modelCalls", "toolCalls"],
+      "properties": {
+        "truncated": { "type": "boolean" },
+        "modelCalls": {
+          "type": "array",
+          "maxItems": 100,
+          "items": { "$ref": "#/$defs/RunnerModelCallTrace" }
+        },
+        "toolCalls": {
+          "type": "array",
+          "maxItems": 100,
+          "items": { "$ref": "#/$defs/RunnerToolCallTrace" }
+        }
+      }
+    },
+    "RunnerModelCallTrace": {
+      "description": "One model call. A count is null when the provider reported none (a refused call, a provider without cache tokens); it is never a guess. tMs is the time since the run started when the call began.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "index",
+        "tMs",
+        "promptTokens",
+        "cacheRead",
+        "cacheWrite",
+        "completionTokens",
+        "costUsd",
+        "finishReason",
+        "final",
+        "tools"
+      ],
+      "properties": {
+        "index": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+        "tMs": { "type": "integer", "minimum": 0, "maximum": 604800000 },
+        "promptTokens": { "type": ["integer", "null"], "minimum": 0, "maximum": 1000000000 },
+        "cacheRead": { "type": ["integer", "null"], "minimum": 0, "maximum": 1000000000 },
+        "cacheWrite": { "type": ["integer", "null"], "minimum": 0, "maximum": 1000000000 },
+        "completionTokens": { "type": ["integer", "null"], "minimum": 0, "maximum": 1000000000 },
+        "costUsd": { "type": ["number", "null"], "minimum": 0 },
+        "finishReason": {
+          "enum": ["stop", "tool_calls", "length", "content_filter", "other", null]
+        },
+        "final": {
+          "description": "True for the call the run was wrapped up with (the wrap-up or the recovery).",
+          "type": "boolean"
+        },
+        "tools": {
+          "description": "The tools the answer asked for, each name once with its count.",
+          "type": "array",
+          "maxItems": 5,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "count"],
+            "properties": {
+              "name": { "$ref": "#/$defs/RunnerTraceToolName" },
+              "count": { "type": "integer", "minimum": 1, "maximum": 1000000000 }
+            }
+          }
+        }
+      }
+    },
+    "RunnerToolCallTrace": {
+      "description": "One tool call. isRepeat is true when the same tool with the same normalised arguments already ran in this job; the arguments themselves are never sent. resultBytes is the size of the result the model was shown, null when it never was.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["index", "name", "resultBytes", "isRepeat"],
+      "properties": {
+        "index": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+        "name": { "$ref": "#/$defs/RunnerTraceToolName" },
+        "resultBytes": { "type": ["integer", "null"], "minimum": 0, "maximum": 67108864 },
+        "isRepeat": { "type": "boolean" }
+      }
+    },
+    "RunnerTraceToolName": {
+      "description": "The engine's tools; every other name a model called is `other`.",
+      "enum": ["read", "grep", "glob", "StructuredOutput", "other"]
     },
     "ReviewFindings": {
       "description": "#405: what a successful review left open on the pull request. `open` counts the findings that are open AFTER the run (a Dynamic Review carries the findings of earlier runs over, PR-Agent keeps a record of active ones), not the ones the run found. `bySeverity` is the count per priority of a Dynamic Review, of the findings its summary lists (so `open` may exceed the sum when lower priority findings did not fit); null for a Diff Review, whose findings have no severity.",
@@ -636,6 +727,36 @@
         }
       }
     },
+    "VmName": {
+      "description": "#493: the name of a Sandbox VM, as the platform and the Dispatcher know it (unique per launch: `cr-<kind>-<job id>-<random>`). Free text of the Dispatcher's own naming; the app uses it only as a key and never as a command.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+    },
+    "VmStartRequest": {
+      "description": "#493: POST /api/runners/v1/jobs/{id}/vm, with the dispatcher credential (RUNNER_TOKEN) in Authorization and the job credential in the body, like the release. The Dispatcher says that it created the VM of the claim, right after `Sandbox.create` returned. Closed: an unknown field is refused. The first report of a VM wins and a repeat changes nothing. `startedAt` is the Dispatcher's clock; the app keeps it between the claim and its own clock. `timeoutSeconds` is the VM's own timeout, the platform's backstop for a VM that nobody stops. Only a job whose running claim the credential holds is accepted: a report after the claim ended is 409 RUNNER_JOB_ENDED, a credential that is not the claim's is 401. It only measures; it sets no price and never has to succeed for a launch to go on.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["credential", "vmName", "startedAt", "timeoutSeconds"],
+      "properties": {
+        "credential": { "$ref": "#/$defs/WorkerCredential" },
+        "vmName": { "$ref": "#/$defs/VmName" },
+        "startedAt": {
+          "description": "ISO 8601 in UTC with the `Z`; milliseconds optional.",
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$"
+        },
+        "timeoutSeconds": { "type": "integer", "minimum": 60, "maximum": 86400 }
+      }
+    },
+    "VmStartResponse": {
+      "description": "#493: 200 from the report. `recorded`: the VM is stored. `replayed`: the VM was known; nothing changed.",
+      "type": "object",
+      "required": ["version", "status"],
+      "properties": {
+        "version": { "const": 1 },
+        "status": { "type": "string", "enum": ["recorded", "replayed"] }
+      }
+    },
     "JobStateResponse": {
       "description": "#364: 200 from GET /api/runners/v1/jobs/{id} (the dispatcher credential only; a per-job credential is refused). What a Dispatcher asks to decide whether the VM of a job is a leftover: the job's status and nothing else, no job input, lease, repository or credential. `running`: the app holds the job under a lease. Any other status: it does not (`queued` also covers a lease that lapsed and a job that was given back). A reader that meets a status it does not know treats the job as running. An unknown id is 404 RUNNER_JOB_NOT_FOUND. An app of a previous release has no such route (a 404 without an ErrorResponse body); it is not a required feature, so a reader goes on without it.",
       "type": "object",
@@ -660,9 +781,15 @@
       }
     },
     "KnownAppFeature": {
-      "description": "The features an app lists in VersionResponse.features. A reader ignores a name it does not know and refuses to run against an app that lacks one it needs. `worker_api`: /api/workers/v1 exists. `claim_by_job_id`: ClaimRequest.jobId is honoured. `pool_cap`: ClaimRequest.maxRunning is honoured. `release`: the release call exists.",
+      "description": "The features an app lists in VersionResponse.features. A reader ignores a name it does not know and refuses to run against an app that lacks one it needs. `worker_api`: /api/workers/v1 exists. `claim_by_job_id`: ClaimRequest.jobId is honoured. `pool_cap`: ClaimRequest.maxRunning is honoured. `release`: the release call exists. `vm_lifecycle` (#493): POST /api/runners/v1/jobs/{id}/vm exists (the Dispatcher reports the VM it created, for the billable minutes); a Dispatcher sends that call only to an app that lists the feature.",
       "type": "string",
-      "enum": ["worker_api", "claim_by_job_id", "pool_cap", "release"]
+      "enum": [
+        "worker_api",
+        "claim_by_job_id",
+        "pool_cap",
+        "release",
+        "vm_lifecycle"
+      ]
     },
     "VersionResponse": {
       "description": "#318: 200 from GET /api/runners/v1/version (dispatcher credential; #322: a Worker may also send its per-job credential with ?jobId=<its job>, which must be the running claim of that job). Lets a Dispatcher or a Worker detect an app that is too old before it claims anything. An app of a previous release has no such route (404), which means it is too old. `version` is the runner API version; `appVersion` is the build of the app, for logs.",

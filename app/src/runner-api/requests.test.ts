@@ -12,6 +12,7 @@ import {
   parseReleaseRequest,
   parseRunnerId,
   parseWorkerLlmProviders,
+  parseWorkerResultRequest,
 } from "./requests.ts";
 
 const TOKEN = "6f1d2c9a-5b3e-4a77-9c0d-8e2f1a4b7c33";
@@ -122,6 +123,7 @@ describe("the complete body", () => {
           usage: null,
         },
       },
+      dropped: [],
     });
   });
 
@@ -310,6 +312,261 @@ describe("the complete body", () => {
         code: "invalid",
       });
     }
+  });
+
+  // #540-N4
+  it("keeps by how much a Dynamic Review passed its cost limit, and nothing when it did not", () => {
+    const over = parseCompleteRequest({
+      leaseToken: TOKEN,
+      result: {
+        ...GOOD_RESULT,
+        usage: { ...GOOD_RESULT.usage, limitExceededBy: 0.0123 },
+      },
+    });
+    expect(over.ok).toBe(true);
+    if (!over.ok) return;
+    expect(over.value.result.usage?.limitExceededBy).toBe(0.0123);
+
+    const within = parseCompleteRequest({
+      leaseToken: TOKEN,
+      result: GOOD_RESULT,
+    });
+    expect(within.ok).toBe(true);
+    if (!within.ok) return;
+    expect(within.value.result.usage).not.toHaveProperty("limitExceededBy");
+  });
+
+  // #540-N4
+  it("refuses an excess over the cost limit that is not a finite number above zero", () => {
+    for (const limitExceededBy of [
+      0,
+      -0.01,
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      "0.01",
+      true,
+      null,
+    ]) {
+      const parsed = parseCompleteRequest({
+        leaseToken: TOKEN,
+        result: {
+          ...GOOD_RESULT,
+          usage: { ...GOOD_RESULT.usage, limitExceededBy },
+        },
+      });
+
+      expect(fieldsOf(parsed)).toContainEqual({
+        field: "result.usage.limitExceededBy",
+        code: "invalid",
+      });
+    }
+  });
+
+  // #541-T07
+  describe("the per-call trace of a Dynamic Review", () => {
+    const modelCall = {
+      index: 0,
+      tMs: 1200,
+      promptTokens: 14600,
+      cacheRead: 0,
+      cacheWrite: 14600,
+      completionTokens: 492,
+      costUsd: 0.0342,
+      finishReason: "tool_calls",
+      final: false,
+      tools: [{ name: "read", count: 2 }],
+    };
+    const toolCall = {
+      index: 0,
+      name: "read",
+      resultBytes: 812,
+      isRepeat: false,
+    };
+    const trace = {
+      truncated: false,
+      modelCalls: [modelCall],
+      toolCalls: [toolCall],
+    };
+    const withTrace = (callTrace: unknown) =>
+      parseCompleteRequest({
+        leaseToken: TOKEN,
+        result: { ...GOOD_RESULT, usage: { ...GOOD_RESULT.usage, callTrace } },
+      });
+
+    it("keeps a valid trace exactly as it was sent", () => {
+      const parsed = withTrace(trace);
+
+      expect(parsed.ok).toBe(true);
+      if (!parsed.ok) return;
+      expect(parsed.value.result.usage?.callTrace).toStrictEqual(trace);
+    });
+
+    it("keeps the nulls of a call the provider reported nothing for", () => {
+      const nulls = {
+        ...modelCall,
+        promptTokens: null,
+        cacheRead: null,
+        cacheWrite: null,
+        completionTokens: null,
+        costUsd: null,
+        finishReason: null,
+        tools: [],
+      };
+      const parsed = withTrace({
+        truncated: true,
+        modelCalls: [nulls],
+        toolCalls: [{ ...toolCall, resultBytes: null }],
+      });
+
+      expect(parsed.ok).toBe(true);
+    });
+
+    it("leaves a usage without a trace as it was, with no trace key at all", () => {
+      const absent = parseCompleteRequest({
+        leaseToken: TOKEN,
+        result: GOOD_RESULT,
+      });
+
+      expect(absent.ok).toBe(true);
+      if (!absent.ok) return;
+      expect(absent.value.result.usage).not.toHaveProperty("callTrace");
+    });
+
+    it.each([
+      ["not an object", "trace"],
+      ["null (it is left out, not null)", null],
+      ["an unknown key", { ...trace, extra: 1 }],
+      ["a missing key", { truncated: false, modelCalls: [] }],
+      ["truncated not a boolean", { ...trace, truncated: "yes" }],
+      [
+        "101 model calls",
+        { ...trace, modelCalls: Array.from({ length: 101 }, () => modelCall) },
+      ],
+      [
+        "101 tool calls",
+        { ...trace, toolCalls: Array.from({ length: 101 }, () => toolCall) },
+      ],
+      [
+        "a call with an extra key",
+        { ...trace, modelCalls: [{ ...modelCall, path: "src/a.py" }] },
+      ],
+      [
+        "a call without a key",
+        { ...trace, modelCalls: [{ ...modelCall, tools: undefined }] },
+      ],
+      [
+        "a negative count",
+        { ...trace, modelCalls: [{ ...modelCall, promptTokens: -1 }] },
+      ],
+      [
+        "a fractional count",
+        { ...trace, modelCalls: [{ ...modelCall, cacheRead: 1.5 }] },
+      ],
+      [
+        "a negative cost",
+        { ...trace, modelCalls: [{ ...modelCall, costUsd: -0.1 }] },
+      ],
+      [
+        "an infinite cost",
+        {
+          ...trace,
+          modelCalls: [{ ...modelCall, costUsd: Number.POSITIVE_INFINITY }],
+        },
+      ],
+      [
+        "an unknown finish reason",
+        { ...trace, modelCalls: [{ ...modelCall, finishReason: "boom" }] },
+      ],
+      [
+        "final not a boolean",
+        { ...trace, modelCalls: [{ ...modelCall, final: 1 }] },
+      ],
+      [
+        "an unknown tool",
+        {
+          ...trace,
+          modelCalls: [{ ...modelCall, tools: [{ name: "bash", count: 1 }] }],
+        },
+      ],
+      [
+        "a tool count of zero",
+        {
+          ...trace,
+          modelCalls: [{ ...modelCall, tools: [{ name: "read", count: 0 }] }],
+        },
+      ],
+      [
+        "an unknown tool call name",
+        { ...trace, toolCalls: [{ ...toolCall, name: "webfetch" }] },
+      ],
+      [
+        "a tool call with an argument",
+        { ...trace, toolCalls: [{ ...toolCall, arguments: {} }] },
+      ],
+      [
+        "isRepeat not a boolean",
+        { ...trace, toolCalls: [{ ...toolCall, isRepeat: "no" }] },
+      ],
+      [
+        "a negative result size",
+        { ...trace, toolCalls: [{ ...toolCall, resultBytes: -1 }] },
+      ],
+    ])("drops %s and keeps the usage", (_name, callTrace) => {
+      const parsed = withTrace(callTrace);
+
+      expect(parsed.ok).toBe(true);
+      if (!parsed.ok) return;
+      expect(parsed.value.result.usage).toMatchObject(GOOD_RESULT.usage);
+      expect(parsed.value.result.usage).not.toHaveProperty("callTrace");
+      expect(parsed.dropped).toEqual(["result.usage.callTrace"]);
+    });
+
+    // #541-T07: the trace is observability. A malformed one costs the trace, never the usage or the verdict.
+    it("still refuses a usage whose own fields are invalid, trace or none", () => {
+      const parsed = parseCompleteRequest({
+        leaseToken: TOKEN,
+        result: {
+          ...GOOD_RESULT,
+          usage: { ...GOOD_RESULT.usage, promptTokens: -1, callTrace: trace },
+        },
+      });
+
+      expect(fieldsOf(parsed)).toContainEqual({
+        field: "result.usage.promptTokens",
+        code: "invalid",
+      });
+    });
+
+    it("says nothing was dropped for a valid trace and for none", () => {
+      const valid = withTrace(trace);
+      const absent = parseCompleteRequest({
+        leaseToken: TOKEN,
+        result: GOOD_RESULT,
+      });
+
+      expect(valid.ok && valid.dropped).toEqual([]);
+      expect(absent.ok && absent.dropped).toEqual([]);
+    });
+
+    it("never repeats a value of the trace in the note of what was dropped", () => {
+      const parsed = withTrace({ ...trace, extra: "SECRET-VALUE" });
+
+      expect(JSON.stringify(parsed)).not.toContain("SECRET-VALUE");
+    });
+
+    it("drops the trace of the Worker's result the same way", () => {
+      const parsed = parseWorkerResultRequest({
+        result: {
+          ...GOOD_RESULT,
+          usage: { ...GOOD_RESULT.usage, callTrace: { ...trace, extra: 1 } },
+        },
+      });
+
+      expect(parsed.ok).toBe(true);
+      if (!parsed.ok) return;
+      expect(parsed.value.result.usage).not.toHaveProperty("callTrace");
+      expect(parsed.dropped).toEqual(["result.usage.callTrace"]);
+    });
   });
 
   // #267-T07

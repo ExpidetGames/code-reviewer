@@ -91,6 +91,11 @@ export type ModelCapabilities = {
   /** US dollars per million input / output tokens, highest of the endpoints; null when unreadable. */
   inputUsdPerMtok: string | null;
   outputUsdPerMtok: string | null;
+  /**
+   * The model cannot run without thinking, and thinking counts against `max_tokens` (#533). Left out when the metadata
+   * does not say, which reads as "no".
+   */
+  alwaysThinks?: boolean;
 };
 
 export type ModelCapabilityResult =
@@ -116,6 +121,11 @@ export type LlmProviderDescriptor<Id extends string = string> = {
   checkModelId(id: string): boolean;
   /** Models to offer in a list. Never the only allowed ones: any model id the provider has may be chosen. */
   readonly suggestedModels: readonly string[];
+  /**
+   * The part of `suggestedModels` that can serve a Dynamic Review, for a provider whose list holds models that cannot.
+   * Absent: every suggestion can. See `suggestedModelsFor`.
+   */
+  readonly dynamicSuggestedModels?: readonly string[];
   /** The price of a model, or null when the adapter does not know it (never an error). */
   priceOf(model: string): ModelPrice | null;
   /** The models used when nobody chose one, for a Diff Review and for a Dynamic Review. */

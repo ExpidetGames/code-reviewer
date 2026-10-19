@@ -14,6 +14,7 @@ import type {
   FieldErrorCode,
   HeartbeatRequest,
   ReleaseRequest,
+  VmStartRequest,
   FindingPriority,
   ReviewFindings,
   RunnerResult,
@@ -31,11 +32,24 @@ import {
   MAX_RUNNING_RANGE,
   RELEASE_RETRY_AFTER_RANGE,
   STOPPED_EARLY_REASONS,
+  VM_NAME_PATTERN,
+  VM_STARTED_AT_PATTERN,
+  VM_TIMEOUT_SECONDS_RANGE,
 } from "./contract.ts";
 import { WORKER_CREDENTIAL_PATTERN } from "../jobs/worker-credential.ts";
+import { checkCallTrace } from "./call-trace.ts";
 
 export type Parsed<T> =
   { ok: true; value: T } | { ok: false; fields: FieldError[] };
+
+/**
+ * A result a runner or a Worker reported. `dropped` names the observability fields that were left out
+ * because they were malformed (#541), by field path and never with a value: the rest of the result is
+ * accepted, so the caller logs the note and goes on.
+ */
+export type ParsedResult<T> =
+  | { ok: true; value: T; dropped: string[] }
+  | { ok: false; fields: FieldError[] };
 
 const JOB_ID =
   /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
@@ -79,6 +93,8 @@ function isRecord(value: unknown): value is Record_ {
 /** Collects the refusals of one body while its fields are checked. */
 class Checker {
   readonly fields: FieldError[] = [];
+  /** Fields that were malformed and left out, not refused: observability the result does without. */
+  readonly dropped: string[] = [];
 
   fail(field: string, code: FieldErrorCode): undefined {
     this.fields.push({ field, code });
@@ -328,6 +344,65 @@ export function parseReleaseRequest(body: unknown): Parsed<ReleaseRequest> {
   };
 }
 
+const VM_START_FIELDS = [
+  "credential",
+  "vmName",
+  "startedAt",
+  "timeoutSeconds",
+] as const;
+
+/**
+ * #493: the body of the report of a VM start. Closed: a field that is not listed is refused (by name, never by value), so
+ * a Dispatcher cannot slip anything else through. The credential is checked for its form only and is never part of a
+ * refusal.
+ */
+export function parseVmStartRequest(body: unknown): Parsed<VmStartRequest> {
+  if (!isRecord(body))
+    return { ok: false, fields: [{ field: "body", code: "invalid" }] };
+  const check = new Checker();
+  for (const key of Object.keys(body))
+    if (!(VM_START_FIELDS as readonly string[]).includes(key))
+      check.fail("body", "invalid");
+  const credential = body.credential;
+  if (credential === undefined) check.fail("credential", "required");
+  else if (
+    typeof credential !== "string" ||
+    !WORKER_CREDENTIAL_PATTERN.test(credential)
+  )
+    check.fail("credential", "invalid");
+  const vmName = body.vmName;
+  if (vmName === undefined) check.fail("vmName", "required");
+  else if (typeof vmName !== "string" || !VM_NAME_PATTERN.test(vmName))
+    check.fail("vmName", "invalid");
+  const startedAt = body.startedAt;
+  if (startedAt === undefined) check.fail("startedAt", "required");
+  else if (
+    typeof startedAt !== "string" ||
+    !VM_STARTED_AT_PATTERN.test(startedAt) ||
+    Number.isNaN(Date.parse(startedAt))
+  )
+    check.fail("startedAt", "invalid");
+  const timeout = body.timeoutSeconds;
+  if (timeout === undefined) check.fail("timeoutSeconds", "required");
+  else if (
+    typeof timeout !== "number" ||
+    !Number.isInteger(timeout) ||
+    timeout < VM_TIMEOUT_SECONDS_RANGE.min ||
+    timeout > VM_TIMEOUT_SECONDS_RANGE.max
+  )
+    check.fail("timeoutSeconds", "invalid");
+  if (check.fields.length > 0) return { ok: false, fields: check.fields };
+  return {
+    ok: true,
+    value: {
+      credential: credential as string,
+      vmName: vmName as string,
+      startedAt: startedAt as string,
+      timeoutSeconds: timeout as number,
+    },
+  };
+}
+
 export function parseHeartbeatRequest(body: unknown): Parsed<HeartbeatRequest> {
   if (!isRecord(body))
     return { ok: false, fields: [{ field: "body", code: "invalid" }] };
@@ -382,6 +457,19 @@ function parseUsage(
     (typeof stoppedEarly === "string" &&
       (STOPPED_EARLY_REASONS as readonly string[]).includes(stoppedEarly));
   if (!stoppedOk) check.fail(`${prefix}stoppedEarly`, "invalid");
+  const limitExceededBy = value.limitExceededBy;
+  const excessOk =
+    limitExceededBy === undefined ||
+    (typeof limitExceededBy === "number" &&
+      limitExceededBy > 0 &&
+      Number.isFinite(limitExceededBy));
+  if (!excessOk) check.fail(`${prefix}limitExceededBy`, "invalid");
+  // The per-call trace (#541) is observability: a trace that is not the contract's is dropped and the usage,
+  // the cost and the verdict of the run are kept. The runner leaves it out for a run without one.
+  const callTrace =
+    value.callTrace === undefined ? undefined : checkCallTrace(value.callTrace);
+  if (value.callTrace !== undefined && callTrace === undefined)
+    check.dropped.push(`${prefix}callTrace`);
   if (
     check.fields.length > before ||
     model === undefined ||
@@ -391,7 +479,8 @@ function parseUsage(
     aiCalls === undefined ||
     typeof fallbackUsed !== "boolean" ||
     !costOk ||
-    !stoppedOk
+    !stoppedOk ||
+    !excessOk
   )
     return undefined;
   return {
@@ -403,6 +492,10 @@ function parseUsage(
     fallbackUsed,
     costUsd: costUsd as number | null,
     stoppedEarly: stoppedEarly as StoppedEarly | null,
+    ...(limitExceededBy === undefined
+      ? {}
+      : { limitExceededBy: limitExceededBy as number }),
+    ...(callTrace === undefined ? {} : { callTrace }),
   };
 }
 
@@ -538,7 +631,9 @@ function parseResult(check: Checker, value: unknown): RunnerResult | undefined {
   };
 }
 
-export function parseCompleteRequest(body: unknown): Parsed<CompleteRequest> {
+export function parseCompleteRequest(
+  body: unknown,
+): ParsedResult<CompleteRequest> {
   if (!isRecord(body))
     return { ok: false, fields: [{ field: "body", code: "invalid" }] };
   const check = new Checker();
@@ -553,13 +648,13 @@ export function parseCompleteRequest(body: unknown): Parsed<CompleteRequest> {
     result === undefined
   )
     return { ok: false, fields: check.fields };
-  return { ok: true, value: { leaseToken, result } };
+  return { ok: true, value: { leaseToken, result }, dropped: check.dropped };
 }
 
 /** #320: the body of the Worker's result call: the result alone, the credential identifies the job. */
 export function parseWorkerResultRequest(
   body: unknown,
-): Parsed<WorkerResultRequest> {
+): ParsedResult<WorkerResultRequest> {
   if (!isRecord(body))
     return { ok: false, fields: [{ field: "body", code: "invalid" }] };
   const check = new Checker();
@@ -569,7 +664,7 @@ export function parseWorkerResultRequest(
       : parseResult(check, body.result);
   if (check.fields.length > 0 || result === undefined)
     return { ok: false, fields: check.fields };
-  return { ok: true, value: { result } };
+  return { ok: true, value: { result }, dropped: check.dropped };
 }
 
 /**

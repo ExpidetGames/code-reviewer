@@ -65,6 +65,8 @@ describe("the routes of the portal", () => {
       "/admin/limits",
       "/admin/llm",
       "/admin/mail",
+      "/admin/runs",
+      "/admin/runs/[id]",
       "/admin/setup",
       "/admin/setup/instance",
       "/admin/setup/sign-in",

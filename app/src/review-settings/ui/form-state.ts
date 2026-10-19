@@ -179,6 +179,22 @@ export function resetField(
   return { ...state, values, overridden };
 }
 
+/**
+ * Puts a model that belongs to the chosen provider back: its own default, set explicitly. The inherited model belongs
+ * to the inherited provider, so "Reset to default" must not bring it back next to another provider (#532); and the
+ * save then sends the pair, because the layer below holds a model of the other provider.
+ */
+export function resetModelTo(
+  state: FormState,
+  defaultModel: string,
+): FormState {
+  return {
+    ...state,
+    values: { ...state.values, model: defaultModel },
+    overridden: { ...state.overridden, model: true },
+  };
+}
+
 const WHOLE_NUMBER = /^[+-]?\d+$/;
 
 /** A typed whole number as a number; text that is no whole number stays text so the validator names it. */

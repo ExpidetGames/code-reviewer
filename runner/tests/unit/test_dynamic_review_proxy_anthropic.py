@@ -139,6 +139,7 @@ def code(response: ProxyResponse) -> str:
     return str(json.loads(response.body)["error"]["code"])
 
 
+# #539-T17
 # #511-T26
 def test_the_request_goes_to_the_messages_endpoint_with_the_key_in_the_header_of_the_api() -> None:
     upstream = Upstream(message())
@@ -153,9 +154,20 @@ def test_the_request_goes_to_the_messages_endpoint_with_the_key_in_the_header_of
     assert "Authorization" not in headers
     assert CAPABILITY not in json.dumps(body) and CAPABILITY not in json.dumps(headers)
     assert body["model"] == MODEL
-    assert body["system"] == "You review code."
+    assert body["system"] == [
+        {"type": "text", "text": "You review code.", "cache_control": {"type": "ephemeral"}}
+    ]
     assert body["messages"] == [
-        {"role": "user", "content": [{"type": "text", "text": "review this change"}]}
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "review this change",
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
+        }
     ]
     assert body["thinking"] == {"type": "disabled"}
     assert body["tool_choice"] == {"type": "auto"}
@@ -312,9 +324,11 @@ def test_a_model_the_list_does_not_know_cannot_be_priced_and_stops_the_run() -> 
     assert code(response) == ErrorCode.DYNAMIC_ACCOUNTING_FAILED.value
 
 
-# #511-T22
+# #511-T22 #533-T01: a model that rejects a forced choice is no longer refused before anything is
+# spent: the choice goes out as `auto` (the whole steering is in
+# `test_dynamic_review_proxy_anthropic_steering.py`).
 @pytest.mark.parametrize("model", ["claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-1"])
-def test_a_forced_tool_choice_for_a_model_that_rejects_it_is_refused_before_anything_is_spent(
+def test_a_forced_tool_choice_for_a_model_that_rejects_it_is_sent_as_auto_never_forced(
     model: str,
 ) -> None:
     upstream = Upstream(message())
@@ -322,10 +336,8 @@ def test_a_forced_tool_choice_for_a_model_that_rejects_it_is_refused_before_anyt
 
     response = post(subject, chat(model=model, tool_choice="required"))
 
-    assert response.status == 403
-    assert code(response) == ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED.value
-    assert upstream.requests == []
-    assert subject.ledger.model_calls == 0
+    assert response.status == 200
+    assert upstream.requests[0][1]["tool_choice"] == {"type": "auto"}
 
 
 # #511-T22

@@ -11,9 +11,15 @@ import { createInstanceSettingsRepository } from "../db/repositories/instance-se
 import type { Database } from "../db/schema.ts";
 import { readBillingSettings } from "./settings.ts";
 
+/** The stored value of `billing_settings`, as it is. The one place that reads it: the switch and the active adapter both ask here. */
+export function readStoredBillingSettings(
+  db: Kysely<Database>,
+): Promise<unknown> {
+  return createInstanceSettingsRepository(db).get("billing_settings");
+}
+
 export async function isBillingOn(db: Kysely<Database>): Promise<boolean> {
-  const stored =
-    await createInstanceSettingsRepository(db).get("billing_settings");
+  const stored = await readStoredBillingSettings(db);
   return stored !== undefined && readBillingSettings(stored).enabled;
 }
 

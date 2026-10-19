@@ -156,6 +156,16 @@ export async function handleHeartbeat(
   );
 }
 
+/** The fields of a result that were malformed and left out (#541): their paths only, never a value. */
+export function logDropped(
+  deps: Pick<ReportDeps, "logger">,
+  what: string,
+  dropped: readonly string[],
+): void {
+  for (const field of dropped)
+    deps.logger.info(`[runner-api] ${what} dropped ${field}: invalid`);
+}
+
 export async function handleComplete(
   deps: ReportDeps,
   jobId: string,
@@ -167,6 +177,7 @@ export async function handleComplete(
 
   const job = await deps.queue.get(jobId);
   if (job === undefined) return errorResponse(404, "RUNNER_JOB_NOT_FOUND");
+  logDropped(deps, `complete runner=${runnerId} job=${jobId}`, parsed.dropped);
 
   return finishJob(deps, {
     job,

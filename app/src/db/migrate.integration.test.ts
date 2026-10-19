@@ -102,6 +102,9 @@ describe("the migrations of both epics", () => {
       "20261018090000_add_usage_record_catalog_entry",
       "20261018170000_migrate_model_tiers_to_catalog",
       "20261019150000_create_billing_journal",
+      "20261019160000_create_job_vm_runs",
+      "20261019170000_create_billing_topup_intents",
+      "20261019183000_add_jobs_created_at_index",
     ]);
   });
 
@@ -146,6 +149,8 @@ describe("starting the database", () => {
       "app_settings",
       "billing_balances",
       "billing_journal_entries",
+      "billing_topup_intents",
+      "billing_webhook_events",
       "email_verification_tokens",
       "installation_link_requests",
       "instance_settings",
@@ -155,6 +160,7 @@ describe("starting the database", () => {
       "job_claimed_keys",
       "job_comments",
       "job_dispatches",
+      "job_vm_runs",
       "jobs",
       "kysely_migration",
       "kysely_migration_lock",

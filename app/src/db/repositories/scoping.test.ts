@@ -21,10 +21,12 @@ import { describe, expect, it } from "vitest";
 const SCOPED = [
   "app-settings-repository.ts",
   "billing-journal-repository.ts",
+  "billing-topup-intents-repository.ts",
   "installation-link-requests-repository.ts",
   "integrations-repository.ts",
   "invitations-repository.ts",
   "job-check-runs-repository.ts",
+  "job-vm-runs-repository.ts",
   "jobs-repository.ts",
   "plan-handoff-tokens-repository.ts",
   "projects-repository.ts",
@@ -87,10 +89,23 @@ const SCOPED = [
  *   configuration, not customer data, and no workspace owns an entry. Its one read across workspaces is a count of
  *   how many projects select an entry (for the operator's confirmation when the model behind it changes); it
  *   returns a number, never a row, a project or a workspace.
+ * - job-directory: the jobs of every workspace for the instance admin's job view (#541). The operator looks at a run
+ *   by its id without being a member of its workspace, to see what a run did. It only reads (a page of the newest
+ *   jobs without their results, and one job by its id), and every answer names its workspace; the only callers are
+ *   the pages of the admin portal behind the admin guard. What a member sees of a run goes through the scoped
+ *   runs repository;
+ * - billing-topup-intent-directory: finds a top-up intent from what a provider event names (#497), before the workspace
+ *   is known; it only reads, an intent is found only for the adapter that created it, and every answer names its
+ *   workspace, which is where everything that follows goes (the scoped intents repository and the journal of that
+ *   workspace);
+ * - billing-webhook-events: the record of provider events by `(provider, event id)` (#497): an id, an outcome and the
+ *   order of the states of a refund or dispute. No payload, no amount and no workspace, so it is not customer data.
  */
 const INSTANCE_LEVEL = [
   "allowed-login-pins-repository.ts",
   "app-meta-repository.ts",
+  "billing-topup-intent-directory-repository.ts",
+  "billing-webhook-events-repository.ts",
   "catalog-repository.ts",
   "claim-admission.ts",
   "installation-link-request-directory-repository.ts",
@@ -99,6 +114,7 @@ const INSTANCE_LEVEL = [
   "invitation-directory-repository.ts",
   "job-check-runs-sweep.ts",
   "job-claimed-keys-repository.ts",
+  "job-directory-repository.ts",
   "job-dispatches-repository.ts",
   "jobs-claim.ts",
   "legacy-users-repository.ts",
