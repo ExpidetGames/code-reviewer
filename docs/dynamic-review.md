@@ -315,7 +315,9 @@ highest prices. The output allowance is at most 32,768 tokens for a model whose 
 of the built-in default model), and 8,192 for a dearer or unpriced one; a larger limit of the model is
 not an invitation, since the allowance is reserved against the cost limit on every call (about 0.13
 USD at the price bound). Why (#309): a review of up to 30 findings plus the reasoning tokens, which
-count against `max_tokens`, does not fit 8,192, and a turn cut off there ends without an answer. The
+count against `max_tokens`, does not fit 8,192, and a turn cut off there ends without an answer. A model
+that cannot run without thinking (the Claude models of #533) gets 32,768 at any price, and the runner reserves
+only 8,192 of it against the cost limit (`runner/README.md`, "Output allowance with thinking"). The
 source for the default model: OpenRouter's `/api/v1/models/deepseek/deepseek-v4.1-flash/endpoints`,
 read on 2026-10-14, where the model's top provider states `max_completion_tokens` 943718 and the
 smallest endpoint limit is 131072, so 32,768 is below every limit; the smallest limit of the endpoints

@@ -1,0 +1,1764 @@
+{
+  "$comment": "One table for both fakes of the Claude Messages API (fakes/llm/anthropic_rules.py and anthropic-rules.ts): a request, optionally the answer the fake gave it, and the status the real API gives. Each case runs on a fresh fake; the steps of a case run in order on the same one (#533).",
+  "cases": [
+    {
+      "id": "any is refused for claude-opus-5-5",
+      "steps": [
+        {
+          "headers": {
+            "x-api-key": "dummy",
+            "anthropic-version": "2023-06-01"
+          },
+          "body": {
+            "model": "claude-opus-5-5",
+            "max_tokens": 1000,
+            "messages": [
+              {
+                "role": "user",
+                "content": "hi"
+              }
+            ],
+            "tools": [
+              {
+                "name": "read",
+                "input_schema": {
+                  "type": "object"
+                }
+              },
+              {
+                "name": "StructuredOutput",
+                "input_schema": {
+                  "type": "object"
+                }
+              }
+            ],
+            "tool_choice": {
+              "type": "any"
+            }
+          },
+          "status": 400
+        }
+      ]
+    },
+    {
+      "id": "a named tool is refused for claude-opus-5-5",
+      "steps": [
+        {
+          "headers": {
+            "x-api-key": "dummy",
+            "anthropic-version": "2023-06-01"
+          },
+          "body": {
+            "model": "claude-opus-5-5",
+            "max_tokens": 1000,
+            "messages": [
+              {
+                "role": "user",
+                "content": "hi"
+              }
+            ],
+            "tools": [
+              {
+                "name": "read",
+                "input_schema": {
+                  "type": "object"
+                }
+              },
+              {
+                "name": "StructuredOutput",
+                "input_schema": {
+                  "type": "object"
+                }
+              }
+            ],
+            "tool_choice": {
+              "type": "tool",
+              "name": "StructuredOutput"
+            }
+          },
+          "status": 400
+        }
+      ]
+    },
+    {
+      "id": "auto is taken by claude-opus-5-5",
+      "steps": [
+        {
+          "headers": {
+            "x-api-key": "dummy",
+            "anthropic-version": "2023-06-01"
+          },
+          "body": {
+            "model": "claude-opus-5-5",
+            "max_tokens": 1000,
+            "messages": [
+              {
+                "role": "user",
+                "content": "hi"
+              }
+            ],
+            "tools": [
+              {
+                "name": "read",
+                "input_schema": {
+                  "type": "object"
+                }
+              },
+              {
+                "name": "StructuredOutput",
+                "input_schema": {
+                  "type": "object"
+                }
+              }
+            ],
+            "tool_choice": {
+              "type": "auto"
+            }
+          },
+          "status": 200
+        }
+      ]
+    },
+    {
+      "id": "none is taken by claude-opus-5-5",
+      "steps": [
+        {
+          "headers": {
+            "x-api-key": "dummy",
+            "anthropic-version": "2023-06-01"
+          },
+          "body": {
+            "model": "claude-opus-5-5",
+            "max_tokens": 1000,
+            "messages": [
+              {
+                "role": "user",
+                "content": "hi"
+              }
+            ],
+            "tools": [
+              {
+                "name": "read",
+                "input_schema": {
+                  "type": "object"
+                }
+              },
+              {
+                "name": "StructuredOutput",
+                "input_schema": {
+                  "type": "object"
+                }
+              }
+            ],
+            "tool_choice": {
+              "type": "none"
+            }
+          },
+          "status": 200
+        }
+      ]
+    },
+    {
+      "id": "any is refused for claude-sonnet-5-5",
+      "steps": [
+        {
+          "headers": {
+            "x-api-key": "dummy",
+            "anthropic-version": "2023-06-01"
+          },
+          "body": {
+            "model": "claude-sonnet-5-5",
+            "max_tokens": 1000,
+            "messages": [
+              {
+                "role": "user",
+                "content": "hi"
+              }
+            ],
+            "tools": [
+              {
+                "name": "read",
+                "input_schema": {
+                  "type": "object"
+                }
+              },
+              {
+                "name": "StructuredOutput",
+                "input_schema": {
+                  "type": "object"
+                }
+              }
+            ],
+            "tool_choice": {
+              "type": "any"
+            }
+          },
+          "status": 400
+        }
+      ]
+    },
+    {
+      "id": "a named tool is refused for claude-sonnet-5-5",
+      "steps": [
+        {
+          "headers": {
+            "x-api-key": "dummy",
+            "anthropic-version": "2023-06-01"
+          },
+          "body": {
+            "model": "claude-sonnet-5-5",
+            "max_tokens": 1000,
+            "messages": [
+              {
+                "role": "user",
+                "content": "hi"
+              }
+            ],
+            "tools": [
+              {
+                "name": "read",
+                "input_schema": {
+                  "type": "object"
+                }
+              },
+              {
+                "name": "StructuredOutput",
+                "input_schema": {
+                  "type": "object"
+                }
+              }
+            ],
+            "tool_choice": {
+              "type": "tool",
+              "name": "StructuredOutput"
+            }
+          },
+          "status": 400
+        }
+      ]
+    },
+    {
+      "id": "auto is taken by claude-sonnet-5-5",
+      "steps": [
+        {
+          "headers": {
+            "x-api-key": "dummy",
+            "anthropic-version": "2023-06-01"
+          },
+          "body": {
+            "model": "claude-sonnet-5-5",
+            "max_tokens": 1000,
+            "messages": [
+              {
+                "role": "user",
+                "content": "hi"
+              }
+            ],
+            "tools": [
+              {
+                "name": "read",
+                "input_schema": {
+                  "type": "object"
+                }
+              },
+              {
+                "name": "StructuredOutput",
+                "input_schema": {
+                  "type": "object"
+                }
+              }
+            ],
+            "tool_choice": {
+              "type": "auto"
+            }
+          },
+          "status": 200
+        }
+      ]
+    },
+    {
+      "id": "none is taken by claude-sonnet-5-5",
+      "steps": [
+        {
+          "headers": {
+            "x-api-key": "dummy",
+            "anthropic-version": "2023-06-01"
+          },
+          "body": {
+            "model": "claude-sonnet-5-5",
+            "max_tokens": 1000,
+            "messages": [
+              {
+                "role": "user",
+                "content": "hi"
+              }
+            ],
+            "tools": [
+              {
+                "name": "read",
+                "input_schema": {
+                  "type": "object"
+                }
+              },
+              {
+                "name": "StructuredOutput",
+                "input_schema": {
+                  "type": "object"
+                }
+              }
+            ],
+            "tool_choice": {
+              "type": "none"
+            }
+          },
+          "status": 200
+        }
+      ]
+    },
+    {
+      "id": "any is refused for claude-fable-5-1",
+      "steps": [
+        {
+          "headers": {
+            "x-api-key": "dummy",
+            "anthropic-version": "2023-06-01"
+          },
+          "body": {
+            "model": "claude-fable-5-1",
+            "max_tokens": 1000,
+            "messages": [
+              {
+                "role": "user",
+                "content": "hi"
+              }
+            ],
+            "tools": [
+              {
+                "name": "read",
+                "input_schema": {
+                  "type": "object"
+                }
+              },
+              {
+                "name": "StructuredOutput",
+                "input_schema": {
+                  "type": "object"
+                }
+              }
+            ],
+            "tool_choice": {
+              "type": "any"
+            }
+          },
+          "status": 400
+        }
+      ]
+    },
+    {
+      "id": "a named tool is refused for claude-fable-5-1",
+      "steps": [
+        {
+          "headers": {
+            "x-api-key": "dummy",
+            "anthropic-version": "2023-06-01"
+          },
+          "body": {
+            "model": "claude-fable-5-1",
+            "max_tokens": 1000,
+            "messages": [
+              {
+                "role": "user",
+                "content": "hi"
+              }
+            ],
+            "tools": [
+              {
+                "name": "read",
+                "input_schema": {
+                  "type": "object"
+                }
+              },
+              {
+                "name": "StructuredOutput",
+                "input_schema": {
+                  "type": "object"
+                }
+              }
+            ],
+            "tool_choice": {
+              "type": "tool",
+              "name": "StructuredOutput"
+            }
+          },
+          "status": 400
+        }
+      ]
+    },
+    {
+      "id": "auto is taken by claude-fable-5-1",
+      "steps": [
+        {
+          "headers": {
+            "x-api-key": "dummy",
+            "anthropic-version": "2023-06-01"
+          },
+          "body": {
+            "model": "claude-fable-5-1",
+            "max_tokens": 1000,
+            "messages": [
+              {
+                "role": "user",
+                "content": "hi"
+              }
+            ],
+            "tools": [
+              {
+                "name": "read",
+                "input_schema": {
+                  "type": "object"
+                }
+              },
+              {
+                "name": "StructuredOutput",
+                "input_schema": {
+                  "type": "object"
+                }
+              }
+            ],
+            "tool_choice": {
+              "type": "auto"
+            }
+          },
+          "status": 200
+        }
+      ]
+    },
+    {
+      "id": "none is taken by claude-fable-5-1",
+      "steps": [
+        {
+          "headers": {
+            "x-api-key": "dummy",
+            "anthropic-version": "2023-06-01"
+          },
+          "body": {
+            "model": "claude-fable-5-1",
+            "max_tokens": 1000,
+            "messages": [
+              {
+                "role": "user",
+                "content": "hi"
+              }
+            ],
+            "tools": [
+              {
+                "name": "read",
+                "input_schema": {
+                  "type": "object"
+                }
+              },
+              {
+                "name": "StructuredOutput",
+                "input_schema": {
+                  "type": "object"
+                }
+              }
+            ],
+            "tool_choice": {
+              "type": "none"
+            }
+          },
+          "status": 200
+        }
+      ]
+    },
+    {
+      "id": "any is taken by claude-sonnet-5",
+      "steps": [
+        {
+          "headers": {
+            "x-api-key": "dummy",
+            "anthropic-version": "2023-06-01"
+          },
+          "body": {
+            "model": "claude-sonnet-5",
+            "max_tokens": 1000,
+            "messages": [
+              {
+                "role": "user",
+                "content": "hi"
+              }
+            ],
+            "tools": [
+              {
+                "name": "read",
+                "input_schema": {
+                  "type": "object"
+                }
+              },
+              {
+                "name": "StructuredOutput",
+                "input_schema": {
+                  "type": "object"
+                }
+              }
+            ],
+            "tool_choice": {
+              "type": "any"
+            }
+          },
+          "status": 200
+        }
+      ]
+    },
+    {
+      "id": "any is taken by claude-haiku-5-5",
+      "steps": [
+        {
+          "headers": {
+            "x-api-key": "dummy",
+            "anthropic-version": "2023-06-01"
+          },
+          "body": {
+            "model": "claude-haiku-5-5",
+            "max_tokens": 1000,
+            "messages": [
+              {
+                "role": "user",
+                "content": "hi"
+              }
+            ],
+            "tools": [
+              {
+                "name": "read",
+                "input_schema": {
+                  "type": "object"
+                }
+              },
+              {
+                "name": "StructuredOutput",
+                "input_schema": {
+                  "type": "object"
+                }
+              }
+            ],
+            "tool_choice": {
+              "type": "any"
+            }
+          },
+          "status": 200
+        }
+      ]
+    },
+    {
+      "id": "any is taken by claude-fable-5",
+      "steps": [
+        {
+          "headers": {
+            "x-api-key": "dummy",
+            "anthropic-version": "2023-06-01"
+          },
+          "body": {
+            "model": "claude-fable-5",
+            "max_tokens": 1000,
+            "messages": [
+              {
+                "role": "user",
+                "content": "hi"
+              }
+            ],
+            "tools": [
+              {
+                "name": "read",
+                "input_schema": {
+                  "type": "object"
+                }
+              },
+              {
+                "name": "StructuredOutput",
+                "input_schema": {
+                  "type": "object"
+                }
+              }
+            ],
+            "tool_choice": {
+              "type": "any"
+            }
+          },
+          "status": 200
+        }
+      ]
+    },
+    {
+      "id": "any is taken by claude-opus-5",
+      "steps": [
+        {
+          "headers": {
+            "x-api-key": "dummy",
+            "anthropic-version": "2023-06-01"
+          },
+          "body": {
+            "model": "claude-opus-5",
+            "max_tokens": 1000,
+            "messages": [
+              {
+                "role": "user",
+                "content": "hi"
+              }
+            ],
+            "tools": [
+              {
+                "name": "read",
+                "input_schema": {
+                  "type": "object"
+                }
+              },
+              {
+                "name": "StructuredOutput",
+                "input_schema": {
+                  "type": "object"
+                }
+              }
+            ],
+            "tool_choice": {
+              "type": "any"
+            }
+          },
+          "status": 200
+        }
+      ]
+    },
+    {
+      "id": "disabled thinking is refused for claude-fable-5-1",
+      "steps": [
+        {
+          "headers": {
+            "x-api-key": "dummy",
+            "anthropic-version": "2023-06-01"
+          },
+          "body": {
+            "model": "claude-fable-5-1",
+            "max_tokens": 1000,
+            "messages": [
+              {
+                "role": "user",
+                "content": "hi"
+              }
+            ],
+            "thinking": {
+              "type": "disabled"
+            }
+          },
+          "status": 400
+        }
+      ]
+    },
+    {
+      "id": "adaptive thinking is taken by claude-fable-5-1",
+      "steps": [
+        {
+          "headers": {
+            "x-api-key": "dummy",
+            "anthropic-version": "2023-06-01"
+          },
+          "body": {
+            "model": "claude-fable-5-1",
+            "max_tokens": 1000,
+            "messages": [
+              {
+                "role": "user",
+                "content": "hi"
+              }
+            ],
+            "thinking": {
+              "type": "adaptive"
+            }
+          },
+          "status": 200
+        }
+      ]
+    },
+    {
+      "id": "disabled thinking is refused for claude-fable-5",
+      "steps": [
+        {
+          "headers": {
+            "x-api-key": "dummy",
+            "anthropic-version": "2023-06-01"
+          },
+          "body": {
+            "model": "claude-fable-5",
+            "max_tokens": 1000,
+            "messages": [
+              {
+                "role": "user",
+                "content": "hi"
+              }
+            ],
+            "thinking": {
+              "type": "disabled"
+            }
+          },
+          "status": 400
+        }
+      ]
+    },
+    {
+      "id": "adaptive thinking is taken by claude-fable-5",
+      "steps": [
+        {
+          "headers": {
+            "x-api-key": "dummy",
+            "anthropic-version": "2023-06-01"
+          },
+          "body": {
+            "model": "claude-fable-5",
+            "max_tokens": 1000,
+            "messages": [
+              {
+                "role": "user",
+                "content": "hi"
+              }
+            ],
+            "thinking": {
+              "type": "adaptive"
+            }
+          },
+          "status": 200
+        }
+      ]
+    },
+    {
+      "id": "disabled thinking is refused for claude-opus-5-5",
+      "steps": [
+        {
+          "headers": {
+            "x-api-key": "dummy",
+            "anthropic-version": "2023-06-01"
+          },
+          "body": {
+            "model": "claude-opus-5-5",
+            "max_tokens": 1000,
+            "messages": [
+              {
+                "role": "user",
+                "content": "hi"
+              }
+            ],
+            "thinking": {
+              "type": "disabled"
+            }
+          },
+          "status": 400
+        }
+      ]
+    },
+    {
+      "id": "adaptive thinking is taken by claude-opus-5-5",
+      "steps": [
+        {
+          "headers": {
+            "x-api-key": "dummy",
+            "anthropic-version": "2023-06-01"
+          },
+          "body": {
+            "model": "claude-opus-5-5",
+            "max_tokens": 1000,
+            "messages": [
+              {
+                "role": "user",
+                "content": "hi"
+              }
+            ],
+            "thinking": {
+              "type": "adaptive"
+            }
+          },
+          "status": 200
+        }
+      ]
+    },
+    {
+      "id": "disabled thinking is refused for claude-sonnet-5-5",
+      "steps": [
+        {
+          "headers": {
+            "x-api-key": "dummy",
+            "anthropic-version": "2023-06-01"
+          },
+          "body": {
+            "model": "claude-sonnet-5-5",
+            "max_tokens": 1000,
+            "messages": [
+              {
+                "role": "user",
+                "content": "hi"
+              }
+            ],
+            "thinking": {
+              "type": "disabled"
+            }
+          },
+          "status": 400
+        }
+      ]
+    },
+    {
+      "id": "adaptive thinking is taken by claude-sonnet-5-5",
+      "steps": [
+        {
+          "headers": {
+            "x-api-key": "dummy",
+            "anthropic-version": "2023-06-01"
+          },
+          "body": {
+            "model": "claude-sonnet-5-5",
+            "max_tokens": 1000,
+            "messages": [
+              {
+                "role": "user",
+                "content": "hi"
+              }
+            ],
+            "thinking": {
+              "type": "adaptive"
+            }
+          },
+          "status": 200
+        }
+      ]
+    },
+    {
+      "id": "disabled thinking is taken by claude-sonnet-5",
+      "steps": [
+        {
+          "headers": {
+            "x-api-key": "dummy",
+            "anthropic-version": "2023-06-01"
+          },
+          "body": {
+            "model": "claude-sonnet-5",
+            "max_tokens": 1000,
+            "messages": [
+              {
+                "role": "user",
+                "content": "hi"
+              }
+            ],
+            "thinking": {
+              "type": "disabled"
+            }
+          },
+          "status": 200
+        }
+      ]
+    },
+    {
+      "id": "disabled thinking is taken by claude-haiku-5-5",
+      "steps": [
+        {
+          "headers": {
+            "x-api-key": "dummy",
+            "anthropic-version": "2023-06-01"
+          },
+          "body": {
+            "model": "claude-haiku-5-5",
+            "max_tokens": 1000,
+            "messages": [
+              {
+                "role": "user",
+                "content": "hi"
+              }
+            ],
+            "thinking": {
+              "type": "disabled"
+            }
+          },
+          "status": 200
+        }
+      ]
+    },
+    {
+      "id": "disabled thinking is taken by claude-opus-5",
+      "steps": [
+        {
+          "headers": {
+            "x-api-key": "dummy",
+            "anthropic-version": "2023-06-01"
+          },
+          "body": {
+            "model": "claude-opus-5",
+            "max_tokens": 1000,
+            "messages": [
+              {
+                "role": "user",
+                "content": "hi"
+              }
+            ],
+            "thinking": {
+              "type": "disabled"
+            }
+          },
+          "status": 200
+        }
+      ]
+    },
+    {
+      "id": "block_binding needs the beta header",
+      "steps": [
+        {
+          "headers": {
+            "x-api-key": "dummy",
+            "anthropic-version": "2023-06-01"
+          },
+          "body": {
+            "model": "claude-sonnet-5-5",
+            "max_tokens": 1000,
+            "messages": [
+              {
+                "role": "user",
+                "content": "hi"
+              }
+            ],
+            "thinking": {
+              "type": "adaptive",
+              "block_binding": {
+                "prefix_mismatch_behavior": "drop_block"
+              }
+            }
+          },
+          "status": 400
+        }
+      ]
+    },
+    {
+      "id": "block_binding with the beta header",
+      "steps": [
+        {
+          "headers": {
+            "x-api-key": "dummy",
+            "anthropic-version": "2023-06-01",
+            "anthropic-beta": "thinking-binding-controls-2026-08-01"
+          },
+          "body": {
+            "model": "claude-sonnet-5-5",
+            "max_tokens": 1000,
+            "messages": [
+              {
+                "role": "user",
+                "content": "hi"
+              }
+            ],
+            "thinking": {
+              "type": "adaptive",
+              "block_binding": {
+                "prefix_mismatch_behavior": "drop_block"
+              }
+            }
+          },
+          "status": 200
+        }
+      ]
+    },
+    {
+      "id": "block_binding with an unknown behavior",
+      "steps": [
+        {
+          "headers": {
+            "x-api-key": "dummy",
+            "anthropic-version": "2023-06-01",
+            "anthropic-beta": "thinking-binding-controls-2026-08-01"
+          },
+          "body": {
+            "model": "claude-sonnet-5-5",
+            "max_tokens": 1000,
+            "messages": [
+              {
+                "role": "user",
+                "content": "hi"
+              }
+            ],
+            "thinking": {
+              "type": "adaptive",
+              "block_binding": {
+                "prefix_mismatch_behavior": "ignore"
+              }
+            }
+          },
+          "status": 400
+        }
+      ]
+    },
+    {
+      "id": "a model of no list is not judged",
+      "steps": [
+        {
+          "headers": {
+            "x-api-key": "dummy",
+            "anthropic-version": "2023-06-01"
+          },
+          "body": {
+            "model": "claude-future-9",
+            "max_tokens": 1000,
+            "messages": [
+              {
+                "role": "user",
+                "content": "hi"
+              }
+            ],
+            "tools": [
+              {
+                "name": "read",
+                "input_schema": {
+                  "type": "object"
+                }
+              },
+              {
+                "name": "StructuredOutput",
+                "input_schema": {
+                  "type": "object"
+                }
+              }
+            ],
+            "tool_choice": {
+              "type": "any"
+            }
+          },
+          "status": 200
+        }
+      ]
+    },
+    {
+      "id": "thinking blocks replayed unchanged are taken",
+      "steps": [
+        {
+          "headers": {
+            "x-api-key": "dummy",
+            "anthropic-version": "2023-06-01"
+          },
+          "body": {
+            "model": "claude-sonnet-5-5",
+            "max_tokens": 1000,
+            "system": "S",
+            "tools": [
+              {
+                "name": "read",
+                "input_schema": {
+                  "type": "object"
+                }
+              },
+              {
+                "name": "StructuredOutput",
+                "input_schema": {
+                  "type": "object"
+                }
+              }
+            ],
+            "messages": [
+              {
+                "role": "user",
+                "content": "hi"
+              }
+            ]
+          },
+          "answer": {
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "sig-1"
+              },
+              {
+                "type": "redacted_thinking",
+                "data": "opaque-1"
+              },
+              {
+                "type": "tool_use",
+                "id": "toolu_1",
+                "name": "read",
+                "input": {
+                  "path": "a"
+                }
+              }
+            ],
+            "stop_reason": "tool_use"
+          },
+          "status": 200
+        },
+        {
+          "headers": {
+            "x-api-key": "dummy",
+            "anthropic-version": "2023-06-01"
+          },
+          "body": {
+            "model": "claude-sonnet-5-5",
+            "max_tokens": 1000,
+            "system": "S",
+            "tools": [
+              {
+                "name": "read",
+                "input_schema": {
+                  "type": "object"
+                }
+              },
+              {
+                "name": "StructuredOutput",
+                "input_schema": {
+                  "type": "object"
+                }
+              }
+            ],
+            "messages": [
+              {
+                "role": "user",
+                "content": "hi"
+              },
+              {
+                "role": "assistant",
+                "content": [
+                  {
+                    "type": "thinking",
+                    "thinking": "",
+                    "signature": "sig-1"
+                  },
+                  {
+                    "type": "redacted_thinking",
+                    "data": "opaque-1"
+                  },
+                  {
+                    "type": "tool_use",
+                    "id": "toolu_1",
+                    "name": "read",
+                    "input": {
+                      "path": "a"
+                    }
+                  }
+                ]
+              },
+              {
+                "role": "user",
+                "content": [
+                  {
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_1",
+                    "content": "x"
+                  }
+                ]
+              }
+            ]
+          },
+          "status": 200
+        }
+      ]
+    },
+    {
+      "id": "thinking blocks left out are refused",
+      "steps": [
+        {
+          "headers": {
+            "x-api-key": "dummy",
+            "anthropic-version": "2023-06-01"
+          },
+          "body": {
+            "model": "claude-sonnet-5-5",
+            "max_tokens": 1000,
+            "system": "S",
+            "tools": [
+              {
+                "name": "read",
+                "input_schema": {
+                  "type": "object"
+                }
+              },
+              {
+                "name": "StructuredOutput",
+                "input_schema": {
+                  "type": "object"
+                }
+              }
+            ],
+            "messages": [
+              {
+                "role": "user",
+                "content": "hi"
+              }
+            ]
+          },
+          "answer": {
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "sig-1"
+              },
+              {
+                "type": "redacted_thinking",
+                "data": "opaque-1"
+              },
+              {
+                "type": "tool_use",
+                "id": "toolu_1",
+                "name": "read",
+                "input": {
+                  "path": "a"
+                }
+              }
+            ],
+            "stop_reason": "tool_use"
+          },
+          "status": 200
+        },
+        {
+          "headers": {
+            "x-api-key": "dummy",
+            "anthropic-version": "2023-06-01"
+          },
+          "body": {
+            "model": "claude-sonnet-5-5",
+            "max_tokens": 1000,
+            "system": "S",
+            "tools": [
+              {
+                "name": "read",
+                "input_schema": {
+                  "type": "object"
+                }
+              },
+              {
+                "name": "StructuredOutput",
+                "input_schema": {
+                  "type": "object"
+                }
+              }
+            ],
+            "messages": [
+              {
+                "role": "user",
+                "content": "hi"
+              },
+              {
+                "role": "assistant",
+                "content": [
+                  {
+                    "type": "tool_use",
+                    "id": "toolu_1",
+                    "name": "read",
+                    "input": {
+                      "path": "a"
+                    }
+                  }
+                ]
+              },
+              {
+                "role": "user",
+                "content": [
+                  {
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_1",
+                    "content": "x"
+                  }
+                ]
+              }
+            ]
+          },
+          "status": 400
+        }
+      ]
+    },
+    {
+      "id": "one thinking block left out is refused",
+      "steps": [
+        {
+          "headers": {
+            "x-api-key": "dummy",
+            "anthropic-version": "2023-06-01"
+          },
+          "body": {
+            "model": "claude-sonnet-5-5",
+            "max_tokens": 1000,
+            "system": "S",
+            "tools": [
+              {
+                "name": "read",
+                "input_schema": {
+                  "type": "object"
+                }
+              },
+              {
+                "name": "StructuredOutput",
+                "input_schema": {
+                  "type": "object"
+                }
+              }
+            ],
+            "messages": [
+              {
+                "role": "user",
+                "content": "hi"
+              }
+            ]
+          },
+          "answer": {
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "sig-1"
+              },
+              {
+                "type": "redacted_thinking",
+                "data": "opaque-1"
+              },
+              {
+                "type": "tool_use",
+                "id": "toolu_1",
+                "name": "read",
+                "input": {
+                  "path": "a"
+                }
+              }
+            ],
+            "stop_reason": "tool_use"
+          },
+          "status": 200
+        },
+        {
+          "headers": {
+            "x-api-key": "dummy",
+            "anthropic-version": "2023-06-01"
+          },
+          "body": {
+            "model": "claude-sonnet-5-5",
+            "max_tokens": 1000,
+            "system": "S",
+            "tools": [
+              {
+                "name": "read",
+                "input_schema": {
+                  "type": "object"
+                }
+              },
+              {
+                "name": "StructuredOutput",
+                "input_schema": {
+                  "type": "object"
+                }
+              }
+            ],
+            "messages": [
+              {
+                "role": "user",
+                "content": "hi"
+              },
+              {
+                "role": "assistant",
+                "content": [
+                  {
+                    "type": "thinking",
+                    "thinking": "",
+                    "signature": "sig-1"
+                  },
+                  {
+                    "type": "tool_use",
+                    "id": "toolu_1",
+                    "name": "read",
+                    "input": {
+                      "path": "a"
+                    }
+                  }
+                ]
+              },
+              {
+                "role": "user",
+                "content": [
+                  {
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_1",
+                    "content": "x"
+                  }
+                ]
+              }
+            ]
+          },
+          "status": 400
+        }
+      ]
+    },
+    {
+      "id": "thinking blocks in another order are refused",
+      "steps": [
+        {
+          "headers": {
+            "x-api-key": "dummy",
+            "anthropic-version": "2023-06-01"
+          },
+          "body": {
+            "model": "claude-sonnet-5-5",
+            "max_tokens": 1000,
+            "system": "S",
+            "tools": [
+              {
+                "name": "read",
+                "input_schema": {
+                  "type": "object"
+                }
+              },
+              {
+                "name": "StructuredOutput",
+                "input_schema": {
+                  "type": "object"
+                }
+              }
+            ],
+            "messages": [
+              {
+                "role": "user",
+                "content": "hi"
+              }
+            ]
+          },
+          "answer": {
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "sig-1"
+              },
+              {
+                "type": "redacted_thinking",
+                "data": "opaque-1"
+              },
+              {
+                "type": "tool_use",
+                "id": "toolu_1",
+                "name": "read",
+                "input": {
+                  "path": "a"
+                }
+              }
+            ],
+            "stop_reason": "tool_use"
+          },
+          "status": 200
+        },
+        {
+          "headers": {
+            "x-api-key": "dummy",
+            "anthropic-version": "2023-06-01"
+          },
+          "body": {
+            "model": "claude-sonnet-5-5",
+            "max_tokens": 1000,
+            "system": "S",
+            "tools": [
+              {
+                "name": "read",
+                "input_schema": {
+                  "type": "object"
+                }
+              },
+              {
+                "name": "StructuredOutput",
+                "input_schema": {
+                  "type": "object"
+                }
+              }
+            ],
+            "messages": [
+              {
+                "role": "user",
+                "content": "hi"
+              },
+              {
+                "role": "assistant",
+                "content": [
+                  {
+                    "type": "redacted_thinking",
+                    "data": "opaque-1"
+                  },
+                  {
+                    "type": "thinking",
+                    "thinking": "",
+                    "signature": "sig-1"
+                  },
+                  {
+                    "type": "tool_use",
+                    "id": "toolu_1",
+                    "name": "read",
+                    "input": {
+                      "path": "a"
+                    }
+                  }
+                ]
+              },
+              {
+                "role": "user",
+                "content": [
+                  {
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_1",
+                    "content": "x"
+                  }
+                ]
+              }
+            ]
+          },
+          "status": 400
+        }
+      ]
+    },
+    {
+      "id": "another set of tools without drop_block is refused",
+      "steps": [
+        {
+          "headers": {
+            "x-api-key": "dummy",
+            "anthropic-version": "2023-06-01"
+          },
+          "body": {
+            "model": "claude-sonnet-5-5",
+            "max_tokens": 1000,
+            "system": "S",
+            "tools": [
+              {
+                "name": "read",
+                "input_schema": {
+                  "type": "object"
+                }
+              },
+              {
+                "name": "StructuredOutput",
+                "input_schema": {
+                  "type": "object"
+                }
+              }
+            ],
+            "messages": [
+              {
+                "role": "user",
+                "content": "hi"
+              }
+            ]
+          },
+          "answer": {
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "sig-1"
+              },
+              {
+                "type": "redacted_thinking",
+                "data": "opaque-1"
+              },
+              {
+                "type": "tool_use",
+                "id": "toolu_1",
+                "name": "read",
+                "input": {
+                  "path": "a"
+                }
+              }
+            ],
+            "stop_reason": "tool_use"
+          },
+          "status": 200
+        },
+        {
+          "headers": {
+            "x-api-key": "dummy",
+            "anthropic-version": "2023-06-01"
+          },
+          "body": {
+            "model": "claude-sonnet-5-5",
+            "max_tokens": 1000,
+            "system": "S",
+            "tools": [
+              {
+                "name": "StructuredOutput",
+                "input_schema": {
+                  "type": "object"
+                }
+              }
+            ],
+            "messages": [
+              {
+                "role": "user",
+                "content": "hi"
+              },
+              {
+                "role": "assistant",
+                "content": [
+                  {
+                    "type": "thinking",
+                    "thinking": "",
+                    "signature": "sig-1"
+                  },
+                  {
+                    "type": "redacted_thinking",
+                    "data": "opaque-1"
+                  },
+                  {
+                    "type": "tool_use",
+                    "id": "toolu_1",
+                    "name": "read",
+                    "input": {
+                      "path": "a"
+                    }
+                  }
+                ]
+              },
+              {
+                "role": "user",
+                "content": [
+                  {
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_1",
+                    "content": "x"
+                  }
+                ]
+              }
+            ]
+          },
+          "status": 400
+        }
+      ]
+    },
+    {
+      "id": "another set of tools with drop_block is taken",
+      "steps": [
+        {
+          "headers": {
+            "x-api-key": "dummy",
+            "anthropic-version": "2023-06-01"
+          },
+          "body": {
+            "model": "claude-sonnet-5-5",
+            "max_tokens": 1000,
+            "system": "S",
+            "tools": [
+              {
+                "name": "read",
+                "input_schema": {
+                  "type": "object"
+                }
+              },
+              {
+                "name": "StructuredOutput",
+                "input_schema": {
+                  "type": "object"
+                }
+              }
+            ],
+            "messages": [
+              {
+                "role": "user",
+                "content": "hi"
+              }
+            ]
+          },
+          "answer": {
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "signature": "sig-1"
+              },
+              {
+                "type": "redacted_thinking",
+                "data": "opaque-1"
+              },
+              {
+                "type": "tool_use",
+                "id": "toolu_1",
+                "name": "read",
+                "input": {
+                  "path": "a"
+                }
+              }
+            ],
+            "stop_reason": "tool_use"
+          },
+          "status": 200
+        },
+        {
+          "headers": {
+            "x-api-key": "dummy",
+            "anthropic-version": "2023-06-01",
+            "anthropic-beta": "thinking-binding-controls-2026-08-01"
+          },
+          "body": {
+            "model": "claude-sonnet-5-5",
+            "max_tokens": 1000,
+            "system": "S",
+            "tools": [
+              {
+                "name": "StructuredOutput",
+                "input_schema": {
+                  "type": "object"
+                }
+              }
+            ],
+            "messages": [
+              {
+                "role": "user",
+                "content": "hi"
+              },
+              {
+                "role": "assistant",
+                "content": [
+                  {
+                    "type": "thinking",
+                    "thinking": "",
+                    "signature": "sig-1"
+                  },
+                  {
+                    "type": "redacted_thinking",
+                    "data": "opaque-1"
+                  },
+                  {
+                    "type": "tool_use",
+                    "id": "toolu_1",
+                    "name": "read",
+                    "input": {
+                      "path": "a"
+                    }
+                  }
+                ]
+              },
+              {
+                "role": "user",
+                "content": [
+                  {
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_1",
+                    "content": "x"
+                  }
+                ]
+              }
+            ],
+            "thinking": {
+              "type": "adaptive",
+              "block_binding": {
+                "prefix_mismatch_behavior": "drop_block"
+              }
+            }
+          },
+          "status": 200
+        }
+      ]
+    }
+  ]
+}

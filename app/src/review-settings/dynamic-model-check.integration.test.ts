@@ -7,6 +7,7 @@
 import { describe, expect, it } from "vitest";
 import { startLlmFake } from "../../../fakes/llm/server.ts";
 import { createFakeAdapter } from "../llm/providers/fake-adapter.ts";
+import { anthropicAdapter } from "../llm/providers/anthropic/adapter.ts";
 import { openrouterAdapter } from "../llm/providers/openrouter/adapter.ts";
 import { createAdapterRegistry } from "../llm/providers/registry.ts";
 import type {
@@ -302,4 +303,38 @@ describe("saving a Dynamic model at a provider the project selected", () => {
       { field: "dynamicModel", code: "DYNAMIC_MODEL_TOOLS_UNSUPPORTED" },
     ]);
   });
+
+  // #533-T17: the four models that took no forced tool choice or could not run without thinking were refused at
+  // the save (`DYNAMIC_MODEL_TOOLS_UNSUPPORTED`); the runner steers them now, so the list is the answer.
+  it.each([
+    "claude-sonnet-5-5",
+    "claude-opus-5-5",
+    "claude-fable-5-1",
+    "claude-fable-5",
+  ])(
+    "saves %s as the Dynamic model of the Anthropic provider",
+    async (model) => {
+      const registry = createAdapterRegistry([
+        openrouterAdapter,
+        anthropicAdapter,
+      ]);
+      const modelCapabilities = createModelCapabilityChecker({
+        adapters: registry,
+        baseUrl: (provider) => registry.get(provider).apiBaseUrl,
+        log: () => undefined,
+      });
+      const app = await setupReviewSettings(undefined, {
+        modelCapabilities,
+        providers: registry,
+      });
+
+      const view = await app.service.updateProjectSettings(app.first.id, {
+        dynamicProvider: "anthropic",
+        dynamicModel: model,
+      });
+
+      expect(view.warnings).toEqual([]);
+      expect(view.dynamic.effective.dynamicModel).toBe(model);
+    },
+  );
 });

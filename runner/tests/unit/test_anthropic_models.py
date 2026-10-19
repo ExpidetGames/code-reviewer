@@ -122,15 +122,16 @@ def test_every_entry_has_sane_prices_and_limits(model: ClaudeModel) -> None:
         assert model.long_prompt.over_input_tokens < model.context_window_tokens
     assert model.context_window_tokens >= model.max_output_tokens
     assert model.top_p == model.temperature
-    # Dynamic needs tools, a forced tool choice and a way to run without thinking blocks.
-    dynamic = model.tools and model.forced_tool_choice and model.thinking_disabled
-    assert ("dynamic" in model.review_kinds) is dynamic
-    assert "diff" in model.review_kinds
+    # #533-T16: Dynamic needs tools; the wire steers a model without a forced choice or with
+    # thinking always on, so every model with tools takes both kinds.
+    assert model.tools
+    assert model.review_kinds == ("diff", "dynamic")
 
 
 # #511-T03
+# #533-T16
 def test_the_defaults_are_listed_and_fit_their_review_kind() -> None:
-    assert DEFAULT_MODELS["diff"] == "claude-haiku-5-5"
+    assert DEFAULT_MODELS == {"diff": "claude-haiku-5-5", "dynamic": "claude-sonnet-5-5"}
     for kind, model_id in DEFAULT_MODELS.items():
         model = model_for(model_id)
         assert model is not None
@@ -148,13 +149,17 @@ def test_temperature_and_top_p_are_accepted_by_the_four_older_models_only() -> N
 
 
 # #511-T05
+# #533-T16: the four models that were Diff only are the ones the wire steers.
 def test_four_models_take_no_forced_tool_choice_or_cannot_run_without_thinking() -> None:
-    assert [m.id for m in MODELS.values() if "dynamic" not in m.review_kinds] == [
+    assert [
+        m.id for m in MODELS.values() if not m.forced_tool_choice or not m.thinking_disabled
+    ] == [
         "claude-fable-5-1",
         "claude-opus-5-5",
         "claude-sonnet-5-5",
         "claude-fable-5",
     ]
+    assert all("dynamic" in m.review_kinds for m in MODELS.values())
 
 
 # #511-T04

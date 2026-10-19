@@ -56,11 +56,13 @@ describe("saving a project with the Anthropic provider", () => {
   });
 
   // #532-T05
-  it("refuses a model that is not suggested for Dynamic Review on the Dynamic model, and stores nothing", async () => {
+  it("refuses a model whose list entry lacks Dynamic Review on the Dynamic model, and stores nothing", async () => {
     const app = await start();
-    const offered = new Set(suggestedModelsFor(anthropicDescriptor, "dynamic"));
-    const refused = ANTHROPIC_MODELS.filter((model) => !offered.has(model.id));
-    expect(refused.length).toBeGreaterThan(0);
+    // Derived from the list: since #533 every model serves a Dynamic Review, so the loop is empty until a model of the
+    // list leaves the kind out again; then this test covers it without an edit.
+    const refused = ANTHROPIC_MODELS.filter(
+      (model) => !model.reviewKinds.includes("dynamic"),
+    );
 
     for (const { id } of refused) {
       const error = await app.service

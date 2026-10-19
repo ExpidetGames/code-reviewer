@@ -358,7 +358,12 @@ class Repo:
         )
 
 
-def dynamic_job(head: str, base_url: str = "http://127.0.0.1:9") -> Job:
+def dynamic_job(
+    head: str,
+    base_url: str = "http://127.0.0.1:9",
+    provider: str = "openrouter",
+    model: str = "deepseek/deepseek-v4.1-flash",
+) -> Job:
     return parse_job(
         json.dumps(
             {
@@ -366,7 +371,7 @@ def dynamic_job(head: str, base_url: str = "http://127.0.0.1:9") -> Job:
                 "command": "review",
                 "reviewKind": "dynamic",
                 "dynamic": {
-                    "model": "deepseek/deepseek-v4.1-flash",
+                    "model": model,
                     "skill": "Look for real bugs.",
                     "limits": {"maxFindings": 5},
                 },
@@ -384,8 +389,8 @@ def dynamic_job(head: str, base_url: str = "http://127.0.0.1:9") -> Job:
                     "botLogin": "code-reviewer[bot]",
                 },
                 "llm": {
-                    "provider": "openrouter",
-                    "model": "deepseek/deepseek-v4.1-flash",
+                    "provider": provider,
+                    "model": model,
                     "apiKey": API_KEY,
                     "baseUrl": base_url,
                 },

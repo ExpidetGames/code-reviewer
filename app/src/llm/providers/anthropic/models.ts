@@ -23,9 +23,12 @@
 // 4.7 and every later model answer a non-default `temperature` or `top_p` with a 400, and Opus 5.5, Sonnet 5.5
 // and Fable 5.1 answer a forced `tool_choice` with a 400.
 //
-// A Dynamic Review needs three things of a model: tools, a forced tool choice (the pinned engine returns its findings
-// through a forced `StructuredOutput` call) and a way to run without thinking blocks (the engine's chat history
-// cannot carry them back, so the runner asks for `thinking: disabled`). `reviewKinds` says which models qualify.
+// A Dynamic Review needs tools, an answer through the engine's `StructuredOutput` tool and a way to carry the
+// model's thinking. The pinned engine forces that tool call, and the history it keeps cannot hold thinking blocks,
+// so the runner's wire adapts to the flags below (#533): a model with no forced tool choice (Fable 5.1, Opus 5.5,
+// Sonnet 5.5) or no way to run without thinking (those and Fable 5) is asked with `tool_choice: auto`, a strict
+// return tool and an instruction, and gets its thinking blocks back with every tool result. `reviewKinds` says which
+// kinds the list offers a model for; every model with tools takes both.
 import type { ReviewKind } from "../../../contracts/runner-api.ts";
 
 /** USD per million tokens, as a decimal string so that no float rounding enters a price. */
@@ -53,7 +56,7 @@ export type AnthropicModel = {
     /** A non-default `top_p` is accepted. Never sent together with `temperature`. */
     readonly topP: boolean;
     readonly tools: boolean;
-    /** `tool_choice` `any` or a named tool is accepted (a 400 on Fable 5.1, Opus 5.5 and Sonnet 5.5). */
+    /** `tool_choice` `any` or a named tool is accepted (a 400 on Fable 5.1, Opus 5.5 and Sonnet 5.5; the runner steers those, #533). */
     readonly forcedToolChoice: boolean;
     /** `thinking: {type: "disabled"}` is accepted at the model's default effort. */
     readonly thinkingDisabled: boolean;
@@ -104,7 +107,7 @@ export const ANTHROPIC_MODELS: readonly AnthropicModel[] = [
       forcedToolChoice: false,
       thinkingDisabled: false,
     },
-    reviewKinds: ["diff"],
+    reviewKinds: ["diff", "dynamic"],
     pricesUsdPerMTok: prices("10", "50", "0.25", "12.50", "20"),
     longPrompt: null,
   },
@@ -120,7 +123,7 @@ export const ANTHROPIC_MODELS: readonly AnthropicModel[] = [
       forcedToolChoice: false,
       thinkingDisabled: false,
     },
-    reviewKinds: ["diff"],
+    reviewKinds: ["diff", "dynamic"],
     pricesUsdPerMTok: prices("4", "20", "0.20", "5", "8"),
     longPrompt: null,
   },
@@ -136,7 +139,7 @@ export const ANTHROPIC_MODELS: readonly AnthropicModel[] = [
       forcedToolChoice: false,
       thinkingDisabled: false,
     },
-    reviewKinds: ["diff"],
+    reviewKinds: ["diff", "dynamic"],
     pricesUsdPerMTok: prices("2", "10", "0.10", "2.50", "4"),
     longPrompt: null,
   },
@@ -171,7 +174,7 @@ export const ANTHROPIC_MODELS: readonly AnthropicModel[] = [
       forcedToolChoice: true,
       thinkingDisabled: false,
     },
-    reviewKinds: ["diff"],
+    reviewKinds: ["diff", "dynamic"],
     pricesUsdPerMTok: prices("10", "50", "1", "12.50", "20"),
     longPrompt: null,
   },
@@ -310,17 +313,14 @@ export const ANTHROPIC_MODELS: readonly AnthropicModel[] = [
  *
  * - **Diff: Haiku 5.5**, at $0.10 / $0.50 per MTok: the recommendation of the model comparison, and the cheapest
  *   current model.
- * - **Dynamic: Sonnet 5.** A Dynamic Review is a tool loop: the model explores a checkout and returns its findings
- *   through a forced `StructuredOutput` call. That excludes Sonnet 5.5, Opus 5.5 and Fable 5.1 (a forced tool choice
- *   is a 400) until the engine can steer with `auto`, and Fable 5 (thinking cannot be switched off). Among the models
- *   that remain, Sonnet 5 is the one Anthropic describes for agentic tool use and the least expensive of that kind
- *   ($2 / $10 per MTok, the price of Sonnet 5.5, one price at every prompt length). Haiku 5.5 qualifies technically
- *   but is Anthropic's model for classification, extraction and routing. Anthropic commits to serve Sonnet 5 until at
- *   least 2027-06-30; the default moves to Sonnet 5.5 when the engine no longer forces the tool choice.
+ * - **Dynamic: Sonnet 5.5** (#533), at $2 / $10 per MTok, one price at every prompt length: Anthropic's model for
+ *   agentic tool use at the lowest price of that kind. Until the runner could steer it (a forced tool choice is a 400
+ *   on it, and it always thinks) the default was its predecessor Sonnet 5, which stays on the list at the same price.
+ *   Haiku 5.5 qualifies technically but is Anthropic's model for classification, extraction and routing.
  */
 export const ANTHROPIC_DEFAULT_MODELS = {
   diff: "claude-haiku-5-5",
-  dynamic: "claude-sonnet-5",
+  dynamic: "claude-sonnet-5-5",
 } as const;
 
 /** The ids of the models that can serve a review of this kind, in the order of the list. */

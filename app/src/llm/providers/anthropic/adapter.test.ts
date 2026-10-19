@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { dynamicCapabilitiesOf } from "../../dynamic-capabilities.ts";
+import {
+  DYNAMIC_THINKING_OUTPUT_ALLOWANCE_TOKENS,
+  dynamicCapabilitiesOf,
+} from "../../dynamic-capabilities.ts";
 import { llmProviderAdapters } from "../server.ts";
 import { ANTHROPIC_MODELS } from "./models.ts";
 
@@ -44,10 +47,11 @@ describe("the Anthropic adapter", () => {
   });
 
   // #511-T01
-  it("keeps the defaults of the decision: Haiku 5.5 for a Diff Review, Sonnet 5 for a Dynamic Review", () => {
+  // #533-T16: the Dynamic default moved from Sonnet 5 to Sonnet 5.5 when the runner learned to steer it.
+  it("keeps the defaults of the decision: Haiku 5.5 for a Diff Review, Sonnet 5.5 for a Dynamic Review", () => {
     expect(adapter.defaultModels).toEqual({
       diff: "claude-haiku-5-5",
-      dynamic: "claude-sonnet-5",
+      dynamic: "claude-sonnet-5-5",
     });
   });
 
@@ -112,8 +116,9 @@ describe("the Anthropic adapter", () => {
         }),
         modelId,
       ).toMatchObject({
-        outcome: "unsupported",
-        capabilities: { tools: true, toolChoiceRequired: false },
+        // #533-T17: the runner steers these, so a Dynamic Review is possible on them.
+        outcome: "supported",
+        capabilities: { tools: true, toolChoiceRequired: true },
       });
     expect(
       await adapter.checkModelCapabilities({
@@ -162,5 +167,32 @@ describe("the Anthropic adapter", () => {
     expect(dynamicCapabilitiesOf(small.capabilities)).toMatchObject({
       contextWindowTokens: 200_000,
     });
+  });
+
+  // #533-T20: the list says which models always think; those get room for the thinking, derived from the flag.
+  it("gives the descriptor of every model that always thinks the thinking allowance, within the model's own maximum", async () => {
+    for (const model of ANTHROPIC_MODELS) {
+      const checked = await adapter.checkModelCapabilities({
+        baseUrl: "http://unreachable.invalid",
+        modelId: model.id,
+      });
+      if (checked.outcome !== "supported") throw new Error(model.id);
+      const alwaysThinks = !model.supports.thinkingDisabled;
+      expect(checked.capabilities.alwaysThinks, model.id).toBe(alwaysThinks);
+      const allowance = dynamicCapabilitiesOf(
+        checked.capabilities,
+      )?.maxOutputTokens;
+      if (alwaysThinks)
+        expect(allowance, model.id).toBe(
+          Math.min(
+            DYNAMIC_THINKING_OUTPUT_ALLOWANCE_TOKENS,
+            model.maxOutputTokens,
+          ),
+        );
+      else
+        expect(allowance, model.id).toBeLessThanOrEqual(
+          DYNAMIC_THINKING_OUTPUT_ALLOWANCE_TOKENS,
+        );
+    }
   });
 });

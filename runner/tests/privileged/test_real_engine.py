@@ -33,6 +33,7 @@ from privileged_support import (
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "engine"))
 from opencode_support import (
+    ScriptedMessagesModel,
     ScriptedModel,
     asks,
     extra_path,
@@ -151,6 +152,67 @@ def test_the_real_engine_reviews_as_the_dedicated_user_and_leaves_nothing_behind
         reached = connect_as(ENGINE_UID, ENGINE_GID, [("elsewhere", "127.0.0.1", elsewhere)])
     assert reached["elsewhere"]["connected"] is False
     assert not list((job_dir / "dynamic").glob("job-*"))
+
+
+# #533-T18: a Claude model that refuses a forced tool choice and always thinks, through the whole
+# production path as root: the engine user, the nft rules, the proxy's Messages wire and the
+# strict fake of the Claude API (a forced choice or a thinking block that does not come back would
+# be a 400).
+def test_the_real_engine_reviews_with_a_steered_claude_model_as_the_dedicated_user(
+    tmp_path: Path, job_dir: Path, engine_binary: Path
+) -> None:
+    repo = Repo(
+        tmp_path / "base.git",
+        {"README.md": b"# demo\n", "src/app.py": b"def handler(user):\n    return query(user)\n"},
+        {"src/app.py": b"def handler(user):\n    return query(user)  # changed\n"},
+    )
+    model = ScriptedMessagesModel(
+        steps=[
+            lambda body: asks(
+                tool_call("read_1", "read", {"filePath": str(_export(job_dir) / "src/app.py")})
+            )
+        ],
+        final=findings_for(repo.head),
+    )
+    environment = {
+        runner.OPENCODE_COMMAND_VARIABLE: str(engine_binary),
+        runner.DYNAMIC_CAPABILITIES_VARIABLE: CAPABILITIES,
+        runner.RIPGREP_PATH_VARIABLE: ripgrep(),
+        ENGINE_UID_VARIABLE: str(ENGINE_UID),
+        ENGINE_GID_VARIABLE: str(ENGINE_GID),
+        EGRESS_MODE_VARIABLE: EGRESS_MODE.value,
+    }
+    extra = extra_path()
+    if extra:
+        environment[runner.DYNAMIC_NODE_BIN_VARIABLE] = extra
+
+    with model:
+        result = runner.run_dynamic_job(
+            dynamic_job(
+                repo.head,
+                base_url=f"{model.url}/v1",
+                provider="anthropic",
+                model="claude-sonnet-5-5",
+            ),
+            None,
+            time.monotonic(),
+            environment,
+            170.0,
+            engines=ALL_ENGINES,
+            prepare=production_preparer(
+                environment, content_for=repo.content_for, context_for=repo.context_for
+            ),
+            publish=no_publication,
+        )
+
+    assert result.ok, (result.error_code, result.log_tail)
+    assert len(model.requests) == 2
+    assert {request["model"] for request in model.requests} == {"claude-sonnet-5-5"}
+    assert all(request["tool_choice"] == {"type": "auto"} for request in model.requests)
+    # The thinking block of the first answer went back with its tool call.
+    assert model.requests[1]["messages"][1]["content"][0]["type"] == "thinking"
+    assert "def handler(user)" in json.dumps(model.requests[1]["messages"])
+    assert user_pids(ENGINE_UID) == []
 
 
 def _export(job_dir: Path) -> Path:
