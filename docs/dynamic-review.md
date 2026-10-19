@@ -285,6 +285,76 @@ operator's `RUNNER_DYNAMIC_CAPABILITIES` (a ceiling for the descriptor the job b
 `RUNNER_DYNAMIC_RIPGREP` or `RUNNER_ADVERTISED_ENGINES` reaches a job. A Dynamic job that arrives at
 a runner without `opencode` in that list is refused with `dynamic_engine_unavailable`.
 
+## The passthrough proxy of native providers (#550)
+
+The legacy proxy (`proxy.py`, `anthropic_wire.py`, `provider_wire.py`) speaks OpenAI Chat to the engine and
+translates to the provider (OpenRouter, Anthropic). A **native job** is different: the engine speaks its own wire
+family to a loopback proxy and the proxy only authenticates, swaps the key, relays and counts
+(`dynamic_review/passthrough/`, design #544, decisions of 2026-10-19). The legacy path stays the production path
+until #556 removes it; a job with a per-job model entry (`contracts/job-model-entry.v1.json`, #548) is native, any
+other job is unchanged (`passthrough/transport.py`). Key isolation is as today: the real key lives in the
+supervisor; the engine holds a random per-job capability and cannot reach the upstream (own uid, nftables).
+
+What the proxy decides, before a byte is reserved or forwarded (`passthrough/admission.py`; the engine is the
+untrusted side):
+
+- **Who.** The job's capability in the one header of the family (`authorization: Bearer`, `x-api-key`,
+  `x-goog-api-key`), exactly once, constant-time. Otherwise 401 and nothing else is looked at.
+- **What.** One method and one path per family, compared as plain text: `POST /v1/chat/completions`,
+  `/v1/responses`, `/v1/messages`, and for Google `/v1beta/models/<the job's model>:streamGenerateContent?alt=sse`.
+  No other query (`?key=` included), no `..`, `;`, second `?` or absolute URL, no `GET`. Anything else is a 403
+  `request_not_allowed`, a Google path for another model is `model_not_allowed`.
+- **How.** Request headers are built from an allow-list (`accept`, `content-type`, `user-agent`, the three
+  `x-*session*` headers; for Messages `anthropic-version` and `anthropic-beta`, whose values must be on a list: the two
+  the pinned OpenCode sends). Every credential, cookie and proxy header is dropped; the proxy sets the one key header
+  of the family, `accept-encoding: identity` (the tee cannot read a compressed answer) and the length itself. The
+  body length must be measurable before it is read (a chunked body is a 411, one above `max_request_bytes` a 413).
+- **The body.** Read as JSON only for `model` (the job's, else 403 `model_not_allowed`), the output cap (present and
+  not above the allowance: `min(limit.output, 32000)`, the cap the engine really sends, spike #546) and `stream`;
+  a key given twice, a non-object, `models`/`route`/`plugins`/`transforms` on Chat are refused. The bytes that go out are
+  the bytes that came in.
+
+The refusal codes are the engine's answer (`capability_invalid`, `request_not_allowed`, `model_not_allowed`,
+`request_too_large`, `length_required`); the run records `dynamic_policy_violation` (a 413: `dynamic_budget_exceeded`),
+except for a 401, which is not the engine of this job and ends nothing.
+
+**The destination** (`address.py`, `upstream.py`). One trusted `https` base URL per job, port 443 only, no
+credentials or query; it follows the SDKs' convention (the root they use as `baseURL`, for example
+`https://api.openai.com/v1`) and the route of the family is appended. Every call opens its own connection, resolves
+the name, refuses it when **one** address is not public (loopback, private, link-local, CGNAT, multicast, reserved,
+documentation and special-purpose ranges, NAT64, 6to4; an IPv4-mapped address by its IPv4) and connects to an address
+it checked, never to the name again. A redirect is a status: it is not followed and ends the run.
+
+**Ledger.** `budget.py` is reused as it is: every upstream call reserves from the bytes of the body and what the run
+has shown (realistic guard, #540/#542), the final-call exemption and "never without a review" rules unchanged. The
+engine's retries (429, 5xx, a stream cut, an error event inside a 200 stream) are calls of their own. A refusal before
+any generation (a 4xx or 5xx status, a connection that never opened) is released at no cost (`settle_unbilled`);
+a call whose usage was never seen (a cut stream, an error event, an engine that went away, a timeout after the request
+was sent) stays spent and makes the cost of the run unknown (`settle_unknown`); a complete answer without a readable
+usage or a price still ends the run (`dynamic_accounting_failed`, as today; the own-key relaxation is #553). Prices are
+the job's (`UnitCosts`: input, output and, when it has them, cache read and write); a cache write without a write
+price has no cost, so the run stops rather than price it too low.
+
+**Relay and tee.** The answer is passed through byte for byte: a stream one whole event at a time as it arrives
+(`sse.py`), a plain answer after a size cap, while the usage tap (`usage.py`, the minimal parser per family; #551
+hardens them) reads the same bytes. A client that goes away cancels the call to the provider. Response headers are
+filtered to a few (`content-type`, `retry-after`, `retry-after-ms`, `x-should-retry`, the request id). Nothing the
+provider says about an error is passed on or logged before the key, and every run of eight or more characters of it, is
+cut out (`redact.py`): error bodies, error events inside a stream and plain answers alike.
+
+**Stable codes the caller branches on.** A provider status maps by the table of the legacy path (`llm_auth`,
+`llm_rate_limit`, `llm_unavailable`, `llm_timeout`, `llm_context_length_exceeded`, `llm_bad_request`); a 404, and the
+engine's own "500 `UnknownError` with no call upstream" for a model its config does not offer
+(`engine_errors.model_not_found_for_turn`), is `model_unknown`. Status that the engine retries itself (408, 409, 429,
+5xx) do not end the run; the code is kept in `PassthroughProxy.last_upstream_error` for the adapter to name when the
+engine gives up. Everything else ends the run with its code, the text of the provider in none of it.
+
+**Not in this change** (follow-ups): reading a job's entry from the claim and starting the engine with the native
+config (#564 has the entry reader; `build_native_engine_config` and `target_from_entry` are the two joints), the audit of
+tool results in a request (it is chat-shaped; the adapter still counts the tool calls the engine reports), how a final
+call is told to answer without rewriting the request (#552), usage parsers hardened against captured answers (#551)
+and the cost policy for an own key (#553).
+
 ## The model
 
 Dynamic Review is model- and provider-agnostic. The default model is `deepseek/deepseek-v4.1-flash`,

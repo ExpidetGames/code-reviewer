@@ -297,6 +297,16 @@ Engine suite (`runner/tests/engine/`, `uv run pytest -m engine`, `make test-engi
   provider answers; what is only assumed about one is listed in `docs/spike/544-passthrough.md`, section 6.
   `test_native_support.py` pins that the support code stops the `opencode serve` it started when that process does
   not come up healthy.
+- The passthrough proxy (#550, `test_engine_opencode_passthrough.py`, support `opencode_passthrough.py`): the same
+  real pinned OpenCode, with the production `PassthroughProxy` in front of each strict fake in place of the relay of
+  the spike (only the last hop is a loopback double, `runner/tests/passthrough_loopback.py`). One engine holds six
+  providers: the four family loops side by side (the fake saw the real key and no other credential, the engine's own
+  cache marks arrived as written, the ledger counted seven calls at the price of the usage the tee read), a provider
+  whose first two calls are a 429 and a 503 (nine upstream calls, nine in the ledger), one whose 401 quotes the key
+  (the engine's error has it redacted) and a turn for a model the engine does not offer (no call, `model_unknown`).
+  Keep it that way: a new claim goes into one of those providers. The policy itself is proven below this level:
+  admission, tee, destination and relay in `tests/unit/test_passthrough_*.py` (no socket: a scripted upstream and an
+  in-memory sink), the server on real loopback sockets in `tests/integration/test_passthrough_server.py`.
 - Upgrading PR-Agent: the suite must pass unchanged, together with the identity patch guard in
   `tests/unit/`. A change in wording that the runner matches (see `error_mapping.py`) shows up here.
 
