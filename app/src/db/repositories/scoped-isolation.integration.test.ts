@@ -28,6 +28,7 @@ import { createPlanHandoffTokensRepository } from "./plan-handoff-tokens-reposit
 import { createJobCheckRunsRepository } from "./job-check-runs-repository.ts";
 import { createRefusalNoticesRepository } from "./refusal-notices-repository.ts";
 import { createUsageRecordsRepository } from "./usage-records-repository.ts";
+import { createBillingJournalRepository } from "./billing-journal-repository.ts";
 
 const SHA = "b".repeat(40);
 const FAILED_SHA = "c".repeat(40);
@@ -49,6 +50,7 @@ function reposOf(db: Kysely<Database>, workspaceId: string) {
     notices: createRefusalNoticesRepository(db, workspaceId),
     jobChecks: createJobCheckRunsRepository(db, workspaceId),
     planHandoff: createPlanHandoffTokensRepository(db, workspaceId),
+    billing: createBillingJournalRepository(db, workspaceId),
   };
 }
 type Repos = ReturnType<typeof reposOf>;
@@ -262,9 +264,18 @@ async function seed(
     lastFour: null,
     updatedBy: `user-${tag}`,
   });
+  // The balance journal (#495): a top-up and a hold, so the other workspace has a balance, an entry and a reservation to reach for.
+  const topUp = await repos.billing.append({
+    type: "top_up",
+    amountMicroUsd: 5_000_000,
+    refKey: `pi-${tag}`,
+  });
+  await repos.billing.reserve(1_000_000, `held-${tag}`);
   return {
     workspaceId,
     userId: `user-${tag}`,
+    journalEntryId: topUp.entry.id,
+    heldJobId: `held-${tag}`,
     invitation,
     linkRequest,
     integration,
@@ -349,6 +360,17 @@ async function rowsOf(db: Kysely<Database>, workspaceId: string) {
       .selectAll()
       .where("workspace_id", "=", workspaceId)
       .orderBy("name")
+      .execute(),
+    billingEntries: await db
+      .selectFrom("billing_journal_entries")
+      .selectAll()
+      .where("workspace_id", "=", workspaceId)
+      .orderBy("id")
+      .execute(),
+    billingBalances: await db
+      .selectFrom("billing_balances")
+      .selectAll()
+      .where("workspace_id", "=", workspaceId)
       .execute(),
     appSettings: await db
       .selectFrom("app_settings")
@@ -1041,6 +1063,90 @@ const CASES: Case[] = [
         ttlMs: 5 * 60 * 1000,
       }),
     expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  // the balance journal: A's entries, balance and holds are A's own; B's key, hold and entry are not there for A, and
+  // what A writes under the same keys lands in A
+  {
+    name: "billing.append",
+    run: (a) =>
+      a.billing.append({
+        type: "top_up",
+        amountMicroUsd: 1_000_000,
+        refKey: "pi-b",
+      }),
+    expectAnswer: (answer, a) =>
+      expect(answer).toMatchObject({
+        created: true,
+        entry: { workspaceId: a.workspaceId, refKey: "pi-b" },
+      }),
+  },
+  {
+    name: "billing.append (a reversal of an entry of B)",
+    run: (a, b) =>
+      settle(() =>
+        a.billing.append({
+          type: "correction",
+          amountMicroUsd: -5_000_000,
+          refKey: "reverse-b",
+          reversesEntryId: b.journalEntryId,
+        }),
+      ),
+    expectAnswer: notFound("reversed_entry_not_found"),
+  },
+  {
+    name: "billing.reserve",
+    run: (a, b) => a.billing.reserve(1_000_000, b.heldJobId),
+    expectAnswer: (answer, a) =>
+      expect(answer).toMatchObject({
+        ok: true,
+        created: true,
+        entry: { workspaceId: a.workspaceId },
+      }),
+  },
+  {
+    name: "billing.settle",
+    run: (a, b) =>
+      a.billing.settle(b.heldJobId, {
+        aiMicroUsd: 0,
+        infraMicroUsd: 500_000,
+        minutes: 1,
+        reviewKind: "diff",
+      }),
+    expectAnswer: (answer) =>
+      expect(answer).toEqual({ ok: false, code: "reservation_not_found" }),
+  },
+  {
+    name: "billing.release",
+    run: (a, b) => a.billing.release(b.heldJobId),
+    expectAnswer: (answer) =>
+      expect(answer).toEqual({ ok: false, code: "reservation_not_found" }),
+  },
+  {
+    name: "billing.balance",
+    run: (a) => a.billing.balance(),
+    expectAnswer: (answer) =>
+      expect(answer).toEqual({
+        balanceMicroUsd: 4_000_000,
+        reservedMicroUsd: 1_000_000,
+      }),
+  },
+  {
+    name: "billing.entries",
+    run: (a) => a.billing.entries({ limit: 50 }),
+    expectAnswer: (answer, a) => {
+      const { entries } = answer as { entries: Array<{ workspaceId: string }> };
+      expect(entries).toHaveLength(2);
+      expect(entries.map((entry) => entry.workspaceId)).toEqual([
+        a.workspaceId,
+        a.workspaceId,
+      ]);
+    },
+  },
+  {
+    name: "billing.verify",
+    run: (a) => a.billing.verify(),
+    expectAnswer: (answer) =>
+      expect(answer).toMatchObject({ consistent: true, differenceMicroUsd: 0 }),
   },
   // runs
   {

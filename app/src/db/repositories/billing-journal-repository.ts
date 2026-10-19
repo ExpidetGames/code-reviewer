@@ -1,0 +1,614 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// The balance journal of ONE workspace (tables `billing_journal_entries` and `billing_balances`; the factory takes the
+// workspace id, see ../workspace-scope.ts; ADR 0006, 2.7; src/billing/README.md). One USD balance per workspace, in
+// micro-USD integers, as the sum of an append-only journal; the balance row is a cache updated in the transaction of
+// every entry, and `verify()` compares the two.
+//
+// Everything that writes runs in one transaction (the caller's, when it hands in a transaction, so a later issue can put
+// a reservation into the claim transaction) and is idempotent on the key `(workspace, type, ref_key)`: the same key with
+// the same amount returns the entry that exists, with another amount it is `idempotency_conflict`. A `reserve` is the one
+// conditional write, a hold of at most the balance: it takes the balance row's lock first (SQLite's `begin immediate`
+// already serializes writers; Postgres `FOR UPDATE`), answers a repeated job from the entry it wrote, and runs
+// `UPDATE ... SET balance = balance - :hold WHERE balance >= :hold`, so two claims of one workspace can never spend the
+// same money. Every other entry updates the balance unconditionally: a settlement, a refund, a chargeback or a
+// correction may take it below zero, and a balance below zero refuses every reserve (`balance_negative`).
+//
+// Amounts are `bigint` columns: Postgres hands them back as text, so every one is converted with `Number` (exact up to
+// 2^53 micro-USD, far beyond any balance). A row of another workspace is simply not there: a reversal names an entry of
+// this workspace or it is `reversed_entry_not_found`, and a settlement names a reservation of this workspace.
+import "server-only";
+import { sql, type Kysely, type Selectable } from "kysely";
+import {
+  BillingJournalError,
+  refKeyOf,
+  validateEntry,
+  type BillingEntryType,
+  type NewJournalEntry,
+  type ReserveRefusal,
+} from "../../billing/journal.ts";
+import type { ProjectReviewKind } from "../../review-settings/settings.ts";
+import { formatTimestamp } from "../codecs.ts";
+import { databaseDriver } from "../driver.ts";
+import type { BillingJournalEntriesTable, Database } from "../schema.ts";
+import type { WorkspaceId } from "../workspace-scope.ts";
+
+/** An entry as the rest of the app sees it. Amounts are micro-USD integers; timestamps are ISO 8601 text in UTC. */
+export type JournalEntry = {
+  id: string;
+  workspaceId: string;
+  type: BillingEntryType;
+  amountMicroUsd: number;
+  refKey: string;
+  jobId: string | null;
+  reviewKind: ProjectReviewKind | null;
+  minutes: number | null;
+  aiMicroUsd: number | null;
+  infraMicroUsd: number | null;
+  reversesEntryId: string | null;
+  provider: string | null;
+  providerRef: string | null;
+  actorUserId: string | null;
+  note: string | null;
+  createdAt: string;
+};
+
+/** Where a reader stopped: the next page starts after this `(createdAt, id)`, going back in time. */
+export type JournalCursor = { createdAt: string; id: string };
+
+export type JournalPage = {
+  entries: JournalEntry[];
+  /** The cursor of the next page, or undefined when this was the last one. */
+  next: JournalCursor | undefined;
+};
+
+export type JournalBalance = {
+  /** The sum of all entries: what the workspace may spend, already without the money held by running reviews. */
+  balanceMicroUsd: number;
+  /** Held by running reviews: the open reservations. */
+  reservedMicroUsd: number;
+};
+
+/** The cache against the journal. Differences are cache minus sum; `consistent` is true when both are zero. */
+export type JournalVerification = {
+  balanceMicroUsd: number;
+  expectedBalanceMicroUsd: number;
+  differenceMicroUsd: number;
+  reservedMicroUsd: number;
+  expectedReservedMicroUsd: number;
+  reservedDifferenceMicroUsd: number;
+  consistent: boolean;
+};
+
+export type AppendResult = {
+  entry: JournalEntry;
+  /** False when the key existed already and its entry was returned. */
+  created: boolean;
+};
+
+export type ReserveResult =
+  | { ok: true; entry: JournalEntry; created: boolean }
+  | {
+      ok: false;
+      code: ReserveRefusal;
+      /** What the balance was when the hold was refused. */
+      balanceMicroUsd: number;
+    };
+
+/** What a finished run cost: the two parts the customer sees, the started minutes and the kind of review. */
+export type JobCharge = {
+  aiMicroUsd: number;
+  infraMicroUsd: number;
+  minutes: number;
+  reviewKind: ProjectReviewKind;
+};
+
+export type SettleResult =
+  | {
+      ok: true;
+      release: JournalEntry;
+      /** Null when the run cost nothing: the hold is released and no usage is written. */
+      usage: JournalEntry | null;
+      created: boolean;
+    }
+  | { ok: false; code: "reservation_not_found" | "job_already_released" };
+
+export type ReleaseResult =
+  | { ok: true; entry: JournalEntry; created: boolean }
+  | { ok: false; code: "reservation_not_found" };
+
+export type BillingJournalRepository = {
+  /**
+   * Appends an entry and updates the balance in the same transaction. Idempotent on `(type, key)`: the same key returns
+   * the existing entry (`created: false`) and changes nothing; another amount under it throws `idempotency_conflict`.
+   * Throws `invalid_entry` for an entry that breaks a rule, `reservation_required` for a `reservation` (only `reserve`
+   * may take a hold), `reversed_entry_not_found` / `already_reversed` for a bad reversal.
+   */
+  append(entry: NewJournalEntry): Promise<AppendResult>;
+  /**
+   * Takes a hold of `holdMicroUsd` for a job: a `reservation` entry and `balance -= hold, reserved += hold`, only when the
+   * balance covers the hold. A refusal writes nothing and says why: `balance_negative` (a refund, chargeback or final
+   * charge took it below zero: the workspace is blocked) or `insufficient_balance`. A repeated job returns its
+   * reservation, whatever the balance is now.
+   */
+  reserve(holdMicroUsd: number, jobId: string): Promise<ReserveResult>;
+  /**
+   * Ends the hold of a job with its charge: a `release` of the whole hold and a `usage` of the charge, in one
+   * transaction. A charge of zero writes only the release. Repeating it changes nothing. A job without a reservation, or
+   * one whose hold was released without a charge, answers with a code.
+   */
+  settle(jobId: string, charge: JobCharge): Promise<SettleResult>;
+  /** Gives the hold of a job back without a charge (a job that never ran). Repeating it changes nothing. */
+  release(jobId: string): Promise<ReleaseResult>;
+  /** The cached balance; a workspace without a row has 0 and 0. */
+  balance(): Promise<JournalBalance>;
+  /** The entries, newest first, `limit` at a time, after the cursor of the previous page. */
+  entries(options: {
+    cursor?: JournalCursor | undefined;
+    limit: number;
+  }): Promise<JournalPage>;
+  /** Compares the cache with the sum of the journal and with its open reservations. */
+  verify(): Promise<JournalVerification>;
+};
+
+function toEntry(row: Selectable<BillingJournalEntriesTable>): JournalEntry {
+  const amount = (value: number | null) =>
+    value === null ? null : Number(value);
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    type: row.type as BillingEntryType,
+    amountMicroUsd: Number(row.amount_micro_usd),
+    refKey: row.ref_key,
+    jobId: row.job_id,
+    reviewKind: row.review_kind as ProjectReviewKind | null,
+    minutes: row.minutes,
+    aiMicroUsd: amount(row.ai_micro_usd),
+    infraMicroUsd: amount(row.infra_micro_usd),
+    reversesEntryId: row.reverses_entry_id,
+    provider: row.provider,
+    providerRef: row.provider_ref,
+    actorUserId: row.actor_user_id,
+    note: row.note,
+    createdAt: row.created_at,
+  };
+}
+
+function inTransaction<T>(
+  db: Kysely<Database>,
+  run: (trx: Kysely<Database>) => Promise<T>,
+): Promise<T> {
+  return db.isTransaction ? run(db) : db.transaction().execute(run);
+}
+
+function requireHold(holdMicroUsd: number, jobId: string): void {
+  if (!Number.isSafeInteger(holdMicroUsd) || holdMicroUsd <= 0)
+    throw new BillingJournalError(
+      "invalid_entry",
+      "a hold is a positive integer",
+    );
+  if (jobId === "")
+    throw new BillingJournalError("invalid_entry", "a hold belongs to a job");
+}
+
+export function createBillingJournalRepository(
+  db: Kysely<Database>,
+  workspaceId: WorkspaceId,
+  now: () => Date = () => new Date(),
+  newId: () => string = () => crypto.randomUUID(),
+): BillingJournalRepository {
+  async function findEntry(
+    trx: Kysely<Database>,
+    type: BillingEntryType,
+    refKey: string,
+  ): Promise<JournalEntry | undefined> {
+    const row = await trx
+      .selectFrom("billing_journal_entries")
+      .selectAll()
+      .where("workspace_id", "=", workspaceId)
+      .where("type", "=", type)
+      .where("ref_key", "=", refKey)
+      .executeTakeFirst();
+    return row === undefined ? undefined : toEntry(row);
+  }
+
+  async function findById(
+    trx: Kysely<Database>,
+    id: string,
+  ): Promise<JournalEntry | undefined> {
+    const row = await trx
+      .selectFrom("billing_journal_entries")
+      .selectAll()
+      .where("workspace_id", "=", workspaceId)
+      .where("id", "=", id)
+      .executeTakeFirst();
+    return row === undefined ? undefined : toEntry(row);
+  }
+
+  /** What a reversal must satisfy before it is written: it names an entry of this workspace, with the opposite amount. */
+  async function checkReversal(
+    trx: Kysely<Database>,
+    entry: NewJournalEntry,
+  ): Promise<void> {
+    if (entry.reversesEntryId == null) return;
+    const original = await findById(trx, entry.reversesEntryId);
+    if (original === undefined)
+      throw new BillingJournalError(
+        "reversed_entry_not_found",
+        "the entry to reverse is not in this workspace",
+      );
+    // A hold and its release move `reserved`; they end with the job, never by a correction.
+    if (original.type === "reservation" || original.type === "release")
+      throw new BillingJournalError(
+        "invalid_entry",
+        "a hold is released, not reversed",
+      );
+    if (entry.amountMicroUsd !== -original.amountMicroUsd)
+      throw new BillingJournalError(
+        "invalid_entry",
+        "a reversal has the opposite amount of the entry it reverses",
+      );
+  }
+
+  /** The hold a release gives back is the hold the job took: the reservation names the amount. */
+  async function checkRelease(
+    trx: Kysely<Database>,
+    entry: NewJournalEntry,
+  ): Promise<void> {
+    if (entry.type !== "release") return;
+    const reservation = await findEntry(trx, "reservation", refKeyOf(entry));
+    if (reservation === undefined)
+      throw new BillingJournalError(
+        "reservation_not_found",
+        "there is no hold to release",
+      );
+    if (entry.amountMicroUsd !== -reservation.amountMicroUsd)
+      throw new BillingJournalError(
+        "invalid_entry",
+        "a release gives back the whole hold",
+      );
+  }
+
+  /** Writes the row of an entry, or finds the one the key has; does not touch the balance. */
+  async function writeEntry(
+    trx: Kysely<Database>,
+    entry: NewJournalEntry,
+    timestamp: string,
+  ): Promise<AppendResult> {
+    validateEntry(entry);
+    await checkReversal(trx, entry);
+    await checkRelease(trx, entry);
+    const refKey = refKeyOf(entry);
+    // No conflict target: any unique index may refuse the row (the key, a second reversal), and none may raise.
+    const inserted = await trx
+      .insertInto("billing_journal_entries")
+      .values({
+        id: newId(),
+        workspace_id: workspaceId,
+        type: entry.type,
+        amount_micro_usd: entry.amountMicroUsd,
+        ref_key: refKey,
+        job_id: entry.jobId ?? null,
+        review_kind: entry.reviewKind ?? null,
+        minutes: entry.minutes ?? null,
+        ai_micro_usd: entry.aiMicroUsd ?? null,
+        infra_micro_usd: entry.infraMicroUsd ?? null,
+        reverses_entry_id: entry.reversesEntryId ?? null,
+        provider: entry.provider ?? null,
+        provider_ref: entry.providerRef ?? null,
+        actor_user_id: entry.actorUserId ?? null,
+        note: entry.note ?? null,
+        created_at: timestamp,
+      })
+      .onConflict((conflict) => conflict.doNothing())
+      .returningAll()
+      .executeTakeFirst();
+    if (inserted !== undefined)
+      return { entry: toEntry(inserted), created: true };
+
+    const existing = await findEntry(trx, entry.type, refKey);
+    if (existing === undefined) {
+      // Not the key, so the only other unique index that applies: the entry was reversed already.
+      if (entry.reversesEntryId != null)
+        throw new BillingJournalError(
+          "already_reversed",
+          "this entry was reversed already",
+        );
+      throw new Error(
+        "The journal refused an entry for a reason that is not its key.",
+      );
+    }
+    if (existing.amountMicroUsd !== entry.amountMicroUsd)
+      throw new BillingJournalError(
+        "idempotency_conflict",
+        `${entry.type} ${refKey} exists with another amount`,
+      );
+    return { entry: existing, created: false };
+  }
+
+  /** The cache follows an entry that was just written: `balance += amount`, and the holds follow reservations and releases. */
+  async function applyToBalance(
+    trx: Kysely<Database>,
+    entry: JournalEntry,
+    timestamp: string,
+  ): Promise<void> {
+    const holds =
+      entry.type === "reservation" || entry.type === "release"
+        ? -entry.amountMicroUsd
+        : 0;
+    const addToRow = async () =>
+      (await trx
+        .updateTable("billing_balances")
+        .set((eb) => ({
+          balance_micro_usd: eb("balance_micro_usd", "+", entry.amountMicroUsd),
+          reserved_micro_usd: eb("reserved_micro_usd", "+", holds),
+          updated_at: timestamp,
+        }))
+        .where("workspace_id", "=", workspaceId)
+        .returning("workspace_id")
+        .executeTakeFirst()) !== undefined;
+    // Not one upsert: Postgres checks the row it would insert (`reserved >= 0`) before it looks for the conflict, and a
+    // release brings `reserved` down. The first entry of a workspace creates the row; a second one racing it adds to it.
+    if (await addToRow()) return;
+    const created = await trx
+      .insertInto("billing_balances")
+      .values({
+        workspace_id: workspaceId,
+        balance_micro_usd: entry.amountMicroUsd,
+        reserved_micro_usd: holds,
+        updated_at: timestamp,
+      })
+      .onConflict((conflict) => conflict.doNothing())
+      .returning("workspace_id")
+      .executeTakeFirst();
+    if (created === undefined && !(await addToRow()))
+      throw new Error(
+        "The balance row of a workspace could be neither added to nor created.",
+      );
+  }
+
+  async function appendIn(
+    trx: Kysely<Database>,
+    entry: NewJournalEntry,
+    timestamp: string,
+  ): Promise<AppendResult> {
+    const written = await writeEntry(trx, entry, timestamp);
+    if (written.created) await applyToBalance(trx, written.entry, timestamp);
+    return written;
+  }
+
+  /** The balance row, locked on Postgres until the transaction ends; undefined for a workspace with no entry yet. */
+  async function lockBalance(
+    trx: Kysely<Database>,
+  ): Promise<JournalBalance | undefined> {
+    let query = trx
+      .selectFrom("billing_balances")
+      .select(["balance_micro_usd", "reserved_micro_usd"])
+      .where("workspace_id", "=", workspaceId);
+    if (databaseDriver(trx) === "postgres") query = query.forUpdate();
+    const row = await query.executeTakeFirst();
+    return row === undefined
+      ? undefined
+      : {
+          balanceMicroUsd: Number(row.balance_micro_usd),
+          reservedMicroUsd: Number(row.reserved_micro_usd),
+        };
+  }
+
+  async function readBalance(): Promise<JournalBalance> {
+    const row = await db
+      .selectFrom("billing_balances")
+      .select(["balance_micro_usd", "reserved_micro_usd"])
+      .where("workspace_id", "=", workspaceId)
+      .executeTakeFirst();
+    return {
+      balanceMicroUsd: Number(row?.balance_micro_usd ?? 0),
+      reservedMicroUsd: Number(row?.reserved_micro_usd ?? 0),
+    };
+  }
+
+  return {
+    async append(entry) {
+      if (entry.type === "reservation")
+        throw new BillingJournalError(
+          "reservation_required",
+          "a hold is taken with reserve, never appended",
+        );
+      const timestamp = formatTimestamp(now());
+      return inTransaction(db, (trx) => appendIn(trx, entry, timestamp));
+    },
+
+    async reserve(holdMicroUsd, jobId) {
+      requireHold(holdMicroUsd, jobId);
+      const timestamp = formatTimestamp(now());
+      return inTransaction(db, async (trx): Promise<ReserveResult> => {
+        const current = await lockBalance(trx);
+        const existing = await findEntry(trx, "reservation", jobId);
+        if (existing !== undefined) {
+          if (existing.amountMicroUsd !== -holdMicroUsd)
+            throw new BillingJournalError(
+              "idempotency_conflict",
+              `reservation ${jobId} exists with another amount`,
+            );
+          return { ok: true, entry: existing, created: false };
+        }
+        const held = await trx
+          .updateTable("billing_balances")
+          .set((eb) => ({
+            balance_micro_usd: eb("balance_micro_usd", "-", holdMicroUsd),
+            reserved_micro_usd: eb("reserved_micro_usd", "+", holdMicroUsd),
+            updated_at: timestamp,
+          }))
+          .where("workspace_id", "=", workspaceId)
+          .where("balance_micro_usd", ">=", holdMicroUsd)
+          .returning("workspace_id")
+          .executeTakeFirst();
+        if (held === undefined) {
+          const balanceMicroUsd = current?.balanceMicroUsd ?? 0;
+          return {
+            ok: false,
+            code:
+              balanceMicroUsd < 0 ? "balance_negative" : "insufficient_balance",
+            balanceMicroUsd,
+          };
+        }
+        const written = await writeEntry(
+          trx,
+          {
+            type: "reservation",
+            amountMicroUsd: -holdMicroUsd,
+            jobId,
+            refKey: jobId,
+          },
+          timestamp,
+        );
+        return { ok: true, entry: written.entry, created: written.created };
+      });
+    },
+
+    async settle(jobId, charge) {
+      const total = charge.aiMicroUsd + charge.infraMicroUsd;
+      const parts = [charge.aiMicroUsd, charge.infraMicroUsd];
+      if (
+        jobId === "" ||
+        !Number.isSafeInteger(total) ||
+        parts.some((part) => !Number.isSafeInteger(part) || part < 0)
+      )
+        throw new BillingJournalError(
+          "invalid_entry",
+          "a charge is made of non-negative integer parts",
+        );
+      const timestamp = formatTimestamp(now());
+      return inTransaction(db, async (trx): Promise<SettleResult> => {
+        const reservation = await findEntry(trx, "reservation", jobId);
+        if (reservation === undefined)
+          return { ok: false, code: "reservation_not_found" };
+        const released = await findEntry(trx, "release", jobId);
+        const charged = await findEntry(trx, "usage", jobId);
+        // Voided before: the hold went back and the run was not billed. A late settlement is not a second life.
+        if (released !== undefined && charged === undefined && total > 0)
+          return { ok: false, code: "job_already_released" };
+        if (total === 0 && charged !== undefined)
+          throw new BillingJournalError(
+            "idempotency_conflict",
+            `usage ${jobId} exists with another amount`,
+          );
+        const release = await appendIn(
+          trx,
+          {
+            type: "release",
+            amountMicroUsd: -reservation.amountMicroUsd,
+            jobId,
+            refKey: jobId,
+          },
+          timestamp,
+        );
+        const usage =
+          total === 0
+            ? null
+            : await appendIn(
+                trx,
+                {
+                  type: "usage",
+                  amountMicroUsd: -total,
+                  jobId,
+                  refKey: jobId,
+                  reviewKind: charge.reviewKind,
+                  minutes: charge.minutes,
+                  aiMicroUsd: charge.aiMicroUsd,
+                  infraMicroUsd: charge.infraMicroUsd,
+                },
+                timestamp,
+              );
+        return {
+          ok: true,
+          release: release.entry,
+          usage: usage?.entry ?? null,
+          created: release.created,
+        };
+      });
+    },
+
+    async release(jobId) {
+      if (jobId === "")
+        throw new BillingJournalError(
+          "invalid_entry",
+          "a release belongs to a job",
+        );
+      const timestamp = formatTimestamp(now());
+      return inTransaction(db, async (trx): Promise<ReleaseResult> => {
+        const reservation = await findEntry(trx, "reservation", jobId);
+        if (reservation === undefined)
+          return { ok: false, code: "reservation_not_found" };
+        const release = await appendIn(
+          trx,
+          {
+            type: "release",
+            amountMicroUsd: -reservation.amountMicroUsd,
+            jobId,
+            refKey: jobId,
+          },
+          timestamp,
+        );
+        return { ok: true, entry: release.entry, created: release.created };
+      });
+    },
+
+    balance: readBalance,
+
+    async entries({ cursor, limit }) {
+      let query = db
+        .selectFrom("billing_journal_entries")
+        .selectAll()
+        .where("workspace_id", "=", workspaceId);
+      if (cursor !== undefined)
+        query = query.where(
+          sql<boolean>`(created_at < ${cursor.createdAt} or (created_at = ${cursor.createdAt} and id < ${cursor.id}))`,
+        );
+      // One more than the page, to know whether another page follows.
+      const rows = await query
+        .orderBy("created_at", "desc")
+        .orderBy("id", "desc")
+        .limit(limit + 1)
+        .execute();
+      const entries = rows.slice(0, limit).map(toEntry);
+      const last = entries.at(-1);
+      return {
+        entries,
+        next:
+          rows.length > limit && last !== undefined
+            ? { createdAt: last.createdAt, id: last.id }
+            : undefined,
+      };
+    },
+
+    async verify() {
+      const { rows } = await sql<{
+        balance: string | number | null;
+        reserved: string | number | null;
+      }>`
+        select
+          sum(amount_micro_usd) as balance,
+          sum(case when type in ('reservation', 'release') then -amount_micro_usd else 0 end) as reserved
+        from billing_journal_entries
+        where workspace_id = ${workspaceId}`.execute(db);
+      const expectedBalanceMicroUsd = Number(rows[0]?.balance ?? 0);
+      const expectedReservedMicroUsd = Number(rows[0]?.reserved ?? 0);
+      const cached = await readBalance();
+      const differenceMicroUsd =
+        cached.balanceMicroUsd - expectedBalanceMicroUsd;
+      const reservedDifferenceMicroUsd =
+        cached.reservedMicroUsd - expectedReservedMicroUsd;
+      return {
+        balanceMicroUsd: cached.balanceMicroUsd,
+        expectedBalanceMicroUsd,
+        differenceMicroUsd,
+        reservedMicroUsd: cached.reservedMicroUsd,
+        expectedReservedMicroUsd,
+        reservedDifferenceMicroUsd,
+        consistent:
+          differenceMicroUsd === 0 && reservedDifferenceMicroUsd === 0,
+      };
+    },
+  };
+}
