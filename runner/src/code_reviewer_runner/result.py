@@ -92,6 +92,9 @@ class Usage:
     # By how much the settled cost passed the operator's cost limit, in USD (#540); None when it did
     # not. The cost guard bounds the excess (see "The bound" in `dynamic_review/budget.py`).
     limit_exceeded_by: float | None = None
+    # The per-call trace of a Dynamic Review without content (#541): `usage.callTrace` of the runner
+    # API, built by `dynamic_review/call_trace.py`. None for any other run.
+    call_trace: dict[str, Any] | None = None
 
     @property
     def used_the_model(self) -> bool:
@@ -112,6 +115,8 @@ class Usage:
             document["stoppedEarly"] = self.stopped_early
         if self.limit_exceeded_by is not None:
             document["limitExceededBy"] = self.limit_exceeded_by
+        if self.call_trace is not None:
+            document["callTrace"] = self.call_trace
         return document
 
 

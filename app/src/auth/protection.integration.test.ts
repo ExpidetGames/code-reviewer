@@ -88,6 +88,8 @@ const PROTECTED_ROUTES = [
   "/instance-portal/limits",
   "/instance-portal/llm",
   "/instance-portal/mail",
+  "/instance-portal/runs",
+  "/instance-portal/runs/[id]",
   "/instance-portal/setup",
   "/instance-portal/setup/instance",
   "/instance-portal/setup/sign-in",

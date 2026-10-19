@@ -426,6 +426,62 @@ export type RunnerUsage = {
   stoppedEarly: StoppedEarly | null;
   /** #540: by how much, in US dollars, the cost passed the operator's cost limit; absent when it did not. */
   limitExceededBy?: number;
+  /** What each call was, without content (#541). Absent for a runner that sends none and for a Diff Review. */
+  callTrace?: RunnerCallTrace;
+};
+
+/** The engine's tools as the trace names them; every other tool a model called is `other` (#541). */
+export const TRACE_TOOL_NAMES = [
+  "read",
+  "grep",
+  "glob",
+  "StructuredOutput",
+  "other",
+] as const;
+export type TraceToolName = (typeof TRACE_TOOL_NAMES)[number];
+/** Why a model call ended, as the trace names it; null when the provider said nothing. */
+export const TRACE_FINISH_REASONS = [
+  "stop",
+  "tool_calls",
+  "length",
+  "content_filter",
+  "other",
+] as const;
+export type TraceFinishReason = (typeof TRACE_FINISH_REASONS)[number];
+/** At most this many model calls and this many tool calls are kept in a trace (the first ones). */
+export const MAX_TRACE_ENTRIES = 100;
+
+/** One model call of the trace (#541). A count is null when the provider reported none. */
+export type RunnerModelCallTrace = {
+  index: number;
+  /** Milliseconds from the start of the run to the start of the call. */
+  tMs: number;
+  promptTokens: number | null;
+  cacheRead: number | null;
+  cacheWrite: number | null;
+  completionTokens: number | null;
+  costUsd: number | null;
+  finishReason: TraceFinishReason | null;
+  /** The call the run was wrapped up with. */
+  final: boolean;
+  tools: { name: TraceToolName; count: number }[];
+};
+
+/** One tool call of the trace (#541). The arguments are never sent. */
+export type RunnerToolCallTrace = {
+  index: number;
+  name: TraceToolName;
+  /** The size of the result the model was shown; null when it never was. */
+  resultBytes: number | null;
+  /** The same tool with the same normalised arguments already ran in this job. */
+  isRepeat: boolean;
+};
+
+/** #541: what each call of a Dynamic Review was, as numbers and stable names; no path, argument or content. */
+export type RunnerCallTrace = {
+  truncated: boolean;
+  modelCalls: RunnerModelCallTrace[];
+  toolCalls: RunnerToolCallTrace[];
 };
 
 /** The reasons a Dynamic Review stops early: its cost limit or its time limit. */

@@ -153,6 +153,7 @@ test.describe("the admin portal", () => {
     await expect(sections.getByRole("link")).toHaveText([
       "Overview",
       "Approvals",
+      "Runs",
       "Instance",
       "Sign-up",
       "Sign-in",
@@ -199,6 +200,7 @@ test.describe("the admin portal", () => {
     await expect(nav.getByRole("link")).toHaveText([
       "Overview",
       "Approvals",
+      "Runs",
       "Instance",
       "Sign-up",
       "Sign-in",
