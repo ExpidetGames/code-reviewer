@@ -674,6 +674,46 @@ export interface ModelCatalogEntriesTable {
   updated_by: string | null;
 }
 
+/**
+ * One thing that happened to a workspace's money (src/billing/README.md, ADR 0006, 2.7; #495). Append-only: the database
+ * refuses an update and a delete. Amounts are micro-USD integers, signed. Postgres hands a `bigint` back as a string, so
+ * the repository converts them with `Number`; the type is the application's.
+ */
+export interface BillingJournalEntriesTable {
+  id: string;
+  workspace_id: string;
+  /** A BillingEntryType (BILLING_ENTRY_TYPES). */
+  type: string;
+  amount_micro_usd: number;
+  /** The job id or the provider reference; with `type` and the workspace the idempotency key (D14). */
+  ref_key: string;
+  /** Opaque, no foreign key: the journal outlives the job. */
+  job_id: string | null;
+  review_kind: string | null;
+  minutes: number | null;
+  ai_micro_usd: number | null;
+  infra_micro_usd: number | null;
+  /** The entry a `correction` reverses; unique, so a reversal happens once. */
+  reverses_entry_id: string | null;
+  provider: string | null;
+  provider_ref: string | null;
+  /** Opaque, no foreign key: a deleted or merged user does not rewrite the journal. */
+  actor_user_id: string | null;
+  note: string | null;
+  /** ISO 8601 text in UTC. */
+  created_at: string;
+}
+
+/** The cache of the journal's sum per workspace, updated in the transaction of every entry (src/billing/README.md). */
+export interface BillingBalancesTable {
+  workspace_id: string;
+  /** The sum of all entries; below zero only through a settlement, refund, chargeback or correction. */
+  balance_micro_usd: number;
+  /** The open reservations; never below zero. */
+  reserved_micro_usd: number;
+  updated_at: string;
+}
+
 export interface Database {
   app_meta: AppMetaTable;
   users: UsersTable;
@@ -703,6 +743,8 @@ export interface Database {
   job_check_runs: JobCheckRunsTable;
   plan_handoff_tokens: PlanHandoffTokensTable;
   model_catalog_entries: ModelCatalogEntriesTable;
+  billing_journal_entries: BillingJournalEntriesTable;
+  billing_balances: BillingBalancesTable;
   password_reset_tokens: PasswordResetTokensTable;
   email_verification_tokens: EmailVerificationTokensTable;
   signed_states: SignedStatesTable;

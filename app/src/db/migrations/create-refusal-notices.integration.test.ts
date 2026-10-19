@@ -34,7 +34,9 @@ async function rowsOfEveryTable(
       table.name === "refusal_notices" ||
       table.name === "plan_handoff_tokens" ||
       table.name === "job_check_runs" ||
-      table.name === "model_catalog_entries"
+      table.name === "model_catalog_entries" ||
+      table.name === "billing_journal_entries" ||
+      table.name === "billing_balances"
     )
       continue;
     const { rows } =
