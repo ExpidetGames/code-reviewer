@@ -162,7 +162,7 @@ def test_arguments_that_do_not_parse_or_fit_the_schema_are_named_in_the_retry() 
     for broken, expected in (
         ('{"findings": [', "not valid JSON"),
         ("[1, 2]", "must be an object"),
-        (json.dumps(review(schemaVersion=2)), "schemaVersion must be 1"),
+        (json.dumps(review(findings="none")), "findings has the wrong type"),
         (json.dumps(review(findings=[{"id": "x"}])), "priority must be one of"),
     ):
         upstream = Sequence(answer_with_usage(), returns(broken), returns(review()))
@@ -197,7 +197,7 @@ def test_the_retries_are_bounded_and_the_last_reply_is_what_the_engine_gets() ->
 # #312-T06: a reply with the tool call whose arguments stay invalid is handed to the engine anyway:
 # the runner's validation then fails the run with the concrete field, not with a missing answer.
 def test_arguments_that_stay_invalid_reach_the_engine_and_do_not_mark_a_missing_answer() -> None:
-    upstream = Sequence(answer_with_usage(), returns(json.dumps(review(schemaVersion=2))))
+    upstream = Sequence(answer_with_usage(), returns(json.dumps(review(findings="none"))))
     subject = make(upstream)
 
     response = post(subject, loop_request())
@@ -292,7 +292,7 @@ def test_the_wrap_up_call_is_enforced_like_the_recovery_call() -> None:
 # #312-T06 (review of #313): a JSON text the proxy rewrote into a tool call and then rejected is
 # still the model's reply: the ask hands that text back, not nothing.
 def test_a_rewritten_text_reply_that_is_rejected_is_handed_back_in_the_retry() -> None:
-    text = json.dumps(review(schemaVersion=2))
+    text = json.dumps(review(findings="none"))
     upstream = Sequence(answer_with_usage(), completion_with(content=text), returns(review()))
     subject = make(upstream)
 
@@ -302,4 +302,4 @@ def test_a_rewritten_text_reply_that_is_rejected_is_handed_back_in_the_retry() -
     assert len(upstream.requests) == 3
     messages = forwarded(upstream, 2)["messages"]
     assert messages[-2] == {"role": "assistant", "content": text}
-    assert "schemaVersion must be 1" in messages[-1]["content"]
+    assert "findings has the wrong type" in messages[-1]["content"]

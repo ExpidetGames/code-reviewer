@@ -907,6 +907,60 @@ def test_the_real_engine_captures_a_return_that_violates_the_schema_without_aski
     with model:
         run = run_engine(model, content, scratch=tmp_path / "scratch")
 
-    assert len(model.requests) == 2  # the read and the return; no repair round
+    # The read and the return. The engine does not ask again; the runner's own recovery turn does
+    # (#530), and with a model that keeps answering nonsense it ends the run, naming the field.
+    assert model.requests[1]["tools"], "the first return is a normal call"
+    assert len(model.requests) == 2 + FINAL_ATTEMPTS
     assert run.answer.error is not None
     assert run.answer.error.code is ErrorCode.DYNAMIC_POLICY_VIOLATION
+    assert "unknown field nonsense" in run.answer.error.detail
+
+
+# #530-T07: the real engine takes a return that leaves out `schemaVersion` and the head (or writes
+# them wrong) as the answer, since it does not check the arguments; the runner sets both itself, so
+# the review is published with the job's head and no recovery turn is needed.
+@pytest.mark.parametrize("wrong", [None, 2, "1"])
+def test_a_return_without_the_constants_the_runner_owns_is_accepted_by_the_real_engine(
+    tmp_path: Path, wrong: Any
+) -> None:
+    content = prepare(tmp_path, {"src/app.py": b"x = 1\n"})
+    answer = findings_for(content.head_sha)
+    del answer["schemaVersion"], answer["reviewedSha"]
+    del answer["findings"][0]["reviewedSha"]
+    if wrong is not None:
+        answer["schemaVersion"] = wrong
+        answer["reviewedSha"] = "0" * 40
+    model = ScriptedModel(steps=[*reading(content.export, 1)], final=answer)
+    with model:
+        run = run_engine(model, content, scratch=tmp_path / "scratch")
+
+    assert run.answer.ok, run.answer.error
+    assert run.answer.findings is not None
+    assert run.answer.findings.reviewed_sha == content.head_sha
+    assert [finding.reviewed_sha for finding in run.answer.findings.findings] == [content.head_sha]
+    assert len(model.requests) == 2  # the read and the return; no recovery
+    assert run.ledger.recovered is False
+    assert "schemaVersion" in "; ".join(run.answer.findings.envelope_overrides)
+
+
+# #530-T03: the same engine, a return that leaves out `resolvedIds` (a field the model owns): one
+# recovery turn names the field, and its answer is published.
+def test_a_return_missing_another_required_field_is_recovered_once_by_the_real_engine(
+    tmp_path: Path,
+) -> None:
+    content = prepare(tmp_path, {"src/app.py": b"x = 1\n"})
+    broken = {"findings": findings_for(content.head_sha)["findings"]}
+    steps: list[Step] = [
+        *reading(content.export, 1),
+        asks(tool_call("bad", "StructuredOutput", broken)),
+    ]
+    model = ScriptedModel(steps=steps, final=findings_for(content.head_sha))
+    with model:
+        run = run_engine(model, content, scratch=tmp_path / "scratch")
+
+    assert run.answer.ok, run.answer.error
+    assert run.answer.findings is not None and len(run.answer.findings.findings) == 1
+    assert len(model.requests) == 3  # the read, the bad return, the recovery call
+    assert run.ledger.recovered is True
+    recovery = json.dumps(model.requests[-1]["messages"])
+    assert "resolvedIds is missing" in recovery
