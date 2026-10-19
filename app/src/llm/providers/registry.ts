@@ -117,6 +117,17 @@ function checkDescriptor(candidate: Candidate): void {
     )
   )
     invalid(id, "suggestedModels");
+  // A subset of the suggestions: a form offers it for Dynamic Review in place of the whole list.
+  const dynamicSuggested = candidate.dynamicSuggestedModels;
+  if (
+    dynamicSuggested !== undefined &&
+    (!Array.isArray(dynamicSuggested) ||
+      !dynamicSuggested.every(
+        (model): model is string =>
+          typeof model === "string" && suggested.includes(model),
+      ))
+  )
+    invalid(id, "dynamicSuggestedModels");
   const defaults = candidate.defaultModels;
   if (
     !isRecord(defaults) ||

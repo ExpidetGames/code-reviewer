@@ -18,6 +18,7 @@ import {
 import { ProviderSelect, type ProviderOption } from "./provider-select.tsx";
 import { CostSummary } from "./cost-summary.tsx";
 import { REVIEW_SETTING_LIMITS } from "../settings.ts";
+import { SUGGESTED_MODEL_PICK } from "./messages.ts";
 
 /** The one sentence about the model, the fact people ask about most. */
 export function modelHint(providerLabel: string): string {
@@ -44,6 +45,7 @@ export function ModelFieldset({
   workspaceSlug,
   providers,
   datalistId,
+  suggestedModels,
   choice,
 }: SettingsFieldsetProps & {
   /**
@@ -57,6 +59,8 @@ export function ModelFieldset({
   providers: readonly ProviderOption[];
   /** The id of the `<datalist>` of the known model names of the chosen provider, rendered by the container. */
   datalistId: string;
+  /** The models of the chosen provider to pick from under the model fields (#532). */
+  suggestedModels: readonly string[];
 }) {
   const origin = (
     name: "provider" | "model" | "fallbackModel" | "maxTokens",
@@ -112,6 +116,10 @@ export function ModelFieldset({
         value={state.values.model}
         onChange={(value) => handlers.setText("model", value)}
         list={datalistId}
+        suggestions={{
+          label: SUGGESTED_MODEL_PICK.model,
+          models: suggestedModels,
+        }}
       />
       <SettingsTextField
         name="fallbackModel"
@@ -122,6 +130,10 @@ export function ModelFieldset({
         value={state.values.fallbackModel}
         onChange={(value) => handlers.setText("fallbackModel", value)}
         list={datalistId}
+        suggestions={{
+          label: SUGGESTED_MODEL_PICK.fallbackModel,
+          models: suggestedModels,
+        }}
         placeholder="None"
       />
       {budget}

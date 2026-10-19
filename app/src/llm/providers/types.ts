@@ -116,6 +116,11 @@ export type LlmProviderDescriptor<Id extends string = string> = {
   checkModelId(id: string): boolean;
   /** Models to offer in a list. Never the only allowed ones: any model id the provider has may be chosen. */
   readonly suggestedModels: readonly string[];
+  /**
+   * The part of `suggestedModels` that can serve a Dynamic Review, for a provider whose list holds models that cannot.
+   * Absent: every suggestion can. See `suggestedModelsFor`.
+   */
+  readonly dynamicSuggestedModels?: readonly string[];
   /** The price of a model, or null when the adapter does not know it (never an error). */
   priceOf(model: string): ModelPrice | null;
   /** The models used when nobody chose one, for a Diff Review and for a Dynamic Review. */
