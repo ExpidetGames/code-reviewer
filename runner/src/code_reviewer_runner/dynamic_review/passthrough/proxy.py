@@ -518,8 +518,8 @@ class PassthroughProxy:
     def _cut(
         self, sink: ResponseSink, error: UpstreamError, reservation: Reservation, started_ms: int
     ) -> None:
-        """The connection stopped mid-answer: the engine's is dropped the same way, and it retries the
-        call as a whole new one."""
+        """The connection stopped mid-answer. The engine's is dropped the same way, and it retries
+        the call as a whole new one."""
         self.ledger.settle_unknown(reservation)
         self._trace_failed(started_ms, reservation)
         self.last_upstream_error = (
