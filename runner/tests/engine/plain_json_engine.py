@@ -176,14 +176,16 @@ _NO_COST_LIMIT = Decimal(1_000_000)
 
 
 class FinalExemptLedger(BudgetLedger):
-    """The ledger with the policy of #540/#542 as far as the spike needs it (a stand-in).
+    """The ledger with the policy of #540/#542 for a request the proxy cannot rewrite (a stand-in).
 
-    A run never ends without a review because of the cost guard. A call that does not fit the cost
-    limit is refused as before, but it is not the run's failure: `refused_at_limit` says so and the
-    adapter asks for the answer. `arm_exempt()` admits the next call whatever the limit says, and
-    its settlement is not an error either: that one call is the overshoot, bounded by the limit
-    plus the excess of the last normal call plus this call. #552 takes the real thing from #542;
-    nothing here is production code.
+    A run never ends without a review because of the cost guard. The merged ledger (#542) admits
+    the final call past the limit, but only for a request it can rewrite into the structured-output
+    call (`can_wrap_up`); the plain-JSON path has none, so there a normal call that does not fit is
+    refused. That refusal is not the run's failure here: `refused_at_limit` says so and the adapter
+    asks for the answer. `arm_exempt()` admits the next call whatever the limit says (and after an
+    overshoot), and its settlement is not an error either: that one call is the overshoot, bounded
+    by the limit plus the excess of the last normal call plus this call. #552 replaces this with an
+    `arm_final()` in the real ledger; nothing here is production code.
     """
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -221,6 +223,10 @@ class FinalExemptLedger(BudgetLedger):
                 recovery_text=recovery_text,
             )
         self._exempt_armed = False
+        # The merged ledger refuses every normal request once a call settled over the limit
+        # (`_overshot`); the exempt call is the one that follows, so the flag is lifted for it. The
+        # settlement of this call sets it again.
+        self._overshot = False  # pyright: ignore[reportPrivateUsage]
         reservation = self._without_cost_limit(
             lambda: super(FinalExemptLedger, self).reserve_call(
                 request_text, output_tokens=output_tokens
@@ -237,6 +243,8 @@ class FinalExemptLedger(BudgetLedger):
         prompt_tokens: int | None,
         completion_tokens: int | None,
         cost: Decimal | None = None,
+        cache_read_tokens: int | None = None,
+        cache_write_tokens: int | None = None,
     ) -> None:
         def settle() -> None:
             super(FinalExemptLedger, self).settle_call(
@@ -244,6 +252,8 @@ class FinalExemptLedger(BudgetLedger):
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
                 cost=cost,
+                cache_read_tokens=cache_read_tokens,
+                cache_write_tokens=cache_write_tokens,
             )
 
         if reservation is self._exempt_reservation:

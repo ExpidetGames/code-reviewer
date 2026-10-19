@@ -125,8 +125,9 @@ plus at most one repair.
 4. **When the ledger refuses an agent call anyway** (the model ignored the message and kept calling
    tools), the turn is aborted (`POST /session/{id}/abort`), the adapter sends **one** "answer now
    as JSON" message (`FINISH_NOW_INSTRUCTION` again, as an ordinary blocking message), and the
-   ledger admits that one call under the **final-call exemption of PR #542** (still open, so the
-   prototype stands in with `FinalExemptLedger`). The tool set, the tool choice and the system
+   ledger admits that one call under the **final-call exemption of #542** (merged into
+   `development` as `22c12af8` while this branch was open; see the note below on what it covers).
+   The tool set, the tool choice and the system
    prompt are unchanged, so the cached prefix and the thinking-block binding stay valid. A tool call
    in that final turn is refused by the ledger (the exemption is one call) and followed by one
    repair, not by a silent failure.
@@ -134,7 +135,18 @@ plus at most one repair.
    the check "is there room for one repair call" is gone; the repair is the other half of the
    policy.
 
-**The overshoot bound** (from #542): the run costs at most **the limit + the excess of the last
+**What #542 covers and what it does not.** The merged ledger admits the final call past the limit
+(`_final_admissible`, delivered whatever it costs), and after a normal call that settled over the
+limit it admits nothing but the final call. That exemption is tied to a request the proxy can
+rewrite into the structured-output call (`can_wrap_up`, `reservation.final` makes the proxy rewrite
+it). The plain-JSON path has no such tool and must not be rewritten, so there a normal call that
+does not fit is simply refused. The prototype therefore stands in with `FinalExemptLedger`
+(`plain_json_engine.py`, pinned by `test_plain_json_final_ledger.py` against the merged rules):
+a refusal at the cost limit is recorded as `refused_at_limit` and is not the run's failure, and
+`arm_exempt()` admits exactly one more call past the limit and past an overshoot. #552 replaces it
+with a real `arm_final()` that reserves the call as final **without** the proxy rewriting it.
+
+**The overshoot bound** (from #542, `budget.py` "The bound"): the run costs at most **the limit + the excess of the last
 normal call** (its real cost minus the expectation it was admitted with, which #542 bounds by that
 one call) **+ the final call** (+ the one repair when the first answer was not valid). Nothing
 else is admitted past the limit; a second tool call in the final turn is refused.
