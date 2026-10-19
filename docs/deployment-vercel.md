@@ -580,6 +580,23 @@ valuable key in `/ci`: it can deploy to production, which is why the environment
   `operator_key_unreadable`. Save the key in the admin portal and the next job runs. Save it **before** you set the
   first workspace to `managed`.
 
+### 3.6 The billing webhook (only when billing is on)
+
+Billing is off by default and a deployment that never turns it on needs nothing here: `POST /api/billing/webhook` answers
+the 404 of a path that does not exist (#497, ADR 0006). When billing is on and the active adapter has a webhook (not
+`manual`, which has none), the payment provider calls this route, and three things must hold:
+
+- **Reachable without a login, from the internet.** The route is public (the signature is the authentication). Do not put
+  Deployment Protection, a firewall rule or a WAF challenge in front of `/api/billing/webhook`; if the App project is
+  protected, allow the provider's sources for this path. A refused delivery is retried by the provider (Stripe: for up to three days).
+- **It must answer within a few seconds.** The handler makes no outbound call: it reads at most 256 KiB, checks the
+  signature, applies the event in one database transaction and answers `200`. A cold function plus the database is the only
+  cost.
+- **A bad signature is `401` with an empty body**, a body the adapter cannot read `400`, a failure `500` (the provider
+  redelivers). A signed event that is no event, and a payment that could not be credited (an unknown intent, an amount above what was asked), are answered `200` and not retried: watch the error log for `billing_webhook_event_invalid` and `billing_webhook_needs_review outcome=...`, and review the open rows of `billing_webhook_events` (`review_state = 'open'`). The logs name a code (`billing_webhook_rejected code=signature_invalid`) and never the body.
+
+Which events to register at the provider, and its signing secret, belong to its adapter (Stripe: #502).
+
 ## 4. First deployment, step by step
 
 Do the steps in this order (migrate, variables, first deployment, setup code, webhook, smoke test); each one has a check.
