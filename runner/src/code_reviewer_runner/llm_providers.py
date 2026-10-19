@@ -26,6 +26,7 @@ from typing import Final
 
 from code_reviewer_runner.anthropic_cost import cost_of_usage
 from code_reviewer_runner.anthropic_models import model_for as claude_model
+from code_reviewer_runner.anthropic_wire import AnthropicMessagesWire
 from code_reviewer_runner.dynamic_review.budget import exact_cost
 from code_reviewer_runner.provider_wire import OpenAiChatWire, UpstreamWire
 from code_reviewer_runner.usage_access import usage_field
@@ -219,6 +220,8 @@ ANTHROPIC: Final = LlmProviderSpec(
     supports_temperature=_anthropic_supports_temperature,
     diff_output_tokens=_anthropic_diff_output_tokens,
     context_window=_anthropic_context_window,
+    # The Messages API, not the OpenAI-compatible endpoint (not for production, no cache tokens).
+    wire=AnthropicMessagesWire,
 )
 
 # A plain dict, so a test can register a second provider for the duration of one test.

@@ -670,7 +670,7 @@ def _run_dynamic_job(
             ledger=ledger,
             base_path="/v1",
             model=dynamic.model,
-            upstream_url=f"{upstream}/chat/completions",
+            upstream_url=provider.wire(job.llm.model).url(upstream),
             upstream_api_key=job.llm.api_key,
             upstream_model=job.llm.model,
             capabilities=capabilities,

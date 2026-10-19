@@ -7,8 +7,8 @@ PR-Agent prices a call itself: from the charge in the answer when it finds one, 
 LiteLLM's price table, which can be missing, stale or different from what the provider charged. Its
 sum also covers only the calls it accepted. A Diff run on the operator's key is billed from its
 cost, so the runner measures it the way the Dynamic Review does (#267): the charge of a call is the
-`usage.cost` the provider states in its answer, nothing is derived from tokens or a price table,
-and the sum is all or nothing.
+`usage.cost` the provider states in its answer, never LiteLLM's table, and the sum is all or
+nothing.
 
 **A provider that states no charge** (Anthropic returns token counts only) is priced by its own rule
 (`LlmProviderSpec.cost_extractor`, #511): the model the request named, the counts of the answer and
