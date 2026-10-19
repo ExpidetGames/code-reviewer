@@ -13,7 +13,6 @@ import { createWorkspaceEntitlementsRepository } from "../db/repositories/worksp
 import { createWorkspacesRepository } from "../db/repositories/workspaces-repository.ts";
 import { getDatabase } from "../db/startup.ts";
 import { consoleRunnerApiLogger, describeError } from "../runner-api/logger.ts";
-import { isBillingSwitchedOn } from "../billing/switch.ts";
 import { createOperatorApi, type OperatorApi } from "./api.ts";
 import type { OperatorRoute } from "./contract.ts";
 import { errorResponse } from "./responses.ts";
@@ -27,7 +26,6 @@ export function getOperatorApi(): OperatorApi {
     entitlementsFor: (workspaceId) =>
       createWorkspaceEntitlementsRepository(db, workspaceId),
     settings: createInstanceSettingsRepository(db),
-    billingOn: () => isBillingSwitchedOn(db),
     usageFeed: createUsageFeedRepository(db),
     usageFor: (workspaceId) => createUsageRecordsRepository(db, workspaceId),
     handoffs: createPlanHandoffRedeemRepository(db),

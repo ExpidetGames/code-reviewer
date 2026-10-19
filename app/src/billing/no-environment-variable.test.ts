@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Billing is configured in the admin portal and in nothing else (ADR 0005, 2.10): no environment variable, so
+// Billing is configured in the admin portal and in nothing else (ADR 0006): no environment variable, so
 // `.env.example` and the deployment files stay as they are for a self-hoster.
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
@@ -17,11 +17,11 @@ describe("billing and the environment", () => {
       .filter((name) => name !== undefined);
 
     expect(names.length).toBeGreaterThan(0);
-    expect(names.filter((name) => /PADDLE|BILLING/.test(name))).toEqual([]);
+    expect(names.filter((name) => /BILLING|STRIPE/.test(name))).toEqual([]);
   });
 
   // #437-T10
-  it("reads no PADDLE or BILLING variable in the billing module", () => {
+  it("reads no BILLING or STRIPE variable in the billing module", () => {
     const sources = readdirSync(import.meta.dirname).filter(
       (name) => /\.tsx?$/.test(name) && !/\.test\./.test(name),
     );
@@ -32,7 +32,7 @@ describe("billing and the environment", () => {
         readFileSync(join(import.meta.dirname, file), "utf8"),
         file,
       ).not.toMatch(
-        /process\.env\.(PADDLE|BILLING)|env\[\s*["'`](PADDLE|BILLING)/,
+        /process\.env\.(BILLING|STRIPE)|env\[\s*["'`](BILLING|STRIPE)/,
       );
   });
 });

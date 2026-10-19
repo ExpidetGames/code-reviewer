@@ -19,11 +19,17 @@ describe("the names of the secrets", () => {
       "github_app_private_key",
       "github_app_webhook_secret",
       "operator_llm_key",
-      "paddle_api_key",
-      "paddle_webhook_secret",
       "smtp_password",
     ]);
     expect([...WORKSPACE_SECRET_NAMES]).toEqual(["llm_api_key"]);
+  });
+
+  // #491-T07
+  it("does not know the names of the removed billing design", () => {
+    const vendor = ["pad", "dle"].join("");
+    expect(SECRET_NAMES.filter((name) => name.includes(vendor))).toEqual([]);
+    expect(isSecretName(`${vendor}_api_key`)).toBe(false);
+    expect(isSecretName(`${vendor}_webhook_secret`)).toBe(false);
   });
 
   // #423-T04
@@ -64,8 +70,6 @@ describe("the names of the secrets", () => {
         "github_app_webhook_secret",
         "operator_llm_key",
         "operator_llm_key.zzz",
-        "paddle_api_key",
-        "paddle_webhook_secret",
         "smtp_password",
       ],
     );

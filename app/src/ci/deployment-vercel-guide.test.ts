@@ -1114,9 +1114,9 @@ describe("the deployment pipeline in the guide", () => {
     expect(start).toBeGreaterThanOrEqual(0);
     const note = update.slice(start, start + 6_000);
 
-    // The entries must be listed in the plans, or managed reviews stop.
+    // The entries must be listed in the lists set by hand, or managed reviews stop.
     expect(note).toContain(
-      "add the migrated entries to the `modelAccess` list of every plan, the Free plan included once billing is on",
+      "add the migrated entries to every `modelAccess` list you set on a workspace or on the instance default by hand",
     );
     expect(note).toContain("managed reviews stop");
     expect(note).toContain("`managed_model_unavailable`");

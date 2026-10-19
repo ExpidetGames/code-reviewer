@@ -29,10 +29,7 @@ import {
   readEntitlements,
   validateEntitlements,
 } from "../../workspaces/entitlements-validation.ts";
-import {
-  readBillingSettings,
-  type BillingSettings,
-} from "../../billing/settings.ts";
+import type { BillingSettings } from "../../billing/settings.ts";
 import type { StoredGithubApp } from "../../github-config/settings.ts";
 import type { CatalogDefaults } from "../../model-catalog/entries.ts";
 import type { ImportNotice } from "../../legacy-import/notice.ts";
@@ -105,16 +102,11 @@ export type InstanceSettingValues = {
    */
   catalog_defaults: CatalogDefaults;
   /**
-   * #437 (epic #421): the billing module's settings (src/billing/): the Paddle environment, the client-side token (public by
-   * design), the grace days and the `enabled` switch. The API key and the webhook secret are in the secret store
-   * (`paddle_api_key`, `paddle_webhook_secret`). No row: billing was never configured, which is off and inert (`isBillingOn`).
+   * The billing module's settings (src/billing/, ADR 0006): today the `enabled` switch. A value of an older shape reads
+   * with the fields it no longer has ignored (`readBillingSettings`). No row: billing was never configured, which is off
+   * and inert (`isBillingOn`).
    */
   billing_settings: BillingSettings;
-  /**
-   * #437: the lease that serializes the creation of the Paddle notification destination (src/billing/): one admin
-   * action at a time makes one. Taken with `claim`, released with `remove`; a lease that ran out is taken over.
-   */
-  billing_destination_lock: { startedAt: string };
 };
 export type InstanceSettingKey = keyof InstanceSettingValues;
 /**
@@ -124,12 +116,6 @@ export type InstanceSettingKey = keyof InstanceSettingValues;
 export type ReadableSettingKey = Exclude<
   InstanceSettingKey,
   "default_entitlements"
->;
-
-/** The settings `setIfUnchanged` and `claim` serve: those with no side effect of their own on a write. */
-export type GuardedSettingKey = Exclude<
-  InstanceSettingKey,
-  "dynamic_review" | "default_entitlements"
 >;
 
 /** A setting with who saved it last and when. */
@@ -156,70 +142,12 @@ export type InstanceSettingsRepository = {
    * `resolveEntitlements` turns it into `invalid` for every workspace without a row of its own.
    */
   getDefaultEntitlements(): Promise<EntitlementsEntry | undefined>;
-  /**
-   * #438: the one writer of the marker `source: billing`. Billing writes the current version of the Free plan as the
-   * default of every workspace without a row while it is on (ADR 0005, 2.9, 2.11). Validated like any write; the type
-   * states `modelAccess` (the plan-to-entitlements function cannot build a payload without it), and the period start
-   * never moves back: an earlier one is replaced by the stored one. A write of the operator through `set` stores no marker.
-   * The switch is read in the same transaction, under the lock of the default: a billing that is off writes nothing and
-   * the answer is false, so a default that carries the marker cannot appear behind a switch that went off in between.
-   */
-  setBillingDefaultEntitlements(
-    value: EntitlementsData & { modelAccess: ModelAccess },
-    updatedBy: string | null,
-  ): Promise<boolean>;
-  /**
-   * #438: the write of the operator (the operator API) that refuses while billing owns the default. The switch is read in
-   * the transaction of the write, under the lock of the default, so a billing that is switched on in between cannot have
-   * its default replaced by an unmarked one. False when billing is on (nothing is written); validated like `set`, which
-   * throws an `EntitlementsError` for what it refuses.
-   */
-  setDefaultEntitlementsUnlessBilling(
-    value: EntitlementsData,
-    updatedBy: string | null,
-  ): Promise<boolean>;
-  /**
-   * #438: removes the default when billing wrote it (billing switched off again: the default returns to the operator,
-   * who has none). Leaves a default of the operator alone. True when a default was removed. Called in the transaction
-   * that flips the switch off (a repository made over a transaction), so no billing default outlives the switch.
-   */
-  removeBillingDefaultEntitlements(): Promise<boolean>;
   /** Inserts the setting or replaces its value, recording who and when. */
   set<K extends InstanceSettingKey>(
     key: K,
     value: InstanceSettingValues[K],
     updatedBy: string | null,
   ): Promise<void>;
-  /**
-   * Replaces the value only if the setting is still as `expected` (what `getWithMeta` returned) says: the same time
-   * of the last write, or still no row when `expected` is undefined. False when it changed in between, and nothing
-   * is written. The new time is always later than the expected one, so a write is never mistaken for the one before.
-   */
-  setIfUnchanged<K extends GuardedSettingKey>(
-    key: K,
-    expected:
-      InstanceSettingWithMeta<Extract<K, ReadableSettingKey>> | undefined,
-    value: InstanceSettingValues[K],
-    updatedBy: string | null,
-  ): Promise<boolean>;
-  /**
-   * Takes the setting as a lease: inserts it, or replaces it when its last write is older than `staleBefore`
-   * (ISO 8601 text). False when somebody else holds it. Release it with `remove`.
-   */
-  claim<K extends GuardedSettingKey>(
-    key: K,
-    value: InstanceSettingValues[K],
-    updatedBy: string | null,
-    staleBefore: string,
-  ): Promise<boolean>;
-  /**
-   * Releases a lease taken with `claim`, only while it still holds `value`, the one this holder claimed with. A holder
-   * whose lease ran out and was taken over leaves the new holder's lease alone. False when it is not (or no longer) held.
-   */
-  release<K extends GuardedSettingKey>(
-    key: K,
-    value: InstanceSettingValues[K],
-  ): Promise<boolean>;
   /** Deletes the setting (it reads as never saved again); false when there was none. */
   remove(key: InstanceSettingKey): Promise<boolean>;
 };
@@ -295,37 +223,16 @@ export function createInstanceSettingsRepository(
    * stored one under a lock (an advisory transaction lock on Postgres, where the value is JSON and there may
    * be no row to lock; SQLite's transactions take the write lock up front).
    */
-  async function billingSwitchedOn(trx: Kysely<Database>): Promise<boolean> {
-    const row = await trx
-      .selectFrom("instance_settings")
-      .select("value")
-      .where("key", "=", "billing_settings")
-      .executeTakeFirst();
-    if (row === undefined) return false;
-    const decoded = tryDecodeJson(row.value);
-    return decoded.ok && readBillingSettings(decoded.value).enabled;
-  }
-
-  /**
-   * Who owns the default is decided under the lock, in the transaction of the write (#438): `billing` writes only while
-   * the switch is on, `operator_unless_billing` only while it is off, `operator` whatever the switch says. False when the
-   * write was not made for that reason.
-   */
   async function setDefaultEntitlements(
     value: EntitlementsData,
     updatedBy: string | null,
-    writer: "operator" | "operator_unless_billing" | "billing" = "operator",
-  ): Promise<boolean> {
+  ): Promise<void> {
     const moment = now();
     const checked = validateEntitlements(value, moment);
     if (!checked.ok) throw new EntitlementsError(checked.code, checked.field);
     const key = "default_entitlements";
-    const write = async (trx: Kysely<Database>): Promise<boolean> => {
+    const write = async (trx: Kysely<Database>) => {
       await lockDefaultEntitlements(trx);
-      if (writer !== "operator") {
-        const on = await billingSwitchedOn(trx);
-        if (on !== (writer === "billing")) return false;
-      }
       const stored = await trx
         .selectFrom("instance_settings")
         .select("value")
@@ -334,17 +241,8 @@ export function createInstanceSettingsRepository(
       // An unreadable stored default has no period start to protect; a valid write that states `modelAccess` repairs it.
       const storedDefault =
         stored === undefined ? undefined : readStoredDefault(stored.value);
-      // The operator is told when a start goes backwards; billing re-states the period on every new Free version, so a
-      // start earlier than the stored one is replaced by it instead of failing the save of the plan.
-      const storedStart = storedDefault?.periodStart;
-      const periodStart =
-        writer === "billing" &&
-        storedStart !== undefined &&
-        checked.value.periodStart < storedStart
-          ? storedStart
-          : checked.value.periodStart;
       const refused = checkPeriodStartNotBackwards(
-        periodStart,
+        checked.value.periodStart,
         storedDefault?.periodStart,
       );
       if (refused !== undefined) throw new EntitlementsError(refused);
@@ -364,12 +262,7 @@ export function createInstanceSettingsRepository(
           : checked.value.modelAccess;
       const row = {
         key,
-        value: encodeJson({
-          ...checked.value,
-          periodStart,
-          modelAccess,
-          ...(writer === "billing" ? { source: "billing" } : {}),
-        }),
+        value: encodeJson({ ...checked.value, modelAccess }),
         updated_by: updatedBy,
         updated_at: formatTimestamp(moment),
       };
@@ -384,42 +277,11 @@ export function createInstanceSettingsRepository(
           }),
         )
         .execute();
-      return true;
     };
     return db.isTransaction ? write(db) : db.transaction().execute(write);
   }
 
-  async function removeBillingDefault(): Promise<boolean> {
-    const key = "default_entitlements";
-    const remove = async (trx: Kysely<Database>) => {
-      await lockDefaultEntitlements(trx);
-      const stored = await trx
-        .selectFrom("instance_settings")
-        .select("value")
-        .where("key", "=", key)
-        .executeTakeFirst();
-      if (stored === undefined) return false;
-      const decoded = tryDecodeJson<{ source?: unknown }>(stored.value);
-      if (!decoded.ok || decoded.value?.source !== "billing") return false;
-      const result = await trx
-        .deleteFrom("instance_settings")
-        .where("key", "=", key)
-        .where("value", "=", stored.value)
-        .executeTakeFirst();
-      return Number(result.numDeletedRows) > 0;
-    };
-    return db.isTransaction ? remove(db) : db.transaction().execute(remove);
-  }
-
   return {
-    setBillingDefaultEntitlements: (value, updatedBy) =>
-      setDefaultEntitlements(value, updatedBy, "billing"),
-
-    setDefaultEntitlementsUnlessBilling: (value, updatedBy) =>
-      setDefaultEntitlements(value, updatedBy, "operator_unless_billing"),
-
-    removeBillingDefaultEntitlements: removeBillingDefault,
-
     async getDefaultEntitlements() {
       const row = await db
         .selectFrom("instance_settings")
@@ -453,73 +315,6 @@ export function createInstanceSettingsRepository(
           };
     },
 
-    async setIfUnchanged(key, expected, value, updatedBy) {
-      const moment = now();
-      const writtenAt = new Date(
-        expected === undefined
-          ? moment.getTime()
-          : Math.max(moment.getTime(), Date.parse(expected.updatedAt) + 1),
-      );
-      const row = {
-        key,
-        value: encodeJson(value),
-        updated_by: updatedBy,
-        updated_at: formatTimestamp(writtenAt),
-      };
-      if (expected === undefined) {
-        const inserted = await db
-          .insertInto("instance_settings")
-          .values(row)
-          .onConflict((conflict) => conflict.column("key").doNothing())
-          .executeTakeFirst();
-        return Number(inserted.numInsertedOrUpdatedRows ?? 0) > 0;
-      }
-      const updated = await db
-        .updateTable("instance_settings")
-        .set({
-          value: row.value,
-          updated_by: row.updated_by,
-          updated_at: row.updated_at,
-        })
-        .where("key", "=", key)
-        .where("updated_at", "=", expected.updatedAt)
-        .executeTakeFirst();
-      return Number(updated.numUpdatedRows) > 0;
-    },
-
-    async claim(key, value, updatedBy, staleBefore) {
-      const row = {
-        key,
-        value: encodeJson(value),
-        updated_by: updatedBy,
-        updated_at: formatTimestamp(now()),
-      };
-      const claimed = await db
-        .insertInto("instance_settings")
-        .values(row)
-        .onConflict((conflict) =>
-          conflict
-            .column("key")
-            .doUpdateSet({
-              value: row.value,
-              updated_by: row.updated_by,
-              updated_at: row.updated_at,
-            })
-            .where("instance_settings.updated_at", "<", staleBefore),
-        )
-        .executeTakeFirst();
-      return Number(claimed.numInsertedOrUpdatedRows ?? 0) > 0;
-    },
-
-    async release(key, value) {
-      const result = await db
-        .deleteFrom("instance_settings")
-        .where("key", "=", key)
-        .where("value", "=", encodeJson(value))
-        .executeTakeFirst();
-      return Number(result.numDeletedRows) > 0;
-    },
-
     async remove(key) {
       return changeGate(key, true, async (executor) => {
         const result = await executor
@@ -531,13 +326,11 @@ export function createInstanceSettingsRepository(
     },
 
     async set(key, value, updatedBy) {
-      if (key === "default_entitlements") {
-        await setDefaultEntitlements(
+      if (key === "default_entitlements")
+        return setDefaultEntitlements(
           value as InstanceSettingValues["default_entitlements"],
           updatedBy,
         );
-        return;
-      }
       const row = {
         key,
         value: encodeJson(value),
