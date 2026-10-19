@@ -495,6 +495,38 @@ export interface JobCheckRunsTable {
 }
 
 /**
+ * Where the infrastructure of a review job began and ended (#493, src/billing/README.md, "Billable minutes"): one row per
+ * VM the Dispatcher reported, or one `job_wall_clock` row where no VM exists. It only measures.
+ */
+export interface JobVmRunsTable {
+  job_id: string;
+  /** The name of the VM (the Dispatcher's; unique per launch), or `job_wall_clock` where no VM exists. */
+  vm_name: string;
+  /** The workspace of the job, repeated here so queries need no join to scope. */
+  workspace_id: string;
+  /** The attempt the VM was started for: the job's lost attempts at the time of the report, plus one. For audit. */
+  attempt: number;
+  /** `jobs.claimed_at` of the claim the VM was started for: the identity of the claim; the VM of the final claim counts. */
+  claimed_at: string;
+  /** ISO 8601 UTC: when the VM was created, as the Dispatcher reported it, kept between the claim and the report. */
+  started_at: string;
+  /** ISO 8601 UTC: when the App received the report (its own clock). */
+  reported_at: string;
+  /** The VM's own timeout in seconds (the platform ends the VM there); null for `job_wall_clock`. */
+  vm_timeout_seconds: number | null;
+  /** ISO 8601 UTC: the teardown, or null while none is known. Null together with `end_source`. */
+  ended_at: string | null;
+  /** A VmEndSource (src/billing/minutes.ts); null together with `ended_at`. */
+  end_source: string | null;
+  /** 1 for the VM that counts for the job's bill (the final claim's), else 0. */
+  billable: ColumnType<number, number | undefined, number>;
+  /** `ceil(seconds / 60)` of the span once the end is known, at least 1; null before that. */
+  billable_minutes: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
  * A single-use token that hands an Owner or Admin over to the operator-configured plan page (#284,
  * src/plan-handoff/). Only the hash of the token is kept.
  */
@@ -701,6 +733,7 @@ export interface Database {
   job_dispatches: JobDispatchesTable;
   refusal_notices: RefusalNoticesTable;
   job_check_runs: JobCheckRunsTable;
+  job_vm_runs: JobVmRunsTable;
   plan_handoff_tokens: PlanHandoffTokensTable;
   model_catalog_entries: ModelCatalogEntriesTable;
   password_reset_tokens: PasswordResetTokensTable;
