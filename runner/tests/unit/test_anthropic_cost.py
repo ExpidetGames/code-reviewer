@@ -6,14 +6,18 @@ Anthropic states token counts and no charge, and billing charges what the call r
 number must be exact: every kind of token at its own price, the higher tier of Haiku 5.5, and an
 unknown cost (never zero) for everything that cannot be priced."""
 
+import json
+import logging
 from decimal import Decimal
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from anthropic_usage import real_anthropic_usage
 
 from code_reviewer_runner.anthropic_cost import cost_of_usage
 from code_reviewer_runner.anthropic_models import MODELS
+from code_reviewer_runner.anthropic_wire import AnthropicMessagesWire
 
 
 def usage(
@@ -353,3 +357,116 @@ def test_the_cost_survives_the_float_of_the_result_unchanged() -> None:
 
     assert cost is not None
     assert Decimal(repr(float(cost))) == cost
+
+
+def priced_through_the_wire(model_id: str, real_usage: dict[str, Any]) -> Decimal | None:
+    """What the Dynamic proxy does: the Messages answer is translated, then its usage is priced."""
+    answer = {
+        "type": "message",
+        "id": "msg_1",
+        "model": model_id,
+        "role": "assistant",
+        "content": [{"type": "text", "text": "ok"}],
+        "stop_reason": "end_turn",
+        "usage": real_usage,
+    }
+    decoded = json.loads(
+        AnthropicMessagesWire(model_id).decode_response(json.dumps(answer).encode())
+    )
+    return cost_of_usage(model_id, decoded["usage"])
+
+
+# #534-T01: the usage the first real Dynamic run got (every field the API returns) was unknown.
+def test_the_usage_a_real_answer_carries_is_priced_exactly() -> None:
+    # Sonnet 5: $2 in, $10 out per million tokens.
+    assert priced_through_the_wire("claude-sonnet-5", real_anthropic_usage(14_641, 492)) == Decimal(
+        "0.034202"
+    )
+
+
+# #534-T03
+@pytest.mark.parametrize("thinking", [0, 100, 492])
+def test_the_breakdown_of_the_output_tokens_changes_no_price(thinking: int) -> None:
+    details = {"thinking_tokens": thinking}
+    real = real_anthropic_usage(14_641, 492, output_tokens_details=details)
+
+    assert priced_through_the_wire("claude-sonnet-5", real) == Decimal("0.034202")
+    assert cost_of_usage("claude-sonnet-5", usage(1000, 500, output_tokens_details=details)) == (
+        Decimal("0.007")
+    )
+    assert cost_of_usage("claude-sonnet-5", usage(1000, 500, output_tokens_details=None)) == (
+        Decimal("0.007")
+    )
+
+
+# #534-T04
+@pytest.mark.parametrize(
+    "details",
+    [
+        {"thinking_tokens": 501},
+        {"thinking_tokens": -1},
+        {"thinking_tokens": "3"},
+        {"thinking_tokens": 1.5},
+        {"thinking_tokens": 0, "tool_tokens": 7},
+        {"a_new_category": {"tokens": 1}},
+        "thinking",
+        7,
+    ],
+)
+def test_an_output_breakdown_this_table_does_not_know_has_no_cost(details: object) -> None:
+    assert cost_of_usage("claude-sonnet-5", usage(1000, 500, output_tokens_details=details)) is None
+
+
+# #534-T05
+def test_the_cache_write_split_alone_is_priced_from_the_split() -> None:
+    split = {"ephemeral_5m_input_tokens": 3000, "ephemeral_1h_input_tokens": 2000}
+    real = real_anthropic_usage(10_000, 3000, cache_creation=split)
+    del real["cache_creation_input_tokens"]
+
+    # Sonnet 5: 10000 x 2 + 3000 x 10 + 3000 x 2.50 + 2000 x 4, per million tokens.
+    assert priced_through_the_wire("claude-sonnet-5", real) == Decimal("0.0655")
+
+
+# #534-T05
+def test_a_split_that_disagrees_with_the_flat_write_count_has_no_cost() -> None:
+    split = {"ephemeral_5m_input_tokens": 3000, "ephemeral_1h_input_tokens": 2000}
+    real = real_anthropic_usage(
+        10_000, 3000, cache_creation=split, cache_creation_input_tokens=4000
+    )
+
+    assert priced_through_the_wire("claude-sonnet-5", real) is None
+
+
+# #534-T06, T07, T08: deny by default still holds for the real shape.
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"service_tier": "priority"},
+        {"service_tier": "batch"},
+        {"service_tier": "flex"},
+        {"speed": "fast"},
+        {"inference_geo": "us"},
+        {"server_tool_use": {"web_fetch_requests": 0, "web_search_requests": 2}},
+        {"a_new_charge": {"units": 1}},
+    ],
+)
+def test_a_real_answer_with_a_charge_the_table_does_not_know_has_no_cost(
+    extra: dict[str, Any],
+) -> None:
+    assert (
+        priced_through_the_wire("claude-sonnet-5", real_anthropic_usage(1000, 500, **extra)) is None
+    )
+
+
+# #534-T09: the field that made a cost unknown is named in the log, and its value is not.
+def test_the_field_that_made_a_cost_unknown_is_logged_without_its_value(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level(logging.WARNING, logger="code_reviewer_runner.anthropic_cost"):
+        assert cost_of_usage("claude-sonnet-5", usage(1000, 500, service_tier="priority")) is None
+        assert cost_of_usage("claude-sonnet-5", usage(1000, 500, a_new_charge="s3cret")) is None
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("service_tier" in message for message in messages)
+    assert any("a_new_charge" in message for message in messages)
+    assert not any("priority" in message or "s3cret" in message for message in messages)
