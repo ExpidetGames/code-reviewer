@@ -24,14 +24,16 @@ import { workspacePath } from "../../workspaces/paths.ts";
 import { formatDuration } from "../run-duration.ts";
 import { KIND_NAMES } from "../../review-settings/kind-names.ts";
 import { isSettled } from "../run-status.ts";
-import type { StoppedEarly } from "../../runner-api/contract.ts";
 import type { RunDetailSnapshot, RunDetailView } from "../run-view.ts";
 import { browserRunsApi, RUNS_POLL, type RunsApi } from "./api.ts";
 import {
   describePollFailure,
   DETAIL_POLL_FAILED_TEXT,
 } from "./poll-messages.ts";
+import { CallTraceTables } from "./call-trace.tsx";
+import { CALL_TRACE_COPY } from "./call-trace-messages.ts";
 import { RunStatusBadge } from "./status-badge.tsx";
+import { usageItems } from "./usage-facts.tsx";
 
 export const NO_LOG_TEXT = "No log available.";
 export const LOG_SHORTENED_TEXT =
@@ -41,80 +43,6 @@ function Time({ value }: { value: string | null }) {
   if (value === null)
     return <span className="text-muted-foreground">Not yet</span>;
   return <time dateTime={value}>{formatUtc(value)}</time>;
-}
-
-const COST = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 4,
-});
-const COUNT = new Intl.NumberFormat("en-US");
-/** The smallest cost the display can tell from zero; a real cost below it must not read as $0. */
-const COST_PRECISION = 0.0001;
-
-function costText(costUsd: number): string {
-  return costUsd > 0 && costUsd < COST_PRECISION
-    ? `Less than ${COST.format(COST_PRECISION)}`
-    : COST.format(costUsd);
-}
-
-/** What a Dynamic Review that was wrapped up at a limit says about itself (#293). */
-const STOPPED_EARLY_TEXT: Record<StoppedEarly, string> = {
-  cost_limit:
-    "The review reached the cost limit and was wrapped up; it may be incomplete.",
-  time_limit:
-    "The review reached its time limit and was wrapped up; it may be incomplete.",
-};
-
-/** The model, tokens, calls and cost the runner reported; a text from outside is rendered as text. */
-function usageItems(run: RunDetailView) {
-  const usage = run.usage;
-  if (usage === null) return { model: [], consumption: [] };
-  const calls = usage.aiCalls === 1 ? "model call" : "model calls";
-  return {
-    model:
-      usage.model === null
-        ? []
-        : [
-            {
-              term: "Model",
-              description: (
-                <span data-slot="run-model" className="break-words">
-                  {usage.model}
-                </span>
-              ),
-            },
-          ],
-    consumption: [
-      {
-        term: "Usage",
-        description: `${COUNT.format(usage.totalTokens)} tokens in ${COUNT.format(usage.aiCalls)} ${calls}`,
-      },
-      // A run on a managed quality level shows no cost: with the tokens it would tell the model (#283).
-      ...(run.costHidden
-        ? []
-        : [
-            {
-              term: "Cost",
-              description:
-                usage.costUsd === null ? (
-                  <span className="text-muted-foreground">Not available</span>
-                ) : (
-                  costText(usage.costUsd)
-                ),
-            },
-          ]),
-      ...(usage.stoppedEarly === null
-        ? []
-        : [
-            {
-              term: "Stopped early",
-              description: STOPPED_EARLY_TEXT[usage.stoppedEarly],
-            },
-          ]),
-    ],
-  };
 }
 
 function DurationText({ run }: { run: RunDetailView }) {
@@ -148,7 +76,7 @@ function FactGroup({
         </CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
-        <DescriptionList items={items} />
+        {items.length === 0 ? null : <DescriptionList items={items} />}
         {children}
       </CardContent>
     </Card>
@@ -384,6 +312,14 @@ export function RunDetail({
       <FactGroup title="Diagnostics" items={diagnosticItems}>
         <LogPanel run={run} />
       </FactGroup>
+      {run.callTrace === null ? null : (
+        <FactGroup title={CALL_TRACE_COPY.title} items={[]}>
+          <CallTraceTables
+            trace={run.callTrace}
+            showProviderDetail={!run.costHidden}
+          />
+        </FactGroup>
+      )}
     </div>
   );
 }

@@ -89,6 +89,11 @@ const SCOPED = [
  *   configuration, not customer data, and no workspace owns an entry. Its one read across workspaces is a count of
  *   how many projects select an entry (for the operator's confirmation when the model behind it changes); it
  *   returns a number, never a row, a project or a workspace.
+ * - job-directory: the jobs of every workspace for the instance admin's job view (#541). The operator looks at a run
+ *   by its id without being a member of its workspace, to see what a run did. It only reads (a page of the newest
+ *   jobs without their results, and one job by its id), and every answer names its workspace; the only callers are
+ *   the pages of the admin portal behind the admin guard. What a member sees of a run goes through the scoped
+ *   runs repository;
  * - models-dev: the providers and models read from models.dev (#548) and the state of the last fetch. It is the catalog
  *   of the installation, fetched at run time from a public source: not customer data, and no workspace owns a row. It
  *   stores and reads whole rows (no query takes a workspace or returns one) and never deletes;
@@ -112,6 +117,7 @@ const INSTANCE_LEVEL = [
   "invitation-directory-repository.ts",
   "job-check-runs-sweep.ts",
   "job-claimed-keys-repository.ts",
+  "job-directory-repository.ts",
   "job-dispatches-repository.ts",
   "jobs-claim.ts",
   "legacy-users-repository.ts",

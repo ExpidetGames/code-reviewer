@@ -165,6 +165,11 @@ export type RunnerJobInput = {
   env: JobEnv;
 };
 /**
+ * The engine's tools; every other name a model called is `other`.
+ */
+export type RunnerTraceToolName =
+  "read" | "grep" | "glob" | "StructuredOutput" | "other";
+/**
  * What the runner prints when a job ends (the output of code-reviewer-run-job), plus an optional errorMessage. The runner has redacted secrets from logTail; the app removes anything that still looks like one before it stores the result.
  */
 export type RunnerResult = {
@@ -843,7 +848,140 @@ export interface RunnerUsage {
    * #540: by how much, in US dollars, the cost of a Dynamic Review passed the operator's cost limit. The review is delivered nevertheless: the last normal call may cost more than expected and the final call that carries the answer is always made (the documented bound: the limit plus the excess of the last normal call plus the final call). Absent when the cost stayed within the limit or is not known.
    */
   limitExceededBy?: number;
+  callTrace?: RunnerCallTrace;
   [k: string]: unknown;
+}
+/**
+ * #541: what each model call and each tool call of a Dynamic Review was, as numbers and stable names (RunnerCallTrace). Optional and additive: a runner of an earlier release sends none, and an app of an earlier release ignores it. Observability only; nothing in the run reads it.
+ */
+export interface RunnerCallTrace {
+  truncated: boolean;
+  /**
+   * @maxItems 100
+   */
+  modelCalls: RunnerModelCallTrace[];
+  /**
+   * @maxItems 100
+   */
+  toolCalls: RunnerToolCallTrace[];
+}
+/**
+ * One model call. A count is null when the provider reported none (a refused call, a provider without cache tokens); it is never a guess. tMs is the time since the run started when the call began.
+ */
+export interface RunnerModelCallTrace {
+  index: number;
+  tMs: number;
+  promptTokens: number | null;
+  cacheRead: number | null;
+  cacheWrite: number | null;
+  completionTokens: number | null;
+  costUsd: number | null;
+  finishReason:
+    "stop" | "tool_calls" | "length" | "content_filter" | "other" | null;
+  /**
+   * True for the call the run was wrapped up with (the wrap-up or the recovery).
+   */
+  final: boolean;
+  /**
+   * The tools the answer asked for, each name once with its count.
+   *
+   * @maxItems 5
+   */
+  tools:
+    | []
+    | [
+        {
+          name: RunnerTraceToolName;
+          count: number;
+        },
+      ]
+    | [
+        {
+          name: RunnerTraceToolName;
+          count: number;
+        },
+        {
+          name: RunnerTraceToolName;
+          count: number;
+        },
+      ]
+    | [
+        {
+          name: RunnerTraceToolName;
+          count: number;
+        },
+        {
+          name: RunnerTraceToolName;
+          count: number;
+        },
+        {
+          name: RunnerTraceToolName;
+          count: number;
+        },
+      ]
+    | [
+        {
+          name: RunnerTraceToolName;
+          count: number;
+        },
+        {
+          name: RunnerTraceToolName;
+          count: number;
+        },
+        {
+          name: RunnerTraceToolName;
+          count: number;
+        },
+        {
+          name: RunnerTraceToolName;
+          count: number;
+        },
+      ]
+    | [
+        {
+          name: RunnerTraceToolName;
+          count: number;
+        },
+        {
+          name: RunnerTraceToolName;
+          count: number;
+        },
+        {
+          name: RunnerTraceToolName;
+          count: number;
+        },
+        {
+          name: RunnerTraceToolName;
+          count: number;
+        },
+        {
+          name: RunnerTraceToolName;
+          count: number;
+        },
+      ];
+}
+/**
+ * One tool call. isRepeat is true when the same tool with the same normalised arguments already ran in this job; the arguments themselves are never sent. resultBytes is the size of the result the model was shown, null when it never was.
+ */
+export interface RunnerToolCallTrace {
+  index: number;
+  name: RunnerTraceToolName;
+  resultBytes: number | null;
+  isRepeat: boolean;
+}
+/**
+ * #541: the per-call trace of a Dynamic Review, without content. Sizes, counts, times, the cost and stable names only: no path, no argument, no tool result and no model text is ever in it. At most 100 model calls and 100 tool calls are kept (the first ones); truncated says that more happened. Tool names are the engine's own; any other name is `other`.
+ */
+export interface RunnerCallTrace1 {
+  truncated: boolean;
+  /**
+   * @maxItems 100
+   */
+  modelCalls: RunnerModelCallTrace[];
+  /**
+   * @maxItems 100
+   */
+  toolCalls: RunnerToolCallTrace[];
 }
 /**
  * #405: what a successful review left open on the pull request. `open` counts the findings that are open AFTER the run (a Dynamic Review carries the findings of earlier runs over, PR-Agent keeps a record of active ones), not the ones the run found. `bySeverity` is the count per priority of a Dynamic Review, of the findings its summary lists (so `open` may exceed the sum when lower priority findings did not fit); null for a Diff Review, whose findings have no severity.

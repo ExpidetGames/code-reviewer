@@ -5,10 +5,12 @@
 import { describe, expect, it } from "vitest";
 import { sql } from "kysely";
 import { sha } from "../test-support/jobs.ts";
+import { sessionUser } from "../test-support/session-lookup.ts";
 import { createRunsFixture } from "../test-support/runs.ts";
 import { addWorkspace } from "../test-support/workspaces.ts";
 import { createRunsRepository } from "../db/repositories/runs-repository.ts";
 import { createUsageRecordsRepository } from "../db/repositories/usage-records-repository.ts";
+import { createRunsRouteHandlers } from "./http.ts";
 import {
   createLastRunSource,
   createRunsService,
@@ -410,6 +412,82 @@ describe("the usage of a run on a managed quality level (#283)", () => {
       usage: { totalTokens: 120, aiCalls: 2, costUsd: null },
     });
     expect(JSON.stringify(detail)).not.toContain("0.0123");
+  });
+
+  // #541-T10: the JSON route `GET /api/w/:workspace/runs/:id` answers the view, so the same holds there.
+  it("shows no cost and no cache count per call in the JSON of the run route", async () => {
+    const f = await createRunsFixture({ dynamicReview: true });
+    const call = {
+      index: 0,
+      tMs: 1200,
+      promptTokens: 14_600,
+      cacheRead: 123_457,
+      cacheWrite: 765_431,
+      completionTokens: 492,
+      costUsd: 0.0342,
+      finishReason: "tool_calls",
+      final: false,
+      tools: [{ name: "read", count: 1 }],
+    };
+    const finished = await f.finished(
+      {
+        ok: true,
+        result: {
+          ok: true,
+          commentUrl: "https://github.com/acme/widgets/pull/1#c",
+          logTail: "ok",
+          usage: {
+            ...usage,
+            callTrace: {
+              truncated: false,
+              modelCalls: [call],
+              toolCalls: [],
+            },
+          },
+        },
+      },
+      { reviewKind: "dynamic" },
+    );
+    const records = createUsageRecordsRepository(
+      f.db,
+      f.workspaceId,
+      f.clock.now,
+    );
+    await records.reserve(finished.id, "managed");
+    // The record may be settled already (setModelTier only changes a reserved one): write the column.
+    await f.db
+      .updateTable("usage_records")
+      .set({ model_tier: "high" })
+      .where("job_id", "=", finished.id)
+      .execute();
+    const route = createRunsRouteHandlers({
+      requireUser: () => Promise.resolve(sessionUser("member")),
+      service: f.runs,
+    });
+
+    const response = await route.detail(
+      new Request(`https://app.test/api/w/default/runs/${finished.id}`),
+      finished.id,
+    );
+    const body = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(JSON.parse(body)).toMatchObject({
+      run: {
+        callTrace: {
+          modelCalls: [
+            {
+              promptTokens: 14_600,
+              cacheRead: null,
+              cacheWrite: null,
+              costUsd: null,
+              finishReason: "tool_calls",
+            },
+          ],
+        },
+      },
+    });
+    expect(body).not.toMatch(/123457|765431|0\.0342|0\.0123/);
   });
 
   // #283-T07
