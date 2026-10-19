@@ -337,7 +337,8 @@ Worker. It cannot count what runs, so the app counts for it. Three additions, al
   from `retryAfterSeconds` (default: at once) and fails on the last allowed attempt (three). The stored
   error code is `launch_failed` or `worker_exited` (#375: the Worker started and its container ended with an
   error before it reported a result), whatever else was sent becomes `launch_failed` (the reason is logged, the UI has
-  copy for both codes). A Dispatcher that does not know `worker_exited` is never needed: an App that does not know it
+  copy for both codes). The Dispatcher of #487 sends only `launch_failed`: it holds no supervision after the hand-over, so
+  `worker_exited` stays accepted for a Dispatcher of the previous release and for the runs already stored. An App that does not know it
   accepts any reason of the right form and stores `launch_failed`. Answers: `200` `{ job: { id, status: "queued" | "failed" } }`; `400` for a body that does not
   fit (a lease token is not a credential); `401 WORKER_CREDENTIAL_INVALID` for a credential that is not the
   running claim of that job (another job's, an earlier claim's, made up; nothing changes); `404` for an unknown
@@ -392,7 +393,7 @@ keep their meaning and the rest is additive:
   grace** it is refused with `409` (`RUNNER_LEASE_LOST`), like a heartbeat, and nothing is stored: the record was
   (or is about to be) settled once with an unknown cost, and a record is not changed after it may have been served.
 - **Job details** of a superseded claim: `409 RUNNER_JOB_ENDED`, like any ended job. A release of one
-  (`worker_exited` after a Worker that exits with an error) is `409`/`401` and changes nothing.
+  (`worker_exited` from a Dispatcher of the previous release) is `409`/`401` and changes nothing.
 
 **Mixed versions of the supersede (#397).** One migration adds `jobs.accepts_supersede` (default 0) and widens the
 check of `usage_records.settled_reason`; an app of the previous release ignores both. A job is superseded only when

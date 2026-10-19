@@ -507,13 +507,14 @@ export interface ContainerInvocation {
 }
 
 export interface ContainerRunResult {
-  exitCode: number;
+  /** The exit code of the container, or null when the host stopped watching it at the hand-over (#487). */
+  exitCode: number | null;
 }
 
 /**
  * Where `docker run` executes: the Sandbox VM (#329), the local Docker host of a test, later a host
  * of a container-per-job deployment. The host runs the invocation and resolves when the container
- * has ended.
+ * has ended, or, for a host that hands the job over to the Worker (the Sandbox VM), when the Worker has taken over.
  */
 export interface ContainerHost {
   run(invocation: ContainerInvocation): Promise<ContainerRunResult>;
