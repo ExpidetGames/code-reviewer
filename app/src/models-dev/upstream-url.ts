@@ -3,10 +3,12 @@
 // The address models.dev states for a provider (`api`) decides where a real key is sent, so it is untrusted data too
 // (#548, part C). Three rules, and the state they keep per provider:
 //
-// 1. **The address must be safe** (`checkUpstreamUrl`): https only, no credentials, no query, and neither a private,
-//    loopback or link-local address nor a name that resolves to one. The name is resolved here, when the catalog is
-//    stored; the supervisor that holds the key must check the address it actually connects to again (#550), because a
-//    name can change what it resolves to afterwards.
+// 1. **The address must be safe** (`checkUpstreamUrl`): https on port 443 only, no credentials, no query, in the form the
+//    job entry accepts (`UPSTREAM_BASE_URL`), and neither a private, loopback, link-local or other special-purpose
+//    address (`billing/public-url.ts`: NAT64, 6to4, the IANA registry) nor a name that resolves to one. The name is
+//    resolved here, when the catalog is stored, which is a verdict of one moment: whoever sends the key must check the
+//    address it connects to on every connection (`connect-guard.ts`, #550), because a name can change what it resolves
+//    to afterwards.
 // 2. **Trust on first use** (`nextUrlState`): the first safe address seen for a provider is the trusted one.
 // 3. **A change blocks** the provider, for the managed key and for an own key, until an admin confirms the new address
 //    (the portal for that is #554; this module is the data and the block). Going back to the trusted address unblocks.
@@ -23,6 +25,12 @@ import {
 
 /** The longest address looked at; models.dev addresses are far shorter. */
 export const MAX_URL_LENGTH = 2048;
+/**
+ * What an upstream address must look like to go into a job entry (`job-entry.ts` and `contracts/job-model-entry.v1.json`
+ * use this text): https, then no whitespace, `?`, `#` or `@` anywhere. Checked when the address is stored too, so that a
+ * trusted address is never one the entry would refuse later.
+ */
+export const UPSTREAM_BASE_URL = /^https:\/\/[^\s?#@]+$/;
 const HOST_NAME =
   /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/i;
 /** How much of a refused address is kept for the admin to read. */
@@ -33,6 +41,8 @@ export const URL_PROBLEMS = [
   "too_long",
   "not_https",
   "credentials_in_url",
+  /** A port other than 443: a key is not sent to a service that is no API (SSH, a database, an admin port). */
+  "port_not_allowed",
   "private_address",
   /** The name did not resolve (or resolved to nothing): inconclusive, not a verdict on the address. */
   "unresolvable",
@@ -83,6 +93,11 @@ export async function checkUpstreamUrl(
     return refused("credentials_in_url", candidate);
   if (url.search !== "" || url.hash !== "")
     return refused("invalid_url", candidate);
+  // `port` is empty for the default port of https, however it was written (`:443`, `:0443`).
+  if (url.port !== "") return refused("port_not_allowed", candidate);
+  const normalized = normalizedAddress(candidate);
+  if (!UPSTREAM_BASE_URL.test(normalized))
+    return refused("invalid_url", candidate);
   // Loopback, private and link-local literals, `localhost`, `.local`, `.internal` and single-label names.
   if (!isPublicHttpsUrl(candidate))
     return refused("private_address", candidate);
@@ -102,7 +117,7 @@ export async function checkUpstreamUrl(
     if (!addresses.every(isPublicAddress))
       return refused("private_address", candidate);
   }
-  return { ok: true, url: normalizedAddress(candidate) };
+  return { ok: true, url: normalized };
 }
 
 /** What is stored per provider about its address. */

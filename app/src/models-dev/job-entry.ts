@@ -14,7 +14,7 @@ import { z } from "zod";
 import type { StoredModel, StoredProvider } from "./catalog.ts";
 import { supportedProvider } from "./opencode-providers.ts";
 import { MODALITIES } from "./parse.ts";
-import { isUsable } from "./upstream-url.ts";
+import { isUsable, UPSTREAM_BASE_URL } from "./upstream-url.ts";
 import { AUTH_HEADERS, WIRE_FAMILIES } from "./wire.ts";
 
 export const JOB_ENTRY_REFUSAL_CODES = [
@@ -60,10 +60,7 @@ const entrySchema = z.strictObject({
   npm: z.string().min(1).max(100),
   family: z.enum(WIRE_FAMILIES),
   authHeader: z.enum(AUTH_HEADERS),
-  upstreamBaseUrl: z
-    .string()
-    .max(2048)
-    .regex(/^https:\/\/[^\s?#@]+$/),
+  upstreamBaseUrl: z.string().max(2048).regex(UPSTREAM_BASE_URL),
   modelId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:/+@-]{0,199}$/),
   model: modelSchema,
 });

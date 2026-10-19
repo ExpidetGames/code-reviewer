@@ -106,4 +106,98 @@ describe("a resolved address", () => {
   ])("is not public: %s", (address) => {
     expect(isPublicAddress(address)).toBe(false);
   });
+
+  // #548-T07
+  it.each([
+    ["192.0.0.0", "IETF protocol assignments /24, first"],
+    ["192.0.0.170", "NAT64 discovery name"],
+    ["192.0.0.255", "IETF protocol assignments /24, last"],
+    ["192.0.2.1", "documentation TEST-NET-1"],
+    ["198.51.100.7", "documentation TEST-NET-2"],
+    ["203.0.113.9", "documentation TEST-NET-3"],
+    ["192.88.99.1", "6to4 relay anycast"],
+    ["198.18.0.0", "benchmarking /15, first"],
+    ["198.19.255.255", "benchmarking /15, last"],
+    ["240.0.0.1", "reserved"],
+    ["255.255.255.255", "broadcast"],
+  ])("is not public (IPv4 special-purpose): %s (%s)", (address) => {
+    expect(isPublicAddress(address)).toBe(false);
+  });
+
+  // #548-T07
+  it.each([
+    "192.0.1.1",
+    "192.0.3.1",
+    "198.17.255.255",
+    "198.20.0.1",
+    "198.51.99.1",
+    "198.51.101.1",
+    "203.0.112.1",
+    "203.0.114.1",
+    "192.88.98.1",
+    "192.88.100.1",
+    "223.255.255.255",
+  ])("stays public next to a special-purpose range: %s", (address) => {
+    expect(isPublicAddress(address)).toBe(true);
+  });
+
+  // #548-T07
+  it.each([
+    ["64:ff9b::7f00:1", "NAT64 of 127.0.0.1"],
+    ["64:ff9b::a00:1", "NAT64 of 10.0.0.1"],
+    ["64:ff9b::a9fe:a9fe", "NAT64 of 169.254.169.254"],
+    ["64:ff9b::c0a8:101", "NAT64 of 192.168.1.1"],
+    ["64:ff9b::c000:2aa", "NAT64 of 192.0.2.170"],
+    ["64:ff9b:1::1", "local-use NAT64 prefix"],
+    ["64:ff9b:1:ffff::1", "local-use NAT64 prefix, last block"],
+    ["2002:7f00:1::1", "6to4 of 127.0.0.1"],
+    ["2002:a00:1::", "6to4 of 10.0.0.1"],
+    ["2002:a9fe:a9fe::1", "6to4 of 169.254.169.254"],
+    ["2002:c0a8:101::1", "6to4 of 192.168.1.1"],
+    ["2001::1", "Teredo (IETF protocol assignments /23)"],
+    ["2001:1ff:ffff::1", "IETF protocol assignments /23, last"],
+    ["2001:db8::1", "documentation"],
+    ["3fff::1", "documentation (3fff::/20)"],
+    ["3fff:fff:ffff::1", "documentation (3fff::/20), last"],
+    ["100::1", "discard-only"],
+    ["fec0::1", "site-local, deprecated"],
+    ["64:ff9a::1", "reserved ::/8, next to the NAT64 prefix"],
+    ["64:ff9c::1", "reserved ::/8, next to the NAT64 prefix"],
+    ["64:ff9b::1:0:0", "64:ff9b::/96 only, not the rest of 64:ff9b::/32"],
+    ["5f00::1", "SRv6 segment identifiers"],
+    ["::ffff:192.0.0.170", "mapped IETF protocol address"],
+    ["::ffff:198.18.0.1", "mapped benchmarking address"],
+  ])("is not public (IPv6 special-purpose): %s (%s)", (address) => {
+    expect(isPublicAddress(address)).toBe(false);
+  });
+
+  // #548-T07
+  it.each([
+    ["64:ff9b::808:808", "NAT64 of 8.8.8.8, a public address behind a DNS64"],
+    ["2002:808:808::1", "6to4 of 8.8.8.8"],
+    ["2001:4860:4860::8888", "outside 2001::/23"],
+    ["2001:200::1", "just above 2001::/23"],
+    ["2a00:1450:4001::1", "an ordinary global address"],
+    ["3ffe::1", "just below 3fff::/20"],
+    ["4000::1", "above 3fff::/20"],
+    ["5e00::1", "just below 5f00::/16"],
+    ["5f01::1", "just above 5f00::/16"],
+  ])("stays public (IPv6): %s (%s)", (address) => {
+    expect(isPublicAddress(address)).toBe(true);
+  });
+});
+
+describe("a special-purpose address in a URL", () => {
+  // #548-T07
+  it.each([
+    "https://192.0.0.1",
+    "https://198.18.0.1",
+    "https://203.0.113.5",
+    "https://[64:ff9b::7f00:1]",
+    "https://[64:ff9b:1::5]",
+    "https://[2002:7f00:1::1]",
+    "https://[2001:db8::1]",
+  ])("is refused: %s", (url) => {
+    expect(isPublicHttpsUrl(url)).toBe(false);
+  });
 });

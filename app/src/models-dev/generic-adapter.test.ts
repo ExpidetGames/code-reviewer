@@ -5,7 +5,7 @@
 // leaves the process.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { StoredModel, StoredProvider } from "./catalog.ts";
 import { createGenericAdapter } from "./generic-adapter.ts";
 import { parseModelsDev } from "./parse.ts";
@@ -253,6 +253,25 @@ describe("the key test of the generic adapter", () => {
 
     expect(check).toEqual({ outcome: "unreachable" });
     expect(JSON.stringify(check)).not.toContain("sk-test");
+  });
+
+  // #548-T07
+  it("sends the key through the connect guard by default, never to a name that now resolves to a private address", async () => {
+    const globalFetch = vi.spyOn(globalThis, "fetch");
+    const r = rows();
+    const made = createGenericAdapter(
+      r.provider("deepseek"),
+      r.models("deepseek"),
+      {
+        resolveAddresses: async () => [{ address: "10.0.0.7", family: 4 }],
+      },
+    );
+    if (!made.ok) throw new Error(made.code);
+
+    const check = await made.adapter.testKey({ apiKey: "sk-test" });
+
+    expect(check).toEqual({ outcome: "unreachable" });
+    expect(globalFetch).not.toHaveBeenCalled();
   });
 
   // #548-T09

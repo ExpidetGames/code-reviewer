@@ -9,11 +9,20 @@
 //
 // The key test is a cheap authenticated read: the provider's model list. "Not verified" is an answer, not a failure,
 // because not every provider has one. It goes to the trusted address of the provider only, never follows a redirect (that
-// would carry the key elsewhere), and returns a class, never a word the provider said (it may repeat the key).
+// would carry the key elsewhere), and returns a class, never a word the provider said (it may repeat the key). The key
+// leaves this server, so the connection itself is guarded (`connect-guard.ts`): the name is resolved again at the
+// connection, a name that now resolves to a private address gets no key, and the connect goes to the address that was
+// checked.
 import "server-only";
 import type { ModelPrice } from "../llm/providers/types.ts";
 import { KEY_TEST_TIMEOUT_MS } from "../llm/providers/types.ts";
 import type { StoredModel, StoredProvider } from "./catalog.ts";
+import {
+  createGuardedFetch,
+  createGuardedLookup,
+  type AddressResolver,
+} from "./connect-guard.ts";
+import type { FetchLike } from "./fetch.ts";
 import { supportedProvider } from "./opencode-providers.ts";
 import { isUsable } from "./upstream-url.ts";
 import type { AuthHeader, WireFamily } from "./wire.ts";
@@ -49,7 +58,8 @@ export type GenericProviderAdapter = {
   priceOf(model: string): ModelPrice | null;
   testKey(input: {
     apiKey: string;
-    fetchImpl?: (url: string, init: RequestInit) => Promise<Response>;
+    /** Left out, the request is made by the connect guard. A test passes its own. */
+    fetchImpl?: FetchLike;
     timeoutMs?: number;
   }): Promise<GenericKeyCheck>;
 };
@@ -79,9 +89,15 @@ function outcomeOfStatus(code: number): GenericKeyOutcome {
   return "provider_error";
 }
 
+export type GenericAdapterOptions = {
+  /** How the guarded connection resolves a name; the real DNS when left out. */
+  resolveAddresses?: AddressResolver;
+};
+
 export function createGenericAdapter(
   provider: StoredProvider,
   models: readonly StoredModel[],
+  options: GenericAdapterOptions = {},
 ): GenericAdapterResult {
   const supported = supportedProvider(provider.id);
   if (supported === undefined)
@@ -122,7 +138,9 @@ export function createGenericAdapter(
       },
       async testKey({
         apiKey,
-        fetchImpl = fetch,
+        fetchImpl = createGuardedFetch({
+          lookup: createGuardedLookup(options.resolveAddresses),
+        }),
         timeoutMs = KEY_TEST_TIMEOUT_MS,
       }) {
         try {

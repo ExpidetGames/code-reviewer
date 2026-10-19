@@ -75,6 +75,85 @@ describe("checking an upstream address", () => {
   });
 
   // #548-T07
+  it.each([
+    ["https://api.example.com:8443/v1", "a port of its own"],
+    ["https://api.example.com:80/v1", "the port of http"],
+    ["https://api.example.com:22/v1", "a service that is no API"],
+    ["https://api.example.com:65535/v1", "the highest port"],
+    ["https://93.184.216.34:8443/v1", "a public literal with a port"],
+    [
+      "https://[2606:4700:4700::1111]:8443/v1",
+      "a public IPv6 literal with a port",
+    ],
+  ])("refuses a port other than 443: %s (%s)", async (candidate) => {
+    const check = await checkUpstreamUrl(candidate, resolvesTo(...PUBLIC));
+
+    expect(check).toMatchObject({ ok: false, problem: "port_not_allowed" });
+  });
+
+  // #548-T07
+  it.each([
+    ["https://api.example.com/v1", "https://api.example.com/v1"],
+    ["https://api.example.com:443/v1", "https://api.example.com/v1"],
+    ["https://API.example.com:0443/v1", "https://api.example.com/v1"],
+    ["https://93.184.216.34:443/v1", "https://93.184.216.34/v1"],
+  ])("accepts port 443 or none: %s", async (candidate, url) => {
+    expect(await checkUpstreamUrl(candidate, resolvesTo(...PUBLIC))).toEqual({
+      ok: true,
+      url,
+    });
+  });
+
+  // #548-T07
+  it.each([
+    ["https://api.example.com/v1@evil", "an @ in the path"],
+    ["https://api.example.com/v1/%40x@y", "an @ after an escape"],
+  ])(
+    "refuses what the job entry would refuse later: %s (%s)",
+    async (candidate) => {
+      const check = await checkUpstreamUrl(candidate, resolvesTo(...PUBLIC));
+
+      expect(check).toMatchObject({ ok: false, problem: "invalid_url" });
+    },
+  );
+
+  // #548-T07
+  it.each([
+    "https://192.0.0.8/v1",
+    "https://198.18.0.1/v1",
+    "https://203.0.113.7/v1",
+    "https://[64:ff9b::7f00:1]/v1",
+    "https://[64:ff9b:1::1]/v1",
+    "https://[2002:7f00:1::1]/v1",
+    "https://[2001:db8::1]/v1",
+  ])("refuses the special-purpose literal %s", async (candidate) => {
+    const check = await checkUpstreamUrl(candidate, resolvesTo(...PUBLIC));
+
+    expect(check).toMatchObject({ ok: false, problem: "private_address" });
+  });
+
+  // #548-T07
+  it.each([
+    ["a name that resolves to NAT64 of loopback", ["64:ff9b::7f00:1"]],
+    [
+      "a name that resolves to NAT64 of the metadata address",
+      ["64:ff9b::a9fe:a9fe"],
+    ],
+    ["a name that resolves to 6to4 of a private address", ["2002:a00:1::1"]],
+    ["a name that resolves to the benchmarking range", ["198.18.0.5"]],
+    ["a name that resolves to a protocol-assignment address", ["192.0.0.170"]],
+    ["a name that resolves to the documentation range", ["2001:db8::5"]],
+    ["a name that resolves to the local-use NAT64 prefix", ["64:ff9b:1::9"]],
+  ])("refuses %s", async (_name, addresses) => {
+    const check = await checkUpstreamUrl(
+      "https://api.example.com/v1",
+      resolvesTo(...addresses),
+    );
+
+    expect(check).toMatchObject({ ok: false, problem: "private_address" });
+  });
+
+  // #548-T07
   it("says so when the name does not resolve, which is not the same as a bad address", async () => {
     const failing: HostResolver = async () => {
       throw new Error("ENOTFOUND");
