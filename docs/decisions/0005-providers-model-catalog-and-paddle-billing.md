@@ -1,6 +1,10 @@
 # 0005: LLM providers, the model catalog and billing with Paddle
 
-- **Status:** Proposed
+- **Status:** Proposed. **Superseded in part by [0006](0006-prepaid-billing-via-stripe-managed-payments.md):** the
+  billing part (Paddle subscriptions, plans, plan versions, the Free plan, M3 to M10, M12 to M14, M17 to M19, C9, sections
+  2.10 to 2.15 and 2.18, and the billing rows of 2.16 and sections 3 to 5) is replaced by prepaid pay-as-you-go billing
+  via Stripe Managed Payments (epic #489). The providers and model-catalog part (M1, M2, C1 to C8, sections 2.4 to 2.9
+  without the `source` marker) stays valid.
 - **Date:** 2026-10-17
 - **Deciders:** the maintainer (Luca). Points marked **decision** are binding. Points marked **default,
   confirm with Luca** are the lead's defaults and may still change before the affected issue starts.
