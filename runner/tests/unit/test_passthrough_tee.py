@@ -165,6 +165,17 @@ def test_a_chat_stream_without_the_usage_chunk_has_no_usage() -> None:
     assert result.terminated
 
 
+# #550-T09
+def test_a_chat_stream_without_the_done_marker_is_complete_with_its_finish_and_usage() -> None:
+    # Not every OpenAI-compatible provider ends with `data: [DONE]`.
+    events = stream("chat", TURN, 2, MODEL)
+    assert events[-1].startswith(b"data: [DONE]")
+    result = read_stream(WireFamily.OPENAI_CHAT, events[:-1])
+    assert result.terminated and result.usage == usage_expected(2, WireFamily.OPENAI_CHAT)
+    # The usage alone, with no finish reason before it, is not an end.
+    assert not read_stream(WireFamily.OPENAI_CHAT, [events[0], events[-2]]).terminated
+
+
 # #550-T06
 def test_a_charge_the_provider_states_is_kept() -> None:
     usage = {"prompt_tokens": 10, "completion_tokens": 5, "cost": 0.0012}

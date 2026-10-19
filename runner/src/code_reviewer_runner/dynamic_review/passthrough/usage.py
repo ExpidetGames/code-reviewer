@@ -131,6 +131,15 @@ def _finished(candidates: Any) -> bool:
     )
 
 
+def _chat_finished(choices: Any) -> bool:
+    if not isinstance(choices, list):
+        return False
+    return any(
+        (choice := _object(entry)) is not None and bool(choice.get("finish_reason"))
+        for entry in choices  # pyright: ignore[reportUnknownVariableType]
+    )
+
+
 class _Reading:
     """What has been seen of an answer so far; the same for a stream and for a document."""
 
@@ -139,6 +148,7 @@ class _Reading:
         self.usage: dict[str, Any] = {}
         self.errored = False
         self.terminated = False
+        self.finished = False
 
     def see(self, name: str | None, value: Any) -> None:
         """One JSON value: an event's data, or the whole document."""
@@ -154,6 +164,11 @@ class _Reading:
         family = self.family
         if family is WireFamily.OPENAI_CHAT:
             self._merge(document.get("usage"), replace=True)
+            # Not every OpenAI-compatible provider ends with `[DONE]`: the usage that comes after a
+            # finish reason is an end as well.
+            self.finished = self.finished or _chat_finished(document.get("choices"))
+            if self.finished and self.usage:
+                self.terminated = True
         elif family is WireFamily.GOOGLE:
             self._merge(document.get("usageMetadata"), replace=True)
             if _finished(document.get("candidates")):
