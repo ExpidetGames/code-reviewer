@@ -6,9 +6,8 @@
 // README.
 import { getBillingWebhookHandler } from "../../../../billing/shared.ts";
 
-// The signature is an HMAC over the exact bytes of the body and the database is a driver: Node, not the edge.
-export const runtime = "nodejs";
-
+// Node, not the edge: the database is a driver. Next.js 16 runs a route handler on Node by default, and a `runtime`
+// segment config is refused with `cacheComponents` (the build fails), so none is exported; the test below pins "not edge".
 export async function POST(request: Request): Promise<Response> {
   return getBillingWebhookHandler()(request);
 }

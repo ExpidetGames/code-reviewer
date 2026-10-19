@@ -55,10 +55,11 @@ describe("the billing webhook route", () => {
   });
 
   // #497-T13
-  it("is a Node-runtime POST route that only hands the request to the wired handler", () => {
+  it("is a POST route on the default Node runtime that only hands the request to the wired handler", () => {
     const route = read("app/api/billing/webhook/route.ts");
 
-    expect(route).toMatch(/export const runtime = "nodejs"/);
+    // Node is the default of Next.js 16; a `runtime` export breaks the build with cacheComponents, so there is none.
+    expect(route).not.toMatch(/export const runtime/);
     expect(route).toMatch(/export async function POST\(/);
     expect(route).not.toMatch(
       /export (async )?function (GET|PUT|PATCH|DELETE)/,
