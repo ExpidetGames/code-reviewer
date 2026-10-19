@@ -11,9 +11,11 @@ result is shrunk before it is sent, never after a 413.
 """
 
 import json
+import logging
 import math
 import re
 from collections.abc import Mapping
+from enum import StrEnum
 from typing import Any, Protocol
 
 from code_reviewer_runner.job_loop.jsonvalues import as_object
@@ -27,6 +29,9 @@ MAX_COMMENT_URL_CHARS = 2048
 MAX_DURATION_MS = 604_800_000
 # The app refuses a body over 65,536 bytes; stay well under it (the lease token is in the body too).
 MAX_REQUEST_BYTES = 48 * 1024
+# The most findings the app accepts in a count (`MAX_FINDING_COUNT`, runner API contract).
+MAX_FINDING_COUNT = 100_000
+_FINDING_PRIORITIES = ("P0", "P1", "P2", "P3")
 RUNNER_SHUTDOWN = "runner_shutdown"
 # The finer names (`errorReason`) of the failures the loop makes itself for a job process that held
 # the job (#273). The model may have been used and nobody can say how much, so the app counts the
@@ -41,7 +46,25 @@ _COMMENT_URL = re.compile(r"https?://\S+")
 _ESCAPE_SEQUENCE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
 _CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 
+# Why a wrapped-up run stopped: the values of `RunnerUsage.stoppedEarly` in the runner API
+# contract. The app never approves a review that carries one.
+STOPPED_EARLY_REASONS = ("cost_limit", "time_limit")
+
 Result = dict[str, Any]
+
+_log = logging.getLogger("code_reviewer_runner.loop.reporting")
+
+
+class DroppedValue(StrEnum):
+    """The stable codes of the log line for a malformed value of a result line that was dropped."""
+
+    FINDINGS_INVALID = "RESULT_FINDINGS_INVALID"
+    STOPPED_EARLY_INVALID = "RESULT_STOPPED_EARLY_INVALID"
+
+
+def _log_dropped(code: DroppedValue) -> None:
+    # The code only: what a job process printed is untrusted and may hold anything.
+    _log.warning("%s", code.value)
 
 
 class TextRedactor(Protocol):
@@ -133,6 +156,13 @@ def _usage(value: object) -> dict[str, Any] | None:
         and math.isfinite(cost)
         and cost >= 0
     )
+    # What the app decides `APPROVE` from: it never approves a review that stopped early, and it
+    # refuses a reason that is none of the contract's. A usage that does not say it fails closed:
+    # left out whole, the app sees no model work behind the run and never approves.
+    stopped = usage.get("stoppedEarly")
+    if stopped is not None and not (isinstance(stopped, str) and stopped in STOPPED_EARLY_REASONS):
+        _log_dropped(DroppedValue.STOPPED_EARLY_INVALID)
+        return None
     if (
         any(number is None for number in numbers)
         or not isinstance(fallback, bool)
@@ -140,7 +170,7 @@ def _usage(value: object) -> dict[str, Any] | None:
         or not cost_ok
     ):
         return None
-    return {
+    document: dict[str, Any] = {
         "model": model,
         "promptTokens": numbers[0],
         "completionTokens": numbers[1],
@@ -149,6 +179,44 @@ def _usage(value: object) -> dict[str, Any] | None:
         "fallbackUsed": fallback,
         "costUsd": cost,
     }
+    if stopped is not None:
+        document["stoppedEarly"] = stopped
+    return document
+
+
+def _finding_count(value: object) -> bool:
+    return (
+        isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= MAX_FINDING_COUNT
+    )
+
+
+def _findings(value: object) -> dict[str, Any] | None:
+    """The findings a successful review left open (#405), checked against the contract.
+
+    The app decides the review verdict from them, so they are passed on exactly or not at all: a
+    shape the app would refuse (and with it the whole result) is left out, and the app then submits
+    no verdict, as for a runner that does not say.
+    """
+    findings = as_object(value)
+    if findings is None or not set(findings) <= {"open", "bySeverity", "incomplete"}:
+        return None
+    if not _finding_count(findings.get("open")) or "bySeverity" not in findings:
+        return None
+    severities = findings["bySeverity"]
+    if severities is not None:
+        counts = as_object(severities)
+        if counts is None or set(counts) != set(_FINDING_PRIORITIES):
+            return None
+        if not all(_finding_count(count) for count in counts.values()):
+            return None
+        severities = {priority: counts[priority] for priority in _FINDING_PRIORITIES}
+    document: dict[str, Any] = {"open": findings["open"], "bySeverity": severities}
+    incomplete = findings.get("incomplete")
+    if incomplete is not None and not isinstance(incomplete, bool):
+        return None
+    if incomplete is True:
+        document["incomplete"] = True
+    return document
 
 
 def _sanitize(line: Mapping[str, Any], redactor: TextRedactor, measured_ms: int) -> Result:
@@ -176,6 +244,11 @@ def _sanitize(line: Mapping[str, Any], redactor: TextRedactor, measured_ms: int)
         "logTruncated": line.get("logTruncated") is True,
         "usage": _usage(line.get("usage")),
     }
+    if ok and (sent := line.get("findings")) is not None:
+        if (findings := _findings(sent)) is None:
+            _log_dropped(DroppedValue.FINDINGS_INVALID)
+        else:
+            result["findings"] = findings
     reason: Any = line.get("errorReason")
     if not ok and isinstance(reason, str) and _ERROR_REASON.fullmatch(reason):
         result["errorReason"] = reason
@@ -245,6 +318,9 @@ def minimal(result: Mapping[str, Any], *, keep_usage: bool = True) -> Result:
         "usage": None,
     }
     if result["ok"]:
+        # What the app decides the review verdict from is part of the verdict of a success (#517).
+        if "findings" in result:
+            verdict["findings"] = result["findings"]
         return verdict
     verdict["usage"] = result.get("usage") if keep_usage else None
     verdict["logTail"] = f"{result['errorCode']}" + (f" [{reason}]" if reason else "")
