@@ -13,6 +13,7 @@ import { builtInProjectDynamicSettings } from "../review-settings/settings.ts";
 import { managedModelsOf } from "./managed-models.ts";
 import { createUsageRecordsRepository } from "../db/repositories/usage-records-repository.ts";
 import { createJobsRepository } from "../db/repositories/jobs-repository.ts";
+import { createJobVmRunsRepository } from "../db/repositories/job-vm-runs-repository.ts";
 import { createRepositoriesRepository } from "../db/repositories/repositories-repository.ts";
 import { getDatabase } from "../db/startup.ts";
 import { integrationRegistry } from "../integrations/registry.ts";
@@ -135,6 +136,8 @@ function sharedDeps(): WorkerApiDeps {
     // #279: the metadata of a job's model (Dynamic, and a managed entry's), read when its claim is built.
     modelCapabilities,
     claimedKeys: getClaimedKeys(),
+    // #493: where a Dispatcher says it created the VM of a claim; scoped to the job's own workspace.
+    vmRuns: (workspaceId) => createJobVmRunsRepository(db, workspaceId),
     // #395: what happens between two sweeps. Both run after the response and do nothing in poll mode.
     jobEnded,
     activity: () => touched(),

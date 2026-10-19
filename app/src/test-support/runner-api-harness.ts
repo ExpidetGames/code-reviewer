@@ -8,6 +8,7 @@ import { createIntegrationsRepository } from "../db/repositories/integrations-re
 import { managedModelsOf } from "../runner-api/managed-models.ts";
 import { createUsageRecordsRepository } from "../db/repositories/usage-records-repository.ts";
 import { createJobsRepository } from "../db/repositories/jobs-repository.ts";
+import { createJobVmRunsRepository } from "../db/repositories/job-vm-runs-repository.ts";
 import { createRepositoriesRepository } from "../db/repositories/repositories-repository.ts";
 import { createDefaultIntegrationRegistry } from "../integrations/registry.ts";
 import { loadGithubAppConfig } from "../integrations/registry.ts";
@@ -417,6 +418,8 @@ export async function startRunnerApiHarness(
         ? {}
         : { modelCapabilities: options.modelCapabilities }),
       claimedKeys,
+      vmRuns: (workspaceId) =>
+        createJobVmRunsRepository(fixture.db, workspaceId, fixture.clock.now),
       ...(options.hooks ?? {}),
       now: fixture.clock.now,
       logger,
@@ -518,6 +521,23 @@ export async function startRunnerApiHarness(
   ): Promise<Response> {
     return target.release(
       new Request(`${url}/jobs/${jobId}/release`, {
+        method: "POST",
+        headers: headers(request, { "content-type": "application/json" }),
+        body: typeof body === "string" ? body : JSON.stringify(body),
+      }),
+      jobId,
+    );
+  }
+
+  /** #493: the report of a VM start by a Dispatcher: `body` is sent as JSON, or as it is if it is a string. */
+  function vmStart(
+    jobId: string,
+    body: unknown,
+    request: RequestOptions = {},
+    target: typeof api = api,
+  ): Promise<Response> {
+    return target.vmStart(
+      new Request(`${url}/jobs/${jobId}/vm`, {
         method: "POST",
         headers: headers(request, { "content-type": "application/json" }),
         body: typeof body === "string" ? body : JSON.stringify(body),
@@ -825,6 +845,13 @@ export async function startRunnerApiHarness(
     claim,
     claimed,
     release,
+    vmStart,
+    /** #493: the VM runs of the harness workspace. */
+    vmRuns: createJobVmRunsRepository(
+      fixture.db,
+      fixture.workspaceId,
+      fixture.clock.now,
+    ),
     jobState,
     version,
     heartbeat,

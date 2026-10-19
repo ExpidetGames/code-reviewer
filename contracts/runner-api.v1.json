@@ -636,6 +636,36 @@
         }
       }
     },
+    "VmName": {
+      "description": "#493: the name of a Sandbox VM, as the platform and the Dispatcher know it (unique per launch: `cr-<kind>-<job id>-<random>`). Free text of the Dispatcher's own naming; the app uses it only as a key and never as a command.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+    },
+    "VmStartRequest": {
+      "description": "#493: POST /api/runners/v1/jobs/{id}/vm, with the dispatcher credential (RUNNER_TOKEN) in Authorization and the job credential in the body, like the release. The Dispatcher says that it created the VM of the claim, right after `Sandbox.create` returned. Closed: an unknown field is refused. The first report of a VM wins and a repeat changes nothing. `startedAt` is the Dispatcher's clock; the app keeps it between the claim and its own clock. `timeoutSeconds` is the VM's own timeout, the platform's backstop for a VM that nobody stops. Only a job whose running claim the credential holds is accepted: a report after the claim ended is 409 RUNNER_JOB_ENDED, a credential that is not the claim's is 401. It only measures; it sets no price and never has to succeed for a launch to go on.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["credential", "vmName", "startedAt", "timeoutSeconds"],
+      "properties": {
+        "credential": { "$ref": "#/$defs/WorkerCredential" },
+        "vmName": { "$ref": "#/$defs/VmName" },
+        "startedAt": {
+          "description": "ISO 8601 in UTC with the `Z`; milliseconds optional.",
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$"
+        },
+        "timeoutSeconds": { "type": "integer", "minimum": 60, "maximum": 86400 }
+      }
+    },
+    "VmStartResponse": {
+      "description": "#493: 200 from the report. `recorded`: the VM is stored. `replayed`: the VM was known; nothing changed.",
+      "type": "object",
+      "required": ["version", "status"],
+      "properties": {
+        "version": { "const": 1 },
+        "status": { "type": "string", "enum": ["recorded", "replayed"] }
+      }
+    },
     "JobStateResponse": {
       "description": "#364: 200 from GET /api/runners/v1/jobs/{id} (the dispatcher credential only; a per-job credential is refused). What a Dispatcher asks to decide whether the VM of a job is a leftover: the job's status and nothing else, no job input, lease, repository or credential. `running`: the app holds the job under a lease. Any other status: it does not (`queued` also covers a lease that lapsed and a job that was given back). A reader that meets a status it does not know treats the job as running. An unknown id is 404 RUNNER_JOB_NOT_FOUND. An app of a previous release has no such route (a 404 without an ErrorResponse body); it is not a required feature, so a reader goes on without it.",
       "type": "object",
@@ -660,9 +690,15 @@
       }
     },
     "KnownAppFeature": {
-      "description": "The features an app lists in VersionResponse.features. A reader ignores a name it does not know and refuses to run against an app that lacks one it needs. `worker_api`: /api/workers/v1 exists. `claim_by_job_id`: ClaimRequest.jobId is honoured. `pool_cap`: ClaimRequest.maxRunning is honoured. `release`: the release call exists.",
+      "description": "The features an app lists in VersionResponse.features. A reader ignores a name it does not know and refuses to run against an app that lacks one it needs. `worker_api`: /api/workers/v1 exists. `claim_by_job_id`: ClaimRequest.jobId is honoured. `pool_cap`: ClaimRequest.maxRunning is honoured. `release`: the release call exists. `vm_lifecycle` (#493): POST /api/runners/v1/jobs/{id}/vm exists (the Dispatcher reports the VM it created, for the billable minutes); a Dispatcher sends that call only to an app that lists the feature.",
       "type": "string",
-      "enum": ["worker_api", "claim_by_job_id", "pool_cap", "release"]
+      "enum": [
+        "worker_api",
+        "claim_by_job_id",
+        "pool_cap",
+        "release",
+        "vm_lifecycle"
+      ]
     },
     "VersionResponse": {
       "description": "#318: 200 from GET /api/runners/v1/version (dispatcher credential; #322: a Worker may also send its per-job credential with ?jobId=<its job>, which must be the running claim of that job). Lets a Dispatcher or a Worker detect an app that is too old before it claims anything. An app of a previous release has no such route (404), which means it is too old. `version` is the runner API version; `appVersion` is the build of the app, for logs.",

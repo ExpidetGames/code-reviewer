@@ -108,6 +108,8 @@ describe("the examples", () => {
         "ReleaseResponse",
         "SplitClaimResponse",
         "VersionResponse",
+        "VmStartRequest",
+        "VmStartResponse",
       ]),
     );
   });
