@@ -952,6 +952,13 @@ after its last call, so one hour can only lose. The shared system message could 
 job per workspace in five to sixty minutes; that is not the case today and the log line below is how
 it would be seen.
 
+**With steering and thinking blocks (#533).** The constant steering instruction is part of the last
+system block, so the static prefix stays byte-stable within a run. A thinking block cannot carry a
+mark: the breakpoint of a turn goes on its last block that is not thinking. The wrap-up call changes
+the tools (and drops the reasoning of the earlier calls with `drop_block`), so it misses the cache by
+design; it is one call. A request without a forced choice has no instruction and non-strict tools, a
+different prefix, and caches on its own.
+
 **The engine marks too.** The pinned OpenCode (1.19.0), when the model id contains `claude` or
 `anthropic`, puts `cache_control` on the system message, on its last two other messages and on the
 tool calls of its history (on the message objects, which the Messages API has no field for: a 400).
