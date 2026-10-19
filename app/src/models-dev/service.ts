@@ -141,27 +141,39 @@ export function createModelsDevService(
     if (!fetched.ok) return fail(fetched.code);
     const parsed = parseModelsDev(fetched.body);
     if (!parsed.ok) return fail(parsed.code);
-    const stored = {
-      providers: await repository.listProviders(),
-      models: await repository.listModels(),
-    };
-    const plan = planCatalog({
-      parsed,
-      stored,
-      urlChecks: await urlChecksOf(parsed.providers),
-      now: now(),
+    // The addresses are judged before the transaction: a lookup can be slow and must not hold a database transaction open.
+    const urlChecks = await urlChecksOf(parsed.providers);
+    // What is stored is read, planned against and written in one transaction, so that a change made to a provider in
+    // between (an admin's confirmation, #554) is seen by the plan and not written over.
+    const planned = await deps.db.transaction().execute(async (trx) => {
+      const transactional = createModelsDevRepository(trx);
+      const plan = planCatalog({
+        parsed,
+        stored: {
+          providers: await transactional.listProviders(),
+          models: await transactional.listModels(),
+        },
+        urlChecks,
+        now: now(),
+      });
+      if (plan.guard.tripped && options.acceptLargeRemoval !== true)
+        return plan;
+      await transactional.apply(plan.write, {
+        summary: plan.summary,
+        at: now(),
+      });
+      return plan;
     });
-    if (plan.guard.tripped && options.acceptLargeRemoval !== true)
+    if (planned.guard.tripped && options.acceptLargeRemoval !== true)
       return fail(
         "models_dev_guard_unlisted_share",
-        `unlisted=${String(plan.guard.unlisted)} listed=${String(plan.guard.listed)}`,
+        `unlisted=${String(planned.guard.unlisted)} listed=${String(planned.guard.listed)}`,
       );
-    await repository.apply(plan.write, { summary: plan.summary, at: now() });
-    const s = plan.summary;
+    const s = planned.summary;
     log.info(
       `[models-dev] fetched: providers=${String(s.providers)} models=${String(s.models)} new=${String(s.newModels)} changed=${String(s.changedModels)} unlisted=${String(s.unlistedModels)} returned=${String(s.returnedModels)} blocked_providers=${String(s.blockedProviders)} rejected_providers=${String(s.rejectedProviders)}.`,
     );
-    return { status: "applied", summary: plan.summary };
+    return { status: "applied", summary: planned.summary };
   }
 
   async function run(
