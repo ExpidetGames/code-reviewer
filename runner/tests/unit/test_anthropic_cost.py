@@ -167,12 +167,16 @@ def test_no_other_model_has_a_higher_tier() -> None:
     assert cost_of_usage("claude-opus-5", usage(900_000)) == Decimal("4.5")
 
 
-# #511-T16
-def test_zero_usage_of_a_listed_model_is_a_known_cost_of_zero() -> None:
-    cost = cost_of_usage("claude-haiku-5-5", usage(0, 0))
+# #511-T16: an answer always has input and output tokens, so no token at all is a usage that was
+# left out (LiteLLM fills a missing usage with zeros): not a call that cost nothing.
+def test_a_usage_of_no_token_at_all_is_not_a_cost_of_zero() -> None:
+    assert cost_of_usage("claude-haiku-5-5", usage(0, 0)) is None
+    assert cost_of_usage("claude-haiku-5-5", {"prompt_tokens": 0, "completion_tokens": 0}) is None
 
-    assert cost == Decimal(0)
-    assert cost is not None
+
+# #511-T16: the smallest real answer still costs something exact.
+def test_one_output_token_is_a_cost() -> None:
+    assert cost_of_usage("claude-haiku-5-5", usage(0, 1)) == Decimal("0.0000005")
 
 
 # #511-T16

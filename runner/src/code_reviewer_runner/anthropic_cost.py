@@ -9,7 +9,9 @@ have one. A call that cannot be priced exactly has **no** cost (`None`), never z
 
 - a model that is not in the list;
 - a usage that cannot be read (a missing, negative, fractional, boolean or absurdly large count,
-  cache counts that do not fit the prompt, a cache write split that does not add up);
+  cache counts that do not fit the prompt, a cache write split that does not add up) or that holds
+  no token at all: every real answer has input and output tokens (an empty reply still has output
+  tokens), so a usage of nothing is a usage that was left out, which LiteLLM fills with zeros;
 - a call that carries a charge the table does not know: a tier other than the standard one, the fast
   mode, an inference region other than the default one, a server tool such as web search, or
   per-iteration usage.
@@ -87,7 +89,7 @@ def _tokens(usage: object) -> _Tokens | None:
     if prompt is None or output is None or read is None or written is None:
         return None
     uncached = prompt - read - written
-    if uncached < 0:
+    if uncached < 0 or prompt + output == 0:
         return None
     write_5m, write_1h = written, 0
     details = usage_field(
@@ -112,7 +114,7 @@ def _prices_for(model: ClaudeModel, tokens: _Tokens) -> Prices:
 def cost_of_usage(model_id: str, usage: object) -> Decimal | None:
     """The exact USD cost of one call to `model_id` with this usage, or None if it cannot be priced.
 
-    `model_id` is the bare Claude API id (no routing prefix). A usage of zero tokens costs zero.
+    `model_id` is the bare Claude API id (no routing prefix).
     """
     model = model_for(model_id)
     if model is None or usage is None or _has_unpriced_charge(usage):

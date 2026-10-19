@@ -1,6 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 
-"""A fake OpenAI-compatible LLM endpoint for the engine suite (OpenRouter shaped, loopback only).
+"""A fake LLM endpoint for the engine suite (OpenRouter shaped and Anthropic's Messages API, on
+loopback only).
+
+The Anthropic provider (#511) reaches the same fake through LiteLLM's real Anthropic code path:
+`ANTHROPIC_API_BASE` is the fake's address without `/v1`, and the request is
+`POST /api/v1/messages` with the key in `x-api-key`. The answer is a message with a usage of input
+and output tokens (`anthropic_usage`) and no charge, as the Claude API states none.
 
 PR-Agent talks to it through LiteLLM's real OpenRouter code path: `OPENROUTER__API_BASE` points at
 `http://127.0.0.1:<port>/api/v1`, and the request is `POST /api/v1/chat/completions` with the key in
@@ -40,6 +46,13 @@ class LlmRequest:
     path: str
     authorization: str
     body: dict[str, Any]
+    # The headers of the Messages API: the key and the version of the protocol.
+    api_key: str = ""
+    anthropic_version: str = ""
+
+    @property
+    def is_messages(self) -> bool:
+        return self.path.split("?")[0].endswith("/messages")
 
     @property
     def model(self) -> str:
@@ -59,6 +72,15 @@ class LlmRequest:
 
     def _text(self, role: str) -> str:
         parts: list[str] = []
+        top_level: Any = self.body.get("system") if role == "system" else None
+        if isinstance(top_level, str):
+            parts.append(top_level)
+        elif isinstance(top_level, list):
+            blocks: list[Any] = top_level  # pyright: ignore[reportUnknownVariableType]
+            for block in blocks:
+                if isinstance(block, dict):
+                    fields: dict[str, Any] = block  # pyright: ignore[reportUnknownVariableType]
+                    parts.append(str(fields.get("text", "")))
         for message in self.body.get("messages", []):
             if message.get("role") != role:
                 continue
@@ -93,6 +115,10 @@ class FakeLlm:
     by_model: dict[str, Reply] = field(default_factory=lambda: {})
     # The charge of an answer in USD, stated in `usage.cost` like OpenRouter; None leaves it out.
     cost: float | None = 0.00042
+    # What an Anthropic answer reports as its usage (#511); cache fields can be added.
+    anthropic_usage: dict[str, Any] = field(
+        default_factory=lambda: {"input_tokens": 100, "output_tokens": 50}
+    )
     # Error messages quote the key that arrived, like a provider that says "Incorrect API key".
     echo_key_in_errors: bool = False
     requests: list[LlmRequest] = field(default_factory=lambda: [])
@@ -179,7 +205,13 @@ class FakeLlm:
             body: dict[str, Any] = json.loads(raw)
         except ValueError:
             body = {}
-        request = LlmRequest(handler.path, handler.headers.get("Authorization", ""), body)
+        request = LlmRequest(
+            handler.path,
+            handler.headers.get("Authorization", ""),
+            body,
+            api_key=handler.headers.get("x-api-key", ""),
+            anthropic_version=handler.headers.get("anthropic-version", ""),
+        )
         with self._changed:
             self.requests.append(request)
             self._changed.notify_all()
@@ -189,8 +221,18 @@ class FakeLlm:
         if reply.status != 200:
             message = reply.message
             if self.echo_key_in_errors:
-                message = f"Incorrect API key provided: {request.authorization.split(' ')[-1]}"
+                key = request.api_key or request.authorization.split(" ")[-1]
+                message = f"Incorrect API key provided: {key}"
+            if request.is_messages:
+                error = {"type": "error", "error": {"type": "api_error", "message": message}}
+                self._send(handler, reply.status, error)
+                return
             self._send(handler, reply.status, {"error": {"message": message, "code": reply.status}})
+            return
+        if request.is_messages:
+            self._send(
+                handler, 200, anthropic_message(request.model, reply.content, self.anthropic_usage)
+            )
             return
         self._send(handler, 200, completion(request.model, reply.content, self.cost))
 
@@ -239,6 +281,20 @@ def completion(model: str, content: str, cost: float | None = None) -> dict[str,
                 "finish_reason": "stop",
             }
         ],
+        "usage": usage,
+    }
+
+
+def anthropic_message(model: str, content: str, usage: dict[str, Any]) -> dict[str, Any]:
+    """A non-streaming answer of the Anthropic Messages API: text and a usage, no charge."""
+    return {
+        "id": "msg_fake",
+        "type": "message",
+        "role": "assistant",
+        "model": model,
+        "content": [{"type": "text", "text": content}],
+        "stop_reason": "end_turn",
+        "stop_sequence": None,
         "usage": usage,
     }
 
