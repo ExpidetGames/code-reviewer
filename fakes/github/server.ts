@@ -107,8 +107,9 @@ export type FakeFailure = {
   pathIncludes?: string;
   /** Applies to requests whose query string contains this text, for example "page=2". */
   queryIncludes?: string;
-  /** Answers with this status and an empty JSON error body. */
+  /** Answers with this status and a JSON error body holding `message` ("Injected failure" when omitted). */
   status?: number;
+  message?: string;
   headers?: Record<string, string>;
   /** Waits this long before looking at the request (and before the status, if both are given). */
   delayMs?: number;
@@ -309,7 +310,7 @@ export async function startGithubFake(
           response,
           failure.status,
           "application/json",
-          JSON.stringify({ message: "Injected failure" }),
+          JSON.stringify({ message: failure.message ?? "Injected failure" }),
           failure.headers,
         );
         return;

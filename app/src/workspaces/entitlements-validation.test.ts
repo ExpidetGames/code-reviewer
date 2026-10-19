@@ -61,6 +61,7 @@ describe("validating entitlements", () => {
         periodStart: "2026-10-01T02:00:00.000Z",
         suspended: false,
         suspensionCode: null,
+        modelAccess: { catalogEntries: null },
       },
     });
   });
@@ -459,7 +460,11 @@ describe("reading stored entitlements", () => {
 
   // #271-T10
   it("returns the data of a valid entry", () => {
-    expect(readEntitlements(stored)).toEqual(stored);
+    // #428-T05: an entry without the model access reads as "every released entry".
+    expect(readEntitlements(stored)).toEqual({
+      ...stored,
+      modelAccess: { catalogEntries: null },
+    });
   });
 
   // #271-T10
@@ -496,7 +501,7 @@ describe("reading stored entitlements", () => {
         newField: 1,
         limits: { ...stored.limits, newLimit: 5 },
       }),
-    ).toEqual(stored);
+    ).toEqual({ ...stored, modelAccess: { catalogEntries: null } });
   });
 });
 
@@ -513,5 +518,147 @@ describe("checking that a period start does not go backwards", () => {
       checkPeriodStartNotBackwards("2026-10-01T00:00:00.001Z", stored),
     ).toBeUndefined();
     expect(checkPeriodStartNotBackwards(stored, undefined)).toBeUndefined();
+  });
+});
+
+describe("the model access (#428)", () => {
+  const ID_A = "mce_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const ID_B = "mce_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+  const manyIds = (count: number) =>
+    Array.from(
+      { length: count },
+      (_unused, index) => `mce_${String(index).padStart(32, "0")}`,
+    );
+
+  // #428-T05
+  it("is optional on a write and reads as every released entry", () => {
+    expect(validateEntitlements(input(), NOW)).toMatchObject({
+      ok: true,
+      value: { modelAccess: { catalogEntries: null } },
+    });
+  });
+
+  it("accepts null, an empty list, listed ids and ids that no entry has", () => {
+    for (const catalogEntries of [null, [], [ID_A], [ID_A, ID_B], manyIds(100)])
+      expect(
+        validateEntitlements(input({ modelAccess: { catalogEntries } }), NOW),
+      ).toMatchObject({
+        ok: true,
+        value: { modelAccess: { catalogEntries } },
+      });
+  });
+
+  // #428-T03
+  it.each([
+    ["a string", { catalogEntries: "all" }],
+    ["an object", { catalogEntries: { [ID_A]: true } }],
+    ["a missing list", {}],
+    ["a number in the list", { catalogEntries: [1] }],
+    ["null in the list", { catalogEntries: [null] }],
+    ["an empty id", { catalogEntries: [""] }],
+    ["an id with a space", { catalogEntries: [`${ID_A} `] }],
+    ["an id with a slash", { catalogEntries: ["vendor/model"] }],
+    [
+      "an id that is far too long",
+      { catalogEntries: [`mce_${"a".repeat(80)}`] },
+    ],
+    ["more than 100 ids", { catalogEntries: manyIds(101) }],
+    ["the same id twice", { catalogEntries: [ID_A, ID_B, ID_A] }],
+    ["a key it does not know", { catalogEntries: null, extra: 1 }],
+  ])("refuses %s with catalog_entry_invalid", (_name, modelAccess) => {
+    expect(validateEntitlements(input({ modelAccess }), NOW)).toMatchObject({
+      ok: false,
+      code: "catalog_entry_invalid",
+    });
+  });
+
+  // #428-T03
+  it.each([
+    ["null", null],
+    ["a string", "all"],
+    ["a list", [ID_A]],
+    ["a number", 1],
+  ])("refuses a model access that is %s", (_name, modelAccess) => {
+    expect(validateEntitlements(input({ modelAccess }), NOW)).toMatchObject({
+      ok: false,
+      code: "catalog_entry_invalid",
+      field: "modelAccess",
+    });
+  });
+
+  // #428-T10
+  it("is accepted next to the own key, so that a switch back to the managed key finds it", () => {
+    expect(
+      validateEntitlements(
+        input({
+          keyMode: "own",
+          limits: limits(),
+          modelAccess: { catalogEntries: [ID_A] },
+        }),
+        NOW,
+      ),
+    ).toMatchObject({
+      ok: true,
+      value: { keyMode: "own", modelAccess: { catalogEntries: [ID_A] } },
+    });
+  });
+
+  describe("when reading", () => {
+    // #428-T05
+    it("reads a missing field as null and a stored list as it is", () => {
+      expect(readEntitlements(input())).toMatchObject({
+        modelAccess: { catalogEntries: null },
+      });
+      expect(
+        readEntitlements(input({ modelAccess: { catalogEntries: [ID_A] } })),
+      ).toMatchObject({ modelAccess: { catalogEntries: [ID_A] } });
+      expect(
+        readEntitlements(input({ modelAccess: { catalogEntries: [] } })),
+      ).toMatchObject({ modelAccess: { catalogEntries: [] } });
+    });
+
+    // #428-T05
+    it("ignores a key of a newer version inside the field", () => {
+      expect(
+        readEntitlements(
+          input({ modelAccess: { catalogEntries: [ID_A], newer: true } }),
+        ),
+      ).toMatchObject({ modelAccess: { catalogEntries: [ID_A] } });
+    });
+
+    // #428-T05
+    it.each([
+      ["a string", "all"],
+      ["a field without a list", {}],
+      ["a list of numbers", { catalogEntries: [1] }],
+      ["more than 100 ids", { catalogEntries: manyIds(101) }],
+    ])("reads %s as unreadable: damaged data grants no model", (_n, value) => {
+      expect(readEntitlements(input({ modelAccess: value }))).toBeUndefined();
+    });
+
+    // #428-T03
+    it("reads a list with the same id twice (only a write refuses it)", () => {
+      expect(
+        readEntitlements(
+          input({ modelAccess: { catalogEntries: [ID_A, ID_A] } }),
+        ),
+      ).toMatchObject({ modelAccess: { catalogEntries: [ID_A, ID_A] } });
+    });
+
+    // #428-T10
+    it("reads a list next to the own key", () => {
+      expect(
+        readEntitlements(
+          input({
+            keyMode: "own",
+            limits: limits(),
+            modelAccess: { catalogEntries: [ID_A] },
+          }),
+        ),
+      ).toMatchObject({
+        keyMode: "own",
+        modelAccess: { catalogEntries: [ID_A] },
+      });
+    });
   });
 });

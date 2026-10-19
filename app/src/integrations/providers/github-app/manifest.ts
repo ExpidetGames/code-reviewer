@@ -20,10 +20,18 @@ export const GITHUB_APP_PATHS = {
   installationSetup: "/github/connected",
 } as const;
 
-/** The repository permissions of the App: exactly what a review job gets, and nothing else. */
+/**
+ * The repository permission the App itself needs for the check run of a review (#405): it creates and updates the
+ * check run in the checks area of the pull request. Only the App's own token has it, never the token of a review
+ * job (`JOB_TOKEN_PERMISSIONS`): the Worker does not write check runs. An installation or an App made by hand that
+ * lacks it keeps reviewing; `missingPermissions` names it and no job fails because of it.
+ */
+export const CHECK_RUN_PERMISSIONS = { checks: "write" } as const;
+
+/** The repository permissions of the App: what a review job gets, and the check runs the App writes itself. */
 export const REPOSITORY_PERMISSIONS: Readonly<
   Record<string, "read" | "write">
-> = JOB_TOKEN_PERMISSIONS;
+> = { ...JOB_TOKEN_PERMISSIONS, ...CHECK_RUN_PERMISSIONS };
 
 /**
  * The account permission "Email addresses": it lets a sign in with GitHub read the verified primary email
@@ -119,8 +127,9 @@ const LEVELS = ["read", "write", "admin"];
 
 /**
  * What an App lacks of what the manifest asks for, by API permission name, given the `permissions` object of
- * `GET /app`. An App that was imported or made by hand may lack the account permission "Email addresses" or
- * the organization permission "Members"; the portal lists what to add in the App's settings. A level below
+ * `GET /app`. An App that was imported or made by hand may lack the repository permission "Checks", the account
+ * permission "Email addresses" or the organization permission "Members"; the portal lists what to add in the
+ * App's settings. A level below
  * the wanted one counts as missing.
  */
 export function missingPermissions(

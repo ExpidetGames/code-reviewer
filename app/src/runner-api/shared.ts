@@ -6,8 +6,11 @@
 import "server-only";
 import { createIntegrationsRepository } from "../db/repositories/integrations-repository.ts";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
-import { createModelTiersService } from "../model-tiers/service.ts";
-import { allTierModels } from "../model-tiers/tiers.ts";
+import { createCatalogRepository } from "../db/repositories/catalog-repository.ts";
+import { createCatalogService } from "../model-catalog/service.ts";
+import { configuredLlmModel } from "../llm/config.ts";
+import { builtInProjectDynamicSettings } from "../review-settings/settings.ts";
+import { managedModelsOf } from "./managed-models.ts";
 import { createUsageRecordsRepository } from "../db/repositories/usage-records-repository.ts";
 import { createJobsRepository } from "../db/repositories/jobs-repository.ts";
 import { createRepositoriesRepository } from "../db/repositories/repositories-repository.ts";
@@ -32,7 +35,7 @@ import { createProjectClaimGuard } from "./project-claim-guard.ts";
 import { HEARTBEAT_INTERVAL_SECONDS } from "./contract.ts";
 import { createReviewSettingsJobOptionsSource } from "./review-settings-job-options.ts";
 import { consoleRunnerApiLogger, describeError } from "./logger.ts";
-import { knownSecretsFromEnv } from "./redact.ts";
+import { createKnownSecrets } from "./known-secrets.ts";
 import { errorResponse } from "./responses.ts";
 import { configuredRunnerToken } from "./token-auth.ts";
 
@@ -55,11 +58,13 @@ function getClaimedKeys(): ClaimedKeys {
  */
 function sharedDeps(): WorkerApiDeps {
   const db = getDatabase();
-  // #280: which model backs a tier. Only the claim and the masking of a result read it; the checks of a save are the
-  // operator API's.
-  const modelTiers = createModelTiersService({
+  // #432: the model catalog. A claim reads it for a workspace on the operator's key only (an entry and the instance
+  // defaults), and the masking of a result reads the model ids of every entry. The claim never writes it.
+  const catalog = createCatalogService({
+    catalog: createCatalogRepository(db),
     settings: createInstanceSettingsRepository(db),
     modelCapabilities,
+    logger: { info: (line) => console.info(line) },
   });
   const llm = getWorkspaceLlm();
   return {
@@ -94,8 +99,9 @@ function sharedDeps(): WorkerApiDeps {
     jobOptions: createReviewSettingsJobOptionsSource({
       settings: reviewSettingsServiceFor,
     }),
-    // The LLM access of the workspace of the claimed job: its own key, never another workspace's (src/llm).
-    loadLlm: (workspaceId) => llm.accessFor(workspaceId),
+    // The key the selection of the claimed job names, of the job's own workspace: its own key of the selected provider, or
+    // the operator's key of it, never another workspace's and never the other key (src/llm).
+    keyFor: (workspaceId, selection) => llm.keyFor(workspaceId, selection),
     // The standing of the job's workspace, asked by the Worker's fetch before it hands out a key (#276).
     entitlementsFor: (workspaceId) =>
       readEffectiveEntitlements(db, workspaceId),
@@ -105,25 +111,28 @@ function sharedDeps(): WorkerApiDeps {
         job.id,
         keyMode,
       ),
-    // #280: the managed tier of a job on the operator's key, in its usage record (the name, never the model).
-    recordModelTier: (job, tier) =>
-      createUsageRecordsRepository(db, job.workspaceId).setModelTier(
-        job.id,
-        tier,
-      ),
-    // #280: which model backs a tier for a kind of review. Only the claim reads it; the checks of a save are the
-    // operator API's, so the service here never writes.
-    modelTiers,
-    tierModels: async (job) => {
-      const record = await createUsageRecordsRepository(
-        db,
-        job.workspaceId,
-      ).get(job.id);
-      return record?.modelTier == null
-        ? { managed: false, models: [] }
-        : { managed: true, models: allTierModels(await modelTiers.read()) };
-    },
-    // #279: the metadata of a job's model (Dynamic, and a managed tier's), read when its claim is built.
+    // #432: the provider and the catalog entry of the job (id and name as they are now), in its usage record; never the model.
+    recordSelection: (job, selection) =>
+      createUsageRecordsRepository(db, job.workspaceId).setSelection(job.id, {
+        provider: selection.provider,
+        catalogEntry:
+          selection.keyMode === "managed"
+            ? { id: selection.entry.id, name: selection.entry.name }
+            : null,
+      }),
+    catalog,
+    // The model of a kind when no layer sets one: read for every claim, so a changed LLM_MODEL reaches the next job.
+    builtInModel: (kind) =>
+      kind === "diff"
+        ? configuredLlmModel(process.env)
+        : builtInProjectDynamicSettings().dynamicModel,
+    // Whether the job ran on the operator's key, and every model id of the catalog, for masking the result.
+    managedModels: managedModelsOf({
+      usage: (job) =>
+        createUsageRecordsRepository(db, job.workspaceId).get(job.id),
+      catalog,
+    }),
+    // #279: the metadata of a job's model (Dynamic, and a managed entry's), read when its claim is built.
     modelCapabilities,
     claimedKeys: getClaimedKeys(),
     // #395: what happens between two sweeps. Both run after the response and do nothing in poll mode.
@@ -133,10 +142,11 @@ function sharedDeps(): WorkerApiDeps {
     logger: consoleRunnerApiLogger,
     heartbeatIntervalSeconds: HEARTBEAT_INTERVAL_SECONDS,
     // The runner token and the current LLM key of the job's workspace (the key of the claim is in the database).
-    knownSecrets: async (workspaceId) => [
-      ...knownSecretsFromEnv(process.env),
-      ...(await llm.currentKeysFor(workspaceId).catch(() => [])),
-    ],
+    // Fails closed (known-secrets.ts): a key that cannot be read fails the completion instead of masking less.
+    knownSecrets: createKnownSecrets({
+      env: process.env,
+      currentKeysFor: (workspaceId) => llm.currentKeysFor(workspaceId),
+    }),
   };
 }
 

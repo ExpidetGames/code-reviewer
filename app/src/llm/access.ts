@@ -126,8 +126,29 @@ export function revealLlmAccess(access: LlmAccess): LlmAccess {
 
 const MASK = "[redacted]";
 
-/** What stands in a text where the id of a managed tier's model was (#283). */
+/** What stands in a text where the id of a managed entry's model was (#283). */
 export const MODEL_MASK = "[model]";
+
+/** What stands in a text where the name of a provider was (#435). */
+export const PROVIDER_MASK = "[provider]";
+
+/**
+ * Replaces the name of a provider (its id and its label) in a text with `[provider]`, in any letter case and also inside
+ * a longer word, so that the exception class named after the provider goes with the provider's own name in its message.
+ * A member of a workspace on the operator's key does not read which provider answers (ADR 0005, 2.17).
+ */
+export function maskProviderInText(text: string, names: string[]): string {
+  let masked = text;
+  // Longest first, so a label that contains an id is masked as a whole.
+  for (const name of [...new Set(names)]
+    .filter((value) => value !== "")
+    .sort((a, b) => b.length - a.length))
+    masked = masked.replace(
+      new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"),
+      PROVIDER_MASK,
+    );
+  return masked;
+}
 
 // The forms a secret takes in an error text besides the plain one: percent-encoded (in a URL),
 // escaped for JSON (in a logged body) and base64 (in an `Authorization: Basic` header or a dump).
@@ -151,8 +172,8 @@ export function maskSecretInText(text: string, ...secrets: string[]): string {
 }
 
 /**
- * Replaces the ids of managed tier models in a text with `[model]` (#283), in the same forms as a secret. The id of a
- * tier's model is operator data a workspace must not read, but it is not a credential: the mask says what was there.
+ * Replaces the ids of managed entry models in a text with `[model]` (#283), in the same forms as a secret. The id of an
+ * entry's model is operator data a workspace must not read, but it is not a credential: the mask says what was there.
  */
 export function maskModelInText(text: string, ...models: string[]): string {
   return replaceForms(text, models, MODEL_MASK);

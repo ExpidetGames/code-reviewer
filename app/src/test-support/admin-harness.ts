@@ -23,9 +23,16 @@ import { createRateLimitsRepository } from "../db/repositories/rate-limits-repos
 import { createSmtpConfigStore } from "../mail/smtp-config.ts";
 import type { SmtpTimeouts } from "../mail/smtp-delivery.ts";
 import { createTestMailService } from "../mail/test-mail.ts";
+import { createOperatorKeyTestService } from "../llm/operator-key-test.ts";
 import { createSecretStore } from "../secrets/store.ts";
 import type { FakeGithub } from "../../../fakes/github/server.ts";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
+import { createCatalogRepository } from "../db/repositories/catalog-repository.ts";
+import { createModelCapabilityChecker } from "../llm/model-capabilities.ts";
+import { llmProviderDescriptors } from "../llm/providers/index.ts";
+import { createCatalogAdminService } from "../model-catalog/admin-service.ts";
+import { createCatalogRouteHandlers } from "../model-catalog/admin-http.ts";
+import { createCatalogService } from "../model-catalog/service.ts";
 import { createGithubCredentialStore } from "../github-config/credentials.ts";
 import { createGithubRouteHandlers } from "../github-config/http.ts";
 import { createGithubConfigService } from "../github-config/service.ts";
@@ -62,6 +69,8 @@ export type AdminHarnessOptions = {
   mailConfigured?: boolean;
   /** The fake GitHub the GitHub routes talk to. Default: one is started the first time a GitHub route is used. */
   github?: FakeGithub;
+  /** The fake LLM the Test button of the operator's keys talks to. Default: an address where nothing answers. */
+  llm?: { baseUrl: string };
 };
 
 /** Short waits, so a test of a mail server that never answers does not take half a minute. */
@@ -106,15 +115,34 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
     env: githubEnv,
   });
   const smtp = createSmtpConfigStore({ db, appSecret: SETUP_TEST_SECRET });
+  // The model catalog (#429): the real service over the real database, its capability checks answered by the fake LLM
+  // (an address where nothing answers when a test brings none), and the audit lines of a change of model kept in a list.
+  const catalogLog: string[] = [];
+  const catalog = createCatalogService({
+    catalog: createCatalogRepository(db),
+    settings: createInstanceSettingsRepository(db),
+    modelCapabilities: createModelCapabilityChecker({
+      baseUrl: () => options.llm?.baseUrl ?? "http://127.0.0.1:1/api/v1",
+      log: () => undefined,
+      timeoutMs: 1_000,
+    }),
+    logger: { info: (line) => catalogLog.push(line) },
+  });
   const service = createAdminService({
     db,
     secrets,
     smtp,
+    catalogSummary: () => catalog.summary(),
     testMail: createTestMailService({
       config: smtp,
       rateLimits: createRateLimitsRepository(db),
       baseUrl: ADMIN_TEST_BASE_URL,
       timeouts: ADMIN_TEST_SMTP_TIMEOUTS,
+    }),
+    operatorKeyTest: createOperatorKeyTestService({
+      rateLimits: createRateLimitsRepository(db),
+      baseUrlOf: () => options.llm?.baseUrl ?? "http://127.0.0.1:1",
+      log: () => undefined,
     }),
     // A test switches the flag; a user authorization saved through the portal counts as well.
     githubConfigured: async () =>
@@ -173,6 +201,22 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
     })();
     return githubPart;
   }
+  // The routes of the model catalog (#429).
+  const catalogRoutes = createCatalogRouteHandlers({
+    access: async () =>
+      adminAccessOf(await lookupSession(auth, current.headers, setup.gates)),
+    notFound: () => {
+      throw new NotFoundSignal();
+    },
+    service: createCatalogAdminService({
+      catalog,
+      providers: () =>
+        llmProviderDescriptors.ids.map((id) => ({
+          id,
+          label: llmProviderDescriptors.labelOf(id),
+        })),
+    }),
+  });
   // The synchronization with GitHub is a double that counts how often it was asked: what these tests need to
   // know is whether a request got as far as the synchronization.
   const syncCalls = { count: 0 };
@@ -397,6 +441,40 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
         request.method === "POST"
       )
         return await handlers.testMail(request);
+      const llmKeyTest =
+        /^\/api\/instance-portal\/llm-keys\/([^/]+)\/test$/.exec(pathname);
+      if (llmKeyTest !== null && request.method === "POST")
+        return await handlers.testLlmKey(
+          request,
+          decodeURIComponent(llmKeyTest[1] ?? ""),
+        );
+      const catalogPath =
+        /^\/api\/instance-portal\/model-catalog(?:\/([^/]+)(?:\/(release|retire))?)?$/.exec(
+          pathname,
+        );
+      if (catalogPath !== null) {
+        const [, segment, action] = catalogPath;
+        const id = decodeURIComponent(segment ?? "");
+        const method = request.method;
+        if (segment === undefined) {
+          if (method === "GET") return await catalogRoutes.get(request);
+          if (method === "POST") return await catalogRoutes.create(request);
+        } else if (action === undefined && segment === "check") {
+          if (method === "POST") return await catalogRoutes.check(request);
+        } else if (action === undefined && segment === "order") {
+          if (method === "PUT") return await catalogRoutes.reorder(request);
+        } else if (action === undefined && segment === "defaults") {
+          if (method === "PUT") return await catalogRoutes.setDefaults(request);
+        } else if (action === undefined) {
+          if (method === "PUT") return await catalogRoutes.update(request, id);
+          if (method === "DELETE")
+            return await catalogRoutes.remove(request, id);
+        } else if (method === "POST") {
+          return action === "release"
+            ? await catalogRoutes.release(request, id)
+            : await catalogRoutes.retire(request, id);
+        }
+      }
       if (pathname.startsWith("/api/instance-portal/github")) {
         const { routes } = await github();
         if (
@@ -510,6 +588,9 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
     secrets,
     smtp,
     service,
+    /** The model catalog service the catalog routes use (#429) and the audit lines it wrote. */
+    catalog,
+    catalogLog,
     credentials,
     /** The fake GitHub behind the GitHub routes (started on first use). */
     fakeGithub: async () => (await github()).fake,

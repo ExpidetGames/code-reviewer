@@ -21,19 +21,19 @@ A save **replaces the whole set** of its layer: a field left out is inherited ag
 allow list may change both layers (no admin role in the MVP); `app_settings.updated_by` records who saved
 the global defaults last.
 
-| Field               | Meaning                                                                                                                                                                | Built-in value                                 | Limits                                                           |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------- |
-| `model`             | The model (as the provider spells it, no prefix); the key is not a review setting but the workspace's own (`src/llm/`)                                                 | `LLM_MODEL`, else `anthropic/claude-haiku-5.5` | the pattern the runner accepts                                   |
-| `fallbackModel`     | Tried when the model fails; `null` = none                                                                                                                              | none                                           | same pattern                                                     |
-| `extraInstructions` | Project rules for the model, free text                                                                                                                                 | none                                           | 4000 characters, no control characters                           |
-| `maxFindings`       | The most findings one review lists                                                                                                                                     | 5                                              | 1 to 30                                                          |
-| `maxTokens`         | Token budget of a review (`llm.maxTokens`)                                                                                                                             | 100000 (PR-Agent's own: 32000)                 | 8000 to 2000000, not above the model's context window (if known) |
-| `largePrChunking`   | Review a large pull request in chunks instead of leaving files out                                                                                                     | on                                             | boolean                                                          |
-| `inlineKeyIssues`   | Also post every finding as an inline comment                                                                                                                           | off                                            | boolean                                                          |
-| `autoReviewOnOpen`  | Review when a pull request is opened, reopened or marked ready                                                                                                         | on                                             | boolean                                                          |
-| `autoReviewOnPush`  | Review again when commits are pushed                                                                                                                                   | on                                             | boolean                                                          |
-| `allowedCommands`   | The comment commands people may use (`review`; the removed commands became `[]` on upgrade)                                                                            | `["review"]`                                   | a subset of `["review"]`, no duplicates                          |
-| `modelTier`         | The quality level of a workspace on the operator's key (#280): which of the operator's models backs its reviews, never shown. Ignored unless the key mode is `managed` | `medium`                                       | `low`, `medium` or `high` (`INVALID_FORMAT` otherwise)           |
+| Field               | Meaning                                                                                                                                                                 | Built-in value                                 | Limits                                                           |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------- |
+| `provider`          | The provider of `model` (#430): a provider of the registry (`src/llm/providers/`), stored by its id. A workspace default that a project may override. Own key mode only | the default provider (`openrouter`)            | an id of the registry (`PROVIDER_UNKNOWN` otherwise)             |
+| `model`             | The model (as the provider spells it, no prefix); the key is not a review setting but the workspace's own (`src/llm/`)                                                  | `LLM_MODEL`, else `anthropic/claude-haiku-5.5` | the pattern the runner accepts                                   |
+| `fallbackModel`     | Tried when the model fails; `null` = none                                                                                                                               | none                                           | same pattern                                                     |
+| `extraInstructions` | Project rules for the model, free text                                                                                                                                  | none                                           | 4000 characters, no control characters                           |
+| `maxFindings`       | The most findings one review lists                                                                                                                                      | 5                                              | 1 to 30                                                          |
+| `maxTokens`         | Token budget of a review (`llm.maxTokens`)                                                                                                                              | 100000 (PR-Agent's own: 32000)                 | 8000 to 2000000, not above the model's context window (if known) |
+| `largePrChunking`   | Review a large pull request in chunks instead of leaving files out                                                                                                      | on                                             | boolean                                                          |
+| `inlineKeyIssues`   | Also post every finding as an inline comment                                                                                                                            | off                                            | boolean                                                          |
+| `autoReviewOnOpen`  | Review when a pull request is opened, reopened or marked ready                                                                                                          | on                                             | boolean                                                          |
+| `autoReviewOnPush`  | Review again when commits are pushed                                                                                                                                    | on                                             | boolean                                                          |
+| `allowedCommands`   | The comment commands people may use (`review`; the removed commands became `[]` on upgrade)                                                                             | `["review"]`                                   | a subset of `["review"]`, no duplicates                          |
 
 The limits are `REVIEW_SETTING_LIMITS`; `validate.ts` checks every field and reports each problem as
 `{ field, code }` with a stable code (`REVIEW_SETTING_ISSUE_CODES`), never with the value.
@@ -50,46 +50,136 @@ request only changed the model). A combination that a later change of another la
 not blamed on an unrelated save; `cost.exceedsContext` lists it for the UI. **For a workspace on the operator's key**
 (key mode `managed`, #280) none of this applies: the stored model is not the one that runs and the user does not know
 the one that does, so the save does not check `maxTokens` against a model and `cost.exceedsContext` is empty; the claim
-cuts the budget to the window of the tier's model (`src/model-tiers/README.md`).
+cuts the budget to the window of the catalog entry's model (`src/model-catalog/README.md`, "The token budget of a managed
+job").
 
-`modelTier` is not sent to the runner: it is read by the claim of a job on the operator's key, which swaps the model
-for the operator's model of the tier.
+**The quality level `modelTier` is gone (#434).** The tiers Low, Medium and High were turned into catalog entries
+(`20261018170000_migrate_model_tiers_to_catalog.ts`, `src/model-catalog/README.md`, "Migrated from the tiers") and are no
+setting any more: a request that carries `modelTier` is refused as an unknown field (`400 UNKNOWN_FIELD`, `field` is the name,
+never a value), and a stored `modelTier` is read by nothing (`parseStoredOverrides` knows the fields of the table above
+only). It stays in the stored JSON until a later migration removes it; **a save of the Diff group of a project or of the
+defaults replaces that group as a whole, so the member goes with the first save of its row** (the migration has already
+copied its meaning into `catalogEntryDiff` and `catalogEntryDynamic`).
 
-## A workspace on the operator's key chooses a quality level, not a model (#283)
+## A workspace on the operator's key chooses a catalog entry, not a model (#283, #433)
 
 For a workspace whose key mode is `managed` (`operatorsModels` of the service, read on every call) the models are the
-operator's and the workspace never sees them (`src/model-tiers/README.md`):
+operator's and the workspace never sees them (`src/model-catalog/README.md`):
 
 - **The views carry no model.** `getGlobalSettings`, `getProjectSettings` and the answer of a save have no `model`, no
   `fallbackModel` and no Dynamic model: not in `effective`, `overrides`, `builtIn`, `inherited`, `sources` or
   `dynamic`. `cost` is `null` (the estimate would be for a model that is not used). They add
-  `modelManagedByInstance: true` and `tierAvailability`, whether each level has a model for each review kind (yes or
-  no, from the operator's configuration, never which model). Other workspaces get `modelManagedByInstance: false`,
-  `tierAvailability: null` and the views exactly as before.
+  `modelManagedByInstance: true`. Other workspaces get `modelManagedByInstance: false` and the views exactly as before.
 - **A write may not set a model.** A body with `model` or `fallbackModel` (and, for a project, `dynamicModel`, also
   `null`) is refused `400 REVIEW_SETTINGS_INVALID` with an issue `{ field, code: "MODEL_MANAGED_BY_INSTANCE" }` for
-  every such field, judged on the names before any value, and nothing is stored. `modelTier` is accepted at the
-  workspace defaults and the project, with the usual layering.
+  every such field, judged on the names before any value, and nothing is stored.
 - **Stored models are kept.** The models a workspace saved on its own key stay stored: a save from a managed
   workspace carries them through (the defaults replace their layer as a whole, so the service puts the stored
   `model`/`fallbackModel` back; the Dynamic model is a project-only field that a save already keeps). The workspace
   gets them back if it returns to its own key.
-- **The form** (`ui/quality-choice.tsx`, copy in `src/copy/model-quality.ts`) shows one **Quality** choice, Low, Medium
-  or High, each with a sentence about speed and depth and no model, vendor or cost, in place of the model, fallback
-  model, Dynamic model, model suggestions and cost estimate. The token budget stays. A level without a model for the
-  kind in force (the project's kind; every kind on the workspace defaults) is shown "Not available" without saying why
-  and cannot be chosen; the level in force stays selectable and a note says reviews would not start. The form reads
-  everything from the view (`managed`, `tierAvailability`), so a save that changes the key mode adapts the next answer.
+- **The form** shows the catalog chooser in place of the provider, model, fallback model, Dynamic model, model
+  suggestions and cost estimate (see "The settings form" below); the Low/Medium/High choice of #283 is gone from it
+  (#433, and the setting itself with #434). The token budget stays. The form reads everything from the view (`managed`, `catalogChoices`), so a save that
+  changes the key mode adapts the next answer.
 - **The instance admin is not special inside a workspace (decision).** An instance admin who is a member of a managed
   workspace gets the same stripped view and the same refusal as its other members: the view depends on the workspace's
-  key mode, never on the user. The operator sees and sets which model backs each level through the operator API
-  (`GET|PUT /api/operator/v1/model-tiers`) and sees whether each level is configured in the instance portal, not inside a
+  key mode, never on the user. The operator sees and sets which model backs each catalog entry in the instance admin portal, not inside a
   customer workspace. The admin's view of a workspace on its own key (the admin's usual one) is unchanged.
 - **Fail closed for display.** The models are hidden whenever the key mode is anything but `own`, so a workspace whose
   entitlements cannot be read (`unreadable`) also shows no model field and no estimate, and refuses a model write; its
   jobs fail closed in that state too.
 - **A reset keeps the stored models.** `DELETE` on a project removes every override but the models saved on the
   workspace's own key (`model`, `fallbackModel`, Dynamic model), like a save does.
+
+## Provider and catalog entry per kind (#430)
+
+Additive fields of the same settings JSON (ADR 0005, 2.7): no table, no migration, every setting stored before them stays
+valid. Two families sit side by side and only the one that matches the workspace's key mode is used.
+
+| Field                                     | Layers                          | Meaning                                                                                                      |
+| ----------------------------------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `provider`                                | workspace default and project   | The provider of the Diff `model`. Absent: the default provider (`openrouter`), so legacy JSON resolves to it |
+| `dynamicProvider`                         | project only (`null` clears it) | The provider of `dynamicModel`                                                                               |
+| `catalogEntryDiff`, `catalogEntryDynamic` | project only (`null` clears it) | Managed mode: the opaque id of the catalog entry for that kind. **No workspace default** (decision C3)       |
+
+- **Validation** (`validate.ts`, pure, stable codes, no value echoed): a provider must be in the registry
+  (`PROVIDER_UNKNOWN`); a model is held to the model-id rule of the provider the same request names (`provider` for
+  `model` and `fallbackModel`, `dynamicProvider` for `dynamicModel`), else the default provider's. An entry id is only
+  checked for its shape (`INVALID_TYPE`, `EMPTY`, `TOO_LONG`, `INVALID_FORMAT`); `dynamicProvider` and the entries are
+  unknown fields of the workspace defaults.
+- **The entry checks** (`catalog-selection.ts`, the service, managed workspaces only): the entry must exist
+  (`CATALOG_ENTRY_UNKNOWN`), be released (`CATALOG_ENTRY_NOT_RELEASED`: a draft or a retired one), serve the kind of the
+  setting (`CATALOG_ENTRY_KIND_MISMATCH`) and be allowed by the plan (`CATALOG_ENTRY_NOT_ALLOWED`, `modelAccess` of
+  #428), in that order. Every refused kind is named. A model name is never an entry id: it is refused like any
+  other id that is no entry.
+- **Who may write what.** A workspace on the operator's key may not write `provider`, `model`, `fallbackModel`,
+  `dynamicProvider` or `dynamicModel` (also not to the workspace defaults): `MODEL_MANAGED_BY_INSTANCE`, as for the models
+  before. A workspace on its own key never reads the catalog, so it **may not select an entry**: the write is refused
+  `CATALOG_ENTRY_OWN_KEY_MODE` (decided against "stored inactive": an entry would be stored unchecked and the catalog
+  would have to be read to check it); `null` is allowed, it clears an entry stored while the workspace was managed.
+- **A save keeps what it does not set.** The Diff group is replaced as a whole by a request that carries a Diff field,
+  as before; the project-only fields, the other kind's fields and the other key mode's family are merged and kept. A
+  managed save puts the stored `provider`, `model` and `fallbackModel` back, and keeps `dynamicModel` and
+  `dynamicProvider`; an own-key save never touches the entries. A **reset** (`DELETE`) keeps the other family too: the
+  own-key models and providers while managed, the catalog entries while on the own key.
+- **Views.** On the operator's key the views carry no `model`, `provider`, `dynamicModel` or `dynamicProvider` (a test
+  searches every key and a sentinel value). The project view adds `catalogSelection` (the entry id per kind, `null`: none,
+  the instance default applies at the claim) and `catalogChoices`, per kind the entries that serve it:
+  `{ id, name, description, available, reason }`. A released entry that the plan does not allow is listed locked
+  (`reason: "CATALOG_ENTRY_NOT_ALLOWED"`, C4); a retired one is listed locked (`CATALOG_ENTRY_NOT_RELEASED`) only while the
+  project has it selected (C5); a draft never. The choices are built from the member entries, which have no provider or
+  model. Both are `null` on an own key; the stored entries are not shown there.
+- **Effective resolution** (`effective.ts`): `provider` layers like any Diff field (project over workspace default over the
+  built-in default provider, with its source); `dynamicProvider` and the entries are the project's or the built-in value
+  (`null` for the entries). `resolveForRepository` returns them for the claim, which hands the entry of the job's kind to the model
+  selection resolver (#432, `runner-api/claim-selection.ts`): `toRunnerSettings` is unchanged.
+- **The Dynamic metadata check** (#269) asks the adapter of the provider the project selected (`dynamic-check.ts`): the
+  model of the request at the provider of the request, else the stored one, else the default; a request that only
+  changes the provider asks again about the stored model at the new provider.
+- The model a provider other than the default would use when no
+  layer sets one is the claim's business (#432): the views show the model of the layers.
+
+## The settings form: provider, model and catalog entry (#433)
+
+`ui/settings-form.tsx` is one form for the workspace defaults and for a project. What the Model card (Diff Review) and
+the Review kind card (Dynamic Review) show depends on the key mode of the workspace, read from the view:
+
+| Key mode | Per review kind                                                                                                                                                                                                                                                                                                                                                                         | Sent when changed                                                                                                                                                         |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| own      | a **provider select** (`ui/provider-select.tsx`: the registered providers, `llmProviderDescriptors`) next to the **model** field, with the suggested models of the chosen provider as its datalist (one `<datalist>` per provider); the cost estimate of Diff Review prices the model with the chosen provider's table (`cost.ts`, `estimateReviewCost(settings, prices?, providers?)`) | `provider`, `model`, `fallbackModel` (Diff group, workspace defaults and project); `dynamicProvider`, `dynamicModel` (project, `null` when put back to the shipped value) |
+| managed  | the **catalog chooser** (`ui/model-choice.tsx`): a radio list of the entries of `catalogChoices[kind]` in the order of the view (`sort_order`), label = name, text = description, nothing else; the project's selection comes from `catalogSelection`. The workspace defaults show a note instead (no workspace-level default entry, decision C3)                                       | `catalogEntryDiff`, `catalogEntryDynamic` (project-only; `null` takes the choice back)                                                                                    |
+
+- **Locked and unusable entries.** An entry that the plan does not allow is listed disabled with "Not included in your plan"
+  and a link "Manage plan" to the plan page of the workspace (`/w/<slug>/settings/plan`, which exists for every workspace;
+  its "Manage plan" button is shown to Owners and Admins only). A retired entry the project still has chosen is badged "No
+  longer available" without a link. The entry in force stays selectable even when unusable, and a status note says
+  reviews would not start until another is chosen (decision C5: no silent fallback). A choice is taken back with "Reset to
+  default", which means "the default of this instance".
+- **Both kinds keep their choice.** The two entries (and the typed provider and model of each kind) are held side by side
+  in the form state (`dynamic-form-state.ts`: `catalogEntries`, `dynamicProvider`), so switching the kind loses neither.
+- **A managed workspace never receives a provider or a model.** The view has none; the form has no control for them, no
+  datalist and no estimate, and `project-save.ts` sends neither (a test plants a sentinel where a leak would sit and
+  searches the DOM and every request body). An untouched form still sends nothing; a changed form sends only the changed
+  groups, and the project-only entries travel in the project request.
+- **A model belongs to its provider.** Choosing a different provider clears the model (and the Diff fallback model) typed
+  for the old one, because a model id means something only at its provider; the person names it again, with the
+  suggestions and the cost estimate of the new provider (the estimate waits for a model). Choosing the same provider again
+  changes nothing, and "Reset to default" on the provider takes its models back with it (`form-state.ts` `setProvider`,
+  `dynamic-form-state.ts` `setDynamicProvider`). The server checks each model against the rule of the provider named in the
+  same request, so a mismatched pair is also refused there.
+- **A provider without a stored key (decision C7).** A page of a workspace on its own key passes `keyedProviders`
+  (`keyed-providers.ts`, from `keyServiceFor(workspaceId).statusAll()`: a readable key counts, an unreadable one does not);
+  a managed workspace gets no list and its statuses are not read (`keyedProvidersFor`, a page test pins it). A provider without one is
+  marked "no key yet" in the select and can still be chosen; the chosen one shows a warning with a link to the LLM
+  access page. The warning is for the kind that is shown (Diff or Dynamic) and never appears on the operator's key.
+- **Copy.** Every code a save can answer with has a sentence in `ui/messages.ts` (`describeIssue`), including
+  `PROVIDER_UNKNOWN`, the four `CATALOG_ENTRY_*` codes and `CATALOG_ENTRY_OWN_KEY_MODE`; the chooser's own words are
+  `src/copy/model-choice.ts`, scanned by a test for model, vendor, price and cost words (the sentences about the plan are
+  the one place that says "plan").
+- **The claim reads the entries (#432).** A managed job runs on the entry the project chose for the kind of the job, else
+  the instance default of that kind, and the usage record names the entry. A tier stored earlier (a managed workspace that
+  chose High under #283) is no longer read by the claim; it stays in the settings until #434 migrates it, and the form
+  neither shows nor changes it.
 
 ## From settings to a runner job
 
@@ -157,7 +247,7 @@ model (and the fallback model) and lists the warnings: `above_limit` when the es
 the customer's limit (exactly 0.10 does not warn), and `cost_unknown` for a model the price table does
 not know. `warn` is true when there is any. It never blocks a setting; the UI shows the warnings.
 
-The price per model is a small static table (`model-pricing.ts`, USD per million tokens from OpenRouter's
+The price per model is a small static table (`src/llm/providers/openrouter/model-pricing.ts`, behind the provider's adapter, USD per million tokens from OpenRouter's
 model list, with the day it was read, the same prices the model comparison used); the model comparison
 ticket keeps it up to date. A review is assumed to send 30000 tokens (the size of a large pull request, never
 more than the budget) and get 3000 back, in one call. The prompt is multiplied by the model's
@@ -179,13 +269,13 @@ Admin or an Owner (`manage_review_defaults`); the settings of a project are read
 a workspace that is not the person's) and by `withWorkspace(...)` (called first). A change must come from
 this site (`Sec-Fetch-Site`/`Origin`), be `application/json` and at most 64 KB.
 
-| Route                                                                  | Does                                                                                                                                                          |
-| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /api/w/:workspace/review-settings`                                | the global defaults: `overrides`, `effective`, `sources`, `builtIn`, `cost`, `modelManagedByInstance`, `tierAvailability`, `limits`, `updatedAt`, `updatedBy` |
-| `PUT /api/w/:workspace/review-settings`                                | body `{ "settings": { ... } }`, replaces the global defaults                                                                                                  |
-| `GET /api/w/:workspace/repositories/:repositoryId/project/settings`    | the project's `overrides`, `effective`, `sources`, `inherited`, `cost`, `limits`                                                                              |
-| `PUT /api/w/:workspace/repositories/:repositoryId/project/settings`    | body `{ "settings": { ... } }`, replaces the project's overrides                                                                                              |
-| `DELETE /api/w/:workspace/repositories/:repositoryId/project/settings` | removes the project's overrides                                                                                                                               |
+| Route                                                                  | Does                                                                                                                                             |
+| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GET /api/w/:workspace/review-settings`                                | the global defaults: `overrides`, `effective`, `sources`, `builtIn`, `cost`, `modelManagedByInstance`, `limits`, `updatedAt`, `updatedBy`        |
+| `PUT /api/w/:workspace/review-settings`                                | body `{ "settings": { ... } }`, replaces the global defaults                                                                                     |
+| `GET /api/w/:workspace/repositories/:repositoryId/project/settings`    | the project's `overrides`, `effective`, `sources`, `inherited`, `cost`, `limits`, and on the operator's key `catalogChoices`, `catalogSelection` |
+| `PUT /api/w/:workspace/repositories/:repositoryId/project/settings`    | body `{ "settings": { ... } }`, replaces the project's overrides                                                                                 |
+| `DELETE /api/w/:workspace/repositories/:repositoryId/project/settings` | removes the project's overrides                                                                                                                  |
 
 A repository that was never activated can be read (the defaults, `projectId` null, `active` false) and
 saved: the first save creates its project with `active = 0`, so the settings are in place when it is
@@ -338,8 +428,10 @@ The claim of the runner API and the webhook intake use `service.resolveForReposi
 
 ## Testing
 
-`validate.test.ts`, `effective.test.ts`, `runner-settings.test.ts`, `cost.test.ts` (unit, pure),
-`service.integration.test.ts`, `dynamic-model-check.integration.test.ts` and `http.integration.test.ts` (real SQLite, the metadata from the fake LLM), the repositories' own tests in
+`validate.test.ts`, `effective.test.ts`, `runner-settings.test.ts`, `cost.test.ts`, `catalog-selection.test.ts` and
+`dynamic-check.test.ts` (unit, pure),
+`service.integration.test.ts`, `selection.integration.test.ts` (the provider and catalog selection, a real catalog),
+`dynamic-model-check.integration.test.ts` and `http.integration.test.ts` (real SQLite, the metadata from the fake LLM), the repositories' own tests in
 `src/db/repositories/`, and in `integration-tests/http/` the proxy in front of the routes
 (`review-settings-route.integration.test.ts`) and the real route files
 (`review-settings-route-file.integration.test.ts`). The test cases that need the real PR-Agent against the

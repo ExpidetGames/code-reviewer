@@ -10,6 +10,7 @@ code rules of a result, tolerance for fields it does not know) hold.
 
 import copy
 import json
+import re
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
@@ -18,6 +19,7 @@ import pytest
 from jsonschema import Draft202012Validator
 
 from code_reviewer_runner import job as runner_job
+from code_reviewer_runner.llm_providers import PROVIDER_ID_PATTERN, registered_provider_ids
 
 CONTRACTS = Path(__file__).resolve().parents[3] / "contracts"
 SCHEMA_PATH = CONTRACTS / "runner-api.v1.json"
@@ -344,6 +346,52 @@ def test_the_result_of_a_diff_run_with_its_exact_cost_is_valid(cost: float | Non
 
     assert _accepts("RunnerResult", result.to_json())
     assert result.to_json()["usage"]["costUsd"] == cost
+
+
+# #405-T30: what the runner prints for the findings a review left open is what the file says.
+@pytest.mark.parametrize(
+    "findings",
+    [
+        None,
+        (3, {"P0": 1, "P1": 0, "P2": 2, "P3": 0}),
+        (2, None),
+        (0, {"P0": 0, "P1": 0, "P2": 0, "P3": 0}),
+        (0, None, True),
+        (1, {"P0": 0, "P1": 1, "P2": 0, "P3": 0}, True),
+    ],
+)
+def test_the_findings_a_review_left_open_are_valid_or_absent(
+    findings: tuple[int, dict[str, int] | None] | tuple[int, dict[str, int] | None, bool] | None,
+) -> None:
+    from code_reviewer_runner.result import JobResult, ReviewFindings
+
+    result = JobResult(
+        ok=True,
+        duration_ms=41200,
+        comment_url="https://github.com/octo/repo/pull/7#issuecomment-1",
+        error_code=None,
+        log_tail="",
+        findings=None
+        if findings is None
+        else ReviewFindings(
+            open=findings[0],
+            by_severity=findings[1],
+            incomplete=len(findings) == 3 and findings[2] is True,
+        ),
+    )
+
+    assert _accepts("RunnerResult", result.to_json())
+    assert ("findings" in result.to_json()) is (findings is not None)
+    # #405 (review round 2): the field for a review that did not cover everything is in the schema.
+    if findings is not None and len(findings) == 3:
+        assert result.to_json()["findings"]["incomplete"] is True
+
+
+# #405-T30
+def test_the_example_of_a_completion_carries_findings_the_runner_can_produce() -> None:
+    example = _example("CompleteRequest")
+
+    assert _accepts("ReviewFindings", example["result"]["findings"])
 
 
 # #296-T10
@@ -730,6 +778,17 @@ def test_the_findings_schema_refuses_unsafe_locations_and_keeps_resolutions_on_t
     assert not _accepts_findings(without_envelope)
 
 
+# #477-T04
+def test_the_diff_parameters_failure_code_is_listed_once_and_reachable() -> None:
+    schema: Document = _load(SCHEMA_PATH)
+    codes: list[str] = schema["$defs"]["KnownRunnerErrorCode"]["enum"]
+    assert codes.count("llm_parameters_unsupported") == 1
+
+    from code_reviewer_runner.result import ErrorCode
+
+    assert ErrorCode.LLM_PARAMETERS_UNSUPPORTED.value == "llm_parameters_unsupported"
+
+
 # #195-T10: the stable feature/isolation/accounting failure codes are in the contract.
 def test_the_dynamic_failure_codes_are_listed_once_and_reachable() -> None:
     schema: Document = _load(SCHEMA_PATH)
@@ -866,3 +925,93 @@ def test_the_supersede_timing_constants_equal_the_contract() -> None:
     assert CLAIM_SECONDS >= (
         MAX_HEARTBEAT_INTERVAL_SECONDS + LONGEST_MODEL_REQUEST_SECONDS + KILL_MARGIN_SECONDS
     )
+
+
+def _job_with_provider(provider: object) -> Document:
+    claim = _example("ClaimResponse")
+    claim["job"]["input"]["llm"]["provider"] = provider
+    return claim
+
+
+# #424-T01: `llm.provider` is a slug in the contract; the registry decides which slugs run.
+@pytest.mark.parametrize(
+    ("provider", "accepted"),
+    [
+        ("openrouter", True),
+        ("fakeai", True),
+        ("a1", True),
+        ("a" + "b" * 31, True),
+        ("a" + "b" * 32, False),
+        ("a", False),
+        ("OpenRouter", False),
+        ("1abc", False),
+        ("open-router", False),
+        ("open router", False),
+        ("", False),
+        (None, False),
+        (7, False),
+    ],
+)
+def test_the_contract_accepts_a_provider_slug_and_refuses_an_uppercase_or_too_long_one(
+    provider: object, accepted: bool
+) -> None:
+    assert _accepts("ClaimResponse", _job_with_provider(provider)) is accepted
+
+
+# #424-T01, #424-T03: the contract takes the slug, the runner refuses one it has no entry for with
+# the existing invalid-job error. The two verdicts on the form always agree for a registered slug.
+def test_a_slug_the_contract_accepts_is_still_refused_by_the_runner_without_an_entry() -> None:
+    claim = _job_with_provider("fakeai")
+
+    assert _accepts("ClaimResponse", claim)
+    with pytest.raises(runner_job.JobError) as refused:
+        runner_job.parse_job(json.dumps(claim["job"]["input"]))
+    assert refused.value.code.value == "invalid_job"
+
+
+# #424-T02: a claim without the advertisement is valid and means OpenRouter; the example names it.
+def test_the_claim_request_may_leave_the_provider_advertisement_out() -> None:
+    assert _accepts("ClaimRequest", {})
+    assert _accepts("ClaimRequest", {"engines": ["pr-agent"], "features": ["supersede"]})
+    assert _accepts("ClaimRequest", {"llmProviders": ["openrouter"]})
+    assert _accepts("ClaimRequest", {"llmProviders": ["openrouter", "fakeai"]})
+    assert _example("ClaimRequest")["llmProviders"] == ["openrouter"]
+    description = _load(SCHEMA_PATH)["$defs"]["ClaimRequest"]["description"]
+    assert "llmProviders" in description and "openrouter" in description
+
+
+# #424-T01
+@pytest.mark.parametrize(
+    "advertised",
+    [
+        [],
+        "openrouter",
+        ["OpenRouter"],
+        ["a" * 33],
+        [1],
+        ["openrouter", "openrouter"],
+        [f"p{index:02d}" for index in range(17)],
+    ],
+)
+def test_the_claim_request_refuses_a_bad_provider_advertisement(advertised: object) -> None:
+    assert not _accepts("ClaimRequest", {"llmProviders": advertised})
+
+
+# #424-T07: the providers the contract knows are the registry of the runner, in the form of the id.
+def test_the_providers_of_the_contract_are_the_providers_of_the_runner_registry() -> None:
+    schema = _load(SCHEMA_PATH)
+    known: list[str] = schema["$defs"]["KnownLlmProvider"]["enum"]
+    pattern: str = schema["$defs"]["LlmProviderId"]["pattern"]
+
+    assert sorted(known) == sorted(registered_provider_ids())
+    assert pattern == PROVIDER_ID_PATTERN.pattern
+    assert all(re.fullmatch(pattern, name) for name in known)
+    assert _example("ClaimRequest")["llmProviders"] == list(registered_provider_ids())
+
+
+# #424-T04: the job of the previous release still validates and still parses.
+def test_the_previous_release_job_is_valid_and_parses_with_the_openrouter_entry() -> None:
+    claim = _previous_release_review_claim()
+
+    assert _accepts("ClaimResponse", claim)
+    assert runner_job.parse_job(json.dumps(claim["job"]["input"])).llm.provider == "openrouter"

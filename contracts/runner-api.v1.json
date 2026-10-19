@@ -36,8 +36,18 @@
       "type": "string",
       "enum": ["diff", "dynamic"]
     },
+    "LlmProviderId": {
+      "description": "#424: the slug of an LLM provider, as in the registries of the app and of the runner. The form only: whether a slug is usable is decided by the registry of the side that reads it.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{1,31}$"
+    },
+    "KnownLlmProvider": {
+      "description": "#424: the providers this release of the contract knows. The registry of the runner (llm_providers.py) and the one of the app (app/src/llm/providers) each list exactly these, and tests compare the three. A provider is added here with the change that adds its adapter.",
+      "type": "string",
+      "enum": ["openrouter"]
+    },
     "ClaimRequest": {
-      "description": "The optional body of POST /api/runners/v1/claim (#195): the engines the calling runner can run. Absent or empty means ['pr-agent'] (a previous-release runner). Unknown or duplicated engine names are refused with 400 RUNNER_REQUEST_INVALID before any job is claimed. #279 adds the optional `features`: what else this runner understands. The app sends a job optional fields a previous-release runner would reject (the job input is closed) only to a runner that names the matching feature, so `dynamic_capabilities` means the runner reads `dynamic.capabilities`. Unknown feature names are ignored, so a newer runner can name features an older app does not know. Unknown fields are ignored, as everywhere in v1. #318 adds the Dispatcher's fields: `jobId` claims exactly that job (anything else, such as a job that is not due, already running, finished, cancelled or of a kind the advertised engines cannot run, is 204), `maxRunning` is the pool cap (the claim is 204 while that many jobs of the same X-Runner-Id are running), and the feature `worker_credential` selects the split answer (SplitClaimResponse: a per-job credential and no job input). Without that feature the answer is the legacy ClaimResponse, unchanged.",
+      "description": "The optional body of POST /api/runners/v1/claim (#195): the engines the calling runner can run. Absent or empty means ['pr-agent'] (a previous-release runner). Unknown or duplicated engine names are refused with 400 RUNNER_REQUEST_INVALID before any job is claimed. #279 adds the optional `features`: what else this runner understands. The app sends a job optional fields a previous-release runner would reject (the job input is closed) only to a runner that names the matching feature, so `dynamic_capabilities` means the runner reads `dynamic.capabilities`. Unknown feature names are ignored, so a newer runner can name features an older app does not know. Unknown fields are ignored, as everywhere in v1. #318 adds the Dispatcher's fields: `jobId` claims exactly that job (anything else, such as a job that is not due, already running, finished, cancelled or of a kind the advertised engines cannot run, is 204), `maxRunning` is the pool cap (the claim is 204 while that many jobs of the same X-Runner-Id are running), and the feature `worker_credential` selects the split answer (SplitClaimResponse: a per-job credential and no job input). Without that feature the answer is the legacy ClaimResponse, unchanged. #424 adds the optional `llmProviders`: the providers the runner can run; absent means ['openrouter'].",
       "type": "object",
       "properties": {
         "engines": {
@@ -51,6 +61,14 @@
           "type": "array",
           "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$" },
           "maxItems": 16
+        },
+        "llmProviders": {
+          "description": "#424: the LLM providers this runner can run (the slugs of its registry). Absent means ['openrouter'], which is what a previous-release runner can run. An app sends a job for a provider only to a caller that listed it, so a newer app never hands an old runner a job it cannot read. The app only parses and validates the list today and does not use it yet (the claim issue of epic #420 will); it still always sends 'openrouter'. A previous-release app ignores the key.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/LlmProviderId" },
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true
         },
         "jobId": {
           "description": "#318: claim exactly this job (a Dispatcher woken by the dispatch webhook). Absent: the next due job, as before.",
@@ -197,6 +215,7 @@
         "llm_context_length_exceeded",
         "llm_output_invalid",
         "model_unknown",
+        "llm_parameters_unsupported",
         "timeout",
         "runner_shutdown",
         "unknown",
@@ -254,7 +273,10 @@
           "additionalProperties": false,
           "required": ["provider", "model", "apiKey"],
           "properties": {
-            "provider": { "type": "string", "enum": ["openrouter"] },
+            "provider": {
+              "description": "#424: the slug of an LLM provider, checked against the registry of the runner (`runner/src/code_reviewer_runner/llm_providers.py`), which refuses one it has none for with invalid_job. The app sends a provider only to a caller that advertised it in `llmProviders`; this release knows KnownLlmProvider.",
+              "$ref": "#/$defs/LlmProviderId"
+            },
             "model": { "type": "string", "minLength": 1, "maxLength": 200 },
             "apiKey": { "type": "string", "minLength": 1, "maxLength": 4096 },
             "baseUrl": { "type": "string", "minLength": 1, "maxLength": 2048 },
@@ -398,6 +420,39 @@
         }
       }
     },
+    "ReviewFindings": {
+      "description": "#405: what a successful review left open on the pull request. `open` counts the findings that are open AFTER the run (a Dynamic Review carries the findings of earlier runs over, PR-Agent keeps a record of active ones), not the ones the run found. `bySeverity` is the count per priority of a Dynamic Review, of the findings its summary lists (so `open` may exceed the sum when lower priority findings did not fit); null for a Diff Review, whose findings have no severity.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["open", "bySeverity"],
+      "properties": {
+        "open": { "type": "integer", "minimum": 0, "maximum": 100000 },
+        "incomplete": {
+          "description": "True when the review did not cover everything it was asked to: a finding its validation dropped, a chunk that failed, files left out for the token budget. `open` may then miss a blocker, so the app never approves on it. Absent means complete.",
+          "type": "boolean"
+        },
+        "bySeverity": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["P0", "P1", "P2", "P3"],
+              "properties": {
+                "P0": { "type": "integer", "minimum": 0, "maximum": 100000 },
+                "P1": { "type": "integer", "minimum": 0, "maximum": 100000 },
+                "P2": { "type": "integer", "minimum": 0, "maximum": 100000 },
+                "P3": { "type": "integer", "minimum": 0, "maximum": 100000 }
+              }
+            },
+            { "type": "null" }
+          ]
+        }
+      },
+      "examples": [
+        { "open": 3, "bySeverity": { "P0": 1, "P1": 0, "P2": 2, "P3": 0 } },
+        { "open": 2, "bySeverity": null }
+      ]
+    },
     "RunnerResult": {
       "description": "What the runner prints when a job ends (the output of code-reviewer-run-job), plus an optional errorMessage. The runner has redacted secrets from logTail; the app removes anything that still looks like one before it stores the result.",
       "type": "object",
@@ -428,6 +483,10 @@
         },
         "logTail": { "type": "string", "maxLength": 8192 },
         "logTruncated": { "type": "boolean" },
+        "findings": {
+          "description": "#405: the findings left open on the pull request by a successful review, which the app turns into the review verdict it submits. Absent (or null) where the runner cannot say, and on every failure: the app then submits no verdict. Additive: a runner that does not send it, or an app that does not read it, keeps working.",
+          "oneOf": [{ "$ref": "#/$defs/ReviewFindings" }, { "type": "null" }]
+        },
         "usage": {
           "description": "What the run used. A failed result carries it too, whenever the run made at least one model call before it failed (a timeout at the end, an answer the validator refuses, a publish error): the app counts such a run exactly like a successful one. A run that failed before its first model call reports null. The cost follows the same rule as for a successful run: exact, or null when any call is unpriced; the token counters are reported either way.",
           "oneOf": [{ "$ref": "#/$defs/RunnerUsage" }, { "type": "null" }]

@@ -96,33 +96,59 @@ claim"). Every claim path passes through it: the legacy claim, the split claim o
 id (for which a refused job answers `204`, like any job that cannot be claimed). Then, for that job, in this order:
 
 1. **The claim guard** may refuse it (below).
-2. **LLM access** of the job's own workspace (`llm.accessFor(job.workspaceId)`, `src/llm/resolve.ts`): the key the
-   workspace entered itself, or, if the operator offers included usage (off), the operator's, or, on a
-   single-tenant instance, the legacy `LLM_PROVIDER`/`LLM_API_KEY` variables. The key of another workspace is
-   never looked at, and a workspace without a key does not get one: the job ends as `failed` with
-   `llm_not_configured` (the log line names the reason, `no_key`, `key_unreadable`, `key_binding_mismatch`, or the
-   legacy variables that are wrong). **Operations:** this fails every job of that workspace a runner claims, up to 25
-   per request, for good; entering a key later does not revive them (they have to be queued again, for example
-   by a new commit or a comment). The key is remembered, encrypted, in the database before the response leaves
-   (`claimed-keys.ts`); if that fails the job is given back and the runner gets a 500 without a key.
-   **Options** of the job come next (`JobOptionsSource`, below): the model and token budget of the
-   review settings replace the instance's model and context window (`llm.model`, `llm.maxTokens`), and
-   the other options go into `env`. **On the operator's key** (#280, `src/model-tiers/README.md`) the model is not the
-   workspace's: the project's tier (`modelTier`, `medium` by default) is noted in the usage record, and the operator's
-   model for that tier and the job's review kind replaces `llm.model` (Diff) or the Dynamic model, with the capabilities
-   of #279 read for it. A tier without a model ends the job as `failed` with **`managed_tier_unavailable`** (the log
-   line names the tier and the kind, never a model), with no key and no token made, and never moves to another tier.
-   The token budget is the workspace's, cut to the context window of the tier's model when the provider states one.
-   The model is remembered with the key, so the result a runner reports is stripped of it (`usage.model` becomes
-   `null`, text is masked). The Worker's first fetch decides the same again. `llm.baseUrl`, `llm.requireParameters` and `llm.fallbackModels` are never
-   sent (the LLM configuration has no base URL, and the MVP has no fallback chain); the runner adds
-   OpenRouter's `provider.require_parameters` to every request for OpenRouter by itself (#270).
-   Once the access is resolved, the claim notes whose key the job runs on in its usage record
-   (`recordKeyMode`: `own` for the workspace's key, `managed` for the operator's; the key mode of the workspace's
-   entitlements picks the key, and a `managed` workspace without a readable operator key fails with
-   `llm_not_configured`, #276). The record itself was
-   reserved by `claimNext`, in the transaction of the claim (`src/usage/README.md`); a failure of this call
-   gives the job back.
+2. **The model selection, then the key** (#432, ADR 0005, 2.8; `claim-selection.ts`, `src/llm/selection.ts`). The key mode
+   of the job's own workspace comes from its effective entitlements (`entitlementsFor`, `keyModeForJob`): `own` (also a
+   workspace without entitlements), `managed` or unreadable (the job ends `llm_not_configured`, reason
+   `entitlements_invalid`, no usage key mode is written). The claim notes it in the usage record (`recordKeyMode`).
+   Then the **provider, model and key mode's key source** are chosen _before_ any key is loaded, for the job's **pinned
+   kind** (never the project's current kind), by `resolveModelSelection`:
+   - **Own key:** the provider and model come from the layers of the settings (the workspace default and the project;
+     `JobOptions.selection.layers`, built by `review-settings-job-options.ts`) over the instance's model
+     (`ClaimDeps.builtInModel`). A model counts only for the provider it was set for; a model next to a provider of
+     another layer ends the job `job_llm_options_invalid` (the save refuses the same pairing, `MODEL_PROVIDER_MISMATCH`).
+     The catalog is not read and the plan's `modelAccess` is not evaluated (#432-T06, T16).
+   - **Operator's key:** the entry the project selected for the kind (`catalogEntryDiff`, `catalogEntryDynamic`), else the
+     instance default entry of the kind, read from the catalog (`ClaimDeps.catalog`: the one entry, and the defaults only
+     when the project names none). It must exist, be released, serve the kind, be allowed by the plan's `modelAccess`
+     and have a provider the runner can run; otherwise the job ends `managed_model_unavailable` (the log names the
+     opaque entry id, the kind and the reason, `no_selection`, `missing`, `not_released`, `kind_mismatch`, `not_allowed`
+     or `provider_unsupported`; never a model or a provider) with no key and no token made, and never moves to another
+     entry, provider or the instance's model (decision C5). `managed_tier_unavailable` is no code of the claim any more; the Runs copy keeps
+     its sentence for old rows only.
+   - **The `llmProviders` gate** (contracts/README.md, "Rolling out providers"): a provider other than the default
+     goes only to a caller that listed it. A runner's claim names its list in the body (absent means `openrouter`);
+     a Worker names it in the `llmProviders=` query of its details call. The claim of a **Dispatcher** names no list the
+     app can rely on, so it does not judge the provider (every provider of the app passes, unless the Dispatcher listed
+     some); the Worker's first fetch decides. An own job whose provider is unknown or not listed ends
+     `llm_provider_unsupported`; the log line carries the provider as the tenant wrote it, cut to 64 characters with the
+     cut marked and every non-printable character replaced (`src/llm/provider-text.ts`).
+   - The input of the managed branch is the whole entitlements object, so any further fact about the workspace that decides a
+     managed job goes through the same input, not a second read path.
+
+   Only a selection that succeeded loads the key (`keyFor`, `src/llm/assemble.ts`): the workspace's own key **of the
+   selected provider**, or the operator's key of it, as the selection's key source says; it does not read the
+   entitlements again, so the key always belongs to the key mode the selection was made for. A workspace without a key
+   for that provider ends the job as `failed` with `llm_not_configured` (log reason `no_key`, `key_unreadable`,
+   `key_binding_mismatch`, `operator_key_missing`, `operator_key_unreadable`); another provider's key is never used.
+   **Operations:** this fails every job of that workspace a runner claims, up to 25 per request, for good; entering a
+   key later does not revive them (they have to be queued again, for example by a new commit or a comment). The key is
+   remembered, encrypted, in the database before the response leaves (`claimed-keys.ts`); if that fails the job is
+   given back and the runner gets a 500 without a key. The usage record notes the provider and, for a job on the
+   operator's key, the catalog entry's id and its name as it is now (`recordSelection`, columns `llm_provider`,
+   `catalog_entry_id`, `catalog_entry_name`; never the model). The claim logs `selection entry=<id> kind=<kind>` for
+   such a job, and no model.
+   **Options** of the job come with the selection (`JobOptionsSource`, below): the token budget of the review settings
+   replaces the instance's context window (`llm.maxTokens`) and the other options go into `env`. **On the operator's
+   key** the model of the job is the entry's, never the workspace's; the capabilities of #279 are read for it, from the
+   selection's provider, and the token budget is cut to the context window of the entry's model when the provider
+   states one (else to the window last read, else to a documented bound). The entry's model is remembered with the key,
+   so the result a runner reports is stripped of it (`usage.model` becomes `null`, the model ids of every entry of every
+   status are masked in the text). The Worker's first fetch decides the same again with the same code (`checkJob`).
+   `llm.baseUrl`, `llm.requireParameters` and `llm.fallbackModels` are never sent (the LLM configuration has no base
+   URL, and the MVP has no fallback chain); the runner adds OpenRouter's `provider.require_parameters` to every
+   request for OpenRouter by itself (#270). The usage record itself was reserved by `claimNext`, in the transaction of
+   the claim (`src/usage/README.md`); a failure of these calls gives the job back.
+
 3. **The pull request** is read through the provider's `getPullRequest`. A pull request that does not
    exist ends the job with `pr_not_found`, one that is closed or merged with `pull_request_closed`;
    `prUrl` in the response is the URL the provider reports.

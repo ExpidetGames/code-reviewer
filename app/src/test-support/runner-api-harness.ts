@@ -5,6 +5,7 @@
 // the real GitHub App provider, and the API itself wired to all of them. `claim`, `heartbeat` and
 // `complete` build requests like the runner does. The clock of the queue is the one in `clock`.
 import { createIntegrationsRepository } from "../db/repositories/integrations-repository.ts";
+import { managedModelsOf } from "../runner-api/managed-models.ts";
 import { createUsageRecordsRepository } from "../db/repositories/usage-records-repository.ts";
 import { createJobsRepository } from "../db/repositories/jobs-repository.ts";
 import { createRepositoriesRepository } from "../db/repositories/repositories-repository.ts";
@@ -13,12 +14,12 @@ import { loadGithubAppConfig } from "../integrations/registry.ts";
 import type { JobQueueLimits } from "../jobs/job-limits.ts";
 import type { LlmAccessResult } from "../llm/access.ts";
 import { createWorkspaceLlm } from "../llm/assemble.ts";
-import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
-import {
-  createModelTiersService,
-  type ModelTiersService,
-} from "../model-tiers/service.ts";
-import { allTierModels, type ManagedModelTiers } from "../model-tiers/tiers.ts";
+import { configuredLlmModel } from "../llm/config.ts";
+import { llmProviderDescriptors } from "../llm/providers/index.ts";
+import type { LlmProviderDescriptor } from "../llm/providers/types.ts";
+import { createCatalogFixture } from "./review-settings-harness.ts";
+import type { CatalogEntry } from "../model-catalog/entries.ts";
+import type { ProjectReviewKind } from "../review-settings/settings.ts";
 import type { ModelCapabilityChecker } from "../llm/model-capabilities.ts";
 import { createRunnerApi } from "../runner-api/api.ts";
 import {
@@ -41,7 +42,7 @@ import {
 } from "../runner-api/job-options.ts";
 import { createClaimedKeys } from "../runner-api/claimed-keys.ts";
 import { createProjectClaimGuard } from "../runner-api/project-claim-guard.ts";
-import { knownSecretsFromEnv } from "../runner-api/redact.ts";
+import { createKnownSecrets } from "../runner-api/known-secrets.ts";
 import { createReviewSettingsJobOptionsSource } from "../runner-api/review-settings-job-options.ts";
 import { configuredRunnerToken } from "../runner-api/token-auth.ts";
 import type { RunnerApiLogger } from "../runner-api/logger.ts";
@@ -56,6 +57,9 @@ import type {
   RefusalNoticeService,
 } from "../refusal-notices/service.ts";
 import { createReviewSettingsService } from "../review-settings/service.ts";
+import { catalogSelectionFrom } from "../review-settings/catalog-selection.ts";
+import { keyModeForJob } from "../llm/resolve.ts";
+import { entryAllowed } from "../workspaces/entitlements.ts";
 import { builtInReviewSettings } from "../review-settings/settings.ts";
 import { startGithubAppHarness } from "./github-app-harness.ts";
 import { readEffectiveEntitlements } from "../workspaces/effective-entitlements.ts";
@@ -82,6 +86,8 @@ export type RequestOptions = {
   engines?: string[];
   /** #279: the features sent in the claim body next to the engines (`dynamic_capabilities`). */
   features?: string[];
+  /** #424: the LLM providers a runner advertises in the claim body. Any value, so a test can send an invalid one. */
+  llmProviders?: unknown;
   /** #322: the job a Dispatcher claims. Sent in the claim body; the engines then default to `pr-agent`. */
   jobId?: string;
   /** #322: the pool cap. Sent in the claim body. Any value, so a test can send an invalid one. */
@@ -110,16 +116,27 @@ export async function startRunnerApiHarness(
      * the workspace). Default: `TEST_LLM_API_KEY`. `null`: the workspace has none.
      */
     llmKey?: string | null;
-    /** Replaces how the claim resolves the LLM access of a workspace (for example to answer with the operator's key). */
+    /** Replaces how the keys to mask in a result are read (for example to make the read of one provider's key fail). */
+    currentKeysFor?: (workspaceId: string) => Promise<readonly string[]>;
+    /** Replaces how the claim loads the key of a selection (for example to answer with the operator's key, or to count the loads). */
     loadLlm?: (workspaceId: string) => Promise<LlmAccessResult>;
     /** #279: where a Dynamic claim reads the model metadata from. Left out, the claim reads none. */
     modelCapabilities?: ModelCapabilityChecker;
     /**
-     * #280: the operator's configuration of the managed tiers, stored as the operator API stores it. Left out: no
-     * tier is configured, and a job on the operator's key fails closed (`managed_tier_unavailable`). It can be
-     * changed later with `h.setTiers`.
+     * #432: the providers of the app, for a test that brings a second one (`createFakeAdapter`). The key services, the
+     * claim and the selection all use it. Default: the registry of the app.
      */
-    modelTiers?: ManagedModelTiers;
+    providers?: {
+      readonly ids: readonly string[];
+      readonly defaultProvider: LlmProviderDescriptor;
+      find(raw: unknown): LlmProviderDescriptor | undefined;
+    };
+    /**
+     * #432: whether the harness makes one released catalog entry that serves both kinds and is the instance default of
+     * both, so a job on the operator's key can run without the test setting a catalog up. Default: true. A test about
+     * the catalog turns it off and builds its own entries (`h.catalogFixture.entry`, `h.setCatalogDefaults`).
+     */
+    defaultEntry?: boolean;
     /**
      * #281: wires the notice of a refused review like the running server does (`h.notices`). With
      * `deliver: "manual"` the refusals are only collected (`h.notices.refusals`) and the test hands them on.
@@ -242,10 +259,49 @@ export async function startRunnerApiHarness(
     ),
     hooks: createJobProjectHooks(fixture.workspaceId),
   });
+  // #432: the model catalog of the instance. The claim reads it only for a workspace on the operator's key; `catalogReads`
+  // counts what it asked, so a test can pin that an own claim asks nothing.
+  const providers = options.providers ?? llmProviderDescriptors;
+  const catalogFixture = createCatalogFixture(fixture.db);
+  const catalogReads = { count: 0 };
+  const catalog = {
+    get: (id: string) => {
+      catalogReads.count += 1;
+      return catalogFixture.service.get(id);
+    },
+    defaults: () => {
+      catalogReads.count += 1;
+      return catalogFixture.service.defaults();
+    },
+    allCatalogModelIds: () => {
+      catalogReads.count += 1;
+      return catalogFixture.service.allCatalogModelIds();
+    },
+  };
+  let defaultEntry: CatalogEntry | undefined;
+  if (options.defaultEntry !== false) {
+    defaultEntry = await catalogFixture.entry({
+      name: "Standard",
+      modelId: "entry/default-model",
+    });
+    const set = await catalogFixture.service.setDefaults(
+      { diff: defaultEntry.id, dynamic: defaultEntry.id },
+      null,
+    );
+    if (!set.ok) throw new Error(`defaults refused: ${set.code}`);
+  }
   const appSettings = createAppSettingsRepository(
     fixture.db,
     fixture.workspaceId,
   );
+  // The settings service as the running server wires it for a workspace: a workspace on the operator's key selects
+  // catalog entries and may not write a model (#283, #430), one on its own key is the other way round.
+  const settingsEntitlements = () =>
+    readEffectiveEntitlements(
+      fixture.db,
+      fixture.workspaceId,
+      fixture.clock.now,
+    );
   const reviewSettings = createReviewSettingsService({
     appSettings,
     projects: createProjectsRepository(
@@ -253,17 +309,14 @@ export async function startRunnerApiHarness(
       fixture.workspaceId,
       fixture.clock.now,
     ),
-    builtIn: () => builtInReviewSettings(env.LLM_MODEL ?? TEST_LLM_MODEL),
+    builtIn: () => builtInReviewSettings(configuredLlmModel(env)),
+    operatorsModels: async () =>
+      keyModeForJob(await settingsEntitlements()) !== "own",
+    catalog: catalogSelectionFrom(catalogFixture.service, async (id) =>
+      entryAllowed(await settingsEntitlements(), { id }),
+    ),
+    providers: options.providers ?? llmProviderDescriptors,
   });
-  // The operator's tiers, read by the claim. The metadata check only matters when saving through the service; the
-  // harness stores the configuration as it is given, like the operator API did before.
-  const instanceSettings = createInstanceSettingsRepository(fixture.db);
-  const modelTiers: ModelTiersService = createModelTiersService({
-    settings: instanceSettings,
-    modelCapabilities: { check: async () => ({ outcome: "unverifiable" }) },
-  });
-  if (options.modelTiers !== undefined)
-    await instanceSettings.set("managed_model_tiers", options.modelTiers, null);
   // One app instance: its own collaborators, over the SAME database, queue and fakes. The LLM access is put
   // together as the running server does it: the key of the job's own workspace. A second instance (`anotherInstance`) shares nothing but
   // the database, which is what several app instances do.
@@ -273,6 +326,7 @@ export async function startRunnerApiHarness(
       appSecret: () => TEST_APP_SECRET,
       env: () => env,
       now: fixture.clock.now,
+      providers,
     });
     const claimedKeys = createClaimedKeys({
       db: fixture.db,
@@ -320,7 +374,37 @@ export async function startRunnerApiHarness(
               settings: () => reviewSettings,
             })
           : emptyJobOptionsSource),
-      loadLlm: options.loadLlm ?? ((workspaceId) => llm.accessFor(workspaceId)),
+      keyFor:
+        options.loadLlm !== undefined
+          ? (workspaceId) => options.loadLlm!(workspaceId)
+          : (workspaceId, selection) => llm.keyFor(workspaceId, selection),
+      recordSelection: (job, selection) =>
+        createUsageRecordsRepository(
+          fixture.db,
+          job.workspaceId,
+          fixture.clock.now,
+        ).setSelection(job.id, {
+          provider: selection.provider,
+          catalogEntry:
+            selection.keyMode === "managed"
+              ? { id: selection.entry.id, name: selection.entry.name }
+              : null,
+        }),
+      catalog,
+      providers,
+      builtInModel: (kind) =>
+        kind === "diff"
+          ? configuredLlmModel(env)
+          : llmProviderDescriptors.defaultProvider.defaultModels.dynamic,
+      managedModels: managedModelsOf({
+        usage: (job) =>
+          createUsageRecordsRepository(
+            fixture.db,
+            job.workspaceId,
+            fixture.clock.now,
+          ).get(job.id),
+        catalog,
+      }),
       entitlementsFor: (workspaceId) =>
         readEffectiveEntitlements(fixture.db, workspaceId, fixture.clock.now),
       recordKeyMode: (job, keyMode) =>
@@ -329,23 +413,6 @@ export async function startRunnerApiHarness(
           job.workspaceId,
           fixture.clock.now,
         ).setKeyMode(job.id, keyMode),
-      modelTiers,
-      tierModels: async (job) => {
-        const record = await createUsageRecordsRepository(
-          fixture.db,
-          job.workspaceId,
-          fixture.clock.now,
-        ).get(job.id);
-        return record?.modelTier == null
-          ? { managed: false, models: [] }
-          : { managed: true, models: allTierModels(await modelTiers.read()) };
-      },
-      recordModelTier: (job, tier) =>
-        createUsageRecordsRepository(
-          fixture.db,
-          job.workspaceId,
-          fixture.clock.now,
-        ).setModelTier(job.id, tier),
       ...(options.modelCapabilities === undefined
         ? {}
         : { modelCapabilities: options.modelCapabilities }),
@@ -354,10 +421,12 @@ export async function startRunnerApiHarness(
       now: fixture.clock.now,
       logger,
       heartbeatIntervalSeconds: 30,
-      knownSecrets: async (workspaceId) => [
-        ...knownSecretsFromEnv(env),
-        ...(await llm.currentKeysFor(workspaceId)),
-      ],
+      knownSecrets: createKnownSecrets({
+        env,
+        currentKeysFor:
+          options.currentKeysFor ??
+          ((workspaceId) => llm.currentKeysFor(workspaceId)),
+      }),
     };
     const api = createRunnerApi({
       ...apiDeps,
@@ -369,17 +438,17 @@ export async function startRunnerApiHarness(
     return { api, workerApi, llm, claimedKeys };
   }
   const { api, workerApi, llm, claimedKeys } = buildApi();
-  /** Saves (or, with null, removes) the LLM key of the workspace of the jobs. */
-  async function setLlmKey(key: string | null): Promise<void> {
+  /** Saves (or, with null, removes) the LLM key of the workspace of the jobs, for a provider (default: the first one). */
+  async function setLlmKey(
+    key: string | null,
+    provider: string = llmProviderDescriptors.defaultProvider.id,
+  ): Promise<void> {
     const keys = llm.keyServiceFor(fixture.workspaceId);
     if (key === null) {
-      await keys.remove();
+      await keys.remove(provider);
       return;
     }
-    const saved = await keys.save(
-      { provider: "openrouter", apiKey: key },
-      null,
-    );
+    const saved = await keys.save({ provider, apiKey: key }, null);
     if (!saved.ok) throw new Error("The test LLM key was refused.");
   }
   await setLlmKey(
@@ -413,6 +482,7 @@ export async function startRunnerApiHarness(
   function claimRequest(request: RequestOptions): Request {
     if (
       request.engines === undefined &&
+      request.llmProviders === undefined &&
       request.jobId === undefined &&
       request.maxRunning === undefined
     )
@@ -428,6 +498,9 @@ export async function startRunnerApiHarness(
         ...(request.features === undefined
           ? {}
           : { features: request.features }),
+        ...(request.llmProviders === undefined
+          ? {}
+          : { llmProviders: request.llmProviders }),
         ...(request.jobId === undefined ? {} : { jobId: request.jobId }),
         ...(request.maxRunning === undefined
           ? {}
@@ -600,10 +673,11 @@ export async function startRunnerApiHarness(
       credential: string | null,
       features?: string,
       target: typeof workerApi = workerApi,
+      llmProviders?: string,
     ) =>
       target.details(
         new Request(
-          `${workerUrl}/jobs/${jobId}${features === undefined ? "" : `?features=${features}`}`,
+          `${workerUrl}/jobs/${jobId}${detailsQuery(features, llmProviders)}`,
           { method: "GET", headers: workerHeaders(credential) },
         ),
         jobId,
@@ -646,12 +720,14 @@ export async function startRunnerApiHarness(
   };
 
   /** Claims as a Dispatcher and fetches the job as its Worker: the credential and the job details. */
-  async function startedWorker(features?: string) {
+  async function startedWorker(features?: string, llmProviders?: string) {
     const claim = await claimedSplit();
     const response = await worker.details(
       claim.job.id,
       claim.job.credential,
       features,
+      undefined,
+      llmProviders,
     );
     if (response.status !== 200)
       throw new Error(`Expected the job details, got ${response.status}.`);
@@ -683,10 +759,35 @@ export async function startRunnerApiHarness(
     env,
     /** The LLM access of each workspace, as the claim resolves it: `llm.keyServiceFor(id).save(...)` sets a workspace key. */
     llm,
-    /** The operator's tiers as the claim reads them; `setTiers` stores a configuration without the metadata check. */
-    modelTiers,
-    setTiers: (tiers: ManagedModelTiers) =>
-      instanceSettings.set("managed_model_tiers", tiers, null),
+    /** #432: the model catalog (a real service on the test database) and the number of questions the claim put to it. */
+    catalogFixture,
+    catalogReads,
+    /**
+     * A released entry (or another status) for a provider of the harness's registry. The catalog service only knows the
+     * providers of the app, so an entry of a test's second provider is made for the default one and moved.
+     */
+    catalogEntryFor: async (
+      provider: string,
+      entryOptions: Parameters<typeof catalogFixture.entry>[0] = {},
+    ) => {
+      const made = await catalogFixture.entry(entryOptions);
+      if (provider === llmProviderDescriptors.defaultProvider.id) return made;
+      await fixture.db
+        .updateTable("model_catalog_entries")
+        .set({ provider })
+        .where("id", "=", made.id)
+        .execute();
+      return { ...made, provider };
+    },
+    /** The entry `defaultEntry` made, or undefined. */
+    defaultEntry,
+    /** Sets the instance defaults (`catalog_defaults`): an entry id per kind or null. */
+    setCatalogDefaults: async (
+      defaults: Record<ProjectReviewKind, string | null>,
+    ) => {
+      const set = await catalogFixture.service.setDefaults(defaults, null);
+      if (!set.ok) throw new Error(`defaults refused: ${set.code}`);
+    },
     setLlmKey,
     claimedKeys,
     registry,
@@ -743,6 +844,14 @@ export type RunnerApiHarness = Awaited<
 >;
 
 /** A valid, successful result; any field can be replaced. */
+function detailsQuery(features?: string, llmProviders?: string): string {
+  const parts = [
+    ...(features === undefined ? [] : [`features=${features}`]),
+    ...(llmProviders === undefined ? [] : [`llmProviders=${llmProviders}`]),
+  ];
+  return parts.length === 0 ? "" : `?${parts.join("&")}`;
+}
+
 export function goodResult(
   overrides: Partial<RunnerResult> = {},
 ): RunnerResult {

@@ -37,9 +37,11 @@ import {
   readExamples,
 } from "../../src/test-support/runner-contract.ts";
 import { PROJECT_REVIEW_KINDS } from "../../src/review-settings/settings.ts";
-import { MODEL_TIER_ERROR_CODES } from "../../src/model-tiers/errors.ts";
-import { MODEL_TIERS } from "../../src/model-tiers/tiers.ts";
 import { KEY_MODES, LIMIT_NAMES } from "../../src/workspaces/entitlements.ts";
+import {
+  CATALOG_ENTRY_ID_PATTERN,
+  MODEL_ACCESS_MAX_ENTRIES,
+} from "../../src/workspaces/entitlements-validation.ts";
 
 const contract = createContractValidator(OPERATOR_CONTRACT_FILE);
 
@@ -47,6 +49,8 @@ function expectValid(definition: string, document: unknown) {
   const { valid, errors } = contract.check(definition, document);
   expect({ valid, errors }).toStrictEqual({ valid: true, errors: "" });
 }
+
+const ENTRY_ID = "mce_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
 const WRITE = {
   planLabel: "team",
@@ -105,6 +109,39 @@ describe("the contract file", () => {
     });
   });
 
+  // #428-T08
+  it("names the code, the id shape and the most entries of the model access like the app", () => {
+    const defs = readContract(OPERATOR_CONTRACT_FILE).$defs as unknown as {
+      ApiErrorCode: { enum: string[] };
+      ModelAccess: {
+        required: string[];
+        additionalProperties: boolean;
+        properties: {
+          catalogEntries: {
+            type: string[];
+            maxItems: number;
+            items: { pattern: string };
+          };
+        };
+      };
+    };
+
+    expect(defs.ApiErrorCode.enum).toContain("catalog_entry_invalid");
+    expect(OPERATOR_API_ERROR_CODES).toContain("catalog_entry_invalid");
+    expect(defs.ModelAccess.required).toEqual(["catalogEntries"]);
+    expect(defs.ModelAccess.additionalProperties).toBe(false);
+    expect(defs.ModelAccess.properties.catalogEntries.type).toEqual([
+      "array",
+      "null",
+    ]);
+    expect(defs.ModelAccess.properties.catalogEntries.maxItems).toBe(
+      MODEL_ACCESS_MAX_ENTRIES,
+    );
+    expect(defs.ModelAccess.properties.catalogEntries.items.pattern).toBe(
+      CATALOG_ENTRY_ID_PATTERN.source,
+    );
+  });
+
   // #275-T10
   it.each(readExamples("examples/operator-api"))(
     "has a valid example for $definition",
@@ -128,8 +165,6 @@ describe("the contract file", () => {
         "ErrorResponse",
         "HandoffRedeemRequest",
         "HandoffRedeemResponse",
-        "ModelTiersResponse",
-        "ModelTiersWrite",
         "PlanManagementResponse",
         "PlanManagementWrite",
         "StoredEntitlements",
@@ -174,6 +209,17 @@ describe("the usage part of the contract file", () => {
     expect(defs.UsagePage.description).toContain("idempotency key");
   });
 
+  // #432-T14
+  it("grows by the entry id and name as optional fields, so a strict reader of the previous release still validates", () => {
+    const defs = readContract(OPERATOR_CONTRACT_FILE).$defs as unknown as {
+      UsageItem: { required: string[] };
+    };
+
+    expect(defs.UsageItem.required).not.toContain("catalogEntryId");
+    expect(defs.UsageItem.required).not.toContain("catalogEntryName");
+    expect(defs.UsageItem.required).toContain("modelTier");
+  });
+
   // #278-T09
   it("promises no field that could carry a repository, a pull request, a title, a user or a model name", () => {
     const defs = readContract(OPERATOR_CONTRACT_FILE).$defs as unknown as {
@@ -185,6 +231,8 @@ describe("the usage part of the contract file", () => {
 
     expect(Object.keys(defs.UsageItem.properties).sort()).toEqual(
       [
+        "catalogEntryId",
+        "catalogEntryName",
         "completionTokens",
         "costMicroUsd",
         "id",
@@ -491,6 +539,78 @@ describe("what the app answers", () => {
     }
   });
 
+  // #428-T01
+  it("answers a row with a model access, one without it and the default with documents valid against the file", async () => {
+    const h = await startOperatorApiHarness();
+
+    for (const modelAccess of [
+      undefined,
+      { catalogEntries: [ENTRY_ID] },
+      { catalogEntries: [] },
+      { catalogEntries: null },
+    ]) {
+      await answer(
+        await h.call("PUT", "/api/operator/v1/entitlements/default", {
+          body: {
+            ...WRITE,
+            ...(modelAccess === undefined ? {} : { modelAccess }),
+          },
+        }),
+        "DefaultEntitlementsResponse",
+      );
+      await answer(
+        await h.call("PUT", path(h.workspaceId), {
+          body: {
+            ...WRITE,
+            ...(modelAccess === undefined ? {} : { modelAccess }),
+          },
+        }),
+        "WorkspaceEntitlementsResponse",
+      );
+    }
+    // A row of before the field existed.
+    await h.db
+      .updateTable("workspace_entitlements")
+      .set({ model_access: null })
+      .execute();
+    await answer(
+      await h.call("GET", path(h.workspaceId)),
+      "WorkspaceEntitlementsResponse",
+    );
+    // The refusal.
+    const refused = await h.call("PUT", path(h.workspaceId), {
+      body: { ...WRITE, modelAccess: { catalogEntries: "all" } },
+    });
+    expect(refused.status).toBe(422);
+    await answer(refused, "ErrorResponse");
+  });
+
+  // #428-T01
+  it("accepts the answers of an instance that is not yet upgraded: a response without modelAccess is valid, a write without it too", () => {
+    const fields = {
+      planLabel: "team",
+      keyMode: "managed",
+      limits: Object.fromEntries(LIMIT_NAMES.map((name) => [name, null])),
+      periodStart: "2026-10-01T00:00:00.000Z",
+      suspended: false,
+      suspensionCode: null,
+    };
+
+    expectValid("EntitlementsFields", fields);
+    expectValid("StoredEntitlements", {
+      ...fields,
+      updatedAt: "2026-10-01T00:00:00.000Z",
+    });
+    expectValid("DefaultEntitlementsResponse", {
+      version: 1,
+      default: fields,
+    });
+    expect(
+      contract.check("EntitlementsFields", { ...fields, modelAccess: null })
+        .valid,
+    ).toBe(false);
+  });
+
   // #275-T10
   it("answers every kind of error with a document valid against the file", async () => {
     const h = await startOperatorApiHarness();
@@ -574,6 +694,26 @@ describe("what the app accepts", () => {
     },
     { ...WRITE, suspended: true, suspensionCode: "unpaid" },
     { ...WRITE, periodStart: "2026-10-01T00:00:00Z".replace("Z", ".000Z") },
+    // #428: the model access is optional (an older writer leaves it out and keeps the stored one), null is every
+    // released entry, [] none; ids that no entry has are accepted; it is kept next to the own key.
+    { ...WRITE, modelAccess: { catalogEntries: null } },
+    { ...WRITE, modelAccess: { catalogEntries: [] } },
+    { ...WRITE, modelAccess: { catalogEntries: [ENTRY_ID] } },
+    {
+      ...WRITE,
+      modelAccess: {
+        catalogEntries: Array.from(
+          { length: 100 },
+          (_unused, index) => `mce_${String(index)}`,
+        ),
+      },
+    },
+    {
+      ...WRITE,
+      keyMode: "own",
+      limits: { ...WRITE.limits, managedCostLimitMicroUsd: null },
+      modelAccess: { catalogEntries: [ENTRY_ID] },
+    },
   ];
   const BAD: unknown[] = [
     null,
@@ -611,6 +751,25 @@ describe("what the app accepts", () => {
     { ...WRITE, limits: { ...WRITE.limits, diffRunsPerPeriod: 1.5 } },
     { ...WRITE, limits: { ...WRITE.limits, diffRunsPerPeriod: "5" } },
     { ...WRITE, limits: { ...WRITE.limits, diffRunPerPeriod: 5 } },
+    // #428: the shape of the model access.
+    { ...WRITE, modelAccess: null },
+    { ...WRITE, modelAccess: "all" },
+    { ...WRITE, modelAccess: [ENTRY_ID] },
+    { ...WRITE, modelAccess: {} },
+    { ...WRITE, modelAccess: { catalogEntries: ENTRY_ID } },
+    { ...WRITE, modelAccess: { catalogEntries: [1] } },
+    { ...WRITE, modelAccess: { catalogEntries: ["gpt-5"] } },
+    { ...WRITE, modelAccess: { catalogEntries: [`${ENTRY_ID} `] } },
+    { ...WRITE, modelAccess: { catalogEntries: null, extra: 1 } },
+    {
+      ...WRITE,
+      modelAccess: {
+        catalogEntries: Array.from(
+          { length: 101 },
+          (_unused, index) => `mce_${String(index)}`,
+        ),
+      },
+    },
   ];
 
   async function accepted(body: unknown): Promise<boolean> {
@@ -703,80 +862,44 @@ describe("what the app answers for the plan handoff", () => {
   });
 });
 
-describe("the model tiers part of the contract file", () => {
-  // #280-T01
-  it("names the tiers and the kinds the app has, and the codes it refuses with", () => {
+describe("the removed model tiers part of the contract file (#434)", () => {
+  // #434-T09
+  it("has no definition, no error code and no path of the tier configuration any more", () => {
+    const contractText = JSON.stringify(readContract(OPERATOR_CONTRACT_FILE));
     const defs = readContract(OPERATOR_CONTRACT_FILE).$defs as unknown as {
-      ModelTiersWrite: {
-        properties: {
-          tiers: {
-            additionalProperties: boolean;
-            propertyNames: { enum: string[] };
-            properties: Record<string, unknown>;
-          };
-        };
-      };
-      ModelTiersResponse: { properties: { tiers: { required: string[] } } };
-      ModelTierModels: {
-        additionalProperties: boolean;
-        properties: Record<string, unknown>;
-      };
       ApiErrorCode: { enum: string[] };
     };
 
-    expect(
-      Object.keys(defs.ModelTiersWrite.properties.tiers.properties).sort(),
-    ).toEqual([...MODEL_TIERS].sort());
-    expect(defs.ModelTiersWrite.properties.tiers.additionalProperties).toBe(
-      false,
-    );
-    expect(
-      [...defs.ModelTiersResponse.properties.tiers.required].sort(),
-    ).toEqual([...MODEL_TIERS].sort());
-    expect(Object.keys(defs.ModelTierModels.properties).sort()).toEqual(
-      [...PROJECT_REVIEW_KINDS].sort(),
-    );
-    expect(defs.ApiErrorCode.enum).toEqual(
-      expect.arrayContaining([...MODEL_TIER_ERROR_CODES]),
-    );
+    for (const name of [
+      "ModelTiersWrite",
+      "ModelTiersResponse",
+      "ModelTierAnswer",
+      "ModelTierModels",
+      "ModelId",
+    ])
+      expect(Object.keys(defs)).not.toContain(name);
+    for (const code of [
+      "model_id_invalid",
+      "MODEL_UNKNOWN",
+      "DYNAMIC_MODEL_TOOLS_UNSUPPORTED",
+      "DYNAMIC_MODEL_UNKNOWN",
+      "DYNAMIC_MODEL_UNVERIFIED",
+    ])
+      expect(defs.ApiErrorCode.enum).not.toContain(code);
+    expect(contractText).not.toContain("/model-tiers");
   });
 
-  // #280-T01
-  it("answers the setting with documents valid against the file, and accepts what the file allows", async () => {
+  // #434-T09
+  it("answers a call of the removed path with the ErrorResponse of any missing path", async () => {
     const h = await startOperatorApiHarness();
-    const path = "/api/operator/v1/model-tiers";
-    const body = {
-      tiers: {
-        low: { diff: "vendor/low-diff" },
-        high: { diff: "vendor/high-diff", dynamic: "vendor/high-dyn:free" },
-      },
-    };
-
-    expectValid("ModelTiersWrite", body);
-    expectValid("ModelTiersWrite", { tiers: {} });
-    expectValid("ModelTiersWrite", { tiers: { medium: { diff: null } } });
-    expect(
-      contract.check("ModelTiersWrite", { tiers: { ultra: {} } }).valid,
-    ).toBe(false);
-    expect(
-      contract.check("ModelTiersWrite", { tiers: { low: { review: "a/b" } } })
-        .valid,
-    ).toBe(false);
-    expect(
-      contract.check("ModelTiersWrite", { tiers: { low: { diff: "a b" } } })
-        .valid,
-    ).toBe(false);
     for (const response of [
-      await h.call("GET", path),
-      await h.call("PUT", path, { body }),
-      await h.call("GET", path),
-    ])
-      expectValid("ModelTiersResponse", await response.json());
-    for (const response of [
-      await h.call("PUT", path, { body: { tiers: { low: { diff: "a b" } } } }),
-      await h.call("PUT", path, { body: { tiers: { ultra: {} } } }),
-      await h.call("POST", path, { body }),
-    ])
+      await h.call("GET", "/api/operator/v1/model-tiers"),
+      await h.call("PUT", "/api/operator/v1/model-tiers", {
+        body: { tiers: { low: { diff: "vendor/low-diff" } } },
+      }),
+    ]) {
+      expect(response.status).toBe(404);
       expectValid("ErrorResponse", await response.json());
+    }
   });
 });

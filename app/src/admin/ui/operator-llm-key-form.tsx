@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 "use client";
-// The operator's own LLM key (#276, docs/decisions/0001-editions-setup-and-accounts.md, section 2.8): the one key
-// of the instance that the workspaces whose key mode is `managed` review with. Write-only like every credential of
-// the portal: the page says whether a key is saved, cannot be read or is missing, and the last four characters of a
-// long key; the field is emptied after a save and the saved value never reaches this page. The server judges the
-// key (src/llm/operator-key.ts); the form shows the reason it gets back. The provider is OpenRouter.
+// The operator's own LLM keys (#276, #427; docs/decisions/0001-editions-setup-and-accounts.md, section 2.8): the keys
+// of the instance that the workspaces whose key mode is `managed` review with, one card for each provider. Write-only
+// like every credential of the portal: a card says whether a key is saved, cannot be read or is missing, and the last
+// four characters of a long key; the field is emptied after a save and the saved value never reaches this page. The
+// server judges the key (src/llm/operator-key.ts); the form shows the reason it gets back. "Test key" asks the
+// provider whether it accepts the typed key, or the saved one when the field is empty (limited, with counters of its
+// own).
 import { useEffect, useId, useState, type FormEvent } from "react";
 import { Button } from "../../components/button.tsx";
 import { DangerZone } from "../../components/danger-zone.tsx";
@@ -26,6 +28,12 @@ import {
 } from "../../components/ui/field.tsx";
 import { Input } from "../../components/ui/input.tsx";
 import type { OperatorLlmKeyStatus } from "../../llm/operator-key.ts";
+import { llmProviderDescriptors } from "../../llm/providers/index.ts";
+import {
+  describeKeyTestFailure,
+  describeLlmKeyFailure,
+  describeLlmKeyIssue,
+} from "../../llm/ui/messages.ts";
 import {
   STORED_ENCRYPTED_HINT,
   UNREADABLE_SECRET_CAUSE,
@@ -41,7 +49,8 @@ function StatusLine({ status }: { status: OperatorLlmKeyStatus }) {
         <AlertDescription>
           <strong>The saved key cannot be read.</strong>{" "}
           {UNREADABLE_SECRET_CAUSE} Enter the key again and save. Until then
-          workspaces that use the key of the instance cannot run reviews.
+          workspaces that use the key of the instance cannot run reviews on this
+          provider.
         </AlertDescription>
       </Alert>
     );
@@ -49,7 +58,7 @@ function StatusLine({ status }: { status: OperatorLlmKeyStatus }) {
     return (
       <FieldDescription>
         No key is saved. Workspaces that use the key of the instance cannot run
-        reviews until there is one.
+        reviews on this provider until there is one.
       </FieldDescription>
     );
   return (
@@ -61,10 +70,22 @@ function StatusLine({ status }: { status: OperatorLlmKeyStatus }) {
   );
 }
 
+type TestOutcome =
+  | { kind: "accepted" }
+  | { kind: "rejected"; text: string; detail: string | null }
+  | { kind: "failed"; text: string };
+
+/** The card of one provider: its key, "Save key", "Test key" and, while a key is stored, the removal. */
 export function OperatorLlmKeyForm({
+  provider,
+  label,
   status: stored,
   api = browserAdminApi,
 }: {
+  /** The id of the provider whose key this card sets. */
+  provider: string;
+  /** Its name for the person. */
+  label: string;
   status: OperatorLlmKeyStatus;
   /** Only tests pass this. */
   api?: AdminApi;
@@ -72,6 +93,8 @@ export function OperatorLlmKeyForm({
   const ids = useId();
   const [apiKey, setApiKey] = useState("");
   const { pending, status, save } = useSave(api);
+  const [testing, setTesting] = useState(false);
+  const [tested, setTested] = useState<TestOutcome | null>(null);
 
   // A failed save only sets state; the focus moves after the render that shows the error is committed.
   useEffect(() => {
@@ -82,9 +105,41 @@ export function OperatorLlmKeyForm({
 
   function submit(event: FormEvent) {
     event.preventDefault();
-    void save({ operatorLlmKey: { apiKey } }).then(([outcome]) => {
-      if (outcome?.kind === "saved") setApiKey("");
-    });
+    setTested(null);
+    void save({ operatorLlmKeys: { [provider]: { apiKey } } }).then(
+      ([outcome]) => {
+        if (outcome?.kind === "saved") setApiKey("");
+      },
+    );
+  }
+
+  async function test() {
+    setTested(null);
+    setTesting(true);
+    const result = await api.testLlmKey({ provider, apiKey });
+    setTesting(false);
+    if (!result.ok) {
+      const issue = result.issues[0];
+      setTested({
+        kind: "failed",
+        text:
+          result.code === "invalid_input" && issue !== undefined
+            ? issue.code === "api_key_unreadable"
+              ? describeAdminIssue(issue)
+              : describeLlmKeyIssue(issue.code)
+            : describeLlmKeyFailure(result.code),
+      });
+      return;
+    }
+    setTested(
+      result.data.ok
+        ? { kind: "accepted" }
+        : {
+            kind: "rejected",
+            text: describeKeyTestFailure(result.data.error),
+            detail: result.data.detail,
+          },
+    );
   }
 
   const issue =
@@ -93,31 +148,16 @@ export function OperatorLlmKeyForm({
       : undefined;
 
   return (
-    <>
+    <section aria-label={label} className="flex flex-col gap-6">
       <form
         onSubmit={submit}
-        aria-label="LLM key of the instance"
+        aria-label={`${label} LLM key`}
         className="flex flex-col gap-6"
       >
-        <HelpDisclosure label="How this works">
-          A workspace whose key mode is managed reviews with this key instead of
-          a key of its own; its own key stays stored and is not used. Any other
-          workspace never uses it. The provider is OpenRouter and bills the
-          account the key belongs to. The key is stored encrypted on this server
-          with the key of this instance (APP_SECRET), so anyone who holds both
-          can decrypt it. Only an instance admin can save or remove it, here;
-          the operator API cannot read or change it.
-        </HelpDisclosure>
-
-        <Card role="region" aria-labelledby={`${ids}-key`}>
+        <Card>
           <CardHeader>
             <CardTitle>
-              <h2
-                id={`${ids}-key`}
-                className="text-lg font-semibold tracking-tight"
-              >
-                Key
-              </h2>
+              <h2 className="text-lg font-semibold tracking-tight">{label}</h2>
             </CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-5">
@@ -156,24 +196,103 @@ export function OperatorLlmKeyForm({
         </Card>
 
         <div className="flex flex-wrap items-center gap-3">
-          <Button type="submit" loading={pending} loadingLabel="Saving the key">
+          <Button
+            type="submit"
+            loading={pending}
+            loadingLabel="Saving the key"
+            disabled={testing}
+          >
             Save key
+          </Button>
+          <Button
+            variant="secondary"
+            loading={testing}
+            loadingLabel="Testing the key"
+            disabled={
+              pending ||
+              (apiKey.trim() === "" && stored.state === "not_configured")
+            }
+            onClick={() => void test()}
+          >
+            Test key
           </Button>
           <SaveResult status={status} />
         </div>
+        <div aria-live="polite" aria-atomic="true">
+          {tested?.kind === "accepted" ? (
+            <p className="text-sm text-success">
+              The provider accepted the key.
+            </p>
+          ) : null}
+        </div>
+        {tested?.kind === "failed" ? (
+          <Alert variant="destructive">
+            <AlertDescription>{tested.text}</AlertDescription>
+          </Alert>
+        ) : null}
+        {tested?.kind === "rejected" ? (
+          <Alert variant="destructive">
+            <AlertDescription>
+              <p>{tested.text}</p>
+              {tested.detail !== null ? (
+                <p className="text-sm text-muted-foreground">
+                  Detail:{" "}
+                  <span className="font-mono text-foreground">
+                    {tested.detail}
+                  </span>
+                </p>
+              ) : null}
+            </AlertDescription>
+          </Alert>
+        ) : null}
       </form>
 
       {stored.state === "not_configured" ? null : (
         <DangerZone
-          title="Danger zone"
-          description="Only when this instance should no longer offer its own key."
+          title={`Danger zone: ${label}`}
+          description={`Only when this instance should no longer offer its own ${label} key.`}
           actionLabel="Remove the key"
-          confirmTitle="Remove the key?"
-          confirmDescription="Workspaces that use the key of the instance cannot run reviews until a key is saved again. Their own keys are not touched."
+          confirmTitle={`Remove the ${label} key?`}
+          confirmDescription={`Workspaces that use the key of the instance cannot run reviews on ${label} until a key is saved again. Their own keys and the keys of other providers are not touched.`}
           confirmLabel="Remove the key"
-          onConfirm={() => void save({ operatorLlmKey: null })}
+          onConfirm={() => void save({ operatorLlmKeys: { [provider]: null } })}
         />
       )}
+    </section>
+  );
+}
+
+/** The whole page: what the keys are for, and the card of each provider in the order of the registry. */
+export function OperatorLlmKeys({
+  keys,
+  api = browserAdminApi,
+}: {
+  /** The state of the key of each provider, by the provider's id. */
+  keys: Record<string, OperatorLlmKeyStatus>;
+  /** Only tests pass this. */
+  api?: AdminApi;
+}) {
+  return (
+    <>
+      <HelpDisclosure label="How this works">
+        A workspace whose key mode is managed reviews with the key of the
+        instance for the provider it runs on, instead of a key of its own; its
+        own keys stay stored and are not used. Any other workspace never uses
+        these keys. Each provider bills the account its key belongs to, and a
+        key is only ever sent to its own provider. The keys are stored encrypted
+        on this server with the key of this instance (APP_SECRET), so anyone who
+        holds both can decrypt them. Only an instance admin can save or remove
+        them, here; the operator API cannot read or change them.
+      </HelpDisclosure>
+      {Object.entries(keys).map(([provider, status]) => (
+        <OperatorLlmKeyForm
+          key={provider}
+          provider={provider}
+          label={llmProviderDescriptors.labelOf(provider)}
+          status={status}
+          api={api}
+        />
+      ))}
     </>
   );
 }

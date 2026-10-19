@@ -2,7 +2,6 @@
 
 // The vocabulary of the operator API v1 that the code and contracts/operator-api.v1.json share. A test compares
 // these lists with the file; the file is the source of the format.
-import { MODEL_TIER_ERROR_CODES } from "../model-tiers/errors.ts";
 import { PLAN_MANAGEMENT_URL_ERROR_CODES } from "../plan-handoff/url.ts";
 import { ENTITLEMENT_ERROR_CODES } from "../workspaces/entitlements-validation.ts";
 
@@ -45,6 +44,9 @@ export const USAGE_SAFETY_LAG_MS = 60_000;
  */
 export const TIER_NAME_PATTERN = /^[a-z][a-z0-9_-]{0,31}$/;
 
+/** What a usage item may show as `catalogEntryId`: the shape of an entry id (the contract's pattern). At most 64 characters. */
+export const ENTRY_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+
 /** The longest cursor the feed accepts (the contract's `UsageCursor.maxLength`). */
 export const MAX_USAGE_CURSOR_LENGTH = 128;
 
@@ -69,8 +71,6 @@ export const OPERATOR_API_ERROR_CODES = [
   ...OPERATOR_OWN_ERROR_CODES,
   ...ENTITLEMENT_ERROR_CODES,
   ...PLAN_MANAGEMENT_URL_ERROR_CODES,
-  /** #280: a refused configuration of the managed model tiers (the id, or a Dynamic model the provider cannot vouch for). */
-  ...MODEL_TIER_ERROR_CODES,
 ] as const;
 export type OperatorApiErrorCode = (typeof OPERATOR_API_ERROR_CODES)[number];
 
@@ -84,7 +84,6 @@ export type OperatorRoute =
   | { kind: "workspace-usage"; workspaceId: string }
   | { kind: "workspace-usage-summary"; workspaceId: string }
   | { kind: "plan-management" }
-  | { kind: "model-tiers" }
   | { kind: "handoff-redeem" }
   | { kind: "unknown" };
 
@@ -98,7 +97,6 @@ export const ROUTE_METHODS: Record<OperatorRoute["kind"], readonly string[]> = {
   "workspace-usage": ["GET"],
   "workspace-usage-summary": ["GET"],
   "plan-management": ["GET", "PUT", "DELETE"],
-  "model-tiers": ["GET", "PUT"],
   "handoff-redeem": ["POST"],
   unknown: [],
 };

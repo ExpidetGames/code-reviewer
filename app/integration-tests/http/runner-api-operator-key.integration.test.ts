@@ -5,6 +5,7 @@
 // the key of a `managed` workspace is the operator's, never the workspace's; it is remembered encrypted for
 // masking; it is in no log line, no stored job row and no Dispatcher answer; and the usage record says the key
 // that was really used, so the cost limit of #277 counts what it should.
+import { DEFAULT_LLM_PROVIDER } from "../../src/llm/providers/index.ts";
 import { describe, expect, it } from "vitest";
 import { createWorkspaceEntitlementsRepository } from "../../src/db/repositories/workspace-entitlements-repository.ts";
 import {
@@ -49,14 +50,16 @@ async function start(
 ): Promise<RunnerApiHarness> {
   const h = await startRunnerApiHarness({
     llmKey: WORKSPACE_KEY,
-    // The job of a managed workspace needs a model for its tier (#280); which one is not what these tests are about.
-    modelTiers: { medium: { diff: "tier/medium-diff" } },
     ...options.harness,
   });
   if (options.operatorKey !== null) {
-    const saved = await h.llm
-      .operatorKey()
-      .save({ apiKey: options.operatorKey ?? OPERATOR_KEY }, null);
+    const saved = await h.llm.operatorKey().save(
+      {
+        provider: DEFAULT_LLM_PROVIDER,
+        apiKey: options.operatorKey ?? OPERATOR_KEY,
+      },
+      null,
+    );
     expect(saved.ok).toBe(true);
   }
   if (keyMode !== null)
@@ -120,7 +123,12 @@ describe("the legacy claim of a managed workspace", () => {
     expect(remembered).toHaveLength(1);
     expect(JSON.stringify(remembered)).not.toContain(OPERATOR_KEY);
     expect(await h.claimedKeys.keysOf(job.id)).toEqual([OPERATOR_KEY]);
-    await h.llm.operatorKey().save({ apiKey: OPERATOR_KEY_ROTATED }, null);
+    await h.llm
+      .operatorKey()
+      .save(
+        { provider: DEFAULT_LLM_PROVIDER, apiKey: OPERATOR_KEY_ROTATED },
+        null,
+      );
 
     const completed = await h
       .anotherInstance()
@@ -316,7 +324,12 @@ describe("the Worker API of a managed workspace", () => {
     const job = await h.enqueueNew();
     const { job: claimed } = await h.claimedSplit();
     await h.worker.details(job.id, claimed.credential);
-    await h.llm.operatorKey().save({ apiKey: OPERATOR_KEY_ROTATED }, null);
+    await h.llm
+      .operatorKey()
+      .save(
+        { provider: DEFAULT_LLM_PROVIDER, apiKey: OPERATOR_KEY_ROTATED },
+        null,
+      );
 
     const response = await h.worker.result(
       job.id,
@@ -355,7 +368,7 @@ describe("the Worker API of a managed workspace", () => {
     const h = await start("managed");
     const job = await h.enqueueNew();
     const { job: claimed } = await h.claimedSplit();
-    await h.llm.operatorKey().remove();
+    await h.llm.operatorKey().remove(DEFAULT_LLM_PROVIDER);
 
     const response = await h.worker.details(job.id, claimed.credential);
     const text = await response.text();
@@ -392,8 +405,8 @@ describe("the Worker API of a managed workspace", () => {
   });
 });
 
-// The model of a job on the operator's key is the operator's model of the project's tier (#280); it is pinned in
-// runner-api-model-tiers.integration.test.ts, where the pin of the instance default model (#276) used to be.
+// The model of a job on the operator's key is the model of the catalog entry of the project (#432); it is pinned in
+// runner-api-selection.integration.test.ts, where the pin of the instance default model (#276) used to be.
 
 describe("the Worker's fetch after the workspace's standing changed (#276)", () => {
   async function suspendedAfterClaim(keyMode: "own" | "managed") {
@@ -489,10 +502,17 @@ describe("every key handed out for a job stays masked (#276)", () => {
     const job = await h.enqueueNew();
     const { job: claimed } = await h.claimedSplit();
     await h.worker.details(job.id, claimed.credential);
-    await h.llm.operatorKey().save({ apiKey: OPERATOR_KEY_ROTATED }, null);
+    await h.llm
+      .operatorKey()
+      .save(
+        { provider: DEFAULT_LLM_PROVIDER, apiKey: OPERATOR_KEY_ROTATED },
+        null,
+      );
     await h.worker.details(job.id, claimed.credential);
     const third = "plain-operator-key-0004-dddddddd";
-    await h.llm.operatorKey().save({ apiKey: third }, null);
+    await h.llm
+      .operatorKey()
+      .save({ provider: DEFAULT_LLM_PROVIDER, apiKey: third }, null);
     expect(await h.claimedKeys.keysOf(job.id)).toEqual([
       OPERATOR_KEY,
       OPERATOR_KEY_ROTATED,
@@ -518,7 +538,12 @@ describe("every key handed out for a job stays masked (#276)", () => {
     const h = await start("managed");
     const job = await h.enqueueNew();
     const first = await h.claimed();
-    await h.llm.operatorKey().save({ apiKey: OPERATOR_KEY_ROTATED }, null);
+    await h.llm
+      .operatorKey()
+      .save(
+        { provider: DEFAULT_LLM_PROVIDER, apiKey: OPERATOR_KEY_ROTATED },
+        null,
+      );
     h.clock.advance(10 * 60 * 1000);
     const again = await h.claimed();
     expect(again.job.id).toBe(job.id);

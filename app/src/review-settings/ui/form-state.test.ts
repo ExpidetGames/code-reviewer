@@ -14,6 +14,7 @@ import {
   resetField,
   setBoolean,
   setCommand,
+  setProvider,
   setText,
 } from "./form-state.ts";
 
@@ -40,11 +41,10 @@ function model(
       autoReviewOnOpen: "built_in",
       autoReviewOnPush: "built_in",
       allowedCommands: "built_in",
-      modelTier: "built_in",
     },
     cost: estimateReviewCost(effective),
     managed: false,
-    tierAvailability: null,
+    catalog: null,
     lastSaved: null,
     ...(dynamic === undefined ? {} : { dynamic }),
   };
@@ -66,6 +66,26 @@ describe("the form values", () => {
     expect(state.overridden.maxFindings).toBe(true);
     expect(state.overridden.maxTokens).toBe(false);
     expect(state.values.maxFindings).toBe("9");
+  });
+
+  // #430-T04
+  it("send a provider the project stored again with the Diff fields, so a save of the form does not drop it", () => {
+    const state = initialFormState(
+      model({ provider: "openrouter", maxFindings: 9 }),
+    );
+
+    expect(state.overridden.provider).toBe(true);
+    expect(buildPatch(state)).toEqual({
+      ok: true,
+      patch: { provider: "openrouter", maxFindings: 9 },
+    });
+  });
+
+  // #430-T04
+  it("send no provider for a project that stored none", () => {
+    const result = buildPatch(initialFormState(model({ maxFindings: 9 })));
+
+    expect(result).toEqual({ ok: true, patch: { maxFindings: 9 } });
   });
 
   it("mark a field as set as soon as the person changes it, even back to the inherited value", () => {
@@ -100,18 +120,55 @@ describe("the form values", () => {
   });
 });
 
-describe("the model tier in the form", () => {
-  // #280-T10
-  it("is carried through a save: a stored tier is sent back, and none is sent when it was never set", () => {
-    const stored = initialFormState(model({ modelTier: "high" }));
-    const unset = initialFormState(model());
+describe("the provider in the form", () => {
+  // #433-T01
+  it("clears the models of the old provider when another one is chosen, and the save has to name them again", () => {
+    const m = model({ fallbackModel: "vendor/backup" });
+    const state = setProvider(initialFormState(m), "fakeai");
 
-    expect(stored.values.modelTier).toBe("high");
-    expect(buildPatch(stored)).toEqual({
-      ok: true,
-      patch: { modelTier: "high" },
+    expect(state.values).toMatchObject({
+      provider: "fakeai",
+      model: "",
+      fallbackModel: "",
     });
-    expect(buildPatch(unset)).toEqual({ ok: true, patch: {} });
+    expect(state.overridden).toMatchObject({
+      provider: true,
+      model: true,
+      fallbackModel: true,
+    });
+  });
+
+  // #433-T01
+  it("changes nothing when the provider that is chosen is chosen again", () => {
+    const state = initialFormState(model());
+
+    expect(setProvider(state, state.values.provider)).toBe(state);
+  });
+
+  // #433-T01
+  it("does not mark a fallback model that was never there", () => {
+    const state = setProvider(initialFormState(model()), "fakeai");
+
+    expect(state.overridden.fallbackModel).toBe(false);
+  });
+
+  // #433-T01
+  it("takes the models back with the provider on 'Reset to default'", () => {
+    const m = model();
+    const changed = setText(
+      setProvider(initialFormState(m), "fakeai"),
+      "model",
+      "fake-small",
+    );
+
+    const reset = resetField(changed, "provider", m);
+
+    expect(reset.values.model).toBe(BUILT_IN.model);
+    expect(reset.overridden).toMatchObject({
+      provider: false,
+      model: false,
+      fallbackModel: false,
+    });
   });
 });
 
@@ -260,16 +317,19 @@ describe("the project-only settings in the form serialization", () => {
       reviewKind: "dynamic" as const,
       dynamicModel: "vendor/dynamic-model",
       reviewSkill: "review for the Dynamic kind",
+      reviewVerdict: "blocking" as const,
     },
     sources: {
       reviewKind: "project" as const,
       dynamicModel: "project" as const,
       reviewSkill: "project" as const,
+      reviewVerdict: "built_in" as const,
     },
     defaults: {
       reviewKind: "diff" as const,
       dynamicModel: "deepseek/deepseek-v4.1-flash",
       reviewSkill: "shipped skill",
+      reviewVerdict: "blocking" as const,
     },
     reviewSkillIsDefault: false,
     defaultSkill: {

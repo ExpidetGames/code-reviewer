@@ -6,6 +6,7 @@
 // among them, and of the stored result only the comment link and the log tail are read. Everything
 // that came from outside (the question of an `/ask`, a login, the log of the runner) is data and is
 // rendered as text; the one link made from stored data is checked here.
+import { maskProvidersInText } from "../llm/provider-mask.ts";
 import type { JsonValue, StoredReviewCommand } from "../integrations/types.ts";
 import {
   STOPPED_EARLY_REASONS,
@@ -301,11 +302,13 @@ export function toRunDetailView(
   now: Date,
   /** Removes secrets from the log (the second line of defense after the runner and the result check). */
   redact: (text: string) => string = (text) => text,
-  /** Whether the run was on a managed quality level (its usage record names one): its cost is not shown. */
-  onManagedTier = false,
+  /** Whether the run was on the operator's key (its usage record says so): its cost is not shown. */
+  onManagedKey = false,
 ): RunDetailView {
   const stored = readStoredResult(job.result);
-  const cleaned = redact(cleanLog(stored.logTail));
+  // A run on the operator's key never names its provider, also when it was stored before the result was masked on its way in.
+  const redactedLog = redact(cleanLog(stored.logTail));
+  const cleaned = onManagedKey ? maskProvidersInText(redactedLog) : redactedLog;
   const overlong = cleaned.length > MAX_LOG_CHARS;
   const hasPostedReview =
     job.status === "succeeded" ||
@@ -333,19 +336,19 @@ export function toRunDetailView(
       truncated: stored.logTruncated || overlong,
     },
     supersededBy: job.supersededBy,
-    usage: usageView(job, redact, onManagedTier),
-    costHidden: onManagedTier,
+    usage: usageView(job, redact, onManagedKey),
+    costHidden: onManagedKey,
   };
 }
 
 function usageView(
   job: Job,
   redact: (text: string) => string,
-  onManagedTier: boolean,
+  onManagedKey: boolean,
 ): RunUsageView | null {
   const stored = readStoredUsage(job.result);
   const usage =
-    stored !== null && onManagedTier ? { ...stored, costUsd: null } : stored;
+    stored !== null && onManagedKey ? { ...stored, costUsd: null } : stored;
   if (usage === null || usage.model === null) return usage;
   // Redaction can lengthen the name: cut again, after it.
   return {

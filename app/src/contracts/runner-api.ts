@@ -28,6 +28,14 @@ export type Engine = "pr-agent" | "opencode";
  */
 export type ReviewKind = "diff" | "dynamic";
 /**
+ * #424: the slug of an LLM provider, as in the registries of the app and of the runner. The form only: whether a slug is usable is decided by the registry of the side that reads it.
+ */
+export type LlmProviderId = string;
+/**
+ * #424: the providers this release of the contract knows. The registry of the runner (llm_providers.py) and the one of the app (app/src/llm/providers) each list exactly these, and tests compare the three. A provider is added here with the change that adds its adapter.
+ */
+export type KnownLlmProvider = "openrouter";
+/**
  * The claim features this version of the contract defines (`features` in ClaimRequest). A reader ignores a feature name it does not know. `dynamic_capabilities` (#279): the runner reads `dynamic.capabilities`. `worker_credential` (#318): the caller is a Dispatcher and wants the split answer; the job input and its secrets reach only the Worker, with the per-job credential. `supersede` (#396): the runner understands `job.superseded` in a heartbeat answer and stops gracefully (it finishes the model requests in flight, sends no more, publishes nothing, reports its result and usage). The app supersedes a running job only when the claim named it. A Worker names it in the `features` of its details request.
  */
 export type KnownClaimFeature =
@@ -92,6 +100,7 @@ export type KnownRunnerErrorCode =
   | "llm_context_length_exceeded"
   | "llm_output_invalid"
   | "model_unknown"
+  | "llm_parameters_unsupported"
   | "timeout"
   | "runner_shutdown"
   | "unknown"
@@ -129,7 +138,10 @@ export type RunnerJobInput = {
     botLogin: string;
   };
   llm: {
-    provider: "openrouter";
+    /**
+     * #424: the slug of an LLM provider, as in the registries of the app and of the runner. The form only: whether a slug is usable is decided by the registry of the side that reads it.
+     */
+    provider: string;
     model: string;
     apiKey: string;
     baseUrl?: string;
@@ -177,6 +189,10 @@ export type RunnerResult = {
   logTail: string;
   logTruncated?: boolean;
   /**
+   * #405: the findings left open on the pull request by a successful review, which the app turns into the review verdict it submits. Absent (or null) where the runner cannot say, and on every failure: the app then submits no verdict. Additive: a runner that does not send it, or an app that does not read it, keeps working.
+   */
+  findings?: ReviewFindings | null;
+  /**
    * What the run used. A failed result carries it too, whenever the run made at least one model call before it failed (a timeout at the end, an answer the validator refuses, a publish error): the app counts such a run exactly like a successful one. A run that failed before its first model call reports null. The cost follows the same rule as for a successful run: exact, or null when any call is unpriced; the token counters are reported either way.
    */
   usage?: RunnerUsage | null;
@@ -208,7 +224,7 @@ export type ApiErrorCode =
   | "RUNNER_JOB_ENDED";
 
 /**
- * The optional body of POST /api/runners/v1/claim (#195): the engines the calling runner can run. Absent or empty means ['pr-agent'] (a previous-release runner). Unknown or duplicated engine names are refused with 400 RUNNER_REQUEST_INVALID before any job is claimed. #279 adds the optional `features`: what else this runner understands. The app sends a job optional fields a previous-release runner would reject (the job input is closed) only to a runner that names the matching feature, so `dynamic_capabilities` means the runner reads `dynamic.capabilities`. Unknown feature names are ignored, so a newer runner can name features an older app does not know. Unknown fields are ignored, as everywhere in v1. #318 adds the Dispatcher's fields: `jobId` claims exactly that job (anything else, such as a job that is not due, already running, finished, cancelled or of a kind the advertised engines cannot run, is 204), `maxRunning` is the pool cap (the claim is 204 while that many jobs of the same X-Runner-Id are running), and the feature `worker_credential` selects the split answer (SplitClaimResponse: a per-job credential and no job input). Without that feature the answer is the legacy ClaimResponse, unchanged.
+ * The optional body of POST /api/runners/v1/claim (#195): the engines the calling runner can run. Absent or empty means ['pr-agent'] (a previous-release runner). Unknown or duplicated engine names are refused with 400 RUNNER_REQUEST_INVALID before any job is claimed. #279 adds the optional `features`: what else this runner understands. The app sends a job optional fields a previous-release runner would reject (the job input is closed) only to a runner that names the matching feature, so `dynamic_capabilities` means the runner reads `dynamic.capabilities`. Unknown feature names are ignored, so a newer runner can name features an older app does not know. Unknown fields are ignored, as everywhere in v1. #318 adds the Dispatcher's fields: `jobId` claims exactly that job (anything else, such as a job that is not due, already running, finished, cancelled or of a kind the advertised engines cannot run, is 204), `maxRunning` is the pool cap (the claim is 204 while that many jobs of the same X-Runner-Id are running), and the feature `worker_credential` selects the split answer (SplitClaimResponse: a per-job credential and no job input). Without that feature the answer is the legacy ClaimResponse, unchanged. #424 adds the optional `llmProviders`: the providers the runner can run; absent means ['openrouter'].
  */
 export interface ClaimRequest {
   /**
@@ -334,6 +350,167 @@ export interface ClaimRequest {
         string,
         string,
         string,
+      ];
+  /**
+   * #424: the LLM providers this runner can run (the slugs of its registry). Absent means ['openrouter'], which is what a previous-release runner can run. An app sends a job for a provider only to a caller that listed it, so a newer app never hands an old runner a job it cannot read. The app only parses and validates the list today and does not use it yet (the claim issue of epic #420 will); it still always sends 'openrouter'. A previous-release app ignores the key.
+   *
+   * @minItems 1
+   * @maxItems 16
+   */
+  llmProviders?:
+    | [LlmProviderId]
+    | [LlmProviderId, LlmProviderId]
+    | [LlmProviderId, LlmProviderId, LlmProviderId]
+    | [LlmProviderId, LlmProviderId, LlmProviderId, LlmProviderId]
+    | [
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+      ]
+    | [
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+      ]
+    | [
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+      ]
+    | [
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+      ]
+    | [
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+      ]
+    | [
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+      ]
+    | [
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+      ]
+    | [
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+      ]
+    | [
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+      ]
+    | [
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+      ]
+    | [
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+      ]
+    | [
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
+        LlmProviderId,
       ];
   /**
    * #318: claim exactly this job (a Dispatcher woken by the dispatch webhook). Absent: the next due job, as before.
@@ -659,6 +836,22 @@ export interface RunnerUsage {
    */
   stoppedEarly?: "cost_limit" | "time_limit" | null;
   [k: string]: unknown;
+}
+/**
+ * #405: what a successful review left open on the pull request. `open` counts the findings that are open AFTER the run (a Dynamic Review carries the findings of earlier runs over, PR-Agent keeps a record of active ones), not the ones the run found. `bySeverity` is the count per priority of a Dynamic Review, of the findings its summary lists (so `open` may exceed the sum when lower priority findings did not fit); null for a Diff Review, whose findings have no severity.
+ */
+export interface ReviewFindings {
+  open: number;
+  /**
+   * True when the review did not cover everything it was asked to: a finding its validation dropped, a chunk that failed, files left out for the token budget. `open` may then miss a blocker, so the app never approves on it. Absent means complete.
+   */
+  incomplete?: boolean;
+  bySeverity: {
+    P0: number;
+    P1: number;
+    P2: number;
+    P3: number;
+  } | null;
 }
 /**
  * The whole request body must not exceed 65536 bytes (413 otherwise).

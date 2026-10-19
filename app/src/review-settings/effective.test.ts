@@ -9,7 +9,12 @@ import {
   resolveProjectDynamicSettings,
   resolveReviewSettings,
 } from "./effective.ts";
-import { MODEL_PRICES } from "./model-pricing.ts";
+import {
+  parseStoredOverrides,
+  parseStoredProjectDynamicOverrides,
+} from "./validate.ts";
+import { DEFAULT_LLM_PROVIDER } from "../llm/providers/index.ts";
+import { MODEL_PRICES } from "../llm/providers/openrouter/model-pricing.ts";
 import {
   DEFAULT_DYNAMIC_MODEL,
   DEFAULT_MAX_TOKENS,
@@ -44,34 +49,6 @@ describe("the built-in review settings", () => {
       autoReviewOnPush: true,
       allowedCommands: ["review"],
     });
-  });
-});
-
-describe("the model tier setting", () => {
-  // #280-T10
-  it("is medium when nothing sets it", () => {
-    expect(builtIn.modelTier).toBe("medium");
-    expect(resolveReviewSettings({ builtIn }).settings.modelTier).toBe(
-      "medium",
-    );
-  });
-
-  // #280-T10
-  it("follows the workspace default, and the project's own tier wins over it", () => {
-    const global = resolveReviewSettings({
-      builtIn,
-      global: { modelTier: "low" },
-    });
-    const project = resolveReviewSettings({
-      builtIn,
-      global: { modelTier: "low" },
-      project: { modelTier: "high" },
-    });
-
-    expect(global.settings.modelTier).toBe("low");
-    expect(global.sources.modelTier).toBe("global");
-    expect(project.settings.modelTier).toBe("high");
-    expect(project.sources.modelTier).toBe("project");
   });
 });
 
@@ -185,11 +162,43 @@ describe("the project-only review kind, model and skill", () => {
     expect(dynamic.dynamicModel).toBe("deepseek/deepseek-v4.1-flash");
     expect(dynamic.reviewSkill).toBe(SHIPPED_SKILL);
     expect(dynamic.reviewSkillIsDefault).toBe(true);
+    // #405-T28: the default verdict mode is the one that blocks on the highest severity only.
+    expect(dynamic.reviewVerdict).toBe("blocking");
     expect(dynamic.sources).toEqual({
       reviewKind: "built_in",
       dynamicModel: "built_in",
+      dynamicProvider: "built_in",
+      catalogEntryDiff: "built_in",
+      catalogEntryDynamic: "built_in",
       reviewSkill: "built_in",
+      reviewVerdict: "built_in",
     });
+  });
+
+  // #405-T28
+  it("take the verdict mode of the project, whatever its review kind, and fall back to the default when it is cleared", () => {
+    for (const reviewKind of ["diff", "dynamic"] as const) {
+      const set = resolveProjectDynamicSettings({
+        builtIn: builtInProjectDynamicSettings(),
+        project: { reviewKind, reviewVerdict: "any" },
+        defaultSkill: SHIPPED_SKILL,
+      });
+      expect(set.reviewVerdict).toBe("any");
+      expect(set.sources.reviewVerdict).toBe("project");
+    }
+    const off = resolveProjectDynamicSettings({
+      builtIn: builtInProjectDynamicSettings(),
+      project: { reviewVerdict: "off" },
+      defaultSkill: SHIPPED_SKILL,
+    });
+    expect(off.reviewVerdict).toBe("off");
+    expect(
+      resolveProjectDynamicSettings({
+        builtIn: builtInProjectDynamicSettings(),
+        project: {},
+        defaultSkill: SHIPPED_SKILL,
+      }).reviewVerdict,
+    ).toBe("blocking");
   });
 
   // #194-T01
@@ -300,5 +309,107 @@ describe("automatic reviews and commands", () => {
     expect(
       isCommandAllowed({ ...builtIn, allowedCommands: [] }, "review"),
     ).toBe(false);
+  });
+});
+
+// #430: the provider and the catalog entry (ADR 0005, 2.7).
+describe("the provider and catalog selection", () => {
+  // #430-T02
+  it("layers the provider: the project over the workspace default over the default provider", () => {
+    const layers = { builtIn };
+    expect(resolveReviewSettings(layers).settings.provider).toBe(
+      DEFAULT_LLM_PROVIDER,
+    );
+    expect(resolveReviewSettings(layers).sources.provider).toBe("built_in");
+
+    const global = resolveReviewSettings({
+      ...layers,
+      global: { provider: "workspace_provider" as never },
+    });
+    expect(global.settings.provider).toBe("workspace_provider");
+    expect(global.sources.provider).toBe("global");
+
+    const project = resolveReviewSettings({
+      ...layers,
+      global: { provider: "workspace_provider" as never },
+      project: { provider: "project_provider" as never },
+    });
+    expect(project.settings.provider).toBe("project_provider");
+    expect(project.sources.provider).toBe("project");
+  });
+
+  // #430-T02
+  it("takes the Dynamic provider and the catalog entries from the project only, with no workspace layer", () => {
+    const none = resolveProjectDynamicSettings({
+      builtIn: builtInProjectDynamicSettings(),
+      defaultSkill: SHIPPED_SKILL,
+    });
+    expect(none.dynamicProvider).toBe(DEFAULT_LLM_PROVIDER);
+    expect(none.catalogEntryDiff).toBeNull();
+    expect(none.catalogEntryDynamic).toBeNull();
+
+    const set = resolveProjectDynamicSettings({
+      builtIn: builtInProjectDynamicSettings(),
+      project: {
+        dynamicProvider: "project_provider" as never,
+        catalogEntryDiff: "mce_diff",
+      },
+      defaultSkill: SHIPPED_SKILL,
+    });
+    expect(set).toMatchObject({
+      dynamicProvider: "project_provider",
+      catalogEntryDiff: "mce_diff",
+      catalogEntryDynamic: null,
+      sources: {
+        dynamicProvider: "project",
+        catalogEntryDiff: "project",
+        catalogEntryDynamic: "built_in",
+      },
+    });
+  });
+
+  // #430-T02
+  it("keeps the provider of Diff and of Dynamic apart, like their models", () => {
+    const project = {
+      provider: "diff_provider" as never,
+      dynamicProvider: "dynamic_provider" as never,
+    };
+    expect(resolveReviewSettings({ builtIn, project }).settings.provider).toBe(
+      "diff_provider",
+    );
+    expect(
+      resolveProjectDynamicSettings({
+        builtIn: builtInProjectDynamicSettings(),
+        project,
+        defaultSkill: SHIPPED_SKILL,
+      }).dynamicProvider,
+    ).toBe("dynamic_provider");
+  });
+
+  // #430-T03
+  it("resolves settings stored before the provider existed to the default provider", () => {
+    const legacy = {
+      model: "qwen/qwen3-coder",
+      maxFindings: 4,
+      reviewKind: "dynamic",
+      dynamicModel: "vendor/dynamic-model",
+    };
+
+    const review = resolveReviewSettings({
+      builtIn,
+      project: parseStoredOverrides(legacy),
+    });
+    const dynamic = resolveProjectDynamicSettings({
+      builtIn: builtInProjectDynamicSettings(),
+      project: parseStoredProjectDynamicOverrides(legacy),
+      defaultSkill: SHIPPED_SKILL,
+    });
+
+    expect(review.settings.provider).toBe(DEFAULT_LLM_PROVIDER);
+    expect(review.settings.model).toBe("qwen/qwen3-coder");
+    expect(review.sources.provider).toBe("built_in");
+    expect(dynamic.dynamicProvider).toBe(DEFAULT_LLM_PROVIDER);
+    expect(dynamic.catalogEntryDiff).toBeNull();
+    expect(dynamic.catalogEntryDynamic).toBeNull();
   });
 });

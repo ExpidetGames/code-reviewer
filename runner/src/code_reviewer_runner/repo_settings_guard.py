@@ -29,11 +29,13 @@ import importlib
 from collections.abc import Callable, Iterable
 from typing import Any
 
+from code_reviewer_runner.llm_providers import PROVIDERS, LlmProviderSpec
 from code_reviewer_runner.pr_agent_config import AUTO_CAST_SETTING
 
 # Settings that route a request or a credential, decide which model runs or what a call may cost,
-# or switch publishing and callbacks. Dotted names as used by Dynaconf's `get` and `set`.
-PROTECTED_SETTINGS = (
+# or switch publishing and callbacks. Dotted names as used by Dynaconf's `get` and `set`. The key
+# and the endpoint of every provider of the registry are added to them (`protected_settings`).
+_FIXED_SETTINGS = (
     AUTO_CAST_SETTING,
     "config.model",
     "config.model_weak",
@@ -77,8 +79,6 @@ PROTECTED_SETTINGS = (
     "config.enable_claude_adaptive_thinking",
     "config.claude_adaptive_thinking_models_override",
     "config.claude_extended_thinking_models_override",
-    "openrouter.key",
-    "openrouter.api_base",
     "openai.key",
     "openai.api_base",
     "openai.api_type",
@@ -106,10 +106,11 @@ PROTECTED_SETTINGS = (
 # credential, or bounds what a call costs. They are pinned as a whole, so a key PR-Agent does not
 # declare in its defaults (`litellm.model_id`, `litellm.drop_params`) cannot be added either. The
 # provider sections are those PR-Agent reads a key or an endpoint from (`PROVIDER_SETTING_PATHS`
-# in its LiteLLM handler; a test compares them, so a new provider after an upgrade is noticed).
-PROTECTED_SECTIONS = (
+# in its LiteLLM handler; a test compares them, so a new provider after an upgrade is noticed). The
+# section of every provider of the registry is added to them (`protected_sections`), so a provider
+# the runner learns to use can never become a way around this guard (#424).
+_FIXED_SECTIONS = (
     "model_routing",
-    "openrouter",
     "litellm",
     "openai",
     "azure_ad",
@@ -134,6 +135,27 @@ PROTECTED_SECTIONS = (
     "xiaomi_mimo",
     "zai",
 )
+
+
+def protected_settings(providers: Iterable[LlmProviderSpec]) -> tuple[str, ...]:
+    """The settings a repository file may not change, with the key and base of each provider."""
+    names = [*_FIXED_SETTINGS]
+    for provider in providers:
+        names.extend(name for name in (provider.key_setting, provider.api_base_setting))
+    return tuple(dict.fromkeys(names))
+
+
+def protected_sections(providers: Iterable[LlmProviderSpec]) -> tuple[str, ...]:
+    """The sections pinned as a whole: the fixed list and the section of every given provider."""
+    return tuple(
+        dict.fromkeys([*_FIXED_SECTIONS, *(provider.settings_section for provider in providers)])
+    )
+
+
+# The registry as it is when the module is loaded; the guard reads the registry again when it takes
+# its snapshot, so a provider added later is pinned too.
+PROTECTED_SETTINGS = protected_settings(PROVIDERS.values())
+PROTECTED_SECTIONS = protected_sections(PROVIDERS.values())
 
 # The functions of PR-Agent's git provider utilities that merge a settings file into the settings.
 _MERGE_FUNCTIONS = ("_apply_repo_settings_file", "_apply_settings_from_file")
@@ -253,11 +275,12 @@ class RepoSettingsGuard:
         `extra_keys` are further settings the runner has set for this job, for example the options
         of the job. The values are taken as they are now, so they must be set before this call.
         """
-        keys = [*PROTECTED_SETTINGS, *(key for key in extra_keys if key not in PROTECTED_SETTINGS)]
+        protected = protected_settings(PROVIDERS.values())
+        keys = [*protected, *(key for key in extra_keys if key not in protected)]
         neutralize_unevaluated_values(settings)
         self._pinned = {key: _peek(settings, key) for key in keys}
         self._pinned_sections = {
-            section: _peek(settings, section) for section in PROTECTED_SECTIONS
+            section: _peek(settings, section) for section in protected_sections(PROVIDERS.values())
         }
         self._active = True
 

@@ -46,7 +46,8 @@ def test_a_review_reports_the_charge_the_provider_stated_for_each_call(
     assert usage["fallbackUsed"] is False
 
 
-# #274-T05: the rest of the result is what it was.
+# #274-T05: the rest of the result is what it was. The optional `findings` of a successful review
+# (#405-T31) is the one addition: the active findings, without severities for a Diff Review.
 def test_the_result_of_a_review_is_otherwise_unchanged(
     engine: Engine, github: FakeGithub, llm: FakeLlm
 ) -> None:
@@ -57,10 +58,12 @@ def test_the_result_of_a_review_is_otherwise_unchanged(
         "durationMs",
         "commentUrl",
         "errorCode",
+        "findings",
         "logTail",
         "logTruncated",
         "usage",
     }
+    assert result["findings"] == {"open": 1, "bySeverity": None}
     assert set(result["usage"]) == {
         "model",
         "promptTokens",

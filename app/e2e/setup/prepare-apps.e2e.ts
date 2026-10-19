@@ -53,6 +53,16 @@ test.describe("the apps under test", () => {
     expect(page.status()).toBe(307);
   });
 
+  test("the catalog app of the providers and catalog journey is set up before it runs", async ({
+    request,
+  }) => {
+    await setUpApp(e2eEnv.catalogAppUrl, e2eEnv.logFiles.catalog, "multi");
+    await enterGithubApp(e2eEnv.catalogAppUrl);
+
+    const page = await request.get(e2eEnv.catalogAppUrl, { maxRedirects: 0 });
+    expect(page.status()).toBe(307);
+  });
+
   test("the app of the real review journey is set up before it runs", async ({
     request,
   }) => {

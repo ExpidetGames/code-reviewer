@@ -1,7 +1,7 @@
 # Secret store
 
 The encrypted credentials of the instance (the SMTP password, the GitHub App's private key, webhook secret
-and client secret, and the operator's own LLM key, `operator_llm_key`, #276). How it works, what it never does and how it fails is in
+and client secret, and the operator's own LLM key of each provider, `operator_llm_key` and `operator_llm_key.<provider>`, #276, #427). How it works, what it never does and how it fails is in
 [`src/admin/README.md`](../admin/README.md), "The secret store"; the decision is in
 `docs/decisions/0001-editions-setup-and-accounts.md`, section 2.7.
 
@@ -14,7 +14,7 @@ and client secret, and the operator's own LLM key, `operator_llm_key`, #276). Ho
 
 The rows are read and written by `src/db/repositories/secrets-repository.ts`.
 
-Workspace secrets (a workspace's own LLM key, `llm_api_key`) belong to a workspace and live in the table
+Workspace secrets (a workspace's own LLM keys, one per provider: `llm_api_key` for OpenRouter, `llm_api_key.<provider>` for later ones) belong to a workspace and live in the table
 `workspace_secrets`, through `workspace-store.ts` (`createWorkspaceSecretStore`, one store per workspace; the names
 are `WORKSPACE_SECRET_NAMES`). Same encryption, but the additional authenticated data is the table, the **workspace
 id** and the name, and every secret carries a `binding` (what it was made for, the provider of an LLM key) that

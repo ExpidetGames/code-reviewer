@@ -51,10 +51,10 @@ function view(overrides: Partial<AdminSettingsView> = {}): AdminSettingsView {
     planManagementUrl: { value: null, ...never },
     smtp: { value: null, password: "none", ...never },
     operatorLlmKey: { state: "not_configured" },
-    modelTiers: {
-      low: { diff: false, dynamic: false },
-      medium: { diff: false, dynamic: false },
-      high: { diff: false, dynamic: false },
+    operatorLlmKeys: { openrouter: { state: "not_configured" } },
+    modelCatalog: {
+      diff: { released: 0, hasDefault: false },
+      dynamic: { released: 0, hasDefault: false },
     },
     workspaceCount: 1,
     githubConfigured: false,
@@ -74,7 +74,10 @@ function apiAnswering(result: Answer) {
   const testMail = vi.fn<AdminApi["testMail"]>(() =>
     Promise.resolve({ ok: true, data: { ok: true } } as const),
   );
-  return { api: { change, testMail } satisfies AdminApi, change };
+  return {
+    api: { change, testMail, testLlmKey: vi.fn() } satisfies AdminApi,
+    change,
+  };
 }
 
 /** An api whose `change` answers with `results` in order, then repeats the last one. */
@@ -85,7 +88,10 @@ function apiSequencing(...results: Answer[]) {
   const testMail = vi.fn<AdminApi["testMail"]>(() =>
     Promise.resolve({ ok: true, data: { ok: true } } as const),
   );
-  return { api: { change, testMail } satisfies AdminApi, change };
+  return {
+    api: { change, testMail, testLlmKey: vi.fn() } satisfies AdminApi,
+    change,
+  };
 }
 
 const SAVED = { ok: true, data: { ok: true, settings: view() } } as const;

@@ -19,7 +19,8 @@ import {
 } from "../../components/ui/card.tsx";
 import type { GithubConfigView } from "../../github-config/service.ts";
 import { GITHUB_SIGN_IN_NOT_ENABLED } from "../../github-config/ui/messages.ts";
-import { MODEL_TIERS } from "../../model-tiers/tiers.ts";
+import { llmProviderDescriptors } from "../../llm/providers/index.ts";
+import { CATALOG_KINDS } from "../../model-catalog/entries.ts";
 import { UNREADABLE_SECRET_CAUSE } from "../../secrets/messages.ts";
 import type { AdminSettingsView } from "../service.ts";
 import { ImportNotice } from "./import-notice.tsx";
@@ -39,7 +40,7 @@ function SetupRow({
   status: RowStatus;
   summary: string;
   hint?: string;
-  /** Left out for a setting that has no page of its own (the model tiers: the operator API sets them). */
+  /** Left out for a setting that has no page of its own (a read-only status). */
   href?: string;
 }) {
   const Icon = status === "ok" ? CheckCircle2 : TriangleAlert;
@@ -100,43 +101,42 @@ function operatorKeyRow(settings: AdminSettingsView): {
   summary: string;
   hint?: string;
 } {
-  const key = settings.operatorLlmKey;
-  if (key.state === "unreadable")
+  // One entry for each provider, by its name (#427); a provider with no key is not a problem, only a saved key that
+  // cannot be read is.
+  const keys = Object.entries(settings.operatorLlmKeys);
+  const describe = ([provider, key]: (typeof keys)[number]) => {
+    const label = llmProviderDescriptors.labelOf(provider);
+    if (key.state === "unreadable") return `${label}: Saved, cannot be read`;
+    if (key.state === "not_configured") return `${label}: Not configured`;
+    return key.lastFour === null
+      ? `${label}: Configured`
+      : `${label}: Configured (ending in ${key.lastFour})`;
+  };
+  const summary = keys.map(describe).join("; ");
+  if (keys.some(([, key]) => key.state === "unreadable"))
     return {
       status: "warn",
-      summary: "Saved, cannot be read",
-      hint: "Workspaces that use the key of the instance cannot run reviews until it is entered again.",
+      summary,
+      hint: "Workspaces that use the key of the instance cannot run reviews on that provider until its key is entered again.",
     };
-  if (key.state === "configured")
-    return {
-      status: "ok",
-      summary:
-        key.lastFour === null
-          ? "Configured"
-          : `Configured (ending in ${key.lastFour})`,
-    };
+  if (keys.some(([, key]) => key.state === "configured"))
+    return { status: "ok", summary };
   return {
     status: "ok",
-    summary: "Not configured",
-    hint: "Optional. Only workspaces that use the key of the instance need it.",
+    summary,
+    hint: "Optional. Only workspaces that use the key of the instance need one.",
   };
 }
 
-const TIER_LABELS = { low: "Low", medium: "Medium", high: "High" } as const;
+const KIND_LABELS = { diff: "Diff", dynamic: "Dynamic" } as const;
 
-/** "Low: Diff only, Medium: not configured, High: Diff and Dynamic": whether, never which model (#280). */
-function modelTiersSummary(tiers: AdminSettingsView["modelTiers"]): string {
-  return MODEL_TIERS.map((tier) => {
-    const { diff, dynamic } = tiers[tier];
-    const state =
-      diff && dynamic
-        ? "Diff and Dynamic"
-        : diff
-          ? "Diff only"
-          : dynamic
-            ? "Dynamic only"
-            : "not configured";
-    return `${TIER_LABELS[tier]}: ${state}`;
+/** "Diff: 2 released, default set, Dynamic: none released, no default": counts, never a name, a provider or a model (#429). */
+function modelCatalogSummary(
+  catalog: AdminSettingsView["modelCatalog"],
+): string {
+  return CATALOG_KINDS.map((kind) => {
+    const { released, hasDefault } = catalog[kind];
+    return `${KIND_LABELS[kind]}: ${released === 0 ? "none" : String(released)} released, ${hasDefault ? "default set" : "no default"}`;
   }).join(", ");
 }
 
@@ -282,7 +282,7 @@ export function Overview({
               href="/admin/integrations"
             />
             <SetupRow
-              title="LLM key of the instance"
+              title="LLM keys of the instance"
               status={operatorKey.status}
               summary={operatorKey.summary}
               {...(operatorKey.hint === undefined
@@ -291,10 +291,11 @@ export function Overview({
               href="/admin/llm"
             />
             <SetupRow
-              title="Managed model tiers"
+              title="Model catalog"
               status="ok"
-              summary={modelTiersSummary(settings.modelTiers)}
-              hint="Optional. Which model backs each tier is set through the operator API and is not shown here. A workspace on the key of the instance cannot run a review of a kind its tier has no model for."
+              summary={modelCatalogSummary(settings.modelCatalog)}
+              hint="Optional. Only workspaces that use the key of the instance need it: they can choose the released entries, by name. A kind with no released entry or no default cannot run a review for them."
+              href="/admin/llm"
             />
             <SetupRow
               title="Tenancy"

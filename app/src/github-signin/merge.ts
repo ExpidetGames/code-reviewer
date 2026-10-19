@@ -55,6 +55,7 @@ export const USER_REFERENCES: ReadonlyArray<{
   { table: "workspace_members", column: "user_id", handling: "membership" },
   { table: "workspaces", column: "created_by", handling: "move" },
   { table: "instance_settings", column: "updated_by", handling: "move" },
+  { table: "model_catalog_entries", column: "updated_by", handling: "move" },
   { table: "secrets", column: "updated_by", handling: "move" },
   { table: "workspace_secrets", column: "updated_by", handling: "move" },
   { table: "workspace_entitlements", column: "updated_by", handling: "move" },
@@ -191,6 +192,11 @@ export async function mergeImportedUser(
       .execute();
     await trx
       .updateTable("instance_settings")
+      .set({ updated_by: actingUserId })
+      .where("updated_by", "=", source.id)
+      .execute();
+    await trx
+      .updateTable("model_catalog_entries")
       .set({ updated_by: actingUserId })
       .where("updated_by", "=", source.id)
       .execute();

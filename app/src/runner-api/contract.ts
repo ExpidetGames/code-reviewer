@@ -41,11 +41,28 @@ export type ClaimFeature = (typeof CLAIM_FEATURES)[number];
 export type ClaimRequest = {
   engines?: ClaimEngine[];
   features?: ClaimFeature[];
+  /**
+   * #424: the LLM providers the runner can run (slugs of its registry). Absent means
+   * `DEFAULT_LLM_PROVIDERS`, which is all a previous-release runner can run. Slugs this app has no
+   * adapter for are kept: a newer runner may know more than this app.
+   */
+  llmProviders?: string[];
   /** #322: claim exactly this job (a Dispatcher woken by the dispatch webhook). */
   jobId?: string;
   /** #322: the pool cap: 204 while this many jobs of the caller's `X-Runner-Id` are running. */
   maxRunning?: number;
 };
+
+/**
+ * #424: the form of an LLM provider slug (`LlmProviderId` in the contract): `llm.provider` of a job
+ * and the items of `llmProviders`. Whether a slug is usable is the registry's decision
+ * (`src/llm/providers`), not the contract's.
+ */
+export const LLM_PROVIDER_ID_PATTERN = /^[a-z][a-z0-9_]{1,31}$/;
+/** #424: what a caller that advertised no providers can run: the only provider before the registry. */
+export const DEFAULT_LLM_PROVIDERS = ["openrouter"] as const;
+/** #424: the bound of `llmProviders` (and of the Worker's list). */
+export const MAX_LLM_PROVIDERS = 16;
 
 /** #322: the range of `ClaimRequest.maxRunning`. */
 export const MAX_RUNNING_RANGE = { min: 1, max: 1000 } as const;
@@ -155,6 +172,7 @@ export const RUNNER_ERROR_CODES = [
   "llm_context_length_exceeded",
   "llm_output_invalid",
   "model_unknown",
+  "llm_parameters_unsupported",
   "timeout",
   "runner_shutdown",
   "unknown",
@@ -301,7 +319,8 @@ export type RunnerJobInput = {
     botLogin: string;
   };
   llm: {
-    provider: "openrouter";
+    /** A slug of the registry (`LlmProviderId`); the claim sends `openrouter` for now. */
+    provider: string;
     model: string;
     apiKey: string;
     /** The token budget of the review; left out when neither the settings nor the instance set one. */
@@ -384,6 +403,25 @@ export type RunnerUsage = {
 export const STOPPED_EARLY_REASONS = ["cost_limit", "time_limit"] as const;
 export type StoppedEarly = (typeof STOPPED_EARLY_REASONS)[number];
 
+/** The priorities of a Dynamic Review's findings, highest first (#195); `P0` is the one that blocks (#405). */
+export const FINDING_PRIORITIES = ["P0", "P1", "P2", "P3"] as const;
+export type FindingPriority = (typeof FINDING_PRIORITIES)[number];
+
+/**
+ * #405: what a successful review left open on the pull request. `open` counts the findings open AFTER the run;
+ * `bySeverity` is the count per priority of the findings a Dynamic summary lists (so it may add up to less than
+ * `open`), and null for a Diff Review, whose findings have no severity.
+ */
+export type ReviewFindings = {
+  open: number;
+  bySeverity: Record<FindingPriority, number> | null;
+  /** True when the review did not cover everything (a dropped finding, a failed chunk): `open` may miss a blocker. */
+  incomplete?: true;
+};
+
+/** The largest count a runner may report; the same bound as the schema. */
+export const MAX_FINDING_COUNT = 100_000;
+
 /** The result of a job as the runner reports it, after the checks and with every field filled. */
 export type RunnerResult = {
   ok: boolean;
@@ -400,6 +438,8 @@ export type RunnerResult = {
   logTail: string;
   logTruncated: boolean;
   usage: RunnerUsage | null;
+  /** #405: the findings left open by a successful review; absent where the runner could not say. */
+  findings?: ReviewFindings;
 };
 
 export type CompleteRequest = { leaseToken: string; result: RunnerResult };

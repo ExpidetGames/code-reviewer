@@ -23,6 +23,10 @@ const upgradeAppPort = Number(process.env.E2E_UPGRADE_PORT) || appPort + 5;
 // The app of the journey of the operator limits (e2e/operator/, #285): multi-tenant, with the operator API on and a
 // real runner polling it. The port after the upgrade app unless E2E_OPERATOR_PORT says otherwise.
 const operatorAppPort = Number(process.env.E2E_OPERATOR_PORT) || appPort + 6;
+// The app of the catalog journey (e2e/operator/catalog-journey.e2e.ts, #435): a fresh multi-tenant instance with the operator API on,
+// so the catalog starts empty and the admin builds it in the portal. The port after the operator app unless
+// E2E_CATALOG_PORT says otherwise.
+const catalogAppPort = Number(process.env.E2E_CATALOG_PORT) || appPort + 7;
 // The fake GitHub gets a random port in a high range, so two checkouts never collide however their
 // E2E_PORT values are chosen. The choice is stored in the environment: Playwright loads this file
 // again in every worker process, which inherits the main process's environment.
@@ -47,12 +51,18 @@ process.env.E2E_MODEL_LLM_PORT ||= String(
 );
 const modelLlmFakePort = Number(process.env.E2E_MODEL_LLM_PORT);
 // The fake LLM of the operator limits journey (#285): it answers the reviews of the real runner and, at the same
-// port, the model metadata the operator app reads when it saves and claims with a managed tier. The app needs the
+// port, the model metadata the operator app reads when it releases a catalog entry and claims with one. The app needs the
 // port when it starts. A range of its own, above the others: 65500-65534.
 process.env.E2E_OPERATOR_LLM_PORT ||= String(
   65500 + Math.floor(Math.random() * 35),
 );
 const operatorLlmFakePort = Number(process.env.E2E_OPERATOR_LLM_PORT);
+// The fake LLM of the catalog journey (#435): the same duties as the operator journey's, at a port of its own, so that the
+// two journeys can run side by side. A range of its own, below the fake SMTP server's: 40000-40499.
+process.env.E2E_CATALOG_LLM_PORT ||= String(
+  40000 + Math.floor(Math.random() * 500),
+);
+const catalogLlmFakePort = Number(process.env.E2E_CATALOG_LLM_PORT);
 
 export const e2eEnv = {
   appPort,
@@ -82,6 +92,13 @@ export const e2eEnv = {
   /** The SQLite file of the operator app (#285), fresh for every run. */
   operatorDatabasePath: "test-results/e2e-operator-data/app.db",
   operatorAppUrl: `http://127.0.0.1:${operatorAppPort}`,
+  catalogAppPort,
+  /** The SQLite file of the catalog app (#435), fresh for every run. */
+  catalogDatabasePath: "test-results/e2e-catalog-data/app.db",
+  catalogAppUrl: `http://127.0.0.1:${catalogAppPort}`,
+  catalogLlmFakePort,
+  /** The fake LLM of the catalog app: reviews and model metadata (`LLM_API_BASE_URL`). */
+  catalogLlmFakeApiUrl: `http://127.0.0.1:${catalogLlmFakePort}/api/v1`,
   operatorLlmFakePort,
   /** The fake LLM of the operator app: reviews and model metadata (`LLM_API_BASE_URL`). */
   operatorLlmFakeApiUrl: `http://127.0.0.1:${operatorLlmFakePort}/api/v1`,
@@ -111,6 +128,7 @@ export const e2eEnv = {
     signup: "test-results/e2e-signup.log",
     multi: "test-results/e2e-multi.log",
     operator: "test-results/e2e-operator.log",
+    catalog: "test-results/e2e-catalog.log",
   },
   /** The instance admin the journeys create when they set an app up. A dummy, as everything here. */
   adminEmail: "admin@e2e.test",

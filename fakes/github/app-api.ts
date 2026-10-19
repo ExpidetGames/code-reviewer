@@ -24,12 +24,18 @@ import {
   type FakeRegisteredApp,
 } from "./registry.ts";
 import {
+  createChecksApi,
+  type FakeCheckRun,
+  type FakePullRequestReview,
+} from "./checks-api.ts";
+import {
   createReviewApi,
   type FakeChangedFile,
   type FakeComment,
 } from "./review-api.ts";
 
 export type { FakeChangedFile, FakeComment } from "./review-api.ts";
+export type { FakeCheckRun, FakePullRequestReview } from "./checks-api.ts";
 
 export type FakeInstallation = {
   id: number;
@@ -101,6 +107,7 @@ export const DEFAULT_FAKE_APP_PERMISSIONS: FakePermissions = {
   contents: "read",
   pull_requests: "write",
   issues: "write",
+  checks: "write",
 };
 
 export type FakeCollaboratorPermission = "admin" | "write" | "read" | "none";
@@ -192,6 +199,24 @@ export type FakeGithubAppControls = {
     body: string,
     login?: string,
   ): FakeComment;
+  /** The check runs of a repository, oldest first, each with the history of its states (#405). */
+  checkRuns(repoFullName: string): FakeCheckRun[];
+  /** The reviews submitted on a pull request, oldest first (#405). */
+  pullRequestReviews(
+    repoFullName: string,
+    number: number,
+  ): FakePullRequestReview[];
+  /** Submits a review as another person, for example a human reviewer (#405). */
+  addPullRequestReview(
+    repoFullName: string,
+    number: number,
+    review: { login: string; event: string; body?: string; commitId?: string },
+  ): FakePullRequestReview;
+  /** Each reviewer's latest review that is not a comment: what GitHub counts for the merge (#405). */
+  pullRequestReviewDecisions(
+    repoFullName: string,
+    number: number,
+  ): Record<string, "APPROVED" | "CHANGES_REQUESTED">;
   /** The permissions the app itself is granted; token requests may not exceed them (422). */
   setAppPermissions(permissions: FakePermissions): void;
   /**
@@ -307,9 +332,22 @@ export function createAppPart(
     botLogin: `${options.appSlug ?? "fake-app"}[bot]`,
   });
 
+  const checks = createChecksApi({
+    webBase,
+    apiBase,
+    botLogin: `${options.appSlug ?? "fake-app"}[bot]`,
+    now,
+  });
+
   const installations = new Map<number, FakeInstallation>();
   const repositories = new Map<number, FakeRepository[]>();
   const pullRequests = new Map<string, FakePullRequest[]>();
+  // Every head a pull request has had ("owner/name#7"): a review may name any of its commits (#405).
+  const commits = new Map<string, Set<string>>();
+  const noteCommit = (repoFullName: string, number: number, sha: string) => {
+    const key = `${repoFullName}#${number}`;
+    commits.set(key, new Set([...(commits.get(key) ?? []), sha]));
+  };
   const gitRepositories = new Map<string, string>();
   const permissions = new Map<string, FakeCollaboratorPermission>();
   const tokens = new Map<string, IssuedToken>();
@@ -488,6 +526,25 @@ export function createAppPart(
       if (repository === "" || !Number.isInteger(number))
         return send(400, { message: "Invalid query" });
       return send(200, review.comments(repository, number));
+    }
+
+    // Control endpoints for a test that runs the fake as its own process (Playwright): the check runs of a
+    // repository (`?repository=owner/name`) and the reviews of a pull request (`&number=7`) with the decision
+    // GitHub would count (#405).
+    if (path === "/__fake/check-runs" && method === "GET") {
+      const repository = url.searchParams.get("repository") ?? "";
+      if (repository === "") return send(400, { message: "Invalid query" });
+      return send(200, checks.checkRuns(repository));
+    }
+    if (path === "/__fake/reviews" && method === "GET") {
+      const repository = url.searchParams.get("repository") ?? "";
+      const number = Number(url.searchParams.get("number"));
+      if (repository === "" || !Number.isInteger(number))
+        return send(400, { message: "Invalid query" });
+      return send(200, {
+        reviews: checks.reviews(repository, number),
+        decisions: checks.reviewDecisions(repository, number),
+      });
     }
 
     // Control endpoint for a test that runs the fake as its own process (Playwright): every
@@ -722,6 +779,22 @@ export function createAppPart(
         });
       }
 
+      // Check runs and pull request reviews (#405).
+      const checksAnswer = await checks.handle({
+        method,
+        rest,
+        query: url.searchParams,
+        repository,
+        pullRequests: prs,
+        commitsOf: (number) =>
+          commits.get(`${fullName}#${number}`) ?? new Set(),
+        body: () => readBody(request),
+        mayDo: (names, level) =>
+          names.some((name) => mayDo(issued, name, level)),
+      });
+      if (checksAnswer !== undefined)
+        return send(checksAnswer.status, checksAnswer.body);
+
       // The rest is what a reviewer reads and writes: one pull request, its files, comments, ...
       const answer = await review.handle({
         method,
@@ -818,6 +891,7 @@ export function createAppPart(
       );
     },
     addPullRequest(repoFullName, pullRequest) {
+      noteCommit(repoFullName, pullRequest.number, pullRequest.headSha);
       pullRequests.set(repoFullName, [
         ...(pullRequests.get(repoFullName) ?? []).filter(
           (existing) => existing.number !== pullRequest.number,
@@ -832,6 +906,8 @@ export function createAppPart(
       const existing = pullRequests.get(repoFullName) ?? [];
       if (!existing.some((pr) => pr.number === number))
         throw new Error(`no pull request ${number} in ${repoFullName}`);
+      if (changes.headSha !== undefined)
+        noteCommit(repoFullName, number, changes.headSha);
       pullRequests.set(
         repoFullName,
         existing.map((pr) =>
@@ -846,6 +922,13 @@ export function createAppPart(
       review.comments(repoFullName, number),
     addPullRequestComment: (repoFullName, number, body, login) =>
       review.addComment(repoFullName, number, body, login),
+    checkRuns: (repoFullName) => checks.checkRuns(repoFullName),
+    pullRequestReviews: (repoFullName, number) =>
+      checks.reviews(repoFullName, number),
+    addPullRequestReview: (repoFullName, number, review) =>
+      checks.addReview(repoFullName, number, review),
+    pullRequestReviewDecisions: (repoFullName, number) =>
+      checks.reviewDecisions(repoFullName, number),
     setAppPermissions(permissions) {
       appPermissions = { ...permissions };
     },
@@ -871,9 +954,11 @@ export function createAppPart(
       installations.clear();
       repositories.clear();
       pullRequests.clear();
+      commits.clear();
       gitRepositories.clear();
       permissions.clear();
       review.reset();
+      checks.reset();
       omitted.clear();
       rawInstallationRecords.length = 0;
       tokens.clear();

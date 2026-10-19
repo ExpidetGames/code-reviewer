@@ -80,10 +80,7 @@ from code_reviewer_runner.dynamic_review.wrap_up import (
 from code_reviewer_runner.error_mapping import is_context_length_exceeded, llm_status_code
 from code_reviewer_runner.job import JobCapabilities
 from code_reviewer_runner.job_loop.jsonvalues import as_object
-from code_reviewer_runner.openrouter_parameters import (
-    REQUIRE_PARAMETERS,
-    is_no_provider_for_parameters,
-)
+from code_reviewer_runner.llm_providers import PROXY_FORWARDED_FIELDS, LlmProviderSpec
 from code_reviewer_runner.result import ErrorCode
 
 # The protocol the run requires (`wrap_up.py` names the tool and the choice). The pinned OpenCode
@@ -91,25 +88,10 @@ from code_reviewer_runner.result import ErrorCode
 # choice is not usable.
 
 _REQUEST_TIMEOUT_SECONDS = 120.0
-# The only request fields that reach the provider. Everything else the engine sends is dropped, and
-# the destination, the model and the output bound come from trusted configuration, never from here.
-# `stream` and `stream_options` are absent on purpose: the provider is always asked for the whole
-# answer (see `completion_stream.py`), whatever the engine asked for.
-_FORWARDED_FIELDS = frozenset(
-    {
-        "messages",
-        "tools",
-        "tool_choice",
-        "parallel_tool_calls",
-        "temperature",
-        "top_p",
-        "frequency_penalty",
-        "presence_penalty",
-        "seed",
-        "stop",
-        "response_format",
-    }
-)
+# `PROXY_FORWARDED_FIELDS` are the only request fields that reach the provider. Everything else the
+# engine sends is dropped, and the destination, the model and the output bound come from trusted
+# configuration, never from here. `stream` and `stream_options` are absent on purpose: the provider
+# is always asked for the whole answer (see `completion_stream.py`), whatever the engine asked for.
 # Fields that would steer a request to another route or destination. They are not merely dropped:
 # an engine that sends one is misbehaving and the run stops.
 _ROUTING_FIELDS = frozenset(
@@ -412,6 +394,7 @@ class ModelProxy:
         capabilities: DynamicCapabilities,
         capability: str,
         post: UpstreamPost = _http_post,
+        provider: LlmProviderSpec,
         require_parameters: bool = False,
         superseded: Callable[[], bool] = lambda: False,
     ) -> None:
@@ -429,8 +412,12 @@ class ModelProxy:
         self.capabilities = capabilities
         self.audit = ToolAudit(ledger)
         self._post = post
-        # True when the destination is OpenRouter (the runner decides, never the engine).
-        self._require_parameters = require_parameters
+        # The registry entry of the job's provider: the require-parameters field, the matcher for
+        # "no endpoint supports them" and the extractor of the stated cost (the runner decides,
+        # never the engine).
+        self._provider = provider
+        # True when the destination is the provider itself and its entry has the mechanism.
+        self._require_parameters = require_parameters and provider.require_parameters is not None
         # #396: true once a newer push replaced the run. A request in flight finishes (and is
         # counted); a new one is refused, with the stable code `superseded`, before anything is
         # forwarded or reserved.
@@ -668,13 +655,14 @@ class ModelProxy:
                 ErrorCode.DYNAMIC_POLICY_VIOLATION, "the request tries to choose a route"
             )
         forwarded: dict[str, Any] = {
-            field: value for field, value in request.items() if field in _FORWARDED_FIELDS
+            field: value for field, value in request.items() if field in PROXY_FORWARDED_FIELDS
         }
         forwarded["model"] = self.upstream_model
         forwarded["max_tokens"] = self._output_allowance(request)
         forwarded["stream"] = False
-        if self._require_parameters:
-            forwarded["provider"] = dict(REQUIRE_PARAMETERS)
+        mechanism = self._provider.require_parameters
+        if self._require_parameters and mechanism is not None:
+            forwarded[mechanism.body_field] = dict(mechanism.body_value)
         # Compact UTF-8 like the engine's own serialisation: the reservation is made on these bytes,
         # and `\uXXXX` escapes of non-ASCII text would inflate it. A lone surrogate (a JSON escape
         # the engine or the provider can emit when a token splits an emoji) has no UTF-8 form: that
@@ -712,23 +700,22 @@ class ModelProxy:
         )
         return prompt_tokens, completion_tokens
 
-    @staticmethod
-    def _cost(document: dict[str, Any]) -> Decimal | None:
-        """The charge the provider reports for this call (`usage.cost`), or None when it has none.
+    def _cost(self, document: dict[str, Any]) -> Decimal | None:
+        """The charge the provider reports for this call, or None when it has none.
 
-        OpenRouter always returns it with the usage; there is no request flag to set. It is read,
-        never computed: a call without it simply has no known cost.
+        What the entry of the provider says is the stated charge (OpenRouter: `usage.cost`). It is
+        read, never computed: a call without it simply has no known cost.
         """
         usage = as_object(document.get("usage"))
-        return None if usage is None else exact_cost(usage.get("cost"))
+        return None if usage is None else self._provider.cost_extractor(usage)
 
     def _provider_error(self, status: int, body: bytes) -> tuple[bytes, ErrorCode]:
-        # OpenRouter has no provider that supports every parameter of the request (#270): the
+        # The provider has no endpoint that supports every parameter of the request (#270): the
         # model cannot serve the run, which is no unknown model.
         if (
             status == 404
             and self._require_parameters
-            and is_no_provider_for_parameters(body.decode("utf-8", errors="replace"))
+            and self._provider.no_endpoint_for_parameters(body.decode("utf-8", errors="replace"))
         ):
             code = ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED
             return error_body(code, "no provider supports every parameter of the request"), code

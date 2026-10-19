@@ -354,6 +354,8 @@ export interface WorkspaceEntitlementsTable {
   suspended: number;
   /** A short lowercase code that says why; null unless `suspended` is 1. */
   suspension_code: string | null;
+  /** #428: JSON text `{"catalogEntries":[ids]}`; null means every released entry (and is what a row of before #428 has). */
+  model_access: string | null;
   /** ISO 8601 text in UTC. */
   updated_at: string;
   /** The id of the user who saved it last, or null (the operator API, or a user who was deleted since). */
@@ -374,8 +376,14 @@ export interface UsageRecordsTable {
   review_kind: string;
   /** `own` or `managed` (KEY_MODES): whose key the run used. */
   key_mode: string;
-  /** The managed model tier; null until the tiers exist. */
+  /** The managed model tier; null until the tiers exist. Old rows only: the catalog entry replaces it (#432). */
   model_tier: string | null;
+  /** The catalog entry a managed run used (#432); null for an own run and for a row from before the catalog. */
+  catalog_entry_id: string | null;
+  /** The name of that entry when the run was claimed (a snapshot: a rename does not rewrite history). */
+  catalog_entry_name: string | null;
+  /** The provider the run was sent to (#432); operator data, never served to a member. Null before #432. */
+  llm_provider: string | null;
   /** `reserved`, `settled` or `void` (USAGE_STATES). */
   state: string;
   /** The measured cost in millionths of a US dollar; null when unknown. Only on a settled record. */
@@ -444,6 +452,44 @@ export interface RefusalNoticesTable {
   next_attempt_at: string;
   /** ISO 8601 text in UTC; only a posted notice has it. */
   posted_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Where the check run and the review verdict of one review job stand on GitHub (#405, src/check-runs/README.md): one
+ * row per job. The ids make the work idempotent; `synced_status` is the job status the check run shows now.
+ */
+export interface JobCheckRunsTable {
+  job_id: string;
+  /** The workspace of the job, repeated here so queries need no join to scope. */
+  workspace_id: string;
+  /** The id of the check run on the platform, as text; null until it is made. */
+  check_run_id: string | null;
+  /** The id of the review the app submitted, as text; null until then (or when none is submitted). */
+  review_id: string | null;
+  /** `approve`, `request_changes` or `withdrawn`: what the app did to the pull request with the verdict; null if nothing. */
+  review_event: string | null;
+  /** When `review_event` was recorded (ISO 8601 UTC); null with it. Orders the events of one pull request. */
+  review_event_at: string | null;
+  /** A JobStatus: the status of the job the check run shows now; null before the first sync. */
+  synced_status: string | null;
+  /** How many times the creation of the check run was started (counted before the call). */
+  check_create_attempts: ColumnType<number, number | undefined, number>;
+  /** How many times the submission of the review was started (counted before the call). */
+  review_submit_attempts: ColumnType<number, number | undefined, number>;
+  /** `active` or `dropped` (`CHECK_RUN_STATES`): the check run alone, dropped when the App may not write it. */
+  check_state: ColumnType<string, string | undefined, string>;
+  /** `pending`, `done` or `dropped` (`REVIEW_VERDICT_STATES`). */
+  review_state: ColumnType<string, string | undefined, string>;
+  /** `active`, `settled` or `dropped` (`JOB_CHECK_STATES`). */
+  state: ColumnType<string, string | undefined, string>;
+  /** Syncs started since the last one that finished, counted when they start (so a sync cut off counts); bounded by the code. */
+  attempts: ColumnType<number, number | undefined, number>;
+  /** ISO 8601 text in UTC: when a sync may start again. While one runs: when its claim ends. */
+  next_attempt_at: string;
+  /** The stable code of the last failure or of the reason the row was dropped. */
+  last_code: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -600,6 +646,34 @@ export interface UnclaimedInstallationsTable {
   source: string;
 }
 
+/**
+ * One entry of the operator's model catalog (#425, src/model-catalog/). Instance level: no workspace owns it. `name` is
+ * shown to members, `provider` and `model_id` are operator only.
+ */
+export interface ModelCatalogEntriesTable {
+  /** Opaque: `mce_` and 32 random hex digits. */
+  id: string;
+  /** 1 to 40 printable characters; shown to members. */
+  name: string;
+  /** The name folded to lower case (`nameKeyOf`); unique, so two names never differ only in case. */
+  name_key: string;
+  description: string | null;
+  /** A provider of the registry; checked in code, not by the database. */
+  provider: string;
+  model_id: string;
+  /** 0 or 1; at least one of the two kinds is 1 (a check). */
+  serves_diff: number;
+  serves_dynamic: number;
+  /** `draft`, `released` or `retired` (`CATALOG_STATUSES`). */
+  status: string;
+  sort_order: number;
+  /** ISO 8601 text in UTC. */
+  created_at: string;
+  updated_at: string;
+  /** The user who changed it last, or null (the system, or a user who was deleted since). */
+  updated_by: string | null;
+}
+
 export interface Database {
   app_meta: AppMetaTable;
   users: UsersTable;
@@ -626,7 +700,9 @@ export interface Database {
   job_claimed_keys: JobClaimedKeysTable;
   job_dispatches: JobDispatchesTable;
   refusal_notices: RefusalNoticesTable;
+  job_check_runs: JobCheckRunsTable;
   plan_handoff_tokens: PlanHandoffTokensTable;
+  model_catalog_entries: ModelCatalogEntriesTable;
   password_reset_tokens: PasswordResetTokensTable;
   email_verification_tokens: EmailVerificationTokensTable;
   signed_states: SignedStatesTable;

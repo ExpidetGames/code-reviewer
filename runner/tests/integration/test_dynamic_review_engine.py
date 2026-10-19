@@ -40,6 +40,7 @@ from code_reviewer_runner.dynamic_review.netguard import IsolationError
 from code_reviewer_runner.dynamic_review.prompts import ReviewInputs, compose_system_prompt
 from code_reviewer_runner.dynamic_review.proxy import ModelProxy, capabilities_from_config
 from code_reviewer_runner.job import Job, parse_job
+from code_reviewer_runner.llm_providers import OPENROUTER
 from code_reviewer_runner.result import ErrorCode
 
 FAKE_ENGINE = Path(__file__).parent / "fake_opencode.py"
@@ -272,6 +273,7 @@ class Fixture:
             upstream_model="deepseek/deepseek-v4.1-flash",
             capabilities=capabilities_from_config(CAPABILITIES),
             capability=capability,
+            provider=OPENROUTER,
         )
         proxy.audit.set_export_root(str(self.directory))
         server = proxy.serve("127.0.0.1").start()

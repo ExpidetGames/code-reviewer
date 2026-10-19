@@ -626,7 +626,7 @@ async function managed() {
       createElement(LlmAccessSection, {
         workspaceSlug: "alpha",
         canManage,
-        keyStatus: await llm.keyServiceFor(t.alpha.id).status(),
+        keyStatuses: await llm.keyServiceFor(t.alpha.id).statusAll(),
         summary: await llm.summaryFor(t.alpha.id),
       }),
     );

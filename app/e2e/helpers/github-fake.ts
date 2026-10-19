@@ -126,7 +126,9 @@ function databaseOf(page: Page): string {
           ? e2eEnv.multiDatabasePath
           : origin === e2eEnv.operatorAppUrl
             ? e2eEnv.operatorDatabasePath
-            : e2eEnv.databasePath;
+            : origin === e2eEnv.catalogAppUrl
+              ? e2eEnv.catalogDatabasePath
+              : e2eEnv.databasePath;
   return resolve(process.cwd(), file);
 }
 

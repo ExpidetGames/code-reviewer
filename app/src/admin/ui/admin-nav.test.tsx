@@ -73,7 +73,7 @@ describe("the sections of the portal", () => {
       "Integrations",
       "GitHub App",
       "Mail",
-      "LLM key",
+      "LLM keys",
     ]);
     expect(links.map((link) => link.getAttribute("href"))).toEqual(
       ADMIN_NAV_ITEMS.map((item) => item.href),
@@ -83,6 +83,14 @@ describe("the sections of the portal", () => {
         .filter((link) => link.getAttribute("aria-current") === "page")
         .map((link) => link.textContent),
     ).toEqual(["Instance"]);
+  });
+
+  // #491-T08
+  it("has no Billing section until the new billing admin page exists", () => {
+    expect(ADMIN_NAV_ITEMS.map((item) => item.label)).not.toContain("Billing");
+    expect(
+      ADMIN_NAV_ITEMS.filter((item) => /billing/i.test(item.href)),
+    ).toEqual([]);
   });
 
   // #185: the nested GitHub App page under Integrations (#182 lead note).
@@ -140,7 +148,7 @@ describe("the sections on a narrow screen", () => {
       "Integrations",
       "GitHub App",
       "Mail",
-      "LLM key",
+      "LLM keys",
     ]);
   });
 });

@@ -2,9 +2,10 @@
 
 // What the operator API says about usage: named fields only, built one by one so that a column added to the table
 // later never reaches the outside by accident. No pull request, repository, branch, title or person is in a
-// record, and the model of a managed tier is only ever its tier name. The shapes are the definitions `UsageItem`
+// record, and the model of a managed run is only ever its entry (or, for a run from before the catalog, its tier name). The shapes are the definitions `UsageItem`
 // and `UsageSummaryResponse` of the contract.
-import { TIER_NAME_PATTERN } from "./contract.ts";
+import { MAX_NAME_CHARS } from "../model-catalog/entries.ts";
+import { ENTRY_ID_PATTERN, TIER_NAME_PATTERN } from "./contract.ts";
 import type { UnknownCostCount } from "../db/repositories/usage-feed-repository.ts";
 import type {
   UsageRecord,
@@ -22,6 +23,18 @@ export function usageItemView(record: UsageRecord) {
     modelTier:
       record.modelTier !== null && TIER_NAME_PATTERN.test(record.modelTier)
         ? record.modelTier
+        : null,
+    // #432: the entry a managed run used, by id and name (the name as it was at the claim). Never the provider or the
+    // model; a value that is not the shape of an id or a name is served as null.
+    catalogEntryId:
+      record.catalogEntryId !== null &&
+      ENTRY_ID_PATTERN.test(record.catalogEntryId)
+        ? record.catalogEntryId
+        : null,
+    catalogEntryName:
+      record.catalogEntryName !== null &&
+      record.catalogEntryName.length <= MAX_NAME_CHARS
+        ? record.catalogEntryName
         : null,
     costMicroUsd: record.costMicroUsd,
     promptTokens: record.promptTokens,

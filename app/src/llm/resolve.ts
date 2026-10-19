@@ -30,7 +30,11 @@ import {
   type LlmAccessResult,
   type LlmNotConfiguredReason,
 } from "./access.ts";
-import { LLM_PROVIDERS, type LlmDefaults, type LlmProvider } from "./config.ts";
+import type { LlmDefaults, LlmProvider } from "./config.ts";
+import {
+  DEFAULT_LLM_PROVIDER,
+  llmProviderDescriptors,
+} from "./providers/index.ts";
 import {
   ENTITLEMENTS_INVALID_CODE,
   type KeyMode,
@@ -54,16 +58,29 @@ export type OperatorKeyForJob =
   | { state: "unreadable" }
   | { state: "key"; apiKey: string };
 
-/** The provider of the operator's key. OpenRouter is the only provider for now; the key is not bound to one. */
-export const OPERATOR_KEY_PROVIDER: LlmProvider = "openrouter";
-
 type Defaults = Pick<LlmDefaults, "model" | "contextWindowTokens">;
 
 export type ResolveLlmInput =
-  /** The workspace's own key. The operator's key has no place here. */
-  | { keyMode: "own"; key: WorkspaceKeyForJob; defaults: Defaults }
-  /** The operator's key. The workspace's own key has no place here. */
-  | { keyMode: "managed"; operatorKey: OperatorKeyForJob; defaults: Defaults }
+  /**
+   * The workspace's own key, the one of `provider` (the provider the job is to run on; the default provider until
+   * a project can choose, #426). The operator's key has no place here.
+   */
+  | {
+      keyMode: "own";
+      provider?: string;
+      key: WorkspaceKeyForJob;
+      defaults: Defaults;
+    }
+  /**
+   * The operator's key, the one of `provider` (the provider the job is to run on; the default provider until a project
+   * can choose, #427). The workspace's own key has no place here.
+   */
+  | {
+      keyMode: "managed";
+      provider?: string;
+      operatorKey: OperatorKeyForJob;
+      defaults: Defaults;
+    }
   /** The entitlements of the workspace cannot be read. */
   | { keyMode: "unreadable"; defaults: Defaults };
 
@@ -76,10 +93,6 @@ export function keyModeForJob(
   return entitlements.keyMode;
 }
 
-function knownProvider(binding: string): LlmProvider | undefined {
-  return LLM_PROVIDERS.find((provider) => provider === binding);
-}
-
 const failure = (reason: LlmNotConfiguredReason) =>
   ({
     ok: false,
@@ -90,6 +103,10 @@ const failure = (reason: LlmNotConfiguredReason) =>
 
 export function resolveWorkspaceLlmAccess(
   input: ResolveLlmInput,
+  /** The providers the app supports; a test passes its own. */
+  providers: {
+    find(raw: unknown): { id: string } | undefined;
+  } = llmProviderDescriptors,
 ): LlmAccessResult {
   const { defaults } = input;
 
@@ -97,6 +114,12 @@ export function resolveWorkspaceLlmAccess(
 
   if (input.keyMode === "managed") {
     const { operatorKey } = input;
+    // The operator's key of one provider is never used for another: the caller read the key of the provider asked
+    // for, and that provider must exist. One that does not has no key.
+    const wanted = input.provider ?? DEFAULT_LLM_PROVIDER;
+    const provider = providers.find(wanted)?.id;
+    if (provider === undefined || provider !== wanted)
+      return failure("operator_key_missing");
     if (operatorKey.state === "unreadable")
       return failure("operator_key_unreadable");
     if (operatorKey.state === "none") return failure("operator_key_missing");
@@ -104,7 +127,8 @@ export function resolveWorkspaceLlmAccess(
       ok: true,
       source: "operator",
       access: createLlmAccess({
-        provider: OPERATOR_KEY_PROVIDER,
+        // A registry of a test may have providers the type does not know.
+        provider: provider as LlmProvider,
         model: defaults.model,
         apiKey: operatorKey.apiKey,
         contextWindowTokens: defaults.contextWindowTokens,
@@ -115,13 +139,18 @@ export function resolveWorkspaceLlmAccess(
   const { key } = input;
   if (key.state === "unreadable") return failure("key_unreadable");
   if (key.state === "none") return failure("no_key");
-  const provider = knownProvider(key.binding);
-  if (provider === undefined) return failure("key_binding_mismatch");
+  // The key of one provider is never used for another: it must be bound to the provider asked for, and that
+  // provider must exist.
+  const wanted = input.provider ?? DEFAULT_LLM_PROVIDER;
+  const provider = providers.find(wanted)?.id;
+  if (provider === undefined || key.binding !== provider)
+    return failure("key_binding_mismatch");
   return {
     ok: true,
     source: "workspace",
     access: createLlmAccess({
-      provider,
+      // A registry of a test may have providers the type does not know.
+      provider: provider as LlmProvider,
       model: defaults.model,
       apiKey: key.apiKey,
       contextWindowTokens: defaults.contextWindowTokens,

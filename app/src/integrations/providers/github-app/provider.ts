@@ -22,11 +22,14 @@ import type { GithubAppConfig } from "./config.ts";
 import { GithubAppError } from "./errors.ts";
 import { parseGithubEvent } from "./events.ts";
 import {
+  CHECK_TOKEN_PERMISSIONS,
   JOB_TOKEN_PERMISSIONS,
   NOTICE_TOKEN_PERMISSIONS,
+  VERDICT_TOKEN_PERMISSIONS,
   jobTokenRepositoryIds,
   toJobAccessError,
   toReadError,
+  toWriteError,
 } from "./job-access.ts";
 import { isValidSignature } from "./webhook-signature.ts";
 import { field, payloadProblems } from "./webhook-fields.ts";
@@ -274,6 +277,173 @@ export function createGithubAppProvider(
         return "posted";
       } catch (error) {
         throw toReadError(error);
+      }
+    },
+
+    async publishReviewCheck(integration, repo, check, known, signal) {
+      try {
+        const repositoryIds = jobTokenRepositoryIds(repo.externalId);
+        if (repo.integrationId !== integration.id || repositoryIds === null)
+          throw new IntegrationError(
+            "INTEGRATION_ACCESS_SCOPE_REFUSED",
+            "The repository does not belong to this integration or has no usable id.",
+          );
+        const scope = { repositoryIds, permissions: CHECK_TOKEN_PERMISSIONS };
+        const client = await getClient();
+        const fields = {
+          status: check.status,
+          externalId: check.jobId,
+          ...(check.conclusion === undefined
+            ? {}
+            : { conclusion: check.conclusion }),
+          ...(check.detailsUrl === undefined
+            ? {}
+            : { detailsUrl: check.detailsUrl }),
+          output: { title: check.title, summary: check.summary },
+        } as const;
+        let checkRunId = known.checkRunId;
+        if (checkRunId === null && known.mayExist)
+          checkRunId =
+            (
+              await client.findCheckRun(
+                integration.externalId,
+                scope,
+                repo.fullName,
+                {
+                  headSha: check.headSha,
+                  name: check.name,
+                  externalId: check.jobId,
+                },
+                signal,
+              )
+            )?.id ?? null;
+        if (checkRunId !== null) {
+          await client.updateCheckRun(
+            integration.externalId,
+            scope,
+            repo.fullName,
+            checkRunId,
+            fields,
+            signal,
+          );
+          return { checkRunId };
+        }
+        if (known.createIfMissing === false) return { checkRunId: null };
+        const created = await client.createCheckRun(
+          integration.externalId,
+          scope,
+          repo.fullName,
+          { name: check.name, headSha: check.headSha, ...fields },
+          signal,
+        );
+        return { checkRunId: created.id };
+      } catch (error) {
+        throw toWriteError(error);
+      }
+    },
+
+    async submitReviewVerdict(
+      integration,
+      repo,
+      prNumber,
+      verdict,
+      options,
+      signal,
+    ) {
+      try {
+        const repositoryIds = jobTokenRepositoryIds(repo.externalId);
+        if (repo.integrationId !== integration.id || repositoryIds === null)
+          throw new IntegrationError(
+            "INTEGRATION_ACCESS_SCOPE_REFUSED",
+            "The repository does not belong to this integration or has no usable id.",
+          );
+        const scope = { repositoryIds, permissions: VERDICT_TOKEN_PERMISSIONS };
+        const client = await getClient();
+        if (options.lookForEarlier) {
+          const botLogin = `${(await getConfig()).slug}[bot]`;
+          const earlier = (
+            await client.listPullRequestReviews(
+              integration.externalId,
+              scope,
+              repo.fullName,
+              prNumber,
+              signal,
+            )
+          ).find(
+            // Only the app's own review counts: anybody can copy a marker into theirs.
+            (review) =>
+              review.authorLogin === botLogin &&
+              review.body.includes(verdict.marker),
+          );
+          if (earlier !== undefined)
+            return { outcome: "already_there" as const, reviewId: earlier.id };
+        }
+        const created = await client.createPullRequestReview(
+          integration.externalId,
+          scope,
+          repo.fullName,
+          prNumber,
+          {
+            commitId: verdict.headSha,
+            body: verdict.body,
+            event: verdict.event === "approve" ? "APPROVE" : "REQUEST_CHANGES",
+          },
+          signal,
+        );
+        return { outcome: "submitted" as const, reviewId: created.id };
+      } catch (error) {
+        throw toWriteError(error);
+      }
+    },
+
+    async withdrawReviewVerdict(integration, repo, prNumber, options, signal) {
+      try {
+        const repositoryIds = jobTokenRepositoryIds(repo.externalId);
+        if (repo.integrationId !== integration.id || repositoryIds === null)
+          throw new IntegrationError(
+            "INTEGRATION_ACCESS_SCOPE_REFUSED",
+            "The repository does not belong to this integration or has no usable id.",
+          );
+        const scope = { repositoryIds, permissions: VERDICT_TOKEN_PERMISSIONS };
+        const client = await getClient();
+        const botLogin = `${(await getConfig()).slug}[bot]`;
+        // Only the app's own reviews that carry its marker count: a review of anybody else is never touched, whatever
+        // its text says. The latest of them that still counts (an approval or a request for changes) decides whether
+        // there is anything to take back; then every request of the app that stands is dismissed, not only the latest,
+        // because GitHub may count an earlier one of the same reviewer again once the latest is gone.
+        const own = (
+          await client.listPullRequestReviews(
+            integration.externalId,
+            scope,
+            repo.fullName,
+            prNumber,
+            signal,
+          )
+        ).filter(
+          (review) =>
+            review.authorLogin === botLogin &&
+            review.body.includes(options.markerPrefix) &&
+            (review.state === "APPROVED" ||
+              review.state === "CHANGES_REQUESTED"),
+        );
+        const latest = own.at(-1);
+        if (latest === undefined || latest.state !== "CHANGES_REQUESTED")
+          return { outcome: "nothing_to_dismiss" as const, reviewId: null };
+        for (const standing of own.filter(
+          (review) => review.state === "CHANGES_REQUESTED",
+        ))
+          await client.dismissPullRequestReview(
+            integration.externalId,
+            scope,
+            repo.fullName,
+            prNumber,
+            standing.id,
+            options.message,
+            signal,
+          );
+        return { outcome: "dismissed" as const, reviewId: latest.id };
+      } catch (error) {
+        throw toWriteError(error);
       }
     },
 

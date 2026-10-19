@@ -14,7 +14,13 @@ import {
   modelsExceedingContext,
   type CostSettings,
 } from "./cost.ts";
-import { MODEL_PRICES, PRICING_AS_OF } from "./model-pricing.ts";
+import {
+  MODEL_PRICES,
+  PRICING_AS_OF,
+} from "../llm/providers/openrouter/model-pricing.ts";
+import { createFakeAdapter } from "../llm/providers/fake-adapter.ts";
+import { openrouterDescriptor } from "../llm/providers/openrouter/descriptor.ts";
+import { createProviderRegistry } from "../llm/providers/registry.ts";
 
 const prices = {
   "test/cheap": {
@@ -267,5 +273,51 @@ describe("the price table", () => {
       if (model.startsWith("anthropic/"))
         expect(price.inputTokenFactor, model).toBe(1.4);
     }
+  });
+});
+
+// #433-T01
+describe("the estimate follows the provider of the settings", () => {
+  const registry = createProviderRegistry([
+    openrouterDescriptor,
+    createFakeAdapter(),
+  ]);
+  const settings = (provider: string, model: string) => ({
+    provider,
+    model,
+    fallbackModel: null,
+    maxTokens: 100_000,
+    largePrChunking: true,
+  });
+
+  it("prices a model with the price table of the chosen provider, not of the default one", () => {
+    const guard = estimateReviewCost(
+      settings("fakeai", "fake-small"),
+      undefined,
+      registry,
+    );
+
+    expect(guard.primary.status).toBe("estimated");
+    expect(guard.exceedsContext).toEqual([]);
+  });
+
+  it("does not know a model of another provider", () => {
+    const guard = estimateReviewCost(
+      settings("openrouter", "fake-small"),
+      undefined,
+      registry,
+    );
+
+    expect(guard.primary.status).toBe("unknown_model");
+  });
+
+  it("uses the default provider for settings that name none", () => {
+    const guard = estimateReviewCost(
+      { ...settings("openrouter", DEFAULT_LLM_MODEL), provider: undefined },
+      undefined,
+      registry,
+    );
+
+    expect(guard.primary.status).toBe("estimated");
   });
 });

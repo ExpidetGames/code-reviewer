@@ -18,6 +18,46 @@ import { TEST_APP_SLUG } from "../../src/test-support/github-app.ts";
 const MINUTE = 60 * 1000;
 
 describe("claiming a job", () => {
+  // #424-T02: a claim without the providers is the claim of a previous-release runner, a claim with
+  // them is the claim of a newer one; both get the same job, and the app still sends OpenRouter.
+  it.each([
+    ["without the providers", undefined],
+    ["with OpenRouter", ["openrouter"]],
+    [
+      "with a provider this app has no adapter for",
+      ["openrouter", "a_future_provider"],
+    ],
+  ])(
+    "hands the same OpenRouter job to a runner %s",
+    async (_name, llmProviders) => {
+      const h = await startRunnerApiHarness();
+      await h.enqueueNew();
+
+      const response = await h.claim({ engines: ["pr-agent"], llmProviders });
+
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body.job.input.llm.provider).toBe("openrouter");
+    },
+  );
+
+  // #424-T01
+  it("refuses a claim whose provider list is malformed before any job is claimed", async () => {
+    const h = await startRunnerApiHarness();
+    const job = await h.enqueueNew();
+
+    const response = await h.claim({
+      engines: ["pr-agent"],
+      llmProviders: ["OpenRouter"],
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: { code: "RUNNER_REQUEST_INVALID" },
+    });
+    expect(await h.queue.get(job.id)).toMatchObject({ status: "queued" });
+  });
+
   // CR-28-T04
   it("hands the oldest waiting job to the runner and reserves it in the database", async () => {
     const h = await startRunnerApiHarness();

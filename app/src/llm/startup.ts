@@ -9,6 +9,7 @@
 // Called from `src/instrumentation.ts`.
 import { ALLOW_TEST_LLM_ENDPOINTS_FLAG, llmApiBaseUrl } from "./endpoint.ts";
 import { readLlmDefaults, type LlmConfigIssue } from "./config.ts";
+import { DEFAULT_LLM_PROVIDER } from "./providers/index.ts";
 
 type StartOptions = {
   env?: Readonly<Record<string, string | undefined>>;
@@ -29,7 +30,7 @@ export function checkLlmConfigOnStart({
     warn(
       `[llm] LLM_TEST_ENDPOINTS_ENABLED: ${ALLOW_TEST_LLM_ENDPOINTS_FLAG} is on, so the keys of workspaces are checked at LLM_API_BASE_URL instead of the provider. Never set it in a real deployment.`,
     );
-  else if (llmApiBaseUrl(env, "openrouter").overrideIgnored)
+  else if (llmApiBaseUrl(env, DEFAULT_LLM_PROVIDER).overrideIgnored)
     warn(
       "[llm] LLM_API_BASE_URL_IGNORED: LLM_API_BASE_URL is set without ALLOW_TEST_LLM_ENDPOINTS=true and is ignored; keys are checked at the provider.",
     );

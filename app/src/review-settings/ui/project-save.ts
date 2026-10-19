@@ -16,9 +16,11 @@ import {
   validateReviewSettingsPatch,
   type ReviewSettingIssue,
 } from "../validate.ts";
-import type {
-  ProjectReviewKind,
-  ReviewSettingsOverrides,
+import {
+  CATALOG_FIELD_OF_KIND,
+  PROJECT_REVIEW_KINDS,
+  type ProjectReviewKind,
+  type ReviewSettingsOverrides,
 } from "../settings.ts";
 import { initialDynamicValues } from "./dynamic-form-state.ts";
 import type { SettingsFormModel } from "./form-model.ts";
@@ -83,12 +85,37 @@ function projectOnlyChanges(
     body.reviewKind = values.reviewKind;
 
   // The built-in default typed again (or put back by "Reset to default") clears an override; any
-  // other value is the new override. A workspace on the operator's key has no Dynamic model field (#283).
-  const typedModel = values.dynamicModel.trim();
-  if (!model.managed && typedModel !== view.effective.dynamicModel) {
+  // other value is the new override. A workspace on the operator's key has no Dynamic model or provider field
+  // (#283, #430) and sends neither; one on its own key has no catalog entry and sends none (#433).
+  if (!model.managed) {
+    const typedModel = values.dynamicModel.trim();
+    if (typedModel !== view.effective.dynamicModel) {
+      const wanted =
+        typedModel === view.defaults.dynamicModel ? null : typedModel;
+      if (check({ dynamicModel: wanted })) body.dynamicModel = wanted;
+    }
+    const typedProvider = values.dynamicProvider;
+    if (typedProvider !== (view.effective.dynamicProvider ?? "")) {
+      const wanted =
+        typedProvider === view.defaults.dynamicProvider ? null : typedProvider;
+      if (check({ dynamicProvider: wanted })) body.dynamicProvider = wanted;
+    }
+  }
+  if (model.catalog !== null)
+    for (const kind of PROJECT_REVIEW_KINDS) {
+      const wanted = values.catalogEntries[kind];
+      if (wanted === model.catalog.selection[kind]) continue;
+      const field = CATALOG_FIELD_OF_KIND[kind];
+      if (check({ [field]: wanted })) body[field] = wanted;
+    }
+
+  // The default mode put back (or chosen again) clears the override; any other mode is the new override (#405).
+  if (values.reviewVerdict !== view.effective.reviewVerdict) {
     const wanted =
-      typedModel === view.defaults.dynamicModel ? null : typedModel;
-    if (check({ dynamicModel: wanted })) body.dynamicModel = wanted;
+      values.reviewVerdict === view.defaults.reviewVerdict
+        ? null
+        : values.reviewVerdict;
+    if (check({ reviewVerdict: wanted })) body.reviewVerdict = wanted;
   }
 
   const shipped = view.defaults.reviewSkill;
@@ -164,8 +191,15 @@ export function adoptCards(
       ? {}
       : {
           dynamic: cards.includes("kind")
-            ? initialDynamicValues(saved.dynamic)
-            : (state.dynamic ?? initialDynamicValues(saved.dynamic)),
+            ? initialDynamicValues(
+                saved.dynamic,
+                saved.catalog?.selection ?? null,
+              )
+            : (state.dynamic ??
+              initialDynamicValues(
+                saved.dynamic,
+                saved.catalog?.selection ?? null,
+              )),
         }),
   };
 }

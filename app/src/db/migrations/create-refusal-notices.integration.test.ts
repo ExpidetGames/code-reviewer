@@ -32,7 +32,9 @@ async function rowsOfEveryTable(
   for (const table of await db.introspection.getTables()) {
     if (
       table.name === "refusal_notices" ||
-      table.name === "plan_handoff_tokens"
+      table.name === "plan_handoff_tokens" ||
+      table.name === "job_check_runs" ||
+      table.name === "model_catalog_entries"
     )
       continue;
     const { rows } =

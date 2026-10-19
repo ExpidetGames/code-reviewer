@@ -19,7 +19,8 @@
 // else is a 404. A fake that guessed would let a test pass on the wrong pull request.
 //
 // Not modelled on purpose, as in the engine suite's own fake (runner/tests/engine/fake_github.py):
-// inline review comments, reviews, labels, check runs and paging (every list comes whole).
+// inline review comments, labels and paging (every list comes whole). Check runs and pull request reviews are
+// served by `checks-api.ts`.
 
 /** GitHub refuses a comment longer than this with a 422. */
 export const MAX_COMMENT_CHARS = 65536;

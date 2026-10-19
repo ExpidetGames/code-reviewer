@@ -56,10 +56,10 @@ function view(
     planManagementUrl: { value: null, ...never },
     smtp: { value: null, password: "none", ...never, ...smtp },
     operatorLlmKey: { state: "not_configured" },
-    modelTiers: {
-      low: { diff: false, dynamic: false },
-      medium: { diff: false, dynamic: false },
-      high: { diff: false, dynamic: false },
+    operatorLlmKeys: { openrouter: { state: "not_configured" } },
+    modelCatalog: {
+      diff: { released: 0, hasDefault: false },
+      dynamic: { released: 0, hasDefault: false },
     },
     workspaceCount: 1,
     githubConfigured: false,
@@ -92,7 +92,11 @@ function api(
   >(() => Promise.resolve(changeResult));
   const testMock = vi.fn<AdminApi["testMail"]>(() => Promise.resolve(testMail));
   return {
-    api: { change: changeMock, testMail: testMock } satisfies AdminApi,
+    api: {
+      change: changeMock,
+      testMail: testMock,
+      testLlmKey: vi.fn(),
+    } satisfies AdminApi,
     changeMock,
     testMock,
   };

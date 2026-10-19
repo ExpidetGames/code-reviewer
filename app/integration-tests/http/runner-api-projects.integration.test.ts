@@ -414,6 +414,7 @@ describe("the contract file and the options the app sends", () => {
   // CR-46-T06
   it("accepts every environment variable the review settings can produce", () => {
     const env = toRunnerSettings({
+      provider: "openrouter",
       model: "vendor/m",
       fallbackModel: null,
       extraInstructions: "rules",
@@ -424,7 +425,6 @@ describe("the contract file and the options the app sends", () => {
       autoReviewOnOpen: true,
       autoReviewOnPush: true,
       allowedCommands: ["review"],
-      modelTier: "medium",
     }).env;
 
     expect(Object.keys(env).length).toBeGreaterThan(0);

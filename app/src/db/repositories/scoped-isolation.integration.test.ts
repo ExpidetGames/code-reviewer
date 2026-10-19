@@ -25,6 +25,7 @@ import { createProjectsRepository } from "./projects-repository.ts";
 import { createRepositoriesRepository } from "./repositories-repository.ts";
 import { createRunsRepository } from "./runs-repository.ts";
 import { createPlanHandoffTokensRepository } from "./plan-handoff-tokens-repository.ts";
+import { createJobCheckRunsRepository } from "./job-check-runs-repository.ts";
 import { createRefusalNoticesRepository } from "./refusal-notices-repository.ts";
 import { createUsageRecordsRepository } from "./usage-records-repository.ts";
 
@@ -46,6 +47,7 @@ function reposOf(db: Kysely<Database>, workspaceId: string) {
     entitlements: createWorkspaceEntitlementsRepository(db, workspaceId),
     usage: createUsageRecordsRepository(db, workspaceId),
     notices: createRefusalNoticesRepository(db, workspaceId),
+    jobChecks: createJobCheckRunsRepository(db, workspaceId),
     planHandoff: createPlanHandoffTokensRepository(db, workspaceId),
   };
 }
@@ -77,6 +79,7 @@ function noticeKeyOf(repositoryId: string) {
   };
 }
 const NOTICE_OPTIONS = { leaseMs: 60_000, maxAttempts: 3 };
+const CHECK_LEASE = { leaseMs: 60_000, maxAttempts: 5 };
 
 /** One workspace with an integration, a repository, a project, a job and a setting. */
 async function seed(
@@ -225,6 +228,14 @@ async function seed(
     NOTICE_OPTIONS,
   );
   if (!taken.acquired) throw new Error("seeding failed");
+  // The check run record of the seeded job (#405).
+  const checked = await repos.jobChecks.take(enqueued.job.id, CHECK_LEASE);
+  if (!checked.acquired) throw new Error("seeding failed");
+  await repos.jobChecks.recordCheck(enqueued.job.id, {
+    checkRunId: `check-${tag}`,
+    syncedStatus: "queued",
+  });
+  await repos.jobChecks.finish(enqueued.job.id, { settled: false });
   // The handoff token of the Owner of the workspace (#284).
   await repos.planHandoff.issue({
     tokenHash: `handoff-${tag}`,
@@ -237,6 +248,16 @@ async function seed(
     binding: `binding-${tag}`,
     ciphertext: `ciphertext-${tag}`,
     nonce: `nonce-${tag}`,
+    keyVersion: 1,
+    lastFour: null,
+    updatedBy: `user-${tag}`,
+  });
+  // #426-T10: the key of a second provider has a name of its own in the same workspace.
+  await repos.workspaceSecrets.put({
+    name: "llm_api_key.fakeai",
+    binding: `fakeai-${tag}`,
+    ciphertext: `ciphertext-fakeai-${tag}`,
+    nonce: `nonce-fakeai-${tag}`,
     keyVersion: 1,
     lastFour: null,
     updatedBy: `user-${tag}`,
@@ -299,6 +320,12 @@ async function rowsOf(db: Kysely<Database>, workspaceId: string) {
       .selectAll()
       .where("workspace_id", "=", workspaceId)
       .orderBy("id")
+      .execute(),
+    jobCheckRuns: await db
+      .selectFrom("job_check_runs")
+      .selectAll()
+      .where("workspace_id", "=", workspaceId)
+      .orderBy("job_id")
       .execute(),
     refusalNotices: await db
       .selectFrom("refusal_notices")
@@ -780,6 +807,32 @@ const CASES: Case[] = [
     run: (a) => a.workspaceSecrets.remove("llm_api_key"),
     expectAnswer: (answer) => expect(answer).toBe(true),
   },
+  // #426-T10: the same, for the name of a second provider's key
+  {
+    name: "workspaceSecrets.get (provider-qualified name)",
+    run: (a) => a.workspaceSecrets.get("llm_api_key.fakeai"),
+    expectAnswer: (answer) =>
+      expect(answer).toMatchObject({ binding: "fakeai-a" }),
+  },
+  {
+    name: "workspaceSecrets.put (provider-qualified name)",
+    run: (a) =>
+      a.workspaceSecrets.put({
+        name: "llm_api_key.fakeai",
+        binding: "fakeai-a-changed",
+        ciphertext: "ciphertext-fakeai-a-changed",
+        nonce: "nonce-fakeai-a-changed",
+        keyVersion: 1,
+        lastFour: null,
+        updatedBy: null,
+      }),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
+    name: "workspaceSecrets.remove (provider-qualified name)",
+    run: (a) => a.workspaceSecrets.remove("llm_api_key.fakeai"),
+    expectAnswer: (answer) => expect(answer).toBe(true),
+  },
   // entitlements: one row per workspace, so the scope alone decides whose row it is
   {
     name: "entitlements.get",
@@ -812,8 +865,12 @@ const CASES: Case[] = [
     expectAnswer: (answer) => expect(answer).toBeUndefined(),
   },
   {
-    name: "usage.setModelTier",
-    run: (a, b) => a.usage.setModelTier(b.job.id, "high"),
+    name: "usage.setSelection",
+    run: (a, b) =>
+      a.usage.setSelection(b.job.id, {
+        provider: "openrouter",
+        catalogEntry: { id: "mce_other", name: "Other" },
+      }),
     expectAnswer: (answer) => expect(answer).toBeUndefined(),
   },
   {
@@ -901,6 +958,76 @@ const CASES: Case[] = [
     name: "notices.failed",
     run: (a, b) =>
       a.notices.failed(b.notice.id, new Date("2099-01-01T00:00:00.000Z")),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  // job check runs (#405): B's job is not one of A's, so A neither sees, takes nor changes B's check run record
+  // (#405-T35, for every method of the repository below)
+  {
+    name: "jobChecks.find",
+    run: (a, b) => a.jobChecks.find(b.job.id),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
+    name: "jobChecks.take",
+    run: (a, b) => a.jobChecks.take(b.job.id, CHECK_LEASE),
+    expectAnswer: (answer) => expect(answer).toEqual({ acquired: false }),
+  },
+  {
+    name: "jobChecks.noteStarted",
+    run: (a, b) => a.jobChecks.noteStarted(b.job.id, "check"),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
+    name: "jobChecks.recordCheck",
+    run: (a, b) =>
+      a.jobChecks.recordCheck(b.job.id, {
+        checkRunId: "hijacked",
+        syncedStatus: "running",
+      }),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
+    name: "jobChecks.dropCheck",
+    run: (a, b) => a.jobChecks.dropCheck(b.job.id, "X"),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
+    name: "jobChecks.lastReviewEventOfPullRequest",
+    run: (a, b) => a.jobChecks.lastReviewEventOfPullRequest(b.job.id),
+    expectAnswer: (answer) => expect(answer).toBeNull(),
+  },
+  {
+    name: "jobChecks.forgetCheckAttempts",
+    run: (a, b) => a.jobChecks.forgetCheckAttempts(b.job.id),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
+    name: "jobChecks.recordReview",
+    run: (a, b) =>
+      a.jobChecks.recordReview(b.job.id, {
+        reviewId: "hijacked",
+        reviewState: "done",
+      }),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
+    name: "jobChecks.finish",
+    run: (a, b) => a.jobChecks.finish(b.job.id, { settled: true }),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
+    name: "jobChecks.failed",
+    run: (a, b) =>
+      a.jobChecks.failed(b.job.id, {
+        code: "X",
+        retryAt: new Date("2099-01-01T00:00:00.000Z"),
+        maxAttempts: 1,
+      }),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
+    name: "jobChecks.drop",
+    run: (a, b) => a.jobChecks.drop(b.job.id, "X"),
     expectAnswer: (answer) => expect(answer).toBeUndefined(),
   },
   // handoff tokens: making one under A for B's Owner revokes nothing of B's
@@ -1116,6 +1243,28 @@ describe("two workspaces", () => {
   });
 
   // #271-T06
+  // #426-T10: both workspaces hold the same names, so a read that lost its workspace filter would still find a row;
+  // only a name that B alone holds shows it.
+  it("keep the key of a provider apart on a read: A does not see the provider-qualified secret only B has", async () => {
+    const { reposA, reposB } = await twoWorkspaces();
+    await reposB.workspaceSecrets.put({
+      name: "llm_api_key.onlyb",
+      binding: "onlyb-b",
+      ciphertext: "ciphertext-onlyb-b",
+      nonce: "nonce-onlyb-b",
+      keyVersion: 1,
+      lastFour: null,
+      updatedBy: "user-b",
+    });
+
+    expect(await reposA.workspaceSecrets.get("llm_api_key.onlyb")).toBe(
+      undefined,
+    );
+    expect(
+      await reposB.workspaceSecrets.get("llm_api_key.onlyb"),
+    ).toMatchObject({ binding: "onlyb-b" });
+  });
+
   it("keep the entitlements apart: changing A's leaves B with its own", async () => {
     const { reposA, reposB } = await twoWorkspaces();
 

@@ -66,6 +66,46 @@ describe("the guards of the admin portal", () => {
     expect(readFileSync(page!.file, "utf8")).toMatch(/\brequireAdmin\(\)/);
   });
 
+  // #491-T08
+  it("has no billing page or billing data route until the billing admin page is built again on these guards", () => {
+    const billing = discoverRoutes().filter(({ route }) =>
+      /billing/i.test(concretePath(route)),
+    );
+
+    expect(billing.map(({ route }) => concretePath(route))).toEqual([]);
+  });
+
+  // #429-T08
+  it("guard the model catalog routes and the page that shows it like every other part of the portal", () => {
+    const catalog = discoverRoutes().filter(({ route }) =>
+      concretePath(route).startsWith("/api/instance-portal/model-catalog"),
+    );
+
+    expect(catalog.map(({ route }) => route).sort()).toEqual([
+      "/api/instance-portal/model-catalog",
+      "/api/instance-portal/model-catalog/[id]",
+      "/api/instance-portal/model-catalog/[id]/release",
+      "/api/instance-portal/model-catalog/[id]/retire",
+      "/api/instance-portal/model-catalog/check",
+      "/api/instance-portal/model-catalog/defaults",
+      "/api/instance-portal/model-catalog/order",
+    ]);
+    for (const { route, file } of catalog) {
+      expect(isInternalPortalPath(concretePath(route))).toBe(true);
+      const source = readFileSync(file, "utf8");
+      expect(source, route).toMatch(/\bcreateCatalogRouteHandlers\(/);
+      expect(source, route).toMatch(/\baccess:\s*lookupAdmin\b/);
+    }
+    // The catalog has no page of its own: it is a section of the LLM page, which asks for the admin itself.
+    const page = discoverRoutes().find(
+      ({ route }) => concretePath(route) === "/instance-portal/llm",
+    );
+    expect(page).toBeDefined();
+    const source = readFileSync(page!.file, "utf8");
+    expect(source).toMatch(/\brequireAdmin\(\)/);
+    expect(source).toMatch(/<ModelCatalogSection\b/);
+  });
+
   it("are handed to the handlers by every data route", () => {
     const handlers = routes.filter(({ file }) => /route\.tsx?$/.test(file));
     expect(handlers.length).toBeGreaterThan(0);
@@ -74,8 +114,9 @@ describe("the guards of the admin portal", () => {
       .filter(({ file }) => {
         const source = readFileSync(file, "utf8");
         return !(
-          /\bcreate(Admin|Github|Approval)RouteHandlers\(/.test(source) &&
-          /\baccess:\s*lookupAdmin\b/.test(source)
+          /\bcreate(Admin|Github|Approval|Catalog)RouteHandlers\(/.test(
+            source,
+          ) && /\baccess:\s*lookupAdmin\b/.test(source)
         );
       })
       .map(({ route }) => route);

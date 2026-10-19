@@ -83,6 +83,7 @@ describe("the examples", () => {
       "WorkerErrorResponse",
       "WorkerHeartbeatRequest",
       "WorkerHeartbeatResponse",
+      "WorkerJobDetailsRequest",
       "WorkerJobDetailsResponse",
       "WorkerResultRequest",
       "WorkerResultResponse",

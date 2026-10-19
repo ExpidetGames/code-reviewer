@@ -15,6 +15,7 @@ import {
   describeCheckoutReason,
   describeErrorCode,
   ERROR_COPY,
+  HISTORIC_ERROR_CODES,
   UNKNOWN_ERROR_COPY,
   UNKNOWN_REASON_COPY,
 } from "./error-copy.ts";
@@ -25,6 +26,7 @@ const ALL_CODES = [
     ...CLAIM_FAILURE_CODES,
     ...CLAIM_RELEASE_REASONS,
     ...RUNNER_ERROR_CODES,
+    ...HISTORIC_ERROR_CODES,
   ]),
 ];
 
@@ -49,15 +51,43 @@ describe("the sentences for error codes", () => {
     }
   });
 
-  // #283: the control exists now, so the copy points at it, still without naming a model.
-  it("tells a person about an unavailable quality level and where to choose another one", () => {
-    const { text } = describeErrorCode("managed_tier_unavailable");
+  // #434-X1: the code no part of the system produces any more, kept for the runs that ended with it.
+  it("keeps the sentence of the removed tier code for old runs, points at the review options that replaced the levels, and the claim cannot end a job with it", () => {
+    const code = "managed_tier_unavailable";
+    const { text, known } = describeErrorCode(code);
 
+    expect(HISTORIC_ERROR_CODES).toEqual([code]);
+    expect(CLAIM_FAILURE_CODES).not.toContain(code);
+    expect(known).toBe(true);
     expect(text).toMatch(/quality level/);
+    expect(text).toMatch(/replaced/);
+    expect(text).toMatch(/Owner or Admin/);
+    expect(text).toMatch(/review settings/);
+    expect(text).not.toMatch(/\bmodel\b(?! was used)/);
+  });
+
+  // #432-T19
+  it("tells a person about an unavailable model choice without naming a model, and where to change it", () => {
+    expect(CLAIM_FAILURE_CODES).toContain("managed_model_unavailable");
+    const { text, known } = describeErrorCode("managed_model_unavailable");
+
+    expect(known).toBe(true);
     expect(text).toMatch(/Owner or Admin/);
     expect(text).toMatch(/review settings/);
     expect(text).toMatch(/whoever runs this instance/);
+    expect(text).toMatch(/no AI model was used/);
     expect(text).not.toMatch(/\bmodel\b(?! was used)/);
+  });
+
+  // #432-T19
+  it("tells a person that the runner cannot use the provider chosen for the project, naming no provider", () => {
+    expect(CLAIM_FAILURE_CODES).toContain("llm_provider_unsupported");
+    const { text, known } = describeErrorCode("llm_provider_unsupported");
+
+    expect(known).toBe(true);
+    expect(text).toMatch(/no AI model was used/);
+    expect(text).toMatch(/model settings/);
+    expect(text).not.toMatch(/openrouter/i);
   });
 
   // #200: the codes a Dynamic project's run can end with are read by people on the Runs pages.
@@ -75,6 +105,14 @@ describe("the sentences for error codes", () => {
     expect(describeErrorCode("dynamic_config_invalid").text).toMatch(
       /project page/,
     );
+  });
+
+  // #432-T22
+  it("tells the user of a Dynamic Review that the Dynamic model counts as a model setting, without naming a model", () => {
+    const { text } = describeErrorCode("job_llm_options_invalid");
+
+    expect(text).toMatch(/Dynamic model/);
+    expect(text).toMatch(/project page/);
   });
 
   // #277-T12
@@ -103,6 +141,17 @@ describe("the sentences for error codes", () => {
     expect(text).toMatch(/context window/);
     expect(text).toMatch(/^[A-Z].*\.$/);
     expect(text).not.toContain("llm_context_length_exceeded");
+  });
+
+  // #477-T04
+  it("tells a person that no provider can serve this model with the request's parameters, and what to do", () => {
+    const { text, known } = describeErrorCode("llm_parameters_unsupported");
+
+    expect(known).toBe(true);
+    expect(text).toMatch(/no provider/i);
+    expect(text).toMatch(/another model/);
+    expect(text).toMatch(/^[A-Z].*\.$/);
+    expect(text).not.toContain("llm_parameters_unsupported");
   });
 
   // #260: the code is also reported when the app could not be asked, not only when the job was lost.

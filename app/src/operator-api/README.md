@@ -58,56 +58,49 @@ by Next.js.
 
 ## Endpoints
 
-| Call                                                   | Does                                                                                                                                                                           |
-| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `GET /api/operator/v1/workspaces?after=<id>&limit=`    | A page (default 50, at most 200) of `{ id, slug, createdAt }` ordered by id, and `nextAfter`. No names of people, no emails, no repositories.                                  |
-| `GET /api/operator/v1/workspaces/{id}/entitlements`    | The stored row (or `null`) and the effective entitlements; `effective.source` says whether they come from the workspace or from the default.                                   |
-| `PUT /api/operator/v1/workspaces/{id}/entitlements`    | Replaces the row. Idempotent. Answers like `GET`.                                                                                                                              |
-| `DELETE /api/operator/v1/workspaces/{id}/entitlements` | Removes the row, so the default applies. Harmless when there is none. Answers like `GET`.                                                                                      |
-| `GET\|PUT /api/operator/v1/entitlements/default`       | The default for workspaces without a row. No `DELETE`.                                                                                                                         |
-| `GET /api/operator/v1/usage?after=&limit=`             | A page (default 50, at most 200) of the **settled** usage records of every workspace, ordered by `(settledAt, id)`, and `nextCursor`.                                          |
-| `GET /api/operator/v1/workspaces/{id}/usage`           | The same for one workspace, plus `from` (included) and `to` (excluded) on `settledAt`.                                                                                         |
-| `GET\|PUT\|DELETE /api/operator/v1/plan-management`    | The address of the operator-configured page that "Manage plan" hands workspace Owners and Admins over to (#284): `{ "url": "https://…" }`; `DELETE` removes it.                |
-| `GET\|PUT /api/operator/v1/model-tiers`                | Which model backs each managed tier (`low`, `medium`, `high`), per review kind (#280): `{ "tiers": { "low": { "diff": "…", "dynamic": "…" }, … } }`. `PUT` replaces all of it. |
-| `POST /api/operator/v1/handoff/redeem`                 | `{ "token": "…" }`: who a handoff token was made for (workspace id and slug, role, opaque user id), once. One `422 invalid_token` for every other case.                        |
-| `GET /api/operator/v1/workspaces/{id}/usage/summary`   | `from` and `to` are required: per review kind and key mode, what the workspace ran in the period.                                                                              |
-| `GET /api/operator/v1/usage/unknown-cost`              | `from` and `to` are required: per workspace and key mode, how many runs of the period settled without a known cost (#385). A page of whole workspaces by id.                   |
+| Call                                                   | Does                                                                                                                                                            |
+| ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/operator/v1/workspaces?after=<id>&limit=`    | A page (default 50, at most 200) of `{ id, slug, createdAt }` ordered by id, and `nextAfter`. No names of people, no emails, no repositories.                   |
+| `GET /api/operator/v1/workspaces/{id}/entitlements`    | The stored row (or `null`) and the effective entitlements; `effective.source` says whether they come from the workspace or from the default.                    |
+| `PUT /api/operator/v1/workspaces/{id}/entitlements`    | Replaces the row. Idempotent. Answers like `GET`.                                                                                                               |
+| `DELETE /api/operator/v1/workspaces/{id}/entitlements` | Removes the row, so the default applies. Harmless when there is none. Answers like `GET`.                                                                       |
+| `GET\|PUT /api/operator/v1/entitlements/default`       | The default for workspaces without a row. No `DELETE`.                                                                                                          |
+| `GET /api/operator/v1/usage?after=&limit=`             | A page (default 50, at most 200) of the **settled** usage records of every workspace, ordered by `(settledAt, id)`, and `nextCursor`.                           |
+| `GET /api/operator/v1/workspaces/{id}/usage`           | The same for one workspace, plus `from` (included) and `to` (excluded) on `settledAt`.                                                                          |
+| `GET\|PUT\|DELETE /api/operator/v1/plan-management`    | The address of the operator-configured page that "Manage plan" hands workspace Owners and Admins over to (#284): `{ "url": "https://…" }`; `DELETE` removes it. |
+| `POST /api/operator/v1/handoff/redeem`                 | `{ "token": "…" }`: who a handoff token was made for (workspace id and slug, role, opaque user id), once. One `422 invalid_token` for every other case.         |
+| `GET /api/operator/v1/workspaces/{id}/usage/summary`   | `from` and `to` are required: per review kind and key mode, what the workspace ran in the period.                                                               |
+| `GET /api/operator/v1/usage/unknown-cost`              | `from` and `to` are required: per workspace and key mode, how many runs of the period settled without a known cost (#385). A page of whole workspaces by id.    |
 
 A change takes effect on the next claim; a running job is not touched.
 
-**There is no call for the operator's own LLM key** (#276): it is saved by the instance admin in the admin portal and by
+**There is no call for the operator's own LLM keys** (#276, #427: one for each provider): they are saved by the instance admin in the admin portal and by
 nobody else. Whoever holds the API token sets which workspaces are `managed`, never the key itself, and no answer or log
-of the API holds or mentions it (`operator-api.integration.test.ts`).
+of the API holds or mentions it (`operator-api.integration.test.ts`; `no-operator-keys.test.ts` fails when a file of the API imports anything that reaches the secret store).
 
 **Upgrade every app instance before setting any workspace to `managed`** (#276). An instance of the previous release
 ignores the key mode: it would run the workspace's jobs on the workspace's own key and model, outside the cost limit.
 
-### Model tiers (#280)
+### The removed model tiers route (#434)
 
-`GET|PUT /model-tiers` is the only way to set or read which model backs a tier (`src/model-tiers/README.md`). The answer
-of both is `{ "version": 1, "tiers": { low|medium|high: { "diff": id|null, "dynamic": id|null } } }`, every tier and kind
-present, `null` where nothing is configured. A `PUT` body is `{ "tiers": { … } }` with any of the tiers and kinds (a tier
-or kind that is left out or `null` is not configured); it replaces the whole configuration, and unknown keys are refused
-(`400 request_invalid`, `field` names the place). A model id the review settings would refuse is `422 model_id_invalid`
-(`field` such as `high.diff`, never the value). A **Dynamic** model is checked against the provider's public metadata and
-refused with `422` `DYNAMIC_MODEL_TOOLS_UNSUPPORTED`, `DYNAMIC_MODEL_UNKNOWN` or `DYNAMIC_MODEL_UNVERIFIED` (unlike a
-user's choice in the review settings, a model that cannot be verified is refused here). A **Diff** model is refused
-`422 MODEL_UNKNOWN` when the provider does not list it, and accepted when it needs no tool support or the provider
-cannot be reached. The models of one `PUT` are read at the same time. Nothing is stored on a refusal. The
-log line is `[operator-api] put model-tiers tiers=<tiers with a model|-> result=<ok|code>`: never an id.
-
-**The ids are operator data**: they are served to the holder of this token and used for the job the runner gets; no
-workspace, page, answer of the admin portal (it says only whether a tier is configured), usage record or log of a
-workspace has them. A change takes effect at the next claim. An older app instance answers the path with its generic
-`404 not_found` and ignores the setting: **upgrade every app instance before saving tiers.**
+`GET|PUT /api/operator/v1/model-tiers` (#280) is **gone**: the model behind a workspace's reviews is a catalog entry now
+(`src/model-catalog/README.md`), chosen in the instance admin portal, and the claim has not read the tiers since #432. A call
+of the old path gets the answer of any path the API does not have: `404 not_found` with a valid token, and `401 unauthorized`
+without one (the credential is checked before the path, so the path is not revealed); while the API is off (no usable
+`OPERATOR_API_TOKEN`) it is the plain `404` of the platform. The tier configuration is neither read nor stored. This is a **documented breaking change** of version 1 (ADR 0005, decision C1;
+`contracts/README.md`, "The removal of `/model-tiers`", has the decision and the compatibility table). There is no facade
+and no `410`: the route has no effect since #432, so a write to it would only look as if it did something. The setting
+`managed_model_tiers` was turned into catalog entries by the migration `20261018170000_migrate_model_tiers_to_catalog.ts`
+and stays in the database, unread, until a later migration removes it. There is no operator API for the catalog (C8).
 
 ### The PUT body of the entitlements
 
 The whole entitlements (`planLabel`, `keyMode`, `limits` with every limit, `periodStart`, `suspended`,
-`suspensionCode`), validated by `validateEntitlements` of #271 (unknown keys are refused). A refusal is `422` with
-the stable code of the validation (`plan_label_invalid`, `key_mode_invalid`, `limits_invalid`, `limit_invalid`,
-`cost_limit_requires_managed_key`, `period_start_invalid`, `period_start_in_future`, `suspended_invalid`,
-`suspension_code_invalid`, `entitlements_invalid`), or `409 period_start_backwards`.
+`suspensionCode`, and optionally `modelAccess`), validated by `validateEntitlements` of #271 (unknown keys are refused).
+A refusal is `422` with the stable code of the validation (`plan_label_invalid`, `key_mode_invalid`, `limits_invalid`,
+`limit_invalid`, `cost_limit_requires_managed_key`, `period_start_invalid`, `period_start_in_future`,
+`suspended_invalid`, `suspension_code_invalid`, `catalog_entry_invalid`, `entitlements_invalid`), or
+`409 period_start_backwards`.
 
 `managedCostLimitMicroUsd` counts the cost of runs on the operator's key, so a non-null value (even `0`) with
 `keyMode: "own"` is refused as `cost_limit_requires_managed_key` (field `managedCostLimitMicroUsd`). Send `null` for it,
@@ -152,6 +145,44 @@ Content-Type: application/json
 }
 ```
 
+### `modelAccess`: which catalog entries a workspace may use (#428)
+
+`"modelAccess": { "catalogEntries": ["mce_...", ...] }` grants catalog entries by their ids (the ids the admin portal
+shows; the API has no catalog route, decision C8 of ADR 0005, so a writer without the portal can only use `null`).
+`catalogEntries: null` is every released entry, `[]` none, a list those entries (at most 100, each `mce_` and opaque
+text; an id that no entry has is accepted and matches nothing). Anything else is `422 catalog_entry_invalid` (`field`:
+`modelAccess` for a value that is not the object or has another key, `modelAccess.catalogEntries` for the list) and
+nothing is stored. It has a meaning for `keyMode: "managed"` only: next to `"own"` it is accepted and kept, not read
+(a workspace on its own key chooses provider and model freely); a later billing design may refuse it for an `own` plan. Every answer states it (`{ "catalogEntries": null }` for an entry that never set it).
+
+**A write without `modelAccess` keeps the stored value**, as one without `periodStart` keeps the stored start, so a writer
+that does not know the field (a script, an older client) cannot clear what an operator granted in
+the admin portal or a plan wrote. To clear it, send `{ "catalogEntries": null }`; a row that has none starts with every
+released entry. The keep happens in the single statement of the write, so two writers do not race on it. The same holds
+for `PUT /entitlements/default`. The log names the field (`modelAccess`) when it changed, never the ids.
+
+**Rollout of `modelAccess`.** Existing writers need no change: the field is optional, so a body that never mentions it
+is accepted before and after the upgrade and changes nothing. A writer that sends it can only do so **after every app
+instance is upgraded**: an instance of an earlier release refuses the key as it refuses any unknown key, with
+`422 entitlements_invalid` (`field: "modelAccess"`), so that a typo cannot pass; treat a `422` with that field during the
+upgrade window as retry-later, not as a refused plan. (An earlier instance that reads a row or default written by a newer
+one ignores the field.) There is no cutover as with `ownKeyCostLimitMicroUsd`, because nothing requires the field.
+
+**Readers during the rollout (response direction).** In `EntitlementsFields` of the contract `modelAccess` is **optional**:
+an instance of an earlier release never sends it, so a client that validates answers strictly must
+accept an answer without it and read a missing field as `{ "catalogEntries": null }`. An upgraded instance always sends
+it. The write direction is the opposite: the field is optional in a body, but when present it is checked strictly, and an
+earlier instance refuses it (above).
+
+**Mixed fleet and rollback: upgrade every instance before anyone sets a default `modelAccess`.** An earlier instance that
+writes `default_entitlements` (a `PUT /entitlements/default` it serves, or an admin action of its own) replaces the whole
+JSON and drops `modelAccess`, which widens that default to every released entry. A workspace row is not affected (the
+earlier upsert names its columns and leaves `model_access` alone). So: upgrade all instances, then set a default
+`modelAccess`; after a rollback to an earlier release, set it again. A write that leaves `modelAccess` out over a stored
+default that cannot be read is refused with `422 catalog_entry_invalid` (field `modelAccess`): state it to repair the
+default. A list holds each id once; a repeated id is refused with the same code. A workspace row overrides the instance
+default entirely, so the default is a fallback for workspaces without a row, not a ceiling.
+
 Limits are JSON numbers. A number above 2^53 − 1 loses precision when JSON is parsed, so it can never be stored
 as sent: it is refused as `limit_invalid`, not rounded.
 
@@ -179,7 +210,7 @@ A stored row or default that cannot be read comes back as `{ "invalid": true }`,
 ## Reading usage (#278)
 
 The records are those of `usage_records` (`src/usage/README.md`). An item is `id`, `workspaceId`, `jobId`,
-`reviewKind`, `keyMode`, `modelTier` (the name of a quality tier or `null`; a stored value that is not a tier name, `^[a-z][a-z0-9_-]{0,31}$`, is served as `null`, never a model id), `costMicroUsd`
+`reviewKind`, `keyMode`, `modelTier` (**deprecated**: the name of the quality tier of a run from before the catalog, #434, or `null`, and `null` for every newer run, whose model is named by `catalogEntryId` and `catalogEntryName`; a stored value that is not a tier name, `^[a-z][a-z0-9_-]{0,31}$`, is served as `null`, never a model id; the field stays required and nullable so that a strict reader keeps working), `costMicroUsd`
 (integer or `null` when it could not be measured), `promptTokens`, `completionTokens`, `settledAt` and `reason` (a short
 code or `null`: `no_result` for a job that ended without any result from its runner, whose cost and tokens are then unknown, or `superseded` for a run a newer push replaced (#397: not a run of the free quota, but the cost and tokens it reported are usage like any other, and unknown ones stay unknown); a run that reported its usage, failed or not, has none, and an unpriced one shows a `null` cost with its tokens). Nothing else leaves the app:
 no pull request, repository, branch, title or person, and no key. The view is built field by field
@@ -258,7 +289,6 @@ for is a generic `500 internal_error`; the log gets the name of the error.
 | `token.ts`                 | The token rules, the constant-time comparison                                   |
 | `startup.ts`               | The one start line                                                              |
 | `contract.ts`              | Error codes, limits, routes and methods, the safety lag, the cursor size        |
-| `api.ts` (model tiers)     | `modelTiers`: the route over `src/model-tiers/service.ts`                       |
 | `usage.ts`                 | The four usage routes (query, safety lag, answer)                               |
 | `api.ts` (plan handoff)    | `redeemHandoff` and `planManagement` (`src/plan-handoff/` has the rest)         |
 | `usage-cursor.ts`          | The opaque cursor and the check of the safety lag                               |
