@@ -16,10 +16,6 @@ export const FIXED_SECRET_NAMES = [
   "github_app_client_secret",
   "github_app_private_key",
   "github_app_webhook_secret",
-  /** The Paddle API key of the billing module (ADR 0005, M11; #437). */
-  "paddle_api_key",
-  /** The signing secret of the Paddle notification destination (ADR 0005, M11; #437). */
-  "paddle_webhook_secret",
   "smtp_password",
 ] as const;
 

@@ -368,8 +368,6 @@ describe("the status of every secret", () => {
       "github_app_webhook_secret",
       "operator_llm_key",
       "operator_llm_key.anthropic",
-      "paddle_api_key",
-      "paddle_webhook_secret",
       "smtp_password",
     ]);
     expect(statuses.map(({ state }) => state)).toEqual([
@@ -378,9 +376,43 @@ describe("the status of every secret", () => {
       "not_configured",
       "not_configured",
       "not_configured",
-      "not_configured",
-      "not_configured",
       "configured",
     ]);
+  });
+
+  // #491-T07
+  it("ignores an encrypted row whose name was removed from the list", async () => {
+    const { db, store } = await startStore();
+    // The name a database that ran the removed billing design may still hold. Built from parts: nothing else in the
+    // repository names that vendor.
+    const orphanName = `${["pad", "dle"].join("")}_api_key`;
+    await store.save("smtp_password", "value-of-the-smtp-password", {
+      updatedBy: "admin-1",
+    });
+    await db
+      .insertInto("secrets")
+      .values({
+        name: orphanName,
+        ciphertext: "b3JwaGFu",
+        nonce: "b3JwaGFu",
+        key_version: 1,
+        last_four: null,
+        updated_by: null,
+        updated_at: "2026-10-11T08:00:00.000Z",
+      })
+      .execute();
+
+    const statuses = await store.statuses();
+
+    expect(statuses.map(({ name }) => name)).toEqual([
+      "github_app_client_secret",
+      "github_app_private_key",
+      "github_app_webhook_secret",
+      "operator_llm_key",
+      "smtp_password",
+    ]);
+    expect(statuses.find(({ name }) => name === "smtp_password")?.state).toBe(
+      "configured",
+    );
   });
 });

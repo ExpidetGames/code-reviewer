@@ -30,14 +30,6 @@ export type EntitlementLimits = Record<LimitName, number | null>;
  */
 export type ModelAccess = { catalogEntries: string[] | null };
 
-/**
- * Who wrote the instance default: `manual` is the operator (the operator API, the admin portal) and `billing` is the
- * billing module, which writes the Free plan there while billing is on (#438, ADR 0005, 2.9). Read leniently: absent,
- * and anything but `billing`, means `manual`, so the type of a stored entry only ever carries `billing`.
- */
-export const ENTITLEMENTS_MARKERS = ["manual", "billing"] as const;
-export type EntitlementsMarker = (typeof ENTITLEMENTS_MARKERS)[number];
-
 /** The fields of a workspace row and of the instance default (`default_entitlements`) alike. */
 export type EntitlementsData = {
   /** A label for display and audit; the code never branches on it. */
@@ -54,11 +46,6 @@ export type EntitlementsData = {
    * (`readEntitlements`); the type lets a writer that does not know the field leave it out.
    */
   modelAccess?: ModelAccess;
-  /**
-   * #438: set to `billing` on a stored instance default that the billing module wrote. A write through `validateEntitlements`
-   * refuses the field (only `setBillingDefaultEntitlements` stores it), and a read keeps it only for `billing`.
-   */
-  source?: EntitlementsMarker;
 };
 
 /** Where an answer came from: the row of the workspace or the default of the instance. */
@@ -80,10 +67,7 @@ export const ENTITLEMENTS_INVALID_CODE = "entitlements_invalid";
 
 export type ResolvedEntitlements =
   | { kind: "unlimited" }
-  | ({ kind: "limited"; source: EntitlementsSource } & Omit<
-      EntitlementsData,
-      "source"
-    >)
+  | ({ kind: "limited"; source: EntitlementsSource } & EntitlementsData)
   | {
       kind: "invalid";
       code: typeof ENTITLEMENTS_INVALID_CODE;
