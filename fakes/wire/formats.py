@@ -17,7 +17,20 @@ parse. They are NOT captured from a real provider: that is the live test of #546
 | chat | `usage` | the last data chunk, with `choices: []` (needs `stream_options.include_usage`) |
 | responses | `usage` | `response.completed` |
 | messages | `usage` | input and cache in `message_start`, cumulative output in `message_delta` |
-| google | `usageMetadata` | `usageMetadata` on the last chunk |
+| google | `usageMetadata` | on the last chunk, or (variant) cumulative on every chunk |
+
+Assumptions that no live capture has confirmed yet (each is marked where it is built, and is an item
+of the live checklist in docs/spike/544-passthrough.md):
+
+- a Messages `message_delta` carries only `output_tokens` (a real one may repeat the input and cache
+  fields);
+- a Google stream states `usageMetadata` once, on the last chunk (the variant states it on every
+  chunk, cumulatively, which is what the Gemini API documents for streaming);
+- the error envelopes and the in-stream error events of every family.
+
+Variants of the framing, so that a parser is not written against the tidy case: the events can be
+re-chunked at arbitrary byte boundaries (`upstream.py`), a stream can use CRLF line ends (Google's
+real stream does), and a stream can fail in the middle with an error event after HTTP 200.
 """
 
 import json
@@ -103,15 +116,52 @@ def is_stream(family: Family, path: str, body: Mapping[str, Any] | None) -> bool
     return bool(body and body.get("stream"))
 
 
-def error_body(family: Family, status: int) -> dict[str, Any]:
-    """The error envelope of a provider for a status (the text is made up)."""
-    message = f"fake upstream {status}"
+# The Messages API names its errors by status (documented): 429 rate limit, 500 api error and 529
+# overloaded. Any other 5xx is an assumption (`api_error`).
+_MESSAGES_ERROR: Final[dict[int, str]] = {
+    400: "invalid_request_error",
+    401: "authentication_error",
+    403: "permission_error",
+    404: "not_found_error",
+    413: "request_too_large",
+    429: "rate_limit_error",
+    500: "api_error",
+    529: "overloaded_error",
+}
+
+
+def error_body(family: Family, status: int, detail: str = "") -> dict[str, Any]:
+    """The error envelope of a provider for a status (the text is made up).
+
+    `detail` is appended to the message: a provider that quotes the key it was given does it there.
+    """
+    message = f"fake upstream {status}" + (f" {detail}" if detail else "")
     if family == "messages":
-        kind = "rate_limit_error" if status == 429 else "overloaded_error"
+        kind = _MESSAGES_ERROR.get(status, "api_error")
         return {"type": "error", "error": {"type": kind, "message": message}}
     if family == "google":
         return {"error": {"code": status, "message": message, "status": "RESOURCE_EXHAUSTED"}}
     return {"error": {"message": message, "type": "fake", "code": str(status)}}
+
+
+def error_event(family: Family, message: str = "overloaded") -> bytes:
+    """An error that arrives inside a stream whose HTTP status was already 200 (an assumption).
+
+    Anthropic documents `event: error` with an `overloaded_error`; OpenAI's Responses stream has an
+    `error` event; Chat-compatible gateways (OpenRouter) and Google send a data chunk that holds an
+    `error` object. None of these shapes is captured live yet.
+    """
+    if family == "messages":
+        data: Any = {"type": "error", "error": {"type": "overloaded_error", "message": message}}
+        return _sse([("error", data)])[0]
+    if family == "responses":
+        data = {"type": "error", "code": "server_error", "message": message, "sequence_number": 99}
+        return _sse([("error", data)])[0]
+    if family == "google":
+        data = {"error": {"code": 503, "message": message, "status": "UNAVAILABLE"}}
+        return _sse([(None, data)])[0]
+    data = {"error": {"message": message, "type": "fake", "code": "server_error"}}
+    return _sse([(None, data)])[0]
 
 
 def parse_sse(chunks: list[bytes]) -> list[tuple[str | None, Any]]:
@@ -133,6 +183,7 @@ def parse_sse(chunks: list[bytes]) -> list[tuple[str | None, Any]]:
 
 
 def _sse(events: list[tuple[str | None, Any]]) -> list[bytes]:
+    """Each event as one `event:`/`data:` block ended by a blank line."""
     chunks: list[bytes] = []
     for name, data in events:
         payload = data if isinstance(data, str) else json.dumps(data)
@@ -181,7 +232,7 @@ def _chat_answer(turn: Turn, call: int, model: str) -> dict[str, Any]:
     }
 
 
-def _chat_stream(turn: Turn, call: int, model: str) -> list[bytes]:
+def _chat_stream(turn: Turn, call: int, model: str, include_usage: bool) -> list[bytes]:
     def chunk(delta: dict[str, Any], finish: str | None = None) -> dict[str, Any]:
         return {
             "id": f"chatcmpl-{call}",
@@ -210,10 +261,13 @@ def _chat_stream(turn: Turn, call: int, model: str) -> list[bytes]:
         events.append((None, chunk({"content": turn.text[:middle]})))
         events.append((None, chunk({"content": turn.text[middle:]})))
         events.append((None, chunk({}, "stop")))
-    closing = chunk({})
-    closing["choices"] = []
-    closing["usage"] = _chat_usage(call)
-    events.append((None, closing))
+    if include_usage:
+        # Only a request with `stream_options.include_usage` gets this chunk; without it a Chat
+        # provider states no usage in the stream at all.
+        closing = chunk({})
+        closing["choices"] = []
+        closing["usage"] = _chat_usage(call)
+        events.append((None, closing))
     events.append((None, "[DONE]"))
     return _sse(events)
 
@@ -427,6 +481,8 @@ def _messages_stream(turn: Turn, call: int, model: str) -> list[bytes]:
                 )
             )
         events.append(("content_block_stop", {"type": "content_block_stop", "index": index}))
+    # ASSUMPTION, unconfirmed live: `message_delta` carries only the cumulative `output_tokens`. A
+    # real one may repeat `input_tokens` and the cache fields; a parser must not rely on either.
     events.append(
         (
             "message_delta",
@@ -483,10 +539,24 @@ def _google_answer(turn: Turn, call: int, model: str) -> dict[str, Any]:
     }
 
 
-def _google_stream(turn: Turn, call: int, model: str) -> list[bytes]:
+def _google_stream(turn: Turn, call: int, model: str, cumulative: bool) -> list[bytes]:
+    """Two chunks: the content, then the finish. Where the usage sits is an ASSUMPTION either way.
+
+    By default `usageMetadata` is on the last chunk only. With `cumulative` every chunk carries it
+    and the numbers grow (the first chunk has a partial candidate count), which is how the Gemini
+    API documents streaming; a parser has to take the last one and must not add them up. Neither
+    form is captured from a real stream yet.
+    """
     first = _google_answer(turn, call, model)
     del first["candidates"][0]["finishReason"]
-    del first["usageMetadata"]
+    if cumulative:
+        first["usageMetadata"] = {
+            **first["usageMetadata"],
+            "candidatesTokenCount": 1,
+            "totalTokenCount": usage_for(call).input + 1 + usage_for(call).reasoning,
+        }
+    else:
+        del first["usageMetadata"]
     last = _google_answer(Turn(text=""), call, model)
     return _sse([(None, first), (None, last)])
 
@@ -502,12 +572,29 @@ def answer(family: Family, turn: Turn, call: int, model: str) -> dict[str, Any]:
     return _google_answer(turn, call, model)
 
 
-def stream(family: Family, turn: Turn, call: int, model: str) -> list[bytes]:
-    """The events of a streaming call, each a complete `event:`/`data:` block with a blank line."""
+def stream(
+    family: Family,
+    turn: Turn,
+    call: int,
+    model: str,
+    *,
+    include_usage: bool = True,
+    cumulative_usage: bool = False,
+    crlf: bool = False,
+) -> list[bytes]:
+    """The events of a streaming call, each a complete `event:`/`data:` block with a blank line.
+
+    `include_usage` only matters for Chat (the closing usage chunk exists only when the request
+    asked for it), `cumulative_usage` only for Google, `crlf` for every family.
+    """
     if family == "chat":
-        return _chat_stream(turn, call, model)
+        return _with_line_ends(_chat_stream(turn, call, model, include_usage), crlf)
     if family == "responses":
-        return _responses_stream(turn, call, model)
+        return _with_line_ends(_responses_stream(turn, call, model), crlf)
     if family == "messages":
-        return _messages_stream(turn, call, model)
-    return _google_stream(turn, call, model)
+        return _with_line_ends(_messages_stream(turn, call, model), crlf)
+    return _with_line_ends(_google_stream(turn, call, model, cumulative_usage), crlf)
+
+
+def _with_line_ends(chunks: list[bytes], crlf: bool) -> list[bytes]:
+    return [chunk.replace(b"\n", b"\r\n") for chunk in chunks] if crlf else chunks

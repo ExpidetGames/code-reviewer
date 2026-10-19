@@ -14,6 +14,13 @@ What it keeps for the tests: every request as the engine sent it (the key shown 
 `<other>`, never as a value), a hash of the body to compare with what the upstream received, and the
 answer as it was streamed back (the tee a usage parser will read).
 
+The relay can also pin the model of the job (`pinned_model`). A real provider serves every model its
+key can reach, so a pure passthrough would let the engine (or a prompt injection that reaches its
+config) pick any of them at the maintainer's price: the production proxy therefore has to read the
+model out of the request (`body.model`; for Google the `models/<m>:` part of the path) and refuse
+any other. The fake upstream already refuses a model it does not serve; the pin is here so that the
+test can show the refusal comes from the relay, before the upstream is asked.
+
 One choice is the lesson of the spike: the engine says `accept-encoding: gzip, deflate, br, zstd`.
 A provider may compress the answer for that, and a tee that has to read the usage then reads
 compressed bytes. The relay therefore asks the upstream for `identity` (`force_identity`, on by
@@ -23,11 +30,13 @@ default); a proxy that forwards the header as it is must decode before it parses
 import hashlib
 import http.client
 import json
+import re
 import threading
+import time
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import TracebackType
-from typing import Any, Self
+from typing import Any, Self, cast
 from urllib.parse import urlsplit
 
 from fakes.wire.formats import AUTH_HEADER, Family, auth_value
@@ -62,6 +71,8 @@ class Seen:
     status: int = 0
     response_headers: dict[str, str] = field(default_factory=lambda: {})
     response_bytes: bytes = b""
+    # `time.monotonic()` when the request arrived: the gap between two retries is visible.
+    at: float = 0.0
 
 
 class KeySwapRelay:
@@ -73,6 +84,7 @@ class KeySwapRelay:
         dummy_key: str,
         real_key: str,
         force_identity: bool = True,
+        pinned_model: str | None = None,
     ) -> None:
         self.family: Family = family
         self.seen: list[Seen] = []
@@ -80,6 +92,7 @@ class KeySwapRelay:
         self._dummy_key = dummy_key
         self._real_key = real_key
         self._force_identity = force_identity
+        self._pinned_model = pinned_model
         relay = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -132,11 +145,24 @@ class KeySwapRelay:
         shown = dict(headers)
         if key_header in shown:
             shown[key_header] = "<dummy>" if is_dummy else "<other>"
-        seen = Seen(handler.command, handler.path, shown, body, hashlib.sha256(raw).hexdigest())
+        seen = Seen(
+            handler.command,
+            handler.path,
+            shown,
+            body,
+            hashlib.sha256(raw).hexdigest(),
+            at=time.monotonic(),
+        )
         self.seen.append(seen)
         if not is_dummy:
             seen.status = 401
-            self._refuse(handler)
+            self._refuse(handler, 401, "not the capability of this job")
+            return
+        if self._pinned_model is not None and self._requested_model(handler.path, body) != (
+            self._pinned_model
+        ):
+            seen.status = 403
+            self._refuse(handler, 403, "this job may not use that model")
             return
         forwarded = {k: v for k, v in headers.items() if k not in _NOT_FORWARDED}
         forwarded[key_header] = auth_value(self.family, self._real_key)
@@ -157,10 +183,20 @@ class KeySwapRelay:
         finally:
             connection.close()
 
+    def _requested_model(self, target: str, body: Any) -> str | None:
+        """The model a request asks for: in the path for Google, in the body for the others."""
+        if self.family == "google":
+            found = re.match(r"^/v1beta/models/([^:/?]+):", target)
+            return found.group(1) if found else None
+        if isinstance(body, dict):
+            model = cast("dict[str, Any]", body).get("model")
+            return model if isinstance(model, str) else None
+        return None
+
     @staticmethod
-    def _refuse(handler: BaseHTTPRequestHandler) -> None:
-        payload = b'{"error":{"message":"not the capability of this job"}}'
-        handler.send_response(401)
+    def _refuse(handler: BaseHTTPRequestHandler, status: int, message: str) -> None:
+        payload = json.dumps({"error": {"message": message}}).encode()
+        handler.send_response(status)
         handler.send_header("Content-Type", "application/json")
         handler.send_header("Content-Length", str(len(payload)))
         handler.end_headers()
@@ -170,7 +206,12 @@ class KeySwapRelay:
     def _relay_answer(
         handler: BaseHTTPRequestHandler, response: http.client.HTTPResponse, seen: Seen
     ) -> None:
-        chunked = response.getheader("Transfer-Encoding") == "chunked"
+        # An answer without a `Content-Length` (it ends when the upstream closes) is handed on in
+        # chunks: a made up length of 0 would drop its body.
+        chunked = (
+            response.getheader("Transfer-Encoding") == "chunked"
+            or response.getheader("Content-Length") is None
+        )
         handler.send_response(response.status)
         for name, value in response.getheaders():
             if name.lower() not in _NOT_RETURNED:

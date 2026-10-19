@@ -13,9 +13,17 @@ about what a passthrough must get right:
 - exactly one path per family, and for Google the model and the choice of stream in that path
   (`/v1beta/models/<model>:streamGenerateContent`); any other path or method is a 404, and so is a
   model other than the one it serves;
-- faults of a test's choice: a status for the next requests (`fail_next`), a stream that is cut
-  after some events (`cut_streams`), an answer compressed with gzip for a client that accepts it
-  (`compress`).
+- faults of a test's choice: a status for the next requests (`fail_next`, with a `retry-after` of
+  the test's choice), a stream that is cut after some events (`cut_streams`), a stream that ends in
+  an error event after HTTP 200 (`error_in_stream`), an answer compressed with gzip for a client
+  that accepts it (`compress`), error messages that quote the key they were sent (`quote_key`), and
+  an answer without a `Content-Length` (`close_delimited`);
+- framing variants of a stream, so that a reader is not written against the tidy case: re-chunked
+  at arbitrary byte boundaries (`rechunk`), CRLF line ends (`crlf`) and, for Google, `usageMetadata`
+  on every chunk (`google_cumulative_usage`, an assumption about the real stream).
+
+An invalid key is a 401 for every family here. ASSUMPTION, unconfirmed: Gemini answers a bad key
+with HTTP 400 and `API_KEY_INVALID`; the live checklist asks for the real status.
 
 A failed or cut request does not use up a turn of the script, so a retry gets the same answer. Every
 request is kept, with its headers and body. Dummy keys only; nothing here leaves loopback.
@@ -40,6 +48,7 @@ from fakes.wire.formats import (
     answer,
     auth_value,
     error_body,
+    error_event,
     is_stream,
     request_path,
     request_tool_names,
@@ -70,11 +79,20 @@ def _object(value: object) -> dict[str, Any] | None:
 
 def _invalid(family: Family, status: int, message: str) -> dict[str, Any]:
     if family == "messages":
-        kind = "invalid_request_error" if status == 400 else "authentication_error"
-        if status == 404:
-            kind = "not_found_error"
-        return {"type": "error", "error": {"type": kind, "message": message}}
+        body = error_body(family, status)
+        body["error"]["message"] = message
+        return body
     return {"error": {"message": message, "code": status}}
+
+
+def _asks_for_usage(body: Mapping[str, Any]) -> bool:
+    """Whether a Chat request asks for the usage: `stream_options.include_usage`, or OpenRouter's
+    `usage: {include: true}` (what the OpenRouter SDK of the pinned engine sends instead)."""
+    options = _object(body.get("stream_options"))
+    openrouter = _object(body.get("usage"))
+    return bool(
+        (options and options.get("include_usage")) or (openrouter and openrouter.get("include"))
+    )
 
 
 class ScriptedUpstream:
@@ -87,19 +105,33 @@ class ScriptedUpstream:
         real_key: str,
         judge: Judge | None = None,
         on_answer: OnAnswer | None = None,
+        also_models: Sequence[str] = (),
     ) -> None:
         self.family: Family = family
         self.model = model
+        # The models it serves: the one of the job and, for a test that needs it, others.
+        self.models = (model, *also_models)
         self.records: list[Record] = []
         self.compress = False
+        # Error messages quote the key of the request (a real provider may: OpenAI does, masked).
+        self.quote_key = False
+        # Answer a JSON document without Content-Length and close the connection after it.
+        self.close_delimited = False
+        # Bytes per HTTP chunk of a stream (None: one chunk per event), CRLF line ends, and Google's
+        # `usageMetadata` on every chunk.
+        self.rechunk: int | None = None
+        self.crlf = False
+        self.google_cumulative_usage = False
         self._script = list(script)
         self._real_key = real_key
         self._judge = judge
         self._on_answer = on_answer
         self._served = 0
-        self._failures: list[int] = []
+        self._failures: list[tuple[int, str | None]] = []
         self._cut_after: int | None = None
         self._cuts_left = 0
+        self._error_after: int | None = None
+        self._errors_left = 0
         self._lock = threading.Lock()
         upstream = self
 
@@ -138,17 +170,42 @@ class ScriptedUpstream:
         self._server.server_close()
         self._thread.join(timeout=5.0)
 
+    def restart(self) -> None:
+        """Start the script from its first turn again (for a test that asks several times)."""
+        with self._lock:
+            self._served = 0
+
+    def reset_faults(self) -> None:
+        """Forget every fault that was set and has not happened yet (framing options stay)."""
+        with self._lock:
+            self._failures.clear()
+            self._cut_after, self._cuts_left = None, 0
+            self._error_after, self._errors_left = None, 0
+            self.compress = self.quote_key = self.close_delimited = False
+
     # -- faults ---------------------------------------------------------------------------------
 
-    def fail_next(self, *statuses: int) -> None:
-        """Answer the next requests with these statuses (429 and 503 carry `retry-after: 0`)."""
+    def fail_next(self, *statuses: int, retry_after: str | None = None) -> None:
+        """Answer the next requests with these statuses.
+
+        429 and 503 carry `retry-after: 0` unless `retry_after` says otherwise; every other status
+        carries none unless `retry_after` is given.
+        """
         with self._lock:
-            self._failures.extend(statuses)
+            self._failures.extend((status, retry_after) for status in statuses)
 
     def cut_streams(self, *, after_events: int, times: int = 1) -> None:
         """Drop the connection of the next `times` streams after `after_events` events."""
         with self._lock:
             self._cut_after, self._cuts_left = after_events, times
+
+    def error_in_stream(self, *, after_events: int, times: int = 1) -> None:
+        """End the next `times` streams after `after_events` events with an error event.
+
+        The status is 200 and the stream is closed properly: the failure is only in the event.
+        """
+        with self._lock:
+            self._error_after, self._errors_left = after_events, times
 
     # -- one request ----------------------------------------------------------------------------
 
@@ -169,10 +226,14 @@ class ScriptedUpstream:
             self.records.append(record)
             index = len(self.records)
             failure = self._failures.pop(0) if self._failures else None
-        refusal = self._refusal(record, failure)
+        refusal = self._refusal(record, failure[0] if failure else None)
         if refusal is not None:
-            extra = {"retry-after": "0"} if refusal[0] in (429, 503) else {}
-            self._send_json(handler, refusal[0], refusal[1], extra)
+            waiting = failure[1] if failure else None
+            if waiting is None and refusal[0] in (429, 503):
+                waiting = "0"
+            self._send_json(
+                handler, refusal[0], refusal[1], {"retry-after": waiting} if waiting else {}
+            )
             return
         document: Mapping[str, Any] = body
         tools = request_tool_names(self.family, document)
@@ -189,7 +250,17 @@ class ScriptedUpstream:
             return
         if self._on_answer is not None:
             self._on_answer(document, answer(self.family, turn, call, self.model))
-        if self._send_stream(handler, stream(self.family, turn, call, self.model)):
+        events = stream(
+            self.family,
+            turn,
+            call,
+            self.model,
+            # A Chat request without `stream_options.include_usage` gets no usage in the stream.
+            include_usage=_asks_for_usage(document),
+            cumulative_usage=self.google_cumulative_usage,
+            crlf=self.crlf,
+        )
+        if self._send_stream(handler, events):
             self._served_one(bool(tools))
 
     def _served_one(self, with_tools: bool) -> None:
@@ -199,19 +270,22 @@ class ScriptedUpstream:
 
     def _refusal(self, record: Record, failure: int | None) -> Refusal | None:
         family = self.family
-        if record.headers.get(AUTH_HEADER[family]) != auth_value(family, self._real_key):
-            return 401, _invalid(family, 401, "invalid key")
+        sent = record.headers.get(AUTH_HEADER[family], "")
+        quoted = f" (key: {sent.removeprefix('Bearer ')})" if self.quote_key else ""
+        if sent != auth_value(family, self._real_key):
+            return 401, _invalid(family, 401, "invalid key" + quoted)
         if family == "messages" and "anthropic-version" not in record.headers:
             return 400, _invalid(family, 400, "anthropic-version: header is required")
         path = urlsplit(record.target).path
         body = _object(record.body)
         streaming = is_stream(family, path, body)
-        if record.method != "POST" or path != request_path(family, self.model, streaming=streaming):
+        routes = {request_path(family, model, streaming=streaming) for model in self.models}
+        if record.method != "POST" or path not in routes:
             return 404, _invalid(family, 404, f"no route for {record.method} {path}")
-        if family != "google" and (body is None or body.get("model") != self.model):
+        if family != "google" and (body is None or body.get("model") not in self.models):
             return 404, _invalid(family, 404, "model not found")
         if failure:
-            return failure, error_body(family, failure)
+            return failure, error_body(family, failure, quoted.strip())
         if self._judge is not None and body is not None:
             return self._judge(record.headers, body)
         return None
@@ -231,7 +305,11 @@ class ScriptedUpstream:
         handler.send_header("Content-Type", "application/json")
         if encoded:
             handler.send_header("Content-Encoding", "gzip")
-        handler.send_header("Content-Length", str(len(payload)))
+        if self.close_delimited:
+            handler.send_header("Connection", "close")
+            handler.close_connection = True
+        else:
+            handler.send_header("Content-Length", str(len(payload)))
         for name, value in (extra or {}).items():
             handler.send_header(name, value)
         handler.end_headers()
@@ -241,7 +319,7 @@ class ScriptedUpstream:
         return self.compress and "gzip" in (handler.headers.get("Accept-Encoding") or "")
 
     def _send_stream(self, handler: BaseHTTPRequestHandler, events: list[bytes]) -> bool:
-        """Send the events as a chunked stream. False when the connection was cut on purpose."""
+        """Send the events as a chunked stream. False when it did not end well, on purpose."""
         encoder = zlib.compressobj(wbits=31) if self._accepts_gzip(handler) else None
         handler.send_response(200)
         handler.send_header("Content-Type", "text/event-stream")
@@ -251,22 +329,36 @@ class ScriptedUpstream:
         handler.end_headers()
         with self._lock:
             cut_after = self._cut_after if self._cuts_left > 0 else None
-        for position, event in enumerate(events):
-            if cut_after is not None and position >= cut_after:
-                with self._lock:
-                    self._cuts_left -= 1
-                handler.wfile.flush()
-                handler.close_connection = True
-                handler.connection.shutdown(2)
-                return False
-            data = event
+            error_after = self._error_after if self._errors_left > 0 else None
+        completed, cut = True, False
+        pieces = events
+        if error_after is not None and error_after < len(events):
+            with self._lock:
+                self._errors_left -= 1
+            pieces, completed = [*events[:error_after], error_event(self.family)], False
+        if cut_after is not None and cut_after < len(pieces):
+            with self._lock:
+                self._cuts_left -= 1
+            pieces, completed, cut = pieces[:cut_after], False, True
+        for data in self._framed(pieces):
             if encoder is not None:
-                data = encoder.compress(event) + encoder.flush(zlib.Z_SYNC_FLUSH)
+                data = encoder.compress(data) + encoder.flush(zlib.Z_SYNC_FLUSH)
             handler.wfile.write(f"{len(data):x}\r\n".encode() + data + b"\r\n")
             handler.wfile.flush()
+        if cut:
+            handler.close_connection = True
+            handler.connection.shutdown(2)
+            return False
         if encoder is not None:
             tail = encoder.flush()
             if tail:
                 handler.wfile.write(f"{len(tail):x}\r\n".encode() + tail + b"\r\n")
         handler.wfile.write(b"0\r\n\r\n")
-        return True
+        return completed
+
+    def _framed(self, events: list[bytes]) -> list[bytes]:
+        """The HTTP chunks of a stream: one per event, or `rechunk` bytes each at any boundary."""
+        if self.rechunk is None:
+            return events
+        whole = b"".join(events)
+        return [whole[at : at + self.rechunk] for at in range(0, len(whole), self.rechunk)]
