@@ -284,11 +284,17 @@ def _control() -> dict[str, str]:
     return dict(CACHE_CONTROL)
 
 
+def _markable(block: dict[str, Any]) -> bool:
+    """The provider refuses a mark on a thinking block and on a tool result without content (a tool
+    that returned nothing), as it does on an empty text block."""
+    kind = block.get("type")
+    if kind in _UNMARKABLE_BLOCKS:
+        return False
+    return kind != "tool_result" or bool(block.get("content"))
+
+
 def _last_markable(turn: dict[str, Any]) -> dict[str, Any] | None:
-    for block in reversed(turn["content"]):
-        if block.get("type") not in _UNMARKABLE_BLOCKS:
-            return block
-    return None
+    return next((block for block in reversed(turn["content"]) if _markable(block)), None)
 
 
 def _mark_turns(turns: list[dict[str, Any]]) -> None:

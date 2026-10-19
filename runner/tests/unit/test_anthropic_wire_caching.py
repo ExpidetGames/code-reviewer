@@ -14,12 +14,17 @@ messages when the model is a Claude (the pinned OpenCode does), and those marks,
 `cache_control` a message, a tool or a pull request carries, never reach the provider."""
 
 import json
+import sys
+from pathlib import Path
 from typing import Any
 
 import pytest
 
 from code_reviewer_runner import anthropic_wire
 from code_reviewer_runner.anthropic_wire import AnthropicMessagesWire
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from fakes.llm.anthropic_cache import PromptCache
 
 MODEL = "claude-sonnet-5"
 MARK = {"type": "ephemeral"}
@@ -188,6 +193,33 @@ def test_a_message_of_only_empty_text_is_never_marked() -> None:
         assert mark == "system.0" or mark.startswith("messages.")
     last = body["messages"][-1]["content"][-1]
     assert last.get("text", "x").strip()
+
+
+def empty_last_result(history: list[dict[str, Any]], content: Any = "") -> list[dict[str, Any]]:
+    """The history with the output of its last tool call replaced (the tool returned nothing)."""
+    return [*history[:-1], {**history[-1], "content": content}]
+
+
+# #539-T03
+@pytest.mark.parametrize("content", ["", [], None])
+def test_a_tool_result_without_content_falls_back_to_the_previous_block_of_its_turn(
+    content: Any,
+) -> None:
+    body = encode(empty_last_result(loop(2, parallel=3), content), tools=[read_tool()])
+    last = body["messages"][-1]["content"]
+    assert [block["type"] for block in last] == ["tool_result"] * 3
+    assert "content" not in last[2]
+    # The mark moved from the empty third result to the second one of the same turn.
+    assert marks(body) == ["system.0", "messages.2.2", "messages.4.1"]
+    assert "cache_control" not in last[2]
+    PromptCache().usage(body, {"input_tokens": 0, "output_tokens": 1})
+
+
+# #539-T03
+def test_a_turn_of_only_empty_tool_results_is_not_marked() -> None:
+    body = encode(empty_last_result(loop(2)), tools=[read_tool()])
+    assert marks(body) == ["system.0", "messages.2.0"]
+    PromptCache().usage(body, {"input_tokens": 0, "output_tokens": 1})
 
 
 # #539-T04
