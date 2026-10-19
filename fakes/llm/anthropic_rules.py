@@ -22,6 +22,12 @@ The rules, read from Anthropic's documentation on 2026-10-19 (`build-with-claude
   set of tools differs from the request that produced it, the request is a 400 unless it asks for
   `prefix_mismatch_behavior: "drop_block"` (an account created after 2026-08-31 is enforced).
 
+One rule is an ASSUMPTION, not a documented one: the 400 for an assistant turn with `tool_use` that
+lacks its thinking blocks altogether (`content[:len(blocks)] != blocks` in `_replayed`). The
+documentation says the blocks are "required" within a tool-use turn and that modified blocks are a
+400, but it does not state the status code for omitted ones. The fake takes the conservative reading
+so that a wire which dropped the blocks cannot pass; the manual smoke run of #519 has to confirm it.
+
 A fake that is stricter than the real API would hide a bug as much as a lenient one; each rule
 here is a documented one."""
 
