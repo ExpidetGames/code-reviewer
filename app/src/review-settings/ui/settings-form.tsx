@@ -34,6 +34,7 @@ import { formatUtc } from "../../ui/format-time.ts";
 import {
   CATALOG_FIELD_OF_KIND,
   PROJECT_DYNAMIC_SETTING_FIELDS,
+  PROJECT_REVIEW_KINDS,
   REVIEW_SETTING_FIELDS,
   type ProjectReviewKind,
   type ReviewSettingField,
@@ -41,6 +42,10 @@ import {
 import type { ReviewCostGuard } from "../cost.ts";
 import { estimateReviewCost } from "../cost.ts";
 import { llmProviderDescriptors } from "../../llm/providers/index.ts";
+import {
+  suggestedModelsFor,
+  type SuggestingProvider,
+} from "../../llm/providers/suggested-models.ts";
 import type { LlmProviderDescriptor } from "../../llm/providers/types.ts";
 import {
   browserGlobalSettingsApi,
@@ -67,6 +72,7 @@ import {
   initialFormState,
   previewSettings,
   resetField,
+  resetModelTo,
   setBoolean,
   setCommand,
   setProvider,
@@ -201,7 +207,8 @@ export function SettingsForm({
   keyedProviders?: readonly string[];
   /** Only tests pass this: the providers the selects offer, the registry's by default. */
   providers?: ReadonlyArray<
-    Pick<LlmProviderDescriptor, "id" | "label" | "suggestedModels">
+    Pick<LlmProviderDescriptor, "id" | "label" | "defaultModels"> &
+      SuggestingProvider
   >;
   /** Only tests pass this: a server component cannot hand functions to this client component. */
   api?: SettingsApi;
@@ -220,6 +227,24 @@ export function SettingsForm({
     () => providerOptions(providerDescriptors, keyedProviders),
     [providerDescriptors, keyedProviders],
   );
+  // The models to pick from for a provider and a review kind (none for a provider the form does not know).
+  const suggestionsOf = (providerId: string, reviewKind: ProjectReviewKind) => {
+    const provider = providerDescriptors.find(
+      (entry) => entry.id === providerId,
+    );
+    return provider === undefined
+      ? []
+      : suggestedModelsFor(provider, reviewKind);
+  };
+  // The default model of a provider for a review kind, where the layer below holds the model of another provider:
+  // "Reset to default" and the hint of the default must never name that one (#532).
+  const providerDefaultModel = (
+    providerId: string,
+    reviewKind: ProjectReviewKind,
+  ) =>
+    providerDescriptors.find((entry) => entry.id === providerId)?.defaultModels[
+      reviewKind
+    ];
   const formRef = useRef<HTMLFormElement>(null);
   const saveRef = useRef<HTMLButtonElement>(null);
   // Set synchronously, so a confirmation that fires twice cannot start two saves (#200 review).
@@ -455,12 +480,29 @@ export function SettingsForm({
       edit(setBoolean(state, name, value), name),
     setCommand: (command, allowed) =>
       edit(setCommand(state, command, allowed), "allowedCommands"),
-    reset: (name: ReviewSettingField) =>
-      edit(resetField(state, name, model), name),
+    reset: (name: ReviewSettingField) => {
+      const ownDefault =
+        name === "model" && state.values.provider !== model.inherited.provider
+          ? providerDefaultModel(state.values.provider, "diff")
+          : undefined;
+      edit(
+        ownDefault === undefined
+          ? resetField(state, name, model)
+          : resetModelTo(state, ownDefault),
+        name,
+      );
+    },
   };
   const shippedSkill = projectView?.defaults.reviewSkill ?? "";
-  const defaultModel = projectView?.defaults.dynamicModel ?? "";
   const defaultProvider = projectView?.defaults.dynamicProvider ?? "";
+  // The default model goes with the provider: the built-in one only while the built-in provider is chosen (#532).
+  const chosenDynamicProvider = state.dynamic?.dynamicProvider ?? "";
+  const defaultModel =
+    chosenDynamicProvider === defaultProvider
+      ? (projectView?.defaults.dynamicModel ?? "")
+      : (providerDefaultModel(chosenDynamicProvider, "dynamic") ??
+        projectView?.defaults.dynamicModel ??
+        "");
   const kindHandlers: ReviewKindHandlers = {
     setKind: (next) => edit(setReviewKind(state, next), "reviewKind"),
     setModel: (text) => edit(setDynamicModel(state, text), "dynamicModel"),
@@ -473,7 +515,7 @@ export function SettingsForm({
       edit(
         setDynamicModel(
           setDynamicProvider(state, defaultProvider),
-          defaultModel,
+          projectView?.defaults.dynamicModel ?? "",
         ),
         "dynamicProvider",
       ),
@@ -516,13 +558,21 @@ export function SettingsForm({
       >
         {model.managed
           ? null
-          : providerDescriptors.map((provider) => (
-              <datalist key={provider.id} id={`${datalistId}-${provider.id}`}>
-                {provider.suggestedModels.map((name) => (
-                  <option key={name} value={name} />
-                ))}
-              </datalist>
-            ))}
+          : providerDescriptors.flatMap((provider) =>
+              (model.mode === "project"
+                ? PROJECT_REVIEW_KINDS
+                : (["diff"] as const)
+              ).map((reviewKind) => (
+                <datalist
+                  key={`${reviewKind}-${provider.id}`}
+                  id={`${datalistId}-${reviewKind}-${provider.id}`}
+                >
+                  {suggestedModelsFor(provider, reviewKind).map((name) => (
+                    <option key={name} value={name} />
+                  ))}
+                </datalist>
+              )),
+            )}
 
         {projectView !== undefined && state.dynamic !== undefined ? (
           <ReviewKindFieldset
@@ -536,7 +586,12 @@ export function SettingsForm({
             handlers={kindHandlers}
             workspaceSlug={workspaceSlug}
             providers={providerChoices}
-            datalistId={`${datalistId}-${state.dynamic.dynamicProvider}`}
+            datalistId={`${datalistId}-dynamic-${state.dynamic.dynamicProvider}`}
+            suggestedModels={suggestionsOf(
+              state.dynamic.dynamicProvider,
+              "dynamic",
+            )}
+            defaultModel={defaultModel}
             choice={model.managed ? choice("dynamic") : undefined}
           />
         ) : null}
@@ -563,7 +618,8 @@ export function SettingsForm({
             cost={cost}
             workspaceSlug={workspaceSlug}
             providers={providerChoices}
-            datalistId={`${datalistId}-${state.values.provider}`}
+            datalistId={`${datalistId}-diff-${state.values.provider}`}
+            suggestedModels={suggestionsOf(state.values.provider, "diff")}
             choice={model.managed ? choice("diff") : undefined}
           />
         ) : null}

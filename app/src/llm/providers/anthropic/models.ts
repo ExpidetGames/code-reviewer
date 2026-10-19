@@ -323,6 +323,13 @@ export const ANTHROPIC_DEFAULT_MODELS = {
   dynamic: "claude-sonnet-5",
 } as const;
 
+/** The ids of the models that can serve a review of this kind, in the order of the list. */
+export function anthropicModelIdsFor(kind: ReviewKind): string[] {
+  return ANTHROPIC_MODELS.filter((model) =>
+    model.reviewKinds.includes(kind),
+  ).map((model) => model.id);
+}
+
 const BY_ID: ReadonlyMap<string, AnthropicModel> = new Map(
   ANTHROPIC_MODELS.map((model) => [model.id, model]),
 );

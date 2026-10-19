@@ -101,6 +101,11 @@ describe("the provider registry", () => {
       "a suggested model its own model-id rule refuses",
       { suggestedModels: ["fake-small", "UPPER CASE"] },
     ],
+    // #532-T07
+    [
+      "a Dynamic suggestion that is not one of the suggestions",
+      { dynamicSuggestedModels: ["fake-small", "fake-other"] },
+    ],
     [
       "an empty secret name",
       { secretNames: { workspace: "", operator: "operator_llm_key.x" } },
