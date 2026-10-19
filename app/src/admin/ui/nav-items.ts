@@ -19,6 +19,8 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
     items: [
       { href: "/admin", label: "Overview", exact: true },
       { href: "/admin/approvals", label: "Approvals", exact: false },
+      // The newest runs of every workspace, with the call trace of each (#541).
+      { href: "/admin/runs", label: "Runs", exact: false },
     ],
   },
   {

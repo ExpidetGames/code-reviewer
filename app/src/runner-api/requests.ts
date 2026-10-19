@@ -37,9 +37,19 @@ import {
   VM_TIMEOUT_SECONDS_RANGE,
 } from "./contract.ts";
 import { WORKER_CREDENTIAL_PATTERN } from "../jobs/worker-credential.ts";
+import { checkCallTrace } from "./call-trace.ts";
 
 export type Parsed<T> =
   { ok: true; value: T } | { ok: false; fields: FieldError[] };
+
+/**
+ * A result a runner or a Worker reported. `dropped` names the observability fields that were left out
+ * because they were malformed (#541), by field path and never with a value: the rest of the result is
+ * accepted, so the caller logs the note and goes on.
+ */
+export type ParsedResult<T> =
+  | { ok: true; value: T; dropped: string[] }
+  | { ok: false; fields: FieldError[] };
 
 const JOB_ID =
   /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
@@ -83,6 +93,8 @@ function isRecord(value: unknown): value is Record_ {
 /** Collects the refusals of one body while its fields are checked. */
 class Checker {
   readonly fields: FieldError[] = [];
+  /** Fields that were malformed and left out, not refused: observability the result does without. */
+  readonly dropped: string[] = [];
 
   fail(field: string, code: FieldErrorCode): undefined {
     this.fields.push({ field, code });
@@ -452,6 +464,12 @@ function parseUsage(
       limitExceededBy > 0 &&
       Number.isFinite(limitExceededBy));
   if (!excessOk) check.fail(`${prefix}limitExceededBy`, "invalid");
+  // The per-call trace (#541) is observability: a trace that is not the contract's is dropped and the usage,
+  // the cost and the verdict of the run are kept. The runner leaves it out for a run without one.
+  const callTrace =
+    value.callTrace === undefined ? undefined : checkCallTrace(value.callTrace);
+  if (value.callTrace !== undefined && callTrace === undefined)
+    check.dropped.push(`${prefix}callTrace`);
   if (
     check.fields.length > before ||
     model === undefined ||
@@ -477,6 +495,7 @@ function parseUsage(
     ...(limitExceededBy === undefined
       ? {}
       : { limitExceededBy: limitExceededBy as number }),
+    ...(callTrace === undefined ? {} : { callTrace }),
   };
 }
 
@@ -612,7 +631,9 @@ function parseResult(check: Checker, value: unknown): RunnerResult | undefined {
   };
 }
 
-export function parseCompleteRequest(body: unknown): Parsed<CompleteRequest> {
+export function parseCompleteRequest(
+  body: unknown,
+): ParsedResult<CompleteRequest> {
   if (!isRecord(body))
     return { ok: false, fields: [{ field: "body", code: "invalid" }] };
   const check = new Checker();
@@ -627,13 +648,13 @@ export function parseCompleteRequest(body: unknown): Parsed<CompleteRequest> {
     result === undefined
   )
     return { ok: false, fields: check.fields };
-  return { ok: true, value: { leaseToken, result } };
+  return { ok: true, value: { leaseToken, result }, dropped: check.dropped };
 }
 
 /** #320: the body of the Worker's result call: the result alone, the credential identifies the job. */
 export function parseWorkerResultRequest(
   body: unknown,
-): Parsed<WorkerResultRequest> {
+): ParsedResult<WorkerResultRequest> {
   if (!isRecord(body))
     return { ok: false, fields: [{ field: "body", code: "invalid" }] };
   const check = new Checker();
@@ -643,7 +664,7 @@ export function parseWorkerResultRequest(
       : parseResult(check, body.result);
   if (check.fields.length > 0 || result === undefined)
     return { ok: false, fields: check.fields };
-  return { ok: true, value: { result } };
+  return { ok: true, value: { result }, dropped: check.dropped };
 }
 
 /**
