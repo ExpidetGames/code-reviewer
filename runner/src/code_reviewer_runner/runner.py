@@ -792,6 +792,10 @@ def _run_dynamic_job(
         summary += (
             f"; dropped {answer.findings.dropped_invalid} finding(s): {DROPPED_INVALID} ({reasons})"
         )
+    if answer.findings.envelope_overrides:
+        # The runner owns these constants (#530); the log says which the model left out or got
+        # wrong, never what it wrote.
+        summary += f"; envelope set by the runner ({', '.join(answer.findings.envelope_overrides)})"
     if published.reset:
         summary += f"; {STATE_RESET_CODE}"
     if findings.stopped_early is not None:

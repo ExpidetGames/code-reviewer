@@ -315,8 +315,13 @@ through repository instructions or skill discovery:
   can change it.
 - The runner-owned review context is emitted next: the **verified reviewed head** (`base.headSha`,
   validated as a 40 character lower-case commit id) and the review mode. The head is trusted context,
-  never repository content, so the model can satisfy the `reviewedSha` requirement on the envelope
-  and on every finding after a force push or an incremental run.
+  never repository content. The model is **not** asked to echo it (#530): the runner sets
+  `schemaVersion` and `reviewedSha` on the envelope and on every finding itself, replacing whatever
+  the model wrote (the engine does not check the arguments of its return tool, so one missing echo
+  would otherwise fail a whole run). The schema handed to the engine omits them; the contract
+  schema keeps requiring them. Any other required field of the envelope that is missing or has the
+  wrong type gets the one recovery turn (#309) with the concrete problem; the job log says
+  `missing` or `wrong_value` per runner-set field, never a value.
 - `dynamic_review/prompts.py` composes the core first, then the skill as delimited, literal,
   lower-priority text, then the pull request input as delimited untrusted blocks. Every block, the
   skill included, is closed by a fence that carries a digest of its content, so an injected delimiter
