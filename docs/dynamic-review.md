@@ -685,7 +685,8 @@ usage do not say what 55 calls did. The runner therefore records a **trace** and
 
 - **Per model call:** `index`, `tMs` (milliseconds since the run started, at the start of the call), `promptTokens`,
   `cacheRead`, `cacheWrite`, `completionTokens`, `costUsd`, `finishReason`, `final` (the wrap-up or recovery call) and
-  the tools the answer asked for with counts. A call the provider refused or never answered is in it with `null`s.
+  the tools the answer asked for with counts. A call the provider refused, never answered, answered without usage or with more
+  bytes than the protocol allows is in it with `null`s (a finish reason too, where the answer had none).
 - **Per tool call:** the tool, `resultBytes` (what the model was shown) and `isRepeat` (the same tool with the same
   normalised arguments, a path spelled absolute or relative being one file, already ran in this job).
 - **Never content:** no path, no argument, no tool result, no model text. A tool name that is none of the engine's
@@ -693,10 +694,12 @@ usage do not say what 55 calls did. The runner therefore records a **trace** and
   call repeats an earlier one is decided from a digest in memory that is never written out. The trace does not steer
   the run: nothing reads it back, and the agent is not told about it.
 - **Bounded:** the first 100 model calls and the first 100 tool calls; `truncated` says that more happened. A full trace
-  is about 30 KB, inside the 64 KiB body the app accepts; if a body is still too large the runner drops the trace before
-  it shortens the log.
-- **Shown** in the Runs detail of a workspace (the cost column only where the run's cost is shown, so not for a managed
-  quality level) and in the instance admin's run view (`/admin/runs`, `/admin/runs/<id>`: the newest runs of every
+  is about 30 KB, inside the 48 KiB body the runner sends; when the whole body is too large the runner drops the trace
+  first, and only then shortens the log. The bare verdict it falls back to when the app refuses a result has no trace.
+  The app drops a trace that is not the contract's and keeps the usage and the verdict (observability, never a reason to
+  lose a result).
+- **Shown** in the Runs detail of a workspace (the cost and the cache columns only where the run's provider may be known, so
+  not for a managed quality level: whether a provider reports cache writes says which one it is) and in the instance admin's run view (`/admin/runs`, `/admin/runs/<id>`: the newest runs of every
   workspace, and one run with its facts, usage and the two tables). A run from a runner that sends no trace shows no
   section in the workspace and a note in the admin view.
 
