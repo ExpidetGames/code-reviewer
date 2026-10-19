@@ -22,9 +22,10 @@ import pytest
 from code_reviewer_runner.dynamic_review.budget import (
     DEFAULT_OUTPUT_TOKENS,
     DEFAULT_WINDOW_TOKENS,
-    FINAL_CALL_GROWTH_BYTES,
+    GROWTH_FLOOR_TOKENS,
     MAX_COST_USD,
     MAX_COST_USD_CEILING,
+    RESERVE_MARGIN,
     BudgetLedger,
     DynamicLimits,
     LimitError,
@@ -338,9 +339,9 @@ class SlowCostLimit(DynamicLimits):
 
 # #290-T08
 def test_concurrent_reservations_cannot_together_exceed_the_cost_limit() -> None:
-    # Each reservation is 34 input and 50,000 output tokens: 0.200034 USD, so a limit of 0.7 fits
-    # three and not a fourth.
-    shared = BudgetLedger(SlowCostLimit(max_cost_usd=Decimal("0.7")), unit_costs=UNIT_COSTS)
+    # Each reservation is 34 input tokens and the 1,024 output tokens a call reserves before the
+    # run has shown any completion (#540): 0.00413 USD, so 0.0125 fits three and not a fourth.
+    shared = BudgetLedger(SlowCostLimit(max_cost_usd=Decimal("0.0125")), unit_costs=UNIT_COSTS)
     outcomes: list[bool] = []
     gate = threading.Barrier(16)
 
@@ -370,8 +371,9 @@ def test_concurrent_reservations_cannot_together_exceed_the_cost_limit() -> None
 
 
 def final_reserve_after(text_bytes: int, output_tokens: int) -> Decimal:
-    """What a final call after a call of this size is reserved at."""
-    estimate = -(-text_bytes // 3) + -(-FINAL_CALL_GROWTH_BYTES // 3)
+    """What a final call after a call of this size is reserved at (#540): one round of growth at
+    its floor, and the output the final call reserves, at most the allowance."""
+    estimate = -(-text_bytes // 3) + GROWTH_FLOOR_TOKENS
     return UNIT_COSTS.of_call(estimate, output_tokens)
 
 
@@ -388,11 +390,13 @@ def test_a_call_that_leaves_room_for_a_final_call_is_a_normal_call() -> None:
 
 # #293-T01
 def test_the_call_after_which_no_final_call_would_fit_is_the_final_call() -> None:
-    subject = ledger(max_cost_usd=Decimal("0.05"))
+    subject = ledger(max_cost_usd=Decimal("0.0114"))
     first = subject.reserve_call("x" * 3000, output_tokens=100, can_wrap_up=True)
+    assert first.final is False  # this call and the final one after it (0.0086) fit the limit
     subject.settle_call(first, prompt_tokens=900, completion_tokens=50, cost=Decimal("0.0036"))
-    # 0.0036 spent + 0.0014 for this call + the final call after it is over 0.05.
-    assert Decimal("0.0036") + Decimal("0.0014") + final_reserve_after(3000, 100) > Decimal("0.05")
+    # 0.0036 spent + (0.0014 for this call + the final call after it) with the margin is over it.
+    expected = Decimal("0.0014") + final_reserve_after(3000, 100)
+    assert Decimal("0.0036") + expected * RESERVE_MARGIN > Decimal("0.0114")
 
     second = subject.reserve_call("x" * 3000, output_tokens=100, can_wrap_up=True)
 
@@ -610,13 +614,13 @@ def test_a_short_deadline_scales_the_clock_reserve_of_the_recovery_like_the_wrap
 # and money for one more call, so only "a final call was granted" can refuse the recovery.
 def test_there_is_no_recovery_after_a_final_call_even_if_cost_and_time_would_allow_it() -> None:
     subject = BudgetLedger(
-        DynamicLimits(max_cost_usd=Decimal("0.01")), output_tokens=100, unit_costs=UNIT_COSTS
+        DynamicLimits(max_cost_usd=Decimal("0.008")), output_tokens=100, unit_costs=UNIT_COSTS
     )
     final = subject.reserve_call("x" * 3000, output_tokens=100, can_wrap_up=True)
     assert final.final is True and subject.stopped_early == "cost_limit"
     subject.settle_call(final, prompt_tokens=900, completion_tokens=50, cost=Decimal("0.0001"))
-    # One more call (about 0.0027 USD) fits the 0.01 USD limit and the clock has not moved.
-    assert Decimal("0.0001") + UNIT_COSTS.of_call(900 + 100 + 1366, 100) < Decimal("0.01")
+    # One more call (about 0.0027 USD) fits the 0.008 USD limit and the clock has not moved.
+    assert Decimal("0.0001") + UNIT_COSTS.of_call(900 + 50 + 1366, 100) < Decimal("0.008")
 
     assert subject.begin_recovery() is False
 

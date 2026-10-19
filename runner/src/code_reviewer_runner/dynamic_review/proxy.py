@@ -50,7 +50,7 @@ import http.client
 import json
 import threading
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
@@ -66,6 +66,7 @@ from code_reviewer_runner.dynamic_review.budget import (
     UnitCosts,
     exact_cost,
 )
+from code_reviewer_runner.dynamic_review.cache_usage import cache_tokens
 from code_reviewer_runner.dynamic_review.call_outcome import describe_call
 from code_reviewer_runner.dynamic_review.completion_stream import completion_as_stream
 from code_reviewer_runner.dynamic_review.config import PROXY_CAPABILITY_BYTES, PROXY_PROVIDER_ID
@@ -182,6 +183,25 @@ DEFAULT_MODEL_CAPABILITIES = DynamicCapabilities(
         input_usd_per_mtok=Decimal("0.02016"), output_usd_per_mtok=Decimal("0.891")
     ),
 )
+
+
+def with_cache_unit_costs(
+    capabilities: DynamicCapabilities, cache_costs: tuple[Decimal, Decimal] | None
+) -> DynamicCapabilities:
+    """The capabilities with the cache prices of the provider's own list (#540): what a million
+    tokens read from and written to its cache cost. They only size a reservation. The descriptor of
+    a job never names them; a provider without a list (None) leaves the prompt priced as input."""
+    unit_costs = capabilities.unit_costs
+    if cache_costs is None or unit_costs is None:
+        return capabilities
+    return replace(
+        capabilities,
+        unit_costs=replace(
+            unit_costs,
+            cache_read_usd_per_mtok=cache_costs[0],
+            cache_write_usd_per_mtok=cache_costs[1],
+        ),
+    )
 
 
 def capabilities_from_config(raw: str | None, model: str | None = None) -> DynamicCapabilities:
@@ -566,11 +586,14 @@ class ModelProxy:
             )
         # The provider is authoritative: its counters replace the reservation. A counter above the
         # reservation is not added up, it fails the run.
+        cache_read, cache_write = self._cache_usage(completion)
         self.ledger.settle_call(
             reservation,
             prompt_tokens=usage[0],
             completion_tokens=usage[1],
             cost=self._cost(completion),
+            cache_read_tokens=cache_read,
+            cache_write_tokens=cache_write,
         )
         self.ledger.note_call_outcome(describe_call(completion, final=reservation.final))
         return _Attempt(body=response_body, completion=completion)
@@ -707,6 +730,13 @@ class ModelProxy:
             completion if isinstance(completion, int) and not isinstance(completion, bool) else None
         )
         return prompt_tokens, completion_tokens
+
+    @staticmethod
+    def _cache_usage(document: dict[str, Any]) -> tuple[int | None, int | None]:
+        """What the provider says it read from and wrote to its cache (#540): the cost guard prices
+        the next call from it. Neither is reported by a provider without a cache."""
+        usage = as_object(document.get("usage"))
+        return (None, None) if usage is None else cache_tokens(usage)
 
     def _cost(self, document: dict[str, Any]) -> Decimal | None:
         """The cost of this call by the rule of the provider, or None when it has none.

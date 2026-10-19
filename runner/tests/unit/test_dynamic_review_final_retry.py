@@ -278,7 +278,7 @@ def test_a_normal_call_in_prose_is_left_alone() -> None:
 
 # #312-T06: the wrap-up call at the cost or clock limit is a final call too.
 def test_the_wrap_up_call_is_enforced_like_the_recovery_call() -> None:
-    ledger = BudgetLedger(DynamicLimits(max_cost_usd=Decimal("0.07")), unit_costs=UNIT_COSTS)
+    ledger = BudgetLedger(DynamicLimits(max_cost_usd=Decimal("0.025")), unit_costs=UNIT_COSTS)
     upstream = Sequence(completion_with(content="prose"), returns(review()))
     subject = proxy(upstream, ledger=ledger)
 

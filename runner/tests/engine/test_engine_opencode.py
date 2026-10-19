@@ -442,17 +442,18 @@ def test_a_run_that_reaches_its_cost_limit_is_wrapped_up_by_the_real_engine(
         asks(tool_call(f"r{index}", "read", {"filePath": str(export / "src/app.py")}))
         for index in range(20)
     ]
-    # Every call reports 0.01 USD. A call is reserved at about 0.02 USD (its 4,096 output tokens
-    # and a request of about 12 KB) and a final call after it at about 0.06 USD. With a limit of
-    # 0.1 USD the third call, after 0.02 USD are spent, is the one after which no final call would
-    # fit, so it is the final call (calls 1 and 2 are normal).
+    # Every call reports 0.01 USD. A call is expected at about 0.006 USD (its request and 1,024
+    # output tokens) and a final call after it at about 0.02 USD (one more round and a review's
+    # output): with the margin of #540 about 0.03 USD for both. With a limit of 0.045 USD the third
+    # call, after 0.02 USD are spent, is the one after which no final call would fit, so it is the
+    # final call (calls 1 and 2 are normal; 0.01 + 0.03 fits, 0.02 + 0.03 does not).
     model = ScriptedModel(steps=steps, final=findings_for(content.head_sha), cost=0.01)
     with model:
         run = run_engine(
             model,
             content,
             scratch=tmp_path / "scratch",
-            limits=DynamicLimits(max_cost_usd=Decimal("0.1")),
+            limits=DynamicLimits(max_cost_usd=Decimal("0.045")),
         )
 
     assert run.answer.ok, run.answer.error
@@ -719,23 +720,26 @@ def test_a_wrap_up_final_call_that_answers_in_prose_is_not_recovered(tmp_path: P
     content = prepare(tmp_path, {"src/app.py": b"x = 1\n"})
     steps: list[Step] = [*reading(content.export, 20)]
     steps[2:] = [says("prose in the final call")] * FINAL_ATTEMPTS
-    model = ScriptedModel(steps=steps, final=None, cost=0.01)
-    with model:
-        run = run_engine(
-            model,
-            content,
-            scratch=tmp_path / "scratch",
-            limits=DynamicLimits(max_cost_usd=Decimal("0.1")),
-        )
+    seconds = [0.0]  # the ledger's clock, which a test moves by hand
 
-    # As in the wrap-up test above: calls 1 and 2 are normal, the third is the final call.
+    def second_request_takes_long(count: int) -> None:
+        if count == 2:
+            seconds[0] += 460.0  # 140 s of 600 s are left, the reserve is 150 s
+
+    # The wrap-up is started by the clock here: with the realistic cost guard (#540) a cost limit
+    # that starts it leaves no room for the final call's retries, which this test is about.
+    model = ScriptedModel(steps=steps, final=None, cost=0.01, on_request=second_request_takes_long)
+    with model:
+        run = run_engine(model, content, scratch=tmp_path / "scratch", clock=lambda: seconds[0])
+
+    # Calls 1 and 2 are normal, the third is the final call.
     assert not run.answer.ok
     assert run.answer.error is not None
     assert run.answer.error.code is ErrorCode.LLM_OUTPUT_INVALID
     assert "no recovery was possible" in run.answer.error.detail
     assert len(model.requests) == 2 + FINAL_ATTEMPTS  # the final call and its asks (#312)
     assert all(only_return_tool(request) for request in model.requests[2:])
-    assert run.ledger.stopped_early == "cost_limit"
+    assert run.ledger.stopped_early == "time_limit"
     assert run.ledger.recovered is False
 
 

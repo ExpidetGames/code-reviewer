@@ -65,6 +65,7 @@ from code_reviewer_runner.dynamic_review.proxy import (
     DynamicCapabilities,
     ModelProxy,
     capabilities_for_job,
+    with_cache_unit_costs,
 )
 from code_reviewer_runner.dynamic_review.publish import (
     STATE_RESET_CODE,
@@ -634,6 +635,10 @@ def _run_dynamic_job(
     try:
         capabilities = capabilities_for_job(
             environment.get(DYNAMIC_CAPABILITIES_VARIABLE), job.llm.model, dynamic.capabilities
+        )
+        # The cache is priced from the provider's own list (#540), never from the job.
+        capabilities = with_cache_unit_costs(
+            capabilities, require_provider(job.llm.provider).cache_unit_costs(job.llm.model)
         )
     except LimitError as error:
         return _failure(error.code, error.detail, started, capture)

@@ -16,24 +16,48 @@ is only asked for in the prompt or only observed after the fact is not enforced.
 is reserved before the request is sent, every tool part the engine reports is counted, and a
 missing or oversized answer fails closed. Nothing here is advisory.
 
-**Cost.** Before a call the ledger reserves what the call could cost: the input estimate and the
-output allowance at the unit costs of the model's descriptor. A model without unit costs does not
-run (`dynamic_config_invalid`, see `runner.dynamic_ledger`): a cost that cannot be priced cannot be
-bounded before it is spent. The call is refused when what is spent, what is reserved for calls in
-flight and this reservation would together pass the limit. After the call the reservation is
-replaced by the `usage.cost` the provider reported. A call that reports no cost cannot be bounded by
-money, so the run stops (`dynamic_accounting_failed`): it is never continued without a bound, and a
-missing cost is never read as zero.
+**Cost.** Before a call the ledger reserves what the call is expected to cost (#540), from what the
+run itself has shown. A model without unit costs does not run (`dynamic_config_invalid`, see
+`runner.dynamic_ledger`): a cost that cannot be priced cannot be bounded before it is spent. The
+call is refused when what is spent, what is reserved for calls in flight and this reservation would
+together pass the limit. After the call the reservation is replaced by the `usage.cost` the provider
+reported. A call that reports no cost cannot be bounded by money, so the run stops
+(`dynamic_accounting_failed`): it is never continued without a bound, and a missing cost is never
+read as zero.
+
+*What a call is expected to cost.* The prompt is split into the **prefix** the previous call left in
+the provider's cache and the **growth** since. When the previous call reported cache reads and the
+descriptor has a cache-read price, the prefix is priced at it; the growth is priced at the
+cache-write price while the cache is in use (else at the input price). A provider that reports no
+cache tokens, or a descriptor without cache prices (an OpenRouter model), is priced at the uncached
+input price throughout: nothing is assumed about a discount that cannot be seen. The growth is the
+bytes the request added since the last one over the observed density, not the whole request again.
+The output is the **p95 of the run's own completions** (nearest rank) with a floor, capped by the
+allowance; the allowance (`max_tokens`) stays the hard cap a completion is held to, but is no longer
+what every call reserves. A call that writes the review (the final call, the recovery, a retry of
+either) reserves at least `FINAL_OUTPUT_FLOOR_TOKENS`.
+
+*The bound.* A call is admitted only while `spent + held + its expected cost <= limit`, so the spend
+is within the limit whenever a call starts. The settled total can therefore pass the limit only by
+the last call's real cost minus what was expected of it, which is at most that call's real cost:
+**the run never exceeds the limit by more than one call's real cost.** A call that costs more than
+expected (a cache miss, an unusually long answer, a 64 KiB tool result) is priced correctly from the
+next call on. A non-final call that settles over the limit still fails closed
+(`dynamic_budget_exceeded`); the final call that carries the answer is delivered, the one overshoot
+the limit allows.
 
 **Wrap-up (#293).** The run does not just stop when the limit is near. A call that can be rewritten
 into a final answer (`can_wrap_up`: the model proxy can reduce the request to the structured-output
 return tool) becomes the *final call* when a further normal call could not be followed by a final
-one inside the cost limit (what is spent, what is held, this call and a final call after it, with
-room for two more tool results in the history), or when less than a reserve of wall clock is left
-(one provider call: 150 s, a quarter of a shorter deadline). The decision is the ledger's alone,
-from its own cost and clock; nothing in the request can start or prevent it. The final call must
-itself fit the cost limit, and it is the last call granted: any other request after it is refused.
-The ledger remembers why the run stopped early (`stopped_early`) for the result and the summary.
+one inside the cost limit, or when less than a reserve of wall clock is left (one provider call:
+150 s, a quarter of a shorter deadline). The cost test is `spent + held + (this call + a final call
+after it) * RESERVE_MARGIN > limit`: the final call after it is priced realistically (#540), as the
+next prompt plus the growth the run showed per round (p95, floor `GROWTH_FLOOR_TOKENS`) with the
+cached prefix and a review-sized output, and the margin keeps a normal call that costs a little more
+than expected from taking the room of the final call. The decision is the ledger's alone, from its
+own cost and clock; nothing in the request can start or prevent it. The final call must itself fit
+the cost limit, and it is the last call granted: any other request after it is refused. The ledger
+remembers why the run stopped early (`stopped_early`) for the result and the summary.
 
 **Recovery (#309).** A turn can end with no structured answer although nothing was used up (the
 model answered in prose, was cut off, or the provider ended a step the engine took for the last).
@@ -52,8 +76,7 @@ reservation. The model window is only a backstop in front of the provider's own 
 checked with a much more lenient density (`WINDOW_CHECK_DENSITY`), so the ledger refuses only what
 cannot fit at any realistic density and leaves every other case to the provider's context error.
 The proven bound stays the byte count (a BPE token is never fewer than one byte): usage the
-provider reports above it is an accounting failure. The margin of the estimate is that every call
-also reserves its whole output allowance at the output cost although a call rarely uses it.
+provider reports above it is an accounting failure.
 """
 
 import math
@@ -96,9 +119,6 @@ ASSUMED_DENSITY = 3.0
 # margin. A shorter deadline gets a quarter of it, so a short test deadline still has a normal part.
 WRAP_UP_RESERVE_SECONDS = 150.0
 WRAP_UP_RESERVE_FRACTION = 0.25
-# What the history of the call after a normal call can have grown by, for the cost of a final call
-# that is reserved before the normal call is allowed: two tool results of the largest size.
-FINAL_CALL_GROWTH_BYTES = 2 * MAX_TOOL_RESULT_BYTES
 STOPPED_EARLY_COST = "cost_limit"
 STOPPED_EARLY_TIME = "time_limit"
 # What the recovery call's request is larger than the last call's by, besides the model's own last
@@ -112,6 +132,19 @@ RECENT_CALL_OUTCOMES = 3
 # that packs tighter), and a request the provider could still take is never refused here: the
 # provider's own context error ends the run with a code of its own instead.
 WINDOW_CHECK_DENSITY = 6.0
+# What a call reserves of its output (#540): the p95 of the run's completions so far, never below
+# this floor and never above the allowance. A call that writes the review reserves more, since a
+# review is longer than a tool call.
+OUTPUT_FLOOR_TOKENS = 1_024
+FINAL_OUTPUT_FLOOR_TOKENS = 4_096
+# What the prompt of the call after the next one grows by, when the run has shown no round yet:
+# about 12 KB of tool result. Later the p95 of the rounds seen takes over, never below this floor.
+GROWTH_FLOOR_TOKENS = 4_096
+# The factor on (this call + a final call after it) in the wrap-up test: both are expectations, and
+# a normal call that costs a little more must not take the room of the final one.
+RESERVE_MARGIN = Decimal("1.25")
+# The nearest-rank percentile of the observed completions and rounds, in percent.
+OBSERVED_PERCENTILE = 95
 # A request smaller than this says nothing about the content's density: the provider's own
 # overhead per request dominates it. Only larger requests tighten the estimate.
 MIN_CALIBRATION_BYTES = 4096
@@ -170,20 +203,39 @@ def max_cost_from_environment(raw: str | None) -> Decimal:
 
 @dataclass(frozen=True)
 class UnitCosts:
-    """What the model's descriptor says one million input and output tokens cost, in USD.
+    """What the model's descriptor says one million tokens cost, in USD.
 
     Used only to price a reservation before a call. The cost of a call is always the `usage.cost`
-    the provider reported after it, never these numbers.
+    the provider reported after it, never these numbers. The two cache prices are optional (#540):
+    only a provider whose price list the runner knows has them (Anthropic); without them every
+    token of the prompt is priced as plain input.
     """
 
     input_usd_per_mtok: Decimal
     output_usd_per_mtok: Decimal
+    cache_read_usd_per_mtok: Decimal | None = None
+    cache_write_usd_per_mtok: Decimal | None = None
 
-    def of_call(self, input_tokens: int, output_tokens: int) -> Decimal:
-        total = _SUM.add(
-            _SUM.multiply(Decimal(input_tokens), self.input_usd_per_mtok),
-            _SUM.multiply(Decimal(output_tokens), self.output_usd_per_mtok),
-        )
+    def of_call(
+        self,
+        input_tokens: int,
+        output_tokens: int,
+        *,
+        cached_tokens: int = 0,
+        cache_in_use: bool = False,
+    ) -> Decimal:
+        """The price of a call: `cached_tokens` of the input at the cache-read price, the rest at
+        the cache-write price while the cache is in use, else at the input price. Without the cache
+        prices of the descriptor everything is plain input."""
+        read_usd = self.cache_read_usd_per_mtok
+        cached = 0 if read_usd is None else min(max(cached_tokens, 0), input_tokens)
+        fresh_usd = self.input_usd_per_mtok
+        if cache_in_use and self.cache_write_usd_per_mtok is not None:
+            fresh_usd = max(fresh_usd, self.cache_write_usd_per_mtok)
+        total = _SUM.multiply(Decimal(input_tokens - cached), fresh_usd)
+        if read_usd is not None:
+            total = _SUM.add(total, _SUM.multiply(Decimal(cached), read_usd))
+        total = _SUM.add(total, _SUM.multiply(Decimal(output_tokens), self.output_usd_per_mtok))
         return _SUM.divide(total, Decimal(1_000_000))
 
 
@@ -214,6 +266,15 @@ class _Counters:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     last_prompt_tokens: int = 0
+    # What the previous call's request weighed, what the provider reported of its cache and how much
+    # it completed (#540).
+    last_request_bytes: int = 0
+    last_cache_read: int = 0
+    last_cache_write: int = 0
+    last_completion_tokens: int = 0
+    # The completions and the per-round growth of the prompt of the normal calls so far.
+    completions: list[int] = field(default_factory=lambda: list[int]())
+    growths: list[int] = field(default_factory=lambda: list[int]())
     # Bytes per token the previous call settled on, when denser than the default estimate.
     density: float = ASSUMED_DENSITY
     # The cost the provider charged, summed as exact decimals, over the calls that reported one.
@@ -249,6 +310,27 @@ def exact_cost(value: object) -> Decimal | None:
     if cost == 0:
         return Decimal(0)
     return cost if cost > 0 else None
+
+
+def _percentile(values: list[int]) -> int:
+    """The nearest-rank `OBSERVED_PERCENTILE` of the values; 0 for none."""
+    if not values:
+        return 0
+    rank = -(-OBSERVED_PERCENTILE * len(values) // 100)
+    return sorted(values)[max(rank, 1) - 1]
+
+
+def _cache_tokens(read: int | None, written: int | None, prompt_tokens: int) -> tuple[int, int]:
+    """The cache tokens a call reported, as counts of the prompt. A count that is missing, not a
+    count, or together above the prompt is no cache signal at all (0, 0): the call is then priced as
+    plain input, the cautious reading."""
+    counts = [0 if value is None else value for value in (read, written)]
+    # A boolean is an int in Python and no count.
+    if any(isinstance(value, bool) or value < 0 for value in counts):
+        return 0, 0
+    if sum(counts) > prompt_tokens:
+        return 0, 0
+    return counts[0], counts[1]
 
 
 def reserved_tokens(text: str) -> int:
@@ -363,9 +445,10 @@ class BudgetLedger:
             if counters.model_calls == 0 or self.remaining_seconds() <= self._wrap_up_seconds:
                 return False
             slack = math.ceil(RECOVERY_REQUEST_SLACK_BYTES / counters.density)
-            input_tokens = counters.last_prompt_tokens + self.output_tokens + slack
+            input_tokens = counters.last_prompt_tokens + counters.last_completion_tokens + slack
             held = counters.cost + counters.reserved_cost
-            if held + self._call_cost(input_tokens, self.output_tokens) > self.limits.max_cost_usd:
+            cost = self._expected_cost(input_tokens, self.output_tokens, final=True)
+            if held + cost > self.limits.max_cost_usd:
                 return False
             self._recovery_armed = True
             return True
@@ -436,12 +519,13 @@ class BudgetLedger:
                     "the request plus its output allowance exceeds the model window",
                 )
             held = counters.cost + counters.reserved_cost
-            cost = self._call_cost(estimate, allowance)
+            priced = self._priced_input(size, estimate)
+            cost = self._expected_cost(priced, allowance)
             recovery = self._recovery_armed and can_wrap_up
             reason = (
                 None
                 if not can_wrap_up or recovery
-                else self._wrap_up_reason(held, cost, estimate, allowance)
+                else self._wrap_up_reason(held, cost, priced, allowance)
             )
             if reason is not None or recovery:
                 # The last call of the run: it carries the instruction and nothing else grows.
@@ -449,7 +533,9 @@ class BudgetLedger:
                 size += len(text.encode("utf-8", errors="replace"))
                 estimate = self._estimate(size)
                 bound += size - len(request_text.encode("utf-8", errors="replace"))
-                cost = self._call_cost(estimate, allowance)
+                cost = self._expected_cost(
+                    self._priced_input(size, estimate), allowance, final=True
+                )
             if held + cost > self.limits.max_cost_usd:
                 raise LimitError(ErrorCode.DYNAMIC_BUDGET_EXCEEDED, "the cost limit is used up")
             if reason is not None or recovery:
@@ -492,7 +578,7 @@ class BudgetLedger:
                 return None
             estimate = self._estimate(size)
             bound = max(size, counters.last_prompt_tokens)
-            cost = self._call_cost(estimate, allowance)
+            cost = self._expected_cost(self._priced_input(size, estimate), allowance, final=True)
             if counters.cost + counters.reserved_cost + cost > self.limits.max_cost_usd:
                 return None
             counters.model_calls += 1
@@ -509,21 +595,77 @@ class BudgetLedger:
     def _estimate(self, size: int) -> int:
         return max(math.ceil(size / self._counters.density), self._counters.last_prompt_tokens)
 
+    def _priced_input(self, size: int, estimate: int) -> int:
+        """The input tokens a reservation is priced with: the last settled prompt plus the tokens of
+        the bytes the request added since (#540), never more than the conservative estimate.
+
+        The provider counted the history it has seen, so it is not estimated again from bytes. A
+        request that is not longer than the last one (a compaction, a hidden call with another
+        prompt) says nothing about the last prompt and is priced at the estimate.
+        """
+        counters = self._counters
+        if counters.last_request_bytes == 0 or size < counters.last_request_bytes:
+            return estimate
+        added = math.ceil((size - counters.last_request_bytes) / counters.density)
+        return min(estimate, counters.last_prompt_tokens + added)
+
+    def _reads_cache(self) -> bool:
+        """True when the previous call read from the cache and the descriptor prices a read."""
+        return self._unit_costs.cache_read_usd_per_mtok is not None and (
+            self._counters.last_cache_read > 0
+        )
+
+    def _cache_in_use(self) -> bool:
+        counters = self._counters
+        return counters.last_cache_read + counters.last_cache_write > 0
+
+    def _expected_output(self, allowance: int, *, final: bool = False) -> int:
+        """The output a call reserves: the p95 of the run's completions with a floor, at most the
+        allowance. The call that writes the review reserves the larger floor."""
+        observed = _percentile(self._counters.completions)
+        floor = FINAL_OUTPUT_FLOOR_TOKENS if final else OUTPUT_FLOOR_TOKENS
+        return min(allowance, max(floor, observed))
+
+    def _growth_tokens(self) -> int:
+        """What one round adds to the prompt: the p95 of the rounds seen, never below the floor."""
+        return max(GROWTH_FLOOR_TOKENS, _percentile(self._counters.growths))
+
+    def _expected_cost(
+        self, priced_input: int, allowance: int, *, final: bool = False, prefix: int | None = None
+    ) -> Decimal:
+        """What one call is expected to cost, to reserve (#540): the prefix the previous call left
+        in the cache at the cache-read price, the rest at the write (or input) price, the output
+        the run has shown. `prefix` defaults to what the previous call cached; it is zero unless
+        that call read from the cache."""
+        if prefix is None:
+            counters = self._counters
+            prefix = (
+                counters.last_cache_read + counters.last_cache_write if self._reads_cache() else 0
+            )
+        return self._unit_costs.of_call(
+            priced_input,
+            self._expected_output(allowance, final=final),
+            cached_tokens=prefix,
+            cache_in_use=self._cache_in_use(),
+        )
+
     def _wrap_up_reason(
-        self, held: Decimal, cost: Decimal, estimate: int, allowance: int
+        self, held: Decimal, cost: Decimal, priced: int, allowance: int
     ) -> str | None:
         """Why this call has to be the final one: the clock first, then what the next would cost."""
         if self.remaining_seconds() <= self._wrap_up_seconds:
             return STOPPED_EARLY_TIME
-        growth = math.ceil(FINAL_CALL_GROWTH_BYTES / self._counters.density)
-        after = self._call_cost(estimate + growth, allowance)
-        if held + cost + after > self.limits.max_cost_usd:
+        # The final call comes after this one: its prompt is this prompt (cached by then) plus one
+        # round of growth.
+        prefix = priced if self._reads_cache() else 0
+        after = self._expected_cost(
+            priced + self._growth_tokens(), allowance, final=True, prefix=prefix
+        )
+        if _SUM.add(held, _SUM.multiply(_SUM.add(cost, after), RESERVE_MARGIN)) > (
+            self.limits.max_cost_usd
+        ):
             return STOPPED_EARLY_COST
         return None
-
-    def _call_cost(self, input_tokens: int, output_tokens: int) -> Decimal:
-        """What one call could cost, to reserve: estimate and allowance at the unit costs."""
-        return self._unit_costs.of_call(input_tokens, output_tokens)
 
     def settle_call(
         self,
@@ -532,6 +674,8 @@ class BudgetLedger:
         prompt_tokens: int | None,
         completion_tokens: int | None,
         cost: Decimal | None = None,
+        cache_read_tokens: int | None = None,
+        cache_write_tokens: int | None = None,
     ) -> None:
         """Replace a reservation with what the provider actually reported. Missing usage fails.
 
@@ -561,12 +705,21 @@ class BudgetLedger:
                 ErrorCode.DYNAMIC_ACCOUNTING_FAILED,
                 "the provider reported more than the request reserved",
             )
+        read, written = _cache_tokens(cache_read_tokens, cache_write_tokens, prompt_tokens)
         counters = self._counters
         with self._lock:
             counters.reserved_cost = _SUM.subtract(counters.reserved_cost, reservation.cost)
             counters.prompt_tokens += prompt_tokens
             counters.completion_tokens += completion_tokens
+            if not reservation.final:
+                counters.completions.append(completion_tokens)
+                if 0 < counters.last_prompt_tokens < prompt_tokens:
+                    counters.growths.append(prompt_tokens - counters.last_prompt_tokens)
             counters.last_prompt_tokens = prompt_tokens
+            counters.last_completion_tokens = completion_tokens
+            counters.last_request_bytes = reservation.request_bytes
+            counters.last_cache_read = read
+            counters.last_cache_write = written
             if prompt_tokens > 0 and reservation.request_bytes >= MIN_CALIBRATION_BYTES:
                 observed = reservation.request_bytes / prompt_tokens
                 counters.density = max(1.0, min(ASSUMED_DENSITY, observed))
@@ -577,7 +730,10 @@ class BudgetLedger:
                 )
             counters.cost = _SUM.add(counters.cost, cost)
             counters.priced_calls += 1
-            if counters.cost > self.limits.max_cost_usd:
+            # The final call carries the answer: it is delivered even if it cost more than expected,
+            # the one overshoot of the limit (see "The bound" above). Any other call over the limit
+            # ends the run.
+            if counters.cost > self.limits.max_cost_usd and not reservation.final:
                 raise LimitError(ErrorCode.DYNAMIC_BUDGET_EXCEEDED, "the cost limit is used up")
 
     def count_tool_call(self, name: str) -> None:

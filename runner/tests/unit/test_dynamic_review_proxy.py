@@ -1489,9 +1489,11 @@ def loop_request(**extra: Any) -> dict[str, Any]:
     return request_body(messages=HISTORY, tools=TOOLS, temperature=0.2, **extra)
 
 
-def wrap_up_ledger(limit: str = "0.05") -> BudgetLedger:
-    # Each call reserves 4,096 output tokens: about 0.0164 USD, so with this limit the first call
-    # of a run is already the one after which no final call would fit.
+def wrap_up_ledger(limit: str = "0.025") -> BudgetLedger:
+    # A call reserves 1,024 output tokens (0.0041 USD) and a final call after it 4,096 (0.0164 USD)
+    # and a round of growth (#540): with the margin that is 0.031 USD, so with this limit the first
+    # call of a run is already the one after which no final call would fit, and the final call
+    # (about 0.0165 USD) itself fits.
     return BudgetLedger(DynamicLimits(max_cost_usd=Decimal(limit)), unit_costs=UNIT_COSTS)
 
 
