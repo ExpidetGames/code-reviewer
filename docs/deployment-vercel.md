@@ -925,10 +925,17 @@ of the previous release: no `/stop`, `404`), `DISPATCH_STOP_REJECTED status=<n>`
 
 A stop that did not arrive or failed, a job that went back to the queue (the next attempt's VM must not be stopped), or an App
 of a previous release leave the VM running, idle and billed, until its own timeout (job timeout plus
-`SANDBOX_VM_TIMEOUT_MARGIN_SECONDS`). The **reaper** (#364) is the safety net: Vercel's cron calls
+`SANDBOX_VM_TIMEOUT_MARGIN_SECONDS`). For a job that went back to the queue the reaper ends the lost attempt's VM only while
+the retry is not yet `running`; once it is, the VM lives until its own timeout or until the job ends for good, when the stop
+by the job ends every attempt's VM. The **reaper** (#364) is the safety net: Vercel's cron calls
 `GET /api/cron/reap-sandboxes` of the Dispatcher every 5 minutes with `CRON_SECRET`, and it stops the VMs of this
 deployment that outlived their purpose.
 
+- **Deployments that share a Vercel team must not share a dispatch signing key.** A VM is scoped by the tag `app =
+  code-reviewer` and the job's UUID only, with no tag of the deployment, and the stop (like the reaper) works on the team's
+  Sandbox VMs. Two deployments (staging and production) with different signing keys cannot stop each other's VMs: a stop
+  needs a signature and a job UUID that the signing App made. Give every deployment its own `RUNNER_WEBHOOK_SECRET` /
+  `DISPATCHER_SIGNING_SECRET` and its own database; never copy one deployment's key or database snapshot into another.
 - It lists only VMs named `cr-...` with the tag `app = code-reviewer` and checks each again: only a running,
   non-persistent VM of exactly the shape our code creates is ever stopped. The snapshot pipeline's builder and check
   VMs and anything else in the project never match.
@@ -1191,8 +1198,13 @@ A self-hosted installation and a hosted one never share a database or a GitHub A
   can read job secrets by construction (`dispatcher/README.md`). The container's hardening is proven by the deploy canary,
   not assumed: a deployment whose canary does not pass is not promoted.
 - **The App's stop is best effort.** If the call does not arrive (the Dispatcher is down, the call failed after its two repeats,
-  the App is on a release without it) or the job went back to the queue, the reaper (or, failing that, the VM timeout) ends the VM,
-  billed meanwhile (section 5.5). The Dispatcher's function no longer has to outlive the job.
+  the App is on a release without it) the reaper (or, failing that, the VM timeout) ends the VM, billed meanwhile (section 5.5).
+  A job that went back to the queue is not stopped: the VM of a lost attempt whose retry is already running lives until its own
+  timeout or until the job's final stop, because the reaper keeps a VM whose job is running. The Dispatcher's function no longer
+  has to outlive the job.
+- **An accepted wake-up whose answer was lost is not stopped by the App.** The App sends a stop only for a job whose wake-up it saw
+  acknowledged (`job_dispatches.acked_at`). If the Dispatcher accepted the call but the answer never arrived (the 8 s timeout, a
+  lost response), no stop is sent for that job and only the reaper and the VM timeout end its VM.
 - **Retired:** the runner's concept. A runner still means what it did on a server.
 
 ## 10. Follow-ups

@@ -208,7 +208,8 @@ hard limit (`timeout`), and the leases and runtimes that ran out and ended the j
 claim, so the sweep, the opportunistic repair work and a claim all stop what they end). It names a job once per call, never
 for a call that changed nothing (a repeated report, a stranger's token). A job that went **back to the queue** (a lapsed
 lease or a release with attempts left) is not named: the Dispatcher stops by the job, the next attempt's VM could exist when
-the call arrives, and the reaper (job not `running`) and the VM timeout end the VM of the lost attempt.
+the call arrives. The VM of the lost attempt lives until its own timeout or until the job ends for good, when the stop by the
+job also ends it; the reaper ends it earlier only while the retry is not yet `running` (it keeps a VM whose job is `running`).
 
 **Which jobs.** Only a job whose wake-up a Dispatcher **acknowledged** (`job_dispatches.acked_at` is set). In poll mode
 (`RUNNER_DISPATCH=poll`, the default: a self-hosted runner, a Compose stack) there is no service and nothing is sent, and on an
@@ -256,8 +257,8 @@ The stop call (#487) adds no table and no column, and the dispatch contract only
 no `POST /stop` and answers `404`, which the App logs once per job (`DISPATCH_STOP_UNSUPPORTED`) and goes on; an App of the
 previous release sends no stop, and the new Dispatcher's reaper ends the VMs as it did before (`contracts/README.md`, "Rolling
 out the stop call"). The Dispatcher of this release no longer releases a job whose container ended with an error after the
-hand-over (`worker_exited`, #375): a Worker that dies is found by its lease, so such a job is requeued after two minutes
-instead of within seconds.
+hand-over (`worker_exited`, #375): a Worker that dies is found by its lease and the next expiry pass (the next claim or the sweep), so such a job is requeued
+after two minutes at the earliest and on an idle instance up to about the sweep interval, instead of within seconds.
 
 The sweep (#328) adds no table and no column. `dispatch_unavailable` is a new value in the free-text `jobs.error_code`;
 a previous release shows a failed job with a code it does not know under its general sentence and the code, never as

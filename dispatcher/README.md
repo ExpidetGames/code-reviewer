@@ -74,8 +74,13 @@ and holds only the App's address and the job credential, and nothing in it can c
 - **Log events.** `stop_received` (`jobId`, `vms`), `vm_stopped`, `vm_stop_failed`, `stop_replayed`, `stop_list_failed`
   (`code`), `stop_refused` (`verdict` only). No key, signature or platform text.
 
+A VM is scoped by the tag `app = code-reviewer` and the job's UUID, with no tag of the deployment: two deployments in one Vercel
+team must use different dispatch signing keys (and databases), or one's valid stop could name the other's job
+(`docs/deployment-vercel.md`, section 5.5).
+
 A job that goes back to the queue is **not** stopped by the App (the next attempt's VM could already exist when the call
-arrives): the reaper and the VM's own timeout end the VM of a lost attempt.
+arrives). The VM of a lost attempt lives until its own timeout or until the job ends for good, when the stop by the job also
+ends it; the reaper ends it earlier only while the retry is not yet `running` (it keeps a VM whose job is `running`).
 
 ## What the core does
 
@@ -98,7 +103,7 @@ arrives): the reaper and the VM's own timeout end the VM of a lost attempt.
    released. The credential is held in memory only, in the scope of that one launch, and is dropped when the launch resolves.
    After the hand-over the core never heartbeats again and holds nothing: the Worker owns the lease, and the Dispatcher
    neither watches the container nor releases the job (#487; the release for a container that ended with an error after the
-   hand-over, `worker_exited` of #375, is gone: a Worker that dies is found by its lease, which lapses after two minutes).
+   hand-over, `worker_exited` of #375, is gone: a Worker that dies is found by its lease, which lapses after two minutes, and then by the next expiry pass: the next claim or the sweep, so on an idle instance up to about the sweep interval).
    The release of a launch that failed is made by the App against the job credential: a job that already has its result,
    or that a newer claim holds, is answered `409`/`401` and nothing changes (a `409` is logged at info as
    `release_job_ended`; a `401`/`404` as the warning `release_not_holder`; neither is retried). The release is tried three times; if the App cannot be
@@ -185,8 +190,8 @@ Per job, after the core has claimed it:
 5. **After the hand-over the Launcher holds nothing (#487).** `launch()` resolves and ends: no `wait()` on the container, no
    work in `waitUntil`, no stop, no callback. The Worker owns the lease and the VM is ended by the App's signal (`POST /stop`,
    "The stop call"), with the reaper and the VM timeout as the safety nets. A Worker that dies after the hand-over is not
-   seen by the Dispatcher: its lease lapses after two minutes without a heartbeat and the App requeues the job (the
-   attempt is lost either way). There is no `poweroff` in the image (spike T13), so a VM is only ever ended by `stop()`
+   seen by the Dispatcher: its lease lapses after two minutes without a heartbeat and the App requeues the job at the next expiry pass (the next
+   claim or the sweep: on an idle instance up to about the sweep interval, 2 hours; the attempt is lost either way). There is no `poweroff` in the image (spike T13), so a VM is only ever ended by `stop()`
    (about 2.4 s for an idle VM, 22.6 s with a running container).
    An exit with an error _before_ the hand-over fails the launch with `worker_exited_early`, and the core releases the job
    once, with `launch_failed`.
@@ -199,7 +204,8 @@ so lowering it is a follow-up once a deployment has run without supervision. Pro
 the old supervision at 300 s, which left the VM running, idle and billed until the VM timeout: this change is the answer.
 Where the App's stop call does not arrive (the App is down, the call failed after its retries, a requeued job, a Dispatcher
 that was restarted before the stop finished), **the reaper and the VM timeout are the backstop**: the VM keeps running, idle
-and billed, until the next reaper run that finds its job not `running`, or until job + margin after its creation.
+and billed, until the next reaper run that finds its job not `running`, or until job + margin after its creation. A requeued
+job whose retry is already `running` keeps the lost attempt's VM until its own timeout, or until the job's final stop.
 
 Every failure before the hand-over stops the VM by name and ends in a `LaunchError` with a stable code and a `retryable`
 flag. The core releases the job with `launch_failed` and the App counts the attempt (three attempts, then `failed`), no
