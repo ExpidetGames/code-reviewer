@@ -837,7 +837,11 @@ no sampling parameter, and its calls cost an unknown amount.
   boolean count, cache counts that do not fit the prompt, a cache write split that does not add up) or
   that holds no token at all (LiteLLM fills a missing usage with zeros; every real answer has tokens);
   a tier other than the standard one, the fast mode, an inference region other than the default,
-  a server tool such as web search, or per-iteration usage, none of which the list can price. A cache
+  any entry of `server_tool_use` that is not zero (web search, web fetch, code execution, a tool that
+  is new), any other usage field that holds something and is not a standard token field (the list is
+  deny by default; a cost a layer states itself is ignored), or per-iteration usage, none of which
+  the list can price. The wire passes every usage field it does not translate on for that check, and
+  sends no text block that is empty or only whitespace (the API answers 400 to one). A cache
   write without a split is priced as a five minute write, the lifetime the runner's requests use.
   The result carries `costUsd` as a JSON number; a cost of a few millionths of a dollar reads back
   exactly. A Dynamic call that cannot be priced stops the run (`dynamic_accounting_failed`), as a call
