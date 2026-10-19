@@ -308,7 +308,7 @@ class PassthroughProxy:
 
     def _forwarded_headers(self, response: UpstreamResponse) -> list[tuple[str, str]]:
         return [
-            (name.lower(), value)
+            (name.lower(), self._redactor.redact(value.encode("utf-8")).decode("utf-8", "replace"))
             for name, value in response.headers
             if name.lower() in _RESPONSE_HEADERS and len(value) <= _MAX_HEADER_VALUE
         ]

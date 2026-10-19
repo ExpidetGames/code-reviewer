@@ -115,6 +115,17 @@ def test_only_a_few_headers_of_the_answer_reach_the_engine() -> None:
     assert names == {"content-type", "retry-after", "x-request-id"}
 
 
+# #550-T10
+def test_a_header_of_the_answer_that_quotes_the_key_is_redacted_too() -> None:
+    family = WireFamily.OPENAI_CHAT
+    answer = streamed(family)
+    answer.headers.append(("x-request-id", f"req_{REAL_KEY}"))
+    r = rig(family, answer)
+    sink = r.post()
+    assert REAL_KEY.encode() not in sink.everything()
+    assert dict(sink.headers)["x-request-id"] == "req_[redacted]"
+
+
 # #550-T08
 @pytest.mark.parametrize("family", FAMILIES)
 def test_a_stream_reaches_the_engine_event_by_event_and_byte_for_byte(family: WireFamily) -> None:
