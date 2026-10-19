@@ -493,6 +493,40 @@ def test_the_stopped_early_reason_of_a_run_reaches_the_reported_usage(reason: st
     assert result["usage"]["stoppedEarly"] == reason
 
 
+# #540-N4: by how much a run passed its cost limit is a fact of the usage, optional and additive.
+def test_the_excess_over_the_cost_limit_reaches_the_reported_usage() -> None:
+    printed = JobResult(
+        ok=True,
+        duration_ms=1200,
+        comment_url="https://github.com/octo/repo/pull/7#c1",
+        error_code=None,
+        log_tail="review published",
+        usage=Usage("vendor/model", 9, 1, 10, 2, False, 1.0123, limit_exceeded_by=0.0123),
+        findings=ReviewFindings(open=0, by_severity={"P0": 0, "P1": 0, "P2": 0, "P3": 0}),
+    ).to_json()
+
+    result = reported(outcome(stdout=(json.dumps(printed) + "\n").encode()))
+
+    assert result["usage"]["limitExceededBy"] == 0.0123
+
+
+# #540-N4
+@pytest.mark.parametrize("usage", [_usage(), _usage(limitExceededBy=None)])
+def test_a_run_within_its_limit_reports_no_excess(usage: dict[str, Any]) -> None:
+    assert "limitExceededBy" not in reported(outcome(stdout=result_line(usage=usage)))["usage"]
+
+
+# #540-N4: the fact is dropped when it is malformed, the rest of the usage is still reported (the
+# app never approves on it, and the tokens and the cost of the run are not lost).
+@pytest.mark.parametrize("value", [-0.5, "0.01", True, [0.01], {}, float("nan"), float("inf")])
+def test_a_malformed_excess_is_left_out_and_the_usage_is_kept(value: Any) -> None:
+    result = reported(outcome(stdout=result_line(usage=_usage(limitExceededBy=value))))
+
+    assert result["usage"] is not None
+    assert "limitExceededBy" not in result["usage"]
+    assert result["usage"]["costUsd"] == 0.0035
+
+
 # #517-B1: a run that was not stopped says nothing, and an explicit null is the same as absent.
 @pytest.mark.parametrize("usage", [_usage(), _usage(stoppedEarly=None)])
 def test_a_run_that_was_not_stopped_early_reports_no_stopped_early(usage: dict[str, Any]) -> None:
@@ -598,7 +632,17 @@ def _populated(ok: bool) -> JobResult:
         error_code=None if ok else ErrorCode.TIMEOUT,
         log_tail="review published",
         log_truncated=True,
-        usage=Usage("vendor/model", 9, 1, 10, 2, True, 0.0035, stopped_early="cost_limit"),
+        usage=Usage(
+            "vendor/model",
+            9,
+            1,
+            10,
+            2,
+            True,
+            0.0035,
+            stopped_early="cost_limit",
+            limit_exceeded_by=0.0123,
+        ),
         error_reason="no_result_from_process",
         findings=ReviewFindings(
             open=3, by_severity={"P0": 0, "P1": 1, "P2": 1, "P3": 1}, incomplete=True
