@@ -969,6 +969,7 @@ def test_a_slug_the_contract_accepts_is_still_refused_by_the_runner_without_an_e
     assert refused.value.code.value == "invalid_job"
 
 
+# #511-T13: the example advertises `anthropic` as well, and the contract file lists it (below).
 # #424-T02: a claim without the advertisement is valid and means OpenRouter; the example names it.
 def test_the_claim_request_may_leave_the_provider_advertisement_out() -> None:
     assert _accepts("ClaimRequest", {})
@@ -997,6 +998,7 @@ def test_the_claim_request_refuses_a_bad_provider_advertisement(advertised: obje
     assert not _accepts("ClaimRequest", {"llmProviders": advertised})
 
 
+# #511-T13
 # #424-T07: the providers the contract knows are the registry of the runner, in the form of the id.
 def test_the_providers_of_the_contract_are_the_providers_of_the_runner_registry() -> None:
     schema = _load(SCHEMA_PATH)
