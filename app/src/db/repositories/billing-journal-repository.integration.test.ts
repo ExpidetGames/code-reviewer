@@ -6,7 +6,7 @@
 // locking run on both: Postgres with a pool and with two pools (two app instances), SQLite with one connection and with
 // several processes on one file. Runs the Postgres half only when TEST_DATABASE_URL is set.
 import { join } from "node:path";
-import type { Kysely } from "kysely";
+import { sql, type Kysely } from "kysely";
 import { describe, expect, it } from "vitest";
 import type { BillingJournalErrorCode } from "../../billing/journal.ts";
 import {
@@ -126,6 +126,27 @@ async function thrownCode(run: () => Promise<unknown>) {
     return codeOf(error);
   }
   return undefined;
+}
+
+/**
+ * Waits until another connection is blocked on a lock, so a staged race is not decided by a timer. SQLite has one
+ * connection per database: the second transaction waits for the connection, a short pause lets it queue.
+ */
+async function untilBlocked(engine: Engine, db: Kysely<Database>) {
+  if (engine.name === "sqlite") {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    return;
+  }
+  for (let attempt = 0; attempt < 500; attempt += 1) {
+    const { rows } = await sql<{
+      n: string;
+    }>`select count(*) as n from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock'`.execute(
+      db,
+    );
+    if (Number(rows[0]?.n) > 0) return;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error("No connection ever blocked on a lock.");
 }
 
 /** The seeded generator of T11: the same numbers on every run. */
@@ -649,7 +670,7 @@ for (const engine of ENGINES) {
     // #495-T10
     it("pages 120 entries newest first with a cursor, complete, ordered and without a duplicate", async () => {
       const { db, workspaceId, otherWorkspaceId } = await setup(engine);
-      // A clock that stays on one millisecond for five entries at a time: the id breaks the tie.
+      // A clock that stays on one millisecond for five entries at a time: the sequence number breaks the tie.
       let readings = 0;
       const repo = createBillingJournalRepository(
         db,
@@ -955,6 +976,382 @@ for (const engine of ENGINES) {
         (await repo.entries({ limit: 1 })).entries[0]?.amountMicroUsd,
       ).toBe(-2400 * USD);
       await expectConsistent(repo);
+    });
+
+    // The release and the settlement of one job decide under one lock.
+    // #495-T06
+    it("refuses to charge a job whose release commits first, even when the settlement started before the commit", async () => {
+      const { db, workspaceId, repo, repoOf } = await setup(engine);
+      await repo.append(topUp(10 * USD));
+      await repo.reserve(2 * USD, "job-1");
+
+      let settlement:
+        Promise<Awaited<ReturnType<typeof repo.settle>>> | undefined;
+      await db.transaction().execute(async (trx) => {
+        expect(await repoOf(workspaceId, trx).release("job-1")).toMatchObject({
+          ok: true,
+          created: true,
+        });
+        // The settlement starts while the release is not committed yet, and has to wait for it.
+        settlement = repo.settle("job-1", charge(USD, USD));
+        await untilBlocked(engine, db);
+      });
+
+      expect(await settlement).toEqual({
+        ok: false,
+        code: "job_already_released",
+      });
+      expect(await repo.balance()).toEqual({
+        balanceMicroUsd: 10 * USD,
+        reservedMicroUsd: 0,
+      });
+      // Only the top-up, the hold and the release: no usage.
+      expect(
+        (await repo.entries({ limit: 10 })).entries.map((e) => e.type).sort(),
+      ).toEqual(["release", "reservation", "top_up"]);
+      await expectConsistent(repo);
+    });
+
+    // reserveUpTo: the hold of a claim (#498), capped by the balance under the same lock as reserve.
+    // #495-T05
+    it("holds the wanted amount when the balance covers it and the whole balance when it does not", async () => {
+      const { repo } = await setup(engine);
+      await repo.append(topUp(10 * USD));
+
+      const full = await repo.reserveUpTo("job-1", 3 * USD);
+      const partial = await repo.reserveUpTo("job-2", 20 * USD);
+
+      expect(full).toMatchObject({ ok: true, created: true });
+      expect(full.ok && full.entry.amountMicroUsd).toBe(-3 * USD);
+      expect(partial).toMatchObject({ ok: true, created: true });
+      expect(partial.ok && partial.entry.amountMicroUsd).toBe(-7 * USD);
+      expect(await repo.balance()).toEqual({
+        balanceMicroUsd: 0,
+        reservedMicroUsd: 10 * USD,
+      });
+      await expectConsistent(repo);
+    });
+
+    // #495-T02
+    it("answers a retried claim with the reservation it holds, whatever the balance and the wanted amount are now", async () => {
+      const { repo } = await setup(engine);
+      await repo.append(topUp(5 * USD, "pi_first"));
+      const first = await repo.reserve(5 * USD, "job-1");
+      await repo.append(topUp(2 * USD, "pi_second"));
+
+      const retry = await repo.reserveUpTo("job-1", 2 * USD);
+      const bigger = await repo.reserveUpTo("job-1", 50 * USD);
+
+      expect(first.ok && first.entry.amountMicroUsd).toBe(-5 * USD);
+      for (const again of [retry, bigger]) {
+        expect(again).toMatchObject({ ok: true, created: false });
+        expect(again.ok && again.entry).toEqual(first.ok && first.entry);
+      }
+      expect(await repo.balance()).toEqual({
+        balanceMicroUsd: 2 * USD,
+        reservedMicroUsd: 5 * USD,
+      });
+      await expectConsistent(repo);
+    });
+
+    // #495-T02
+    it("answers a retried claim with its reservation even when a refund has taken the balance below zero", async () => {
+      const { repo } = await setup(engine);
+      await repo.append(topUp(5 * USD));
+      await repo.reserveUpTo("job-1", 5 * USD);
+      await repo.append({
+        type: "refund",
+        amountMicroUsd: -3 * USD,
+        refKey: "re_1",
+      });
+
+      const retry = await repo.reserveUpTo("job-1", 5 * USD);
+
+      expect(retry).toMatchObject({ ok: true, created: false });
+      expect((await repo.balance()).balanceMicroUsd).toBe(-3 * USD);
+    });
+
+    // #495-T08
+    it("refuses a claim with balance_negative when the balance is zero or below, and writes nothing", async () => {
+      const { db, workspaceId, repo } = await setup(engine);
+      // No balance row at all.
+      expect(await repo.reserveUpTo("job-0", USD)).toEqual({
+        ok: false,
+        code: "balance_negative",
+        balanceMicroUsd: 0,
+      });
+      await repo.append(topUp(2 * USD));
+      await repo.reserveUpTo("job-1", 5 * USD); // takes all of it: the balance is 0
+      expect(await repo.reserveUpTo("job-2", USD)).toEqual({
+        ok: false,
+        code: "balance_negative",
+        balanceMicroUsd: 0,
+      });
+      await repo.append({
+        type: "refund",
+        amountMicroUsd: -USD,
+        refKey: "re_1",
+      });
+      expect(await repo.reserveUpTo("job-3", USD)).toEqual({
+        ok: false,
+        code: "balance_negative",
+        balanceMicroUsd: -USD,
+      });
+
+      expect(
+        (
+          await db
+            .selectFrom("billing_journal_entries")
+            .select("ref_key")
+            .where("workspace_id", "=", workspaceId)
+            .where("type", "=", "reservation")
+            .execute()
+        ).map((row) => row.ref_key),
+      ).toEqual(["job-1"]);
+      await expectConsistent(repo);
+    });
+
+    // #495-T07
+    it("refuses a claim without a job or with an amount that is not a positive integer", async () => {
+      const { repo } = await setup(engine);
+      await repo.append(topUp(USD));
+
+      for (const attempt of [
+        () => repo.reserveUpTo("", USD),
+        () => repo.reserveUpTo("job-1", 0),
+        () => repo.reserveUpTo("job-1", -1),
+        () => repo.reserveUpTo("job-1", 1.5),
+      ])
+        expect(await thrownCode(attempt)).toBe("invalid_entry");
+      expect((await repo.balance()).reservedMicroUsd).toBe(0);
+    });
+
+    // #495-T05
+    it("lets 20 parallel claims of up to 3 against a balance of 10 hold exactly the balance", async () => {
+      const { db, workspaceId, repo } = await setup(engine);
+      await repo.append(topUp(10 * USD));
+
+      const results = await Promise.all(
+        Array.from({ length: 20 }, (_, index) =>
+          repo.reserveUpTo(`job-${index}`, 3 * USD),
+        ),
+      );
+
+      const held = results.flatMap((result) =>
+        result.ok ? [-result.entry.amountMicroUsd] : [],
+      );
+      expect(held.sort((a, b) => a - b)).toEqual([
+        USD,
+        3 * USD,
+        3 * USD,
+        3 * USD,
+      ]);
+      expect(
+        results.filter(
+          (result) => !result.ok && result.code === "balance_negative",
+        ),
+      ).toHaveLength(16);
+      expect(await repo.balance()).toEqual({
+        balanceMicroUsd: 0,
+        reservedMicroUsd: 10 * USD,
+      });
+      expect(await sumOfEntries(db, workspaceId)).toBe(0);
+      await expectConsistent(repo);
+    });
+
+    // #495-T06
+    it("holds one job once when the same claim is repeated at the same moment", async () => {
+      const { repo } = await setup(engine);
+      await repo.append(topUp(10 * USD));
+
+      const results = await Promise.all(
+        Array.from({ length: 6 }, () => repo.reserveUpTo("job-1", 4 * USD)),
+      );
+
+      expect(
+        results.filter((result) => result.ok && result.created),
+      ).toHaveLength(1);
+      expect(results.every((result) => result.ok)).toBe(true);
+      expect(await repo.balance()).toEqual({
+        balanceMicroUsd: 6 * USD,
+        reservedMicroUsd: 4 * USD,
+      });
+    });
+
+    // verify reads the sum and the cache as one snapshot.
+    // #495-T11
+    it("reads the sum and the cache in one statement", async () => {
+      const { db, workspaceId, repo } = await setup(engine);
+      await repo.append(topUp(5 * USD));
+      let statements = 0;
+      const counting = db.withPlugin({
+        transformQuery: ({ node }) => node,
+        async transformResult({ result }) {
+          statements += 1;
+          return result;
+        },
+      });
+
+      const verified = await createBillingJournalRepository(
+        counting,
+        workspaceId,
+      ).verify();
+
+      expect(verified).toMatchObject({ consistent: true });
+      expect(statements).toBe(1);
+    });
+
+    // #495-T11
+    it("reports no drift while other callers write", async () => {
+      const { repo } = await setup(engine);
+      await repo.append(topUp(100 * USD));
+      let writing = true;
+      const writers = [0, 1].map(async (writer) => {
+        for (let index = 0; writing; index += 1) {
+          await repo.append(topUp(USD, `pi_busy_${writer}_${index}`));
+          await repo.reserve(USD, `busy_${writer}_${index}`);
+          await repo.settle(`busy_${writer}_${index}`, charge(1, 1));
+        }
+      });
+
+      const drifting = [];
+      for (let round = 0; round < 60; round += 1) {
+        const verified = await repo.verify();
+        if (!verified.consistent) drifting.push(verified);
+      }
+      writing = false;
+      await Promise.all(writers);
+
+      expect(drifting).toEqual([]);
+      await expectConsistent(repo);
+    });
+
+    // A repeated settlement is the same settlement or a conflict.
+    // #495-T03
+    it("refuses a settlement repeated with the same total but other parts, minutes or kind", async () => {
+      const { repo } = await setup(engine);
+      await repo.append(topUp(10 * USD));
+      await repo.reserve(2 * USD, "job-1");
+      const first = {
+        aiMicroUsd: USD,
+        infraMicroUsd: 500_000,
+        minutes: 3,
+        reviewKind: "diff" as const,
+      };
+      await repo.settle("job-1", first);
+      const before = await repo.balance();
+
+      for (const other of [
+        { ...first, aiMicroUsd: 0, infraMicroUsd: 1_500_000 },
+        { ...first, aiMicroUsd: 1_500_000, infraMicroUsd: 0 },
+        { ...first, minutes: 9 },
+        { ...first, reviewKind: "dynamic" as const },
+      ])
+        expect(await thrownCode(() => repo.settle("job-1", other))).toBe(
+          "idempotency_conflict",
+        );
+
+      expect(await repo.settle("job-1", first)).toMatchObject({
+        ok: true,
+        created: false,
+      });
+      expect(await repo.balance()).toEqual(before);
+      await expectConsistent(repo);
+    });
+
+    // #495-T03
+    it("refuses an appended usage with the key and the amount of an entry but other parts, minutes or kind", async () => {
+      const { repo } = await setup(engine);
+      await repo.append(topUp(10 * USD));
+      await repo.reserve(2 * USD, "job-1");
+      const usage = {
+        type: "usage" as const,
+        amountMicroUsd: -1_500_000,
+        jobId: "job-1",
+        refKey: "job-1",
+        reviewKind: "diff" as const,
+        minutes: 3,
+        aiMicroUsd: USD,
+        infraMicroUsd: 500_000,
+      };
+      await repo.append(usage);
+
+      for (const other of [
+        { ...usage, aiMicroUsd: 500_000, infraMicroUsd: USD },
+        { ...usage, minutes: 4 },
+        { ...usage, reviewKind: "dynamic" as const },
+      ])
+        expect(await thrownCode(() => repo.append(other))).toBe(
+          "idempotency_conflict",
+        );
+      expect(await repo.append(usage)).toMatchObject({ created: false });
+    });
+
+    // #495-T02
+    it("says a settlement is new when it wrote the usage, not when it wrote the release", async () => {
+      const { repo } = await setup(engine);
+      await repo.append(topUp(10 * USD));
+      await repo.reserve(2 * USD, "job-1");
+      // The usage was appended by hand; the settlement then writes only the release.
+      await repo.append({
+        type: "usage",
+        amountMicroUsd: -USD,
+        jobId: "job-1",
+        refKey: "job-1",
+        reviewKind: "diff",
+        minutes: 3,
+        aiMicroUsd: 0,
+        infraMicroUsd: USD,
+      });
+
+      const settled = await repo.settle("job-1", charge(0, USD));
+
+      expect(settled).toMatchObject({ ok: true, created: false });
+      expect(settled.ok && settled.release).toBeDefined();
+      expect(await repo.balance()).toEqual({
+        balanceMicroUsd: 9 * USD,
+        reservedMicroUsd: 0,
+      });
+    });
+
+    // A stable order: entries written in one millisecond keep the order they were written in.
+    // #495-T10
+    it("lists entries of one millisecond in the order they were written, newest first, across pages", async () => {
+      const { db, workspaceId } = await setup(engine);
+      const repo = createBillingJournalRepository(
+        db,
+        workspaceId,
+        () => new Date(START),
+      );
+      await repo.append(topUp(20 * USD));
+      for (let index = 0; index < 12; index += 1) {
+        await repo.reserve(USD, `job-${index}`);
+        await repo.settle(`job-${index}`, charge(0, 500_000));
+      }
+      const written = (await repo.entries({ limit: 200 })).entries;
+
+      const seen: string[] = [];
+      let cursor: Awaited<ReturnType<typeof repo.entries>>["next"];
+      do {
+        const page = await repo.entries({ cursor, limit: 5 });
+        seen.push(...page.entries.map((entry) => entry.id));
+        cursor = page.next;
+      } while (cursor !== undefined);
+
+      expect(new Set(written.map((entry) => entry.createdAt)).size).toBe(1);
+      expect(seen).toEqual(written.map((entry) => entry.id));
+      // Per job the reservation comes before the release and the usage, so newest first it is the other way round.
+      for (let index = 0; index < 12; index += 1) {
+        const positions = ["usage", "release", "reservation"].map((type) =>
+          written.findIndex(
+            (entry) => entry.type === type && entry.jobId === `job-${index}`,
+          ),
+        );
+        expect(positions).toEqual([...positions].sort((a, b) => a - b));
+      }
+      const seqs = written.map((entry) => entry.seq);
+      expect(seqs).toEqual([...seqs].sort((a, b) => b - a));
+      expect(new Set(seqs).size).toBe(seqs.length);
     });
   });
 }

@@ -1104,6 +1104,16 @@ const CASES: Case[] = [
       }),
   },
   {
+    name: "billing.reserveUpTo",
+    run: (a, b) => a.billing.reserveUpTo(b.heldJobId, 1_000_000),
+    expectAnswer: (answer, a) =>
+      expect(answer).toMatchObject({
+        ok: true,
+        created: true,
+        entry: { workspaceId: a.workspaceId },
+      }),
+  },
+  {
     name: "billing.settle",
     run: (a, b) =>
       a.billing.settle(b.heldJobId, {
