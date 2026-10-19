@@ -174,6 +174,60 @@ describe("one run for the admin", () => {
     expect(text).not.toContain("SECRET-LEASE");
   });
 
+  // #541-T09: an allow-list, not "everything but the log": a field a later change adds to the workspace view
+  // does not reach the admin by itself. Left out on purpose: how the run was triggered and by whom, the
+  // comment and pull request addresses, the commit, the reason a checkout failed and the problem sentence.
+  it("has exactly the fields the admin page shows and none of the others of the workspace view", async () => {
+    const failed: DirectoryRun = {
+      ...stored,
+      job: job({
+        status: "failed",
+        errorCode: "timeout",
+        result: {
+          ok: false,
+          commentUrl: "https://github.com/acme/widgets/pull/7#SECRET-COMMENT",
+          errorReason: "no_result_from_process",
+          logTail: "SECRET-LOG",
+        } as never,
+      }),
+    };
+    const service = createAdminRunsService({
+      directory: directory(failed),
+      now: () => NOW,
+    });
+
+    const detail = await service.get(ID);
+
+    expect(Object.keys(detail?.run ?? {}).sort()).toEqual(
+      [
+        "callTrace",
+        "costHidden",
+        "createdAt",
+        "durationMs",
+        "errorCode",
+        "id",
+        "prNumber",
+        "project",
+        "reviewKind",
+        "status",
+        "usage",
+      ].sort(),
+    );
+    for (const left of [
+      "trigger",
+      "commentUrl",
+      "prUrl",
+      "headSha",
+      "errorReason",
+      "problem",
+    ])
+      expect(detail?.run).not.toHaveProperty(left);
+    const text = JSON.stringify(detail);
+    expect(text).not.toContain("SECRET-COMMENT");
+    expect(text).not.toContain("octocat");
+    expect(text).not.toContain("0123456789abcdef");
+  });
+
   // #541-T09
   it("shows the cost of a run on the operator's key in full", async () => {
     const service = createAdminRunsService({

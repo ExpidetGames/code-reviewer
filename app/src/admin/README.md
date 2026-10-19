@@ -128,7 +128,9 @@ identity linked to the acting admin (`github-identity.ts`: a row in `accounts`),
 `/admin/runs` lists the newest runs of every workspace (workspace, project and pull request, review kind, status, time,
 duration, error code) and `/admin/runs/<id>` shows one: its facts, what it consumed (model, tokens, cost in full, why it
 stopped early) and the two tables of the call trace (`app/src/runs/ui/call-trace.tsx`, `contracts/README.md`). The operator
-pays for the runs, so the cost is shown; the log of a run and the question of an `/ask` never reach this view. It reads
+pays for the runs, so the cost is shown; the view names the fields it shows (`AdminRunDetailView`), so the log, the
+question of an `/ask`, the trigger and actor, the pull request and comment addresses, the commit and the failure reason
+and problem never reach it, and a field added to the workspace view does not appear here by itself. It reads
 through `db/repositories/job-directory-repository.ts`, an instance level repository that only reads (`src/db/README.md`,
 "Workspace scoping"); the pages ask `requireAdmin()` first like every page of the portal.
 

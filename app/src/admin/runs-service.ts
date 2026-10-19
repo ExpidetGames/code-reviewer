@@ -35,8 +35,26 @@ export type AdminRunsListView = { runs: AdminRunRowView[]; hasMore: boolean };
 export type AdminRunDetailView = {
   workspaceSlug: string;
   workspaceName: string;
-  /** The run as the Runs page of a workspace knows it, without the log and the question of an `/ask`. */
-  run: Omit<RunDetailView, "log" | "args">;
+  /**
+   * What the admin page shows of a run, named one by one: a field the workspace view gets later does not
+   * reach the admin by itself. Not here on purpose: the log and the question of an `/ask`, how the run was
+   * triggered and by whom, the pull request and comment addresses, the commit, why a checkout failed and the
+   * problem sentence (all of it is what the repository said, not what the run did).
+   */
+  run: Pick<
+    RunDetailView,
+    | "id"
+    | "project"
+    | "prNumber"
+    | "reviewKind"
+    | "status"
+    | "errorCode"
+    | "createdAt"
+    | "durationMs"
+    | "usage"
+    | "callTrace"
+    | "costHidden"
+  >;
 };
 
 export type AdminRunsService = {
@@ -87,19 +105,29 @@ export function createAdminRunsService(deps: {
       if (!parseJobId(id)) return undefined;
       const stored = await deps.directory.get(id);
       if (stored === undefined) return undefined;
-      // Left out on purpose: the log and the question are what the repository said, not what the run did.
-      const { log, args, ...run } = toRunDetailView(
+      const view = toRunDetailView(
         stored.job,
         stored.project,
         now(),
         redact,
         false,
       );
-      void [log, args];
       return {
         workspaceSlug: stored.workspaceSlug,
         workspaceName: stored.workspaceName,
-        run,
+        run: {
+          id: view.id,
+          project: view.project,
+          prNumber: view.prNumber,
+          reviewKind: view.reviewKind,
+          status: view.status,
+          errorCode: view.errorCode,
+          createdAt: view.createdAt,
+          durationMs: view.durationMs,
+          usage: view.usage,
+          callTrace: view.callTrace,
+          costHidden: view.costHidden,
+        },
       };
     },
   };
