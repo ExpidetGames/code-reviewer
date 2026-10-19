@@ -100,6 +100,17 @@ export type RunnerJobsRepositoryOptions = {
    * figure or a name. Same rules as `onRefused` (a callback that throws is logged and ignored).
    */
   onUnknownCostSettled?: (settlement: UnknownCostSettlement) => void;
+  /**
+   * #487: called once per call that ended the claims of jobs for good, with the ids of the jobs, after the transaction
+   * that ended them committed: a result, a failure or a cancel reported by the holder, a job given back on its last
+   * attempt, a heartbeat past the hard limit, and the leases and runtimes that ran out and ended the job (in
+   * `expireStaleJobs` and in the expiry step of a claim). The running server tells the Dispatcher to stop those jobs'
+   * VMs. A job that went back to the queue is **not** named: the Dispatcher stops by job, and the next attempt's VM may
+   * exist by the time the call arrives; the reaper and the VM's own timeout end the VM of the lost attempt. Same rules as
+   * `onRefused`: a callback that throws is logged and ignored, and a repository that joined a caller's transaction calls
+   * it never (it cannot see the commit).
+   */
+  onClaimsEnded?: (jobIds: readonly string[]) => void;
 };
 
 /**
@@ -309,13 +320,19 @@ export function createRunnerJobsRepository(
     run: (
       executor: Kysely<Database>,
       unknownCost: UnknownCostSettlement[],
+      endedClaims: string[],
     ) => Promise<T>,
   ): Promise<T> {
     const unknownCost: UnknownCostSettlement[] = [];
-    const result = await inTransaction((trx) => run(trx, unknownCost));
+    const endedClaims: string[] = [];
+    const result = await inTransaction((trx) =>
+      run(trx, unknownCost, endedClaims),
+    );
     if (db.isTransaction) return result;
     for (const settlement of unknownCost)
       notify(() => options.onUnknownCostSettled?.(settlement));
+    if (endedClaims.length > 0)
+      notify(() => options.onClaimsEnded?.(endedClaims));
     return result;
   }
 
@@ -484,10 +501,37 @@ export function createRunnerJobsRepository(
     return Number(result.numUpdatedRows);
   }
 
+  /**
+   * #487: the running jobs whose claim the passes of `expire` act on: the lease ran out or the runtime is past the hard
+   * limit. Read after the rows were reserved and before the passes change them, so it is the set they act on.
+   */
+  async function claimsEndingByExpiry(
+    executor: Kysely<Database>,
+    current: Date,
+  ): Promise<string[]> {
+    const timestamp = formatTimestamp(current);
+    const startedBefore = formatTimestamp(
+      new Date(current.getTime() - limits.maxRuntimeMs),
+    );
+    const rows = await executor
+      .selectFrom("jobs")
+      .select("id")
+      .where("status", "=", "running")
+      .where((eb) =>
+        eb.or([
+          eb("lease_expires_at", "<=", timestamp),
+          eb("claimed_at", "<=", startedBefore),
+        ]),
+      )
+      .execute();
+    return rows.map((row) => row.id);
+  }
+
   async function expire(
     executor: Kysely<Database>,
     current: Date,
     unknownCost: UnknownCostSettlement[],
+    endedClaims: string[],
   ): Promise<ExpiryReport> {
     const timestamp = formatTimestamp(current);
     // Before the expiry passes or claim: reserve all live candidates in the same row order. The
@@ -499,6 +543,7 @@ export function createRunnerJobsRepository(
         .select("id")
         .where("status", "in", ["queued", "running"]),
     );
+    const expiring = await claimsEndingByExpiry(executor, current);
     if (!(await dynamicReviewAllowed(executor))) {
       await executor
         .updateTable("jobs")
@@ -528,6 +573,18 @@ export function createRunnerJobsRepository(
     // whose runner vanished long ago is retried, not failed for taking long.
     const timedOut = await failTimedOut(executor, {}, current);
     unknownCost.push(...(await closeRecordsOfEndedJobs(executor, timestamp)));
+    // Only the jobs that are over: one that went back to the queue gets a new claim, and its VM must not be stopped.
+    if (expiring.length > 0)
+      endedClaims.push(
+        ...(
+          await executor
+            .selectFrom("jobs")
+            .select("id")
+            .where("id", "in", expiring)
+            .where("status", "<>", "queued")
+            .execute()
+        ).map((row) => row.id),
+      );
     return {
       requeued: lost.requeued,
       leaseExpired: lost.failed,
@@ -656,119 +713,125 @@ export function createRunnerJobsRepository(
     async claimNext(runnerId, engines = DEFAULT_ENGINES, claimOptions = {}) {
       const refusals: ClaimRefusal[] = [];
       const ignoredCostLimits = new Set<string>();
-      const claimed = await inAlertingTransaction(async (trx, unknownCost) => {
-        const current = now();
-        await expire(trx, current, unknownCost);
-        // The credential is only ever returned; the database gets its hash as the lease token.
-        const credential =
-          claimOptions.workerCredential === true ? newCredential() : undefined;
-        const leaseToken =
-          credential === undefined ? newToken() : workerLeaseToken(credential);
-        const claim = {
-          runnerId,
-          leaseToken,
-          now: current,
-          leaseExpiresAt: new Date(current.getTime() + limits.leaseMs),
-          ...(claimOptions.acceptsSupersede === true
-            ? { acceptsSupersede: true }
-            : {}),
-        };
-        const reviewKinds = reviewKindsForEngines(engines);
-        // #322: the pool cap. Atomic because a claim is the only way a job becomes running and every
-        // claim runs under the exclusive gate lock of `inTransaction` (Postgres) or the write lock of the
-        // connection (SQLite): two claims of one pool cannot both count below the cap and then both
-        // claim. The count follows `expire`, so a lapsed lease does not hold a slot.
-        if (
-          claimOptions.maxRunning !== undefined &&
-          (await runningInPool(trx, runnerId)) >= claimOptions.maxRunning
-        )
-          return null;
-        for (let refused = 0; refused < MAX_REFUSED_PER_CLAIM; refused += 1) {
-          const row = await (
-            driver === "postgres"
-              ? claimOldestDueJobPostgres
-              : claimOldestDueJob
-          )(trx, claim, reviewKinds, claimOptions.jobId);
-          if (row === undefined) return null;
-          // #277: the limits and the suspension of the job's workspace, decided in this transaction, before
-          // the record is reserved: a refused job leaves no record, and two claims cannot both take the
-          // last unit of a limit.
-          const { admission, hadRecord, ignoredCostLimit } =
-            await admitClaimedJob(trx, row, () => current);
-          if (ignoredCostLimit) ignoredCostLimits.add(row.workspace_id);
-          if (!admission.allow) {
-            const detail = {
-              ...(admission.detail === undefined
-                ? {}
-                : { detail: admission.detail }),
-              ...(admission.periodStart === undefined
-                ? {}
-                : { periodStart: admission.periodStart }),
-            };
-            if (isJobIndependentRefusal(admission.errorCode)) {
-              const ended = await refuseDueJobsOfWorkspace(
-                trx,
-                row.workspace_id,
-                row.id,
-                admission.errorCode,
-                current,
-              );
-              // Any of them may have had a record that counted (claimed before, lost its lease).
-              unknownCost.push(
-                ...(await closeRecordsOfEndedJobs(
+      const claimed = await inAlertingTransaction(
+        async (trx, unknownCost, endedClaims) => {
+          const current = now();
+          await expire(trx, current, unknownCost, endedClaims);
+          // The credential is only ever returned; the database gets its hash as the lease token.
+          const credential =
+            claimOptions.workerCredential === true
+              ? newCredential()
+              : undefined;
+          const leaseToken =
+            credential === undefined
+              ? newToken()
+              : workerLeaseToken(credential);
+          const claim = {
+            runnerId,
+            leaseToken,
+            now: current,
+            leaseExpiresAt: new Date(current.getTime() + limits.leaseMs),
+            ...(claimOptions.acceptsSupersede === true
+              ? { acceptsSupersede: true }
+              : {}),
+          };
+          const reviewKinds = reviewKindsForEngines(engines);
+          // #322: the pool cap. Atomic because a claim is the only way a job becomes running and every
+          // claim runs under the exclusive gate lock of `inTransaction` (Postgres) or the write lock of the
+          // connection (SQLite): two claims of one pool cannot both count below the cap and then both
+          // claim. The count follows `expire`, so a lapsed lease does not hold a slot.
+          if (
+            claimOptions.maxRunning !== undefined &&
+            (await runningInPool(trx, runnerId)) >= claimOptions.maxRunning
+          )
+            return null;
+          for (let refused = 0; refused < MAX_REFUSED_PER_CLAIM; refused += 1) {
+            const row = await (
+              driver === "postgres"
+                ? claimOldestDueJobPostgres
+                : claimOldestDueJob
+            )(trx, claim, reviewKinds, claimOptions.jobId);
+            if (row === undefined) return null;
+            // #277: the limits and the suspension of the job's workspace, decided in this transaction, before
+            // the record is reserved: a refused job leaves no record, and two claims cannot both take the
+            // last unit of a limit.
+            const { admission, hadRecord, ignoredCostLimit } =
+              await admitClaimedJob(trx, row, () => current);
+            if (ignoredCostLimit) ignoredCostLimits.add(row.workspace_id);
+            if (!admission.allow) {
+              const detail = {
+                ...(admission.detail === undefined
+                  ? {}
+                  : { detail: admission.detail }),
+                ...(admission.periodStart === undefined
+                  ? {}
+                  : { periodStart: admission.periodStart }),
+              };
+              if (isJobIndependentRefusal(admission.errorCode)) {
+                const ended = await refuseDueJobsOfWorkspace(
                   trx,
-                  formatTimestamp(current),
-                )),
-              );
-              for (const job of ended)
-                refusals.push({
-                  jobId: job.id,
-                  workspaceId: row.workspace_id,
-                  repositoryId: job.repository_id,
-                  prNumber: job.pr_number,
-                  triggerKind: job.trigger_kind,
-                  errorCode: admission.errorCode,
-                  ...detail,
-                });
+                  row.workspace_id,
+                  row.id,
+                  admission.errorCode,
+                  current,
+                );
+                // Any of them may have had a record that counted (claimed before, lost its lease).
+                unknownCost.push(
+                  ...(await closeRecordsOfEndedJobs(
+                    trx,
+                    formatTimestamp(current),
+                  )),
+                );
+                for (const job of ended)
+                  refusals.push({
+                    jobId: job.id,
+                    workspaceId: row.workspace_id,
+                    repositoryId: job.repository_id,
+                    prNumber: job.pr_number,
+                    triggerKind: job.trigger_kind,
+                    errorCode: admission.errorCode,
+                    ...detail,
+                  });
+                continue;
+              }
+              await refuseClaimedJob(trx, row.id, admission.errorCode, current);
+              // A job claimed again after a lost lease had a record that counted: it ends with the job.
+              if (hadRecord)
+                unknownCost.push(
+                  ...(await closeRecordsOfEndedJobs(
+                    trx,
+                    formatTimestamp(current),
+                  )),
+                );
+              refusals.push({
+                jobId: row.id,
+                workspaceId: row.workspace_id,
+                repositoryId: row.repository_id,
+                prNumber: row.pr_number,
+                triggerKind: row.trigger_kind,
+                errorCode: admission.errorCode,
+                ...detail,
+              });
               continue;
             }
-            await refuseClaimedJob(trx, row.id, admission.errorCode, current);
-            // A job claimed again after a lost lease had a record that counted: it ends with the job.
-            if (hadRecord)
-              unknownCost.push(
-                ...(await closeRecordsOfEndedJobs(
-                  trx,
-                  formatTimestamp(current),
-                )),
-              );
-            refusals.push({
-              jobId: row.id,
-              workspaceId: row.workspace_id,
-              repositoryId: row.repository_id,
-              prNumber: row.pr_number,
-              triggerKind: row.trigger_kind,
-              errorCode: admission.errorCode,
-              ...detail,
-            });
-            continue;
+            // The record is reserved in the transaction of the claim, so a job handed out always counts. The
+            // key mode is the workspace's own until the claim route has resolved the access (`setKeyMode`); a
+            // job claimed again keeps the record it has.
+            await createUsageRecordsRepository(
+              trx,
+              row.workspace_id,
+              () => current,
+            ).reserve(row.id, "own");
+            return {
+              job: toJob(row),
+              leaseToken,
+              ...(credential === undefined ? {} : { credential }),
+            };
           }
-          // The record is reserved in the transaction of the claim, so a job handed out always counts. The
-          // key mode is the workspace's own until the claim route has resolved the access (`setKeyMode`); a
-          // job claimed again keeps the record it has.
-          await createUsageRecordsRepository(
-            trx,
-            row.workspace_id,
-            () => current,
-          ).reserve(row.id, "own");
-          return {
-            job: toJob(row),
-            leaseToken,
-            ...(credential === undefined ? {} : { credential }),
-          };
-        }
-        // Many jobs in a row were refused; the runner asks again.
-        return null;
-      });
+          // Many jobs in a row were refused; the runner asks again.
+          return null;
+        },
+      );
       // After the commit, and never able to fail it: a claimed job is already running under its lease.
       for (const refusal of refusals)
         notify(() => options.onRefused?.(refusal));
@@ -809,7 +872,7 @@ export function createRunnerJobsRepository(
 
     heartbeat(jobId, leaseToken) {
       return inAlertingTransaction<HeartbeatResult>(
-        async (trx, unknownCost) => {
+        async (trx, unknownCost, endedClaims) => {
           const current = now();
           const timestamp = formatTimestamp(current);
           // The hard limit does not depend on anyone else's claim: the holder that is past it learns
@@ -819,10 +882,12 @@ export function createRunnerJobsRepository(
             { claim: { jobId, leaseToken } },
             current,
           );
-          if (timedOut > 0)
+          if (timedOut > 0) {
+            endedClaims.push(jobId);
             unknownCost.push(
               ...(await closeRecordsOfEndedJobs(trx, timestamp)),
             );
+          }
           const row = await trx
             .updateTable("jobs")
             .set({
@@ -869,158 +934,168 @@ export function createRunnerJobsRepository(
       const target: JobStatus = outcome.ok ? "succeeded" : "failed";
       const errorCode = outcome.ok ? null : outcome.errorCode;
       const result = outcome.result ?? null;
-      return inAlertingTransaction<CompleteResult>(async (trx, unknownCost) => {
-        const timestamp = formatTimestamp(now());
-        const finished = await trx
-          .updateTable("jobs")
-          .set({
-            status: target,
-            result: result === null ? null : encodeJson(result),
-            error_code: errorCode,
-            lease_expires_at: null,
-            finished_at: timestamp,
-            updated_at: timestamp,
-          })
-          .where(runningWhere({ claim: { jobId, leaseToken } }))
-          .returningAll()
-          .executeTakeFirst();
-        if (finished !== undefined) {
-          // Settled from what the runner reported, in the same transaction as the job's end.
-          const settlement = settlementOfOutcome(outcome);
-          const settled = await createUsageRecordsRepository(
-            trx,
-            finished.workspace_id,
-            now,
-          ).settle(finished.id, settlement);
-          // #361: no cost limit bounds a run without a cost; it is reported so it can be watched (once: when this
-          // call settled the record, not when it was settled already).
-          if (
-            settled &&
-            settlement.state === "settled" &&
-            settlement.costMicroUsd === null
-          )
-            unknownCost.push({
-              workspaceId: finished.workspace_id,
-              jobId: finished.id,
-            });
-          return { status: "completed", job: toJob(finished) };
-        }
-
-        // Not running any more: either this claim already reported (same or other outcome), or it
-        // was lost, or it never existed.
-        const row = await trx
-          .selectFrom("jobs")
-          .selectAll()
-          .where("id", "=", jobId)
-          .where("lease_token", "=", leaseToken)
-          .executeTakeFirst();
-        if (row === undefined) return { status: "not_holder" };
-        const job = toJob(row);
-        if (job.status === "superseded") {
-          // #397: the report of a run a newer push replaced is stored once and settles its record (the cost it
-          // measured is usage, the run is not counted as a run of the quota). The job stays `superseded`. Another
-          // report, after the first, is judged by the same rule as for any job.
-          if (row.claimed_at === null) return { status: "not_holder" };
-          if (row.result !== null)
-            return isDeepStrictEqual(job.result, result)
-              ? { status: "already_completed", job }
-              : { status: "outcome_conflict", job };
+      return inAlertingTransaction<CompleteResult>(
+        async (trx, unknownCost, endedClaims) => {
           const timestamp = formatTimestamp(now());
-          // The claim lasts the drain window and the report is taken for a grace after it, the time before which
-          // the sweep does not settle the record (`closeRecordsOfEndedJobs`). Later the record is (or may be)
-          // settled with an unknown cost already, and a record is settled once: the report is refused, like a
-          // heartbeat, instead of being stored with a cost that is not applied.
-          if (
-            row.lease_expires_at === null ||
-            Date.parse(row.lease_expires_at) + SUPERSEDED_REPORT_GRACE_MS <=
-              now().getTime()
-          )
-            return { status: "not_holder" };
-          const stored = await trx
+          const finished = await trx
             .updateTable("jobs")
             .set({
+              status: target,
               result: result === null ? null : encodeJson(result),
+              error_code: errorCode,
+              lease_expires_at: null,
+              finished_at: timestamp,
               updated_at: timestamp,
             })
-            .where("id", "=", jobId)
-            .where("lease_token", "=", leaseToken)
-            .where("status", "=", "superseded")
-            .where("result", "is", null)
+            .where(runningWhere({ claim: { jobId, leaseToken } }))
             .returningAll()
             .executeTakeFirst();
-          if (stored === undefined) return { status: "not_holder" };
-          const settlement = settlementOfSupersededOutcome(outcome);
-          const settled = await createUsageRecordsRepository(
-            trx,
-            stored.workspace_id,
-            now,
-          ).settle(stored.id, settlement);
-          if (
-            settled &&
-            settlement.state === "settled" &&
-            settlement.costMicroUsd === null
-          )
-            unknownCost.push({
-              workspaceId: stored.workspace_id,
-              jobId: stored.id,
-            });
-          return { status: "completed", job: toJob(stored) };
-        }
-        if (job.status !== "succeeded" && job.status !== "failed")
-          return { status: "not_holder" };
-        const sameOutcome =
-          job.status === target &&
-          job.errorCode === errorCode &&
-          isDeepStrictEqual(job.result, result);
-        return sameOutcome
-          ? { status: "already_completed", job }
-          : { status: "outcome_conflict", job };
-      });
+          if (finished !== undefined) {
+            endedClaims.push(jobId);
+            // Settled from what the runner reported, in the same transaction as the job's end.
+            const settlement = settlementOfOutcome(outcome);
+            const settled = await createUsageRecordsRepository(
+              trx,
+              finished.workspace_id,
+              now,
+            ).settle(finished.id, settlement);
+            // #361: no cost limit bounds a run without a cost; it is reported so it can be watched (once: when this
+            // call settled the record, not when it was settled already).
+            if (
+              settled &&
+              settlement.state === "settled" &&
+              settlement.costMicroUsd === null
+            )
+              unknownCost.push({
+                workspaceId: finished.workspace_id,
+                jobId: finished.id,
+              });
+            return { status: "completed", job: toJob(finished) };
+          }
+
+          // Not running any more: either this claim already reported (same or other outcome), or it
+          // was lost, or it never existed.
+          const row = await trx
+            .selectFrom("jobs")
+            .selectAll()
+            .where("id", "=", jobId)
+            .where("lease_token", "=", leaseToken)
+            .executeTakeFirst();
+          if (row === undefined) return { status: "not_holder" };
+          const job = toJob(row);
+          if (job.status === "superseded") {
+            // #397: the report of a run a newer push replaced is stored once and settles its record (the cost it
+            // measured is usage, the run is not counted as a run of the quota). The job stays `superseded`. Another
+            // report, after the first, is judged by the same rule as for any job.
+            if (row.claimed_at === null) return { status: "not_holder" };
+            if (row.result !== null)
+              return isDeepStrictEqual(job.result, result)
+                ? { status: "already_completed", job }
+                : { status: "outcome_conflict", job };
+            const timestamp = formatTimestamp(now());
+            // The claim lasts the drain window and the report is taken for a grace after it, the time before which
+            // the sweep does not settle the record (`closeRecordsOfEndedJobs`). Later the record is (or may be)
+            // settled with an unknown cost already, and a record is settled once: the report is refused, like a
+            // heartbeat, instead of being stored with a cost that is not applied.
+            if (
+              row.lease_expires_at === null ||
+              Date.parse(row.lease_expires_at) + SUPERSEDED_REPORT_GRACE_MS <=
+                now().getTime()
+            )
+              return { status: "not_holder" };
+            const stored = await trx
+              .updateTable("jobs")
+              .set({
+                result: result === null ? null : encodeJson(result),
+                updated_at: timestamp,
+              })
+              .where("id", "=", jobId)
+              .where("lease_token", "=", leaseToken)
+              .where("status", "=", "superseded")
+              .where("result", "is", null)
+              .returningAll()
+              .executeTakeFirst();
+            if (stored === undefined) return { status: "not_holder" };
+            const settlement = settlementOfSupersededOutcome(outcome);
+            const settled = await createUsageRecordsRepository(
+              trx,
+              stored.workspace_id,
+              now,
+            ).settle(stored.id, settlement);
+            if (
+              settled &&
+              settlement.state === "settled" &&
+              settlement.costMicroUsd === null
+            )
+              unknownCost.push({
+                workspaceId: stored.workspace_id,
+                jobId: stored.id,
+              });
+            endedClaims.push(jobId);
+            return { status: "completed", job: toJob(stored) };
+          }
+          if (job.status !== "succeeded" && job.status !== "failed")
+            return { status: "not_holder" };
+          const sameOutcome =
+            job.status === target &&
+            job.errorCode === errorCode &&
+            isDeepStrictEqual(job.result, result);
+          return sameOutcome
+            ? { status: "already_completed", job }
+            : { status: "outcome_conflict", job };
+        },
+      );
     },
 
     release(jobId, leaseToken, reason, releaseOptions = {}) {
-      return inAlertingTransaction<ReleaseResult>(async (trx, unknownCost) => {
-        const timestamp = formatTimestamp(now());
-        // A removed command (#203) that is given back is cancelled, never requeued: no attempt of it
-        // may ever run again. Only the current holder (the lease token) may cancel it this way.
-        const removed = await trx
-          .updateTable("jobs")
-          .set({
-            status: "cancelled",
-            error_code: "command_removed" satisfies JobErrorCode,
-            lease_expires_at: null,
-            finished_at: timestamp,
-            updated_at: timestamp,
-          })
-          .where(runningWhere({ claim: { jobId, leaseToken } }))
-          .where("command", "!=", "review")
-          .returningAll()
-          .executeTakeFirst();
-        if (removed !== undefined) {
+      return inAlertingTransaction<ReleaseResult>(
+        async (trx, unknownCost, endedClaims) => {
+          const timestamp = formatTimestamp(now());
+          // A removed command (#203) that is given back is cancelled, never requeued: no attempt of it
+          // may ever run again. Only the current holder (the lease token) may cancel it this way.
+          const removed = await trx
+            .updateTable("jobs")
+            .set({
+              status: "cancelled",
+              error_code: "command_removed" satisfies JobErrorCode,
+              lease_expires_at: null,
+              finished_at: timestamp,
+              updated_at: timestamp,
+            })
+            .where(runningWhere({ claim: { jobId, leaseToken } }))
+            .where("command", "!=", "review")
+            .returningAll()
+            .executeTakeFirst();
+          if (removed !== undefined) {
+            endedClaims.push(jobId);
+            unknownCost.push(
+              ...(await closeRecordsOfEndedJobs(trx, timestamp)),
+            );
+            return { status: "cancelled", job: toJob(removed) };
+          }
+          const lost = await loseAttempt(
+            trx,
+            { claim: { jobId, leaseToken } },
+            reason,
+            timestamp,
+            releaseOptions.retryAt === undefined
+              ? undefined
+              : formatTimestamp(releaseOptions.retryAt),
+          );
+          if (lost.failed === 0 && lost.requeued === 0)
+            return { status: "not_holder" };
+          if (lost.failed > 0) endedClaims.push(jobId);
           unknownCost.push(...(await closeRecordsOfEndedJobs(trx, timestamp)));
-          return { status: "cancelled", job: toJob(removed) };
-        }
-        const lost = await loseAttempt(
-          trx,
-          { claim: { jobId, leaseToken } },
-          reason,
-          timestamp,
-          releaseOptions.retryAt === undefined
-            ? undefined
-            : formatTimestamp(releaseOptions.retryAt),
-        );
-        if (lost.failed === 0 && lost.requeued === 0)
-          return { status: "not_holder" };
-        unknownCost.push(...(await closeRecordsOfEndedJobs(trx, timestamp)));
-        const row = await trx
-          .selectFrom("jobs")
-          .selectAll()
-          .where("id", "=", jobId)
-          .executeTakeFirstOrThrow();
-        return lost.failed > 0
-          ? { status: "failed", job: toJob(row) }
-          : { status: "requeued", job: toJob(row) };
-      });
+          const row = await trx
+            .selectFrom("jobs")
+            .selectAll()
+            .where("id", "=", jobId)
+            .executeTakeFirstOrThrow();
+          return lost.failed > 0
+            ? { status: "failed", job: toJob(row) }
+            : { status: "requeued", job: toJob(row) };
+        },
+      );
     },
 
     async get(id) {
@@ -1033,8 +1108,8 @@ export function createRunnerJobsRepository(
     },
 
     expireStaleJobs() {
-      return inAlertingTransaction((trx, unknownCost) =>
-        expire(trx, now(), unknownCost),
+      return inAlertingTransaction((trx, unknownCost, endedClaims) =>
+        expire(trx, now(), unknownCost, endedClaims),
       );
     },
 
@@ -1055,7 +1130,7 @@ export function createRunnerJobsRepository(
 
     cancelClaimed(jobId, leaseToken, errorCode) {
       return inAlertingTransaction<CancelClaimedResult>(
-        async (trx, unknownCost) => {
+        async (trx, unknownCost, endedClaims) => {
           const timestamp = formatTimestamp(now());
           // Not a transition of the shared table (`canTransition`): `cancelWaiting` derives its statuses
           // from that table and a deactivation must never cancel running jobs. This one statement is the
@@ -1073,6 +1148,7 @@ export function createRunnerJobsRepository(
             .returningAll()
             .executeTakeFirst();
           if (row === undefined) return { status: "not_holder" };
+          endedClaims.push(jobId);
           unknownCost.push(...(await closeRecordsOfEndedJobs(trx, timestamp)));
           return { status: "cancelled", job: toJob(row) };
         },

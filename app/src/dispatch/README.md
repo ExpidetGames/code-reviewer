@@ -188,6 +188,47 @@ The answer is `{"status":"ok","expired":{...},"givenUp":n,"revived":n,"sent":n,"
 `[sweep] requeued=.. lease_expired=.. timed_out=.. given_up=.. revived=.. sent=..` is logged for a run that did
 something. Nothing a database or a Dispatcher said reaches a log or an answer.
 
+## Stopping the VM when a job ends (#487)
+
+The Dispatcher holds no supervision after it handed a job to its Worker, and the Worker's VM never gets access to the
+Dispatcher (it runs an untrusted review and holds only this app's address and the job credential). So **the App tells the
+Dispatcher** when the claim of a job has ended, and the Dispatcher stops that job's VMs (`dispatcher/README.md`, "The stop
+call"). `stop.ts` is the sender; `shared.ts` (`stopEndedClaims`) hands it to `after()` like every other reaction.
+
+| File                                        | Role                                                                                                                                                                                                        |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `stop.ts`                                   | `createStopService(...).stopJobs(ids)`: the lookup of the job's dispatch row, one signed `POST` per job, the bounded retry, the log line; `stopUrlOf`                                                       |
+| `request.ts`                                | `buildStopRequest`: the closed `DispatchStop` body (`{version, type:"job.stop", jobId, stopId, sentAt}`) and the headers; the same `signDispatch` as the wake-up call, with `stopId` as the `x-dispatch-id` |
+| `shared.ts`                                 | `getStopService()` (none in poll mode) and `stopEndedClaims(jobIds)`: after the response, never throws                                                                                                      |
+| `db/repositories/runner-jobs-repository.ts` | `onClaimsEnded(jobIds)`: the one place that sees every end of a claim, after its transaction committed                                                                                                      |
+
+**When.** The queue calls `onClaimsEnded` for a claim that ended **for good**: a result delivered (`complete`, also the report of
+a superseded run), a failure, a cancel (`cancelClaimed`), a job given back on its last attempt (`release`), a heartbeat past the
+hard limit (`timeout`), and the leases and runtimes that ran out and ended the job (`expireStaleJobs`, the expiry step of every
+claim, so the sweep, the opportunistic repair work and a claim all stop what they end). It names a job once per call, never
+for a call that changed nothing (a repeated report, a stranger's token). A job that went **back to the queue** (a lapsed
+lease or a release with attempts left) is not named: the Dispatcher stops by the job, the next attempt's VM could exist when
+the call arrives, and the reaper (job not `running`) and the VM timeout end the VM of the lost attempt.
+
+**Which jobs.** Only a job whose wake-up a Dispatcher **acknowledged** (`job_dispatches.acked_at` is set). In poll mode
+(`RUNNER_DISPATCH=poll`, the default: a self-hosted runner, a Compose stack) there is no service and nothing is sent, and on an
+instance in webhook mode a job that a self-hosted runner took has no acknowledged row, so it gets no call either. The call
+goes to the address of the wake-up (`RUNNER_WEBHOOK_URL`) with its last path segment `dispatch` replaced by `stop`
+(`stopUrlOf`); an address that does not end in `/dispatch` gets no stop and the job logs `DISPATCH_STOP_URL_INVALID`.
+
+**Never in the way.** The job's transition has committed before anything is sent; the call runs in `after()` and nothing
+awaits it, throws from it or is changed by it. A failure is best effort:
+
+| Answer                                                                 | What the App does                                                                                                                                                                                                                                  |
+| ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `202`, `200` (`stopping`, `no_vm`, `replayed`)                         | done                                                                                                                                                                                                                                               |
+| `429`, `503`, other `5xx`, a timeout (5 seconds a call), no connection | repeated after 1 s and 3 s (`STOP_RETRY_DELAYS_MS`; the longer of the pause and `Retry-After`, cut to 5 s), the **same `stopId`** every time, so a stop that arrived twice is a replay the receiver ignores; then logged as `DISPATCH_STOP_FAILED` |
+| `404`                                                                  | a Dispatcher of the previous release has no `/stop`: logged once as `DISPATCH_STOP_UNSUPPORTED`, not repeated; the reaper ends the VM as before                                                                                                    |
+| any other status (`401`, `400`, `413`, a redirect)                     | logged as `DISPATCH_STOP_REJECTED` with the status (a wrong URL or secret looks like this), not repeated                                                                                                                                           |
+
+One line per job and call, `[dispatch] <CODE> job=<id> [status=<n>]`, never the URL, a key, a header or the text of an answer or
+an error. At most about 25 seconds a job (two pauses of up to 5 seconds and three calls of 5 seconds), five jobs at a time.
+
 ## Rotating the key
 
 The receiver accepts a current and a previous key. Order: (1) give the Dispatcher the new key as current and the old
@@ -198,6 +239,8 @@ never signs with it.
 
 ## Logs
 
+A failed stop logs `[dispatch] DISPATCH_STOP_FAILED`, `DISPATCH_STOP_UNSUPPORTED`, `DISPATCH_STOP_REJECTED` or
+`DISPATCH_STOP_URL_INVALID` (`STOP_RESULT_CODES`, "Stopping the VM when a job ends").
 A failed send logs `[dispatch] DISPATCH_SEND_FAILED job=<id> code=<name> status=<n|none> failures=<n> retry_at=<time>`;
 an answer an operator has to look at logs `DISPATCH_REJECTED`; a failure inside the dispatch logs `DISPATCH_FAILED`
 with the database error code. Never the URL, the key, the key id, a signature, a header or the text of an error.
@@ -208,6 +251,13 @@ The table is new and nothing reads it but this code, so an app of the previous r
 unaffected; the jobs it queues have no row and are found by `sendDue`. The default is poll mode, which changes
 nothing. A Dispatcher of the previous release has no `/dispatch`; the app then gets `404`, which is the "any other
 status" case above (30 minute wait and an alert), never a lost job.
+
+The stop call (#487) adds no table and no column, and the dispatch contract only grows: a Dispatcher of the previous release has
+no `POST /stop` and answers `404`, which the App logs once per job (`DISPATCH_STOP_UNSUPPORTED`) and goes on; an App of the
+previous release sends no stop, and the new Dispatcher's reaper ends the VMs as it did before (`contracts/README.md`, "Rolling
+out the stop call"). The Dispatcher of this release no longer releases a job whose container ended with an error after the
+hand-over (`worker_exited`, #375): a Worker that dies is found by its lease, so such a job is requeued after two minutes
+instead of within seconds.
 
 The sweep (#328) adds no table and no column. `dispatch_unavailable` is a new value in the free-text `jobs.error_code`;
 a previous release shows a failed job with a code it does not know under its general sentence and the code, never as

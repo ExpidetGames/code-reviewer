@@ -18,6 +18,7 @@ App ──signed POST /dispatch──▶ Trigger ──▶ core ──claim─�
 | --------------------------------------------------------------------------------- | -------------------------------------------------- | ---------------------------------------------------------------------------------- |
 | Dispatcher core: claim, capacity, heartbeat during the launch, release on failure | `src/core/`                                        | here; platform-free (no `node:*`, no platform SDK: ESLint and a test check it)     |
 | Webhook-Trigger: `POST /dispatch`, `GET /health`                                  | `src/triggers/webhook.ts`, `src/dispatcher-app.ts` | here                                                                               |
+| Stop route: signed `POST /stop` (#487)                                            | `src/triggers/stop.ts`, `src/stop/`                | here                                                                               |
 | Fake Launcher (tests)                                                             | `src/launchers/fake.ts`                            | here                                                                               |
 | Hardened container spec renderer and `ContainerLauncher` (#325)                   | `src/launchers/container*.ts`                      | here, used by the Sandbox-Launcher (#329) and the Docker-Launcher (#334)           |
 | Sandbox-Launcher over the Vercel Sandbox SDK (#329)                               | `src/launchers/sandbox*.ts`, `vercel-sandbox.ts`   | here, wired into the Vercel entry when `SANDBOX_SNAPSHOT_ID` is set                |
@@ -47,6 +48,35 @@ the platform, a tracked promise in the Node process), `200 ignored` with `not_cl
 replay, a job that is running or finished, or the pool cap) or `not_capable` (no configured engine of the Launcher
 runs that kind; nothing is claimed), `429` or `503` with `Retry-After`.
 
+## The stop call (#487)
+
+The Dispatcher holds no supervision after the hand-over. When a job's claim ends, the **App** tells it to stop that job's
+Sandbox VM with `POST /stop` (`contracts/dispatch-webhook.v1.json`, `DispatchStop`: `{version, type: "job.stop", jobId,
+stopId, sentAt}`, closed, at most 1 KiB, no secret). The VM never gets access to the Dispatcher: it runs an untrusted review
+and holds only the App's address and the job credential, and nothing in it can call this route.
+
+- **Verified like `/dispatch`**, by the same code (`src/triggers/verified-request.ts`): content type and size, the form of
+  the headers, the clock, the current and the previous key, the signature in constant time, then the closed body, whose
+  `stopId` must equal the `x-dispatch-id` header. A refusal never says which check failed: the same `401`/`400`/`413` with the
+  same body as `/dispatch`, and nothing is looked up or stopped.
+- **Replay protection by `stopId`.** A stop id that was handled is answered `200 {"status":"ignored","reason":"replayed"}`
+  and nothing is done (`src/stop/replay-guard.ts`: in memory, bounded, and the id is forgotten when the platform could not be
+  asked, so the same call can be repeated). The memory is per instance: a replay that reaches another instance stops the same
+  VMs again, which is harmless because a stop is idempotent. The clock window of the signature (5 minutes) bounds how long a
+  captured call could be replayed at all.
+- **Tag-scoped.** `jobId` is a strict UUID (it becomes a tag filter, never part of a command). The route lists the VMs
+  tagged `{app, kind, job}` for that job and stops those, nothing else (`src/stop/job-stopper.ts`); a VM of another job, a
+  canary or a foreign VM is never touched. No VM means `200 {"status":"ignored","reason":"no_vm"}`: a stop is idempotent.
+- **Answers.** `202 {"status":"stopping"}` when VMs are being stopped in the background (`waitUntil` on the platform, the
+  tracker of the Node entry): stopping a VM with a running container takes 20 seconds or more, and the App does not wait for
+  it. `503` with `Retry-After` when the platform could not be asked; the App repeats it. A stop that fails later is logged
+  (`vm_stop_failed`, the job and the VM name) and left to the reaper.
+- **Log events.** `stop_received` (`jobId`, `vms`), `vm_stopped`, `vm_stop_failed`, `stop_replayed`, `stop_list_failed`
+  (`code`), `stop_refused` (`verdict` only). No key, signature or platform text.
+
+A job that goes back to the queue is **not** stopped by the App (the next attempt's VM could already exist when the call
+arrives): the reaper and the VM's own timeout end the VM of a lost attempt.
+
 ## What the core does
 
 1. Engines are the configured ones (`DISPATCHER_ENGINES`) that the Launcher advertises (`capabilities`, fail closed).
@@ -65,13 +95,12 @@ runs that kind; nothing is claimed), `429` or `503` with `Retry-After`.
    job credential every `heartbeatIntervalSeconds` so the two minute lease does not lapse. The launch has five
    minutes. At the deadline, or on a shutdown, the signal aborts and the job is released with `launch_failed` (the
    App counts it as a failed attempt). When a heartbeat shows the lease is lost the launch is stopped and nothing is
-   released. The credential is held in memory only: in the scope of that one launch, and, for a Launcher that watches the
-   Worker after the hand-over (the Sandbox-Launcher), in the callback `spec.onWorkerExit` until that supervision ends.
-   After the hand-over the core never heartbeats again: the Worker owns the lease.
-   When that callback is called with a non-zero exit code, the core releases the job with `worker_exited` instead of
-   waiting about two minutes for the lease to lapse (#375). Exit 0 releases nothing. The call is made by the App against the
-   job credential: a job that already has its result, or that a newer claim holds, is answered `409`/`401` and nothing
-   changes (a `409`, the expected answer after a Worker that delivered its result and exited 1, is logged at info as
+   released. The credential is held in memory only, in the scope of that one launch, and is dropped when the launch resolves.
+   After the hand-over the core never heartbeats again and holds nothing: the Worker owns the lease, and the Dispatcher
+   neither watches the container nor releases the job (#487; the release for a container that ended with an error after the
+   hand-over, `worker_exited` of #375, is gone: a Worker that dies is found by its lease, which lapses after two minutes).
+   The release of a launch that failed is made by the App against the job credential: a job that already has its result,
+   or that a newer claim holds, is answered `409`/`401` and nothing changes (a `409` is logged at info as
    `release_job_ended`; a `401`/`404` as the warning `release_not_holder`; neither is retried). The release is tried three times; if the App cannot be
    reached it logs `release_failed` with the reason and the lease ends the job as before.
 6. Logs go through a masker: the dispatcher token, the signing secrets and anything shaped like a job credential or an
@@ -153,31 +182,29 @@ Per job, after the core has claimed it:
    (20), or ended with 0 sooner. Until then the core heartbeats with the credential so the lease does not lapse. A
    container that ends with an error first is `worker_exited_early`. The time is the stand-in for the Worker's own first
    heartbeat, which the Worker does not announce (follow-up).
-5. When the container ends, the VM is stopped by the name the platform returned (`stop()` takes about 2.4 s for an idle VM,
-   22.6 s with a running container, so the container ends first). A `wait()` that fails (a broken log stream or network
-   during a long job) is asked again, three tries in all; if it still fails, what became of the container is unknown, so
-   the VM is **not** stopped under a Worker that may be reviewing: `worker_wait_failed` is logged and the VM timeout ends
-   it, and **nothing is released** (what became of the Worker is unknown, the lease is the safeguard). There is no
-   `poweroff` in the image (spike T13).
-   A confirmed end with a **non-zero** exit code (a setup error 2, a crash, an out-of-memory kill 137, a Worker that
-   failed to deliver its result with 1) is also reported to the core (`spec.onWorkerExit`, #375), at the same time as the
-   VM is stopped: the core releases the job with `worker_exited` and the App counts a lost attempt. Exit 0 reports nothing.
-   An exit with an error _before_ the hand-over is not reported this way: the launch fails with `worker_exited_early` and the
-   core releases the job once, with `launch_failed`.
+5. **After the hand-over the Launcher holds nothing (#487).** `launch()` resolves and ends: no `wait()` on the container, no
+   work in `waitUntil`, no stop, no callback. The Worker owns the lease and the VM is ended by the App's signal (`POST /stop`,
+   "The stop call"), with the reaper and the VM timeout as the safety nets. A Worker that dies after the hand-over is not
+   seen by the Dispatcher: its lease lapses after two minutes without a heartbeat and the App requeues the job (the
+   attempt is lost either way). There is no `poweroff` in the image (spike T13), so a VM is only ever ended by `stop()`
+   (about 2.4 s for an idle VM, 22.6 s with a running container).
+   An exit with an error _before_ the hand-over fails the launch with `worker_exited_early`, and the core releases the job
+   once, with `launch_failed`.
 
-**The function lifetime and the VM timeout.** The supervision of step 5 is work held in `waitUntil`, so it lives as long as
-the Dispatcher's function may. `vercel.json` sets `maxDuration` of `src/index.ts` explicitly to **1800 s** and the region
-to `fra1`. 1800 s is the extended maximum for Pro and Enterprise teams on Node.js 22 or 24 (**beta**; 800 s is the generally
-available maximum, and Hobby is limited to 300 s); it covers the default job (1200 s) plus its launch (at most 300 s). When
-the function ends before the container does (a job of more than about 1500 s, a platform restart, a lost instance), nothing
-stops the VM and **the VM timeout is the backstop**: it keeps running, idle and billed, until job + margin after its
-creation. A reaper that stops leftover VMs by their tags is a follow-up of #316, to be done before staging.
+**The function lifetime and the VM timeout.** Nothing is held in `waitUntil` for a job's life any more. A function lives for
+the launch (at most 300 s: create, prepare, image check, hand-over) and for the work it started in the background: the
+stop of a failed launch's VM, and the stops of `POST /stop`. `vercel.json` still sets `maxDuration` of `src/index.ts` to
+**1800 s** and the region to `fra1`; that was sized for the supervision (job plus launch) and the launch alone needs far less,
+so lowering it is a follow-up once a deployment has run without supervision. Production had observed the platform cutting
+the old supervision at 300 s, which left the VM running, idle and billed until the VM timeout: this change is the answer.
+Where the App's stop call does not arrive (the App is down, the call failed after its retries, a requeued job, a Dispatcher
+that was restarted before the stop finished), **the reaper and the VM timeout are the backstop**: the VM keeps running, idle
+and billed, until the next reaper run that finds its job not `running`, or until job + margin after its creation.
 
 Every failure before the hand-over stops the VM by name and ends in a `LaunchError` with a stable code and a `retryable`
 flag. The core releases the job with `launch_failed` and the App counts the attempt (three attempts, then `failed`), no
-matter whether the flag is set; it is for logs and for the operator. A Worker that ends with an error _after_ the hand-over
-is released the same way with the reason `worker_exited` (the Runs page shows that code; log lines `worker_exited` with the
-`exitCode`, then `released`, `release_job_ended`, `release_not_holder` or `release_failed`, each with the `reason`).
+matter whether the flag is set; it is for logs and for the operator (log lines `launch_failed` with the code and `retryable`,
+then `released`, `release_job_ended`, `release_not_holder` or `release_failed`, each with the `reason`).
 
 | Code                                                                      | Retryable                    | Cause                                                                                                                                                                                                                                                                                |
 | ------------------------------------------------------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -384,9 +411,10 @@ so a Dynamic-Worker whose rules are not in place is not advertised. A seccomp pr
 
 ## The reaper (#364)
 
-The Launcher stops a job's VM from `waitUntil` work, which lives as long as the function. A job longer than the
-function's `maxDuration`, a restart, a `wait()` that kept failing or a failed `stop()` leave the VM running, idle and
-billed, until its own timeout (job timeout plus margin). The reaper is the second line: the platform's cron calls
+The App stops a job's VM with a signed `POST /stop` when the job's claim ends ("The stop call"). A stop that did not
+arrive or failed, a job that went back to the queue, or a VM that nobody was told about (the App of a previous release sends
+no stop) leave the VM running, idle and billed, until its own timeout (job timeout plus margin). The reaper is the safety net:
+the platform's cron calls
 `GET /api/cron/reap-sandboxes` every five minutes (`vercel.json`) and it stops the VMs that outlived their purpose.
 
 - **Credential.** `CRON_SECRET` of this project, which the platform sends as `Authorization: Bearer <secret>`. A secret

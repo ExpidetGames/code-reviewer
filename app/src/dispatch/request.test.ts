@@ -9,9 +9,14 @@ import {
 } from "../../../fakes/dispatcher-app/signing.ts";
 import type {
   DispatchSigningVectors,
+  DispatchStop,
   DispatchWebhook,
 } from "../contracts/dispatch-webhook.ts";
-import { buildDispatchRequest, signDispatch } from "./request.ts";
+import {
+  buildDispatchRequest,
+  buildStopRequest,
+  signDispatch,
+} from "./request.ts";
 
 const CONTRACTS = join(import.meta.dirname, "..", "..", "..", "contracts");
 const vectors = JSON.parse(
@@ -207,5 +212,84 @@ describe("the dispatch request", () => {
         }),
         vector.name,
       ).toBe(vector.expected);
+  });
+});
+
+const stopExample = JSON.parse(
+  readFileSync(
+    join(CONTRACTS, "examples", "dispatch-webhook", "DispatchStop.json"),
+    "utf8",
+  ),
+) as DispatchStop;
+
+describe("the stop request", () => {
+  const stopAt = new Date(stopExample.sentAt);
+
+  function stop(key: DispatchKey = current, bypassToken?: string) {
+    return buildStopRequest({
+      key,
+      ...(bypassToken === undefined ? {} : { bypassToken }),
+      jobId: stopExample.jobId,
+      stopId: stopExample.stopId,
+      now: stopAt,
+    });
+  }
+
+  // #487-T01
+  it("is the example of the contract, byte for byte", () => {
+    expect(stop().body).toBe(JSON.stringify(stopExample));
+  });
+
+  // #487-T01
+  it("carries the stop id as the dispatch id and is signed over the stop body like a wake-up call", () => {
+    const built = stop();
+
+    expect(built.headers["x-dispatch-id"]).toBe(stopExample.stopId);
+    expect(built.headers["x-dispatch-key-id"]).toBe(current.kid);
+    expect(
+      verifyDispatch({
+        keys: [current, previous],
+        headers: built.headers,
+        rawBody: built.body,
+        nowSeconds: Math.floor(stopAt.getTime() / 1000),
+        toleranceSeconds: vectors.toleranceSeconds,
+      }),
+    ).toBe("ok");
+  });
+
+  // #487-T02
+  it("is refused by the receiver when the body is changed, the clock is off or the key is unknown", () => {
+    const built = stop();
+    const view = (overrides: Partial<Parameters<typeof verifyDispatch>[0]>) =>
+      verifyDispatch({
+        keys: [current, previous],
+        headers: built.headers,
+        rawBody: built.body,
+        nowSeconds: Math.floor(stopAt.getTime() / 1000),
+        toleranceSeconds: vectors.toleranceSeconds,
+        ...overrides,
+      });
+
+    expect(view({ rawBody: built.body.replace("job.stop", "job.ready") })).toBe(
+      "bad_signature",
+    );
+    expect(
+      view({ nowSeconds: Math.floor(stopAt.getTime() / 1000) + 3600 }),
+    ).toBe("expired");
+    expect(view({ keys: [previous] })).toBe("unknown_key");
+  });
+
+  // #487-T01
+  it("is a closed body of at most 1 KiB with no secret and no repository data", () => {
+    const built = stop(current, "example-bypass-token-0000000000000000");
+
+    expect(Object.keys(JSON.parse(built.body) as object).sort()).toEqual(
+      ["jobId", "sentAt", "stopId", "type", "version"].sort(),
+    );
+    expect(Buffer.byteLength(built.body)).toBeLessThanOrEqual(1024);
+    expect(built.body).not.toContain(current.secret);
+    expect(built.headers["x-vercel-protection-bypass"]).toBe(
+      "example-bypass-token-0000000000000000",
+    );
   });
 });
