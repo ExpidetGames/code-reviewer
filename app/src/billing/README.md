@@ -32,10 +32,15 @@ total      = aiPrice + infraPrice
 ```
 
 - **A** is stored in parts per 10,000 (1.2 is 12,000; at least 10,000, at most 1,000,000). **B** is micro-USD per started
-  minute, one per review kind (0 allowed, at most 10,000,000). A and both B have **no default**: billing cannot be
-  switched on before they are set (`canSwitchBillingOn`, `billing_rates_incomplete`, enforced where the switch is, #504).
-  The AI reserve of a Diff review (`diffAiReserveMicroUsd`, at most 50,000,000) has a default, because a hold needs some
-  AI part: it is a hold, never a price.
+  minute, one per review kind (0 allowed, at most 10,000,000). The **AI reserve of a Diff review**
+  (`diffAiReserveMicroUsd`, 0 to 50,000,000) is the AI part of its hold. A, both B and the reserve have **no default**
+  and are all required: billing cannot be switched on before they are set (`canSwitchBillingOn`,
+  `billing_rates_incomplete`).
+- **The reserve is real model cost.** It is in micro-USD of real model cost, before A, the unit of the Dynamic cost limit,
+  and the hold multiplies it by A. Changing A therefore never changes the real-cost margin of a hold. The admin form (#504)
+  labels it "real model cost, before the factor". _Guidance, not a default:_ the #492 estimate for a Diff review is
+  about 150,000 (0.15 USD of real cost, Sonnet-class: the largest run measured was 0.1004 times 1.5); about 370,000 if an
+  Opus-class model joins the catalog. At A = 5 the first is 0.75 USD of hold.
 - **Rounding.** The AI price is `cost x A / 10,000` rounded **half up** to a whole micro-USD, once per run, on the whole
   cost. The infrastructure price is whole started minutes times a whole rate, so it is exact and needs no rounding;
   minutes that are not whole are refused. The two are separate amounts, each computed alone, and the total is their sum.
@@ -48,8 +53,12 @@ total      = aiPrice + infraPrice
 
 `reserveFor` is the hold of ADR 0006, D6: the longest the VM lives (rounded up to a started minute) times `B[kind]`, plus,
 on the managed key, `round(AI budget x A / 10,000)`, where the AI budget is the cost limit of the job for Dynamic and
-`diffAiReserveMicroUsd` for Diff. A bring-your-own-key job holds the minutes only. A hold is not a price: settlement
-charges what the run really cost, even above the hold.
+`diffAiReserveMicroUsd` for Diff (both real model cost, multiplied by A). A bring-your-own-key job holds the minutes only.
+A hold is not a price: settlement charges what the run really cost, even above the hold.
+
+`reserveFor` returns the **full** hold. Decision 5 of #489 (reserve at most the available balance; the final charge may take
+the balance slightly negative) is applied by the caller, **#498**, as `min(hold, available)`, with its own test, so that
+there is one interpretation of it. A hold is never clamped here.
 
 ### The classes of an outcome
 
@@ -61,12 +70,23 @@ charges what the run really cost, even above the hold.
 
 `classifyOutcome` maps the end of a job to a class. A delivered result and a run that failed on the customer's side of
 the line are `charged` (an unknown cost then leaves only the minutes, which is also how a superseded run without a report
-bills). A run that ended without a result (`timeout`, a result that was not published, a process the loop of a runner had
-to end) is `minutes_only`. An error on our side (the launch failed, the VM or the Worker died, the lease ran out, the
-runner shut down, a limit refused the claim) and a job that never ran are `free`. The key, the account and the model of the
-managed key are ours when they fail, and the customer's on their own key. When several facts apply (the code, a finer
-reason, the settled reason of the usage record) the cheapest class for the customer wins. A code the build does not know
-is `minutes_only`; it never throws.
+bills). A run that ended without a result that is not attributable (a result that was not published, a process the loop
+of a runner had to end, `git_auth` and `git_forbidden`, which can be a revoked installation or our own App token) is
+`minutes_only`. An error on our side and a job that never ran are `free`: the launch failed, the VM or the Worker died,
+the lease ran out, the runner shut down, a limit refused the claim, and **every timeout** (the queue's `timeout`, the
+runner's and `llm_timeout`; decision 1: "a timeout caused by us bills nothing"). A queued job superseded before it ran has
+no run and is `free`; a superseded run that began (its usage record says `superseded`) is `charged`. The key, the account,
+the model and the rate limit of the managed key are ours when they fail, and the customer's on their own key. When several
+facts apply (the code, a finer reason, the settled reason of the usage record) the cheapest class for the customer wins. A
+code or a checkout reason the build does not know is `minutes_only`; it never throws.
+
+**Open question for the maintainer (B2 of the review of #520).** A run that failed after it used the model and delivered
+no result (`command_failed`, `dynamic_budget_exceeded`, `dynamic_policy_violation`, `llm_bad_request`,
+`llm_context_length_exceeded`) is `charged` (AI and minutes) today, as ADR 0006, 2.6 row 2 says. Decision 1 ("a review that
+ends without a result but already incurred AI cost bills the minutes only"), read literally, makes them `minutes_only`.
+The five codes are one group in `outcome.ts` (`AI_COST_FAILURE_CODES`) with one class (`AI_COST_FAILURE_CLASS`), so the
+answer is a one-line change; a test pins the members. The money difference is mostly `dynamic_budget_exceeded`: a run that
+burns its whole cost limit pays up to `limit x A`.
 
 The table is exhaustive over today's terminal codes: the job end codes, the release reasons, the error codes and checkout
 reasons of the runner contract, the reasons of the loop of a runner and the settled reasons. `outcome.test.ts` fails when
@@ -79,6 +99,11 @@ billing table. The readiness of the payment adapter joins the answer with the ad
 one reader of the switch**; a test (`src/ci/billing-cleanup.test.ts`) fails when a second one appears. Every billing
 route, page and sweep step asks `isBillingOn` first: while it is false they are inert, a route answers the 404 of a path
 that does not exist (`guardBillingRoute`, Next.js's own `notFound()`), no billing table is read and nobody is called.
+
+**Billing on with incomplete rates.** `isBillingOn` stays a pure switch. If `enabled` is true while a rate is missing or
+damaged (`rates()` is null), the claim of a job (#498) refuses it with the stable code `billing_rates_incomplete`, with a
+test; reviews do not run free. To keep that state from arising, #504 must call `canSwitchBillingOn` **inside the same
+`lockBillingSettings` transaction that writes `enabled`**, or the check can race with a rate write.
 
 There is no environment variable: billing is configured in the admin portal and in nothing else, so `.env.example` and
 the deployment files stay as they are for a self-hoster (`no-environment-variable.test.ts`).
