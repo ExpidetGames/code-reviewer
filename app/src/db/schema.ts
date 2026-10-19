@@ -707,6 +707,74 @@ export interface ModelCatalogEntriesTable {
 }
 
 /**
+ * A provider of the models.dev catalog (#548, src/models-dev/). Instance level. Never deleted: a provider that
+ * disappears upstream gets `unlisted_at`. Every text is untrusted data, length-capped before it is stored.
+ */
+export interface ModelsDevProvidersTable {
+  /** The id models.dev uses and the supported-provider file lists (`deepseek`, `anthropic`). */
+  provider_id: string;
+  name: string;
+  /** `trusted`, `url_changed` or `rejected` (`URL_STATES`): the trust on first use of the address. */
+  url_state: string;
+  /** The address the first check passed and an admin confirmed later; null while `rejected`. Where a real key is sent. */
+  trusted_url: string | null;
+  /** The address (or refused text) that differs from the trusted one and waits for an admin; null otherwise. */
+  pending_url: string | null;
+  /** Why the address was refused (`URL_PROBLEMS`), or null. */
+  url_problem: string | null;
+  /** ISO 8601 text in UTC: when the block began. */
+  url_changed_at: string | null;
+  first_seen_at: string;
+  /** Set when the provider has no model in the latest fetch; the last known row stays. */
+  unlisted_at: string | null;
+  updated_at: string;
+}
+
+/**
+ * A model of the models.dev catalog: only models with tool calling of a supported provider. Never deleted: a model
+ * that disappears upstream gets `unlisted_at` and keeps its last known entry; a returning model clears it.
+ */
+export interface ModelsDevModelsTable {
+  provider_id: string;
+  model_id: string;
+  name: string;
+  family: string | null;
+  context_limit: number;
+  output_limit: number;
+  input_limit: number | null;
+  /** 0 or 1. */
+  reasoning: number;
+  temperature: number;
+  attachment: number;
+  /** JSON text: `{"input":["text"],"output":["text"]}`. */
+  modalities: string;
+  /** models.dev's own status (`alpha`, `beta`, `deprecated`, `active`); `deprecated` is shown as a warning. */
+  upstream_status: string | null;
+  /** JSON text of the prices (decimal strings, USD per million tokens), or null for an unpriced model. */
+  cost: string | null;
+  /** The `last_updated` date models.dev states. */
+  upstream_updated: string | null;
+  /** JSON text: `true` or `{"field":"reasoning_content"}`, or null. */
+  interleaved: string | null;
+  first_seen_at: string;
+  unlisted_at: string | null;
+  updated_at: string;
+}
+
+/** The one row (`id` = `models.dev`) of the state of the last fetch. */
+export interface ModelsDevFetchStateTable {
+  id: string;
+  last_attempt_at: string | null;
+  last_success_at: string | null;
+  /** `ok` or `failed`. */
+  last_status: string;
+  /** A stable code of the last failure (`MODELS_DEV_FETCH_ERROR_CODES`); kept until the next success. */
+  last_error: string | null;
+  /** JSON text of the counts of the last applied fetch. */
+  last_summary: string | null;
+}
+
+/**
  * One thing that happened to a workspace's money (src/billing/README.md, ADR 0006, 2.7; #495). Append-only: the database
  * refuses an update and a delete. Amounts are micro-USD integers, signed. Postgres hands a `bigint` back as a string, so
  * the repository converts them with `Number`; the type is the application's.
@@ -822,6 +890,9 @@ export interface Database {
   job_vm_runs: JobVmRunsTable;
   plan_handoff_tokens: PlanHandoffTokensTable;
   model_catalog_entries: ModelCatalogEntriesTable;
+  models_dev_providers: ModelsDevProvidersTable;
+  models_dev_models: ModelsDevModelsTable;
+  models_dev_fetch_state: ModelsDevFetchStateTable;
   billing_journal_entries: BillingJournalEntriesTable;
   billing_balances: BillingBalancesTable;
   billing_topup_intents: BillingTopupIntentsTable;

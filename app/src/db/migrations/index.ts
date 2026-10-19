@@ -55,6 +55,7 @@ import { migration as migrateModelTiersToCatalog } from "./20261018170000_migrat
 import { migration as createBillingJournal } from "./20261019150000_create_billing_journal.ts";
 import { migration as createJobVmRuns } from "./20261019160000_create_job_vm_runs.ts";
 import { migration as createBillingTopupIntents } from "./20261019170000_create_billing_topup_intents.ts";
+import { migration as createModelsDevCatalog } from "./20261019200000_create_models_dev_catalog.ts";
 
 const migrations: Record<string, Migration> = {
   "0001_create_app_meta": createAppMeta,
@@ -112,6 +113,7 @@ const migrations: Record<string, Migration> = {
   "20261019150000_create_billing_journal": createBillingJournal,
   "20261019160000_create_job_vm_runs": createJobVmRuns,
   "20261019170000_create_billing_topup_intents": createBillingTopupIntents,
+  "20261019200000_create_models_dev_catalog": createModelsDevCatalog,
 };
 
 export const migrationProvider: MigrationProvider = {

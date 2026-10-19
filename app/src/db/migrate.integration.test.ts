@@ -104,6 +104,7 @@ describe("the migrations of both epics", () => {
       "20261019150000_create_billing_journal",
       "20261019160000_create_job_vm_runs",
       "20261019170000_create_billing_topup_intents",
+      "20261019200000_create_models_dev_catalog",
     ]);
   });
 
@@ -164,6 +165,9 @@ describe("starting the database", () => {
       "kysely_migration",
       "kysely_migration_lock",
       "model_catalog_entries",
+      "models_dev_fetch_state",
+      "models_dev_models",
+      "models_dev_providers",
       "password_reset_tokens",
       "plan_handoff_tokens",
       "projects",
