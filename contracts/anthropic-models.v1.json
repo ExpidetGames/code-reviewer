@@ -12,7 +12,7 @@
   ],
   "defaultModels": {
     "diff": "claude-haiku-5-5",
-    "dynamic": "claude-sonnet-5"
+    "dynamic": "claude-sonnet-5-5"
   },
   "models": [
     {
@@ -28,7 +28,7 @@
         "forcedToolChoice": false,
         "thinkingDisabled": false
       },
-      "reviewKinds": ["diff"],
+      "reviewKinds": ["diff", "dynamic"],
       "pricesUsdPerMTok": {
         "input": "10",
         "output": "50",
@@ -51,7 +51,7 @@
         "forcedToolChoice": false,
         "thinkingDisabled": false
       },
-      "reviewKinds": ["diff"],
+      "reviewKinds": ["diff", "dynamic"],
       "pricesUsdPerMTok": {
         "input": "4",
         "output": "20",
@@ -74,7 +74,7 @@
         "forcedToolChoice": false,
         "thinkingDisabled": false
       },
-      "reviewKinds": ["diff"],
+      "reviewKinds": ["diff", "dynamic"],
       "pricesUsdPerMTok": {
         "input": "2",
         "output": "10",
@@ -129,7 +129,7 @@
         "forcedToolChoice": true,
         "thinkingDisabled": false
       },
-      "reviewKinds": ["diff"],
+      "reviewKinds": ["diff", "dynamic"],
       "pricesUsdPerMTok": {
         "input": "10",
         "output": "50",

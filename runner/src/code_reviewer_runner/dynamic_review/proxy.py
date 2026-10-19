@@ -50,7 +50,7 @@ import http.client
 import json
 import threading
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
@@ -85,6 +85,7 @@ from code_reviewer_runner.error_mapping import is_context_length_exceeded, llm_s
 from code_reviewer_runner.job import JobCapabilities
 from code_reviewer_runner.job_loop.jsonvalues import as_object
 from code_reviewer_runner.llm_providers import PROXY_FORWARDED_FIELDS, LlmProviderSpec
+from code_reviewer_runner.provider_wire import UpstreamWire
 from code_reviewer_runner.result import ErrorCode
 
 # The protocol the run requires (`wrap_up.py` names the tool and the choice). The pinned OpenCode
@@ -131,6 +132,9 @@ class DynamicCapabilities:
     context_window_tokens: int = DEFAULT_WINDOW_TOKENS
     # What a call reserves before it is sent. Optional: without it a call reserves a floor.
     unit_costs: UnitCosts | None = None
+    # What a call reserves of `max_output_tokens` against the cost limit (#533); None reserves
+    # all of it. Set from the model's wire (`with_reserved_output`), never from the job.
+    reserved_output_tokens: int | None = None
 
     def check_required(self) -> None:
         if not self.tool_choice_required:
@@ -182,6 +186,16 @@ DEFAULT_MODEL_CAPABILITIES = DynamicCapabilities(
         input_usd_per_mtok=Decimal("0.02016"), output_usd_per_mtok=Decimal("0.891")
     ),
 )
+
+
+def with_reserved_output(
+    capabilities: DynamicCapabilities, wire: UpstreamWire
+) -> DynamicCapabilities:
+    """The capabilities with the output a call of this model reserves, as its wire says (#533)."""
+    return replace(
+        capabilities,
+        reserved_output_tokens=wire.reserved_output_tokens(capabilities.max_output_tokens),
+    )
 
 
 def capabilities_from_config(raw: str | None, model: str | None = None) -> DynamicCapabilities:

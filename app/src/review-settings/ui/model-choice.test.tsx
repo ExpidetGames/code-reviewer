@@ -17,6 +17,11 @@ import {
 } from "../../copy/model-choice.ts";
 import { createFakeAdapter } from "../../llm/providers/fake-adapter.ts";
 import { anthropicDescriptor } from "../../llm/providers/anthropic/descriptor.ts";
+import {
+  ANTHROPIC_DEFAULT_MODELS,
+  ANTHROPIC_MODELS,
+  anthropicModelIdsFor,
+} from "../../llm/providers/anthropic/models.ts";
 import { openrouterDescriptor } from "../../llm/providers/openrouter/descriptor.ts";
 import type { ProjectDynamicView } from "../service.ts";
 import {
@@ -914,15 +919,15 @@ describe("the catalog chooser of a workspace on the operator's key", () => {
   });
 });
 
-// The Anthropic list is closed and has models that cannot serve a Dynamic Review (#532).
-describe("choosing Anthropic as the provider", () => {
-  const DIFF_ONLY = [
-    "claude-fable-5-1",
-    "claude-opus-5-5",
-    "claude-sonnet-5-5",
-    "claude-fable-5",
-  ];
+// The Anthropic list is closed; which of its models a Dynamic Review accepts is the list's own `reviewKinds` (#532).
+const DYNAMIC_MODELS = anthropicModelIdsFor("dynamic");
+const NOT_DYNAMIC_MODELS = ANTHROPIC_MODELS.filter(
+  (model) => !model.reviewKinds.includes("dynamic"),
+).map((model) => model.id);
+const ANOTHER_DYNAMIC_MODEL =
+  DYNAMIC_MODELS.find((id) => id !== ANTHROPIC_DEFAULT_MODELS.dynamic) ?? "";
 
+describe("choosing Anthropic as the provider", () => {
   function renderAnthropic(model: SettingsFormModel, api: SettingsApi) {
     return render(
       <SettingsForm
@@ -962,10 +967,8 @@ describe("choosing Anthropic as the provider", () => {
 
     const model = screen.getByLabelText("Model", { exact: true });
     expect((model as HTMLInputElement).value).toBe("");
-    expect(suggestionsOf(model)).toEqual(
-      expect.arrayContaining([...DIFF_ONLY, "claude-haiku-5-5"]),
-    );
-    expect(suggestionsOf(model)).toHaveLength(13);
+    expect(suggestionsOf(model)).toEqual(ANTHROPIC_MODELS.map((m) => m.id));
+    expect(suggestionsOf(model)).toHaveLength(ANTHROPIC_MODELS.length);
     await user.type(model, "claude-sonnet-5-5");
     await user.click(screen.getByRole("button", SAVE));
 
@@ -976,7 +979,7 @@ describe("choosing Anthropic as the provider", () => {
   });
 
   // #532-T04
-  it("offers only the Claude models that can serve a Dynamic Review for that kind, and saves the one that is picked", async () => {
+  it("offers the Claude models whose list entry says they can serve a Dynamic Review, and saves the one that is picked", async () => {
     const user = userEvent.setup();
     const { api, save } = fakeApi();
     renderAnthropic(ownModel({ kind: "dynamic" }), api);
@@ -985,16 +988,15 @@ describe("choosing Anthropic as the provider", () => {
 
     const model = screen.getByLabelText("Dynamic Review model");
     const offered = suggestionsOf(model);
-    expect(offered).toHaveLength(9);
-    for (const id of DIFF_ONLY) expect(offered).not.toContain(id);
-    expect(offered).toContain("claude-sonnet-5");
-    expect(offered).toContain("claude-haiku-5-5");
-    await user.type(model, "claude-sonnet-5");
+    expect(offered).toEqual(DYNAMIC_MODELS);
+    for (const id of NOT_DYNAMIC_MODELS) expect(offered).not.toContain(id);
+    expect(offered).toContain(ANTHROPIC_DEFAULT_MODELS.dynamic);
+    await user.type(model, ANOTHER_DYNAMIC_MODEL);
     await user.click(screen.getByRole("button", SAVE));
 
     expect(save.mock.calls[0]?.[0]).toEqual({
       dynamicProvider: "anthropic",
-      dynamicModel: "claude-sonnet-5",
+      dynamicModel: ANOTHER_DYNAMIC_MODEL,
     });
   });
 });
@@ -1033,7 +1035,7 @@ describe("the suggested models to pick from", () => {
     await user.click(
       screen.getByRole("combobox", { name: "Pick a suggested model" }),
     );
-    expect(screen.getAllByRole("option")).toHaveLength(13);
+    expect(screen.getAllByRole("option")).toHaveLength(ANTHROPIC_MODELS.length);
     await user.click(screen.getByRole("option", { name: "claude-haiku-5-5" }));
 
     expect(
@@ -1048,7 +1050,7 @@ describe("the suggested models to pick from", () => {
   });
 
   // #532-T06
-  it("lists only the Claude models that can serve a Dynamic Review for that kind, and a pick fills the field and is saved", async () => {
+  it("lists the Claude models whose list entry says they can serve a Dynamic Review, and a pick fills the field and is saved", async () => {
     const user = userEvent.setup();
     const { api, save } = fakeApi();
     renderAnthropic(ownModel({ kind: "dynamic" }), api);
@@ -1062,23 +1064,19 @@ describe("the suggested models to pick from", () => {
     const offered = screen
       .getAllByRole("option")
       .map((option) => option.textContent);
-    expect(offered).toHaveLength(9);
-    for (const id of [
-      "claude-fable-5-1",
-      "claude-opus-5-5",
-      "claude-sonnet-5-5",
-      "claude-fable-5",
-    ])
-      expect(offered).not.toContain(id);
-    await user.click(screen.getByRole("option", { name: "claude-sonnet-5" }));
+    expect(offered).toEqual(DYNAMIC_MODELS);
+    for (const id of NOT_DYNAMIC_MODELS) expect(offered).not.toContain(id);
+    await user.click(
+      screen.getByRole("option", { name: ANOTHER_DYNAMIC_MODEL }),
+    );
 
     expect(
       (screen.getByLabelText("Dynamic Review model") as HTMLInputElement).value,
-    ).toBe("claude-sonnet-5");
+    ).toBe(ANOTHER_DYNAMIC_MODEL);
     await user.click(screen.getByRole("button", SAVE));
     expect(save.mock.calls[0]?.[0]).toEqual({
       dynamicProvider: "anthropic",
-      dynamicModel: "claude-sonnet-5",
+      dynamicModel: ANOTHER_DYNAMIC_MODEL,
     });
   });
 
@@ -1178,7 +1176,9 @@ describe("resetting a model after Anthropic was chosen", () => {
     await choose(user, "Dynamic Review provider", "Anthropic");
     const model = screen.getByLabelText("Dynamic Review model");
     const field = model.closest("[data-field]") as HTMLElement;
-    expect(field.textContent).toContain("the default is claude-sonnet-5.");
+    expect(field.textContent).toContain(
+      `the default is ${ANTHROPIC_DEFAULT_MODELS.dynamic}.`,
+    );
     expect(field.textContent).not.toContain(DEFAULT_DYNAMIC_MODEL);
     await user.type(model, "claude-opus-5");
 
@@ -1188,11 +1188,13 @@ describe("resetting a model after Anthropic was chosen", () => {
       }),
     );
 
-    expect((model as HTMLInputElement).value).toBe("claude-sonnet-5");
+    expect((model as HTMLInputElement).value).toBe(
+      ANTHROPIC_DEFAULT_MODELS.dynamic,
+    );
     await user.click(screen.getByRole("button", SAVE));
     expect(save.mock.calls[0]?.[0]).toEqual({
       dynamicProvider: "anthropic",
-      dynamicModel: "claude-sonnet-5",
+      dynamicModel: ANTHROPIC_DEFAULT_MODELS.dynamic,
     });
   });
 

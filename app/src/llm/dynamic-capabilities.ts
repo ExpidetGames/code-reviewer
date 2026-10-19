@@ -26,6 +26,16 @@ export const DYNAMIC_OUTPUT_ALLOWANCE_TOKENS = 8192;
 export const DYNAMIC_LARGE_OUTPUT_ALLOWANCE_TOKENS = 32_768;
 
 /**
+ * The allowance of a model that cannot run without thinking (`ModelCapabilities.alwaysThinks`, #533), at any price.
+ * Thinking is output and counts against `max_tokens`, which is a hard cap: an allowance sized for an answer alone
+ * can be used up by the thinking, and the answer is cut off. The provider's documentation (see the adapter) names
+ * raising `max_tokens` first. A review of up to 20 findings is about 6000 tokens, so 32768 leaves about 26000 for
+ * thinking, and it is the value of the default model (#309). The runner reserves less than this against the cost
+ * limit (`UpstreamWire.reserved_output_tokens`), so the price of a model does not decide whether a run can start.
+ */
+export const DYNAMIC_THINKING_OUTPUT_ALLOWANCE_TOKENS = 32_768;
+
+/**
  * The highest output price (USD per million tokens) at which the large allowance is given. Every call
  * reserves its whole allowance at the output price against the cost limit (1 USD by default), and a
  * reservation of two calls (a call and the final call after it) must leave room: at this price one
@@ -33,7 +43,11 @@ export const DYNAMIC_LARGE_OUTPUT_ALLOWANCE_TOKENS = 32_768;
  */
 export const LARGE_ALLOWANCE_MAX_OUTPUT_USD_PER_MTOK = 4;
 
-function allowanceFor(outputUsdPerMtok: string | null): number {
+function allowanceFor(
+  outputUsdPerMtok: string | null,
+  alwaysThinks: boolean,
+): number {
+  if (alwaysThinks) return DYNAMIC_THINKING_OUTPUT_ALLOWANCE_TOKENS;
   if (outputUsdPerMtok === null || outputUsdPerMtok.trim() === "")
     return DYNAMIC_OUTPUT_ALLOWANCE_TOKENS;
   const price = Number(outputUsdPerMtok);
@@ -58,7 +72,10 @@ export function dynamicCapabilitiesOf(
   const window = metadata.contextLength;
   if (window === null || window > MAX_CONTEXT_WINDOW_TOKENS) return null;
   const { inputUsdPerMtok, outputUsdPerMtok } = metadata;
-  const allowance = allowanceFor(outputUsdPerMtok);
+  const allowance = allowanceFor(
+    outputUsdPerMtok,
+    metadata.alwaysThinks === true,
+  );
   return {
     toolChoiceRequired: metadata.toolChoiceRequired,
     // The pinned engine returns its findings through a tool call: structured output here is tool

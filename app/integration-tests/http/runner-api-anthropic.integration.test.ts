@@ -158,24 +158,37 @@ describe("a job on the Anthropic provider, own key", () => {
   });
 
   // #511-T12
-  it("refuses a Dynamic job on a model that takes no forced tool choice, before the runner sees it", async () => {
-    const h = await start({
-      keyMode: "own",
-      dynamic: true,
-      project: {
-        dynamicProvider: "anthropic",
-        dynamicModel: "claude-sonnet-5-5",
-      },
-    });
-    const [job] = await h.snapshotJobs();
+  // #533-T17: these four were refused at the claim (`dynamic_model_features_unsupported`) while the runner could
+  // not steer them; now the job carries the descriptor of the model like any other.
+  it.each([
+    "claude-sonnet-5-5",
+    "claude-opus-5-5",
+    "claude-fable-5-1",
+    "claude-fable-5",
+  ])(
+    "hands a Dynamic job on %s, which takes no forced tool choice or always thinks, to the runner",
+    async (model) => {
+      const h = await start({
+        keyMode: "own",
+        dynamic: true,
+        project: { dynamicProvider: "anthropic", dynamicModel: model },
+      });
 
-    expect((await h.claim(DYNAMIC_CLAIM)).status).toBe(204);
+      const { job } = await h.claimed(DYNAMIC_CLAIM);
 
-    expect(await h.queue.get(job!.id)).toMatchObject({
-      status: "failed",
-      errorCode: "dynamic_model_features_unsupported",
-    });
-  });
+      expect(job.input).toMatchObject({
+        llm: { provider: "anthropic", model, apiKey: ANTHROPIC_KEY },
+        dynamic: {
+          model,
+          capabilities: {
+            toolChoiceRequired: true,
+            structuredOutput: true,
+            contextWindowTokens: 1_000_000,
+          },
+        },
+      });
+    },
+  );
 
   // #511-T12
   it("is not sent to a runner that did not advertise the provider", async () => {
