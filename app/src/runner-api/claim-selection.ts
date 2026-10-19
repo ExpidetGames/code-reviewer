@@ -1,14 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// The part of the claim that chooses what a job runs on (#432, docs/decisions/0005-providers-model-catalog-and-paddle-
-// billing.md, 2.8): it builds the input of `resolveModelSelection` from what the claim knows (the effective entitlements,
+// The part of the claim that chooses what a job runs on (#432, ADR 0005, 2.8): it builds the input of `resolveModelSelection` from what the claim knows (the effective entitlements,
 // the options of the project for the job's pinned kind, the providers of the caller), reads the catalog for a job on the
 // operator's key, runs the resolver and turns a failure into the refusal the job ends with. It loads no key: the key
 // follows the selection (`ClaimDeps.keyFor`).
 //
-// The managed input is built from the whole entitlements object, so what the billing epic adds to it (the `source` of the
-// entitlements, #442) reaches the resolver through the same input and needs no second read path. The same goes for any
-// other fact about the workspace that decides a managed job: it is added here, to one input, not read elsewhere.
+// The managed input is built from the whole entitlements object, so any further fact about the workspace that decides a
+// managed job reaches the resolver through the same input and needs no second read path: it is added here, to one input,
+// not read elsewhere.
 //
 // Nothing here logs a model or a key. A failure names a code, a reason, the kind and (managed) the opaque id of the entry.
 import type { Job } from "../jobs/job-types.ts";

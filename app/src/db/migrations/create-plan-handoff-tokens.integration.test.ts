@@ -33,10 +33,7 @@ async function rowsOfEveryTable(
     if (
       table.name === "plan_handoff_tokens" ||
       table.name === "job_check_runs" ||
-      table.name === "model_catalog_entries" ||
-      table.name === "billing_plans" ||
-      table.name === "billing_plan_versions" ||
-      table.name === "billing_plan_prices"
+      table.name === "model_catalog_entries"
     )
       continue;
     const { rows } =

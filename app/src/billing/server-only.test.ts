@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// #436-T11: the billing module reads credentials and talks to Paddle, so it must never reach a browser bundle.
+// #436-T11: the billing module reads credentials and talks to the payment provider, so it must never reach a browser bundle.
 // Every source file of the module carries the `server-only` marker (Next.js fails the build when a client
 // component imports a file that has it), and no client component may import the module, directly or through
 // another file. The scan reads the real source tree.

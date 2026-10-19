@@ -674,107 +674,6 @@ export interface ModelCatalogEntriesTable {
   updated_by: string | null;
 }
 
-/**
- * A plan the operator sells (#438, src/billing/, ADR 0005, 2.11). Instance level: no workspace owns a plan. The fields
- * the operator edits in place are the display fields; what is sold lives in `billing_plan_versions`.
- */
-export interface BillingPlansTable {
-  id: string;
-  /** Unique, lower case, chosen once. */
-  plan_key: string;
-  name: string;
-  description: string;
-  /** The display order of the plan screen, ascending. */
-  sort: number;
-  /** `free`, `paid` or `contact` (`PLAN_KINDS`). At most one plan is `free`. */
-  kind: string;
-  /** 0 or 1. */
-  offered: number;
-  /** 0 or 1; at most one plan has 1 (a partial unique index), and only a `paid` one. */
-  popular: number;
-  /** An https link or a `mailto:` address; a `contact` plan only. */
-  contact_target: string | null;
-  /** ISO 8601 text in UTC: the plan is hidden from new subscribers since then. */
-  archived_at: string | null;
-  created_at: string;
-  updated_at: string;
-  /** The user who changed it last, or null (the system, or a user who was deleted since). */
-  updated_by: string | null;
-  /** The Paddle product the plan is sold under: set when the first price is linked (#439); every later price belongs to it. */
-  paddle_product_id: string | null;
-  /** `sandbox` or `live`: the Paddle environment `paddle_product_id` belongs to. */
-  paddle_product_env: string | null;
-}
-
-/**
- * One version of a plan: the sold unit. Immutable after creation but for `role` (src/db/repositories/billing-plan-versions-repository.ts).
- */
-export interface BillingPlanVersionsTable {
-  id: string;
-  plan_id: string;
-  /** 1, 2, ...: unique per plan. */
-  number: number;
-  /** `current` (one per plan, what a new subscriber gets) or `legacy`. */
-  role: string;
-  /** `own` or `managed` (KEY_MODES). */
-  key_mode: string;
-  /** JSON text of the four limits, each a count or null. */
-  limits: string;
-  /** JSON text `{"catalogEntries":[ids] or null}` for a `managed` version; null for `own`. */
-  model_access: string | null;
-  /** USD minor units, tax inclusive; null on a plan that is not paid. */
-  monthly_amount_minor: number | null;
-  /** USD minor units; null is no yearly option. An amount, never a percentage. */
-  yearly_amount_minor: number | null;
-  created_at: string;
-  created_by: string | null;
-  /** The Paddle price the monthly slot is sold with (`billing_plan_prices.id`); changes only by linking (#439). */
-  monthly_price_id: string | null;
-  /** The same for the yearly slot; only a version with a yearly amount has one. */
-  yearly_price_id: string | null;
-}
-
-/**
- * A Paddle price the app knows (#439, src/billing/README.md): what Paddle said about it at `snapshot_at`, never written
- * back. A version links to one per slot; versions may share a price, and a price belongs to one plan.
- */
-export interface BillingPlanPricesTable {
-  id: string;
-  plan_id: string;
-  /** Unique; null while a price that the app creates (#440) has not been answered by Paddle yet. */
-  paddle_price_id: string | null;
-  paddle_product_id: string;
-  /** Paddle's price type, `standard` or `custom`, as Paddle said at `snapshot_at`. */
-  price_type: string;
-  /** `sandbox` or `live`. */
-  paddle_env: string;
-  /** Paddle's billing cycle interval: `day`, `week`, `month` or `year`. */
-  interval: string;
-  frequency: number;
-  currency: string;
-  /** Paddle's own string of minor units ("1234"); text, so any amount a price is changed to is cached whole. */
-  unit_amount_minor: string;
-  tax_mode: string;
-  /** 0 or 1: the price has country overrides. */
-  has_overrides: number;
-  /** The trial in days, as Paddle says it; null for none. */
-  trial_days: number | null;
-  /** The limits Paddle puts on the quantity of one item (`quantity.minimum` / `maximum`), whole numbers from one up. */
-  quantity_min: number;
-  quantity_max: number;
-  /** `active` or `archived`, as Paddle said at `snapshot_at`; null before the first read. */
-  paddle_status: string | null;
-  /** `linked` (pasted by the operator, #439) or `created` (by the app, #440). */
-  origin: string;
-  intent_id: string | null;
-  /** `pending`, `ready` or `failed`. */
-  state: string;
-  last_error_code: string | null;
-  snapshot_at: string | null;
-  created_at: string;
-  archived_at: string | null;
-}
-
 export interface Database {
   app_meta: AppMetaTable;
   users: UsersTable;
@@ -804,9 +703,6 @@ export interface Database {
   job_check_runs: JobCheckRunsTable;
   plan_handoff_tokens: PlanHandoffTokensTable;
   model_catalog_entries: ModelCatalogEntriesTable;
-  billing_plans: BillingPlansTable;
-  billing_plan_versions: BillingPlanVersionsTable;
-  billing_plan_prices: BillingPlanPricesTable;
   password_reset_tokens: PasswordResetTokensTable;
   email_verification_tokens: EmailVerificationTokensTable;
   signed_states: SignedStatesTable;

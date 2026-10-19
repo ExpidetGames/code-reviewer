@@ -66,33 +66,13 @@ describe("the guards of the admin portal", () => {
     expect(readFileSync(page!.file, "utf8")).toMatch(/\brequireAdmin\(\)/);
   });
 
-  // #437-T07
-  it("guard the billing page and its data routes like every other part of the portal", () => {
-    const billing = discoverRoutes().filter(
-      ({ route }) =>
-        (concretePath(route).startsWith("/instance-portal/billing") ||
-          concretePath(route).startsWith("/api/instance-portal/billing")) &&
-        !concretePath(route).includes("/billing/plans"),
+  // #491-T08
+  it("has no billing page or billing data route until the billing admin page is built again on these guards", () => {
+    const billing = discoverRoutes().filter(({ route }) =>
+      /billing/i.test(concretePath(route)),
     );
-    const files = billing.map(({ file }) => file);
 
-    expect(billing.map(({ route }) => concretePath(route)).sort()).toEqual([
-      "/api/instance-portal/billing",
-      "/api/instance-portal/billing/check",
-      "/api/instance-portal/billing/notification-destination",
-      "/instance-portal/billing",
-    ]);
-    for (const { route, file } of billing) {
-      expect(isInternalPortalPath(concretePath(route))).toBe(true);
-      const source = readFileSync(file, "utf8");
-      if (/page\.tsx?$/.test(file))
-        expect(source).toMatch(/\brequireAdmin\(\)/);
-      else {
-        expect(source).toMatch(/\bcreateBillingRouteHandlers\(/);
-        expect(source).toMatch(/\baccess:\s*lookupAdmin\b/);
-      }
-    }
-    expect(files.length).toBe(4);
+    expect(billing.map(({ route }) => concretePath(route))).toEqual([]);
   });
 
   // #429-T08
@@ -126,32 +106,6 @@ describe("the guards of the admin portal", () => {
     expect(source).toMatch(/<ModelCatalogSection\b/);
   });
 
-  // #438-T11
-  it("guard the plans page and its data routes like every other part of the portal", () => {
-    const plans = discoverRoutes().filter(({ route }) =>
-      concretePath(route).includes("/billing/plans"),
-    );
-
-    expect(plans.map(({ route }) => concretePath(route)).sort()).toEqual([
-      "/api/instance-portal/billing/plans",
-      // A dynamic segment is read as "x" (src/test-support/routes.ts).
-      "/api/instance-portal/billing/plans/x",
-      "/instance-portal/billing/plans",
-    ]);
-    for (const { route, file } of plans) {
-      expect(isInternalPortalPath(concretePath(route))).toBe(true);
-      const source = readFileSync(file, "utf8");
-      if (/page\.tsx?$/.test(file))
-        expect(source).toMatch(/\brequireAdmin\(\)/);
-      else {
-        expect(source).toMatch(/\bcreatePlansRouteHandlers\(/);
-        expect(source).toMatch(/\baccess:\s*lookupAdmin\b/);
-        // Billing off: the routes are the 404 of a missing path (src/billing/enabled.ts).
-        expect(source).toMatch(/\bisOn:\s*isBillingOnNow\b/);
-      }
-    }
-  });
-
   it("are handed to the handlers by every data route", () => {
     const handlers = routes.filter(({ file }) => /route\.tsx?$/.test(file));
     expect(handlers.length).toBeGreaterThan(0);
@@ -160,7 +114,7 @@ describe("the guards of the admin portal", () => {
       .filter(({ file }) => {
         const source = readFileSync(file, "utf8");
         return !(
-          /\bcreate(Admin|Github|Approval|Billing|Plans|Catalog)RouteHandlers\(/.test(
+          /\bcreate(Admin|Github|Approval|Catalog)RouteHandlers\(/.test(
             source,
           ) && /\baccess:\s*lookupAdmin\b/.test(source)
         );

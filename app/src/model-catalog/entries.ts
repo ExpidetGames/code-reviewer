@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// The vocabulary of the model catalog (#425, docs/decisions/0005-providers-model-catalog-and-paddle-billing.md, 2.6): the
+// The vocabulary of the model catalog (#425, ADR 0005, 2.6): the
 // operator's list of models that workspaces on the operator's key may use. An entry has a free **name** that members see
 // and a provider and model id that only the operator sees. Pure: no database, no clock, no network.
 import { mentionsModelOrPrice } from "../copy/member-copy-scan.ts";

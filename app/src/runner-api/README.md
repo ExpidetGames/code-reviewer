@@ -122,8 +122,8 @@ id (for which a refused job answers `204`, like any job that cannot be claimed).
      some); the Worker's first fetch decides. An own job whose provider is unknown or not listed ends
      `llm_provider_unsupported`; the log line carries the provider as the tenant wrote it, cut to 64 characters with the
      cut marked and every non-printable character replaced (`src/llm/provider-text.ts`).
-   - The input of the managed branch is the whole entitlements object, so what the billing epic adds (the `source`, the
-     refusal `own_key_requires_plan`, #442) goes through the same input, not a second read path.
+   - The input of the managed branch is the whole entitlements object, so any further fact about the workspace that decides a
+     managed job goes through the same input, not a second read path.
 
    Only a selection that succeeded loads the key (`keyFor`, `src/llm/assemble.ts`): the workspace's own key **of the
    selected provider**, or the operator's key of it, as the selection's key source says; it does not read the

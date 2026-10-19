@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Whether an address can be reached by Paddle from the internet: `https`, no credentials, and a host that is neither a
-// loopback, a private, a link-local nor a local name. The notification destination is created with the app's own
-// address (`BETTER_AUTH_URL`); an address that fails this would leave a destination that never delivers (or, on the
-// live account, one that points at a staging host). Pure: no name is resolved, so a public name that resolves to a
-// private address is not caught here (Paddle is the one that connects).
+// Whether an address can be reached by Stripe from the internet: `https`, no credentials, and a host that is neither a
+// loopback, a private, a link-local nor a local name. A webhook endpoint is registered with the app's own address
+// (`BETTER_AUTH_URL`); an address that fails this would leave an endpoint that never delivers (or, on the live account,
+// one that points at a staging host). Pure: no name is resolved, so a public name that resolves to a private address
+// is not caught here (Stripe is the one that connects).
 import "server-only";
 import { isIPv4 } from "node:net";
 
