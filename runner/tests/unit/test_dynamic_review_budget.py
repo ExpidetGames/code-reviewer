@@ -195,6 +195,72 @@ def test_an_answer_larger_than_its_output_allowance_fails_the_run() -> None:
     assert refused.value.code is ErrorCode.DYNAMIC_ACCOUNTING_FAILED
 
 
+# #533-T21 (folded into #540): a call may use the whole output allowance it sends (thinking counts
+# against it) while the cost limit reserves what the run has shown, at most the cap the model's wire
+# names; the provider's answer is still held to the allowance.
+def test_a_call_reserves_the_realistic_output_and_is_held_to_the_whole_allowance() -> None:
+    subject = BudgetLedger(
+        DynamicLimits(),
+        clock=Clock(),
+        output_tokens=32_768,
+        reserved_output_tokens=8_192,
+        unit_costs=UNIT_COSTS,
+    )
+    reservation = subject.reserve_call("x" * 300)
+
+    assert reservation.output_tokens == 32_768
+    assert reservation.cost == UNIT_COSTS.of_call(reservation.input_tokens, 1_024)
+    subject.settle_call(
+        reservation, prompt_tokens=100, completion_tokens=30_000, cost=Decimal("0.2")
+    )
+    # A completion of 30,000 tokens is shown: the next call reserves the wire's cap, not more.
+    too_much = subject.reserve_call("x" * 300)
+    assert too_much.cost == UNIT_COSTS.of_call(too_much.input_tokens, 8_192)
+    with pytest.raises(LimitError) as refused:
+        subject.settle_call(
+            too_much, prompt_tokens=100, completion_tokens=32_769, cost=Decimal("0.2")
+        )
+    assert refused.value.code is ErrorCode.DYNAMIC_ACCOUNTING_FAILED
+
+
+# #533-T21: the reservation of a per-call allowance below the realistic part is that allowance.
+def test_a_call_with_a_smaller_allowance_than_the_realistic_output_reserves_its_allowance() -> None:
+    subject = BudgetLedger(
+        DynamicLimits(), clock=Clock(), reserved_output_tokens=8_192, unit_costs=UNIT_COSTS
+    )
+
+    reservation = subject.reserve_call("x" * 300, output_tokens=100)
+
+    assert reservation.cost == UNIT_COSTS.of_call(reservation.input_tokens, 100)
+
+
+# #533-T21 (folded into #540): a larger allowance must not make the cost guard stop a run earlier.
+# A model at 20 USD per million output tokens, a 40000 token prompt and the 1 USD default limit:
+# reserving the whole 32768 tokens (0.66 USD, twice with the final call after it) would wrap the run
+# up at its first call. A call reserves the output the run has shown instead, so the allowance, with
+# or without the wire's cap, changes nothing.
+def test_a_larger_output_allowance_does_not_wrap_a_run_up_earlier_than_before() -> None:
+    prices = UnitCosts(input_usd_per_mtok=Decimal(4), output_usd_per_mtok=Decimal(20))
+    request = "x" * 120_000
+
+    whole = BudgetLedger(
+        DynamicLimits(), clock=Clock(), output_tokens=32_768, unit_costs=prices
+    ).reserve_call(request, can_wrap_up=True)
+    capped = BudgetLedger(
+        DynamicLimits(),
+        clock=Clock(),
+        output_tokens=32_768,
+        reserved_output_tokens=8_192,
+        unit_costs=prices,
+    ).reserve_call(request, can_wrap_up=True)
+    before = BudgetLedger(
+        DynamicLimits(), clock=Clock(), output_tokens=8_192, unit_costs=prices
+    ).reserve_call(request, can_wrap_up=True)
+
+    assert not (whole.final or capped.final or before.final)
+    assert whole.cost == capped.cost == before.cost
+
+
 # #290-T05: the window check is a backstop. It refuses only a request that cannot fit even if the
 # text were as sparse as text gets (6 bytes per token), so it never refuses what the provider would
 # accept; the provider's own context error decides every other case.

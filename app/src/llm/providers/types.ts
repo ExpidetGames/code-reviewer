@@ -91,6 +91,11 @@ export type ModelCapabilities = {
   /** US dollars per million input / output tokens, highest of the endpoints; null when unreadable. */
   inputUsdPerMtok: string | null;
   outputUsdPerMtok: string | null;
+  /**
+   * The model cannot run without thinking, and thinking counts against `max_tokens` (#533). Left out when the metadata
+   * does not say, which reads as "no".
+   */
+  alwaysThinks?: boolean;
 };
 
 export type ModelCapabilityResult =

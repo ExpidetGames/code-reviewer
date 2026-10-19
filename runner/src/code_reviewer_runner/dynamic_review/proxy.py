@@ -86,6 +86,7 @@ from code_reviewer_runner.error_mapping import is_context_length_exceeded, llm_s
 from code_reviewer_runner.job import JobCapabilities
 from code_reviewer_runner.job_loop.jsonvalues import as_object
 from code_reviewer_runner.llm_providers import PROXY_FORWARDED_FIELDS, LlmProviderSpec
+from code_reviewer_runner.provider_wire import UpstreamWire
 from code_reviewer_runner.result import ErrorCode
 
 # The protocol the run requires (`wrap_up.py` names the tool and the choice). The pinned OpenCode
@@ -132,6 +133,9 @@ class DynamicCapabilities:
     context_window_tokens: int = DEFAULT_WINDOW_TOKENS
     # What a call reserves before it is sent. Optional: without it a call reserves a floor.
     unit_costs: UnitCosts | None = None
+    # What a call reserves of `max_output_tokens` against the cost limit (#533); None reserves
+    # all of it. Set from the model's wire (`with_reserved_output`), never from the job.
+    reserved_output_tokens: int | None = None
 
     def check_required(self) -> None:
         if not self.tool_choice_required:
@@ -201,6 +205,17 @@ def with_cache_unit_costs(
             cache_read_usd_per_mtok=cache_costs[0],
             cache_write_usd_per_mtok=cache_costs[1],
         ),
+    )
+
+
+def with_reserved_output(
+    capabilities: DynamicCapabilities, wire: UpstreamWire
+) -> DynamicCapabilities:
+    """The capabilities with the most a call of this model reserves of its output, as its wire says
+    (#533). What a call really reserves is the output the run has shown, up to this cap (#540)."""
+    return replace(
+        capabilities,
+        reserved_output_tokens=wire.reserved_output_tokens(capabilities.max_output_tokens),
     )
 
 

@@ -7,17 +7,13 @@ import { dynamicCapabilitiesOf } from "../dynamic-capabilities.ts";
 import { resolveModelSelection } from "../selection.ts";
 import { anthropicDescriptor } from "./anthropic/descriptor.ts";
 import { checkModelCapabilities } from "./anthropic/capabilities.ts";
-import { ANTHROPIC_MODELS } from "./anthropic/models.ts";
+import {
+  ANTHROPIC_DEFAULT_MODELS,
+  ANTHROPIC_MODELS,
+} from "./anthropic/models.ts";
 import { createFakeAdapter } from "./fake-adapter.ts";
 import { openrouterDescriptor } from "./openrouter/descriptor.ts";
 import { suggestedModelsFor } from "./suggested-models.ts";
-
-const DIFF_ONLY = [
-  "claude-fable-5-1",
-  "claude-opus-5-5",
-  "claude-sonnet-5-5",
-  "claude-fable-5",
-];
 
 describe("the models suggested for a review kind", () => {
   // #532-T01
@@ -38,13 +34,19 @@ describe("the models suggested for a review kind", () => {
   });
 
   // #532-T02
-  it("leave out the Anthropic models that cannot serve a Dynamic Review", () => {
+  it("are the Anthropic models whose list entry says they can serve a Dynamic Review", () => {
     const dynamic = suggestedModelsFor(anthropicDescriptor, "dynamic");
+    const declared = ANTHROPIC_MODELS.filter((model) =>
+      model.reviewKinds.includes("dynamic"),
+    ).map((model) => model.id);
+    const excluded = ANTHROPIC_MODELS.filter(
+      (model) => !model.reviewKinds.includes("dynamic"),
+    ).map((model) => model.id);
 
-    expect(dynamic).toHaveLength(9);
-    for (const id of DIFF_ONLY) expect(dynamic).not.toContain(id);
+    expect(dynamic).toEqual(declared);
+    for (const id of excluded) expect(dynamic).not.toContain(id);
+    expect(dynamic).toContain(ANTHROPIC_DEFAULT_MODELS.dynamic);
     expect(dynamic).toContain(anthropicDescriptor.defaultModels.dynamic);
-    expect(dynamic).toContain("claude-haiku-5-5");
   });
 
   // #532-T03

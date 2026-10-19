@@ -33,8 +33,9 @@ cache tokens, or a descriptor without cache prices (an OpenRouter model), is pri
 input price throughout: nothing is assumed about a discount that cannot be seen. The growth is the
 bytes the request added since the last one over the observed density, not the whole request again.
 The output is the **p95 of the run's own completions** (nearest rank) with a floor, capped by the
-allowance; the allowance (`max_tokens`) stays the hard cap a completion is held to, but is no longer
-what every call reserves. A call that writes the review (the final call, the recovery, a retry of
+allowance and by the cap the model's wire names for a reservation (a thinking model, #533); the
+allowance (`max_tokens`) stays the hard cap a completion is held to, but is no longer what every
+call reserves. A call that writes the review (the final call, the recovery, a retry of
 either) reserves at least `FINAL_OUTPUT_FLOOR_TOKENS`.
 
 *The bound.* A call is admitted only while `spent + held + its expected cost <= limit`, so the spend
@@ -354,6 +355,7 @@ class BudgetLedger:
         *,
         window_tokens: int = DEFAULT_WINDOW_TOKENS,
         output_tokens: int = DEFAULT_OUTPUT_TOKENS,
+        reserved_output_tokens: int | None = None,
         unit_costs: UnitCosts,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
@@ -362,6 +364,15 @@ class BudgetLedger:
         self.limits = limits
         self.window_tokens = window_tokens
         self.output_tokens = min(max(output_tokens, 1), window_tokens)
+        # The most a call reserves of its output allowance (#533): the allowance (None) unless the
+        # model's wire says a call rarely uses the whole of it (thinking raises it). Within this cap
+        # a call reserves the output the run has shown (#540). The allowance stays the cap an answer
+        # is held to.
+        self._reserved_cap = (
+            None
+            if reserved_output_tokens is None
+            else min(max(reserved_output_tokens, 1), self.output_tokens)
+        )
         self._unit_costs = unit_costs
         self._wrap_up_seconds = min(
             WRAP_UP_RESERVE_SECONDS, WRAP_UP_RESERVE_FRACTION * limits.deadline_seconds
@@ -621,10 +632,12 @@ class BudgetLedger:
 
     def _expected_output(self, allowance: int, *, final: bool = False) -> int:
         """The output a call reserves: the p95 of the run's completions with a floor, at most the
-        allowance. The call that writes the review reserves the larger floor."""
+        allowance and at most the cap the model's wire names for a reservation (#533). The call
+        that writes the review reserves the larger floor."""
         observed = _percentile(self._counters.completions)
         floor = FINAL_OUTPUT_FLOOR_TOKENS if final else OUTPUT_FLOOR_TOKENS
-        return min(allowance, max(floor, observed))
+        cap = allowance if self._reserved_cap is None else min(allowance, self._reserved_cap)
+        return min(cap, max(floor, observed))
 
     def _growth_tokens(self) -> int:
         """What one round adds to the prompt: the p95 of the rounds seen, never below the floor."""

@@ -66,6 +66,7 @@ from code_reviewer_runner.dynamic_review.proxy import (
     ModelProxy,
     capabilities_for_job,
     with_cache_unit_costs,
+    with_reserved_output,
 )
 from code_reviewer_runner.dynamic_review.publish import (
     STATE_RESET_CODE,
@@ -465,6 +466,7 @@ def dynamic_ledger(
         limits,
         window_tokens=capabilities.context_window_tokens,
         output_tokens=capabilities.max_output_tokens,
+        reserved_output_tokens=capabilities.reserved_output_tokens,
         unit_costs=capabilities.unit_costs,
     )
 
@@ -637,9 +639,10 @@ def _run_dynamic_job(
             environment.get(DYNAMIC_CAPABILITIES_VARIABLE), job.llm.model, dynamic.capabilities
         )
         # The cache is priced from the provider's own list (#540), never from the job.
-        capabilities = with_cache_unit_costs(
-            capabilities, require_provider(job.llm.provider).cache_unit_costs(job.llm.model)
-        )
+        provider = require_provider(job.llm.provider)
+        capabilities = with_cache_unit_costs(capabilities, provider.cache_unit_costs(job.llm.model))
+        # The most a call reserves of its output allowance is the model's wire's to say (#533).
+        capabilities = with_reserved_output(capabilities, provider.wire(job.llm.model))
     except LimitError as error:
         return _failure(error.code, error.detail, started, capture)
 

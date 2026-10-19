@@ -313,9 +313,11 @@ reservation needs, over the endpoints that can serve the run (those that list `t
 highest prices. The output allowance is at most 32,768 tokens for a model whose highest output price is
 4 USD per million tokens or less (the app's `DYNAMIC_LARGE_OUTPUT_ALLOWANCE_TOKENS`, and the allowance
 of the built-in default model), and 8,192 for a dearer or unpriced one; a larger limit of the model is
-not an invitation, since the allowance is reserved against the cost limit on every call (about 0.13
-USD at the price bound). Why (#309): a review of up to 30 findings plus the reasoning tokens, which
-count against `max_tokens`, does not fit 8,192, and a turn cut off there ends without an answer. The
+not an invitation, since the cost limit reserves the output the run has shown, never more than the
+allowance (#540, see "How the cost is bounded"). Why (#309): a review of up to 30 findings plus the reasoning tokens, which
+count against `max_tokens`, does not fit 8,192, and a turn cut off there ends without an answer. A model
+that cannot run without thinking (the Claude models of #533) gets 32,768 at any price, and the runner reserves
+at most 8,192 of it against the cost limit (`runner/README.md`, "Output allowance with thinking"). The
 source for the default model: OpenRouter's `/api/v1/models/deepseek/deepseek-v4.1-flash/endpoints`,
 read on 2026-10-14, where the model's top provider states `max_completion_tokens` 943718 and the
 smallest endpoint limit is 131072, so 32,768 is below every limit; the smallest limit of the endpoints
@@ -406,29 +408,55 @@ Removed in #290: 30 model calls, 120,000 total tokens, 200 tool calls and 100 di
 of the technical limits blocks a normal review of a medium repository, report it with evidence
 instead of raising it.
 
-**How the cost is bounded.** Before every call the ledger reserves what the call could cost: the
-input estimate and the output allowance at the unit costs of the model's description (a model
-without unit costs does not run, see above). The call is refused (`dynamic_budget_exceeded`, before the provider sees it) when
-what is spent, what is reserved for calls in flight and this reservation would together pass the
-limit. After the call the reservation is replaced by the `usage.cost` the provider reported (the
-credits it charged, #286). **A call that reports no cost ends the run with
+**How the cost is bounded.** Before every call the ledger reserves what the call is **expected** to
+cost (#540), from what the run itself has shown, at the unit costs of the model's description (a model
+without unit costs does not run, see above). The call is refused (`dynamic_budget_exceeded`, before
+the provider sees it) when what is spent, what is reserved for calls in flight and this reservation
+would together pass the limit. After the call the reservation is replaced by the `usage.cost` the
+provider reported (the credits it charged, #286). **A call that reports no cost ends the run with
 `dynamic_accounting_failed`**: without it the run cannot be bounded by money, and a missing cost is
-never read as zero. A cost of 0 (a free model) is a cost. What can still end above the limit
-is the estimate's error: the input estimate can be up to 3 times too low for dense input (base64,
-minified code), and a price list that changed after it was read under-prices the reservation; both
-are paid for one call at most, and the next call is refused. The output cannot exceed its allowance
-(the proxy sets `max_tokens`). A call that failed or was retried keeps its reservation (it may
-still have been billed), so many provider retries can use up the limit without spending. With
-OpenRouter's bring-your-own-key routing `usage.cost` may exclude the upstream provider's charge.
-Repository and pull request input never set any of this.
+never read as zero. A cost of 0 (a free model) is a cost. A call that failed or was retried keeps
+its reservation (it may still have been billed), so many provider retries can use up the limit
+without spending. With OpenRouter's bring-your-own-key routing `usage.cost` may exclude the upstream
+provider's charge. Repository and pull request input never set any of this.
 
-**The input estimate.** Bytes divided by 3 (real text has about 3 to 4 bytes per token; the old
-estimate of one token per byte was 3 to 4 times too high, which refused a request of about 92 KB
-against a 100,000-token window), tightened to what the provider settled on the previous call when
-that was denser (only from requests of 4 KiB up), and never below the last settled prompt. The
-margin: every call also reserves its whole output allowance at the output cost, though most calls
-use a small part of it. The provider's reported usage replaces the estimate after the call. It is
-accepted up to the proven byte bound (a token is never fewer than one byte); above that it is an
+*The expected cost of a call.* Before #540 the guard priced the whole prompt at the uncached input
+price, reserved the full output allowance and, for the final call, 128 KiB of extra history: about
+16 times what a Sonnet 5 tool loop cost per call, so a 55-call run that cost 0.70 USD was wrapped up
+at about 0.55 USD of a 1.00 USD limit. Now:
+
+- **Prompt.** The part of the prompt the previous call left in the provider's cache (its reported
+  cache reads plus writes) is priced at the cache-read price when that call reported cache reads;
+  the rest (the growth since, taken from the bytes the request added over the observed density) at
+  the cache-write price while the cache is in use, else at the input price. The cache prices come
+  from the runner's own list of the provider (Anthropic's), never from the job or the repository.
+  A provider that reports no cache tokens, or has no such list (an OpenRouter model), is priced at
+  the uncached input price throughout.
+- **Output.** The p95 of the run's own completions so far (nearest rank), not below 1,024 tokens
+  (4,096 for the call that writes the review: the final call, the recovery and a retry of either),
+  and not above the allowance or the cap the model's wire names (8,192 for a model that cannot run
+  without thinking, #533). The allowance itself (`max_tokens`) stays the hard cap: an answer above
+  it is `dynamic_accounting_failed`.
+- **The final call after a normal call** (the wrap-up test, below) is priced the same way: the next
+  prompt plus one round of growth (the p95 of the rounds seen, at least 4,096 tokens), with the cached
+  prefix and a review-sized output. The wrap-up test multiplies this call and the final call by
+  1.25.
+
+**The bound.** A call is admitted only while `spent + held + its expected cost <= limit`, so the
+spend is within the limit whenever a call starts. The settled total can pass the limit only by the
+last call's real cost minus what was expected of it, hence **by at most one call's real cost**. That
+is the estimate's error (a cache miss, an unusually long answer, a 64 KiB tool result, a dense input
+that has up to 3 times more tokens than the byte estimate), and it is priced correctly from the next
+call on. A non-final call that settles over the limit ends the run (`dynamic_budget_exceeded`); the
+final call that carries the answer is delivered, the one overshoot the limit allows. A price list
+that changed after it was read under-prices the reservation the same way.
+
+**The input estimate.** Bytes divided by 3 (real text has about 3 to 4 bytes per token), tightened
+to what the provider settled on the previous call when that was denser (only from requests of 4 KiB
+up), and never below the last settled prompt. It is the conservative estimate that sizes the window
+backstop and the byte bound; the price of a reservation uses the last settled prompt plus the added
+bytes over the same density. The provider's reported usage replaces the estimate after the call. It
+is accepted up to the proven byte bound (a token is never fewer than one byte); above that it is an
 accounting failure (`dynamic_accounting_failed`).
 
 **The window is a backstop.** The window of a run is the model's, from its description
@@ -459,8 +487,7 @@ published.
 - **When.** The ledger decides, per model request, from its own cost and clock (never from the
   content of the request): the request becomes the *final call* when a further normal call could
   not be followed by a final one inside the cost limit (what is spent, what is held for calls in
-  flight, this call, and a final call after it whose history may have grown by two tool results,
-  128 KiB), or when less wall clock is left than one provider call needs (150 s of the 600 s; a
+  flight, this call, and a final call after it, with the margin above, #540), or when less wall clock is left than one provider call needs (150 s of the 600 s; a
   quarter of a shorter deadline). The final call must itself fit the cost limit, else the run ends
   with `dynamic_budget_exceeded` as before.
 - **What changes in that call.** The model proxy, which is trusted runner code, rewrites the request
@@ -541,7 +568,7 @@ sent on every request and forwarded by the proxy (both checked against the real 
   (`begin_recovery`). The ledger says yes only if no final call was granted yet, a model call was
   made, more than the wrap-up's clock reserve is left (150 s of 600 s, a quarter of a shorter
   deadline: the recovery call writes a whole review) and the estimate of one more call (the last
-  prompt, one output allowance for the model's last answer, a 4 KiB slack) fits the cost limit. Only
+  prompt, the model's last answer, a 4 KiB slack, priced like a final call) fits the cost limit. Only
   the engine's own missing-answer error (`StructuredOutputError`, or a turn that ended with no error
   at all) is recovered; another error of the engine (`APIError`, an abort, a content filter, ...) is
   its own failure and ends the run as before, with the error name in the detail. The adapter then sends a second message to the same session with the runner's fixed
