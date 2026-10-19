@@ -975,7 +975,7 @@ def test_the_claim_request_may_leave_the_provider_advertisement_out() -> None:
     assert _accepts("ClaimRequest", {"engines": ["pr-agent"], "features": ["supersede"]})
     assert _accepts("ClaimRequest", {"llmProviders": ["openrouter"]})
     assert _accepts("ClaimRequest", {"llmProviders": ["openrouter", "fakeai"]})
-    assert _example("ClaimRequest")["llmProviders"] == ["openrouter"]
+    assert _example("ClaimRequest")["llmProviders"] == ["openrouter", "anthropic"]
     description = _load(SCHEMA_PATH)["$defs"]["ClaimRequest"]["description"]
     assert "llmProviders" in description and "openrouter" in description
 

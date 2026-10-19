@@ -707,7 +707,7 @@ class ModelProxy:
         read, never computed: a call without it simply has no known cost.
         """
         usage = as_object(document.get("usage"))
-        return None if usage is None else self._provider.cost_extractor(usage)
+        return None if usage is None else self._provider.cost_extractor(self.upstream_model, usage)
 
     def _provider_error(self, status: int, body: bytes) -> tuple[bytes, ErrorCode]:
         # The provider has no endpoint that supports every parameter of the request (#270): the

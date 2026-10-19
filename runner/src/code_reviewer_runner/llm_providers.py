@@ -6,9 +6,11 @@ One entry per provider, keyed by the slug the job names in `llm.provider`. What 
 OpenRouter-specific code scattered over the runner is a field of the entry: the LiteLLM prefix, the
 default API base, the names of the PR-Agent key and base settings, how a request is told to route
 only to endpoints that support every parameter, the matcher for "no endpoint supports these
-parameters" and the extractor of the cost a provider states. `job.py`, `pr_agent_config.py`, the
-require-parameters patch, `runner.py`, the Dynamic proxy and `repo_settings_guard.py` read the entry
-of the job's provider; none of them names a provider.
+parameters", the cost of a call (a charge the provider states, or one computed from its usage and a
+price list), whether a model takes `temperature`, the output a Diff run asks for, and how the
+Dynamic proxy speaks to the provider (`provider_wire.py`). `job.py`, `pr_agent_config.py`, the
+require-parameters patch, `temperature_patch.py`, `diff_cost.py`, `runner.py`, the Dynamic proxy and
+`repo_settings_guard.py` read the entry of the job's provider; none of them names a provider.
 
 The registry is also what the runner advertises (`llmProviders` of a claim and of the Worker's
 details request), so an app never hands it a job for a provider it cannot read. A slug has the form
@@ -22,7 +24,11 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Final
 
+from code_reviewer_runner.anthropic_cost import cost_of_usage
+from code_reviewer_runner.anthropic_models import model_for as claude_model
 from code_reviewer_runner.dynamic_review.budget import exact_cost
+from code_reviewer_runner.provider_wire import OpenAiChatWire, UpstreamWire
+from code_reviewer_runner.usage_access import usage_field
 
 PROVIDER_ID_PATTERN: Final = re.compile(r"^[a-z][a-z0-9_]{1,31}$")
 
@@ -68,6 +74,22 @@ class RequireParameters:
             )
 
 
+def _same_base(base: str) -> str:
+    return base
+
+
+def _no_opinion(model: str) -> bool | None:
+    return None
+
+
+def _no_limit(model: str) -> int | None:
+    return None
+
+
+def _openai_chat_wire(model: str) -> UpstreamWire:
+    return OpenAiChatWire()
+
+
 @dataclass(frozen=True)
 class LlmProviderSpec:
     id: str
@@ -83,8 +105,22 @@ class LlmProviderSpec:
     require_parameters: RequireParameters | None
     # True for the text of the provider's answer "no endpoint can serve the requested parameters".
     no_endpoint_for_parameters: Callable[[str], bool]
-    # The charge the provider states in the `usage` object of an answer, None when it states none.
-    cost_extractor: Callable[[Mapping[str, object]], Decimal | None]
+    # The cost of one call to `model` (the bare name, no prefix) from the `usage` of its answer, a
+    # mapping or an object: the charge the provider states, or one computed from the token counts.
+    # None when the call cannot be priced exactly: an unknown cost, never zero.
+    cost_extractor: Callable[[str, object], Decimal | None]
+    # The API base as LiteLLM wants it, from the one of the job (which may carry a version path
+    # that LiteLLM adds itself).
+    litellm_api_base: Callable[[str], str] = _same_base
+    # Whether a request to `model` may carry `temperature`: the provider's own knowledge of the
+    # model. None leaves the decision to the name rules of `temperature_patch.py`.
+    supports_temperature: Callable[[str], bool | None] = _no_opinion
+    # The output a Diff run asks `model` for, in tokens; None leaves it to the provider's default.
+    diff_output_tokens: Callable[[str], int | None] = _no_limit
+    # The context window of `model` for PR-Agent, which does not know every model; None if unknown.
+    context_window: Callable[[str], int | None] = _no_limit
+    # How the Dynamic proxy speaks to the provider for `model`.
+    wire: Callable[[str], UpstreamWire] = _openai_chat_wire
 
     @property
     def settings_section(self) -> str:
@@ -107,10 +143,10 @@ def _openrouter_no_endpoint_for_parameters(text: str) -> bool:
     return _OPENROUTER_NO_ENDPOINT.search(text) is not None
 
 
-def _openrouter_cost(usage: Mapping[str, object]) -> Decimal | None:
+def _openrouter_cost(model: str, usage: object) -> Decimal | None:
     """OpenRouter always returns `usage.cost`; there is no request flag to set. It is read, never
     computed: a call without it simply has no known cost."""
-    return exact_cost(usage.get("cost"))
+    return exact_cost(usage_field(usage, "cost"))
 
 
 OPENROUTER: Final = LlmProviderSpec(
@@ -132,8 +168,61 @@ OPENROUTER: Final = LlmProviderSpec(
     cost_extractor=_openrouter_cost,
 )
 
+# What a Diff run asks a Claude model for. Reasoning tokens count against the output limit, so
+# LiteLLM's default of 4096 can be used up before the review is written. Below the size at which
+# Anthropic's SDKs insist on streaming (21333 tokens), so a plain request is still fine.
+_CLAUDE_DIFF_OUTPUT_TOKENS: Final = 16_000
+
+# The API address of the job carries `/v1`; LiteLLM adds `/v1/messages` to the address it is given.
+_VERSION_PATH = re.compile(r"/v1/?$")
+
+
+def _anthropic_api_base(base: str) -> str:
+    return _VERSION_PATH.sub("", base)
+
+
+def _anthropic_supports_temperature(model: str) -> bool | None:
+    """From the flag of the model in the list. A model that is not listed takes none: nothing is
+    guessed from its name."""
+    entry = claude_model(model)
+    return entry is not None and entry.temperature
+
+
+def _anthropic_diff_output_tokens(model: str) -> int | None:
+    entry = claude_model(model)
+    return None if entry is None else min(_CLAUDE_DIFF_OUTPUT_TOKENS, entry.max_output_tokens)
+
+
+def _anthropic_context_window(model: str) -> int | None:
+    entry = claude_model(model)
+    return None if entry is None else entry.context_window_tokens
+
+
+def _anthropic_cost(model: str, usage: object) -> Decimal | None:
+    """Anthropic states token counts and no charge: the cost is computed from them and the price
+    list of the model. Whatever else the answer says about a charge is not read."""
+    return cost_of_usage(model, usage)
+
+
+ANTHROPIC: Final = LlmProviderSpec(
+    id="anthropic",
+    litellm_prefix="anthropic/",
+    default_api_base="https://api.anthropic.com/v1",
+    key_setting="anthropic.key",
+    api_base_setting="anthropic.api_base",
+    # PR-Agent has no `anthropic.api_base`; its LiteLLM handler reads the address here.
+    api_base_variable="ANTHROPIC_API_BASE",
+    require_parameters=None,
+    no_endpoint_for_parameters=lambda text: False,
+    cost_extractor=_anthropic_cost,
+    litellm_api_base=_anthropic_api_base,
+    supports_temperature=_anthropic_supports_temperature,
+    diff_output_tokens=_anthropic_diff_output_tokens,
+    context_window=_anthropic_context_window,
+)
+
 # A plain dict, so a test can register a second provider for the duration of one test.
-PROVIDERS: Final[dict[str, LlmProviderSpec]] = {OPENROUTER.id: OPENROUTER}
+PROVIDERS: Final[dict[str, LlmProviderSpec]] = {OPENROUTER.id: OPENROUTER, ANTHROPIC.id: ANTHROPIC}
 
 
 def provider_for(provider_id: str) -> LlmProviderSpec | None:
