@@ -144,8 +144,10 @@ class _PinnedConnection(http.client.HTTPSConnection):
         raise failure
 
 
-class _Response:
-    def __init__(self, connection: http.client.HTTPSConnection, response: http.client.HTTPResponse):
+class HttpUpstreamResponse:
+    def __init__(
+        self, connection: http.client.HTTPConnection, response: http.client.HTTPResponse
+    ) -> None:
         self._connection = connection
         self._response = response
         self.status = response.status
@@ -219,4 +221,4 @@ class HttpsUpstream:
         except (http.client.HTTPException, OSError):
             connection.close()
             raise UpstreamError(UpstreamFailure.CUT, sent=True) from None
-        return _Response(connection, response)
+        return HttpUpstreamResponse(connection, response)

@@ -69,6 +69,17 @@ class Refused(Exception):
         self.error = _RUN_CODE.get(code, ErrorCode.DYNAMIC_POLICY_VIOLATION)
 
 
+# The pinned engine sends `min(limit.output, 32000)` as the output cap, whatever the catalog says
+# (spike #546): a model with a limit of 128000 is asked for 32000. The reservation of the ledger
+# and the cap a request may ask for are this number, not the catalog's.
+ENGINE_OUTPUT_CAP: Final = 32_000
+
+
+def output_allowance(limit_output: int) -> int:
+    """The output cap the engine will send for a model whose entry states `limit_output`."""
+    return max(1, min(limit_output, ENGINE_OUTPUT_CAP))
+
+
 @dataclass(frozen=True)
 class PassthroughTarget:
     """The one thing a job may ask of the provider.

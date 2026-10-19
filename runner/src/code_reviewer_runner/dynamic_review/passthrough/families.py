@@ -66,6 +66,10 @@ class FamilySpec:
     output_caps: tuple[tuple[str, ...], ...]
     model_in_route: bool = False
 
+    def proxy_base_url(self, proxy_url: str) -> str:
+        """The `baseURL` the engine's SDK is given for the proxy at `proxy_url`."""
+        return proxy_url.rstrip("/") + self.base_path
+
     def engine_target(self, model: str) -> str:
         """The request target the engine sends for `model`: path and query."""
         target = self.base_path + self.route.format(model=model)

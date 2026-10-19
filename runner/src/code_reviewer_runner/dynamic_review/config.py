@@ -22,6 +22,7 @@ misconfiguration can reach; the export and the OS boundary of #196/#202 are what
 """
 
 import secrets
+from collections.abc import Mapping
 from typing import Any
 
 # The one provider the engine may talk to: the runner-owned model proxy on loopback. Its key is the
@@ -73,19 +74,9 @@ def permission_block() -> dict[str, str]:
     return permissions
 
 
-def build_engine_config(
-    *, proxy_url: str, model: str, system_prompt: str, proxy_capability: str
+def _engine_config(
+    *, provider: dict[str, Any], model_reference: str, system_prompt: str
 ) -> dict[str, Any]:
-    """The whole engine configuration for one job, as data the runner writes itself.
-
-    `model` is the operator-configured model identifier; the proxy resolves it to a destination.
-    `system_prompt` is the runner-composed trusted prompt (fixed core + review context + skill,
-    #198): it is the runner-defined agent's prompt, so the fixed core reaches the model through the
-    trusted channel and never through repository instructions or skill discovery. The prepared
-    export is not a config key: the adapter scopes every request to it with the directory header.
-    `proxy_capability` is the job's bearer capability for the proxy; the config file is the only
-    place the engine receives it (never the environment, never the prompt).
-    """
     return {
         "permission": permission_block(),
         # The one agent the run may use. The request may not select another; extra built-in agents
@@ -94,24 +85,15 @@ def build_engine_config(
             "review": {
                 "description": "Read-only Dynamic Review of one change",
                 "mode": "primary",
-                "model": f"{PROXY_PROVIDER_ID}/{model}",
+                "model": model_reference,
                 "prompt": system_prompt,
                 # No `tools` map: in the pinned release `{"*": false}` removes every tool, the
                 # structured-output return included (found against the real binary). The tool
                 # set is the permission block above, default-deny.
             }
         },
-        # One provider, the loopback proxy. Bundled `@ai-sdk/openai-compatible`, so no package is
-        # fetched for an unknown SDK.
-        "provider": {
-            PROXY_PROVIDER_ID: {
-                "npm": "@ai-sdk/openai-compatible",
-                "name": "Runner model proxy",
-                "options": {"baseURL": f"{proxy_url}/v1", "apiKey": proxy_capability},
-                "models": {model: {}},
-            }
-        },
-        "enabled_providers": [PROXY_PROVIDER_ID],
+        "provider": provider,
+        "enabled_providers": list(provider),
         # No repository instruction discovery: the runner composes the prompt (core + skill)
         "instructions": [],
         "plugin": [],
@@ -127,6 +109,53 @@ def build_engine_config(
         # the proxy and the cost limit bounds the run instead.
         "compaction": {"auto": False, "prune": False},
     }
+
+
+def build_engine_config(
+    *, proxy_url: str, model: str, system_prompt: str, proxy_capability: str
+) -> dict[str, Any]:
+    """The whole engine configuration for one job, as data the runner writes itself.
+
+    `model` is the operator-configured model identifier; the proxy resolves it to a destination.
+    `system_prompt` is the runner-composed trusted prompt (fixed core + review context + skill,
+    #198): it is the runner-defined agent's prompt, so the fixed core reaches the model through the
+    trusted channel and never through repository instructions or skill discovery. The prepared
+    export is not a config key: the adapter scopes every request to it with the directory header.
+    `proxy_capability` is the job's bearer capability for the proxy; the config file is the only
+    place the engine receives it (never the environment, never the prompt).
+    """
+    return _engine_config(
+        # One provider, the loopback proxy. Bundled `@ai-sdk/openai-compatible`, so no package is
+        # fetched for an unknown SDK.
+        provider={
+            PROXY_PROVIDER_ID: {
+                "npm": "@ai-sdk/openai-compatible",
+                "name": "Runner model proxy",
+                "options": {"baseURL": f"{proxy_url}/v1", "apiKey": proxy_capability},
+                "models": {model: {}},
+            }
+        },
+        model_reference=f"{PROXY_PROVIDER_ID}/{model}",
+        system_prompt=system_prompt,
+    )
+
+
+def build_native_engine_config(
+    *, provider: Mapping[str, Any], model_reference: str, system_prompt: str
+) -> dict[str, Any]:
+    """The engine configuration of a native job (#550): the `provider` object of the job's model
+    entry (#548: one provider with `npm`, `options.baseURL` = the passthrough proxy, a dummy
+    `options.apiKey` and `models.<id>`) in place of the legacy proxy provider, and the rest the
+    same.
+
+    The real key and the upstream address are not parameters: they are the supervisor's, and
+    nothing here could write them into the file.
+    """
+    if len(provider) != 1:
+        raise ValueError("a native job is configured with one provider")
+    return _engine_config(
+        provider=dict(provider), model_reference=model_reference, system_prompt=system_prompt
+    )
 
 
 def engine_environment(
