@@ -29,6 +29,7 @@ import { createJobCheckRunsRepository } from "./job-check-runs-repository.ts";
 import { createRefusalNoticesRepository } from "./refusal-notices-repository.ts";
 import { createUsageRecordsRepository } from "./usage-records-repository.ts";
 import { createBillingJournalRepository } from "./billing-journal-repository.ts";
+import { createBillingTopUpIntentsRepository } from "./billing-topup-intents-repository.ts";
 
 const SHA = "b".repeat(40);
 const FAILED_SHA = "c".repeat(40);
@@ -51,6 +52,7 @@ function reposOf(db: Kysely<Database>, workspaceId: string) {
     jobChecks: createJobCheckRunsRepository(db, workspaceId),
     planHandoff: createPlanHandoffTokensRepository(db, workspaceId),
     billing: createBillingJournalRepository(db, workspaceId),
+    topUpIntents: createBillingTopUpIntentsRepository(db, workspaceId),
   };
 }
 type Repos = ReturnType<typeof reposOf>;
@@ -271,7 +273,17 @@ async function seed(
     refKey: `pi-${tag}`,
   });
   await repos.billing.reserve(1_000_000, `held-${tag}`);
+  // The top-up intents (#497): one with a payment, so the other workspace has an intent to reach for.
+  const topUpIntent = await repos.topUpIntents.create({
+    adapter: "fake",
+    amountMicroUsd: 25_000_000,
+  });
+  await repos.topUpIntents.attachRefs(topUpIntent.id, {
+    checkoutRef: `cs-${tag}`,
+    paymentRef: `pi-intent-${tag}`,
+  });
   return {
+    topUpIntentId: topUpIntent.id,
     workspaceId,
     userId: `user-${tag}`,
     journalEntryId: topUp.entry.id,
@@ -371,6 +383,12 @@ async function rowsOf(db: Kysely<Database>, workspaceId: string) {
       .selectFrom("billing_balances")
       .selectAll()
       .where("workspace_id", "=", workspaceId)
+      .execute(),
+    billingTopUpIntents: await db
+      .selectFrom("billing_topup_intents")
+      .selectAll()
+      .where("workspace_id", "=", workspaceId)
+      .orderBy("id")
       .execute(),
     appSettings: await db
       .selectFrom("app_settings")
@@ -1147,6 +1165,54 @@ const CASES: Case[] = [
     run: (a) => a.billing.verify(),
     expectAnswer: (answer) =>
       expect(answer).toMatchObject({ consistent: true, differenceMicroUsd: 0 }),
+  },
+  // the journal lookup by key (#497): B's entry is not there for A
+  {
+    name: "billing.findByKey",
+    run: (a) => a.billing.findByKey("top_up", "pi-b"),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  // the top-up intents (#497): A sees only its own; B's intent is not there for A, and what A creates lands in A
+  {
+    name: "topUpIntents.get",
+    run: (a, b) => a.topUpIntents.get(b.topUpIntentId),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
+    name: "topUpIntents.list",
+    run: (a) => a.topUpIntents.list({ limit: 50 }),
+    expectAnswer: (answer, a) => {
+      const intents = answer as Array<{ workspaceId: string }>;
+      expect(intents).toHaveLength(1);
+      expect(intents[0]?.workspaceId).toBe(a.workspaceId);
+    },
+  },
+  {
+    name: "topUpIntents.create",
+    run: (a) =>
+      a.topUpIntents.create({ adapter: "fake", amountMicroUsd: 10_000_000 }),
+    expectAnswer: (answer, a) =>
+      expect(answer).toMatchObject({
+        workspaceId: a.workspaceId,
+        state: "pending",
+      }),
+  },
+  {
+    name: "topUpIntents.attachRefs",
+    run: (a, b) =>
+      a.topUpIntents.attachRefs(b.topUpIntentId, { paymentRef: "pi-stolen" }),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
+    name: "topUpIntents.markPaid",
+    run: (a, b) =>
+      a.topUpIntents.markPaid(b.topUpIntentId, { paymentRef: "pi-intent-b" }),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
+    name: "topUpIntents.markFailed",
+    run: (a, b) => a.topUpIntents.markFailed(b.topUpIntentId),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
   },
   // runs
   {

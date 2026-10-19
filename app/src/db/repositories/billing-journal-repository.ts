@@ -140,6 +140,11 @@ export type BillingJournalRepository = {
   settle(jobId: string, charge: JobCharge): Promise<SettleResult>;
   /** Gives the hold of a job back without a charge (a job that never ran). Repeating it changes nothing. */
   release(jobId: string): Promise<ReleaseResult>;
+  /** The entry of this workspace with a type and key (a payment, a refund, a dispute, a job), or undefined (#497). */
+  findByKey(
+    type: BillingEntryType,
+    refKey: string,
+  ): Promise<JournalEntry | undefined>;
   /** The cached balance; a workspace without a row has 0 and 0. */
   balance(): Promise<JournalBalance>;
   /** The entries, newest first, `limit` at a time, after the cursor of the previous page. */
@@ -553,6 +558,8 @@ export function createBillingJournalRepository(
         return { ok: true, entry: release.entry, created: release.created };
       });
     },
+
+    findByKey: (type, refKey) => findEntry(db, type, refKey),
 
     balance: readBalance,
 

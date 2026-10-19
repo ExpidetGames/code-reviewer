@@ -714,6 +714,43 @@ export interface BillingBalancesTable {
   updated_at: string;
 }
 
+/**
+ * The row written before any checkout exists (src/billing/README.md, ADR 0006, 2.13; #497): the one way a payment reaches
+ * a workspace. `amount_micro_usd` is what WE asked for and bounds the credit; the provider ids are recorded once known.
+ */
+export interface BillingTopupIntentsTable {
+  id: string;
+  workspace_id: string;
+  /** The id of the adapter that created the checkout. */
+  adapter: string;
+  amount_micro_usd: number;
+  /** A TopUpIntentState (src/billing/adapter.ts): pending, paid, failed or expired. */
+  state: string;
+  /** The provider's opaque id of the checkout session; unique per adapter. */
+  provider_checkout_ref: string | null;
+  /** The provider's opaque id of the payment; unique per adapter, and the key of the journal's `top_up`. */
+  provider_payment_ref: string | null;
+  /** ISO 8601 text in UTC. */
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * One delivery of a provider's event, by event id (#497). No payload and no amount: an id, an outcome and, for a refund
+ * or a dispute, the order of its states. Instance level.
+ */
+export interface BillingWebhookEventsTable {
+  provider: string;
+  event_id: string;
+  /** A BillingEventOutcome (src/billing/adapter.ts), or 'processing' inside the transaction that handles the event. */
+  outcome: string;
+  /** 'refund:<id>' or 'dispute:<id>' for the events about those objects, else null. */
+  subject: string | null;
+  /** ISO 8601 text in UTC: when it happened at the provider. */
+  occurred_at: string | null;
+  received_at: string;
+}
+
 export interface Database {
   app_meta: AppMetaTable;
   users: UsersTable;
@@ -745,6 +782,8 @@ export interface Database {
   model_catalog_entries: ModelCatalogEntriesTable;
   billing_journal_entries: BillingJournalEntriesTable;
   billing_balances: BillingBalancesTable;
+  billing_topup_intents: BillingTopupIntentsTable;
+  billing_webhook_events: BillingWebhookEventsTable;
   password_reset_tokens: PasswordResetTokensTable;
   email_verification_tokens: EmailVerificationTokensTable;
   signed_states: SignedStatesTable;
