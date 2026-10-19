@@ -15,6 +15,7 @@ answer into the chat completion the rest of the proxy works on. What it must kee
   counts the cost rule reads (cache tokens included)."""
 
 import json
+import re
 from decimal import Decimal
 from typing import Any
 
@@ -193,6 +194,56 @@ def test_an_assistant_turn_without_content_or_calls_is_left_out_and_empty_text_i
         {"role": "user", "content": [{"type": "text", "text": "go"}, {"type": "text", "text": "b"}]}
     ]
     assert "thinking out loud" not in json.dumps(body)
+
+
+# #511-T21: the API answers 400 to a text block of nothing but whitespace, as to an empty one.
+def test_a_text_that_is_only_whitespace_is_never_sent_as_a_block() -> None:
+    body = encode(
+        messages=[
+            {"role": "system", "content": " \n"},
+            {"role": "system", "content": "rules"},
+            {"role": "user", "content": "go"},
+            {
+                "role": "assistant",
+                "content": "\n",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "t", "arguments": "{}"},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call_1", "content": " \t\n"},
+            {"role": "assistant", "content": "  \n\n"},
+            {
+                "role": "user",
+                "content": [{"type": "text", "text": "\n"}, {"type": "text", "text": " b "}],
+            },
+        ]
+    )
+
+    assert body["system"] == "rules"
+    assert body["messages"] == [
+        {"role": "user", "content": [{"type": "text", "text": "go"}]},
+        {
+            "role": "assistant",
+            "content": [{"type": "tool_use", "id": "call_1", "name": "t", "input": {}}],
+        },
+        {
+            "role": "user",
+            "content": [
+                {"type": "tool_result", "tool_use_id": "call_1"},
+                {"type": "text", "text": " b "},
+            ],
+        },
+    ]
+    assert not _blank_text_blocks(body)
+
+
+def _blank_text_blocks(body: dict[str, Any]) -> list[str]:
+    """Every text block of a request body, in a turn or in a tool result, without visible text."""
+    return re.findall(r'"text": "(?:\\[nrt]| )*"', json.dumps(body))
 
 
 # #511-T21
@@ -668,6 +719,16 @@ def test_the_fields_that_change_a_price_are_passed_on_for_the_cost_rule() -> Non
     assert completion["usage"]["service_tier"] == "priority"
     assert completion["usage"]["speed"] == "fast"
     assert ANTHROPIC.cost_extractor(MODEL, completion["usage"]) is None
+
+
+# #511-T24: a field of the usage the wire does not know travels on too, so a charge Anthropic adds
+# later reaches the cost rule, which refuses to price it.
+def test_a_usage_field_the_wire_does_not_know_is_passed_on_and_the_call_has_no_cost() -> None:
+    completion = decode(message(code_execution_tokens=7, harmless=None))
+
+    assert completion["usage"]["code_execution_tokens"] == 7
+    assert ANTHROPIC.cost_extractor(MODEL, completion["usage"]) is None
+    assert ANTHROPIC.cost_extractor(MODEL, decode(message(harmless=None))["usage"]) is not None
 
 
 # #511-T24

@@ -45,8 +45,16 @@ _FINISH_REASONS: Final = {
     "refusal": "content_filter",
     "pause_turn": "stop",
 }
-# Fields of a usage that are passed on as they are for the cost rule: they decide the price.
-_PRICE_FIELDS: Final = ("service_tier", "speed", "inference_geo", "server_tool_use", "iterations")
+# Fields of a usage the translation reads and states again in LiteLLM's names. Any other field is
+# passed on as it is for the cost rule (`service_tier`, `speed`, `server_tool_use`, a charge that is
+# new): it may decide the price, and the rule refuses to price what it does not know.
+_TRANSLATED_FIELDS: Final = (
+    "input_tokens",
+    "output_tokens",
+    "cache_read_input_tokens",
+    "cache_creation_input_tokens",
+    "cache_creation",
+)
 _SYSTEM_ROLES: Final = ("system", "developer")
 
 
@@ -82,8 +90,13 @@ def _text_parts(content: object) -> list[str]:
     return pieces
 
 
+def _visible(text: str) -> bool:
+    """The API answers 400 to a text block that is empty or only whitespace, so neither is sent."""
+    return bool(text.strip())
+
+
 def _text_blocks(content: object) -> list[dict[str, Any]]:
-    return [{"type": "text", "text": text} for text in _text_parts(content) if text]
+    return [{"type": "text", "text": text} for text in _text_parts(content) if _visible(text)]
 
 
 def _tool_use_blocks(raw: object) -> list[dict[str, Any]]:
@@ -147,7 +160,7 @@ def _convert_messages(raw: object) -> tuple[str, list[dict[str, Any]]]:
         if message is None or not isinstance(role, str):
             raise _policy("a message has no role")
         if role in _SYSTEM_ROLES:
-            system.extend(text for text in _text_parts(message.get("content")) if text)
+            system.extend(text for text in _text_parts(message.get("content")) if _visible(text))
         elif role == "user":
             add("user", _text_blocks(message.get("content")))
         elif role == "assistant":
@@ -421,7 +434,7 @@ def _usage(raw: object) -> dict[str, Any] | None:
                 "ephemeral_1h_input_tokens": split.get("ephemeral_1h_input_tokens"),
             },
         }
-    for name in _PRICE_FIELDS:
-        if name in usage:
-            translated[name] = usage[name]
+    for name, value in usage.items():
+        if name not in _TRANSLATED_FIELDS:
+            translated[name] = value
     return translated
