@@ -5,8 +5,8 @@
 // A stored value that is not an adapter id reads as `manual`, never as an error: this is read on a public route.
 import "server-only";
 import type { Kysely } from "kysely";
-import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
 import type { Database } from "../db/schema.ts";
+import { readStoredBillingSettings } from "./enabled.ts";
 import {
   isAdapterId,
   type AdapterRegistry,
@@ -28,9 +28,5 @@ export function createActiveAdapterResolver(
   registry: AdapterRegistry,
 ): () => Promise<BillingAdapter | undefined> {
   return async () =>
-    registry.get(
-      readActiveAdapterId(
-        await createInstanceSettingsRepository(db).get("billing_settings"),
-      ),
-    );
+    registry.get(readActiveAdapterId(await readStoredBillingSettings(db)));
 }

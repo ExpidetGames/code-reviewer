@@ -417,6 +417,24 @@ workspace_id = :w AND balance >= :hold`; no row changed means the hold is refuse
   or correction. The balance row is updated, then inserted if missing, never upserted: Postgres checks the row it would
   insert (`reserved >= 0`) before it looks for a conflict. See `src/billing/README.md`.
 
+### Top-up intents and provider events
+
+Migration `20261019170000_create_billing_topup_intents` (#497; epic #489, ADR 0006, 2.12 and 2.13). It adds two empty
+tables and touches no existing row:
+
+- `billing_topup_intents` (`id` primary key; `workspace_id` → `workspaces.id`; `adapter`; `amount_micro_usd`, what WE asked
+  for, a check `> 0`; `state`, a check of `pending`/`paid`/`failed`/`expired`; `provider_checkout_ref` and
+  `provider_payment_ref`, opaque provider ids, null until known; `created_at`, `updated_at`). Unique per adapter on each
+  of the two refs (NULLs do not collide), so one payment or checkout belongs to one intent. Written before any checkout
+  exists; the only way a payment reaches a workspace. **Workspace scoped**
+  (`billing-topup-intents-repository.ts`); `billing-topup-intent-directory-repository.ts` finds an intent from an event
+  before the workspace is known (read only, instance level, listed in `scoping.test.ts`).
+- `billing_webhook_events` (primary key `(provider, event_id)`; `outcome`; `subject` and `occurred_at`, which order the
+  states of one refund or dispute; `received_at`). The first idempotency layer: an id, an outcome and an order, **no
+  payload, no amount, no name**, so it is instance level (`billing-webhook-events-repository.ts`). Not pruned yet.
+
+The amount column is `integer` on SQLite and `bigint` on Postgres, like the journal. See `src/billing/README.md`.
+
 ### A database that ran the removed billing migrations
 
 Three migrations of an earlier billing design existed on `development` for a few days and are deleted (#491):
