@@ -43,14 +43,10 @@ from typing import Any, Final
 from code_reviewer_runner.anthropic_models import ClaudeModel, model_for
 from code_reviewer_runner.dynamic_review.budget import LimitError
 from code_reviewer_runner.job_loop.jsonvalues import as_object
+from code_reviewer_runner.provider_wire import CACHE_CONTROL
 from code_reviewer_runner.result import ErrorCode
 
 ANTHROPIC_VERSION: Final = "2023-06-01"
-# The one breakpoint every mark is made of: the provider's default lifetime of five minutes. Every
-# read renews the entry for free and a tool loop calls the model every few seconds, so it never
-# expires inside a run; a one hour write costs 2x instead of 1.25x and could only pay if the same
-# prefix were read again after more than five minutes, which a conversation is not (#539).
-CACHE_CONTROL: Final = {"type": "ephemeral"}
 # Blocks the provider refuses a breakpoint on.
 _UNMARKABLE_BLOCKS: Final = frozenset({"thinking", "redacted_thinking"})
 
