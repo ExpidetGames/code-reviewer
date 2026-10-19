@@ -417,8 +417,94 @@
         "stoppedEarly": {
           "description": "Why a Dynamic Review was wrapped up before it was done: the model was asked for its answer right away because the run reached its cost limit or its time limit. Absent or null for a complete run; the review it produced is published and says it may be incomplete.",
           "enum": ["cost_limit", "time_limit", null]
+        },
+        "callTrace": {
+          "description": "#541: what each model call and each tool call of a Dynamic Review was, as numbers and stable names (RunnerCallTrace). Optional and additive: a runner of an earlier release sends none, and an app of an earlier release ignores it. Observability only; nothing in the run reads it.",
+          "$ref": "#/$defs/RunnerCallTrace"
         }
       }
+    },
+    "RunnerCallTrace": {
+      "description": "#541: the per-call trace of a Dynamic Review, without content. Sizes, counts, times, the cost and stable names only: no path, no argument, no tool result and no model text is ever in it. At most 100 model calls and 100 tool calls are kept (the first ones); truncated says that more happened. Tool names are the engine's own; any other name is `other`.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["truncated", "modelCalls", "toolCalls"],
+      "properties": {
+        "truncated": { "type": "boolean" },
+        "modelCalls": {
+          "type": "array",
+          "maxItems": 100,
+          "items": { "$ref": "#/$defs/RunnerModelCallTrace" }
+        },
+        "toolCalls": {
+          "type": "array",
+          "maxItems": 100,
+          "items": { "$ref": "#/$defs/RunnerToolCallTrace" }
+        }
+      }
+    },
+    "RunnerModelCallTrace": {
+      "description": "One model call. A count is null when the provider reported none (a refused call, a provider without cache tokens); it is never a guess. tMs is the time since the run started when the call began.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "index",
+        "tMs",
+        "promptTokens",
+        "cacheRead",
+        "cacheWrite",
+        "completionTokens",
+        "costUsd",
+        "finishReason",
+        "final",
+        "tools"
+      ],
+      "properties": {
+        "index": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+        "tMs": { "type": "integer", "minimum": 0, "maximum": 604800000 },
+        "promptTokens": { "type": ["integer", "null"], "minimum": 0, "maximum": 1000000000 },
+        "cacheRead": { "type": ["integer", "null"], "minimum": 0, "maximum": 1000000000 },
+        "cacheWrite": { "type": ["integer", "null"], "minimum": 0, "maximum": 1000000000 },
+        "completionTokens": { "type": ["integer", "null"], "minimum": 0, "maximum": 1000000000 },
+        "costUsd": { "type": ["number", "null"], "minimum": 0 },
+        "finishReason": {
+          "enum": ["stop", "tool_calls", "length", "content_filter", "other", null]
+        },
+        "final": {
+          "description": "True for the call the run was wrapped up with (the wrap-up or the recovery).",
+          "type": "boolean"
+        },
+        "tools": {
+          "description": "The tools the answer asked for, each name once with its count.",
+          "type": "array",
+          "maxItems": 5,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "count"],
+            "properties": {
+              "name": { "$ref": "#/$defs/RunnerTraceToolName" },
+              "count": { "type": "integer", "minimum": 1, "maximum": 1000000000 }
+            }
+          }
+        }
+      }
+    },
+    "RunnerToolCallTrace": {
+      "description": "One tool call. isRepeat is true when the same tool with the same normalised arguments already ran in this job; the arguments themselves are never sent. resultBytes is the size of the result the model was shown, null when it never was.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["index", "name", "resultBytes", "isRepeat"],
+      "properties": {
+        "index": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+        "name": { "$ref": "#/$defs/RunnerTraceToolName" },
+        "resultBytes": { "type": ["integer", "null"], "minimum": 0, "maximum": 67108864 },
+        "isRepeat": { "type": "boolean" }
+      }
+    },
+    "RunnerTraceToolName": {
+      "description": "The engine's tools; every other name a model called is `other`.",
+      "enum": ["read", "grep", "glob", "StructuredOutput", "other"]
     },
     "ReviewFindings": {
       "description": "#405: what a successful review left open on the pull request. `open` counts the findings that are open AFTER the run (a Dynamic Review carries the findings of earlier runs over, PR-Agent keeps a record of active ones), not the ones the run found. `bySeverity` is the count per priority of a Dynamic Review, of the findings its summary lists (so `open` may exceed the sum when lower priority findings did not fit); null for a Diff Review, whose findings have no severity.",

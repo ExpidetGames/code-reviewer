@@ -504,6 +504,46 @@ def test_a_run_that_reaches_the_clock_reserve_is_wrapped_up_by_the_real_engine(
     assert run.ledger.stopped_early == "time_limit"
 
 
+# #541-T11
+def test_a_real_engine_run_leaves_a_call_trace_without_content(tmp_path: Path) -> None:
+    content = prepare(
+        tmp_path,
+        {"src/app.py": b"SECRETFILECONTENT = 1\n", "src/sub/mod.py": b"y = 2\n"},
+    )
+    export = content.export
+    steps: list[Step] = [
+        asks(tool_call("r0", "read", {"filePath": str(export / "src/app.py")})),
+        asks(tool_call("r1", "read", {"filePath": str(export / "src/app.py")})),
+        asks(tool_call("r2", "grep", {"pattern": "SECRETPATTERN", "path": str(export)})),
+    ]
+    model = ScriptedModel(steps=steps, final=findings_for(content.head_sha), cost=0.01)
+    with model:
+        run = run_engine(model, content, scratch=tmp_path / "scratch")
+
+    assert run.answer.ok, run.answer.error
+    usage = run.ledger.usage("vendor/model").to_json()
+    trace = usage["callTrace"]
+    # One entry per model call, in order, with the cost the provider stated.
+    assert [call["index"] for call in trace["modelCalls"]] == list(range(len(model.requests)))
+    assert all(call["costUsd"] == 0.01 for call in trace["modelCalls"])
+    assert [call["tools"] for call in trace["modelCalls"][:3]] == [
+        [{"name": "read", "count": 1}],
+        [{"name": "read", "count": 1}],
+        [{"name": "grep", "count": 1}],
+    ]
+    # Three tool calls; the second read repeats the first, with the path spelled the same way.
+    assert [(call["name"], call["isRepeat"]) for call in trace["toolCalls"][:3]] == [
+        ("read", False),
+        ("read", True),
+        ("grep", False),
+    ]
+    assert all(call["resultBytes"] is not None for call in trace["toolCalls"][:3])
+    # No path, no pattern and no file content anywhere in what is sent to the app.
+    text = json.dumps(trace)
+    for marker in ("SECRETFILECONTENT", "SECRETPATTERN", "app.py", str(export)):
+        assert marker not in text, marker
+
+
 # #293-T09
 def test_a_run_that_stays_inside_its_limits_is_never_wrapped_up(tmp_path: Path) -> None:
     content = prepare(tmp_path, {"src/app.py": b"x = 1\n"})

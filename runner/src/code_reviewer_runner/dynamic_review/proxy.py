@@ -68,6 +68,7 @@ from code_reviewer_runner.dynamic_review.budget import (
 )
 from code_reviewer_runner.dynamic_review.cache_usage import cache_tokens
 from code_reviewer_runner.dynamic_review.call_outcome import describe_call
+from code_reviewer_runner.dynamic_review.call_trace import answer_finish_reason, answer_tool_names
 from code_reviewer_runner.dynamic_review.completion_stream import completion_as_stream
 from code_reviewer_runner.dynamic_review.config import PROXY_CAPABILITY_BYTES, PROXY_PROVIDER_ID
 from code_reviewer_runner.dynamic_review.net import no_redirect_opener
@@ -570,6 +571,7 @@ class ModelProxy:
     def _attempt(self, forwarded: bytes, reservation: Reservation) -> "_Attempt | ProxyResponse":
         """One request to the provider, reserved before and settled after: its answer, or the
         response that ends the run (a provider refusal, a transport failure)."""
+        started_ms = int(self.ledger.elapsed_seconds() * 1000)
         try:
             status, response_body = self._post(
                 self.upstream_url,
@@ -582,9 +584,11 @@ class ModelProxy:
             # provider error it ends the run with a stable code of its own; the reservation stays
             # spent and the engine gets a 5xx that is no budget refusal. The exception text is
             # never passed on: it can carry the destination.
+            self._trace_failed_call(started_ms, reservation)
             return self._transport_failure(error)
         self.ledger.check_response_bytes(len(response_body))
         if status != 200:
+            self._trace_failed_call(started_ms, reservation)
             # The run ends with the provider's stable code; no partial success is claimed and no
             # counter is invented for a refused call (the reservation stays spent).
             refusal, code = self._provider_error(status, response_body)
@@ -602,16 +606,44 @@ class ModelProxy:
         # The provider is authoritative: its counters replace the reservation. A counter above the
         # reservation is not added up, it fails the run.
         cache_read, cache_write = self._cache_usage(completion)
+        cost = self._cost(completion)
+        # Noted before the settlement: a call the ledger then stops the run for is in the trace too.
+        self.ledger.trace.model_call(
+            t_ms=started_ms,
+            prompt_tokens=usage[0],
+            cache_read=cache_read,
+            cache_write=cache_write,
+            completion_tokens=usage[1],
+            cost=cost,
+            finish_reason=answer_finish_reason(completion),
+            final=reservation.final,
+            tool_names=answer_tool_names(completion),
+        )
         self.ledger.settle_call(
             reservation,
             prompt_tokens=usage[0],
             completion_tokens=usage[1],
-            cost=self._cost(completion),
+            cost=cost,
             cache_read_tokens=cache_read,
             cache_write_tokens=cache_write,
         )
         self.ledger.note_call_outcome(describe_call(completion, final=reservation.final))
         return _Attempt(body=response_body, completion=completion)
+
+    def _trace_failed_call(self, started_ms: int, reservation: Reservation) -> None:
+        """A call that got no answer (refused, or never answered) was reserved and may have been
+        billed: it is in the trace with nothing known about it."""
+        self.ledger.trace.model_call(
+            t_ms=started_ms,
+            prompt_tokens=None,
+            cache_read=None,
+            cache_write=None,
+            completion_tokens=None,
+            cost=None,
+            finish_reason=None,
+            final=reservation.final,
+            tool_names=[],
+        )
 
     def _enforce_answer(
         self, attempt: "_Attempt", request: dict[str, Any]

@@ -1020,3 +1020,125 @@ def test_the_previous_release_job_is_valid_and_parses_with_the_openrouter_entry(
 
     assert _accepts("ClaimResponse", claim)
     assert runner_job.parse_job(json.dumps(claim["job"]["input"])).llm.provider == "openrouter"
+
+
+# -- the per-call trace (#541) -------------------------------------------------------------------
+
+
+def _trace_document() -> Document:
+    from decimal import Decimal
+
+    from code_reviewer_runner.dynamic_review.call_trace import CallTrace
+
+    trace = CallTrace()
+    trace.tool_called("c1", "read", {"filePath": "src/a.py"})
+    trace.tool_resulted("c1", 812)
+    trace.tool_called("c2", "bash", {})
+    for index in range(3):
+        trace.model_call(
+            t_ms=1000 * index,
+            prompt_tokens=14_600 + 780 * index,
+            cache_read=0 if index == 0 else 14_600,
+            cache_write=14_600 if index == 0 else 780,
+            completion_tokens=400,
+            cost=Decimal("0.0342"),
+            finish_reason="tool_calls" if index < 2 else "stop",
+            final=index == 2,
+            tool_names=["read", "bash"] if index < 2 else [],
+        )
+    document = trace.to_json()
+    assert document is not None
+    return document
+
+
+def _complete_with(trace: Any) -> Document:
+    complete = _example("CompleteRequest")
+    complete["result"]["usage"]["callTrace"] = trace
+    return complete
+
+
+# #541-T06: the contract has the trace as an optional, additive field of the usage.
+def test_the_call_trace_the_runner_records_is_valid_and_a_usage_without_one_stays_valid() -> None:
+    assert _accepts("CompleteRequest", _complete_with(_trace_document()))
+    assert _accepts("CompleteRequest", _example("CompleteRequest"))
+    schema: Document = _load(SCHEMA_PATH)
+    assert "callTrace" not in schema["$defs"]["RunnerUsage"]["required"]
+
+
+# #541-T06
+def test_the_usage_the_runner_prints_with_a_trace_is_valid() -> None:
+    from code_reviewer_runner.result import Usage
+
+    usage = Usage(
+        model="vendor/model",
+        prompt_tokens=1,
+        completion_tokens=1,
+        total_tokens=2,
+        ai_calls=3,
+        fallback_used=False,
+        cost_usd=0.01,
+        call_trace=_trace_document(),
+    ).to_json()
+    complete = _example("CompleteRequest")
+    complete["result"]["usage"] = usage
+
+    assert _accepts("CompleteRequest", complete)
+
+
+def _mutations() -> list[tuple[str, Callable[[Document], None]]]:
+    return [
+        ("an unknown key", lambda t: t.update(extra=1)),
+        ("a missing key", lambda t: t.pop("truncated")),
+        ("truncated not a boolean", lambda t: t.update(truncated="yes")),
+        ("101 model calls", lambda t: t.update(modelCalls=t["modelCalls"][:1] * 101)),
+        ("101 tool calls", lambda t: t.update(toolCalls=t["toolCalls"][:1] * 101)),
+        ("a call with an extra key", lambda t: t["modelCalls"][0].update(path="src/a.py")),
+        ("a call without a key", lambda t: t["modelCalls"][0].pop("tools")),
+        ("a negative count", lambda t: t["modelCalls"][0].update(promptTokens=-1)),
+        ("a fractional count", lambda t: t["modelCalls"][0].update(cacheRead=1.5)),
+        ("a negative cost", lambda t: t["modelCalls"][0].update(costUsd=-0.1)),
+        ("an unknown finish reason", lambda t: t["modelCalls"][0].update(finishReason="boom")),
+        ("final not a boolean", lambda t: t["modelCalls"][0].update(final=1)),
+        ("an unknown tool", lambda t: t["modelCalls"][0]["tools"][0].update(name="bash")),
+        ("a tool count of zero", lambda t: t["modelCalls"][0]["tools"][0].update(count=0)),
+        ("a tool entry with an extra key", lambda t: t["modelCalls"][0]["tools"][0].update(a=1)),
+        ("an unknown tool call name", lambda t: t["toolCalls"][0].update(name="webfetch")),
+        ("a tool call with an argument", lambda t: t["toolCalls"][0].update(arguments={})),
+        ("isRepeat not a boolean", lambda t: t["toolCalls"][0].update(isRepeat="no")),
+        ("a negative result size", lambda t: t["toolCalls"][0].update(resultBytes=-1)),
+    ]
+
+
+# #541-T06: the schema refuses every shape the runner's own check refuses, and the other way round.
+@pytest.mark.parametrize(("name", "mutate"), _mutations(), ids=[name for name, _ in _mutations()])
+def test_the_contract_and_the_runner_refuse_the_same_bad_call_traces(
+    name: str, mutate: Callable[[Document], None]
+) -> None:
+    from code_reviewer_runner.dynamic_review.call_trace import valid_call_trace
+
+    trace = _trace_document()
+    mutate(trace)
+
+    assert not _accepts("CompleteRequest", _complete_with(trace)), name
+    assert valid_call_trace(trace) is None, name
+
+
+# #541-T06
+def test_the_contract_and_the_runner_accept_the_same_good_call_traces() -> None:
+    from code_reviewer_runner.dynamic_review.call_trace import valid_call_trace
+
+    nulls = _trace_document()
+    nulls["modelCalls"][0].update(
+        promptTokens=None,
+        cacheRead=None,
+        cacheWrite=None,
+        completionTokens=None,
+        costUsd=None,
+        finishReason=None,
+        tools=[],
+    )
+    nulls["toolCalls"][0]["resultBytes"] = None
+    empty: Document = {"truncated": False, "modelCalls": [], "toolCalls": []}
+    for trace in (_trace_document(), nulls, empty):
+        assert _accepts("CompleteRequest", _complete_with(trace))
+        assert valid_call_trace(trace) == trace

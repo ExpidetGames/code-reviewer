@@ -118,6 +118,20 @@ keeps a record of the active ones), and the app decides the review verdict it su
 (`app/src/check-runs/README.md`). A runner that does not send it, a failed result, or a count that cannot be known
 means no verdict. The app stores it with the result and ignores it when it is absent.
 
+### The call trace of a Dynamic Review (#541)
+
+Additive, so a previous-release reader and writer keep working: `RunnerUsage.callTrace`, an optional `RunnerCallTrace`
+(`truncated`, `modelCalls` and `toolCalls`, at most 100 of each: the first ones). Per model call it has `index`, `tMs`
+(since the run started), `promptTokens`, `cacheRead`, `cacheWrite`, `completionTokens` and `costUsd` (each `null` when
+the provider reported none), `finishReason`, `final` (the wrap-up or recovery call) and `tools` (the names the answer
+asked for, with counts); per tool call `index`, `name`, `resultBytes` and `isRepeat` (the same tool with the same
+normalised arguments already ran in this job). **No path, argument, tool result or model text is in it**, and a tool
+name that is none of the engine's is `other`. A runner of an earlier release sends none (an app reads that as "no
+trace"); an app of an earlier release ignores it. Not nullable: a runner leaves it out. The runner checks it against
+this shape before it sends it and leaves out one that does not fit, keeping the usage; the app refuses a result whose
+trace does not fit (`app/src/runner-api/call-trace.ts`), as the schema does. The Runs detail of a workspace and the
+admin portal's run view show it (`app/src/runs/README.md`, `app/src/admin/README.md`).
+
 ### A superseded run (#396, #397)
 
 Additive, so a previous-release reader and writer keep working: the claim feature `supersede` (a runner or Worker

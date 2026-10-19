@@ -648,6 +648,29 @@ sent on every request and forwarded by the proxy (both checked against the real 
   `llm_bad_request`), the fallback is to keep the original tool definitions in that call and rely on
   `tool_choice`.
 
+## The call trace: what each call was, without content (#541)
+
+A run that stops at its cost limit or costs more than expected has to be explainable afterwards, and the totals of its
+usage do not say what 55 calls did. The runner therefore records a **trace** and sends it in `usage.callTrace` of the result
+(`contracts/runner-api.v1.json`, `RunnerCallTrace`, additive and optional):
+
+- **Per model call:** `index`, `tMs` (milliseconds since the run started, at the start of the call), `promptTokens`,
+  `cacheRead`, `cacheWrite`, `completionTokens`, `costUsd`, `finishReason`, `final` (the wrap-up or recovery call) and
+  the tools the answer asked for with counts. A call the provider refused or never answered is in it with `null`s.
+- **Per tool call:** the tool, `resultBytes` (what the model was shown) and `isRepeat` (the same tool with the same
+  normalised arguments, a path spelled absolute or relative being one file, already ran in this job).
+- **Never content:** no path, no argument, no tool result, no model text. A tool name that is none of the engine's
+  (`read`, `grep`, `glob`, `StructuredOutput`) is stored as `other`; a finish reason outside the protocol's too. Whether a
+  call repeats an earlier one is decided from a digest in memory that is never written out. The trace does not steer
+  the run: nothing reads it back, and the agent is not told about it.
+- **Bounded:** the first 100 model calls and the first 100 tool calls; `truncated` says that more happened. A full trace
+  is about 30 KB, inside the 64 KiB body the app accepts; if a body is still too large the runner drops the trace before
+  it shortens the log.
+- **Shown** in the Runs detail of a workspace (the cost column only where the run's cost is shown, so not for a managed
+  quality level) and in the instance admin's run view (`/admin/runs`, `/admin/runs/<id>`: the newest runs of every
+  workspace, and one run with its facts, usage and the two tables). A run from a runner that sends no trace shows no
+  section in the workspace and a note in the admin view.
+
 ## Context window and compaction
 
 OpenCode can compact a long session itself (`compaction.auto`, with the model's `limit.context` and

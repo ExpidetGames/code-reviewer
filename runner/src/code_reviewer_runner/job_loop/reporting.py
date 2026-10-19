@@ -18,6 +18,7 @@ from collections.abc import Mapping
 from enum import StrEnum
 from typing import Any, Protocol
 
+from code_reviewer_runner.dynamic_review.call_trace import valid_call_trace
 from code_reviewer_runner.job_loop.jsonvalues import as_object
 from code_reviewer_runner.job_loop.process import ProcessOutcome
 from code_reviewer_runner.redaction import Redactor
@@ -60,6 +61,7 @@ class DroppedValue(StrEnum):
 
     FINDINGS_INVALID = "RESULT_FINDINGS_INVALID"
     STOPPED_EARLY_INVALID = "RESULT_STOPPED_EARLY_INVALID"
+    CALL_TRACE_INVALID = "RESULT_CALL_TRACE_INVALID"
 
 
 def _log_dropped(code: DroppedValue) -> None:
@@ -181,6 +183,15 @@ def _usage(value: object) -> dict[str, Any] | None:
     }
     if stopped is not None:
         document["stoppedEarly"] = stopped
+    # The per-call trace (#541) is observability: one that is not the contract's is left out, and
+    # the usage, the cost and the verdict stay.
+    raw_trace = usage.get("callTrace")
+    if raw_trace is not None:
+        trace = valid_call_trace(raw_trace)
+        if trace is None:
+            _log_dropped(DroppedValue.CALL_TRACE_INVALID)
+        else:
+            document["callTrace"] = trace
     return document
 
 
@@ -285,15 +296,26 @@ def result_from_outcome(
 
 
 def fit_request(result: Result) -> Result:
-    """Shrink the log tail until the `complete` body is small enough; never loses the verdict."""
+    """Shrink the log tail until the `complete` body is small enough; never loses the verdict.
+
+    The per-call trace (#541) goes first when the body is too large even without the log: it is
+    observability, and the usage and the log are what the app needs.
+    """
     current = dict(result)
+    usage = as_object(current.get("usage"))
+    if (
+        usage is not None
+        and "callTrace" in usage
+        and len(json.dumps({**current, "logTail": ""})) > MAX_REQUEST_BYTES
+    ):
+        current["usage"] = {name: value for name, value in usage.items() if name != "callTrace"}
     while len(json.dumps(current)) > MAX_REQUEST_BYTES:
         tail = current["logTail"]
         if not tail:
             current["errorMessage"] = ""
             current["usage"] = None
             break
-        current["logTail"] = tail[len(tail) // 2 :]
+        current["logTail"] = tail[(len(tail) + 1) // 2 :]
         current["logTruncated"] = True
     return current
 

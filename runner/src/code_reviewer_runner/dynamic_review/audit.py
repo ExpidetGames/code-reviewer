@@ -50,6 +50,8 @@ class ToolAudit:
     def __init__(self, ledger: BudgetLedger, *, export_root: str | None = None) -> None:
         self._ledger = ledger
         self._root = posixpath.normpath(export_root) if export_root else None
+        if self._root is not None:
+            ledger.trace.set_export_root(self._root)
         self._calls: dict[str, tuple[str, dict[str, Any]]] = {}
         self._resulted: set[str] = set()
         self._anonymous = 0
@@ -57,6 +59,7 @@ class ToolAudit:
     def set_export_root(self, root: str) -> None:
         """Name files relative to the export once it exists (the proxy is built before it)."""
         self._root = posixpath.normpath(root)
+        self._ledger.trace.set_export_root(self._root)
 
     # -- the provider's answer ------------------------------------------------
 
@@ -113,6 +116,7 @@ class ToolAudit:
         self._ledger.count_tool_call(name if isinstance(name, str) else "")
         arguments: Any = function.get("arguments") if function else None
         self._calls[identity] = (name if isinstance(name, str) else "", _arguments(arguments))
+        self._ledger.trace.tool_called(identity, self._calls[identity][0], self._calls[identity][1])
 
     def _note_result(self, message: Mapping[str, Any]) -> dict[str, Any]:
         identity: Any = message.get("tool_call_id")
@@ -131,7 +135,9 @@ class ToolAudit:
             return neutral
         self._resulted.add(identity)
         text = _content_text(content)
-        self._ledger.add_result_bytes(len(text.encode("utf-8", errors="replace")))
+        size = len(text.encode("utf-8", errors="replace"))
+        self._ledger.add_result_bytes(size)
+        self._ledger.trace.tool_resulted(identity, size)
         for path in _result_files(name, arguments, text):
             self._ledger.count_file(self._normal(path))
         return neutral

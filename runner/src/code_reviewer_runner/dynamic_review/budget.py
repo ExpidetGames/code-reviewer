@@ -89,6 +89,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from decimal import Context, Decimal, InvalidOperation
 
+from code_reviewer_runner.dynamic_review.call_trace import CallTrace
 from code_reviewer_runner.result import ErrorCode, Usage
 
 # Operator-owned validated configuration, never repository instructions.
@@ -386,6 +387,9 @@ class BudgetLedger:
         self._started = clock()
         self._counters = _Counters()
         self._lock = threading.Lock()
+        # What each call was, without content (#541); filled by the proxy and the audit, read by
+        # nothing in the run.
+        self.trace = CallTrace()
         self._failure: LimitError | None = None
         self._outcomes: deque[str] = deque(maxlen=RECENT_CALL_OUTCOMES)
 
@@ -845,4 +849,5 @@ class BudgetLedger:
                 fallback_used=False,
                 cost_usd=total if exact and math.isfinite(total) else None,
                 stopped_early=self._stopped_early,
+                call_trace=self.trace.to_json(),
             )
