@@ -312,6 +312,54 @@ describe("the complete body", () => {
     }
   });
 
+  // #540-N4
+  it("keeps by how much a Dynamic Review passed its cost limit, and nothing when it did not", () => {
+    const over = parseCompleteRequest({
+      leaseToken: TOKEN,
+      result: {
+        ...GOOD_RESULT,
+        usage: { ...GOOD_RESULT.usage, limitExceededBy: 0.0123 },
+      },
+    });
+    expect(over.ok).toBe(true);
+    if (!over.ok) return;
+    expect(over.value.result.usage?.limitExceededBy).toBe(0.0123);
+
+    const within = parseCompleteRequest({
+      leaseToken: TOKEN,
+      result: GOOD_RESULT,
+    });
+    expect(within.ok).toBe(true);
+    if (!within.ok) return;
+    expect(within.value.result.usage).not.toHaveProperty("limitExceededBy");
+  });
+
+  // #540-N4
+  it("refuses an excess over the cost limit that is not a finite number above zero", () => {
+    for (const limitExceededBy of [
+      0,
+      -0.01,
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      "0.01",
+      true,
+      null,
+    ]) {
+      const parsed = parseCompleteRequest({
+        leaseToken: TOKEN,
+        result: {
+          ...GOOD_RESULT,
+          usage: { ...GOOD_RESULT.usage, limitExceededBy },
+        },
+      });
+
+      expect(fieldsOf(parsed)).toContainEqual({
+        field: "result.usage.limitExceededBy",
+        code: "invalid",
+      });
+    }
+  });
+
   // #267-T07
   it("refuses a cost that is not a finite number of at least zero", () => {
     for (const costUsd of [

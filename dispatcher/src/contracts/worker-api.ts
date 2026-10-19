@@ -445,6 +445,10 @@ export interface RunnerUsage {
    * Why a Dynamic Review was wrapped up before it was done: the model was asked for its answer right away because the run reached its cost limit or its time limit. Absent or null for a complete run; the review it produced is published and says it may be incomplete.
    */
   stoppedEarly?: "cost_limit" | "time_limit" | null;
+  /**
+   * #540: by how much, in US dollars, the cost of a Dynamic Review passed the operator's cost limit. The review is delivered nevertheless: the last normal call may cost more than expected and the final call that carries the answer is always made (the documented bound: the limit plus the excess of the last normal call plus the final call). Absent when the cost stayed within the limit or is not known.
+   */
+  limitExceededBy?: number;
   [k: string]: unknown;
 }
 /**

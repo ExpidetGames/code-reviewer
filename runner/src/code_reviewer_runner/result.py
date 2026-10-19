@@ -89,6 +89,9 @@ class Usage:
     cost_usd: float | None
     # Why a Dynamic Review was wrapped up before it was done (`cost_limit`, `time_limit`, #293).
     stopped_early: str | None = None
+    # By how much the settled cost passed the operator's cost limit, in USD (#540); None when it did
+    # not. The cost guard bounds the excess (see "The bound" in `dynamic_review/budget.py`).
+    limit_exceeded_by: float | None = None
 
     @property
     def used_the_model(self) -> bool:
@@ -107,6 +110,8 @@ class Usage:
         }
         if self.stopped_early is not None:
             document["stoppedEarly"] = self.stopped_early
+        if self.limit_exceeded_by is not None:
+            document["limitExceededBy"] = self.limit_exceeded_by
         return document
 
 

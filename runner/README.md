@@ -354,9 +354,15 @@ input and the boundaries around it (the epic's binding decision). Modules:
 - `dynamic_review/budget.py` holds the limits and the ledger shared by the proxy and the adapter. The
   one budget is an operator cost limit in USD (#290: default 1.00, `RUNNER_DYNAMIC_MAX_COST_USD`, a
   ceiling of 20 in the code); the technical limits stay (600 s, 64 KiB per result, 4 MiB cumulative
-  content, the byte caps). Every call is reserved before it is sent (a priced estimate), every tool
+  content, the byte caps). Every call is reserved before it is sent (the cost it is expected to have from
+  what the run showed: cached prefix, observed output, #540), every tool
   part is counted, and a missing or oversized answer fails closed; a call without `usage.cost` ends
-  the run. The input estimate is bytes over 3, tightened by the previous call's real density, and the
+  the run. A normal call is admitted only when its expected cost fits; the final call (wrap-up,
+  recovery, retries) is admitted whenever the spend is within the limit, and a normal call that
+  settles over the limit ends the agent phase instead of failing the run, so the cost guard never
+  ends a run without a review. The settled total is at most the limit plus the excess of the last
+  normal call plus the final call's cost (`usage.limitExceededBy` reports it; `docs/dynamic-review.md`, "The bound").
+  The input estimate is bytes over 3, tightened by the previous call's real density, and the
   model's window (from its capability descriptor, never the Diff `llm.maxTokens`) is a backstop in
   front of the provider's own limit. Details: `docs/dynamic-review.md`, "Hard limits". Near the cost
   or time limit the ledger makes one call the *final call* (#293): `dynamic_review/wrap_up.py`
@@ -902,7 +908,8 @@ no sampling parameter, and its calls cost an unknown amount.
   models state 128000; Anthropic's "Cost control" section names raising `max_tokens` before lowering
   `effort`, which is only soft guidance and, changed within a run, invalidates the prompt cache). The cost
   limit does not reserve all of it: `reserved_output_tokens` of the wire (`THINKING_RESERVED_OUTPUT_TOKENS`,
-  8192, what every call reserved before) is what a call holds back, so the larger allowance does not make the
+  8192) is the most a call holds back, and within it a call reserves the output the run has shown (#540: the
+  p95 of its completions, at least 1,024 tokens), so the larger allowance does not make the
   guard stop a run earlier (reserving 32768 at Opus 5.5's 20 USD per million tokens would be 0.66 USD per call,
   and the 1 USD default would wrap every run up at its first call; Fable's price is higher still). The answer
   is still held to the whole allowance, and a call that really uses more than it reserved passes the limit
