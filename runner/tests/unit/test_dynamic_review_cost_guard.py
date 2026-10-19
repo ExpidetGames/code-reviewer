@@ -74,11 +74,14 @@ def exact(prompt_tokens: int) -> str:
     return request_for(prompt_tokens, 3)
 
 
-def make_ledger(prices: UnitCosts, limit: str = "1.00") -> BudgetLedger:
+def make_ledger(
+    prices: UnitCosts, limit: str = "1.00", reserved_output_tokens: int | None = None
+) -> BudgetLedger:
     return BudgetLedger(
         DynamicLimits(max_cost_usd=Decimal(limit)),
         window_tokens=1_000_000,
         output_tokens=ALLOWANCE,
+        reserved_output_tokens=reserved_output_tokens,
         unit_costs=prices,
     )
 
@@ -101,13 +104,14 @@ def run_profile(
     completion: int = 400,
     final_completion: int = 3_000,
     limit: str = "1.00",
+    reserved_output_tokens: int | None = None,
 ) -> Run:
     """A tool loop like the live one: every round re-sends the history plus one more result.
 
     With `cached` the provider reports what it read from the cache (the previous prompt) and what
     it wrote (the growth); without it the whole prompt is billed and reported as plain input.
     """
-    ledger = make_ledger(prices, limit)
+    ledger = make_ledger(prices, limit, reserved_output_tokens)
     total = Decimal(0)
     previous = 0
     last_cost = Decimal(0)
@@ -149,6 +153,17 @@ def test_the_55_call_sonnet_profile_runs_to_just_under_the_limit() -> None:
     assert run.calls > 55
     assert Decimal("0.90") <= run.total <= Decimal("1.00")
     assert run.ledger.usage("m").cost_usd == pytest.approx(float(run.total))
+
+
+# #540-T01, #540-S2: the production ledger has the wire's cap (the allowance for a model that does
+# not always think), so the final call is reserved at its worst case, a review of 8,192 tokens, and
+# the wrap-up comes earlier than with the realistic 4,096. Measured: 0.893 USD.
+def test_the_55_call_profile_with_the_wires_cap_still_uses_most_of_the_limit() -> None:
+    run = run_profile(SONNET, cached=True, reserved_output_tokens=ALLOWANCE)
+
+    assert run.ledger.stopped_early == "cost_limit"
+    assert run.calls > 55
+    assert Decimal("0.88") <= run.total <= Decimal("1.00")
 
 
 # #540-T01
@@ -572,7 +587,9 @@ class Simulated:
     failure: ErrorCode | None = None
 
 
-def simulate(profile: Profile, limit: Decimal, seed: int) -> Simulated:
+def simulate(
+    profile: Profile, limit: Decimal, seed: int, reserved_output_tokens: int | None = None
+) -> Simulated:
     """One run of a tool loop against the ledger, the way the proxy and the engine drive it.
 
     The engine asks again after every normal call; a request that cannot be rewritten (a hidden
@@ -582,7 +599,7 @@ def simulate(profile: Profile, limit: Decimal, seed: int) -> Simulated:
     rng = random.Random(seed)
     prices = profile.prices
     cached = prices.cache_read_usd_per_mtok is not None
-    ledger = make_ledger(prices, str(limit))
+    ledger = make_ledger(prices, str(limit), reserved_output_tokens)
     run = Simulated()
     previous = 0
     prompt = rng.randint(2_000, 30_000)
@@ -742,13 +759,14 @@ def test_the_final_call_reserves_the_wires_cap_when_there_is_one() -> None:
 
 
 # #540-T07
+@pytest.mark.parametrize("cap", [None, ALLOWANCE])
 @pytest.mark.parametrize("limit", LIMITS)
 @pytest.mark.parametrize("name", PROFILES)
 def test_a_run_always_ends_with_its_final_call_and_stays_within_the_bound(
-    name: str, limit: str
+    name: str, limit: str, cap: int | None
 ) -> None:
     for seed in range(60):
-        run = simulate(PROFILES[name], Decimal(limit), seed)
+        run = simulate(PROFILES[name], Decimal(limit), seed, cap)
 
         assert run.failure is None, (name, limit, seed, run.failure)
         assert run.delivered, (name, limit, seed)
