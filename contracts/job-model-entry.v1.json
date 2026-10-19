@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ExpidetGames/code-reviewer/contracts/job-model-entry.v1.json",
+  "title": "Code Reviewer per-job model entry, version 1",
+  "description": "What a job is told about the model it runs with (#548, native OpenCode providers, #544): the one provider and the one model of the catalog read from models.dev (src/models-dev/), and nothing else of the catalog. It holds no secret: no key, no header value. `upstreamBaseUrl` is where the supervisor sends the real key; the engine is never given it, only the loopback address of the per-job proxy (#550). The runner turns the entry into the `provider.<providerId>` block of the engine's configuration: `npm` and `options.baseURL` (the proxy) with a dummy `options.apiKey`, and `models.<modelId>` as `model` says. Closed: a reader refuses a field it does not know, because the entry decides where a key goes and what the engine is told it may do. The writer is the app (src/models-dev/job-entry.ts); the version is in the path and in `version`.",
+  "version": 1,
+  "$defs": {
+    "ProviderId": {
+      "description": "The provider's id in models.dev (and in the supported-provider file, contracts/opencode-providers.v1.json).",
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+    },
+    "ModelId": {
+      "description": "The model's id at the provider; the key of `provider.<providerId>.models`. The same rule as the runner's `llm.model` plus the `@region` suffix some providers use.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/+@-]{0,199}$"
+    },
+    "WireFamily": {
+      "description": "The wire format the pinned engine speaks to the provider's SDK: it decides the path the proxy allows and how the usage is read.",
+      "type": "string",
+      "enum": ["openai-chat", "openai-responses", "anthropic-messages", "google"]
+    },
+    "AuthHeader": {
+      "description": "The header the SDK of the family sends the key in; the proxy swaps the dummy key for the real one in this header.",
+      "type": "string",
+      "enum": ["Authorization", "x-api-key", "x-goog-api-key"]
+    },
+    "Modality": {
+      "type": "string",
+      "enum": ["text", "audio", "image", "video", "pdf"]
+    },
+    "Limit": {
+      "description": "Both `context` and `output`, always: the engine refuses a limit with one of them (`ConfigInvalidError`, spike #546). `input` is optional.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["context", "output"],
+      "properties": {
+        "context": { "type": "integer", "minimum": 1, "maximum": 100000000 },
+        "output": { "type": "integer", "minimum": 1, "maximum": 100000000 },
+        "input": { "type": "integer", "minimum": 1, "maximum": 100000000 }
+      }
+    },
+    "Interleaved": {
+      "description": "Where the model carries its reasoning in a tool loop, so the engine hands it back (`true`, or the field).",
+      "oneOf": [
+        { "const": true },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["field"],
+          "properties": {
+            "field": { "type": "string", "pattern": "^[a-z][a-z_]{0,39}$" }
+          }
+        }
+      ]
+    },
+    "JobModel": {
+      "description": "The entry for `provider.<providerId>.models.<modelId>`. `status` is normalised: the pinned engine drops a model whose status is `deprecated` or `alpha`, so those are written as `active` (the warning is shown in our own screens, from the catalog) and `beta` runs as it is. `tool_call` is always true: the catalog stores no other model, and the engine does not enforce the flag. No price: the engine's own cost is not used (the ledger reads the raw usage of the provider).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "status", "tool_call", "reasoning", "temperature", "limit", "modalities"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "status": { "type": "string", "enum": ["active", "beta"] },
+        "tool_call": { "const": true },
+        "reasoning": { "type": "boolean" },
+        "temperature": { "type": "boolean" },
+        "limit": { "$ref": "#/$defs/Limit" },
+        "modalities": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["input", "output"],
+          "properties": {
+            "input": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/Modality" },
+              "uniqueItems": true
+            },
+            "output": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/Modality" },
+              "uniqueItems": true
+            }
+          }
+        },
+        "interleaved": { "$ref": "#/$defs/Interleaved" }
+      }
+    },
+    "JobModelEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "providerId", "npm", "family", "authHeader", "upstreamBaseUrl", "modelId", "model"],
+      "properties": {
+        "version": { "const": 1 },
+        "providerId": { "$ref": "#/$defs/ProviderId" },
+        "npm": {
+          "description": "The bundled SDK of the pinned engine. Always set: without it the engine treats a provider it does not know as OpenAI-compatible and speaks Chat to it, whatever the provider is (spike #546).",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "family": { "$ref": "#/$defs/WireFamily" },
+        "authHeader": { "$ref": "#/$defs/AuthHeader" },
+        "upstreamBaseUrl": {
+          "description": "https only, no credentials, no query, and not a private, loopback or link-local address; trusted on first use and blocked until an admin confirms a change (src/models-dev/upstream-url.ts). Kept by the supervisor; never given to the engine.",
+          "type": "string",
+          "pattern": "^https://[^\\s?#@]+$",
+          "maxLength": 2048
+        },
+        "modelId": { "$ref": "#/$defs/ModelId" },
+        "model": { "$ref": "#/$defs/JobModel" }
+      }
+    }
+  }
+}
