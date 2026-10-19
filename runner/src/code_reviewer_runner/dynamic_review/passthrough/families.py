@@ -4,9 +4,9 @@
 
 A family is what the pinned engine's bundled SDK speaks to a provider (spike #546, section 4):
 OpenAI Chat (and every OpenAI-compatible provider), OpenAI Responses, Anthropic Messages and
-Google's Generative Language API. For each there is exactly one request the engine may make: one method,
-one path (Google: with the job's model in it), one query, the key in one header and a closed set of
-other headers. The engine always streams; no `GET` is needed.
+Google's Generative Language API. For each there is exactly one request the engine may make: one
+method, one path (Google: with the job's model in it), one query, the key in one header and a
+closed set of other headers. The engine always streams; no `GET` is needed.
 
 The paths are the engine's own: the proxy's loopback address is the SDK's `baseURL` (`/v1`, for
 Google `/v1beta`) and the SDK appends the route. The upstream path is the same route below the job's
