@@ -743,6 +743,35 @@ def test_a_wrap_up_final_call_that_answers_in_prose_is_not_recovered(tmp_path: P
     assert run.ledger.recovered is False
 
 
+# #309-T07, #312, #540 (S1): the same with the wrap-up started by the cost limit. The final call and
+# its asks are final calls: they are made while the spend is within the limit, although they no
+# longer fit (before #540 the asks found no room and the run ended after one reply).
+def test_a_cost_triggered_wrap_up_final_call_gets_its_asks_although_they_no_longer_fit(
+    tmp_path: Path,
+) -> None:
+    content = prepare(tmp_path, {"src/app.py": b"x = 1\n"})
+    steps: list[Step] = [*reading(content.export, 20)]
+    steps[2:] = [says("prose in the final call")] * FINAL_ATTEMPTS
+    # Every call reports 0.01 USD: calls 1 and 2 are normal (0.02 spent), the third is the final
+    # call (0.03), and its two asks start at 0.03 and 0.04 of the 0.045 limit.
+    model = ScriptedModel(steps=steps, final=None, cost=0.01)
+    with model:
+        run = run_engine(
+            model,
+            content,
+            scratch=tmp_path / "scratch",
+            limits=DynamicLimits(max_cost_usd=Decimal("0.045")),
+        )
+
+    assert not run.answer.ok
+    assert run.answer.error is not None
+    assert run.answer.error.code is ErrorCode.LLM_OUTPUT_INVALID
+    assert len(model.requests) == 2 + FINAL_ATTEMPTS
+    assert all(only_return_tool(request) for request in model.requests[2:])
+    assert run.ledger.stopped_early == "cost_limit"
+    assert run.ledger.limit_exceeded_by is not None
+
+
 # #309-T05: the turn ends with less than the recovery reserve of the clock left.
 def test_no_recovery_is_started_when_the_clock_has_no_room_for_it(tmp_path: Path) -> None:
     content = prepare(tmp_path, {"src/app.py": b"x = 1\n"})
