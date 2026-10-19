@@ -474,13 +474,19 @@ test.describe("what the hosted deployment does when the Dispatcher, the platform
     // The Dispatcher does not watch a Worker after the hand-over: its end is not reported, the job stays running until the
     // lease (two minutes without a heartbeat) runs out. The clock of the job is moved and the app's own sweep ends the
     // lease, requeues the job and announces it again, three times.
+    const launches = () =>
+      theDispatcher().output().split(`"event":"launched","jobId":"${job.id}"`)
+        .length - 1;
     for (let attempt = 1; attempt <= 3; attempt += 1) {
+      // The launch is over (the Worker took over) before the sweep announces the job again: a Dispatcher that is still
+      // launching answers 429.
       await eventually(
-        `Worker ${String(attempt)} to start and end`,
+        `Worker ${String(attempt)} to start and take over`,
         async () => {
           const state = await onlyJobOf(REPOSITORY.fullName, number);
           return (
             theDispatcher().workersOf(job.id).length === attempt &&
+            launches() === attempt &&
             state.status === "running" &&
             state.attempts === attempt - 1
           );
@@ -500,6 +506,18 @@ test.describe("what the hosted deployment does when the Dispatcher, the platform
     });
     expect(theDispatcher().workersOf(job.id)).toHaveLength(3);
     expect(fakeLlm().requests()).toHaveLength(0);
+    // The last lapsed lease ended the job for good, so the app told the Dispatcher to stop its VM (#487-T06). The two
+    // lapsed leases before it only sent the job back to the queue, and nothing was stopped for them.
+    await eventually("the app's stop for the failed job", async () => {
+      return theDispatcher()
+        .output()
+        .includes(`"event":"stop_received","jobId":"${job.id}"`);
+    });
+    expect(
+      theDispatcher()
+        .output()
+        .split(`"event":"stop_received","jobId":"${job.id}"`).length - 1,
+    ).toBe(1);
     await page.reload();
     const run = runsOf(page, REPOSITORY.fullName, number);
     await expect(run.locator("[data-status]")).toContainText("Failed");
