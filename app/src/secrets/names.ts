@@ -7,6 +7,7 @@
 // they belong to a workspace and are stored with it, see WORKSPACE_SECRET_NAMES below.)
 import { llmProviderDescriptors } from "../llm/providers/index.ts";
 import { ProviderRegistryError } from "../llm/providers/registry.ts";
+import type { NativeKeySecretName } from "../native-providers/lookup.ts";
 
 /** The operator's LLM key of each provider, from the registry (src/llm/providers/). */
 type OperatorLlmKeyName =
@@ -58,4 +59,9 @@ export function isSecretName(value: unknown): value is SecretName {
 export const WORKSPACE_SECRET_NAMES: readonly WorkspaceSecretName[] =
   llmProviderDescriptors.workspaceSecretNames;
 export type WorkspaceSecretName =
-  (typeof llmProviderDescriptors.workspaceSecretNames)[number];
+  | (typeof llmProviderDescriptors.workspaceSecretNames)[number]
+  /**
+   * The key of a catalog provider (#555), `llm_api_key.<slug>`. Those names are not a closed list: the providers are data
+   * (`contracts/opencode-providers.v1.json`), so the slot is named after the slug and the store accepts any slug.
+   */
+  | NativeKeySecretName;
