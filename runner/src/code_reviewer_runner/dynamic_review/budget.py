@@ -671,7 +671,9 @@ class BudgetLedger:
         with self._lock:
             return self._final_armed
 
-    def _carries_mark(self, request_text: str | bytes, size: int, allowance: int) -> bool:
+    def _carries_mark(
+        self, request_text: str | bytes, size: int, allowance: int, last_user_text: str | None
+    ) -> bool:
         """Whether this request is the one the armed mark is for. Call with the lock held.
 
         It holds the adapter's message as a JSON body holds text, and it is no larger than the
@@ -693,7 +695,14 @@ class BudgetLedger:
         )
         if size > allowed:
             return False
+        # The token stands once in the whole body, and in the last user message: the system prompt,
+        # a tool result, what the assistant said or an earlier message holding it is not the
+        # adapter's message being asked for.
+        if last_user_text is None or self._final_token not in last_user_text:
+            return False
         body = request_text if isinstance(request_text, bytes) else request_text.encode()
+        if body.count(self._final_token.encode("utf-8")) != 1:
+            return False
         return any(needle in body for needle in self._final_needles)
 
     def check_deadline(self, *, tolerance: float = 0.0) -> None:
@@ -799,7 +808,7 @@ class BudgetLedger:
             if self._above_wire and self._failure is not None:
                 # The run has failed (#552): no call is admitted after a recorded failure.
                 raise LimitError(self._failure.code, self._failure.detail)
-            marked = self._carries_mark(request_text, size, allowance)
+            marked = self._carries_mark(request_text, size, allowance, last_user_text)
             if self._final_granted and not marked:
                 if self._final_unanswered:
                     raise LimitError(

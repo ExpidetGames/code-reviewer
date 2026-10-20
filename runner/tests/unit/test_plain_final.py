@@ -115,10 +115,12 @@ class Engine:
         self.turns: list[Callable[[Engine], None]] = []
         # What the turn that runs now was told: the engine's next request carries it.
         self.told = b""
+        self.user_text: str | None = None
 
     def send(self, prompt: str | None) -> None:
         self.prompts.append(prompt)
         self.told = b"" if prompt is None else json.dumps(prompt)[1:-1].encode()
+        self.user_text = prompt
         if len(self.prompts) > len(self.turns):
             raise AssertionError(f"the adapter sent a message the test did not expect: {prompt!r}")
         self.turns[len(self.prompts) - 1](self)
@@ -127,7 +129,9 @@ class Engine:
 
     def call(self, cost: str) -> None:
         """One model call the way the proxy makes it: reserved, and settled at `cost`."""
-        reservation = self.ledger.reserve_call(REQUEST + self.told, output_tokens=1_024)
+        reservation = self.ledger.reserve_call(
+            REQUEST + self.told, output_tokens=1_024, last_user_text=self.user_text
+        )
         self.ledger.settle_call(
             reservation, prompt_tokens=1000, completion_tokens=100, cost=Decimal(cost)
         )
@@ -614,7 +618,9 @@ def test_a_429_on_the_marked_call_does_not_end_the_run_without_a_review() -> Non
     final, engine = make()
 
     def final_turn_429(engine: Engine) -> None:
-        reservation = engine.ledger.reserve_call(REQUEST + engine.told, output_tokens=1_024)
+        reservation = engine.ledger.reserve_call(
+            REQUEST + engine.told, output_tokens=1_024, last_user_text=engine.user_text
+        )
         assert reservation.final
         engine.ledger.settle_unbilled(reservation)  # the provider said 429
         engine.answer(review())  # the engine retried
@@ -633,7 +639,9 @@ def test_two_429s_on_the_marked_call_still_leave_the_final_call_to_the_retry() -
 
     def final_turn_two_429s(engine: Engine) -> None:
         for _ in range(2):
-            reservation = engine.ledger.reserve_call(REQUEST + engine.told, output_tokens=1_024)
+            reservation = engine.ledger.reserve_call(
+                REQUEST + engine.told, output_tokens=1_024, last_user_text=engine.user_text
+            )
             engine.ledger.settle_unbilled(reservation)
         engine.answer(review())
 
@@ -654,7 +662,9 @@ def test_a_refusal_recorded_before_the_final_turn_does_not_abort_the_marked_call
     engine.client.on_abort = late_retry_of_the_refused_call
 
     def final_turn(engine: Engine) -> None:
-        reservation = engine.ledger.reserve_call(REQUEST + engine.told, output_tokens=1_024)
+        reservation = engine.ledger.reserve_call(
+            REQUEST + engine.told, output_tokens=1_024, last_user_text=engine.user_text
+        )
         time.sleep(0.3)  # in flight; the watch looks every 50 ms
         engine.ledger.settle_call(
             reservation, prompt_tokens=1000, completion_tokens=100, cost=Decimal("0.01")

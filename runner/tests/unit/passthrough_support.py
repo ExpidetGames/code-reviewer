@@ -319,10 +319,14 @@ def real_key_header(family: WireFamily) -> str:
     return auth_value(FAKE[family], REAL_KEY)
 
 
-def conversation(family: WireFamily, *turns: tuple[str, str]) -> bytes:
+def conversation(family: WireFamily, *turns: tuple[str, str], pad: int = 0) -> bytes:
     """A body of the family's closed schema from `(kind, text)` turns, kind one of `system`,
     `user`, `assistant` and `tool` (a tool result). The order is kept as given, so a test can put
-    the same text in the system prompt, in a result or in what the assistant said."""
+    the same text in the system prompt, in a result or in what the assistant said. `pad` puts that
+    many bytes of text in a user message first, so the body weighs what the fake provider's usage
+    says it did."""
+    if pad:
+        turns = (("user", "x" * pad), *turns)
     system: list[str] = [text for kind, text in turns if kind == "system"]
     rest = [(kind, text) for kind, text in turns if kind != "system"]
     document: dict[str, Any]

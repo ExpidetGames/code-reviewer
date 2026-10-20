@@ -29,6 +29,7 @@ from passthrough_support import (
     TURN,
     MemorySink,
     Scripted,
+    conversation,
     document,
     failing,
     real_key_header,
@@ -566,3 +567,53 @@ def test_the_key_is_in_nothing_the_engine_is_told(family: WireFamily) -> None:
     seen += r.post(target="/v1/other").everything()
     assert REAL_KEY.encode() not in seen
     assert CallUsage  # the tap's usage type is part of the surface under test
+
+
+# #552-F2: the mark is for the request whose LAST USER MESSAGE holds the message and its token; the
+# same text anywhere else in the body (the system prompt, a tool result, what the assistant said),
+# or the token twice, is an ordinary call
+MARK = '<runner-wrap-up id="tok-9f3a">\nAnswer "now".\n</runner-wrap-up>'
+PAD = 6000  # the weight of the default body of the rig
+POSITIONS = {
+    "system": (("system", MARK), ("user", "hello")),
+    "tool-result": (("user", "hello"), ("tool", MARK)),
+    "assistant": (("user", "hello"), ("assistant", MARK)),
+    "earlier-user": (("user", MARK), ("assistant", "ok"), ("user", "hello")),
+    "twice": (("system", MARK), ("user", MARK)),
+    "twice-in-the-last": (("user", MARK + MARK),),
+}
+
+
+@pytest.mark.parametrize("family", FAMILIES)
+@pytest.mark.parametrize("where", list(POSITIONS))
+def test_the_token_anywhere_but_once_in_the_last_user_message_marks_nothing(
+    family: WireFamily, where: str
+) -> None:
+    r = rig(family, *[streamed(family, call=n) for n in range(1, 5)])
+    r.ledger.enable_final_above_wire()
+    r.post()  # a normal call settles
+    assert r.ledger.arm_final(MARK, "tok-9f3a")
+
+    r.post(conversation(family, *POSITIONS[where], pad=PAD))
+    r.post(conversation(family, ("user", "hello"), ("assistant", "ok"), ("user", MARK), pad=PAD))
+
+    trace = r.ledger.usage(MODEL).call_trace
+    assert trace is not None
+    assert [call["final"] for call in trace["modelCalls"]] == [False, False, True]
+
+
+@pytest.mark.parametrize("family", FAMILIES)
+def test_a_message_with_the_token_once_in_the_last_user_message_is_the_final_call(
+    family: WireFamily,
+) -> None:
+    r = rig(family, streamed(family, call=1), streamed(family, call=2))
+    r.ledger.enable_final_above_wire()
+    r.post()
+    assert r.ledger.arm_final(MARK, "tok-9f3a")
+
+    body = conversation(family, ("user", "hello"), ("assistant", "ok"), ("user", MARK), pad=PAD)
+    r.post(body)
+
+    assert r.upstream.requests[1].body == body
+    trace = r.ledger.usage(MODEL).call_trace
+    assert trace is not None and trace["modelCalls"][1]["final"] is True

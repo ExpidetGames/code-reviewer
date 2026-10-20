@@ -143,7 +143,9 @@ class Client(EngineClient):
         if self.ledger is not None:
             # The engine's request to the model carries the message it was sent.
             sent = json.dumps(parts_of(body))[1:-1].encode()
-            call = self.ledger.reserve_call(b"history " + sent, output_tokens=1_024)
+            call = self.ledger.reserve_call(
+                b"history " + sent, output_tokens=1_024, last_user_text=parts_of(body)
+            )
             self.ledger.settle_call(
                 call, prompt_tokens=100, completion_tokens=10, cost=Decimal("0.0001")
             )
