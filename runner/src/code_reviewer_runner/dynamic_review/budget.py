@@ -147,6 +147,7 @@ WRAP_UP_RESERVE_SECONDS = 150.0
 WRAP_UP_RESERVE_FRACTION = 0.25
 STOPPED_EARLY_COST = "cost_limit"
 STOPPED_EARLY_TIME = "time_limit"
+STOPPED_EARLY_TOKENS = "token_limit"
 # What the recovery call's request is larger than the last call's by, besides the model's own last
 # answer (one output allowance): the engine's recovery message and the runner's instruction.
 RECOVERY_REQUEST_SLACK_BYTES = 4096
@@ -281,6 +282,8 @@ class Reservation:
     byte_bound: int = 0
     request_bytes: int = 0
     cost: Decimal = Decimal(0)
+    # The tokens the call is expected to use, counted against the token cap of an own key (#553).
+    tokens: int = 0
     # True for the one call that the run is wrapped up with (#293): the proxy rewrites it.
     final: bool = False
     # True when that final call is the recovery of a turn without an answer (#309), which carries
@@ -314,6 +317,11 @@ class _Counters:
     priced_calls: int = 0
     # Calls whose usage was never seen (#550): booked at their worst case.
     unknown_calls: int = 0
+    # An own key (#553): the tokens held for calls in flight, the tokens booked for calls whose
+    # usage was never seen, and the calls whose tokens were read but whose cost could not be.
+    reserved_tokens: int = 0
+    unknown_tokens: int = 0
+    unpriced_calls: int = 0
     tool_calls: int = 0
     returned_bytes: int = 0
     files: set[str] = field(default_factory=lambda: set[str]())
@@ -397,6 +405,10 @@ class BudgetLedger:
         reserved_output_tokens: int | None = None,
         unit_costs: UnitCosts,
         book: "PriceBook | None" = None,
+        priced: bool = True,
+        unknown_cost_tolerated: bool = False,
+        max_total_tokens: int | None = None,
+        reserve_full_output: bool = False,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         if window_tokens < 1:
@@ -414,6 +426,14 @@ class BudgetLedger:
             else min(max(reserved_output_tokens, 1), self.output_tokens)
         )
         self._unit_costs = unit_costs
+        # The cost policy of a native job (#553, `cost_policy.py`). `priced` is False when no price
+        # is known: no dollar is counted and the cost of the run is unknown. An own key tolerates
+        # a cost that is unknown and is bound by `max_total_tokens` once one is. A reasoning model
+        # reserves its whole output cap, since its thinking is output nobody can predict.
+        self._priced = priced
+        self._tolerates_unknown_cost = unknown_cost_tolerated
+        self._max_total_tokens = max_total_tokens
+        self._reserve_full_output = reserve_full_output
         # What the worst case of a call is priced with: the book of the model when there is one
         # (tiers, reasoning, both cache writes), else the job's unit costs as a one-level book.
         # Imported here: the price book module reads `UnitCosts` from this one.
@@ -438,6 +458,7 @@ class BudgetLedger:
         # A normal call settled over the limit (#540): the agent phase is over, the next request
         # that can be rewritten is the final call. And whether the retry past the limit was used.
         self._overshot = False
+        self._overshot_by_tokens = False
         self._retried_past_limit = False
         self._stopped_early: str | None = None
         self._clock = clock
@@ -603,14 +624,15 @@ class BudgetLedger:
             held = counters.cost + counters.reserved_cost
             priced = self._priced_input(size, estimate)
             cost = self._expected_cost(priced, allowance)
+            tokens = priced + self._expected_output(allowance)
             recovery = self._recovery_armed and can_wrap_up
             if self._overshot and not can_wrap_up:
                 # A normal call settled over the limit: nothing but the final call follows.
-                raise LimitError(ErrorCode.DYNAMIC_BUDGET_EXCEEDED, "the cost limit is used up")
+                raise LimitError(ErrorCode.DYNAMIC_BUDGET_EXCEEDED, self._used_up())
             if recovery:
                 reason = None
             elif self._overshot:
-                reason = STOPPED_EARLY_COST
+                reason = STOPPED_EARLY_TOKENS if self._overshot_by_tokens else STOPPED_EARLY_COST
             elif can_wrap_up:
                 reason = self._wrap_up_reason(held, cost, priced, allowance)
             else:
@@ -625,6 +647,9 @@ class BudgetLedger:
                 cost = self._expected_cost(
                     self._priced_input(size, estimate), allowance, final=True
                 )
+                tokens = self._priced_input(size, estimate) + self._expected_output(
+                    allowance, final=True
+                )
             # A normal call is admitted only when its expected cost fits. The final call is the last
             # chance of a review, so it is admitted whenever the spend and what is in flight are
             # within the limit, even when its expected cost no longer fits (#540).
@@ -633,6 +658,8 @@ class BudgetLedger:
             )
             if not fits:
                 raise LimitError(ErrorCode.DYNAMIC_BUDGET_EXCEEDED, "the cost limit is used up")
+            if not self._tokens_fit(tokens, final):
+                raise LimitError(ErrorCode.DYNAMIC_BUDGET_EXCEEDED, "the token cap is used up")
             if final:
                 self._final_granted = True
                 if recovery:
@@ -642,6 +669,7 @@ class BudgetLedger:
                     self._stopped_early = reason
             counters.model_calls += 1
             counters.reserved_cost = _SUM.add(counters.reserved_cost, cost)
+            counters.reserved_tokens += tokens
             serial = self._issue()
         return Reservation(
             input_tokens=estimate,
@@ -649,6 +677,7 @@ class BudgetLedger:
             byte_bound=bound,
             request_bytes=size,
             cost=cost,
+            tokens=tokens,
             final=final,
             recovery=recovery,
             serial=serial,
@@ -677,12 +706,18 @@ class BudgetLedger:
             estimate = self._estimate(size)
             bound = max(size, counters.last_prompt_tokens)
             cost = self._expected_cost(self._priced_input(size, estimate), allowance, final=True)
-            if counters.cost + counters.reserved_cost > self.limits.max_cost_usd:
+            tokens = self._priced_input(size, estimate) + self._expected_output(
+                allowance, final=True
+            )
+            if counters.cost + counters.reserved_cost > self.limits.max_cost_usd or (
+                self._tokens_over_cap()
+            ):
                 if self._retried_past_limit:
                     return None
                 self._retried_past_limit = True
             counters.model_calls += 1
             counters.reserved_cost = _SUM.add(counters.reserved_cost, cost)
+            counters.reserved_tokens += tokens
             serial = self._issue()
         return Reservation(
             input_tokens=estimate,
@@ -690,6 +725,7 @@ class BudgetLedger:
             byte_bound=bound,
             request_bytes=size,
             cost=cost,
+            tokens=tokens,
             final=True,
             serial=serial,
         )
@@ -700,6 +736,41 @@ class BudgetLedger:
         run (#540). Its expected cost is not asked: the final call is delivered whatever it costs.
         """
         return self._overshot or held <= self.limits.max_cost_usd
+
+    def _token_cap_binds(self) -> bool:
+        """Whether the token cap of an own key bounds the run now (#553): when no dollar can bound
+        it (no price is known), or once a call's cost was unknown. While every call is priced the
+        dollar limit of #540 is the bound and the cap does not apply. Call with the lock held."""
+        if self._max_total_tokens is None:
+            return False
+        counters = self._counters
+        return not self._priced or counters.unknown_calls > 0 or counters.unpriced_calls > 0
+
+    def _tokens_used(self) -> int:
+        counters = self._counters
+        return counters.prompt_tokens + counters.completion_tokens + counters.unknown_tokens
+
+    def _tokens_over_cap(self) -> bool:
+        """The tokens used and held already pass the cap. Call with the lock held."""
+        cap = self._max_total_tokens
+        if cap is None or not self._token_cap_binds():
+            return False
+        return self._tokens_used() + self._counters.reserved_tokens > cap
+
+    def _tokens_fit(self, tokens: int, final: bool) -> bool:
+        """The token cap's half of admission, as the cost limit's: a normal call is admitted only
+        when its expected tokens fit, the final call whenever the tokens used and held are within
+        the cap or a normal call settled over it. Call with the lock held."""
+        cap = self._max_total_tokens
+        if cap is None or not self._token_cap_binds():
+            return True
+        held = self._tokens_used() + self._counters.reserved_tokens
+        return (self._overshot or held <= cap) if final else held + tokens <= cap
+
+    def _used_up(self) -> str:
+        return (
+            "the token cap is used up" if self._overshot_by_tokens else "the cost limit is used up"
+        )
 
     def _estimate(self, size: int) -> int:
         return max(math.ceil(size / self._counters.density), self._counters.last_prompt_tokens)
@@ -735,7 +806,7 @@ class BudgetLedger:
         itself: a review can use all of it (the thinking of a model counts), and the final call is
         the one call that is delivered over the limit, so it is not priced optimistically (#540)."""
         cap = allowance if self._reserved_cap is None else min(allowance, self._reserved_cap)
-        if final and self._reserved_cap is not None:
+        if (final and self._reserved_cap is not None) or self._reserve_full_output:
             return cap
         observed = _percentile(self._counters.completions)
         floor = FINAL_OUTPUT_FLOOR_TOKENS if final else OUTPUT_FLOOR_TOKENS
@@ -780,6 +851,20 @@ class BudgetLedger:
             self.limits.max_cost_usd
         ):
             return STOPPED_EARLY_COST
+        return self._wrap_up_for_tokens(priced, allowance)
+
+    def _wrap_up_for_tokens(self, priced: int, allowance: int) -> str | None:
+        """The same test for the token cap of an own key (#553): this call and a final call after
+        it must fit, with the margin, or this call is the final one."""
+        cap = self._max_total_tokens
+        if cap is None or not self._token_cap_binds():
+            return None
+        counters = self._counters
+        now = priced + self._expected_output(allowance)
+        after = priced + self._growth_tokens() + self._expected_output(allowance, final=True)
+        held = self._tokens_used() + counters.reserved_tokens
+        if held + math.ceil((now + after) * float(RESERVE_MARGIN)) > cap:
+            return STOPPED_EARLY_TOKENS
         return None
 
     def settle_call(
@@ -791,6 +876,7 @@ class BudgetLedger:
         cost: Decimal | None = None,
         cache_read_tokens: int | None = None,
         cache_write_tokens: int | None = None,
+        allow_unpriced: bool = False,
     ) -> None:
         """Replace a reservation with what the provider actually reported. Missing usage fails.
 
@@ -802,7 +888,10 @@ class BudgetLedger:
         `cost` is what this call cost: the charge the provider states (`exact_cost`), or the usage
         priced with the provider's price list (`LlmProviderSpec.cost_extractor`). A call without one
         cannot be bounded by money: the tokens are recorded, then the run is stopped, and it is
-        never read as zero.
+        never read as zero. The one exception is an own key (#553): with `allow_unpriced` the tokens
+        are booked, the call is counted as unpriced, the cost of the run is unknown, and the token
+        cap bounds the run from then on. A ledger that does not tolerate an unknown cost refuses it
+        like any call without a price.
         """
         if not self._is_open(reservation):
             return  # settled already (an error handler came after the normal path)
@@ -842,18 +931,28 @@ class BudgetLedger:
             if prompt_tokens > 0 and reservation.request_bytes >= MIN_CALIBRATION_BYTES:
                 observed = reservation.request_bytes / prompt_tokens
                 counters.density = max(1.0, min(ASSUMED_DENSITY, observed))
-            if cost is None:
+            if cost is None and not (allow_unpriced and self._tolerates_unknown_cost):
                 raise LimitError(
                     ErrorCode.DYNAMIC_ACCOUNTING_FAILED,
                     "the provider did not report the cost of a call",
                 )
-            counters.cost = _SUM.add(counters.cost, cost)
-            counters.priced_calls += 1
+            if cost is None:
+                counters.unpriced_calls += 1
+            else:
+                counters.cost = _SUM.add(counters.cost, cost)
+                counters.priced_calls += 1
             # The final call carries the answer: it is delivered even if it cost more than expected.
             # A normal call over the limit is delivered too, but it ends the agent phase: the next
             # request is the final call, and no normal call is admitted again (see "The bound").
             if counters.cost > self.limits.max_cost_usd and not reservation.final:
                 self._overshot = True
+            if (
+                self._token_cap_binds()
+                and not reservation.final
+                and self._tokens_used() > (self._max_total_tokens or 0)
+            ):
+                self._overshot = True
+                self._overshot_by_tokens = counters.cost <= self.limits.max_cost_usd
 
     def _book_over_report(
         self,
@@ -894,6 +993,8 @@ class BudgetLedger:
 
     def _close(self, reservation: Reservation) -> None:
         """The reservation is settled. Call with the lock held."""
+        if reservation.serial in self._open:
+            self._counters.reserved_tokens -= reservation.tokens
         self._open.discard(reservation.serial)
 
     def settle_unbilled(self, reservation: Reservation) -> None:
@@ -922,7 +1023,7 @@ class BudgetLedger:
             max(reservation.byte_bound, reservation.input_tokens), reservation.output_tokens
         )
 
-    def settle_unknown(self, reservation: Reservation) -> bool:
+    def settle_unknown(self, reservation: Reservation, *, worst_case: bool = True) -> bool:
         """Settle a call whose usage was never seen (a cut stream, an error inside a stream, a
         timeout after the request was sent, a server error) (#550).
 
@@ -931,8 +1032,17 @@ class BudgetLedger:
         expected to cost, and counted as unknown. Like any call without a reported cost it makes
         the cost of the whole run unknown, never a partial sum. Returns False (and books nothing)
         for a reservation that was settled already.
+
+        An own key (#553, `worst_case=False`, honoured only by a ledger that tolerates an unknown
+        cost) books what the call was expected to cost, and its expected tokens against the token
+        cap: the worst case of one cut stream would otherwise end a run whose user pays the
+        provider and bounds it by tokens.
         """
-        worst = self.worst_case_cost(reservation)
+        worst = (
+            self.worst_case_cost(reservation)
+            if worst_case or not self._tolerates_unknown_cost
+            else reservation.cost
+        )
         with self._lock:
             if reservation.serial and reservation.serial not in self._open:
                 return False  # settled already: an error handler came after the normal path
@@ -941,6 +1051,7 @@ class BudgetLedger:
             counters.reserved_cost = _SUM.subtract(counters.reserved_cost, reservation.cost)
             counters.cost = _SUM.add(counters.cost, max(worst, reservation.cost))
             counters.unknown_calls += 1
+            counters.unknown_tokens += reservation.tokens
         return True
 
     @property
@@ -1034,7 +1145,12 @@ class BudgetLedger:
         """
         with self._lock:
             counters = self._counters
-            exact = counters.model_calls > 0 and counters.priced_calls == counters.model_calls
+            # A run with no price (#553) has no cost: unknown, never zero.
+            exact = (
+                self._priced
+                and counters.model_calls > 0
+                and counters.priced_calls == counters.model_calls
+            )
             total = float(counters.cost)
             excess = float(counters.cost - self.limits.max_cost_usd)
             return Usage(

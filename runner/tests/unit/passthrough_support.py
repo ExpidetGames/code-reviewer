@@ -278,6 +278,8 @@ def rig(
         window_tokens=1_000_000,
         output_tokens=ALLOWANCE,
         unit_costs=PRICES,
+        # An own key (#553) tolerates a cost that is not known; the proxy and the ledger agree.
+        unknown_cost_tolerated=not unknown_cost_ends_run,
         clock=lambda: clock[0],
     )
     upstream = ScriptedUpstream(*answers, on_send=on_send)

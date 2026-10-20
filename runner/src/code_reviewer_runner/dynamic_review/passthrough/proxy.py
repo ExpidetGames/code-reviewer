@@ -65,6 +65,7 @@ from code_reviewer_runner.dynamic_review.passthrough.admission import (
     RefusalCode,
     Refused,
 )
+from code_reviewer_runner.dynamic_review.passthrough.call_usage import CallUsage
 from code_reviewer_runner.dynamic_review.passthrough.families import WireFamily, spec_of
 from code_reviewer_runner.dynamic_review.passthrough.price_book import (
     PriceBook,
@@ -90,6 +91,7 @@ from code_reviewer_runner.dynamic_review.passthrough.usage import (
 )
 from code_reviewer_runner.dynamic_review.passthrough.usage_report import (
     log_price_drift,
+    log_price_risk,
     log_unknown_fields,
 )
 from code_reviewer_runner.error_mapping import is_context_length_exceeded, llm_status_code
@@ -239,7 +241,7 @@ class PassthroughProxy:
         upstream: Upstream,
         upstream_api_key: str,
         capability: str,
-        prices: UnitCosts | PriceBook,
+        prices: UnitCosts | PriceBook | None,
         superseded: Callable[[], bool] = lambda: False,
         call_timeout: float = CALL_TIMEOUT_SECONDS,
         unknown_cost_ends_run: bool = True,
@@ -265,18 +267,29 @@ class PassthroughProxy:
         self._key = upstream_api_key
         self._redactor = Redactor(upstream_api_key)
         # Read once: prices that are no prices are refused here and not in the middle of a call.
+        # No prices at all (#553) is an own key whose model nobody priced: every call is settled
+        # by its tokens, and a managed key never gets there.
+        if prices is None and unknown_cost_ends_run:
+            raise LimitError(ErrorCode.DYNAMIC_CONFIG_INVALID, "a managed key needs prices")
+        self._prices: PriceBook | None = None
         try:
-            self._prices = prices if isinstance(prices, PriceBook) else book_from_unit_costs(prices)
+            if prices is not None:
+                self._prices = (
+                    prices if isinstance(prices, PriceBook) else book_from_unit_costs(prices)
+                )
         except PriceBookError as error:
             raise LimitError(
                 ErrorCode.DYNAMIC_CONFIG_INVALID, "the prices of the model are not prices"
             ) from error
         # Calls whose stated charge the price book did not agree with (counts only, `price_drift`).
         self.price_drift_calls = 0
+        # Calls of an own key whose tokens were read and whose cost could not be (counts only,
+        # `price_risk`, #553).
+        self.price_risk_calls = 0
         self._superseded = superseded
         self._call_timeout = call_timeout
-        # Whether a call whose usage was never seen ends the run (a managed key). An own key may
-        # go on with the worst case booked: that is #553, off here.
+        # Whether a call whose usage was never seen, or whose cost cannot be known, ends the run:
+        # the managed key's rule (#553, `cost_policy.py`). An own key goes on, booked by its tokens.
         self._unknown_ends_run = unknown_cost_ends_run
         # The one call that may be in flight.
         self._slot = threading.Lock()
@@ -705,7 +718,7 @@ class PassthroughProxy:
         case, in the trace with nothing known about it, and for a managed key the end of the run.
         `reason` (a limit that was hit) is recorded first, since the first failure is the one that
         is reported."""
-        if not self.ledger.settle_unknown(reservation):
+        if not self.ledger.settle_unknown(reservation, worst_case=self._unknown_ends_run):
             return  # settled already: nothing more to book, and the run's failure is recorded
         self._trace_failed(started_ms, reservation)
         if reason is not None:
@@ -741,9 +754,16 @@ class PassthroughProxy:
         if usage.unknown_fields:
             # The provider stated something the proxy cannot price (a field it does not know that
             # could carry a charge, a value it cannot trust, a second choice, a service tier): the
-            # call is unknown, whatever the figures say, and a managed run ends.
+            # call is unknown, whatever the figures say, and a managed run ends. An own key goes
+            # on with the tokens the provider stated and a cost that is unknown (#553).
             log_unknown_fields(usage.unknown_fields)
-            self._unknown(reservation, started_ms)
+            if self._unknown_ends_run:
+                self._unknown(reservation, started_ms)
+            else:
+                self._tokens_only(usage, reservation, started_ms)
+            return
+        if self._prices is None:
+            self._tokens_only(usage, reservation, started_ms, risk=False)
             return
         priced = price_call(usage, self._prices)
         if priced.drift:
@@ -753,7 +773,11 @@ class PassthroughProxy:
         if cost is None:
             # The book cannot price the call, or the charge the provider states is not to be
             # believed: unknown, booked at the worst case, never at what it was expected to cost.
-            self._unknown(reservation, started_ms)
+            # An own key goes on by the tokens (#553).
+            if self._unknown_ends_run:
+                self._unknown(reservation, started_ms)
+            else:
+                self._tokens_only(usage, reservation, started_ms)
             return
         # Noted before the settlement: a call the ledger then stops the run for is in the trace too.
         self.ledger.trace.model_call(
@@ -775,6 +799,48 @@ class PassthroughProxy:
                 cost=cost,
                 cache_read_tokens=usage.cache_read,
                 cache_write_tokens=usage.cache_write,
+            )
+        except LimitError as error:
+            self.ledger.record_failure(error)
+            return
+        self.cache_tally.add(
+            {
+                "prompt_tokens": usage.prompt_tokens,
+                "cache_read_input_tokens": usage.cache_read,
+                "cache_creation_input_tokens": usage.cache_write,
+            }
+        )
+
+    def _tokens_only(
+        self, usage: CallUsage, reservation: Reservation, started_ms: int, *, risk: bool = True
+    ) -> None:
+        """Settle a call of an own key by its tokens (#553): the provider stated its usage and
+        nobody can say what it cost. The tokens count against the cap, the cost of the run
+        becomes unknown (`costUsd: null`, minutes only in billing), and the run goes on.
+        `risk` is False for a model nobody priced: that is no surprise and not counted."""
+        if risk:
+            self.price_risk_calls += 1
+            log_price_risk(self.price_risk_calls)
+        self.ledger.trace.model_call(
+            t_ms=started_ms,
+            prompt_tokens=usage.prompt_tokens,
+            cache_read=usage.cache_read,
+            cache_write=usage.cache_write,
+            completion_tokens=usage.completion_tokens,
+            cost=None,
+            finish_reason=None,
+            final=reservation.final,
+            tool_names=[],
+        )
+        try:
+            self.ledger.settle_call(
+                reservation,
+                prompt_tokens=usage.prompt_tokens,
+                completion_tokens=usage.completion_tokens,
+                cost=None,
+                cache_read_tokens=usage.cache_read,
+                cache_write_tokens=usage.cache_write,
+                allow_unpriced=True,
             )
         except LimitError as error:
             self.ledger.record_failure(error)

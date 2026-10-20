@@ -129,6 +129,11 @@ STOPPED_EARLY_NOTICES = {
     "time_limit": (
         "> **This review stopped early** because it reached its time limit. It may be incomplete."
     ),
+    # An own key without a known price (#553): the run is bound by tokens.
+    "token_limit": (
+        "> **This review stopped early** because it reached the token limit set for a review. "
+        "It may be incomplete."
+    ),
 }
 
 
