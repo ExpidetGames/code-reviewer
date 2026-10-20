@@ -12,8 +12,9 @@ family, model and output cap allow, and only the proxy's own copy of the headers
    model is in the path and has to be the job's.
 3. **How.** A header allow-list (and an allow-list of `anthropic-beta` values); every credential,
    cookie and proxy header is dropped. A body length that can be measured before it is read.
-4. **The body.** Read as JSON only to see three fields: `model` (the job's, nothing else), the
-   output cap (present and not above the allowance) and `stream`. The body that is forwarded is the
+4. **The body.** Read as JSON and walked against the closed schema of the family
+   (`body_schema.py`): the job's model, exactly one output cap within the allowance, function tools
+   and text only, and no key the pinned engine does not send. The body that is forwarded is the
    bytes that arrived.
 
 Every refusal is a stable `RefusalCode`, and the `ErrorCode` the run records for it.
@@ -27,6 +28,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Final, Protocol
 
+from code_reviewer_runner.dynamic_review.passthrough.body_schema import NotAllowed, check_body
 from code_reviewer_runner.dynamic_review.passthrough.families import (
     ALLOWED_ANTHROPIC_BETAS,
     ALLOWED_ANTHROPIC_VERSIONS,
@@ -108,14 +110,11 @@ class Admitted:
     body: bytes
     model: str
     output_cap: int
-    stream: bool
 
 
 _LENGTH = re.compile(r"[0-9]{1,12}")
 _MAX_HEADER_VALUE = 1024
 _GOOGLE_MODEL_PATH = re.compile(r"/v1beta/models/([^:/?#]+):streamGenerateContent")
-# OpenRouter's own routing: it would let the request name other models or buy plugins.
-_CHAT_FORBIDDEN_FIELDS: Final = frozenset({"models", "route", "plugins", "transforms"})
 
 
 class NativeEntry(Protocol):
@@ -164,13 +163,6 @@ def _no_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 
 def _refuse_constant(_name: str) -> Any:
     raise ValueError("not JSON")
-
-
-def _count(value: Any) -> int | None:
-    # A boolean is an int in Python and no count in JSON.
-    if isinstance(value, bool) or not isinstance(value, int):
-        return None
-    return value
 
 
 class Admission:
@@ -272,7 +264,7 @@ class Admission:
     # -- the body ---------------------------------------------------------------
 
     def body(self, head: Head, body: bytes) -> Admitted:
-        """Decide on the three fields of the body the ledger relies on. Raises `Refused`.
+        """Decide on the body against the closed schema of the family. Raises `Refused`.
 
         `head` only proves the request was admitted; the body that comes back is `body` itself.
         """
@@ -284,16 +276,11 @@ class Admission:
                 raise _not_allowed()
             if requested != model:
                 raise Refused(RefusalCode.MODEL_NOT_ALLOWED)
-        if self._target.family is WireFamily.OPENAI_CHAT and (
-            _CHAT_FORBIDDEN_FIELDS & document.keys()
-        ):
-            raise _not_allowed()
-        return Admitted(
-            body=body,
-            model=model,
-            output_cap=self._output_cap(document),
-            stream=self._spec.model_in_route or document.get("stream") is True,
-        )
+        try:
+            output_cap = check_body(self._target.family, document, self._target.output_allowance)
+        except NotAllowed:
+            raise _not_allowed() from None
+        return Admitted(body=body, model=model, output_cap=output_cap)
 
     @staticmethod
     def _document(body: bytes) -> dict[str, Any]:
@@ -308,19 +295,3 @@ class Admission:
         if not isinstance(value, dict):
             raise _not_allowed()
         return value  # pyright: ignore[reportUnknownVariableType]
-
-    def _output_cap(self, document: dict[str, Any]) -> int:
-        found: list[int] = []
-        for path in self._spec.output_caps:
-            node: Any = document
-            for key in path:
-                node = node.get(key) if isinstance(node, dict) else None  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
-            if node is None:
-                continue
-            cap = _count(node)
-            if cap is None or not 1 <= cap <= self._target.output_allowance:
-                raise _not_allowed()
-            found.append(cap)
-        if not found:
-            raise _not_allowed()
-        return max(found)

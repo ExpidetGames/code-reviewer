@@ -783,6 +783,7 @@ class BudgetLedger:
             prompt_tokens > max(reservation.byte_bound, reservation.input_tokens)
             or completion_tokens > reservation.output_tokens
         ):
+            self._book_over_report(reservation, prompt_tokens, completion_tokens, cost)
             raise LimitError(
                 ErrorCode.DYNAMIC_ACCOUNTING_FAILED,
                 "the provider reported more than the request reserved",
@@ -817,6 +818,29 @@ class BudgetLedger:
             # request is the final call, and no normal call is admitted again (see "The bound").
             if counters.cost > self.limits.max_cost_usd and not reservation.final:
                 self._overshot = True
+
+    def _book_over_report(
+        self,
+        reservation: Reservation,
+        prompt_tokens: int,
+        completion_tokens: int,
+        cost: Decimal | None,
+    ) -> None:
+        """Book a call whose usage broke the envelope, before the run is stopped for it (#550).
+
+        The provider did charge for it. Stopping the run without booking would drop the charge from
+        the result (a hostile engine could hide a cost by making the report look like a
+        violation): the reported cost is spent, or, with none reported, what was reserved, and then
+        the cost of the run is unknown.
+        """
+        with self._lock:
+            counters = self._counters
+            counters.reserved_cost = _SUM.subtract(counters.reserved_cost, reservation.cost)
+            counters.prompt_tokens += prompt_tokens
+            counters.completion_tokens += completion_tokens
+            counters.cost = _SUM.add(counters.cost, reservation.cost if cost is None else cost)
+            if cost is not None:
+                counters.priced_calls += 1
 
     def settle_unbilled(self, reservation: Reservation) -> None:
         """Release the reservation of a call the provider refused before it generated anything

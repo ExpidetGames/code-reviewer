@@ -184,17 +184,28 @@ class Rig:
         return [*sent, *extra]
 
     def body(self, size: int = 6000, **overrides: Any) -> bytes:
-        document: dict[str, Any] = {"model": MODEL, "stream": True, "padding": "x" * size}
+        """A body of the closed schema of the family, padded to about `size` bytes of text."""
+        padding = "x" * size
+        document: dict[str, Any]
         if self.family is WireFamily.GOOGLE:
             document = {
-                "contents": [],
-                "padding": "x" * size,
+                "contents": [{"role": "user", "parts": [{"text": padding}]}],
                 "generationConfig": {"maxOutputTokens": 1000},
             }
         elif self.family is WireFamily.OPENAI_RESPONSES:
-            document["max_output_tokens"] = 1000
+            document = {
+                "model": MODEL,
+                "stream": True,
+                "max_output_tokens": 1000,
+                "input": [{"role": "user", "content": [{"type": "input_text", "text": padding}]}],
+            }
         else:
-            document["max_tokens"] = 1000
+            document = {
+                "model": MODEL,
+                "stream": True,
+                "max_tokens": 1000,
+                "messages": [{"role": "user", "content": padding}],
+            }
         document.update(overrides)
         return json.dumps(document).encode()
 

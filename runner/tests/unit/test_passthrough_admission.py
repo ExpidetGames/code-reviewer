@@ -82,13 +82,13 @@ def engine_headers(family: WireFamily, *extra: tuple[str, str]) -> Headers:
 
 
 def body_for(family: WireFamily, **overrides: Any) -> bytes:
-    document: dict[str, Any] = {"model": MODEL, "messages": [], "stream": True}
+    document: dict[str, Any]
     if family is WireFamily.GOOGLE:
         document = {"contents": [], "generationConfig": {"maxOutputTokens": 1000}}
     elif family is WireFamily.OPENAI_RESPONSES:
-        document["max_output_tokens"] = 1000
+        document = {"model": MODEL, "input": [], "stream": True, "max_output_tokens": 1000}
     else:
-        document["max_tokens"] = 1000
+        document = {"model": MODEL, "messages": [], "stream": True, "max_tokens": 1000}
     document.update(overrides)
     return json.dumps(document).encode()
 
@@ -351,9 +351,16 @@ def test_an_openai_chat_body_may_not_name_other_models_or_plugins(field: str) ->
 @pytest.mark.parametrize("family", FAMILIES)
 def test_a_valid_body_is_relayed_byte_for_byte(family: WireFamily) -> None:
     # Odd spacing, key order and an OpenRouter field: nothing of it is parsed away.
-    extra = {"usage": {"include": True}, "tools": [{"type": "function"}]}
+    tools: dict[WireFamily, Any] = {
+        WireFamily.OPENAI_CHAT: [{"type": "function", "function": {"name": "read"}}],
+        WireFamily.OPENAI_RESPONSES: [{"type": "function", "name": "read", "parameters": {}}],
+        WireFamily.ANTHROPIC_MESSAGES: [{"name": "read", "input_schema": {}}],
+        WireFamily.GOOGLE: [{"functionDeclarations": [{"name": "read"}]}],
+    }
     document = json.loads(body_for(family))
-    document.update(extra)
+    document["tools"] = tools[family]
+    if family is WireFamily.OPENAI_CHAT:
+        document["usage"] = {"include": True}
     body = json.dumps(document, indent=3, ensure_ascii=False, sort_keys=True).encode()
     admitted = admission(family).body(admit_head(family, length=len(body)), body)
     assert admitted.body == body

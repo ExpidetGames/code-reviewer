@@ -65,7 +65,7 @@ class Front:
             "model": MODEL,
             "stream": True,
             "max_tokens": 1000,
-            "padding": "x" * 6000,
+            "messages": [{"role": "user", "content": "x" * 6000}],
             # A request that offers tools is a step of the loop: the fake takes the next turn.
             "tools": [{"type": "function", "function": {"name": "read"}}],
         }

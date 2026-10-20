@@ -1,0 +1,967 @@
+{
+ "chat": {
+  "model": "acme-chat-9",
+  "max_tokens": 8192,
+  "messages": [
+   {
+    "role": "system",
+    "content": "You review code. Use read, grep and glob, then answer in JSON text.\nYou are powered by the model named acme-chat-9. The exact model ID is acme-chat/acme-chat-9\nHere is some useful information about the environment you are running in:\n<env>\n  Working directory: /work/export\n  Workspace root folder: /\n  Is directory a git repo: no\n  Platform: linux\n  Today's date: Tue Oct 20 2026\n</env>"
+   },
+   {
+    "role": "user",
+    "content": "Review src and answer in JSON."
+   },
+   {
+    "role": "assistant",
+    "content": "",
+    "tool_calls": [
+     {
+      "id": "call_1",
+      "type": "function",
+      "function": {
+       "name": "glob",
+       "arguments": "{\"pattern\":\"**/*.py\"}"
+      }
+     }
+    ]
+   },
+   {
+    "role": "tool",
+    "tool_call_id": "call_1",
+    "content": "/work/export/src/app.py\n/work/export/src/db.py"
+   },
+   {
+    "role": "assistant",
+    "content": "",
+    "tool_calls": [
+     {
+      "id": "call_2",
+      "type": "function",
+      "function": {
+       "name": "read",
+       "arguments": "{\"filePath\":\"/work/export/src/app.py\"}"
+      }
+     }
+    ]
+   },
+   {
+    "role": "tool",
+    "tool_call_id": "call_2",
+    "content": "<path>/work/export/src/app.py</path>\n<type>file</type>\n<content>\n1: def handler(user):\n2:     return query(user)\n\n(End of file - total 2 lines)\n</content>"
+   },
+   {
+    "role": "assistant",
+    "content": "",
+    "tool_calls": [
+     {
+      "id": "call_3",
+      "type": "function",
+      "function": {
+       "name": "grep",
+       "arguments": "{\"pattern\":\"def \"}"
+      }
+     }
+    ]
+   },
+   {
+    "role": "tool",
+    "tool_call_id": "call_3",
+    "content": "Found 2 matches\n/work/export/src/app.py:\n  Line 1: def handler(user):\n\n\n/work/export/src/db.py:\n  Line 1: def query(value):\n"
+   },
+   {
+    "role": "assistant",
+    "content": "",
+    "tool_calls": [
+     {
+      "id": "call_4",
+      "type": "function",
+      "function": {
+       "name": "read",
+       "arguments": "{\"filePath\":\"/work/export/src/db.py\"}"
+      }
+     }
+    ]
+   },
+   {
+    "role": "tool",
+    "tool_call_id": "call_4",
+    "content": "<path>/work/export/src/db.py</path>\n<type>file</type>\n<content>\n1: def query(value):\n2:     return 'SELECT ' + value\n\n(End of file - total 2 lines)\n</content>"
+   },
+   {
+    "role": "assistant",
+    "content": "",
+    "tool_calls": [
+     {
+      "id": "call_5",
+      "type": "function",
+      "function": {
+       "name": "glob",
+       "arguments": "{\"pattern\":\"*.md\"}"
+      }
+     }
+    ]
+   },
+   {
+    "role": "tool",
+    "tool_call_id": "call_5",
+    "content": "/work/export/README.md"
+   },
+   {
+    "role": "assistant",
+    "content": "",
+    "tool_calls": [
+     {
+      "id": "call_6",
+      "type": "function",
+      "function": {
+       "name": "grep",
+       "arguments": "{\"pattern\":\"query\"}"
+      }
+     }
+    ]
+   },
+   {
+    "role": "tool",
+    "tool_call_id": "call_6",
+    "content": "Found 2 matches\n/work/export/src/app.py:\n  Line 2:     return query(user)\n\n\n/work/export/src/db.py:\n  Line 1: def query(value):\n"
+   }
+  ],
+  "tools": [
+   {
+    "type": "function",
+    "function": {
+     "name": "glob",
+     "description": "- Fast file pattern matching tool that works with any codebase size\n- Supports glob patterns like \"**/*.js\" or \"src/**/*.ts\"\n- Returns matching file paths\n- Use this tool when you need to find files by name patterns\n- When you are doing an open-ended search that may require multiple rounds of globbing and grepping, use the Task tool instead\n- You have the capability to call multiple tools in a single response. It is always better to speculatively perform multiple searches as a batch that are potentially useful.\n",
+     "parameters": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+       "pattern": {
+        "type": "string",
+        "description": "The glob pattern to match files against"
+       },
+       "path": {
+        "type": "string",
+        "description": "The directory to search in. If not specified, the current working directory will be used. IMPORTANT: Omit this field to use the default directory. DO NOT enter \"undefined\" or \"null\" - simply omit it for the default behavior. Must be a valid directory path if provided."
+       }
+      },
+      "required": [
+       "pattern"
+      ]
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "grep",
+     "description": "- Fast content search tool that works with any codebase size\n- Searches file contents using regular expressions\n- Supports full regex syntax (eg. \"log.*Error\", \"function\\s+\\w+\", etc.)\n- Filter files by pattern with the include parameter (eg. \"*.js\", \"*.{ts,tsx}\")\n- Returns file paths and line numbers with matching lines\n- Use this tool when you need to find files containing specific patterns\n- If you need to identify/count the number of matches within files, use the Bash tool with `rg` (ripgrep) directly. Do NOT use `grep`.\n- When you are doing an open-ended search that may require multiple rounds of globbing and grepping, use the Task tool instead\n",
+     "parameters": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+       "pattern": {
+        "type": "string",
+        "description": "The regex pattern to search for in file contents"
+       },
+       "path": {
+        "type": "string",
+        "description": "The directory to search in. Defaults to the current working directory."
+       },
+       "include": {
+        "type": "string",
+        "description": "File pattern to include in the search (e.g. \"*.js\", \"*.{ts,tsx}\")"
+       }
+      },
+      "required": [
+       "pattern"
+      ]
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "read",
+     "description": "Read a file or directory from the local filesystem. If the path does not exist, an error is returned.\n\nUsage:\n- The filePath parameter should be an absolute path.\n- By default, this tool returns up to 2000 lines from the start of the file.\n- The offset parameter is the line number to start from (1-indexed).\n- To read later sections, call this tool again with a larger offset.\n- Use the grep tool to find specific content in large files or files with long lines.\n- If you are unsure of the correct file path, use the glob tool to look up filenames by glob pattern.\n- Contents are returned with each line prefixed by its line number as `<line>: <content>`. For example, if a file has contents \"foo\\n\", you will receive \"1: foo\\n\". For directories, entries are returned one per line (without line numbers) with a trailing `/` for subdirectories.\n- Any line longer than 2000 characters is truncated.\n- Call this tool in parallel when you know there are multiple files you want to read.\n- Avoid tiny repeated slices (30 line chunks). If you need more context, read a larger window.\n- This tool can read image files and PDFs and return them as file attachments.\n",
+     "parameters": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+       "filePath": {
+        "type": "string",
+        "description": "The absolute path to the file or directory to read"
+       },
+       "offset": {
+        "minimum": 0,
+        "type": "integer",
+        "maximum": 9007199254740991,
+        "description": "The line number to start reading from (1-indexed)"
+       },
+       "limit": {
+        "minimum": 0,
+        "type": "integer",
+        "maximum": 9007199254740991,
+        "description": "The maximum number of lines to read (defaults to 2000)"
+       }
+      },
+      "required": [
+       "filePath"
+      ]
+     }
+    }
+   }
+  ],
+  "tool_choice": "auto",
+  "stream": true,
+  "stream_options": {
+   "include_usage": true
+  }
+ },
+ "responses": {
+  "model": "acme-resp-9",
+  "input": [
+   {
+    "role": "system",
+    "content": "You review code. Use read, grep and glob, then answer in JSON text.\nYou are powered by the model named acme-resp-9. The exact model ID is acme-resp/acme-resp-9\nHere is some useful information about the environment you are running in:\n<env>\n  Working directory: /work/export\n  Workspace root folder: /\n  Is directory a git repo: no\n  Platform: linux\n  Today's date: Tue Oct 20 2026\n</env>"
+   },
+   {
+    "role": "user",
+    "content": [
+     {
+      "type": "input_text",
+      "text": "Review src and answer in JSON."
+     }
+    ]
+   },
+   {
+    "type": "function_call",
+    "call_id": "call_1",
+    "name": "glob",
+    "arguments": "{\"pattern\":\"**/*.py\"}"
+   },
+   {
+    "type": "function_call_output",
+    "call_id": "call_1",
+    "output": "/work/export/src/app.py\n/work/export/src/db.py"
+   },
+   {
+    "type": "function_call",
+    "call_id": "call_2",
+    "name": "read",
+    "arguments": "{\"filePath\":\"/work/export/src/app.py\"}"
+   },
+   {
+    "type": "function_call_output",
+    "call_id": "call_2",
+    "output": "<path>/work/export/src/app.py</path>\n<type>file</type>\n<content>\n1: def handler(user):\n2:     return query(user)\n\n(End of file - total 2 lines)\n</content>"
+   },
+   {
+    "type": "function_call",
+    "call_id": "call_3",
+    "name": "grep",
+    "arguments": "{\"pattern\":\"def \"}"
+   },
+   {
+    "type": "function_call_output",
+    "call_id": "call_3",
+    "output": "Found 2 matches\n/work/export/src/app.py:\n  Line 1: def handler(user):\n\n\n/work/export/src/db.py:\n  Line 1: def query(value):\n"
+   },
+   {
+    "type": "function_call",
+    "call_id": "call_4",
+    "name": "read",
+    "arguments": "{\"filePath\":\"/work/export/src/db.py\"}"
+   },
+   {
+    "type": "function_call_output",
+    "call_id": "call_4",
+    "output": "<path>/work/export/src/db.py</path>\n<type>file</type>\n<content>\n1: def query(value):\n2:     return 'SELECT ' + value\n\n(End of file - total 2 lines)\n</content>"
+   },
+   {
+    "type": "function_call",
+    "call_id": "call_5",
+    "name": "glob",
+    "arguments": "{\"pattern\":\"*.md\"}"
+   },
+   {
+    "type": "function_call_output",
+    "call_id": "call_5",
+    "output": "/work/export/README.md"
+   },
+   {
+    "type": "function_call",
+    "call_id": "call_6",
+    "name": "grep",
+    "arguments": "{\"pattern\":\"query\"}"
+   },
+   {
+    "type": "function_call_output",
+    "call_id": "call_6",
+    "output": "Found 2 matches\n/work/export/src/app.py:\n  Line 2:     return query(user)\n\n\n/work/export/src/db.py:\n  Line 1: def query(value):\n"
+   }
+  ],
+  "max_output_tokens": 8192,
+  "store": false,
+  "prompt_cache_key": "ses_ea9535dfeffesHfKcm8BYMQcIb",
+  "tools": [
+   {
+    "type": "function",
+    "name": "glob",
+    "description": "- Fast file pattern matching tool that works with any codebase size\n- Supports glob patterns like \"**/*.js\" or \"src/**/*.ts\"\n- Returns matching file paths\n- Use this tool when you need to find files by name patterns\n- When you are doing an open-ended search that may require multiple rounds of globbing and grepping, use the Task tool instead\n- You have the capability to call multiple tools in a single response. It is always better to speculatively perform multiple searches as a batch that are potentially useful.\n",
+    "parameters": {
+     "properties": {
+      "pattern": {
+       "description": "The glob pattern to match files against",
+       "type": "string"
+      },
+      "path": {
+       "description": "The directory to search in. If not specified, the current working directory will be used. IMPORTANT: Omit this field to use the default directory. DO NOT enter \"undefined\" or \"null\" - simply omit it for the default behavior. Must be a valid directory path if provided.",
+       "type": "string"
+      }
+     },
+     "required": [
+      "pattern"
+     ],
+     "type": "object"
+    },
+    "strict": false
+   },
+   {
+    "type": "function",
+    "name": "grep",
+    "description": "- Fast content search tool that works with any codebase size\n- Searches file contents using regular expressions\n- Supports full regex syntax (eg. \"log.*Error\", \"function\\s+\\w+\", etc.)\n- Filter files by pattern with the include parameter (eg. \"*.js\", \"*.{ts,tsx}\")\n- Returns file paths and line numbers with matching lines\n- Use this tool when you need to find files containing specific patterns\n- If you need to identify/count the number of matches within files, use the Bash tool with `rg` (ripgrep) directly. Do NOT use `grep`.\n- When you are doing an open-ended search that may require multiple rounds of globbing and grepping, use the Task tool instead\n",
+    "parameters": {
+     "properties": {
+      "pattern": {
+       "description": "The regex pattern to search for in file contents",
+       "type": "string"
+      },
+      "path": {
+       "description": "The directory to search in. Defaults to the current working directory.",
+       "type": "string"
+      },
+      "include": {
+       "description": "File pattern to include in the search (e.g. \"*.js\", \"*.{ts,tsx}\")",
+       "type": "string"
+      }
+     },
+     "required": [
+      "pattern"
+     ],
+     "type": "object"
+    },
+    "strict": false
+   },
+   {
+    "type": "function",
+    "name": "read",
+    "description": "Read a file or directory from the local filesystem. If the path does not exist, an error is returned.\n\nUsage:\n- The filePath parameter should be an absolute path.\n- By default, this tool returns up to 2000 lines from the start of the file.\n- The offset parameter is the line number to start from (1-indexed).\n- To read later sections, call this tool again with a larger offset.\n- Use the grep tool to find specific content in large files or files with long lines.\n- If you are unsure of the correct file path, use the glob tool to look up filenames by glob pattern.\n- Contents are returned with each line prefixed by its line number as `<line>: <content>`. For example, if a file has contents \"foo\\n\", you will receive \"1: foo\\n\". For directories, entries are returned one per line (without line numbers) with a trailing `/` for subdirectories.\n- Any line longer than 2000 characters is truncated.\n- Call this tool in parallel when you know there are multiple files you want to read.\n- Avoid tiny repeated slices (30 line chunks). If you need more context, read a larger window.\n- This tool can read image files and PDFs and return them as file attachments.\n",
+    "parameters": {
+     "properties": {
+      "filePath": {
+       "description": "The absolute path to the file or directory to read",
+       "type": "string"
+      },
+      "offset": {
+       "description": "The line number to start reading from (1-indexed)",
+       "type": "integer"
+      },
+      "limit": {
+       "description": "The maximum number of lines to read (defaults to 2000)",
+       "type": "integer"
+      }
+     },
+     "required": [
+      "filePath"
+     ],
+     "type": "object"
+    },
+    "strict": false
+   }
+  ],
+  "tool_choice": "auto",
+  "stream": true
+ },
+ "messages": {
+  "model": "acme-claude-9",
+  "max_tokens": 8192,
+  "thinking": {
+   "type": "adaptive",
+   "block_binding": {
+    "prefix_mismatch_behavior": "drop_block"
+   }
+  },
+  "system": [
+   {
+    "type": "text",
+    "text": "You review code. Use read, grep and glob, then answer in JSON text.\nYou are powered by the model named acme-claude-9. The exact model ID is acme-claude/acme-claude-9\nHere is some useful information about the environment you are running in:\n<env>\n  Working directory: /work/export\n  Workspace root folder: /\n  Is directory a git repo: no\n  Platform: linux\n  Today's date: Tue Oct 20 2026\n</env>",
+    "cache_control": {
+     "type": "ephemeral"
+    }
+   }
+  ],
+  "messages": [
+   {
+    "role": "user",
+    "content": [
+     {
+      "type": "text",
+      "text": "Review src and answer in JSON."
+     }
+    ]
+   },
+   {
+    "role": "assistant",
+    "content": [
+     {
+      "type": "thinking",
+      "thinking": "Let me look at the files.",
+      "signature": "sig-1"
+     },
+     {
+      "type": "tool_use",
+      "id": "toolu_1",
+      "name": "glob",
+      "input": {
+       "pattern": "**/*.py"
+      }
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "content": [
+     {
+      "type": "tool_result",
+      "tool_use_id": "toolu_1",
+      "content": "/work/export/src/app.py\n/work/export/src/db.py"
+     }
+    ]
+   },
+   {
+    "role": "assistant",
+    "content": [
+     {
+      "type": "thinking",
+      "thinking": "Let me look at the files.",
+      "signature": "sig-2"
+     },
+     {
+      "type": "tool_use",
+      "id": "toolu_2",
+      "name": "read",
+      "input": {
+       "filePath": "/work/export/src/app.py"
+      }
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "content": [
+     {
+      "type": "tool_result",
+      "tool_use_id": "toolu_2",
+      "content": "<path>/work/export/src/app.py</path>\n<type>file</type>\n<content>\n1: def handler(user):\n2:     return query(user)\n\n(End of file - total 2 lines)\n</content>"
+     }
+    ]
+   },
+   {
+    "role": "assistant",
+    "content": [
+     {
+      "type": "thinking",
+      "thinking": "Let me look at the files.",
+      "signature": "sig-3"
+     },
+     {
+      "type": "tool_use",
+      "id": "toolu_3",
+      "name": "grep",
+      "input": {
+       "pattern": "def "
+      }
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "content": [
+     {
+      "type": "tool_result",
+      "tool_use_id": "toolu_3",
+      "content": "Found 2 matches\n/work/export/src/app.py:\n  Line 1: def handler(user):\n\n\n/work/export/src/db.py:\n  Line 1: def query(value):\n"
+     }
+    ]
+   },
+   {
+    "role": "assistant",
+    "content": [
+     {
+      "type": "thinking",
+      "thinking": "Let me look at the files.",
+      "signature": "sig-4"
+     },
+     {
+      "type": "tool_use",
+      "id": "toolu_4",
+      "name": "read",
+      "input": {
+       "filePath": "/work/export/src/db.py"
+      }
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "content": [
+     {
+      "type": "tool_result",
+      "tool_use_id": "toolu_4",
+      "content": "<path>/work/export/src/db.py</path>\n<type>file</type>\n<content>\n1: def query(value):\n2:     return 'SELECT ' + value\n\n(End of file - total 2 lines)\n</content>"
+     }
+    ]
+   },
+   {
+    "role": "assistant",
+    "content": [
+     {
+      "type": "thinking",
+      "thinking": "Let me look at the files.",
+      "signature": "sig-5"
+     },
+     {
+      "type": "tool_use",
+      "id": "toolu_5",
+      "name": "glob",
+      "input": {
+       "pattern": "*.md"
+      }
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "content": [
+     {
+      "type": "tool_result",
+      "tool_use_id": "toolu_5",
+      "content": "/work/export/README.md"
+     }
+    ]
+   },
+   {
+    "role": "assistant",
+    "content": [
+     {
+      "type": "thinking",
+      "thinking": "Let me look at the files.",
+      "signature": "sig-6"
+     },
+     {
+      "type": "tool_use",
+      "id": "toolu_6",
+      "name": "grep",
+      "input": {
+       "pattern": "query"
+      },
+      "cache_control": {
+       "type": "ephemeral"
+      }
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "content": [
+     {
+      "type": "tool_result",
+      "tool_use_id": "toolu_6",
+      "content": "Found 2 matches\n/work/export/src/app.py:\n  Line 2:     return query(user)\n\n\n/work/export/src/db.py:\n  Line 1: def query(value):\n",
+      "cache_control": {
+       "type": "ephemeral"
+      }
+     }
+    ]
+   }
+  ],
+  "tools": [
+   {
+    "name": "glob",
+    "description": "- Fast file pattern matching tool that works with any codebase size\n- Supports glob patterns like \"**/*.js\" or \"src/**/*.ts\"\n- Returns matching file paths\n- Use this tool when you need to find files by name patterns\n- When you are doing an open-ended search that may require multiple rounds of globbing and grepping, use the Task tool instead\n- You have the capability to call multiple tools in a single response. It is always better to speculatively perform multiple searches as a batch that are potentially useful.\n",
+    "input_schema": {
+     "$schema": "https://json-schema.org/draft/2020-12/schema",
+     "type": "object",
+     "properties": {
+      "pattern": {
+       "type": "string",
+       "description": "The glob pattern to match files against"
+      },
+      "path": {
+       "type": "string",
+       "description": "The directory to search in. If not specified, the current working directory will be used. IMPORTANT: Omit this field to use the default directory. DO NOT enter \"undefined\" or \"null\" - simply omit it for the default behavior. Must be a valid directory path if provided."
+      }
+     },
+     "required": [
+      "pattern"
+     ]
+    },
+    "eager_input_streaming": true
+   },
+   {
+    "name": "grep",
+    "description": "- Fast content search tool that works with any codebase size\n- Searches file contents using regular expressions\n- Supports full regex syntax (eg. \"log.*Error\", \"function\\s+\\w+\", etc.)\n- Filter files by pattern with the include parameter (eg. \"*.js\", \"*.{ts,tsx}\")\n- Returns file paths and line numbers with matching lines\n- Use this tool when you need to find files containing specific patterns\n- If you need to identify/count the number of matches within files, use the Bash tool with `rg` (ripgrep) directly. Do NOT use `grep`.\n- When you are doing an open-ended search that may require multiple rounds of globbing and grepping, use the Task tool instead\n",
+    "input_schema": {
+     "$schema": "https://json-schema.org/draft/2020-12/schema",
+     "type": "object",
+     "properties": {
+      "pattern": {
+       "type": "string",
+       "description": "The regex pattern to search for in file contents"
+      },
+      "path": {
+       "type": "string",
+       "description": "The directory to search in. Defaults to the current working directory."
+      },
+      "include": {
+       "type": "string",
+       "description": "File pattern to include in the search (e.g. \"*.js\", \"*.{ts,tsx}\")"
+      }
+     },
+     "required": [
+      "pattern"
+     ]
+    },
+    "eager_input_streaming": true
+   },
+   {
+    "name": "read",
+    "description": "Read a file or directory from the local filesystem. If the path does not exist, an error is returned.\n\nUsage:\n- The filePath parameter should be an absolute path.\n- By default, this tool returns up to 2000 lines from the start of the file.\n- The offset parameter is the line number to start from (1-indexed).\n- To read later sections, call this tool again with a larger offset.\n- Use the grep tool to find specific content in large files or files with long lines.\n- If you are unsure of the correct file path, use the glob tool to look up filenames by glob pattern.\n- Contents are returned with each line prefixed by its line number as `<line>: <content>`. For example, if a file has contents \"foo\\n\", you will receive \"1: foo\\n\". For directories, entries are returned one per line (without line numbers) with a trailing `/` for subdirectories.\n- Any line longer than 2000 characters is truncated.\n- Call this tool in parallel when you know there are multiple files you want to read.\n- Avoid tiny repeated slices (30 line chunks). If you need more context, read a larger window.\n- This tool can read image files and PDFs and return them as file attachments.\n",
+    "input_schema": {
+     "$schema": "https://json-schema.org/draft/2020-12/schema",
+     "type": "object",
+     "properties": {
+      "filePath": {
+       "type": "string",
+       "description": "The absolute path to the file or directory to read"
+      },
+      "offset": {
+       "minimum": 0,
+       "type": "integer",
+       "maximum": 9007199254740991,
+       "description": "The line number to start reading from (1-indexed)"
+      },
+      "limit": {
+       "minimum": 0,
+       "type": "integer",
+       "maximum": 9007199254740991,
+       "description": "The maximum number of lines to read (defaults to 2000)"
+      }
+     },
+     "required": [
+      "filePath"
+     ]
+    },
+    "eager_input_streaming": true
+   }
+  ],
+  "tool_choice": {
+   "type": "auto"
+  },
+  "stream": true
+ },
+ "google": {
+  "generationConfig": {
+   "maxOutputTokens": 8192
+  },
+  "contents": [
+   {
+    "role": "user",
+    "parts": [
+     {
+      "text": "Review src and answer in JSON."
+     }
+    ]
+   },
+   {
+    "role": "model",
+    "parts": [
+     {
+      "text": "Let me look at the files.",
+      "thought": true
+     },
+     {
+      "functionCall": {
+       "name": "glob",
+       "args": {
+        "pattern": "**/*.py"
+       }
+      },
+      "thoughtSignature": "tsig-glob"
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "parts": [
+     {
+      "functionResponse": {
+       "name": "glob",
+       "response": {
+        "name": "glob",
+        "content": "/work/export/src/app.py\n/work/export/src/db.py"
+       }
+      }
+     }
+    ]
+   },
+   {
+    "role": "model",
+    "parts": [
+     {
+      "text": "Let me look at the files.",
+      "thought": true
+     },
+     {
+      "functionCall": {
+       "name": "read",
+       "args": {
+        "filePath": "/work/export/src/app.py"
+       }
+      },
+      "thoughtSignature": "tsig-read"
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "parts": [
+     {
+      "functionResponse": {
+       "name": "read",
+       "response": {
+        "name": "read",
+        "content": "<path>/work/export/src/app.py</path>\n<type>file</type>\n<content>\n1: def handler(user):\n2:     return query(user)\n\n(End of file - total 2 lines)\n</content>"
+       }
+      }
+     }
+    ]
+   },
+   {
+    "role": "model",
+    "parts": [
+     {
+      "text": "Let me look at the files.",
+      "thought": true
+     },
+     {
+      "functionCall": {
+       "name": "grep",
+       "args": {
+        "pattern": "def "
+       }
+      },
+      "thoughtSignature": "tsig-grep"
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "parts": [
+     {
+      "functionResponse": {
+       "name": "grep",
+       "response": {
+        "name": "grep",
+        "content": "Found 2 matches\n/work/export/src/app.py:\n  Line 1: def handler(user):\n\n\n/work/export/src/db.py:\n  Line 1: def query(value):\n"
+       }
+      }
+     }
+    ]
+   },
+   {
+    "role": "model",
+    "parts": [
+     {
+      "text": "Let me look at the files.",
+      "thought": true
+     },
+     {
+      "functionCall": {
+       "name": "read",
+       "args": {
+        "filePath": "/work/export/src/db.py"
+       }
+      },
+      "thoughtSignature": "tsig-read"
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "parts": [
+     {
+      "functionResponse": {
+       "name": "read",
+       "response": {
+        "name": "read",
+        "content": "<path>/work/export/src/db.py</path>\n<type>file</type>\n<content>\n1: def query(value):\n2:     return 'SELECT ' + value\n\n(End of file - total 2 lines)\n</content>"
+       }
+      }
+     }
+    ]
+   },
+   {
+    "role": "model",
+    "parts": [
+     {
+      "text": "Let me look at the files.",
+      "thought": true
+     },
+     {
+      "functionCall": {
+       "name": "glob",
+       "args": {
+        "pattern": "*.md"
+       }
+      },
+      "thoughtSignature": "tsig-glob"
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "parts": [
+     {
+      "functionResponse": {
+       "name": "glob",
+       "response": {
+        "name": "glob",
+        "content": "/work/export/README.md"
+       }
+      }
+     }
+    ]
+   },
+   {
+    "role": "model",
+    "parts": [
+     {
+      "text": "Let me look at the files.",
+      "thought": true
+     },
+     {
+      "functionCall": {
+       "name": "grep",
+       "args": {
+        "pattern": "query"
+       }
+      },
+      "thoughtSignature": "tsig-grep"
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "parts": [
+     {
+      "functionResponse": {
+       "name": "grep",
+       "response": {
+        "name": "grep",
+        "content": "Found 2 matches\n/work/export/src/app.py:\n  Line 2:     return query(user)\n\n\n/work/export/src/db.py:\n  Line 1: def query(value):\n"
+       }
+      }
+     }
+    ]
+   }
+  ],
+  "systemInstruction": {
+   "parts": [
+    {
+     "text": "You review code. Use read, grep and glob, then answer in JSON text.\nYou are powered by the model named acme-gemini-9. The exact model ID is acme-gemini/acme-gemini-9\nHere is some useful information about the environment you are running in:\n<env>\n  Working directory: /work/export\n  Workspace root folder: /\n  Is directory a git repo: no\n  Platform: linux\n  Today's date: Tue Oct 20 2026\n</env>"
+    }
+   ]
+  },
+  "tools": [
+   {
+    "functionDeclarations": [
+     {
+      "name": "glob",
+      "description": "- Fast file pattern matching tool that works with any codebase size\n- Supports glob patterns like \"**/*.js\" or \"src/**/*.ts\"\n- Returns matching file paths\n- Use this tool when you need to find files by name patterns\n- When you are doing an open-ended search that may require multiple rounds of globbing and grepping, use the Task tool instead\n- You have the capability to call multiple tools in a single response. It is always better to speculatively perform multiple searches as a batch that are potentially useful.\n",
+      "parameters": {
+       "required": [
+        "pattern"
+       ],
+       "type": "object",
+       "properties": {
+        "pattern": {
+         "description": "The glob pattern to match files against",
+         "type": "string"
+        },
+        "path": {
+         "description": "The directory to search in. If not specified, the current working directory will be used. IMPORTANT: Omit this field to use the default directory. DO NOT enter \"undefined\" or \"null\" - simply omit it for the default behavior. Must be a valid directory path if provided.",
+         "type": "string"
+        }
+       }
+      }
+     },
+     {
+      "name": "grep",
+      "description": "- Fast content search tool that works with any codebase size\n- Searches file contents using regular expressions\n- Supports full regex syntax (eg. \"log.*Error\", \"function\\s+\\w+\", etc.)\n- Filter files by pattern with the include parameter (eg. \"*.js\", \"*.{ts,tsx}\")\n- Returns file paths and line numbers with matching lines\n- Use this tool when you need to find files containing specific patterns\n- If you need to identify/count the number of matches within files, use the Bash tool with `rg` (ripgrep) directly. Do NOT use `grep`.\n- When you are doing an open-ended search that may require multiple rounds of globbing and grepping, use the Task tool instead\n",
+      "parameters": {
+       "required": [
+        "pattern"
+       ],
+       "type": "object",
+       "properties": {
+        "pattern": {
+         "description": "The regex pattern to search for in file contents",
+         "type": "string"
+        },
+        "path": {
+         "description": "The directory to search in. Defaults to the current working directory.",
+         "type": "string"
+        },
+        "include": {
+         "description": "File pattern to include in the search (e.g. \"*.js\", \"*.{ts,tsx}\")",
+         "type": "string"
+        }
+       }
+      }
+     },
+     {
+      "name": "read",
+      "description": "Read a file or directory from the local filesystem. If the path does not exist, an error is returned.\n\nUsage:\n- The filePath parameter should be an absolute path.\n- By default, this tool returns up to 2000 lines from the start of the file.\n- The offset parameter is the line number to start from (1-indexed).\n- To read later sections, call this tool again with a larger offset.\n- Use the grep tool to find specific content in large files or files with long lines.\n- If you are unsure of the correct file path, use the glob tool to look up filenames by glob pattern.\n- Contents are returned with each line prefixed by its line number as `<line>: <content>`. For example, if a file has contents \"foo\\n\", you will receive \"1: foo\\n\". For directories, entries are returned one per line (without line numbers) with a trailing `/` for subdirectories.\n- Any line longer than 2000 characters is truncated.\n- Call this tool in parallel when you know there are multiple files you want to read.\n- Avoid tiny repeated slices (30 line chunks). If you need more context, read a larger window.\n- This tool can read image files and PDFs and return them as file attachments.\n",
+      "parameters": {
+       "required": [
+        "filePath"
+       ],
+       "type": "object",
+       "properties": {
+        "filePath": {
+         "description": "The absolute path to the file or directory to read",
+         "type": "string"
+        },
+        "offset": {
+         "description": "The line number to start reading from (1-indexed)",
+         "type": "integer"
+        },
+        "limit": {
+         "description": "The maximum number of lines to read (defaults to 2000)",
+         "type": "integer"
+        }
+       }
+      }
+     }
+    ]
+   }
+  ],
+  "toolConfig": {
+   "functionCallingConfig": {
+    "mode": "AUTO"
+   }
+  }
+ }
+}

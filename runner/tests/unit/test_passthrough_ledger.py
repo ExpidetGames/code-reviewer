@@ -69,3 +69,46 @@ def test_a_call_without_usage_stays_spent_and_makes_the_run_cost_unknown() -> No
         for _ in range(20):
             budget.settle_unknown(budget.reserve_call(b"x" * 3000, output_tokens=1_000))
     assert raised.value.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
+
+
+# #550-B1-L04
+def test_a_call_that_reports_more_output_than_it_reserved_is_booked_before_the_run_stops() -> None:
+    budget = ledger()
+    reservation = budget.reserve_call(b"x" * 3000, output_tokens=1_000)
+    reported = Decimal("0.40")
+    with pytest.raises(LimitError) as raised:
+        budget.settle_call(
+            reservation,
+            prompt_tokens=100,
+            completion_tokens=reservation.output_tokens + 1,
+            cost=reported,
+        )
+    assert raised.value.code is ErrorCode.DYNAMIC_ACCOUNTING_FAILED
+    # What the provider charged is spent, whatever the run does next; the hold is released.
+    usage = budget.usage("m")
+    assert usage.cost_usd == pytest.approx(0.40)
+    assert budget.reserve_call(b"x" * 3000, output_tokens=1_000).cost == reservation.cost
+
+
+# #550-B1-L04
+def test_a_call_that_reports_more_prompt_than_the_bytes_allow_is_booked_too() -> None:
+    budget = ledger()
+    reservation = budget.reserve_call(b"x" * 300, output_tokens=1_000)
+    with pytest.raises(LimitError):
+        budget.settle_call(
+            reservation, prompt_tokens=10**6, completion_tokens=10, cost=Decimal("2.5")
+        )
+    assert budget.usage("m").cost_usd == pytest.approx(2.5)
+
+
+# #550-B1-L04
+def test_an_over_report_without_a_cost_is_booked_at_what_was_reserved() -> None:
+    budget = ledger()
+    reservation = budget.reserve_call(b"x" * 3000, output_tokens=1_000)
+    with pytest.raises(LimitError):
+        budget.settle_call(reservation, prompt_tokens=100, completion_tokens=2_000, cost=None)
+    # No cost was reported, so none is known: the run's cost is unknown, and the guard keeps
+    # counting the reservation as spent.
+    assert budget.usage("m").cost_usd is None
+    held_after = budget.reserve_call(b"x" * 3000, output_tokens=1_000)
+    assert held_after.cost >= reservation.cost
