@@ -13,7 +13,7 @@ that. The shapes follow the providers' documented formats; a real answer is stil
 import json
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -302,3 +302,163 @@ def test_an_error_event_is_one_complete_event_that_holds_an_error(
     assert event == name
     assert "boom" in json.dumps(data)
     assert "error" in data or data["type"] == "error"
+
+
+# -- the usage faults of the generic fakes (#551) ------------------------------------------------
+
+
+def keys_anywhere(value: Any) -> set[str]:
+    """Every object key at any depth of a JSON value."""
+    found: set[str] = set()
+    if isinstance(value, dict):
+        for key, inner in value.items():  # pyright: ignore[reportUnknownVariableType]
+            found.add(str(key))  # pyright: ignore[reportUnknownArgumentType]
+            found |= keys_anywhere(inner)
+    elif isinstance(value, list):
+        for inner in value:  # pyright: ignore[reportUnknownVariableType]
+            found |= keys_anywhere(inner)
+    return found
+
+
+def usage_of_events(family: Family, call: int, **options: Any) -> list[Any]:
+    """The usage objects a stream states, in order: `usage`, `usageMetadata`, never the text."""
+    found: list[Any] = []
+    for _, data in parse_sse(stream(family, READ, call, MODEL, **options)):
+        if not isinstance(data, dict):
+            continue
+        fields = cast("dict[str, Any]", data)
+        holders: list[object] = [fields, fields.get("message"), fields.get("response")]
+        for holder in holders:
+            if isinstance(holder, dict):
+                for key in ("usage", "usageMetadata"):
+                    if key in holder:
+                        found.append(cast("dict[str, Any]", holder)[key])
+    return found
+
+
+# #551-F01
+@pytest.mark.parametrize("family", FAMILIES)
+def test_no_fault_is_the_default_and_changes_nothing(family: Family) -> None:
+    assert answer(family, READ, 3, MODEL, usage_fault=None) == answer(family, READ, 3, MODEL)
+    assert stream(family, READ, 3, MODEL, usage_fault=None) == stream(family, READ, 3, MODEL)
+
+
+# #551-F01
+@pytest.mark.parametrize("family", FAMILIES)
+def test_a_missing_usage_is_left_out_of_the_answer_and_of_the_stream(family: Family) -> None:
+    document = answer(family, READ, 3, MODEL, usage_fault="missing")
+    assert not {"usage", "usageMetadata"} & set(document)
+    assert usage_of_events(family, 3, usage_fault="missing") == []
+    # The rest of the answer is untouched: it is a complete answer that states no usage.
+    clean = answer(family, READ, 3, MODEL)
+    assert {k: v for k, v in clean.items() if k not in ("usage", "usageMetadata")} == document
+    # Chat states its usage in a chunk of its own; the others in an event they send anyway.
+    left_out = 1 if family == "chat" else 0
+    assert len(stream(family, READ, 3, MODEL, usage_fault="missing")) == (
+        len(stream(family, READ, 3, MODEL)) - left_out
+    )
+
+
+# #551-F01
+@pytest.mark.parametrize("family", FAMILIES)
+def test_an_unknown_usage_field_adds_one_field_that_holds_something(family: Family) -> None:
+    clean = usage_for(3)
+    assert clean.input > 0
+    faulty = answer(family, READ, 3, MODEL, usage_fault="unknown_field")
+    plain = answer(family, READ, 3, MODEL)
+    key = "usageMetadata" if family == "google" else "usage"
+    added = keys_anywhere(faulty[key]) - keys_anywhere(plain[key])
+    assert len(added) >= 1
+    # The same one is in the stream.
+    in_stream = usage_of_events(family, 3, usage_fault="unknown_field")
+    assert any(keys_anywhere(item) >= added for item in in_stream)
+
+
+# #551-F01
+@pytest.mark.parametrize("family", FAMILIES)
+def test_a_bad_value_changes_one_count_of_the_usage_into_something_that_is_no_count(
+    family: Family,
+) -> None:
+    key = "usageMetadata" if family == "google" else "usage"
+    faulty = answer(family, READ, 3, MODEL, usage_fault="bad_value")[key]
+    plain = answer(family, READ, 3, MODEL)[key]
+    assert faulty != plain
+    assert keys_anywhere(faulty) == keys_anywhere(plain)
+    assert usage_of_events(family, 3, usage_fault="bad_value") != usage_of_events(family, 3)
+
+
+# -- the faults of the order of the usage (#551, review of PR #569) ------------------------------
+
+ORDERED_FAMILIES = ("chat", "messages", "google")
+
+
+def output_of(family: Family, usage: Any) -> int:
+    key = {
+        "chat": "completion_tokens",
+        "responses": "output_tokens",
+        "messages": "output_tokens",
+        "google": "candidatesTokenCount",
+    }[family]
+    return cast("int", usage[key])
+
+
+# #551-R569-F03
+@pytest.mark.parametrize("family", FAMILIES)
+def test_a_duplicate_usage_is_stated_a_second_time_with_a_lower_count_in_a_stream(
+    family: Family,
+) -> None:
+    healthy = usage_of_events(family, 3)
+    replayed = usage_of_events(family, 3, usage_fault="duplicate")
+    assert len(replayed) == len(healthy) + 1
+    assert replayed[: len(healthy)] == healthy
+    # A replay of an older count: the same usage with less output.
+    assert output_of(family, replayed[-1]) == output_of(family, healthy[-1]) - 1
+
+
+# #551-R569-F03
+@pytest.mark.parametrize("family", FAMILIES)
+@pytest.mark.parametrize("fault", ["duplicate", "out_of_order"])
+def test_a_fault_of_the_order_of_the_usage_leaves_a_whole_document_as_it_is(
+    family: Family, fault: str
+) -> None:
+    if (family, fault) == ("responses", "out_of_order"):
+        pytest.skip("a Responses stream states its usage once, in its last event")
+    assert answer(family, READ, 3, MODEL, usage_fault=fault) == answer(family, READ, 3, MODEL)  # type: ignore[arg-type]
+
+
+# #551-R569-F03
+def test_a_chat_usage_out_of_order_comes_before_the_chunk_that_finishes() -> None:
+    parsed = events("chat", READ)
+    out_of_order = parse_sse(stream("chat", READ, 3, MODEL, usage_fault="out_of_order"))
+    assert sorted(map(json.dumps, out_of_order)) == sorted(map(json.dumps, parsed))
+    where_usage = next(i for i, (_, d) in enumerate(out_of_order) if d != "[DONE]" and "usage" in d)
+    where_finish = next(
+        i
+        for i, (_, d) in enumerate(out_of_order)
+        if d != "[DONE]" and any(c.get("finish_reason") for c in d["choices"])
+    )
+    assert where_usage < where_finish
+
+
+# #551-R569-F03
+def test_a_messages_delta_out_of_order_comes_before_the_message_start() -> None:
+    names = [
+        name
+        for name, _ in parse_sse(stream("messages", READ, 3, MODEL, usage_fault="out_of_order"))
+    ]
+    assert names.index("message_delta") < names.index("message_start")
+    assert sorted(map(str, names)) == sorted(str(name) for name, _ in events("messages", READ))
+
+
+# #551-R569-F03
+def test_a_google_stream_out_of_order_ends_with_the_chunk_that_states_less() -> None:
+    healthy = usage_of_events("google", 3, cumulative_usage=True)
+    swapped = usage_of_events("google", 3, cumulative_usage=True, usage_fault="out_of_order")
+    assert swapped == healthy[::-1]
+    assert output_of("google", swapped[-1]) < output_of("google", swapped[0])
+
+
+# #551-R569-F03
+def test_a_responses_stream_has_no_order_of_the_usage_to_break() -> None:
+    with pytest.raises(ValueError):
+        stream("responses", READ, 3, MODEL, usage_fault="out_of_order")

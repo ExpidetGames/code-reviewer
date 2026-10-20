@@ -36,11 +36,11 @@ stream is replaced by a fixed event of ours; the headers of an answer have the k
 refusal that ends the run (a policy violation, a limit, a provider error that no retry will help)
 is recorded in the ledger with a stable `ErrorCode`; one the engine retries by itself (429, a cut
 stream) is not, and its code is kept in `last_upstream_error` for the caller to name when the
-engine gives up. No file here logs.
+engine gives up. No file here logs, except `usage_report.py`: names of usage fields and a count.
 
 Not done here: how a final call is told to answer (#552: a call is never rewritten on this path, so
-the ledger is asked with `can_wrap_up=False` and a call the limit cannot hold is refused); the
-parsers beyond the minimal ones (#551); an own key without prices (#553).
+the ledger is asked with `can_wrap_up=False` and a call the limit cannot hold is refused); an own
+key without prices (#553).
 """
 
 import json
@@ -66,7 +66,12 @@ from code_reviewer_runner.dynamic_review.passthrough.admission import (
     Refused,
 )
 from code_reviewer_runner.dynamic_review.passthrough.families import WireFamily, spec_of
-from code_reviewer_runner.dynamic_review.passthrough.pricing import call_cost
+from code_reviewer_runner.dynamic_review.passthrough.price_book import (
+    PriceBook,
+    PriceBookError,
+    book_from_unit_costs,
+)
+from code_reviewer_runner.dynamic_review.passthrough.pricing import price_call
 from code_reviewer_runner.dynamic_review.passthrough.redact import MIN_KEY_CHARS, Redactor
 from code_reviewer_runner.dynamic_review.passthrough.sink import ClientGone, ResponseSink
 from code_reviewer_runner.dynamic_review.passthrough.sse import SseFramer
@@ -82,6 +87,10 @@ from code_reviewer_runner.dynamic_review.passthrough.usage import (
     UsageTap,
     is_error_event,
     tap_for,
+)
+from code_reviewer_runner.dynamic_review.passthrough.usage_report import (
+    log_price_drift,
+    log_unknown_fields,
 )
 from code_reviewer_runner.error_mapping import is_context_length_exceeded, llm_status_code
 from code_reviewer_runner.result import ErrorCode
@@ -230,7 +239,7 @@ class PassthroughProxy:
         upstream: Upstream,
         upstream_api_key: str,
         capability: str,
-        prices: UnitCosts,
+        prices: UnitCosts | PriceBook,
         superseded: Callable[[], bool] = lambda: False,
         call_timeout: float = CALL_TIMEOUT_SECONDS,
         unknown_cost_ends_run: bool = True,
@@ -255,7 +264,15 @@ class PassthroughProxy:
         self._upstream = upstream
         self._key = upstream_api_key
         self._redactor = Redactor(upstream_api_key)
-        self._prices = prices
+        # Read once: prices that are no prices are refused here and not in the middle of a call.
+        try:
+            self._prices = prices if isinstance(prices, PriceBook) else book_from_unit_costs(prices)
+        except PriceBookError as error:
+            raise LimitError(
+                ErrorCode.DYNAMIC_CONFIG_INVALID, "the prices of the model are not prices"
+            ) from error
+        # Calls whose stated charge the price book did not agree with (counts only, `price_drift`).
+        self.price_drift_calls = 0
         self._superseded = superseded
         self._call_timeout = call_timeout
         # Whether a call whose usage was never seen ends the run (a managed key). An own key may
@@ -710,7 +727,7 @@ class PassthroughProxy:
             self.last_upstream_error = ErrorCode.LLM_UNAVAILABLE
             return
         usage = result.usage
-        if usage is None or not result.terminated:
+        if usage is None or not usage.complete:
             # A complete answer without usage fails the run for every key (#553 will price an own
             # key's calls another way); the call itself is booked at its worst case.
             self._unknown(
@@ -721,7 +738,23 @@ class PassthroughProxy:
                 ),
             )
             return
-        cost = call_cost(usage, self._prices)
+        if usage.unknown_fields:
+            # The provider stated something the proxy cannot price (a field it does not know that
+            # could carry a charge, a value it cannot trust, a second choice, a service tier): the
+            # call is unknown, whatever the figures say, and a managed run ends.
+            log_unknown_fields(usage.unknown_fields)
+            self._unknown(reservation, started_ms)
+            return
+        priced = price_call(usage, self._prices)
+        if priced.drift:
+            self.price_drift_calls += 1
+            log_price_drift(self.price_drift_calls)
+        cost = priced.cost
+        if cost is None:
+            # The book cannot price the call, or the charge the provider states is not to be
+            # believed: unknown, booked at the worst case, never at what it was expected to cost.
+            self._unknown(reservation, started_ms)
+            return
         # Noted before the settlement: a call the ledger then stops the run for is in the trace too.
         self.ledger.trace.model_call(
             t_ms=started_ms,
