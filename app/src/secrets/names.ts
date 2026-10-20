@@ -17,6 +17,10 @@ export const FIXED_SECRET_NAMES = [
   "github_app_private_key",
   "github_app_webhook_secret",
   "smtp_password",
+  // The Stripe credentials of the billing module (ADR 0006, 2.14; #500): the API key and the signing secret of the
+  // webhook endpoint. Encrypted and write-only like the others; the admin form that sets them is #504.
+  "stripe_api_key",
+  "stripe_webhook_secret",
 ] as const;
 
 /**

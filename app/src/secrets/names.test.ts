@@ -21,6 +21,8 @@ describe("the names of the secrets", () => {
       "operator_llm_key",
       "operator_llm_key.anthropic",
       "smtp_password",
+      "stripe_api_key",
+      "stripe_webhook_secret",
     ]);
     expect([...WORKSPACE_SECRET_NAMES]).toEqual([
       "llm_api_key",
@@ -34,6 +36,18 @@ describe("the names of the secrets", () => {
     expect(SECRET_NAMES.filter((name) => name.includes(vendor))).toEqual([]);
     expect(isSecretName(`${vendor}_api_key`)).toBe(false);
     expect(isSecretName(`${vendor}_webhook_secret`)).toBe(false);
+  });
+
+  // #500-T13
+  it("has the two Stripe secrets: the API key and the webhook secret of the endpoint", () => {
+    expect(SECRET_NAMES).toContain("stripe_api_key");
+    expect(SECRET_NAMES).toContain("stripe_webhook_secret");
+    expect(isSecretName("stripe_api_key")).toBe(true);
+    expect(isSecretName("stripe_webhook_secret")).toBe(true);
+    // Instance secrets only: a workspace never holds a payment provider credential.
+    expect(
+      WORKSPACE_SECRET_NAMES.filter((name) => name.includes("stripe")),
+    ).toEqual([]);
   });
 
   // #423-T04
@@ -75,6 +89,8 @@ describe("the names of the secrets", () => {
         "operator_llm_key",
         "operator_llm_key.zzz",
         "smtp_password",
+        "stripe_api_key",
+        "stripe_webhook_secret",
       ],
     );
   });
