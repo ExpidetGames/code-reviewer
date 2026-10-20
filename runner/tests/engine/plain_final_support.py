@@ -10,16 +10,16 @@ Nothing here talks beyond loopback. Not a test file.
 """
 
 import sys
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Mapping
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from fakes.wire.formats import Family, Turn
-from fakes.wire.upstream import Record, ScriptedUpstream
+from fakes.wire.upstream import Record, Refusal, ScriptedUpstream
 from opencode_native import (
     BASE_PATH,
     DEFAULT_IDS,
@@ -71,6 +71,26 @@ def review(count: int = 1) -> str:
     return json.dumps(document)
 
 
+class Scene:
+    """What a test can do to the provider while the run goes on: see each request that carries
+    tools, and decide what the provider's next answer is (a test that must not depend on how many
+    calls the cost limit admits before it refuses)."""
+
+    def __init__(self) -> None:
+        self.upstream: ScriptedUpstream | None = None
+        self.calls = 0
+
+    def answer_next_with(self, turn: Turn) -> None:
+        """The next call the provider answers is `turn`, whatever the script said."""
+        assert self.upstream is not None
+        script = self.upstream._script  # pyright: ignore[reportPrivateUsage]
+        served = self.upstream._served  # pyright: ignore[reportPrivateUsage]
+        script[served] = turn
+
+
+Reaction = Callable[[Scene, dict[str, Any]], None]
+
+
 @dataclass
 class NativeRun:
     answer: EngineAnswer
@@ -85,9 +105,11 @@ class NativeRun:
         has none)."""
         bodies: list[dict[str, Any]] = []
         for record in self.upstream.records:
-            body = record.body
-            if isinstance(body, dict) and body.get("tools"):
-                bodies.append(body)  # pyright: ignore[reportUnknownArgumentType]
+            body: Any = record.body
+            if isinstance(body, dict):
+                document = cast("dict[str, Any]", body)
+                if document.get("tools"):
+                    bodies.append(document)
         return bodies
 
     @property
@@ -120,14 +142,26 @@ def native_run(
     *,
     limit: str = "5.00",
     family: Family = "messages",
+    react: Reaction | None = None,
 ) -> Generator[NativeRun]:
     """Run one review on the native path against a provider that follows `script(export)`."""
     export = make_export(scratch)
     provider = Provider(family)
+    scene = Scene()
+
+    def judge(headers: Mapping[str, str], body: Mapping[str, Any]) -> Refusal | None:
+        if react is not None and body.get("tools"):
+            scene.calls += 1
+            react(scene, dict(body))
+        return None
+
     with ExitStack() as stack:
         upstream = stack.enter_context(
-            ScriptedUpstream(family, script(export), provider.model_id, real_key=REAL_KEY)
+            ScriptedUpstream(
+                family, script(export), provider.model_id, real_key=REAL_KEY, judge=judge
+            )
         )
+        scene.upstream = upstream
         ledger = BudgetLedger(
             DynamicLimits(max_cost_usd=Decimal(limit)),
             window_tokens=1_000_000,
