@@ -55,6 +55,7 @@ from code_reviewer_runner.dynamic_review.passthrough.server import PassthroughSe
 from code_reviewer_runner.dynamic_review.passthrough.upstream import HttpsUpstream, Upstream
 from code_reviewer_runner.dynamic_review.prompts import compose_system_prompt
 from code_reviewer_runner.job import Job
+from code_reviewer_runner.llm_providers import upstream_base_is_the_providers
 from code_reviewer_runner.result import ErrorCode
 from code_reviewer_runner.supersede_timing import SUPERSEDED_DRAIN_SECONDS
 
@@ -125,6 +126,10 @@ def build_native_job(
     assert dynamic is not None and dynamic.model_entry is not None and dynamic.cost is not None
     entry = dynamic.model_entry
     try:
+        # The key goes only where the registry says its provider is (`parse_job` checked it too);
+        # nothing is prepared for any other address.
+        if not upstream_base_is_the_providers(job.llm.provider, entry.upstream_base_url):
+            raise ValueError("the entry names an address that is not the provider's")
         target = target_from_entry(entry)
         upstream = upstream_for(entry.upstream_base_url)
     except (ValueError, UpstreamRefused):

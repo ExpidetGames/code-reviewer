@@ -10,6 +10,7 @@ import json
 import sys
 from collections.abc import Generator
 from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, ClassVar
 from urllib.parse import urlsplit
@@ -34,6 +35,7 @@ from code_reviewer_runner.dynamic_review.native_job import (
 )
 from code_reviewer_runner.dynamic_review.passthrough.families import WireFamily, spec_of
 from code_reviewer_runner.job import Job
+from code_reviewer_runner.llm_providers import ANTHROPIC, PROVIDERS
 from code_reviewer_runner.result import ErrorCode
 
 HEAD = "1f3a5c7e9b2d4f60a8c1e3b5d7f90a2c4e6b8d01"
@@ -262,8 +264,11 @@ def test_the_managed_policy_ends_a_run_on_an_unknown_cost_and_the_own_one_does_n
     ],
 )
 def test_an_upstream_address_the_guard_refuses_ends_the_job_before_the_engine(
-    address: str,
+    address: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # The registry pins the address of its providers (T27); to reach the guard of the address
+    # itself, the registry here names the refused address, as a later provider's entry could.
+    monkeypatch.setitem(PROVIDERS, "anthropic", replace(ANTHROPIC, default_api_base=address))
     job = native_job(entry={**ENTRY, "upstreamBaseUrl": address})
 
     with pytest.raises(LimitError) as caught:

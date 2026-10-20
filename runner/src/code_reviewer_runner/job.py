@@ -56,6 +56,7 @@ from code_reviewer_runner.llm_providers import (
     LlmProviderSpec,
     provider_for,
     registered_provider_ids,
+    upstream_base_is_the_providers,
     without_prefix,
 )
 from code_reviewer_runner.platforms import PLATFORMS
@@ -575,6 +576,9 @@ def _entry_matches(dynamic: DynamicReview, llm: LlmAccess) -> None:
         raise _invalid("dynamic.modelEntry is not the model of the job")
     if entry.provider_id != llm.provider.replace("_", "-"):
         raise _invalid("dynamic.modelEntry is not of the provider of llm.provider")
+    # The key is the registry provider's, so it goes to the registry's address and to no other.
+    if not upstream_base_is_the_providers(llm.provider, entry.upstream_base_url):
+        raise _invalid("dynamic.modelEntry.upstreamBaseUrl is not the address of the provider")
 
 
 def _capability_integer(document: dict[str, Any], key: str, upper: int) -> int:

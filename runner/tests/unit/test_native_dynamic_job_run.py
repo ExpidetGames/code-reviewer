@@ -8,6 +8,7 @@ import json
 import sys
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +30,7 @@ from code_reviewer_runner.dynamic_review.native_job import NativeSeams
 from code_reviewer_runner.dynamic_review.passthrough.families import WireFamily
 from code_reviewer_runner.dynamic_review.publish import Published
 from code_reviewer_runner.job import Job, parse_job
+from code_reviewer_runner.llm_providers import ANTHROPIC, PROVIDERS
 from code_reviewer_runner.result import ErrorCode
 
 
@@ -163,8 +165,13 @@ def test_a_job_without_an_entry_still_takes_the_legacy_path(tmp_path: Path) -> N
 
 # #578-T13
 def test_an_address_the_guard_refuses_ends_the_job_before_anything_is_prepared(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # See T13 in `test_native_job.py`: the registry names the refused address so that the guard of
+    # the address is what ends the job.
+    monkeypatch.setitem(
+        PROVIDERS, "anthropic", replace(ANTHROPIC, default_api_base="https://10.0.0.5")
+    )
     job = native_job(entry={**ENTRY, "upstreamBaseUrl": "https://10.0.0.5"})
     prepared: list[str] = []
 
