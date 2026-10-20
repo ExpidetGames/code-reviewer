@@ -225,7 +225,7 @@ test.describe("the models.dev catalog in the admin portal", () => {
     await test.step("the admin corrects the price with a reason and the correction is the source", async () => {
       const row = rowOf(page, NEW_MODEL);
       await row
-        .getByRole("button", { name: "Review price of Mistral New 1" })
+        .getByRole("button", { name: "Price of Mistral New 1", exact: true })
         .click();
       const dialog = page.getByRole("dialog", {
         name: "Price of Mistral New 1",
