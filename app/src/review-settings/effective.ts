@@ -68,7 +68,7 @@ export type EffectiveProjectDynamic = {
   reviewKind: ProjectReviewKind;
   dynamicModel: string;
   /** The provider of `dynamicModel`; the default provider unless the project chose one (#430). */
-  dynamicProvider: LlmProvider;
+  dynamicProvider: string;
   /** The catalog entry the project selects per kind, or null for none (#430). */
   catalogEntryDiff: string | null;
   catalogEntryDynamic: string | null;
@@ -91,7 +91,7 @@ export function resolveProjectDynamicSettings(layers: {
   builtIn: {
     reviewKind: ProjectReviewKind;
     dynamicModel: string;
-    dynamicProvider: LlmProvider;
+    dynamicProvider: string;
     catalogEntryDiff: string | null;
     catalogEntryDynamic: string | null;
     reviewSkill: string | null;

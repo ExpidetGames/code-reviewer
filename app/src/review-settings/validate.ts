@@ -7,6 +7,10 @@ import { REVIEW_COMMANDS, type ReviewCommand } from "../integrations/types.ts";
 import type { LlmProvider } from "../llm/config.ts";
 import { llmProviderDescriptors } from "../llm/providers/index.ts";
 import {
+  isCatalogModelId,
+  nativeProviderIdOf,
+} from "../native-cost/catalog-ref.ts";
+import {
   PROJECT_CATALOG_FIELDS,
   PROJECT_DYNAMIC_LIMITS,
   PROJECT_DYNAMIC_SETTING_FIELDS,
@@ -81,6 +85,11 @@ export const REVIEW_SETTING_ISSUE_CODES = [
    * Never reported by the validation itself.
    */
   "MODEL_PROVIDER_MISMATCH",
+  /**
+   * The Dynamic provider is a catalog provider (#555) and the model is not one the catalog lists for it: unknown, released since
+   * the last daily fetch, or no longer listed. Never reported by the validation itself: it needs the catalog.
+   */
+  "MODEL_NOT_IN_CATALOG",
 ] as const;
 export type ReviewSettingIssueCode =
   (typeof REVIEW_SETTING_ISSUE_CODES)[number];
@@ -148,6 +157,13 @@ function contextFor(input: unknown, providers: ProviderLookup): CheckContext {
   const named = (field: "provider" | "dynamicProvider") => {
     const raw = isPlainObject(input) ? input[field] : undefined;
     const found = typeof raw === "string" ? providers.find(raw) : undefined;
+    // The Dynamic provider may be a catalog provider (#555): its model is held to the shape a job entry carries.
+    if (
+      found === undefined &&
+      field === "dynamicProvider" &&
+      nativeDynamicProvider(raw) !== undefined
+    )
+      return isCatalogModelId;
     const provider = found ?? providers.find(providers.defaultProvider.id);
     return (id: string) => provider?.checkModelId(id) ?? false;
   };
@@ -323,13 +339,31 @@ function dynamicModelValue(
   return modelName(value, context.dynamicModelRule);
 }
 
-/** The Dynamic provider of a project save, or `null` to clear the override so the default provider applies (#430). */
+/**
+ * The catalog provider (#555) a Dynamic provider names, by its slug as the request wrote it (trimmed, any case), or
+ * undefined. A provider of the registry is not one (it keeps its own path until #556); an excluded or unknown one is not.
+ */
+function nativeDynamicProvider(raw: unknown): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  const slug = raw.trim().toLowerCase();
+  return nativeProviderIdOf(slug, llmProviderDescriptors.ids) === null
+    ? undefined
+    : slug;
+}
+
+/**
+ * The Dynamic provider of a project save, or `null` to clear the override so the default provider applies (#430). A provider
+ * of the registry, or (#555) a catalog provider by its slug. Whether the catalog offers it is the service's question.
+ */
 function dynamicProviderValue(
   value: unknown,
   context: CheckContext,
-): FieldResult<LlmProvider | null> {
+): FieldResult<string | null> {
   if (value === null) return ok(null);
-  return providerId(value, context);
+  const registered = providerId(value, context);
+  if (registered.ok) return registered;
+  const native = nativeDynamicProvider(value);
+  return native === undefined ? registered : ok(native);
 }
 
 const DYNAMIC_FIELD_CHECKS: {

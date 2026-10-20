@@ -22,6 +22,11 @@ const SLUG = /^[a-z][a-z0-9_]{1,31}$/;
 // The charset of the job entry's model id, without `..` (it would walk out of a path the id is put into).
 const MODEL_ID = /^(?!.*\.\.)[A-Za-z0-9][A-Za-z0-9._:/+@-]{0,199}$/;
 
+/** Whether `id` has the shape of a model id a job entry can carry (the one rule for a catalog model's id; its existence is the catalog's). */
+export function isCatalogModelId(id: string): boolean {
+  return MODEL_ID.test(id);
+}
+
 /** The models.dev provider id a registry slug stands for, or null when the text is no slug. */
 export function catalogProviderIdOf(slug: string): string | null {
   return SLUG.test(slug) ? slug.replaceAll("_", "-") : null;
@@ -58,6 +63,6 @@ export function catalogRefOf(
   legacyProviders: readonly string[],
 ): CatalogRef | null {
   const providerId = nativeProviderIdOf(selection.provider, legacyProviders);
-  if (providerId === null || !MODEL_ID.test(selection.model)) return null;
+  if (providerId === null || !isCatalogModelId(selection.model)) return null;
   return { providerId, modelId: selection.model };
 }
