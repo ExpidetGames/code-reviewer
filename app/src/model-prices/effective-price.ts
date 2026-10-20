@@ -1,14 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // The effective price of a model (#549, part C): a pure function of the models.dev row, the override file and the admin's
-// latest confirmation of it. Precedence: the admin's correction, then the override file, then models.dev, field by field.
-// The status decides whether the managed key, which we pay, may use the model:
+// latest confirmation. What is priced from is **a whole book**: the admin's confirmed book (a correction replaces the whole
+// book, it is not merged field by field), and the reference an admin is asked to confirm is models.dev's price with the
+// override file's 1-hour cache write over it. `sources` says per field where each amount of the shown book comes from
+// (catalog, override, admin), for the admin to read; it decides nothing. The status decides whether the managed key, which we
+// pay, may use the model:
 //   confirmed    an admin confirmed (or corrected) the price and neither models.dev nor the override has moved since;
-//   stale        they have moved since: the safe default is to treat it as unconfirmed until the admin confirms again;
+//   stale        they have moved since, or the hash is of another version: the safe default is to treat it as unconfirmed
+//                until the admin confirms again;
 //   unconfirmed  there is a price, and nobody has confirmed it;
-//   unpriced     models.dev states none and nobody has stated one.
-// A price is confirmed against the *reference* (models.dev plus the override file) as it was then, by hash, so a change
-// of input, output, cache read, cache write, a tier or the 1-hour cache write is seen, and a change back is not stale.
+//   unpriced     models.dev states none (or one we cannot read) and nobody has stated one.
+// Only a `confirmed` price has a `book`, so nothing that prices a run can read one by mistake; every other status has
+// `book: null` and shows a price to look at in `display`. A price is confirmed against the *reference* (models.dev plus the
+// override file) as it was then, by hash (`price-hash.ts`), so a change of any price, a tier or the model's `reasoning` flag is
+// seen, and a change back is not stale.
 import "server-only";
 import type { ModelCost } from "../models-dev/parse.ts";
 import type { PriceConfirmation } from "./confirmation.ts";
@@ -47,14 +53,7 @@ export type PriceField = (typeof PRICE_FIELDS)[number];
 /** Where each field of a book comes from; null for a field the book does not price. */
 export type PriceSources = Record<PriceField, PriceSource | null>;
 
-export type EffectivePrice = {
-  status: PriceStatus;
-  /**
-   * The book the managed key prices from when the status is `confirmed`: the confirmed one. Otherwise what an admin would
-   * be asked to confirm: the confirmed book of a stale price (the old price), the reference of an unconfirmed one, null
-   * when unpriced. Only `confirmed` may be used for a run.
-   */
-  book: PriceBook | null;
+type EffectivePriceShared = {
   sources: PriceSources | null;
   /** The price today, from models.dev and the override file, and its hash. */
   reference: {
@@ -65,6 +64,27 @@ export type EffectivePrice = {
   /** The latest confirmation, whatever the status. */
   confirmation: PriceConfirmation | null;
 };
+
+export type EffectivePrice = EffectivePriceShared &
+  (
+    | {
+        status: "confirmed";
+        /** The book the managed key prices from: the confirmed one. */
+        book: PriceBook;
+        /** The same book, for the admin's view. */
+        display: PriceBook;
+      }
+    | {
+        status: Exclude<PriceStatus, "confirmed">;
+        /** Not a price to run on. */
+        book: null;
+        /**
+         * What the admin is shown: the old confirmed price of a stale one, the reference they would confirm for an unconfirmed
+         * one, null when unpriced.
+         */
+        display: PriceBook | null;
+      }
+  );
 
 export type EffectivePriceInput = {
   cost: ModelCost | null;
@@ -183,7 +203,8 @@ export function effectivePrice(input: EffectivePriceInput): EffectivePrice {
   if (confirmation === null)
     return {
       status: referenceBook === null ? "unpriced" : "unconfirmed",
-      book: referenceBook,
+      book: null,
+      display: referenceBook,
       sources: referenceSources,
       reference,
       confirmation: null,
@@ -192,10 +213,21 @@ export function effectivePrice(input: EffectivePriceInput): EffectivePrice {
   const current =
     hashVersionOf(confirmation.referenceHash) === HASH_VERSION &&
     confirmation.referenceHash === reference.hash;
+  const sources = sourcesOfConfirmed(confirmation, referenceSources);
+  if (current)
+    return {
+      status: "confirmed",
+      book: confirmation.book,
+      display: confirmation.book,
+      sources,
+      reference,
+      confirmation,
+    };
   return {
-    status: current ? "confirmed" : "stale",
-    book: confirmation.book,
-    sources: sourcesOfConfirmed(confirmation, referenceSources),
+    status: "stale",
+    book: null,
+    display: confirmation.book,
+    sources,
     reference,
     confirmation,
   };

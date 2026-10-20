@@ -66,7 +66,7 @@ export type CatalogModelView = {
   price: {
     status: PriceStatus;
     warnings: PriceWarning[];
-    /** What the managed key prices from when `confirmed`; otherwise the old price of a stale one, or the proposal. */
+    /** What the managed key prices from when `confirmed`; otherwise the old price of a stale one, or the proposal: a price to look at, never one to run on (`managed` says whether it may run). */
     book: PriceBookJson | null;
     sources: PriceSources | null;
     /** The price today, from models.dev and the override file; `hash` is what a confirmation must echo. */
@@ -149,7 +149,7 @@ export function toModelView(input: ModelViewInput): CatalogModelView {
       warnings: isUnreadable(input.confirmation)
         ? ["confirmation_unreadable"]
         : [],
-      book: json(price.book),
+      book: json(price.display),
       sources: price.sources,
       reference: {
         book: json(price.reference.book),

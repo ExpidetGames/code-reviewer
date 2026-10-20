@@ -59,7 +59,7 @@ describe("effectivePrice", () => {
     });
 
     expect(price.status).toBe("unconfirmed");
-    expect(price.book).toMatchObject({
+    expect(price.display).toMatchObject({
       input: BigInt(2_000_000),
       output: BigInt(10_000_000),
       cacheRead: BigInt(100_000),
@@ -101,7 +101,7 @@ describe("effectivePrice", () => {
   });
 
   // #549-T02
-  it("prefers the admin's correction to the override and the catalog, field by field", () => {
+  it("prices from the admin's corrected book as a whole, and shows per field where each amount comes from", () => {
     const reference = priceBookFromCatalog(
       COST,
       OVERRIDE.cacheWrite1h ?? undefined,
@@ -144,7 +144,7 @@ describe("effectivePrice", () => {
       confirmation: null,
     });
 
-    expect(price.book?.cacheWrite1h).toBe(BigInt(6_000_000));
+    expect(price.display?.cacheWrite1h).toBe(BigInt(6_000_000));
     expect(price.sources?.cacheWrite1h).toBe("override");
   });
 
@@ -157,7 +157,7 @@ describe("effectivePrice", () => {
       confirmation: null,
     });
 
-    expect(price.book?.cacheWrite1h).toBeNull();
+    expect(price.display?.cacheWrite1h).toBeNull();
     expect(price.sources?.cacheWrite1h).toBeNull();
   });
 
@@ -174,7 +174,7 @@ describe("effectivePrice", () => {
     });
 
     expect(price.status).toBe("stale");
-    expect(price.book?.input).toBe(BigInt(2_000_000));
+    expect(price.display?.input).toBe(BigInt(2_000_000));
     expect(price.reference.book?.input).toBe(BigInt(2_200_000));
     expect(price.confirmation?.book.input).toBe(BigInt(2_000_000));
   });
@@ -243,7 +243,7 @@ describe("effectivePrice", () => {
     });
 
     expect(price.status).toBe("stale");
-    expect(price.book?.input).toBe(BigInt(3_000_000));
+    expect(price.display?.input).toBe(BigInt(3_000_000));
   });
 
   // #549-T02
@@ -256,7 +256,7 @@ describe("effectivePrice", () => {
     });
 
     expect(price.status).toBe("unpriced");
-    expect(price.book).toBeNull();
+    expect(price.display).toBeNull();
     expect(price.sources).toBeNull();
     expect(price.reference.book).toBeNull();
   });
@@ -299,6 +299,38 @@ describe("effectivePrice", () => {
         confirmation,
       }).status,
     ).toBe("stale");
+  });
+});
+
+describe("the book of an effective price", () => {
+  // #549-T07
+  it("is there for a run only when the price is confirmed; any other status shows a price for the admin to look at, never a book to run on", () => {
+    const confirmation = confirmationOf(COST, undefined);
+    const common = { reasoning: false, override: undefined };
+    const unconfirmed = effectivePrice({
+      ...common,
+      cost: COST,
+      confirmation: null,
+    });
+    const stale = effectivePrice({
+      ...common,
+      cost: { ...COST, output: "11" },
+      confirmation,
+    });
+    const unpriced = effectivePrice({
+      ...common,
+      cost: null,
+      confirmation: null,
+    });
+    const confirmed = effectivePrice({ ...common, cost: COST, confirmation });
+
+    expect(confirmed.book).toEqual(confirmation.book);
+    for (const price of [unconfirmed, stale, unpriced]) {
+      expect(price.book).toBeNull();
+    }
+    expect(unconfirmed.display).toEqual(unconfirmed.reference.book);
+    expect(stale.display).toEqual(confirmation.book);
+    expect(unpriced.display).toBeNull();
   });
 });
 

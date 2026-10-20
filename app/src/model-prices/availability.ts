@@ -142,11 +142,7 @@ export function managedAvailability(
   )
     return no("model_retired");
   if (!input.enabled) return no("model_not_enabled");
-  if (
-    price.status !== "confirmed" ||
-    price.book === null ||
-    price.confirmation === null
-  )
+  if (price.status !== "confirmed" || price.confirmation === null)
     return no("price_unconfirmed");
   return {
     selectable: true,

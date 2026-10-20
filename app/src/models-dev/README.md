@@ -67,8 +67,9 @@ sees a model id from here (principle 2 of #420); the admin screens (#554) escape
 - **Not a language model** (a model with a `type`: embedding, image, video, speech, rerank) and **a model that carries a
   `provider` of its own** (another SDK or address, which would change the wire or where the key goes) are skipped and counted.
 - **A reduced row:** ids, name, family, limits (context, output, input), `reasoning`, `temperature`, `attachment`,
-  `modalities`, `status`, `cost` (input, output, cache read, cache write, context tiers) as exact decimal strings of USD per
-  million tokens, `last_updated` and `interleaved` (where the model carries its reasoning in a tool loop; the engine needs it
+  `modalities`, `status`, `cost` (input, output, cache read, cache write, **reasoning**, **audio** in and out, the older `context_over_200k` and **every
+  context tier**, up to 64) as exact decimal strings of USD per million tokens, plus an `unknown` list of the names of any
+  price field or tier kind it cannot read (a model with one is not priced for the managed key, #549), `last_updated` and `interleaved` (where the model carries its reasoning in a tool loop; the engine needs it
   to hand the reasoning back). Descriptions and the rest are dropped.
 - **Untrusted data:** the body is read with a size cap (24 MiB) before it is parsed; a model that does not fit the schema is
   skipped and counted, never half written; a body that is not a usable catalog (not an object, or not one usable model of a

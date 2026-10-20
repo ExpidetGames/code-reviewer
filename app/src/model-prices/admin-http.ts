@@ -35,7 +35,7 @@ import {
   type ModelPriceService,
 } from "./service.ts";
 
-/** A few short fields: the biggest body is a price book of eight tiers, well below this. */
+/** A few short fields: the biggest body is a price book of 64 tiers (about 20 KB), well below this. */
 export const MODEL_PRICE_REQUEST_MAX_BYTES = 64 * 1024;
 
 export type ModelPriceRouteDependencies = {
