@@ -230,6 +230,12 @@ export type CreateWebhookEndpointInput = {
 };
 /** For a call that creates something at Stripe: the key that makes it safe to repeat. */
 export type WriteOptions = { idempotencyKey?: string };
+/**
+ * For a call that moves money (a Checkout session, a refund): the key is not optional. A key generated per call would be
+ * new for every call of ours, so a repeat after a crash or a lost answer would charge or refund a second time; the
+ * caller derives the key from what it is doing (the top-up intent, the refund request).
+ */
+export type MoneyWriteOptions = { idempotencyKey: string };
 
 export type StripeClientOptions = {
   /** Server-only. Sent as the bearer token and used for nothing else; never logged, never in an error. */
@@ -402,21 +408,49 @@ type Attempt =
       shouldRetry: boolean;
     };
 
+/**
+ * The host as the URL parser reads it (lowercase, percent-escapes decoded, IPv4 forms normalised), without the trailing
+ * dots that name the same host in DNS: `api.stripe.com.` and `api.stripe.com%2e` are Stripe's host, spelled differently.
+ */
+function normalisedHostname(url: URL): string {
+  return url.hostname.replace(/\.+$/, "");
+}
+
+/** Stripe's own hosts: `stripe.com` and everything below it. */
+function isStripeHost(hostname: string): boolean {
+  return hostname === "stripe.com" || hostname.endsWith(".stripe.com");
+}
+
+/** The loopback of this machine, where the fake runs; the only place a key may travel without TLS. */
+function isLoopbackHost(hostname: string): boolean {
+  return (
+    hostname === "localhost" ||
+    hostname === "[::1]" ||
+    /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname)
+  );
+}
+
 export function createStripeClient(options: StripeClientOptions) {
   const { apiKey } = options;
   let origin: string;
+  let hostname: string;
   try {
     const url = new URL(options.baseUrl);
     if (url.protocol !== "http:" && url.protocol !== "https:")
       throw new Error("protocol");
     origin = url.origin;
+    hostname = normalisedHostname(url);
+    // The key is a bearer token: it travels over TLS, or to a process on this very machine.
+    if (url.protocol === "http:" && !isLoopbackHost(hostname))
+      throw new Error("plain http");
   } catch {
     throw new StripeClientError("invalid_configuration");
   }
   if (apiKey === "") throw new StripeClientError("invalid_configuration");
-  // On Stripe's own address the key's prefix must fit the configured environment (a live key under a test setting would
-  // charge real cards); Stripe itself would only accept the key. An address that is not Stripe's (the fake) takes any key.
-  if (origin === STRIPE_API_BASE_URL) {
+  // On a Stripe host (however it is spelled) the key's prefix must fit the configured environment (a live key under a test
+  // setting would charge real cards); Stripe itself would only accept the key. Only a host that is not Stripe's (the fake
+  // on the loopback, a stub under test) takes any key.
+  if (isStripeHost(hostname)) {
     if (options.environment === undefined)
       throw new StripeClientError("invalid_configuration");
     if (stripeKeyEnvironment(apiKey) !== options.environment)
@@ -677,7 +711,7 @@ export function createStripeClient(options: StripeClientOptions) {
 
     createCheckoutSession: (
       input: CreateCheckoutSessionInput,
-      write: WriteOptions = {},
+      write: MoneyWriteOptions,
     ): Promise<StripeCheckoutSession> =>
       request("POST", "/v1/checkout/sessions", stripeCheckoutSessionSchema, {
         form: input,
@@ -711,7 +745,7 @@ export function createStripeClient(options: StripeClientOptions) {
 
     createRefund: (
       input: CreateRefundInput,
-      write: WriteOptions = {},
+      write: MoneyWriteOptions,
     ): Promise<StripeRefund> => {
       // Stripe takes one of the two; both or neither is a mistake of the caller that must not cost a request.
       if ((input.payment_intent === undefined) === (input.charge === undefined))

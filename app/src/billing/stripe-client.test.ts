@@ -10,6 +10,7 @@ import {
   StripeClientError,
   createStripeClient,
   stripeKeyEnvironment,
+  type CreateCheckoutSessionInput,
   type StripeClientOptions,
 } from "./stripe-client.ts";
 
@@ -64,7 +65,7 @@ function stubbed(
   let keys = 0;
   const client = createStripeClient({
     apiKey: API_KEY,
-    baseUrl: "http://stripe.invalid",
+    baseUrl: "https://stripe.invalid",
     fetch: async (url, init) => {
       const call = { url, init };
       calls.push(call);
@@ -125,7 +126,7 @@ describe("the requests", () => {
     });
     expect(calls).toHaveLength(1);
     const call = calls[0];
-    expect(call?.url).toBe("http://stripe.invalid/v1/customers");
+    expect(call?.url).toBe("https://stripe.invalid/v1/customers");
     expect(call?.init.method).toBe("POST");
     const headers = headersOf(call);
     expect(headers.get("authorization")).toBe(`Bearer ${API_KEY}`);
@@ -183,7 +184,7 @@ describe("the requests", () => {
       url: "https://checkout.example.test/c/pay/cs_test_Fake0001",
     });
     const call = calls[0];
-    expect(call?.url).toBe("http://stripe.invalid/v1/checkout/sessions");
+    expect(call?.url).toBe("https://stripe.invalid/v1/checkout/sessions");
     expect(headersOf(call).get("idempotency-key")).toBe("topup-intent-1");
     expect(Object.fromEntries(bodyOf(call))).toEqual({
       mode: "payment",
@@ -209,13 +210,13 @@ describe("the requests", () => {
     await client.expireCheckoutSession("cs_test_Fake0001");
     expect(calls[0]?.init.method).toBe("GET");
     expect(calls[0]?.url).toBe(
-      "http://stripe.invalid/v1/checkout/sessions/cs_test_Fake0001",
+      "https://stripe.invalid/v1/checkout/sessions/cs_test_Fake0001",
     );
     expect(calls[0]?.init.body).toBeUndefined();
     expect(headersOf(calls[0]).get("idempotency-key")).toBeNull();
     expect(calls[1]?.init.method).toBe("POST");
     expect(calls[1]?.url).toBe(
-      "http://stripe.invalid/v1/checkout/sessions/cs_test_Fake0001/expire",
+      "https://stripe.invalid/v1/checkout/sessions/cs_test_Fake0001/expire",
     );
     expect(headersOf(calls[1]).get("idempotency-key")).toBe("generated-key-1");
   });
@@ -223,12 +224,15 @@ describe("the requests", () => {
   // #500-T01
   it("creates a refund of a payment intent or a charge, and retrieves one", async () => {
     const { client, calls } = stubbed(() => json(REFUND));
-    const refund = await client.createRefund({
-      payment_intent: "pi_Fake0001",
-      amount: 500,
-      reason: "requested_by_customer",
-      metadata: { note: "n" },
-    });
+    const refund = await client.createRefund(
+      {
+        payment_intent: "pi_Fake0001",
+        amount: 500,
+        reason: "requested_by_customer",
+        metadata: { note: "n" },
+      },
+      { idempotencyKey: "refund-1" },
+    );
     expect(refund).toMatchObject({
       id: "re_Fake0001",
       amount: 500,
@@ -242,24 +246,48 @@ describe("the requests", () => {
       reason: "requested_by_customer",
       "metadata[note]": "n",
     });
-    await client.createRefund({ charge: "ch_Fake0001" });
+    await client.createRefund(
+      { charge: "ch_Fake0001" },
+      { idempotencyKey: "refund-2" },
+    );
     expect(Object.fromEntries(bodyOf(calls[1]))).toEqual({
       charge: "ch_Fake0001",
     });
     await client.getRefund("re_Fake0001");
-    expect(calls[2]?.url).toBe("http://stripe.invalid/v1/refunds/re_Fake0001");
+    expect(calls[2]?.url).toBe("https://stripe.invalid/v1/refunds/re_Fake0001");
+  });
+
+  // #500-T17
+  it("cannot be called to move money without an idempotency key: the type refuses it", () => {
+    // A compile-time check, run by `tsc` in `make verify`: each `@ts-expect-error` fails the typecheck as soon as the key
+    // is optional again. The function is never called.
+    const neverCalled = (client: ReturnType<typeof createStripeClient>) => {
+      // @ts-expect-error a refund needs an idempotency key
+      void client.createRefund({ charge: "ch_a" });
+      // @ts-expect-error an empty option object has no idempotency key either
+      void client.createRefund({ charge: "ch_a" }, {});
+      // @ts-expect-error a Checkout session needs an idempotency key
+      void client.createCheckoutSession({} as CreateCheckoutSessionInput);
+      // With the key it compiles.
+      void client.createRefund({ charge: "ch_a" }, { idempotencyKey: "k" });
+    };
+    expect(neverCalled).toBeTypeOf("function");
   });
 
   // #500-T01
   it("refuses a refund of neither or of both a payment intent and a charge, before any request", async () => {
     const { client, calls } = stubbed(() => json(REFUND));
-    expect((await errorOf(client.createRefund({}))).code).toBe(
-      "invalid_argument",
-    );
+    expect(
+      (await errorOf(client.createRefund({}, { idempotencyKey: "refund-3" })))
+        .code,
+    ).toBe("invalid_argument");
     expect(
       (
         await errorOf(
-          client.createRefund({ payment_intent: "pi_a", charge: "ch_a" }),
+          client.createRefund(
+            { payment_intent: "pi_a", charge: "ch_a" },
+            { idempotencyKey: "refund-4" },
+          ),
         )
       ).code,
     ).toBe("invalid_argument");
@@ -289,7 +317,7 @@ describe("the requests", () => {
       expandTaxIds: true,
     });
     expect(calls[0]?.url).toBe(
-      "http://stripe.invalid/v1/customers/cus_Fake0001?expand%5B%5D=tax_ids",
+      "https://stripe.invalid/v1/customers/cus_Fake0001?expand%5B%5D=tax_ids",
     );
     expect(customer.tax_ids?.data[0]).toMatchObject({
       id: "txi_Fake0001",
@@ -301,7 +329,7 @@ describe("the requests", () => {
       metadata: { stale: null },
     });
     expect(calls[1]?.url).toBe(
-      "http://stripe.invalid/v1/customers/cus_Fake0001",
+      "https://stripe.invalid/v1/customers/cus_Fake0001",
     );
     expect(calls[1]?.init.method).toBe("POST");
     expect(Object.fromEntries(bodyOf(calls[1]))).toEqual({
@@ -330,7 +358,7 @@ describe("the requests", () => {
     });
     expect(created.id).toBe("txi_Fake0002");
     expect(calls[0]?.url).toBe(
-      "http://stripe.invalid/v1/customers/cus_Fake0001/tax_ids",
+      "https://stripe.invalid/v1/customers/cus_Fake0001/tax_ids",
     );
     expect(Object.fromEntries(bodyOf(calls[0]))).toEqual({
       type: "eu_vat",
@@ -339,7 +367,7 @@ describe("the requests", () => {
     await client.deleteCustomerTaxId("cus_Fake0001", "txi_Fake0002");
     expect(calls[1]?.init.method).toBe("DELETE");
     expect(calls[1]?.url).toBe(
-      "http://stripe.invalid/v1/customers/cus_Fake0001/tax_ids/txi_Fake0002",
+      "https://stripe.invalid/v1/customers/cus_Fake0001/tax_ids/txi_Fake0002",
     );
   });
 
@@ -396,8 +424,8 @@ describe("the requests", () => {
       disputed: false,
     });
     expect(calls.map((call) => call.url)).toEqual([
-      "http://stripe.invalid/v1/payment_intents/pi_Fake0001",
-      "http://stripe.invalid/v1/charges/ch_Fake0001",
+      "https://stripe.invalid/v1/payment_intents/pi_Fake0001",
+      "https://stripe.invalid/v1/charges/ch_Fake0001",
     ]);
   });
 
@@ -440,12 +468,12 @@ describe("the requests", () => {
     expect(listed).toHaveLength(1);
     expect(listed[0]?.secret).toBeUndefined();
     expect(calls[1]?.url).toBe(
-      "http://stripe.invalid/v1/webhook_endpoints?limit=100",
+      "https://stripe.invalid/v1/webhook_endpoints?limit=100",
     );
     await client.deleteWebhookEndpoint("we_Fake0001");
     expect(calls[2]?.init.method).toBe("DELETE");
     expect(calls[2]?.url).toBe(
-      "http://stripe.invalid/v1/webhook_endpoints/we_Fake0001",
+      "https://stripe.invalid/v1/webhook_endpoints/we_Fake0001",
     );
   });
 
@@ -500,7 +528,7 @@ describe("the requests", () => {
       country: "DE",
       default_currency: "eur",
     });
-    expect(calls[0]?.url).toBe("http://stripe.invalid/v1/account");
+    expect(calls[0]?.url).toBe("https://stripe.invalid/v1/account");
   });
 
   // #500-T01
@@ -644,14 +672,77 @@ describe("the key and the address", () => {
       "https://api.stripe.com/",
       "https://API.stripe.com",
       "https://api.stripe.com:443/v1",
+      "https://api.stripe.com.",
+      "https://api.stripe.com..",
+      "https://api.stripe.com%2e",
+      "https://API.STRIPE.COM.:443/",
+      "http://api.stripe.com",
+      "http://api.stripe.com:80",
+      "https://files.stripe.com",
+      "https://stripe.com",
     ])
-      expect(() =>
-        createStripeClient({
-          apiKey: "sk_live_abc",
-          baseUrl: spelling,
-          environment: "test",
-        }),
+      expect(
+        () =>
+          createStripeClient({
+            apiKey: "sk_live_abc",
+            baseUrl: spelling,
+            environment: "test",
+          }),
+        spelling,
       ).toThrow(StripeClientError);
+  });
+
+  // #500-T03
+  it("treats every spelling of Stripe's host as Stripe's: the environment is needed and the key must fit it", () => {
+    for (const spelling of [
+      "https://api.stripe.com.",
+      "https://api.stripe.com%2e",
+      "https://API.Stripe.Com.:443/v1",
+    ]) {
+      const code = (options: Partial<StripeClientOptions>) => {
+        try {
+          createStripeClient({
+            apiKey: "sk_live_abc",
+            baseUrl: spelling,
+            ...options,
+          });
+        } catch (error) {
+          return (error as StripeClientError).code;
+        }
+        return null;
+      };
+      expect(code({})).toBe("invalid_configuration");
+      expect(code({ environment: "test" })).toBe("environment_mismatch");
+      expect(code({ environment: "live" })).toBeNull();
+    }
+  });
+
+  // #500-T16
+  it("never sends a key over plain http, except to the loopback of this machine", () => {
+    for (const baseUrl of [
+      "http://api.stripe.com",
+      "http://stripe.invalid",
+      "http://stripe-fake:4010",
+      "http://10.0.0.5:4010",
+      "http://localhost.example.test",
+      "http://127.0.0.1.example.test",
+    ])
+      expect(
+        () => createStripeClient({ apiKey: "sk_test_abc", baseUrl }),
+        baseUrl,
+      ).toThrow(/not configured/);
+    for (const baseUrl of [
+      "http://127.0.0.1:4010",
+      "http://127.5.6.7:1",
+      "http://localhost:4010",
+      "http://LOCALHOST.:4010",
+      "http://[::1]:4010",
+      "https://stripe.invalid",
+    ])
+      expect(
+        () => createStripeClient({ apiKey: "sk_test_abc", baseUrl }),
+        baseUrl,
+      ).not.toThrow();
   });
 
   // #500-T03

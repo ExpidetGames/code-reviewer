@@ -127,11 +127,14 @@ describe("the client against the fake", () => {
 
     // The buyer pays, then the operator refunds half of it through the API.
     const paid = fake.buyer.pay(session.id);
-    const refund = await client.createRefund({
-      payment_intent: paid.paymentIntent.id,
-      amount: 1000,
-      reason: "requested_by_customer",
-    });
+    const refund = await client.createRefund(
+      {
+        payment_intent: paid.paymentIntent.id,
+        amount: 1000,
+        reason: "requested_by_customer",
+      },
+      { idempotencyKey: "refund-1" },
+    );
     expect(refund).toMatchObject({
       amount: 1000,
       currency: "usd",
@@ -613,10 +616,10 @@ describe("what Managed Payments does not support", () => {
     const fake = await startTestStripe();
     const client: StripeClient = clientFor(fake);
     const customer = await client.createCustomer({ name: "Example GmbH" });
-    const session = await client.createCheckoutSession({
-      ...SESSION_INPUT,
-      customer: customer.id,
-    });
+    const session = await client.createCheckoutSession(
+      { ...SESSION_INPUT, customer: customer.id },
+      { idempotencyKey: "topup-intent-2" },
+    );
     expect(session.status).toBe("open");
     const expired = await client.expireCheckoutSession(session.id);
     expect(expired).toMatchObject({ status: "expired", url: null });

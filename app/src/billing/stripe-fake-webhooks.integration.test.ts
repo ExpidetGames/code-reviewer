@@ -8,7 +8,11 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { describe, expect, it } from "vitest";
 import type { StripeEvent } from "../../../fakes/stripe/server.ts";
-import { clientFor, startTestStripe } from "../test-support/stripe-fake.ts";
+import {
+  clientFor,
+  startTestStripe,
+  uniqueIdempotencyKey,
+} from "../test-support/stripe-fake.ts";
 import { cleanUpAfterTest } from "../test-support/test-database.ts";
 import type { CreateCheckoutSessionInput } from "./stripe-client.ts";
 import { verifyStripeSignature } from "./stripe-webhook-verify.ts";
@@ -82,7 +86,9 @@ async function setup(
   });
   const secret = endpoint.secret ?? "";
   expect(secret).not.toBe("");
-  const session = await client.createCheckoutSession(SESSION_INPUT);
+  const session = await client.createCheckoutSession(SESSION_INPUT, {
+    idempotencyKey: uniqueIdempotencyKey(),
+  });
   return { fake, client, receiver, endpoint, secret, session };
 }
 
@@ -204,10 +210,10 @@ describe("the buyer pays a session", () => {
     const fake = await startTestStripe();
     const client = clientFor(fake);
     const customer = await client.createCustomer({ name: "Example GmbH" });
-    const session = await client.createCheckoutSession({
-      ...SESSION_INPUT,
-      customer: customer.id,
-    });
+    const session = await client.createCheckoutSession(
+      { ...SESSION_INPUT, customer: customer.id },
+      { idempotencyKey: uniqueIdempotencyKey() },
+    );
     const paid = fake.buyer.pay(session.id);
     expect(paid.paymentIntent.customer).toBe(customer.id);
   });
@@ -217,7 +223,9 @@ describe("the buyer pays a session", () => {
     const { fake, client, session } = await setup();
     fake.buyer.pay(session.id);
     expect(() => fake.buyer.pay(session.id)).toThrow(/not open/);
-    const other = await client.createCheckoutSession(SESSION_INPUT);
+    const other = await client.createCheckoutSession(SESSION_INPUT, {
+      idempotencyKey: uniqueIdempotencyKey(),
+    });
     await client.expireCheckoutSession(other.id);
     expect(() => fake.buyer.pay(other.id)).toThrow(/not open/);
     expect(() => fake.buyer.pay("cs_test_Nothing")).toThrow(/No such/);
@@ -227,7 +235,9 @@ describe("the buyer pays a session", () => {
   it("makes the event of an expired session and of a payment that failed later", async () => {
     const { fake, client, session } = await setup();
     await client.expireCheckoutSession(session.id);
-    const second = await client.createCheckoutSession(SESSION_INPUT);
+    const second = await client.createCheckoutSession(SESSION_INPUT, {
+      idempotencyKey: uniqueIdempotencyKey(),
+    });
     fake.buyer.failAsync(second.id);
     expect(fake.events().map((event) => event.type)).toEqual([
       "checkout.session.expired",
@@ -333,11 +343,17 @@ describe("refunds and disputes that Stripe starts", () => {
     const { fake, client, session } = await setup();
     const paid = fake.buyer.pay(session.id);
     const tooMuch = await client
-      .createRefund({ charge: paid.charge.id, amount: 2501 })
+      .createRefund(
+        { charge: paid.charge.id, amount: 2501 },
+        { idempotencyKey: uniqueIdempotencyKey("refund") },
+      )
       .catch((error: unknown) => error);
     expect(tooMuch).toMatchObject({ code: "bad_request", status: 400 });
     const unknown = await client
-      .createRefund({ charge: "ch_Nothing" })
+      .createRefund(
+        { charge: "ch_Nothing" },
+        { idempotencyKey: uniqueIdempotencyKey("refund") },
+      )
       .catch((error: unknown) => error);
     expect(unknown).toMatchObject({ code: "not_found" });
     expect(fake.refunds()).toHaveLength(0);
@@ -385,7 +401,11 @@ describe("refunds and disputes that Stripe starts", () => {
     expect(lost.status).toBe("lost");
 
     const second = fake.buyer.pay(
-      (await clientFor(fake).createCheckoutSession(SESSION_INPUT)).id,
+      (
+        await clientFor(fake).createCheckoutSession(SESSION_INPUT, {
+          idempotencyKey: uniqueIdempotencyKey(),
+        })
+      ).id,
     );
     const wonDispute = fake.stripe.openDispute(second.charge.id, {
       amount: 1000,
@@ -549,7 +569,9 @@ describe("delivery", () => {
     await fake.flush();
     expect(types(receiver.received)).toEqual(["charge.succeeded"]);
     await client.deleteWebhookEndpoint(endpoint.id);
-    const second = await client.createCheckoutSession(SESSION_INPUT);
+    const second = await client.createCheckoutSession(SESSION_INPUT, {
+      idempotencyKey: uniqueIdempotencyKey(),
+    });
     fake.buyer.pay(second.id);
     expect(await fake.flush()).toEqual([]);
     expect(receiver.received).toHaveLength(1);
@@ -570,7 +592,9 @@ describe("delivery", () => {
       enabled_events: ["checkout.session.completed"],
     });
     expect(first.secret).not.toBe(second.secret);
-    const session = await client.createCheckoutSession(SESSION_INPUT);
+    const session = await client.createCheckoutSession(SESSION_INPUT, {
+      idempotencyKey: uniqueIdempotencyKey(),
+    });
     fake.buyer.pay(session.id);
     await fake.flush();
     expect(a.received).toHaveLength(3);
@@ -611,7 +635,9 @@ describe("delivery", () => {
       url: "http://127.0.0.1:9/nothing-listens",
       enabled_events: ["*"],
     });
-    const session = await client.createCheckoutSession(SESSION_INPUT);
+    const session = await client.createCheckoutSession(SESSION_INPUT, {
+      idempotencyKey: uniqueIdempotencyKey(),
+    });
     fake.buyer.pay(session.id);
     const results = await fake.flush();
     expect(results).toHaveLength(3);

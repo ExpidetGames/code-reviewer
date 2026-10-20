@@ -34,3 +34,10 @@ export function clientFor(
     ...overrides,
   });
 }
+
+let keyCounter = 0;
+/** A key no other call of this process has used: a test that creates several sessions or refunds must not replay one. */
+export function uniqueIdempotencyKey(label = "test"): string {
+  keyCounter += 1;
+  return `${label}-${keyCounter}`;
+}
