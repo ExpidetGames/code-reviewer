@@ -10,6 +10,7 @@ in it.
 """
 
 import hashlib
+import json
 import logging
 import sys
 from decimal import Decimal
@@ -323,6 +324,31 @@ def test_a_provider_error_gets_a_stable_code_and_keeps_its_status_for_the_engine
     assert r.ledger.failure is not None
     assert r.ledger.failure.code is run_code
     assert "provider words" not in r.ledger.failure.detail
+
+
+# #552-S2: the mark crosses the proxy as it crosses the ledger: the request that holds the adapter's
+# text is the final call, the engine's bytes go to the provider as they came, and no other request
+# is final by what it carries
+@pytest.mark.parametrize("family", FAMILIES)
+def test_the_marked_call_is_the_request_that_holds_the_adapters_text_and_is_relayed_unchanged(
+    family: WireFamily,
+) -> None:
+    message = '<runner-wrap-up>\nAnswer "now".\n</runner-wrap-up>'
+    r = rig(family, streamed(family, call=1), streamed(family, call=2), streamed(family, call=3))
+    r.ledger.enable_final_above_wire()
+    r.post()  # a normal call settles
+    assert r.ledger.arm_final(message)
+
+    ordinary = r.body()
+    carrying = r.body().replace(b"x" * 10, json.dumps(message)[1:-1].encode(), 1)
+    r.post(ordinary)
+    r.post(carrying)
+
+    sent = [request.body for request in r.upstream.requests]
+    assert sent[2] == carrying  # byte for byte, the message inside it
+    trace = r.ledger.usage(MODEL).call_trace
+    assert trace is not None
+    assert [call["final"] for call in trace["modelCalls"]] == [False, False, True]
 
 
 # #552-N2: the code names the last call's error: a call that went well clears it
