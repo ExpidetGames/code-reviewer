@@ -34,7 +34,8 @@ publishes as one persistent summary comment. The decisions are in epic
 | Full path from a signed webhook to the Run: the pull request title, body and previous-review state in the prompt (#251), the review kind proved for every entry point and the model and usage in Runs (#252), and the privileged `e2e-dynamic` journey with the real pinned OpenCode that publishes the summary (#253) | Shipped (#251, #252, #253) |
 | Recovery when a run wrote the summary and then ended failed | Shipped (#255, #257): the claim names the heads of earlier unsuccessful runs and says when that list was cut, see "Known limitations" |
 | A short failure note in the summary comment when a run fails (not `lease_lost`, not a refused token) | Shipped (#299) |
-| Finalization above the wire for native providers: the review as plain JSON text, one repair, wrap-up by message, the final call after a refusal, the tool-result audit on the adapter side (`DynamicEngine(plain_final=True)`; not wired to the claim yet) | Shipped (#552), see "Finalization above the wire" |
+| Finalization above the wire for native providers: the review as plain JSON text, one repair, wrap-up by message, the final call after a refusal, the tool-result audit on the adapter side (`DynamicEngine(plain_final=True)`) | Shipped (#552), see "Finalization above the wire" |
+| The wiring of the native path: the claim carries the model entry and the cost policy, the runner starts the passthrough proxy and the plain-final engine with them, behind the app's switch `NATIVE_OPENCODE_PROVIDERS` (default off) | Shipped (#578), see "The native path of a job" |
 | Hosted activation | Needs the hosted egress gate (#82) |
 
 ## How a Dynamic job reaches an engine
@@ -507,12 +508,52 @@ engine's own "500 `UnknownError` with no call upstream" for a model its config d
 5xx) do not end the run by themselves (a 408/504/524 is an unknown call, see the ledger); the code is kept in `PassthroughProxy.last_upstream_error` for the adapter to name when the
 engine gives up. Everything else ends the run with its code, the text of the provider in none of it.
 
-**Not in this change** (follow-ups): reading a job's entry from the claim and starting the engine with the native
-config (#564 has the entry reader; `build_native_engine_config`, which asserts the provider block against the entry, and
-`target_from_entry` are the two joints; wiring and the claim contract test T13 come as a separate step; its ledger and proxy come
-from `native_run.py`, see the next section), the audit of tool results in a request (it is chat-shaped; since #552 the adapter counts
+**Not in this change** (follow-ups): the audit of tool results in a request (it is chat-shaped; since #552 the adapter counts
 them from the engine's own event stream), how a final call is told to answer without rewriting the request (done in #552, see
-"Finalization above the wire") and the live capture that replaces the assumed usage shapes (L14).
+"Finalization above the wire") and the live capture that replaces the assumed usage shapes (L14). Reading a job's entry from
+the claim and starting the engine with the native config is the wiring of #578, see "The native path of a job".
+
+### The native path of a job (#578)
+
+`dynamic_review/native_job.py` joins the pieces above for one job; `runner.py` keeps its own flow (the same checks before, the
+same conclusion after, `_conclude_dynamic_job`). A job is **native** when its claim carries `dynamic.modelEntry` (the
+`JobModelEntry` of `contracts/job-model-entry.v1.json`) next to `dynamic.cost`; the runner has no switch of its own, it follows
+the claim. Both are read strictly (`job.py`): an entry without a cost policy, an entry whose model is not `dynamic.model`, or
+whose provider is not the provider of `llm.provider` (the underscore of a slug is the hyphen of the id; the key goes to the
+entry's address, so the two must agree) is a refused job. A cost policy without an entry is refused as before (#553). A job with
+neither is a job of today and runs through `ModelProxy` exactly as before.
+
+1. `build_native_job`, before anything is prepared: `target_from_entry`, the production `HttpsUpstream` on the entry's address
+   (an address the guard refuses ends the job `dynamic_config_invalid` before the engine exists, naming neither the address nor
+   the reason), a fresh capability, and the ledger and the proxy from the claim's policy (`build_native_run`, with the window
+   and the output bound from the entry, `reasoning` from the entry, the operator's `RUNNER_DYNAMIC_MAX_COST_USD` and the
+   deadline). The capability descriptor of the legacy path (`RUNNER_DYNAMIC_CAPABILITIES`) is not read.
+2. `run_native_engine`, inside the preparation: the loopback server on the slot's port, the engine configuration
+   (`native_provider_config` for the entry, `build_native_engine_config`: one provider, one model, the capability as its key,
+   no real key and no upstream address), `DynamicEngine(plain_final=True, ...)`, and, when the run ends, the server is stopped
+   (a superseded run drains first).
+3. The usage is booked by the proxy's parsers into the ledger; the result carries `ledger.usage(...)` as for any Dynamic run.
+   The cost policy decides what an unknown cost does (managed: the run ends `dynamic_accounting_failed`; own key: the token cap
+   binds and `costUsd` is null).
+4. **One finalization line** is added to the log of the result (and to the facts of a failure that got that far):
+   `finalization first=<ok|problem> repaired=<true|false> second=<none|ok|problem> wrap_up=<cost_limit|time_limit|token_limit|none>
+   final_call=<normal|exempt> final_tokens=<in>/<out>/<cache read> repair_tokens=<in>/<out>/<cache read> finish=<finish of the
+   call that wrote the review> prev_prompt_tokens=<prompt of the call before>`. Stable names and numbers only
+   (`finalization_log.py`); the tokens come from the call trace and are `-` when the trace was cut or is missing. A run whose log
+   has no such line did not take the native path.
+
+Nothing about the engine changed for this: no step limit, no steering, no `cache_control` set by us (caching comes from the
+engine), the cost limit is the only brake and the final-call exemption makes a run end with a review.
+
+**The switch.** In the app, the environment variable `NATIVE_OPENCODE_PROVIDERS` (`1`, `true` or `on`; anything else, or unset, is
+off; `app/src/native-cost/switch.ts`). Off, `catalogRefOf` names no registry provider, so every claim is the claim of today. On, a
+**Dynamic** job on `openrouter` or `anthropic` takes the native path: the claim checks the price (managed key) or reads the
+catalog's price and the token cap (own key), builds the entry of the chosen model from the stored catalog and sends both. A
+Diff job is never native. A managed model that is not enabled with a confirmed price ends `managed_model_unavailable`; a model
+the catalog does not have ends `managed_model_unavailable` (managed) or `dynamic_model_features_unsupported` (own key), before any
+key or token exists. The variable is read at every claim, so turning it off again takes effect on the next claim; a runner or
+Worker image that does not know `dynamic.modelEntry` must not be in the fleet while it is on (the cost policy already needs the
+claim feature `dynamic_cost_policy`, which gates both).
 
 ### The cost policy of a native job (#553)
 
@@ -561,7 +602,7 @@ the proxy rewrite the last request (`wrap_up.py`). A passthrough proxy cannot do
 choice. On the native path the finish is decided **in the adapter**, the same for every model, and the engine runs with
 `read` / `grep` / `glob`, tool choice `auto`, no `format`, no `StructuredOutput` and no `response_format`. Switch:
 `DynamicEngine(plain_final=True, engine_config=<build_native_engine_config>, provider_id=...)`; the default is the legacy
-path, unchanged until #556 deletes it. (Reading a job's entry from the claim and building those arguments is the wiring step.)
+path, unchanged until #556 deletes it. (A claim's model entry builds those arguments since #578, see "The native path of a job".)
 
 **The answer** is the visible text of the *last* assistant message and nothing else: not reasoning, not a tool result, not
 `info.structured`, not an earlier message (`final_json.extract_final_json`). It is accepted when the whole text is one JSON

@@ -298,6 +298,13 @@ Engine suite (`runner/tests/engine/`, `uv run pytest -m engine`, `make test-engi
   provider answers; what is only assumed about one is listed in `docs/spike/544-passthrough.md`, section 6.
   `test_native_support.py` pins that the support code stops the `opencode serve` it started when that process does
   not come up healthy.
+- A whole native job (#578, `test_engine_native_job.py`, support `native_full_job.py`): `run_dynamic_job` with the claim of a native
+  job (the model entry and the cost policy in `dynamic`), the real pinned OpenCode, the production passthrough proxy, ledger,
+  engine configuration and finalization, and the strict fake of `fakes/wire` as the provider (only the preparation, the
+  publication and the last hop are doubles). Four jobs: managed key (Messages), own key without a price, the Chat family, and a
+  run at its cost limit that must still end with a published review (the final-call exemption). The unit tests of the wiring are
+  `tests/unit/test_native_job.py` and `test_native_dynamic_job_run.py` (an engine double that makes the one request the real one
+  makes), the claim side is in `app/integration-tests/http/runner-api-cost-policy.integration.test.ts`.
 - The passthrough proxy (#550, `test_engine_opencode_passthrough.py`, support `opencode_passthrough.py`): the same
   real pinned OpenCode, with the production `PassthroughProxy` in front of each strict fake in place of the relay of
   the spike (only the last hop is a loopback double, `runner/tests/passthrough_loopback.py`). One engine holds six
