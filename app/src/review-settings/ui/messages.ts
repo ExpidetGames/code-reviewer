@@ -150,6 +150,9 @@ const ISSUE_COPY: Record<ReviewSettingIssueCode, (field: string) => string> = {
     "Your plan does not include this choice. Choose another or change your plan.",
   MODEL_PROVIDER_MISMATCH: () =>
     "The model that applies was chosen for another provider. Set a model for this provider too, or use the provider the model was chosen for.",
+  // #555: the catalog is the list of a catalog provider; a model new at the provider is missing for up to a day.
+  MODEL_NOT_IN_CATALOG: () =>
+    "This model is not in the catalog. Pick one from the list. A model that was released only recently can take up to a day to appear.",
   // The user has to be on the operator's key before an entry can be chosen (#430): say so, and nothing about a model.
   CATALOG_ENTRY_OWN_KEY_MODE: () =>
     "This workspace reviews with its own AI key, so the choices of this instance cannot be used. They can be chosen once the AI access comes from this instance.",

@@ -6,8 +6,8 @@ The key of a registry provider (`anthropic`, `openrouter`) belongs to that provi
 legacy path always used the hard-coded `default_api_base` of the registry; the native path reads the
 address from the claim's entry, so the runner pins it: an entry whose address is not the registry's
 is a refused job, before any key is used and before any connection is made. A provider the runner
-has no entry for keeps the rules of #548 (https, a public host, checked per connection);
-the registry does not speak for it.
+has no entry for is not judged by the registry: its destination rule is
+`test_native_job_catalog_destination.py` (#555).
 """
 
 import dataclasses
@@ -121,7 +121,7 @@ def test_the_builder_refuses_the_address_before_any_upstream_is_made() -> None:
 
 
 # #578-T27
-def test_a_provider_the_registry_has_no_entry_for_keeps_the_rules_of_the_entry() -> None:
+def test_the_registry_pin_does_not_judge_a_provider_the_registry_has_no_entry_for() -> None:
     assert "deepseek" not in PROVIDERS
     assert upstream_base_is_the_providers("deepseek", "https://api.deepseek.com") is True
     assert upstream_base_is_the_providers("deepseek", ATTACKER) is True
@@ -138,10 +138,11 @@ def test_the_pin_compares_the_address_and_nothing_but_a_trailing_slash() -> None
 
 
 # #578-T32
-def test_the_builder_refuses_a_provider_the_registry_has_no_entry_for() -> None:
-    # `parse_job` refuses such a job today; the builder must not rely on it. The helper above
-    # does not judge an unregistered provider, so the builder fails closed on its own: the key of
-    # a provider nobody registered goes nowhere (#555 defines its own destination rule).
+def test_the_builder_refuses_an_entry_of_another_provider_than_the_key_is_for() -> None:
+    # `parse_job` refuses such a job; the builder must not rely on it. The entry here is the
+    # registry provider's (`anthropic`) and the key is for `deepseek`: the key of a provider never
+    # follows the address of another provider's entry (the rule of a catalog provider's own entry
+    # is `test_native_job_catalog_destination.py`, #555).
     job = native_job()
     assert job.dynamic is not None and job.dynamic.model_entry is not None
     entry = dataclasses.replace(

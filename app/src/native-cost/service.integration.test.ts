@@ -439,6 +439,170 @@ describe.each(MODELS_DEV_ENGINES)(
         },
       );
 
+      // #555-T13
+      it_(
+        "is refused for a provider whose address the catalog never trusted: nothing the workspace could make the key go to",
+        async () => {
+          const first = modelsDevFixture() as Record<string, { api?: string }>;
+          first.deepseek!.api = "https://10.0.0.5/v1";
+          const t = await setup(first);
+
+          const outcome = await t.native.entryFor(DEEPSEEK);
+
+          expect(outcome).toEqual({ ok: false, code: "provider_url_blocked" });
+          expect(JSON.stringify(outcome)).not.toContain("10.0.0.5");
+        },
+      );
+
+      // #555-T13
+      it_(
+        "is refused for a provider whose address changed to another one and waits for an admin, and served once an admin confirmed it",
+        async () => {
+          const t = await setup();
+          const moved = modelsDevFixture() as Record<string, { api?: string }>;
+          moved.deepseek!.api = "https://api.attacker.example/v1";
+          t.fake.respondWith(moved);
+          await t.modelsDev.refresh({ acceptReasons: GUARD_REASONS });
+          expect(await t.native.entryFor(DEEPSEEK)).toEqual({
+            ok: false,
+            code: "provider_url_blocked",
+          });
+
+          await createModelsDevRepository(t.db).confirmPendingUrl(
+            "deepseek",
+            "https://api.attacker.example/v1",
+          );
+
+          // The admin's decision is the catalog's trust: the entry names exactly that address.
+          expect(await t.native.entryFor(DEEPSEEK)).toMatchObject({
+            ok: true,
+            entry: { upstreamBaseUrl: "https://api.attacker.example/v1" },
+          });
+        },
+      );
+
+      // The ten providers the committed file (`contracts/opencode-providers.v1.json`) has an SDK address for: that address is
+      // the one expected, whatever models.dev states.
+      // #555-T15
+      it_(
+        "is refused, on the first fetch and on every one after, for a provider with a committed address whose models.dev address differs",
+        async () => {
+          const first = modelsDevFixture() as Record<string, { api?: string }>;
+          first.openai!.api = "https://api.attacker.example/v1";
+          const t = await setup(first);
+          const OPENAI = { providerId: "openai", modelId: "gpt-5.5" };
+
+          expect(await t.native.entryFor(OPENAI)).toEqual({
+            ok: false,
+            code: "provider_url_blocked",
+          });
+          await t.modelsDev.refresh({ acceptReasons: GUARD_REASONS });
+          await t.modelsDev.refresh({ acceptReasons: GUARD_REASONS });
+          expect(await t.native.entryFor(OPENAI)).toEqual({
+            ok: false,
+            code: "provider_url_blocked",
+          });
+        },
+      );
+
+      // #555-T15
+      it_(
+        "is served at the committed address for a provider whose models.dev address is the same one or states none",
+        async () => {
+          const same = modelsDevFixture() as Record<string, { api?: string }>;
+          same.openai!.api = "https://API.openai.com/v1/";
+          const stated = await setup(same);
+          const none = await setup();
+
+          for (const t of [stated, none])
+            expect(
+              await t.native.entryFor({
+                providerId: "openai",
+                modelId: "gpt-5.5",
+              }),
+            ).toMatchObject({
+              ok: true,
+              entry: { upstreamBaseUrl: "https://api.openai.com/v1" },
+            });
+        },
+      );
+
+      // #555-T15
+      it_(
+        "is served at the address an admin confirmed for such a provider, and stays so on the next fetch",
+        async () => {
+          const moved = modelsDevFixture() as Record<string, { api?: string }>;
+          moved.openai!.api = "https://gateway.example/v1";
+          const t = await setup(moved);
+          const OPENAI = { providerId: "openai", modelId: "gpt-5.5" };
+          expect((await t.native.entryFor(OPENAI)).ok).toBe(false);
+
+          await createModelsDevRepository(t.db).confirmPendingUrl(
+            "openai",
+            "https://gateway.example/v1",
+          );
+          await t.modelsDev.refresh({ acceptReasons: GUARD_REASONS });
+
+          expect(await t.native.entryFor(OPENAI)).toMatchObject({
+            ok: true,
+            entry: { upstreamBaseUrl: "https://gateway.example/v1" },
+          });
+        },
+      );
+
+      // #555-T13
+      it_.each([
+        "https://API.deepseek.com",
+        "https://api.deepseek.com/",
+        "https://api.deepseek.com:443",
+        "https://api.deepseek.com//v1",
+        "https://api.deepseek.com/v1/../v2",
+        "https://10.0.0.5/v1",
+        "https://localhost/v1",
+        "https://models.internal/v1",
+      ])(
+        "is refused for a provider whose stored trusted address %s is not a plain public https address in its canonical spelling",
+        async (address) => {
+          const t = await setup();
+          const catalog = createModelsDevRepository(t.db);
+          const [stored] = (await catalog.listProviders()).filter(
+            (provider) => provider.id === "deepseek",
+          );
+          await catalog.apply({
+            providers: [
+              { ...stored!, url: { ...stored!.url, trustedUrl: address } },
+            ],
+            models: [],
+          });
+
+          const outcome = await t.native.entryFor(DEEPSEEK);
+
+          expect(outcome).toEqual({ ok: false, code: "upstream_invalid" });
+          expect(JSON.stringify(outcome)).not.toContain("10.0.0.5");
+        },
+      );
+
+      // #555-T09
+      it_("says whether the model is still listed by the catalog", async () => {
+        const t = await setup();
+        expect(await t.native.entryFor(DEEPSEEK)).toMatchObject({
+          ok: true,
+          unlisted: false,
+        });
+        const body = modelsDevFixture() as Record<
+          string,
+          { models: Record<string, unknown> }
+        >;
+        delete body.deepseek!.models["deepseek-v4-pro"];
+        t.fake.respondWith(body);
+        await t.modelsDev.refresh({ acceptReasons: GUARD_REASONS });
+
+        expect(await t.native.entryFor(DEEPSEEK)).toMatchObject({
+          ok: true,
+          unlisted: true,
+        });
+      });
+
       // #578-T04
       it_("is refused for a model the catalog does not have", async () => {
         const t = await setup();

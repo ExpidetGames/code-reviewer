@@ -43,6 +43,18 @@ CHAT_ENTRY: dict[str, Any] = {
     "upstreamBaseUrl": "https://openrouter.ai/api/v1",
     "modelId": CHAT_MODEL,
 }
+# A provider of the models.dev catalog that is not in the registry (#555): the own key of the
+# workspace goes to the address the catalog trusts for it, which the claim carries in the entry.
+DEEPSEEK_MODEL = "deepseek-v4-pro"
+DEEPSEEK_ENTRY: dict[str, Any] = {
+    **ENTRY,
+    "providerId": "deepseek",
+    "npm": "@ai-sdk/openai-compatible",
+    "family": "openai-chat",
+    "authHeader": "Authorization",
+    "upstreamBaseUrl": "https://api.deepseek.com",
+    "modelId": DEEPSEEK_MODEL,
+}
 # The levels of a price book are whole micro-USD per million tokens, as the app writes them.
 BOOK: dict[str, Any] = {
     "input": "3000000",

@@ -271,6 +271,28 @@ describe.each(MODELS_DEV_ENGINES)(
       },
     );
 
+    // #555-T03
+    it_(
+      "reads the models of one provider by itself, listed or not, in the order of their ids",
+      async () => {
+        const { repository } = await setup();
+        await repository.apply({
+          providers: [provider(), provider({ id: "openai", name: "OpenAI" })],
+          models: [
+            model({ id: "b" }),
+            model({ id: "a" }),
+            model({ id: "gone", unlistedAt: T2.toISOString() }),
+            model({ providerId: "openai", id: "c" }),
+          ],
+        });
+
+        expect(
+          (await repository.listModelsOf("deepseek")).map((m) => m.id),
+        ).toEqual(["a", "b", "gone"]);
+        expect(await repository.listModelsOf("nobody")).toEqual([]);
+      },
+    );
+
     // #548-T04
     it_(
       "records the start of an attempt first: a new row is a failure that was interrupted, an old one keeps how it ended",

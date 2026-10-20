@@ -30,9 +30,10 @@ import {
 } from "./resolve.ts";
 import {
   createWorkspaceLlmKeyService,
-  type ProviderLookup,
+  type OperatorProviderLookup,
   type WorkspaceLlmKeyService,
 } from "./workspace-key.ts";
+import { withNativeProviders } from "../native-providers/lookup.ts";
 
 type Env = Readonly<Record<string, string | undefined>>;
 
@@ -101,9 +102,13 @@ export function createWorkspaceLlm({
   /** The environment as it is NOW; read on every call, never cached. */
   env: () => Env;
   now?: () => Date;
-  /** The providers the app supports; a test passes its own. */
-  providers?: ProviderLookup;
+  /**
+   * The providers of the registry; a test passes its own. The workspace's own key also knows the catalog providers
+   * (#555); the operator's key and a managed job do not (their models are the catalog entries of the admin).
+   */
+  providers?: OperatorProviderLookup;
 }): WorkspaceLlmAssembly {
+  const ownProviders = withNativeProviders(providers);
   const keyServiceFor = (workspaceId: string) =>
     createWorkspaceLlmKeyService({
       store: createWorkspaceSecretStore({
@@ -112,7 +117,7 @@ export function createWorkspaceLlm({
         appSecret: appSecret(),
         ...(now === undefined ? {} : { now }),
       }),
-      providers,
+      providers: ownProviders,
     });
 
   const operatorKey = () =>
@@ -156,9 +161,10 @@ export function createWorkspaceLlm({
     workspaceId: string,
     provider: string = DEFAULT_LLM_PROVIDER,
   ): Promise<LlmAccessResult> {
+    const input = await resolveInput(workspaceId, provider);
     return resolveWorkspaceLlmAccess(
-      await resolveInput(workspaceId, provider),
-      providers,
+      input,
+      input.keyMode === "own" ? ownProviders : providers,
     );
   }
 
@@ -182,7 +188,7 @@ export function createWorkspaceLlm({
             key: await keyServiceFor(workspaceId).keyFor(provider),
             defaults,
           },
-      providers,
+      keyMode === "own" ? ownProviders : providers,
     );
   }
 
@@ -199,6 +205,11 @@ export function createWorkspaceLlm({
       const service = keyServiceFor(workspaceId);
       for (const id of providers.ids) {
         const own = await service.keyFor(id);
+        if (own.state === "key") keys.push(own.apiKey);
+      }
+      // The keys of the catalog providers (#555) are masked in a result as well.
+      for (const { provider } of await service.nativeStatuses()) {
+        const own = await service.keyFor(provider);
         if (own.state === "key") keys.push(own.apiKey);
       }
       const mode = keyModeForJob(

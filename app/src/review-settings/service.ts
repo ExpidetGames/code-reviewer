@@ -42,6 +42,8 @@ import {
   dynamicModelToCheck,
   type DynamicModelCheck,
 } from "./dynamic-check.ts";
+import { isNativeProvider, nativeDynamicChoice } from "./native-choice.ts";
+import type { NativeCatalogReader } from "../native-providers/catalog.ts";
 import { ReviewSettingsError } from "./errors.ts";
 import type { ReviewSettingsHooks } from "./hooks.ts";
 import { noopReviewSettingsHooks } from "./hooks.ts";
@@ -155,7 +157,7 @@ export type ProjectDynamicView = {
     /** Absent for a workspace on the operator's key (#283). */
     dynamicModel?: string;
     /** The provider of the Dynamic model; absent for a workspace on the operator's key (#430). */
-    dynamicProvider?: LlmProvider;
+    dynamicProvider?: string;
     /** The text a Dynamic review uses: the project's override, else the shipped default. */
     reviewSkill: string;
     /** What a finished review does on its pull request besides the check run (#405). */
@@ -178,7 +180,7 @@ export type ProjectDynamicView = {
     /** Absent for a workspace on the operator's key (#283). */
     dynamicModel?: string;
     /** Absent for a workspace on the operator's key (#430). */
-    dynamicProvider?: LlmProvider;
+    dynamicProvider?: string;
     reviewSkill: string;
     reviewVerdict: ReviewVerdictMode;
   };
@@ -532,6 +534,12 @@ export function createReviewSettingsService(deps: {
   catalog?: CatalogSelectionSource;
   /** Where a provider id is looked up; the registry of the app unless a test brings a second provider. */
   providers?: ProviderLookup;
+  /**
+   * The models.dev catalog as far as a save needs it (#555): whether a Dynamic provider that is a catalog provider has this
+   * model listed. Only read for a workspace on its own key and a Dynamic provider outside the registry. Default: an empty
+   * catalog, so such a choice is refused.
+   */
+  nativeCatalog?: Pick<NativeCatalogReader, "checkSelection">;
 }): ReviewSettingsService {
   const { appSettings, projects } = deps;
   const dynamicDefaults =
@@ -751,6 +759,35 @@ export function createReviewSettingsService(deps: {
   }
 
   /**
+   * A Dynamic provider that is a catalog provider (#555) needs a model, and the pair must be in the catalog. The provider's
+   * model metadata is not asked: the catalog is the list. A pair that is stored already and that this save does not touch is
+   * left alone.
+   */
+  async function refuseUnfitNativeChoice(
+    patch: ProjectDynamicPatch,
+    stored: ProjectDynamicOverrides,
+  ): Promise<void> {
+    const choice = nativeDynamicChoice(patch, stored);
+    if (choice === null || !choice.changed) return;
+    const refuse = (code: ReviewSettingIssue["code"]): never => {
+      throw new ReviewSettingsError(
+        "REVIEW_SETTINGS_INVALID",
+        "Some settings are not valid.",
+        [{ field: "dynamicModel", code }],
+      );
+    };
+    if (choice.model === null) refuse("EMPTY");
+    const found =
+      deps.nativeCatalog === undefined
+        ? { ok: false }
+        : await deps.nativeCatalog.checkSelection(
+            choice.provider,
+            choice.model ?? "",
+          );
+    if (!found.ok) refuse("MODEL_NOT_IN_CATALOG");
+  }
+
+  /**
    * A workspace on the operator's key selects an entry of the catalog per kind (#430-T07): it must exist, be released,
    * serve the kind and be allowed by the plan. Every refused kind is named. `null` (clear) needs no check.
    */
@@ -840,12 +877,18 @@ export function createReviewSettingsService(deps: {
       else refuseCatalogEntries(input);
       const patch = checkedProject(input, providers);
       if (managed) await refuseUnfitEntries(patch.dynamic);
+      const storedDynamic = parseDynamic(
+        (await projects.get(repositoryId))?.settings,
+      );
+      if (!managed) await refuseUnfitNativeChoice(patch.dynamic, storedDynamic);
+      const toCheck = dynamicModelToCheck(
+        patch.dynamic,
+        storedDynamic,
+        providers.defaultProvider.id,
+      );
+      // The model of a catalog provider is vouched for by the catalog (above), not by metadata the provider serves.
       const warnings = await checkDynamicModel(
-        dynamicModelToCheck(
-          patch.dynamic,
-          parseDynamic((await projects.get(repositoryId))?.settings),
-          providers.defaultProvider.id,
-        ),
+        toCheck !== null && isNativeProvider(toCheck.provider) ? null : toCheck,
       );
       if (!managed)
         refuseBudgetAboveContext(

@@ -1,0 +1,19 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// The catalog of providers and models a workspace on its own key chooses from, on the running server's database (#555).
+import "server-only";
+import { createModelsDevRepository } from "../db/repositories/models-dev-repository.ts";
+import { getDatabase } from "../db/startup.ts";
+import { llmProviderDescriptors } from "../llm/providers/index.ts";
+import {
+  createNativeCatalogReader,
+  type NativeCatalogReader,
+} from "./catalog.ts";
+
+export function getNativeCatalog(): NativeCatalogReader {
+  return createNativeCatalogReader({
+    models: createModelsDevRepository(getDatabase()),
+    // The registry's two providers keep their own path until #556: they are never offered as catalog providers.
+    legacyProviders: llmProviderDescriptors.ids,
+  });
+}

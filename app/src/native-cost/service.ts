@@ -13,6 +13,7 @@ import {
   type JobModelEntry,
 } from "../models-dev/job-entry.ts";
 import type { ModelPriceService } from "../model-prices/service.ts";
+import { isCanonicalCatalogAddress } from "./catalog-address.ts";
 import { catalogRefOf, type CatalogRef } from "./catalog-ref.ts";
 import {
   managedPolicy,
@@ -32,20 +33,26 @@ export type PolicyOutcome =
     }
   | Extract<ManagedPolicyOutcome, { ok: false }>;
 
+/** The refusal of an entry for a provider outside the registry whose trusted address is not a plain public https address in its canonical spelling. */
+export const UPSTREAM_INVALID = "upstream_invalid";
+
 /**
  * The entry of the chosen model for the claim (#578), or why there is none. `model_not_in_catalog`: the catalog has no such
  * provider or model; `upstream_not_registry`: the provider is one of the app's registry and the catalog's trusted address is not
- * the registry's (the key goes only to the registry's address); `check_failed`: the database could not be read (the job is given
- * back, as for a failed price check).
+ * the registry's (the key goes only to the registry's address); `upstream_invalid` (#555): any other provider, whose stored trusted
+ * address is not a plain public https address in the one spelling the runner accepts (`catalog-address.ts`); `check_failed`: the
+ * database could not be read (the job is given back, as for a failed price check). `unlisted`: models.dev no longer lists the
+ * model and the last known row serves (#548).
  */
 export type EntryOutcome =
-  | { ok: true; entry: JobModelEntry }
+  | { ok: true; entry: JobModelEntry; unlisted?: boolean }
   | {
       ok: false;
       code:
         | JobEntryRefusalCode
         | "model_not_in_catalog"
         | typeof UPSTREAM_NOT_REGISTRY
+        | typeof UPSTREAM_INVALID
         | "check_failed";
     };
 
@@ -109,12 +116,18 @@ export function createNativeCostService(deps: {
         const built = buildJobModelEntry(provider, model);
         if (!built.ok) return built;
         const pinned = deps.registryAddresses[ref.providerId];
-        if (
-          pinned !== undefined &&
-          !sameAddress(built.entry.upstreamBaseUrl, pinned)
-        )
-          return { ok: false, code: UPSTREAM_NOT_REGISTRY };
-        return built;
+        // The key of a registry provider goes to the registry's address; the key of any other provider to the address the catalog
+        // trusts for it, in the one spelling the runner accepts (#555). Nothing a workspace typed is ever an address.
+        if (pinned !== undefined) {
+          if (!sameAddress(built.entry.upstreamBaseUrl, pinned))
+            return { ok: false, code: UPSTREAM_NOT_REGISTRY };
+        } else if (!isCanonicalCatalogAddress(built.entry.upstreamBaseUrl))
+          return { ok: false, code: UPSTREAM_INVALID };
+        return {
+          ok: true,
+          entry: built.entry,
+          unlisted: model.unlistedAt !== null,
+        };
       } catch {
         // No error text: it could carry whatever the failing layer held.
         return { ok: false, code: "check_failed" };

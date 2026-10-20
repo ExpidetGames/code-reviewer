@@ -49,13 +49,13 @@ from code_reviewer_runner.dynamic_review.job_model_entry import (
 )
 from code_reviewer_runner.dynamic_review.passthrough.address import UpstreamRefused
 from code_reviewer_runner.dynamic_review.passthrough.admission import target_from_entry
+from code_reviewer_runner.dynamic_review.passthrough.destination import key_destination
 from code_reviewer_runner.dynamic_review.passthrough.families import WireFamily, spec_of
 from code_reviewer_runner.dynamic_review.passthrough.native_run import NativeRun, build_native_run
 from code_reviewer_runner.dynamic_review.passthrough.server import PassthroughServer
 from code_reviewer_runner.dynamic_review.passthrough.upstream import HttpsUpstream, Upstream
 from code_reviewer_runner.dynamic_review.prompts import compose_system_prompt
 from code_reviewer_runner.job import Job
-from code_reviewer_runner.llm_providers import provider_for, upstream_base_is_the_providers
 from code_reviewer_runner.result import ErrorCode
 from code_reviewer_runner.supersede_timing import SUPERSEDED_DRAIN_SECONDS
 
@@ -126,16 +126,12 @@ def build_native_job(
     assert dynamic is not None and dynamic.model_entry is not None and dynamic.cost is not None
     entry = dynamic.model_entry
     try:
-        # The key goes only where the registry says its provider is (`parse_job` checked it too);
-        # nothing is prepared for any other address. A provider the registry has no entry for
-        # fails closed here: the helper does not judge it. The BYOK destination rule for providers
-        # outside the registry is #555's (PR #579) to define when it integrates; this path has none.
-        if provider_for(job.llm.provider) is None:
-            raise ValueError("the provider of the job is not in the registry")
-        if not upstream_base_is_the_providers(job.llm.provider, entry.upstream_base_url):
-            raise ValueError("the entry names an address that is not the provider's")
+        # The key goes only where `key_destination` says (`parse_job` checked it too): the
+        # registry's address for a registry provider, the entry's plain public https address for
+        # any other provider of the catalog (#555); nothing is prepared for any other address.
+        destination = key_destination(job.llm.provider, entry)
         target = target_from_entry(entry)
-        upstream = upstream_for(entry.upstream_base_url)
+        upstream = upstream_for(destination)
     except (ValueError, UpstreamRefused):
         # Neither the entry's address nor the text of the refusal is shown.
         raise LimitError(

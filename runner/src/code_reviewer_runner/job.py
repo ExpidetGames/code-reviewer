@@ -46,17 +46,21 @@ from code_reviewer_runner.dynamic_review.job_model_entry import (
     JobModelEntryError,
     parse_job_model_entry,
 )
+from code_reviewer_runner.dynamic_review.passthrough.address import UpstreamRefused
 from code_reviewer_runner.dynamic_review.passthrough.cost_policy import (
     CostPolicy,
     CostPolicyError,
     parse_cost_policy,
+)
+from code_reviewer_runner.dynamic_review.passthrough.destination import (
+    PROVIDER_SLUG,
+    key_destination,
 )
 from code_reviewer_runner.dynamic_review.prompts import MAX_SKILL_BYTES as MAX_DYNAMIC_SKILL_BYTES
 from code_reviewer_runner.llm_providers import (
     LlmProviderSpec,
     provider_for,
     registered_provider_ids,
-    upstream_base_is_the_providers,
     without_prefix,
 )
 from code_reviewer_runner.platforms import PLATFORMS
@@ -130,6 +134,8 @@ _PR_PATH = re.compile(r"/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/pull/([1-9][0-9]{0,
 # the identity patch (identity_patch.py) both validate with it.
 BOT_LOGIN_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}(\[bot\])?")
 _MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+-]{0,199}")
+# A catalog provider's model is named as the entry of the claim names it (`job_model_entry.py`).
+_CATALOG_MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+@-]{0,199}")
 # `env` may only set the options of the PR-Agent tools. An allowlist instead of a list of forbidden
 # keys: PR-Agent has many sections (litellm, openai, azure, push_outputs, ...) that route requests
 # or credentials, and a new PR-Agent version can add more. One option name per key: a second `__`
@@ -352,10 +358,35 @@ def _git_access(data: dict[str, Any]) -> GitAccess:
     )
 
 
-def _llm_access(data: dict[str, Any]) -> LlmAccess:
+def _catalog_llm_access(llm: dict[str, Any], slug: str) -> LlmAccess:
+    """The `llm` section of a native job whose provider the registry does not have (#555): a
+    provider of the models.dev catalog, whose key goes to the address of the claim's entry
+    (`key_destination`). Nothing of the legacy path applies, so nothing only it reads is taken."""
+    if PROVIDER_SLUG.fullmatch(slug) is None:
+        raise _invalid("llm.provider is not a provider slug")
+    for name in ("baseUrl", "requireParameters", "fallbackModels"):
+        if name in llm:
+            raise _invalid(f"llm.{name} is not accepted for a provider of the catalog")
+    model = _string(llm, "model", "llm.")
+    if not _CATALOG_MODEL.fullmatch(model):
+        raise _invalid("llm.model contains characters that are not allowed in a model name")
+    return LlmAccess(
+        provider=slug,
+        model=model,
+        api_key=_secret(llm, "apiKey", "llm."),
+        require_parameters=False,
+        max_tokens=_max_tokens(llm),
+    )
+
+
+def _llm_access(data: dict[str, Any], *, catalog: bool = False) -> LlmAccess:
+    """`catalog`: the job is native, so a provider outside the registry may be a catalog one."""
     llm = _section(data, "llm")
     _check_fields(llm, _LLM_FIELDS, "llm.")
-    provider = provider_for(_string(llm, "provider", "llm."))
+    slug = _string(llm, "provider", "llm.")
+    provider = provider_for(slug)
+    if provider is None and catalog:
+        return _catalog_llm_access(llm, slug)
     if provider is None:
         raise _invalid(
             f"llm.provider must be one of: {', '.join(sorted(registered_provider_ids()))}"
@@ -576,9 +607,14 @@ def _entry_matches(dynamic: DynamicReview, llm: LlmAccess) -> None:
         raise _invalid("dynamic.modelEntry is not the model of the job")
     if entry.provider_id != llm.provider.replace("_", "-"):
         raise _invalid("dynamic.modelEntry is not of the provider of llm.provider")
-    # The key is the registry provider's, so it goes to the registry's address and to no other.
-    if not upstream_base_is_the_providers(llm.provider, entry.upstream_base_url):
-        raise _invalid("dynamic.modelEntry.upstreamBaseUrl is not the address of the provider")
+    # The key goes to the registry's address for a registry provider, and for any other provider to
+    # the plain public https address of the entry and to no other (`key_destination`).
+    try:
+        key_destination(llm.provider, entry)
+    except UpstreamRefused:
+        raise _invalid(
+            "dynamic.modelEntry.upstreamBaseUrl is not the address of the provider"
+        ) from None
 
 
 def _capability_integer(document: dict[str, Any], key: str, upper: int) -> int:
@@ -708,7 +744,7 @@ def parse_job(raw: str) -> Job:
         dynamic = None
         base = None
     git = _git_access(job)
-    llm = _llm_access(job)
+    llm = _llm_access(job, catalog=dynamic is not None and dynamic.model_entry is not None)
     if dynamic is not None:
         _entry_matches(dynamic, llm)
     return Job(
