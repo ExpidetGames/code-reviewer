@@ -9,7 +9,8 @@
     "src/app/api/runners/**/route.ts": { "maxDuration": 60 },
     "src/app/api/workers/**/route.ts": { "maxDuration": 60 },
     "src/app/api/w/**/route.ts": { "maxDuration": 60 },
-    "src/app/api/internal/**/route.ts": { "maxDuration": 300 }
+    "src/app/api/internal/**/route.ts": { "maxDuration": 300 },
+    "src/app/api/instance-portal/catalog-fetch/route.ts": { "maxDuration": 60 }
   },
   "crons": [
     { "path": "/api/internal/repository-sync", "schedule": "17 3 * * *" },

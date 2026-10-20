@@ -131,6 +131,34 @@ describe("the guards of the admin portal", () => {
     }
   });
 
+  // #554-T09
+  it("guard the models.dev catalog routes and its page like every other part of the portal, and keep them out of every other area", () => {
+    const catalog = discoverRoutes().filter(({ route }) =>
+      /^\/api\/instance-portal\/catalog-(providers|fetch)/.test(
+        concretePath(route),
+      ),
+    );
+
+    expect(catalog.map(({ route }) => route).sort()).toEqual([
+      "/api/instance-portal/catalog-fetch",
+      "/api/instance-portal/catalog-providers/url/confirm",
+    ]);
+    for (const { route, file } of catalog) {
+      expect(isInternalPortalPath(concretePath(route))).toBe(true);
+      const source = readFileSync(file, "utf8");
+      expect(source, route).toMatch(/\bcreateModelsDevRouteHandlers\(/);
+      expect(source, route).toMatch(/\baccess:\s*lookupAdmin\b/);
+    }
+    const page = discoverRoutes().find(
+      ({ route }) => concretePath(route) === "/instance-portal/catalog",
+    );
+    expect(page).toBeDefined();
+    expect(isInternalPortalPath(concretePath(page!.route))).toBe(true);
+    const source = readFileSync(page!.file, "utf8");
+    expect(source).toMatch(/\brequireAdmin\(\)/);
+    expect(source).toMatch(/<AdminCatalogContent\b/);
+  });
+
   it("are handed to the handlers by every data route", () => {
     const handlers = routes.filter(({ file }) => /route\.tsx?$/.test(file));
     expect(handlers.length).toBeGreaterThan(0);
@@ -139,7 +167,7 @@ describe("the guards of the admin portal", () => {
       .filter(({ file }) => {
         const source = readFileSync(file, "utf8");
         return !(
-          /\bcreate(Admin|Github|Approval|Catalog|ModelPrice)RouteHandlers\(/.test(
+          /\bcreate(Admin|Github|Approval|Catalog|ModelPrice|ModelsDev)RouteHandlers\(/.test(
             source,
           ) && /\baccess:\s*lookupAdmin\b/.test(source)
         );

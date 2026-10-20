@@ -12,6 +12,7 @@ import {
 import { createModelEnablementsRepository } from "../db/repositories/model-enablements-repository.ts";
 import { createModelsDevRepository } from "../db/repositories/models-dev-repository.ts";
 import { MODELS_DEV_ENGINES } from "../test-support/models-dev-engines.ts";
+import { GUARD_REASONS } from "./errors.ts";
 import type { FetchLike } from "./fetch.ts";
 import type { ModelsDevSettings } from "./settings.ts";
 import { createModelsDevService } from "./service.ts";
@@ -328,6 +329,10 @@ describe.each(MODELS_DEV_ENGINES)("the models.dev fetch on $name", (engine) => {
       expect(outcome).toEqual({
         status: "failed",
         code: "models_dev_guard_unlisted_share",
+        guard: {
+          reasons: ["unlisted_share"],
+          figures: expect.objectContaining({ unlisted: 4, listed: 13 }),
+        },
       });
       expect(await t.repository.listModels()).toEqual(before);
       expect(
@@ -367,6 +372,10 @@ describe.each(MODELS_DEV_ENGINES)("the models.dev fetch on $name", (engine) => {
       expect(refused).toEqual({
         status: "failed",
         code: "models_dev_guard_growth",
+        guard: {
+          reasons: ["growth"],
+          figures: expect.objectContaining({ listed: 13, listedAfter: 21 }),
+        },
       });
       expect(await t.repository.listModels()).toEqual(before);
       expect(await t.repository.fetchState()).toMatchObject({
@@ -375,7 +384,9 @@ describe.each(MODELS_DEV_ENGINES)("the models.dev fetch on $name", (engine) => {
       });
       expect(t.lines.join("\n")).not.toContain("Filler");
 
-      const accepted = await t.service.refresh({ acceptLargeChange: true });
+      const accepted = await t.service.refresh({
+        acceptReasons: GUARD_REASONS,
+      });
 
       expect(accepted).toMatchObject({ status: "applied" });
       expect(await t.repository.listModels()).toHaveLength(21);
@@ -401,10 +412,16 @@ describe.each(MODELS_DEV_ENGINES)("the models.dev fetch on $name", (engine) => {
       expect(refused).toEqual({
         status: "failed",
         code: "models_dev_guard_url_changed_share",
+        guard: {
+          reasons: ["url_changed_share"],
+          figures: expect.objectContaining({ newlyBlocked: 3, providers: 6 }),
+        },
       });
       expect(await t.repository.listProviders()).toEqual(before);
 
-      const accepted = await t.service.refresh({ acceptLargeChange: true });
+      const accepted = await t.service.refresh({
+        acceptReasons: GUARD_REASONS,
+      });
 
       expect(accepted).toMatchObject({ status: "applied" });
       const states = (await t.repository.listProviders()).filter(
@@ -431,13 +448,119 @@ describe.each(MODELS_DEV_ENGINES)("the models.dev fetch on $name", (engine) => {
     delete poor.openai?.models["gpt-5-mini"];
     t.fake.respondWith(poor);
 
-    const outcome = await t.service.refresh({ acceptLargeChange: true });
+    const outcome = await t.service.refresh({ acceptReasons: GUARD_REASONS });
 
     expect(outcome).toMatchObject({ status: "applied" });
     expect(
       (await t.repository.listModels()).filter((m) => m.unlistedAt !== null),
     ).toHaveLength(3);
   });
+
+  /** Three models gone and ten new ones: 3 of 13 unlisted and 20 listed afterwards, so two reasons trip at once. */
+  function removalAndGrowth(t: Awaited<ReturnType<typeof setup>>) {
+    const body = t.body();
+    delete body.xai?.models["grok-4.5"];
+    delete body.openai?.models["gpt-5.5"];
+    delete body.openai?.models["gpt-5-mini"];
+    const template = body.deepseek?.models["deepseek-v4-pro"] ?? {};
+    for (let i = 0; i < 10; i += 1)
+      body.deepseek!.models[`filler-${String(i)}`] = {
+        ...template,
+        id: `filler-${String(i)}`,
+        name: `Filler ${String(i)}`,
+      };
+    t.fake.respondWith(body);
+  }
+
+  // #554-T08
+  it_(
+    "reports every reason that tripped with its figures, and applies the fetch only when each of them is accepted",
+    async () => {
+      const t = await setup();
+      await t.service.refresh();
+      const before = await t.repository.listModels();
+      t.advance(DAY);
+      removalAndGrowth(t);
+
+      const refused = await t.service.refresh();
+
+      expect(refused).toEqual({
+        status: "failed",
+        code: "models_dev_guard_unlisted_share",
+        guard: {
+          reasons: ["unlisted_share", "growth"],
+          figures: expect.objectContaining({
+            unlisted: 3,
+            listed: 13,
+            listedAfter: 20,
+          }),
+        },
+      });
+      for (const accepted of [[], ["unlisted_share"], ["growth"]] as const) {
+        const again = await t.service.refresh({ acceptReasons: accepted });
+        expect(again).toMatchObject({
+          status: "failed",
+          guard: { reasons: ["unlisted_share", "growth"] },
+        });
+        expect(await t.repository.listModels()).toEqual(before);
+      }
+      expect(
+        await t.service.refresh({
+          acceptReasons: ["growth", "unlisted_share"],
+        }),
+      ).toMatchObject({ status: "applied" });
+      expect(await t.repository.listModels()).toHaveLength(13 + 10);
+    },
+  );
+
+  // #554-T08
+  it_(
+    "names the reason that is not accepted yet in the code of a fetch that was only partly accepted",
+    async () => {
+      const t = await setup();
+      await t.service.refresh();
+      t.advance(DAY);
+      removalAndGrowth(t);
+
+      const outcome = await t.service.refresh({
+        acceptReasons: ["unlisted_share"],
+      });
+
+      expect(outcome).toMatchObject({
+        status: "failed",
+        code: "models_dev_guard_growth",
+      });
+      expect(await t.repository.fetchState()).toMatchObject({
+        lastError: "models_dev_guard_growth",
+      });
+    },
+  );
+
+  // #554-T08
+  it_(
+    "refuses again when the reason that trips now is not the one that was accepted",
+    async () => {
+      const t = await setup();
+      await t.service.refresh();
+      const before = await t.repository.listModels();
+      t.advance(DAY);
+      const poor = t.body();
+      for (const id of ["gpt-5.5", "gpt-5-mini"])
+        delete poor.openai?.models[id];
+      delete poor.xai?.models["grok-4.5"];
+      t.fake.respondWith(poor);
+
+      // The admin looked at a growth earlier; this fetch is a removal.
+      const outcome = await t.service.refresh({ acceptReasons: ["growth"] });
+
+      expect(outcome).toMatchObject({
+        status: "failed",
+        code: "models_dev_guard_unlisted_share",
+        guard: { reasons: ["unlisted_share"] },
+      });
+      expect(await t.repository.listModels()).toEqual(before);
+    },
+  );
 
   // #548-T08
   it_(
@@ -960,6 +1083,13 @@ describe.each(MODELS_DEV_ENGINES)("the models.dev fetch on $name", (engine) => {
       expect(refused).toEqual({
         status: "failed",
         code: "models_dev_guard_enabled_unlisted",
+        guard: {
+          reasons: ["enabled_unlisted_share"],
+          figures: expect.objectContaining({
+            enabledUnlisted: 4,
+            enabledListed: 4,
+          }),
+        },
       });
       expect(
         (await t.repository.getModel("deepseek", "filler-0"))?.unlistedAt,
@@ -969,7 +1099,9 @@ describe.each(MODELS_DEV_ENGINES)("the models.dev fetch on $name", (engine) => {
         lastError: "models_dev_guard_enabled_unlisted",
       });
 
-      const accepted = await t.service.refresh({ acceptLargeChange: true });
+      const accepted = await t.service.refresh({
+        acceptReasons: GUARD_REASONS,
+      });
 
       expect(accepted).toMatchObject({ status: "applied" });
       expect(

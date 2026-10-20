@@ -157,8 +157,9 @@ request. A pinned `baseUrl` per provider (mentioned in #548 C) is **not** part o
 
 ## What is not here
 
-The pages (#554), the claim-time refusal that calls `availability` and the price book in the claim (#553), the "fetch now"
-route (#554), and the confirmation of a changed provider address (#554). **The release guard on the named entries of #425** is
+The claim-time refusal that calls `availability` and the price book in the claim (#553). The pages, the "fetch now" route and
+the confirmation of a changed provider address are built (#554: `/admin/catalog`, `src/admin/catalog-models/`,
+`src/models-dev/admin-*.ts`). **The release guard on the named entries of #425** is
 deferred too: it needs the map from a registry slug to the models.dev id (#553/#555), so it is not here. **Order of the
 cut-over:** when #553 enforces `availability` at claim, every managed entry that is already released is refused until an
-admin enables and confirms its model, so the screens of #554 must be live before #553 enforces it.
+admin enables and confirms its model, so the screens of #554 (live now) must be used before #553 enforces it.
