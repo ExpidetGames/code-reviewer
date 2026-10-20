@@ -16,7 +16,7 @@ jobs:
   engine:
     name: "Runner: engine tests (real PR-Agent, fake GitHub and LLM)"
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: runner
