@@ -5,8 +5,11 @@
 // provider and one of its tool-calling models for Dynamic Review in the project settings, sees what bounds a run without a
 // price, saves, and finds the pair after a reload. The catalog is filled by the real fetch with the committed fixture and no
 // network (src/test-support/e2e-models-dev-child.ts). The key is in no address, no page and no answer.
-// Not in this journey: the review that runs on this model. A claim hands a catalog model to a runner only once the passthrough
-// proxy is wired (the follow-up of #555 and #550-T13); the claim itself is proven at its level
+// Then a pull request is opened and a script plays the Dynamic runner, as the journey of the operator catalog does: the job is
+// handed out with the chosen provider and model, the workspace's own key of that provider, the entry of the model with the address
+// the catalog trusts for it, and the cost policy of an own key; the script reports the run and the Runs page shows it succeeded.
+// Not in this journey: the native engine itself running that job. It needs root and an https upstream at a public address, which
+// the browser lane has not (the privileged lane, #581); the claim is also proven at its level
 // (integration-tests/http/runner-api-native-own.integration.test.ts).
 import { expect, test, type Page } from "@playwright/test";
 import { syncFromGithubAsAdmin } from "../helpers/admin-api";
@@ -14,11 +17,18 @@ import { e2eEnv } from "../helpers/e2e-env";
 import {
   addGithubAccount,
   addGithubInstallation,
+  addGithubPullRequest,
   GITHUB_APP_OWNER_ACCOUNT,
   signInThroughTheForm,
   type GithubAccount,
 } from "../helpers/github-fake";
 import { fetchModelsDevCatalog } from "../helpers/models-dev";
+import {
+  dynamicRunnerScript,
+  type ClaimedDynamicJob,
+  type DynamicRunnerScript,
+} from "../helpers/runner-api";
+import { deliverPullRequestEvent } from "../helpers/webhooks";
 
 const account: GithubAccount = {
   id: 7300050,
@@ -29,8 +39,33 @@ const account: GithubAccount = {
 const REPOSITORY = "native-provider-journey/widgets";
 // A key that must never show up anywhere but in the body of the request that sets it.
 const KEY = "sk-deepseek-e2e-workspace-key-0123456789abcdefabcd";
+const INSTALLATION_ID = 9100050;
+const REPOSITORY_ID = 9200050;
+// The address the committed catalog fixture states for DeepSeek: trusted on first sight, the destination of the key.
+const DEEPSEEK_ADDRESS = "https://api.deepseek.com";
 
 test.describe.configure({ mode: "serial" });
+
+/** Claims the Dynamic job as a runner that can run a native job would, once the webhook has made it. */
+async function claimDynamicJob(
+  runner: DynamicRunnerScript,
+): Promise<ClaimedDynamicJob> {
+  let claimed: ClaimedDynamicJob | null = null;
+  await expect
+    .poll(
+      async () => {
+        claimed = await runner.claim([
+          "dynamic_capabilities",
+          "dynamic_cost_policy",
+        ]);
+        return claimed !== null;
+      },
+      { timeout: 60_000, intervals: [500, 1_000] },
+    )
+    .toBe(true);
+  if (claimed === null) throw new Error("No Dynamic job was handed out.");
+  return claimed;
+}
 
 async function openProject(page: Page) {
   await page
@@ -49,8 +84,8 @@ test.describe("a provider of the catalog for Dynamic Review", () => {
     await addGithubAccount(request, account);
     await addGithubInstallation(
       request,
-      { id: 9100050, account: GITHUB_APP_OWNER_ACCOUNT },
-      [{ id: 9200050, fullName: REPOSITORY }],
+      { id: INSTALLATION_ID, account: GITHUB_APP_OWNER_ACCOUNT },
+      [{ id: REPOSITORY_ID, fullName: REPOSITORY }],
     );
     await syncFromGithubAsAdmin(e2eEnv.appUrl);
   });
@@ -121,5 +156,74 @@ test.describe("a provider of the catalog for Dynamic Review", () => {
     await expect(page.getByText("Chosen:")).toContainText("deepseek-v4-pro");
     expect(await page.content()).not.toContain(KEY);
     for (const url of requestedUrls) expect(url).not.toContain(KEY);
+  });
+  // #555-T10
+  test("a review of a pull request is handed out with the chosen model, the workspace's own key and the catalog's address, and succeeds", async ({
+    page,
+    request,
+  }) => {
+    test.setTimeout(180_000);
+    await signInThroughTheForm(page, account);
+    // The project is switched on (a project that was never activated runs no review).
+    await page
+      .getByRole("navigation", { name: "Main" })
+      .getByRole("link", { name: "Projects" })
+      .click();
+    const row = page.getByRole("row").filter({ hasText: REPOSITORY });
+    await row.getByRole("switch", { name: `Review ${REPOSITORY}` }).click();
+    await expect(row.getByText("Active", { exact: true })).toBeVisible();
+
+    await addGithubPullRequest(request, REPOSITORY, {
+      number: 1,
+      title: "Change number 1",
+      headSha: "b".repeat(40),
+    });
+    const answer = await deliverPullRequestEvent(request, {
+      action: "opened",
+      installationId: INSTALLATION_ID,
+      repository: {
+        id: REPOSITORY_ID,
+        fullName: REPOSITORY,
+        owner: {
+          login: GITHUB_APP_OWNER_ACCOUNT.login,
+          id: GITHUB_APP_OWNER_ACCOUNT.id,
+        },
+      },
+      number: 1,
+      title: "Change number 1",
+      headSha: "b".repeat(40),
+    });
+    expect(answer).toEqual({ status: "accepted", outcome: "trigger_enqueued" });
+
+    const runner = await dynamicRunnerScript(e2eEnv.appUrl);
+    try {
+      const job = await claimDynamicJob(runner);
+      expect(job.llm).toEqual({
+        provider: "deepseek",
+        model: "deepseek-v4-pro",
+        apiKey: KEY,
+      });
+      expect(job.dynamic.cost?.keyMode).toBe("own");
+      expect(job.dynamic.modelEntry).toMatchObject({
+        providerId: "deepseek",
+        modelId: "deepseek-v4-pro",
+        upstreamBaseUrl: DEEPSEEK_ADDRESS,
+      });
+      await runner.complete(job, { model: job.dynamic.model });
+    } finally {
+      await runner.dispose();
+    }
+
+    await page
+      .getByRole("navigation", { name: "Main" })
+      .getByRole("link", { name: "Runs" })
+      .click();
+    await expect(
+      page
+        .locator("[data-run-id]")
+        .filter({ hasText: REPOSITORY })
+        .locator("[data-status]"),
+    ).toContainText("Succeeded", { timeout: 60_000 });
+    expect(await page.content()).not.toContain(KEY);
   });
 });

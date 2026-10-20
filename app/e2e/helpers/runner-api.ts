@@ -17,13 +17,27 @@ export type ClaimedDynamicJob = {
   leaseToken: string;
   /** The `llm` object of the job input: provider, model and the key the model is asked with. */
   llm: { provider: string; model: string; apiKey: string };
-  /** The `dynamic` object of the job input: the model of the agent. */
-  dynamic: { model: string };
+  /**
+   * The `dynamic` object of the job input: the model of the agent and, for a native job (#578), the cost policy and the entry of
+   * the model, whose `upstreamBaseUrl` is where the supervisor sends the key.
+   */
+  dynamic: {
+    model: string;
+    cost?: { keyMode: string };
+    modelEntry?: {
+      providerId: string;
+      modelId: string;
+      upstreamBaseUrl: string;
+    };
+  };
 };
 
 export type DynamicRunnerScript = {
-  /** Claims the next Dynamic job, or null when none is due. */
-  claim(): Promise<ClaimedDynamicJob | null>;
+  /**
+   * Claims the next Dynamic job, or null when none is due. `features` are what the runner says it can do besides the default; a
+   * native job (#578) goes only to a runner that names `dynamic_cost_policy`.
+   */
+  claim(features?: readonly string[]): Promise<ClaimedDynamicJob | null>;
   /** Reports a finished run: the model the engine reports in its usage and the cost the provider stated. */
   complete(job: ClaimedDynamicJob, usage: { model: string }): Promise<void>;
   dispose(): Promise<void>;
@@ -40,11 +54,11 @@ export async function dynamicRunnerScript(
     },
   });
   return {
-    async claim() {
+    async claim(features = ["dynamic_capabilities"]) {
       const response = await context.post(`${API}/claim`, {
         data: {
           engines: ["opencode"],
-          features: ["dynamic_capabilities"],
+          features,
           llmProviders: ["openrouter"],
         },
       });
@@ -59,7 +73,7 @@ export async function dynamicRunnerScript(
           leaseToken: string;
           input: {
             llm: { provider: string; model: string; apiKey: string };
-            dynamic: { model: string };
+            dynamic: ClaimedDynamicJob["dynamic"];
           };
         };
       };
