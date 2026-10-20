@@ -15,6 +15,7 @@ the first-run setup that creates the admin is `src/setup/`.
 | `http.ts`, `errors.ts`, `shared.ts` | The handlers of `GET\|PUT /api/admin/settings`, `POST /api/admin/mail/test` and `POST /api/admin/integrations/sync`, their stable error codes, and the wiring of the running server                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `ui/`                               | The pages' building blocks: navigation, overview, the forms (instance — tenancy, limits and the Dynamic Review gate (#202) —, sign-up rule, ways to sign in, mail server with the test mail button, the LLM key of the instance (#276)), the copy for the error codes. Pages: `src/app/(app)/instance-portal/`. The setup is split into `setup/instance`, `setup/sign-up` and `setup/sign-in` (#181); `/admin/setup` and `/admin/limits` redirect to the instance section. The Integrations group nests the GitHub App page (`/admin/integrations/github`) under its index (#182/#185). |
 | Model catalog                       | The section of the LLM page (`/admin/llm`, #429) where the operator manages the models that workspaces on the key of the instance choose from: name, description, provider, model id, kinds, status, order and the default of each kind. It is `src/model-catalog/` (`admin-service.ts`, `admin-http.ts`, its README has the routes), its data routes are below `/api/admin/model-catalog`, and the overview shows only counts                                                                                                                                                          |
+| models.dev catalog                  | `/admin/catalog` (#554): the daily fetch with "Fetch now", the providers whose address changed, and the models of the models.dev catalog with their state (new, enabled, disabled), price status and actions. The screens are `src/admin/catalog-models/`, the data routes are below `/api/admin/catalog-models` (`src/model-prices/`, #549), `/api/admin/catalog-providers/url/confirm` and `/api/admin/catalog-fetch` (the list of providers is read on the server, there is no route for it) (`src/models-dev/admin-*.ts`); the section below says how they work                     |
 | GitHub                              | The Integrations page (the GitHub App, the one-click and the manual way, the sign in with GitHub, the admin's own GitHub account) is `src/github-config/`; its data routes are below `/api/admin/github`                                                                                                                                                                                                                                                                                                                                                                                |
 
 The command line for a lost admin password is `src/admin-cli/` (below).
@@ -133,6 +134,43 @@ question of an `/ask`, the trigger and actor, the pull request and comment addre
 and problem never reach it, and a field added to the workspace view does not appear here by itself. It reads
 through `db/repositories/job-directory-repository.ts`, an instance level repository that only reads (`src/db/README.md`,
 "Workspace scoping"); the pages ask `requireAdmin()` first like every page of the portal.
+
+## The models.dev catalog (#554)
+
+`/admin/catalog` is where the admin decides which models of the daily models.dev catalog (`src/models-dev/`) the managed key,
+which we pay, may use, and what each costs. Instance admin only, like every page of the portal: `requireAdmin()` on the page,
+`lookupAdmin` handed to the handlers of every data route (`portal-guards.test.ts` finds one that forgot it). Nothing here is
+served to a workspace (`src/model-prices/visibility.test.ts` fails when anything outside the portal imports it).
+
+- **The list** is filtered and paged on the server and the filters live in the address (`?provider=&q=&price=&state=&page=`,
+  `catalog-models/query.ts`): there are about two hundred providers and thousands of models, so the page lists 50 at a time,
+  newest first (what "new" is read by). The states are _new_ (no decision, first seen after the first fetch), _enabled_,
+  _disabled_ (that is "dismissed") and _not decided_ (a model of the first fetch). **Reset to new** takes a decision back.
+- **The price** of a model (a dialog) shows the price today with the source of every amount (models.dev, the override file or
+  the admin's correction), the status (`confirmed`, `stale`, `unconfirmed`, `unpriced`) and, for a stale price, both prices.
+  _Confirm price as shown_ echoes the hash of the price the admin saw (`price_changed` reloads the page with a notice);
+  _Correct price_ takes dollars per million tokens as decimals and sends whole micro-USD digit strings, never through a float
+  (`catalog-models/price-form.ts`, `src/model-prices/money.ts`), with a required reason. `fetch_in_progress` offers another try.
+- **The fetch**: the state of the last attempt (success, or failure with its stable code as a sentence) and _Fetch now_
+  (`POST /api/admin/catalog-fetch`): `refresh({ deadlineMs: 45 s })` (the route runs 60 s on the hosted deployment,
+  `vercel.json`, pinned by a test), at most 6 times in 10 minutes for the whole instance (`rate_limits`, key
+  `models-dev-fetch-now`). A fetch the guard stopped (`models_dev_guard_*`) is **not** applied silently: the answer (409)
+  carries `reasons` (the code of every reason that tripped) and `details` (the figures the guard measured), the page lists them
+  and asks, and the second request carries `acceptReasons`, the codes the admin accepted. A reason that is new in that fetch, or
+  one that was not named, refuses it again.
+- **A provider whose address changed** (`url_changed`, or a new one that was refused) is shown with the trusted and the new
+  address next to each other as text, and with the reason in words. _Confirm the new address_ asks first and is a guarded update
+  of the one provider row in a transaction of its own (`POST /api/admin/catalog-providers/url/confirm`,
+  `{ providerId, pendingUrl }`): only the address the admin saw, only while `url_problem` is null, never a refused one. It reads
+  the row `FOR UPDATE` first with a `lock_timeout` of 5 seconds on Postgres, so it waits for a fetch that is writing
+  (`fetch_in_progress`, nothing written) and is applied after it; it does not take `MODELS_DEV_LOCK`. There is no "reject": the
+  provider stays blocked until the address is confirmed or models.dev states the trusted one again, so doing nothing is the
+  rejection.
+- **Untrusted text.** Every name, id and address comes from models.dev. React escapes it, nothing is set as HTML, long strings are
+  cut where they are shown (the whole text stays in the title), and an address is a link only when it is plain https
+  (`catalog-models/format.ts`, `safeHttpsHref`); a pending address is never a link.
+- **Codes.** A stable code from a route becomes a sentence in `catalog-models/messages.ts`; every table there is typed over the
+  codes it translates.
 
 ## A lost admin password
 

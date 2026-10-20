@@ -51,6 +51,7 @@ docker run --detach --name "$container" \
   --volume "$volume:/data" \
   --env APP_SECRET=smoke-test-secret-0123456789-0123456789-abcdef \
   --env BETTER_AUTH_URL=http://localhost:3000 \
+  --env MODELS_DEV_FETCH=off \
   --env RUNNER_TOKEN=smoke-runner-token-0123456789-0123456789-abcdef \
   --health-interval 2s \
   "$image" >/dev/null

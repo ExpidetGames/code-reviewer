@@ -56,6 +56,8 @@ import { migration as createBillingJournal } from "./20261019150000_create_billi
 import { migration as createJobVmRuns } from "./20261019160000_create_job_vm_runs.ts";
 import { migration as createBillingTopupIntents } from "./20261019170000_create_billing_topup_intents.ts";
 import { migration as addJobsCreatedAtIndex } from "./20261019183000_add_jobs_created_at_index.ts";
+import { migration as createModelsDevCatalog } from "./20261019200000_create_models_dev_catalog.ts";
+import { migration as createModelDecisions } from "./20261020090000_create_model_decisions.ts";
 
 const migrations: Record<string, Migration> = {
   "0001_create_app_meta": createAppMeta,
@@ -114,6 +116,8 @@ const migrations: Record<string, Migration> = {
   "20261019160000_create_job_vm_runs": createJobVmRuns,
   "20261019170000_create_billing_topup_intents": createBillingTopupIntents,
   "20261019183000_add_jobs_created_at_index": addJobsCreatedAtIndex,
+  "20261019200000_create_models_dev_catalog": createModelsDevCatalog,
+  "20261020090000_create_model_decisions": createModelDecisions,
 };
 
 export const migrationProvider: MigrationProvider = {

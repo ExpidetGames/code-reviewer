@@ -41,6 +41,8 @@ const appEnv = {
   RUNNER_TOKEN: e2eEnv.runnerToken,
   // Without this flag the server refuses the two overrides above.
   ALLOW_TEST_GITHUB_ENDPOINTS: "true",
+  // A production server fetches the models.dev catalog on its own (#548); no test reaches the internet.
+  MODELS_DEV_FETCH: "off",
 };
 
 export default defineConfig({
@@ -84,6 +86,7 @@ export default defineConfig({
         /e2e\/auth\/(sign-up|password-reset)\.e2e\.ts$/,
         /e2e\/admin\/mail\.e2e\.ts$/,
         /e2e\/admin\/github-integration\.e2e\.ts$/,
+        /e2e\/admin\/catalog\.e2e\.ts$/,
         /e2e\/workspaces\//,
         /e2e\/settings\/llm-key\.e2e\.ts$/,
         /e2e\/upgrade\//,
@@ -179,6 +182,17 @@ export default defineConfig({
       testMatch: /e2e\/admin\/github-integration\.e2e\.ts$/,
       dependencies: ["setup"],
     },
+    // The journey of the models.dev catalog in the admin portal (#554): an app of its own (the ninth) that fetches the
+    // catalog from the fake models.dev the journey starts, so it can move a price and fetch again without disturbing the
+    // other journeys.
+    {
+      name: "catalog-admin",
+      // No retry: a second attempt would find the catalog filled and the decisions made.
+      retries: 0,
+      use: { ...browser, baseURL: e2eEnv.catalogAdminAppUrl },
+      testMatch: /e2e\/admin\/catalog\.e2e\.ts$/,
+      dependencies: ["prepare"],
+    },
     // The update of an installation of the previous release (a database and an environment made like the
     // previous release's): the journey starts and restarts the app itself, with a database of its own, and
     // runs the real runner and the real PR-Agent against the fake GitHub, so it only needs the fake GitHub and
@@ -238,7 +252,7 @@ export default defineConfig({
       dependencies: ["prepare", "connect"],
     },
   ],
-  // Seven apps under test (the port `E2E_PORT` + 5 is the one the update journey starts itself) and the two
+  // Nine apps under test (the port `E2E_PORT` + 5 is the one the update journey starts itself) and the two
   // fake servers they share, GitHub and SMTP; the journeys start their own fake LLMs. The apps take consecutive ports
   // from `E2E_PORT` up to `E2E_PORT` + 7. The fake GitHub stands in for github.com (sign in) and api.github.com; the app
   // under test is pointed at it by environment variables. The journeys always run against a
@@ -286,6 +300,14 @@ export default defineConfig({
         SMTP_FAKE_PASSWORD: e2eEnv.smtp.password,
       },
       url: `${e2eEnv.smtp.controlUrl}/__fake/health`,
+      reuseExistingServer: false,
+      timeout: 30_000,
+    },
+    {
+      // The fake models.dev the catalog admin app fetches from (#554); the journey scripts it over HTTP.
+      command: "node ../fakes/models-dev/main.ts",
+      env: { MODELS_DEV_FAKE_PORT: String(e2eEnv.modelsDevFakePort) },
+      url: `http://127.0.0.1:${e2eEnv.modelsDevFakePort}/__fake/health`,
       reuseExistingServer: false,
       timeout: 30_000,
     },
@@ -403,6 +425,22 @@ export default defineConfig({
         LLM_MAX_TOKENS: llmEnv.maxTokens,
       },
       url: e2eEnv.catalogAppUrl,
+      reuseExistingServer: false,
+      timeout: 60_000,
+    },
+    {
+      command:
+        "rm -rf test-results/e2e-catalog-admin-data && mkdir -p test-results/e2e-catalog-admin-data && " +
+        `pnpm start --hostname 127.0.0.1 --port ${e2eEnv.catalogAdminAppPort} > ${e2eEnv.logFiles.catalogAdmin} 2>&1`,
+      env: {
+        ...appEnv,
+        DATABASE_PATH: e2eEnv.catalogAdminDatabasePath,
+        BETTER_AUTH_URL: e2eEnv.catalogAdminAppUrl,
+        // This app fetches the catalog, from the fake models.dev of the journey (#554).
+        MODELS_DEV_FETCH: "on",
+        MODELS_DEV_URL: e2eEnv.modelsDevFakeUrl,
+      },
+      url: e2eEnv.catalogAdminAppUrl,
       reuseExistingServer: false,
       timeout: 60_000,
     },

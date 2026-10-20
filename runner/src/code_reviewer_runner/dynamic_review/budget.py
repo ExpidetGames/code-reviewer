@@ -108,9 +108,13 @@ from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from decimal import Context, Decimal, InvalidOperation
+from typing import TYPE_CHECKING
 
 from code_reviewer_runner.dynamic_review.call_trace import CallTrace
 from code_reviewer_runner.result import ErrorCode, Usage
+
+if TYPE_CHECKING:
+    from code_reviewer_runner.dynamic_review.passthrough.price_book import PriceBook
 
 # Operator-owned validated configuration, never repository instructions.
 TOTAL_DEADLINE_SECONDS = 600.0
@@ -237,6 +241,9 @@ class UnitCosts:
     output_usd_per_mtok: Decimal
     cache_read_usd_per_mtok: Decimal | None = None
     cache_write_usd_per_mtok: Decimal | None = None
+    # The 1-hour cache write (#551): the passthrough proxy prices the two write lifetimes apart. The
+    # reservation (`of_call`) does not read it: no request can ask for a 1-hour write.
+    cache_write_1h_usd_per_mtok: Decimal | None = None
 
     def of_call(
         self,
@@ -279,6 +286,9 @@ class Reservation:
     # True when that final call is the recovery of a turn without an answer (#309), which carries
     # the recovery instruction instead of the wrap-up one.
     recovery: bool = False
+    # Which reservation this is (0: none). The ledger settles each once, so a call that an error
+    # handler settles again after the normal path already did is booked once (#550).
+    serial: int = 0
 
 
 @dataclass
@@ -302,6 +312,8 @@ class _Counters:
     # The cost the provider charged, summed as exact decimals, over the calls that reported one.
     cost: Decimal = field(default_factory=lambda: Decimal(0))
     priced_calls: int = 0
+    # Calls whose usage was never seen (#550): booked at their worst case.
+    unknown_calls: int = 0
     tool_calls: int = 0
     returned_bytes: int = 0
     files: set[str] = field(default_factory=lambda: set[str]())
@@ -360,6 +372,12 @@ def reserved_tokens(text: str) -> int:
     return len(text.encode("utf-8", errors="replace"))
 
 
+def _byte_size(text: str | bytes) -> int:
+    """The bytes of a request: the length of the bytes the passthrough proxy relays (#550), the
+    UTF-8 length of the text the legacy proxy builds."""
+    return len(text) if isinstance(text, bytes) else len(text.encode("utf-8", errors="replace"))
+
+
 class BudgetLedger:
     """Reserves and counts everything one Dynamic Review consumes. Fails closed.
 
@@ -378,6 +396,7 @@ class BudgetLedger:
         output_tokens: int = DEFAULT_OUTPUT_TOKENS,
         reserved_output_tokens: int | None = None,
         unit_costs: UnitCosts,
+        book: "PriceBook | None" = None,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         if window_tokens < 1:
@@ -395,6 +414,20 @@ class BudgetLedger:
             else min(max(reserved_output_tokens, 1), self.output_tokens)
         )
         self._unit_costs = unit_costs
+        # What the worst case of a call is priced with: the book of the model when there is one
+        # (tiers, reasoning, both cache writes), else the job's unit costs as a one-level book.
+        # Imported here: the price book module reads `UnitCosts` from this one.
+        from code_reviewer_runner.dynamic_review.passthrough.price_book import (
+            PriceBookError,
+            book_from_unit_costs,
+        )
+
+        try:
+            self._worst_case_book = book or book_from_unit_costs(unit_costs)
+        except PriceBookError as error:
+            raise LimitError(
+                ErrorCode.DYNAMIC_CONFIG_INVALID, "the unit costs are not prices"
+            ) from error
         self._wrap_up_seconds = min(
             WRAP_UP_RESERVE_SECONDS, WRAP_UP_RESERVE_FRACTION * limits.deadline_seconds
         )
@@ -411,6 +444,8 @@ class BudgetLedger:
         self._started = clock()
         self._counters = _Counters()
         self._lock = threading.Lock()
+        self._serials = 0
+        self._open: set[int] = set()
         # What each call was, without content (#541); filled by the proxy and the audit, read by
         # nothing in the run.
         self.trace = CallTrace()
@@ -524,7 +559,7 @@ class BudgetLedger:
 
     def reserve_call(
         self,
-        request_text: str,
+        request_text: str | bytes,
         *,
         output_tokens: int | None = None,
         can_wrap_up: bool = False,
@@ -540,7 +575,7 @@ class BudgetLedger:
         flight and the cost this call could have must stay within the limit.
         """
         self.check_deadline()
-        size = len(request_text.encode("utf-8", errors="replace"))
+        size = _byte_size(request_text)
         allowance = self.output_tokens if output_tokens is None else output_tokens
         counters = self._counters
         with self._lock:
@@ -586,7 +621,7 @@ class BudgetLedger:
                 text = recovery_text if recovery else wrap_up_text
                 size += len(text.encode("utf-8", errors="replace"))
                 estimate = self._estimate(size)
-                bound += size - len(request_text.encode("utf-8", errors="replace"))
+                bound += size - _byte_size(request_text)
                 cost = self._expected_cost(
                     self._priced_input(size, estimate), allowance, final=True
                 )
@@ -607,6 +642,7 @@ class BudgetLedger:
                     self._stopped_early = reason
             counters.model_calls += 1
             counters.reserved_cost = _SUM.add(counters.reserved_cost, cost)
+            serial = self._issue()
         return Reservation(
             input_tokens=estimate,
             output_tokens=allowance,
@@ -615,10 +651,11 @@ class BudgetLedger:
             cost=cost,
             final=final,
             recovery=recovery,
+            serial=serial,
         )
 
     def try_reserve_final_retry(
-        self, request_text: str, *, output_tokens: int | None = None
+        self, request_text: str | bytes, *, output_tokens: int | None = None
     ) -> Reservation | None:
         """Reserve one more attempt at the final call, or say there is no room for it (#312).
 
@@ -630,7 +667,7 @@ class BudgetLedger:
         none (#540). None means "stop asking"; the last reply is what the engine gets.
         """
         allowance = self.output_tokens if output_tokens is None else output_tokens
-        size = len(request_text.encode("utf-8", errors="replace"))
+        size = _byte_size(request_text)
         counters = self._counters
         with self._lock:
             if not self._final_granted or self.remaining_seconds() <= 0:
@@ -646,6 +683,7 @@ class BudgetLedger:
                 self._retried_past_limit = True
             counters.model_calls += 1
             counters.reserved_cost = _SUM.add(counters.reserved_cost, cost)
+            serial = self._issue()
         return Reservation(
             input_tokens=estimate,
             output_tokens=allowance,
@@ -653,6 +691,7 @@ class BudgetLedger:
             request_bytes=size,
             cost=cost,
             final=True,
+            serial=serial,
         )
 
     def _final_admissible(self, held: Decimal) -> bool:
@@ -765,6 +804,8 @@ class BudgetLedger:
         cannot be bounded by money: the tokens are recorded, then the run is stopped, and it is
         never read as zero.
         """
+        if not self._is_open(reservation):
+            return  # settled already (an error handler came after the normal path)
         if prompt_tokens is None or completion_tokens is None:
             raise LimitError(
                 ErrorCode.DYNAMIC_ACCOUNTING_FAILED, "the provider did not report usage"
@@ -777,6 +818,7 @@ class BudgetLedger:
             prompt_tokens > max(reservation.byte_bound, reservation.input_tokens)
             or completion_tokens > reservation.output_tokens
         ):
+            self._book_over_report(reservation, prompt_tokens, completion_tokens, cost)
             raise LimitError(
                 ErrorCode.DYNAMIC_ACCOUNTING_FAILED,
                 "the provider reported more than the request reserved",
@@ -784,6 +826,7 @@ class BudgetLedger:
         read, written = _cache_tokens(cache_read_tokens, cache_write_tokens, prompt_tokens)
         counters = self._counters
         with self._lock:
+            self._close(reservation)
             counters.reserved_cost = _SUM.subtract(counters.reserved_cost, reservation.cost)
             counters.prompt_tokens += prompt_tokens
             counters.completion_tokens += completion_tokens
@@ -811,6 +854,100 @@ class BudgetLedger:
             # request is the final call, and no normal call is admitted again (see "The bound").
             if counters.cost > self.limits.max_cost_usd and not reservation.final:
                 self._overshot = True
+
+    def _book_over_report(
+        self,
+        reservation: Reservation,
+        prompt_tokens: int,
+        completion_tokens: int,
+        cost: Decimal | None,
+    ) -> None:
+        """Book a call whose usage broke the envelope, before the run is stopped for it (#550).
+
+        The provider did charge for it. Stopping the run without booking would drop the charge from
+        the result (a hostile engine could hide a cost by making the report look like a
+        violation): the reported cost is spent, or, with none reported, the worst case of the call
+        (not what it was expected to cost), and then the cost of the run is unknown.
+        """
+        with self._lock:
+            counters = self._counters
+            self._close(reservation)
+            counters.reserved_cost = _SUM.subtract(counters.reserved_cost, reservation.cost)
+            counters.prompt_tokens += prompt_tokens
+            counters.completion_tokens += completion_tokens
+            counters.cost = _SUM.add(
+                counters.cost,
+                max(self.worst_case_cost(reservation), reservation.cost) if cost is None else cost,
+            )
+            if cost is not None:
+                counters.priced_calls += 1
+
+    def _issue(self) -> int:
+        """A serial for a new reservation. Call with the lock held."""
+        self._serials += 1
+        self._open.add(self._serials)
+        return self._serials
+
+    def _is_open(self, reservation: Reservation) -> bool:
+        with self._lock:
+            return reservation.serial == 0 or reservation.serial in self._open
+
+    def _close(self, reservation: Reservation) -> None:
+        """The reservation is settled. Call with the lock held."""
+        self._open.discard(reservation.serial)
+
+    def settle_unbilled(self, reservation: Reservation) -> None:
+        """Release the reservation of a call the provider refused before it generated anything
+        (#550).
+
+        The engine of the passthrough path retries a refusal (429, 5xx) by itself, so the refusal
+        does not end the run as it does on the legacy path. The call was made and is counted, it
+        cost nothing, and what was held for it is free again.
+        """
+        with self._lock:
+            if reservation.serial and reservation.serial not in self._open:
+                return
+            self._close(reservation)
+            self._counters.reserved_cost = _SUM.subtract(
+                self._counters.reserved_cost, reservation.cost
+            )
+            self._counters.priced_calls += 1
+
+    def worst_case_cost(self, reservation: Reservation) -> Decimal:
+        """The most one reserved call can cost: the bytes of its request, each as a token of the
+        dearest input kind (the byte count bounds the tokens), and the whole output cap at the
+        dearest output kind, at the dearest tier the request can reach (N8 of the review of PR
+        #569)."""
+        return self._worst_case_book.worst_case(
+            max(reservation.byte_bound, reservation.input_tokens), reservation.output_tokens
+        )
+
+    def settle_unknown(self, reservation: Reservation) -> bool:
+        """Settle a call whose usage was never seen (a cut stream, an error inside a stream, a
+        timeout after the request was sent, a server error) (#550).
+
+        The provider may have billed it, and an engine that can make a call's usage unreadable
+        must not thereby make it free: the call is booked at its **worst case**, not at what it was
+        expected to cost, and counted as unknown. Like any call without a reported cost it makes
+        the cost of the whole run unknown, never a partial sum. Returns False (and books nothing)
+        for a reservation that was settled already.
+        """
+        worst = self.worst_case_cost(reservation)
+        with self._lock:
+            if reservation.serial and reservation.serial not in self._open:
+                return False  # settled already: an error handler came after the normal path
+            self._close(reservation)
+            counters = self._counters
+            counters.reserved_cost = _SUM.subtract(counters.reserved_cost, reservation.cost)
+            counters.cost = _SUM.add(counters.cost, max(worst, reservation.cost))
+            counters.unknown_calls += 1
+        return True
+
+    @property
+    def unknown_calls(self) -> int:
+        """How many calls were booked at their worst case because their usage was never seen."""
+        with self._lock:
+            return self._counters.unknown_calls
 
     def count_tool_call(self, name: str) -> None:
         """Count one tool call the engine reported. Unknown attempts count too. Not a budget."""

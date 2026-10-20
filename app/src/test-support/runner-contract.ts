@@ -55,6 +55,8 @@ export function createContractValidator(
   for (const name of readdirSync(CONTRACTS_DIRECTORY)) {
     if (!name.endsWith(".v1.json") || name === file) continue;
     const sibling = readContract(name);
+    // A data file (the model lists) has no `$id` and nothing refers to it; two of them would collide under no key.
+    if ((sibling as { $id?: string }).$id === undefined) continue;
     if (sibling.$id !== schema.$id) ajv.addSchema(sibling);
   }
   return {

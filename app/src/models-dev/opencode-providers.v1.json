@@ -1,0 +1,1091 @@
+{
+  "version": 1,
+  "opencode": {
+    "version": "1.19.0",
+    "commit": "733b2c627e5aec39cb33cc22373bdce33053ef2c"
+  },
+  "providers": {
+    "302ai": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "abacus": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "abliteration-ai": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "above": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "agentrouter": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "agnes": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "ai-router": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "ai21": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "aiand": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "aihubmix": { "excluded": "runtime_install" },
+    "aimlapi": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "ainetcafe": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "aixy": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "aki-io": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "alibaba": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "alibaba-cn": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "alibaba-coding-plan": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "alibaba-coding-plan-cn": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "alibaba-token-plan": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "alibaba-token-plan-cn": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "amazon-bedrock": { "excluded": "cloud_iam" },
+    "ambient": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "amd": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "anthropic": {
+      "npm": "@ai-sdk/anthropic",
+      "family": "anthropic-messages",
+      "authHeader": "x-api-key",
+      "defaultBaseUrl": "https://api.anthropic.com/v1"
+    },
+    "anyapi": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "arcee": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "atomic-chat": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "auriko": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "azure": { "excluded": "cloud_iam" },
+    "azure-cognitive-services": { "excluded": "cloud_iam" },
+    "bailing": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "baseten": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "bee": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "berget": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "blueclaw": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "bothub": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "boundless": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "cerebras": {
+      "npm": "@ai-sdk/cerebras",
+      "family": "openai-chat",
+      "authHeader": "Authorization",
+      "defaultBaseUrl": "https://api.cerebras.ai/v1"
+    },
+    "chutes": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "clarifai": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "claudinio": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "cline-pass": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "cloudferro-sherlock": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "cloudflare-ai-gateway": { "excluded": "cloud_iam" },
+    "cloudflare-workers-ai": { "excluded": "cloud_iam" },
+    "cohere": { "excluded": "wire_not_supported" },
+    "commandcode": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "coralbricks": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "cortecs": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "crof": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "crossmodel": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "crusoe": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "daoxe": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "databricks": { "excluded": "templated_base_url" },
+    "deepinfra": {
+      "npm": "@ai-sdk/deepinfra",
+      "family": "openai-chat",
+      "authHeader": "Authorization",
+      "defaultBaseUrl": "https://api.deepinfra.com/v1/openai"
+    },
+    "deepseek": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "digitalocean": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "dinference": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "drun": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "ebcloud": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "echo": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "edenai": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "empiriolabs": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "engy": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "evroc": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "fastrouter": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "fireworks-ai": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "freemodel": {
+      "npm": "@ai-sdk/anthropic",
+      "family": "anthropic-messages",
+      "authHeader": "x-api-key"
+    },
+    "friendli": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "frogbot": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "github-copilot": { "excluded": "oauth" },
+    "gitlab": { "excluded": "oauth" },
+    "gmicloud": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "google": {
+      "npm": "@ai-sdk/google",
+      "family": "google",
+      "authHeader": "x-goog-api-key",
+      "defaultBaseUrl": "https://generativelanguage.googleapis.com/v1beta"
+    },
+    "google-vertex": { "excluded": "cloud_iam" },
+    "google-vertex-anthropic": { "excluded": "cloud_iam" },
+    "greenpt": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "groq": {
+      "npm": "@ai-sdk/groq",
+      "family": "openai-chat",
+      "authHeader": "Authorization",
+      "defaultBaseUrl": "https://api.groq.com/openai/v1"
+    },
+    "helicone": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "hetzner": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "hpc-ai": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "huggingface": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "hyper": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "iflowcn": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "impossibl": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "inception": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "inceptron": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "inco": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "infer": {
+      "npm": "@ai-sdk/openai",
+      "family": "openai-responses",
+      "authHeader": "Authorization"
+    },
+    "inference": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "inferx": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "infomaniak": { "excluded": "templated_base_url" },
+    "io-net": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "iteracompute": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "jalapeno": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "jiekou": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "kenari": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "kilo": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "kimi-code-plan-cn": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "kimi-code-plan-global": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "klokintegration": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "kosmik": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "kuae-cloud-coding-plan": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "lilac": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "llama": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "llmgateway": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "llmgateway-providers": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "llmtech": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "llmtr": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "lmstudio": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "longcat": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "lowrouter": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "lucidquery": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "lynkr": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "meganova": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "melious": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "merge-gateway": { "excluded": "runtime_install" },
+    "meta": {
+      "npm": "@ai-sdk/openai",
+      "family": "openai-responses",
+      "authHeader": "Authorization"
+    },
+    "minimax": {
+      "npm": "@ai-sdk/anthropic",
+      "family": "anthropic-messages",
+      "authHeader": "x-api-key"
+    },
+    "minimax-cn": {
+      "npm": "@ai-sdk/anthropic",
+      "family": "anthropic-messages",
+      "authHeader": "x-api-key"
+    },
+    "minimax-cn-coding-plan": {
+      "npm": "@ai-sdk/anthropic",
+      "family": "anthropic-messages",
+      "authHeader": "x-api-key"
+    },
+    "minimax-coding-plan": {
+      "npm": "@ai-sdk/anthropic",
+      "family": "anthropic-messages",
+      "authHeader": "x-api-key"
+    },
+    "mistral": {
+      "npm": "@ai-sdk/mistral",
+      "family": "openai-chat",
+      "authHeader": "Authorization",
+      "defaultBaseUrl": "https://api.mistral.ai/v1"
+    },
+    "mixlayer": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "moark": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "modal": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "model-oracle-ai": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "modelis": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "modelscope": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "moonshotai": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "moonshotai-cn": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "morph": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "nan": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "nano-gpt": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "nearai": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "nebius": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "neon": { "excluded": "templated_base_url" },
+    "neosmith": {
+      "npm": "@ai-sdk/openai",
+      "family": "openai-responses",
+      "authHeader": "Authorization"
+    },
+    "neuralwatt": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "nova": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "novita-ai": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "nvidia": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "oci": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "ofox": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "ollama-cloud": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "openai": {
+      "npm": "@ai-sdk/openai",
+      "family": "openai-responses",
+      "authHeader": "Authorization",
+      "defaultBaseUrl": "https://api.openai.com/v1"
+    },
+    "opencode": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "opencode-go": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "openreason": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "openrouter": {
+      "npm": "@openrouter/ai-sdk-provider",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "opper": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "orcarouter": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "ovhcloud": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "pareto": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "pendra": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "perplexity": {
+      "npm": "@ai-sdk/perplexity",
+      "family": "openai-chat",
+      "authHeader": "Authorization",
+      "defaultBaseUrl": "https://api.perplexity.ai"
+    },
+    "perplexity-agent": {
+      "npm": "@ai-sdk/openai",
+      "family": "openai-responses",
+      "authHeader": "Authorization"
+    },
+    "pioneer": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "poe": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "poolside": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "prime": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "privatemode-ai": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "qihang-ai": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "qiniu-ai": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "qvac": { "excluded": "runtime_install" },
+    "reflection": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "regolo-ai": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "requesty": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "routing-run": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "runinfra": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "sakana": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "salad-cloud": { "excluded": "runtime_install" },
+    "sambanova": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "sap-ai-core": { "excluded": "cloud_iam" },
+    "sarvam": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "scaleway": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "scnet-token-plan": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "scx-ai": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "sensenova": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "siliconflow": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "siliconflow-cn": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "snowflake-cortex": { "excluded": "cloud_iam" },
+    "stackit": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "standardcompute": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "stepfun": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "stepfun-ai": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "stepfun-ai-step-plan": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "stepfun-step-plan": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "subconscious": {
+      "npm": "@ai-sdk/anthropic",
+      "family": "anthropic-messages",
+      "authHeader": "x-api-key"
+    },
+    "submodel": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "synthetic": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "tempr": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "tencent-coding-plan": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "tencent-token-plan": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "tencent-tokenhub": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "tensorx": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "the-grid-ai": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "thinkingmachines": {
+      "npm": "@ai-sdk/anthropic",
+      "family": "anthropic-messages",
+      "authHeader": "x-api-key"
+    },
+    "tinfoil": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "togetherai": {
+      "npm": "@ai-sdk/togetherai",
+      "family": "openai-chat",
+      "authHeader": "Authorization",
+      "defaultBaseUrl": "https://api.together.xyz/v1"
+    },
+    "tokengo": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "tokenrouter": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "trustedrouter": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "umans-ai": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "umans-ai-coding-plan": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "unorouter": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "upstage": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "vancine": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "venice": { "excluded": "runtime_install" },
+    "vercel": { "excluded": "wire_not_supported" },
+    "vispark": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "vivgrid": {
+      "npm": "@ai-sdk/openai",
+      "family": "openai-responses",
+      "authHeader": "Authorization"
+    },
+    "volcengine": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "volcengine-coding-plan": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "vultr": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "wafer.ai": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "wallaby": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "wandb": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "watsonx": { "excluded": "runtime_install" },
+    "xai": {
+      "npm": "@ai-sdk/xai",
+      "family": "openai-responses",
+      "authHeader": "Authorization",
+      "defaultBaseUrl": "https://api.x.ai/v1"
+    },
+    "xiaomi": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "xiaomi-token-plan-ams": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "xiaomi-token-plan-cn": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "xiaomi-token-plan-sgp": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "xpersona": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "zai": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "zai-coding-plan": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "zeldoc": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "zenifra": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "zenmux": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "zhipuai": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    },
+    "zhipuai-coding-plan": {
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "openai-chat",
+      "authHeader": "Authorization"
+    }
+  }
+}

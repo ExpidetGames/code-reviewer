@@ -22,7 +22,8 @@
     "spdx:add": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON src/ci/spdx-headers/cli.ts --write",
     "spdx:check": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON src/ci/spdx-headers/cli.ts --check",
     "contracts:generate": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON src/ci/contract-types/cli.ts --write",
-    "contracts:check": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON src/ci/contract-types/cli.ts --check"
+    "contracts:check": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON src/ci/contract-types/cli.ts --check",
+    "opencode-providers:derive": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON src/ci/opencode-providers/cli.ts --write"
   },
   "dependencies": {
     "@vercel/functions": "^3.10.1",

@@ -53,6 +53,7 @@ key_body_line=$(sed -n 2p "$work/app.pem")
 previous_release_environment=(
   --env "BETTER_AUTH_SECRET=$secret"
   --env BETTER_AUTH_URL=http://localhost:3000
+  --env MODELS_DEV_FETCH=off
   --env "RUNNER_TOKEN=$runner_token"
   --env GITHUB_OAUTH_CLIENT_ID=smoke-oauth-client-id
   --env "GITHUB_OAUTH_CLIENT_SECRET=$oauth_secret"
@@ -67,6 +68,7 @@ previous_release_environment=(
 new_release_environment=(
   --env "APP_SECRET=$secret"
   --env BETTER_AUTH_URL=http://localhost:3000
+  --env MODELS_DEV_FETCH=off
   --env "RUNNER_TOKEN=$runner_token"
 )
 

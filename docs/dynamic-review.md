@@ -285,6 +285,235 @@ operator's `RUNNER_DYNAMIC_CAPABILITIES` (a ceiling for the descriptor the job b
 `RUNNER_DYNAMIC_RIPGREP` or `RUNNER_ADVERTISED_ENGINES` reaches a job. A Dynamic job that arrives at
 a runner without `opencode` in that list is refused with `dynamic_engine_unavailable`.
 
+## The passthrough proxy of native providers (#550)
+
+The legacy proxy (`proxy.py`, `anthropic_wire.py`, `provider_wire.py`) speaks OpenAI Chat to the engine and
+translates to the provider (OpenRouter, Anthropic). A **native job** is different: the engine speaks its own wire
+family to a loopback proxy and the proxy only authenticates, swaps the key, relays and counts
+(`dynamic_review/passthrough/`, design #544, decisions of 2026-10-19). The legacy path stays the production path
+until #556 removes it; a job with a per-job model entry (`contracts/job-model-entry.v1.json`, #548) is native, any
+other job is unchanged (`passthrough/transport.py`). Key isolation is as today: the real key lives in the
+supervisor; the engine holds a random per-job capability and cannot reach the upstream (own uid, nftables).
+
+What the proxy decides, before a byte is reserved or forwarded (`passthrough/admission.py`; the engine is the
+untrusted side):
+
+- **Who.** The job's capability in the one header of the family (`authorization: Bearer`, `x-api-key`,
+  `x-goog-api-key`), exactly once, constant-time. Otherwise 401 and nothing else is looked at.
+- **What.** One method and one path per family, compared as plain text: `POST /v1/chat/completions`,
+  `/v1/responses`, `/v1/messages`, and for Google `/v1beta/models/<the job's model>:streamGenerateContent?alt=sse`.
+  No other query (`?key=` included), no `..`, `;`, second `?` or absolute URL, no `GET`. Anything else is a 403
+  `request_not_allowed`, a Google path for another model is `model_not_allowed`.
+- **How.** Request headers are built from an allow-list (`accept`, `content-type`, `user-agent`, the three
+  `x-*session*` headers; for Messages `anthropic-version` and `anthropic-beta`, whose values must be on a list: the two
+  the pinned OpenCode sends). Every credential, cookie and proxy header is dropped; the proxy sets the one key header
+  of the family, `content-type: application/json` (the engine's is checked, then dropped, so no parameter of its choosing
+  reaches the provider), `accept-encoding: identity` (the tee cannot read a compressed answer) and the length itself. The
+  body length must be measurable before it is read (a chunked body is a 411, one above `max_request_bytes` a 413).
+- **The body.** Read as JSON and walked against a **closed schema per family** (`passthrough/body_schema.py`): the
+  keys the pinned OpenCode sends (`fakes/wire/engine_requests.json` is one captured body per family), compared
+  case-sensitively, and nothing else, also inside messages, tools and options. `model` must be the job's (else 403
+  `model_not_allowed`); exactly one spelling of the output cap, within `min(limit.output, 32000)` (the cap the engine
+  really sends, spike #546), and a second spelling (`max_tokens` with `max_completion_tokens`, a snake-case
+  `generation_config`) is refused whatever its value. Tools are function tools only (Chat/Responses `type: function`,
+  Messages none or `custom`, Google `functionDeclarations`); no web search, code execution, MCP, computer use,
+  `mcp_servers` or `container`. Content parts are text, the tool exchange of the family and the engine's reasoning
+  blocks; **no image, audio, file or document part at all** (the model entries are text-only; a part that can carry a
+  URL is a part the provider can fetch). `stream` is present and `true` (the engine always streams; a non-stream call is refused), `n` and `candidateCount` are 1, `store` is `false`, a number is finite and no larger than 2^53, Google's `thinkingBudget` is within the allowance, `cache_control` has no `ttl` (a 1-hour write needs its own price, #553); no `service_tier`,
+  `background`, `previous_response_id`, `cachedContent`, `metadata`, `response_format` or OpenRouter routing. A key
+  given twice and a non-object are refused. The walk only checks: the bytes that go out are the bytes that came in.
+  What the engine sends for a provider that no capture has covered fails closed as `request_not_allowed`, and its key
+  joins the set once a live capture shows it is the engine's (spike section 7). The schema lets numeric sampling
+  options through (`temperature`, `top_p`, `top_k`, Google's `generationConfig` twins), which `ProviderTransform`
+  sets for some model ids; they are not in the captures and are an item of the live checklist (L12).
+- **One call at a time.** The engine's calls are serial. A second request while one is in flight is a 429
+  `call_in_flight` with `retry-after: 1`, answered before anything is reserved or sent: not a call, no reason to end
+  the run (it comes after the capability check, so a stranger only ever sees 401). It is refused and not queued: a
+  queue is something a hostile engine can fill, the engine retries a 429 by itself, and a refusal needs no thread to
+  wait and no deadline to track.
+
+The refusal codes are the engine's answer (`capability_invalid`, `request_not_allowed`, `model_not_allowed`,
+`request_too_large`, `length_required`, and `call_in_flight`, which ends nothing); the run records `dynamic_policy_violation` (a 413: `dynamic_budget_exceeded`),
+except for a 401, which is not the engine of this job and ends nothing.
+
+**The destination** (`address.py`, `upstream.py`). One trusted `https` base URL per job, port 443 only, no
+credentials or query; it follows the SDKs' convention (the root they use as `baseURL`, for example
+`https://api.openai.com/v1`) and the route of the family is appended. Every call opens its own connection, resolves
+the name, refuses it when **one** address is not public (loopback, private, link-local, CGNAT, multicast, reserved,
+documentation and special-purpose ranges, NAT64, 6to4; an IPv4-mapped address by its IPv4) and connects to an address
+it checked, never to the name again. A redirect is a status: it is not followed and ends the run.
+
+*Address rules.* They are those of `app/src/billing/public-url.ts` (the edges of every range are in
+`test_passthrough_destination.py`), with one deliberate difference: the app judges NAT64 `64:ff9b::/96` and 6to4
+`2002::/16` by the IPv4 address inside them, this guard refuses them whatever it is. A provider is not behind either,
+and a translator routes to whatever its prefix says, so the check of the embedded address would only be a way to be
+wrong. Everything the app refuses is refused here too.
+
+*Waits.* Every wait is bounded by the budget of the call (the smaller of 120 s and the time the job has left; a call
+with none makes no lookup and no connection): the name lookup runs in a thread that is given up on (`getaddrinfo` has
+no timeout; at most one call is in flight, so a hanging resolver costs one idle thread), each connection attempt gets
+what is left of the budget after the attempts before it, the TLS handshake what is left after the connection, then
+the socket timeout is set again before **every** read of the answer (the call's budget or what the job has left,
+whichever is less; the body of an error and a document included). On the engine's side of the loopback socket (`server.py`) a connection that says nothing is
+closed after 5 s (one that has been served may idle for 30 s), reading a body and writing an answer each wait at most 60 s and never longer than the job has left
+(a timeout there is an engine that went away), and no more than 16 connections are served at once; one over is closed
+at once.
+
+**Ledger.** `budget.py` is reused as it is: every upstream call reserves from the bytes of the body and what the run
+has shown (realistic guard, #540/#542), the final-call exemption and "never without a review" rules unchanged. The
+engine's retries (429, 5xx, a stream cut, an error event inside a 200 stream) are calls of their own. How a call is
+settled:
+
+| What happened | Settled as |
+|---|---|
+| a complete answer with usage and a price | the provider's usage and the price (`settle_call`; a usage above the reservation is **booked first**, then the run stops) |
+| the provider refused with a 4xx (not 408), a 429, or a **500, 502, 503 or 529 that is only a status** (all of: the status line came within 15 s of the request, the content type is not `text/event-stream`, and the bounded body, read whole, states no usage object), a redirect, a connection that never opened | unbilled: the reservation is released (`settle_unbilled`) |
+| 408, 504, 524, a status below 200, any other status, a 500/502/503/529 that fails one of the three conditions, every error **after** the first byte of a stream or body (a cut stream, an error event in a 200), a timeout after the request went out, an encoded body | **unknown**: booked at its **worst case**, not at its expected cost (`settle_unknown`), counted in `unknown_calls`, and for a managed key the run ends (`dynamic_accounting_failed`) |
+| a complete answer without a readable usage (none stated, a bad value, a stream that stopped before its usage event) or a price | the call is unknown, and the run ends for every key (the own-key relaxation is #553) |
+| a usage that lists a field nobody can price (`unknown_fields`: an unknown field that holds something, `server_tool_use`, audio, a `service_tier` other than the standard one, a second choice) or that cannot be priced from the book | **unknown** as above, for a managed key (`unknown_cost_ends_run`); the names of the fields (never a value) are logged |
+
+The worst case of a call is the bytes of its request, each as a token at the dearest input price (the byte count bounds
+the tokens), plus the whole output cap at the output price (`BudgetLedger.worst_case_cost`). An engine that can make
+a call's usage unreadable must not make the call free, so a call that may have been billed and was not read ends a
+managed run. *Why a 500/502/503/529 status is not such a call:* it arrives as a status line before any byte of an
+answer, so the provider failed the request before it generated anything, and the providers do not bill that (a
+transient overload is the commonest event of a long run, and the engine retries it as a call of its own). It is
+trusted only while it looks like that: a status line that took more than 15 s, an event-stream content type, or a body
+that states a usage (JSON with a `usage`/`usageMetadata` object anywhere, or, for a body that does not parse, the word
+`usage`; a body longer than the bound or cut counts too) means the provider may have been generating. A timeout
+status (408, 504, 524) and anything after the first byte of a stream or body say the provider may have been generating,
+so they stay unknown. The assumption is unproven for real providers and is item L13 of the live checklist. The hook
+for #553 is `PassthroughProxy(unknown_cost_ends_run=)`, on by default and set by nothing yet. The whole-run cost stays
+unknown after any unknown call (`usage.cost_usd` is `None`), never a partial sum.
+
+**A hang-up does not hide a cost.** When the engine disconnects mid-stream, the call to the provider is **not**
+cancelled at once: the proxy stops forwarding but keeps reading the stream into the tap to the end of the answer (bounded by the
+byte bound, the deadline and the per-read timeout), and then settles the call normally. Cancelling at once would let a hostile engine
+turn any call into an unknown (or free) one by hanging up after the first event, and an unknown call is booked at its
+worst case and ends a managed run. If the usage still cannot be read, the call is unknown as above.
+
+**Relay and tee.** The answer is passed through byte for byte: a stream one whole event at a time as it arrives
+(`sse.py`), while the usage tap (`usage.py`, hardened in #551, see "The usage parsers" below) reads the same bytes.
+The bound of a stream is the larger of `max_stream_bytes` (1 MiB) and **256 bytes per output token the request asks
+for**, up to 8 MB for the 32000-token cap: an event per token costs about 100 bytes of framing. An answer that is not
+an SSE stream is a document: it is read whole up to `max_response_bytes` (256 KiB), settled, then sent with its length
+(a long-lived non-SSE stream such as JSON lines is therefore not streamed; none of the four families answers a
+streaming request that way, and one that does is cut at 256 KiB and ends the run). Response headers of a successful
+answer are filtered to a few (`content-type`, `retry-after`, `retry-after-ms`, `x-should-retry`, the request id).
+
+*What the engine is told about an error, and why redaction is not used on content.* If the proxy cut the key out of
+what the provider answers, an engine that writes guesses of the key into its output would see the cut where a guess is
+right: the proxy would be an oracle, one character run at a time. So **a successful answer is never changed**.
+Redaction (`redact.py`: the key and any run of eight or more characters of it) is used only on what no model writes:
+the headers of a successful answer. An error event inside a 200 stream (an `error` event, or JSON with an `error` key,
+`type: error` or `response.failed`: decided by the provider's structure, never by the model's words) is **replaced by a
+fixed event of ours** (`fixed_error_event`, one per family, the shapes of the fakes), and a 200 document that is an
+error by a fixed document: nothing the provider wrote is passed on, so an event cannot be an oracle either. The tap still
+reads the original bytes, so the call is settled as unknown. The engine retries a fixed chat event as it did the
+provider's (engine test); the types in the fixed events of the other families are what a live capture (L7) has
+to confirm. For a non-2xx answer the provider's body is read locally (to tell a too-long request from other refusals,
+and to see whether it states a usage) and **not passed on at all**: the engine gets the status, a code and a sentence
+of the proxy's own, and the plain-number `retry-after` and `retry-after-ms`, nothing else.
+
+*An exception after the request was sent.* Whatever breaks while an answer is relayed (a bug, an unreadable shape) the
+call may have been billed: it is booked as unknown (once: the ledger settles a reservation a single time, so an error
+handler after the normal path books nothing twice), the engine's connection is dropped, and the run ends with
+`dynamic_accounting_failed` and not with a generic `runner_error`. Neither code is retried by the app (only
+`runner_shutdown` is given back to the queue; both are free of charge for the member), but the first says in the run's
+copy that the usage could not be accounted for. An event nested deeper than the JSON parser goes is unreadable, not a
+crash.
+
+**The usage parsers (#551).** One parser per family behind the tap, each for a whole document and for a stream,
+each returning the same typed `CallUsage` (`call_usage.py`: prompt, completion, cache read, cache write 5-minute and
+1-hour, reasoning, the charge the provider states, `unknown_fields`, `complete`). The prompt counts the cache and the
+completion counts the reasoning. Where the usage sits: Chat, the last data chunk with `usage` (OpenRouter's `cost` and
+`cost_details`, DeepSeek's `prompt_cache_hit_tokens` and `prompt_cache_miss_tokens`); Responses, `response.completed`;
+Messages, `message_start.usage` plus `message_delta.usage` (the output of `message_start` is a placeholder, so a
+stream that stops without a `message_delta` that states `output_tokens` is not complete); Google, `usageMetadata` of
+the last chunk or cumulative on every chunk (the last one, never a sum, and it must be at or after the chunk that
+finishes). Only the structure of the answer counts: the usage is read from that one
+place and never from a value the model wrote (text and tool arguments are JSON strings or sit below a key no usage is
+read from), and an event of a kind that carries no usage is not looked at for one (`#551-T13`).
+
+Fail closed, all of it (`usage_normalize.py`):
+
+- A count the family must state (prompt, completion) that is missing, negative, boolean, fractional, textual or above
+  10^12 makes the usage unreadable: no usage, never zero. A count the provider may leave out as a zero (cache, reasoning)
+  is zero when absent; a bad one, one above what it is part of (a cache above the prompt, reasoning above the
+  completion) or a split that disagrees with its total (the Messages `cache_creation` against
+  `cache_creation_input_tokens`, DeepSeek's hit and miss against the prompt) puts the field in `unknown_fields`.
+- A field the parser does not know whose value holds something (anything but null, false, zero, empty text, list or
+  object) is in `unknown_fields`: it could carry a price. A zero of a kind we do not price costs nothing, so OpenAI's
+  `audio_tokens: 0` is harmless. Known and harmless: totals, OpenRouter's `cost_details`, a `service_tier` of
+  `standard` or `default` (any other, priority, flex, batch, is unknown), the legacy cost rule's Anthropic fields
+  (`speed`, `inference_geo`, `server_tool_use` and `iterations` when empty or zero, as in `anthropic_cost.py`), and
+  Google's per-modality breakdowns when only text carries tokens. Names are logged (`usage_report.py`), values never.
+- **A usage only grows, and a call has one** (review of PR #569). Chat states its usage once, in the finish chunk or
+  after it: one before it, or a second one (whatever it says), is unknown (S1, S2). Responses has one terminal event
+  (`response.completed` or `incomplete`); a second one, also a `failed`, is unknown. Messages has `message_start` first
+  and exactly once, `message_delta` only after it, and nothing but a `ping` after `message_stop`; a repeated or
+  misplaced event is unknown. Whatever a later statement of the same call (a Messages delta, a Google chunk) states
+  less of than an earlier one, or, for Google, leaves out of a count that was there, is unknown: a usage that goes
+  backwards is not the usage of one call. The unknown fields and the service tier of **every** statement count, the
+  union over the stream; a later event cannot overwrite what an earlier one revealed. These marks are named
+  `usage_events` and `usage_backwards` in `unknown_fields`.
+- A **total** the provider states (`total_tokens`, `totalTokenCount`) must be the sum of the counts of the family
+  (Chat and Responses: prompt + completion; Google: prompt + candidates + thoughts + tool use), else the counts are not
+  what the provider bills and the call is unknown (S5). xAI's reasoning tokens on top of the completion
+  (`total_tokens` above prompt + completion) are exactly this case. Extra fields of the chat providers of the catalog
+  that are harmless but not zero (xAI `prompt_tokens_details.text_tokens`, Groq's `queue_time`, `prompt_time`,
+  `completion_time`, `total_time`) are **not** on the list of known fields: no official documentation of them is
+  at hand (Groq shows them only in an example response), so they stay unknown until the live test (L14) shows them.
+- The tap never fails the relay: nothing in it recurses over what the provider sent (a value nested thousands deep
+  is read iteratively; JSON nested deeper than the parser goes is unreadable), and a normalizer that did raise
+  `RecursionError` would make the call "no usage".
+- More than one choice (`choices[1]`, a second candidate, an `index` that is not 0) is a usage the proxy cannot
+  attribute to the request: unknown, never summed.
+- `error: null` (some providers send it in every chunk) is not an error; an object, or text or a count that says
+  something, is. A Chat choice that finishes with `error` is an error.
+- An answer that was cut, failed, or never stated its usage is `complete = false` or has no usage, and the call is booked
+  at its worst case (the ledger's `unknown_calls`), never free.
+
+Pricing is `pricing.py`, from a price book in the form of #549 (`price_book.py` reads the JSON that
+`service.availability` hands out, as strictly as the app does: `fakes/fixtures/price-books.json` is read by both
+readers' tests). Prices are whole micro-USD per million tokens as Python ints, the cost is an exact `Decimal` (counts
+times a price is a whole number of 10^-12 USD; no float and no rounding), and a call that needs a price the book lacks
+has no cost, and a call without a cost is **unknown**: booked at its worst case, counted in `unknown_calls`, a managed
+run ends (an unpriced 1-hour write, a tier without the price of a write, two tiers of one size that disagree; S3). A
+tier applies to a prompt strictly above its size with that level's own prices (the older
+`context_over_200k` is the tier of 200,000); reasoning tokens cost the reasoning price, or the output price when there
+is none; a cache read without a read price costs the input price (an upper bound), a cache write without a price of
+its kind (5-minute or 1-hour; a tier states no 1-hour price) has no cost. A charge the provider states (OpenRouter's `usage.cost`) is
+held against the price the book expects for the same call, and **the dearer of the two is booked** (S4); beyond 1 % (and
+1 micro-USD) either way it is counted as `price_drift` (`PassthroughProxy.price_drift_calls`, logged as a count). A
+stated amount **more than 10 times below** the book's price (zero, `1e-300`, anything that is not a price for that
+many tokens) is not believed and not booked: the call is unknown. A call the book cannot price is unknown even when a
+charge is stated, since there is nothing to hold it against. The worst case of an unknown call (`worst_case_cost`) is
+priced from the book too (N8): every byte of the request as a token of the dearest kind of input (plain, a cache read,
+either write), every output token at the dearer of output and reasoning, at the dearest tier the request can reach
+(a tier may be cheaper than the level below it, so the base counts as well). Until the claim carries the confirmed book (#553) the
+proxy reads its per-job `UnitCosts` as a one-level book (a price finer than a micro-USD is rounded up, never down;
+`cache_write_1h_usd_per_mtok` is new). Every shape of the book is table-tested against an independent calculator
+(`runner/tests/usage_calc.py`).
+
+What a real answer may still show differently is **unconfirmed** and marked in the code (`UNCONFIRMED`) and as item L14
+of the live checklist in `docs/spike/544-passthrough.md`.
+
+**Stable codes the caller branches on.** A provider status maps by the table of the legacy path (`llm_auth`,
+`llm_rate_limit`, `llm_unavailable`, `llm_timeout`, `llm_context_length_exceeded`, `llm_bad_request`); a 404, and the
+engine's own "500 `UnknownError` with no call upstream" for a model its config does not offer
+(`engine_errors.model_not_found_for_turn`), is `model_unknown`. Status that the engine retries itself (408, 409, 429,
+5xx) do not end the run by themselves (a 408/504/524 is an unknown call, see the ledger); the code is kept in `PassthroughProxy.last_upstream_error` for the adapter to name when the
+engine gives up. Everything else ends the run with its code, the text of the provider in none of it.
+
+**Not in this change** (follow-ups): reading a job's entry from the claim and starting the engine with the native
+config (#564 has the entry reader; `build_native_engine_config`, which asserts the provider block against the entry, and
+`target_from_entry` are the two joints; wiring and the claim contract test T13 come as a separate step), the audit of
+tool results in a request (it is chat-shaped; the adapter still counts the tool calls the engine reports), how a final
+call is told to answer without rewriting the request (#552), the live capture that replaces the assumed usage shapes
+(L14) and the cost policy for an own key (#553: how a managed and an own key treat `unknown_fields`, `price_drift` and a
+call without usage; reading the confirmed price book from the claim).
+
 ## The model
 
 Dynamic Review is model- and provider-agnostic. The default model is `deepseek/deepseek-v4.1-flash`,
