@@ -20,6 +20,7 @@ async function start() {
 }
 
 describe("the scripting routes of the fake models.dev", () => {
+  // #554-T10
   it("answers its health and hands out the fixture", async () => {
     const { base } = await start();
 
@@ -30,6 +31,7 @@ describe("the scripting routes of the fake models.dev", () => {
     expect(Object.keys(fixture)).toContain("deepseek");
   });
 
+  // #554-T10
   it("answers from then on with the body it was sent, and refuses a body that is not JSON", async () => {
     const { base, fake } = await start();
 

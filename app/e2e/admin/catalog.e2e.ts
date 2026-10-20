@@ -104,6 +104,7 @@ test.describe("the models.dev catalog in the admin portal", () => {
     await respondWith(await bodyOf());
   });
 
+  // #554-T10
   test("the admin fetches the catalog, enables a new model, confirms its price, sees it go stale and confirms it again", async ({
     page,
   }) => {

@@ -63,6 +63,7 @@ test.describe("the apps under test", () => {
     expect(page.status()).toBe(307);
   });
 
+  // #554-T10
   test("the app of the catalog admin journey is set up before it runs", async ({
     request,
   }) => {
