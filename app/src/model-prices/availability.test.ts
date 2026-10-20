@@ -96,7 +96,7 @@ describe("managedAvailability", () => {
 
     expect(result).toMatchObject({ selectable: true });
     if (!result.selectable) return;
-    expect(result.book.input).toBe(600_000n);
+    expect(result.book.input).toBe(BigInt(600_000));
   });
 
   // #549-T07

@@ -48,7 +48,7 @@ describe("parseModelOverrides", () => {
       parsed.overrides.providers.anthropic?.models["claude-sonnet-5-5"],
     ).toEqual({
       reason: "models.dev states no 1-hour cache write price.",
-      cacheWrite1h: 4_000_000n,
+      cacheWrite1h: BigInt(4_000_000),
       retiresNotBefore: null,
       blocked: false,
     });
@@ -206,7 +206,7 @@ describe("modelOverride", () => {
   // #549-T03
   it("finds the override of a model", () => {
     expect(modelOverride("anthropic", "claude-sonnet-5-5")?.cacheWrite1h).toBe(
-      4_000_000n,
+      BigInt(4_000_000),
     );
     expect(MODEL_OVERRIDES.version).toBe(1);
   });

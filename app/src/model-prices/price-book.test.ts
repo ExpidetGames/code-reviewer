@@ -33,18 +33,18 @@ describe("priceBookFromCatalog", () => {
     const book = priceBookFromCatalog(COST, undefined) as PriceBook;
 
     expect(book).toEqual({
-      input: 100_000n,
-      output: 500_000n,
-      cacheRead: 10_000n,
-      cacheWrite5m: 125_000n,
+      input: BigInt(100_000),
+      output: BigInt(500_000),
+      cacheRead: BigInt(10_000),
+      cacheWrite5m: BigInt(125_000),
       cacheWrite1h: null,
       tiers: [
         {
           contextOver: 100000,
-          input: 500_000n,
-          output: 2_500_000n,
-          cacheRead: 50_000n,
-          cacheWrite5m: 625_000n,
+          input: BigInt(500_000),
+          output: BigInt(2_500_000),
+          cacheRead: BigInt(50_000),
+          cacheWrite5m: BigInt(625_000),
           cacheWrite1h: null,
         },
       ],
@@ -53,9 +53,9 @@ describe("priceBookFromCatalog", () => {
 
   // #549-T03
   it("takes the 1-hour cache write from the override when the catalog has none", () => {
-    const book = priceBookFromCatalog(COST, 200_000n) as PriceBook;
+    const book = priceBookFromCatalog(COST, BigInt(200_000)) as PriceBook;
 
-    expect(book.cacheWrite1h).toBe(200_000n);
+    expect(book.cacheWrite1h).toBe(BigInt(200_000));
     expect(book.tiers[0]?.cacheWrite1h).toBeNull();
   });
 
@@ -81,8 +81,8 @@ describe("priceBookFromCatalog", () => {
       undefined,
     ) as PriceBook;
 
-    expect(book.input).toBe(0n);
-    expect(book.cacheRead).toBe(0n);
+    expect(book.input).toBe(BigInt(0));
+    expect(book.cacheRead).toBe(BigInt(0));
   });
 
   it("has no book for a model the catalog does not price", () => {
@@ -109,7 +109,7 @@ describe("priceBookFromCatalog", () => {
 describe("the JSON form of a book", () => {
   // #549-T04
   it("round-trips, with every amount a decimal string of whole micro-USD", () => {
-    const book = priceBookFromCatalog(COST, 200_000n) as PriceBook;
+    const book = priceBookFromCatalog(COST, BigInt(200_000)) as PriceBook;
 
     const json = priceBookToJson(book);
 
@@ -154,7 +154,7 @@ describe("parsePriceBookJson", () => {
   it("accepts a book with only input and output", () => {
     expect(parsePriceBookJson({ input: "1", output: "2" })).toMatchObject({
       ok: true,
-      book: { input: 1n, output: 2n, cacheRead: null, tiers: [] },
+      book: { input: BigInt(1), output: BigInt(2), cacheRead: null, tiers: [] },
     });
   });
 

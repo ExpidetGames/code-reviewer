@@ -19,7 +19,7 @@ const COST: ModelCost = {
 };
 const OVERRIDE: ModelOverride = {
   reason: "No 1-hour price upstream.",
-  cacheWrite1h: 4_000_000n,
+  cacheWrite1h: BigInt(4_000_000),
   retiresNotBefore: null,
   blocked: false,
 };
@@ -59,11 +59,11 @@ describe("effectivePrice", () => {
 
     expect(price.status).toBe("unconfirmed");
     expect(price.book).toMatchObject({
-      input: 2_000_000n,
-      output: 10_000_000n,
-      cacheRead: 100_000n,
-      cacheWrite5m: 2_500_000n,
-      cacheWrite1h: 4_000_000n,
+      input: BigInt(2_000_000),
+      output: BigInt(10_000_000),
+      cacheRead: BigInt(100_000),
+      cacheWrite5m: BigInt(2_500_000),
+      cacheWrite1h: BigInt(4_000_000),
     });
     expect(price.sources).toEqual({
       input: "catalog",
@@ -100,8 +100,8 @@ describe("effectivePrice", () => {
     ) as PriceBook;
     const corrected: PriceBook = {
       ...reference,
-      input: 3_000_000n,
-      cacheWrite1h: 5_000_000n,
+      input: BigInt(3_000_000),
+      cacheWrite1h: BigInt(5_000_000),
     };
     const confirmation = confirmationOf(COST, OVERRIDE, {
       source: "admin",
@@ -116,9 +116,9 @@ describe("effectivePrice", () => {
     });
 
     expect(price.status).toBe("confirmed");
-    expect(price.book?.input).toBe(3_000_000n);
-    expect(price.book?.output).toBe(10_000_000n);
-    expect(price.book?.cacheWrite1h).toBe(5_000_000n);
+    expect(price.book?.input).toBe(BigInt(3_000_000));
+    expect(price.book?.output).toBe(BigInt(10_000_000));
+    expect(price.book?.cacheWrite1h).toBe(BigInt(5_000_000));
     expect(price.sources).toMatchObject({
       input: "admin",
       output: "catalog",
@@ -130,11 +130,11 @@ describe("effectivePrice", () => {
   it("prefers the override to the catalog for the 1-hour cache write", () => {
     const price = effectivePrice({
       cost: COST,
-      override: { ...OVERRIDE, cacheWrite1h: 6_000_000n },
+      override: { ...OVERRIDE, cacheWrite1h: BigInt(6_000_000) },
       confirmation: null,
     });
 
-    expect(price.book?.cacheWrite1h).toBe(6_000_000n);
+    expect(price.book?.cacheWrite1h).toBe(BigInt(6_000_000));
     expect(price.sources?.cacheWrite1h).toBe("override");
   });
 
@@ -162,9 +162,9 @@ describe("effectivePrice", () => {
     });
 
     expect(price.status).toBe("stale");
-    expect(price.book?.input).toBe(2_000_000n);
-    expect(price.reference.book?.input).toBe(2_200_000n);
-    expect(price.confirmation?.book.input).toBe(2_000_000n);
+    expect(price.book?.input).toBe(BigInt(2_000_000));
+    expect(price.reference.book?.input).toBe(BigInt(2_200_000));
+    expect(price.confirmation?.book.input).toBe(BigInt(2_000_000));
   });
 
   // #549-T05
@@ -191,7 +191,7 @@ describe("effectivePrice", () => {
 
     const price = effectivePrice({
       cost: COST,
-      override: { ...OVERRIDE, cacheWrite1h: 4_500_000n },
+      override: { ...OVERRIDE, cacheWrite1h: BigInt(4_500_000) },
       confirmation,
     });
 
@@ -213,7 +213,7 @@ describe("effectivePrice", () => {
     const reference = priceBookFromCatalog(COST, undefined) as PriceBook;
     const confirmation = confirmationOf(COST, undefined, {
       source: "admin",
-      book: { ...reference, input: 3_000_000n },
+      book: { ...reference, input: BigInt(3_000_000) },
       reason: "Invoice.",
     });
 
@@ -224,7 +224,7 @@ describe("effectivePrice", () => {
     });
 
     expect(price.status).toBe("stale");
-    expect(price.book?.input).toBe(3_000_000n);
+    expect(price.book?.input).toBe(BigInt(3_000_000));
   });
 
   // #549-T02
@@ -274,9 +274,12 @@ describe("effectivePrice", () => {
 describe("referenceHash", () => {
   // #549-T04
   it("is one value for equal books and another for any change, and for no book", () => {
-    const a = priceBookFromCatalog(COST, 4_000_000n);
-    const b = priceBookFromCatalog({ ...COST }, 4_000_000n);
-    const c = priceBookFromCatalog({ ...COST, output: "10.5" }, 4_000_000n);
+    const a = priceBookFromCatalog(COST, BigInt(4_000_000));
+    const b = priceBookFromCatalog({ ...COST }, BigInt(4_000_000));
+    const c = priceBookFromCatalog(
+      { ...COST, output: "10.5" },
+      BigInt(4_000_000),
+    );
 
     expect(referenceHash(a)).toBe(referenceHash(b));
     expect(referenceHash(a)).not.toBe(referenceHash(c));

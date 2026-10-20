@@ -218,7 +218,7 @@ describe.each(MODELS_DEV_ENGINES)(
         async () => {
           const { confirmations } = await setup();
           const first = await confirmations.append(confirm(), T1);
-          const corrected = { ...REFERENCE, input: 700_000n };
+          const corrected = { ...REFERENCE, input: BigInt(700_000) };
 
           const second = await confirmations.append(
             confirm({
@@ -239,7 +239,7 @@ describe.each(MODELS_DEV_ENGINES)(
           );
           expect(history.map((row) => row.id)).toEqual([second.id, first.id]);
           expect(history[1]?.book).toEqual(REFERENCE);
-          expect(history[0]?.book.input).toBe(700_000n);
+          expect(history[0]?.book.input).toBe(BigInt(700_000));
           expect(history[0]?.reason).toBe("Invoice of October.");
         },
       );
@@ -251,7 +251,7 @@ describe.each(MODELS_DEV_ENGINES)(
         const latest = await confirmations.append(
           confirm({
             source: "admin",
-            book: { ...REFERENCE, output: 2_000_000n },
+            book: { ...REFERENCE, output: BigInt(2_000_000) },
             reason: "x",
           }),
           T2,

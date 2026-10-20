@@ -7,7 +7,9 @@
 // charge nobody confirmed. Client safe.
 
 /** USD 100,000 per million tokens: far above any real price, the bound `parse.ts` puts on a catalog price too. */
-export const MAX_PRICE_MICRO_USD_PER_MTOK = 100_000_000_000n;
+const MICRO = BigInt(1_000_000);
+
+export const MAX_PRICE_MICRO_USD_PER_MTOK = BigInt(100_000) * MICRO;
 
 const DECIMAL = /^(\d{1,9})(?:\.(\d{1,12}))?$/;
 
@@ -20,14 +22,14 @@ export function usdPerMTokToMicroUsd(text: string): bigint | null {
   // Beyond the sixth decimal only zeros are the same number.
   if (/[^0]/.test(fraction.slice(6))) return null;
   const micro =
-    BigInt(whole) * 1_000_000n + BigInt(fraction.slice(0, 6).padEnd(6, "0"));
+    BigInt(whole) * MICRO + BigInt(fraction.slice(0, 6).padEnd(6, "0"));
   return micro > MAX_PRICE_MICRO_USD_PER_MTOK ? null : micro;
 }
 
 /** Micro-USD per million tokens as the shortest exact decimal text of USD per million tokens. */
 export function microUsdPerMTokToUsd(value: bigint): string {
-  const whole = value / 1_000_000n;
-  const fraction = (value % 1_000_000n)
+  const whole = value / MICRO;
+  const fraction = (value % MICRO)
     .toString()
     .padStart(6, "0")
     .replace(/0+$/, "");

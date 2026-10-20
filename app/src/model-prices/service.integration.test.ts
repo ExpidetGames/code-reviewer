@@ -453,7 +453,7 @@ describe.each(MODELS_DEV_ENGINES)("the model prices on $name", (engine) => {
           "claude-sonnet-5-5",
         );
         expect(history.map((row) => row.source)).toEqual(["admin", "catalog"]);
-        expect(history[1]?.book.input).toBe(2_000_000n);
+        expect(history[1]?.book.input).toBe(BigInt(2_000_000));
       },
     );
 
@@ -794,7 +794,7 @@ describe.each(MODELS_DEV_ENGINES)("the model prices on $name", (engine) => {
           "claude-sonnet-5-5",
         );
         expect(open).toMatchObject({ selectable: true });
-        expect(open.selectable && open.book.output).toBe(10_000_000n);
+        expect(open.selectable && open.book.output).toBe(BigInt(10_000_000));
         await t.service.setEnabled(ADMIN, { ...SONNET, enabled: false });
         expect(
           await t.service.availability("anthropic", "claude-sonnet-5-5"),
