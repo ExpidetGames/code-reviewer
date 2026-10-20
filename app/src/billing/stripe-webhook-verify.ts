@@ -92,7 +92,8 @@ export function verifyStripeSignature(input: {
   if (!matched) return { ok: false, code: "signature_mismatch" };
 
   const ageSeconds = input.now.getTime() / 1000 - parsed.timestamp;
-  if (Math.abs(ageSeconds) > tolerance)
+  // Written so that a `NaN` age (an invalid `now`) is refused: `NaN > tolerance` would be false.
+  if (!(Math.abs(ageSeconds) <= tolerance))
     return { ok: false, code: "timestamp_out_of_tolerance" };
   return { ok: true, timestamp: parsed.timestamp };
 }

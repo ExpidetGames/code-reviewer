@@ -1,12 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { createHmac } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { createHmac, timingSafeEqual } from "node:crypto";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   STRIPE_SIGNATURE_ERROR_CODES,
   STRIPE_SIGNATURE_TOLERANCE_SECONDS,
   verifyStripeSignature,
 } from "./stripe-webhook-verify.ts";
+
+// The real function, wrapped so that the calls can be counted.
+vi.mock("node:crypto", async (importOriginal) => {
+  const original = await importOriginal<typeof import("node:crypto")>();
+  return { ...original, timingSafeEqual: vi.fn(original.timingSafeEqual) };
+});
 
 const SECRET = "whsec_test_secret_value";
 const BODY = '{"id":"evt_test_1","object":"event","type":"charge.refunded"}';
@@ -41,6 +47,8 @@ function verify(
 }
 
 describe("verifyStripeSignature", () => {
+  afterEach(() => vi.mocked(timingSafeEqual).mockClear());
+
   // #500-T07
   it("accepts a correctly signed body", () => {
     expect(v1Of(T, BODY)).toBe(KNOWN_V1);
@@ -241,6 +249,55 @@ describe("verifyStripeSignature", () => {
     const b = verify(`t=${T},v1=${bad},v1=${bad},v1=${KNOWN_V1}`);
     expect(a).toEqual(b);
     expect(a).toEqual({ ok: true, timestamp: T });
+  });
+
+  // #500-T14
+  it("refuses an invalid `now` instead of skipping the age check", () => {
+    // `Math.abs(NaN) > tolerance` is false: an invalid clock must not turn a stale message into a fresh one.
+    const header = `t=${T},v1=${KNOWN_V1}`;
+    for (const now of [
+      new Date(Number.NaN),
+      new Date("not a date"),
+      at(T + 100_000),
+    ])
+      expect(verify(header, { now })).toEqual({
+        ok: false,
+        code: "timestamp_out_of_tolerance",
+      });
+  });
+
+  // #500-T15
+  it("does not take a v0 signature for a v1", () => {
+    const v0 = v1Of(T, BODY);
+    expect(verify(`t=${T},v0=${v0}`)).toEqual({
+      ok: false,
+      code: "signature_malformed",
+    });
+    expect(verify(`t=${T},v1=${OTHER_SECRET_V1},v0=${v0}`)).toEqual({
+      ok: false,
+      code: "signature_mismatch",
+    });
+  });
+
+  // #500-T15
+  it("refuses a v1 that is longer than a SHA-256 digest, whatever its first 64 characters are", () => {
+    const header = (v1: string) => `t=${T},v1=${v1}`;
+    for (const v1 of [`${KNOWN_V1}ab`, `ab${KNOWN_V1}`])
+      expect(verify(header(v1))).toEqual({
+        ok: false,
+        code: "signature_malformed",
+      });
+  });
+
+  // #500-T15
+  it("compares each v1 candidate with timingSafeEqual, and every one of them", () => {
+    const spy = vi.mocked(timingSafeEqual);
+    const bad = "2".repeat(64);
+    verify(`t=${T},v1=${KNOWN_V1},v1=${bad},v1=${bad}`);
+    expect(spy).toHaveBeenCalledTimes(3);
+    spy.mockClear();
+    verify(`t=${T},v1=${bad},v1=${bad}`);
+    expect(spy).toHaveBeenCalledTimes(2);
   });
 
   // #500-T08
