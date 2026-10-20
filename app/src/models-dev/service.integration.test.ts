@@ -9,6 +9,7 @@ import {
   startModelsDevFake,
   type ModelsDevFake,
 } from "../../../fakes/models-dev/server.ts";
+import { createModelEnablementsRepository } from "../db/repositories/model-enablements-repository.ts";
 import { createModelsDevRepository } from "../db/repositories/models-dev-repository.ts";
 import { MODELS_DEV_ENGINES } from "../test-support/models-dev-engines.ts";
 import type { FetchLike } from "./fetch.ts";
@@ -919,6 +920,61 @@ describe.each(MODELS_DEV_ENGINES)("the models.dev fetch on $name", (engine) => {
         trustedUrl: "https://api.deepseek.moved.example/v1",
         pendingUrl: null,
       });
+    },
+  );
+
+  // #549-T13
+  it_(
+    "refuses a fetch that would unlist most of the models an admin enabled, though they are few of all, until an admin accepts it",
+    async () => {
+      const t = await setup();
+      const big = t.body();
+      for (let index = 0; index < 60; index++)
+        big.deepseek!.models[`filler-${String(index)}`] = {
+          ...big.deepseek!.models["deepseek-v4-pro"],
+          id: `filler-${String(index)}`,
+          name: `Filler ${String(index)}`,
+        };
+      t.fake.respondWith(big);
+      await t.service.refresh();
+      const enablements = createModelEnablementsRepository(t.db);
+      for (const id of ["filler-0", "filler-1", "filler-2", "filler-3"])
+        await enablements.set(
+          {
+            providerId: "deepseek",
+            modelId: id,
+            enabled: true,
+            changedBy: "admin-1",
+          },
+          T1,
+        );
+      t.advance(DAY);
+      const smaller = t.body();
+      for (let index = 4; index < 60; index++)
+        smaller.deepseek!.models[`filler-${String(index)}`] =
+          big.deepseek!.models[`filler-${String(index)}`]!;
+      t.fake.respondWith(smaller);
+
+      const refused = await t.service.refresh();
+
+      expect(refused).toEqual({
+        status: "failed",
+        code: "models_dev_guard_enabled_unlisted",
+      });
+      expect(
+        (await t.repository.getModel("deepseek", "filler-0"))?.unlistedAt,
+      ).toBeNull();
+      expect(await t.repository.fetchState()).toMatchObject({
+        lastStatus: "failed",
+        lastError: "models_dev_guard_enabled_unlisted",
+      });
+
+      const accepted = await t.service.refresh({ acceptLargeChange: true });
+
+      expect(accepted).toMatchObject({ status: "applied" });
+      expect(
+        (await t.repository.getModel("deepseek", "filler-0"))?.unlistedAt,
+      ).not.toBeNull();
     },
   );
 

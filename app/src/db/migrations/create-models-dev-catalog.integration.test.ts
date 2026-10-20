@@ -17,6 +17,8 @@ const NEW_TABLES = [
   "models_dev_fetch_state",
 ];
 
+const LATER_TABLES = ["model_enablements", "model_price_confirmations"];
+
 const beforeThisMigration: MigrationProvider = {
   async getMigrations() {
     return Object.fromEntries(
@@ -34,7 +36,9 @@ async function rowsOfEveryTable(
 ): Promise<Record<string, unknown[]>> {
   const result: Record<string, unknown[]> = {};
   for (const table of await db.introspection.getTables()) {
-    if (NEW_TABLES.includes(table.name)) continue;
+    // Tables of later migrations are not this migration's to compare.
+    if (NEW_TABLES.includes(table.name) || LATER_TABLES.includes(table.name))
+      continue;
     const { rows } =
       await sql<unknown>`select * from ${sql.table(table.name)}`.execute(db);
     result[table.name] = rows;

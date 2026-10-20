@@ -775,6 +775,43 @@ export interface ModelsDevFetchStateTable {
 }
 
 /**
+ * Whether the admin enabled a catalog model for the managed key (#549). One row per model, changed in place; no row means
+ * the admin has not decided ("new"). Instance level.
+ */
+export interface ModelEnablementsTable {
+  provider_id: string;
+  model_id: string;
+  /** 0 or 1. */
+  enabled: number;
+  /** The user who made the last change, or null. No foreign key: the decision stays when a user is deleted. */
+  changed_by: string | null;
+  changed_at: string;
+}
+
+/**
+ * What an admin confirmed as a catalog model's price (#549). Append-only (the database refuses an update and a delete);
+ * the latest row of a model counts. Instance level.
+ */
+export interface ModelPriceConfirmationsTable {
+  /** The order rows were written in (identity / rowid): the primary key, never set by the app. */
+  seq: Generated<number>;
+  provider_id: string;
+  model_id: string;
+  /** `catalog` (confirmed as shown) or `admin` (corrected, with a reason). */
+  source: string;
+  /** JSON text of the confirmed price book (src/model-prices/price-book.ts): amounts are decimal strings of micro-USD per million tokens. */
+  price: string;
+  /** JSON text of the price models.dev and the override file stated at that time; null when they stated none. */
+  reference_price: string | null;
+  /** SHA-256 hex of the reference; the price is stale once today's reference hashes differently. */
+  reference_hash: string;
+  reason: string | null;
+  /** The user who confirmed, or null. No foreign key: the history stays when a user is deleted. */
+  confirmed_by: string | null;
+  confirmed_at: string;
+}
+
+/**
  * One thing that happened to a workspace's money (src/billing/README.md, ADR 0006, 2.7; #495). Append-only: the database
  * refuses an update and a delete. Amounts are micro-USD integers, signed. Postgres hands a `bigint` back as a string, so
  * the repository converts them with `Number`; the type is the application's.
@@ -893,6 +930,8 @@ export interface Database {
   models_dev_providers: ModelsDevProvidersTable;
   models_dev_models: ModelsDevModelsTable;
   models_dev_fetch_state: ModelsDevFetchStateTable;
+  model_enablements: ModelEnablementsTable;
+  model_price_confirmations: ModelPriceConfirmationsTable;
   billing_journal_entries: BillingJournalEntriesTable;
   billing_balances: BillingBalancesTable;
   billing_topup_intents: BillingTopupIntentsTable;

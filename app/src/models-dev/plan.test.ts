@@ -10,6 +10,7 @@ import type {
   ReducedProvider,
 } from "./parse.ts";
 import {
+  ENABLED_UNLISTED_MIN_COUNT,
   GROWTH_LIMIT,
   UNLISTED_SHARE_LIMIT,
   URL_CHANGED_SHARE_LIMIT,
@@ -401,6 +402,98 @@ describe("the fetch guard", () => {
       unlisted: 0,
       listed: 18,
     });
+  });
+});
+
+describe("the fetch guard and the models an admin enabled", () => {
+  const hundred = Array.from({ length: 100 }, (_unused, i) =>
+    reducedModel(`m${String(i)}`),
+  );
+  const stored = applied(
+    EMPTY,
+    planCatalog({
+      parsed: parsed(hundred),
+      stored: EMPTY,
+      urlChecks: okUrl(),
+      now: T1,
+    }).write,
+  );
+  const enabledOf = (from: number, to: number) =>
+    hundred
+      .slice(from, to)
+      .map((model) => ({ providerId: "deepseek", modelId: model.id }));
+  /** The fetch of the next day without the models at these positions. */
+  const without = (positions: number[]) =>
+    parsed(hundred.filter((_model, index) => !positions.includes(index)));
+  const plan = (positions: number[], enabled?: ReturnType<typeof enabledOf>) =>
+    planCatalog({
+      parsed: without(positions),
+      stored,
+      urlChecks: okUrl(),
+      now: T2,
+      ...(enabled === undefined ? {} : { enabled }),
+    });
+
+  // #549-T13
+  it("trips when the enabled models are the ones that vanish, even if they are a few of all", () => {
+    expect(ENABLED_UNLISTED_MIN_COUNT).toBe(3);
+
+    const result = plan([0, 1, 2], enabledOf(0, 10));
+
+    expect(result.guard).toEqual({
+      tripped: true,
+      reasons: ["enabled_unlisted_share"],
+      unlisted: 3,
+      listed: 100,
+    });
+  });
+
+  // #549-T13
+  it("does not trip when the same fetch is not about enabled models", () => {
+    expect(plan([50, 51, 52], enabledOf(0, 10)).guard.tripped).toBe(false);
+  });
+
+  // #549-T13
+  it("does not trip on a model or two of the enabled ones, which is the normal case of a provider retiring a model", () => {
+    expect(plan([0, 1], enabledOf(0, 10)).guard.tripped).toBe(false);
+  });
+
+  // #549-T13
+  it("does not trip when the enabled ones that vanish are at most a tenth of them", () => {
+    expect(plan([0, 1, 2], enabledOf(0, 40)).guard.tripped).toBe(false);
+    expect(plan([0, 1, 2, 3, 4], enabledOf(0, 40)).guard.tripped).toBe(true);
+  });
+
+  // #549-T13
+  it("is the guard of before when nobody enabled a model", () => {
+    expect(plan([0, 1, 2]).guard.tripped).toBe(false);
+    expect(plan([0, 1, 2], []).guard.tripped).toBe(false);
+  });
+
+  // #549-T13
+  it("does not count a model that was unlisted already, or an enabled model that is not in the catalog", () => {
+    const gone = applied(
+      stored,
+      planCatalog({
+        parsed: without([0, 1, 2]),
+        stored,
+        urlChecks: okUrl(),
+        now: T2,
+      }).write,
+    );
+
+    const result = planCatalog({
+      parsed: without([0, 1, 2]),
+      stored: gone,
+      urlChecks: okUrl(),
+      now: T3,
+      enabled: [
+        ...enabledOf(0, 10),
+        { providerId: "deepseek", modelId: "never-listed" },
+      ],
+    });
+
+    expect(result.guard.tripped).toBe(false);
   });
 });
 

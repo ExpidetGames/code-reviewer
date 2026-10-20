@@ -62,11 +62,22 @@ export type ModelsDevRepository = {
   listProviders(options?: { forUpdate?: boolean }): Promise<StoredProvider[]>;
   /** Every model, listed or not. */
   listModels(): Promise<StoredModel[]>;
-  getProvider(id: string): Promise<StoredProvider | undefined>;
+  /**
+   * One provider. `forUpdate` locks the row until the transaction ends on Postgres, as for `listProviders`: a write to a
+   * model of the provider that must not run beside a fetch (an admin's price confirmation, #549) takes this lock first, so
+   * that it waits for a fetch that is writing and then reads what the fetch wrote. On SQLite every transaction begins
+   * with `begin immediate`, so the option does nothing.
+   */
+  getProvider(
+    id: string,
+    options?: { forUpdate?: boolean },
+  ): Promise<StoredProvider | undefined>;
   getModel(
     providerId: string,
     modelId: string,
   ): Promise<StoredModel | undefined>;
+  /** When the first model was seen, i.e. the day of the first fetch; null while the catalog is empty. */
+  earliestModelSeenAt(): Promise<string | null>;
   fetchState(): Promise<FetchState | undefined>;
   /**
    * Writes the given rows (insert, or replace all but `first_seen_at`) in one transaction and, when `success` is given,
@@ -266,12 +277,14 @@ export function createModelsDevRepository(
       return rows.map(modelOf);
     },
 
-    async getProvider(id) {
-      const row = await db
+    async getProvider(id, options) {
+      let query = db
         .selectFrom("models_dev_providers")
         .selectAll()
-        .where("provider_id", "=", id)
-        .executeTakeFirst();
+        .where("provider_id", "=", id);
+      if (options?.forUpdate === true && databaseDriver(db) === "postgres")
+        query = query.forUpdate();
+      const row = await query.executeTakeFirst();
       return row === undefined ? undefined : providerOf(row);
     },
 
@@ -283,6 +296,14 @@ export function createModelsDevRepository(
         .where("model_id", "=", modelId)
         .executeTakeFirst();
       return row === undefined ? undefined : modelOf(row);
+    },
+
+    async earliestModelSeenAt() {
+      const row = await db
+        .selectFrom("models_dev_models")
+        .select((builder) => builder.fn.min("first_seen_at").as("first"))
+        .executeTakeFirst();
+      return row?.first ?? null;
     },
 
     async fetchState() {

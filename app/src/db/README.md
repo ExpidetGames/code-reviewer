@@ -404,6 +404,27 @@ reads the provider rows `FOR UPDATE` on Postgres (`listProviders({ forUpdate: tr
 them, so a guarded update of one provider by an admin (#554) is not written over; on SQLite every transaction begins
 `begin immediate`.
 
+### Model enablement and price confirmation
+
+Migration `20261020090000_create_model_decisions` (#549; epic #420). It adds two empty tables and touches no existing row, so
+an app of the previous release on the same database is unaffected. Instance level (`model-enablements-repository.ts`,
+`model-price-confirmations-repository.ts`, `src/model-prices/README.md`): the admin's decisions about models of the
+models.dev catalog, not owned by a workspace, and **a confirmation is never changed or deleted**.
+
+- `model_enablements` (`(provider_id, model_id)` primary key and foreign key to `models_dev_models`; `enabled` 0 or 1 with a
+  check; `changed_by`, `changed_at`): whether the admin enabled the model for the managed key. One row per model, changed in
+  place. No row means the admin has not decided (the model is "new" while it is also newer than the first fetch); the admin
+  can take a decision back (`clear`), which puts the model back to that state.
+- `model_price_confirmations` (`seq` identity / rowid, the order rows were written in; `(provider_id, model_id)` foreign key to
+  `models_dev_models`; `source` `catalog` / `admin`; `price` the confirmed price book and `reference_price` the price models.dev
+  and the override file stated at that time, both JSON text with amounts as decimal strings of whole micro-USD per million
+  tokens; `reference_hash` SHA-256 of the reference; `reason`; `confirmed_by`, `confirmed_at`): checks make a correction carry
+  a reason and a confirmation as shown carry a reference. The latest row of a model counts; the price is stale once today's
+  reference hashes differently, or when the stored hash is of another version than the current one (`v2:` prefix; the bare
+  digest of the first release is version 1 and counts as stale). A row whose JSON cannot be read back is reported as
+  unreadable (never as "no confirmation"), and a new confirmation repairs it. Triggers refuse an update, a delete and (Postgres) a truncate, like the billing journal.
+  `confirmed_by` and `changed_by` have no foreign key: the history stays as written when a user is deleted.
+
 ### Billing journal and balances
 
 Migration `20261019150000_create_billing_journal` (#495; epic #489, ADR 0006, 2.7). It adds two empty tables and touches no
@@ -571,6 +592,8 @@ Not scoped, each for a reason (the list is in `scoping.test.ts`):
 | `refusal-notices-sweep.ts`                                           | The notices of refused reviews that are due to be posted again (#281), for the cron sweep that serves the whole instance. It only reads the `pending` rows whose wait is over, and every answer carries `workspaceId`; the record itself goes through the scoped refusal notices repository                                                                                                                                                                                                                                      |
 | `catalog-repository.ts`                                              | The operator's model catalog (#425): instance configuration, not customer data; no workspace owns an entry. Its one read across workspaces is `countProjectsUsing`, one number per entry of how many projects use it (those that select it, and in a workspace on the operator's key those that fall back to it as the instance default; for the operator's "used by" and the confirmation when the model behind it changes); it returns no row, project or workspace. The member view selects only the columns a member may see |
 | `models-dev-repository.ts`                                           | The catalog read from models.dev (#548): the providers and models a job can use, and the state of the last fetch. Fetched at run time from a public source, so not customer data, and no workspace owns a row. It stores and reads whole rows, takes no workspace, returns none, and never deletes (a row that disappears upstream gets `unlisted_at`)                                                                                                                                                                           |
+| `model-enablements-repository.ts`                                    | Whether the admin enabled a catalog model for the managed key (#549): one row per model, changed in place, who and when of the last change. Instance configuration, not customer data; no workspace owns a row.                                                                                                                                                                                                                                                                                                                  |
+| `model-price-confirmations-repository.ts`                            | The append-only history of what an admin confirmed as a catalog model's price (#549); the latest row counts, the database refuses an update and a delete. Instance configuration, not customer data; no workspace owns a row.                                                                                                                                                                                                                                                                                                    |
 
 A signed-in user works in the workspace named by the address (`/w/<slug>`) and only in one they are a member
 of (`src/workspaces/README.md`); the repositories of members and invitations below follow the same rule,
