@@ -3,7 +3,7 @@
 "use client";
 // The "Other providers" card of the LLM access page (#555): the providers of the models.dev catalog a workspace on its own key may
 // use for Dynamic Review, searchable, each with the write-only key form of the generic adapter (save, test). One key per provider,
-// stored and revealed like the key of OpenRouter or Anthropic; a key of one provider is never used for another. The list is
+// stored and revealed like the key of a registry provider; a key of one provider is never used for another. The list is
 // what the server offered: an excluded provider (cloud IAM) or one whose address is blocked is not in it. A member who may not
 // manage keys is told which providers have one.
 import { useId, useMemo, useState } from "react";
