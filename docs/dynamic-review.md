@@ -369,7 +369,8 @@ settled:
 | a complete answer with usage and a price | the provider's usage and the price (`settle_call`; a usage above the reservation is **booked first**, then the run stops) |
 | the provider refused with a 4xx (not 408), a 429, or a **500, 502, 503 or 529 that is only a status** (all of: the status line came within 15 s of the request, the content type is not `text/event-stream`, and the bounded body, read whole, states no usage object), a redirect, a connection that never opened | unbilled: the reservation is released (`settle_unbilled`) |
 | 408, 504, 524, a status below 200, any other status, a 500/502/503/529 that fails one of the three conditions, every error **after** the first byte of a stream or body (a cut stream, an error event in a 200), a timeout after the request went out, an encoded body | **unknown**: booked at its **worst case**, not at its expected cost (`settle_unknown`), counted in `unknown_calls`, and for a managed key the run ends (`dynamic_accounting_failed`) |
-| a complete answer without a readable usage or a price | the call is unknown, and the run ends for every key (the own-key relaxation is #553) |
+| a complete answer without a readable usage (none stated, a bad value, a stream that stopped before its usage event) or a price | the call is unknown, and the run ends for every key (the own-key relaxation is #553) |
+| a usage that lists a field nobody can price (`unknown_fields`: an unknown field that holds something, `server_tool_use`, audio, a `service_tier` other than the standard one, a second choice) or that cannot be priced from the book | **unknown** as above, for a managed key (`unknown_cost_ends_run`); the names of the fields (never a value) are logged |
 
 The worst case of a call is the bytes of its request, each as a token at the dearest input price (the byte count bounds
 the tokens), plus the whole output cap at the output price (`BudgetLedger.worst_case_cost`). An engine that can make
@@ -392,7 +393,7 @@ turn any call into an unknown (or free) one by hanging up after the first event,
 worst case and ends a managed run. If the usage still cannot be read, the call is unknown as above.
 
 **Relay and tee.** The answer is passed through byte for byte: a stream one whole event at a time as it arrives
-(`sse.py`), while the usage tap (`usage.py`, the minimal parser per family; #551 hardens them) reads the same bytes.
+(`sse.py`), while the usage tap (`usage.py`, hardened in #551, see "The usage parsers" below) reads the same bytes.
 The bound of a stream is the larger of `max_stream_bytes` (1 MiB) and **256 bytes per output token the request asks
 for**, up to 8 MB for the 32000-token cap: an event per token costs about 100 bytes of framing. An answer that is not
 an SSE stream is a document: it is read whole up to `max_response_bytes` (256 KiB), settled, then sent with its length
@@ -422,6 +423,56 @@ handler after the normal path books nothing twice), the engine's connection is d
 copy that the usage could not be accounted for. An event nested deeper than the JSON parser goes is unreadable, not a
 crash.
 
+**The usage parsers (#551).** One parser per family behind the tap, each for a whole document and for a stream,
+each returning the same typed `CallUsage` (`call_usage.py`: prompt, completion, cache read, cache write 5-minute and
+1-hour, reasoning, the charge the provider states, `unknown_fields`, `complete`). The prompt counts the cache and the
+completion counts the reasoning. Where the usage sits: Chat, the last data chunk with `usage` (OpenRouter's `cost` and
+`cost_details`, DeepSeek's `prompt_cache_hit_tokens` and `prompt_cache_miss_tokens`); Responses, `response.completed`;
+Messages, `message_start.usage` plus `message_delta.usage` (the later statement of a field wins; the output of
+`message_start` is a placeholder, so a stream that stops without a `message_delta` that states `output_tokens` is not
+complete); Google, `usageMetadata` of the last chunk or cumulative on every chunk (the last one, never a sum, and it
+must be at or after the chunk that finishes). Only the structure of the answer counts: the usage is read from that one
+place and never from a value the model wrote (text and tool arguments are JSON strings or sit below a key no usage is
+read from), and an event of a kind that carries no usage is not looked at for one (`#551-T13`).
+
+Fail closed, all of it (`usage_normalize.py`):
+
+- A count the family must state (prompt, completion) that is missing, negative, boolean, fractional, textual or above
+  10^12 makes the usage unreadable: no usage, never zero. A count the provider may leave out as a zero (cache, reasoning)
+  is zero when absent; a bad one, one above what it is part of (a cache above the prompt, reasoning above the
+  completion) or a split that disagrees with its total (the Messages `cache_creation` against
+  `cache_creation_input_tokens`, DeepSeek's hit and miss against the prompt) puts the field in `unknown_fields`.
+- A field the parser does not know whose value holds something (anything but null, false, zero, empty text, list or
+  object) is in `unknown_fields`: it could carry a price. A zero of a kind we do not price costs nothing, so OpenAI's
+  `audio_tokens: 0` is harmless. Known and harmless: totals, OpenRouter's `cost_details`, a `service_tier` of
+  `standard` or `default` (any other, priority, flex, batch, is unknown), the legacy cost rule's Anthropic fields
+  (`speed`, `inference_geo`, `server_tool_use` and `iterations` when empty or zero, as in `anthropic_cost.py`), and
+  Google's per-modality breakdowns when only text carries tokens. Names are logged (`usage_report.py`), values never.
+- More than one choice (`choices[1]`, a second candidate, an `index` that is not 0) is a usage the proxy cannot
+  attribute to the request: unknown, never summed.
+- `error: null` (some providers send it in every chunk) is not an error; an object, or text or a count that says
+  something, is. A Chat choice that finishes with `error` is an error.
+- An answer that was cut, failed, or never stated its usage is `complete = false` or has no usage, and the call is booked
+  at its worst case (the ledger's `unknown_calls`), never free.
+
+Pricing is `pricing.py`, from a price book in the form of #549 (`price_book.py` reads the JSON that
+`service.availability` hands out, as strictly as the app does: `fakes/fixtures/price-books.json` is read by both
+readers' tests). Prices are whole micro-USD per million tokens as Python ints, the cost is an exact `Decimal` (counts
+times a price is a whole number of 10^-12 USD; no float and no rounding), and a call that needs a price the book lacks
+has no cost. A tier applies to a prompt strictly above its size with that level's own prices (the older
+`context_over_200k` is the tier of 200,000); reasoning tokens cost the reasoning price, or the output price when there
+is none; a cache read without a read price costs the input price (an upper bound), a cache write without a price of
+its kind (5-minute or 1-hour; a tier states no 1-hour price) has no cost. A charge the provider states is the reference
+and is never recomputed; if the book can price the same call and the two differ by more than 1 % (and 1 micro-USD) it is
+counted as `price_drift` (`PassthroughProxy.price_drift_calls`, logged as a count), and a stated zero for a call that
+used tokens is not believed when the book prices it above zero. Until the claim carries the confirmed book (#553) the
+proxy reads its per-job `UnitCosts` as a one-level book (a price finer than a micro-USD is rounded up, never down;
+`cache_write_1h_usd_per_mtok` is new). Every shape of the book is table-tested against an independent calculator
+(`runner/tests/usage_calc.py`).
+
+What a real answer may still show differently is **unconfirmed** and marked in the code (`UNCONFIRMED`) and as item L14
+of the live checklist in `docs/spike/544-passthrough.md`.
+
 **Stable codes the caller branches on.** A provider status maps by the table of the legacy path (`llm_auth`,
 `llm_rate_limit`, `llm_unavailable`, `llm_timeout`, `llm_context_length_exceeded`, `llm_bad_request`); a 404, and the
 engine's own "500 `UnknownError` with no call upstream" for a model its config does not offer
@@ -433,8 +484,9 @@ engine gives up. Everything else ends the run with its code, the text of the pro
 config (#564 has the entry reader; `build_native_engine_config`, which asserts the provider block against the entry, and
 `target_from_entry` are the two joints; wiring and the claim contract test T13 come as a separate step), the audit of
 tool results in a request (it is chat-shaped; the adapter still counts the tool calls the engine reports), how a final
-call is told to answer without rewriting the request (#552), usage parsers hardened against captured answers (#551)
-and the cost policy for an own key (#553).
+call is told to answer without rewriting the request (#552), the live capture that replaces the assumed usage shapes
+(L14) and the cost policy for an own key (#553: how a managed and an own key treat `unknown_fields`, `price_drift` and a
+call without usage; reading the confirmed price book from the claim).
 
 ## The model
 

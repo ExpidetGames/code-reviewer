@@ -1,48 +1,117 @@
 # SPDX-License-Identifier: Apache-2.0
 
-"""What a call cost, from its usage and the prices of the job (#550).
+"""What a call cost, from its usage and a price book (#550, #551).
 
-The prices are what the job brings (`UnitCosts`: input, output and, when it has them, the cache read
-and write prices); the catalog's own prices come with #549 and #553. A charge the provider states
-(OpenRouter's `usage.cost`) is the cost and is never recomputed. Otherwise the cost is exact decimal
-arithmetic over the counts, and a call that cannot be priced exactly has no cost (None, which stops
-the run: it is never read as zero and never priced lower than it may have been).
+The prices are a price book (`price_book.py`, the form of #549: whole micro-USD per million tokens,
+a reasoning price, the two cache write lifetimes, tiers by prompt size) or, until the claim carries
+the confirmed book (#553), the per-job `UnitCosts` read as a one-level book. The cost is exact
+integer arithmetic: every count times a price in micro-USD per million tokens is a whole number of
+10^-12 USD, so the USD amount is an exact `Decimal`, never a float and never rounded.
+
+A call that cannot be priced exactly has no cost (None), which stops the run: it is never read as
+zero and never priced lower than it may have been. That is a usage with fields nobody could price
+(`unknown_fields`), one that is not `complete`, counts that cannot be true (a cache above the
+prompt, reasoning above the completion), a cache write whose lifetime the level has no price for,
+and a prompt whose size two tiers of one size price differently.
+
+- A **tier** applies to a prompt strictly above its size (`PriceBook.level_for`), with that
+  level's own prices: a price the tier leaves out is not the base price.
+- **Reasoning** tokens are part of the completion and cost the level's reasoning price, or its
+  output price when it states none.
+- A **cache read** without a read price costs the input price (never less than it is); a **cache
+  write** without a price of its kind has no cost.
+- A **charge the provider states** (OpenRouter's `usage.cost`) is the reference and is never
+  recomputed. When the book can price the same call and the two differ by more than
+  `DRIFT_RELATIVE` (and `DRIFT_ABSOLUTE` USD), the call is a `price_drift` (the proxy counts them,
+  counts only). A stated charge of zero for a call that used tokens is not sane when the book
+  prices it above zero: the book's price is booked instead (and it is a drift), because a zero the
+  provider "stated" must never make a call free.
 """
 
+from dataclasses import dataclass
 from decimal import Context, Decimal
+from typing import Final
 
 from code_reviewer_runner.dynamic_review.budget import UnitCosts
-from code_reviewer_runner.dynamic_review.passthrough.usage import CallUsage
+from code_reviewer_runner.dynamic_review.passthrough.call_usage import CallUsage
+from code_reviewer_runner.dynamic_review.passthrough.price_book import (
+    PriceBook,
+    PriceLevel,
+    book_from_unit_costs,
+)
 
-_EXACT = Context(prec=100)
-_MILLION = Decimal(1_000_000)
+# Counts times micro-USD per million tokens: a whole number of 10^-12 USD.
+_PICO: Final = -12
+_EXACT: Final = Context(prec=100)
+# A stated charge within 1 % of the book's price, or within a micro-USD of it, is no drift. The
+# tolerance is a guess until a live capture shows how far OpenRouter's charge strays (live L14).
+DRIFT_RELATIVE: Final = Decimal("0.01")
+DRIFT_ABSOLUTE: Final = Decimal("0.000001")
 
 
-def call_cost(usage: CallUsage, prices: UnitCosts) -> Decimal | None:
-    if usage.stated_cost is not None:
-        return usage.stated_cost
-    read, written = usage.cache_read, usage.cache_write
-    if read + written > usage.prompt_tokens:
-        # Counts that cannot be true are no cache signal: the whole prompt is plain input.
-        read = written = 0
-    if written > 0 and prices.cache_write_usd_per_mtok is None:
-        return None
+@dataclass(frozen=True)
+class PricedCall:
+    cost: Decimal | None
+    # The provider's stated charge and the book's price disagree beyond the tolerance.
+    drift: bool = False
+
+
+def _book_cost(usage: CallUsage, level: PriceLevel) -> int | None:
+    """The price of the call at one level in 10^-12 USD, or None when it has no price there."""
+    read, w5, w1 = usage.cache_read, usage.cache_write_5m, usage.cache_write_1h
+    plain_input = usage.prompt_tokens - read - w5 - w1
+    plain_output = usage.completion_tokens - usage.reasoning_tokens
+    if min(plain_input, plain_output) < 0:
+        return None  # counts that cannot be true
     # A read without its own price is priced as input, which is never less than a read costs.
-    read_price = prices.cache_read_usd_per_mtok
-    total = _EXACT.multiply(
-        Decimal(usage.prompt_tokens - read - written), prices.input_usd_per_mtok
+    total = plain_input * level.input + read * (
+        level.input if level.cache_read is None else level.cache_read
     )
-    total = _EXACT.add(
-        total,
-        _EXACT.multiply(
-            Decimal(read), prices.input_usd_per_mtok if read_price is None else read_price
-        ),
-    )
-    if written > 0 and prices.cache_write_usd_per_mtok is not None:
-        total = _EXACT.add(
-            total, _EXACT.multiply(Decimal(written), prices.cache_write_usd_per_mtok)
-        )
-    total = _EXACT.add(
-        total, _EXACT.multiply(Decimal(usage.completion_tokens), prices.output_usd_per_mtok)
-    )
-    return _EXACT.divide(total, _MILLION)
+    for tokens, price in ((w5, level.cache_write_5m), (w1, level.cache_write_1h)):
+        if tokens == 0:
+            continue
+        if price is None:
+            return None
+        total += tokens * price
+    reasoning_price = level.output if level.reasoning is None else level.reasoning
+    return total + plain_output * level.output + usage.reasoning_tokens * reasoning_price
+
+
+def _usd(pico: int) -> Decimal:
+    return _EXACT.scaleb(Decimal(pico), _PICO)
+
+
+def book_price(usage: CallUsage, book: PriceBook) -> Decimal | None:
+    """What the book says the call costs, whatever the provider states; None when it has no
+    price."""
+    if usage.unknown_fields or not usage.complete:
+        return None
+    level = book.level_for(usage.prompt_tokens)
+    if level is None:
+        return None
+    pico = _book_cost(usage, level)
+    return None if pico is None else _usd(pico)
+
+
+def _drifts(stated: Decimal, expected: Decimal) -> bool:
+    allowed = max(_EXACT.multiply(expected, DRIFT_RELATIVE), DRIFT_ABSOLUTE)
+    return abs(_EXACT.subtract(stated, expected)) > allowed
+
+
+def price_call(usage: CallUsage, prices: PriceBook | UnitCosts) -> PricedCall:
+    book = prices if isinstance(prices, PriceBook) else book_from_unit_costs(prices)
+    if usage.unknown_fields or not usage.complete:
+        return PricedCall(None)
+    expected = book_price(usage, book)
+    stated = usage.stated_cost
+    if stated is None:
+        return PricedCall(expected)
+    if expected is None:
+        return PricedCall(stated)
+    if stated == 0 and expected > 0:
+        return PricedCall(expected, drift=True)
+    return PricedCall(stated, drift=_drifts(stated, expected))
+
+
+def call_cost(usage: CallUsage, prices: PriceBook | UnitCosts) -> Decimal | None:
+    return price_call(usage, prices).cost

@@ -237,6 +237,9 @@ class UnitCosts:
     output_usd_per_mtok: Decimal
     cache_read_usd_per_mtok: Decimal | None = None
     cache_write_usd_per_mtok: Decimal | None = None
+    # The 1-hour cache write (#551): the passthrough proxy prices the two write lifetimes apart. The
+    # reservation (`of_call`) does not read it: no request can ask for a 1-hour write.
+    cache_write_1h_usd_per_mtok: Decimal | None = None
 
     def of_call(
         self,

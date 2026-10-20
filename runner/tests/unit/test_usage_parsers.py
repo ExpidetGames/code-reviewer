@@ -197,8 +197,8 @@ def test_a_chat_stream_in_the_openrouter_form_states_the_charge_on_its_last_chun
     size: int,
 ) -> None:
     usage = {"prompt_tokens": 10, "completion_tokens": 5, "cost": 0.0012}
-    finish = {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}
-    last = {"choices": [], "usage": usage}
+    finish: dict[str, Any] = {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}
+    last: dict[str, Any] = {"choices": [], "usage": usage}
     data = sse((None, finish), (None, last), (None, "[DONE]"))
     got = assert_priceable(read_stream(CHAT, data, size=size))
     assert got == CallUsage(10, 5, stated_cost=Decimal("0.0012"))
@@ -212,7 +212,10 @@ def test_a_chat_stream_in_the_openrouter_form_states_the_charge_on_its_last_chun
 def test_google_takes_the_last_cumulative_usage_and_never_the_sum(size: int) -> None:
     result = read_stream(GOOGLE, fake_stream(GOOGLE, 4, cumulative_usage=True), size=size)
     assert assert_priceable(result) == usage_expected(4, GOOGLE)
-    first = {"candidates": [{"content": {"parts": []}}], "usageMetadata": _g(100, 5)}
+    first: dict[str, Any] = {
+        "candidates": [{"content": {"parts": []}}],
+        "usageMetadata": _g(100, 5),
+    }
     last = {"candidates": [{"finishReason": "STOP"}], "usageMetadata": _g(100, 9, thoughts=2)}
     got = assert_priceable(read_stream(GOOGLE, sse((None, first), (None, last)), size=size))
     assert (got.prompt_tokens, got.completion_tokens) == (100, 11)
@@ -226,7 +229,10 @@ def _g(prompt: int, candidates: int, *, thoughts: int = 0) -> dict[str, int]:
 # #551-T03
 def test_a_google_stream_whose_last_chunk_has_no_usage_is_not_complete() -> None:
     # A usage from before the end is a part of the count: not a usage to settle with.
-    first = {"candidates": [{"content": {"parts": []}}], "usageMetadata": _g(100, 5)}
+    first: dict[str, Any] = {
+        "candidates": [{"content": {"parts": []}}],
+        "usageMetadata": _g(100, 5),
+    }
     last = {"candidates": [{"finishReason": "STOP"}]}
     result = read_stream(GOOGLE, sse((None, first), (None, last)))
     assert result.usage is None or not result.usage.complete
@@ -370,7 +376,7 @@ def test_the_same_values_in_a_stream_are_unknown_too(
     elif family is GOOGLE:
         data = sse((None, {"candidates": [{"finishReason": "STOP"}], "usageMetadata": usage}))
     else:
-        finish = {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}
+        finish: dict[str, Any] = {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}
         data = sse((None, finish), (None, {"choices": [], "usage": usage}), (None, "[DONE]"))
     assert_unknown(read_stream(family, data))
 
@@ -515,7 +521,7 @@ def test_an_unknown_usage_field_in_a_whole_answer_is_listed_too(family: WireFami
 def test_a_service_tier_other_than_the_standard_one_is_unknown_on_chat_and_responses(
     tier: object,
 ) -> None:
-    chat = {"choices": [], "usage": CHAT_OK, "service_tier": tier}
+    chat: dict[str, Any] = {"choices": [], "usage": CHAT_OK, "service_tier": tier}
     got = read_document(CHAT, chat).usage
     assert got is not None and "service_tier" in got.unknown_fields
     responses = {
@@ -529,7 +535,7 @@ def test_a_service_tier_other_than_the_standard_one_is_unknown_on_chat_and_respo
 # #551-T06
 @pytest.mark.parametrize("tier", [None, "default", "standard"])
 def test_the_default_service_tier_of_chat_and_responses_is_no_unknown_field(tier: object) -> None:
-    chat = {"choices": [], "usage": CHAT_OK, "service_tier": tier}
+    chat: dict[str, Any] = {"choices": [], "usage": CHAT_OK, "service_tier": tier}
     got = read_document(CHAT, chat).usage
     assert got is not None and got.unknown_fields == ()
     responses = {
@@ -562,7 +568,7 @@ def test_an_answer_with_more_than_one_choice_is_unknown_and_never_summed() -> No
     only_second = {"choices": [{"index": 1, "finish_reason": "stop"}], "usage": CHAT_OK}
     got = read_document(CHAT, only_second).usage
     assert got is not None and "choices" in got.unknown_fields
-    chunk = {
+    chunk: dict[str, Any] = {
         "choices": [{"index": 0, "delta": {}}, {"index": 1, "delta": {}, "finish_reason": "stop"}]
     }
     data = sse((None, chunk), (None, {"choices": [], "usage": CHAT_OK}), (None, "[DONE]"))
@@ -590,7 +596,9 @@ def test_an_answer_with_more_than_one_candidate_is_unknown_and_never_summed() ->
 @pytest.mark.parametrize("family", FAMILIES)
 def test_a_stream_cut_anywhere_is_never_a_complete_usage(family: WireFamily) -> None:
     events = stream(FAKE[family], TURN, 3, MODEL)
-    for keep in range(len(events)):
+    # A Chat stream that is cut only before `[DONE]` has ended: its finish and usage are in.
+    last = len(events) - 1 if family is CHAT else len(events)
+    for keep in range(last):
         result = read_stream(family, b"".join(events[:keep]))
         assert not result.terminated
         assert result.usage is None or not result.usage.complete
@@ -601,8 +609,12 @@ def test_a_stream_cut_anywhere_is_never_a_complete_usage(family: WireFamily) -> 
 def test_a_stream_cut_in_the_middle_of_an_event_is_never_a_complete_usage(
     family: WireFamily,
 ) -> None:
-    whole = fake_stream(family, 3)
-    for cut in range(0, len(whole) - 1, 11):
+    events = stream(FAKE[family], TURN, 3, MODEL)
+    whole = b"".join(events)
+    # What is left of the usage event, ends with its data: cut inside its last bytes, not in a
+    # `[DONE]` that follows it on Chat, and not just before its closing blank line.
+    tail = len(events[-1]) if family is CHAT else 0
+    for cut in range(0, len(whole) - tail - 2, 11):
         result = read_stream(family, whole[:cut])
         assert result.usage is None or not result.usage.complete
 
@@ -740,6 +752,6 @@ def test_a_real_error_object_in_a_whole_answer_is_an_error(family: WireFamily) -
 
 # #551-N8
 def test_a_chat_choice_that_finishes_with_an_error_is_an_error() -> None:
-    chunk = {"choices": [{"index": 0, "delta": {}, "finish_reason": "error"}]}
+    chunk: dict[str, Any] = {"choices": [{"index": 0, "delta": {}, "finish_reason": "error"}]}
     result = read_stream(CHAT, sse((None, chunk), (None, {"choices": [], "usage": CHAT_OK})))
     assert result.errored and not result.terminated

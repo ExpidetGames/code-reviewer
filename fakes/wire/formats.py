@@ -28,6 +28,11 @@ of the live checklist in docs/spike/544-passthrough.md):
   chunk, cumulatively, which is what the Gemini API documents for streaming);
 - the error envelopes and the in-stream error events of every family.
 
+Usage faults (#551): `answer` and `stream` take a `usage_fault` that leaves the usage out
+(`missing`), adds a field that could carry a price and that the parsers do not know
+(`unknown_field`) or damages one count (`bad_value`), for every family, so that the parsers and the
+ledger are tested against the answers they must refuse.
+
 Variants of the framing, so that a parser is not written against the tidy case: the events can be
 re-chunked at arbitrary byte boundaries (`upstream.py`), a stream can use CRLF line ends (Google's
 real stream does), and a stream can fail in the middle with an error event after HTTP 200.
@@ -39,6 +44,9 @@ from dataclasses import dataclass, field
 from typing import Any, Final, Literal
 
 Family = Literal["chat", "responses", "messages", "google"]
+# What a test can do to the usage of an answer (#551): leave it out, add a field nobody can price,
+# or put something into a count that is no count. Every family has all three.
+UsageFault = Literal["missing", "unknown_field", "bad_value"]
 FAMILIES: Final[tuple[Family, ...]] = ("chat", "responses", "messages", "google")
 
 # The header that carries the key. The swap table of the proxy has these three entries.
@@ -85,6 +93,43 @@ def usage_for(call: int) -> Usage:
         cache_write_1h=7 + call,
         reasoning=5 + call,
     )
+
+
+def _faulted(
+    family: Family, usage: dict[str, Any], fault: UsageFault | None
+) -> dict[str, Any] | None:
+    """The usage with the fault applied; None when it is to be left out."""
+    if fault is None:
+        return usage
+    if fault == "missing":
+        return None
+    faulty = json.loads(json.dumps(usage))
+    if fault == "unknown_field":
+        if family == "chat":
+            faulty["prompt_tokens_details"]["audio_tokens"] = 11
+        elif family == "responses":
+            faulty["input_tokens_details"]["audio_tokens"] = 11
+        elif family == "messages":
+            faulty["server_tool_use"] = {"web_search_requests": 2}
+        else:
+            faulty["toolUsePromptTokenCount"] = 9
+        return faulty
+    if family == "chat":
+        faulty["prompt_tokens"] = -1
+    elif family == "responses":
+        faulty["input_tokens"] = 1.5
+    elif family == "messages":
+        faulty["output_tokens"] = -3
+    else:
+        faulty["promptTokenCount"] = True
+    return faulty
+
+
+def _with_usage(document: dict[str, Any], key: str, usage: dict[str, Any] | None) -> dict[str, Any]:
+    """`document` with its usage under `key`, or without the key when the usage is left out."""
+    if usage is None:
+        return document
+    return {**document, key: usage}
 
 
 def request_path(family: Family, model: str, *, streaming: bool = True) -> str:
@@ -195,18 +240,24 @@ def _sse(events: list[tuple[str | None, Any]]) -> list[bytes]:
 # -- OpenAI Chat ---------------------------------------------------------------------------------
 
 
-def _chat_usage(call: int) -> dict[str, Any]:
+def _chat_usage(call: int, fault: UsageFault | None = None) -> dict[str, Any] | None:
     usage = usage_for(call)
-    return {
-        "prompt_tokens": usage.input,
-        "completion_tokens": usage.output,
-        "total_tokens": usage.input + usage.output,
-        "prompt_tokens_details": {"cached_tokens": usage.cache_read},
-        "completion_tokens_details": {"reasoning_tokens": usage.reasoning},
-    }
+    return _faulted(
+        "chat",
+        {
+            "prompt_tokens": usage.input,
+            "completion_tokens": usage.output,
+            "total_tokens": usage.input + usage.output,
+            "prompt_tokens_details": {"cached_tokens": usage.cache_read},
+            "completion_tokens_details": {"reasoning_tokens": usage.reasoning},
+        },
+        fault,
+    )
 
 
-def _chat_answer(turn: Turn, call: int, model: str) -> dict[str, Any]:
+def _chat_answer(
+    turn: Turn, call: int, model: str, fault: UsageFault | None = None
+) -> dict[str, Any]:
     message: dict[str, Any] = {"role": "assistant", "content": turn.text or None}
     if turn.tool:
         message["tool_calls"] = [
@@ -216,7 +267,7 @@ def _chat_answer(turn: Turn, call: int, model: str) -> dict[str, Any]:
                 "function": {"name": turn.tool, "arguments": json.dumps(dict(turn.args))},
             }
         ]
-    return {
+    document: dict[str, Any] = {
         "id": f"chatcmpl-{call}",
         "object": "chat.completion",
         "created": 1,
@@ -228,11 +279,13 @@ def _chat_answer(turn: Turn, call: int, model: str) -> dict[str, Any]:
                 "finish_reason": "tool_calls" if turn.tool else "stop",
             }
         ],
-        "usage": _chat_usage(call),
     }
+    return _with_usage(document, "usage", _chat_usage(call, fault))
 
 
-def _chat_stream(turn: Turn, call: int, model: str, include_usage: bool) -> list[bytes]:
+def _chat_stream(
+    turn: Turn, call: int, model: str, include_usage: bool, fault: UsageFault | None = None
+) -> list[bytes]:
     def chunk(delta: dict[str, Any], finish: str | None = None) -> dict[str, Any]:
         return {
             "id": f"chatcmpl-{call}",
@@ -261,12 +314,13 @@ def _chat_stream(turn: Turn, call: int, model: str, include_usage: bool) -> list
         events.append((None, chunk({"content": turn.text[:middle]})))
         events.append((None, chunk({"content": turn.text[middle:]})))
         events.append((None, chunk({}, "stop")))
-    if include_usage:
+    closing_usage = _chat_usage(call, fault)
+    if include_usage and closing_usage is not None:
         # Only a request with `stream_options.include_usage` gets this chunk; without it a Chat
         # provider states no usage in the stream at all.
         closing = chunk({})
         closing["choices"] = []
-        closing["usage"] = _chat_usage(call)
+        closing["usage"] = closing_usage
         events.append((None, closing))
     events.append((None, "[DONE]"))
     return _sse(events)
@@ -275,15 +329,19 @@ def _chat_stream(turn: Turn, call: int, model: str, include_usage: bool) -> list
 # -- OpenAI Responses ----------------------------------------------------------------------------
 
 
-def _responses_usage(call: int) -> dict[str, Any]:
+def _responses_usage(call: int, fault: UsageFault | None = None) -> dict[str, Any] | None:
     usage = usage_for(call)
-    return {
-        "input_tokens": usage.input,
-        "input_tokens_details": {"cached_tokens": usage.cache_read},
-        "output_tokens": usage.output,
-        "output_tokens_details": {"reasoning_tokens": usage.reasoning},
-        "total_tokens": usage.input + usage.output,
-    }
+    return _faulted(
+        "responses",
+        {
+            "input_tokens": usage.input,
+            "input_tokens_details": {"cached_tokens": usage.cache_read},
+            "output_tokens": usage.output,
+            "output_tokens_details": {"reasoning_tokens": usage.reasoning},
+            "total_tokens": usage.input + usage.output,
+        },
+        fault,
+    )
 
 
 def _responses_item(turn: Turn, call: int, status: str) -> dict[str, Any]:
@@ -305,20 +363,24 @@ def _responses_item(turn: Turn, call: int, status: str) -> dict[str, Any]:
     }
 
 
-def _responses_answer(turn: Turn, call: int, model: str) -> dict[str, Any]:
-    return {
+def _responses_answer(
+    turn: Turn, call: int, model: str, fault: UsageFault | None = None
+) -> dict[str, Any]:
+    document: dict[str, Any] = {
         "id": f"resp_{call}",
         "object": "response",
         "created_at": 1,
         "status": "completed",
         "model": model,
         "output": [_responses_item(turn, call, "completed")],
-        "usage": _responses_usage(call),
         "incomplete_details": None,
     }
+    return _with_usage(document, "usage", _responses_usage(call, fault))
 
 
-def _responses_stream(turn: Turn, call: int, model: str) -> list[bytes]:
+def _responses_stream(
+    turn: Turn, call: int, model: str, fault: UsageFault | None = None
+) -> list[bytes]:
     base = {"id": f"resp_{call}", "created_at": 1, "model": model}
     opening = _responses_item(turn, call, "in_progress")
     if turn.tool:
@@ -383,12 +445,11 @@ def _responses_stream(turn: Turn, call: int, model: str) -> list[bytes]:
             },
         )
     )
-    completed = {
-        **base,
-        "status": "completed",
-        "incomplete_details": None,
-        "usage": _responses_usage(call),
-    }
+    completed = _with_usage(
+        {**base, "status": "completed", "incomplete_details": None},
+        "usage",
+        _responses_usage(call, fault),
+    )
     events.append(("response.completed", {"type": "response.completed", "response": completed}))
     return _sse(events)
 
@@ -396,19 +457,23 @@ def _responses_stream(turn: Turn, call: int, model: str) -> list[bytes]:
 # -- Anthropic Messages --------------------------------------------------------------------------
 
 
-def _messages_usage(call: int) -> dict[str, Any]:
+def _messages_usage(call: int, fault: UsageFault | None = None) -> dict[str, Any] | None:
     usage = usage_for(call)
-    return {
-        "input_tokens": usage.input,
-        "output_tokens": usage.output,
-        "cache_creation_input_tokens": usage.cache_write_5m + usage.cache_write_1h,
-        "cache_read_input_tokens": usage.cache_read,
-        "cache_creation": {
-            "ephemeral_5m_input_tokens": usage.cache_write_5m,
-            "ephemeral_1h_input_tokens": usage.cache_write_1h,
+    return _faulted(
+        "messages",
+        {
+            "input_tokens": usage.input,
+            "output_tokens": usage.output,
+            "cache_creation_input_tokens": usage.cache_write_5m + usage.cache_write_1h,
+            "cache_read_input_tokens": usage.cache_read,
+            "cache_creation": {
+                "ephemeral_5m_input_tokens": usage.cache_write_5m,
+                "ephemeral_1h_input_tokens": usage.cache_write_1h,
+            },
+            "service_tier": "standard",
         },
-        "service_tier": "standard",
-    }
+        fault,
+    )
 
 
 def _messages_content(turn: Turn, call: int) -> list[dict[str, Any]]:
@@ -424,8 +489,10 @@ def _messages_content(turn: Turn, call: int) -> list[dict[str, Any]]:
     return content
 
 
-def _messages_answer(turn: Turn, call: int, model: str) -> dict[str, Any]:
-    return {
+def _messages_answer(
+    turn: Turn, call: int, model: str, fault: UsageFault | None = None
+) -> dict[str, Any]:
+    document: dict[str, Any] = {
         "id": f"msg_{call}",
         "type": "message",
         "role": "assistant",
@@ -433,12 +500,14 @@ def _messages_answer(turn: Turn, call: int, model: str) -> dict[str, Any]:
         "content": _messages_content(turn, call),
         "stop_reason": "tool_use" if turn.tool else "end_turn",
         "stop_sequence": None,
-        "usage": _messages_usage(call),
     }
+    return _with_usage(document, "usage", _messages_usage(call, fault))
 
 
-def _messages_stream(turn: Turn, call: int, model: str) -> list[bytes]:
-    usage = _messages_usage(call)
+def _messages_stream(
+    turn: Turn, call: int, model: str, fault: UsageFault | None = None
+) -> list[bytes]:
+    usage = _messages_usage(call, fault)
     message: dict[str, Any] = {
         "id": f"msg_{call}",
         "type": "message",
@@ -447,8 +516,9 @@ def _messages_stream(turn: Turn, call: int, model: str) -> list[bytes]:
         "content": [],
         "stop_reason": None,
         "stop_sequence": None,
-        "usage": {**usage, "output_tokens": 1},
     }
+    if usage is not None:
+        message["usage"] = {**usage, "output_tokens": 1}
     events: list[tuple[str | None, Any]] = [
         ("message_start", {"type": "message_start", "message": message})
     ]
@@ -483,19 +553,13 @@ def _messages_stream(turn: Turn, call: int, model: str) -> list[bytes]:
         events.append(("content_block_stop", {"type": "content_block_stop", "index": index}))
     # ASSUMPTION, unconfirmed live: `message_delta` carries only the cumulative `output_tokens`. A
     # real one may repeat `input_tokens` and the cache fields; a parser must not rely on either.
-    events.append(
-        (
-            "message_delta",
-            {
-                "type": "message_delta",
-                "delta": {
-                    "stop_reason": "tool_use" if turn.tool else "end_turn",
-                    "stop_sequence": None,
-                },
-                "usage": {"output_tokens": usage["output_tokens"]},
-            },
-        )
-    )
+    delta: dict[str, Any] = {
+        "type": "message_delta",
+        "delta": {"stop_reason": "tool_use" if turn.tool else "end_turn", "stop_sequence": None},
+    }
+    if usage is not None:
+        delta["usage"] = {"output_tokens": usage["output_tokens"]}
+    events.append(("message_delta", delta))
     events.append(("message_stop", {"type": "message_stop"}))
     return _sse(events)
 
@@ -503,18 +567,24 @@ def _messages_stream(turn: Turn, call: int, model: str) -> list[bytes]:
 # -- Google Generative Language ------------------------------------------------------------------
 
 
-def _google_usage(call: int) -> dict[str, Any]:
+def _google_usage(call: int, fault: UsageFault | None = None) -> dict[str, Any] | None:
     usage = usage_for(call)
-    return {
-        "promptTokenCount": usage.input,
-        "candidatesTokenCount": usage.output,
-        "totalTokenCount": usage.input + usage.output + usage.reasoning,
-        "cachedContentTokenCount": usage.cache_read,
-        "thoughtsTokenCount": usage.reasoning,
-    }
+    return _faulted(
+        "google",
+        {
+            "promptTokenCount": usage.input,
+            "candidatesTokenCount": usage.output,
+            "totalTokenCount": usage.input + usage.output + usage.reasoning,
+            "cachedContentTokenCount": usage.cache_read,
+            "thoughtsTokenCount": usage.reasoning,
+        },
+        fault,
+    )
 
 
-def _google_answer(turn: Turn, call: int, model: str) -> dict[str, Any]:
+def _google_answer(
+    turn: Turn, call: int, model: str, fault: UsageFault | None = None
+) -> dict[str, Any]:
     parts: list[dict[str, Any]] = []
     if turn.thinking:
         parts.append({"text": turn.thinking, "thought": True})
@@ -525,7 +595,7 @@ def _google_answer(turn: Turn, call: int, model: str) -> dict[str, Any]:
         parts.append(part)
     else:
         parts.append({"text": turn.text})
-    return {
+    document: dict[str, Any] = {
         "candidates": [
             {
                 "content": {"role": "model", "parts": parts},
@@ -533,13 +603,15 @@ def _google_answer(turn: Turn, call: int, model: str) -> dict[str, Any]:
                 "index": 0,
             }
         ],
-        "usageMetadata": _google_usage(call),
         "modelVersion": model,
         "responseId": f"r{call}",
     }
+    return _with_usage(document, "usageMetadata", _google_usage(call, fault))
 
 
-def _google_stream(turn: Turn, call: int, model: str, cumulative: bool) -> list[bytes]:
+def _google_stream(
+    turn: Turn, call: int, model: str, cumulative: bool, fault: UsageFault | None = None
+) -> list[bytes]:
     """Two chunks: the content, then the finish. Where the usage sits is an ASSUMPTION either way.
 
     By default `usageMetadata` is on the last chunk only. With `cumulative` every chunk carries it
@@ -547,29 +619,31 @@ def _google_stream(turn: Turn, call: int, model: str, cumulative: bool) -> list[
     API documents streaming; a parser has to take the last one and must not add them up. Neither
     form is captured from a real stream yet.
     """
-    first = _google_answer(turn, call, model)
+    first = _google_answer(turn, call, model, fault)
     del first["candidates"][0]["finishReason"]
-    if cumulative:
+    if cumulative and "usageMetadata" in first:
         first["usageMetadata"] = {
             **first["usageMetadata"],
             "candidatesTokenCount": 1,
             "totalTokenCount": usage_for(call).input + 1 + usage_for(call).reasoning,
         }
     else:
-        del first["usageMetadata"]
-    last = _google_answer(Turn(text=""), call, model)
+        first.pop("usageMetadata", None)
+    last = _google_answer(Turn(text=""), call, model, fault)
     return _sse([(None, first), (None, last)])
 
 
-def answer(family: Family, turn: Turn, call: int, model: str) -> dict[str, Any]:
+def answer(
+    family: Family, turn: Turn, call: int, model: str, *, usage_fault: UsageFault | None = None
+) -> dict[str, Any]:
     """The whole answer of a non-streaming call."""
     if family == "chat":
-        return _chat_answer(turn, call, model)
+        return _chat_answer(turn, call, model, usage_fault)
     if family == "responses":
-        return _responses_answer(turn, call, model)
+        return _responses_answer(turn, call, model, usage_fault)
     if family == "messages":
-        return _messages_answer(turn, call, model)
-    return _google_answer(turn, call, model)
+        return _messages_answer(turn, call, model, usage_fault)
+    return _google_answer(turn, call, model, usage_fault)
 
 
 def stream(
@@ -581,19 +655,20 @@ def stream(
     include_usage: bool = True,
     cumulative_usage: bool = False,
     crlf: bool = False,
+    usage_fault: UsageFault | None = None,
 ) -> list[bytes]:
     """The events of a streaming call, each a complete `event:`/`data:` block with a blank line.
 
     `include_usage` only matters for Chat (the closing usage chunk exists only when the request
-    asked for it), `cumulative_usage` only for Google, `crlf` for every family.
+    asked for it), `cumulative_usage` only for Google, `crlf` and `usage_fault` for every family.
     """
     if family == "chat":
-        return _with_line_ends(_chat_stream(turn, call, model, include_usage), crlf)
+        return _with_line_ends(_chat_stream(turn, call, model, include_usage, usage_fault), crlf)
     if family == "responses":
-        return _with_line_ends(_responses_stream(turn, call, model), crlf)
+        return _with_line_ends(_responses_stream(turn, call, model, usage_fault), crlf)
     if family == "messages":
-        return _with_line_ends(_messages_stream(turn, call, model), crlf)
-    return _with_line_ends(_google_stream(turn, call, model, cumulative_usage), crlf)
+        return _with_line_ends(_messages_stream(turn, call, model, usage_fault), crlf)
+    return _with_line_ends(_google_stream(turn, call, model, cumulative_usage, usage_fault), crlf)
 
 
 def _with_line_ends(chunks: list[bytes], crlf: bool) -> list[bytes]:

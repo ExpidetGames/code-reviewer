@@ -14,6 +14,7 @@ import logging
 import sys
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -25,6 +26,7 @@ from passthrough_support import (
     MODEL,
     PRICES,
     TURN,
+    Rig,
     Scripted,
     document,
     failing,
@@ -32,6 +34,7 @@ from passthrough_support import (
     streamed,
 )
 
+from code_reviewer_runner.dynamic_review.budget import BudgetLedger
 from code_reviewer_runner.dynamic_review.passthrough.families import WireFamily
 from code_reviewer_runner.dynamic_review.passthrough.pricing import call_cost
 from code_reviewer_runner.dynamic_review.passthrough.upstream import UpstreamError, UpstreamFailure
@@ -39,22 +42,21 @@ from code_reviewer_runner.result import ErrorCode
 from passthrough_expect import usage_expected
 
 FAMILIES = list(WireFamily)
-LOGGER = "code_reviewer_runner.dynamic_review.passthrough.proxy"
+LOGGER = "code_reviewer_runner.dynamic_review.passthrough.usage_report"
 
 
 def worst_case(body_bytes: int, output_cap: int = 1000) -> Decimal:
     return PRICES.of_call(body_bytes, output_cap, cache_in_use=True)
 
 
-def spent(r_ledger: object) -> Decimal:
-    return r_ledger._counters.cost  # type: ignore[attr-defined]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType, reportUnknownVariableType]
+def spent(ledger: BudgetLedger) -> Decimal:
+    return ledger._counters.cost  # pyright: ignore[reportPrivateUsage]
 
 
-def assert_unknown_call(r: object, body_bytes: int) -> None:
-    ledger = r.ledger  # type: ignore[attr-defined]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType, reportUnknownVariableType]
-    assert spent(ledger) == worst_case(body_bytes)
-    assert ledger.usage(MODEL).cost_usd is None  # pyright: ignore[reportUnknownMemberType]
-    assert ledger.unknown_calls == 1  # pyright: ignore[reportUnknownMemberType]
+def assert_unknown_call(r: Rig, body_bytes: int) -> None:
+    assert spent(r.ledger) == worst_case(body_bytes)
+    assert r.ledger.usage(MODEL).cost_usd is None
+    assert r.ledger.unknown_calls == 1
 
 
 # #551-T07
@@ -123,9 +125,11 @@ def test_a_usage_with_an_unknown_field_or_a_bad_value_is_an_unknown_call_for_a_m
     assert_unknown_call(r, len(body))
     assert r.ledger.failure is not None
     assert r.ledger.failure.code is ErrorCode.DYNAMIC_ACCOUNTING_FAILED
-    # The names of what could not be read are logged and no value is.
+    # The names of what could not be priced are logged and no value is (a count that cannot be read
+    # at all leaves no field to name).
     messages = " ".join(record.getMessage() for record in caplog.records)
-    assert "usage" in messages
+    assert ("usage" in messages) == (fault == "unknown_field")
+    assert not any(char.isdigit() for char in messages.replace("usageMetadata", ""))
 
 
 # #551-T06
@@ -173,7 +177,7 @@ def test_the_usage_the_fakes_state_still_settles_at_the_price_of_the_book(
 
 def _openrouter(cost: float) -> Scripted:
     usage = {"prompt_tokens": 10, "completion_tokens": 5, "cost": cost}
-    finish = {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}
+    finish: dict[str, Any] = {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}
     chunks = [
         f"data: {json.dumps(finish)}\n\n".encode(),
         f"data: {json.dumps({'choices': [], 'usage': usage})}\n\n".encode(),

@@ -36,7 +36,11 @@ def level_for(book: dict[str, Any], prompt: int) -> dict[str, Any] | None:
     exceeded = sorted((t for t in tiers if prompt > t[0]), key=lambda t: t[0], reverse=True)
     if not exceeded:
         return book
-    same = [level for size, level in exceeded if size == exceeded[0][0]]
+    same = [
+        {k: v for k, v in level.items() if k != "contextOver"}
+        for size, level in exceeded
+        if size == exceeded[0][0]
+    ]
     if any(level != same[0] for level in same):
         return None
     return same[0]

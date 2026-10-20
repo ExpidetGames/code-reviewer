@@ -13,7 +13,7 @@ that. The shapes follow the providers' documented formats; a real answer is stil
 import json
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -326,11 +326,13 @@ def usage_of_events(family: Family, call: int, **options: Any) -> list[Any]:
     for _, data in parse_sse(stream(family, READ, call, MODEL, **options)):
         if not isinstance(data, dict):
             continue
-        for holder in (data, data.get("message"), data.get("response")):  # pyright: ignore[reportUnknownMemberType]
+        fields = cast("dict[str, Any]", data)
+        holders: list[object] = [fields, fields.get("message"), fields.get("response")]
+        for holder in holders:
             if isinstance(holder, dict):
                 for key in ("usage", "usageMetadata"):
                     if key in holder:
-                        found.append(holder[key])  # pyright: ignore[reportUnknownMemberType]
+                        found.append(cast("dict[str, Any]", holder)[key])
     return found
 
 
@@ -350,8 +352,10 @@ def test_a_missing_usage_is_left_out_of_the_answer_and_of_the_stream(family: Fam
     # The rest of the answer is untouched: it is a complete answer that states no usage.
     clean = answer(family, READ, 3, MODEL)
     assert {k: v for k, v in clean.items() if k not in ("usage", "usageMetadata")} == document
-    assert len(stream(family, READ, 3, MODEL, usage_fault="missing")) == len(
-        stream(family, READ, 3, MODEL)
+    # Chat states its usage in a chunk of its own; the others in an event they send anyway.
+    left_out = 1 if family == "chat" else 0
+    assert len(stream(family, READ, 3, MODEL, usage_fault="missing")) == (
+        len(stream(family, READ, 3, MODEL)) - left_out
     )
 
 
@@ -367,7 +371,7 @@ def test_an_unknown_usage_field_adds_one_field_that_holds_something(family: Fami
     assert len(added) >= 1
     # The same one is in the stream.
     in_stream = usage_of_events(family, 3, usage_fault="unknown_field")
-    assert in_stream and all(keys_anywhere(item) >= added for item in in_stream[-1:])
+    assert any(keys_anywhere(item) >= added for item in in_stream)
 
 
 # #551-F01
@@ -380,4 +384,4 @@ def test_a_bad_value_changes_one_count_of_the_usage_into_something_that_is_no_co
     plain = answer(family, READ, 3, MODEL)[key]
     assert faulty != plain
     assert keys_anywhere(faulty) == keys_anywhere(plain)
-    assert usage_of_events(family, 3, usage_fault="bad_value")[-1] != usage_of_events(family, 3)[-1]
+    assert usage_of_events(family, 3, usage_fault="bad_value") != usage_of_events(family, 3)

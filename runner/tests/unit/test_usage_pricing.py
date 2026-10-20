@@ -20,12 +20,11 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from code_reviewer_runner.dynamic_review.budget import UnitCosts
 from code_reviewer_runner.dynamic_review.passthrough.price_book import (
     PriceBook,
     parse_price_book,
 )
-
-from code_reviewer_runner.dynamic_review.budget import UnitCosts
 from code_reviewer_runner.dynamic_review.passthrough.pricing import call_cost, price_call
 from code_reviewer_runner.dynamic_review.passthrough.usage import CallUsage
 from usage_calc import expected_cost
@@ -328,8 +327,8 @@ def test_a_book_is_read_into_whole_micro_usd_and_null_stays_null() -> None:
 PLAIN = parsed(book(level(3_000_000, 15_000_000)))
 
 
-def stated(cost: str, **counts: int) -> CallUsage:
-    return CallUsage(100, 10, stated_cost=Decimal(cost), **counts)
+def stated(cost: str, *, cache_write_5m: int = 0) -> CallUsage:
+    return CallUsage(100, 10, cache_write_5m=cache_write_5m, stated_cost=Decimal(cost))
 
 
 # #551-T09

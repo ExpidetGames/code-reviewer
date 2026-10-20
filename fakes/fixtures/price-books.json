@@ -1021,9 +1021,7 @@
       "book": {
         "input": "1",
         "output": "2",
-        "tiers": [
-          "x"
-        ]
+        "tiers": ["x"]
       }
     },
     {

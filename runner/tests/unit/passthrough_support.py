@@ -47,6 +47,7 @@ PRICES = UnitCosts(
     output_usd_per_mtok=Decimal(15),
     cache_read_usd_per_mtok=Decimal("0.3"),
     cache_write_usd_per_mtok=Decimal("3.75"),
+    cache_write_1h_usd_per_mtok=Decimal(6),
 )
 FAKE: dict[WireFamily, Family] = {
     WireFamily.OPENAI_CHAT: "chat",
