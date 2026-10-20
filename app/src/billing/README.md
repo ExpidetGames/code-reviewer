@@ -6,28 +6,29 @@ epic #489): prepaid pay-as-you-go through Stripe Managed Payments, a provider-ne
 earlier subscription design (plans, plan versions, prices with a payment provider, an admin page for them) was deleted
 before it reached a release (#491); the model catalog, the providers and `modelAccess` of epic #420 are unaffected.
 
-What is here today is the part every later billing issue builds on, the price of a run (#494), and the adapter seam with its event application and the `manual` adapter (#497). Server-only: every
+What is here today is the part every later billing issue builds on, the price of a run (#494), the adapter seam with its event application and the `manual` adapter (#497), the Stripe client (#500) and the admin page that switches billing on (#504, below). Server-only: every
 source file imports `"server-only"` (`server-only.test.ts`).
 
-| File                                                   | What it is                                                                                                                                                                                                                                                                                                                                                 |
-| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `settings.ts`                                          | The instance setting `billing_settings`: the switch `enabled` and the rates. `readBillingSettings` reads a stored value leniently: a field it does not know (a value of the older shape also had an environment, a client token and grace days) is ignored, `enabled` is true only when it is exactly `true`, and a rate that is damaged reads as not set. |
-| `rates.ts`                                             | The rates (pure): the bounds, `validateRatesPatch` with the stable codes `factor_invalid`, `rate_invalid`, `reserve_invalid`, `billingRatesOf` (the complete rates or null) and `canSwitchBillingOn` (`billing_rates_incomplete`).                                                                                                                         |
-| `rates-service.ts`                                     | The one writer of the rates: validates, merges into the stored setting under an advisory lock (`db/billing-settings-lock.ts`), keeps the switch as it is. The admin form is #504.                                                                                                                                                                          |
-| `outcome.ts`                                           | `classifyOutcome`: the end state of a job and its stable codes to `charged`, `minutes_only` or `free`, from an exhaustive table (pure).                                                                                                                                                                                                                    |
-| `pricing.ts`                                           | `priceRun` and `reserveFor` (pure): the two prices of a run and the hold of a job, in whole micro-USD.                                                                                                                                                                                                                                                     |
-| `journal.ts`                                           | The vocabulary of the balance journal (#495): the entry types as an `as const` set, the sign of each, the stable error codes, `validateEntry`. The table checks restate the type and sign rules in SQL; `journal.test.ts` fails when they drift apart.                                                                                                     |
-| `minutes.ts`                                           | Billable minutes (pure, #493): `billableMinutes`, `backstopEnd`, `boundedEnd`, the end sources and `STOP_RETRY_WINDOW_SECONDS`.                                                                                                                                                                                                                            |
-| `wall-clock.ts`                                        | `createWallClockRecorder`: the measure of a job without a VM, where billing is on (#493). `shared.ts` hands it to the platform after the response.                                                                                                                                                                                                         |
-| `enabled.ts`                                           | `isBillingOn(db)`: the one reader of the switch. `guardBillingRoute`: the first line of every billing route.                                                                                                                                                                                                                                               |
-| `adapter.ts`                                           | The provider-neutral seam (#497): `BillingAdapter`, `BillingCapabilities`, the normalized `BillingEvent`s, `WebhookResult`, the code constants (USD, the top-up range 10 to 500), the registry and `validateBillingEvent`.                                                                                                                                 |
-| `apply-event.ts`                                       | `applyBillingEvent`: the one place where a normalized event becomes money (#497).                                                                                                                                                                                                                                                                          |
-| `topup-intent.ts`                                      | The vocabulary of a top-up intent: states, codes and the shape the app sees.                                                                                                                                                                                                                                                                               |
-| `manual-adapter.ts`, `manual-credit.ts`                | The `manual` adapter and the service an operator's credits and corrections go through (#497).                                                                                                                                                                                                                                                              |
-| `webhook-handler.ts`, `active-adapter.ts`, `shared.ts` | The generic handler behind `POST /api/billing/webhook`, which adapter is active, and the wiring (#497); `shared.ts` also hands the wall-clock recorder to the platform (#493).                                                                                                                                                                             |
-| `public-url.ts`                                        | Whether an address can be reached from the internet (https, no credentials, no loopback, private, link-local or local name; pure), and the one spelling addresses are compared in. A Stripe webhook endpoint needs it.                                                                                                                                     |
-| `stripe-client.ts`, `stripe-schemas.ts`                | A thin typed `fetch` client of the Stripe API and our own schemas of the fields we read (#500); no SDK. Used by the Stripe adapter (#501) and the webhook route (#502).                                                                                                                                                                                    |
-| `stripe-webhook-verify.ts`                             | `verifyStripeSignature` (pure): the `Stripe-Signature` header over the raw body bytes (#500).                                                                                                                                                                                                                                                              |
+| File                                                                                                                              | What it is                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| --------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `settings.ts`                                                                                                                     | The instance setting `billing_settings`: the switch `enabled`, the `adapter`, the rates, the numbers next to them and the record of the Stripe check (`stripe`). `readBillingSettings` reads a stored value leniently: a field it does not know (a value of the older shape also had an environment, a client token and grace days) is ignored, `enabled` is true only when it is exactly `true`, and a rate that is damaged reads as not set. |
+| `rates.ts`                                                                                                                        | The rates and numbers (pure): the bounds, `validateRatesPatch` with the stable codes `factor_invalid`, `rate_invalid`, `reserve_invalid`, `start_credit_invalid`, `low_balance_invalid`, `hourly_limit_invalid`, `billingRatesOf` (the complete rates or null), `billingNumbersOf` (the numbers with their defaults) and `canSwitchBillingOn` (`billing_rates_incomplete`).                                                                    |
+| `rates-service.ts`, `settings-store.ts`                                                                                           | The one writer of the rates and numbers: validates, merges into the stored setting under an advisory lock (`db/billing-settings-lock.ts`), keeps the switch, the adapter and the Stripe record as they are. `settings-store.ts` is the read-modify-write both this service and the admin service (#504) go through.                                                                                                                            |
+| `outcome.ts`                                                                                                                      | `classifyOutcome`: the end state of a job and its stable codes to `charged`, `minutes_only` or `free`, from an exhaustive table (pure).                                                                                                                                                                                                                                                                                                        |
+| `pricing.ts`                                                                                                                      | `priceRun` and `reserveFor` (pure): the two prices of a run and the hold of a job, in whole micro-USD.                                                                                                                                                                                                                                                                                                                                         |
+| `journal.ts`                                                                                                                      | The vocabulary of the balance journal (#495): the entry types as an `as const` set, the sign of each, the stable error codes, `validateEntry`. The table checks restate the type and sign rules in SQL; `journal.test.ts` fails when they drift apart.                                                                                                                                                                                         |
+| `minutes.ts`                                                                                                                      | Billable minutes (pure, #493): `billableMinutes`, `backstopEnd`, `boundedEnd`, the end sources and `STOP_RETRY_WINDOW_SECONDS`.                                                                                                                                                                                                                                                                                                                |
+| `wall-clock.ts`                                                                                                                   | `createWallClockRecorder`: the measure of a job without a VM, where billing is on (#493). `shared.ts` hands it to the platform after the response.                                                                                                                                                                                                                                                                                             |
+| `enabled.ts`, `readiness.ts`                                                                                                      | `isBillingOn(db)`: the one reader of the switch (on = the switch is set and the adapter is ready, `readiness.ts`); `readBillingSwitch(db)`: the same with what is missing. `guardBillingRoute`: the first line of every billing route.                                                                                                                                                                                                         |
+| `adapter.ts`                                                                                                                      | The provider-neutral seam (#497): `BillingAdapter`, `BillingCapabilities`, the normalized `BillingEvent`s, `WebhookResult`, the code constants (USD, the top-up range 10 to 500), the registry and `validateBillingEvent`.                                                                                                                                                                                                                     |
+| `apply-event.ts`                                                                                                                  | `applyBillingEvent`: the one place where a normalized event becomes money (#497).                                                                                                                                                                                                                                                                                                                                                              |
+| `topup-intent.ts`                                                                                                                 | The vocabulary of a top-up intent: states, codes and the shape the app sees.                                                                                                                                                                                                                                                                                                                                                                   |
+| `manual-adapter.ts`, `manual-credit.ts`                                                                                           | The `manual` adapter and the service an operator's credits and corrections go through (#497).                                                                                                                                                                                                                                                                                                                                                  |
+| `webhook-handler.ts`, `active-adapter.ts`, `shared.ts`                                                                            | The generic handler behind `POST /api/billing/webhook`, which adapter is active, and the wiring (#497); `shared.ts` also hands the wall-clock recorder to the platform (#493).                                                                                                                                                                                                                                                                 |
+| `public-url.ts`                                                                                                                   | Whether an address can be reached from the internet (https, no credentials, no loopback, private, link-local or local name; pure), and the one spelling addresses are compared in. A Stripe webhook endpoint needs it.                                                                                                                                                                                                                         |
+| `stripe-client.ts`, `stripe-schemas.ts`                                                                                           | A thin typed `fetch` client of the Stripe API and our own schemas of the fields we read (#500); no SDK. Used by the Stripe adapter (#501) and the webhook route (#502).                                                                                                                                                                                                                                                                        |
+| `stripe-webhook-verify.ts`                                                                                                        | `verifyStripeSignature` (pure): the `Stripe-Signature` header over the raw body bytes (#500).                                                                                                                                                                                                                                                                                                                                                  |
+| `admin-service.ts`, `admin-credit-service.ts`, `admin-http.ts`, `admin-errors.ts`, `enabling-copy.ts`, `stripe-webhook-events.ts` | The billing page of the admin portal (#504): the settings service (adapter, credentials, rates, connection check, webhook endpoint, the switch), the manual credit, the handlers of the data routes with their stable codes, the wording of the enabling statement, and the events Stripe is told to send. The page itself is `src/admin/ui/billing-*` and `src/app/(app)/instance-portal/billing/`.                                           |
 
 ## The Stripe client and the webhook verifier
 
@@ -69,7 +70,7 @@ The first real adapter (#501, #502) talks to Stripe through `stripe-client.ts` a
   buyer's deleted object from other 404s; the journal tolerates it). Fixed texts; **no response body, no header, no key and no
   cause** in an error, and the client logs nothing. A customer Stripe reports as `deleted: true` is `not_found`.
 - **Secrets.** `stripe_api_key` and `stripe_webhook_secret` are names in `SECRET_NAMES` (encrypted, write-only like the others);
-  the form that sets them is #504.
+  the billing page sets them (#504).
 - **The verifier.** `verifyStripeSignature({ header, rawBody, secret, now, toleranceSeconds })` returns `{ ok: true, timestamp }`
   or `{ ok: false, code }` with a code of `STRIPE_SIGNATURE_ERROR_CODES` (`secret_missing`, `signature_missing`,
   `signature_malformed`, `signature_mismatch`, `timestamp_out_of_tolerance`, `tolerance_invalid`). It takes the body as the
@@ -215,23 +216,74 @@ confirmation) counts from the job's `finished_at`.
 
 ## The switch
 
-`isBillingOn` reads the instance setting `billing_settings.enabled` and nothing else. It calls nobody and reads no
-billing table. The readiness of the payment adapter joins the answer with the adapter (#501, #504). **There is exactly
-one reader of the switch**; a test (`src/ci/billing-cleanup.test.ts`) fails when a second one appears. Every billing
-route, page and sweep step asks `isBillingOn` first: while it is false they are inert, a route answers the 404 of a path
-that does not exist (`guardBillingRoute`, Next.js's own `notFound()`), no billing table is read and nobody is called.
+Billing is **on** when the instance setting `billing_settings.enabled` is exactly `true` **and the active adapter is ready**
+(`isBillingOn`, `readiness.ts`; #504). Ready means, for every adapter, that A, both B and the Diff AI reserve are set, and for
+`stripe` also that the API key and the webhook secret are stored and a connection check passed. The passing check is a record in
+the setting (`stripe.checkedAt`, with the environment of the key): the switch reader may not call Stripe, so the admin page makes
+the check and the setting remembers it. A new API key clears the record; a check that fails never does, so a click during a
+Stripe outage cannot turn billing off. The switch reader looks for the two Stripe secrets by name in the secret table and does not
+decrypt them: whether they can be read is judged when they are saved, at the connection check and on the page ("cannot be
+read"). It calls nobody. **There is exactly one reader of the switch**; a test (`src/ci/billing-cleanup.test.ts`) fails when a
+second one appears. Every billing route, page and sweep step asks `isBillingOn` first: while it is false they are inert, a route
+answers the 404 of a path that does not exist (`guardBillingRoute`, Next.js's own `notFound()`), no billing table is read and
+nobody is called.
 
-**Billing on with incomplete rates.** `isBillingOn` stays a pure switch. If `enabled` is true while a rate is missing or
-damaged (`rates()` is null), the claim of a job (#498) refuses it with the stable code `billing_rates_incomplete`, with a
-test; reviews do not run free. To keep that state from arising, #504 must call `canSwitchBillingOn` **inside the same
-`lockBillingSettings` transaction that writes `enabled`**, or the check can race with a rate write.
+**Switch set, adapter not ready.** `readBillingSwitch(db)` answers `{ enabled, missing }` from the same read: `isBillingOn` is
+`enabled && missing.length === 0`. The state "set, but no longer ready" (a credential or a rate that is gone since the switch was
+set, which the admin page does not allow but a damaged database can show) is therefore **off for `isBillingOn`**, so a route is
+inert and a job would run unbilled. #498's claim can tell the two states apart with `readBillingSwitch` and refuse with
+`billing_rates_incomplete` instead; the admin page shows "the switch is on, but billing is not running" with the list.
 
 There is no environment variable: billing is configured in the admin portal and in nothing else, so `.env.example` and
 the deployment files stay as they are for a self-hoster (`no-environment-variable.test.ts`).
 
-The credentials of a payment provider are encrypted, write-only secrets of the secret store (`src/secrets/`, ADR 0006
-2.14); no name of one is in `SECRET_NAMES` yet. A row of a removed secret name that an old database still holds is not
-read, not listed and not an error.
+The credentials of Stripe are the encrypted, write-only secrets `stripe_api_key` and `stripe_webhook_secret` of the secret
+store (`src/secrets/`, ADR 0006 2.14). A row of a removed secret name that an old database still holds is not read, not listed
+and not an error.
+
+## The billing page
+
+`/admin/billing` (data routes below `/api/admin/billing`; `src/admin/README.md` has the guards), instance admin only. Opening it
+changes nothing and calls nobody; a self-hoster who never opens it sees no change, no new route that answers and no outbound call.
+
+- **The switch.** `PUT { "enabled": true }` reads everything again in one transaction under `lockBillingSettings`
+  (`settings-store.ts`) and writes the switch only if `missingItemsOf` is empty; otherwise it is refused with `billing_not_ready`
+  and `missing`, every missing item by its code (`factor_a_missing`, `minute_rate_diff_missing`, `minute_rate_dynamic_missing`,
+  `diff_ai_reserve_missing`, `stripe_api_key_missing`, `stripe_webhook_secret_missing`, `connection_check_missing`,
+  `connection_check_failed`). With Stripe the connection check is made once more just before, so a key that was revoked since the
+  last click is found now. Switching off is always allowed and writes nothing else: rates, credentials, journal and balances stay.
+- **The enabling statement** (`enabling-copy.ts`) says what switching on does: the reviews of every workspace are charged from a
+  prepaid balance, workspaces choose their key mode (our models are the default), a workspace with no balance cannot start a
+  review until it has the start credit or credit, the run quotas are not applied and the operator API limits stay, with the
+  number of workspaces and of those that hold a stored own key (`db/repositories/own-key-count-repository.ts`).
+- **The adapter** is `manual` or `stripe` (`PUT { "adapter" }`); it stays while billing is on (`billing_disable_first`).
+- **The Stripe credentials** (`PUT { "stripe": { "apiKey", "webhookSecret" } }`, an empty field keeps the stored one) are
+  write-only: the answers carry `configured`, `unreadable` or `not_configured` and the last four characters of a long value. The
+  key must start with `sk_test_`, `rk_test_`, `sk_live_` or `rk_live_`; its environment is read from the prefix and shown. A
+  credential is not removed while billing is on, and a new key must pass a check before it replaces the one that works. A key of
+  the other environment takes the stored webhook secret and endpoint id with it.
+- **The connection check** (`POST /check`) reads the account (`GET /v1/account`) and answers `{ ok, environment }` or a stable
+  code (`stripe_key_rejected`, `stripe_rate_limited`, `stripe_unreachable`, `stripe_unavailable`, `api_key_missing`,
+  `api_key_unreadable`). A pass is recorded.
+- **The webhook endpoint** (`POST /webhook-endpoint`) registers the public address of this app (`BETTER_AUTH_URL`, never a
+  request header) plus `/api/billing/webhook` with the events in `stripe-webhook-events.ts` and stores the returned secret. The
+  address must pass `isPublicHttpsUrl` or nothing is called (`webhook_url_not_public`). One creation runs at a time (a lease of
+  60 seconds in the setting `billing_destination_lock`: `webhook_endpoint_in_progress`), Stripe is asked first and an endpoint of
+  our address that exists is **adopted**, not duplicated, when its secret is stored. Stripe shows an endpoint's secret only in the
+  answer to the create, so an endpoint of ours without a stored secret answers `webhook_endpoint_secret_unknown` (enter the
+  secret, or `{ "recreate": true }` with billing off, which deletes ours and creates a new one). An endpoint whose `livemode` is
+  not the key's environment is refused (`webhook_environment_mismatch`) and removed again; a secret that cannot be stored removes
+  the endpoint too (`webhook_secret_not_stored`), because the secret cannot be fetched later.
+- **Rates and numbers** (`PUT { "rates" }`): A, B for Diff and Dynamic, the Diff AI reserve, the start credit, the low-balance
+  threshold and the hourly brake, with the codes of `rates.ts`. The API takes the stored whole numbers (A in parts per 10,000,
+  money in micro-USD); the page shows and takes decimals (`src/admin/ui/billing-money.ts`: no float touches an amount). A, both B
+  and the reserve have no default; the start credit is 2 USD, the threshold 5 USD and the brake 60 reviews per rolling hour until
+  they are set (ADR 0006 D3, D9, D10; `billingNumbersOf`). The numbers are stored here for the later issues that read them (the
+  start credit grant #507, the notifications #506, the brake #499). They can be changed at any time, also while billing is on.
+- **Manual credit and correction** (`GET /workspaces?q=`, `GET /workspaces/<id>`, `POST /workspaces/<id>/credit`
+  `{ type: "credit" | "correction", amountMicroUsd, note, requestId }`): the admin searches a workspace by name, sees its balance
+  and its ten newest entries, and writes a `top_up` (credit) or a signed `correction` through `createManualCreditService` with
+  their user id as the actor and the required note. It works with either adapter and while billing is off.
 
 ## The balance journal
 
@@ -377,8 +429,9 @@ code, no outbound call, and `lookupTopUp` when it has one) and, when it has a we
 engine; the same event twice, the same payment under another event id and the wrong order leave the state of one correct
 delivery). Both live in `src/test-support/billing-adapter-kit.ts`; the fake adapter in `fake-billing-adapter.ts` is the
 model, and `adapter-kit.test.ts` / `adapter-kit.integration.test.ts` show the call. The active adapter is the `adapter`
-field of the instance setting `billing_settings` (`manual` when it is not set or not an adapter id); the admin page that
-sets it is #504.
+field of the instance setting `billing_settings` (`manual` when it is not set or not an adapter id); the admin page sets it
+(#504). The Stripe adapter itself joins the registry with #501 and #502: until then a Stripe instance is configured and
+checked on the page, its routes answer the missing path (no adapter).
 
 ## Top-up intents
 
@@ -426,7 +479,7 @@ payment, checkout or intent id, only for the adapter that made it.
 `event_invalid`, mean a buyer may have paid and got nothing (an unknown intent, a second payment of an intent that is
 paid, an amount above what we asked, a payment that changes the amount of a credit) or been refunded and kept the credit
 (a refund before its payment, or beyond the caps). Each is recorded with `review_state = 'open'` and the subject it was
-about (`payment:<id>`, `refund:<id>`, `dispute:<id>`; `listOpenReviews` reads them for the admin page of #504), logged
+about (`payment:<id>`, `refund:<id>`, `dispute:<id>`; `listOpenReviews` reads them; the admin view of them is a follow-up of #504), logged
 at error level with its code (`billing_webhook_needs_review outcome=...`), and answered 200: the provider's retry would
 not change it. The repair is the operator's: a `manual` grant or correction, or "Check payment" (#502) when the provider's
 state is the doubt. A signed event that is not a normalized event (an adapter bug, a provider change) is recorded
@@ -460,8 +513,8 @@ provider `manual`) and `correct` (a `correction` of either sign, which may take 
 and a note: the immutable journal entry is the audit trail. A grant is keyed by a random reference, so granting twice is
 two grants, unless the caller passes a `requestId` (a form token): then the same request makes one entry. An amount is a
 whole micro-USD amount, never zero, at most 10,000 USD at once, a note is required (at most 500 characters) and the
-workspace must exist (`MANUAL_CREDIT_ERROR_CODES`). The forms are #504; they check that the caller is an instance admin and
-that billing is on first.
+workspace must exist (`MANUAL_CREDIT_ERROR_CODES`). The form is the billing page (#504, above); its routes check that the
+caller is an instance admin first and work whether billing is on or off.
 
 ## Where billing is not allowed to reach
 

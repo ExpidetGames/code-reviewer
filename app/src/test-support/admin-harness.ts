@@ -38,6 +38,11 @@ import { createModelsDevAdminService } from "../models-dev/admin-service.ts";
 import type { RefreshOptions, RefreshOutcome } from "../models-dev/service.ts";
 import { createModelPriceService } from "../model-prices/service.ts";
 import { createCatalogService } from "../model-catalog/service.ts";
+import { createBillingCreditService } from "../billing/admin-credit-service.ts";
+import { createBillingRouteHandlers } from "../billing/admin-http.ts";
+import { createBillingAdminService } from "../billing/admin-service.ts";
+import { createStripeClient } from "../billing/stripe-client.ts";
+import type { StripeFake } from "../../../fakes/stripe/server.ts";
 import { createGithubCredentialStore } from "../github-config/credentials.ts";
 import { createGithubRouteHandlers } from "../github-config/http.ts";
 import { createGithubConfigService } from "../github-config/service.ts";
@@ -76,6 +81,12 @@ export type AdminHarnessOptions = {
   github?: FakeGithub;
   /** The fake LLM the Test button of the operator's keys talks to. Default: an address where nothing answers. */
   llm?: { baseUrl: string };
+  /** The fake Stripe the billing page talks to (#504). Default: an address where nothing answers. */
+  stripe?: StripeFake;
+  /** The public address of the app, where Stripe is told to post its events (`BETTER_AUTH_URL`). Default: a public https one. */
+  billingPublicUrl?: string;
+  /** The key sent to Stripe is kept off a fake that expects another: the client of the fake is made over this fetch. */
+  stripeFetch?: typeof fetch;
 };
 
 /** Short waits, so a test of a mail server that never answers does not take half a minute. */
@@ -269,6 +280,39 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
       throw new NotFoundSignal();
     },
     service: modelsDevAdmin,
+  });
+  // The billing page (#504): the real service over the real database and secret store, its Stripe client pointed at the fake
+  // Stripe (an address where nothing answers when a test brings none), the audit lines kept in a list.
+  const billingLog: string[] = [];
+  const billingService = createBillingAdminService({
+    db,
+    secrets,
+    publicUrl: options.billingPublicUrl ?? "https://reviews.example.test",
+    clientFor: (apiKey, environment) =>
+      createStripeClient({
+        apiKey,
+        baseUrl: options.stripe?.baseUrl ?? "http://127.0.0.1:1",
+        environment,
+        maxRetries: 0,
+        sleep: () => Promise.resolve(),
+        ...(options.stripeFetch === undefined
+          ? {}
+          : { fetch: options.stripeFetch }),
+      }),
+    log: (line) => billingLog.push(line),
+  });
+  const billingCreditLog: string[] = [];
+  const billingRoutes = createBillingRouteHandlers({
+    access: async () =>
+      adminAccessOf(await lookupSession(auth, current.headers, setup.gates)),
+    notFound: () => {
+      throw new NotFoundSignal();
+    },
+    service: billingService,
+    credit: createBillingCreditService({
+      db,
+      logger: { info: (line) => billingCreditLog.push(line) },
+    }),
   });
   // The synchronization with GitHub is a double that counts how often it was asked: what these tests need to
   // know is whether a request got as far as the synchronization.
@@ -552,6 +596,28 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
         request.method === "POST"
       )
         return await modelsDevRoutes.fetchNow(request);
+      if (pathname.startsWith("/api/instance-portal/billing")) {
+        const rest = pathname.slice("/api/instance-portal/billing".length);
+        const method = request.method;
+        if (rest === "" && method === "GET")
+          return await billingRoutes.get(request);
+        if (rest === "" && method === "PUT")
+          return await billingRoutes.put(request);
+        if (rest === "/check" && method === "POST")
+          return await billingRoutes.check(request);
+        if (rest === "/webhook-endpoint" && method === "POST")
+          return await billingRoutes.webhookEndpoint(request);
+        if (rest === "/workspaces" && method === "GET")
+          return await billingRoutes.searchWorkspaces(request);
+        const workspace = /^\/workspaces\/([^/]+)(\/credit)?$/.exec(rest);
+        if (workspace !== null) {
+          const id = decodeURIComponent(workspace[1] ?? "");
+          if (workspace[2] === undefined && method === "GET")
+            return await billingRoutes.workspace(request, id);
+          if (workspace[2] !== undefined && method === "POST")
+            return await billingRoutes.credit(request, id);
+        }
+      }
       if (pathname.startsWith("/api/instance-portal/github")) {
         const { routes } = await github();
         if (
@@ -676,6 +742,10 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
     modelsDevLog,
     modelsDevFetch,
     credentials,
+    /** The billing service the billing routes use (#504) and the lines it and the manual credit logged. */
+    billingService,
+    billingLog,
+    billingCreditLog,
     /** The fake GitHub behind the GitHub routes (started on first use). */
     fakeGithub: async () => (await github()).fake,
     flags,
