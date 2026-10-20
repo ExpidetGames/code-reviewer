@@ -9,6 +9,7 @@
 //                                                 it; query: provider, search, priceStatus, enabled (yes|no|undecided), new
 //                                                 (true), limit, offset. Also the "new" count and the state of the last fetch.
 //   POST /api/admin/catalog-models/enablement     { providerId, modelId, enabled }: enable or disable a model for the managed key
+//   POST /api/admin/catalog-models/enablement/reset  { providerId, modelId }: take the decision back, so the model is "new" again
 //   POST /api/admin/catalog-models/price/confirm  { providerId, modelId, referenceHash }: confirm the price as the admin saw it
 //   POST /api/admin/catalog-models/price/correct  { providerId, modelId, referenceHash, price, reason }: state the price
 //
@@ -48,6 +49,7 @@ export type ModelPriceRouteDependencies = {
 export type ModelPriceRouteHandlers = {
   list(request: Request): Promise<Response>;
   setEnabled(request: Request): Promise<Response>;
+  resetDecision(request: Request): Promise<Response>;
   confirmPrice(request: Request): Promise<Response>;
   correctPrice(request: Request): Promise<Response>;
 };
@@ -164,6 +166,8 @@ export function createModelPriceRouteHandlers({
 
     setEnabled: (request) =>
       change(request, (who, body) => service.setEnabled(who.id, body)),
+    resetDecision: (request) =>
+      change(request, (who, body) => service.resetDecision(who.id, body)),
     confirmPrice: (request) =>
       change(request, (who, body) => service.confirmPrice(who.id, body)),
     correctPrice: (request) =>

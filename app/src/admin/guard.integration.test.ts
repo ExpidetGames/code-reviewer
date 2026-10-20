@@ -74,6 +74,7 @@ describe("the routes of the portal", () => {
       "/api/admin/approvals/[id]",
       "/api/admin/catalog-models",
       "/api/admin/catalog-models/enablement",
+      "/api/admin/catalog-models/enablement/reset",
       "/api/admin/catalog-models/price/confirm",
       "/api/admin/catalog-models/price/correct",
       "/api/admin/github",

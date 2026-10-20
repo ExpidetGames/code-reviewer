@@ -104,6 +104,7 @@ afterEach(() => {
 
 const WRITES: Array<{ method: string; path: string; body: unknown }> = [
   { method: "POST", path: "/enablement", body: { ...IDS, enabled: true } },
+  { method: "POST", path: "/enablement/reset", body: { ...IDS } },
   {
     method: "POST",
     path: "/price/confirm",
@@ -280,6 +281,33 @@ describe("enabling, confirming and correcting through the routes", () => {
     expect(
       await portal.modelPrices.availability("deepseek", "deepseek-v4-pro"),
     ).toMatchObject({ selectable: true });
+  });
+
+  // #549-T06
+  it("puts a decision back to nothing through the reset route, and leaves a stranger's body alone", async () => {
+    const portal = await start();
+    await call(portal, "POST", "/enablement", { ...IDS, enabled: true });
+
+    const reset = await call(portal, "POST", "/enablement/reset", IDS);
+    const refused = await call(portal, "POST", "/enablement/reset", {
+      ...IDS,
+      enabled: false,
+    });
+
+    expect(reset.status).toBe(200);
+    expect(((await reset.json()) as { model: View }).model).toMatchObject({
+      enabled: null,
+      managed: { selectable: false, reason: "model_not_enabled" },
+    });
+    expect(refused.status).toBe(422);
+    expect(await refused.json()).toEqual({ error: "request_invalid" });
+    expect(
+      portal.modelPriceLog.filter((line) => line.includes("DECISION_RESET")),
+    ).toEqual([
+      expect.stringMatching(
+        /^model prices: MODEL_DECISION_RESET by=\S+ model=deepseek\/deepseek-v4-pro$/,
+      ),
+    ]);
   });
 
   // #549-T04

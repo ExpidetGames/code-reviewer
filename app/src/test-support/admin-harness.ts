@@ -498,6 +498,8 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
       if (request.method === "POST") {
         if (pathname === "/api/instance-portal/catalog-models/enablement")
           return await modelPriceRoutes.setEnabled(request);
+        if (pathname === "/api/instance-portal/catalog-models/enablement/reset")
+          return await modelPriceRoutes.resetDecision(request);
         if (pathname === "/api/instance-portal/catalog-models/price/confirm")
           return await modelPriceRoutes.confirmPrice(request);
         if (pathname === "/api/instance-portal/catalog-models/price/correct")

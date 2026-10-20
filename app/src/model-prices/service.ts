@@ -81,6 +81,11 @@ export type ModelPriceService = {
   ): Promise<{ ok: true; model: CatalogModelView } | ModelPriceRefusal>;
   /** `{ providerId, modelId, enabled }`. */
   setEnabled(actorId: string, input: unknown): Promise<ModelChange>;
+  /**
+   * `{ providerId, modelId }`: takes the admin's decision back, enabled or disabled, so that the model has none again (it is
+   * "new" once more when it was first seen after the first fetch, and is not selectable). The price confirmations stay.
+   */
+  resetDecision(actorId: string, input: unknown): Promise<ModelChange>;
   /** `{ providerId, modelId, referenceHash }`: confirms the reference price as the admin saw it. */
   confirmPrice(actorId: string, input: unknown): Promise<ModelChange>;
   /** `{ providerId, modelId, referenceHash, price, reason }`: states the price, against the reference the admin saw. */
@@ -377,6 +382,19 @@ export function createModelPriceService(
       log.info(
         `model prices: ${enabled ? "MODEL_ENABLED" : "MODEL_DISABLED"} by=${actorId} model=${ids.providerId}/${ids.modelId}`,
       );
+      return changed(ids.providerId, ids.modelId);
+    },
+
+    async resetDecision(actorId, input) {
+      const ids = exactTexts(input, ["providerId", "modelId"]);
+      if (ids === undefined) return refuse("request_invalid");
+      const exists = await models.getModel(ids.providerId, ids.modelId);
+      if (exists === undefined) return refuse("model_unknown");
+      // Nothing to take back writes nothing and logs nothing.
+      if (await enablements.clear(ids.providerId, ids.modelId))
+        log.info(
+          `model prices: MODEL_DECISION_RESET by=${actorId} model=${ids.providerId}/${ids.modelId}`,
+        );
       return changed(ids.providerId, ids.modelId);
     },
 

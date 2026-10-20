@@ -132,6 +132,7 @@ const PROTECTED_DATA_ROUTES = [
   "/api/instance-portal/llm-keys/[provider]/test",
   "/api/instance-portal/catalog-models",
   "/api/instance-portal/catalog-models/enablement",
+  "/api/instance-portal/catalog-models/enablement/reset",
   "/api/instance-portal/catalog-models/price/confirm",
   "/api/instance-portal/catalog-models/price/correct",
   "/api/instance-portal/model-catalog",

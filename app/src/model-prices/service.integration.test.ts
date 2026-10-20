@@ -249,6 +249,97 @@ describe.each(MODELS_DEV_ENGINES)("the model prices on $name", (engine) => {
 
     // #549-T06
     it_(
+      "calls a decided model new again when the admin resets the decision, and does not select it",
+      async () => {
+        const t = await setup();
+        await t.fetchChanged((body) => {
+          for (const id of ["a-new", "b-new"])
+            body.deepseek!.models[id] = {
+              ...body.deepseek!.models["deepseek-v4-pro"],
+              id,
+              name: id,
+            };
+        });
+        const a = { providerId: "deepseek", modelId: "a-new" };
+        const b = { providerId: "deepseek", modelId: "b-new" };
+        await t.service.setEnabled(ADMIN, { ...a, enabled: true });
+        await t.service.setEnabled(ADMIN, { ...b, enabled: false });
+        expect((await t.service.list({})).newCount).toBe(0);
+        t.lines.length = 0;
+
+        const resetA = await t.service.resetDecision(ADMIN, a);
+        const resetB = await t.service.resetDecision(ADMIN, b);
+
+        expect(resetA).toMatchObject({
+          ok: true,
+          model: { enabled: null, enablement: null, isNew: true },
+        });
+        expect(resetB).toMatchObject({ ok: true, model: { isNew: true } });
+        expect((await t.service.list({})).newCount).toBe(2);
+        expect(await t.service.availability("deepseek", "a-new")).toMatchObject(
+          { selectable: false, reason: "model_not_enabled" },
+        );
+        expect(t.lines).toEqual([
+          `model prices: MODEL_DECISION_RESET by=${ADMIN} model=deepseek/a-new`,
+          `model prices: MODEL_DECISION_RESET by=${ADMIN} model=deepseek/b-new`,
+        ]);
+      },
+    );
+
+    // #549-T06
+    it_(
+      "keeps the price confirmation when a decision is reset, so enabling again needs nothing more",
+      async () => {
+        const t = await setup();
+        await t.service.confirmPrice(ADMIN, {
+          ...SONNET,
+          referenceHash: (await view(t)).price.reference.hash,
+        });
+        await t.service.setEnabled(ADMIN, { ...SONNET, enabled: true });
+
+        await t.service.resetDecision(ADMIN, SONNET);
+
+        expect((await view(t)).price.status).toBe("confirmed");
+        await t.service.setEnabled(ADMIN, { ...SONNET, enabled: true });
+        expect(
+          await t.service.availability("anthropic", "claude-sonnet-5-5"),
+        ).toMatchObject({ selectable: true });
+      },
+    );
+
+    // #549-T06
+    it_(
+      "resets a model without a decision to nothing and writes no audit line",
+      async () => {
+        const t = await setup();
+
+        const result = await t.service.resetDecision(ADMIN, SONNET);
+
+        expect(result).toMatchObject({ ok: true, model: { enabled: null } });
+        expect(t.lines).toEqual([]);
+      },
+    );
+
+    // #549-T10
+    it_.each([
+      [
+        "a model the catalog does not have",
+        { providerId: "deepseek", modelId: "nobody" },
+        "model_unknown",
+      ],
+      ["an unknown field", { ...SONNET, enabled: true }, "request_invalid"],
+      ["a missing model", { providerId: "deepseek" }, "request_invalid"],
+    ])("refuses to reset %s", async (_name, input, code) => {
+      const t = await setup();
+
+      expect(await t.service.resetDecision(ADMIN, input)).toMatchObject({
+        ok: false,
+        code,
+      });
+    });
+
+    // #549-T06
+    it_(
       "filters by provider, search text, price status, enablement and page",
       async () => {
         const t = await setup();
