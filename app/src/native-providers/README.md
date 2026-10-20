@@ -9,7 +9,7 @@ per-job entry are `src/models-dev/` (#548); what a run costs and what bounds it 
 | File             | Role                                                                                                                                                                                                |
 | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `lookup.ts`      | Pure and client safe: a catalog provider by its slug (`findNativeProvider`), the slot of its key (`llm_api_key.<slug>`), and `withNativeProviders`, the registry's lookup extended with the catalog |
-| `catalog.ts`     | `createNativeCatalogReader`: `providers()` (the offered ones), `providerAvailable`, `models(slug)`, `checkSelection` (the save) and `resolve` (the claim: the stored row becomes the per-job entry) |
+| `catalog.ts`     | `createNativeCatalogReader`: `providers()` (the offered ones), `providerAvailable`, `models(slug)`, `checkSelection` (the save); the claim builds the per-job entry from the stored row with `native-cost/service.ts` `entryFor` |
 | `key-test.ts`    | The "Test key" of a catalog provider: the generic adapter's model-list read at the trusted address, as a class (`accepted`, `rejected`, `not_verified`, `unreachable`, `provider_error`)            |
 | `models-http.ts` | `GET /api/w/:workspace/llm-catalog/:provider/models`: the models of one provider for the picker; own key only, the 404 of a missing path for a managed workspace                                    |
 | `form-data.ts`   | What the project form is given: the catalog providers the workspace holds a key for, the token cap, whether billing is on (nothing, and nothing read, for a managed workspace)                      |
@@ -26,10 +26,14 @@ per-job entry are `src/models-dev/` (#548); what a run costs and what bounds it 
   before the next daily fetch) or no longer listed is refused with `MODEL_NOT_IN_CATALOG` on the field and nothing is stored; the
   admin's "Refresh now" is the way to get it sooner. The provider's own metadata is not asked: the catalog is the list. A pair that is
   stored already is not checked again by a save that does not touch it.
-- **Served.** The claim resolves the stored row, **listed or not** (decision of 2026-10-19 on #548: a model that disappears keeps
-  working until the provider retires it; the settings warn). It fails closed, with no move to another model, provider or key, when the
-  row is gone (`llm_model_unavailable`) or the provider cannot carry a key any more (`llm_provider_unsupported`). Only the key of that
-  provider is revealed (`key_binding_mismatch`/`no_key` otherwise: `llm_not_configured`).
+- **Served.** The claim builds the entry from the stored row, **listed or not** (decision of 2026-10-19 on #548: a model that
+  disappears keeps working until the provider retires it; the settings warn, the claim logs it). It fails closed, with no move to
+  another model, provider or key, when the row is gone (`llm_model_unavailable`) or the provider cannot carry a key any more
+  (`llm_provider_unsupported`: not supported, blocked by `url_changed`, refused, or an address that is not the plain public https one
+  in its canonical spelling). Only the key of that provider is revealed (`key_binding_mismatch`/`no_key` otherwise:
+  `llm_not_configured`).
+- **Where the key goes.** To the address the catalog trusts for the provider and to no other, re-checked by the runner:
+  `src/native-cost/README.md`, "Where the key goes". **This needs a security review.**
 
 ## What a workspace is told
 

@@ -530,8 +530,20 @@ job is refused before any key is used, in `parse_job` (`invalid_job`, "dynamic.m
 provider") and again in `build_native_job` (`dynamic_config_invalid`, before an upstream is made). The app refuses the same case
 at the claim (`entryFor`: `upstream_not_registry`, `reason=entry_upstream_not_registry` in the log; `managed_model_unavailable` on
 the operator's key, `dynamic_model_features_unsupported` on an own key), against the addresses of its own registry
-(`app/src/native-cost/registry-addresses.ts`). A provider the registry has no entry for (the BYOK providers of #555) keeps the
-rules of #548: an https address at a public host, vetted when the catalog is stored and on every connection.
+(`app/src/native-cost/registry-addresses.ts`).
+
+A provider the registry has no entry for (the BYOK providers of #555, any provider of the models.dev catalog the pinned engine can
+drive with a static key) has no address in the code. Its key goes to the address the app's catalog **trusts** for it (#548) and
+to none a workspace could type: the claim carries that address in the entry, and the app refuses to build an entry from a
+provider that is not trusted (`url_changed`, `rejected`) or whose stored address is not a plain public https address in one exact
+spelling (`upstream_invalid`). The runner re-checks what it can see (`passthrough/destination.py`, `key_destination`, in
+`parse_job` and again in `build_native_job`): the entry is of the provider the key is for, the address is a plain public https
+address (port 443, no credentials, no query, a public name or IP, a plain path) **in exactly that spelling**, so the string the app
+judged is the string it connects to; the job then carries no `llm.baseUrl`, `llm.requireParameters` or `llm.fallbackModels`. Every
+connection resolves the name, judges every address, connects to the one it judged and follows no redirect. App and runner are held
+to the same verdicts by `contracts/key-destination-vectors.json`. The runner cannot tell a trusted public name from another public
+name; that is the catalog's trust record, and the residual risk is #548's trust on first use
+(`app/src/native-cost/README.md`, "Where the key goes").
 
 1. `build_native_job`, before anything is prepared: `target_from_entry`, the production `HttpsUpstream` on the entry's address
    (an address the guard refuses ends the job `dynamic_config_invalid` before the engine exists, naming neither the address nor
@@ -563,8 +575,8 @@ off; `app/src/native-cost/switch.ts`). Off, `catalogRefOf` names no registry pro
 **Dynamic** job on `openrouter` or `anthropic` takes the native path: the claim checks the price (managed key) or reads the
 catalog's price and the token cap (own key), builds the entry of the chosen model from the stored catalog and sends both. A
 Diff job is never native. A managed model that is not enabled with a confirmed price ends `managed_model_unavailable`; a model
-the catalog does not have ends `managed_model_unavailable` (managed) or `dynamic_model_features_unsupported` (own key), before any
-key or token exists. The variable is read at every claim, so turning it off again takes effect on the next claim; a runner or
+the catalog does not have ends `managed_model_unavailable` (managed), `dynamic_model_features_unsupported` (own key, a registry
+provider) or `llm_model_unavailable` / `llm_provider_unsupported` (own key, a catalog provider, #555), before any key or token exists. The variable is read at every claim, so turning it off again takes effect on the next claim; a runner or
 Worker image that does not know `dynamic.modelEntry` must not be in the fleet while it is on (the cost policy already needs the
 claim feature `dynamic_cost_policy`, which gates both).
 
