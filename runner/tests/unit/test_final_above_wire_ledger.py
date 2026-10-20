@@ -608,3 +608,17 @@ def test_the_refusal_of_a_mark_says_why_for_every_cause() -> None:
     failed.record_failure(cause)
     assert failed.arm_final(MESSAGE, TOKEN) is False
     assert failed.final_refusal() is cause
+
+
+# #552-F2: the token alone is not the message: the body must hold the message as the adapter sent it
+def test_a_body_that_holds_the_token_but_not_the_message_is_not_the_final_call() -> None:
+    budget = over_the_limit()
+    assert budget.arm_final(MESSAGE, TOKEN) is True
+
+    altered = (
+        b"x" * len(REQUEST) + b'"text":"<runner-wrap-up id=\\"' + TOKEN.encode() + b'\\">Do it"'
+    )
+    with pytest.raises(RefusedForFinal):
+        budget.reserve_call(altered, output_tokens=1_024, last_user_text=MESSAGE)
+
+    assert budget.reserve_call(carrying(), output_tokens=1_024, last_user_text=MESSAGE).final
