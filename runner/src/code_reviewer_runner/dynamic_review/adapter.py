@@ -78,6 +78,7 @@ from code_reviewer_runner.dynamic_review.config import (
 from code_reviewer_runner.dynamic_review.engine_events import EventReader, EventStream
 from code_reviewer_runner.dynamic_review.engine_user import EngineLaunch
 from code_reviewer_runner.dynamic_review.final_messages import final_answer_line
+from code_reviewer_runner.dynamic_review.finalization_log import FinalizationRecord
 from code_reviewer_runner.dynamic_review.net import no_redirect_opener
 from code_reviewer_runner.dynamic_review.netguard import IsolationError
 from code_reviewer_runner.dynamic_review.plain_final import NoFinalAnswer, PlainFinalization
@@ -704,6 +705,8 @@ class DynamicEngine:
         # Set when a turn ended without a structured answer and one more turn was started (#309):
         # how the first turn ended, for the result and the log.
         self.recovery: str | None = None
+        # How the native finalization ended the review (#578); None on the legacy path.
+        self.finalization: FinalizationRecord | None = None
 
     # -- process --------------------------------------------------------------
 
@@ -942,6 +945,7 @@ class DynamicEngine:
                 provider_error=self._provider_error,
                 wait_idle=self._wait_idle,
             )
+            self.finalization = final.record
             try:
                 answer = EngineAnswer(findings=final.run(), error=None)
             except NoFinalAnswer as error:
