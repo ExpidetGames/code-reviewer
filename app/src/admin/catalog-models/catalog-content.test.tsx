@@ -15,6 +15,7 @@ import {
   staleModel,
   staleModelBetween,
 } from "../../test-support/catalog-models-fixtures.ts";
+import { findHtmlSinks } from "../../test-support/html-sinks.ts";
 import { AdminCatalogContent } from "./catalog-content.tsx";
 import { PAGE_SIZE, type CatalogQuery } from "./query.ts";
 
@@ -234,18 +235,22 @@ describe("what comes from models.dev is text", () => {
   });
 
   // #554-T07
-  it("sets nothing from the catalog as HTML", async () => {
+  it("sets nothing from the catalog as HTML, script or a place to go", async () => {
     const { readFileSync, readdirSync } = await import("node:fs");
     const { join } = await import("node:path");
     const files = readdirSync(import.meta.dirname).filter(
       (name) => /\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name),
     );
 
+    expect(files).toContain("providers-panel.tsx");
     for (const file of files)
       expect(
-        readFileSync(join(import.meta.dirname, file), "utf8"),
+        findHtmlSinks(
+          readFileSync(join(import.meta.dirname, file), "utf8"),
+          file,
+        ),
         file,
-      ).not.toMatch(/dangerouslySetInnerHTML|innerHTML/);
+      ).toEqual([]);
   });
 });
 
