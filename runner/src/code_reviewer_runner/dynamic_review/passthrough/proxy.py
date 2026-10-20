@@ -255,9 +255,9 @@ class PassthroughProxy:
         self.ledger = ledger
         # How much of the input of the run came from the provider's cache (counts only, #539).
         self.cache_tally = CacheTally()
-        # The stable code of the last thing the provider did wrong (429, 5xx, a cut stream), kept
-        # for
-        # the caller to name if the engine gives up: the engine retries these itself.
+        # The stable code of the last call's failure (429, 5xx, a cut stream), kept for the caller
+        # to name if the engine gives up: the engine retries these itself, and a call that went
+        # through clears it.
         self.last_upstream_error: ErrorCode | None = None
         self._admission = Admission(target, capability)
         self._spec = spec_of(target.family)
@@ -346,7 +346,11 @@ class PassthroughProxy:
             if self._superseded():
                 raise LimitError(ErrorCode.SUPERSEDED, "the run was superseded by a newer push")
             admitted = self._admission.body(head, read_body(head.content_length))
-            reservation = self.ledger.reserve_call(admitted.body, output_tokens=admitted.output_cap)
+            reservation = self.ledger.reserve_call(
+                admitted.body,
+                output_tokens=admitted.output_cap,
+                last_user_text=admitted.last_user_text,
+            )
         except Refused as refused:
             self._refuse(sink, refused)
             return
@@ -786,6 +790,9 @@ class PassthroughProxy:
                 "cache_creation_input_tokens": usage.cache_write,
             }
         )
+        # The engine retried a refusal and the call went through: the earlier code is not the
+        # reason the run would give up now.
+        self.last_upstream_error = None
 
     def _trace_failed(self, started_ms: int, reservation: Reservation) -> None:
         """A call that gave no usable answer is in the trace with nothing known about it."""

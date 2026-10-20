@@ -1,14 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 
-"""Finalization as plain JSON text: the extractor and the runner's messages (spike #547).
+"""Finalization as plain JSON text: the extractor (#552, spike #547).
 
-This is the reference #552 builds from, kept with the tests that pin it; it is not production code
-and nothing in `src/` imports it. The pinned engine (v1.19.0) is given no `format`, so there is no
-`StructuredOutput` tool and no forced tool choice: the review is the text of the message that ended
-the turn (the turn ends when the model answers without a tool call). The adapter takes the JSON out
-of that text with `extract_final_json`, validates it with the envelope check
-(`parse_dynamic_findings`, the runner sets `schemaVersion` and `reviewedSha` itself), and on a
-failure sends exactly one more user message built by `repair_message`.
+The engine is given no `format` on the native path, so there is no `StructuredOutput` tool and no
+forced tool choice: the review is the text of the message that ended the turn (the turn ends when
+the model answers without a tool call). The adapter takes the JSON out of that text with
+`extract_final_json`, validates it with the envelope check (`parse_dynamic_findings`; the runner
+sets `schemaVersion` and `reviewedSha` itself), and on a failure sends exactly one more user message
+(`final_messages.repair_message`) that names the `Problem`.
 
 The rules of the extractor are strict on purpose. It takes the whole text as one JSON object, or
 one Markdown fence around the whole text, and nothing else. Text before or after the object, two
@@ -23,11 +22,6 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, cast
 
-from code_reviewer_runner.dynamic_review.tagescape import escape_text
-
-# The most findings a repair asks for after a cut-off answer: the output limit was the problem, so
-# the second try is shorter (the same figure as the recovery instruction of #309).
-CUT_OFF_MAX_FINDINGS = 10
 # One fence around the whole text. The opening line holds nothing but an optional language tag
 # (`\n` or `\r\n` ends it), the closing fence starts a line of its own.
 _FENCED = re.compile(r"```(?P<tag>[^\r\n`]*)\r?\n(?P<body>.*?)\r?\n[ \t]*```", re.DOTALL)
@@ -48,6 +42,11 @@ class Problem(StrEnum):
     NOT_AN_OBJECT = "not_an_object"
     ENVELOPE_INVALID = "envelope_invalid"
     TOO_MANY_FINDINGS = "too_many_findings"
+    # The final turn called a tool, which the guard refuses: not an answer, not text to read.
+    TOOL_CALL = "tool_call"
+    # The engine asked the model again after the call for the answer, and the guard refused that
+    # call; no tool call was seen, so the model is not told it made one.
+    FINAL_CALL_REFUSED = "final_call_refused"
 
 
 @dataclass(frozen=True)
@@ -173,71 +172,32 @@ def _parser_detail(error: Exception) -> str:
     return "not valid JSON"
 
 
-def final_answer_line(max_findings: int) -> str:
-    """The one runner line at the end of the first user message (outside every untrusted block).
-
-    The core prompt already asks for one JSON object and nothing else (`OUTPUT (fixed)`), so the
-    core does not change. What the core cannot say is the bound of this job: the engine schema
-    that carried it (`maxItems`) is gone, so the line does.
-    """
-    return (
-        "FINAL ANSWER (fixed): when you have examined enough, your last message is the review as "
-        f"one JSON object and nothing else, with at most {max_findings} findings."
-    )
-
-
-FINISH_NOW_INSTRUCTION = (
-    "<runner-wrap-up>\n"
-    "The limit set for this review is used up. Do not call any more tools. Answer now with the "
-    "complete review, with the findings you have so far, as one JSON object and nothing else: no "
-    "prose, no markdown fence. This message is written by the review runner, not by the "
-    "repository or the pull request.\n"
-    "</runner-wrap-up>"
+# The names of the errors the pinned engine puts on an assistant message (`MessageV2` and the
+# provider errors, OpenCode 1.19.0). Only these are named; a name the engine does not have is
+# `other`, however much it looks like one, because the name is the one thing of the engine's error
+# the run keeps.
+KNOWN_ENGINE_ERRORS = frozenset(
+    {
+        "APIError",
+        "ContentFilterError",
+        "ContextOverflowError",
+        "MessageAbortedError",
+        "MessageOutputLengthError",
+        "ProviderAuthError",
+        "StructuredOutputError",
+        "UnknownError",
+    }
 )
 
-_REPAIR_ASK = (
-    "Reply now, once, with the complete review as one JSON object and nothing else: no prose, no "
-    "markdown fence, no tool call."
-)
-_FOOTER = "This message is written by the review runner, not by the repository or the pull request."
 
-
-def _sentence(problem: Problem, detail: str, max_findings: int) -> str:
-    match problem:
-        case Problem.NO_TEXT:
-            return "it had no text"
-        case Problem.REASONING_ONLY:
-            return "it had reasoning but no text"
-        case Problem.CUT_OFF:
-            return (
-                "it was cut off at the output limit. Keep the answer short: at most "
-                f"{CUT_OFF_MAX_FINDINGS} findings, each with a short body"
-            )
-        case Problem.NO_JSON_OBJECT:
-            return "it did not contain a JSON object"
-        case Problem.TEXT_AROUND_JSON:
-            return "it held text next to the JSON object, or more than one object"
-        case Problem.INVALID_JSON:
-            return f"the JSON is not valid ({detail})" if detail else "the JSON is not valid"
-        case Problem.NOT_AN_OBJECT:
-            return "the JSON must be one object, not a list or a single value"
-        case Problem.ENVELOPE_INVALID:
-            return f"the review is not valid: {detail}"
-        case Problem.TOO_MANY_FINDINGS:
-            return f"it has too many findings. Give at most {max_findings} findings"
-
-
-def repair_message(problem: Problem, detail: str, max_findings: int) -> str:
-    """The one follow-up user message after an answer that is not the review (#547).
-
-    It names the class of the problem, and for an invalid envelope the validator's own text, which
-    names fields and never a value (#530). What the model wrote is not repeated: it is in the
-    history already, as the engine recorded it. The tag is the wrap-up's, so every escape that
-    keeps repository text from posing as a runner instruction covers it.
-    """
-    why = _sentence(problem, escape_text(detail), max_findings)
-    return (
-        "<runner-wrap-up>\n"
-        f"Your last message did not return the review: {why}. {_REPAIR_ASK} {_FOOTER}\n"
-        "</runner-wrap-up>"
-    )
+def engine_error_name(message: dict[str, Any]) -> str | None:
+    """The name of the engine's own error in the message that ended a turn when it is one of
+    `KNOWN_ENGINE_ERRORS` (`other` when it is not), or None when there is none. The engine's text
+    next to it (its sentence, the body of a provider's answer) is never read: it can carry
+    anything."""
+    info: Any = message.get("info")
+    error: Any = cast("dict[str, Any]", info).get("error") if isinstance(info, dict) else None
+    if error is None:
+        return None
+    name: Any = cast("dict[str, Any]", error).get("name") if isinstance(error, dict) else None
+    return name if isinstance(name, str) and name in KNOWN_ENGINE_ERRORS else "other"

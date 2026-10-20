@@ -36,6 +36,7 @@ from code_reviewer_runner.dynamic_review.passthrough.families import (
     WireFamily,
     spec_of,
 )
+from code_reviewer_runner.dynamic_review.passthrough.last_user import last_user_text
 from code_reviewer_runner.result import ErrorCode
 
 
@@ -114,6 +115,9 @@ class Admitted:
     body: bytes
     model: str
     output_cap: int
+    # The text of the last message of the body when it is a user message (the final call is bound
+    # to it, `last_user.py`).
+    last_user_text: str | None = None
 
 
 _LENGTH = re.compile(r"[0-9]{1,12}")
@@ -287,7 +291,12 @@ class Admission:
             output_cap = check_body(self._target.family, document, self._target.output_allowance)
         except (NotAllowed, OverflowError, RecursionError):
             raise _not_allowed() from None
-        return Admitted(body=body, model=model, output_cap=output_cap)
+        return Admitted(
+            body=body,
+            model=model,
+            output_cap=output_cap,
+            last_user_text=last_user_text(self._target.family, document),
+        )
 
     @staticmethod
     def _document(body: bytes) -> dict[str, Any]:
