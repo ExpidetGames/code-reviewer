@@ -31,6 +31,23 @@ export function truncateText(
   return { text: `${characters.slice(0, max - 1).join("")}…`, cut: true };
 }
 
+/** Characters a reader does not see: control, format (bidi marks, zero-width), line and paragraph separators. */
+const INVISIBLE = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu;
+
+/** A text with its invisible characters left out: for a text that is only shown (a refused address), never one that is acted on. */
+export function stripInvisible(text: string): string {
+  return text.replace(INVISIBLE, "");
+}
+
+/** A text with each invisible character written as `\u{XXXX}`: for a text that is acted on, so what is read is what is sent. */
+export function escapeInvisible(text: string): string {
+  return text.replace(
+    INVISIBLE,
+    (character) =>
+      `\\u{${(character.codePointAt(0) ?? 0).toString(16).toUpperCase()}}`,
+  );
+}
+
 /**
  * The address to put in a link, or null: only `https`, with a host, without credentials, whitespace or control characters.
  * `javascript:`, `data:`, `http:` and relative addresses are never links; the page shows them as text.

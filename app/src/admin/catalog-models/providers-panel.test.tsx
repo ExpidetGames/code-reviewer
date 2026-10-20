@@ -227,6 +227,127 @@ describe("a provider whose address was refused", () => {
   });
 });
 
+describe("an address that can be confirmed is shown whole", () => {
+  // 23 + (63 × 3 + 2 dots) + 16 = 230 characters: a look-alike host that a cut at 200 would hide behind api.openai.com
+  const LONG = `https://api.openai.com.${["a", "b", "c"].map((c) => c.repeat(63)).join(".")}.attacker.net/v1`;
+  const lookAlike = provider({
+    id: "openai",
+    name: "OpenAI",
+    url: {
+      state: "url_changed",
+      trustedUrl: "https://api.openai.com/v1",
+      pendingUrl: LONG,
+      problem: null,
+    },
+  });
+
+  // #554-T06
+  it("shows a 230 character address in full in the table and in the dialog, and confirms exactly that", async () => {
+    expect(LONG).toHaveLength(230);
+    const api = fakeApi();
+    render(<ProvidersPanel providers={[lookAlike]} api={api} />);
+
+    const item = within(
+      screen.getByRole("listitem", { name: "Address of OpenAI" }),
+    );
+    const shown = item.getByText("New address").nextElementSibling;
+    expect(shown?.textContent).toBe(LONG);
+    expect(shown?.querySelector("code")?.className).toContain("break-all");
+
+    await userEvent.click(
+      screen.getByRole("button", { name: /Confirm the new address of OpenAI/ }),
+    );
+    const dialog = within(await screen.findByRole("alertdialog"));
+    expect(dialog.getByText(LONG).className).toContain("break-all");
+    await userEvent.click(
+      dialog.getByRole("button", { name: "Trust the new address" }),
+    );
+    await waitFor(() =>
+      expect(api.confirmUrl).toHaveBeenCalledWith({
+        providerId: "openai",
+        pendingUrl: LONG,
+      }),
+    );
+  });
+
+  // #554-T06
+  it("shows the longest address the check accepts in full too", () => {
+    const longest = `https://${"a".repeat(60)}.example/${"p".repeat(2048 - 8 - 60 - 9)}`;
+    expect(longest).toHaveLength(2048);
+    render(
+      <ProvidersPanel
+        providers={[
+          provider({
+            ...lookAlike,
+            url: { ...lookAlike.url, pendingUrl: longest },
+          }),
+        ]}
+        api={fakeApi()}
+      />,
+    );
+
+    expect(
+      screen.getByText("New address").nextElementSibling?.textContent,
+    ).toBe(longest);
+  });
+
+  // #554-T06
+  it("makes a format or control character in a confirmable address visible instead of dropping it", async () => {
+    const tricky = "https://api.example.com/v1/\u202Efoo\u200Bbar";
+    const api = fakeApi();
+    render(
+      <ProvidersPanel
+        providers={[
+          provider({
+            ...lookAlike,
+            url: { ...lookAlike.url, pendingUrl: tricky },
+          }),
+        ]}
+        api={api}
+      />,
+    );
+
+    const shown = screen.getByText("New address").nextElementSibling;
+    expect(shown?.textContent).toBe(
+      "https://api.example.com/v1/\\u{202E}foo\\u{200B}bar",
+    );
+    expect(shown?.textContent).not.toMatch(/[\u202E\u200B]/u);
+    await userEvent.click(
+      screen.getByRole("button", { name: /Confirm the new address of OpenAI/ }),
+    );
+    await userEvent.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", {
+        name: "Trust the new address",
+      }),
+    );
+    await waitFor(() =>
+      expect(api.confirmUrl).toHaveBeenCalledWith({
+        providerId: "openai",
+        pendingUrl: tricky,
+      }),
+    );
+  });
+
+  // #554-T07
+  it("shows a refused address without its format and control characters", () => {
+    const refused = provider({
+      url: {
+        state: "rejected",
+        trustedUrl: null,
+        pendingUrl: "http://evil.example/\u202Epath\u200B\u0007\u2028x",
+        problem: "not_https",
+      },
+    });
+    const { container } = render(
+      <ProvidersPanel providers={[refused]} api={fakeApi()} />,
+    );
+
+    const code = container.querySelector("dd code");
+    expect(code?.textContent).toBe("http://evil.example/pathx");
+    expect(container.textContent).not.toMatch(/[\u202E\u200B\u0007\u2028]/u);
+  });
+});
+
 describe("links from models.dev", () => {
   // #554-T07
   it("links the trusted address when it is plain https, with no opener and no referrer", () => {

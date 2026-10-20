@@ -3,7 +3,13 @@
 // What the catalog screens do with text and numbers (#554): prices from micro-USD to exact dollars without a float, the
 // visible cut of a long string, and the check that a link is https before it is rendered as one.
 import { describe, expect, it } from "vitest";
-import { formatUsdPerMTok, safeHttpsHref, truncateText } from "./format.ts";
+import {
+  escapeInvisible,
+  formatUsdPerMTok,
+  safeHttpsHref,
+  stripInvisible,
+  truncateText,
+} from "./format.ts";
 
 describe("a price as dollars per million tokens", () => {
   // #554-T03
@@ -69,5 +75,23 @@ describe("a link from models.dev", () => {
     "",
   ])("is not rendered for %j", (address) => {
     expect(safeHttpsHref(address)).toBeNull();
+  });
+});
+
+describe("characters that are not seen", () => {
+  // #554-T07
+  it("strips format, control and line-separator characters from a text that is only shown", () => {
+    expect(stripInvisible("a\u202Eb\u200Bc\u0007d\u2028e\u2029f\uFEFFg")).toBe(
+      "abcdefg",
+    );
+    expect(stripInvisible("plain ünïcode 😀")).toBe("plain ünïcode 😀");
+  });
+
+  // #554-T07
+  it("writes format and control characters as visible escapes so a text can be read as it is", () => {
+    expect(escapeInvisible("a\u202Eb\u200Bc\u0007d")).toBe(
+      "a\\u{202E}b\\u{200B}c\\u{7}d",
+    );
+    expect(escapeInvisible("plain ünïcode 😀")).toBe("plain ünïcode 😀");
   });
 });

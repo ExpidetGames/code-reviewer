@@ -30,7 +30,12 @@ import {
 } from "../../components/ui/card.tsx";
 import type { ProviderView } from "../../models-dev/admin-service.ts";
 import { browserCatalogModelsApi, type CatalogModelsApi } from "./api.ts";
-import { safeHttpsHref, truncateText } from "./format.ts";
+import {
+  escapeInvisible,
+  safeHttpsHref,
+  stripInvisible,
+  truncateText,
+} from "./format.ts";
 import {
   URL_PROBLEM_COPY,
   URL_STATE_LABEL,
@@ -41,13 +46,29 @@ import { URL_BADGE } from "./status-badges.ts";
 /** The most providers listed at once; a mass change is stopped by the fetch guard long before. */
 const MAX_LISTED = 50;
 
+/** The most of an address that is shown when it cannot be confirmed; a confirmable one is shown whole. */
+const REFUSED_ADDRESS_CHARS = 200;
+
+/**
+ * An address that can be acted on is shown whole (a cut would hide the end of a look-alike host such as
+ * `api.openai.com.<63 characters>.attacker.net`) with its invisible characters written out, so that what is read is
+ * what is trusted. One that cannot be confirmed is only shown: stripped of invisible characters, then cut.
+ */
+function addressText(text: string, confirmable: boolean): string {
+  return confirmable
+    ? escapeInvisible(text)
+    : truncateText(stripInvisible(text), REFUSED_ADDRESS_CHARS).text;
+}
+
 /** An address from models.dev: text, and a link only when it is a plain https address. */
 function Address({ text }: { text: string | null }) {
   if (text === null) return <span className="text-muted-foreground">none</span>;
-  const shown = truncateText(text, 200);
   const href = safeHttpsHref(text);
+  // The trusted address passed the check once: whole, like a confirmable one.
   const code = (
-    <code className="font-mono text-xs break-all">{shown.text}</code>
+    <code className="font-mono text-xs break-all">
+      {addressText(text, href !== null)}
+    </code>
   );
   return href === null ? (
     code
@@ -164,7 +185,7 @@ export function ProvidersPanel({
                         <span className="text-muted-foreground">none</span>
                       ) : (
                         <code className="font-mono text-xs break-all">
-                          {truncateText(provider.url.pendingUrl, 200).text}
+                          {addressText(provider.url.pendingUrl, canConfirm)}
                         </code>
                       )}
                     </dd>
@@ -227,7 +248,7 @@ export function ProvidersPanel({
                 {confirming?.url.pendingUrl === null ||
                 confirming?.url.pendingUrl === undefined
                   ? ""
-                  : truncateText(confirming.url.pendingUrl, 200).text}
+                  : addressText(confirming.url.pendingUrl, true)}
               </code>
               . Confirm only an address you recognise. The change is written to
               the server log with your account.
