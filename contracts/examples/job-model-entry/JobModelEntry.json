@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "providerId": "deepseek",
+  "npm": "@ai-sdk/openai-compatible",
+  "family": "openai-chat",
+  "authHeader": "Authorization",
+  "upstreamBaseUrl": "https://api.deepseek.com",
+  "modelId": "deepseek-v4-pro",
+  "model": {
+    "name": "DeepSeek V4 Pro",
+    "status": "active",
+    "tool_call": true,
+    "reasoning": true,
+    "temperature": true,
+    "limit": { "context": 1000000, "output": 384000 },
+    "modalities": { "input": ["text"], "output": ["text"] },
+    "interleaved": { "field": "reasoning_content" }
+  }
+}

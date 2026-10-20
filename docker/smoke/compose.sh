@@ -54,6 +54,7 @@ export APP_IMAGE=$app_image
 export RUNNER_IMAGE=$runner_image
 export APP_PORT=0 # Docker picks a free port on the host
 export BETTER_AUTH_URL=http://localhost:3000
+export MODELS_DEV_FETCH=off # the app would fetch the models.dev catalog on its own (#548); a smoke test reaches no internet
 export APP_SECRET=smoke-test-secret-0123456789-0123456789-abcdef
 export RUNNER_TOKEN=smoke-runner-token-0123456789-0123456789-abcdef
 

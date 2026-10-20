@@ -94,6 +94,9 @@ const SCOPED = [
  *   jobs without their results, and one job by its id), and every answer names its workspace; the only callers are
  *   the pages of the admin portal behind the admin guard. What a member sees of a run goes through the scoped
  *   runs repository;
+ * - models-dev: the providers and models read from models.dev (#548) and the state of the last fetch. It is the catalog
+ *   of the installation, fetched at run time from a public source: not customer data, and no workspace owns a row. It
+ *   stores and reads whole rows (no query takes a workspace or returns one) and never deletes;
  * - billing-topup-intent-directory: finds a top-up intent from what a provider event names (#497), before the workspace
  *   is known; it only reads, an intent is found only for the adapter that created it, and every answer names its
  *   workspace, which is where everything that follows goes (the scoped intents repository and the journal of that
@@ -118,6 +121,7 @@ const INSTANCE_LEVEL = [
   "job-dispatches-repository.ts",
   "jobs-claim.ts",
   "legacy-users-repository.ts",
+  "models-dev-repository.ts",
   "plan-handoff-redeem-repository.ts",
   "rate-limits-repository.ts",
   "refusal-notices-sweep.ts",
@@ -243,6 +247,18 @@ describe("the repositories and workspace scoping", () => {
       touchesTheDatabase,
     );
     expect(factories.map((fn) => fn.name)).toEqual(["createCatalogRepository"]);
+  });
+
+  // #548-T12
+  it("classifies the models.dev catalog repository as instance level, with an exported factory that takes no workspace", () => {
+    expect(INSTANCE_LEVEL).toContain("models-dev-repository.ts");
+    expect(SCOPED).not.toContain("models-dev-repository.ts");
+    const factories = exportedFunctions("models-dev-repository.ts").filter(
+      touchesTheDatabase,
+    );
+    expect(factories.map((fn) => fn.name)).toEqual([
+      "createModelsDevRepository",
+    ]);
   });
 
   it("keeps the instance level modules from taking a workspace, so the two groups stay apart", () => {

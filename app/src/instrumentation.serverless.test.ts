@@ -27,6 +27,9 @@ vi.mock("./integrations/sync/startup.ts", () => ({
 vi.mock("./maintenance/startup.ts", () => ({
   startCleanupOnStart: spied("cleanup"),
 }));
+vi.mock("./models-dev/startup.ts", () => ({
+  startModelsDevRefreshOnStart: spied("models-dev-timer"),
+}));
 vi.mock("./check-runs/startup.ts", () => ({
   startCheckReconcilerOnStart: spied("check-run-timer"),
 }));
