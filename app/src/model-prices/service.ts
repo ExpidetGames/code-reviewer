@@ -26,7 +26,8 @@ import type { Database } from "../db/schema.ts";
 import type { FetchState } from "../models-dev/catalog.ts";
 import {
   managedAvailability,
-  type ManagedAvailability,
+  managedAvailabilityToJson,
+  type ManagedAvailabilityJson,
 } from "./availability.ts";
 import type { PriceConfirmation } from "./confirmation.ts";
 import { toModelView, type CatalogModelView } from "./admin-view.ts";
@@ -84,18 +85,26 @@ export type ModelPriceService = {
   confirmPrice(actorId: string, input: unknown): Promise<ModelChange>;
   /** `{ providerId, modelId, referenceHash, price, reason }`: states the price, against the reference the admin saw. */
   correctPrice(actorId: string, input: unknown): Promise<ModelChange>;
-  /** Whether the managed key may use the model now, and at which price (for the claim of #553). */
+  /**
+   * Whether the managed key may use the model now, and at which price (for the claim of #553), in a form that is JSON as it
+   * is: amounts are decimal strings of whole micro-USD per million tokens (`bigint` is only used inside), with the id of the
+   * confirmation and the version of its hash. **It never throws:** a database that cannot be read is a refusal
+   * (`{ selectable: false, reason: "check_failed", code: "catalog_model_unavailable" }`) and one log line without detail, because
+   * the caller must treat anything but `selectable: true` as "the managed key is not used", and an exception is easy to
+   * handle as something else. A refusal carries a stable `code` (`catalog_price_unconfirmed` for a price that is not
+   * confirmed or no longer is, `catalog_model_unavailable` otherwise).
+   */
   availability(
     providerId: string,
     modelId: string,
-  ): Promise<ManagedAvailability>;
+  ): Promise<ManagedAvailabilityJson>;
 };
 
 export type ModelPriceServiceDependencies = {
   db: Kysely<Database>;
   now?: () => Date;
   /** Where the audit line goes (the server's log in production, a list in tests). */
-  log?: { info(line: string): void };
+  log?: { info(line: string): void; error?(line: string): void };
   /** The override file; tests bring their own. */
   overrideOf?: (
     providerId: string,
@@ -147,6 +156,10 @@ export function createModelPriceService(
   const { db } = deps;
   const now = deps.now ?? (() => new Date());
   const log = deps.log ?? { info: (line: string) => console.info(line) };
+  const logError =
+    deps.log === undefined
+      ? (line: string) => console.error(line)
+      : (deps.log.error ?? ((line: string) => deps.log?.info(line)));
   const overrideOf = deps.overrideOf ?? modelOverride;
   const models = createModelsDevRepository(db);
   const enablements = createModelEnablementsRepository(db);
@@ -415,26 +428,39 @@ export function createModelPriceService(
     },
 
     async availability(providerId, modelId) {
-      const [provider, model, enablement, confirmation] = await Promise.all([
-        models.getProvider(providerId),
-        models.getModel(providerId, modelId),
-        enablements.get(providerId, modelId),
-        confirmations.latest(providerId, modelId),
-      ]);
-      const override = overrideOf(providerId, modelId);
-      return managedAvailability({
-        provider,
-        model,
-        enabled: enablement?.enabled === true,
-        override,
-        price: effectivePrice({
-          cost: model?.cost ?? null,
-          reasoning: model?.reasoning ?? false,
-          override,
-          confirmation: confirmation ?? null,
-        }),
-        now: now(),
-      });
+      try {
+        const [provider, model, enablement, confirmation] = await Promise.all([
+          models.getProvider(providerId),
+          models.getModel(providerId, modelId),
+          enablements.get(providerId, modelId),
+          confirmations.latest(providerId, modelId),
+        ]);
+        const override = overrideOf(providerId, modelId);
+        return managedAvailabilityToJson(
+          managedAvailability({
+            provider,
+            model,
+            enabled: enablement?.enabled === true,
+            override,
+            price: effectivePrice({
+              cost: model?.cost ?? null,
+              reasoning: model?.reasoning ?? false,
+              override,
+              confirmation: confirmation ?? null,
+            }),
+            now: now(),
+          }),
+        );
+      } catch {
+        // No error text: it could carry whatever the failing layer held (a model id, a price).
+        logError(
+          "model prices: AVAILABILITY_CHECK_FAILED: the managed key is refused for this model.",
+        );
+        return managedAvailabilityToJson({
+          selectable: false,
+          reason: "check_failed",
+        });
+      }
     },
   };
 }

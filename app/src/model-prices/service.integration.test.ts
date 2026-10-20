@@ -67,11 +67,15 @@ describe.each(MODELS_DEV_ENGINES)("the model prices on $name", (engine) => {
     });
     await modelsDev.refresh();
     const lines: string[] = [];
+    const errors: string[] = [];
     const overrides = options.overrides ?? {};
     const service = createModelPriceService({
       db,
       now: () => now,
-      log: { info: (line) => lines.push(line) },
+      log: {
+        info: (line) => lines.push(line),
+        error: (line) => errors.push(line),
+      },
       overrideOf: (providerId, modelId) =>
         overrides[`${providerId}/${modelId}`],
     });
@@ -81,6 +85,7 @@ describe.each(MODELS_DEV_ENGINES)("the model prices on $name", (engine) => {
       modelsDev,
       service,
       lines,
+      errors,
       confirmations: createModelPriceConfirmationsRepository(db),
       advance: (ms: number) => {
         now = new Date(now.getTime() + ms);
@@ -955,11 +960,19 @@ describe.each(MODELS_DEV_ENGINES)("the model prices on $name", (engine) => {
 
         expect(
           await t.service.availability("anthropic", "claude-sonnet-5-5"),
-        ).toEqual({ selectable: false, reason: "model_not_enabled" });
+        ).toEqual({
+          selectable: false,
+          reason: "model_not_enabled",
+          code: "catalog_model_unavailable",
+        });
         await t.service.setEnabled(ADMIN, { ...SONNET, enabled: true });
         expect(
           await t.service.availability("anthropic", "claude-sonnet-5-5"),
-        ).toEqual({ selectable: false, reason: "price_unconfirmed" });
+        ).toEqual({
+          selectable: false,
+          reason: "price_unconfirmed",
+          code: "catalog_price_unconfirmed",
+        });
         await t.service.confirmPrice(ADMIN, {
           ...SONNET,
           referenceHash: await hash(),
@@ -969,11 +982,80 @@ describe.each(MODELS_DEV_ENGINES)("the model prices on $name", (engine) => {
           "claude-sonnet-5-5",
         );
         expect(open).toMatchObject({ selectable: true });
-        expect(open.selectable && open.book.output).toBe(BigInt(10_000_000));
+        expect(open.selectable && open.book.output).toBe("10000000");
         await t.service.setEnabled(ADMIN, { ...SONNET, enabled: false });
         expect(
           await t.service.availability("anthropic", "claude-sonnet-5-5"),
-        ).toEqual({ selectable: false, reason: "model_not_enabled" });
+        ).toEqual({
+          selectable: false,
+          reason: "model_not_enabled",
+          code: "catalog_model_unavailable",
+        });
+      },
+    );
+
+    // #549-T07
+    it_(
+      "answers in a form that survives JSON: prices as decimal strings, with the confirmation and the hash version",
+      async () => {
+        const t = await setup();
+        await t.service.setEnabled(ADMIN, { ...SONNET, enabled: true });
+        await t.service.confirmPrice(ADMIN, {
+          ...SONNET,
+          referenceHash: (await view(t)).price.reference.hash,
+        });
+        const confirmation = (await view(t)).price.confirmation;
+
+        const answer = await t.service.availability(
+          "anthropic",
+          "claude-sonnet-5-5",
+        );
+
+        expect(JSON.parse(JSON.stringify(answer))).toEqual(answer);
+        expect(answer).toMatchObject({
+          selectable: true,
+          confirmationId: confirmation?.id,
+          hashVersion: 2,
+          book: { input: "2000000", output: "10000000", cacheWrite1h: null },
+        });
+      },
+    );
+
+    // #549-T07
+    it_("refuses with the stable code of an unconfirmed price", async () => {
+      const t = await setup();
+      await t.service.setEnabled(ADMIN, { ...SONNET, enabled: true });
+
+      expect(
+        await t.service.availability("anthropic", "claude-sonnet-5-5"),
+      ).toEqual({
+        selectable: false,
+        reason: "price_unconfirmed",
+        code: "catalog_price_unconfirmed",
+      });
+    });
+
+    // #549-T07
+    it_(
+      "counts a database that cannot be read as a refusal with a stable code, not a throw, and logs no detail",
+      async () => {
+        const t = await setup();
+        await t.service.setEnabled(ADMIN, { ...SONNET, enabled: true });
+        await t.db.destroy();
+
+        const answer = await t.service.availability(
+          "anthropic",
+          "claude-sonnet-5-5",
+        );
+
+        expect(answer).toEqual({
+          selectable: false,
+          reason: "check_failed",
+          code: "catalog_model_unavailable",
+        });
+        expect(t.errors).toEqual([
+          "model prices: AVAILABILITY_CHECK_FAILED: the managed key is refused for this model.",
+        ]);
       },
     );
 
@@ -998,7 +1080,11 @@ describe.each(MODELS_DEV_ENGINES)("the model prices on $name", (engine) => {
 
         expect(
           await t.service.availability("anthropic", "claude-sonnet-5-5"),
-        ).toEqual({ selectable: false, reason: "price_unconfirmed" });
+        ).toEqual({
+          selectable: false,
+          reason: "price_unconfirmed",
+          code: "catalog_price_unconfirmed",
+        });
       },
     );
 
@@ -1011,6 +1097,7 @@ describe.each(MODELS_DEV_ENGINES)("the model prices on $name", (engine) => {
         expect(await t.service.availability("anthropic", "nobody")).toEqual({
           selectable: false,
           reason: "model_unknown",
+          code: "catalog_model_unavailable",
         });
       },
     );
@@ -1035,7 +1122,11 @@ describe.each(MODELS_DEV_ENGINES)("the model prices on $name", (engine) => {
 
         expect(
           await t.service.availability("deepseek", "deepseek-v4-pro"),
-        ).toEqual({ selectable: false, reason: "provider_url_blocked" });
+        ).toEqual({
+          selectable: false,
+          reason: "provider_url_blocked",
+          code: "catalog_model_unavailable",
+        });
       },
     );
   });

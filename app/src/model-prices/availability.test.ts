@@ -4,7 +4,11 @@
 // still is), the provider's address is trusted, and the override file does not block or retire it. Pure.
 import { describe, expect, it } from "vitest";
 import type { StoredModel, StoredProvider } from "../models-dev/catalog.ts";
-import { managedAvailability } from "./availability.ts";
+import {
+  MANAGED_UNAVAILABLE_REASONS,
+  managedAvailability,
+  managedAvailabilityToJson,
+} from "./availability.ts";
 import type { PriceConfirmation } from "./confirmation.ts";
 import { effectivePrice } from "./effective-price.ts";
 import type { ModelOverride } from "./overrides.ts";
@@ -198,5 +202,50 @@ describe("managedAvailability", () => {
     expect(
       check({ model: { ...model, unlistedAt: "2026-10-20T03:00:00.000Z" } }),
     ).toMatchObject({ selectable: true });
+  });
+});
+
+describe("managedAvailabilityToJson", () => {
+  // #549-T07
+  it("hands out the book as decimal strings with the id of the confirmation and the hash version", () => {
+    const result = check();
+
+    const json = managedAvailabilityToJson(result);
+
+    expect(json).toEqual({
+      selectable: true,
+      confirmationId: 1,
+      hashVersion: 2,
+      book: expect.objectContaining({
+        input: "600000",
+        output: "1200000",
+        cacheRead: "60000",
+      }),
+    });
+    expect(JSON.parse(JSON.stringify(json))).toEqual(json);
+  });
+
+  // #549-T07
+  it("names the stable code of a price that is not confirmed, and one code for every other reason", () => {
+    const codes = MANAGED_UNAVAILABLE_REASONS.map((reason) => [
+      reason,
+      managedAvailabilityToJson({ selectable: false, reason }),
+    ]);
+
+    expect(
+      Object.fromEntries(
+        codes.map(([r, j]) => [r, (j as { code: string }).code]),
+      ),
+    ).toEqual({
+      model_unknown: "catalog_model_unavailable",
+      provider_unsupported: "catalog_model_unavailable",
+      provider_url_blocked: "catalog_model_unavailable",
+      model_entry_invalid: "catalog_model_unavailable",
+      model_blocked: "catalog_model_unavailable",
+      model_retired: "catalog_model_unavailable",
+      model_not_enabled: "catalog_model_unavailable",
+      price_unconfirmed: "catalog_price_unconfirmed",
+      check_failed: "catalog_model_unavailable",
+    });
   });
 });
