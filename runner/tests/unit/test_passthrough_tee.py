@@ -181,8 +181,10 @@ def test_a_chat_stream_without_the_done_marker_is_complete_with_its_finish_and_u
 # #550-T06
 def test_a_charge_the_provider_states_is_kept() -> None:
     usage = {"prompt_tokens": 10, "completion_tokens": 5, "cost": 0.0012}
+    finish: dict[str, object] = {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}
     chunk: dict[str, object] = {"choices": [], "usage": usage}
-    body = f"data: {json.dumps(chunk)}\n\ndata: [DONE]\n\n".encode()
+    # The usage comes after the finish chunk, as every provider sends it (review of PR #569, S2).
+    body = f"data: {json.dumps(finish)}\n\ndata: {json.dumps(chunk)}\n\ndata: [DONE]\n\n".encode()
     result = read_stream(WireFamily.OPENAI_CHAT, [body])
     assert result.usage == CallUsage(10, 5, stated_cost=Decimal("0.0012"))
 

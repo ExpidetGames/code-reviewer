@@ -340,7 +340,7 @@ def test_a_usage_in_the_wrong_order_is_an_unknown_call_at_the_worst_case(
 # #551-R569-S2
 def test_the_two_usage_chunks_of_the_reviewers_chat_stream_cannot_book_the_smaller_one() -> None:
     # Before: the last chunk (5 tokens out) replaced the first (500) and the call cost a hundredth.
-    finish = {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}
+    finish: dict[str, Any] = {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}
 
     def usage(completion: int) -> dict[str, Any]:
         counts = {"prompt_tokens": 1000, "completion_tokens": completion}

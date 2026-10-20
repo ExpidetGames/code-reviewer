@@ -156,7 +156,7 @@ def book_ledger(book: PriceBook) -> BudgetLedger:
         window_tokens=200_000,
         output_tokens=8_192,
         unit_costs=UNIT_COSTS,
-        price_book=book,
+        book=book,
     )
 
 

@@ -20,12 +20,14 @@ and a prompt whose size two tiers of one size price differently.
   output price when it states none.
 - A **cache read** without a read price costs the input price (never less than it is); a **cache
   write** without a price of its kind has no cost.
-- A **charge the provider states** (OpenRouter's `usage.cost`) is the reference and is never
-  recomputed. When the book can price the same call and the two differ by more than
-  `DRIFT_RELATIVE` (and `DRIFT_ABSOLUTE` USD), the call is a `price_drift` (the proxy counts them,
-  counts only). A stated charge of zero for a call that used tokens is not sane when the book
-  prices it above zero: the book's price is booked instead (and it is a drift), because a zero the
-  provider "stated" must never make a call free.
+- A **call the book cannot price** has no cost (None), whether the provider states a charge or not:
+  the proxy books its worst case and counts it as unknown (review of PR #569, S3).
+- A **charge the provider states** (OpenRouter's `usage.cost`) is held against what the book
+  expects for the same call, and the dearer of the two is booked (S4). When the two differ by more
+  than `DRIFT_RELATIVE` (and `DRIFT_ABSOLUTE` USD) the call is a `price_drift` (the proxy counts
+  them, counts only). A stated charge more than `IMPLAUSIBLE_BELOW` (10) times below the book's
+  price is not a price: zero, 1e-300 and "a little less than nothing" are all the call being
+  unknown, never a cheap call. A model the book prices at zero may state zero.
 """
 
 from dataclasses import dataclass
@@ -47,6 +49,8 @@ _EXACT: Final = Context(prec=100)
 # tolerance is a guess until a live capture shows how far OpenRouter's charge strays (live L14).
 DRIFT_RELATIVE: Final = Decimal("0.01")
 DRIFT_ABSOLUTE: Final = Decimal("0.000001")
+# A stated charge more than this many times below what the book expects is not believed.
+IMPLAUSIBLE_BELOW: Final = Decimal(10)
 
 
 @dataclass(frozen=True)
@@ -103,14 +107,17 @@ def price_call(usage: CallUsage, prices: PriceBook | UnitCosts) -> PricedCall:
     if usage.unknown_fields or not usage.complete:
         return PricedCall(None)
     expected = book_price(usage, book)
+    if expected is None:
+        # The book cannot price the call (no price for a kind it used, no single tier): the call is
+        # unknown, a charge the provider states or not. With nothing to hold that charge against
+        # there is nothing to believe it by.
+        return PricedCall(None)
     stated = usage.stated_cost
     if stated is None:
         return PricedCall(expected)
-    if expected is None:
-        return PricedCall(stated)
-    if stated == 0 and expected > 0:
-        return PricedCall(expected, drift=True)
-    return PricedCall(stated, drift=_drifts(stated, expected))
+    if _EXACT.multiply(stated, IMPLAUSIBLE_BELOW) < expected:
+        return PricedCall(None)
+    return PricedCall(max(stated, expected), drift=_drifts(stated, expected))
 
 
 def call_cost(usage: CallUsage, prices: PriceBook | UnitCosts) -> Decimal | None:

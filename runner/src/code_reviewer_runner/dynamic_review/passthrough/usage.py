@@ -23,14 +23,16 @@ docs/spike/544-passthrough.md, L3 and L14).
 
 import json
 from dataclasses import dataclass, replace
-from typing import Any, Protocol
+from typing import Any, Final, Protocol, cast
 
 from code_reviewer_runner.dynamic_review.passthrough.call_usage import CallUsage
 from code_reviewer_runner.dynamic_review.passthrough.families import WireFamily
 from code_reviewer_runner.dynamic_review.passthrough.sse import SseFramer, read_event
 from code_reviewer_runner.dynamic_review.passthrough.usage_normalize import (
     STANDARD_OPENAI_TIERS,
+    audit,
     normalize,
+    went_backwards,
 )
 
 __all__ = ["CallUsage", "TapResult", "UsageTap", "is_error_event", "tap_for"]
@@ -118,21 +120,43 @@ def is_error_event(raw: bytes) -> bool:
     return document is not None and _is_error(event.name, document)
 
 
+# What the tap adds to `unknown_fields` for an answer whose events are not the ones the family
+# sends: a usage stated more often or in another place than the family does, and one that states
+# less than an earlier statement of the same call.
+EVENTS: Final = "usage_events"
+BACKWARDS: Final = "usage_backwards"
+# Events that carry no meaning for the order of a Messages stream.
+_IDLE: Final = ("ping", "error")
+
+
 class _Reading:
-    """What has been seen of an answer so far; the same for a stream and for a document."""
+    """What has been seen of an answer so far; the same for a stream and for a document.
+
+    A call has one usage. Chat and Responses state it once (one chunk at or after the finish, one
+    terminal event); Messages states the input in `message_start`, exactly once and first, and the
+    output in the `message_delta` events that follow, until `message_stop`; Google may state its
+    cumulative usage again. A usage that is stated more often, in the wrong place or order, or less
+    than before, is not the usage of one call, and it is never settled with (review of PR #569).
+    """
 
     def __init__(self, family: WireFamily, *, whole: bool) -> None:
         self.family = family
         # A whole document is one value that is the answer; a stream's values are its events.
         self.whole = whole
         self.usage: dict[str, Any] = {}
+        # Everything any statement of the call said that cannot be priced or trusted: the union
+        # over the events, so that a later event cannot overwrite what an earlier one revealed.
         self.unknown: set[str] = set()
         self.errored = False
         self.terminated = False
         self.finished = False
         # The usage that is there is the final one (the answer's own end has stated it).
         self.usage_final = whole
+        self._statements = 0
+        self._terminals = 0
         self._output_stated = False
+        self._started = False
+        self._stopped = False
 
     def see(self, name: str | None, value: Any) -> None:
         """One JSON value: an event's data, or the whole document."""
@@ -153,7 +177,11 @@ class _Reading:
 
     def _chat(self, document: dict[str, Any]) -> None:
         choices = document.get("choices")
-        self._merge(document.get("usage"), replace=True)
+        self.finished = self.finished or _chat_finished(choices)
+        raw = document.get("usage")
+        if raw is not None:
+            # One statement, at or after the finish: an earlier one is a part of the count.
+            self._state(raw, replace=True, once=True, in_order=self.finished or self.whole)
         if _several(choices):
             self.unknown.add("choices")
         if _chat_failed(choices):
@@ -161,60 +189,82 @@ class _Reading:
         self._service_tier(document)
         # Not every OpenAI-compatible provider ends with `[DONE]`: the usage that comes after a
         # finish reason is an end as well.
-        self.finished = self.finished or _chat_finished(choices)
         if self.finished and self.usage:
             self.terminated = True
             self.usage_final = True
 
     def _google(self, document: dict[str, Any]) -> None:
         # UNCONFIRMED live (L14): `usageMetadata` on every chunk (cumulative) or only on the last.
-        usage = _object(document.get("usageMetadata"))
+        raw = document.get("usageMetadata")
         candidates = document.get("candidates")
         if _several(candidates):
             self.unknown.add("candidates")
-        self._merge(usage, replace=True)
+        if raw is not None:
+            self._state(raw, replace=True)
         if _finished(candidates):
             # The usage must be stated at the end (the last chunk, or the cumulative one): one from
             # before it is a part of the count.
             self.terminated = True
-            self.usage_final = usage is not None
-        elif self.terminated and usage is not None:
+            self.usage_final = raw is not None
+        elif self.terminated and raw is not None:
             self.usage_final = True
 
     def _responses(self, name: str | None, document: dict[str, Any]) -> None:
         if self.whole:
-            self._merge(document.get("usage"), replace=True)
+            raw = document.get("usage")
+            if raw is not None:
+                self._state(raw, replace=True)
             self._service_tier(document)
             return
         # Only the event that ends the response carries its usage (`response.created` has none, and
-        # a usage in any other event is not read).
-        if (document.get("type") or name) not in ("response.completed", "response.incomplete"):
+        # a usage in any other event is not read), and a response ends once.
+        kind = document.get("type") or name
+        if kind not in ("response.completed", "response.incomplete", "response.failed"):
+            return
+        self._terminals += 1
+        if self._terminals > 1:
+            self.unknown.add(EVENTS)
+        if kind == "response.failed":
             return
         response = _object(document.get("response")) or {}
-        usage = _object(response.get("usage"))
-        self._merge(usage, replace=True)
+        raw = response.get("usage")
+        if raw is not None:
+            self._state(raw, replace=True)
         self._service_tier(response)
         self.terminated = True
-        self.usage_final = usage is not None
+        self.usage_final = isinstance(raw, dict)
 
     def _messages(self, name: str | None, document: dict[str, Any]) -> None:
         if self.whole:
-            self._merge(document.get("usage"))
+            self._state(document.get("usage"), replace=False)
             return
         kind = document.get("type") or name
+        if kind in _IDLE:
+            return
+        if self._stopped:
+            # Nothing comes after `message_stop`: a second message in the stream is a second usage.
+            self.unknown.add(EVENTS)
+            return
         if kind == "message_start":
+            if self._started:
+                self.unknown.add(EVENTS)  # exactly once
+                return
+            self._started = True
             message = _object(document.get("message"))
-            self._merge(message.get("usage") if message else None)
+            self._state(message.get("usage") if message else None, replace=False)
+        elif not self._started:
+            self.unknown.add(EVENTS)  # the start comes first
         elif kind == "message_delta":
             # UNCONFIRMED live (L14): the delta may state only `output_tokens` (the fakes) or repeat
-            # the input and cache fields cumulatively; either way a later statement replaces an
-            # earlier one, and the output counts only once a delta has stated it.
-            usage = _object(document.get("usage"))
-            self._merge(usage)
+            # the input and cache fields cumulatively; either way it may only state more than the
+            # start did, and the output counts only once a delta has stated it.
+            usage = document.get("usage")
+            self._state(usage, replace=False)
             # The output of `message_start` is a placeholder: only a delta states the real one.
-            if usage is not None and usage.get("output_tokens") is not None:
+            if isinstance(usage, dict) and usage.get("output_tokens") is not None:  # pyright: ignore[reportUnknownMemberType]
                 self._output_stated = True
         elif kind == "message_stop":
+            self._stopped = True
             self.terminated = True
             self.usage_final = self._output_stated
 
@@ -222,17 +272,48 @@ class _Reading:
         if holder.get("service_tier") not in STANDARD_OPENAI_TIERS:
             self.unknown.add("service_tier")
 
-    def _merge(self, usage: Any, *, replace: bool = False) -> None:
-        found = _object(usage)
+    def _state(self, raw: Any, *, replace: bool, once: bool = False, in_order: bool = True) -> None:
+        """One statement of the usage. `replace`: it stands in place of the earlier one (otherwise
+        it adds to it, a field stated again taking the later value); `once`: it is the only one a
+        call may have; `in_order`: it came where the family states it."""
+        self._statements += 1
+        if (once and self._statements > 1) or not in_order:
+            self.unknown.add(EVENTS)
+        found = _object(raw)
         if found is None:
+            self.unknown.add("usage")  # a usage that is not an object is not understood
             return
-        # Messages states the input first and the output at the end, each in its own object:
-        # fields add up by name, a later value replacing an earlier one.
-        self.usage = dict(found) if replace else {**self.usage, **found}
+        self.unknown |= audit(self.family, found)
+        # The output of a Messages start is a placeholder, whatever it says.
+        placeholder = () if self._output_stated or self.whole else ("output_tokens",)
+        if self.usage and went_backwards(
+            self.usage, found, replaced=replace, ignore=placeholder if not replace else ()
+        ):
+            self.unknown.add(BACKWARDS)
+        self.usage = dict(found) if replace else _joined(self.usage, found)
+
+
+def _joined(earlier: dict[str, Any], later: dict[str, Any]) -> dict[str, Any]:
+    """`later` over `earlier`, one level of objects deep (a split of the cache stated again)."""
+    joined = dict(earlier)
+    for key, value in later.items():
+        old = joined.get(key)
+        if isinstance(old, dict) and isinstance(value, dict):
+            joined[key] = {**cast("dict[str, Any]", old), **cast("dict[str, Any]", value)}
+        else:
+            joined[key] = value
+    return joined
 
 
 def _result(reading: _Reading) -> TapResult:
-    usage = normalize(reading.family, reading.usage, reading.unknown) if reading.usage else None
+    usage: CallUsage | None = None
+    if reading.usage:
+        try:
+            usage = normalize(reading.family, reading.usage, reading.unknown)
+        except RecursionError:
+            # Nothing in the normalizer recurses over what the provider sent; if something ever
+            # did, the call has no usage (unknown), and the relay is not touched.
+            usage = None
     terminated = reading.terminated and not reading.errored
     if usage is not None:
         usage = replace(usage, complete=terminated and reading.usage_final)
@@ -254,8 +335,6 @@ class _StreamTap:
         if event.data == "[DONE]":
             reading = self._reading
             reading.terminated = reading.terminated or self._done
-            # A Chat stream that states its usage and then ends has ended with its usage.
-            reading.usage_final = reading.usage_final or (self._done and bool(reading.usage))
             return
         try:
             value: Any = json.loads(event.data)

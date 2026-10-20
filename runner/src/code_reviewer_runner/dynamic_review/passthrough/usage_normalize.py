@@ -18,11 +18,21 @@ The rules, the same for the four families:
   empty string, list or object) is in `unknown_fields` too: it could carry a price. A zero of a
   kind we do not price costs nothing, so it is harmless. The few fields that are known and harmless
   but not zero (a total, the standard service tier) are in the schema below;
-- fields are named in `unknown_fields`, never their values, in a bounded plain form.
+- a total the provider states (`total_tokens`, `totalTokenCount`) must be the sum of the counts of
+  its family (Chat and Responses: prompt + completion; Google: prompt + candidates + thoughts + tool
+  use); one that is not means the counts are not what the provider bills (xAI states reasoning on
+  top of the completion), and the call is unknown (review of PR #569, S5);
+- fields are named in `unknown_fields`, never their values, in a bounded plain form;
+- nothing here recurses over what the provider sent: it may nest as deep as it likes (N1).
+
+`audit` reads one statement of a usage alone, so that the tap can keep what every statement of a
+stream said (a later one that leaves a field out must not hide it), and `went_backwards` says
+whether a later statement states less than an earlier one.
 """
 
 import re
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Collection, Iterable
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Final, cast
 
@@ -41,20 +51,26 @@ type Schema = dict[str, "Schema | Benign | None"]
 
 def holds_something(value: object) -> bool:
     """Whether a field states a use: not null, false, zero, empty text, or a list or an object with
-    nothing in it. A value of a kind we do not know counts as something."""
-    if value is None or value is False:
-        return False
-    if isinstance(value, (int, float)):
-        return value != 0
-    if isinstance(value, str):
-        return value != ""
-    if isinstance(value, list):
-        items: list[object] = value  # pyright: ignore[reportUnknownVariableType]
-        return any(holds_something(item) for item in items)
-    if isinstance(value, dict):
-        members: dict[object, object] = value  # pyright: ignore[reportUnknownVariableType]
-        return any(holds_something(item) for item in members.values())
-    return True
+    nothing in it. A value of a kind we do not know counts as something. Iterative, so that a value
+    nested as deep as the provider (or anybody on the way) wants cannot exhaust the stack."""
+    pending: list[object] = [value]
+    while pending:
+        item = pending.pop()
+        if item is None or item is False:
+            continue
+        if isinstance(item, (int, float)):
+            if item != 0:
+                return True
+        elif isinstance(item, str):
+            if item != "":
+                return True
+        elif isinstance(item, list):
+            pending.extend(cast("list[object]", item))
+        elif isinstance(item, dict):
+            pending.extend(cast("dict[str, object]", item).values())
+        else:
+            return True
+    return False
 
 
 def _one_of(*allowed: object) -> Benign:
@@ -224,38 +240,29 @@ class _Fields:
         return first
 
 
-def _done(
-    fields: _Fields,
-    schema: Schema,
-    prompt: int,
-    completion: int,
-    *,
-    read: int = 0,
-    write_5m: int = 0,
-    write_1h: int = 0,
-    reasoning: int = 0,
-    stated_cost: Decimal | None = None,
-    extra: Iterable[str],
-) -> CallUsage:
-    _walk(fields.usage, schema, fields.root, fields.unknown)
-    names = sorted({*fields.unknown, *extra})[:MAX_UNKNOWN_FIELDS]
-    return CallUsage(
-        prompt_tokens=prompt,
-        completion_tokens=completion,
-        cache_read=read,
-        cache_write_5m=write_5m,
-        cache_write_1h=write_1h,
-        reasoning_tokens=reasoning,
-        stated_cost=stated_cost,
-        unknown_fields=tuple(names),
-    )
+@dataclass(frozen=True)
+class _Counts:
+    prompt: int
+    completion: int
+    read: int = 0
+    write_5m: int = 0
+    write_1h: int = 0
+    reasoning: int = 0
+    stated_cost: Decimal | None = None
 
 
-def _chat(usage: dict[str, Any], extra: Iterable[str]) -> CallUsage | None:
-    f = _Fields(usage, "usage")
+def _total(f: _Fields, expected: int) -> None:
+    """A total the provider states must be the sum of the counts it states."""
+    total = f.stated(_TOTAL[f.root])
+    if total is not None and total != expected:
+        f.mark(_TOTAL[f.root])
+
+
+def _chat(f: _Fields) -> _Counts | None:
     prompt, completion = f.required("prompt_tokens"), f.required("completion_tokens")
     if prompt is None or completion is None:
         return None
+    _total(f, prompt + completion)
     # The cache is stated as `cached_tokens` (OpenAI, OpenRouter) or as DeepSeek's hit and miss
     # tokens (miss = prompt - hit): every statement there is must agree.
     read = f.agree(
@@ -275,33 +282,22 @@ def _chat(usage: dict[str, Any], extra: Iterable[str]) -> CallUsage | None:
     read = read or 0
     f.fit(read + written, prompt, "prompt_tokens_details")
     f.fit(reasoning, completion, "completion_tokens_details", "reasoning_tokens")
-    return _done(
-        f,
-        _CHAT,
-        prompt,
-        completion,
-        read=read,
-        write_5m=written,
-        reasoning=reasoning,
-        stated_cost=f.charge("cost"),
-        extra=extra,
-    )
+    return _Counts(prompt, completion, read, written, 0, reasoning, stated_cost=f.charge("cost"))
 
 
-def _responses(usage: dict[str, Any], extra: Iterable[str]) -> CallUsage | None:
-    f = _Fields(usage, "usage")
+def _responses(f: _Fields) -> _Counts | None:
     prompt, completion = f.required("input_tokens"), f.required("output_tokens")
     if prompt is None or completion is None:
         return None
+    _total(f, prompt + completion)
     read = f.optional("input_tokens_details", "cached_tokens")
     reasoning = f.optional("output_tokens_details", "reasoning_tokens")
     f.fit(read, prompt, "input_tokens_details", "cached_tokens")
     f.fit(reasoning, completion, "output_tokens_details", "reasoning_tokens")
-    return _done(f, _RESPONSES, prompt, completion, read=read, reasoning=reasoning, extra=extra)
+    return _Counts(prompt, completion, read, reasoning=reasoning)
 
 
-def _messages(usage: dict[str, Any], extra: Iterable[str]) -> CallUsage | None:
-    f = _Fields(usage, "usage")
+def _messages(f: _Fields) -> _Counts | None:
     fresh, completion = f.required("input_tokens"), f.required("output_tokens")
     if fresh is None or completion is None:
         return None
@@ -319,47 +315,98 @@ def _messages(usage: dict[str, Any], extra: Iterable[str]) -> CallUsage | None:
             f.mark("cache_creation")
     thinking = f.optional("output_tokens_details", "thinking_tokens")
     f.fit(thinking, completion, "output_tokens_details", "thinking_tokens")
-    return _done(
-        f,
-        _MESSAGES,
-        fresh + read + write_5m + write_1h,
-        completion,
-        read=read,
-        write_5m=write_5m,
-        write_1h=write_1h,
-        reasoning=thinking,
-        extra=extra,
+    return _Counts(
+        fresh + read + write_5m + write_1h, completion, read, write_5m, write_1h, thinking
     )
 
 
-def _google(usage: dict[str, Any], extra: Iterable[str]) -> CallUsage | None:
-    f = _Fields(usage, "usageMetadata")
+def _google(f: _Fields) -> _Counts | None:
     prompt = f.required("promptTokenCount")
     candidates, thoughts = f.stated("candidatesTokenCount"), f.stated("thoughtsTokenCount")
     # Gemini leaves a zero out (UNCONFIRMED live, L14); one of the two must be there for an output
     # to have been stated at all.
     if prompt is None or (candidates is None and thoughts is None):
         return None
+    tool_use = f.optional("toolUsePromptTokenCount")
+    _total(f, prompt + (candidates or 0) + (thoughts or 0) + tool_use)
     cached = f.optional("cachedContentTokenCount")
     f.fit(cached, prompt, "cachedContentTokenCount")
     # Thoughts are billed as output and are not part of the candidates. UNCONFIRMED live (L14).
-    return _done(
-        f,
-        _GOOGLE,
-        prompt,
-        (candidates or 0) + (thoughts or 0),
-        read=cached,
-        reasoning=thoughts or 0,
-        extra=extra,
-    )
+    return _Counts(prompt, (candidates or 0) + (thoughts or 0), cached, reasoning=thoughts or 0)
 
 
-_NORMALIZE: Final = {
+_READERS: Final = {
     WireFamily.OPENAI_CHAT: _chat,
     WireFamily.OPENAI_RESPONSES: _responses,
     WireFamily.ANTHROPIC_MESSAGES: _messages,
     WireFamily.GOOGLE: _google,
 }
+_SCHEMAS: Final = {
+    WireFamily.OPENAI_CHAT: _CHAT,
+    WireFamily.OPENAI_RESPONSES: _RESPONSES,
+    WireFamily.ANTHROPIC_MESSAGES: _MESSAGES,
+    WireFamily.GOOGLE: _GOOGLE,
+}
+_ROOTS: Final = {
+    WireFamily.OPENAI_CHAT: "usage",
+    WireFamily.OPENAI_RESPONSES: "usage",
+    WireFamily.ANTHROPIC_MESSAGES: "usage",
+    WireFamily.GOOGLE: "usageMetadata",
+}
+_TOTAL: Final = {"usage": "total_tokens", "usageMetadata": "totalTokenCount"}
+# Every count a family states, so that a bad one is marked wherever the reader gets to.
+_COUNTS: Final[dict[WireFamily, tuple[tuple[str, ...], ...]]] = {
+    WireFamily.OPENAI_CHAT: (
+        ("prompt_tokens",),
+        ("completion_tokens",),
+        ("total_tokens",),
+        ("prompt_tokens_details", "cached_tokens"),
+        ("prompt_tokens_details", "cache_write_tokens"),
+        ("completion_tokens_details", "reasoning_tokens"),
+        ("prompt_cache_hit_tokens",),
+        ("prompt_cache_miss_tokens",),
+    ),
+    WireFamily.OPENAI_RESPONSES: (
+        ("input_tokens",),
+        ("output_tokens",),
+        ("total_tokens",),
+        ("input_tokens_details", "cached_tokens"),
+        ("output_tokens_details", "reasoning_tokens"),
+    ),
+    WireFamily.ANTHROPIC_MESSAGES: (
+        ("input_tokens",),
+        ("output_tokens",),
+        ("cache_read_input_tokens",),
+        ("cache_creation_input_tokens",),
+        ("cache_creation", "ephemeral_5m_input_tokens"),
+        ("cache_creation", "ephemeral_1h_input_tokens"),
+        ("output_tokens_details", "thinking_tokens"),
+    ),
+    WireFamily.GOOGLE: (
+        ("promptTokenCount",),
+        ("candidatesTokenCount",),
+        ("thoughtsTokenCount",),
+        ("cachedContentTokenCount",),
+        ("toolUsePromptTokenCount",),
+        ("totalTokenCount",),
+    ),
+}
+
+
+def _read(family: WireFamily, usage: dict[str, Any]) -> tuple[_Counts | None, set[str]]:
+    """The counts of one usage object, and the names of everything in it that cannot be trusted."""
+    root = _ROOTS[family]
+    f = _Fields(usage, root)
+    for path in _COUNTS[family]:
+        f.stated(*path)
+    counts = _READERS[family](f)
+    _walk(usage, _SCHEMAS[family], root, f.unknown)
+    return counts, f.unknown
+
+
+def audit(family: WireFamily, usage: dict[str, Any]) -> frozenset[str]:
+    """What cannot be trusted in this one statement of a usage, whether it is complete or not."""
+    return frozenset(_read(family, usage)[1])
 
 
 def normalize(
@@ -367,5 +414,58 @@ def normalize(
 ) -> CallUsage | None:
     """The usage of an answer as a `CallUsage` (complete, until the tap says it was not), or None
     when it does not state what every usage must. `extra_unknown` is what the rest of the answer
-    (a service tier, a second choice) already made unknown."""
-    return _NORMALIZE[family](usage, extra_unknown)
+    (a service tier, a second choice, the other statements of a stream) already made unknown."""
+    counts, marks = _read(family, usage)
+    if counts is None:
+        return None
+    names = sorted({*marks, *extra_unknown})[:MAX_UNKNOWN_FIELDS]
+    return CallUsage(
+        prompt_tokens=counts.prompt,
+        completion_tokens=counts.completion,
+        cache_read=counts.read,
+        cache_write_5m=counts.write_5m,
+        cache_write_1h=counts.write_1h,
+        reasoning_tokens=counts.reasoning,
+        stated_cost=counts.stated_cost,
+        unknown_fields=tuple(names),
+    )
+
+
+def _leaves(usage: dict[str, Any]) -> dict[str, int]:
+    """The whole-number fields of a usage object by their path (objects entered, lists not)."""
+    found: dict[str, int] = {}
+    pending: list[tuple[str, dict[str, Any]]] = [("", usage)]
+    while pending:
+        path, node = pending.pop()
+        for key, item in node.items():
+            where = f"{path}.{key}" if path else key
+            if isinstance(item, dict):
+                pending.append((where, cast("dict[str, Any]", item)))
+            elif isinstance(item, int) and not isinstance(item, bool):
+                found[where] = item
+    return found
+
+
+def went_backwards(
+    before: dict[str, Any],
+    after: dict[str, Any],
+    *,
+    replaced: bool,
+    ignore: Collection[str] = (),
+) -> bool:
+    """Whether `after` states less than `before` of some count. A usage only grows during a call.
+
+    `replaced` is a statement that stands in place of the earlier one (Google's cumulative chunks):
+    a count it leaves out has become zero. Otherwise it adds to the earlier one (Messages) and only
+    the counts it states again are compared. `ignore` are counts of `before` that were only a
+    placeholder."""
+    earlier, later = _leaves(before), _leaves(after)
+    for path, count in earlier.items():
+        if path in ignore:
+            continue
+        if path in later:
+            if later[path] < count:
+                return True
+        elif replaced and count > 0:
+            return True
+    return False

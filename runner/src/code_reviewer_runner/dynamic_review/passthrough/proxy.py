@@ -66,6 +66,11 @@ from code_reviewer_runner.dynamic_review.passthrough.admission import (
     Refused,
 )
 from code_reviewer_runner.dynamic_review.passthrough.families import WireFamily, spec_of
+from code_reviewer_runner.dynamic_review.passthrough.price_book import (
+    PriceBook,
+    PriceBookError,
+    book_from_unit_costs,
+)
 from code_reviewer_runner.dynamic_review.passthrough.pricing import price_call
 from code_reviewer_runner.dynamic_review.passthrough.redact import MIN_KEY_CHARS, Redactor
 from code_reviewer_runner.dynamic_review.passthrough.sink import ClientGone, ResponseSink
@@ -234,7 +239,7 @@ class PassthroughProxy:
         upstream: Upstream,
         upstream_api_key: str,
         capability: str,
-        prices: UnitCosts,
+        prices: UnitCosts | PriceBook,
         superseded: Callable[[], bool] = lambda: False,
         call_timeout: float = CALL_TIMEOUT_SECONDS,
         unknown_cost_ends_run: bool = True,
@@ -259,7 +264,13 @@ class PassthroughProxy:
         self._upstream = upstream
         self._key = upstream_api_key
         self._redactor = Redactor(upstream_api_key)
-        self._prices = prices
+        # Read once: prices that are no prices are refused here and not in the middle of a call.
+        try:
+            self._prices = prices if isinstance(prices, PriceBook) else book_from_unit_costs(prices)
+        except PriceBookError as error:
+            raise LimitError(
+                ErrorCode.DYNAMIC_CONFIG_INVALID, "the prices of the model are not prices"
+            ) from error
         # Calls whose stated charge the price book did not agree with (counts only, `price_drift`).
         self.price_drift_calls = 0
         self._superseded = superseded
@@ -739,6 +750,11 @@ class PassthroughProxy:
             self.price_drift_calls += 1
             log_price_drift(self.price_drift_calls)
         cost = priced.cost
+        if cost is None:
+            # The book cannot price the call, or the charge the provider states is not to be
+            # believed: unknown, booked at the worst case, never at what it was expected to cost.
+            self._unknown(reservation, started_ms)
+            return
         # Noted before the settlement: a call the ledger then stops the run for is in the trace too.
         self.ledger.trace.model_call(
             t_ms=started_ms,

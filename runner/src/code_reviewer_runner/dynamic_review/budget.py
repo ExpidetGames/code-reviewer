@@ -108,9 +108,13 @@ from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from decimal import Context, Decimal, InvalidOperation
+from typing import TYPE_CHECKING
 
 from code_reviewer_runner.dynamic_review.call_trace import CallTrace
 from code_reviewer_runner.result import ErrorCode, Usage
+
+if TYPE_CHECKING:
+    from code_reviewer_runner.dynamic_review.passthrough.price_book import PriceBook
 
 # Operator-owned validated configuration, never repository instructions.
 TOTAL_DEADLINE_SECONDS = 600.0
@@ -392,6 +396,7 @@ class BudgetLedger:
         output_tokens: int = DEFAULT_OUTPUT_TOKENS,
         reserved_output_tokens: int | None = None,
         unit_costs: UnitCosts,
+        book: "PriceBook | None" = None,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         if window_tokens < 1:
@@ -409,6 +414,20 @@ class BudgetLedger:
             else min(max(reserved_output_tokens, 1), self.output_tokens)
         )
         self._unit_costs = unit_costs
+        # What the worst case of a call is priced with: the book of the model when there is one
+        # (tiers, reasoning, both cache writes), else the job's unit costs as a one-level book.
+        # Imported here: the price book module reads `UnitCosts` from this one.
+        from code_reviewer_runner.dynamic_review.passthrough.price_book import (
+            PriceBookError,
+            book_from_unit_costs,
+        )
+
+        try:
+            self._worst_case_book = book or book_from_unit_costs(unit_costs)
+        except PriceBookError as error:
+            raise LimitError(
+                ErrorCode.DYNAMIC_CONFIG_INVALID, "the unit costs are not prices"
+            ) from error
         self._wrap_up_seconds = min(
             WRAP_UP_RESERVE_SECONDS, WRAP_UP_RESERVE_FRACTION * limits.deadline_seconds
         )
@@ -847,8 +866,8 @@ class BudgetLedger:
 
         The provider did charge for it. Stopping the run without booking would drop the charge from
         the result (a hostile engine could hide a cost by making the report look like a
-        violation): the reported cost is spent, or, with none reported, what was reserved, and then
-        the cost of the run is unknown.
+        violation): the reported cost is spent, or, with none reported, the worst case of the call
+        (not what it was expected to cost), and then the cost of the run is unknown.
         """
         with self._lock:
             counters = self._counters
@@ -856,7 +875,10 @@ class BudgetLedger:
             counters.reserved_cost = _SUM.subtract(counters.reserved_cost, reservation.cost)
             counters.prompt_tokens += prompt_tokens
             counters.completion_tokens += completion_tokens
-            counters.cost = _SUM.add(counters.cost, reservation.cost if cost is None else cost)
+            counters.cost = _SUM.add(
+                counters.cost,
+                max(self.worst_case_cost(reservation), reservation.cost) if cost is None else cost,
+            )
             if cost is not None:
                 counters.priced_calls += 1
 
@@ -893,11 +915,11 @@ class BudgetLedger:
 
     def worst_case_cost(self, reservation: Reservation) -> Decimal:
         """The most one reserved call can cost: the bytes of its request, each as a token of the
-        dearest input kind (the byte count bounds the tokens), and the whole output cap."""
-        return self._unit_costs.of_call(
-            max(reservation.byte_bound, reservation.input_tokens),
-            reservation.output_tokens,
-            cache_in_use=True,
+        dearest input kind (the byte count bounds the tokens), and the whole output cap at the
+        dearest output kind, at the dearest tier the request can reach (N8 of the review of PR
+        #569)."""
+        return self._worst_case_book.worst_case(
+            max(reservation.byte_bound, reservation.input_tokens), reservation.output_tokens
         )
 
     def settle_unknown(self, reservation: Reservation) -> bool:

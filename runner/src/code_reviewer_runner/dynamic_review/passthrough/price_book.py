@@ -18,10 +18,14 @@ finer than a micro-USD is rounded **up**, never down.
 
 import re
 from dataclasses import dataclass
-from decimal import ROUND_CEILING, Decimal
+from decimal import ROUND_CEILING, Context, Decimal
+from enum import StrEnum
 from typing import Any, Final
 
 from code_reviewer_runner.dynamic_review.budget import UnitCosts
+
+# Counts times micro-USD per million tokens: a whole number of 10^-12 USD, exactly.
+_EXACT: Final = Context(prec=100)
 
 # The bounds of the app's schema: whole micro-USD in at most 12 digits and at most USD 100,000 per
 # million tokens; at most 64 tiers; a tier above at least one token and below 100 million.
@@ -41,6 +45,18 @@ _LEVEL_KEYS: Final = (
     "inputAudio",
     "outputAudio",
 )
+
+
+class PriceBookErrorCode(StrEnum):
+    """Why prices could not be made a price book; callers branch on the code, never on the text."""
+
+    UNIT_COSTS_INVALID = "unit_costs_invalid"
+
+
+class PriceBookError(Exception):
+    def __init__(self, code: PriceBookErrorCode, detail: str) -> None:
+        super().__init__(f"{code}: {detail}")
+        self.code = code
 
 
 @dataclass(frozen=True)
@@ -89,6 +105,34 @@ class PriceBook:
         levels = {level for size, level in exceeded if size == largest}
         return next(iter(levels)) if len(levels) == 1 else None
 
+    def worst_case(self, prompt_tokens: int, completion_tokens: int) -> Decimal:
+        """The most a call of at most `prompt_tokens` of prompt and `completion_tokens` of output
+        can cost at these prices, in USD, exactly (review of PR #569, N8).
+
+        Each token is priced at the dearest kind there is: a prompt token as plain input, a cache
+        read or either cache write; an output token as output or reasoning. A prompt may be any size
+        up to `prompt_tokens`, so every level it can reach counts: the base, and each tier its size
+        can exceed (a tier may be cheaper than the level below it, then the base is the dearer).
+        """
+        levels = [self.base]
+        levels += [tier.level for tier in self.tiers if prompt_tokens > tier.context_over]
+        if self.over_200k is not None and prompt_tokens > OVER_200K_SIZE:
+            levels.append(self.over_200k)
+        pico = max(_worst_pico(level, prompt_tokens, completion_tokens) for level in levels)
+        return _EXACT.scaleb(Decimal(pico), -12)
+
+
+def _dearest(*prices: int | None) -> int:
+    return max((price for price in prices if price is not None), default=0)
+
+
+def _worst_pico(level: PriceLevel, prompt_tokens: int, completion_tokens: int) -> int:
+    # Every prompt token at the dearest kind of input there is (plain, a cache read, either write),
+    # every output token at the output or the reasoning price, whichever is dearer.
+    dearest_in = _dearest(level.input, level.cache_read, level.cache_write_5m, level.cache_write_1h)
+    dearest_out = _dearest(level.output, level.reasoning)
+    return prompt_tokens * dearest_in + completion_tokens * dearest_out
+
 
 def _amount(value: Any, *, required: bool) -> tuple[bool, int | None]:
     """Whether `value` is an acceptable amount, and what it is: a decimal string of whole micro-USD
@@ -120,7 +164,8 @@ def _read_level(value: dict[str, Any], *, extra: tuple[str, ...]) -> PriceLevel 
     # The audio prices are read, validated and not used: audio is a charge the ledger does not price
     # (a call with audio tokens is unknown), whatever the book says about it.
     inp, out = read["input"], read["output"]
-    assert inp is not None and out is not None
+    if inp is None or out is None:
+        return None  # not reachable (both are required above); a book that lacks one is no book
     return PriceLevel(
         input=inp,
         output=out,
@@ -169,24 +214,33 @@ def parse_price_book(document: object) -> PriceBook | None:
     return PriceBook(base=base, over_200k=over_200k, tiers=tuple(tiers))
 
 
-def _micro_usd(usd_per_mtok: Decimal | None) -> int | None:
+def _micro_usd(usd_per_mtok: Decimal | None, name: str) -> int | None:
+    """Whole micro-USD per million tokens, rounded up; None for no price."""
     if usd_per_mtok is None:
         return None
-    return int((usd_per_mtok * 1_000_000).to_integral_value(rounding=ROUND_CEILING))
+    if not usd_per_mtok.is_finite() or usd_per_mtok < 0:
+        raise PriceBookError(PriceBookErrorCode.UNIT_COSTS_INVALID, f"{name} is not a price")
+    micro = int((usd_per_mtok * 1_000_000).to_integral_value(rounding=ROUND_CEILING))
+    if micro > MAX_MICRO_USD_PER_MTOK:
+        raise PriceBookError(PriceBookErrorCode.UNIT_COSTS_INVALID, f"{name} is above any price")
+    return micro
 
 
 def book_from_unit_costs(prices: UnitCosts) -> PriceBook:
     """The price book of a job's per-model prices: one level, no tiers. The legacy descriptor has
     one cache write price, the 5-minute one the runner's requests use; the 1-hour price is its own
-    field and stays unpriced without it."""
-    inp, out = _micro_usd(prices.input_usd_per_mtok), _micro_usd(prices.output_usd_per_mtok)
-    assert inp is not None and out is not None
+    field and stays unpriced without it. A price that is no price (not finite, below zero, above
+    what a book holds) is a `PriceBookError`."""
+    inp = _micro_usd(prices.input_usd_per_mtok, "input")
+    out = _micro_usd(prices.output_usd_per_mtok, "output")
+    if inp is None or out is None:
+        raise PriceBookError(PriceBookErrorCode.UNIT_COSTS_INVALID, "input or output has no price")
     return PriceBook(
         base=PriceLevel(
             input=inp,
             output=out,
-            cache_read=_micro_usd(prices.cache_read_usd_per_mtok),
-            cache_write_5m=_micro_usd(prices.cache_write_usd_per_mtok),
-            cache_write_1h=_micro_usd(prices.cache_write_1h_usd_per_mtok),
+            cache_read=_micro_usd(prices.cache_read_usd_per_mtok, "cache read"),
+            cache_write_5m=_micro_usd(prices.cache_write_usd_per_mtok, "cache write"),
+            cache_write_1h=_micro_usd(prices.cache_write_1h_usd_per_mtok, "cache write 1h"),
         )
     )

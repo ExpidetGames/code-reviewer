@@ -447,7 +447,7 @@ def test_a_messages_delta_out_of_order_comes_before_the_message_start() -> None:
         for name, _ in parse_sse(stream("messages", READ, 3, MODEL, usage_fault="out_of_order"))
     ]
     assert names.index("message_delta") < names.index("message_start")
-    assert sorted(names) == sorted(name for name, _ in events("messages", READ))
+    assert sorted(map(str, names)) == sorted(str(name) for name, _ in events("messages", READ))
 
 
 # #551-R569-F03
