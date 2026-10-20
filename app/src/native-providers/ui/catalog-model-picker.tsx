@@ -57,7 +57,11 @@ export function CatalogModelPicker({
   api?: CatalogModelsApi;
 }) {
   const ids = useId();
-  const [loaded, setLoaded] = useState<Loaded>({ state: "loading" });
+  // What the route answered for which provider; an answer for another provider than the one shown is not an answer yet.
+  const [fetched, setFetched] = useState<{
+    provider: string;
+    models: readonly NativeModelView[] | null;
+  } | null>(null);
   const [query, setQuery] = useState("");
   const client = useMemo(
     () => api ?? browserCatalogModelsApi(workspaceSlug),
@@ -66,20 +70,24 @@ export function CatalogModelPicker({
 
   useEffect(() => {
     let current = true;
-    setLoaded({ state: "loading" });
     void client.models(provider).then((result) => {
-      if (!current) return;
-      setLoaded(
-        result.ok
-          ? { state: "ready", models: result.data.models }
-          : { state: "failed" },
-      );
+      if (current)
+        setFetched({
+          provider,
+          models: result.ok ? result.data.models : null,
+        });
     });
     return () => {
       current = false;
     };
   }, [client, provider]);
 
+  const loaded: Loaded =
+    fetched?.provider !== provider
+      ? { state: "loading" }
+      : fetched.models === null
+        ? { state: "failed" }
+        : { state: "ready", models: fetched.models };
   const models = loaded.state === "ready" ? loaded.models : [];
   const needle = query.trim().toLowerCase();
   const shown = models.filter(
