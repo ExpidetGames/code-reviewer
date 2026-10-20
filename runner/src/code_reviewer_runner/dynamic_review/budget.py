@@ -510,6 +510,12 @@ class BudgetLedger:
         with self._lock:
             self._above_wire = True
 
+    @property
+    def refusal_pending(self) -> bool:
+        """True while the guard's refusal has not been taken (`take_refusal`)."""
+        with self._lock:
+            return self._refusals > 0
+
     def take_refusal(self) -> bool:
         """True once after the guard refused a call for the adapter to finalize; clears it."""
         with self._lock:

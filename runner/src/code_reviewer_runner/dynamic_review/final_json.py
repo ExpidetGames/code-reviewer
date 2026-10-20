@@ -167,3 +167,18 @@ def _parser_detail(error: Exception) -> str:
     if isinstance(error, json.JSONDecodeError):
         return f"{error.msg} at position {error.pos}"
     return "not valid JSON"
+
+
+_IDENTIFIER = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,39}")
+
+
+def engine_error_name(message: dict[str, Any]) -> str | None:
+    """The name of the engine's own error in the message that ended a turn, as a plain identifier
+    (`other` when it is not one), or None when there is none. The engine's text next to it (its
+    sentence, the body of a provider's answer) is never read: it can carry anything."""
+    info: Any = message.get("info")
+    error: Any = cast("dict[str, Any]", info).get("error") if isinstance(info, dict) else None
+    if error is None:
+        return None
+    name: Any = cast("dict[str, Any]", error).get("name") if isinstance(error, dict) else None
+    return name if isinstance(name, str) and _IDENTIFIER.fullmatch(name) else "other"
