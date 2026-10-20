@@ -122,14 +122,15 @@ an earlier message holding the token does not count, and the announcement carrie
 allowance (the model's last answer), plus the tool results the audit saw since that call (frozen
 when the mark is armed, so reports after it widen nothing), plus the message, plus
 `RECOVERY_REQUEST_SLACK_BYTES` for the engine's framing. Any other request is a normal call: it
-must fit the limit or it is refused, and the mark stays armed. So an engine cannot spend the mark on a request of its own choosing, and a
-request cannot make itself final; a result the engine does not report widens nothing (the final
-call is then refused and the run ends without a review, which a hostile engine does to itself). A
-marked call the provider turns away before it generated anything (a 429 or 5xx, settled as
-unbilled) gives its mark back, at most `MAX_MARK_RETURNS` times per mark: the engine retries such a
-call itself. A call that may have been billed keeps the mark spent. The bound is the one above:
-the limit, plus the excess of the last normal call, plus the final call, plus the one repair. A
-failure that is recorded (a limit, a policy violation) admits no later call at all.
+must fit the limit or it is refused, and the mark stays armed. So an engine cannot spend the mark
+on a request of its own choosing, and a request cannot make itself final; a result the engine does
+not report widens nothing (the final call is then refused and the run ends without a review, which
+a hostile engine does to itself). A marked call the provider turns away before it generated
+anything (a 429 or 5xx, settled as unbilled) gives its mark back, at most `MAX_MARK_RETURNS` times
+per mark: the engine retries such a call itself. A call that may have been billed keeps the mark
+spent. The bound is the one above: the limit, plus the excess of the last normal call, plus the
+final call, plus the one repair. A failure that is recorded (a limit, a policy violation) admits no
+later call at all.
 
 **Tokens.** The input estimate is bytes over a conservative 3 bytes per token (real text has
 about 3 to 4), tightened to what the provider settled on the previous call when that content was
