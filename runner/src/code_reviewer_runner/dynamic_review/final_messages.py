@@ -81,6 +81,8 @@ def _sentence(problem: Problem, detail: str, max_findings: int) -> str:
             return f"it has too many findings. Give at most {max_findings} findings"
         case Problem.TOOL_CALL:
             return "it called a tool, and no tool may be called now"
+        case Problem.FINAL_CALL_REFUSED:
+            return "no answer came back: a further model call was refused after the call for it"
 
 
 def repair_message(problem: Problem, detail: str, max_findings: int) -> str:

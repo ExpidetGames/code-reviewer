@@ -216,6 +216,7 @@ def native_run(
             engine_config=config,
             provider_id=provider.provider_id,
             provider_error=lambda: proxy.last_upstream_error,
+            wait_idle=proxy.wait_idle,
         )
         answer = engine.run()
         yield NativeRun(answer, ledger, proxy, upstream, engine)

@@ -94,8 +94,7 @@ def test_a_call_the_cost_limit_cannot_hold_is_a_refusal_to_finalize_not_the_runs
 
     assert error.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
     assert budget.failure is None
-    assert budget.take_refusal() is True
-    assert budget.take_refusal() is False  # taken once
+    assert budget.refusals == 1
     assert budget.stopped_early == "cost_limit"
 
 
@@ -107,7 +106,7 @@ def test_without_the_mode_the_same_refusal_is_the_failure_of_the_run() -> None:
     error = refused(budget)
 
     assert budget.failure is error
-    assert budget.take_refusal() is False
+    assert budget.refusals == 0
 
 
 # #552-L03
@@ -118,7 +117,7 @@ def test_a_refusal_that_is_not_about_the_cost_still_ends_the_run() -> None:
     budget.record_failure(policy)
 
     assert budget.failure is policy
-    assert budget.take_refusal() is False
+    assert budget.refusals == 0
 
 
 # #552-L04: the final call is admitted past the limit, once, and only when the adapter marked it
@@ -136,7 +135,7 @@ def test_the_marked_call_is_admitted_past_the_limit_as_the_final_call_and_once()
     # refused, and that refusal is again not the run's failure.
     refused(budget)
     assert budget.failure is None
-    assert budget.take_refusal() is True
+    assert budget.refusals == 2  # the first refusal and the tool call's
     assert budget.usage(None).cost_usd == pytest.approx(0.35)  # pyright: ignore[reportUnknownMemberType]
 
 

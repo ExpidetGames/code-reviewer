@@ -362,7 +362,9 @@ class EngineClient:
         except EngineError:
             return  # the process group is ended anyway
 
-    def queue_message(self, session_id: str, *, model: str, text: str) -> bool:
+    def queue_message(
+        self, session_id: str, *, model: str, text: str, timeout: float = SESSION_TIMEOUT_SECONDS
+    ) -> bool:
         """Add a user message to the turn that is running (`prompt_async`, 204): the engine reads
         it before its next step. Nothing else about the turn changes (#552, spike #547). True when
         the engine accepted it."""
@@ -371,9 +373,7 @@ class EngineClient:
             "model": {"providerID": self._provider_id, "modelID": model},
             "parts": [{"type": "text", "text": text}],
         }
-        status, _ = self._call(
-            "POST", f"/session/{session_id}/prompt_async", body, timeout=SESSION_TIMEOUT_SECONDS
-        )
+        status, _ = self._call("POST", f"/session/{session_id}/prompt_async", body, timeout=timeout)
         return status == 204
 
     def open_events(self) -> EventStream:
@@ -599,6 +599,7 @@ class DynamicEngine:
         engine_config: Mapping[str, Any] | None = None,
         provider_id: str = PROXY_PROVIDER_ID,
         provider_error: Callable[[], ErrorCode | None] = lambda: None,
+        wait_idle: Callable[[float], bool] = lambda _timeout: True,
     ) -> None:
         if job.dynamic is None or job.base is None:
             raise EngineError(
@@ -638,6 +639,9 @@ class DynamicEngine:
         # The stable code the proxy kept for a provider that failed (`PassthroughProxy`), named
         # when the engine gives up; the engine's own error text is never shown.
         self._provider_error = provider_error
+        # Whether the proxy has answered every request it took (`PassthroughProxy.wait_idle`): the
+        # final call is marked only when nothing of the aborted turn is in flight (#552).
+        self._wait_idle = wait_idle
         self._events_connect_seconds = EVENTS_CONNECT_SECONDS
         # Set by the supervisor: the engine then runs as the dedicated user with its own network
         # rules, and its home, temporary files and config live where `export_isolation` prepared
@@ -896,6 +900,7 @@ class DynamicEngine:
                 max_findings=dynamic.limits.max_findings,
                 parse=self._parse_plain,
                 provider_error=self._provider_error,
+                wait_idle=self._wait_idle,
             )
             try:
                 return EngineAnswer(findings=final.run(), error=None)

@@ -127,12 +127,21 @@ class Client(EngineClient):
         self.bodies: list[dict[str, Any]] = []
         self.events = events if events is not None else Events()
         self.aborted = 0
+        # The ledger the scripted engine "calls the model" through, the way the proxy would.
+        self.ledger: BudgetLedger | None = None
 
     def _call(
         self, method: str, path: str, body: Any = None, *, scoped: bool = True, timeout: float = 0
     ) -> tuple[int, bytes]:
         assert path.endswith("/message") and method == "POST", (method, path)
         self.bodies.append(body)
+        if self.ledger is not None:
+            # The engine's request to the model carries the message it was sent.
+            sent = json.dumps(parts_of(body))[1:-1].encode()
+            call = self.ledger.reserve_call(b"history " + sent, output_tokens=1_024)
+            self.ledger.settle_call(
+                call, prompt_tokens=100, completion_tokens=10, cost=Decimal("0.0001")
+            )
         self.last_message = self.replies.pop(0) if self.replies else reply(None)
         return 200, self.last_message
 
@@ -165,6 +174,7 @@ def engine_with(tmp_path: Path, *, plain: bool) -> DynamicEngine:
 
 
 def run_turns(engine: DynamicEngine, client: Client) -> Any:
+    client.ledger = engine.ledger
     return engine._run_turns(client, "ses_1")  # pyright: ignore[reportPrivateUsage]
 
 

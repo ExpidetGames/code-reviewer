@@ -129,7 +129,7 @@ def test_a_run_near_its_cost_limit_is_asked_by_a_message_and_a_model_that_compli
         usage = run.ledger.usage(None)
         assert usage.stopped_early == "cost_limit"
         assert usage.limit_exceeded_by is None
-        assert run.ledger.failure is None and not run.ledger.refusal_pending
+        assert run.ledger.failure is None and run.ledger.refusals == 0
         assert final_calls(run) == [False] * len(run.requests)  # no call needed the exemption
 
 

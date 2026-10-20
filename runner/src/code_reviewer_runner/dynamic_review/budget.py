@@ -95,7 +95,7 @@ and never rewrites a request, so it cannot make the final call. The adapter asks
 instead, and the ledger gives it the same guarantee, with the same bound: a run never ends without
 a review because of the cost guard. The adapter declares this (`enable_final_above_wire`); from then
 on a call the guard refuses for the cost or the clock is a `RefusedForFinal`, which is **not** the
-run's failure (`record_failure` keeps it as a pending refusal, `take_refusal`) but the signal to
+run's failure (`record_failure` counts it, `refusals`) but the signal to
 abort the turn and send one "answer now" message. That message's call is admitted past the limit
 when the adapter marked it (`arm_final`): the mark is one call, it needs nothing in flight, it is
 consumed by the next reservation, and nothing in a request can make a call final by itself. A second
@@ -216,7 +216,7 @@ class RefusedForFinal(LimitError):
     limit is used up, the clock reserve has started, or a call came after the final one.
 
     It is a `LimitError` like any other, so a ledger without `enable_final_above_wire` records it
-    as the run's failure; with it, it is a pending refusal (`take_refusal`).
+    as the run's failure; with it, it is a counted refusal (`refusals`).
     """
 
 
@@ -531,17 +531,25 @@ class BudgetLedger:
             self._above_wire = True
 
     @property
-    def refusal_pending(self) -> bool:
-        """True while the guard's refusal has not been taken (`take_refusal`)."""
+    def refusals(self) -> int:
+        """How many calls the guard has refused for the adapter to finalize, ever. The adapter
+        takes this count when a turn starts and reacts only to an increase (#552): a refusal that
+        landed between two turns belongs to neither."""
         with self._lock:
-            return self._refusals > 0
+            return self._refusals
 
-    def take_refusal(self) -> bool:
-        """True once after the guard refused a call for the adapter to finalize; clears it."""
-        with self._lock:
-            pending = self._refusals > 0
-            self._refusals = 0
-            return pending
+    def wait_idle(self, timeout: float) -> bool:
+        """Wait until no reserved call is open; False when `timeout` ran out first (#552). A call
+        of the aborted turn can still be answered by the provider when the adapter wants to mark
+        the next one, and the mark needs nothing in flight."""
+        until = time.monotonic() + max(timeout, 0.0)
+        while True:
+            with self._lock:
+                if not self._open:
+                    return True
+            if time.monotonic() >= until:
+                return False
+            time.sleep(min(0.01, max(until - time.monotonic(), 0.0)))
 
     def note_wrap_up(self, reason: str) -> None:
         """The model was asked to answer now (`wrap_up_due`): that is why the run stopped early.

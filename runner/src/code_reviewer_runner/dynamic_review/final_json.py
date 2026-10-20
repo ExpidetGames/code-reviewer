@@ -44,6 +44,9 @@ class Problem(StrEnum):
     TOO_MANY_FINDINGS = "too_many_findings"
     # The final turn called a tool, which the guard refuses: not an answer, not text to read.
     TOOL_CALL = "tool_call"
+    # The engine asked the model again after the call for the answer, and the guard refused that
+    # call; no tool call was seen, so the model is not told it made one.
+    FINAL_CALL_REFUSED = "final_call_refused"
 
 
 @dataclass(frozen=True)
