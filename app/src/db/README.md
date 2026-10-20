@@ -414,7 +414,7 @@ models.dev catalog, not owned by a workspace, and **a confirmation is never chan
 - `model_enablements` (`(provider_id, model_id)` primary key and foreign key to `models_dev_models`; `enabled` 0 or 1 with a
   check; `changed_by`, `changed_at`): whether the admin enabled the model for the managed key. One row per model, changed in
   place. No row means the admin has not decided (the model is "new" while it is also newer than the first fetch).
-- `model_price_confirmations` (`id` identity / rowid, the order rows were written in; `(provider_id, model_id)` foreign key to
+- `model_price_confirmations` (`seq` identity / rowid, the order rows were written in; `(provider_id, model_id)` foreign key to
   `models_dev_models`; `source` `catalog` / `admin`; `price` the confirmed price book and `reference_price` the price models.dev
   and the override file stated at that time, both JSON text with amounts as decimal strings of whole micro-USD per million
   tokens; `reference_hash` SHA-256 of the reference; `reason`; `confirmed_by`, `confirmed_at`): checks make a correction carry

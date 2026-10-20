@@ -63,7 +63,7 @@ function readBook(text: string, id: number): PriceBook {
 }
 
 function confirmationOf(row: Row): PriceConfirmation {
-  const id = Number(row.id);
+  const id = Number(row.seq);
   const source = CONFIRMATION_SOURCES.find(
     (candidate) => candidate === row.source,
   );
@@ -116,7 +116,7 @@ export function createModelPriceConfirmationsRepository(
         .selectAll()
         .where("provider_id", "=", providerId)
         .where("model_id", "=", modelId)
-        .orderBy("id", "desc")
+        .orderBy("seq", "desc")
         .limit(1)
         .executeTakeFirst();
       return row === undefined ? undefined : confirmationOf(row);
@@ -126,10 +126,10 @@ export function createModelPriceConfirmationsRepository(
       const rows = await db
         .selectFrom("model_price_confirmations")
         .selectAll()
-        .where("id", "in", (query) =>
+        .where("seq", "in", (query) =>
           query
             .selectFrom("model_price_confirmations")
-            .select((builder) => builder.fn.max("id").as("id"))
+            .select((builder) => builder.fn.max("seq").as("seq"))
             .groupBy(["provider_id", "model_id"]),
         )
         .orderBy("provider_id")
@@ -144,7 +144,7 @@ export function createModelPriceConfirmationsRepository(
         .selectAll()
         .where("provider_id", "=", providerId)
         .where("model_id", "=", modelId)
-        .orderBy("id", "desc")
+        .orderBy("seq", "desc")
         .execute();
       return rows.map(confirmationOf);
     },

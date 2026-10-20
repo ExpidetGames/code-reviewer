@@ -30,11 +30,7 @@ import {
 } from "./availability.ts";
 import type { PriceConfirmation } from "./confirmation.ts";
 import { toModelView, type CatalogModelView } from "./admin-view.ts";
-import {
-  effectivePrice,
-  PRICE_STATUSES,
-  type PriceStatus,
-} from "./effective-price.ts";
+import { effectivePrice, type PriceStatus } from "./effective-price.ts";
 import type { ModelPriceErrorCode } from "./errors.ts";
 import { modelOverride, type ModelOverride } from "./overrides.ts";
 import {
@@ -440,5 +436,3 @@ export function createModelPriceService(
     },
   };
 }
-
-export { PRICE_STATUSES };

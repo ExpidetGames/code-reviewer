@@ -321,12 +321,12 @@ describe.each(MODELS_DEV_ENGINES)(
           const saved = await confirmations.append(confirm(), T1);
 
           await expect(
-            sql`update model_price_confirmations set confirmed_by = 'someone' where id = ${saved.id}`.execute(
+            sql`update model_price_confirmations set confirmed_by = 'someone' where seq = ${saved.id}`.execute(
               db,
             ),
           ).rejects.toThrow(/model_price_confirmations_immutable/);
           await expect(
-            sql`delete from model_price_confirmations where id = ${saved.id}`.execute(
+            sql`delete from model_price_confirmations where seq = ${saved.id}`.execute(
               db,
             ),
           ).rejects.toThrow(/model_price_confirmations_immutable/);

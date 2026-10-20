@@ -56,7 +56,7 @@ export const migration: Migration = {
       .createTable("model_price_confirmations")
       // The order rows were written in, which a timestamp is not: two confirmations may share a millisecond. An identity
       // on Postgres; on SQLite an `integer primary key`, which only ever grows because no row is deleted (the trigger).
-      .addColumn("id", "integer", (column) =>
+      .addColumn("seq", "integer", (column) =>
         postgres
           ? column.primaryKey().generatedAlwaysAsIdentity()
           : column.primaryKey(),
@@ -95,7 +95,7 @@ export const migration: Migration = {
     await db.schema
       .createIndex("model_price_confirmations_model")
       .on("model_price_confirmations")
-      .columns(["provider_id", "model_id", "id"])
+      .columns(["provider_id", "model_id", "seq"])
       .execute();
 
     if (postgres) {

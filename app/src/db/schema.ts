@@ -794,7 +794,7 @@ export interface ModelEnablementsTable {
  */
 export interface ModelPriceConfirmationsTable {
   /** The order rows were written in (identity / rowid): the primary key, never set by the app. */
-  id: Generated<number>;
+  seq: Generated<number>;
   provider_id: string;
   model_id: string;
   /** `catalog` (confirmed as shown) or `admin` (corrected, with a reason). */
