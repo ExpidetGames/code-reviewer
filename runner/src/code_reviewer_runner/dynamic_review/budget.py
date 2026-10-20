@@ -90,6 +90,23 @@ the same last call as the wrap-up's (nothing is granted after it), so a run has 
 two, and it does not count as stopping early: the review is not cut short by a limit. If it fails,
 the run fails as it did before.
 
+**Finalization above the wire (#552).** On the native path the proxy relays the engine's bytes
+and never rewrites a request, so it cannot make the final call. The adapter asks for the answer
+instead, and the ledger gives it the same guarantee, with the same bound: a run never ends without
+a review because of the cost guard. The adapter declares this (`enable_final_above_wire`); from then
+on a call the guard refuses for the cost or the clock is a `RefusedForFinal`, which is **not** the
+run's failure (`record_failure` keeps it as a pending refusal, `take_refusal`) but the signal to
+abort the turn and send one "answer now" message. That message's call is admitted past the limit
+when the adapter marked it (`arm_final`): the mark is one call, it needs nothing in flight, it is
+consumed by the next reservation, and nothing in a request can make a call final by itself. A second
+mark exists for the one repair of an answer that is not the review; there is no third. Before
+refusing, the adapter can ask whether the answer is due (`wrap_up_due`, read only: the arithmetic of
+the wrap-up above and, for the clock, a lead of `WRAP_UP_ANNOUNCE_LEAD` of the reserve) and announce
+it to the model by an ordinary message; a model that complies is wrapped up without any refusal.
+The bound is the one above: the limit, plus the excess of the last normal call, plus the final
+call, plus the one repair. A failure that is recorded (a limit, a policy violation) admits no later
+call at all.
+
 **Tokens.** The input estimate is bytes over a conservative 3 bytes per token (real text has
 about 3 to 4), tightened to what the provider settled on the previous call when that content was
 denser, and never below the last settled prompt. It is an estimate, not a bound: it prices the
@@ -143,6 +160,12 @@ WRAP_UP_RESERVE_SECONDS = 150.0
 WRAP_UP_RESERVE_FRACTION = 0.25
 STOPPED_EARLY_COST = "cost_limit"
 STOPPED_EARLY_TIME = "time_limit"
+# The adapter asks the model for its answer this much before the clock reserve starts (a share of
+# the reserve), so a model that complies is never refused; the reserve itself is the hard rule.
+WRAP_UP_ANNOUNCE_LEAD = 0.4
+# The calls the adapter may mark as final (#552): the answer, and the one repair of an answer that
+# is not the review.
+MAX_FINAL_MARKS = 2
 # What the recovery call's request is larger than the last call's by, besides the model's own last
 # answer (one output allowance): the engine's recovery message and the runner's instruction.
 RECOVERY_REQUEST_SLACK_BYTES = 4096
@@ -182,6 +205,15 @@ class LimitError(Exception):
         super().__init__(f"{code.value}: {detail}")
         self.code = code
         self.detail = detail
+
+
+class RefusedForFinal(LimitError):
+    """The guard refused a call that the adapter can answer with a final call (#552): the cost
+    limit is used up, the clock reserve has started, or a call came after the final one.
+
+    It is a `LimitError` like any other, so a ledger without `enable_final_above_wire` records it
+    as the run's failure; with it, it is a pending refusal (`take_refusal`).
+    """
 
 
 @dataclass(frozen=True)
@@ -417,6 +449,11 @@ class BudgetLedger:
         # that can be rewritten is the final call. And whether the retry past the limit was used.
         self._overshot = False
         self._retried_past_limit = False
+        # Finalization above the wire (#552): declared by the adapter, then marks and refusals.
+        self._above_wire = False
+        self._final_armed = False
+        self._marks_used = 0
+        self._refusals = 0
         self._stopped_early: str | None = None
         self._clock = clock
         self._started = clock()
@@ -454,13 +491,83 @@ class BudgetLedger:
         not a success.
         """
         with self._lock:
-            if self._failure is None:
+            if self._above_wire and isinstance(error, RefusedForFinal):
+                # Not the run's failure: the adapter asks for the answer (#552).
+                self._refusals += 1
+            elif self._failure is None:
                 self._failure = error
 
     @property
     def failure(self) -> LimitError | None:
         with self._lock:
             return self._failure
+
+    def enable_final_above_wire(self) -> None:
+        """The adapter will ask for the answer itself (#552): a call the guard refuses for the cost
+        or the clock is then a pending refusal and not the run's failure, and a call the adapter
+        marked (`arm_final`) is admitted as the final call. The ledger of a run on the legacy path
+        never calls this."""
+        with self._lock:
+            self._above_wire = True
+
+    def take_refusal(self) -> bool:
+        """True once after the guard refused a call for the adapter to finalize; clears it."""
+        with self._lock:
+            pending = self._refusals > 0
+            self._refusals = 0
+            return pending
+
+    def note_wrap_up(self, reason: str) -> None:
+        """The model was asked to answer now (`wrap_up_due`): that is why the run stopped early.
+        The first reason wins."""
+        with self._lock:
+            if self._stopped_early is None:
+                self._stopped_early = reason
+
+    def wrap_up_due(self) -> str | None:
+        """Why the model should be asked for its answer now, or None. Read only (#552).
+
+        It is the arithmetic of the wrap-up (`_wrap_up_reason`) for the call the run would make
+        next, priced from what the run has shown, and the clock a little before its reserve
+        starts, so that a model that answers when asked is never refused. Nothing is recorded.
+        """
+        with self._lock:
+            if self._final_granted or self._final_armed:
+                return None
+            reserve = self._wrap_up_seconds
+            if self.remaining_seconds() <= reserve * (1 + WRAP_UP_ANNOUNCE_LEAD):
+                return STOPPED_EARLY_TIME
+            counters = self._counters
+            if counters.last_prompt_tokens == 0:
+                return None  # no call settled yet: nothing to price a next one with
+            priced = counters.last_prompt_tokens + self._growth_tokens()
+            allowance = self.output_tokens
+            held = counters.cost + counters.reserved_cost
+            return self._wrap_up_reason(
+                held, self._expected_cost(priced, allowance), priced, allowance
+            )
+
+    def arm_final(self) -> bool:
+        """Mark the next call as the run's final call, or say that it cannot be (#552).
+
+        The final call is admitted past the cost limit (see "The bound"), once. The adapter marks
+        it after it aborted the turn, so nothing is in flight; the call that follows is the
+        engine's answer to the adapter's message. Not possible: a call is in flight, the mark is
+        armed already, both marks (the answer and its one repair) are used, the deadline has
+        passed, the run failed, or the spend already passes the limit without a normal call having
+        settled over it (a cost that was only booked at its worst case).
+        """
+        with self._lock:
+            if self._failure is not None or self._final_armed or self._open:
+                return False
+            if self._marks_used >= MAX_FINAL_MARKS or self.remaining_seconds() <= 0:
+                return False
+            held = self._counters.cost + self._counters.reserved_cost
+            if not (self._final_granted or self._final_admissible(held)):
+                return False
+            self._final_armed = True
+            self._marks_used += 1
+            return True
 
     def check_deadline(self, *, tolerance: float = 0.0) -> None:
         """Raise when the deadline has passed, or is closer than `tolerance` seconds."""
@@ -557,15 +664,25 @@ class BudgetLedger:
         allowance = self.output_tokens if output_tokens is None else output_tokens
         counters = self._counters
         with self._lock:
-            if self._final_granted:
+            if self._above_wire and self._failure is not None:
+                # The run has failed (#552): no call is admitted after a recorded failure.
+                raise LimitError(self._failure.code, self._failure.detail)
+            marked = self._final_armed
+            if self._final_granted and not marked:
                 if self._final_unanswered:
                     raise LimitError(
                         ErrorCode.LLM_OUTPUT_INVALID,
                         "the final call returned no structured answer",
                     )
-                raise LimitError(
+                raise RefusedForFinal(
                     ErrorCode.DYNAMIC_BUDGET_EXCEEDED,
                     "the run asked for a call after its final call",
+                )
+            if self._above_wire and not marked and self._wrap_up_started():
+                self._stop_early(STOPPED_EARLY_TIME)
+                raise RefusedForFinal(
+                    ErrorCode.DYNAMIC_BUDGET_EXCEEDED,
+                    "the clock reserve for the answer has started",
                 )
             # The estimate prices the reservation. The last settled prompt is a heuristic floor:
             # it usually predicts the next prompt in a tool loop, and after a compaction or a
@@ -582,10 +699,10 @@ class BudgetLedger:
             priced = self._priced_input(size, estimate)
             cost = self._expected_cost(priced, allowance)
             recovery = self._recovery_armed and can_wrap_up
-            if self._overshot and not can_wrap_up:
+            if self._overshot and not can_wrap_up and not marked:
                 # A normal call settled over the limit: nothing but the final call follows.
-                raise LimitError(ErrorCode.DYNAMIC_BUDGET_EXCEEDED, "the cost limit is used up")
-            if recovery:
+                raise self._cost_refusal()
+            if recovery or marked:
                 reason = None
             elif self._overshot:
                 reason = STOPPED_EARLY_COST
@@ -593,7 +710,7 @@ class BudgetLedger:
                 reason = self._wrap_up_reason(held, cost, priced, allowance)
             else:
                 reason = None
-            final = reason is not None or recovery
+            final = reason is not None or recovery or marked
             if final:
                 # The last call of the run: it carries the instruction and nothing else grows.
                 text = recovery_text if recovery else wrap_up_text
@@ -606,14 +723,18 @@ class BudgetLedger:
             # A normal call is admitted only when its expected cost fits. The final call is the last
             # chance of a review, so it is admitted whenever the spend and what is in flight are
             # within the limit, even when its expected cost no longer fits (#540).
-            fits = (
+            # A call the adapter marked was checked when it was marked (`arm_final`).
+            fits = marked or (
                 self._final_admissible(held) if final else held + cost <= self.limits.max_cost_usd
             )
             if not fits:
-                raise LimitError(ErrorCode.DYNAMIC_BUDGET_EXCEEDED, "the cost limit is used up")
+                raise self._cost_refusal()
             if final:
                 self._final_granted = True
-                if recovery:
+                if marked:
+                    # Why the run stopped early, if it did, was recorded when the model was asked.
+                    self._final_armed = False
+                elif recovery:
                     self._recovery_armed = False
                     self._recovered = True
                 else:
@@ -631,6 +752,21 @@ class BudgetLedger:
             recovery=recovery,
             serial=serial,
         )
+
+    def _wrap_up_started(self) -> bool:
+        """The clock reserve for the answer has started. Call with the lock held."""
+        return self.remaining_seconds() <= self._wrap_up_seconds
+
+    def _stop_early(self, reason: str) -> None:
+        """Remember why the run is wrapped up; the first reason wins. Call with the lock held."""
+        if self._stopped_early is None:
+            self._stopped_early = reason
+
+    def _cost_refusal(self) -> RefusedForFinal:
+        """The error of a call the cost limit cannot hold. Call with the lock held."""
+        if self._above_wire:
+            self._stop_early(STOPPED_EARLY_COST)
+        return RefusedForFinal(ErrorCode.DYNAMIC_BUDGET_EXCEEDED, "the cost limit is used up")
 
     def try_reserve_final_retry(
         self, request_text: str | bytes, *, output_tokens: int | None = None
