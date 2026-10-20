@@ -28,13 +28,24 @@ class WireFamily(StrEnum):
     GOOGLE = "google"
 
 
-# The SDKs of the pinned engine that speak each family, as verified by the engine tests (spike
-# #546: `docs/spike/544-passthrough.md`, section 4). The contract of the entry lists every bundled
-# SDK; an SDK that no test has seen speak its family is not served by the passthrough until one
-# has (`config.build_native_engine_config` refuses it).
+# The SDKs of the pinned engine that speak each family: the pairs of
+# `contracts/opencode-providers.v1.json` (#548, derived from the pinned engine's source; a test
+# compares them). The entry's `npm` and `family` are checked against each other when the engine's
+# configuration is built, so an SDK cannot be pointed at a wire it does not speak.
 NPM_OF_FAMILY: Final = {
-    WireFamily.OPENAI_CHAT: frozenset({"@ai-sdk/openai-compatible", "@openrouter/ai-sdk-provider"}),
-    WireFamily.OPENAI_RESPONSES: frozenset({"@ai-sdk/openai"}),
+    WireFamily.OPENAI_CHAT: frozenset(
+        {
+            "@ai-sdk/openai-compatible",
+            "@openrouter/ai-sdk-provider",
+            "@ai-sdk/cerebras",
+            "@ai-sdk/deepinfra",
+            "@ai-sdk/groq",
+            "@ai-sdk/mistral",
+            "@ai-sdk/perplexity",
+            "@ai-sdk/togetherai",
+        }
+    ),
+    WireFamily.OPENAI_RESPONSES: frozenset({"@ai-sdk/openai", "@ai-sdk/xai"}),
     WireFamily.ANTHROPIC_MESSAGES: frozenset({"@ai-sdk/anthropic"}),
     WireFamily.GOOGLE: frozenset({"@ai-sdk/google"}),
 }

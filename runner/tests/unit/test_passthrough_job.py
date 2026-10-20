@@ -9,6 +9,7 @@ shapes used here are the example of that contract.
 
 import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -32,7 +33,11 @@ from code_reviewer_runner.dynamic_review.passthrough.engine_errors import (
     MODEL_NOT_FOUND,
     model_not_found_for_turn,
 )
-from code_reviewer_runner.dynamic_review.passthrough.families import WireFamily, spec_of
+from code_reviewer_runner.dynamic_review.passthrough.families import (
+    NPM_OF_FAMILY,
+    WireFamily,
+    spec_of,
+)
 from code_reviewer_runner.dynamic_review.passthrough.transport import Transport, transport_of
 from code_reviewer_runner.result import ErrorCode
 
@@ -128,7 +133,9 @@ def test_the_provider_block_the_entry_makes_is_what_the_config_accepts() -> None
     [
         (WireFamily.OPENAI_CHAT, "@ai-sdk/openai-compatible"),
         (WireFamily.OPENAI_CHAT, "@openrouter/ai-sdk-provider"),
+        (WireFamily.OPENAI_CHAT, "@ai-sdk/groq"),
         (WireFamily.OPENAI_RESPONSES, "@ai-sdk/openai"),
+        (WireFamily.OPENAI_RESPONSES, "@ai-sdk/xai"),
         (WireFamily.ANTHROPIC_MESSAGES, "@ai-sdk/anthropic"),
         (WireFamily.GOOGLE, "@ai-sdk/google"),
     ],
@@ -366,3 +373,20 @@ def test_the_target_of_a_job_is_read_from_its_model_entry() -> None:
         target_from_entry(EntryLike("openai-completions", "m", UPSTREAM, MODEL))
     with pytest.raises(ValueError, match="limit"):
         target_from_entry(EntryLike("google", "m", UPSTREAM, {"name": "x"}))
+
+
+# #550-T12
+def test_the_sdk_of_each_family_is_the_one_the_catalog_maps_to_it() -> None:
+    """`NPM_OF_FAMILY` is the pairs of `contracts/opencode-providers.v1.json` (#548)."""
+    catalog = json.loads(
+        (
+            Path(__file__).resolve().parents[3] / "contracts" / "opencode-providers.v1.json"
+        ).read_text()
+    )
+    pairs = {
+        (provider["npm"], provider["family"])
+        for provider in catalog["providers"].values()
+        if "npm" in provider
+    }
+    ours = {(npm, family.value) for family, npms in NPM_OF_FAMILY.items() for npm in npms}
+    assert ours == pairs

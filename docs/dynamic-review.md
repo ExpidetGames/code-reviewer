@@ -309,13 +309,30 @@ untrusted side):
   the pinned OpenCode sends). Every credential, cookie and proxy header is dropped; the proxy sets the one key header
   of the family, `accept-encoding: identity` (the tee cannot read a compressed answer) and the length itself. The
   body length must be measurable before it is read (a chunked body is a 411, one above `max_request_bytes` a 413).
-- **The body.** Read as JSON only for `model` (the job's, else 403 `model_not_allowed`), the output cap (present and
-  not above the allowance: `min(limit.output, 32000)`, the cap the engine really sends, spike #546) and `stream`;
-  a key given twice, a non-object, `models`/`route`/`plugins`/`transforms` on Chat are refused. The bytes that go out are
-  the bytes that came in.
+- **The body.** Read as JSON and walked against a **closed schema per family** (`passthrough/body_schema.py`): the
+  keys the pinned OpenCode sends (`fakes/wire/engine_requests.json` is one captured body per family), compared
+  case-sensitively, and nothing else, also inside messages, tools and options. `model` must be the job's (else 403
+  `model_not_allowed`); exactly one spelling of the output cap, within `min(limit.output, 32000)` (the cap the engine
+  really sends, spike #546), and a second spelling (`max_tokens` with `max_completion_tokens`, a snake-case
+  `generation_config`) is refused whatever its value. Tools are function tools only (Chat/Responses `type: function`,
+  Messages none or `custom`, Google `functionDeclarations`); no web search, code execution, MCP, computer use,
+  `mcp_servers` or `container`. Content parts are text, the tool exchange of the family and the engine's reasoning
+  blocks; **no image, audio, file or document part at all** (the model entries are text-only; a part that can carry a
+  URL is a part the provider can fetch). `n` and `candidateCount` are 1, `store` is `false`; no `service_tier`,
+  `background`, `previous_response_id`, `cachedContent`, `metadata`, `response_format` or OpenRouter routing. A key
+  given twice and a non-object are refused. The walk only checks: the bytes that go out are the bytes that came in.
+  What the engine sends for a provider that no capture has covered fails closed as `request_not_allowed`, and its key
+  joins the set once a live capture shows it is the engine's (spike section 7). The schema lets numeric sampling
+  options through (`temperature`, `top_p`, `top_k`, Google's `generationConfig` twins), which `ProviderTransform`
+  sets for some model ids; they are not in the captures and are an item of the live checklist (L12).
+- **One call at a time.** The engine's calls are serial. A second request while one is in flight is a 429
+  `call_in_flight` with `retry-after: 1`, answered before anything is reserved or sent: not a call, no reason to end
+  the run (it comes after the capability check, so a stranger only ever sees 401). It is refused and not queued: a
+  queue is something a hostile engine can fill, the engine retries a 429 by itself, and a refusal needs no thread to
+  wait and no deadline to track.
 
 The refusal codes are the engine's answer (`capability_invalid`, `request_not_allowed`, `model_not_allowed`,
-`request_too_large`, `length_required`); the run records `dynamic_policy_violation` (a 413: `dynamic_budget_exceeded`),
+`request_too_large`, `length_required`, and `call_in_flight`, which ends nothing); the run records `dynamic_policy_violation` (a 413: `dynamic_budget_exceeded`),
 except for a 401, which is not the engine of this job and ends nothing.
 
 **The destination** (`address.py`, `upstream.py`). One trusted `https` base URL per job, port 443 only, no
@@ -325,32 +342,77 @@ the name, refuses it when **one** address is not public (loopback, private, link
 documentation and special-purpose ranges, NAT64, 6to4; an IPv4-mapped address by its IPv4) and connects to an address
 it checked, never to the name again. A redirect is a status: it is not followed and ends the run.
 
+*Address rules.* They are those of `app/src/billing/public-url.ts` (the edges of every range are in
+`test_passthrough_destination.py`), with one deliberate difference: the app judges NAT64 `64:ff9b::/96` and 6to4
+`2002::/16` by the IPv4 address inside them, this guard refuses them whatever it is. A provider is not behind either,
+and a translator routes to whatever its prefix says, so the check of the embedded address would only be a way to be
+wrong. Everything the app refuses is refused here too.
+
+*Waits.* Every wait is bounded by the budget of the call (the smaller of 120 s and the time the job has left; a call
+with none makes no lookup and no connection): the name lookup runs in a thread that is given up on (`getaddrinfo` has
+no timeout; at most one call is in flight, so a hanging resolver costs one idle thread), each connection attempt gets
+what is left of the budget after the attempts before it, the TLS handshake what is left after the connection, then
+each read gets the budget. On the engine's side of the loopback socket (`server.py`) a connection that says nothing is
+closed after 30 s, reading a body and writing an answer each wait at most 60 s and never longer than the job has left
+(a timeout there is an engine that went away), and no more than 16 connections are served at once; one over is closed
+at once.
+
 **Ledger.** `budget.py` is reused as it is: every upstream call reserves from the bytes of the body and what the run
 has shown (realistic guard, #540/#542), the final-call exemption and "never without a review" rules unchanged. The
-engine's retries (429, 5xx, a stream cut, an error event inside a 200 stream) are calls of their own. A refusal before
-any generation (a 4xx or 5xx status, a connection that never opened) is released at no cost (`settle_unbilled`);
-a call whose usage was never seen (a cut stream, an error event, an engine that went away, a timeout after the request
-was sent) stays spent and makes the cost of the run unknown (`settle_unknown`); a complete answer without a readable
-usage or a price still ends the run (`dynamic_accounting_failed`, as today; the own-key relaxation is #553). Prices are
-the job's (`UnitCosts`: input, output and, when it has them, cache read and write); a cache write without a write
-price has no cost, so the run stops rather than price it too low.
+engine's retries (429, 5xx, a stream cut, an error event inside a 200 stream) are calls of their own. How a call is
+settled:
+
+| What happened | Settled as |
+|---|---|
+| a complete answer with usage and a price | the provider's usage and the price (`settle_call`; a usage above the reservation is **booked first**, then the run stops) |
+| the provider refused with a 4xx (not 408) or a 429, a redirect, a connection that never opened | unbilled: the reservation is released (`settle_unbilled`) |
+| 408, any 5xx (524 included), a cut stream, an error event in a 200, a timeout after the request went out, an encoded body | **unknown**: booked at its **worst case**, not at its expected cost (`settle_unknown`), counted in `unknown_calls`, and for a managed key the run ends (`dynamic_accounting_failed`) |
+| a complete answer without a readable usage or a price | the call is unknown, and the run ends for every key (the own-key relaxation is #553) |
+
+The worst case of a call is the bytes of its request, each as a token at the dearest input price (the byte count bounds
+the tokens), plus the whole output cap at the output price (`BudgetLedger.worst_case_cost`). An engine that can make
+a call's usage unreadable must not make the call free; the price of that is that a transient 5xx ends a managed run,
+which is the safe side until #553 prices an own key's calls another way (`PassthroughProxy(unknown_cost_ends_run=)`
+is that hook; it is on by default and nothing sets it off yet). The whole-run cost stays unknown after any unknown call
+(`usage.cost_usd` is `None`), never a partial sum.
+
+**A hang-up does not hide a cost.** When the engine disconnects mid-stream, the call to the provider is **not**
+cancelled at once: the proxy stops forwarding but keeps reading the stream into the tap until the usage event, or the
+byte bound or the deadline, and then settles the call normally. Cancelling at once would let a hostile engine
+turn any call into an unknown (or free) one by hanging up after the first event, and an unknown call is booked at its
+worst case and ends a managed run. If the usage still cannot be read, the call is unknown as above.
 
 **Relay and tee.** The answer is passed through byte for byte: a stream one whole event at a time as it arrives
-(`sse.py`), a plain answer after a size cap, while the usage tap (`usage.py`, the minimal parser per family; #551
-hardens them) reads the same bytes. A client that goes away cancels the call to the provider. Response headers are
-filtered to a few (`content-type`, `retry-after`, `retry-after-ms`, `x-should-retry`, the request id). Nothing the
-provider says about an error is passed on or logged before the key, and every run of eight or more characters of it, is
-cut out (`redact.py`): error bodies, error events inside a stream and plain answers alike.
+(`sse.py`), while the usage tap (`usage.py`, the minimal parser per family; #551 hardens them) reads the same bytes.
+The bound of a stream is the larger of `max_stream_bytes` (1 MiB) and **256 bytes per output token the request asks
+for**, up to 8 MB for the 32000-token cap: an event per token costs about 100 bytes of framing. An answer that is not
+an SSE stream is a document: it is read whole up to `max_response_bytes` (256 KiB), settled, then sent with its length
+(a long-lived non-SSE stream such as JSON lines is therefore not streamed; none of the four families answers a
+streaming request that way, and one that does is cut at 256 KiB and ends the run). Response headers of a successful
+answer are filtered to a few (`content-type`, `retry-after`, `retry-after-ms`, `x-should-retry`, the request id).
+
+*What the engine is told about an error, and why redaction is not used on content.* If the proxy cut the key out of
+what the provider answers, an engine that writes guesses of the key into its output would see the cut where a guess is
+right: the proxy would be an oracle, one character run at a time. So **a successful answer is never changed**.
+Redaction (`redact.py`: the key and any run of eight or more characters of it) is used only on what no model writes:
+the events of an error stream (an `error` event, or JSON with an `error` key, `type: error` or
+`response.failed`: decided by the provider's structure, never by the model's words) and the headers of an answer. For a
+non-2xx answer the provider's body is read locally (to tell a too-long request from other refusals) and **not passed
+on at all**: the engine gets the status, a code and a sentence of the proxy's own, and the plain-number `retry-after`
+and `retry-after-ms`, nothing else. The residual: an error event inside a 200 stream is still the provider's text with
+the key cut out, because the engine's retry logic reads its shape and no capture of one exists yet (live item L7); it
+can only be an oracle if a provider quotes request content in such an event.
 
 **Stable codes the caller branches on.** A provider status maps by the table of the legacy path (`llm_auth`,
 `llm_rate_limit`, `llm_unavailable`, `llm_timeout`, `llm_context_length_exceeded`, `llm_bad_request`); a 404, and the
 engine's own "500 `UnknownError` with no call upstream" for a model its config does not offer
 (`engine_errors.model_not_found_for_turn`), is `model_unknown`. Status that the engine retries itself (408, 409, 429,
-5xx) do not end the run; the code is kept in `PassthroughProxy.last_upstream_error` for the adapter to name when the
+5xx) do not end the run by themselves (a 408 or 5xx is an unknown call, see the ledger); the code is kept in `PassthroughProxy.last_upstream_error` for the adapter to name when the
 engine gives up. Everything else ends the run with its code, the text of the provider in none of it.
 
 **Not in this change** (follow-ups): reading a job's entry from the claim and starting the engine with the native
-config (#564 has the entry reader; `build_native_engine_config` and `target_from_entry` are the two joints), the audit of
+config (#564 has the entry reader; `build_native_engine_config`, which asserts the provider block against the entry, and
+`target_from_entry` are the two joints; wiring and the claim contract test T13 come as a separate step), the audit of
 tool results in a request (it is chat-shaped; the adapter still counts the tool calls the engine reports), how a final
 call is told to answer without rewriting the request (#552), usage parsers hardened against captured answers (#551)
 and the cost policy for an own key (#553).

@@ -456,6 +456,9 @@ class PassthroughProxy:
         started_ms: int,
         sink: ResponseSink,
     ) -> None:
+        # A document, not a stream: read whole (bounded), settled, then sent with its length. A
+        # long-lived answer that is not server-sent events is not streamed; none of the four
+        # families answers a streaming request that way, and one that does is cut at the bound.
         tap = tap_for(self._family, sse=False)
         limit = self.ledger.limits.max_response_bytes
         body = b""

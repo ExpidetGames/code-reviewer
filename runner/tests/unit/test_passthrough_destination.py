@@ -94,6 +94,140 @@ def test_loopback_private_link_local_and_special_purpose_addresses_are_refused(
     assert not is_public_address(address)
 
 
+# The edges of every range of `app/src/billing/public-url.ts` (and `connect-guard.ts`): the last
+# address inside a range is refused, the first one outside it passes. Where the guard here is
+# stricter than the app's it is on purpose: NAT64 `64:ff9b::/96` and 6to4 `2002::/16` are refused
+# whatever IPv4 address is in them (the app judges the embedded address; a provider is never behind
+# either, and a translator can route to anything), see "Address rules" in docs/dynamic-review.md.
+EDGES_PUBLIC = [
+    "11.0.0.1",
+    "100.63.255.255",
+    "100.128.0.1",
+    "172.15.255.255",
+    "172.32.0.1",
+    "192.0.1.1",
+    "192.0.3.1",
+    "192.88.98.1",
+    "192.88.100.1",
+    "192.169.0.1",
+    "198.17.255.255",
+    "198.20.0.1",
+    "198.51.99.1",
+    "198.51.101.1",
+    "203.0.112.1",
+    "203.0.114.1",
+    "223.255.255.255",
+    "2001:200::1",
+    "2001:db9::1",
+    "2001:4860:4860::8888",
+    "3fff:1000::1",
+    "2003::1",
+    "::ffff:93.184.216.34",
+]
+EDGES_NOT_PUBLIC = [
+    "0.255.255.255",
+    "10.255.255.255",
+    "100.64.0.0",
+    "100.127.255.255",
+    "127.0.0.0",
+    "169.254.0.0",
+    "169.254.255.255",
+    "172.16.0.0",
+    "192.0.0.0",
+    "192.0.0.170",
+    "192.0.0.255",
+    "192.0.2.0",
+    "192.0.2.255",
+    "192.88.99.0",
+    "192.88.99.255",
+    "192.168.0.0",
+    "192.168.255.255",
+    "198.18.0.0",
+    "198.19.255.255",
+    "198.51.100.0",
+    "198.51.100.255",
+    "203.0.113.0",
+    "203.0.113.255",
+    "224.0.0.0",
+    "239.255.255.255",
+    "240.0.0.0",
+    "::2",
+    "::ffff:0:1",
+    "::ffff:0.0.0.0",
+    "::ffff:169.254.169.254",
+    "1ff::1",
+    "64:ff9b::1",
+    "64:ff9b::5db8:d822",
+    "64:ff9b:1::5db8:d822",
+    "64:ff9b:1:ffff::1",
+    "100::",
+    "100::ffff",
+    "2001::",
+    "2001:1ff:ffff::1",
+    "2001:db8::",
+    "2001:db8:ffff::1",
+    "2002::",
+    "2002:5db8:d822::1",
+    "3fff::",
+    "3fff:fff:ffff::1",
+    "5f00::",
+    "5f00:ffff::1",
+    "fc00::",
+    "fdff:ffff::1",
+    "fe80::",
+    "febf::1",
+    "fec0::",
+    "feff::1",
+    "ff00::",
+    "ffff::1",
+    "fe80::1%eth0",
+]
+
+
+# #550-T07
+@pytest.mark.parametrize("address", EDGES_PUBLIC)
+def test_the_first_address_outside_each_special_range_passes(address: str) -> None:
+    assert is_public_address(address)
+
+
+# #550-T07
+@pytest.mark.parametrize("address", EDGES_NOT_PUBLIC)
+def test_the_last_address_inside_each_special_range_is_refused(address: str) -> None:
+    assert not is_public_address(address.split("%")[0])
+
+
+# #550-T07
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://api.example.com:443/v1",
+        "https://api.example.com/v1/",
+        "https://API.Example.COM./v1",
+    ],
+)
+def test_the_port_is_443_whatever_the_spelling_and_the_name_is_one_spelling(url: str) -> None:
+    assert check_base_url(url) in ("https://api.example.com:443/v1", "https://api.example.com/v1")
+    assert ":443" not in check_base_url(url)
+
+
+# #550-T07
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://api.example.com:0/v1",
+        "https://api.example.com:444/v1",
+        "https://api.example.com:65535/v1",
+        "https://[2606:4700:4700::1111]:8443/v1",
+        "https://93.184.216.34:8080/v1",
+        "https://api.example.com:99999/v1",
+        "https://api.example.com:abc/v1",
+    ],
+)
+def test_a_port_other_than_443_is_refused(url: str) -> None:
+    with pytest.raises(UpstreamRefused):
+        check_base_url(url)
+
+
 # #550-T07
 @pytest.mark.parametrize(
     "url",
