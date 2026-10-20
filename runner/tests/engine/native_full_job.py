@@ -139,6 +139,7 @@ class FullJob:
     result: JobResult
     publisher: Publisher
     upstream: ScriptedUpstream
+    family: Family = "messages"
     # The configuration the engine was given, as the adapter received it.
     configs: list[dict[str, Any]] = field(default_factory=lambda: [])
 
@@ -234,4 +235,4 @@ def full_job(
             publish=publisher,
             native=NativeSeams(upstream_for=lambda _url: hop, engine_factory=engine),
         )
-        yield FullJob(result, publisher, upstream, configs)
+        yield FullJob(result, publisher, upstream, family, configs)

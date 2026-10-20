@@ -58,6 +58,10 @@ def assert_a_native_review(job: FullJob) -> None:
         assert request.get("tool_choice") in (None, "auto", {"type": "auto"})
         assert "StructuredOutput" not in str(request)
         assert not {"response_format", "output_config", "output_format"} & request.keys()
+    # Prompt caching stays on: the engine itself marks the prefix, we set nothing (the claim's
+    # provider is a real one, so the engine's own rule for it applies).
+    if job.family == "messages":
+        assert all("cache_control" in json.dumps(request) for request in job.requests)
     # The engine's configuration holds one provider with one model, the capability and no key.
     ((config,),) = [job.configs]
     assert len(config["provider"]) == 1

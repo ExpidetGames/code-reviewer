@@ -199,6 +199,45 @@ def test_the_proxy_is_built_from_the_entry_and_the_address_is_the_entrys(tmp_pat
     assert len(native.capability) >= 43
 
 
+# #578-T11
+def test_the_operators_cost_limit_is_read_from_the_variable_the_legacy_path_reads() -> None:
+    from code_reviewer_runner import runner
+    from code_reviewer_runner.dynamic_review import native_job
+
+    assert native_job._MAX_COST_VARIABLE == runner.DYNAMIC_MAX_COST_VARIABLE  # pyright: ignore[reportPrivateUsage]
+
+
+# #578-T14
+def test_the_cost_limit_of_the_operator_is_the_limit_of_the_ledger(tmp_path: Path) -> None:
+    from decimal import Decimal
+
+    job = native_job()
+
+    native = build_native_job(
+        job,
+        deadline=600.0,
+        environment={"RUNNER_DYNAMIC_MAX_COST_USD": "0.25"},
+        upstream_for=upstream_for(ScriptedUpstream(streamed(FAMILY))),
+    )
+
+    assert native.ledger.limits.max_cost_usd == Decimal("0.25")
+
+
+# #578-T14
+def test_a_cost_limit_that_is_no_number_ends_the_job_before_the_engine() -> None:
+    job = native_job()
+
+    with pytest.raises(LimitError) as caught:
+        build_native_job(
+            job,
+            deadline=600.0,
+            environment={"RUNNER_DYNAMIC_MAX_COST_USD": "a lot"},
+            upstream_for=upstream_for(ScriptedUpstream(streamed(FAMILY))),
+        )
+
+    assert caught.value.code is ErrorCode.DYNAMIC_CONFIG_INVALID
+
+
 # #578-T14
 def test_the_managed_policy_ends_a_run_on_an_unknown_cost_and_the_own_one_does_not(
     tmp_path: Path,
