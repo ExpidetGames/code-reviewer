@@ -197,7 +197,10 @@ export type ClaimDeps = {
    * Where the key handed out with a claim is noted (encrypted, in the database), so a rotated key can still be masked,
    * and the model of a catalog entry (#280, #432), so it can be masked in the result even if the operator changes the entry.
    */
-  claimedKeys: Pick<ClaimedKeys, "remember" | "rememberModel">;
+  claimedKeys: Pick<
+    ClaimedKeys,
+    "remember" | "rememberModel" | "rememberNative"
+  >;
   /**
    * #279: where the metadata of a Dynamic job's model is read when its claim is built (the provider's
    * public endpoint metadata, cached for a short time). Left out, a claim reads none and a Dynamic job
@@ -208,10 +211,7 @@ export type ClaimDeps = {
    * #553: the cost policy of a native job (a job whose selection names a catalog model, src/native-cost/). Left out, no job
    * is native: the claim is exactly the claim of today. The running server wires it (`getNativeCost()`).
    */
-  nativeCost?: Pick<
-    NativeCostService,
-    "refOf" | "policyFor" | "isNativeProvider" | "entryFor"
-  >;
+  nativeCost?: Pick<NativeCostService, "refOf" | "policyFor" | "entryFor">;
   now: () => Date;
   logger: RunnerApiLogger;
   heartbeatIntervalSeconds: number;
@@ -224,7 +224,12 @@ export type Refusal =
   | { kind: "retry"; reason: string; retryAfterSeconds: number };
 
 type Prepared =
-  | { kind: "ready"; response: ClaimResponse; entryModel: string | null }
+  | {
+      kind: "ready";
+      response: ClaimResponse;
+      entryModel: string | null;
+      native: boolean;
+    }
   /** #320: the claim of a Dispatcher: the credential and no input. */
   | { kind: "split"; response: SplitClaimResponse }
   | Refusal;
@@ -258,6 +263,8 @@ export type Built = {
   tokenExpiresAt: string | null;
   /** The model of the catalog entry the job runs on, or null for an own job; remembered for masking (#280, #432). */
   entryModel: string | null;
+  /** #578: the input carries a native model entry (`dynamic.modelEntry`); remembered for the report. */
+  native: boolean;
 };
 
 function refuse(errorCode: string, detail?: string): Refusal {
@@ -860,6 +867,7 @@ export async function buildJobInput(
     input,
     tokenExpiresAt: git.expiresAt,
     entryModel: managed ? selection.model : null,
+    native: modelEntry !== null,
   };
 }
 
@@ -911,6 +919,7 @@ async function prepare(
   return {
     kind: "ready",
     entryModel: built.entryModel,
+    native: built.native,
     response: {
       version: RUNNER_API_VERSION,
       job: {
@@ -1104,6 +1113,8 @@ export async function handleClaim(
           claimed.job.id,
           prepared.entryModel,
         );
+      if (prepared.native)
+        await deps.claimedKeys.rememberNative(claimed.job.id);
       deps.logger.info(
         `[runner-api] ${origin.label} job=${claimed.job.id} command=${claimed.job.command}`,
       );

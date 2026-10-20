@@ -146,7 +146,10 @@ async function start(options: {
   entry?: EntryOutcome;
   /** A reader of the provider's model metadata, to see whether a claim asks it (#578). */
   capabilities?: ModelCapabilityChecker;
+  /** The switch of the native path as the server reads it, now: a test turns it off after the claim (#578). */
+  live?: { native: boolean };
 }): Promise<Started> {
+  const live = options.live ?? { native: true };
   const script = scriptedPrices(
     options.availability ?? CONFIRMED,
     options.catalogPrice === undefined ? BOOK : options.catalogPrice,
@@ -179,6 +182,7 @@ async function start(options: {
           getModel: async () => undefined,
         },
         legacyProviders: [openrouterDescriptor.id],
+        registryAddresses: {},
       }),
       entryFor: async () => {
         entries.count += 1;
@@ -186,10 +190,9 @@ async function start(options: {
       },
       // The harness's second provider is the native one: the real map names no provider outside the legacy registry.
       refOf: (selection) =>
-        selection.provider === FAKE_PROVIDER_ID
+        live.native && selection.provider === FAKE_PROVIDER_ID
           ? { providerId: "deepseek", modelId: selection.model }
           : null,
-      isNativeProvider: (slug) => slug === FAKE_PROVIDER_ID,
     },
     loadLlm: undefined,
   });
@@ -382,6 +385,22 @@ describe("the managed key (we pay)", () => {
     });
     expect(again.status).toBe(200);
     expect(await again.json()).toMatchObject({ alreadyCompleted: true });
+  });
+
+  // #578-T30
+  it("still holds a native run to its cost when the switch is turned off between the claim and the report", async () => {
+    const live = { native: true };
+    const h = await start({ keyMode: "managed", live });
+    const { job } = await h.claimed(CLAIM);
+    live.native = false;
+    const noCost = { ...goodResult().usage!, costUsd: null };
+
+    await h.complete(job.id, job.leaseToken, { usage: noCost });
+
+    expect(await h.queue.get(job.id)).toMatchObject({
+      status: "failed",
+      errorCode: "dynamic_accounting_failed",
+    });
   });
 
   // #577-L6
@@ -621,6 +640,33 @@ describe("the model entry of a native job (#578)", () => {
     expect(written).toContain("reason=entry_provider_url_blocked");
     for (const hidden of [NATIVE_MODEL, FAKE_PROVIDER_ID, "deepseek", "660000"])
       expect(written).not.toContain(hidden);
+  });
+
+  // #578-T28
+  it("ends a job, before any key or token exists, when the address of a registry provider is not the registry's", async () => {
+    for (const keyMode of ["managed", "own"] as const) {
+      const h = await start({
+        keyMode,
+        entry: { ok: false, code: "upstream_not_registry" },
+      });
+      const [job] = await h.snapshotJobs();
+
+      const response = await h.claim(CLAIM);
+
+      expect(response.status).toBe(204);
+      expect(await h.queue.get(job!.id)).toMatchObject({
+        status: "failed",
+        errorCode:
+          keyMode === "managed"
+            ? "managed_model_unavailable"
+            : "dynamic_model_features_unsupported",
+      });
+      expect(h.issuedJobTokens()).toEqual([]);
+      expect(h.keyLoads.count).toBe(0);
+      expect(h.logLines().join("\n")).toContain(
+        "reason=entry_upstream_not_registry",
+      );
+    }
   });
 
   // #578-T04

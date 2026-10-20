@@ -21,9 +21,18 @@ import { createNativeCostService } from "./service.ts";
 const T1 = new Date("2026-10-19T03:00:00.000Z");
 const ADMIN = "admin-1";
 const SONNET = { providerId: "anthropic", modelId: "claude-sonnet-5-5" };
+const OPENROUTER = {
+  providerId: "openrouter",
+  modelId: "mistralai/mistral-saba",
+};
 const DEEPSEEK = { providerId: "deepseek", modelId: "deepseek-v4-pro" };
 // The model-prices tests keep the price rules; here the legacy registry is the only thing the service needs to be told.
 const LEGACY = ["openrouter", "anthropic"] as const;
+// The registry's addresses (#578): the key of these two providers goes nowhere else.
+const REGISTRY_ADDRESSES = {
+  openrouter: "https://openrouter.ai/api/v1",
+  anthropic: "https://api.anthropic.com/v1",
+} as const;
 
 const fakes: ModelsDevFake[] = [];
 afterEach(async () => {
@@ -35,9 +44,10 @@ describe.each(MODELS_DEV_ENGINES)(
   (engine) => {
     const it_ = engine.skip ? it.skip : it;
 
-    async function setup() {
+    async function setup(catalog?: unknown) {
       const fake = await startModelsDevFake();
       fakes.push(fake);
+      if (catalog !== undefined) fake.respondWith(catalog);
       const { db } = await engine.create();
       const modelsDev = createModelsDevService({
         db,
@@ -59,6 +69,7 @@ describe.each(MODELS_DEV_ENGINES)(
         settings,
         catalog: createModelsDevRepository(db),
         legacyProviders: LEGACY,
+        registryAddresses: REGISTRY_ADDRESSES,
       });
       const confirm = async (ids: typeof SONNET) => {
         await prices.setEnabled(ADMIN, { ...ids, enabled: true });
@@ -352,6 +363,81 @@ describe.each(MODELS_DEV_ENGINES)(
           },
         });
       });
+
+      // #578-T28
+      it_(
+        "is refused for a registry provider whose address, trusted on first sight, is not the registry's, before any key",
+        async () => {
+          const first = modelsDevFixture() as Record<string, { api?: string }>;
+          first.openrouter!.api =
+            "https://openrouter-proxy.evilcorp.net/api/v1";
+          const t = await setup(first);
+
+          const outcome = await t.native.entryFor(OPENROUTER);
+
+          expect(outcome).toEqual({ ok: false, code: "upstream_not_registry" });
+          expect(JSON.stringify(outcome)).not.toContain("evilcorp");
+        },
+      );
+
+      // #578-T28
+      it_(
+        "is refused for a registry provider whose changed address an admin confirmed, and the catalog alone would serve it",
+        async () => {
+          const t = await setup();
+          const moved = modelsDevFixture() as Record<string, { api?: string }>;
+          moved.anthropic!.api = "https://anthropic-proxy.evilcorp.net/v1";
+          t.fake.respondWith(moved);
+          await t.modelsDev.refresh({ acceptReasons: GUARD_REASONS });
+          expect(await t.native.entryFor(SONNET)).toEqual({
+            ok: false,
+            code: "provider_url_blocked",
+          });
+
+          const catalog = createModelsDevRepository(t.db);
+          await catalog.confirmPendingUrl(
+            "anthropic",
+            "https://anthropic-proxy.evilcorp.net/v1",
+          );
+
+          expect(await t.native.entryFor(SONNET)).toEqual({
+            ok: false,
+            code: "upstream_not_registry",
+          });
+        },
+      );
+
+      // #578-T28
+      it_(
+        "is the entry of the registry's address for both registry providers",
+        async () => {
+          const t = await setup();
+
+          expect(await t.native.entryFor(SONNET)).toMatchObject({
+            ok: true,
+            entry: { upstreamBaseUrl: "https://api.anthropic.com/v1" },
+          });
+          expect(await t.native.entryFor(OPENROUTER)).toMatchObject({
+            ok: true,
+            entry: { upstreamBaseUrl: "https://openrouter.ai/api/v1" },
+          });
+        },
+      );
+
+      // #578-T28
+      it_(
+        "keeps the rules of the catalog for a provider the registry has no address for",
+        async () => {
+          const moved = modelsDevFixture() as Record<string, { api?: string }>;
+          moved.deepseek!.api = "https://api.deepseek-other.example/v1";
+          const t = await setup(moved);
+
+          expect(await t.native.entryFor(DEEPSEEK)).toMatchObject({
+            ok: true,
+            entry: { upstreamBaseUrl: "https://api.deepseek-other.example/v1" },
+          });
+        },
+      );
 
       // #578-T04
       it_("is refused for a model the catalog does not have", async () => {

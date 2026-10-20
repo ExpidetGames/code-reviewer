@@ -874,7 +874,6 @@ describe("the cost policy of a native job", () => {
       projects: true,
       nativeCost: {
         refOf: () => ({ providerId: "deepseek", modelId: "deepseek-v4-pro" }),
-        isNativeProvider: () => true,
         policyFor: async () => ({
           ok: true,
           policy: {
