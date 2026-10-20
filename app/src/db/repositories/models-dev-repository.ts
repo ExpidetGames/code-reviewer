@@ -6,7 +6,7 @@
 // src/models-dev/ (the fetch guard, the trust on first use). It never deletes a row: a provider or model that goes away
 // upstream is written again with `unlistedAt`.
 import "server-only";
-import type { Kysely, Selectable } from "kysely";
+import { sql, type Kysely, type Selectable } from "kysely";
 import {
   decodeBoolean,
   encodeBoolean,
@@ -78,6 +78,15 @@ export type ModelsDevRepository = {
   ): Promise<StoredModel | undefined>;
   /** When the first model was seen, i.e. the day of the first fetch; null while the catalog is empty. */
   earliestModelSeenAt(): Promise<string | null>;
+  /**
+   * An admin's confirmation of a changed address (#554): the one guarded update of the one provider row,
+   * `... where provider_id = ? and url_state = 'url_changed' and pending_url = ? and url_problem is null`, so only the
+   * address the admin saw, and never a refused one (http, private, a port), becomes the trusted address. Returns whether
+   * a row changed. It takes no lock of its own and needs none: the update waits for a fetch that holds the provider rows
+   * `FOR UPDATE` (see `listProviders`); the caller reads the row `FOR UPDATE` first in the same transaction to bound
+   * that wait.
+   */
+  confirmPendingUrl(providerId: string, pendingUrl: string): Promise<boolean>;
   fetchState(): Promise<FetchState | undefined>;
   /**
    * Writes the given rows (insert, or replace all but `first_seen_at`) in one transaction and, when `success` is given,
@@ -304,6 +313,24 @@ export function createModelsDevRepository(
         .select((builder) => builder.fn.min("first_seen_at").as("first"))
         .executeTakeFirst();
       return row?.first ?? null;
+    },
+
+    async confirmPendingUrl(providerId, pendingUrl) {
+      const result = await db
+        .updateTable("models_dev_providers")
+        .set({
+          url_state: "trusted",
+          trusted_url: sql<string | null>`pending_url`,
+          pending_url: null,
+          url_problem: null,
+          url_changed_at: null,
+        })
+        .where("provider_id", "=", providerId)
+        .where("url_state", "=", "url_changed")
+        .where("pending_url", "=", pendingUrl)
+        .where("url_problem", "is", null)
+        .executeTakeFirst();
+      return Number(result.numUpdatedRows) > 0;
     },
 
     async fetchState() {

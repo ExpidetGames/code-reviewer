@@ -7,24 +7,25 @@ can drive with a static key (about 210 of the 232 that models.dev lists). **The 
 and nothing reads it yet** (the consumers are #549, #550, #553, #554 and #555), so a workspace sees no change. Everything
 that comes from models.dev is untrusted data.
 
-| File                                                  | Role                                                                                                                                                      |
-| ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `wire.ts`                                             | The four wire families (`openai-chat`, `openai-responses`, `anthropic-messages`, `google`), the key header of each and the reasons a provider is left out |
-| `opencode-providers.ts`, `opencode-providers.v1.json` | The supported providers: the app's copy of `contracts/opencode-providers.v1.json` (the image holds `app/` only; a test compares the two)                  |
-| `settings.ts`                                         | `MODELS_DEV_URL` and `MODELS_DEV_FETCH`                                                                                                                   |
-| `fetch.ts`                                            | One request: size cap before parsing, time limit, no redirect, a stable code per failure (`errors.ts`)                                                    |
-| `parse.ts`                                            | The strict tolerant schema; the filters; the reduced rows                                                                                                 |
-| `upstream-url.ts`                                     | The address check, trust on first use and the block on change                                                                                             |
-| `plan.ts`                                             | What a fetch writes (new, changed, unlisted, returned) and the guard                                                                                      |
-| `service.ts`, `shared.ts`, `startup.ts`               | The fetch end to end, with a lock; the sweep and the timer of a long-lived server call `refreshIfDue`                                                     |
-| `job-entry.ts`                                        | `buildJobModelEntry`: the secret-free entry of one provider and one model for a job (`contracts/job-model-entry.v1.json`)                                 |
-| `generic-adapter.ts`                                  | The provider adapter built from catalog rows, with a best-effort key test per family                                                                      |
-| `catalog.ts`                                          | The stored types                                                                                                                                          |
+| File                                                   | Role                                                                                                                                                                                                                         |
+| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `wire.ts`                                              | The four wire families (`openai-chat`, `openai-responses`, `anthropic-messages`, `google`), the key header of each and the reasons a provider is left out                                                                    |
+| `opencode-providers.ts`, `opencode-providers.v1.json`  | The supported providers: the app's copy of `contracts/opencode-providers.v1.json` (the image holds `app/` only; a test compares the two)                                                                                     |
+| `settings.ts`                                          | `MODELS_DEV_URL` and `MODELS_DEV_FETCH`                                                                                                                                                                                      |
+| `fetch.ts`                                             | One request: size cap before parsing, time limit, no redirect, a stable code per failure (`errors.ts`)                                                                                                                       |
+| `parse.ts`                                             | The strict tolerant schema; the filters; the reduced rows                                                                                                                                                                    |
+| `upstream-url.ts`                                      | The address check, trust on first use and the block on change                                                                                                                                                                |
+| `plan.ts`                                              | What a fetch writes (new, changed, unlisted, returned) and the guard                                                                                                                                                         |
+| `service.ts`, `shared.ts`, `startup.ts`                | The fetch end to end, with a lock; the sweep and the timer of a long-lived server call `refreshIfDue`                                                                                                                        |
+| `job-entry.ts`                                         | `buildJobModelEntry`: the secret-free entry of one provider and one model for a job (`contracts/job-model-entry.v1.json`)                                                                                                    |
+| `generic-adapter.ts`                                   | The provider adapter built from catalog rows, with a best-effort key test per family                                                                                                                                         |
+| `admin-service.ts`, `admin-http.ts`, `admin-errors.ts` | The admin portal's side (#554): the providers with the state of their addresses, the guarded confirmation of a changed address, "fetch now" with its deadline and limit; the handlers of their routes and their stable codes |
+| `catalog.ts`                                           | The stored types                                                                                                                                                                                                             |
 
 The tables are `models_dev_providers`, `models_dev_models` and `models_dev_fetch_state` (migration
 `20261019200000_create_models_dev_catalog`, `src/db/README.md`); the repository is the instance level
 `src/db/repositories/models-dev-repository.ts`. The catalog is not customer data: no workspace owns a row. A member never
-sees a model id from here (principle 2 of #420); the admin screens (#554) escape every string they show.
+sees a model id from here (principle 2 of #420); the admin screens (#554, `src/admin/catalog-models/`) escape every string they show.
 
 ## When it runs
 
@@ -45,8 +46,10 @@ sees a model id from here (principle 2 of #420); the admin screens (#554) escape
   `WRITE_RESERVE_MS` (10 s) before the deadline and a name not looked up is "did not resolve" (`lookupsSkipped` in the
   summary); the write checks the clock before every batch of 100 rows and, past the deadline, rolls back and fails with
   `models_dev_timeout`: nothing is half written.
-- `refresh()` fetches now. It is what the admin's "fetch now" action will call (#554: the route and the button; this issue
-  has the service function only), also for a model that is newer than the last fetch (#555).
+- `refresh()` fetches now. It is what the admin's "fetch now" action calls (#554: `admin-service.ts` and
+  `POST /api/admin/catalog-fetch`, with a deadline of 45 seconds under the 60 of the route and a limit of 6 in 10 minutes), also
+  for a model that is newer than the last fetch (#555). `acceptLargeChange` applies a fetch the guard refused; the page asks the
+  admin first.
 
 | Variable           | Meaning                                                                                                                                                                                                            |
 | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -127,7 +130,7 @@ a **real key is sent**, so it is untrusted (`upstream-url.ts`):
 3. **A change blocks:** a later different address, or one that is refused, sets `url_state = url_changed` and keeps
    `trusted_url`; the new text waits in `pending_url`. The provider is unusable (`isUsable`; `buildJobModelEntry` refuses it
    with `provider_url_blocked`) **for the managed key and for an own key** until an admin confirms the new address (the
-   confirmation is #554; the override file of #549 can pin an address). Going back to the trusted address unblocks. A first
+   confirmation is `admin-service.ts`, #554; the override file of #549 can pin an address). Going back to the trusted address unblocks. A first
    address that is refused is `rejected`. A name that does not resolve one day is inconclusive: a trusted address stays.
 
 **The admin's confirmation and the fetch.** A fetch reads the provider rows, plans and writes in one transaction, and reads

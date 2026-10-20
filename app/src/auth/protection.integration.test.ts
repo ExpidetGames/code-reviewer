@@ -83,6 +83,7 @@ const PROTECTED_ROUTES = [
   // and does not exist for anybody else (src/admin/guard.integration.test.ts).
   "/instance-portal",
   "/instance-portal/approvals",
+  "/instance-portal/catalog",
   "/instance-portal/integrations",
   "/instance-portal/integrations/github",
   "/instance-portal/limits",
@@ -127,6 +128,7 @@ const PROTECTED_ROUTES = [
 const PROTECTED_DATA_ROUTES = [
   "/api/account/github/link",
   "/api/instance-portal/approvals/[id]",
+  "/api/instance-portal/catalog-fetch",
   "/api/instance-portal/settings",
   "/api/instance-portal/mail/test",
   "/api/instance-portal/llm-keys/[provider]/test",
@@ -135,6 +137,8 @@ const PROTECTED_DATA_ROUTES = [
   "/api/instance-portal/catalog-models/enablement/reset",
   "/api/instance-portal/catalog-models/price/confirm",
   "/api/instance-portal/catalog-models/price/correct",
+  "/api/instance-portal/catalog-providers",
+  "/api/instance-portal/catalog-providers/url/confirm",
   "/api/instance-portal/model-catalog",
   "/api/instance-portal/model-catalog/[id]",
   "/api/instance-portal/model-catalog/[id]/release",

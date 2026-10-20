@@ -361,3 +361,110 @@ describe.each(MODELS_DEV_ENGINES)(
     );
   },
 );
+
+describe.each(MODELS_DEV_ENGINES)(
+  "the guarded confirmation of an address on $name",
+  (engine) => {
+    const it_ = engine.skip ? it.skip : it;
+    const MOVED = "https://api.deepseek.moved.example/v1";
+    const changed = (overrides: Partial<StoredProvider["url"]> = {}) =>
+      provider({
+        url: {
+          state: "url_changed",
+          trustedUrl: "https://api.deepseek.com",
+          pendingUrl: MOVED,
+          problem: null,
+          ...overrides,
+        },
+        urlChangedAt: T2.toISOString(),
+      });
+
+    // #554-T06
+    it_(
+      "trusts the pending address and clears the block, and only that row",
+      async () => {
+        const { db } = await engine.create();
+        const repository = createModelsDevRepository(db);
+        await repository.apply({
+          providers: [changed(), provider({ id: "openai", name: "OpenAI" })],
+          models: [],
+        });
+
+        const changedRow = await repository.confirmPendingUrl(
+          "deepseek",
+          MOVED,
+        );
+
+        expect(changedRow).toBe(true);
+        expect((await repository.getProvider("deepseek"))?.url).toEqual({
+          state: "trusted",
+          trustedUrl: MOVED,
+          pendingUrl: null,
+          problem: null,
+        });
+        expect(
+          (await repository.getProvider("deepseek"))?.urlChangedAt,
+        ).toBeNull();
+        expect((await repository.getProvider("openai"))?.url.trustedUrl).toBe(
+          "https://api.deepseek.com",
+        );
+      },
+    );
+
+    // #554-T06
+    it_(
+      "changes nothing for an address other than the one pending, a trusted provider or an unknown one",
+      async () => {
+        const { db } = await engine.create();
+        const repository = createModelsDevRepository(db);
+        await repository.apply({
+          providers: [changed(), provider({ id: "openai", name: "OpenAI" })],
+          models: [],
+        });
+
+        expect(
+          await repository.confirmPendingUrl("deepseek", "https://x.example/"),
+        ).toBe(false);
+        expect(
+          await repository.confirmPendingUrl(
+            "openai",
+            "https://api.deepseek.com",
+          ),
+        ).toBe(false);
+        expect(await repository.confirmPendingUrl("nobody", MOVED)).toBe(false);
+
+        expect((await repository.getProvider("deepseek"))?.url).toMatchObject({
+          state: "url_changed",
+          pendingUrl: MOVED,
+        });
+      },
+    );
+
+    // #548 review round: a refused address has no confirmation
+    it_(
+      "never trusts an address that was refused, even when it is the pending one",
+      async () => {
+        const { db } = await engine.create();
+        const repository = createModelsDevRepository(db);
+        await repository.apply({
+          providers: [
+            changed({ pendingUrl: "http://10.0.0.1/", problem: "not_https" }),
+          ],
+          models: [],
+        });
+
+        const changedRow = await repository.confirmPendingUrl(
+          "deepseek",
+          "http://10.0.0.1/",
+        );
+
+        expect(changedRow).toBe(false);
+        expect((await repository.getProvider("deepseek"))?.url).toMatchObject({
+          state: "url_changed",
+          trustedUrl: "https://api.deepseek.com",
+          problem: "not_https",
+        });
+      },
+    );
+  },
+);
