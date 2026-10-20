@@ -10,6 +10,7 @@ Nothing here talks beyond loopback. Not a test file.
 """
 
 import sys
+import time
 from collections.abc import Callable, Generator, Mapping
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
@@ -78,7 +79,16 @@ class Scene:
 
     def __init__(self) -> None:
         self.upstream: ScriptedUpstream | None = None
+        self.ledger: BudgetLedger | None = None
         self.calls = 0
+        # Seconds the run's clock is ahead of the real one (a test moves it to reach a deadline).
+        self.clock_offset = 0.0
+
+    def wait_until(self, condition: Callable[[], bool], seconds: float = 10.0) -> None:
+        """Hold the provider's answer until `condition` holds (the run goes on beside it)."""
+        until = time.monotonic() + seconds
+        while not condition() and time.monotonic() < until:
+            time.sleep(0.02)
 
     def answer_next_with(self, turn: Turn) -> None:
         """The next call the provider answers is `turn`, whatever the script said."""
@@ -167,7 +177,9 @@ def native_run(
             window_tokens=1_000_000,
             output_tokens=output_allowance(OUTPUT_LIMIT),
             unit_costs=PRICES,
+            clock=lambda: time.monotonic() + scene.clock_offset,
         )
+        scene.ledger = ledger
         capability = new_proxy_capability()
         proxy = PassthroughProxy(
             ledger=ledger,

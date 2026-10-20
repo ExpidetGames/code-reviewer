@@ -784,10 +784,11 @@ def test_a_mark_that_stays_unused_ends_the_run_after_the_one_resend() -> None:
 
     engine.turns = [over_then_refused, no_call_yet, no_call_yet, says(review())]
 
-    with pytest.raises(NoFinalAnswer):
+    with pytest.raises(NoFinalAnswer) as raised:
         final.run()
 
     assert len(engine.prompts) == 3  # never a fourth message
+    assert "made no model call" in raised.value.note  # and the note says what happened
 
 
 # #552-T01 (watch): an engine whose turn does not end after the guard refused is aborted
@@ -804,3 +805,59 @@ def test_the_watch_aborts_a_turn_that_goes_on_after_the_guard_refused_a_call() -
     engine.turns = [refused_but_not_over, says(review())]
 
     assert len(final.run().findings) == 1
+
+
+# #552-S3: the refusal that started the final turn is the earlier turn's, not this answer's
+def test_a_refusal_of_the_earlier_turn_is_not_read_into_the_answer_of_the_final_turn() -> None:
+    final, engine = make()
+    engine.turns = [over_then_refused, says("I found nothing."), says(review())]
+
+    final.run()
+
+    text = repair_text(engine)
+    assert "did not contain a JSON object" in text
+    assert "refused" not in text
+
+
+# #552-S3: a request of the old turn that reaches the guard before the call for the answer is a
+# stray refusal; it must not abort the call the mark is waiting for
+def test_a_stray_refusal_while_the_mark_waits_does_not_abort_the_call_for_the_answer() -> None:
+    final, engine = make()
+
+    def final_turn(engine: Engine) -> None:
+        with pytest.raises(RefusedForFinal) as stray:
+            engine.ledger.reserve_call(REQUEST, output_tokens=1_024)  # it carries no message
+        engine.ledger.record_failure(stray.value)
+        time.sleep(0.3)  # the watch looks every 50 ms
+        engine.answer(review())
+
+    engine.turns = [over_then_refused, final_turn]
+
+    assert len(final.run().findings) == 1
+    assert engine.client.aborted == 1  # the adapter's own abort of the first turn, and no other
+
+
+# #552-S5: an announcement that is still running when the turn ends is never marked around
+def test_an_announcement_that_outlives_its_timeout_fails_the_run_and_nothing_is_marked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(plain_final, "_JOIN_SECONDS", 0.1)
+    final, engine = make()
+    release = threading.Event()
+    engine.client.queue_result = lambda: release.wait(5.0) or True
+
+    def due_then_refused(engine: Engine) -> None:
+        engine.call("0.01")
+        engine.call("0.0895")
+        assert engine.client.queued_event.wait(5.0)
+        engine.refused_call()
+
+    engine.turns = [due_then_refused, says(review())]
+
+    with pytest.raises(LimitError) as raised:
+        final.run()
+    release.set()
+
+    assert raised.value.code is ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE
+    assert engine.client.aborted == 0
+    assert len(engine.prompts) == 1  # no answer was asked for around the announcement

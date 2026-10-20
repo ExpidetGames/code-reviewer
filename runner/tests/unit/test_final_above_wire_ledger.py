@@ -461,3 +461,28 @@ def test_a_path_longer_than_any_real_one_fails_closed() -> None:
         ledger().count_file("p" * (MAX_FILE_PATH_CHARS + 1))
 
     assert raised.value.code is ErrorCode.DYNAMIC_ACCOUNTING_FAILED
+
+
+# #552-T1: a spend that passes the limit only as a worst case booked for a call whose usage was
+# never seen is no ground for a final call: the mark is refused
+def test_the_mark_is_refused_when_only_a_worst_case_booking_passes_the_limit() -> None:
+    budget = ledger()
+    unseen = budget.reserve_call(b"x" * 150_000, output_tokens=1_024)  # its expected cost fits
+    budget.settle_unknown(unseen)  # booked at its worst case, which is above the limit
+
+    assert budget.arm_final(MESSAGE) is False
+
+
+# #552-T1: nobody is asked for the answer while a mark waits for the call that carries it
+def test_the_answer_is_not_asked_for_while_a_mark_is_armed_or_after_the_final_call() -> None:
+    budget = ledger()
+    call(budget, "0.01")
+    call(budget, "0.0895")
+    assert budget.wrap_up_due() == "cost_limit"
+
+    assert budget.arm_final(MESSAGE) is True
+    assert budget.wrap_up_due() is None  # the message is on its way already
+
+    final = budget.reserve_call(carrying(), output_tokens=1_024)
+    budget.settle_call(final, prompt_tokens=1000, completion_tokens=100, cost=Decimal("0.001"))
+    assert budget.wrap_up_due() is None  # and nobody is asked after the final call

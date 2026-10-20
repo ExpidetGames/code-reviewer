@@ -10,7 +10,7 @@ a script here, so nothing starts an engine.
 import json
 import queue
 import threading
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -23,6 +23,7 @@ from code_reviewer_runner.dynamic_review.budget import (
     BudgetLedger,
     DynamicLimits,
     LimitError,
+    RefusedForFinal,
     UnitCosts,
 )
 from code_reviewer_runner.dynamic_review.final_messages import final_answer_line
@@ -156,7 +157,9 @@ class Client(EngineClient):
         self.aborted += 1
 
 
-def engine_with(tmp_path: Path, *, plain: bool) -> DynamicEngine:
+def engine_with(
+    tmp_path: Path, *, plain: bool, wait_idle: Callable[[float], bool] | None = None
+) -> DynamicEngine:
     job = dynamic_job()
     engine = DynamicEngine(
         job,
@@ -172,6 +175,7 @@ def engine_with(tmp_path: Path, *, plain: bool) -> DynamicEngine:
         scratch_dir=str(tmp_path / "scratch"),
         require_ripgrep=False,
         plain_final=plain,
+        wait_idle=wait_idle or (lambda _timeout: True),
     )
     engine._is_running = lambda: True  # type: ignore[method-assign]  # pyright: ignore[reportPrivateUsage]
     return engine
@@ -317,7 +321,7 @@ def test_the_error_type_of_an_unopenable_stream_is_the_engines(tmp_path: Path) -
 
 # #552-S4: an audit failure the reader records while the run is closing is still the run's result
 def test_a_failure_the_reader_records_while_the_run_closes_it_is_not_lost(tmp_path: Path) -> None:
-    oversized = {
+    oversized: dict[str, Any] = {
         "type": "message.part.updated",
         "properties": {
             "sessionID": "ses_1",
@@ -336,3 +340,42 @@ def test_a_failure_the_reader_records_while_the_run_closes_it_is_not_lost(tmp_pa
         run_turns(engine_with(tmp_path, plain=True), client)
 
     assert raised.value.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
+
+
+# #552-S6: the proxy's idle wait is the engine's: it is asked before the final call is marked
+def test_the_proxys_idle_wait_is_asked_before_the_final_call_is_marked(tmp_path: Path) -> None:
+    waited: list[float] = []
+
+    class RefusedFirst(Client):
+        def _call(
+            self,
+            method: str,
+            path: str,
+            body: Any = None,
+            *,
+            scoped: bool = True,
+            timeout: float = 0,
+        ) -> tuple[int, bytes]:
+            if self.bodies:
+                return super()._call(method, path, body, scoped=scoped, timeout=timeout)
+            assert self.ledger is not None
+            self.bodies.append(body)
+            call = self.ledger.reserve_call(b"h" * 400, output_tokens=1_024)
+            self.ledger.settle_call(
+                call, prompt_tokens=100, completion_tokens=10, cost=Decimal("2.0")
+            )
+            with pytest.raises(RefusedForFinal) as refused:  # the next call is over the limit
+                self.ledger.reserve_call(b"h" * 400, output_tokens=1_024)
+            self.ledger.record_failure(refused.value)
+            self.last_message = reply(None, error="APIError")
+            return 200, self.last_message
+
+    client = RefusedFirst([reply(review_text())])
+    engine = engine_with(
+        tmp_path, plain=True, wait_idle=lambda seconds: waited.append(seconds) or True
+    )
+
+    answer = run_turns(engine, client)
+
+    assert answer.ok
+    assert len(waited) == 1 and 0 < waited[0] <= 30.0
