@@ -664,3 +664,21 @@ def test_restarting_the_script_and_resetting_the_faults_make_the_upstream_ready_
     )
     assert streamed[0] == 200 and b"[DONE]" in streamed[2]
     assert not server.quote_key
+
+
+# #551-F02
+@pytest.mark.parametrize("family", FAMILIES)
+@pytest.mark.parametrize("fault", ["missing", "unknown_field", "bad_value"])
+def test_the_upstream_can_answer_with_a_usage_fault_in_a_document_and_in_a_stream(
+    family: Family, fault: str
+) -> None:
+    with upstream(family, TOOL) as server:
+        server.usage_fault = fault  # type: ignore[assignment]
+        _, _, plain = ask(server.url, family, REAL, streaming=False)
+        _, _, streamed = ask(server.url, family, REAL, streaming=True)
+        server.reset_faults()
+        _, _, healthy = ask(server.url, family, REAL, streaming=False)
+
+    assert json.loads(plain) == answer(family, TOOL, 1, MODEL, usage_fault=fault)  # type: ignore[arg-type]
+    assert streamed == b"".join(stream(family, TOOL, 2, MODEL, usage_fault=fault))  # type: ignore[arg-type]
+    assert json.loads(healthy) == answer(family, TOOL, 3, MODEL)

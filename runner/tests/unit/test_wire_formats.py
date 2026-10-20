@@ -302,3 +302,82 @@ def test_an_error_event_is_one_complete_event_that_holds_an_error(
     assert event == name
     assert "boom" in json.dumps(data)
     assert "error" in data or data["type"] == "error"
+
+
+# -- the usage faults of the generic fakes (#551) ------------------------------------------------
+
+
+def keys_anywhere(value: Any) -> set[str]:
+    """Every object key at any depth of a JSON value."""
+    found: set[str] = set()
+    if isinstance(value, dict):
+        for key, inner in value.items():  # pyright: ignore[reportUnknownVariableType]
+            found.add(str(key))  # pyright: ignore[reportUnknownArgumentType]
+            found |= keys_anywhere(inner)
+    elif isinstance(value, list):
+        for inner in value:  # pyright: ignore[reportUnknownVariableType]
+            found |= keys_anywhere(inner)
+    return found
+
+
+def usage_of_events(family: Family, call: int, **options: Any) -> list[Any]:
+    """The usage objects a stream states, in order: `usage`, `usageMetadata`, never the text."""
+    found: list[Any] = []
+    for _, data in parse_sse(stream(family, READ, call, MODEL, **options)):
+        if not isinstance(data, dict):
+            continue
+        for holder in (data, data.get("message"), data.get("response")):  # pyright: ignore[reportUnknownMemberType]
+            if isinstance(holder, dict):
+                for key in ("usage", "usageMetadata"):
+                    if key in holder:
+                        found.append(holder[key])  # pyright: ignore[reportUnknownMemberType]
+    return found
+
+
+# #551-F01
+@pytest.mark.parametrize("family", FAMILIES)
+def test_no_fault_is_the_default_and_changes_nothing(family: Family) -> None:
+    assert answer(family, READ, 3, MODEL, usage_fault=None) == answer(family, READ, 3, MODEL)
+    assert stream(family, READ, 3, MODEL, usage_fault=None) == stream(family, READ, 3, MODEL)
+
+
+# #551-F01
+@pytest.mark.parametrize("family", FAMILIES)
+def test_a_missing_usage_is_left_out_of_the_answer_and_of_the_stream(family: Family) -> None:
+    document = answer(family, READ, 3, MODEL, usage_fault="missing")
+    assert not {"usage", "usageMetadata"} & set(document)
+    assert usage_of_events(family, 3, usage_fault="missing") == []
+    # The rest of the answer is untouched: it is a complete answer that states no usage.
+    clean = answer(family, READ, 3, MODEL)
+    assert {k: v for k, v in clean.items() if k not in ("usage", "usageMetadata")} == document
+    assert len(stream(family, READ, 3, MODEL, usage_fault="missing")) == len(
+        stream(family, READ, 3, MODEL)
+    )
+
+
+# #551-F01
+@pytest.mark.parametrize("family", FAMILIES)
+def test_an_unknown_usage_field_adds_one_field_that_holds_something(family: Family) -> None:
+    clean = usage_for(3)
+    assert clean.input > 0
+    faulty = answer(family, READ, 3, MODEL, usage_fault="unknown_field")
+    plain = answer(family, READ, 3, MODEL)
+    key = "usageMetadata" if family == "google" else "usage"
+    added = keys_anywhere(faulty[key]) - keys_anywhere(plain[key])
+    assert len(added) >= 1
+    # The same one is in the stream.
+    in_stream = usage_of_events(family, 3, usage_fault="unknown_field")
+    assert in_stream and all(keys_anywhere(item) >= added for item in in_stream[-1:])
+
+
+# #551-F01
+@pytest.mark.parametrize("family", FAMILIES)
+def test_a_bad_value_changes_one_count_of_the_usage_into_something_that_is_no_count(
+    family: Family,
+) -> None:
+    key = "usageMetadata" if family == "google" else "usage"
+    faulty = answer(family, READ, 3, MODEL, usage_fault="bad_value")[key]
+    plain = answer(family, READ, 3, MODEL)[key]
+    assert faulty != plain
+    assert keys_anywhere(faulty) == keys_anywhere(plain)
+    assert usage_of_events(family, 3, usage_fault="bad_value")[-1] != usage_of_events(family, 3)[-1]

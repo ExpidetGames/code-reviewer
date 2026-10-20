@@ -1,0 +1,1040 @@
+{
+  "_comment": "Price books in the JSON form of the app (priceBookToJson, app/src/model-prices/price-book.ts): amounts are decimal strings of whole micro-USD per million tokens. app/src/model-prices/price-book-fixtures.test.ts and runner/tests/unit/test_usage_pricing.py both read this file, so the TypeScript reader (parsePriceBookJson) and the runner's (parse_price_book) accept and refuse the same books (#551).",
+  "valid": [
+    {
+      "name": "minimal: input and output only (every other price defaults to null, tiers to none)",
+      "book": {
+        "input": "3000000",
+        "output": "15000000"
+      }
+    },
+    {
+      "name": "flat with the cache prices and a reasoning price",
+      "book": {
+        "input": "3000000",
+        "output": "15000000",
+        "cacheRead": "300000",
+        "cacheWrite5m": "3750000",
+        "cacheWrite1h": "6000000",
+        "reasoning": "20000000",
+        "inputAudio": null,
+        "outputAudio": null,
+        "contextOver200k": null,
+        "tiers": []
+      }
+    },
+    {
+      "name": "a free model is zero, not missing",
+      "book": {
+        "input": "0",
+        "output": "0",
+        "cacheRead": null,
+        "cacheWrite5m": null,
+        "cacheWrite1h": null,
+        "reasoning": null,
+        "inputAudio": null,
+        "outputAudio": null,
+        "contextOver200k": null,
+        "tiers": []
+      }
+    },
+    {
+      "name": "the older context_over_200k tier",
+      "book": {
+        "input": "3000000",
+        "output": "15000000",
+        "cacheRead": "300000",
+        "cacheWrite5m": "3750000",
+        "cacheWrite1h": "6000000",
+        "reasoning": null,
+        "inputAudio": null,
+        "outputAudio": null,
+        "contextOver200k": {
+          "input": "6000000",
+          "output": "22500000",
+          "cacheRead": "600000",
+          "cacheWrite5m": "7500000",
+          "cacheWrite1h": null,
+          "reasoning": null,
+          "inputAudio": null,
+          "outputAudio": null
+        },
+        "tiers": []
+      }
+    },
+    {
+      "name": "two context tiers from the smallest up",
+      "book": {
+        "input": "1000000",
+        "output": "4000000",
+        "cacheRead": "100000",
+        "cacheWrite5m": "1250000",
+        "cacheWrite1h": null,
+        "reasoning": null,
+        "inputAudio": null,
+        "outputAudio": null,
+        "contextOver200k": null,
+        "tiers": [
+          {
+            "contextOver": 128000,
+            "input": "2000000",
+            "output": "8000000",
+            "cacheRead": "200000",
+            "cacheWrite5m": "2500000",
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 256000,
+            "input": "4000000",
+            "output": "16000000",
+            "cacheRead": "400000",
+            "cacheWrite5m": "5000000",
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "the largest amounts the book holds",
+      "book": {
+        "input": "100000000000",
+        "output": "100000000000"
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "not an object",
+      "book": "3000000"
+    },
+    {
+      "name": "a missing output price",
+      "book": {
+        "input": "1"
+      }
+    },
+    {
+      "name": "a negative amount",
+      "book": {
+        "input": "-1",
+        "output": "2"
+      }
+    },
+    {
+      "name": "an amount with a decimal point",
+      "book": {
+        "input": "1.5",
+        "output": "2"
+      }
+    },
+    {
+      "name": "an amount with an exponent",
+      "book": {
+        "input": "1e3",
+        "output": "2"
+      }
+    },
+    {
+      "name": "an amount with a leading zero",
+      "book": {
+        "input": "01",
+        "output": "2"
+      }
+    },
+    {
+      "name": "an amount that is a JSON number",
+      "book": {
+        "input": 1,
+        "output": "2"
+      }
+    },
+    {
+      "name": "an amount above the sanity bound",
+      "book": {
+        "input": "100000000001",
+        "output": "2"
+      }
+    },
+    {
+      "name": "a key the book does not know",
+      "book": {
+        "input": "1",
+        "output": "2",
+        "inputVideo": "1"
+      }
+    },
+    {
+      "name": "a tier with a key the book does not know",
+      "book": {
+        "input": "1",
+        "output": "2",
+        "tiers": [
+          {
+            "contextOver": 10,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null,
+            "region": "eu"
+          }
+        ]
+      }
+    },
+    {
+      "name": "tiers that do not go up",
+      "book": {
+        "input": "1",
+        "output": "2",
+        "tiers": [
+          {
+            "contextOver": 200,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 100,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "two tiers of one size",
+      "book": {
+        "input": "1",
+        "output": "2",
+        "tiers": [
+          {
+            "contextOver": 100,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 100,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "a tier of size zero",
+      "book": {
+        "input": "1",
+        "output": "2",
+        "tiers": [
+          {
+            "contextOver": 0,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "a tier size that is not a whole number",
+      "book": {
+        "input": "1",
+        "output": "2",
+        "tiers": [
+          {
+            "contextOver": 1.5,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "more than 64 tiers",
+      "book": {
+        "input": "1",
+        "output": "2",
+        "tiers": [
+          {
+            "contextOver": 1,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 2,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 3,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 4,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 5,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 6,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 7,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 8,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 9,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 10,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 11,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 12,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 13,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 14,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 15,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 16,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 17,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 18,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 19,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 20,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 21,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 22,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 23,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 24,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 25,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 26,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 27,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 28,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 29,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 30,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 31,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 32,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 33,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 34,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 35,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 36,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 37,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 38,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 39,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 40,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 41,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 42,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 43,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 44,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 45,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 46,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 47,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 48,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 49,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 50,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 51,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 52,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 53,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 54,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 55,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 56,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 57,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 58,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 59,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 60,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 61,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 62,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 63,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 64,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          },
+          {
+            "contextOver": 65,
+            "input": "1",
+            "output": "2",
+            "cacheRead": null,
+            "cacheWrite5m": null,
+            "cacheWrite1h": null,
+            "reasoning": null,
+            "inputAudio": null,
+            "outputAudio": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "a tier that is not an object",
+      "book": {
+        "input": "1",
+        "output": "2",
+        "tiers": [
+          "x"
+        ]
+      }
+    },
+    {
+      "name": "a context_over_200k that is not a level",
+      "book": {
+        "input": "1",
+        "output": "2",
+        "contextOver200k": {
+          "input": "1"
+        }
+      }
+    }
+  ]
+}
