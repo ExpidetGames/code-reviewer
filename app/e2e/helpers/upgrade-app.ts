@@ -150,6 +150,8 @@ function environmentOfTheServer(): Record<string, string> {
     HOME: process.env.HOME ?? "",
     TMPDIR: process.env.TMPDIR ?? "/tmp",
     NODE_ENV: "production",
+    // A production server fetches the models.dev catalog on its own (#548); no test reaches the internet.
+    MODELS_DEV_FETCH: "off",
     DATABASE_PATH: upgradePaths.database,
     BACKUP_DIR: upgradePaths.backups,
     BETTER_AUTH_URL: e2eEnv.upgradeAppUrl,

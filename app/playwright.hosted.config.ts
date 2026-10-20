@@ -111,6 +111,8 @@ export default defineConfig({
         DATABASE_URL: database.app,
         DATABASE_URL_MIGRATE: database.app,
         APP_SECRET: hostedEnv.appSecret,
+        // The sweep of the hosted lane would fetch the models.dev catalog (#548); no test reaches the internet.
+        MODELS_DEV_FETCH: "off",
         BETTER_AUTH_URL: hostedEnv.appUrl,
         GITHUB_OAUTH_BASE_URL: e2eEnv.githubUrl,
         GITHUB_API_BASE_URL: e2eEnv.githubUrl,

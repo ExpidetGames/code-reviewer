@@ -214,6 +214,8 @@ value), set Literal.
 | `LLM_MAX_TOKENS` | optional | Context window of a model PR-Agent does not know | Leave empty for known models. |
 | `DATABASE_BUSY_TIMEOUT_MS` | optional | A number of milliseconds | How long a database write waits for a lock. Empty: 5000. |
 | `BACKUP_TIME` | optional | `HH:MM` in UTC, or `off` | When the app backs up the database every day. Empty: `02:30`. Use `off` only together with a Coolify scheduled task, [section 8](#8-storage-and-backups). |
+| `MODELS_DEV_URL` | optional | An `http` or `https` address | Where the app reads the public model catalog from once a day (prices, limits and capability flags, so a new model needs no release). Empty: `https://models.dev/api.json`. Set it to a mirror when the instance cannot reach the internet. A failed or implausible read keeps the catalog it has. |
+| `MODELS_DEV_FETCH` | optional | `off` | `off` switches that read off, for an air-gapped instance: no call is made, the catalog stays empty and nothing else changes. Empty or anything else: on. |
 | `RUNNER_CONCURRENCY` | optional | A whole number from 1 to 32 | How many reviews the runner runs at once, [section 9](#9-runner-sizing-and-runner_concurrency). Empty: 3 (right for the runner's 2 GiB). Raise it only together with `RUNNER_MEMORY_LIMIT`. |
 | `RUNNER_MEMORY_LIMIT` | optional | A Docker memory size such as `3g` or `1536m` | The memory the runner container may use. Empty: 2g. Change it together with `RUNNER_CONCURRENCY`, the pairs are in [section 9](#9-runner-sizing-and-runner_concurrency). |
 | `RUNNER_JOB_TIMEOUT_SECONDS` | optional | A number of seconds | Hard timeout of one review; the runner ends a longer one and reports `timeout`. Empty: 1200 (20 minutes). |

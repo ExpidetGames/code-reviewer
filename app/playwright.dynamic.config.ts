@@ -118,6 +118,8 @@ export default defineConfig({
         `./node_modules/.bin/next start --hostname 127.0.0.1 --port ${e2eEnv.pipelineAppPort} > ${e2eEnv.logFiles.pipeline} 2>&1`,
       env: {
         APP_SECRET: e2eEnv.appSecret,
+        // A production server fetches the models.dev catalog on its own (#548); no test reaches the internet.
+        MODELS_DEV_FETCH: "off",
         GITHUB_OAUTH_BASE_URL: e2eEnv.githubUrl,
         GITHUB_API_BASE_URL: e2eEnv.githubUrl,
         RUNNER_TOKEN: e2eEnv.runnerToken,
@@ -147,6 +149,8 @@ export default defineConfig({
         `./node_modules/.bin/next start --hostname 127.0.0.1 --port ${String(hostedEnv.appPort)} > ${hostedEnv.logFiles.app} 2>&1`,
       env: {
         APP_SECRET: e2eEnv.appSecret,
+        // A production server fetches the models.dev catalog on its own (#548); no test reaches the internet.
+        MODELS_DEV_FETCH: "off",
         GITHUB_OAUTH_BASE_URL: e2eEnv.githubUrl,
         GITHUB_API_BASE_URL: e2eEnv.githubUrl,
         RUNNER_TOKEN: hostedEnv.dispatcherToken,
