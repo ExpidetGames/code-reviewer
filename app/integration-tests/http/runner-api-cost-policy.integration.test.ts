@@ -403,6 +403,27 @@ describe("the managed key (we pay)", () => {
     });
   });
 
+  // #578-T33
+  it("still holds a native run to its cost when the switch is turned off between the Worker's fetch and its report", async () => {
+    const live = { native: true };
+    const h = await start({ keyMode: "managed", live });
+    const { jobId, credential, details } = await h.startedWorker(
+      WORKER_FEATURES,
+      BOTH.join(","),
+      DISPATCHER,
+    );
+    expect(details.job.input).toMatchObject({ dynamic: { modelEntry: ENTRY } });
+    live.native = false;
+    const noCost = { ...goodResult().usage!, costUsd: null };
+
+    await h.worker.result(jobId, credential, { usage: noCost });
+
+    expect(await h.queue.get(jobId)).toMatchObject({
+      status: "failed",
+      errorCode: "dynamic_accounting_failed",
+    });
+  });
+
   // #577-L6
   it("settles a native success with a known cost as before", async () => {
     const h = await start({ keyMode: "managed" });
