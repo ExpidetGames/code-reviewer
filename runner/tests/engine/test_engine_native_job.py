@@ -22,6 +22,7 @@ from opencode_support import opencode_binary
 from plain_final_support import reads, review, user_texts
 
 from code_reviewer_runner.dynamic_review.final_messages import FINISH_NOW_INSTRUCTION
+from code_reviewer_runner.result import ErrorCode
 
 pytestmark = pytest.mark.engine
 
@@ -60,8 +61,9 @@ def assert_a_native_review(job: FullJob) -> None:
         assert not {"response_format", "output_config", "output_format"} & request.keys()
     # Prompt caching stays on: the engine itself marks the prefix, we set nothing (the claim's
     # provider is a real one, so the engine's own rule for it applies).
-    if job.family == "messages":
-        assert all("cache_control" in json.dumps(request) for request in job.requests)
+    # Anthropic's Messages and a Claude behind OpenRouter's chat wire: the engine's cache marks
+    # are in every request of both (#539).
+    assert all("cache_control" in json.dumps(request) for request in job.requests)
     # The engine's configuration holds one provider with one model, the capability and no key.
     ((config,),) = [job.configs]
     assert len(config["provider"]) == 1
@@ -70,6 +72,17 @@ def assert_a_native_review(job: FullJob) -> None:
     assert block["options"]["apiKey"] != REAL_KEY
     assert REAL_KEY not in json.dumps(config)
     assert REAL_KEY not in job.result.to_line()
+    # And in what the engine process really got: the file it reads its configuration from (written
+    # for the job), its environment, and the log of the run (T12 and T32).
+    assert job.spawned
+    for spawned in job.spawned:
+        assert REAL_KEY not in spawned.config_text
+        assert block["options"]["apiKey"] in spawned.config_text
+        assert REAL_KEY not in json.dumps(spawned.environment)
+        assert "openrouter.ai" not in spawned.config_text
+        assert "api.anthropic.com" not in spawned.config_text
+    assert REAL_KEY not in job.result.log_tail
+    assert REAL_KEY not in job.log
 
 
 # #578-T15, #578-T17: a whole job on the managed key
@@ -136,4 +149,33 @@ def test_a_job_at_its_cost_limit_ends_with_a_review_and_not_with_the_cost_guard(
         assert usage is not None
         assert usage.stopped_early == "cost_limit"
         assert job.publisher.calls[0].stopped_early == "cost_limit"
+        assert "final_call=exempt" in job.result.log_tail
+
+
+# #578-T25: a provider that states something nobody can price ends a managed run with the code that
+# bills as our fault, and nothing is published
+def test_a_managed_job_with_an_unpriceable_usage_ends_dynamic_accounting_failed(
+    tmp_path: Path,
+) -> None:
+    with full_job(
+        tmp_path, three_reads_then_the_review, cost=MANAGED, usage_fault="unknown_field"
+    ) as job:
+        result = job.result
+        assert result.ok is False
+        assert result.error_code is ErrorCode.DYNAMIC_ACCOUNTING_FAILED
+        assert job.publisher.calls == []
+        assert REAL_KEY not in result.to_line()
+
+
+# #578-T26: an own key (BYOK) is bound by the token cap of the claim: the run is wrapped up at it,
+# the final call is the exemption, and the review is published
+def test_a_job_on_an_own_key_at_its_token_cap_ends_with_a_review(tmp_path: Path) -> None:
+    capped = {**OWN, "maxTotalTokens": 6_000}
+    with full_job(tmp_path, many_reads, cost=capped, react=answer_when_asked_twice) as job:
+        assert_a_native_review(job)
+        usage = job.result.usage
+        assert usage is not None
+        assert usage.stopped_early == "token_limit"
+        assert usage.cost_usd is None
+        assert job.publisher.calls[0].stopped_early == "token_limit"
         assert "final_call=exempt" in job.result.log_tail

@@ -523,6 +523,16 @@ whose provider is not the provider of `llm.provider` (the underscore of a slug i
 entry's address, so the two must agree) is a refused job. A cost policy without an entry is refused as before (#553). A job with
 neither is a job of today and runs through `ModelProxy` exactly as before.
 
+**Where the key goes.** The key of a provider the runner's registry has (`llm_providers.py`: `anthropic`, `openrouter`) is that
+provider's own, and the legacy path always sent it to the registry's `default_api_base`. The native path reads the address from the
+entry, so it is pinned: `entry.upstreamBaseUrl` must equal the registry's address (a trailing slash aside, nothing else), else the
+job is refused before any key is used, in `parse_job` (`invalid_job`, "dynamic.modelEntry.upstreamBaseUrl is not the address of the
+provider") and again in `build_native_job` (`dynamic_config_invalid`, before an upstream is made). The app refuses the same case
+at the claim (`entryFor`: `upstream_not_registry`, `reason=entry_upstream_not_registry` in the log; `managed_model_unavailable` on
+the operator's key, `dynamic_model_features_unsupported` on an own key), against the addresses of its own registry
+(`app/src/native-cost/registry-addresses.ts`). A provider the registry has no entry for (the BYOK providers of #555) keeps the
+rules of #548: an https address at a public host, vetted when the catalog is stored and on every connection.
+
 1. `build_native_job`, before anything is prepared: `target_from_entry`, the production `HttpsUpstream` on the entry's address
    (an address the guard refuses ends the job `dynamic_config_invalid` before the engine exists, naming neither the address nor
    the reason), a fresh capability, and the ledger and the proxy from the claim's policy (`build_native_run`, with the window
@@ -538,7 +548,10 @@ neither is a job of today and runs through `ModelProxy` exactly as before.
 4. **One finalization line** is added to the log of the result (and to the facts of a failure that got that far):
    `finalization first=<ok|problem> repaired=<true|false> second=<none|ok|problem> wrap_up=<cost_limit|time_limit|token_limit|none>
    final_call=<normal|exempt> final_tokens=<in>/<out>/<cache read> repair_tokens=<in>/<out>/<cache read> finish=<finish of the
-   call that wrote the review> prev_prompt_tokens=<prompt of the call before>`. Stable names and numbers only
+   call that wrote the review> prev_prompt_tokens=<prompt of the call before>`. The finish is the one the provider's answer states
+   (the usage tap reads it: Chat `finish_reason`, Messages `stop_reason`, Responses `status` and `incomplete_details.reason`, Google
+   `finishReason`), in the four words of the call trace (`stop`, `tool_calls`, `length`, `content_filter`; any other is `other`).
+   Stable names and numbers only
    (`finalization_log.py`); the tokens come from the call trace and are `-` when the trace was cut or is missing. A run whose log
    has no such line did not take the native path.
 

@@ -55,7 +55,8 @@ The confirmed **book** goes into the claim (`dynamic.cost.priceBook`) and is the
 `cost`, never models.dev. An unknown cost ends the run with `dynamic_accounting_failed`, which billing treats as our fault. There is
 no token cap. The result is checked once more when it comes back: the success of a **native** managed Dynamic job that reports a
 null cost is stored as `dynamic_accounting_failed` (`runner-api/managed-cost-guard.ts`); it can never settle with a null cost. Whether
-a job was native is read from the provider its usage record remembers (`isNativeProvider`), so a job on the legacy wires is unchanged.
+a job was native is what its claim stored (`claimedKeys.wasNative`, set when the claim sends `dynamic.modelEntry`), not the switch of the moment the
+report arrives, so a native run that finishes after the switch was turned off is still held to its cost, and a job on the legacy wires is unchanged.
 
 **Cache prices (decision).** A cache read without a confirmed read price is not priced as input (the upper bound #569 left open),
 because the member would be charged a price nobody confirmed. So "selectable" includes the cache prices, defined once in

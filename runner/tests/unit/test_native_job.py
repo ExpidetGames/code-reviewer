@@ -7,6 +7,7 @@ ask; the provider is the strict double of the passthrough tests. Nothing leaves 
 
 import http.client
 import json
+import logging
 import sys
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -26,6 +27,7 @@ from code_reviewer_runner.dynamic_findings import DynamicFindings, parse_dynamic
 from code_reviewer_runner.dynamic_review.adapter import EngineAnswer
 from code_reviewer_runner.dynamic_review.budget import LimitError
 from code_reviewer_runner.dynamic_review.checkout import PreparedContent
+from code_reviewer_runner.dynamic_review.config import engine_environment
 from code_reviewer_runner.dynamic_review.limits import CheckoutMetrics
 from code_reviewer_runner.dynamic_review.native_job import (
     NativeJob,
@@ -297,15 +299,34 @@ def test_the_engine_is_given_only_the_chosen_model_and_the_capability(tmp_path: 
 
 
 # #578-T12
-def test_the_real_key_and_the_upstream_address_never_reach_the_engine(tmp_path: Path) -> None:
+def test_the_real_key_and_the_upstream_address_never_reach_the_engine(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.DEBUG)
     with started(tmp_path) as (native, job, _upstream):
-        run(native, job, tmp_path)
+        outcome = run(native, job, tmp_path)
 
     engine = FakeEngine.made[0]
-    handed = {name: value for name, value in engine.options.items() if name != "provider_error"}
+    options = engine.options
+    # What the engine process would be given: the per-job config file the adapter writes (exactly
+    # `json.dumps(config)`, which fails on anything it cannot write) and its environment.
+    written = json.dumps(options["engine_config"])
+    environment = engine_environment(
+        proxy_url=options["proxy_url"], home="/h", scratch_dir="/s", node_bin=None, tools_dir=None
+    )
+    everything = {
+        "the engine config file": written,
+        "the engine environment": json.dumps(environment),
+        "every other option": repr({k: v for k, v in options.items() if k != "engine_config"}),
+        "the log": caplog.text,
+        "the finalization line": outcome.finalization or "",
+        "the notes": f"{outcome.turn_note} {outcome.recovery_note} {outcome.cache_line}",
+    }
     for forbidden in (API_KEY, "api.anthropic.com"):
-        assert forbidden not in json.dumps(handed, default=str)
-    assert engine.options["proxy_capability"] == native.capability
+        for name, text in everything.items():
+            assert forbidden not in text, f"{forbidden!r} is in {name}"
+    assert options["proxy_capability"] == native.capability
+    assert native.capability in written
 
 
 # #578-T11

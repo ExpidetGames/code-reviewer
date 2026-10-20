@@ -8,6 +8,7 @@ pinned https connection). Nothing here talks beyond loopback. Not a test file.
 """
 
 import json
+import logging
 import sys
 from collections.abc import Callable, Generator, Mapping
 from contextlib import ExitStack, contextmanager
@@ -16,7 +17,7 @@ from pathlib import Path
 from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-from fakes.wire.formats import Family, Turn
+from fakes.wire.formats import Family, Turn, UsageFault
 from fakes.wire.upstream import Record, Refusal, ScriptedUpstream
 from opencode_native import BASE_PATH, REAL_KEY, make_export
 from opencode_support import extra_path, opencode_binary, ripgrep_binary
@@ -60,11 +61,13 @@ ENTRIES: dict[Family, dict[str, Any]] = {
     },
     "chat": {
         "provider": "openrouter",
-        "npm": "@ai-sdk/openai-compatible",
+        # The npm package of OpenRouter in the catalog, and a Claude behind it: the case the engine
+        # marks for prompt caching on the chat wire (#539, #546-T08).
+        "npm": "@openrouter/ai-sdk-provider",
         "family": "openai-chat",
         "authHeader": "Authorization",
         "upstreamBaseUrl": "https://openrouter.ai/api/v1",
-        "model": "acme-chat-9",
+        "model": "anthropic/claude-acme-9",
     },
 }
 
@@ -135,6 +138,12 @@ class Publisher:
 
 
 @dataclass
+class Spawned:
+    environment: dict[str, str]
+    config_text: str
+
+
+@dataclass
 class FullJob:
     result: JobResult
     publisher: Publisher
@@ -142,6 +151,11 @@ class FullJob:
     family: Family = "messages"
     # The configuration the engine was given, as the adapter received it.
     configs: list[dict[str, Any]] = field(default_factory=lambda: [])
+    # What the engine process was started with: its environment and the text of the per-job config
+    # file it reads, as they were when it was spawned.
+    spawned: list["Spawned"] = field(default_factory=lambda: [])
+    # Everything the Python loggers wrote during the run.
+    log: str = ""
 
     @property
     def requests(self) -> list[dict[str, Any]]:
@@ -169,6 +183,7 @@ def full_job(
     cost: Mapping[str, Any] = MANAGED,
     limit: str = "5.00",
     react: Reaction | None = None,
+    usage_fault: UsageFault | None = None,
 ) -> Generator[FullJob]:
     """Run one whole native job to its result."""
     export = make_export(scratch)
@@ -183,16 +198,28 @@ def full_job(
 
     publisher = Publisher()
     configs: list[dict[str, Any]] = []
+    spawned: list[Spawned] = []
+
+    class Watched(DynamicEngine):
+        def _spawn(self, environment: dict[str, str], port: int) -> None:  # pyright: ignore[reportPrivateUsage]
+            spawned.append(
+                Spawned(
+                    dict(environment),
+                    Path(environment["OPENCODE_CONFIG"]).read_text(encoding="utf-8"),
+                )
+            )
+            super()._spawn(environment, port)  # pyright: ignore[reportPrivateUsage]
 
     def engine(job: Job, **options: Any) -> DynamicEngine:
         configs.append(options["engine_config"])
-        return DynamicEngine(job, startup_seconds=60.0, **options)
+        return Watched(job, startup_seconds=60.0, **options)
 
     with ExitStack() as stack:
         upstream = stack.enter_context(
             ScriptedUpstream(family, script(export), entry["model"], real_key=REAL_KEY, judge=judge)
         )
         scene.upstream = upstream
+        upstream.usage_fault = usage_fault
         hop = LoopbackUpstream(upstream.url + BASE_PATH[family])
         ripgrep = ripgrep_binary()
         assert ripgrep is not None, "the engine tests need an rg on the PATH (OPENCODE_TEST_PATH)"
@@ -225,14 +252,28 @@ def full_job(
         }
         if (node := extra_path()) is not None:
             environment[runner.DYNAMIC_NODE_BIN_VARIABLE] = node
-        result = runner.run_dynamic_job(
-            job_for(family, cost),
-            None,
-            0.0,
-            environment,
-            engines=ALL_ENGINES,
-            prepare=prepare,
-            publish=publisher,
-            native=NativeSeams(upstream_for=lambda _url: hop, engine_factory=engine),
-        )
-        yield FullJob(result, publisher, upstream, family, configs)
+        lines: list[str] = []
+
+        class Collect(logging.Handler):
+            def emit(self, record: logging.LogRecord) -> None:
+                lines.append(self.format(record))
+
+        collector, root = Collect(), logging.getLogger()
+        was = root.level
+        root.addHandler(collector)
+        root.setLevel(logging.DEBUG)
+        try:
+            result = runner.run_dynamic_job(
+                job_for(family, cost),
+                None,
+                0.0,
+                environment,
+                engines=ALL_ENGINES,
+                prepare=prepare,
+                publish=publisher,
+                native=NativeSeams(upstream_for=lambda _url: hop, engine_factory=engine),
+            )
+        finally:
+            root.removeHandler(collector)
+            root.setLevel(was)
+        yield FullJob(result, publisher, upstream, family, configs, spawned, "\n".join(lines))
