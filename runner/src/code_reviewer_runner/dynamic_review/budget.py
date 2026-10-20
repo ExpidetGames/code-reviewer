@@ -121,8 +121,8 @@ an earlier message holding the token does not count, and the announcement carrie
 **and is no larger than the history the run had**: the last settled request, plus one output
 allowance (the model's last answer), plus the tool results the audit saw since that call (frozen
 when the mark is armed, so reports after it widen nothing), plus the message, plus
-`RECOVERY_REQUEST_SLACK_BYTES` for the engine's framing. Any other request is a normal call: it must fit the limit or it is refused, and
-the mark stays armed. So an engine cannot spend the mark on a request of its own choosing, and a
+`RECOVERY_REQUEST_SLACK_BYTES` for the engine's framing. Any other request is a normal call: it
+must fit the limit or it is refused, and the mark stays armed. So an engine cannot spend the mark on a request of its own choosing, and a
 request cannot make itself final; a result the engine does not report widens nothing (the final
 call is then refused and the run ends without a review, which a hostile engine does to itself). A
 marked call the provider turns away before it generated anything (a 429 or 5xx, settled as
