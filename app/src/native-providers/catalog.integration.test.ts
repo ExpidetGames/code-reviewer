@@ -3,7 +3,7 @@
 // What a workspace on its own key may choose from the models.dev catalog (#555): the providers of the supported file that
 // are not blocked, and the tool-calling models of one of them. Over a real database filled with rows directly; the fetch
 // that fills it has its own tests (src/models-dev/).
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { createModelsDevRepository } from "../db/repositories/models-dev-repository.ts";
 import type { StoredModel, StoredProvider } from "../models-dev/catalog.ts";
 import { MODELS_DEV_ENGINES } from "../test-support/models-dev-engines.ts";
