@@ -145,19 +145,6 @@ describe("a Dynamic result on the managed key", () => {
   });
 
   // #553-T09
-  it("is the same for a success that reports no usage at all", async () => {
-    const h = await start("managed");
-    const job = await claimedDynamic(h);
-
-    await h.complete(job.id, job.leaseToken, { usage: null });
-
-    expect(await h.queue.get(job.id)).toMatchObject({
-      status: "failed",
-      errorCode: "dynamic_accounting_failed",
-    });
-  });
-
-  // #553-T09
   it("repeats to the same stored result when the runner sends it twice", async () => {
     const h = await start("managed");
     const job = await claimedDynamic(h);

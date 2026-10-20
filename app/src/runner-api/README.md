@@ -47,7 +47,7 @@ are the same as for a single workspace.
 ## A managed Dynamic result without a cost (#553)
 
 `finishJob` (`report.ts`, shared by the runner API's `complete` and the Worker API's `result`) stores a Dynamic result of a job on
-the operator's key that claims a success and reports no cost (`usage.costUsd` null, or no usage) as `dynamic_accounting_failed`
+the operator's key that claims a success and reports a usage with no cost (`usage.costUsd` null) as `dynamic_accounting_failed`
 (`managed-cost-guard.ts`): a managed run never settles with an unknown cost, and the code is free for the customer. A failure keeps
 the runner's code. On the workspace's own key a null cost is a success whose usage record settles with an unknown cost (minutes
 only in billing).

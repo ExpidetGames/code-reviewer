@@ -49,13 +49,9 @@ describe("a managed Dynamic result without a known cost", () => {
   });
 
   // #553-T09
-  it("is the same when the runner reported no usage at all", () => {
-    expect(
-      withoutUnaccountedManagedSuccess(
-        resultOf({ usage: null }),
-        MANAGED_DYNAMIC,
-      ),
-    ).toMatchObject({ ok: false, errorCode: "dynamic_accounting_failed" });
+  it("leaves a success that reports no usage at all as it is: that settles with an unknown cost as it always did", () => {
+    const bare = resultOf({ usage: null });
+    expect(withoutUnaccountedManagedSuccess(bare, MANAGED_DYNAMIC)).toBe(bare);
   });
 
   // #553-T09

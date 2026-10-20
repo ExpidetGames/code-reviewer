@@ -20,6 +20,7 @@ from code_reviewer_runner.dynamic_review.passthrough.cost_policy import (
     CostPolicyError,
     KeyMode,
     parse_cost_policy,
+    unit_costs_of,
 )
 from code_reviewer_runner.dynamic_review.passthrough.pricing import call_cost
 
@@ -135,3 +136,18 @@ def test_the_policy_type_is_immutable() -> None:
     policy = CostPolicy(key_mode=KeyMode.OWN, book=None, max_total_tokens=10)
     with pytest.raises(AttributeError):
         policy.max_total_tokens = 11  # type: ignore[misc]
+
+
+# #553-R06
+def test_a_reservation_is_made_with_the_base_level_of_the_book_and_with_no_price_without_one() -> (
+    None
+):
+    priced = parse_cost_policy(managed(priceBook={**LEVEL, "cacheWrite1h": "6000000"}))
+    costs = unit_costs_of(priced.book)
+    assert costs.input_usd_per_mtok == Decimal(3) and costs.output_usd_per_mtok == Decimal(15)
+    assert costs.cache_read_usd_per_mtok == Decimal("0.3")
+    assert costs.cache_write_usd_per_mtok == Decimal("3.75")
+    assert costs.cache_write_1h_usd_per_mtok == Decimal(6)
+    nothing = unit_costs_of(None)
+    assert nothing.input_usd_per_mtok == 0 and nothing.output_usd_per_mtok == 0
+    assert nothing.cache_read_usd_per_mtok is None
