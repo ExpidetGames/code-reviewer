@@ -325,6 +325,24 @@ def test_a_provider_error_gets_a_stable_code_and_keeps_its_status_for_the_engine
     assert "provider words" not in r.ledger.failure.detail
 
 
+# #552-N2: the code names the last call's error: a call that went well clears it
+def test_the_kept_provider_error_is_the_last_calls_and_a_good_call_clears_it() -> None:
+    family = WireFamily.ANTHROPIC_MESSAGES
+    r = rig(
+        family,
+        failing(family, 429, "slow down"),
+        streamed(family, call=1),
+        failing(family, 503, "x"),
+    )
+
+    r.post()
+    assert r.proxy.last_upstream_error is ErrorCode.LLM_RATE_LIMIT
+    r.post()
+    assert r.proxy.last_upstream_error is None  # the engine's retry went through
+    r.post()
+    assert r.proxy.last_upstream_error is ErrorCode.LLM_UNAVAILABLE  # and the last one failed
+
+
 # #550-T10
 def test_a_request_that_is_larger_than_the_context_has_a_code_of_its_own() -> None:
     family = WireFamily.OPENAI_CHAT
