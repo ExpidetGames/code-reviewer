@@ -1344,6 +1344,70 @@ describe.each(MODELS_DEV_ENGINES)("the model prices on $name", (engine) => {
     );
   });
 
+  describe("the price an own key runs on", () => {
+    // #553-T04
+    it_(
+      "is the confirmed book when there is one, else the price the catalog states, else none",
+      async () => {
+        const t = await setup();
+        // Never confirmed: the catalog's own price, which is all an own key needs (nobody pays but its user).
+        expect(
+          await t.service.catalogPrice("anthropic", "claude-sonnet-5-5"),
+        ).toMatchObject({
+          input: "2000000",
+          output: "10000000",
+        });
+        await t.service.setEnabled(ADMIN, { ...SONNET, enabled: true });
+        await t.service.confirmPrice(ADMIN, {
+          ...SONNET,
+          referenceHash: (await view(t)).price.reference.hash,
+        });
+        expect(
+          await t.service.catalogPrice("anthropic", "claude-sonnet-5-5"),
+        ).toMatchObject({
+          output: "10000000",
+        });
+        // The catalog moves: the confirmation is stale for the managed key, an own key follows today's price.
+        await t.fetchChanged((body) => {
+          const model = body.anthropic?.models["claude-sonnet-5-5"] as
+            { cost: { output: number } } | undefined;
+          if (model !== undefined) model.cost.output = 11;
+        });
+        expect(
+          await t.service.catalogPrice("anthropic", "claude-sonnet-5-5"),
+        ).toMatchObject({
+          output: "11000000",
+        });
+        expect(
+          await t.service.availability("anthropic", "claude-sonnet-5-5"),
+        ).toMatchObject({
+          selectable: false,
+        });
+      },
+    );
+
+    // #553-T05
+    it_(
+      "is none for a model nobody priced, for an unknown model and when the database cannot be read",
+      async () => {
+        const t = await setup();
+        expect(await t.service.catalogPrice("anthropic", "nobody")).toBeNull();
+        await t.fetchChanged((body) => {
+          const model = body.anthropic?.models["claude-sonnet-5-5"] as
+            { cost?: unknown } | undefined;
+          if (model !== undefined) delete model.cost;
+        });
+        expect(
+          await t.service.catalogPrice("anthropic", "claude-sonnet-5-5"),
+        ).toBeNull();
+        await t.db.destroy();
+        expect(
+          await t.service.catalogPrice("anthropic", "claude-sonnet-5-5"),
+        ).toBeNull();
+      },
+    );
+  });
+
   describe("the audit", () => {
     // #549-T09
     it_(

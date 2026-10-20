@@ -46,6 +46,10 @@ import {
 import type { CatalogSummary } from "../model-catalog/service.ts";
 import { savePlanManagementUrl } from "../plan-handoff/settings.ts";
 import { checkPlanManagementUrl } from "../plan-handoff/url.ts";
+import {
+  checkOwnKeyTokenCap,
+  ownKeyTokenCapOf,
+} from "../native-cost/token-cap.ts";
 import { githubIdentityLinked } from "./github-identity.ts";
 import { parseOperatorKeyChange } from "./operator-key-change.ts";
 import {
@@ -86,6 +90,11 @@ export type AdminSettingsView = {
     effective: SignInMethods;
   };
   maxWorkspacesPerUser: SettingView<number>;
+  /**
+   * #553: the most tokens a Dynamic run on a workspace's own key may use when the price of its model is not known. The
+   * default until saved; a saved value is within the bounds of `token-cap.ts`.
+   */
+  ownKeyTokenCap: SettingView<number>;
   /**
    * #195/#202 rollout gate: whether Dynamic Review may be queued. Off until an admin turns it on; turning
    * it off cancels the waiting Dynamic jobs and leaves the running ones (contracts/README.md).
@@ -157,6 +166,8 @@ export type AdminService = {
     actorId: string,
     limits: { maxWorkspacesPerUser: unknown },
   ): Promise<ChangeResult>;
+  /** `value` is the request's `ownKeyTokenCap` as received: a whole number of tokens within the bounds of `token-cap.ts`. */
+  changeOwnKeyTokenCap(actorId: string, value: unknown): Promise<ChangeResult>;
   /**
    * `change` is the request's `dynamicReview` value as received: `{ enabled: boolean }`. It goes through the
    * instance settings repository, which takes the gate lock and cancels the waiting Dynamic jobs on off.
@@ -303,6 +314,7 @@ export function createAdminService({
         "sign_up_rule",
         "sign_in_methods",
         "max_workspaces_per_user",
+        "own_key_max_total_tokens",
         "setup_completed_at",
         "import_notice",
         "dynamic_review",
@@ -313,6 +325,7 @@ export function createAdminService({
         rule,
         methods,
         maxWorkspaces,
+        ownKeyTokenCap,
         completed,
         notice,
         dynamicReview,
@@ -325,6 +338,7 @@ export function createAdminService({
         rule?.updatedBy,
         methods?.updatedBy,
         maxWorkspaces?.updatedBy,
+        ownKeyTokenCap?.updatedBy,
         dynamicReview?.updatedBy,
         planManagementUrl?.updatedBy,
         mailServer.updatedBy,
@@ -367,6 +381,10 @@ export function createAdminService({
           maxWorkspaces,
           (maxWorkspaces?.value as number | undefined) ??
             DEFAULT_MAX_WORKSPACES_PER_USER,
+        ),
+        ownKeyTokenCap: view(
+          ownKeyTokenCap,
+          ownKeyTokenCapOf(ownKeyTokenCap?.value),
         ),
         dynamicReview: view(
           dynamicReview,
@@ -565,6 +583,18 @@ export function createAdminService({
           ],
         };
       await settings.set("max_workspaces_per_user", value, actorId);
+      return { ok: true };
+    },
+
+    async changeOwnKeyTokenCap(actorId, value) {
+      const checked = checkOwnKeyTokenCap(value);
+      if (!checked.ok)
+        return {
+          ok: false,
+          error: "invalid_input",
+          issues: [{ field: "ownKeyTokenCap", code: checked.code }],
+        };
+      await settings.set("own_key_max_total_tokens", checked.value, actorId);
       return { ok: true };
     },
   };

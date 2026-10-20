@@ -368,14 +368,14 @@ settled:
 |---|---|
 | a complete answer with usage and a price | the provider's usage and the price (`settle_call`; a usage above the reservation is **booked first**, then the run stops) |
 | the provider refused with a 4xx (not 408), a 429, or a **500, 502, 503 or 529 that is only a status** (all of: the status line came within 15 s of the request, the content type is not `text/event-stream`, and the bounded body, read whole, states no usage object), a redirect, a connection that never opened | unbilled: the reservation is released (`settle_unbilled`) |
-| 408, 504, 524, a status below 200, any other status, a 500/502/503/529 that fails one of the three conditions, every error **after** the first byte of a stream or body (a cut stream, an error event in a 200), a timeout after the request went out, an encoded body | **unknown**: booked at its **worst case**, not at its expected cost (`settle_unknown`), counted in `unknown_calls`, and for a managed key the run ends (`dynamic_accounting_failed`) |
-| a complete answer without a readable usage (none stated, a bad value, a stream that stopped before its usage event) or a price | the call is unknown, and the run ends for every key (the own-key relaxation is #553) |
-| a usage that lists a field nobody can price (`unknown_fields`: an unknown field that holds something, `server_tool_use`, audio, a `service_tier` other than the standard one, a second choice) or that cannot be priced from the book | **unknown** as above, for a managed key (`unknown_cost_ends_run`); the names of the fields (never a value) are logged |
+| 408, 504, 524, a status below 200, any other status, a 500/502/503/529 that fails one of the three conditions, every error **after** the first byte of a stream or body (a cut stream, an error event in a 200), a timeout after the request went out, an encoded body | **unknown**: counted in `unknown_calls`. Managed key: booked at its **worst case** (`settle_unknown`) and the run ends (`dynamic_accounting_failed`). Own key: booked at what it was **expected to cost** and its expected tokens, and the run goes on (see "The cost policy of a native job") |
+| a complete answer without a readable usage (none stated, a bad value, a stream that stopped before its usage event) | the call is unknown, and the run ends for **every** key: with no tokens to count, the token cap cannot apply |
+| a usage that lists a field nobody can price (`unknown_fields`: an unknown field that holds something, `server_tool_use`, audio, a `service_tier` other than the standard one, a second choice) or that cannot be priced from the book | managed key: **unknown** as above and the run ends. Own key: the tokens the provider stated are booked against the cap, the cost of the call is unknown, the run goes on and `price_risk` (a count, with the names of the fields, never a value) is logged |
 
 The worst case of a call is the bytes of its request, each as a token at the dearest input price (the byte count bounds
 the tokens), plus the whole output cap at the output price (`BudgetLedger.worst_case_cost`). An engine that can make
 a call's usage unreadable must not make the call free, so a call that may have been billed and was not read ends a
-managed run. *Why a 500/502/503/529 status is not such a call:* it arrives as a status line before any byte of an
+managed run (an own key goes on, see "The cost policy of a native job"). *Why a 500/502/503/529 status is not such a call:* it arrives as a status line before any byte of an
 answer, so the provider failed the request before it generated anything, and the providers do not bill that (a
 transient overload is the commonest event of a long run, and the engine retries it as a call of its own). It is
 trusted only while it looks like that: a status line that took more than 15 s, an event-stream content type, or a body
@@ -383,8 +383,8 @@ that states a usage (JSON with a `usage`/`usageMetadata` object anywhere, or, fo
 `usage`; a body longer than the bound or cut counts too) means the provider may have been generating. A timeout
 status (408, 504, 524) and anything after the first byte of a stream or body say the provider may have been generating,
 so they stay unknown. The assumption is unproven for real providers and is item L13 of the live checklist. The hook
-for #553 is `PassthroughProxy(unknown_cost_ends_run=)`, on by default and set by nothing yet. The whole-run cost stays
-unknown after any unknown call (`usage.cost_usd` is `None`), never a partial sum.
+of the cost policy is `PassthroughProxy(unknown_cost_ends_run=)`, set from the claim's `dynamic.cost` (`cost_policy.py`, below). The
+whole-run cost stays unknown after any unknown call (`usage.cost_usd` is `None`), never a partial sum.
 
 **A hang-up does not hide a cost.** When the engine disconnects mid-stream, the call to the provider is **not**
 cancelled at once: the proxy stops forwarding but keeps reading the stream into the tap to the end of the answer (bounded by the
@@ -491,9 +491,9 @@ many tokens) is not believed and not booked: the call is unknown. A call the boo
 charge is stated, since there is nothing to hold it against. The worst case of an unknown call (`worst_case_cost`) is
 priced from the book too (N8): every byte of the request as a token of the dearest kind of input (plain, a cache read,
 either write), every output token at the dearer of output and reasoning, at the dearest tier the request can reach
-(a tier may be cheaper than the level below it, so the base counts as well). Until the claim carries the confirmed book (#553) the
-proxy reads its per-job `UnitCosts` as a one-level book (a price finer than a micro-USD is rounded up, never down;
-`cache_write_1h_usd_per_mtok` is new). Every shape of the book is table-tested against an independent calculator
+(a tier may be cheaper than the level below it, so the base counts as well). A native job prices from the book its claim carries (#553, below); until the
+wiring runs a job that way, the proxy reads a per-job `UnitCosts` as a one-level book (a price finer than a micro-USD is rounded up,
+never down; `cache_write_1h_usd_per_mtok` is new). Every shape of the book is table-tested against an independent calculator
 (`runner/tests/usage_calc.py`).
 
 What a real answer may still show differently is **unconfirmed** and marked in the code (`UNCONFIRMED`) and as item L14
@@ -508,11 +508,42 @@ engine gives up. Everything else ends the run with its code, the text of the pro
 
 **Not in this change** (follow-ups): reading a job's entry from the claim and starting the engine with the native
 config (#564 has the entry reader; `build_native_engine_config`, which asserts the provider block against the entry, and
-`target_from_entry` are the two joints; wiring and the claim contract test T13 come as a separate step), the audit of
-tool results in a request (it is chat-shaped; the adapter still counts the tool calls the engine reports), how a final
-call is told to answer without rewriting the request (#552), the live capture that replaces the assumed usage shapes
-(L14) and the cost policy for an own key (#553: how a managed and an own key treat `unknown_fields`, `price_drift` and a
-call without usage; reading the confirmed price book from the claim).
+`target_from_entry` are the two joints; wiring and the claim contract test T13 come as a separate step; its ledger and proxy come
+from `cost_policy.py`, see the next section), the audit of tool results in a request (it is chat-shaped; the adapter still counts
+the tool calls the engine reports), how a final call is told to answer without rewriting the request (#552; the token cap uses the
+same refusal as the cost limit once it lands) and the live capture that replaces the assumed usage shapes (L14).
+
+### The cost policy of a native job (#553)
+
+Whose key pays decides what an unknown cost means. The claim hands the runner `dynamic.cost` (`contracts/runner-api.v1.json`,
+`DynamicCostPolicy`; `passthrough/cost_policy.py` reads it as strictly as the app writes it), only to a runner that named the claim
+feature `dynamic_cost_policy`, and only for a **native** job (`app/src/native-cost/README.md` says which selection is one). A job
+without it is a job of today; a job with it that would reach the legacy wire is refused (`dynamic_config_invalid`).
+
+| | managed key (we pay) | own key (the user pays the provider) |
+|---|---|---|
+| model | refused at claim (`managed_model_unavailable`) unless enabled with a **confirmed** price, before any key, token or VM | free choice |
+| price source | the confirmed book of the claim, nothing else: never the engine's `cost`, never models.dev | the confirmed book, else the catalog's price, else none |
+| an unknown cost (a call whose usage was not read, one the book cannot price, a field nobody can price) | worst case booked, the run ends `dynamic_accounting_failed` (free) | the run goes on; the call books its tokens (or its expected cost and tokens when its usage was not read) |
+| bound | the dollar limit of #540 | the dollar limit while every call is priced; once the price is not known or a call is unknown, `maxTotalTokens` (instance setting, default 4,000,000: prompt, cache and completion tokens in all) and the clock |
+| result | `costUsd` known; the app refuses a managed success with a null cost (stored as `dynamic_accounting_failed`) | `costUsd: null` when any call is unpriced; billing charges minutes only |
+| a call with no usage at all | fails the run | fails the run (the cap cannot count it) |
+
+`build_native_ledger(policy, limits, window_tokens, output_tokens, reasoning)` makes the ledger: no book means no dollar is counted
+(`priced=False`), the output of a call is held to `min(limit.output, 32000)` (what the engine really sends, spike #546), and a model
+the catalog marks `reasoning` reserves that whole output cap for every call, since its thinking is output nobody can predict (#548:
+the flag changes the request, so it changes the reservation). The token cap binds like the cost limit: a normal call is admitted
+only while the tokens used, the tokens held for calls in flight and this call's expected tokens fit; a call that settles over the cap
+is delivered and ends the agent phase; the run is wrapped up first when a further call and a final one would not fit, with the
+reason `token_limit` (`stoppedEarly`), which the summary and the check run say in words. The unit costs a reservation is made with
+are the book's base level (an expectation: what a call costs is always the book applied to its usage, so a model with tiers can
+settle above its reservation, which the final-call exemption already bounds).
+
+The book of a claim is read with `strict_cache_read` (`price_book.py`): a cache read without a read price is **not** priced as input
+(N4 of the review of PR #569). The claim refuses a managed book that sells a cache write and states no read; if a read slips past
+(a provider that caches a model with no cache price at all) the call is unpriced, and the run ends `dynamic_accounting_failed`, which
+is free. `cache_control.ttl` stays out of the request schema: the pinned engine never sends one, and a 1-hour write is a price the
+book states but nothing asks for.
 
 ## The model
 

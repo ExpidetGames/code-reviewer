@@ -81,7 +81,10 @@ Rules (the CR-29 decisions; tests in `tests/unit/test_job_loop*.py` and `tests/i
   The loop gives the job process of a Dynamic job the advertised engines, the verified engine command
   and `RUNNER_DYNAMIC_CAPABILITIES`; a Diff job process gets none of them. The claim names the feature
   `dynamic_capabilities` (`features` next to `engines`), which tells the app this runner reads the model
-  descriptor of a Dynamic job (#279); an app from before ignores the key and sends none. A runner that cannot run a
+  descriptor of a Dynamic job (#279); an app from before ignores the key and sends none. The claim also names
+  `dynamic_cost_policy` (#553): the runner reads `dynamic.cost` (the price book of the managed key, the token cap of an own
+  key; `dynamic_review/passthrough/cost_policy.py`), and a job that carries one but would reach the legacy wire is refused
+  with `dynamic_config_invalid`. A runner that cannot run a
   kind is never handed such a job by the app; a Dynamic job that arrives anyway is refused locally and
   never run by PR-Agent.
 - **Refused jobs start nothing.** The input is validated with the runner's own `parse_job` before a

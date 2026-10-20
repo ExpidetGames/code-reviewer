@@ -22,6 +22,7 @@ import { getRunnerQueue } from "../jobs/shared.ts";
 import { resolveAppSecret } from "../crypto/app-secret.ts";
 import { readEffectiveEntitlements } from "../workspaces/effective-entitlements.ts";
 import { getWorkspaceLlm, modelCapabilities } from "../llm/shared.ts";
+import { getNativeCost } from "../native-cost/shared.ts";
 import { projectServiceFor } from "../projects/shared.ts";
 import { reviewSettingsServiceFor } from "../review-settings/shared.ts";
 import { createRunnerApi, type RunnerApi } from "./api.ts";
@@ -135,6 +136,8 @@ function sharedDeps(): WorkerApiDeps {
     }),
     // #279: the metadata of a job's model (Dynamic, and a managed entry's), read when its claim is built.
     modelCapabilities,
+    // #553: the cost policy of a native job. No selection the registry allows names a catalog model yet, so no job is native.
+    nativeCost: getNativeCost(),
     claimedKeys: getClaimedKeys(),
     // #395: what happens between two sweeps. Both run after the response and do nothing in poll mode.
     jobEnded,

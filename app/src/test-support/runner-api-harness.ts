@@ -23,6 +23,7 @@ import type { CatalogEntry } from "../model-catalog/entries.ts";
 import type { ProjectReviewKind } from "../review-settings/settings.ts";
 import type { ModelCapabilityChecker } from "../llm/model-capabilities.ts";
 import { createRunnerApi } from "../runner-api/api.ts";
+import type { ClaimDeps } from "../runner-api/claim.ts";
 import {
   createWorkerApi,
   type WorkerApiDeps,
@@ -123,6 +124,8 @@ export async function startRunnerApiHarness(
     loadLlm?: (workspaceId: string) => Promise<LlmAccessResult>;
     /** #279: where a Dynamic claim reads the model metadata from. Left out, the claim reads none. */
     modelCapabilities?: ModelCapabilityChecker;
+    /** #553: the cost policy of a native job (`ClaimDeps.nativeCost`). Left out, no job is native, as on the running server today. */
+    nativeCost?: ClaimDeps["nativeCost"];
     /**
      * #432: the providers of the app, for a test that brings a second one (`createFakeAdapter`). The key services, the
      * claim and the selection all use it. Default: the registry of the app.
@@ -417,6 +420,9 @@ export async function startRunnerApiHarness(
       ...(options.modelCapabilities === undefined
         ? {}
         : { modelCapabilities: options.modelCapabilities }),
+      ...(options.nativeCost === undefined
+        ? {}
+        : { nativeCost: options.nativeCost }),
       claimedKeys,
       ...(options.hooks ?? {}),
       now: fixture.clock.now,
@@ -740,8 +746,13 @@ export async function startRunnerApiHarness(
   };
 
   /** Claims as a Dispatcher and fetches the job as its Worker: the credential and the job details. */
-  async function startedWorker(features?: string, llmProviders?: string) {
-    const claim = await claimedSplit();
+  async function startedWorker(
+    features?: string,
+    llmProviders?: string,
+    /** How the Dispatcher claims, for example `{ engines: ["opencode"] }` to be handed a Dynamic job. */
+    request?: RequestOptions & { engines?: string[] },
+  ) {
+    const claim = await claimedSplit(request);
     const response = await worker.details(
       claim.job.id,
       claim.job.credential,

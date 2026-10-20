@@ -364,6 +364,32 @@ describe("the class of a run's end", () => {
   });
 });
 
+describe("the cost policy of a native job (#553)", () => {
+  // #553-T08
+  it("charges the minutes only for an own-key Dynamic run that delivered a review at its token cap or without a price", () => {
+    for (const end of [
+      { status: "succeeded", errorCode: null },
+      failed("dynamic_budget_exceeded"),
+    ] satisfies Array<Pick<RunEnd, "status" | "errorCode">>)
+      expect(
+        classifyOutcome({ ...end, keyMode: "own", aiCostKnown: false }),
+      ).toBe("minutes_only");
+  });
+
+  // #553-T03
+  it("treats a managed run that could not account for its cost as our fault, whatever else is known", () => {
+    for (const aiCostKnown of [true, false, undefined])
+      expect(
+        classifyOutcome(
+          failed("dynamic_accounting_failed", {
+            keyMode: "managed",
+            ...(aiCostKnown === undefined ? {} : { aiCostKnown }),
+          }),
+        ),
+      ).toBe("free");
+  });
+});
+
 describe("a run whose AI cost is unknown", () => {
   // #523-T11
   it("is charged the minutes only: the AI part cannot be priced", () => {

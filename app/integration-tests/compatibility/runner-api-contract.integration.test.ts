@@ -727,6 +727,162 @@ describe("the model capabilities of a Dynamic job", () => {
   });
 });
 
+// #553-T02: the cost policy of a native job. The examples are valid, the policy is closed and typed, and the type the app
+// builds (`CostPolicyJson`) is what the file describes.
+describe("the cost policy of a native job", () => {
+  const FIXTURES = new URL("../../../fakes/fixtures/", import.meta.url);
+  const read = (name: string): Record<string, unknown> =>
+    JSON.parse(readFileSync(new URL(name, FIXTURES), "utf8")) as Record<
+      string,
+      unknown
+    >;
+  const costOf = (job: Record<string, unknown>) =>
+    (job.dynamic as { cost: Record<string, unknown> }).cost;
+
+  it.each([
+    "dynamic-review-job-cost-managed.json",
+    "dynamic-review-job-cost-own.json",
+  ])("accepts the golden Dynamic job %s", (name) => {
+    expectValid("RunnerJobInput", read(name));
+  });
+
+  it("refuses a policy that is not closed, typed and complete", () => {
+    const changes: Array<[string, (cost: Record<string, unknown>) => void]> = [
+      ["an unknown key", (cost) => Object.assign(cost, { command: "x" })],
+      ["no key mode", (cost) => delete cost.keyMode],
+      [
+        "a bad key mode",
+        (cost) => Object.assign(cost, { keyMode: "operator" }),
+      ],
+      ["no book key", (cost) => delete cost.priceBook],
+      ["no cap key", (cost) => delete cost.maxTotalTokens],
+      [
+        "a cap as text",
+        (cost) => Object.assign(cost, { maxTotalTokens: "4000000" }),
+      ],
+      ["a cap of zero", (cost) => Object.assign(cost, { maxTotalTokens: 0 })],
+      [
+        "a fractional cap",
+        (cost) => Object.assign(cost, { maxTotalTokens: 1.5 }),
+      ],
+      [
+        "a huge cap",
+        (cost) => Object.assign(cost, { maxTotalTokens: 10 ** 12 }),
+      ],
+    ];
+    for (const [name, change] of changes) {
+      const job = read("dynamic-review-job-cost-own.json");
+      change(costOf(job));
+      expect({
+        name,
+        valid: contract.check("RunnerJobInput", job).valid,
+      }).toEqual({
+        name,
+        valid: false,
+      });
+    }
+  });
+
+  it("refuses a managed policy without a book, with a cap, or with a book that is not exact", () => {
+    const changes: Array<[string, (cost: Record<string, unknown>) => void]> = [
+      ["no book", (cost) => Object.assign(cost, { priceBook: null })],
+      ["a cap", (cost) => Object.assign(cost, { maxTotalTokens: 4_000_000 })],
+      [
+        "an amount as a number",
+        (cost) => Object.assign(cost.priceBook as object, { input: 3 }),
+      ],
+      [
+        "a decimal amount",
+        (cost) => Object.assign(cost.priceBook as object, { input: "3.5" }),
+      ],
+      [
+        "a negative amount",
+        (cost) => Object.assign(cost.priceBook as object, { output: "-1" }),
+      ],
+      [
+        "an unknown price",
+        (cost) => Object.assign(cost.priceBook as object, { cacheBlend: "1" }),
+      ],
+      [
+        "a tier without a size",
+        (cost) =>
+          Object.assign(cost.priceBook as object, {
+            tiers: [{ input: "1", output: "2" }],
+          }),
+      ],
+    ];
+    for (const [name, change] of changes) {
+      const job = read("dynamic-review-job-cost-managed.json");
+      change(costOf(job));
+      expect({
+        name,
+        valid: contract.check("RunnerJobInput", job).valid,
+      }).toEqual({
+        name,
+        valid: false,
+      });
+    }
+  });
+
+  it("accepts an own policy with the catalog's price, tiers and a level that states fewer prices", () => {
+    const job = read("dynamic-review-job-cost-own.json");
+    Object.assign(costOf(job), {
+      priceBook: {
+        input: "3000000",
+        output: "15000000",
+        cacheRead: null,
+        contextOver200k: { input: "6000000", output: "22500000" },
+        tiers: [{ contextOver: 128000, input: "4000000", output: "16000000" }],
+      },
+    });
+    expectValid("RunnerJobInput", job);
+  });
+
+  it("names the feature a runner says it enforces the policy with, and the reason a run may stop for", () => {
+    const features = readContract().$defs.KnownClaimFeature?.enum ?? [];
+    expect(features).toContain("dynamic_cost_policy");
+    const usage = readContract().$defs.RunnerUsage as {
+      properties: { stoppedEarly: { enum: Array<string | null> } };
+    };
+    expect(usage.properties.stoppedEarly.enum).toContain("token_limit");
+  });
+
+  it("gives the real claim answer of the app the shape of the file", async () => {
+    const h = await startRunnerApiHarness({
+      projects: true,
+      nativeCost: {
+        refOf: () => ({ providerId: "deepseek", modelId: "deepseek-v4-pro" }),
+        policyFor: async () => ({
+          ok: true,
+          policy: {
+            keyMode: "own",
+            priceBook: null,
+            maxTotalTokens: 4_000_000,
+          },
+        }),
+      },
+    });
+    await h.projectService.activateProject(h.repositoryId);
+    await h.reviewSettings.updateProjectSettings(h.repositoryId, {
+      reviewKind: "dynamic",
+      dynamicModel: "vendor/dynamic-model",
+    });
+    await h.enqueueNew();
+
+    const claim = await h.claimed({
+      engines: ["opencode"],
+      features: ["dynamic_capabilities", "dynamic_cost_policy"],
+    });
+
+    expect(claim.job.input.dynamic?.cost).toEqual({
+      keyMode: "own",
+      priceBook: null,
+      maxTotalTokens: 4_000_000,
+    });
+    expectValid("ClaimResponse", claim);
+  });
+});
+
 // #541-T06: the per-call trace of a usage. The hand-written check of the app and the schema give the same
 // verdict on each of these (the app then drops a malformed trace instead of refusing the result).
 function callTraceCases(
