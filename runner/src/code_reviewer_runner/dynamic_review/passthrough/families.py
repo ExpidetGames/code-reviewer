@@ -28,6 +28,17 @@ class WireFamily(StrEnum):
     GOOGLE = "google"
 
 
+# The SDKs of the pinned engine that speak each family, as verified by the engine tests (spike
+# #546: `docs/spike/544-passthrough.md`, section 4). The contract of the entry lists every bundled
+# SDK; an SDK that no test has seen speak its family is not served by the passthrough until one
+# has (`config.build_native_engine_config` refuses it).
+NPM_OF_FAMILY: Final = {
+    WireFamily.OPENAI_CHAT: frozenset({"@ai-sdk/openai-compatible", "@openrouter/ai-sdk-provider"}),
+    WireFamily.OPENAI_RESPONSES: frozenset({"@ai-sdk/openai"}),
+    WireFamily.ANTHROPIC_MESSAGES: frozenset({"@ai-sdk/anthropic"}),
+    WireFamily.GOOGLE: frozenset({"@ai-sdk/google"}),
+}
+
 # The `anthropic-beta` values the pinned engine sends (v1.19.0, docs/spike/544-passthrough.md,
 # section 4). A beta changes what a provider does and charges, so any other value is refused.
 ALLOWED_ANTHROPIC_BETAS: Final = frozenset(

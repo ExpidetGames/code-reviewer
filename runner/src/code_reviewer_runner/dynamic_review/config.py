@@ -21,9 +21,18 @@ The spike's caveat is binding: the flags are not proof of isolation. They only n
 misconfiguration can reach; the export and the OS boundary of #196/#202 are what actually protect.
 """
 
+import re
 import secrets
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, cast
+from urllib.parse import urlsplit
+
+from code_reviewer_runner.dynamic_review.job_model_entry import MODEL_KEYS
+from code_reviewer_runner.dynamic_review.passthrough.families import (
+    NPM_OF_FAMILY,
+    WireFamily,
+    spec_of,
+)
 
 # The one provider the engine may talk to: the runner-owned model proxy on loopback. Its key is the
 # per-job capability (`new_proxy_capability`), never the workspace credential; the proxy checks it
@@ -140,19 +149,102 @@ def build_engine_config(
     )
 
 
-def build_native_engine_config(
-    *, provider: Mapping[str, Any], model_reference: str, system_prompt: str
-) -> dict[str, Any]:
-    """The engine configuration of a native job (#550): the `provider` object of the job's model
-    entry (#548: one provider with `npm`, `options.baseURL` = the passthrough proxy, a dummy
-    `options.apiKey` and `models.<id>`) in place of the legacy proxy provider, and the rest the
-    same.
+class NativeConfigRefused(ValueError):
+    """The provider block of a native job is not exactly what the entry makes. Carries no value of
+    the block: a refusal may be logged."""
 
-    The real key and the upstream address are not parameters: they are the supervisor's, and
-    nothing here could write them into the file.
+    def __init__(self, reason: str) -> None:
+        super().__init__(f"native job: {reason}")
+
+
+_PROVIDER_ID = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
+# The id of a model goes into the request: the body of three families and, for Google, a segment
+# of the path the proxy compares as text. Google's therefore holds no `/`, `:`, `@` or `+`: none can
+# end the segment, start a method (`:streamGenerateContent`) or be read as an escape.
+_MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+@-]{0,199}")
+_GOOGLE_MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
+_BLOCK_KEYS = frozenset({"npm", "name", "options", "models"})
+_OPTION_KEYS = frozenset({"baseURL", "apiKey"})
+_LOOPBACK = ("127.0.0.1", "::1", "localhost")
+# A weaker capability than `new_proxy_capability` makes is no capability.
+_MIN_CAPABILITY_CHARS = -(-PROXY_CAPABILITY_BYTES * 4 // 3)
+
+
+def _refused(reason: str) -> NativeConfigRefused:
+    return NativeConfigRefused(reason)
+
+
+def _checked_native_provider(
+    provider: Mapping[str, Any],
+    model_reference: str,
+    family: WireFamily,
+    proxy_url: str,
+    capability: str,
+) -> None:
+    """Assert that `provider` is the block the entry makes for this job and nothing else.
+
+    The engine reads this block as its trusted configuration: a key in it that the proxy did not
+    expect (a `headers` option, a `provider` or `api` override on the model, a `baseURL` that is
+    the provider's) would be the one place a mistake in the app, or in the entry, reaches the engine
+    as a way around the proxy.
     """
     if len(provider) != 1:
         raise ValueError("a native job is configured with one provider")
+    ((provider_id, raw_block),) = provider.items()
+    if _PROVIDER_ID.fullmatch(provider_id) is None or not isinstance(raw_block, Mapping):
+        raise _refused("the provider id is not a plain id")
+    block = cast(Mapping[str, Any], raw_block)
+    if not {"npm", "options", "models"} <= block.keys() <= _BLOCK_KEYS:
+        raise _refused("the provider block has other keys than the entry makes")
+    if block["npm"] not in NPM_OF_FAMILY[family]:
+        raise _refused("the SDK of the provider is not one that speaks the family")
+    host = urlsplit(proxy_url)
+    if host.scheme != "http" or host.hostname not in _LOOPBACK or host.path not in ("", "/"):
+        raise _refused("the engine is not pointed at a loopback proxy")
+    if len(capability) < _MIN_CAPABILITY_CHARS:
+        raise _refused("the capability is too weak")
+    options = block["options"]
+    if (
+        not isinstance(options, Mapping)
+        or frozenset(cast(Mapping[str, Any], options)) != _OPTION_KEYS
+        or options["baseURL"] != spec_of(family).proxy_base_url(proxy_url)
+        or options["apiKey"] != capability
+    ):
+        raise _refused("the options are not the proxy and the capability, and nothing else")
+    models = block["models"]
+    if not isinstance(models, Mapping) or len(cast(Mapping[str, Any], models)) != 1:
+        raise _refused("the provider has not exactly one model")
+    ((model_id, model),) = cast(Mapping[str, Any], models).items()
+    pattern = _GOOGLE_MODEL_ID if family is WireFamily.GOOGLE else _MODEL_ID
+    if pattern.fullmatch(model_id) is None:
+        raise _refused("the model id is not a plain id")
+    if model_reference != f"{provider_id}/{model_id}":
+        raise _refused("the agent names another model than the provider has")
+    if not isinstance(model, Mapping) or not set(cast(Mapping[str, Any], model)) <= MODEL_KEYS:
+        raise _refused("the model has other keys than the entry makes")
+
+
+def build_native_engine_config(
+    *,
+    provider: Mapping[str, Any],
+    model_reference: str,
+    system_prompt: str,
+    family: WireFamily,
+    proxy_url: str,
+    capability: str,
+) -> dict[str, Any]:
+    """The engine configuration of a native job (#550): the `provider` object of the job's model
+    entry (#548: one provider with `npm`, `options.baseURL` = the passthrough proxy, the job's
+    capability as `options.apiKey` and `models.<id>`) in place of the legacy proxy provider, and the
+    rest the same.
+
+    The block is **asserted**, not trusted (`_checked_native_provider`): its one provider has the
+    SDK of the family, `options` are the proxy's address and the capability and nothing else (no
+    `headers`), the model has the keys of the entry and no `provider`/`api` override, and the model
+    id is a plain id (it goes into the Google path). The real key and the upstream address are not
+    parameters: they are the supervisor's, and nothing here could write them into the file.
+    """
+    _checked_native_provider(provider, model_reference, family, proxy_url, capability)
     return _engine_config(
         provider=dict(provider), model_reference=model_reference, system_prompt=system_prompt
     )
