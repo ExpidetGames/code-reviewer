@@ -302,6 +302,8 @@ class _Counters:
     # The cost the provider charged, summed as exact decimals, over the calls that reported one.
     cost: Decimal = field(default_factory=lambda: Decimal(0))
     priced_calls: int = 0
+    # Calls whose usage was never seen (#550): booked at their worst case.
+    unknown_calls: int = 0
     tool_calls: int = 0
     returned_bytes: int = 0
     files: set[str] = field(default_factory=lambda: set[str]())
@@ -856,16 +858,36 @@ class BudgetLedger:
             )
             self._counters.priced_calls += 1
 
+    def worst_case_cost(self, reservation: Reservation) -> Decimal:
+        """The most one reserved call can cost: the bytes of its request, each as a token of the
+        dearest input kind (the byte count bounds the tokens), and the whole output cap."""
+        return self._unit_costs.of_call(
+            max(reservation.byte_bound, reservation.input_tokens),
+            reservation.output_tokens,
+            cache_in_use=True,
+        )
+
     def settle_unknown(self, reservation: Reservation) -> None:
-        """Settle a call whose usage was never seen (a cut stream, an error inside a stream, an
-        engine that went away) (#550). It may have been billed, so it is not given back: what was
-        reserved for it becomes spent, and the guard keeps counting it. Like any call without a
-        reported cost it makes the cost of the whole run unknown, never a partial sum.
+        """Settle a call whose usage was never seen (a cut stream, an error inside a stream, a
+        timeout after the request was sent, a server error) (#550).
+
+        The provider may have billed it, and an engine that can make a call's usage unreadable
+        must not thereby make it free: the call is booked at its **worst case**, not at what it was
+        expected to cost, and counted as unknown. Like any call without a reported cost it makes
+        the cost of the whole run unknown, never a partial sum.
         """
+        worst = self.worst_case_cost(reservation)
         with self._lock:
             counters = self._counters
             counters.reserved_cost = _SUM.subtract(counters.reserved_cost, reservation.cost)
-            counters.cost = _SUM.add(counters.cost, reservation.cost)
+            counters.cost = _SUM.add(counters.cost, max(worst, reservation.cost))
+            counters.unknown_calls += 1
+
+    @property
+    def unknown_calls(self) -> int:
+        """How many calls were booked at their worst case because their usage was never seen."""
+        with self._lock:
+            return self._counters.unknown_calls
 
     def count_tool_call(self, name: str) -> None:
         """Count one tool call the engine reported. Unknown attempts count too. Not a budget."""

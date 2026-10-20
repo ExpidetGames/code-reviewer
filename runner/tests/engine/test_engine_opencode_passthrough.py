@@ -73,7 +73,7 @@ def plan() -> list[Step]:
             "retry",
             "acme-retry",
             "acme-retry-9",
-            faults=lambda upstream: upstream.fail_next(429, 503),
+            faults=lambda upstream: upstream.fail_next(429, 429),
         ),
         Step(
             "quote",
@@ -151,7 +151,7 @@ def test_the_retries_of_the_engine_are_calls_of_their_own(run: Any) -> None:
     assert outcome.http_status == 200
     assert [tool for step in outcome.assistants for tool in step.tools] == TOOL_ORDER
     front = engine.front("acme-retry")
-    # A 429 and a 503, then the seven calls of the loop: nine upstream calls, nine in the ledger.
+    # Two 429s, then the seven calls of the loop: nine upstream calls, nine in the ledger.
     assert len(outcome.records) == 9
     usage = front.ledger.usage("acme-retry-9")
     assert usage.ai_calls == 9
@@ -165,7 +165,7 @@ def test_the_retries_of_the_engine_are_calls_of_their_own(run: Any) -> None:
         )
     )
     assert front.ledger.failure is None
-    assert front.proxy.last_upstream_error is ErrorCode.LLM_UNAVAILABLE
+    assert front.proxy.last_upstream_error is ErrorCode.LLM_RATE_LIMIT
 
 
 # #550-T10
@@ -180,7 +180,8 @@ def test_an_error_that_quotes_the_key_reaches_the_engine_without_it(run: Any) ->
     assert errors, outcome.reply
     shown = json.dumps(errors) + json.dumps(outcome.reply)
     assert REAL_KEY not in shown and REAL_KEY[:12] not in shown
-    assert "[redacted]" in shown
+    # The provider's words are not passed on, so there is nothing to cut: our sentence is.
+    assert "the model provider refused the request" in shown
     failure = engine.front("acme-quote").ledger.failure
     assert failure is not None and failure.code is ErrorCode.LLM_AUTH
     assert REAL_KEY[:12] not in failure.detail

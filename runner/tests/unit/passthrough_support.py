@@ -238,6 +238,7 @@ def rig(
     prices: UnitCosts = PRICES,
     superseded: Callable[[], bool] = lambda: False,
     on_send: Callable[[], None] | None = None,
+    unknown_cost_ends_run: bool = True,
 ) -> Rig:
     clock = [0.0]
     ledger = BudgetLedger(
@@ -257,6 +258,7 @@ def rig(
         capability=capability,
         prices=prices,
         superseded=superseded,
+        unknown_cost_ends_run=unknown_cost_ends_run,
     )
     return Rig(proxy, ledger, upstream, family, capability, clock)
 

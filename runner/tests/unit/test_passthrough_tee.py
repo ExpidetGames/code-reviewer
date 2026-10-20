@@ -67,10 +67,12 @@ def test_an_answer_that_has_nothing_of_the_key_is_returned_as_it_is() -> None:
 
 # #550-T10
 def test_a_short_key_is_cut_out_whole_and_nothing_else() -> None:
-    redactor = Redactor("abc12345")
-    assert redactor.redact(b"key abc12345 and abc1234 and bc12345") == (
-        b"key [redacted] and abc1234 and bc12345"
+    redactor = Redactor("abc1234567890xyz")
+    assert redactor.redact(b"key abc1234567890xyz and abc123456789 and bc1234567890xy") == (
+        b"key [redacted] and [redacted] and [redacted]"
     )
+    # A run shorter than eight characters of it is ordinary text.
+    assert redactor.redact(b"abc1234 and 7890xyz") == b"abc1234 and 7890xyz"
 
 
 # -- server-sent events --------------------------------------------------------------------------

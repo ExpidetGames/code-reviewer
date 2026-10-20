@@ -231,7 +231,7 @@ def test_the_first_event_reaches_the_engine_before_the_provider_has_sent_the_las
 
 
 # #550-T09
-def test_an_engine_that_closes_its_connection_cancels_the_call_to_the_provider() -> None:
+def test_an_engine_that_closes_its_connection_does_not_hide_the_usage_of_the_call() -> None:
     gated = Gated()
     try:
         with front(gated.url) as f:
@@ -248,8 +248,11 @@ def test_an_engine_that_closes_its_connection_cancels_the_call_to_the_provider()
                 time.sleep(0.05)
             assert f.proxy.wait_idle(5)
             usage = f.ledger.usage(MODEL)
-            # The call was made and its usage was never seen: the cost of the run is unknown.
-            assert usage.ai_calls == 1 and usage.cost_usd is None
+            # The proxy read the rest of the answer for its usage, then closed the provider's
+            # connection: the call is settled at the provider's own figures, nothing is hidden.
+            assert usage.ai_calls == 1
+            assert usage.cost_usd is not None and usage.cost_usd > 0
+            assert f.ledger.failure is None
     finally:
         gated.stop()
 
@@ -300,7 +303,7 @@ def test_a_redirect_from_the_provider_is_not_followed() -> None:
 
 
 # #550-T10
-def test_an_error_body_that_quotes_the_key_is_redacted_on_the_wire() -> None:
+def test_an_error_body_that_quotes_the_key_reaches_the_engine_as_our_sentence() -> None:
     with fake_provider() as provider, front(provider.url) as f:
         provider.quote_key = True
         provider.fail_next(500)
@@ -310,7 +313,9 @@ def test_an_error_body_that_quotes_the_key_is_redacted_on_the_wire() -> None:
         data = response.read()
         assert response.status == 500
         assert REAL_KEY.encode() not in data and REAL_KEY[:12].encode() not in data
-        assert b"[redacted]" in data
+        # The provider's words are not passed on at all: the engine gets our sentence.
+        assert b"fake upstream" not in data
+        assert json.loads(data)["error"]["code"] == "llm_unavailable"
         # The key was in the provider's answer: it really did quote the one the proxy sent.
         assert REAL_KEY in provider.records[0].headers["authorization"]
 

@@ -239,8 +239,9 @@ def test_a_cut_stream_cuts_the_engine_and_is_held_as_spent_not_given_back(
     sink = r.post()
     assert sink.aborted and not sink.ended
     assert sink.body == b"".join(events[:2])
-    # The engine retries it as a new call, so the run goes on; its cost is unknown from here on.
-    assert r.ledger.failure is None
+    # The engine retries it as a new call, but the cost of this one is unknown: a managed run ends.
+    assert r.ledger.failure is not None
+    assert r.ledger.failure.code is ErrorCode.DYNAMIC_ACCOUNTING_FAILED
     usage = r.ledger.usage(MODEL)
     assert usage.ai_calls == 1 and usage.cost_usd is None
     assert r.proxy.last_upstream_error is ErrorCode.LLM_UNAVAILABLE
@@ -255,7 +256,8 @@ def test_an_error_inside_a_200_stream_is_a_failed_call(family: WireFamily) -> No
     sink = r.post()
     assert sink.status == 200 and sink.ended
     assert sink.body == b"".join(events)  # the engine sees the error, as it does from a provider
-    assert r.ledger.failure is None
+    assert r.ledger.failure is not None
+    assert r.ledger.failure.code is ErrorCode.DYNAMIC_ACCOUNTING_FAILED
     assert r.ledger.usage(MODEL).cost_usd is None
     assert r.proxy.last_upstream_error is ErrorCode.LLM_UNAVAILABLE
 
@@ -268,30 +270,18 @@ def test_a_stream_that_closes_before_its_last_event_is_cut_for_the_engine() -> N
     assert sink.aborted and not sink.ended
 
 
-# #550-T09
-@pytest.mark.parametrize("family", FAMILIES)
-def test_an_engine_that_goes_away_cancels_the_call_to_the_provider(family: WireFamily) -> None:
-    r = rig(family, streamed(family))
-    sink = MemorySink(r.upstream.timeline, gone_after=1)
-    r.post(sink=sink)
-    assert r.upstream.responses[0].closed
-    assert sink.aborted
-    assert len(sink.chunks) < len(streamed(family).chunks)
-    assert r.ledger.usage(MODEL).cost_usd is None
-
-
 # #550-T10
 def test_the_retries_of_the_engine_are_calls_of_their_own_in_the_ledger() -> None:
     family = WireFamily.OPENAI_CHAT
     r = rig(
         family,
-        failing(family, 429, retry_after="2"),
-        failing(family, 500),
-        failing(family, 529),
+        failing(family, 429, **{"retry-after": "2"}),
+        failing(family, 429),
+        failing(family, 409),
         streamed(family, 4),
     )
     statuses = [r.post().status for _ in range(4)]
-    assert statuses == [429, 500, 529, 200]
+    assert statuses == [429, 429, 409, 200]
     usage = r.ledger.usage(MODEL)
     assert usage.ai_calls == 4
     # A refusal costs nothing; only the answered call has a price.
@@ -302,32 +292,35 @@ def test_the_retries_of_the_engine_are_calls_of_their_own_in_the_ledger() -> Non
 
 # #550-T10
 @pytest.mark.parametrize(
-    ("status", "code", "ends_the_run"),
+    ("status", "code", "run_code"),
     [
-        (401, ErrorCode.LLM_AUTH, True),
-        (403, ErrorCode.LLM_AUTH, True),
-        (402, ErrorCode.LLM_QUOTA, True),
-        (404, ErrorCode.MODEL_UNKNOWN, True),
-        (400, ErrorCode.LLM_BAD_REQUEST, True),
-        (422, ErrorCode.LLM_BAD_REQUEST, True),
-        (429, ErrorCode.LLM_RATE_LIMIT, False),
-        (500, ErrorCode.LLM_UNAVAILABLE, False),
-        (503, ErrorCode.LLM_UNAVAILABLE, False),
-        (529, ErrorCode.LLM_UNAVAILABLE, False),
+        (401, ErrorCode.LLM_AUTH, ErrorCode.LLM_AUTH),
+        (403, ErrorCode.LLM_AUTH, ErrorCode.LLM_AUTH),
+        (402, ErrorCode.LLM_QUOTA, ErrorCode.LLM_QUOTA),
+        (404, ErrorCode.MODEL_UNKNOWN, ErrorCode.MODEL_UNKNOWN),
+        (400, ErrorCode.LLM_BAD_REQUEST, ErrorCode.LLM_BAD_REQUEST),
+        (422, ErrorCode.LLM_BAD_REQUEST, ErrorCode.LLM_BAD_REQUEST),
+        (429, ErrorCode.LLM_RATE_LIMIT, None),
+        # A server error may have been billed: the call is unknown and a managed run ends.
+        (500, ErrorCode.LLM_UNAVAILABLE, ErrorCode.DYNAMIC_ACCOUNTING_FAILED),
+        (503, ErrorCode.LLM_UNAVAILABLE, ErrorCode.DYNAMIC_ACCOUNTING_FAILED),
+        (529, ErrorCode.LLM_UNAVAILABLE, ErrorCode.DYNAMIC_ACCOUNTING_FAILED),
     ],
 )
 def test_a_provider_error_gets_a_stable_code_and_keeps_its_status_for_the_engine(
-    status: int, code: ErrorCode, ends_the_run: bool
+    status: int, code: ErrorCode, run_code: ErrorCode | None
 ) -> None:
     family = WireFamily.ANTHROPIC_MESSAGES
     r = rig(family, failing(family, status, "provider words about the pull request"))
     sink = r.post()
     assert sink.status == status
     assert r.proxy.last_upstream_error is code
-    assert (r.ledger.failure is not None) is ends_the_run
-    if r.ledger.failure is not None:
-        assert r.ledger.failure.code is code
-        assert "provider words" not in r.ledger.failure.detail
+    if run_code is None:
+        assert r.ledger.failure is None
+        return
+    assert r.ledger.failure is not None
+    assert r.ledger.failure.code is run_code
+    assert "provider words" not in r.ledger.failure.detail
 
 
 # #550-T10
@@ -359,10 +352,15 @@ def test_a_call_without_an_answer_is_a_5xx_the_engine_may_retry(
     sink = r.post()
     assert sink.status == status
     assert r.proxy.last_upstream_error is code
-    assert r.ledger.failure is None
     usage = r.ledger.usage(MODEL)
-    # A call that never left costs nothing; one that did may have been billed.
+    # A call that never left costs nothing; one that did may have been billed: unknown, and a
+    # managed run ends.
     assert usage.cost_usd == (0.0 if settled_free else None)
+    if settled_free:
+        assert r.ledger.failure is None
+    else:
+        assert r.ledger.failure is not None
+        assert r.ledger.failure.code is ErrorCode.DYNAMIC_ACCOUNTING_FAILED
 
 
 # #550-T10
@@ -377,7 +375,7 @@ def test_a_destination_that_is_not_public_ends_the_run() -> None:
 
 # #550-T10
 @pytest.mark.parametrize("family", FAMILIES)
-def test_an_error_body_that_quotes_the_key_reaches_the_engine_redacted(
+def test_an_error_body_that_quotes_the_key_reaches_the_engine_without_it(
     family: WireFamily, caplog: pytest.LogCaptureFixture
 ) -> None:
     caplog.set_level(logging.DEBUG)
@@ -388,7 +386,8 @@ def test_an_error_body_that_quotes_the_key_reaches_the_engine_redacted(
     wire = sink.everything()
     assert REAL_KEY.encode() not in wire
     assert REAL_KEY[:12].encode() not in wire and REAL_KEY[-9:].encode() not in wire
-    assert b"[redacted]" in wire
+    # Not even cut out: the provider's words are not passed on at all (hostile engine tests).
+    assert b"fake upstream" not in wire
     assert sink.length == len(sink.body)
     assert r.ledger.failure is not None
     assert REAL_KEY[:12] not in r.ledger.failure.detail

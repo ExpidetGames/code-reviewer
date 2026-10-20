@@ -47,6 +47,9 @@ class RefusalCode(StrEnum):
     MODEL_NOT_ALLOWED = "model_not_allowed"
     REQUEST_TOO_LARGE = "request_too_large"
     LENGTH_REQUIRED = "length_required"
+    # A second call while one is in flight (the engine's calls are serial): refused at once, not a
+    # call, no reason to end the run. The engine retries a 429 by itself.
+    CALL_IN_FLIGHT = "call_in_flight"
 
 
 _STATUS: Final = {
@@ -55,6 +58,7 @@ _STATUS: Final = {
     RefusalCode.MODEL_NOT_ALLOWED: 403,
     RefusalCode.REQUEST_TOO_LARGE: 413,
     RefusalCode.LENGTH_REQUIRED: 411,
+    RefusalCode.CALL_IN_FLIGHT: 429,
 }
 _RUN_CODE: Final = {
     RefusalCode.REQUEST_TOO_LARGE: ErrorCode.DYNAMIC_BUDGET_EXCEEDED,

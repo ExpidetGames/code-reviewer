@@ -48,6 +48,11 @@ class TapResult:
 class UsageTap(Protocol):
     def feed(self, data: bytes) -> None: ...
 
+    @property
+    def complete(self) -> bool:
+        """The answer has reached its end and stated its usage: nothing more is needed from it."""
+        ...
+
     def finish(self) -> TapResult: ...
 
 
@@ -140,6 +145,30 @@ def _chat_finished(choices: Any) -> bool:
     )
 
 
+def _is_error(name: str | None, document: dict[str, Any]) -> bool:
+    """Whether one event (or the whole document) of an answer is an error, whatever the HTTP status
+    of the answer was."""
+    return (
+        "error" in document
+        or name == "error"
+        or document.get("type") in ("error", "response.failed")
+    )
+
+
+def is_error_event(raw: bytes) -> bool:
+    """Whether one framed event of a stream is an error event. Only the provider's own structure
+    counts (the name of the event, the keys of its JSON): the words of the model never do."""
+    event = read_event(raw)
+    if event.name == "error":
+        return True
+    try:
+        value: Any = json.loads(event.data)
+    except ValueError:
+        return False
+    document = _object(value)
+    return document is not None and _is_error(event.name, document)
+
+
 class _Reading:
     """What has been seen of an answer so far; the same for a stream and for a document."""
 
@@ -155,11 +184,7 @@ class _Reading:
         document = _object(value)
         if document is None:
             return
-        if (
-            "error" in document
-            or name == "error"
-            or document.get("type") in ("error", "response.failed")
-        ):
+        if _is_error(name, document):
             self.errored = True
         family = self.family
         if family is WireFamily.OPENAI_CHAT:
@@ -211,6 +236,10 @@ class _StreamTap:
         for raw in self._framer.feed(data):
             self._take(raw)
 
+    @property
+    def complete(self) -> bool:
+        return self._reading.terminated and not self._reading.errored and bool(self._reading.usage)
+
     def _take(self, raw: bytes) -> None:
         event = read_event(raw)
         if event.data == "[DONE]":
@@ -238,6 +267,10 @@ class _DocumentTap:
 
     def feed(self, data: bytes) -> None:
         self._body += data
+
+    @property
+    def complete(self) -> bool:
+        return False
 
     def finish(self) -> TapResult:
         reading = _Reading(self._family)

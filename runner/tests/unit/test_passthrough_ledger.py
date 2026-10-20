@@ -112,3 +112,27 @@ def test_an_over_report_without_a_cost_is_booked_at_what_was_reserved() -> None:
     assert budget.usage("m").cost_usd is None
     held_after = budget.reserve_call(b"x" * 3000, output_tokens=1_000)
     assert held_after.cost >= reservation.cost
+
+
+# #550-B3-L05
+def test_a_call_without_usage_is_booked_at_its_worst_case_not_its_expected_cost() -> None:
+    budget = BudgetLedger(
+        DynamicLimits(max_cost_usd=Decimal("1.00")),
+        window_tokens=200_000,
+        output_tokens=8_192,
+        unit_costs=UnitCosts(
+            input_usd_per_mtok=Decimal(3),
+            output_usd_per_mtok=Decimal(15),
+            cache_read_usd_per_mtok=Decimal("0.3"),
+            cache_write_usd_per_mtok=Decimal("3.75"),
+        ),
+    )
+    reservation = budget.reserve_call(b"x" * 3000, output_tokens=1_000)
+    budget.settle_unknown(reservation)
+    # Every byte as a token at the dearest input price (the cache write), plus the whole cap.
+    worst = Decimal(3000) * Decimal("3.75") / 1_000_000 + Decimal(1000) * 15 / 1_000_000
+    assert budget.worst_case_cost(reservation) == worst
+    assert budget._counters.cost == worst  # pyright: ignore[reportPrivateUsage]
+    assert worst > reservation.cost
+    assert budget.unknown_calls == 1
+    assert budget._counters.reserved_cost == 0  # pyright: ignore[reportPrivateUsage]
