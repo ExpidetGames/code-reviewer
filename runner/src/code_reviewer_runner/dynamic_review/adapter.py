@@ -39,6 +39,7 @@ removes it.
 """
 
 import contextlib
+import http.client
 import json
 import logging
 import os
@@ -55,6 +56,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlsplit
 from urllib.request import Request
 
 from code_reviewer_runner.dynamic_findings import (
@@ -113,6 +115,12 @@ DEADLINE_TOLERANCE_SECONDS = 0.25
 # How long the engine's event stream may take to say it is connected (the audit of the native path
 # runs on it, so no turn starts before it does).
 EVENTS_CONNECT_SECONDS = 10.0
+# How long opening the stream may take (the connection and the response head).
+EVENTS_OPEN_SECONDS = 10.0
+# How long an open stream may say nothing at all. The pinned engine beats every ten seconds
+# (`server.heartbeat`), so a stream that is quiet for this long is not the engine's: the audit that
+# runs on it has stopped. A version bump of the pinned engine must keep that beat.
+EVENT_IDLE_SECONDS = 35.0
 # The agent the runner defines and selects; the request may never name another.
 REVIEW_AGENT = "review"
 # The largest startup/answer body the adapter will read before the ledger refuses it.
@@ -377,24 +385,56 @@ class EngineClient:
         return status == 204
 
     def open_events(self) -> EventStream:
-        """The engine's event stream (`GET /event`), scoped to the export like every request. The
-        socket timeout is the longest a turn can take: the stream is quiet while a model thinks."""
-        request = Request(
-            f"{self.base_url}/event",
-            headers={"x-opencode-directory": self.directory, "accept": "text/event-stream"},
+        """The engine's event stream (`GET /event`), scoped to the export like every request.
+
+        Opening it has a short timeout of its own, and an open stream a read timeout of its own: the
+        engine beats every ten seconds, so a quiet stream is a dead one (`EVENT_IDLE_SECONDS`). It
+        is a direct connection to the engine's loopback port: no proxy from the environment, no
+        redirect."""
+        parts = urlsplit(self.base_url)
+        connection = http.client.HTTPConnection(
+            parts.hostname or "127.0.0.1", parts.port, timeout=EVENTS_OPEN_SECONDS
         )
         try:
-            response = no_redirect_opener(direct=True).open(
-                request, timeout=MAX_TURN_TIMEOUT_SECONDS
+            connection.request(
+                "GET",
+                "/event",
+                headers={"x-opencode-directory": self.directory, "accept": "text/event-stream"},
             )
-        except (HTTPError, URLError, OSError):
+            response = connection.getresponse()
+        except (OSError, http.client.HTTPException):
+            connection.close()
             raise _unreachable() from None
-        if response.status != 200:
-            response.close()
+        if response.status != 200 or connection.sock is None:
+            connection.close()
             raise EngineError(
                 ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE, "the engine refused its event stream"
             )
-        return response
+        connection.sock.settimeout(EVENT_IDLE_SECONDS)
+        return _EventResponse(connection, response)
+
+
+class _EventResponse:
+    """The open event response. Closing it from another thread shuts the socket down first, so a
+    reader that waits for the next line is released at once instead of at its timeout."""
+
+    def __init__(
+        self, connection: http.client.HTTPConnection, response: http.client.HTTPResponse
+    ) -> None:
+        self._connection = connection
+        self._response = response
+
+    def readline(self, limit: int = -1, /) -> bytes:
+        return self._response.readline(limit)
+
+    def close(self) -> None:
+        sock = self._connection.sock
+        if sock is not None:
+            with contextlib.suppress(OSError):  # a socket that is gone is the point
+                sock.shutdown(socket.SHUT_RDWR)
+        with contextlib.suppress(OSError):
+            self._response.close()
+        self._connection.close()
 
 
 # What a finish reason or an error name of the engine's answer may look like to be named in a log:
@@ -903,11 +943,15 @@ class DynamicEngine:
                 wait_idle=self._wait_idle,
             )
             try:
-                return EngineAnswer(findings=final.run(), error=None)
+                answer = EngineAnswer(findings=final.run(), error=None)
             except NoFinalAnswer as error:
-                return self._no_answer(error.note)
+                answer = self._no_answer(error.note)
         finally:
             events.stop()
+        # The reader may have been working on a last event when it was stopped: what it recorded
+        # then is the run's result as much as what it recorded before.
+        self._raise_recorded_failure()
+        return answer
 
     def _parse_plain(self, document: dict[str, Any]) -> DynamicFindings:
         """The envelope check of the model's JSON; the runner sets the constants itself (#530)."""

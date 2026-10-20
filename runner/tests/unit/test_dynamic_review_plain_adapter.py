@@ -105,8 +105,10 @@ def reply(text: str | None = None, *, error: str | None = None) -> bytes:
 class Events:
     """An engine event stream that says it is connected and then stays quiet until closed."""
 
-    def __init__(self, *, connected: bool = True) -> None:
+    def __init__(self, *, connected: bool = True, late: list[bytes] | None = None) -> None:
         self._lines: queue.Queue[bytes] = queue.Queue()
+        # Lines the reader is still working on when the run closes the stream.
+        self._late = late or []
         if connected:
             self._lines.put(b'data: {"type": "server.connected", "properties": {}}\n')
             self._lines.put(b"\n")
@@ -115,6 +117,8 @@ class Events:
         return self._lines.get(timeout=10)
 
     def close(self) -> None:
+        for line in self._late:
+            self._lines.put(line)
         self._lines.put(b"")
 
 
@@ -309,3 +313,26 @@ def test_the_error_type_of_an_unopenable_stream_is_the_engines(tmp_path: Path) -
 
     with pytest.raises(EngineError):
         run_turns(engine_with(tmp_path, plain=True), client)
+
+
+# #552-S4: an audit failure the reader records while the run is closing is still the run's result
+def test_a_failure_the_reader_records_while_the_run_closes_it_is_not_lost(tmp_path: Path) -> None:
+    oversized = {
+        "type": "message.part.updated",
+        "properties": {
+            "sessionID": "ses_1",
+            "part": {
+                "type": "tool",
+                "tool": "read",
+                "callID": "c1",
+                "state": {"status": "completed", "input": {}, "output": "x" * 70_000},
+            },
+        },
+    }
+    late = [f"data: {json.dumps(oversized)}\n".encode(), b"\n"]
+    client = Client([reply(review_text())], events=Events(late=late))
+
+    with pytest.raises(LimitError) as raised:
+        run_turns(engine_with(tmp_path, plain=True), client)
+
+    assert raised.value.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED

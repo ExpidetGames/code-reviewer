@@ -35,7 +35,7 @@ class ScriptedStream:
     """An event stream a test feeds line by line; `close` ends it, as a closed socket does."""
 
     def __init__(self) -> None:
-        self.lines: queue.Queue[bytes] = queue.Queue()
+        self.lines: queue.Queue[bytes | None] = queue.Queue()
         self.closed = False
 
     def send(self, event: dict[str, Any]) -> None:
@@ -45,8 +45,14 @@ class ScriptedStream:
     def send_raw(self, line: bytes) -> None:
         self.lines.put(line)
 
+    def go_silent(self) -> None:
+        """What a socket whose read timeout ran out does: the next read raises."""
+        self.lines.put(None)
+
     def readline(self, limit: int = -1) -> bytes:
         line = self.lines.get(timeout=5)
+        if line is None:
+            raise TimeoutError("timed out")
         return line[:limit] if limit >= 0 else line
 
     def end(self) -> None:
@@ -214,3 +220,35 @@ def test_an_event_too_large_to_audit_is_the_failure_of_the_run() -> None:
 
     assert ledger.failure is not None
     assert ledger.failure.code is ErrorCode.DYNAMIC_ACCOUNTING_FAILED
+
+
+# #552-S4: the data lines of ONE event are bounded together, not only line by line
+def test_the_data_lines_of_one_event_are_bounded_by_their_sum() -> None:
+    stream = ScriptedStream()
+    events, ledger = reader(stream)
+    stream.send(CONNECTED)
+    events.start(5.0)
+
+    megabyte = b"data: " + b"a" * (1024 * 1024) + b"\n"
+    for _ in range(MAX_EVENT_BYTES // (1024 * 1024) + 1):  # no blank line ends the event
+        stream.send_raw(megabyte)
+    wait_for(lambda: ledger.failure is not None, 2.0)
+
+    assert ledger.failure is not None
+    assert ledger.failure.code is ErrorCode.DYNAMIC_ACCOUNTING_FAILED
+    events.stop()
+
+
+# #552-N3, #552-S4: a stream that stays open and goes quiet is an audit that stopped
+def test_a_stream_that_goes_silent_is_the_failure_of_the_run() -> None:
+    stream = ScriptedStream()
+    events, ledger = reader(stream)
+    stream.send(CONNECTED)
+    events.start(5.0)
+
+    stream.go_silent()
+    wait_for(lambda: ledger.failure is not None, 2.0)
+
+    assert ledger.failure is not None
+    assert ledger.failure.code is ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE
+    events.stop()

@@ -17,6 +17,8 @@ from decimal import Decimal
 import pytest
 
 from code_reviewer_runner.dynamic_review.budget import (
+    MAX_COUNTED_FILES,
+    MAX_FILE_PATH_CHARS,
     MAX_MARK_RETURNS,
     WRAP_UP_RESERVE_SECONDS,
     BudgetLedger,
@@ -438,3 +440,24 @@ def test_an_unbilled_normal_call_arms_nothing() -> None:
     budget.settle_unbilled(normal)
 
     assert budget.reserve_call(carrying(), output_tokens=1_024).final is False
+
+
+# #552-S4: the files the audit has seen are held; the engine cannot make the ledger hold more
+# than it can, by count or by the length of a path
+def test_more_distinct_files_than_the_ledger_can_hold_fail_closed() -> None:
+    budget = ledger()
+
+    for number in range(MAX_COUNTED_FILES):
+        budget.count_file(f"f{number}")
+    budget.count_file("f0")  # a file seen again is still one file
+    with pytest.raises(LimitError) as raised:
+        budget.count_file("one-too-many")
+
+    assert raised.value.code is ErrorCode.DYNAMIC_ACCOUNTING_FAILED
+
+
+def test_a_path_longer_than_any_real_one_fails_closed() -> None:
+    with pytest.raises(LimitError) as raised:
+        ledger().count_file("p" * (MAX_FILE_PATH_CHARS + 1))
+
+    assert raised.value.code is ErrorCode.DYNAMIC_ACCOUNTING_FAILED

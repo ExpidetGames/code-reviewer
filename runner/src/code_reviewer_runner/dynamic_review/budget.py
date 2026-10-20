@@ -170,6 +170,11 @@ MAX_FINAL_MARKS = 2
 # How often one mark comes back when its call was turned away unbilled (a 429 or a 5xx before the
 # provider generated anything): the engine retries such a call by itself.
 MAX_MARK_RETURNS = 2
+# The files the ledger holds as read, and the longest path it holds (#552). A path comes from what
+# a tool returned (itself bounded) or from an argument the engine reported, which is the engine's
+# to choose; neither may make the ledger hold without end.
+MAX_COUNTED_FILES = 100_000
+MAX_FILE_PATH_CHARS = 4_096
 # What the recovery call's request is larger than the last call's by, besides the model's own last
 # answer (one output allowance): the engine's recovery message and the runner's instruction.
 RECOVERY_REQUEST_SLACK_BYTES = 4096
@@ -1154,8 +1159,15 @@ class BudgetLedger:
 
     def count_file(self, path: str) -> None:
         """Count a content-bearing file the run read. Distinct files, not calls. Not a budget."""
+        if len(path) > MAX_FILE_PATH_CHARS:
+            raise LimitError(ErrorCode.DYNAMIC_ACCOUNTING_FAILED, "a file path is too long")
         with self._lock:
-            self._counters.files.add(path)
+            files = self._counters.files
+            if path not in files and len(files) >= MAX_COUNTED_FILES:
+                raise LimitError(
+                    ErrorCode.DYNAMIC_ACCOUNTING_FAILED, "more distinct files than the ledger holds"
+                )
+            files.add(path)
 
     def add_result_bytes(self, size: int) -> None:
         """Count the UTF-8 bytes of one tool result delivered to the model."""

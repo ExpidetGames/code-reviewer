@@ -25,9 +25,10 @@ from code_reviewer_runner.dynamic_review.tool_part_audit import ToolPartAudit
 from code_reviewer_runner.job_loop.jsonvalues import as_object
 from code_reviewer_runner.result import ErrorCode
 
-# The longest line of the stream that is held. A result is at most 64 KiB, which JSON escaping can
-# multiply by six, so no event of a run within its bounds comes near this; a longer line is an
-# event the audit cannot see into, and that is a failure, not something to skip.
+# The most one event may hold: the sum of its `data:` lines, and so also any one line. A result is
+# at most 64 KiB, which JSON escaping can multiply by six, so no event of a run within its bounds
+# comes near this; a larger event is one the audit cannot see into, and that is a failure, not
+# something to skip. Nothing of an event is kept past this, so the reader's memory is bounded by it.
 MAX_EVENT_BYTES: Final = 8 * 1024 * 1024
 CONNECTED_EVENT: Final = "server.connected"
 _DATA: Final = b"data:"
@@ -91,6 +92,11 @@ class EventReader:
             self._events(stream)
         except LimitError as error:
             self._ledger.record_failure(error)
+        except TimeoutError:
+            # The stream stayed open and said nothing: the engine beats every ten seconds.
+            self._fail(
+                ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE, "the engine's event stream went silent"
+            )
         except Exception:  # an audit that broke must stop the run, never be lost
             self._fail(ErrorCode.DYNAMIC_ACCOUNTING_FAILED, "the engine's events could not be read")
         else:
@@ -103,22 +109,27 @@ class EventReader:
 
     def _events(self, stream: EventStream) -> None:
         data: list[bytes] = []
+        held = 0
         while True:
             line = stream.readline(MAX_EVENT_BYTES + 1)
             if not line:
                 return
-            if len(line) > MAX_EVENT_BYTES:
-                raise LimitError(
-                    ErrorCode.DYNAMIC_ACCOUNTING_FAILED, "an engine event is too large to audit"
-                )
             line = line.rstrip(b"\r\n")
             if line:
                 if line.startswith(_DATA):
                     data.append(line[len(_DATA) :].lstrip(b" "))
+                    held += len(line)
+                    if held > MAX_EVENT_BYTES:
+                        # One event is the sum of its data lines: bounded as a whole, not per line.
+                        raise LimitError(
+                            ErrorCode.DYNAMIC_ACCOUNTING_FAILED,
+                            "an engine event is too large to audit",
+                        )
                 continue  # a comment or another field of the framing: not data
             if data:
                 self._event(b"\n".join(data))
                 data = []
+                held = 0
 
     def _event(self, payload: bytes) -> None:
         try:

@@ -33,6 +33,12 @@ from code_reviewer_runner.result import ErrorCode
 
 PART_EVENT = "message.part.updated"
 _DONE = ("completed", "error")
+# The audit holds one id per tool part it has seen, and an id the engine chose. Both are bounded, so
+# an engine that reports without end cannot make the adapter hold without end. A run within its
+# cost limit makes far fewer tool calls than this (a call takes seconds, the job a few minutes),
+# and a real call id is a few dozen characters.
+MAX_AUDITED_PARTS = 10_000
+MAX_PART_ID_CHARS = 256
 
 
 class ToolPartAudit:
@@ -68,7 +74,13 @@ class ToolPartAudit:
                     ErrorCode.DYNAMIC_ACCOUNTING_FAILED, "a tool result cannot be tied to a call"
                 )
             return
+        if len(identity) > MAX_PART_ID_CHARS:
+            raise LimitError(ErrorCode.DYNAMIC_ACCOUNTING_FAILED, "a tool call id is too long")
         if identity not in self._called:
+            if len(self._called) >= MAX_AUDITED_PARTS:
+                raise LimitError(
+                    ErrorCode.DYNAMIC_ACCOUNTING_FAILED, "more tool parts than the audit can hold"
+                )
             self._called.add(identity)
             self._ledger.count_tool_call(name)
         if state is not None and status in _DONE and identity not in self._resulted:

@@ -23,7 +23,11 @@ from code_reviewer_runner.dynamic_review.budget import (
     LimitError,
     UnitCosts,
 )
-from code_reviewer_runner.dynamic_review.tool_part_audit import ToolPartAudit
+from code_reviewer_runner.dynamic_review.tool_part_audit import (
+    MAX_AUDITED_PARTS,
+    MAX_PART_ID_CHARS,
+    ToolPartAudit,
+)
 from code_reviewer_runner.result import ErrorCode
 
 SESSION = "ses_1"
@@ -167,3 +171,26 @@ def test_events_that_are_not_tool_parts_of_the_session_are_ignored(event: dict[s
     ToolPartAudit(budget, SESSION).feed(event)
 
     assert budget.tool_calls == 0 and budget.returned_bytes == 0
+
+
+# #552-S4: the audit holds the ids it has seen; an engine cannot make it hold without end
+def test_more_distinct_tool_parts_than_the_audit_can_hold_fail_closed() -> None:
+    budget = ledger()
+    audit = ToolPartAudit(budget, SESSION, export_root=ROOT)
+
+    for number in range(MAX_AUDITED_PARTS):
+        audit.feed(part(f"call-{number}", "read", "running"))
+    with pytest.raises(LimitError) as raised:
+        audit.feed(part("one-too-many", "read", "running"))
+
+    assert raised.value.code is ErrorCode.DYNAMIC_ACCOUNTING_FAILED
+
+
+# #552-S4: and an id of the engine's choosing is not held at any length
+def test_a_call_id_longer_than_any_id_of_the_engine_fails_closed() -> None:
+    audit = ToolPartAudit(ledger(), SESSION, export_root=ROOT)
+
+    with pytest.raises(LimitError) as raised:
+        audit.feed(part("c" * (MAX_PART_ID_CHARS + 1), "read", "running"))
+
+    assert raised.value.code is ErrorCode.DYNAMIC_ACCOUNTING_FAILED
