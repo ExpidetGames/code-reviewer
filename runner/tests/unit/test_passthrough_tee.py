@@ -181,10 +181,12 @@ def test_a_chat_stream_without_the_done_marker_is_complete_with_its_finish_and_u
 # #550-T06
 def test_a_charge_the_provider_states_is_kept() -> None:
     usage = {"prompt_tokens": 10, "completion_tokens": 5, "cost": 0.0012}
+    finish: dict[str, object] = {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}
     chunk: dict[str, object] = {"choices": [], "usage": usage}
-    body = f"data: {json.dumps(chunk)}\n\ndata: [DONE]\n\n".encode()
+    # The usage comes after the finish chunk, as every provider sends it (review of PR #569, S2).
+    body = f"data: {json.dumps(finish)}\n\ndata: {json.dumps(chunk)}\n\ndata: [DONE]\n\n".encode()
     result = read_stream(WireFamily.OPENAI_CHAT, [body])
-    assert result.usage == CallUsage(10, 5, 0, 0, Decimal("0.0012"))
+    assert result.usage == CallUsage(10, 5, stated_cost=Decimal("0.0012"))
 
 
 # #550-T06
@@ -253,7 +255,7 @@ PRICES = UnitCosts(
 
 # #550-T11
 def test_a_call_costs_its_fresh_input_its_cache_reads_and_writes_and_its_output() -> None:
-    usage = CallUsage(1000, 20, 300, 100, None)
+    usage = CallUsage(1000, 20, cache_read=300, cache_write_5m=100)
     # 600 fresh * 3 + 300 read * 0.3 + 100 written * 3.75 + 20 out * 15, per million tokens.
     assert call_cost(usage, PRICES) == Decimal("0.002565")
 
@@ -261,17 +263,18 @@ def test_a_call_costs_its_fresh_input_its_cache_reads_and_writes_and_its_output(
 # #550-T11
 def test_a_cache_read_without_a_read_price_is_priced_as_input_and_a_write_has_no_price() -> None:
     plain = UnitCosts(input_usd_per_mtok=Decimal(3), output_usd_per_mtok=Decimal(15))
-    assert call_cost(CallUsage(1000, 20, 300, 0, None), plain) == Decimal("0.0033")
+    assert call_cost(CallUsage(1000, 20, cache_read=300), plain) == Decimal("0.0033")
     # Priced as input it would be cheaper than it is, so the cost is unknown instead.
-    assert call_cost(CallUsage(1000, 20, 300, 100, None), plain) is None
+    assert call_cost(CallUsage(1000, 20, cache_read=300, cache_write_5m=100), plain) is None
 
 
 # #550-T11
 def test_the_charge_a_provider_states_is_the_cost() -> None:
-    usage = CallUsage(1000, 20, 0, 0, Decimal("0.5"))
+    usage = CallUsage(1000, 20, stated_cost=Decimal("0.5"))
     assert call_cost(usage, PRICES) == Decimal("0.5")
 
 
-# #550-T11
-def test_cache_counts_that_do_not_fit_the_prompt_are_priced_as_plain_input() -> None:
-    assert call_cost(CallUsage(100, 10, 90, 90, None), PRICES) == Decimal("0.00045")
+# #551-T05
+def test_cache_counts_that_do_not_fit_the_prompt_have_no_cost() -> None:
+    # Once priced as plain input; counts that cannot be true are now an unknown call, never a guess.
+    assert call_cost(CallUsage(100, 10, cache_read=90, cache_write_5m=90), PRICES) is None

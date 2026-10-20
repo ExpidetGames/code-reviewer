@@ -15,6 +15,7 @@ import http.client
 import json
 import socket
 import sys
+import threading
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -664,3 +665,69 @@ def test_restarting_the_script_and_resetting_the_faults_make_the_upstream_ready_
     )
     assert streamed[0] == 200 and b"[DONE]" in streamed[2]
     assert not server.quote_key
+
+
+# #551-F02
+@pytest.mark.parametrize("family", FAMILIES)
+@pytest.mark.parametrize("fault", ["missing", "unknown_field", "bad_value", "duplicate"])
+def test_the_upstream_can_answer_with_a_usage_fault_in_a_document_and_in_a_stream(
+    family: Family, fault: str
+) -> None:
+    with upstream(family, TOOL) as server:
+        server.usage_fault = fault  # type: ignore[assignment]
+        _, _, plain = ask(server.url, family, REAL, streaming=False)
+        _, _, streamed = ask(server.url, family, REAL, streaming=True)
+        server.reset_faults()
+        _, _, healthy = ask(server.url, family, REAL, streaming=False)
+
+    assert json.loads(plain) == answer(family, TOOL, 1, MODEL, usage_fault=fault)  # type: ignore[arg-type]
+    assert streamed == b"".join(stream(family, TOOL, 2, MODEL, usage_fault=fault))  # type: ignore[arg-type]
+    assert json.loads(healthy) == answer(family, TOOL, 3, MODEL)
+
+
+# -- the number of the call is taken before the answer is sent (#551-F02, #567) -------------------
+
+
+class _Load:
+    """CPU load in the background: threads that never wait, as a loaded CI machine."""
+
+    def __init__(self, threads: int = 2) -> None:
+        self._stop = threading.Event()
+        self._threads = [threading.Thread(target=self._burn, daemon=True) for _ in range(threads)]
+
+    def _burn(self) -> None:
+        while not self._stop.is_set():
+            sum(range(2000))
+
+    def __enter__(self) -> "_Load":
+        for thread in self._threads:
+            thread.start()
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self._stop.set()
+        for thread in self._threads:
+            thread.join(timeout=5.0)
+
+
+# #567-T01
+@pytest.mark.parametrize("streaming", [False, True])
+def test_a_restart_right_after_an_answer_starts_the_script_from_its_first_turn(
+    streaming: bool,
+) -> None:
+    # The turn used by an answer was counted after the answer had been written, so a restart that
+    # came at once was undone by that late count and the next answer was the second turn. This is
+    # also why the call numbers of #551-F02 (a document, a stream, a document) could repeat.
+    first, second = Turn(tool="read", args={}), Turn(tool="grep", args={})
+    with upstream("chat", first, second) as server, _Load():
+        names: list[str] = []
+        for _ in range(30):
+            server.restart()
+            ask(server.url, "chat", REAL, streaming=streaming)
+            server.restart()
+            _, _, data = ask(server.url, "chat", REAL, streaming=False)
+            names.append(
+                json.loads(data)["choices"][0]["message"]["tool_calls"][0]["function"]["name"]
+            )
+
+    assert set(names) == {"read"}
