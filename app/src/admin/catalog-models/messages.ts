@@ -247,7 +247,7 @@ const ERROR_COPY: Record<CatalogErrorCode, string> = {
   model_blocked:
     "The override file blocks this model, so it cannot be enabled.",
   price_invalid:
-    "The price is not valid: amounts must be whole micro-dollars, not negative and not absurdly high, and tiers must go up.",
+    "The price is not valid: enter dollars per million tokens as a number with at most six decimals, not negative and not above $100000, and let the context tiers go up.",
   price_missing:
     "models.dev states no price we can read. Enter the price yourself.",
   price_changed:

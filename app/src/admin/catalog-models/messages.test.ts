@@ -19,6 +19,9 @@ import {
   FETCH_ERROR_COPY,
   GUARD_CODES,
   MANAGED_REASON_COPY,
+  PRICE_FIELD_SENTENCE,
+  describeChangedFields,
+  describeGuardFigures,
   PRICE_FIELD_LABEL,
   PRICE_SOURCE_LABEL,
   PRICE_STATUS_HELP,
@@ -64,6 +67,16 @@ describe("the copy of the stable codes", () => {
     expect(describeCatalogError("fetch_in_progress")).toMatch(/Try again/);
     expect(describeIssue("negative")).toMatch(/negative/);
     expect(describeIssue("reason_invalid")).toMatch(/reason/);
+  });
+
+  // #554-T04
+  it("explains a price the route refused in dollars, as the form asks for them, not in micro-dollars", () => {
+    const text = describeCatalogError("price_invalid");
+
+    expect(text).toMatch(/dollars per million tokens/);
+    expect(text).toMatch(/six decimals/);
+    expect(text).toMatch(/\$100000/);
+    expect(text).not.toMatch(/micro/i);
   });
 
   // #554-T04
@@ -114,5 +127,48 @@ describe("the copy of the statuses", () => {
       expect(FETCH_ERROR_COPY[code]).toMatch(/fetch/);
     }
     expect(isGuardCode("models_dev_timeout")).toBe(false);
+  });
+});
+
+describe("the sentences about the guard and a stale price", () => {
+  const FIGURES = {
+    unlisted: 3,
+    listed: 13,
+    listedAfter: 20,
+    providersUnlisted: 1,
+    providersListed: 6,
+    enabledUnlisted: 4,
+    enabledListed: 5,
+    newlyBlocked: 3,
+    providers: 6,
+    oversizedProviders: 2,
+  };
+
+  // #554-T08
+  it("has a sentence with the figures for every code of the guard, and no sentence shows a code", () => {
+    for (const code of GUARD_CODES) {
+      const text = describeGuardFigures(code, FIGURES);
+      expect(text, code).toMatch(/\d/);
+      expect(text, code).not.toContain("models_dev");
+    }
+    expect(
+      describeGuardFigures("models_dev_guard_unlisted_share", FIGURES),
+    ).toBe("It would unlist 3 of 13 listed models and 1 of 6 providers.");
+    expect(
+      describeGuardFigures("models_dev_guard_growth", {
+        ...FIGURES,
+        listed: 0,
+        listedAfter: 5,
+      }),
+    ).toBe("The listed models would grow from 0 to 5.");
+  });
+
+  // #554-T05
+  it("names every field of a price in a sentence, and joins the changed ones", () => {
+    for (const field of PRICE_FIELDS)
+      expect(PRICE_FIELD_SENTENCE[field]).toMatch(/\S/);
+    expect(describeChangedFields(["cacheRead", "reasoning"])).toBe(
+      "cache read, reasoning",
+    );
   });
 });
