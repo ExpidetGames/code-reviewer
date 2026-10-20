@@ -100,7 +100,7 @@ export function CatalogProvidersCard({
         <p className="text-sm text-muted-foreground">
           Dynamic Review can run on a model of any of these providers with your
           own key. Add the key here, then choose the model in the review
-          settings of a project. Diff Review uses OpenRouter or Anthropic.
+          settings of a project. Diff Review uses the providers above.
         </p>
         <HelpDisclosure label="How the key is stored">
           {HOW_STORED}
