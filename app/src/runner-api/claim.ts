@@ -63,6 +63,7 @@ import {
 } from "../model-catalog/token-budget.ts";
 import type { NativeCostService } from "../native-cost/service.ts";
 import type { CostPolicyJson } from "../native-cost/policy.ts";
+import type { JobModelEntry } from "../models-dev/job-entry.ts";
 import type { ClaimedKeys } from "./claimed-keys.ts";
 import type { ClaimGuard } from "./claim-guard.ts";
 import { selectModel, type SelectionDeps } from "./claim-selection.ts";
@@ -209,7 +210,7 @@ export type ClaimDeps = {
    */
   nativeCost?: Pick<
     NativeCostService,
-    "refOf" | "policyFor" | "isNativeProvider"
+    "refOf" | "policyFor" | "isNativeProvider" | "entryFor"
   >;
   now: () => Date;
   logger: RunnerApiLogger;
@@ -242,6 +243,8 @@ export type Checked = {
   dynamic: DynamicReviewOptions | null;
   /** #553: the cost policy of a native Dynamic job (`dynamic.cost`); null for every other job. */
   cost: CostPolicyJson | null;
+  /** #578: the entry of the model of a native Dynamic job (`dynamic.modelEntry`); null exactly when `cost` is. */
+  modelEntry: JobModelEntry | null;
   integration: Integration;
   repo: RepoRef;
   prUrl: string;
@@ -455,6 +458,8 @@ type CostDecision =
   | {
       kind: "decided";
       policy: CostPolicyJson | null;
+      /** #578: the entry of the model of a native job; absent exactly when `policy` is null. */
+      entry?: JobModelEntry;
       /** Which confirmation priced a managed run, for the log. */
       confirmation?: { id: number; hashVersion: number };
     }
@@ -479,21 +484,44 @@ async function costOf(
   const ref = native.refOf(selection);
   if (ref === null) return { kind: "decided", policy: null };
   const outcome = await native.policyFor(selection.keyMode, ref);
-  if (outcome.ok)
+  if (!outcome.ok) {
+    // #549: `check_failed` is the one reason that may pass, because it says the check failed and not the model.
+    if (outcome.reason === "check_failed") return { kind: "retry" };
     return {
-      kind: "decided",
-      policy: outcome.policy,
-      ...(outcome.confirmation === null
-        ? {}
-        : { confirmation: outcome.confirmation }),
+      kind: "refused",
+      errorCode: MANAGED_MODEL_UNAVAILABLE,
+      detail: `${whose(selection)}kind=${selection.kind} reason=${outcome.code}:${outcome.reason}`,
     };
-  // #549: `check_failed` is the one reason that may pass, because it says the check failed and not the model.
-  if (outcome.reason === "check_failed") return { kind: "retry" };
+  }
+  // #578: what the runner is told about the model. The price is judged first, so a managed model with no confirmed price
+  // keeps the refusal it always had. A model the catalog cannot describe (or whose provider's address is not trusted) is
+  // refused like an unavailable one: on the operator's key, which we pay, as `managed_model_unavailable` (free); on the
+  // workspace's own key as a model Dynamic Review cannot use. No key exists yet in either case.
+  const entry = await native.entryFor(ref);
+  if (!entry.ok) {
+    if (entry.code === "check_failed") return { kind: "retry" };
+    return {
+      kind: "refused",
+      errorCode:
+        selection.keyMode === "managed"
+          ? MANAGED_MODEL_UNAVAILABLE
+          : "dynamic_model_features_unsupported",
+      detail: `${whose(selection)}kind=${selection.kind} reason=entry_${entry.code}`,
+    };
+  }
   return {
-    kind: "refused",
-    errorCode: MANAGED_MODEL_UNAVAILABLE,
-    detail: `${selection.keyMode === "managed" ? `entry=${selection.entry.id} ` : ""}kind=${selection.kind} reason=${outcome.code}:${outcome.reason}`,
+    kind: "decided",
+    policy: outcome.policy,
+    entry: entry.entry,
+    ...(outcome.confirmation === null
+      ? {}
+      : { confirmation: outcome.confirmation }),
   };
+}
+
+/** The opaque id of the catalog entry for the log of a job on the operator's key; nothing for an own key. */
+function whose(selection: Selection): string {
+  return selection.keyMode === "managed" ? `entry=${selection.entry.id} ` : "";
 }
 
 /**
@@ -659,6 +687,7 @@ export async function checkJob(
     llmOptions,
     dynamic,
     cost: cost.policy,
+    modelEntry: cost.entry ?? null,
     integration,
     repo,
     prUrl,
@@ -686,6 +715,7 @@ export async function buildJobInput(
     llmOptions,
     dynamic,
     cost,
+    modelEntry,
     integration,
     repo,
   } = checked;
@@ -700,7 +730,11 @@ export async function buildJobInput(
   // local refusal above, and still before the git credentials are created. A job on the operator's key (#280, #432) reads
   // its model's metadata too, Diff or Dynamic, for the context window its token budget is clamped to: one read serves
   // both (a Dynamic job's model is the entry's). The metadata is read from the selection's provider.
-  const modelToRead = dynamic !== null || managed ? selection.model : null;
+  // A native job (#578) reads none: its entry states the window, the output bound and the flags of the model.
+  const modelToRead =
+    (dynamic !== null || managed) && modelEntry === null
+      ? selection.model
+      : null;
   // The claim of a job on the operator's key asks as a claim (an outage costs one wait, not one per claim) and names the
   // entry in the log line instead of the model.
   const metadata =
@@ -798,6 +832,7 @@ export async function buildJobInput(
             ...dynamic,
             ...(capabilities === undefined ? {} : { capabilities }),
             ...(cost === null ? {} : { cost }),
+            ...(modelEntry === null ? {} : { modelEntry }),
           },
           base: claimBaseOf(
             repo.fullName,

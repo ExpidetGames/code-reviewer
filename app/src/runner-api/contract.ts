@@ -7,6 +7,7 @@
 import type { ReviewCommand } from "../integrations/types.ts";
 import type { JobStatus } from "../jobs/job-status.ts";
 import type { CostPolicyJson } from "../native-cost/policy.ts";
+import type { JobModelEntry } from "../models-dev/job-entry.ts";
 import type { ProjectReviewKind } from "../review-settings/settings.ts";
 import {
   RUNNER_ENGINES,
@@ -303,6 +304,11 @@ export type DynamicReviewOptions = {
    * `dynamic_cost_policy` feature; a job without it is a job of today.
    */
   cost?: CostPolicyJson;
+  /**
+   * #578: the provider and the one model of a native job (`JobModelEntry`, contracts/job-model-entry.v1.json): the entry the
+   * runner turns into the provider block of the engine's configuration. No key. Sent exactly when `cost` is.
+   */
+  modelEntry?: JobModelEntry;
 };
 
 /** `DynamicModelCapabilities` in the contract. Prices are exact decimal text, US dollars per million tokens. */

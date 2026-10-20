@@ -6,6 +6,12 @@
 // models and prices, none of which reaches a member.
 import "server-only";
 import type { InstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
+import type { ModelsDevRepository } from "../db/repositories/models-dev-repository.ts";
+import {
+  buildJobModelEntry,
+  type JobEntryRefusalCode,
+  type JobModelEntry,
+} from "../models-dev/job-entry.ts";
 import type { ModelPriceService } from "../model-prices/service.ts";
 import {
   catalogRefOf,
@@ -29,6 +35,17 @@ export type PolicyOutcome =
     }
   | Extract<ManagedPolicyOutcome, { ok: false }>;
 
+/**
+ * The entry of the chosen model for the claim (#578), or why there is none. `model_not_in_catalog`: the catalog has no such
+ * provider or model; `check_failed`: the database could not be read (the job is given back, as for a failed price check).
+ */
+export type EntryOutcome =
+  | { ok: true; entry: JobModelEntry }
+  | {
+      ok: false;
+      code: JobEntryRefusalCode | "model_not_in_catalog" | "check_failed";
+    };
+
 export type NativeCostService = {
   /** The catalog model a selection names, or null when the job does not take the native path (catalog-ref.ts). */
   refOf(selection: { provider: string; model: string }): CatalogRef | null;
@@ -44,11 +61,18 @@ export type NativeCostService = {
     keyMode: "managed" | "own",
     ref: CatalogRef,
   ): Promise<PolicyOutcome>;
+  /**
+   * The entry the claim tells the runner about the model (`dynamic.modelEntry`, #578): the last known row of the catalog, so a
+   * model models.dev no longer lists is still served. No key, no price. Never throws.
+   */
+  entryFor(ref: CatalogRef): Promise<EntryOutcome>;
 };
 
 export function createNativeCostService(deps: {
   prices: Pick<ModelPriceService, "availability" | "catalogPrice">;
   settings: Pick<InstanceSettingsRepository, "get">;
+  /** The stored providers and models the entry is made from. */
+  catalog: Pick<ModelsDevRepository, "getProvider" | "getModel">;
   /** The providers of the app's registry, which keep the legacy path until #556. */
   legacyProviders: readonly string[];
 }): NativeCostService {
@@ -71,6 +95,21 @@ export function createNativeCostService(deps: {
         policy: ownPolicy(book, ownKeyTokenCapOf(stored)),
         confirmation: null,
       };
+    },
+
+    async entryFor(ref) {
+      try {
+        const [provider, model] = await Promise.all([
+          deps.catalog.getProvider(ref.providerId),
+          deps.catalog.getModel(ref.providerId, ref.modelId),
+        ]);
+        if (provider === undefined || model === undefined)
+          return { ok: false, code: "model_not_in_catalog" };
+        return buildJobModelEntry(provider, model);
+      } catch {
+        // No error text: it could carry whatever the failing layer held.
+        return { ok: false, code: "check_failed" };
+      }
     },
   };
 }

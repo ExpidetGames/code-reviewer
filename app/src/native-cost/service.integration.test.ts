@@ -11,6 +11,7 @@ import {
   type ModelsDevFake,
 } from "../../../fakes/models-dev/server.ts";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
+import { createModelsDevRepository } from "../db/repositories/models-dev-repository.ts";
 import { GUARD_REASONS } from "../models-dev/errors.ts";
 import { createModelsDevService } from "../models-dev/service.ts";
 import { createModelPriceService } from "../model-prices/service.ts";
@@ -56,6 +57,7 @@ describe.each(MODELS_DEV_ENGINES)(
       const native = createNativeCostService({
         prices,
         settings,
+        catalog: createModelsDevRepository(db),
         legacyProviders: LEGACY,
       });
       const confirm = async (ids: typeof SONNET) => {
@@ -304,6 +306,99 @@ describe.each(MODELS_DEV_ENGINES)(
           expect(await t.native.policyFor("own", DEEPSEEK)).toMatchObject({
             policy: { maxTotalTokens: 4_000_000 },
           });
+        },
+      );
+    });
+
+    describe("the model entry", () => {
+      // #578-T03
+      it_(
+        "is the entry of the chosen model, with the address of its provider and no key and no price",
+        async () => {
+          const t = await setup();
+
+          const outcome = await t.native.entryFor(DEEPSEEK);
+
+          expect(outcome).toMatchObject({
+            ok: true,
+            entry: {
+              version: 1,
+              providerId: "deepseek",
+              npm: "@ai-sdk/openai-compatible",
+              family: "openai-chat",
+              authHeader: "Authorization",
+              upstreamBaseUrl: "https://api.deepseek.com",
+              modelId: "deepseek-v4-pro",
+            },
+          });
+          const text = JSON.stringify(outcome);
+          expect(text).not.toContain("cost");
+          expect(text).not.toContain("apiKey");
+        },
+      );
+
+      // #578-T03
+      it_("is the entry of an Anthropic model too", async () => {
+        const t = await setup();
+
+        expect(await t.native.entryFor(SONNET)).toMatchObject({
+          ok: true,
+          entry: {
+            providerId: "anthropic",
+            npm: "@ai-sdk/anthropic",
+            family: "anthropic-messages",
+            authHeader: "x-api-key",
+            modelId: "claude-sonnet-5-5",
+          },
+        });
+      });
+
+      // #578-T04
+      it_("is refused for a model the catalog does not have", async () => {
+        const t = await setup();
+
+        expect(
+          await t.native.entryFor({
+            providerId: "deepseek",
+            modelId: "deepseek-v9",
+          }),
+        ).toEqual({ ok: false, code: "model_not_in_catalog" });
+        expect(
+          await t.native.entryFor({ providerId: "nobody", modelId: "x" }),
+        ).toEqual({ ok: false, code: "model_not_in_catalog" });
+      });
+
+      // #578-T05
+      it_(
+        "is refused while the provider's address changed and waits for an admin",
+        async () => {
+          const t = await setup();
+          const moved = modelsDevFixture() as Record<string, { api?: string }>;
+          moved.deepseek!.api = "https://api.deepseek-proxy.example/v1";
+          t.fake.respondWith(moved);
+          await t.modelsDev.refresh({ acceptReasons: GUARD_REASONS });
+
+          expect(await t.native.entryFor(DEEPSEEK)).toEqual({
+            ok: false,
+            code: "provider_url_blocked",
+          });
+        },
+      );
+
+      // #578-T03
+      it_(
+        "is still served for a model models.dev no longer lists: the last known entry is the entry",
+        async () => {
+          const t = await setup();
+          const body = modelsDevFixture() as Record<
+            string,
+            { models: Record<string, unknown> }
+          >;
+          delete body.deepseek!.models["deepseek-v4-pro"];
+          t.fake.respondWith(body);
+          await t.modelsDev.refresh({ acceptReasons: GUARD_REASONS });
+
+          expect(await t.native.entryFor(DEEPSEEK)).toMatchObject({ ok: true });
         },
       );
     });
