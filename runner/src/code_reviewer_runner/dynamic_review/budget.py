@@ -170,6 +170,11 @@ GROWTH_FLOOR_TOKENS = 4_096
 # The factor on (this call + a final call after it) in the wrap-up test: both are expectations, and
 # a normal call that costs a little more must not take the room of the final one.
 RESERVE_MARGIN = Decimal("1.25")
+# What a call of a model that thinks reserves of its output at least (#553): its thinking is output
+# nobody can predict, so the floor is higher than the one of a model that does not think. Not the
+# whole cap: reserving 32,000 tokens at 15 USD per million would make the first call of a 1 USD run
+# the final call.
+REASONING_OUTPUT_FLOOR_TOKENS = 8_192
 # The nearest-rank percentile of the observed completions and rounds, in percent.
 OBSERVED_PERCENTILE = 95
 # A request smaller than this says nothing about the content's density: the provider's own
@@ -529,6 +534,22 @@ class BudgetLedger:
             return excess if excess > 0 else None
 
     @property
+    def tokens_used(self) -> int:
+        """The tokens settled and booked so far: what the token cap of an own key counts (#553)."""
+        with self._lock:
+            return self._tokens_used()
+
+    @property
+    def priced(self) -> bool:
+        """False for a run with no price at all: no dollar is counted and its cost is unknown."""
+        return self._priced
+
+    @property
+    def tolerates_unknown_cost(self) -> bool:
+        """True for an own key, whose run goes on when a cost is unknown."""
+        return self._tolerates_unknown_cost
+
+    @property
     def recovered(self) -> bool:
         """True when the run's final call was the recovery of a turn without an answer (#309)."""
         with self._lock:
@@ -738,13 +759,10 @@ class BudgetLedger:
         return self._overshot or held <= self.limits.max_cost_usd
 
     def _token_cap_binds(self) -> bool:
-        """Whether the token cap of an own key bounds the run now (#553): when no dollar can bound
-        it (no price is known), or once a call's cost was unknown. While every call is priced the
-        dollar limit of #540 is the bound and the cap does not apply. Call with the lock held."""
-        if self._max_total_tokens is None:
-            return False
-        counters = self._counters
-        return not self._priced or counters.unknown_calls > 0 or counters.unpriced_calls > 0
+        """Whether a token cap bounds the run (#553): always, for an own key. With a price the run
+        is bound by the dollar limit of #540 and the cap is a ceiling over it; without one the cap
+        is the bound. The managed key has no cap. Call with the lock held."""
+        return self._max_total_tokens is not None
 
     def _tokens_used(self) -> int:
         counters = self._counters
@@ -806,10 +824,12 @@ class BudgetLedger:
         itself: a review can use all of it (the thinking of a model counts), and the final call is
         the one call that is delivered over the limit, so it is not priced optimistically (#540)."""
         cap = allowance if self._reserved_cap is None else min(allowance, self._reserved_cap)
-        if (final and self._reserved_cap is not None) or self._reserve_full_output:
+        if final and self._reserved_cap is not None:
             return cap
         observed = _percentile(self._counters.completions)
         floor = FINAL_OUTPUT_FLOOR_TOKENS if final else OUTPUT_FLOOR_TOKENS
+        if self._reserve_full_output:
+            floor = max(floor, REASONING_OUTPUT_FLOOR_TOKENS)
         return min(cap, max(floor, observed))
 
     def _growth_tokens(self) -> int:
@@ -877,6 +897,7 @@ class BudgetLedger:
         cache_read_tokens: int | None = None,
         cache_write_tokens: int | None = None,
         allow_unpriced: bool = False,
+        extra_tokens: int = 0,
     ) -> None:
         """Replace a reservation with what the provider actually reported. Missing usage fails.
 
@@ -919,6 +940,9 @@ class BudgetLedger:
             counters.reserved_cost = _SUM.subtract(counters.reserved_cost, reservation.cost)
             counters.prompt_tokens += prompt_tokens
             counters.completion_tokens += completion_tokens
+            # Tokens the provider billed beyond the counts it states (reasoning on top, a total
+            # above the parts): they count against the cap and nowhere else (#553).
+            counters.unknown_tokens += max(extra_tokens, 0)
             if not reservation.final:
                 counters.completions.append(completion_tokens)
                 if 0 < counters.last_prompt_tokens < prompt_tokens:
@@ -946,13 +970,7 @@ class BudgetLedger:
             # request is the final call, and no normal call is admitted again (see "The bound").
             if counters.cost > self.limits.max_cost_usd and not reservation.final:
                 self._overshot = True
-            if (
-                self._token_cap_binds()
-                and not reservation.final
-                and self._tokens_used() > (self._max_total_tokens or 0)
-            ):
-                self._overshot = True
-                self._overshot_by_tokens = counters.cost <= self.limits.max_cost_usd
+            self._note_token_overshoot(reservation)
 
     def _book_over_report(
         self,
@@ -1051,8 +1069,24 @@ class BudgetLedger:
             counters.reserved_cost = _SUM.subtract(counters.reserved_cost, reservation.cost)
             counters.cost = _SUM.add(counters.cost, max(worst, reservation.cost))
             counters.unknown_calls += 1
-            counters.unknown_tokens += reservation.tokens
+            # The call may have used any of what it was allowed: the estimate of its input and
+            # the whole output allowance count against the token cap (#553).
+            counters.unknown_tokens += reservation.input_tokens + reservation.output_tokens
+            self._note_token_overshoot(reservation)
         return True
+
+    def _note_token_overshoot(self, reservation: Reservation) -> None:
+        """A normal call that takes the tokens over the cap ends the agent phase, as one that
+        settles over the cost limit does (#553). Call with the lock held."""
+        if (
+            self._token_cap_binds()
+            and not reservation.final
+            and self._tokens_used() > (self._max_total_tokens or 0)
+        ):
+            self._overshot = True
+            self._overshot_by_tokens = self._overshot_by_tokens or not (
+                self._counters.cost > self.limits.max_cost_usd
+            )
 
     @property
     def unknown_calls(self) -> int:

@@ -40,11 +40,9 @@ from code_reviewer_runner.dynamic_review.passthrough.admission import (
     PassthroughTarget,
     output_allowance,
 )
-from code_reviewer_runner.dynamic_review.passthrough.cost_policy import (
-    CostPolicy,
-    build_native_ledger,
-)
+from code_reviewer_runner.dynamic_review.passthrough.cost_policy import CostPolicy
 from code_reviewer_runner.dynamic_review.passthrough.families import WireFamily
+from code_reviewer_runner.dynamic_review.passthrough.native_run import build_native_run
 from code_reviewer_runner.dynamic_review.passthrough.proxy import PassthroughProxy
 from code_reviewer_runner.dynamic_review.passthrough.server import PassthroughServer
 from passthrough_loopback import LoopbackUpstream
@@ -131,6 +129,13 @@ def passthrough_engine(
             limits = DynamicLimits(max_cost_usd=Decimal(limit))
             output = (provider.entry or {}).get("limit", {}).get("output", 8192)
             policy = (policies or {}).get(provider.provider_id)
+            capability = new_proxy_capability()
+            target = PassthroughTarget(
+                family=WIRE[provider.family],
+                model=provider.model_id,
+                output_allowance=output_allowance(int(output)),
+            )
+            hop = LoopbackUpstream(upstream.url + BASE_PATH[provider.family])
             if policy is None:
                 ledger = BudgetLedger(
                     limits,
@@ -138,27 +143,27 @@ def passthrough_engine(
                     output_tokens=output_allowance(int(output)),
                     unit_costs=PRICES,
                 )
+                proxy = PassthroughProxy(
+                    ledger=ledger,
+                    target=target,
+                    upstream=hop,
+                    upstream_api_key=REAL_KEY,
+                    capability=capability,
+                    prices=PRICES,
+                )
             else:
-                ledger = build_native_ledger(
+                # A native job: the ledger and the proxy of one policy, from the one factory.
+                run = build_native_run(
                     policy,
                     limits,
                     window_tokens=1_000_000,
                     output_tokens=output_allowance(int(output)),
+                    target=target,
+                    upstream=hop,
+                    upstream_api_key=REAL_KEY,
+                    capability=capability,
                 )
-            capability = new_proxy_capability()
-            proxy = PassthroughProxy(
-                ledger=ledger,
-                target=PassthroughTarget(
-                    family=WIRE[provider.family],
-                    model=provider.model_id,
-                    output_allowance=output_allowance(int(output)),
-                ),
-                upstream=LoopbackUpstream(upstream.url + BASE_PATH[provider.family]),
-                upstream_api_key=REAL_KEY,
-                capability=capability,
-                prices=PRICES if policy is None else policy.book,
-                unknown_cost_ends_run=True if policy is None else policy.unknown_cost_ends_run,
-            )
+                ledger, proxy = run.ledger, run.proxy
             server = PassthroughServer(proxy, "127.0.0.1", 0).start()
             stack.callback(server.stop)
             front = PassthroughFront(proxy, server, ledger, capability)

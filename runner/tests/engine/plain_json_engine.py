@@ -246,6 +246,7 @@ class FinalExemptLedger(BudgetLedger):
         cache_read_tokens: int | None = None,
         cache_write_tokens: int | None = None,
         allow_unpriced: bool = False,
+        extra_tokens: int = 0,
     ) -> None:
         def settle() -> None:
             super(FinalExemptLedger, self).settle_call(
@@ -256,6 +257,7 @@ class FinalExemptLedger(BudgetLedger):
                 cache_read_tokens=cache_read_tokens,
                 cache_write_tokens=cache_write_tokens,
                 allow_unpriced=allow_unpriced,
+                extra_tokens=extra_tokens,
             )
 
         if reservation is self._exempt_reservation:

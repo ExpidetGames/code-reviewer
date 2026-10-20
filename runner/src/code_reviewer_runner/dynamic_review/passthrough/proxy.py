@@ -298,6 +298,11 @@ class PassthroughProxy:
         self._in_flight = 0
         self._idle = threading.Condition()
 
+    @property
+    def ends_run_on_unknown_cost(self) -> bool:
+        """The managed key's rule (#553): a call whose cost is unknown ends the run."""
+        return self._unknown_ends_run
+
     def authorized(self, headers: Sequence[tuple[str, str]]) -> bool:
         return self._admission.authorized(headers)
 
@@ -832,6 +837,15 @@ class PassthroughProxy:
             final=reservation.final,
             tool_names=[],
         )
+        # The call is booked at the largest of what it states: its counts, the total it states (a
+        # total above the counts is tokens the parser has no field for), and reasoning on top of
+        # the completion (xAI). A cap that counted the counts alone could be passed unseen.
+        counted = usage.prompt_tokens + usage.completion_tokens
+        booked = max(
+            counted,
+            usage.stated_total or 0,
+            counted + max(usage.reasoning_tokens - usage.completion_tokens, 0),
+        )
         try:
             self.ledger.settle_call(
                 reservation,
@@ -841,6 +855,7 @@ class PassthroughProxy:
                 cache_read_tokens=usage.cache_read,
                 cache_write_tokens=usage.cache_write,
                 allow_unpriced=True,
+                extra_tokens=booked - counted,
             )
         except LimitError as error:
             self.ledger.record_failure(error)

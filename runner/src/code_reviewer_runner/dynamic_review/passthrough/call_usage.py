@@ -10,7 +10,7 @@ a count the provider did not state in a field it must state is not a `CallUsage`
 stated that the parser cannot price is in `unknown_fields` (the names of the fields, never a value).
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 
 
@@ -24,6 +24,11 @@ class CallUsage:
     reasoning_tokens: int = 0
     # The charge the provider states for the call (OpenRouter's `usage.cost`), if it does.
     stated_cost: Decimal | None = None
+    # The total the provider states (`total_tokens`, `totalTokenCount`), if it does. It can be above
+    # the sum of the counts (reasoning on top, a part the parser does not model): the token cap of
+    # an own key (#553) books the larger. Not part of equality: it is a fact about the statement,
+    # not about what the call used.
+    stated_total: int | None = field(default=None, compare=False)
     # Fields of the usage that hold something the parser does not know how to price (or a value it
     # cannot trust, or a split that disagrees with its total): the call's cost is unknown.
     unknown_fields: tuple[str, ...] = ()

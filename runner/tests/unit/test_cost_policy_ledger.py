@@ -153,21 +153,50 @@ def test_the_deadline_ends_an_unpriced_run_exactly_as_a_priced_one() -> None:
     assert ledger.expired()
 
 
-# #553-T04
-def test_a_priced_own_run_is_bound_by_dollars_and_the_token_cap_does_not_apply() -> None:
-    # Far more tokens than the cap: the price is known, so the dollar limit of #540 is the bound.
-    ledger = priced_own(cap=1_000, limit="5.00")
+# #553-T04, #577-L7
+def test_a_priced_own_run_is_bound_by_dollars_and_the_token_cap_is_a_ceiling_over_it() -> None:
+    # Priced own key = the dollar limit of #540 plus the token cap as a ceiling. Within the cap
+    # the run is priced and bound by dollars exactly as before.
+    ledger = priced_own(cap=100_000, limit="5.00")
     for _ in range(3):
         reservation = reserve(ledger, size=30_000)
         ledger.settle_call(
-            reservation,
-            prompt_tokens=9_000,
-            completion_tokens=500,
-            cost=Decimal("0.0345"),
+            reservation, prompt_tokens=9_000, completion_tokens=500, cost=Decimal("0.0345")
         )
     usage = ledger.usage("m")
-    assert usage.prompt_tokens == 27_000 > 1_000
+    assert usage.prompt_tokens == 27_000
     assert usage.cost_usd == pytest.approx(0.1035)
+
+
+# #577-L7
+def test_the_token_cap_stops_a_priced_own_run_whose_dollars_never_would() -> None:
+    # A free model (a $0 book) is priced and costs nothing: only the cap can bound the run.
+    free = {**BOOK, "input": "0", "output": "0", "cacheRead": None, "cacheWrite5m": None}
+    policy = parse_cost_policy({"keyMode": "own", "priceBook": free, "maxTotalTokens": 40_000})
+    ledger = build_native_ledger(
+        policy, DynamicLimits(), window_tokens=1_000_000, output_tokens=4_096
+    )
+    with pytest.raises(LimitError) as raised:
+        for _ in range(20):
+            reservation = reserve(ledger, size=30_000)
+            ledger.settle_call(
+                reservation, prompt_tokens=9_000, completion_tokens=500, cost=Decimal(0)
+            )
+    assert raised.value.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
+    assert "token" in raised.value.detail
+    assert ledger.usage("m").cost_usd == 0.0
+
+
+# #577-L7
+def test_a_priced_own_run_over_the_cap_is_delivered_and_ends_the_agent_phase() -> None:
+    ledger = priced_own(cap=20_000, limit="5.00")
+    reservation = reserve(ledger, size=30_000)
+    ledger.settle_call(
+        reservation, prompt_tokens=25_000, completion_tokens=500, cost=Decimal("0.0345")
+    )
+    with pytest.raises(LimitError) as raised:
+        reserve(ledger, size=30_000)
+    assert "token" in raised.value.detail
 
 
 # #553-T04
@@ -192,7 +221,8 @@ def test_an_unknown_call_of_an_own_key_books_its_expected_tokens_and_not_its_wor
     assert counters.cost == reservation.cost < ledger.worst_case_cost(reservation)
     assert ledger.unknown_calls == 1
     assert ledger.usage("m").cost_usd is None
-    assert counters.unknown_tokens == reservation.tokens
+    # The estimate of the input and the whole output allowance: the call may have used any of it.
+    assert counters.unknown_tokens == reservation.input_tokens + reservation.output_tokens
 
 
 # #553-T05
@@ -319,3 +349,63 @@ def test_a_run_that_can_be_rewritten_is_wrapped_up_before_the_token_cap_is_passe
     # Nothing is granted after it.
     with pytest.raises(LimitError):
         reserve(ledger)
+
+
+# #577-L1
+def test_an_unknown_call_books_the_input_estimate_and_the_output_allowance() -> None:
+    ledger = unpriced(cap=1_000_000)
+    reservation = reserve(ledger, size=30_000, output=3_000)
+    ledger.settle_unknown(reservation, worst_case=False)
+    assert ledger.tokens_used == reservation.input_tokens + 3_000
+    assert ledger.tokens_used > reservation.tokens
+
+
+# #577-L2
+def test_an_unknown_call_that_takes_a_priced_run_over_the_cap_ends_the_agent_phase() -> None:
+    ledger = priced_own(cap=20_000, limit="5.00")
+    ledger.settle_call(
+        reserve(ledger, size=30_000),
+        prompt_tokens=9_000,
+        completion_tokens=500,
+        cost=Decimal("0.03"),
+    )
+    ledger.settle_unknown(reserve(ledger, size=30_000, output=4_000), worst_case=False)
+    assert ledger.tokens_used > 20_000
+    with pytest.raises(LimitError) as raised:
+        reserve(ledger, size=30_000)
+    assert raised.value.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
+    assert "token" in raised.value.detail
+    # The review is not lost: the final call is still admitted, once.
+    final = ledger.reserve_call(
+        b"x" * 30_000, output_tokens=1_000, can_wrap_up=True, wrap_up_text="Answer now."
+    )
+    assert final.final is True
+    assert ledger.stopped_early == "token_limit"
+
+
+# #577-L2
+def test_an_unknown_call_that_leaves_the_run_within_the_cap_ends_nothing() -> None:
+    ledger = priced_own(cap=1_000_000, limit="5.00")
+    ledger.settle_unknown(reserve(ledger), worst_case=False)
+    reserve(ledger)  # still admitted
+
+
+# #577-NIT reasoning
+def test_the_first_call_of_a_reasoning_model_is_not_already_the_final_call() -> None:
+    # $3 and $15 per million tokens, a $1 limit, the whole 32,000-token output cap of the engine.
+    policy = parse_cost_policy({"keyMode": "managed", "priceBook": BOOK, "maxTotalTokens": None})
+    ledger = build_native_ledger(
+        policy,
+        DynamicLimits(max_cost_usd=Decimal("1.00")),
+        window_tokens=1_000_000,
+        output_tokens=NATIVE_OUTPUT_CAP,
+        reasoning=True,
+    )
+    first = ledger.reserve_call(
+        b"x" * 30_000,
+        output_tokens=NATIVE_OUTPUT_CAP,
+        can_wrap_up=True,
+        wrap_up_text="Answer now.",
+    )
+    assert first.final is False
+    assert ledger.stopped_early is None
